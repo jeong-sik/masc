@@ -256,7 +256,8 @@ let test_non_positive_limit_reads_nothing () =
 let test_committed_line_decodes_as_a_commit () =
   with_keepers_dir (fun keepers_dir ->
     let fact : Types.fact =
-      { claim = "a claim"; category = Fact; first_seen = 1_700_000_000.0 }
+      Types.observed ~claim:"a claim" ~category:Fact ~now:1_700_000_000.0
+        ~origin:{ kind = Legacy; trace_id = "" }
     in
     match
       Current.replace

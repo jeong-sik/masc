@@ -210,12 +210,12 @@ let test_projection_docker_requires_segment_boundary () =
       "prefix-adjacent sibling leaked into the sandbox as %S"
       (Keeper_sandbox.Path.visible_to_string visible)
 
-(* Local keepers execute on the host filesystem, so the projection is the
+(* Remote_ssh keepers keep a host bookkeeping bundle, so the projection is the
    identity. Containment is a separate question, decided by
    Keeper_alerting_path, and must not be smuggled in here. *)
 let test_projection_local_is_identity () =
   let config = make_config () in
-  let meta = make_meta ~name:"alpha" ~sandbox:Keeper_types_profile_sandbox.Local in
+  let meta = make_meta ~name:"alpha" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh in
   let sandbox = Keeper_sandbox.of_meta ~config ~meta in
   let outside = "/tmp/anywhere/at/all.ml" in
   Alcotest.(check string)

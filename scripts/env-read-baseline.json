@@ -8,12 +8,13 @@
     "lib/dashboard/dashboard_cache.ml": 1,
     "lib/dashboard_tla_specs/dashboard_tla_specs.ml": 2,
     "lib/exec/exec_dispatch.ml": 1,
+    "lib/exec_shim/exec_shim.ml": 1,
     "lib/graphql_client.ml": 1,
     "lib/graphql_endpoint.ml": 2,
     "lib/host_config/host_config.ml": 3,
     "lib/http_server_eio.ml": 1,
     "lib/keeper/keeper_event_bridge.ml": 1,
-    "lib/keeper/keeper_sandbox_runtime_setup.ml": 4,
+    "lib/keeper/keeper_sandbox_runtime_setup.ml": 2,
     "lib/keeper/keeper_secret_projection.ml": 1,
     "lib/keeper/keeper_tool_surface_ops.ml": 1,
     "lib/keeper/keeper_tool_task_runtime.ml": 1,
@@ -56,6 +57,7 @@
     "lib/workspace/workspace_identity.ml": 1,
     "lib/workspace/workspace_utils_backend_setup.ml": 1,
     "packages/agent_core/lib/llm_provider/cli_common_env.ml": 1,
+    "packages/agent_core/lib/llm_provider/complete_stream_error.ml": 1,
     "packages/agent_core/lib/llm_provider/env_parse.ml": 2
   }
 }

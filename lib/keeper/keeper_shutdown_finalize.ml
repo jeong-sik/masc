@@ -691,6 +691,16 @@ let complete_cleanup
     operation
     cleanup
   =
+  let sandbox_backend =
+    match read_operation_meta ~config operation with
+    | Error detail -> Error detail
+    | Ok meta ->
+      Ok
+        (match meta.Keeper_meta_contract.sandbox_profile with
+         | Docker -> Keeper_sandbox.Docker
+         | Micro_vm -> Keeper_sandbox.Micro_vm
+         | Remote_ssh -> Keeper_sandbox.Remote_ssh)
+  in
   let require_released_summary_owner () =
     match operation.cleanup_intent.reason with
     | Operator_stop_retain_meta -> Ok ()
@@ -786,11 +796,10 @@ let complete_cleanup
         with
         | Error detail -> block ~config operation Registry_unregister detail
         | Ok registry_unregistered ->
-          (* Both sandbox lanes keep one container per keeper across turns,
-             so turn teardown deliberately leaves it running; this is the
-             only place that knows the keeper is gone for good. Without it a
-             removed keeper left ~400 MB of guest (or a persistent Docker
-             container) behind for somebody to notice by hand.
+          (* Docker and microVM keep one runtime per keeper across turns, so
+             turn teardown deliberately leaves it running; this is the only
+             place that knows the keeper is gone for good. Local and remote
+             SSH own no local container and must not probe either runtime.
 
              After the unregister, not before: a failed unregister leaves the
              keeper registered, and a keeper that is still registered must
@@ -799,10 +808,14 @@ let complete_cleanup
              refusing to finish would leave the shutdown half-applied over a
              container that can be removed by hand. *)
           (match
-             Keeper_turn_sandbox_runtime.teardown_keeper_sandbox_by_name
-               ~config
-               ~keeper_name:operation.keeper_name
-               ()
+             match sandbox_backend with
+             | Error detail -> Error detail
+             | Ok backend ->
+               Keeper_turn_sandbox_runtime.teardown_keeper_sandbox_by_name
+                 ~config
+                 ~keeper_name:operation.keeper_name
+                 ~backend
+                 ()
            with
            | Ok () -> ()
            | Error detail ->

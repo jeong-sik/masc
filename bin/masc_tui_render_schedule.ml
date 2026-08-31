@@ -249,16 +249,37 @@ type board_read_allocation = {
   comment_rows : int;
 }
 
+(* What the comments may take. Five rows was a flat constant, so a forty-reply
+   thread got five rows on an eighty-row terminal exactly as it did on a
+   twenty-row one, and reading it meant scrolling the whole post past first.
+
+   Two claims replace it. Rows the body does not need belong to the comments:
+   a ten-line post on a sixty-row pane left twenty-four rows of filler under
+   it while the thread was cut at five. And where the body does want the whole
+   pane, the comments still take a share of it rather than a constant.
+
+   A third, not a half: at a half the two are the same size and the post one
+   came to read stops being the larger thing on the screen. The floor keeps
+   every short pane drawing exactly what it drew before. *)
+let board_comment_share = 3
+let board_comment_floor_rows = 5
+
 let allocate_board_read ~terminal_rows ~body_line_count ~comment_count =
   (* Eight rows are invariant chrome. A visible Comments section adds its
      divider and heading; keep one body row when the post has body text, then
-     give comments their existing five-row cap. *)
+     give comments the smaller of what they need and what they may take. *)
   let comment_count = max 0 comment_count in
   let comment_chrome_rows = if comment_count > 0 then 2 else 0 in
   let available = max 0 (terminal_rows - 8 - comment_chrome_rows) in
   let minimum_body_rows = if body_line_count > 0 then 1 else 0 in
+  let comment_ceiling =
+    max board_comment_floor_rows
+      (max
+         (available - max 0 body_line_count)
+         (available / board_comment_share))
+  in
   let comment_rows =
-    min (min 5 comment_count) (max 0 (available - minimum_body_rows))
+    min (min comment_ceiling comment_count) (max 0 (available - minimum_body_rows))
   in
   let body_rows = max 0 (available - comment_rows) in
   { body_rows; comment_rows }

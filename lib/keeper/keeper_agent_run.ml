@@ -1123,6 +1123,21 @@ let run_turn
                       ?event_bus
                       ?trace_link
                       ~on_runtime_attempt:s.Keeper_run_tools.on_runtime_attempt
+                      ~on_runtime_attempt_error:
+                        (fun ~runtime_id:_ ~attempt _error ->
+                           (* [on_runtime_attempt] observes only materialized
+                              runtimes immediately before provider dispatch.
+                              A candidate that disappeared from the runtime
+                              catalog is still a routed lane attempt and emits
+                              a typed attempt error without reaching that
+                              callback. Preserve its index too, so total
+                              failure cannot collapse the manifest's routed
+                              candidates back to one. [max] makes the duplicate
+                              observation of an ordinary failed provider
+                              idempotent. *)
+                           Keeper_run_tools_setup.record_lane_attempt_index
+                             receipt_lane_attempt_index_ref
+                             attempt)
                       ~on_runtime_observation:
                         (fun observation ->
                            receipt_runtime_observation_ref := Some observation)
@@ -1515,6 +1530,50 @@ let run_turn
         let (price_input_per_million, price_output_per_million) =
           Runtime.pricing_of_runtime_id settled_runtime_id
         in
+        (* The names and schema sizes of the surface this request carried.
+           [input_components] records what the schemas cost; without this the
+           byte total can never be resolved back into which tools it was.
+
+           Stored as a content-addressed blob and referenced by its canonical
+           marker: the surface repeats almost unchanged from turn to turn, so
+           inlining it would repeat in every record what one blob holds once.
+           The maintenance scan already walks the keepers root these records
+           live under and recognises the marker, so the blob stays reachable
+           for as long as the record does.
+
+           [None] when the turn recorded no request evidence, or when the put
+           failed -- an unwritable blob is an absent reference, never a marker
+           pointing at bytes that are not there. *)
+        let tool_surface_ref =
+          match !request_evidence_ref with
+          | None -> None
+          | Some { tools = request_tools; _ } ->
+            let payload =
+              Yojson.Safe.to_string
+                (Turn_record.tool_surface_to_json
+                   (List.map
+                      (fun (tool : Agent_core.Tool.t) ->
+                         { Turn_record.name = tool.Agent_core.Tool.schema.name
+                         ; schema_bytes =
+                             String.length
+                               (Yojson.Safe.to_string
+                                  (Agent_core.Types.tool_schema_to_yojson
+                                     tool.Agent_core.Tool.schema))
+                         })
+                      request_tools))
+            in
+            let store = Tool_blob_store.create ~base_path:config.base_path in
+            (match
+               Tool_blob_store.put_durable
+                 store
+                 ~bytes:payload
+                 ~mime:"application/json"
+             with
+             | reference ->
+               Some
+                 (Tool_output.encode_for_agent_core
+                    (Tool_output.Stored reference)))
+        in
         let input_components =
           match !request_evidence_ref with
           | Some
@@ -1616,6 +1675,7 @@ let run_turn
           ~execution_ids
           ~blocks
           ~input_components
+          ~tool_surface_ref
           ();
         prune_raw_traces_after_turn_record ~config ~meta raw_trace;
         (* RFC-0233 §2.3 PR-4: project the same record onto the ambient

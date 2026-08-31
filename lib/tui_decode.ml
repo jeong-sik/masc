@@ -1802,7 +1802,24 @@ type harness_verdict = {
   hv_notes_hash : string;
 }
 
-type harness_snapshot = { hs_verdicts : harness_verdict list }
+type harness_calibration = {
+  hcal_total : int;
+  hcal_approve : int;
+  hcal_reject : int;
+  hcal_labeled : int;
+  hcal_gates : (string * int) list;
+}
+
+type harness_overview = {
+  hov_evaluator_status : string;
+  hov_last_signal_at : float option;
+}
+
+type harness_snapshot = {
+  hs_verdicts : harness_verdict list;
+  hs_calibration : harness_calibration option;
+  hs_overview : harness_overview option;
+}
 
 type verification_request = {
   vr_request_id : string;
@@ -3298,12 +3315,65 @@ let decode_harness_verdict json =
     ; hv_notes_hash
     }
 
+(* Counts keyed by gate name, highest first and ties by name so two reads of
+   the same numbers order them the same. An entry that is not a count is
+   dropped rather than read as zero: the pane reports proportions from this
+   section, and a malformed entry counted as nothing moves every one of
+   them. *)
+let decode_gate_distribution json =
+  match member "gate_distribution" json with
+  | `Assoc fields ->
+      fields
+      |> List.filter_map (fun (gate, value) ->
+             match value with `Int count -> Some (gate, count) | _ -> None)
+      |> List.sort (fun (left_gate, left) (right_gate, right) ->
+             match Int.compare right left with
+             | 0 -> String.compare left_gate right_gate
+             | order -> order)
+  | _ -> []
+
+let decode_harness_calibration json =
+  match member "calibration" json with
+  | `Assoc _ as calibration ->
+      let count key =
+        match member key calibration with `Int value -> value | _ -> 0
+      in
+      Some
+        { hcal_total = count "total_verdicts"
+        ; hcal_approve = count "approve_count"
+        ; hcal_reject = count "reject_count"
+        ; hcal_labeled = count "labeled_count"
+        ; hcal_gates = decode_gate_distribution calibration
+        }
+  | _ -> None
+
+let decode_harness_overview json =
+  match member "overview" json with
+  | `Assoc _ as overview ->
+      let status =
+        match member "evaluator_status" overview with
+        | `String value -> value
+        | _ -> "unknown"
+      in
+      let last_signal_at =
+        match member "last_signal_at" overview with
+        | `Float value -> Some value
+        | `Int value -> Some (Float.of_int value)
+        | _ -> None
+      in
+      Some { hov_evaluator_status = status; hov_last_signal_at = last_signal_at }
+  | _ -> None
+
 let decode_harness_snapshot json =
   let* verdicts_json = required_list_field json "recent_verdicts" in
   let* hs_verdicts =
     decode_list "recent_verdicts" decode_harness_verdict verdicts_json
   in
-  Ok { hs_verdicts }
+  Ok
+    { hs_verdicts
+    ; hs_calibration = decode_harness_calibration json
+    ; hs_overview = decode_harness_overview json
+    }
 
 let decode_verification_request json =
   let* vr_request_id = required_string_field json "request_id" in
@@ -4242,7 +4312,11 @@ let gate_pending_phase_of_json json =
   in
   match disposition_code, pre_worker_reason, summary_status, judgment with
   | ("identity_unbound" | "persistence_uncertain"), _, _, _ -> Gate_blocked
-  | "pre_worker_unavailable", "start_reserved", _, _ -> Gate_judging
+  (* A start reservation is a pre-worker state like its siblings: the worker is
+     not judging yet. Rendering it as judging hid reservations that a restart
+     stranded (now recovered by [release_orphaned_start_reservation]) behind a
+     healthy-looking in-progress row. Blocked surfaces a lingering one; a healthy
+     reservation clears within a poll. *)
   | "pre_worker_unavailable", _, _, _ -> Gate_blocked
   | _, _, "failed", _ -> Gate_blocked
   | _, _, "available", "require_human" -> Gate_human_required
@@ -5729,13 +5803,20 @@ let decode_asks_snapshot json =
 
 (* Goal detail timeline (GET /api/v1/dashboard/goals/detail). The server
    merges task/approval/keeper/goal events into one list of uniform
-   six-field rows; the TUI carries the four it renders. [timeline] is
+   six-field rows, and the TUI carries all six. It used to keep four, which
+   dropped exactly the two that say which thing the row is about: a goal with
+   thirteen task rows drew "task  todo" thirteen times, and the id and title
+   the server had already sent were thrown away in the decoder. [timeline] is
    [`Null] exactly when the approval-queue store could not be read — the
    same discriminated failure the gate snapshot carries — so that case is
    an explicit constructor, never an empty list. *)
 type goal_timeline_event = {
   gt_ts : string;
   gt_kind : string;
+  gt_lane : string;
+      (** The row's subject as a typed reference: ["task:task-1013"],
+          ["approval:appr-…"], ["keeper:<name>"], ["goal"]. *)
+  gt_title : string;
   gt_summary : string;
   gt_severity : string;  (** producer emits ok | warn | bad; open for renderers *)
 }
@@ -5752,9 +5833,11 @@ let decode_goal_timeline_event json =
   in
   let* gt_ts = required "ts" in
   let* gt_kind = required "kind" in
+  let* gt_lane = required "lane" in
+  let* gt_title = required "title" in
   let* gt_summary = required "summary" in
   let* gt_severity = required "severity" in
-  Ok { gt_ts; gt_kind; gt_summary; gt_severity }
+  Ok { gt_ts; gt_kind; gt_lane; gt_title; gt_summary; gt_severity }
 
 let decode_goal_detail_timeline json =
   match member "timeline" json with

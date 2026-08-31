@@ -1,10 +1,4 @@
 type sandbox_profile =
-  | Local
-    (** Host-process execution. Filesystem scope is bound to
-        [<base-path>/.masc/playground/<keeper>/] (see [Playground_paths]).
-        Network inherits the server's namespace. Intended for keepers
-        whose work stays on local files and does not need container-grade
-        isolation. *)
   | Docker
     (** Containerized execution with hardened defaults: cap-drop,
         no-new-privs, read-only rootfs, tmpfs, pids/memory limits.
@@ -29,7 +23,6 @@ type sandbox_profile =
 
 module Sandbox_profile_tla = struct
   type t = sandbox_profile =
-    | Local [@tla.symbol "Local"]
     | Docker [@tla.symbol "Docker"]
     | Micro_vm [@tla.symbol "Micro_vm"]
     | Remote_ssh [@tla.symbol "Remote_ssh"]
@@ -47,13 +40,11 @@ type network_mode =
 [@@deriving tla]
 
 let sandbox_profile_to_config = function
-  | Local -> Keeper_sandbox_config.Local
   | Docker -> Keeper_sandbox_config.Docker
   | Micro_vm -> Keeper_sandbox_config.Micro_vm
   | Remote_ssh -> Keeper_sandbox_config.Remote_ssh
 
 let sandbox_profile_of_config = function
-  | Keeper_sandbox_config.Local -> Local
   | Keeper_sandbox_config.Docker -> Docker
   | Keeper_sandbox_config.Micro_vm -> Micro_vm
   | Keeper_sandbox_config.Remote_ssh -> Remote_ssh
@@ -64,8 +55,8 @@ let sandbox_profile_to_string profile =
   |> Keeper_sandbox_config.sandbox_profile_to_string
 ;;
 
-(** Parse a sandbox profile string. Canonical values are ["local"],
-    ["docker"], ["microvm"] and ["remote_ssh"]. *)
+(** Parse a sandbox profile string. Canonical values are ["docker"],
+    ["microvm"] and ["remote_ssh"]. *)
 let sandbox_profile_of_string raw =
   raw
   |> Keeper_sandbox_config.sandbox_profile_of_string
@@ -76,7 +67,7 @@ let sandbox_profile_of_string raw =
    forces [sandbox_profile_to_string] exhaustiveness AND extends
    [valid_sandbox_profile_strings] so [keeper_schema] picks it up via
    the mirror declared there. *)
-let all_sandbox_profiles = [ Local; Docker; Micro_vm; Remote_ssh ]
+let all_sandbox_profiles = [ Docker; Micro_vm; Remote_ssh ]
 let valid_sandbox_profile_strings = Keeper_sandbox_config.valid_sandbox_profile_strings
 
 let network_mode_to_string = function
@@ -94,10 +85,8 @@ let network_mode_of_string raw =
 (* Issue #8467: Variant SSOT for [network_mode]. *)
 let all_network_modes = [ Network_none; Network_inherit ]
 let valid_network_mode_strings = List.map network_mode_to_string all_network_modes
-let default_sandbox_profile = Local
 
 let default_network_mode_for_profile = function
-  | Local -> Network_inherit
   | Docker -> Network_none
   (* Same default as Docker: the guest is a boundary, and opening it is a
      separate decision the keeper TOML states outright. *)

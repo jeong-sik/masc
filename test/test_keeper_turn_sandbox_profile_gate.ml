@@ -71,79 +71,35 @@ let contains needle haystack =
   scan 0
 ;;
 
-let hatch_key = "MASC_EXEC_ALLOW_LOCAL_PLAYGROUND"
-
-(* Every case restores the cleared state so no empty-string value leaks into
-   the next case (env is process-global). Same hygiene as
-   test_keeper_turn_up_args. *)
-let with_hatch value f =
-  Unix.putenv hatch_key value;
-  Fun.protect ~finally:(fun () -> Unix.putenv hatch_key "") f
-;;
-
-(* A keeper TOML that declares [sandbox_profile = "local"]: the manifest
-   source is present and the resolved profile is [Local]. *)
-let local_profile_defaults =
-  { Masc.Keeper_types_profile.empty_keeper_profile_defaults with
-    manifest_path = Some ".masc/config/keepers/local-gated.toml"
-  ; sandbox_profile = Some Keeper_types_profile_sandbox.Local
-  }
-;;
-
 let gate_meta () =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
-        [ "name", `String "local-gated"
-        ; "trace_id", `String "trace-local-gated"
+        [ "name", `String "unstated-profile"
+        ; "trace_id", `String "trace-unstated-profile"
         ])
   with
   | Ok meta -> meta
   | Error err -> Alcotest.fail err
 ;;
 
-let test_local_profile_defaults_rejected_when_gate_off () =
-  with_hatch "" (fun () ->
-      match
-        Masc.Keeper_meta_contract.effective_meta_of_profile_defaults
-          local_profile_defaults
-          (gate_meta ())
-      with
-      | Error msg ->
-        Alcotest.(check bool) "error names disabled" true (contains "disabled" msg)
-      | Ok _ ->
-        Alcotest.fail "local profile defaults must be rejected when the gate is off")
-;;
-
-let test_local_profile_defaults_allowed_with_hatch () =
-  with_hatch "true" (fun () ->
-      match
-        Masc.Keeper_meta_contract.effective_meta_of_profile_defaults
-          local_profile_defaults
-          (gate_meta ())
-      with
-      | Ok meta ->
-        Alcotest.(check string)
-          "hatch keeps the resolved profile"
-          "local"
-          (Masc.Keeper_types_profile.sandbox_profile_to_string meta.sandbox_profile)
-      | Error err -> Alcotest.fail ("hatch must allow local: " ^ err))
-;;
-
-(* No profile source at all: the resolution falls back to the meta's own
-   [sandbox_profile], which for any durable keeper JSON is the decoder's
-   placeholder [Local] -- the gate rejects that fallback just the same. *)
-let test_no_profile_source_fallback_rejected_when_gate_off () =
-  with_hatch "" (fun () ->
-      match
-        Masc.Keeper_meta_contract.effective_meta_of_profile_defaults
-          Masc.Keeper_types_profile.empty_keeper_profile_defaults
-          (gate_meta ())
-      with
-      | Error msg ->
-        Alcotest.(check bool) "error names disabled" true (contains "disabled" msg)
-      | Ok _ ->
-        Alcotest.fail "no-source fallback to Local must be rejected when the gate is off")
+(* No profile source at all. This used to fall back to the meta's own
+   [sandbox_profile] -- for any durable keeper JSON, the decoder's placeholder
+   -- and a feature flag defaulting to off was what stopped that from becoming
+   host execution. The placeholder is gone as an answer: a keeper with nothing
+   stating a profile has none, and there is no flag that changes it. *)
+let test_no_profile_source_is_refused () =
+  match
+    Masc.Keeper_meta_contract.effective_meta_of_profile_defaults
+      Masc.Keeper_types_profile.empty_keeper_profile_defaults
+      (gate_meta ())
+  with
+  | Error msg ->
+    Alcotest.(check bool)
+      "the error says a profile is required"
+      true
+      (contains "sandbox_profile is required" msg)
+  | Ok _ -> Alcotest.fail "a keeper with no profile source must be refused"
 ;;
 
 let () =
@@ -165,17 +121,9 @@ let () =
         ] )
     ; ( "config_load_gate"
       , [ Alcotest.test_case
-            "local profile defaults rejected when the gate is off"
+            "a keeper with no profile source is refused"
             `Quick
-            test_local_profile_defaults_rejected_when_gate_off
-        ; Alcotest.test_case
-            "local profile defaults allowed with the hatch set"
-            `Quick
-            test_local_profile_defaults_allowed_with_hatch
-        ; Alcotest.test_case
-            "no-profile-source fallback to local rejected when the gate is off"
-            `Quick
-            test_no_profile_source_fallback_rejected_when_gate_off
+            test_no_profile_source_is_refused
         ] )
     ]
 ;;

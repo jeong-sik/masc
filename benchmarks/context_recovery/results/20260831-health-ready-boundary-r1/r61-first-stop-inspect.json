@@ -1,0 +1,273 @@
+[
+    {
+        "Id": "ad0991ad829074e6edbf9939310e8685b4b309346ab0cb529d6878c94aa21ddc",
+        "Created": "2026-08-30T17:34:39.794969417Z",
+        "Path": "/usr/bin/tini",
+        "Args": [
+            "--",
+            "/app/scripts/docker-entrypoint.sh"
+        ],
+        "State": {
+            "Status": "exited",
+            "Running": false,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 0,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-08-30T17:34:39.981391751Z",
+            "FinishedAt": "2026-08-30T17:37:39.550377459Z",
+            "Health": {
+                "Status": "unhealthy",
+                "FailingStreak": 1,
+                "Log": [
+                    {
+                        "Start": "2026-08-30T17:35:15.075636712Z",
+                        "End": "2026-08-30T17:35:15.099372545Z",
+                        "ExitCode": 0,
+                        "Output": "{\"status\":\"ok\",\"server\":\"masc\",\"version\":\"0.28.0\",\"release_version\":\"0.28.0\",\"build\":{\"release_version\":\"0.28.0\",\"binary_version\":\"0.28.0\",\"provenance_source\":\"self_observed\",\"executable_sha256\":\"0dd6883dbebb12c4b32f45188f77d43cddb6f6a29554cf5983effdbed5b3243a\",\"executable_path\":\"/app/masc\",\"executable_dir\":\"/app\",\"runtime_instance_id\":\"01a053bc-d7e6-7000-8206-06623dd99d9b\",\"started_at\":\"2026-08-30T17:34:40Z\",\"uptime_seconds\":34},\"health_detail\":\"probe\",\"full_health_url\":\"/health?full=1\",\"protocol\":{\"default\":\"2025-11-25\",\"listener\":\"http/1.1\",\"supported\":[\"2026-07-28\",\"DRAFT-2026-v1\",\"2024-11-05\",\"2025-03-26\",\"2025-06-18\",\"2025-11-25\"]},\"transport\":{\"streamable_http_default\":true,\"http\":{\"configured\":true,\"enabled\":true,\"protocol_capable\":true,\"auth_policy_present\":false,\"base_url\":\"http://127.0.0.1:8080\",\"mcp_url\":\"http://127.0.0.1:8080/mcp\",\"sse_url\":\"http://127.0.0.1:8080/mcp?sse_kind=observer\"},\"grpc\":{\"enabled\":false,\"configured\":false,\"listening\":false,\"reachable\":false,\"listen_status\":\"disabled\",\"port\":8936,\"service\":\"masc.workspace.v1.MascWorkspace\",\"health_service\":\"grpc.health.v1.Health\"},\"websocket\":{\"enabled\":true,\"configured\":true,\"listening\":true,\"reachable\":true,\"mode\":\"same_origin\",\"discovery_path\":\"/ws\",\"upgrade_path\":\"/ws\",\"request_host\":\"127.0.0.1\",\"session_count\":0,\"ws_url\":\"ws://127.0.0.1:8080/ws\",\"same_origin_upgrade_enabled\":true,\"same_origin_upgrade_path\":\"/ws\",\"same_origin_ws_url\":\"ws://127.0.0.1:8080/ws\"},\"total_sessions\":0,\"enabled_protocols\":[\"json-rpc\",\"sse\",\"ws\"]},\"http_listener\":{\"mode\":\"auto\",\"status\":\"listening\",\"active_connections\":1,\"accepted_total\":3,\"accept_errors_total\":0,\"rate_limit_responses_total\":0,\"rate_limit_responses\":[{\"protocol\":\"h1\",\"scope\":\"client_ip\",\"total\":0},{\"protocol\":\"h1\",\"scope\":\"agent\",\"total\":0},{\"protocol\":\"h1\",\"scope\":\"sse_connection\",\"total\":0},{\"protocol\":\"h2\",\"scope\":\"client_ip\",\"total\":0},{\"protocol\":\"h2\",\"scope\":\"agent\",\"total\":0},{\"protocol\":\"h2\",\"scope\":\"sse_connection\",\"total\":0}],\"last_accept_unix\":1788111315.097832,\"last_accept_age_seconds\":0.00033402442932128906,\"last_error\":null},\"paths\":{\"cwd\":\"/app\",\"effective_base_path\":\"/app\",\"effective_masc_root\":\"/app/.masc\",\"current_task_path\":\"/app/.masc/current_task\",\"current_task_shape\":\"absent\",\"effective_has_masc_dir\":true,\"roots_diverge\":false,\"strict_mode_requested\":false,\"startup_rejected\":false,\"startup_abort_eligible\":false,\"input_base_path\":\"/app\",\"env_masc_base_path\":\"/app\",\"resolution_source\":\"explicit_cli\"},\"internal_mcp_auth\":{\"schema\":\"masc.internal_mcp_auth.v1\",\"status\":\"ok\",\"source\":\"running_process_env_and_auth_hash\",\"env_key\":\"MASC_INTERNAL_MCP_TOKEN\",\"env_token_present\":true,\"token_hash_file_present\":true,\"env_token_verifies\":true,\"keeper_internal_runtime_mcp_ready\":true,\"missing\":[],\"operator_action_required\":false,\"operator_next_action\":\"none\"},\"otel\":{\"enabled\":true,\"status\":\"inactive\",\"endpoint\":\"http://127.0.0.1:4318\",\"service_name\":\"masc\",\"exporter_active\":false,\"exporter_degraded\":false,\"consecutive_failures\":0,\"last_successful_export_unix\":null,\"last_degradation_error\":null},\"uptime\":\"34s\",\"sse_clients\":0,\"startup\":{\"phase\":\"ready\",\"state_ready\":true,\"pending_lazy_tasks\":[],\"last_error\":null,\"path_diagnostics\":{\"cwd\":\"/app\",\"effective_base_path\":\"/app\",\"effective_masc_root\":\"/app/.masc\",\"current_task_path\":\"/app/.masc/current_task\",\"current_task_shape\":\"absent\",\"effective_has_masc_dir\":true,\"roots_diverge\":false,\"strict_mode_requested\":false,\"startup_rejected\":false,\"startup_abort_eligible\":false,\"input_base_path\":\"/app\",\"env_masc_base_path\":\"/app\",\"resolution_source\":\"explicit_cli\"},\"config_resolution\":{\"status\":\"ready\",\"warnings\":[],\"config_root\":{\"path\":\"/app/.masc/config\",\"exists\":true,\"source\":\"local_masc\"},\"prompts\":{\"path\":\"/app/.masc/config/prompts\",\"exists\":true,\"source\":\"local_masc\"},\"keepers\":{\"path\":\"/app/.masc/config/keepers\",\"exists\":true,\"source\":\"local_masc\"}},\"elapsed_sec\":34.93459391593933,\"watchdog_timeout_sec\":240.0,\"product\":{\"lifecycle\":\"serving\",\"lazy_tasks\":\"complete\",\"readiness\":\"ready\",\"last_error\":null,\"flat_phase\":\"ready\"}},\"schedule_runner\":{\"schema\":..."
+                    },
+                    {
+                        "Start": "2026-08-30T17:35:45.10087842Z",
+                        "End": "2026-08-30T17:35:52.24874834Z",
+                        "ExitCode": -1,
+                        "Output": "Health check exceeded timeout (3s)"
+                    },
+                    {
+                        "Start": "2026-08-30T17:36:22.251134923Z",
+                        "End": "2026-08-30T17:36:32.75153872Z",
+                        "ExitCode": -1,
+                        "Output": "Health check exceeded timeout (3s)"
+                    },
+                    {
+                        "Start": "2026-08-30T17:37:02.753699095Z",
+                        "End": "2026-08-30T17:37:07.647333916Z",
+                        "ExitCode": 0,
+                        "Output": "{\"status\":\"ok\",\"server\":\"masc\",\"version\":\"0.28.0\",\"release_version\":\"0.28.0\",\"build\":{\"release_version\":\"0.28.0\",\"binary_version\":\"0.28.0\",\"provenance_source\":\"self_observed\",\"executable_sha256\":\"0dd6883dbebb12c4b32f45188f77d43cddb6f6a29554cf5983effdbed5b3243a\",\"executable_path\":\"/app/masc\",\"executable_dir\":\"/app\",\"runtime_instance_id\":\"01a053bc-d7e6-7000-8206-06623dd99d9b\",\"started_at\":\"2026-08-30T17:34:40Z\",\"uptime_seconds\":147},\"health_detail\":\"probe\",\"full_health_url\":\"/health?full=1\",\"protocol\":{\"default\":\"2025-11-25\",\"listener\":\"http/1.1\",\"supported\":[\"2026-07-28\",\"DRAFT-2026-v1\",\"2024-11-05\",\"2025-03-26\",\"2025-06-18\",\"2025-11-25\"]},\"transport\":{\"streamable_http_default\":true,\"http\":{\"configured\":true,\"enabled\":true,\"protocol_capable\":true,\"auth_policy_present\":false,\"base_url\":\"http://127.0.0.1:8080\",\"mcp_url\":\"http://127.0.0.1:8080/mcp\",\"sse_url\":\"http://127.0.0.1:8080/mcp?sse_kind=observer\"},\"grpc\":{\"enabled\":false,\"configured\":false,\"listening\":false,\"reachable\":false,\"listen_status\":\"disabled\",\"port\":8936,\"service\":\"masc.workspace.v1.MascWorkspace\",\"health_service\":\"grpc.health.v1.Health\"},\"websocket\":{\"enabled\":true,\"configured\":true,\"listening\":true,\"reachable\":true,\"mode\":\"same_origin\",\"discovery_path\":\"/ws\",\"upgrade_path\":\"/ws\",\"request_host\":\"127.0.0.1\",\"session_count\":0,\"ws_url\":\"ws://127.0.0.1:8080/ws\",\"same_origin_upgrade_enabled\":true,\"same_origin_upgrade_path\":\"/ws\",\"same_origin_ws_url\":\"ws://127.0.0.1:8080/ws\"},\"total_sessions\":0,\"enabled_protocols\":[\"json-rpc\",\"sse\",\"ws\"]},\"http_listener\":{\"mode\":\"auto\",\"status\":\"listening\",\"active_connections\":1,\"accepted_total\":21,\"accept_errors_total\":0,\"rate_limit_responses_total\":0,\"rate_limit_responses\":[{\"protocol\":\"h1\",\"scope\":\"client_ip\",\"total\":0},{\"protocol\":\"h1\",\"scope\":\"agent\",\"total\":0},{\"protocol\":\"h1\",\"scope\":\"sse_connection\",\"total\":0},{\"protocol\":\"h2\",\"scope\":\"client_ip\",\"total\":0},{\"protocol\":\"h2\",\"scope\":\"agent\",\"total\":0},{\"protocol\":\"h2\",\"scope\":\"sse_connection\",\"total\":0}],\"last_accept_unix\":1788111427.645678,\"last_accept_age_seconds\":0.00030493736267089844,\"last_error\":null},\"paths\":{\"cwd\":\"/app\",\"effective_base_path\":\"/app\",\"effective_masc_root\":\"/app/.masc\",\"current_task_path\":\"/app/.masc/current_task\",\"current_task_shape\":\"absent\",\"effective_has_masc_dir\":true,\"roots_diverge\":false,\"strict_mode_requested\":false,\"startup_rejected\":false,\"startup_abort_eligible\":false,\"input_base_path\":\"/app\",\"env_masc_base_path\":\"/app\",\"resolution_source\":\"explicit_cli\"},\"internal_mcp_auth\":{\"schema\":\"masc.internal_mcp_auth.v1\",\"status\":\"ok\",\"source\":\"running_process_env_and_auth_hash\",\"env_key\":\"MASC_INTERNAL_MCP_TOKEN\",\"env_token_present\":true,\"token_hash_file_present\":true,\"env_token_verifies\":true,\"keeper_internal_runtime_mcp_ready\":true,\"missing\":[],\"operator_action_required\":false,\"operator_next_action\":\"none\"},\"otel\":{\"enabled\":true,\"status\":\"inactive\",\"endpoint\":\"http://127.0.0.1:4318\",\"service_name\":\"masc\",\"exporter_active\":false,\"exporter_degraded\":false,\"consecutive_failures\":0,\"last_successful_export_unix\":null,\"last_degradation_error\":null},\"uptime\":\"2m 27s\",\"sse_clients\":0,\"startup\":{\"phase\":\"ready\",\"state_ready\":true,\"pending_lazy_tasks\":[],\"last_error\":null,\"path_diagnostics\":{\"cwd\":\"/app\",\"effective_base_path\":\"/app\",\"effective_masc_root\":\"/app/.masc\",\"current_task_path\":\"/app/.masc/current_task\",\"current_task_shape\":\"absent\",\"effective_has_masc_dir\":true,\"roots_diverge\":false,\"strict_mode_requested\":false,\"startup_rejected\":false,\"startup_abort_eligible\":false,\"input_base_path\":\"/app\",\"env_masc_base_path\":\"/app\",\"resolution_source\":\"explicit_cli\"},\"config_resolution\":{\"status\":\"ready\",\"warnings\":[],\"config_root\":{\"path\":\"/app/.masc/config\",\"exists\":true,\"source\":\"local_masc\"},\"prompts\":{\"path\":\"/app/.masc/config/prompts\",\"exists\":true,\"source\":\"local_masc\"},\"keepers\":{\"path\":\"/app/.masc/config/keepers\",\"exists\":true,\"source\":\"local_masc\"}},\"elapsed_sec\":147.48241305351257,\"watchdog_timeout_sec\":240.0,\"product\":{\"lifecycle\":\"serving\",\"lazy_tasks\":\"complete\",\"readiness\":\"ready\",\"last_error\":null,\"flat_phase\":\"ready\"}},\"schedule_runner\":{\"sc..."
+                    },
+                    {
+                        "Start": "2026-08-30T17:37:37.656673083Z",
+                        "End": "2026-08-30T17:37:39.549277292Z",
+                        "ExitCode": 137,
+                        "Output": ""
+                    }
+                ]
+            }
+        },
+        "Image": "sha256:870546f09fe7596523475ac485440a8e65f86a7db901d1614db1c2c85df9f38c",
+        "ResolvConfPath": "/var/lib/docker/containers/ad0991ad829074e6edbf9939310e8685b4b309346ab0cb529d6878c94aa21ddc/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/ad0991ad829074e6edbf9939310e8685b4b309346ab0cb529d6878c94aa21ddc/hostname",
+        "HostsPath": "/var/lib/docker/containers/ad0991ad829074e6edbf9939310e8685b4b309346ab0cb529d6878c94aa21ddc/hosts",
+        "LogPath": "/var/lib/docker/containers/ad0991ad829074e6edbf9939310e8685b4b309346ab0cb529d6878c94aa21ddc/ad0991ad829074e6edbf9939310e8685b4b309346ab0cb529d6878c94aa21ddc-json.log",
+        "Name": "/masc-health-worker-restart-r61",
+        "RestartCount": 0,
+        "Driver": "overlayfs",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "masc-health-worker-restart-r61-data:/app/.masc"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {}
+            },
+            "NetworkMode": "bridge",
+            "PortBindings": {},
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": null,
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 10000000,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": [],
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/acpi",
+                "/proc/asound",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/sys/devices/virtual/powercap",
+                "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "Storage": {
+            "RootFS": {
+                "Snapshot": {
+                    "Name": "overlayfs"
+                }
+            }
+        },
+        "Mounts": [
+            {
+                "Type": "volume",
+                "Name": "masc-health-worker-restart-r61-data",
+                "Source": "/var/lib/docker/volumes/masc-health-worker-restart-r61-data/_data",
+                "Destination": "/app/.masc",
+                "Driver": "local",
+                "Mode": "z",
+                "RW": true,
+                "Propagation": ""
+            }
+        ],
+        "Config": {
+            "Hostname": "ad0991ad8290",
+            "Domainname": "",
+            "User": "appuser",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "ExposedPorts": {
+                "8080/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1",
+                "OLLAMA_CLOUD_API_KEY=nonsecret-measurement-token",
+                "MASC_TEAM_PRESET=classic",
+                "MASC_LOG_LEVEL=debug",
+                "MASC_ADMIN_TOKEN=health-worker-restart-r61-token",
+                "MASC_HTTP_BASE_URL=http://127.0.0.1:8080",
+                "MASC_KEEPER_BOOTSTRAP_ENABLED=true",
+                "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=300",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "PORT=8080",
+                "MASC_BASE_PATH=/app"
+            ],
+            "Cmd": null,
+            "Healthcheck": {
+                "Test": [
+                    "CMD-SHELL",
+                    "curl -fsS http://localhost:${PORT}/health || exit 1"
+                ],
+                "Interval": 30000000000,
+                "Timeout": 3000000000,
+                "StartPeriod": 15000000000,
+                "Retries": 5
+            },
+            "Image": "masc-oneclick:health-worker-singleflight-linux-ac8e5d4",
+            "Volumes": {
+                "/app/.masc": {}
+            },
+            "WorkingDir": "/app",
+            "Entrypoint": [
+                "/usr/bin/tini",
+                "--",
+                "/app/scripts/docker-entrypoint.sh"
+            ],
+            "Labels": {
+                "org.opencontainers.image.version": "24.04"
+            },
+            "StopSignal": "SIGTERM",
+            "StopTimeout": 1
+        },
+        "NetworkSettings": {
+            "SandboxID": "",
+            "SandboxKey": "",
+            "Ports": {},
+            "Networks": {
+                "bridge": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "7256863e0adae898e75befe4f8b205e9c438cf54a253ea5bbede3f0074de1aca",
+                    "EndpointID": "",
+                    "Gateway": "",
+                    "IPAddress": "",
+                    "MacAddress": "",
+                    "IPPrefixLen": 0,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        },
+        "ImageManifestDescriptor": {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:748ad7d93a83d3d98724171d2dcd20026ff7fbd05593e6c1f33343110cc0778e",
+            "size": 2570,
+            "platform": {
+                "architecture": "arm64",
+                "os": "linux"
+            }
+        }
+    }
+]

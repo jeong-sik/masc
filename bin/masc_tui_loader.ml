@@ -378,6 +378,16 @@ let add_event (state : state) event_type content =
       state.overview_event_scroll;
   state.events <- events
 
+(* An outcome the operator pressed a key for, rather than something that
+   happened on its own. It goes to the event log like any other event, and to
+   the footer, because the log is drawn by Overview alone: the operator who
+   pressed [a] on Repos stood on the one surface that could not show them
+   whether the registration landed, the declaration was refused, or the
+   editor never started. *)
+let report_action (state : state) event_type content =
+  add_event state event_type content;
+  state.last_action <- Some (content, Unix.gettimeofday ())
+
 (** HTTP JSON decoding helpers. These intentionally fail closed for the TUI
     dashboard surfaces: an empty list means the API really returned an empty
     list, not that a malformed payload was silently dropped. *)
@@ -437,6 +447,17 @@ let decode_board_post ?(require_body = false) json =
   let* bp_created_at =
     required_display_any_field json [ "created_at_iso"; "created_at" ]
   in
+  (* The numeric field, not its ISO twin: the list draws an age, and parsing a
+     formatted timestamp back into one would be a second reading of the same
+     fact. Absent reads as the creation time, which is what an untouched post's
+     [updated_at] holds anyway -- so a server too old to send it degrades to
+     "as old as it looks" rather than to a blank column. *)
+  let updated_at =
+    match Yojson.Safe.Util.member "updated_at" json with
+    | `Float value -> Some value
+    | `Int value -> Some (Float.of_int value)
+    | _ -> None
+  in
   let* bp_hearth = optional_string_field json "hearth" in
   let* raw_kind = optional_string_field json "post_kind" in
   (* Optional, and an unknown value is carried rather than rejected: the list
@@ -459,21 +480,63 @@ let decode_board_post ?(require_body = false) json =
       bp_votes;
       bp_comment_count;
       bp_created_at;
+      bp_updated_at =
+        (match updated_at with
+         | Some updated_at -> updated_at
+         | None -> Option.value (float_of_string_opt bp_created_at) ~default:0.);
       bp_hearth;
       bp_kind;
     }
+
+(* The board's own hearth census: name and post count, over the whole board.
+   Sorted busiest first here rather than trusted from the wire, so the pane's
+   order is its own statement and not a property of whichever query answered.
+   An entry missing either half is dropped -- a hearth with no name cannot be
+   narrowed to, and one with no count cannot be weighed. *)
+let decode_board_hearths json =
+  match Yojson.Safe.Util.member "hearths" json with
+  | `List items ->
+      Ok
+        (items
+        |> List.filter_map (fun item ->
+               match
+                 ( Yojson.Safe.Util.member "name" item
+                 , Yojson.Safe.Util.member "count" item )
+               with
+               | `String name, `Int count when String.trim name <> "" ->
+                   Some (String.trim name, count)
+               | _ -> None)
+        |> List.sort (fun (left_name, left) (right_name, right) ->
+               match Int.compare right left with
+               | 0 -> String.compare left_name right_name
+               | order -> order))
+  | `Null -> Ok []
+  | value ->
+      Error
+        (Printf.sprintf "board hearths must be a list: %s"
+           (Yojson.Safe.to_string value))
+
+(** Load the hearth census from /api/v1/board/hearths. *)
+let load_board_hearths ~(host : string) ~(port : int) :
+    ((string * int) list, string) result =
+  match fetch_board_hearths ~host ~port with
+  | Error err -> Error ("board hearths load failed: " ^ err)
+  | Ok json -> decode_board_hearths json
 
 let decode_board_posts json_list =
   decode_list "posts" decode_board_post json_list
 
 let decode_board_comment json =
   let* bc_id = required_string_field json "id" in
+  (* Optional because a top-level comment has none, not because the field may
+     be absent: the wire always carries the key and answers [null] there. *)
+  let* bc_parent_id = optional_string_field json "parent_id" in
   let* bc_author = required_string_field json "author" in
   let* bc_content = required_string_field json "content" in
   let* bc_created_at =
     required_display_any_field json [ "created_at_iso"; "created_at" ]
   in
-  Ok { bc_id; bc_author; bc_content; bc_created_at }
+  Ok { bc_id; bc_parent_id; bc_author; bc_content; bc_created_at }
 
 let decode_board_comments json_list =
   decode_list "comments" decode_board_comment json_list
@@ -495,6 +558,26 @@ let optional_nested_string_field json object_field field =
   match Yojson.Safe.Util.member object_field json with
   | `Null -> Ok None
   | `Assoc _ as nested -> optional_string_field nested field
+  | value ->
+      Error
+        (Printf.sprintf "schedule %s must be an object or null: %s"
+           object_field (Yojson.Safe.to_string value))
+
+(* Whether a step of the wake actually happened, as the reaction ledger
+   recorded it. Absent reads as [None] and not as [false]: "the ledger did not
+   say" and "the ledger said no" are different answers, and only one of them
+   means something went wrong. *)
+let optional_nested_bool_field json object_field field =
+  match Yojson.Safe.Util.member object_field json with
+  | `Null -> Ok None
+  | `Assoc _ as nested -> (
+      match Yojson.Safe.Util.member field nested with
+      | `Null -> Ok None
+      | `Bool value -> Ok (Some value)
+      | value ->
+          Error
+            (Printf.sprintf "schedule %s.%s must be a boolean or null: %s"
+               object_field field (Yojson.Safe.to_string value)))
   | value ->
       Error
         (Printf.sprintf "schedule %s must be an object or null: %s"
@@ -563,6 +646,32 @@ let decode_schedule_row json =
     optional_nested_string_field json "keeper_reaction_evidence"
       "latest_recorded_at_iso"
   in
+  (* What became of the wake, step by step, as the reaction ledger recorded
+     it. [projection_status] above is the verdict on all four at once; these
+     are the four, and they are what tells a stalled wake from a delivered
+     one that nobody acted on. *)
+  let* sch_reaction_kind =
+    optional_nested_string_field json "keeper_reaction_evidence" "reaction_kind"
+  in
+  let* sch_wake_seen =
+    optional_nested_bool_field json "keeper_reaction_evidence" "stimulus_seen"
+  in
+  let* sch_turn_started =
+    optional_nested_bool_field json "keeper_reaction_evidence"
+      "turn_started_seen"
+  in
+  let* sch_queue_ack_seen =
+    optional_nested_bool_field json "keeper_reaction_evidence"
+      "event_queue_ack_seen"
+  in
+  let* sch_wake_cancelled =
+    optional_nested_bool_field json "keeper_reaction_evidence"
+      "event_queue_cancelled_seen"
+  in
+  let* sch_reaction_quarantined =
+    optional_nested_int_field json "keeper_reaction_evidence"
+      "quarantined_record_count"
+  in
   Ok
     { sch_schedule_instance_id
     ; sch_schedule_id
@@ -587,6 +696,12 @@ let decode_schedule_row json =
     ; sch_queue_projection_status
     ; sch_queue_pending_count
     ; sch_reaction_projection_status
+    ; sch_reaction_kind
+    ; sch_wake_seen
+    ; sch_turn_started
+    ; sch_queue_ack_seen
+    ; sch_wake_cancelled
+    ; sch_reaction_quarantined
     ; sch_reaction_latest_at_iso
     }
 
@@ -654,9 +769,9 @@ let load_schedules ~(host : string) ~(port : int) :
 
 (** Load board post list from /api/v1/board *)
 let load_board_list ~(host : string) ~(port : int)
-    ~(sort_by : string) :
+    ~(sort_by : string) ~(hearth : string option) :
     (board_post list, string) result =
-  match fetch_board ~host ~port ~sort_by with
+  match fetch_board ~host ~port ~sort_by ~hearth with
   | Error err -> Error ("board load failed: " ^ err)
   | Ok json ->
       let* posts = required_list_field json "posts" in

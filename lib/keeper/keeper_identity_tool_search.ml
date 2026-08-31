@@ -19,9 +19,15 @@
    [agent.tools] before the history sees it, so the call would disappear
    rather than fail. *)
 
+type deferred =
+  { tool : Agent_core.Tool.t
+  ; summary : string
+  }
+
 type surface =
-  { offered : Keeper_identity_tools.offered_tool list
+  { deferred : deferred list
   ; agent_cell : Agent_core.Agent.t option ref
+  ; history : Agent_core.Types.message list
   }
 
 type entry =
@@ -37,6 +43,7 @@ type turn_discovery =
 
 type placement =
   { tool : Agent_core.Tool.t
+  ; already_used : Agent_core.Tool.t list
   ; observe_turn : unit -> turn_discovery
   }
 
@@ -93,12 +100,23 @@ let summary_of description =
    the listing is built here, because only this turn knows what is attached. *)
 let declared = Tool_schemas_identity_tool_search.schema
 
-let description_of entries =
+(* [placed] are the entries this turn hands over with their schemas, so the
+   model reads them from its own tool list. Naming them here as well would
+   spend the listing's bytes -- charged to every request of the turn -- on a
+   line that says what the schema beside it already says. Measured over three
+   days, that duplication was a median 7 of the listed tools and reached 24,
+   a third of one listing. They stay in [entries]: asking for a tool that is
+   already callable answers rather than refuses. *)
+let description_of ~placed entries =
+  let omitted name = List.exists (String.equal name) placed in
   String.concat
     "\n"
     (declared.Masc_domain.description
-     :: List.map
-          (fun entry -> Printf.sprintf "- %s: %s" entry.name entry.summary)
+     :: List.filter_map
+          (fun entry ->
+             if omitted entry.name
+             then None
+             else Some (Printf.sprintf "- %s: %s" entry.name entry.summary))
           entries)
 ;;
 
@@ -222,25 +240,67 @@ let observe_turn ~keeper_name ~usage () =
     Loaded_unused loaded
 ;;
 
-let make ~keeper_name ~build { offered; agent_cell } =
-  match offered with
+(* Which attached tools this conversation actually ran.
+
+   Read off the tools' own ToolUse blocks: a call the model made is a call the
+   model needed, and the block carries the tool's name directly. Nothing about
+   the listing is parsed -- the request for a tool is not evidence that the
+   tool was wanted, only that it looked wanted.
+
+   That distinction is the bound. Carrying every requested tool grows the
+   surface toward the full attached list on a long conversation: measured
+   2026-08-30 after one hour, polisher was at 111 tools of a possible 133 and
+   still climbing. Carrying only what ran stops where use stops -- 29 of 145
+   attached tools were called at all on the day the RFC measured, 20%. *)
+let already_used_from_history ~entries history =
+  let called = Hashtbl.create 8 in
+  List.iter
+    (fun (message : Agent_core.Types.message) ->
+       List.iter
+         (fun (block : Agent_core.Types.content_block) ->
+            match block with
+            | Agent_core.Types.ToolUse { name; _ } -> Hashtbl.replace called name ()
+            | Agent_core.Types.Text _
+            | Agent_core.Types.Thinking _
+            | Agent_core.Types.RedactedThinking _
+            | Agent_core.Types.ToolResult _
+            | Agent_core.Types.Image _
+            | Agent_core.Types.Document _
+            | Agent_core.Types.ReasoningDetails _
+            | Agent_core.Types.Audio _ -> ())
+         message.Agent_core.Types.content)
+    history;
+  List.filter_map
+    (fun entry ->
+       if Hashtbl.mem called entry.name then Some entry.callable else None)
+    entries
+;;
+
+let make ~keeper_name { deferred; agent_cell; history } =
+  match deferred with
   | [] -> None
   | _ :: _ ->
     let usage = { loaded = Atomic.make []; used = Atomic.make [] } in
     let entries =
       List.map
-        (fun (offer : Keeper_identity_tools.offered_tool) ->
-           { name = offer.Keeper_identity_tools.schema.name
-           ; summary = summary_of offer.Keeper_identity_tools.schema.description
-           ; callable = observed usage (build offer)
+        (fun (d : deferred) ->
+           { name = d.tool.Agent_core.Tool.schema.name
+           ; summary = d.summary
+           ; callable = observed usage d.tool
            })
-        offered
+        deferred
+    in
+    let already_used = already_used_from_history ~entries history in
+    let placed =
+      List.map
+        (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
+        already_used
     in
     let schema =
       match
         Agent_core.Types.tool_schema_of_input_schema
           ~name:tool_name
-          ~description:(description_of entries)
+          ~description:(description_of ~placed entries)
           ~input_schema:declared.Masc_domain.input_schema
           ()
       with
@@ -270,6 +330,7 @@ let make ~keeper_name ~build { offered; agent_cell } =
           Agent_core.Tool.of_schema
             schema
             (Agent_core.Tool.ignoring_execution_env handler)
+      ; already_used
       ; observe_turn = observe_turn ~keeper_name ~usage
       }
 ;;

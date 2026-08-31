@@ -180,7 +180,7 @@ let write_keeper_toml config_dir ~name =
 [keeper]
 name = "%s"
 instructions = "test keeper"
-sandbox_profile = "local"
+sandbox_profile = "docker"
 |}
        name)
 
@@ -193,7 +193,7 @@ let write_keeper_toml_with_instructions config_dir ~name ~instructions =
        {|
 [keeper]
 name = "%s"
-sandbox_profile = "local"
+sandbox_profile = "docker"
 proactive_enabled = false
 instructions = "%s"
 |}
@@ -208,7 +208,7 @@ let write_empty_keeper_toml config_dir ~name =
 [keeper]
 name = "%s"
 instructions = "test keeper"
-sandbox_profile = "local"
+sandbox_profile = "docker"
 proactive_enabled = false
 |}
        name);

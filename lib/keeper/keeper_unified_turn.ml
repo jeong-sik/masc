@@ -102,24 +102,42 @@ type continuation_route_disposition =
   | Continuation_route_addressed
   | Continuation_route_not_addressed
 
+type checkpoint_reason =
+  | Operation_queued
+  | Durable_stimulus_arrived
+  | Awaiting_external_effect
+  | Repeated_tool_call
+  | Repeated_assistant_text
+
 type turn_success =
   | Turn_completed of
       { meta : keeper_meta
       ; continuation_route : continuation_route_disposition
       }
-  | Turn_checkpointed of keeper_meta
+  | Turn_checkpointed of
+      { meta : keeper_meta
+      ; checkpoint_reason : checkpoint_reason
+      ; continuation_route : continuation_route_disposition
+      }
   | Turn_input_required of keeper_meta
   | Turn_cancelled of keeper_meta
   | Turn_skipped of keeper_meta
 
 let turn_success_of_stop_reason ~meta ~continuation_route = function
   | Runtime_agent.Completed -> Turn_completed { meta; continuation_route }
-  | Runtime_agent.Yielded_to_operation_queued _
-  | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Awaiting_external_effect _
-  | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.Yielded_to_operation_queued _ ->
+    Turn_checkpointed { meta; checkpoint_reason = Operation_queued; continuation_route }
+  | Runtime_agent.Yielded_to_durable_stimulus _ ->
+    Turn_checkpointed
+      { meta; checkpoint_reason = Durable_stimulus_arrived; continuation_route }
+  | Runtime_agent.Awaiting_external_effect _ ->
+    Turn_checkpointed
+      { meta; checkpoint_reason = Awaiting_external_effect; continuation_route }
+  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
+    Turn_checkpointed { meta; checkpoint_reason = Repeated_tool_call; continuation_route }
   | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
-    Turn_checkpointed meta
+    Turn_checkpointed
+      { meta; checkpoint_reason = Repeated_assistant_text; continuation_route }
   | Runtime_agent.InputRequired _ -> Turn_input_required meta
 ;;
 
@@ -1027,7 +1045,10 @@ let run_keeper_cycle
                   let is_auto_recoverable = EC.is_auto_recoverable_turn_error err in
                   let counts_toward_crash =
                     Keeper_unified_turn_failure.account_failure_counting
-                      ~keeper_name:meta.name ~is_auto_recoverable err
+                      ~base_path:config.base_path
+                      ~keeper_name:meta.name
+                      ~is_auto_recoverable
+                      err
                   in
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string Turns)

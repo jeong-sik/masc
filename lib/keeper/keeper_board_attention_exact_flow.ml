@@ -59,22 +59,24 @@ type prepared =
   { candidate : Keeper_board_attention_candidate.candidate
   ; net : Eio_context.eio_net
   ; attempt : Exact_output.flow_attempt
+  ; cli_slots : string list
+        (** Carried from the same lane resolution the catalog slots came from,
+            so the tail cannot drift from the flow it follows. *)
+  ; prompt : string
+  ; requirement : Exact_output.output_requirement
   }
 
 let message role text =
   Agent_core.Types.make_message ~role [ Agent_core.Types.Text text ]
 ;;
 
-let messages candidate =
+let judge_prompt candidate =
   let* request =
     Keeper_board_attention_candidate.singleton_judgment_request candidate
   in
-  let* prompt =
-    Prompt_registry.render_prompt_template
-      Prompt_names.judge_board
-      [ "judgment_request_json", Yojson.Safe.to_string request ]
-  in
-  Ok [ message Agent_core.Types.User prompt ]
+  Prompt_registry.render_prompt_template
+    Prompt_names.judge_board
+    [ "judgment_request_json", Yojson.Safe.to_string request ]
 ;;
 
 let flow_candidates selected_slots =
@@ -121,10 +123,11 @@ let prepare ~base_path ~keeper_name ~net candidate =
     | Keeper_board_attention_candidate.Requeued_resumable
         { resumable = Keeper_board_attention_candidate.Resumable_pending _; _ }
     ), Some net ->
-    let* messages =
-      messages candidate
+    let* prompt =
+      judge_prompt candidate
       |> Result.map_error (fun detail -> Prompt_contract_unavailable detail)
     in
+    let messages = [ message Agent_core.Types.User prompt ] in
     let* registry =
       Runtime_exact_output_registry.current ()
       |> Result.map_error (fun _ -> Registry_unavailable)
@@ -160,7 +163,14 @@ let prepare ~base_path ~keeper_name ~net candidate =
          Exact_output.start_flow snapshot
          |> Result.map_error (fun _ -> Flow_start_failed)
        in
-       Ok { candidate; net; attempt })
+       Ok
+         { candidate
+         ; net
+         ; attempt
+         ; cli_slots = resolved.cli_slots
+         ; prompt
+         ; requirement
+         })
 ;;
 
 let string_of_call_id call_id = Exact_output.call_id_to_string call_id
@@ -241,6 +251,35 @@ let require_equal ~field left right =
          (Printf.sprintf "%s mismatch left=%S right=%S" field left right))
 ;;
 
+(* The batch decoder and the singleton identity check are the same question on
+   both transports: did this answer judge exactly this candidate. Only the
+   provenance recorded alongside differs, so the two callers share this. *)
+let verdict_of_batch_output candidate output =
+  let* items =
+    Keeper_board_attention_judgment.batch_of_yojson output
+    |> Result.map_error (fun detail -> Domain_output_invalid detail)
+  in
+  match items with
+  | [ item ]
+    when String.equal
+           item.candidate_id
+           candidate.Keeper_board_attention_candidate.candidate_id ->
+    Ok item.verdict
+  | [ item ] ->
+    Error
+      (Domain_output_invalid
+         (Printf.sprintf
+            "singleton verdict identity mismatch expected=%S actual=%S"
+            candidate.Keeper_board_attention_candidate.candidate_id
+            item.candidate_id))
+  | items ->
+    Error
+      (Domain_output_invalid
+         (Printf.sprintf
+            "singleton verdict count must be exactly one, got %d"
+            (List.length items)))
+;;
+
 let judgment_of_success candidate (flow_success : Exact_output.flow_success) =
   let selected = Exact_output.flow_success_candidate flow_success in
   let success = Exact_output.flow_success_output flow_success in
@@ -308,36 +347,81 @@ let judgment_of_success candidate (flow_success : Exact_output.flow_success) =
       selected_request_body_sha256
       success_request_body_sha256
   in
-  let* items =
-    Keeper_board_attention_judgment.batch_of_yojson success.output
-    |> Result.map_error (fun detail -> Domain_output_invalid detail)
-  in
-  match items with
-  | [ item ]
-    when String.equal
-           item.candidate_id
-           candidate.Keeper_board_attention_candidate.candidate_id ->
-    Ok
-      { Keeper_board_attention_candidate.verdict = item.verdict
-      ; slot_id
-      ; call_id
-      ; plan_fingerprint = selected_plan_fingerprint
-      ; request_body_sha256 = selected_request_body_sha256
-      ; judged_at = Time_compat.now ()
+  let* verdict = verdict_of_batch_output candidate success.output in
+  Ok
+    { Keeper_board_attention_candidate.verdict
+    ; slot_id
+    ; source =
+        Keeper_board_attention_candidate.Exact_attempt
+          { call_id
+          ; plan_fingerprint = selected_plan_fingerprint
+          ; request_body_sha256 = selected_request_body_sha256
+          }
+    ; judged_at = Time_compat.now ()
+    }
+;;
+
+(* RFC cli-runtimes-as-lane-slots: after every catalog slot is exhausted the
+   lane may walk its declared official clients as one-shots. This lane is
+   boot-mandatory and its catalog slots share two quota pools, so without a
+   tail an exhausted pool stops Board attention outright.
+
+   The walk is deliberately not part of [execute]: a caller must ask for it,
+   and the judgment it produces says [Cli_lane_slot] so the durable record
+   never claims an AGENT_CORE attempt that was not allocated. *)
+type cli_tail_error =
+  | No_cli_slots
+  | Cli_slots_exhausted of Keeper_lane_cli_oneshot.failure list
+  | Cli_output_invalid of
+      { slot_id : string
+      ; detail : string
       }
-  | [ item ] ->
-    Error
-      (Domain_output_invalid
-         (Printf.sprintf
-            "singleton verdict identity mismatch expected=%S actual=%S"
-            candidate.candidate_id
-            item.candidate_id))
-  | items ->
-    Error
-      (Domain_output_invalid
-         (Printf.sprintf
-            "singleton verdict count must be exactly one, got %d"
-             (List.length items)))
+
+let cli_slots prepared = prepared.cli_slots
+
+let cli_tail_error_to_string = function
+  | No_cli_slots -> "lane declares no cli slots"
+  | Cli_slots_exhausted failures ->
+    String.concat
+      "; "
+      (List.map Keeper_lane_cli_oneshot.failure_to_string failures)
+  | Cli_output_invalid { slot_id; detail } ->
+    Printf.sprintf "slot=%s output invalid: %s" slot_id detail
+;;
+
+let run_cli_tail ?runner ~base_path prepared =
+  match prepared.cli_slots with
+  | [] -> Error No_cli_slots
+  | cli_slots ->
+    (match
+       Keeper_lane_cli_oneshot.walk
+         ?runner
+         ~base_dir:base_path
+         ~cli_slots
+         ~system_prompt:""
+         ~requirement:prepared.requirement
+         ~prompt:prepared.prompt
+         ()
+     with
+     | Error failures -> Error (Cli_slots_exhausted failures)
+     | Ok (slot_id, output) ->
+       (match verdict_of_batch_output prepared.candidate output with
+        | Error (Domain_output_invalid detail) ->
+          Error (Cli_output_invalid { slot_id; detail })
+        | Error _ ->
+          (* [verdict_of_batch_output] only ever fails as Domain_output_invalid;
+             the other arms of the execution error are unreachable here. *)
+          Error
+            (Cli_output_invalid
+               { slot_id; detail = "unexpected verdict failure" })
+        | Ok verdict ->
+          Ok
+            ( slot_id
+            , { Keeper_board_attention_candidate.verdict
+              ; slot_id = slot_id
+              ; source = Keeper_board_attention_candidate.Cli_lane_slot
+              ; judged_at = Time_compat.now ()
+              } )))
 ;;
 
 type terminal_outcome =

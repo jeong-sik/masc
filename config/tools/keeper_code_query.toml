@@ -2,6 +2,12 @@ name = "keeper_code_query"
 description = "Ask the language server about a name in a file: where it is defined, or what its type and documentation are. The answer comes from the compiler's view of the code, so a same-named binding in an unrelated module is not confused with this one, and a name inside a comment or a string is not an occurrence. Find the line with Grep first, then ask about that line. Every answer is as fresh as the last build of the project: this reads what the compiler recorded, not the file on disk."
 additional_properties = false
 
+# Held back from the request until the model asks for it by name.
+# 2026-08-25..08-31 across the fleet: called 28 times in 11 turns, 1777 bytes of
+# schema on every request. Deferring saves those bytes on ~254 requests
+# a day and costs at most 11 extra requests over the same week.
+defer_loading = true
+
 [[params]]
 name = "question"
 type = "string"

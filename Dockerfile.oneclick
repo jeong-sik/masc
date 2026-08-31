@@ -29,9 +29,13 @@ WORKDIR /src
 
 # Copy the external pin script + opam metadata first so the expensive
 # dependency layer is cached across ordinary source edits.
-COPY --chown=opam:opam scripts/opam-pin-external-deps.sh scripts/
+COPY --chown=opam:opam \
+    scripts/opam-pin-external-deps.sh \
+    scripts/opam-switch-rw-lock.sh \
+    scripts/
 COPY --chown=opam:opam dune-project masc.opam ./
-RUN opam update -y \
+RUN opam repository set-url default https://opam.ocaml.org \
+    && opam update -y \
     && chmod +x scripts/opam-pin-external-deps.sh \
     && scripts/opam-pin-external-deps.sh --with-compact-protocol
 RUN ok=0; for attempt in 1 2 3; do \
@@ -43,7 +47,8 @@ RUN ok=0; for attempt in 1 2 3; do \
 COPY --chown=opam:opam . .
 RUN opam exec -- dune build --release bin/main_eio.exe \
     && cp _build/default/bin/main_eio.exe /tmp/masc \
-    && (strip /tmp/masc || true)
+    && chmod u+w /tmp/masc \
+    && strip /tmp/masc
 
 # ---- Stage 2: dashboard SPA -------------------------------------------------
 FROM node:22-slim AS dashboard-builder
@@ -76,18 +81,21 @@ COPY scripts/seed-team.sh scripts/docker-entrypoint.sh /app/scripts/
 RUN chmod +x /app/scripts/*.sh
 
 COPY --from=dashboard-builder /build/assets/dashboard /app/assets/dashboard
+RUN touch /app/assets/dashboard/.build-stamp
 
 RUN groupadd --system appgroup && useradd --system --gid appgroup appuser \
-    && mkdir -p /app/.masc && chown -R appuser:appgroup /app
+    && mkdir -p /app/.masc /app/data && chown -R appuser:appgroup /app
 
 ENV PORT=8080
 ENV MASC_BASE_PATH=/app
+ENV MASC_BASE_PATH_LEASE_DIR=/app/.masc/runtime/base-path-lease
+ENV OCAML_RUNTIME_EVENTS_DIR=/app/.masc/runtime/events
 # The classic one-touch preset deliberately runs Execute inside this container.
 ENV MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1
 # MASC_CONFIG_DIR intentionally unset: config resolves to /app/.masc/config
 # (Local_masc), the writable root the entrypoint seeds on the volume.
 
-VOLUME ["/app/.masc"]
+VOLUME ["/app/.masc", "/app/data"]
 EXPOSE 8080
 STOPSIGNAL SIGTERM
 

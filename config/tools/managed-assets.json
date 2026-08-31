@@ -34,6 +34,7 @@
     "keeper_tasks_audit.toml",
     "keeper_tasks_list.toml",
     "keeper_time_now.toml",
+    "keeper_tool_search.toml",
     "keeper_tools_list.toml",
     "keeper_voice_agent.toml",
     "keeper_voice_listen.toml",

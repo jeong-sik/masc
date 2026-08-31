@@ -331,8 +331,9 @@ let with_bundle_tools
            ~ctx_snapshot
            ~capability_surface
            ~identity_surface:
-             { Masc.Keeper_identity_tool_search.offered = identity_tools ()
+             { Masc.Keeper_tools_agent_core.offered = identity_tools ()
              ; agent_cell = ref None
+             ; history = []
              }
            ~composition_plan_index
            ?skill_activation_context:

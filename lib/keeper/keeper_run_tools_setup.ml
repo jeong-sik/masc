@@ -33,6 +33,11 @@ open Keeper_agent_prompt_metrics
    comment rests on cannot decay on one axis while the other holds. *)
 let gate_history_budget_bytes = Keeper_gate_causal_context.evidence_budget_bytes
 
+let record_lane_attempt_index receipt_lane_attempt_index_ref lane_attempt_index =
+  receipt_lane_attempt_index_ref :=
+    max !receipt_lane_attempt_index_ref lane_attempt_index
+;;
+
 let tool_use_ids_of_message (message : Agent_core.Types.message) =
   List.filter_map
     (fun (block : Agent_core.Types.content_block) ->
@@ -98,11 +103,29 @@ let gate_causal_initial
 ;;
 
 let expected_model_tool_names
+      ?(deferred_names = [])
       ~skill_catalog
       ~identity_names
       ~model_visible_descriptors
       ()
   =
+  (* [deferred_names] are the built-ins this surface actually holds behind the
+     listing. Empty for the surface that carries every tool as a schema, and
+     for every caller that predates the axis.
+
+     "Actually" is the load-bearing word. A tool declaring
+     [defer_loading = true] is not enough: a tool this conversation has run is
+     placed with its schema again, so a declared tool the Keeper uses is on the
+     surface after all. Reading the declaration instead cost 60
+     [keeper_model_tool_projection_mismatch] errors in an hour on 2026-08-31,
+     all on [keeper_ide_annotate] -- declared deferrable, called once the day
+     before, and legitimately present ever since.
+
+     Subtracted rather than the check being widened: a tool leaving the request
+     is the thing this whole change does, so an invariant that stopped noticing
+     it would stop being an invariant. What it still catches is a tool that
+     left for any other reason. *)
+  let is_deferred name = List.exists (String.equal name) deferred_names in
   let descriptor_names =
     model_visible_descriptors
     |> List.concat_map Keeper_tool_descriptor.keeper_model_names
@@ -125,10 +148,9 @@ let expected_model_tool_names
   in
   List.sort_uniq
     String.compare
-    (descriptor_names
-         @ composition_names
-         @ instruction_names
-         @ control_names
+    (List.filter
+       (fun name -> not (is_deferred name))
+       (descriptor_names @ composition_names @ instruction_names @ control_names)
          (* What the work services this Keeper is attached to offer, as this
             surface names them: the official-client lanes carry the tools
             themselves, the Agent Core lane carries the one listing tool that
@@ -137,6 +159,61 @@ let expected_model_tool_names
             "the surface is what it was built from" rather than being widened
             into always passing. *)
          @ identity_names)
+;;
+
+(* One question, asked from both sides: of the names this surface was built to
+   treat specially, which ones did the turn actually place?
+
+   Both callers face the same trap. The Agent Core lane always carries the
+   attached-tool listing and may also carry attached schemas its conversation
+   used on an earlier turn; and a built-in that declares [defer_loading = true]
+   is placed with its schema again once this conversation has run it. So
+   neither "attached" nor "declared deferrable" predicts presence, and a check
+   built on the declaration expects a tool that is legitimately there.
+
+   Reading the declaration instead of the surface cost 60
+   [keeper_model_tool_projection_mismatch] errors in an hour on 2026-08-31, all
+   on [keeper_ide_annotate]: declared deferrable, called once the day before,
+   and carried ever since.
+
+   An unknown actual name stays outside either answer, so the projection check
+   still reports it. *)
+let partition_by_presence ~names ~actual_names =
+  List.partition (fun name -> List.mem name actual_names) names
+;;
+
+(* Present: the listing plus whatever attached schemas were carried in. The
+   listing is expected even when it is accidentally absent from the actual
+   surface, which is the one thing the check must still catch.
+
+   [listed] is whether the turn placed a listing at all, reported by the bundle
+   that placed it. It is not the same question as "is anything attached": since
+   built-ins declare their own loading, a Keeper with no attached service still
+   gets a listing when one of its built-ins declares [defer_loading = true].
+   Deriving it from [attached_names] left code-reviewer -- no attachment, one
+   declared built-in -- reporting keeper_tool_search as a tool the projection
+   did not expect.
+
+   Deriving it from the actual surface instead would be worse than either: the
+   check would expect the listing exactly when the listing is there, which is
+   the same as not checking. A listing that went missing is the one thing this
+   must still catch. *)
+let agent_core_identity_names ~listed ~attached_names ~actual_names =
+  if not listed
+  then []
+  else (
+    let present, (_ : string list) =
+      partition_by_presence ~names:attached_names ~actual_names
+    in
+    Keeper_identity_tool_search.tool_name :: present |> List.sort_uniq String.compare)
+;;
+
+(* Absent: the declared built-ins this surface really did leave out. *)
+let deferred_names_absent_from ~declared_names ~actual_names =
+  let (_ : string list), absent =
+    partition_by_presence ~names:declared_names ~actual_names
+  in
+  absent
 ;;
 
 let prepare_agent_setup
@@ -180,6 +257,7 @@ let prepare_agent_setup
   let runtime_id_string = runtime_id in
   let active_checkpoint_owner = ref None in
   let active_runtime_id = Atomic.make None in
+  let receipt_lane_attempt_index_ref : int ref = ref 0 in
   let tool_result_commit_required () =
     match on_tool_result_ready, !active_checkpoint_owner with
     | None, _ -> false
@@ -191,6 +269,9 @@ let prepare_agent_setup
     =
     active_checkpoint_owner := Some attempt.checkpoint_owner;
     Atomic.set active_runtime_id (Some attempt.runtime_id);
+    record_lane_attempt_index
+      receipt_lane_attempt_index_ref
+      attempt.lane_attempt_index;
     Option.iter
       (fun observe ->
          observe
@@ -346,6 +427,7 @@ let prepare_agent_setup
   let
     { Keeper_tools_agent_core.tools = keeper_tools
     ; agent_core_tools = keeper_agent_core_tools
+    ; listing = keeper_listing
     ; cleanup = keeper_tools_cleanup
     ; terminal_effect_state
     ; gate_replay_delivery
@@ -361,9 +443,10 @@ let prepare_agent_setup
       ~gate_context
       ?hitl_resolution
       ~identity_surface:
-        { Keeper_identity_tool_search.offered =
+        { Keeper_tools_agent_core.offered =
             identity_offering.Keeper_identity_tools.offered
         ; agent_cell
+        ; history = history_messages
         }
       ?composition_plan_index
       ~skill_activation_context
@@ -501,10 +584,11 @@ let prepare_agent_setup
      check over one of them would leave the other free to drift: they differ
      only in how the attached tools appear, which is exactly the part being
      changed. *)
-  let check_projection ~surface ~identity_names tools =
+  let check_projection ?deferred_names ~surface ~identity_names tools =
     let actual = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools in
     let expected =
       expected_model_tool_names
+        ?deferred_names
         ~skill_catalog
         ~identity_names
         ~model_visible_descriptors:turn_model_visible_descriptors
@@ -527,12 +611,31 @@ let prepare_agent_setup
         "Keeper model tool bundle differs from the descriptor projection"
   in
   check_projection ~surface:"tools" ~identity_names:attached_names keeper_tools;
+  let agent_core_actual_names =
+    List.map
+      (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
+      keeper_agent_core_tools
+  in
   check_projection
     ~surface:"agent_core_tools"
+    ~deferred_names:
+      (match keeper_listing with
+       | Keeper_tools_agent_core.No_listing -> []
+       | Keeper_tools_agent_core.Listing { deferred_builtin_names } ->
+         deferred_names_absent_from
+           ~declared_names:deferred_builtin_names
+           ~actual_names:
+             (List.map
+                (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
+                keeper_agent_core_tools))
     ~identity_names:
-      (match attached_names with
-       | [] -> []
-       | _ :: _ -> [ Keeper_identity_tool_search.tool_name ])
+      (agent_core_identity_names
+         ~listed:
+           (match keeper_listing with
+            | Keeper_tools_agent_core.No_listing -> false
+            | Keeper_tools_agent_core.Listing _ -> true)
+         ~attached_names
+         ~actual_names:agent_core_actual_names)
     keeper_agent_core_tools;
   Log.Keeper.routine
     "keeper:%s tool visibility: registered=%d visible=%d transport_alias=%d \
@@ -570,7 +673,6 @@ let prepare_agent_setup
     =
     ref None
   in
-  let receipt_lane_attempt_index_ref : int ref = ref 0 in
   let receipt_response_text_present_ref = ref false in
   let compute_tool_surface
         ~turn:_

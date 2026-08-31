@@ -1,0 +1,110 @@
+name: docker-persist-bulk-data-20260831
+services:
+  grafana:
+    container_name: masc-grafana
+    depends_on:
+      jaeger:
+        condition: service_started
+        required: true
+      loki:
+        condition: service_started
+        required: true
+      victoriametrics:
+        condition: service_started
+        required: true
+    environment:
+      GF_FEATURE_TOGGLES_ENABLE: traceQLStreaming
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: admin
+    image: grafana/grafana:latest
+    networks:
+      default: null
+    ports:
+      - mode: ingress
+        target: 3000
+        published: "3000"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/docker-persist-bulk-data-20260831/infrastructure/monitoring/grafana/provisioning
+        target: /etc/grafana/provisioning
+        bind: {}
+  jaeger:
+    command:
+      - --collector.otlp.grpc.max-message-size=16777216
+    container_name: masc-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    image: jaegertracing/all-in-one:latest
+    networks:
+      default: null
+    ports:
+      - mode: ingress
+        target: 16686
+        published: "16686"
+        protocol: tcp
+    restart: unless-stopped
+  loki:
+    command:
+      - -config.file=/etc/loki/local-config.yaml
+    container_name: masc-loki
+    image: grafana/loki:latest
+    networks:
+      default: null
+    ports:
+      - mode: ingress
+        target: 3100
+        published: "3100"
+        protocol: tcp
+    restart: unless-stopped
+  otel-collector:
+    command:
+      - --config=/etc/otelcol-contrib/config.yaml
+    container_name: masc-otel-collector
+    depends_on:
+      jaeger:
+        condition: service_started
+        required: true
+      victoriametrics:
+        condition: service_started
+        required: true
+    image: otel/opentelemetry-collector-contrib:latest
+    networks:
+      default: null
+    ports:
+      - mode: ingress
+        target: 4318
+        published: "4318"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/docker-persist-bulk-data-20260831/infrastructure/monitoring/otel-collector-config.yaml
+        target: /etc/otelcol-contrib/config.yaml
+        bind: {}
+  victoriametrics:
+    command:
+      - -retentionPeriod=7d
+    container_name: masc-victoriametrics
+    image: victoriametrics/victoria-metrics:latest
+    networks:
+      default: null
+    ports:
+      - mode: ingress
+        target: 8428
+        published: "8428"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: volume
+        source: victoriametrics-data
+        target: /victoria-metrics-data
+        volume: {}
+networks:
+  default:
+    name: docker-persist-bulk-data-20260831_default
+volumes:
+  victoriametrics-data:
+    name: docker-persist-bulk-data-20260831_victoriametrics-data
+    driver: local

@@ -93,6 +93,7 @@ type t =
   ; runtime_profile : string
   ; selected_model : string option
   ; finish_reason : string option
+  ; tool_surface_ref : string option
   ; context_window : int option
   ; price_input_per_million : float option
   ; price_output_per_million : float option
@@ -111,6 +112,45 @@ type t =
 let opt_field name to_json = function
   | Some value -> [ (name, to_json value) ]
   | None -> []
+
+type tool_surface_entry =
+  { name : string
+  ; schema_bytes : int
+  }
+
+let tool_surface_to_json entries : Yojson.Safe.t =
+  `List
+    (List.map
+       (fun entry ->
+          `Assoc
+            [ "name", `String entry.name
+            ; "schema_bytes", `Int entry.schema_bytes
+            ])
+       entries)
+
+let tool_surface_entry_of_json = function
+  | `Assoc fields ->
+      (match
+         List.assoc_opt "name" fields, List.assoc_opt "schema_bytes" fields
+       with
+       | Some (`String name), Some (`Int schema_bytes)
+         when String.length name > 0 && schema_bytes >= 0 ->
+           Ok { name; schema_bytes }
+       | _ ->
+           Error "tool surface entry needs a non-empty name and schema_bytes")
+  | _ -> Error "tool surface entry is not an object"
+
+let tool_surface_of_json = function
+  | `List items ->
+      let rec decode reversed = function
+        | [] -> Ok (List.rev reversed)
+        | item :: rest ->
+            (match tool_surface_entry_of_json item with
+             | Ok entry -> decode (entry :: reversed) rest
+             | Error detail -> Error detail)
+      in
+      decode [] items
+  | _ -> Error "tool surface payload is not a JSON array"
 
 let prompt_block_to_json (b : prompt_block) : Yojson.Safe.t =
   `Assoc
@@ -201,6 +241,7 @@ let to_json (r : t) : Yojson.Safe.t =
      ]
     @ opt_field "selected_model" (fun v -> `String v) r.selected_model
     @ opt_field "finish_reason" (fun v -> `String v) r.finish_reason
+    @ opt_field "tool_surface_ref" (fun v -> `String v) r.tool_surface_ref
     @ opt_field "context_window" (fun v -> `Int v) r.context_window
     @ opt_field "price_input_per_million" (fun v -> `Float v) r.price_input_per_million
     @ opt_field "price_output_per_million" (fun v -> `Float v) r.price_output_per_million
@@ -465,6 +506,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "raw_trace_run_ref"
             ; "selected_model"
             ; "finish_reason"
+            ; "tool_surface_ref"
             ; "context_window"
             ; "price_input_per_million"
             ; "price_output_per_million"
@@ -591,6 +633,9 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       in
       let* selected_model = opt_member "selected_model" fields as_nonempty_string in
       let* finish_reason = opt_member "finish_reason" fields as_string in
+      let* tool_surface_ref =
+        opt_member "tool_surface_ref" fields as_nonempty_string
+      in
       let* context_window = opt_member "context_window" fields as_int in
       let* price_input_per_million = opt_member "price_input_per_million" fields as_float in
       let* price_output_per_million = opt_member "price_output_per_million" fields as_float in
@@ -631,6 +676,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; turn_ref
         ; blocks
         ; input_components
+        ; tool_surface_ref
         ; runtime_profile
         ; selected_model
         ; finish_reason

@@ -93,7 +93,7 @@ let test_lanes_scroll_reserves_standalone_matrix_rows () =
 
 let test_harness_footer_links_to_overview_task () =
   check str "Harness names its task link"
-    "j/k:move  PgUp/PgDn:page  Right / Enter:verdict  Left / Esc:back  y:agree  n:overrule  Y:copy task  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  PgUp/PgDn:page  [ / ]:previous / next  Right / Enter:verdict  Left / Esc:back  y:agree  n:overrule  Y:copy task  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Harness)
 
 (* Tools left the plain group when it grew a per-Keeper axis: the pane now
@@ -115,14 +115,14 @@ let test_verification_footer_carries_the_verdict_keys () =
   (* Verification is a list/detail surface: Enter explains the request before
      the two-press approve or the $EDITOR reject reason changes it. *)
   check str "verification names detail, approve, and reject"
-    "j/k:move  v:Goals  Right / Enter:details  Left / Esc:back  a:approve  x:reject  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  [ / ]:previous / next  Right / Enter:details  Left / Esc:back  a:approve  x:reject  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Verification)
 
 let test_fusion_footer_pins_the_shared_list_projection () =
   (* Pin the shared list footer as display data. The PTY scenario separately
      exercises j, r, Enter, PgDn, and detail Esc through the real dispatch. *)
   check str "fusion names its list keys"
-    "j/k:move  PgUp/PgDn:page  Enter:detail  Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  Enter:detail  Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Fusion)
 
 let test_lanes_run_list_footer_names_the_drill_down () =
@@ -149,9 +149,40 @@ let test_overview_footer_projects_by_focus () =
     "j/k:tasks  h/l:pane  Right / Enter:open  Left / Esc:back  2:keepers  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints_overview ~task_focus:true)
 
+(* Reading a queue meant Esc, move, Enter for every row -- three keys to do
+   what one does on Changes and the Keeper detail tabs, both of which already
+   spell it [ / ]. Six surfaces have a list and a detail over it and none of
+   them offered the step.
+
+   Asserted over the whole set rather than one at a time: the gap was that
+   each surface decided this for itself, and a table that names them together
+   is what stops the seventh from being added without it. *)
+let test_every_detail_surface_steps_through_its_list () =
+  List.iter
+    (fun (label, surface) ->
+      let keys =
+        List.map
+          (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
+          (Masc_tui_keys.for_surface surface)
+      in
+      Alcotest.(check bool)
+        (Printf.sprintf "%s steps with [ / ]" label)
+        true
+        (List.mem "[ / ]" keys))
+    [ "Approvals", Approvals
+    ; "Planning", Planning
+    ; "Schedules", Schedules
+    ; "Verification", Verification
+    ; "Harness", Harness
+    ; "Fusion", Fusion
+    ; "Board", Board
+    ; "Changes", Changes
+    ; "Keeper detail", Keepers Keeper_detail
+    ]
+
 let test_planning_footer_carries_filter_and_sort () =
   check str "planning names filter and sort"
-    "j/k:move  v:Task Review  f:filter  s:sort  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Planning)
 
 let test_task_review_is_a_planning_child () =
@@ -160,6 +191,21 @@ let test_task_review_is_a_planning_child () =
   Alcotest.(check int) "Task Review highlights Planning"
     (surface_ring_index Planning)
     (surface_ring_index Verification)
+
+(* Verdicts is the far half of Task Review -- one lists what is waiting for a
+   ruling, the other what was ruled -- and it stood on the top-level ring under
+   the name "Harness", which named a mechanism rather than a thing an operator
+   opens. Both halves now hang off Planning, and [v] walks the three. *)
+let test_verdicts_is_a_planning_child () =
+  Alcotest.(check bool) "Verdicts is not a top-level ring entry" false
+    (List.exists (fun (surface, _) -> surface = Harness) surface_ring);
+  Alcotest.(check int) "Verdicts highlights Planning"
+    (surface_ring_index Planning)
+    (surface_ring_index Harness);
+  Alcotest.(check bool) "and the help sheet files it under Planning" true
+    (List.exists
+       (fun (label, _) -> String.equal label "Planning / Verdicts")
+       (Masc_tui_keys.help_sections ()))
 
 (* Changes reads one keeper's file writes and binds to the roster cursor on
    entry, so it opens with [f] from the roster instead of holding a Tab stop
@@ -565,10 +611,14 @@ let () =
             test_overview_footer_projects_by_focus
         ; Alcotest.test_case "System logs lost the keys it never had" `Quick
             test_system_logs_lost_the_keys_it_never_had
+        ; Alcotest.test_case "every detail surface steps through its list"
+            `Quick test_every_detail_surface_steps_through_its_list
         ; Alcotest.test_case "Planning carries filter and sort" `Quick
             test_planning_footer_carries_filter_and_sort
         ; Alcotest.test_case "Task Review is a Planning child" `Quick
             test_task_review_is_a_planning_child
+        ; Alcotest.test_case "Verdicts is a Planning child" `Quick
+            test_verdicts_is_a_planning_child
         ; Alcotest.test_case "Changes is a Keepers child" `Quick
             test_changes_is_a_keeper_child
         ; Alcotest.test_case "help documents what was missing" `Quick

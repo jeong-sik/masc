@@ -32,6 +32,8 @@ let global =
   ; b Meta "?" "this help"
   ; b Meta "Ctrl-B" "show or hide a visible keeper roster pane"
   ; b Meta "Ctrl-T" "release the mouse so you can drag-select and copy"
+  ; b Navigate "Ctrl-]" "follow the reference under the cursor"
+      ~help:"and Esc on the surface it opens comes back here"
   ; b Meta "q" "quit"
   ]
 
@@ -135,7 +137,11 @@ let for_surface = function
       ; b Act "w" "write" ~help:"write a post"
       ; b Act "v / V" "vote up / down"
       ; b Act "c" "reply" ~help:"reply (while reading)"
+      ; b Navigate "[ / ]" "previous / next post"
+          ~help:"while reading, open the post before or after this one"
       ; b Navigate "s" "sort" ~help:"cycle hot / trending / recent / updated / discussed"
+      ; b Search "f" "hearth"
+          ~help:"narrow to one sub-board, busiest first; again for the next"
       ; b Navigate "z" "wide detail" ~help:"hide or show the post list while reading"
       ; b Act "Y" "copy link" ~help:"copy the selected post reference"
       ; b Navigate "Ctrl-W" "pane" ~help:"switch between the post list and detail pane"
@@ -149,6 +155,8 @@ let for_surface = function
       ; b Act "Enter" "read the whole ask" ~help:"j/k scrolls it; Esc goes back"
       ; b Act "y" "confirm"
       ; b Act "n" "deny"
+      ; b Navigate "[ / ]" "previous / next"
+          ~help:"while a detail is open, step to the row before or after it"
       ; b Act "e" "external Gate lane"
           ~help:"cycle manual / auto_judge / always_allow for calls into \
                  attached outside services"
@@ -156,11 +164,14 @@ let for_surface = function
       @ listing_meta
   | Planning ->
       [ b Navigate "j/k" "move"
-      ; b Navigate "v" "Task Review" ~help:"open the task verdict queue"
+      ; b Navigate "v" "next Planning tab"
+          ~help:"Goals \xe2\x86\x92 Task Review \xe2\x86\x92 Verdicts"
       ; b Act "Right / Enter" "detail"
       ; b Act "Left / Esc" "back"
       ; b Navigate "f" "filter" ~help:"cycle all / active / completed / dropped"
       ; b Navigate "s" "sort" ~help:"cycle phase / updated / due"
+      ; b Navigate "[ / ]" "previous / next"
+          ~help:"while a detail is open, step to the row before or after it"
       ; b Act "c" "complete" ~help:"complete goal"
       ; b Act "x" "drop"
       ; b Act "o" "reopen"
@@ -171,24 +182,31 @@ let for_surface = function
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the payload"
       ; b Act "Right / Enter" "details" ~help:"open schedule details"
       ; b Act "Left / Esc" "back" ~help:"back to the schedule list"
+      ; b Navigate "[ / ]" "previous / next"
+          ~help:"while a detail is open, step to the row before or after it"
       ; b Act "x" "cancel" ~help:"arm / confirm cancellation"
       ; b Act "Y" "copy link" ~help:"copy the selected schedule reference"
       ]
       @ listing_meta
   | Verification ->
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the evidence"
-      ; b Navigate "v" "Goals" ~help:"return to Planning goals"
+      ; b Navigate "v" "next Planning tab" ~help:"on to Verdicts, then Goals"
       ; b Act "Right / Enter" "details" ~help:"read the request and evidence"
       ; b Act "Left / Esc" "back" ~help:"back to the verification queue"
+      ; b Navigate "[ / ]" "previous / next"
+          ~help:"while a detail is open, step to the row before or after it"
       ; b Act "a" "approve" ~help:"approve the row under the cursor (press twice)"
       ; b Act "x" "reject" ~help:"reject with a reason ($EDITOR form)"
       ]
       @ listing_meta
   | Harness ->
       [ b Navigate "j/k" "move" ~help:"move; in a verdict, scroll"
+      ; b Navigate "v" "next Planning tab" ~help:"back round to Goals"
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Right / Enter" "verdict" ~help:"open the full harness verdict"
       ; b Act "Left / Esc" "back" ~help:"back to the verdict list"
+      ; b Navigate "[ / ]" "previous / next"
+          ~help:"while a detail is open, step to the row before or after it"
       ; b Act "y" "agree" ~help:"record the machine's verdict as yours"
       ; b Act "n" "overrule" ~help:"record the opposite verdict; $EDITOR takes the reason"
       ; b Act "Y" "copy task" ~help:"copy a link to the task on Overview"
@@ -201,6 +219,8 @@ let for_surface = function
       [ b Navigate "j/k" "move"
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Enter" "detail" ~help:"Right or Enter opens detail"
+      ; b Navigate "[ / ]" "previous / next"
+          ~help:"while a detail is open, step to the row before or after it"
       ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
       ; b Act "Esc" "back" ~help:"leave detail, or return to Overview"
       ]
@@ -416,8 +436,8 @@ let help_surfaces : (string * surface) list =
   ; "Approvals", Approvals
   ; "Planning / Goals", Planning
   ; "Planning / Task Review", Verification
+  ; "Planning / Verdicts", Harness
   ; "Schedules", Schedules
-  ; "Harness", Harness
   ; "Fusion", Fusion
   ; "Repos", Repositories
   ; "Changes", Changes

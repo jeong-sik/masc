@@ -60,10 +60,6 @@ let sandbox_target_label = function
    path so the two cannot drift apart into an unsupported-replay repair. *)
 let gate_operation = "tool_execute"
 
-(* Warn-once latch for the local-playground escape hatch: when the hatch is
-   on we log a single warning per process rather than per dispatch. *)
-let local_hatch_warned = ref false
-
 let execute_gate_input ~input ~cwd ~sandbox_profile ~sandbox_target =
   `Assoc
     [ "schema", `String "masc.keeper_gate.request.v1"
@@ -192,10 +188,6 @@ let typed_input_env
   env
 ;;
 
-let normalize_path_for_keeper_tool_execute_shell_ir_containment path =
-  Keeper_alerting_path.normalize_path_for_check path
-  |> Keeper_alerting_path.strip_trailing_slashes
-
 (* Backend target helpers for typed Shell IR dispatch. *)
 let docker_sandbox_target = Keeper_sandbox_shell_ir_target.docker_target
 
@@ -271,107 +263,8 @@ let handle_tool_execute_typed
         let sandbox_profile, _ =
           Keeper_sandbox_runner.effective_sandbox_profile ~meta
         in
-        let local_dispatch_sandbox ?(extra_fields = []) () =
-          match Keeper_github_identity.validate_local_tool_env (typed_input_env input) with
-          | Error err ->
-            Error
-              (Keeper_sandbox_shell_ir_target.target_error
-                 ~fields:extra_fields
-                 err)
-          | Ok () ->
-            (match
-               Keeper_secret_projection.local_env_for_keeper
-                 ~host_env:(Unix.environment ())
-                 ~base_path:config.base_path
-                 ~keeper_name:meta.name
-                 ()
-             with
-             | Error err ->
-               Error
-                 (Keeper_sandbox_shell_ir_target.target_error
-                    ~fields:extra_fields
-                    ("local_secret_projection_failed: " ^ err))
-             | Ok base_host_env ->
-               (match base_host_env with
-                | None ->
-                  Error
-                    (Keeper_sandbox_shell_ir_target.target_error
-                       ~fields:extra_fields
-                       "local_secret_projection_failed: projection returned no environment")
-                | Some env ->
-                  (* Host-lane twin of the guest-lane refresh in
-                     [Keeper_turn_sandbox_runtime.prepare_github_identity_secret_files]:
-                     an App-identity keeper gets a fresh installation token
-                     before its hosts file is projected. *)
-                  (match
-                     Keeper_github_app_broker.ensure_fresh
-                       ~now:(Time_compat.now ())
-                       ~http_post:Keeper_github_app_broker.default_http_post
-                       ~config
-                       ~keeper_name:meta.name
-                   with
-                   | Error err ->
-                     Error
-                       (Keeper_sandbox_shell_ir_target.target_error
-                          ~fields:extra_fields
-                          ("github_app_token_refresh_failed: " ^ err))
-                   | Ok
-                       ( Keeper_github_app_broker.No_app_identity
-                       | Keeper_github_app_broker.Fresh _
-                       | Keeper_github_app_broker.Refreshed _ ) ->
-                  match
-                     Keeper_github_identity.runtime_env_for_tool
-                       ~config
-                       ~keeper_name:meta.name
-                       env
-                   with
-                   | Error err ->
-                     Error
-                       (Keeper_sandbox_shell_ir_target.target_error
-                          ~fields:extra_fields
-                          ("local_github_identity_invalid: " ^ err))
-                   | Ok (env, identity_state, cleanup) ->
-                     let identity_field =
-                       match identity_state with
-                       | Keeper_github_identity.Unconfigured -> "unconfigured"
-                       | Configured _ -> "configured"
-                     in
-                     (match Keeper_github_identity.projected_config_dir env with
-                      | None ->
-                        cleanup ();
-                        Error
-                          (Keeper_sandbox_shell_ir_target.target_error
-                             ~fields:extra_fields
-                             "local GitHub identity projection has no GH_CONFIG_DIR")
-                      | Some github_config_dir ->
-                        Ok
-                          { sandbox = Masc_exec.Sandbox_target.host ()
-                          ; fields =
-                              ("github_identity", `String identity_field) :: extra_fields
-                          ; base_host_env = Some env
-                          ; github_secret_files =
-                              (fun () ->
-                                 Ok [ Filename.concat github_config_dir "hosts.yml" ])
-                          ; cleanup
-                          }))))
-        in
         let dispatch_sandbox =
           match sandbox_profile with
-          | Local ->
-            if Env_config_sandbox.Gate.allow_local_playground ()
-            then (
-              if not !local_hatch_warned
-              then (
-                local_hatch_warned := true;
-                Log.Keeper.warn
-                  "local playground enabled via MASC_EXEC_ALLOW_LOCAL_PLAYGROUND keeper=%s (dev/test only)"
-                  meta.name);
-              local_dispatch_sandbox ())
-            else
-              Error
-                (Keeper_sandbox_shell_ir_target.target_error
-                   ("local_playground_disabled: "
-                    ^ Env_config_sandbox.Gate.disabled_message))
           | Remote_ssh ->
             (* Host identity projection is deliberately absent: the remote
                shim synthesizes its own minimal environment and receives only
@@ -478,15 +371,15 @@ let handle_tool_execute_typed
         let sandbox_extra_fields = dispatch_bundle.fields in
         let base_host_env = dispatch_bundle.base_host_env in
         let dispatched_model_location_fields =
+          (* [Host] is unreachable on this lane: every profile a keeper may
+             declare builds a Docker or Ssh target, and the builder that made
+             a host one went with the [Local] profile. The arm stays because
+             [Sandbox_target.t] is the general execution type and other
+             callers do run on this host; it answers with the same fields the
+             other targets do rather than describing a keeper that cannot
+             exist. *)
           match dispatch_sandbox with
-          | Masc_exec.Sandbox_target.Host ->
-            let local_meta =
-              { meta with sandbox_profile = Keeper_types_profile_sandbox.Local }
-            in
-            let local_cwd =
-              normalize_path_for_keeper_tool_execute_shell_ir_containment cwd
-            in
-            model_execute_location_fields ~config ~meta:local_meta ~args ~cwd:local_cwd
+          | Masc_exec.Sandbox_target.Host
           | Docker _ | Ssh _ -> model_location_fields
         in
         (* Lower the validated typed input exactly once. The resulting Shell IR
@@ -694,17 +587,13 @@ let handle_tool_execute_typed
              records: 9 [representable], and no way to tell how many of them
              the gate actually took.
 
-             It is a property of the call rather than of the stage: a lowered
-             call has one stage, and a call that kept its shell has whatever
-             the caller wrote. *)
-          let lowered =
-            match ir with
-            | Masc_exec.Shell_ir.Simple simple ->
-              not
-                (Keeper_tooling.Shell_costume.names_a_shell
-                   (Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin))
-            | Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _ -> true
-          in
+             It is a property of the call rather than of the stage, so every
+             stage has to answer: lowering rewrites one costume, and a
+             multi-stage call whose second stage is still [bash -c] has not
+             left its shell behind because its first stage did.  Reading only
+             the [Simple] arm and calling the other two lowered said the
+             opposite. *)
+          let lowered = not (Keeper_tooling.Shell_costume.ir_keeps_a_shell ir) in
           let costume_findings =
             Keeper_tool_execute_typed_input.hidden_script_findings
               ~sandbox:dispatch_sandbox

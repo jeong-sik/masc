@@ -181,6 +181,17 @@ val base_path_source_opt : unit -> (string * string) option
 
 val running_under_test_executable : unit -> bool
 val base_path_prod_guard : string -> string
+
+val test_allow_real_docker_env : string
+(** Name of the hook a refusal message tells the operator to set. The fake
+    docker path's key stays private: callers want the value, not the name. *)
+
+val fake_docker_path_opt : unit -> string option
+(** The fake docker script a test asked for, or [None] when the variable is
+    unset or blank. *)
+
+val real_docker_allowed_under_test : unit -> bool
+(** Whether a test executable said it may talk to the live docker daemon. *)
 val base_path : unit -> string
 
 val resolve_against_base_path : string -> string

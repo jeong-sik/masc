@@ -612,7 +612,7 @@ let test_docker_keeper_sees_its_container_root () =
 let test_local_keeper_sees_its_host_root () =
   with_repo_prompt_config (fun () ->
     let rendered, visible_root =
-      sandbox_root_for Masc.Keeper_types_profile.Local
+      sandbox_root_for Masc.Keeper_types_profile.Remote_ssh
     in
     check bool "host root is in the prompt" true
       (contains ~needle:visible_root rendered))
@@ -653,7 +653,7 @@ let test_docker_root_is_not_promised_as_execution_operand () =
 
 let test_local_root_carries_no_backend_caveat () =
   with_repo_prompt_config (fun () ->
-    let rendered, _ = sandbox_root_for Masc.Keeper_types_profile.Local in
+    let rendered, _ = sandbox_root_for Masc.Keeper_types_profile.Remote_ssh in
     check bool "local prompt has no container fallback caveat" false
       (contains ~needle:"when the container backend is unavailable" rendered))
 

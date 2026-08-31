@@ -2,6 +2,12 @@ name = "masc_schedule_cancel"
 description = "Cancel a scheduled or due request before execution."
 additional_properties = false
 
+# Held back from the request until the model asks for it by name.
+# 2026-08-25..08-31 across the fleet: called 21 times in 9 turns, 614 bytes of
+# schema on every request. Deferring saves those bytes on ~254 requests
+# a day and costs at most 9 extra requests over the same week.
+defer_loading = true
+
 [[params]]
 name = "schedule_id"
 type = "string"

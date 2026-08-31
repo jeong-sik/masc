@@ -10,7 +10,6 @@ let docker ~host_cwd ~container_cwd =
 let of_sandbox ~(sandbox : Keeper_sandbox.t) ~host_cwd
     ~container_cwd_for_docker =
   match sandbox.backend with
-  | Keeper_sandbox.Local -> local ~host_cwd
   (* Phase 1: no remote<->host cwd translation exists yet; the
      keeper-visible cwd is the host bookkeeping path, and execution
      dispatch fails closed upstream. *)

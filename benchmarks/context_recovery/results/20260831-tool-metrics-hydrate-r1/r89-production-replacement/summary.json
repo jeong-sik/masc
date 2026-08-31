@@ -1,0 +1,74 @@
+{
+  "schema": "masc.tool_metrics_hydration.production_replacement.v1",
+  "base_head": "7bb18b9af5671a8e55a7b9ef38f14f76dfac8c3c",
+  "product_head": "4dd5fc316520460f5f52795bced68b552744da28",
+  "image_id": "sha256:0ea91a347442b5b8399a379906b5db65b1d93f7b3dae34e3b7f1c81ea00315b4",
+  "image_os": "linux",
+  "image_arch": "arm64",
+  "binary_sha256": "e494ec0eaaa4bc36739505b6e92c122f599968436dc558535b79ab8a596cd6d3",
+  "preflight_helper_sha256": "e17e1b2d987462c38aca1182bd3f02393e309844cdf4a3c41bffc6ca97863658",
+  "mounts": [
+    "masc-r89-state:/app/.masc",
+    "masc-r89-data:/app/data"
+  ],
+  "runtimes": [
+    {
+      "container": "masc-r89-a",
+      "container_id": "b6ab6c6f91dff9528b9522813b77e3fd5355b3f1e31500a611c803cdc3c3c84e",
+      "runtime_instance_id": "01a05466-8b32-7000-89af-4f54168add74",
+      "hydrated_records": 0,
+      "tool_calls": 1,
+      "api_totals_after_calls": [1, 1],
+      "exit_code": 0,
+      "oom_killed": false
+    },
+    {
+      "container": "masc-r89-b",
+      "container_id": "4d89beca06418293e2667967884cd90fb3491ee5ceaf23538c31675dee74ad12",
+      "runtime_instance_id": "01a05467-5693-7000-9991-0ea079eb28e7",
+      "hydrated_records": 1,
+      "api_totals_before_calls": [1, 1],
+      "tool_calls": 1,
+      "api_totals_after_calls": [2, 2],
+      "exit_code": 0,
+      "oom_killed": false
+    },
+    {
+      "container": "masc-r89-c",
+      "container_id": "441d99adac8b9ea17cc886a4b2176821f0eb0c26631e25eb714c64192341d745",
+      "runtime_instance_id": "01a05468-0279-7000-a10f-e1032fd86561",
+      "hydrated_records": 2,
+      "api_totals_before_calls": [2, 2],
+      "tool_calls": 0,
+      "exit_code": 0,
+      "oom_killed": false
+    }
+  ],
+  "runtime_ids_unique": true,
+  "disk_after_a": {
+    "rows": 1,
+    "sha256": "581f8e7b2eb38a827bc3009d3c5b8eaaee7e11e9e38be469fbf80aa0482d4761"
+  },
+  "disk_after_b": {
+    "rows": 2,
+    "sha256": "ec1288632f7f3743e9e40c4dec5bd706812329225b5f94173b0812e17d6e69ac"
+  },
+  "disk_after_c": {
+    "rows": 2,
+    "sha256": "ec1288632f7f3743e9e40c4dec5bd706812329225b5f94173b0812e17d6e69ac"
+  },
+  "replacement_api_hydrates_persisted_rows": true,
+  "repeated_reads_are_idempotent": true,
+  "rejected_measurements": [
+    {
+      "id": "r87",
+      "reason": "auto-minted admin credential was not a reusable bearer; the attempted call returned HTTP 401 and total_calls stayed 0"
+    },
+    {
+      "id": "r88",
+      "product_head": "c4b6922d875e96977237b6c3deebda34a8e13b3e",
+      "reason": "startup logged hydrated=1 but the API still returned 0 because Tool_unified totals came from Tool_registry rather than Tool_metrics"
+    }
+  ],
+  "verified_at": "2026-08-31T05:42:07+09:00"
+}

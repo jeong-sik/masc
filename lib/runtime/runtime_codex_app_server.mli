@@ -38,6 +38,13 @@ type config =
         shared hours-scale default). The idle timeout above resets on every
         received message, so this is the only bound a turn of continuous
         thin progress cannot outlive (#31242). *)
+  ; output_schema : Yojson.Safe.t option
+    (** JSON Schema for the turn's final assistant message, sent as
+        [outputSchema] on the v2 [turn/start] request. The flag documented for
+        [codex exec] is a different surface; this transport speaks the
+        app-server protocol, whose own generated schema declares the field.
+        The schema binds the message itself, so unlike the Antigravity adapter
+        there is no separate structured field to prefer. *)
   }
 
 val default_timeout_s : float

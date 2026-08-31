@@ -176,7 +176,13 @@ val to_json : t -> Yojson.Safe.t
 type operator_disposition_kind =
   | Disp_pass
   | Disp_fail_open_next_runtime
+  | Disp_retry_later
+  (** The terminal turn did not fall through to another runtime. The Keeper
+      remains live and may retry on a later keepalive cycle. *)
   | Disp_pass_next_model
+  | Disp_operator_action_required
+  (** The turn is terminal and names a known operator-only repair. No runtime
+      continuation or fallback is claimed. *)
   | Disp_user_cancelled
   | Disp_skipped
   | Disp_unknown
@@ -190,20 +196,27 @@ type operator_disposition_reason =
   | Reason_healthy
   | Reason_runtime_exhausted
   | Reason_preflight_config_error
+  (** Terminal configuration or authorization failure before provider
+      dispatch. Paired with [Disp_operator_action_required]; the receipt does
+      not claim a fallback that did not happen. *)
   | Reason_degraded_retry
   | Reason_runtime_fallback
   | Reason_transient_runtime_retry
   (** A retry-recoverable transient provider-runtime failure
-      ([api_error_timeout] / [api_error_network]) that the keeper's in-turn
-      retry self-healed on the SAME runtime — distinct from
-      [Reason_runtime_fallback] (cross-runtime fallback). Paired with
-      [Disp_fail_open_next_runtime]. *)
+      ([api_error_timeout] / [api_error_network]) that terminally failed this
+      turn after neither a degraded retry nor cross-runtime fallback occurred.
+      Paired with [Disp_retry_later]: a later keepalive cycle may retry, but the
+      receipt does not claim same-turn continuation. *)
   | Reason_capacity_backpressure
   (** Typed provider-capacity observation before a retry/rotation has completed.
       Paired with [Disp_fail_open_next_runtime]: the keeper keeps moving and
       no operator broadcast is emitted, while the receipt does not falsely
       claim [Reason_runtime_fallback]. *)
   | Reason_provider_runtime_error
+  (** A terminal provider rejection or parse/runtime failure after neither a
+      degraded retry nor cross-runtime fallback occurred. Paired with
+      [Disp_retry_later]: a later keepalive cycle may retry, but the receipt
+      does not claim same-turn lane continuation. *)
   | Reason_internal_error
   | Reason_input_required
   | Reason_cancelled

@@ -487,18 +487,9 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
        else old.max_context_override);
     updated_at = now_iso ();
   } in
-  match
-    validate_sandbox_settings_with_profile ~sandbox_profile
-  with
-  | Error err ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string TurnUpUpdateFailures)
-        ~labels:[("keeper", p.name); ("site", Keeper_turn_up_update_failure_site.(to_label Sandbox_validation))]
-        ();
-      Log.Keeper.warn "update_keeper failed sandbox validation for %s: %s"
-        p.name err;
-      tool_result_error ~class_:Tool_result.Policy_rejection err
-  | Ok () ->
+  (* The sandbox-profile gate that stood here rejected exactly one profile,
+     [Local], and that profile no longer exists. What remains is reached the
+     same way. *)
          (match
             Keeper_shutdown_supersession.preflight
               ~config:ctx.config

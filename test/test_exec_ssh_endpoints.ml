@@ -96,6 +96,83 @@ capabilities = ["kvm"]
     check (list string) "capabilities" [ "kvm" ]
       endpoint.Exec_ssh_endpoint.capabilities
 
+(* --- R00 encoder roundtrip (task-888) ----------------------------------
+
+   Exec_ssh_endpoint.to_toml is the type-derived mirror of the strict
+   decoder in this suite: whatever the encoder emits must load back
+   through Runtime_toml into the very record that produced it. A field
+   rename or a stray key (for example a duplicated name entry) that drifts
+   between encoder and decoder fails here instead of letting every fixture
+   silently feed a dead table. *)
+
+let test_roundtrip_full_fields () =
+  let endpoint =
+    Exec_ssh_endpoint.
+      { name = "build-box"
+      ; host = "builder.local"
+      ; user = "masc-exec"
+      ; port = 2222
+      ; identity_file = "/keys/dev.key"
+      ; known_hosts_file = "/keys/dev.known_hosts"
+      ; remote_root = "/srv/masc/playground"
+      ; connect_timeout_sec = 3
+      ; max_concurrent_sessions = 2
+      ; env_allowlist = [ "PATH"; "HOME" ]
+      ; capabilities = [ "kvm" ]
+      }
+  in
+  match parse_cfg (Exec_ssh_endpoint.to_toml endpoint) with
+  | Error errors -> fail (render_errors errors)
+  | Ok cfg ->
+    let decoded = endpoint_exn cfg "build-box" in
+    check bool "full-field roundtrip equal" true
+      (Exec_ssh_endpoint.equal endpoint decoded)
+
+let test_roundtrip_defaults () =
+  let endpoint =
+    Exec_ssh_endpoint.
+      { name = "dev"
+      ; host = "builder.local"
+      ; user = "masc-exec"
+      ; port = default_port
+      ; identity_file = default_identity_file ~name:"dev"
+      ; known_hosts_file = default_known_hosts_file ~name:"dev"
+      ; remote_root = "/srv/masc/playground"
+      ; connect_timeout_sec = default_connect_timeout_sec
+      ; max_concurrent_sessions = default_max_concurrent_sessions
+      ; env_allowlist = []
+      ; capabilities = []
+      }
+  in
+  match parse_cfg (Exec_ssh_endpoint.to_toml endpoint) with
+  | Error errors -> fail (render_errors errors)
+  | Ok cfg ->
+    let decoded = endpoint_exn cfg "dev" in
+    check bool "defaults roundtrip equal" true
+      (Exec_ssh_endpoint.equal endpoint decoded)
+
+let test_roundtrip_no_stray_name_field () =
+  (* The registry name is the table header key, never a body field: a
+     duplicated name entry is an unknown key and fails the whole load. *)
+  let endpoint =
+    Exec_ssh_endpoint.
+      { name = "dev"
+      ; host = "builder.local"
+      ; user = "masc-exec"
+      ; port = default_port
+      ; identity_file = default_identity_file ~name:"dev"
+      ; known_hosts_file = default_known_hosts_file ~name:"dev"
+      ; remote_root = "/srv/masc/playground"
+      ; connect_timeout_sec = default_connect_timeout_sec
+      ; max_concurrent_sessions = default_max_concurrent_sessions
+      ; env_allowlist = []
+      ; capabilities = []
+      }
+  in
+  let text = Exec_ssh_endpoint.to_toml endpoint in
+  check bool "no name body field" false (contains "name = " text);
+  check bool "header names the endpoint" true (contains "endpoints.dev]" text)
+
 let test_unknown_capability_warn_and_ignore () =
   let extra = "capabilities = [\"kvm\", \"time-travel\"]" in
   match parse_cfg (endpoint_toml "dev" extra) with
@@ -257,6 +334,12 @@ let () =
         ; test_case "explicit overrides" `Quick test_explicit_overrides
         ; test_case "absent section" `Quick test_absent_section_is_empty_registry
         ] )
+    ; ( "roundtrip"
+      , [ test_case "full-field roundtrip" `Quick test_roundtrip_full_fields
+        ; test_case "spec defaults roundtrip" `Quick test_roundtrip_defaults
+        ; test_case "no stray name field" `Quick test_roundtrip_no_stray_name_field
+        ]
+      )
     ; ( "fail-closed"
       , [ test_case "unknown key rejected" `Quick test_unknown_key_rejected
         ; test_case "missing required rejected" `Quick test_missing_required_rejected

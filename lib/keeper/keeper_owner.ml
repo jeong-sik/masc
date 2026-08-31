@@ -1,5 +1,17 @@
 let mailbox_capacity = 128
 
+let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
+let install_state_change_observer observer = Atomic.set state_change_observer observer
+
+let notify_state_change_observer ~keeper_name =
+  try (Atomic.get state_change_observer) () with
+  | exn ->
+    Log.Keeper.warn
+      "keeper Owner state-change observer failed keeper=%s: %s"
+      keeper_name
+      (Printexc.to_string exn)
+;;
+
 type store =
   { replace : Keeper_meta_contract.keeper_meta -> (unit, string) result
   ; remove : Keeper_meta_contract.keeper_meta -> (unit, string) result
@@ -194,7 +206,7 @@ type t =
   ; operation_projection : operation_projection Atomic.t
   ; turn_in_flight : turn_in_flight option Atomic.t
   ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option Atomic.t
-  ; operation_store : Chat_operation_store.t
+  ; mutable operation_store : Chat_operation_store.t
   ; now : unit -> float
   ; closed : bool Atomic.t
   ; closed_p : unit Eio.Promise.t
@@ -235,6 +247,53 @@ let projection t = Atomic.get t.projection
 let operation_projection t = Atomic.get t.operation_projection
 let turn_in_flight t = Atomic.get t.turn_in_flight
 let shutdown_operation_id t = Atomic.get t.shutdown_operation_id
+
+let operation_projection_equal
+      (left : operation_projection)
+      (right : operation_projection)
+  =
+  Int.equal left.queued_count right.queued_count
+  && Option.equal Operation_id.equal left.running_operation_id right.running_operation_id
+  && Int.equal left.terminal_count right.terminal_count
+  && Int.equal left.interrupted_count right.interrupted_count
+  && Bool.equal left.store_unavailable right.store_unavailable
+;;
+
+let turn_in_flight_equal (left : turn_in_flight option) (right : turn_in_flight option) =
+  match left, right with
+  | None, None -> true
+  | Some left, Some right ->
+    left.lane = right.lane && Float.equal left.started_at right.started_at
+  | None, Some _ | Some _, None -> false
+;;
+
+let shutdown_operation_id_equal =
+  Option.equal Keeper_shutdown_types.Operation_id.equal
+;;
+
+let publish_operation_projection t next =
+  let previous = Atomic.get t.operation_projection in
+  if not (operation_projection_equal previous next)
+  then (
+    Atomic.set t.operation_projection next;
+    notify_state_change_observer ~keeper_name:t.keeper_name)
+;;
+
+let publish_turn_in_flight t next =
+  let previous = Atomic.get t.turn_in_flight in
+  if not (turn_in_flight_equal previous next)
+  then (
+    Atomic.set t.turn_in_flight next;
+    notify_state_change_observer ~keeper_name:t.keeper_name)
+;;
+
+let publish_shutdown_operation_id t next =
+  let previous = Atomic.get t.shutdown_operation_id in
+  if not (shutdown_operation_id_equal previous next)
+  then (
+    Atomic.set t.shutdown_operation_id next;
+    notify_state_change_observer ~keeper_name:t.keeper_name)
+;;
 
 (* The freed slot is offered to a queued chat operation first (the caller runs
    [start_child_if_needed] immediately before this). Notifying only when it is
@@ -391,9 +450,61 @@ let read_operation_inventory operation_store =
   |> Result.map_error owner_error_of_operation_error
 ;;
 
+let reopen_operation_store_if_missing t =
+  let path = Chat_operation_store.path t.operation_store in
+  let path_exists =
+    run_operation_store ~label:"probe Keeper chat operation store path" (fun () ->
+      Ok (Sys.file_exists path))
+  in
+  match path_exists with
+  | Error error -> Error (owner_error_of_operation_error error)
+  | Ok true -> Ok ()
+  | Ok false ->
+    let prepare_parent =
+      run_operation_store ~label:"recreate Keeper chat operation store parent" (fun () ->
+        let parent = Filename.dirname path in
+        (try Unix.mkdir parent 0o755 with
+         | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+        if Sys.is_directory parent
+        then Ok ()
+        else
+          Error
+            (Chat_operation_store.Store_unavailable
+               (Printf.sprintf
+                  "Keeper chat operation store parent is not a directory: %s"
+                  parent)))
+    in
+    (match prepare_parent with
+     | Error error -> Error (owner_error_of_operation_error error)
+     | Ok () ->
+       (match
+          run_operation_store ~label:"close purged Keeper chat operation store" (fun () ->
+            Chat_operation_store.close t.operation_store)
+        with
+        | Error error -> Error (owner_error_of_operation_error error)
+        | Ok () ->
+          (match
+             run_operation_store ~label:"reopen purged Keeper chat operation store" (fun () ->
+               Chat_operation_store.open_or_create ~path)
+           with
+           | Error error -> Error (owner_error_of_operation_error error)
+           | Ok operation_store ->
+             (match read_operation_inventory operation_store with
+              | Error error ->
+                ignore (Chat_operation_store.close operation_store : (unit, _) result);
+                Error error
+              | Ok inventory ->
+                t.operation_store <- operation_store;
+                t.store_error := None;
+                Atomic.set
+                  t.operation_projection
+                  (operation_projection_of_inventory inventory);
+                Ok ()))))
+;;
+
 let mark_operation_store_unavailable t =
   let projection = Atomic.get t.operation_projection in
-  Atomic.set t.operation_projection { projection with store_unavailable = true }
+  publish_operation_projection t { projection with store_unavailable = true }
 ;;
 
 let run_operation_command t ~label f =
@@ -418,7 +529,7 @@ let run_operation_command t ~label f =
         | Error _ as error -> error
         | Ok inventory ->
           let projection = operation_projection_of_inventory inventory in
-          Atomic.set t.operation_projection projection;
+          publish_operation_projection t projection;
           Keeper_waiting_inventory_broadcast.changed
             ~keeper_name:t.keeper_name
             ~source:Keeper_waiting_inventory_broadcast.Chat_operation;
@@ -575,8 +686,8 @@ let start
         if inventory.queued_count > 0 && Option.is_none inventory.running_operation_id
         then (
           t.child_active := true;
-          Atomic.set
-            t.turn_in_flight
+          publish_turn_in_flight
+            t
             (Some { lane = Chat_operation; started_at = t.now () });
           Eio.Fiber.fork ~sw (fun () ->
             let claimed_operation_id = ref None in
@@ -663,6 +774,17 @@ let start
           Eio.Promise.resolve resolve (Ok (Keeper_owner_reducer.projection state));
           loop state shutdown_operation_id
         | Command (Apply_meta command, resolve) ->
+          let operation_store_ready =
+            match command, (Keeper_owner_reducer.projection state).meta with
+            | Keeper_owner_reducer.Create _, None ->
+              reopen_operation_store_if_missing t
+            | _ -> Ok ()
+          in
+          (match operation_store_ready with
+           | Error error ->
+             Eio.Promise.resolve resolve (Error error);
+             loop state shutdown_operation_id
+           | Ok () ->
           (match !(t.store_error) with
            | Some detail ->
              Eio.Promise.resolve resolve (Error (Store_unavailable detail));
@@ -680,9 +802,9 @@ let start
                  | Ok state ->
                    Eio.Promise.resolve
                      resolve
-                     (Ok (Keeper_owner_reducer.projection state).meta);
+                   (Ok (Keeper_owner_reducer.projection state).meta);
                    start_child_if_needed state shutdown_operation_id;
-                   loop state shutdown_operation_id)))
+                   loop state shutdown_operation_id))))
         | Command (Exact_operation operation_id, resolve) ->
           let response =
             run_operation_read t ~label:"lookup Keeper chat operation" (fun () ->
@@ -817,7 +939,7 @@ let start
         | Command (Begin_shutdown { operation_id }, resolve) ->
           (match shutdown_operation_id with
            | None ->
-             Atomic.set t.shutdown_operation_id (Some operation_id);
+             publish_shutdown_operation_id t (Some operation_id);
              Eio.Promise.resolve
                resolve
                (Ok (Shutdown_reserved (shutdown_reservation t operation_id)));
@@ -836,7 +958,7 @@ let start
              loop state shutdown_operation_id
            | Some existing
              when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
-             Atomic.set t.shutdown_operation_id None;
+             publish_shutdown_operation_id t None;
              Eio.Promise.resolve resolve (Ok Shutdown_rolled_back);
              start_child_if_needed state None;
              loop state None
@@ -846,7 +968,7 @@ let start
         | Command (Restore_shutdown { operation_id }, resolve) ->
           (match shutdown_operation_id with
            | None ->
-             Atomic.set t.shutdown_operation_id (Some operation_id);
+             publish_shutdown_operation_id t (Some operation_id);
              Eio.Promise.resolve resolve (Ok Shutdown_restored);
              loop state (Some operation_id)
            | Some existing
@@ -874,7 +996,7 @@ let start
             | Some existing, _ ->
               Shutdown_transition_reserved_by_other existing, shutdown_operation_id
           in
-          Atomic.set t.shutdown_operation_id next_shutdown_operation_id;
+          publish_shutdown_operation_id t next_shutdown_operation_id;
           Eio.Promise.resolve resolve (Ok result);
           if Option.is_none next_shutdown_operation_id
           then start_child_if_needed state None;
@@ -907,8 +1029,8 @@ let start
                      (Ok (Autonomous_busy (Turn_busy (Some in_flight))))
                  | None ->
                    t.child_active := true;
-                   Atomic.set
-                     t.turn_in_flight
+                   publish_turn_in_flight
+                     t
                      (Some { lane; started_at = t.now () });
                    Eio.Fiber.fork ~sw (fun () ->
                      let outcome =
@@ -945,7 +1067,7 @@ let start
               Ok ()
           in
           t.child_active := false;
-          Atomic.set t.turn_in_flight None;
+          publish_turn_in_flight t None;
           Eio.Promise.resolve resolve result;
           let stopping_waiters = List.rev !(t.stopping_waiters) in
           t.stopping_waiters := [];

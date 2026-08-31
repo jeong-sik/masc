@@ -23,6 +23,9 @@ let fact ?(claim = "claim") () :
   { claim
   ; category = Types.Constraint
   ; first_seen = 100.0
+  ; last_seen = 100.0
+  ; reinforcement = 0
+  ; origin = { kind = Types.Authored; trace_id = "trace" }
   }
 ;;
 
@@ -576,18 +579,18 @@ let test_journal_recreated_after_purge_sequence () =
     (List.length (read_journal_lines ~keepers_dir))
 ;;
 
-(* Both Memory OS sidecars live in the config keepers directory, outside the
-   runtime directory the purge already removes: without plan entries a purged
-   keeper leaks its facts and journal to a later keeper with the same name. *)
+(* Memory OS snapshots and the journal live in the config keepers directory,
+   outside the runtime directory the purge already removes: without plan
+   entries a purged keeper leaks them to a later keeper with the same name. *)
 let test_purge_plan_removes_memory_sidecars () =
   let module Shutdown = Masc.Keeper_shutdown_types in
-  let context =
-    { Shutdown.requested_name = "keeper" }
-  in
+  let context = { Shutdown.requested_name = "keeper" } in
   let plan = Shutdown.dashboard_purge_artifact_plan ~keeper_name:"keeper" context in
   let contains artifact = List.exists (fun entry -> entry = artifact) plan in
   check bool "plan removes the fact snapshot" true
     (contains Shutdown.Keeper_memory_current_artifact);
+  check bool "plan removes the source-bound snapshot" true
+    (contains Shutdown.Keeper_memory_source_current_artifact);
   check bool "plan removes the memory journal" true
     (contains Shutdown.Keeper_memory_journal_artifact)
 ;;
@@ -632,6 +635,83 @@ let test_stale_replace_rejects_concurrent_explicit_write () =
     "explicit fact preserved"
     (fact_ids [ initial; explicit ])
     (fact_ids snapshot.facts)
+;;
+
+(* A pre-provenance three-field row — the shape of every snapshot already on
+   disk — must decode as a Legacy row instead of being rejected: last_seen
+   collapses to first_seen, reinforcement to 0, and no origin is invented. A
+   row mixing the two vocabularies is a shape this build does not know and
+   must reject rather than read past. *)
+let test_legacy_three_field_fact_row_decodes_as_legacy () =
+  let strip_newer_fields fields =
+    List.filter
+      (fun (key, _) ->
+         not (List.mem key [ "last_seen"; "reinforcement"; "origin" ]))
+      fields
+  in
+  let legacy_row =
+    match Types.fact_to_json (fact ~claim:"written before provenance" ()) with
+    | `Assoc fields -> `Assoc (strip_newer_fields fields)
+    | _ -> fail "fact_to_json did not produce an object"
+  in
+  (match Types.fact_of_json legacy_row with
+   | Some decoded ->
+     check bool "legacy origin declared" true (decoded.origin.kind = Types.Legacy);
+     check
+       bool
+       "no invented trace"
+       true
+       (String.equal decoded.origin.trace_id "");
+     check (float 0.0) "last_seen collapses to first_seen" 100.0 decoded.last_seen;
+     check int "no phantom reinforcement" 0 decoded.reinforcement;
+     check
+       string
+       "claim bytes survive the widening"
+       "written before provenance"
+       decoded.claim
+   | None -> fail "legacy three-field row was rejected");
+  let mixed_row =
+    match legacy_row with
+    | `Assoc fields ->
+      `Assoc
+        (("origin", `Assoc [ "kind", `String "authored"; "trace_id", `String "" ]) :: fields)
+    | _ -> fail "unreachable"
+  in
+  check bool "mixed vocabulary rejects" true (Types.fact_of_json mixed_row = None)
+;;
+
+(* Byte-identical re-observation is reinforcement, not duplication: the row
+   count stays flat, insertion time stays authoritative, the observation time
+   refreshes, the re-observation is counted, and an injected copy re-observing
+   an authored row must not repaint its origin (task-1032 loop damper). *)
+let test_reobservation_reinforces_instead_of_duplicating () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let initial = fact ~claim:"reinforced claim" () in
+  ignore (replace ~keepers_dir ~facts:[ initial ] () |> require_ok);
+  let reinjected =
+    { initial with
+      category = Types.Lesson
+    ; first_seen = 500.0
+    ; last_seen = 600.0
+    ; origin = { kind = Types.Injected; trace_id = "" }
+    }
+  in
+  let snapshot =
+    Current.upsert_fact
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~now:600.0
+      ~source:(source Current.Librarian)
+      reinjected
+    |> require_ok
+  in
+  check int "one row, not a duplicate" 1 (List.length snapshot.facts);
+  let stored = List.hd snapshot.facts in
+  check (float 0.0) "insertion time remains authoritative" 100.0 stored.first_seen;
+  check (float 0.0) "observation time refreshed" 600.0 stored.last_seen;
+  check int "re-observation counted" 1 stored.reinforcement;
+  check bool "original origin preserved" true (stored.origin.kind = Types.Authored);
+  check bool "category still updates" true (stored.category = Types.Lesson)
 ;;
 
 let () =
@@ -723,6 +803,14 @@ let () =
             "journal recreated after purge sequence"
             `Quick
             test_journal_recreated_after_purge_sequence
+        ; test_case
+            "legacy three-field row decodes as legacy"
+            `Quick
+            test_legacy_three_field_fact_row_decodes_as_legacy
+        ; test_case
+            "re-observation reinforces instead of duplicating"
+            `Quick
+            test_reobservation_reinforces_instead_of_duplicating
         ] )
     ]
 ;;

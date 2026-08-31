@@ -570,6 +570,83 @@ let test_fresh_presence_preserves_turn_failures () =
       | Some phase -> check string "heartbeat alone stays failing" "failing" (KSM.phase_to_string phase)
       | None -> fail "expected registered keeper phase")
 
+let test_turn_failure_streak_survives_registry_restart () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.For_testing.clear ();
+  let base_path = temp_dir "turn-failure-streak-restart" in
+  Fun.protect
+    ~finally:(fun () ->
+      R.For_testing.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+      let meta = make_meta "failure-streak-restart" in
+      let register () =
+        ignore (R.For_testing.register ~base_path meta.name meta)
+      in
+      register ();
+      ignore
+        (Masc.Keeper_turn_failure_streak.increment
+           ~base_path
+           ~keeper_name:meta.name);
+      check int "first process count" 1 (R.get_turn_failures ~base_path meta.name);
+      R.For_testing.clear ();
+      register ();
+      check int "first restart restores one" 1
+        (R.get_turn_failures ~base_path meta.name);
+      (match R.get ~base_path meta.name with
+       | Some { last_failure_reason = Some (R.Turn_consecutive_failures 1); _ } -> ()
+       | Some _ -> fail "restart did not restore the typed failure reason"
+       | None -> fail "restart did not register the Keeper");
+      ignore
+        (Masc.Keeper_turn_failure_streak.increment
+           ~base_path
+           ~keeper_name:meta.name);
+      check int "restart advances to two" 2 (R.get_turn_failures ~base_path meta.name);
+      R.For_testing.clear ();
+      register ();
+      check int "second restart restores two" 2
+        (R.get_turn_failures ~base_path meta.name);
+      check bool
+        "successful turn reset committed"
+        true
+        (Masc.Keeper_turn_failure_streak.reset
+           ~base_path
+           ~keeper_name:meta.name);
+      check int "successful turn reset" 0 (R.get_turn_failures ~base_path meta.name);
+      R.For_testing.clear ();
+      register ();
+      check int "reset remains zero after restart" 0
+        (R.get_turn_failures ~base_path meta.name))
+;;
+
+let test_turn_failure_streak_unknown_schema_fails_closed () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.For_testing.clear ();
+  let base_path = temp_dir "turn-failure-streak-schema" in
+  Fun.protect
+    ~finally:(fun () ->
+      R.For_testing.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+      let meta = make_meta "failure-streak-schema" in
+      let path =
+        Masc.Keeper_turn_failure_streak_store.path_for
+          ~base_path
+          ~keeper_name:meta.name
+      in
+      write_file
+        path
+        {|{"schema":"keeper.turn_failure_streak.v0","count":9}|};
+      match R.register_offline_if_admitted ~base_path meta.name meta with
+      | Error (R.Registration_turn_failure_streak_unavailable _) ->
+        check bool "malformed state is not registered" true
+          (Option.is_none (R.get ~base_path meta.name))
+      | Error _ -> fail "unknown schema returned the wrong registration error"
+      | Ok _ -> fail "unknown streak schema must not be treated as a fresh zero")
+;;
+
 (** T6 audit: a swallowed keepalive-cycle exception must surface as a
     turn failure. [record_crashed_cycle_failure] (called by the
     [run_keepalive_unified_turn] catch-all) increments the same
@@ -2735,6 +2812,30 @@ let test_dashboard_purge_resolution_is_fail_closed () =
        | Ok None -> ()
        | Ok (Some _) -> fail "plain agent was classified as a Keeper"
        | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
+      (match Dashboard_purge.resolve config "plain:agent" with
+       | Ok None -> ()
+       | Ok (Some _) -> fail "namespaced plain agent was classified as a Keeper"
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
+      let long_name = String.make 75 'k' in
+      let long_meta = { (make_meta "dashboard-purge-long") with name = long_name } in
+      create_owner_meta_exn config long_meta;
+      (match Dashboard_purge.existing_operation config long_name with
+       | Ok None -> ()
+       | Ok (Some _) -> fail "long-name Keeper unexpectedly had a purge operation"
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
+      (match Dashboard_purge.resolve config long_name with
+       | Ok (Some target) ->
+         check string "resolved long Keeper name" long_name target.keeper_name
+       | Ok None -> fail "long-name Keeper fell through to plain-agent purge"
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
+      (match
+         Dashboard_purge.resolve
+           config
+           (String.make (Keeper_id.Keeper_name.max_length + 1) 'k')
+       with
+       | Error (Dashboard_purge.Invalid_requested_name _) -> ()
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error)
+       | Ok _ -> fail "Keeper name beyond the creation limit was accepted");
       let persisted = make_meta "dashboard-purge-persisted" in
       create_owner_meta_exn config persisted;
       let persisted =
@@ -3740,7 +3841,9 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       let (_init_message : string) =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
-      let initial = make_meta "dashboard-purge-finalize" in
+      let initial =
+        { (make_meta "dashboard-purge-finalize") with name = String.make 75 'p' }
+      in
       (match Keeper_meta_store.replace_snapshot config initial with
        | Ok () -> ()
        | Error detail -> fail detail);
@@ -3779,6 +3882,23 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
           (meta.name ^ ".toml")
       in
       write_file configuration_path "[keeper]\nautoboot = false\n";
+      let playground_paths =
+        Keeper_types_profile.all_sandbox_profiles
+        |> List.map (fun profile ->
+             Filename.concat
+               config.base_path
+               (Masc.Keeper_sandbox.host_root_rel_of_profile profile meta.name))
+        |> List.sort_uniq String.compare
+      in
+      List.iter
+        (fun path -> write_file (Filename.concat path "workspace/stale.txt") "stale")
+        playground_paths;
+      let unrelated_playground_path =
+        Filename.concat
+          config.base_path
+          ".masc/playground/unrelated/workspace/keep.txt"
+      in
+      write_file unrelated_playground_path "keep";
       let agent_path =
         Filename.concat
           (Workspace.agents_dir config)
@@ -3918,6 +4038,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         ; Auth.credential_file config.base_path meta.name
         ]
         @ sidecar_paths
+        @ playground_paths
       in
       List.iter
         (fun path ->
@@ -3925,6 +4046,8 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         removed_paths;
       check bool "unrelated agent artifact preserved" true
         (Sys.file_exists unrelated_path);
+      check bool "unrelated playground preserved" true
+        (Sys.file_exists unrelated_playground_path);
       check bool
         "exact workspace owner unbound"
         false
@@ -4795,6 +4918,10 @@ let () =
       eio_test "turn crash flow" test_crash_turn_failures;
       test_case "fresh presence preserves turn failures" `Quick
         test_fresh_presence_preserves_turn_failures;
+      test_case "turn failure streak survives registry restart" `Quick
+        test_turn_failure_streak_survives_registry_restart;
+      test_case "turn failure streak rejects unknown schema" `Quick
+        test_turn_failure_streak_unknown_schema_fails_closed;
       test_case "crashed cycle surfaces as turn failure" `Quick
         test_crashed_cycle_records_turn_failure;
       test_case "operator interrupt skips turn accounting" `Quick

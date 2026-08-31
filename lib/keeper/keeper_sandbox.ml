@@ -5,7 +5,6 @@
     that path is an implementation detail of the local/docker backends. *)
 
 type backend =
-  | Local
   | Docker
   | Micro_vm
   | Remote_ssh
@@ -72,13 +71,11 @@ module Path = struct
 end
 
 let backend_of_profile = function
-  | Keeper_types_profile_sandbox.Local -> Local
   | Keeper_types_profile_sandbox.Docker -> Docker
   | Keeper_types_profile_sandbox.Micro_vm -> Micro_vm
   | Keeper_types_profile_sandbox.Remote_ssh -> Remote_ssh
 
 let backend_to_string = function
-  | Local -> "local"
   | Docker -> "docker"
   | Micro_vm -> "microvm"
   | Remote_ssh -> "remote_ssh"
@@ -89,7 +86,6 @@ let backend_of_config_agent ~(config : Workspace.config) ~(agent_name : string) 
       ~base_path:config.Workspace.base_path
       ~agent_name
   with
-  | Keeper_sandbox_config.Local -> Local
   | Keeper_sandbox_config.Docker -> Docker
   | Keeper_sandbox_config.Micro_vm -> Micro_vm
   | Keeper_sandbox_config.Remote_ssh -> Remote_ssh
@@ -106,7 +102,6 @@ let sandbox_id_of_name name =
 let host_root_rel_of_backend ~(backend : backend) name =
   Keeper_sandbox_config.host_root_rel_of_profile
     (match backend with
-     | Local -> Keeper_sandbox_config.Local
      | Docker -> Keeper_sandbox_config.Docker
      | Micro_vm -> Keeper_sandbox_config.Micro_vm
      | Remote_ssh -> Keeper_sandbox_config.Remote_ssh)
@@ -142,7 +137,6 @@ let host_path_of_visible_path ~config ~agent_name raw_path =
   then raw_path
   else
     match backend_of_config_agent ~config ~agent_name with
-    | Local -> raw_path
     (* Phase 1: no remote<->host path translation exists yet (it lands
        with the SSH runner's translation module); the only host-side
        namespace a remote_ssh keeper has is its bookkeeping bundle, so
@@ -173,7 +167,6 @@ let host_path_of_visible_path ~config ~agent_name raw_path =
 let keeper_visible_root_abs_of_meta ~(config : Workspace.config)
     (meta : Keeper_meta_contract.keeper_meta) =
   match backend_of_profile meta.sandbox_profile with
-  | Local -> host_root_abs_of_meta ~config meta
   | Docker | Micro_vm -> container_root meta.name
   (* Phase 1: the keeper-visible root is the host bookkeeping bundle
      until the SSH lane's remote root translation lands (task 6+). *)
@@ -190,7 +183,6 @@ let of_meta ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_me
   ; host_root_abs = host_root_abs_of_meta ~config meta
   ; container_root =
       (match backend with
-       | Local -> None
        | Docker | Micro_vm -> Some (container_root meta.name)
        | Remote_ssh -> None)
   ; root_arg = "."
@@ -224,7 +216,6 @@ let visible_path_of_host (t : t) (p : Path.host Path.t)
   =
   let path = Path.unsafe_to_string p in
   match t.backend with
-  | Local -> Ok path
   (* Phase 1: identity — the only keeper-visible namespace that exists
      host-side for remote_ssh is the bookkeeping bundle. True
      remote<->logical projection arrives with the SSH lane's path

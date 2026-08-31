@@ -22,6 +22,7 @@ type config =
   ; admission_timeout_s : float
   ; timeout_s : float option
   ; wall_clock_ceiling_s : float option
+  ; output_schema : Yojson.Safe.t option
   }
 
 let default_timeout_s = 300.0
@@ -46,6 +47,7 @@ let default_config () =
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
   ; wall_clock_ceiling_s = None
+  ; output_schema = None
   }
 ;;
 
@@ -372,13 +374,33 @@ let reject_server_request io id =
        ])
 ;;
 
+(* Every Keeper tool is declared once, under one namespace, deferred.
+
+   The app-server takes two encodings of [dynamicTools] and refuses a mix
+   ("dynamic tools must use either canonical or legacy format consistently").
+   The legacy one is tagged ["type": "function"] and cannot defer: it answers
+   [deferLoading: true] with "deferred dynamic tool must include a namespace",
+   and it has nowhere to put one. The canonical one carries no type tag and
+   takes [namespace] as a string, which is what a deferred tool needs, so that
+   is the one written here.
+
+   Deferring means the app-server holds the schema and decides when the model
+   sees it, rather than every schema riding in the model's context from the
+   first token of every turn. The schemas still cross this wire once at
+   thread/start; what changes is the context they are spent from. Measured
+   2026-08-30 against the live surface: 83 tools, 81,270 bytes of spec. The
+   saving itself is not observable here — turn/completed carries no token
+   usage — so what is verified is that the model still resolves and calls a
+   deferred tool, not how much it costs. *)
+let tool_namespace = "masc"
+
 let dynamic_tool_spec (tool : dynamic_tool) =
   `Assoc
-    [ "type", `String "function"
-    ; "name", `String tool.name
+    [ "name", `String tool.name
     ; "description", `String tool.description
     ; "inputSchema", tool.input_schema
-    ; "deferLoading", `Bool false
+    ; "namespace", `String tool_namespace
+    ; "deferLoading", `Bool true
     ]
 ;;
 
@@ -416,8 +438,21 @@ let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count
   let* arguments = required_member stage "arguments" fields in
   if request_thread_id <> thread_id || request_turn_id <> turn_id
   then protocol_error stage "tool call identity does not match the active turn"
-  else if Option.is_some namespace
-  then protocol_error stage "function tool call unexpectedly declared a namespace"
+  else if
+    (* Every tool is declared under [tool_namespace], so a call names it back.
+       A call naming any other namespace belongs to tools this host did not
+       declare and must not be answered from this table. *)
+    not
+      (match namespace with
+       | None -> true
+       | Some declared -> String.equal declared tool_namespace)
+  then
+    protocol_error
+      stage
+      (Printf.sprintf
+         "tool call declared namespace %s, not %s"
+         (Option.value namespace ~default:"<none>")
+         tool_namespace)
   else
     match find_dynamic_tool tools tool_name with
     | None -> protocol_error stage (Printf.sprintf "unknown dynamic tool %S" tool_name)
@@ -1023,7 +1058,15 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
           ]
           @ optional_field
               "effort"
-              (Option.map Llm_provider.Reasoning_effort.to_string reasoning_effort)));
+              (Option.map Llm_provider.Reasoning_effort.to_string reasoning_effort)
+          @ (match config.output_schema with
+             | None -> []
+             (* v2 TurnStartParams.outputSchema: "Optional JSON Schema used to
+                constrain the final assistant message for this turn." Unlike the
+                Antigravity CLI there is no second field to read -- the schema
+                binds the message itself, so the existing text path already
+                carries the constrained answer. *)
+             | Some schema -> [ "outputSchema", schema ])));
   on_turn_dispatched ();
   (* The complete request is now outside this process. Admission stays finite
      through dispatch; only the subsequent model turn adopts its declared

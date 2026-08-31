@@ -83,8 +83,14 @@ bin/keeper_canary_run.ml
 bin/keeper_canary_http.ml
 bin/fusion_run.ml
 bin/keeper_capability_probe_cli.ml
+bin/masc_lane_cli_probe.ml
 bin/masc_checkpoint_purge.ml
 bin/deployment_preflight_helper.ml
+# masc_lane_cli_probe measures a declared cli_slots runtime against a lane's
+# real requirement; its usage/unknown-lane/init-failure diagnostics and
+# per-trial verdicts are the measurement the operator asked for, not server
+# records.
+bin/masc_lane_cli_probe.ml
 
 # --- Before the screen, and before the log ---
 # masc_tui writes to stderr while deciding where stderr goes; saying it

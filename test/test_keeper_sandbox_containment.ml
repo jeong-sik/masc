@@ -56,7 +56,7 @@ let make_meta ~name ~sandbox () =
 let test_local_profile_uses_same_containment () =
   with_tmp_base @@ fun base ->
   let config = Workspace.default_config base in
-  let meta = make_meta ~name:"alice" ~sandbox:Keeper_types_profile_sandbox.Local () in
+  let meta = make_meta ~name:"alice" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh () in
   let outside = "/etc/passwd" in
   Alcotest.(check bool)
     "Local keeper uses allowed roots"

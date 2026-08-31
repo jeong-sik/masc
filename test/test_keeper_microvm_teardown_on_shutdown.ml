@@ -5,9 +5,8 @@
 
    Two properties hold it. The first is that finalization calls the teardown
    at all -- deleting the call is the regression, and no other suite would
-   notice. The second is that the teardown is safe to call for every keeper:
-   a docker keeper has no guest under this name, and finalization must not
-   turn that into a blocked shutdown. *)
+   notice. The second is that finalization carries the declared backend so a
+   Local keeper never probes microVM or Docker runtimes it cannot own. *)
 
 module Runtime = Masc.Keeper_turn_sandbox_runtime
 
@@ -28,6 +27,7 @@ let test_removing_an_absent_guest_succeeds () =
            ~timeout_sec:30.0
            ~config
            ~keeper_name:"microvm-teardown-probe-never-started"
+           ~backend:Masc.Keeper_sandbox.Micro_vm
            ()
        with
        | Ok () -> ()
@@ -41,11 +41,33 @@ let test_removing_an_absent_guest_succeeds () =
              "removing a guest that was never started must succeed, got: %s"
              detail)
 
+let test_local_teardown_skips_container_runtimes () =
+  let base_path = Filename.temp_file "local_teardown_" "" in
+  Unix.unlink base_path;
+  Unix.mkdir base_path 0o755;
+  Fun.protect
+    ~finally:(fun () -> try Unix.rmdir base_path with _ -> ())
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       match
+         Runtime.teardown_keeper_sandbox_by_name
+           ~timeout_sec:0.01
+           ~config
+           ~keeper_name:"local-teardown-never-probes-container-runtime"
+           ~backend:Masc.Keeper_sandbox.Remote_ssh
+           ()
+       with
+       | Ok () -> ()
+       | Error detail ->
+         Alcotest.failf "Local teardown called a container runtime: %s" detail)
+
 let () =
   Alcotest.run
     "keeper_microvm_teardown_on_shutdown"
     [ ( "teardown"
       , [ Alcotest.test_case "removing an absent guest succeeds" `Quick
             test_removing_an_absent_guest_succeeds
+        ; Alcotest.test_case "Local teardown skips container runtimes" `Quick
+            test_local_teardown_skips_container_runtimes
         ] )
     ]

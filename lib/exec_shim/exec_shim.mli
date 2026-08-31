@@ -136,6 +136,11 @@ val trailer_of_status :
 val jail_error_code : string
 (** [= "remote_ssh_path_jail_violation"]. *)
 
+(** [Ok ()] iff [cwd] — after [realpath] normalization of both paths —
+    equals [root] or is a descendant of it (component-boundary aware).
+    [Error] carries a message starting with {!jail_error_code} when [cwd]
+    escapes the jail OR cannot be resolved (nonexistent path, realpath
+    failure). *)
 val check_cwd_jail : root:string -> cwd:string -> (unit, string) result
 
 val check_request_root_jail
@@ -149,11 +154,6 @@ val check_request_root_jail
     the shim cannot read the jail from its own config -- doing that makes
     every root but one read as an escape. The request names the jail and this
     keeps it from naming one the host never granted. *)
-(** [Ok ()] iff [cwd] — after [realpath] normalization of both paths —
-    equals [root] or is a descendant of it (component-boundary aware).
-    [Error] carries a message starting with {!jail_error_code} when [cwd]
-    escapes the jail OR cannot be resolved (nonexistent path, realpath
-    failure). *)
 
 (** {1 Shim config file}
 

@@ -54,9 +54,13 @@ let run_cmd cli_base_path =
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     Server_runtime_bootstrap.init_runtime_context env
   in
-  let run_dir = (Host_config.host ()).run_dir in
+  let lease_dir = (Host_config.host ()).base_path_lease_dir in
   let lease =
-    match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+    match
+      Server_startup_takeover.acquire_base_path_lock
+        ~run_dir:lease_dir
+        base_path
+    with
     | Server_startup_takeover.Base_path_acquired lease -> lease
     | Server_startup_takeover.Base_path_already_owned { pid } ->
       Log.Server.error

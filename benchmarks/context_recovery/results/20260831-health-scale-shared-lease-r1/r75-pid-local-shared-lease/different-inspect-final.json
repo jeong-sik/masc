@@ -1,0 +1,30 @@
+{
+  "Id": "58efead7fd1fe41ff6044791f589c047a563b5b85bf0210037f5d5bcf5c7831b",
+  "Name": "/masc-r75-pid-local-different",
+  "State": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-08-30T19:03:39.264629389Z",
+    "FinishedAt": "2026-08-30T19:03:44.038396835Z",
+    "Health": {
+      "Status": "unhealthy",
+      "FailingStreak": 0,
+      "Log": []
+    }
+  },
+  "Mounts": [
+    {
+      "Type": "volume",
+      "Name": "masc-r75-pid-local-other",
+      "Destination": "/app/.masc",
+      "RW": true
+    }
+  ]
+}

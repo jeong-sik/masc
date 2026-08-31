@@ -190,12 +190,62 @@ let parse_max_context_override args =
            "max_context_override must be an integer or null (received %s)"
            (Json_util.kind_name other))
 
+(* The unknown-key contract, derived from the [parse] body below: every
+   top-level key the parser consumes, and nothing else. A consumed-but-
+   unlisted key would make the gate reject valid traffic; a listed-but-dead
+   key would certify exactly the silent drop this gate exists to kill
+   (R09: [turn_up_arg_unknown]). Keep exactly in sync with [parse]. *)
+let known_turn_up_args =
+  [ "name"
+  ; "runtime_id"
+  ; "autoboot_enabled"
+  ; "mention_targets"
+  ; "max_context_override"
+  ; "proactive_enabled"
+  ; "sandbox_profile"
+  ; "remote_endpoint"
+  ; "network_mode"
+  ; "tools"
+  ; "skills"
+  ; "instructions"
+  ]
+
+(* Typed rejection naming every unrecognised key, so a caller that sends
+   [merge_existing] / [keep_warm] / [stash_untracked] hears about it instead
+   of watching the field vanish. *)
+let turn_up_arg_unknown keys =
+  tool_result_error
+    ~class_:Tool_result.Policy_rejection
+    (Printf.sprintf
+       "[turn_up_arg_unknown] unknown keeper_up argument(s): %s (known arguments: %s)"
+       (String.concat ", " (List.sort String.compare keys))
+       (String.concat ", " (List.sort String.compare known_turn_up_args)))
+
+(* Top-level envelope gate. Non-object envelopes pass here: the required-name
+   check rejects them with the field it cannot find. *)
+let validate_no_unknown_keys args =
+  match args with
+  | `Assoc fields ->
+    let unknown =
+      List.filter_map
+        (fun (key, _) ->
+           if List.exists (fun known -> String.equal known key) known_turn_up_args
+           then None
+           else Some key)
+        fields
+    in
+    if unknown = [] then Ok () else Error (turn_up_arg_unknown unknown)
+  | _ -> Ok ()
+
 let parse (ctx : _ context) (args : Yojson.Safe.t) :
     (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
     Error (tool_result_error ~class_:Tool_result.Policy_rejection (invalid_name_error name))
   else
+    match validate_no_unknown_keys args with
+    | Error result -> Error result
+    | Ok () ->
     let mention_targets_opt_res = parse_present_string_list_opt args "mention_targets" in
     let runtime_id_opt_res = parse_runtime_id_opt args in
     let tools_patch_res = parse_tools_patch args in
@@ -227,10 +277,10 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
     | Error error ->
       Error (tool_result_error ~class_:Tool_result.Policy_rejection (keeper_toml_load_error_to_string error))
     | Ok { profile_defaults; manifest_snapshot = declarative_manifest_snapshot } ->
-    (* An explicit profile must be valid. When neither the call nor keeper TOML states
-       one, resolution falls back to [Local] (playground-only writes) — which
-       create/update validation rejects unless the MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1
-       dev/test hatch is set. Docker remains an explicit opt-in. *)
+    (* An explicit profile must be valid, and one of the call, the keeper TOML,
+       or the manifest has to state it. There is no fallback: the arm that used
+       to take [None, None, None] resolved to [Local], and the only thing
+       between that and host execution was a feature flag defaulting to off. *)
     let sandbox_profile_error =
       match sandbox_profile_opt, profile_defaults.sandbox_profile,
         profile_defaults.manifest_path
@@ -238,10 +288,11 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       | Some raw, _, _ when Option.is_none (sandbox_profile_of_string raw) ->
         Some
           (Printf.sprintf
-             "invalid sandbox_profile: %S (expected: local, docker, microvm, or remote_ssh)"
-             raw)
-      | Some _, _, _ | None, Some _, _ | None, None, None -> None
-      | None, None, Some _ ->
+             "invalid sandbox_profile: %S (expected: %s)"
+             raw
+             (String.concat ", " Keeper_types_profile.valid_sandbox_profile_strings))
+      | Some _, _, _ | None, Some _, _ -> None
+      | None, None, None | None, None, Some _ ->
         Some
           (missing_required_sandbox_profile_error
              ~keeper_name:name
@@ -257,12 +308,17 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       | Some _, _ -> None
       | None, Error error -> Some error
       | None, Ok (remote_endpoint_present, remote_endpoint_opt) ->
+        (* [sandbox_profile_error] is [None] only when a profile was stated,
+           so this is a [Some] every time control reaches here. Naming the
+           other arm rather than defaulting keeps it that way: a later edit
+           that admits an unstated profile has to answer this match. *)
         let sandbox_profile =
-          match Option.bind sandbox_profile_opt sandbox_profile_of_string with
-          | Some profile -> profile
-          | None ->
-            Option.value profile_defaults.sandbox_profile
-              ~default:default_sandbox_profile
+          match
+            Option.bind sandbox_profile_opt sandbox_profile_of_string,
+            profile_defaults.sandbox_profile
+          with
+          | Some profile, _ | None, Some profile -> Some profile
+          | None, None -> None
         in
         let endpoint_name =
           if remote_endpoint_present
@@ -270,10 +326,11 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
           else profile_defaults.remote_endpoint
         in
         (match sandbox_profile, endpoint_name with
-         | Remote_ssh, None ->
+         | None, _ -> None
+         | Some Remote_ssh, None ->
            Some
              "remote_ssh_endpoint_missing: sandbox_profile=remote_ssh requires remote_endpoint"
-         | Remote_ssh, Some endpoint_name ->
+         | Some Remote_ssh, Some endpoint_name ->
            (match
               Keeper_sandbox_ssh.resolve_endpoint_name
                 ~base_path:ctx.config.base_path ~name:endpoint_name
@@ -292,10 +349,10 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
                    (match Keeper_sandbox_ssh.check_preflight ~force:true ssh with
                     | Ok () -> None
                     | Error error -> Some error)))
-         | (Local | Docker | Micro_vm), Some _ ->
+         | Some (Docker | Micro_vm), Some _ ->
            Some
              "remote_endpoint_requires_remote_ssh: clear remote_endpoint or select sandbox_profile=remote_ssh"
-         | (Local | Docker | Micro_vm), None -> None)
+         | Some (Docker | Micro_vm), None -> None)
     in
     match
       sandbox_profile_error, remote_endpoint_error, max_context_override_res
@@ -352,18 +409,7 @@ let resolve_sandbox_profile ?requested ~fallback () =
   | Some stated -> Some stated
   | None -> fallback
 
-(* Fail-closed gate: the local playground is off unless the operator sets the
-   hatch.  See [Env_config_sandbox.Gate] for the SSOT. *)
-let validate_sandbox_profile_allowed ~profile =
-  match profile with
-  | Local when not (Env_config_sandbox.Gate.allow_local_playground ()) ->
-    Error Env_config_sandbox.Gate.disabled_message
-  | _ -> Ok ()
-
 let resolve_network_mode ~sandbox_profile ~fallback =
   fallback
   |> Option.value ~default:(default_network_mode_for_profile sandbox_profile)
 
-
-let validate_sandbox_settings_with_profile ~sandbox_profile =
-  validate_sandbox_profile_allowed ~profile:sandbox_profile

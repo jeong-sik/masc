@@ -47,7 +47,7 @@ let make_local_meta ~name : Keeper_meta_contract.keeper_meta =
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
-    { meta with sandbox_profile = Keeper_types_profile_sandbox.Local }
+    { meta with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh }
   | Error e -> Alcotest.fail e
 
 let rec mkdir_p path =
@@ -262,41 +262,6 @@ let test_a_backgrounded_child_still_holds_the_call () =
           elapsed)
 ;;
 
-(** RFC-0394: pin the dispatch-surface rejection marker. The stanza lifts the
-    gate for the whole executable; this case re-arms it in-process (the flag
-    registry reads the env live) and restores the hatch on exit, so the three
-    gate surfaces cannot drift apart on the error marker. *)
-let test_local_dispatch_rejected_without_hatch () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base = temp_dir "exec_local_reject_" in
-  Unix.putenv Env_config_sandbox.Gate.env_key "false";
-  Fun.protect
-    ~finally:(fun () ->
-      Unix.putenv Env_config_sandbox.Gate.env_key "true";
-      cleanup_dir base)
-    (fun () ->
-      let config = Workspace.default_config base in
-      (match Keeper_approval_queue.install_persistence ~base_path:base with
-       | Ok _ -> ()
-       | Error error ->
-         Alcotest.fail (Keeper_approval_queue.install_error_to_string error));
-      install_always_allow_gate ~base;
-      let meta = make_local_meta ~name:"reject-pin" in
-      let cwd = playground_dir ~base ~name:"reject-pin" in
-      let execution = run_execute ~config ~meta ~argv:[ "ls"; "." ] ~cwd in
-      (match execution.disposition with
-       | Tool_result.Failed _ -> ()
-       | Tool_result.Completed () ->
-         Alcotest.fail "local dispatch must fail when the hatch is off"
-       | Tool_result.Deferred () ->
-         Alcotest.fail "local dispatch rejection must not defer");
-      check bool "dispatch error names local_playground_disabled" true
-        (String_util.contains_substring
-           execution.raw_output
-           "local_playground_disabled"))
-;;
-
 let () =
   run
     "keeper_tool_execute_exit_result"
@@ -314,9 +279,5 @@ let () =
             "escaped-shell advice is in what the model reads"
             `Quick
             test_escaped_shell_advice_is_in_what_the_model_reads
-        ; test_case
-            "local dispatch rejected without the hatch"
-            `Quick
-            test_local_dispatch_rejected_without_hatch
         ] )
     ]

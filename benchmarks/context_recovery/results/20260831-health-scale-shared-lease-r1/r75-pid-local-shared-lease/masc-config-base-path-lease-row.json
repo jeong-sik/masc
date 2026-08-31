@@ -1,0 +1,20 @@
+{
+  "env": "MASC_BASE_PATH_LEASE_DIR",
+  "description": "Cross-process BasePath ownership lease directory",
+  "value": "/app/.masc/runtime/base-path-lease",
+  "default": "(host temp directory)",
+  "source": "env",
+  "source_detail": "environment variable MASC_BASE_PATH_LEASE_DIR",
+  "provenance": {
+    "kind": "env",
+    "detail": "environment variable MASC_BASE_PATH_LEASE_DIR",
+    "env": "MASC_BASE_PATH_LEASE_DIR",
+    "raw_source": "environment",
+    "raw_env_present": true,
+    "raw_env_blank": false,
+    "default": "(host temp directory)",
+    "sensitive": false,
+    "value_redacted": false
+  },
+  "sensitive": false
+}

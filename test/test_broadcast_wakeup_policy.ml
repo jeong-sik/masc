@@ -492,6 +492,47 @@ let test_projection_waits_for_the_mention_transcript () =
     (settled (Workspace_broadcast.Rejected Workspace_broadcast.Invalid_target))
 ;;
 
+let test_workspace_message_mutation_invalidates_workspace_and_health () =
+  with_workspace @@ fun config ->
+  let workspace_projection = ref 0 in
+  let dashboard_projection = ref 0 in
+  let unrelated_projection = ref 0 in
+  let full_health_invalidations = ref 0 in
+  let read key counter =
+    Dashboard_cache.get_or_compute key ~ttl:120.0 (fun () ->
+      incr counter;
+      `Int !counter)
+  in
+  let dashboard_key =
+    Printf.sprintf "dashboard.workspace:%s;probe" config.Workspace.base_path
+  in
+  let workspace_key = Printf.sprintf "workspace:%s:probe" config.base_path in
+  ignore (read dashboard_key dashboard_projection);
+  ignore (read workspace_key workspace_projection);
+  ignore (read "unrelated:message-mutation" unrelated_projection);
+  let previous = Atomic.get Workspace_hooks.on_workspace_message_mutation_fn in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.on_workspace_message_mutation_fn previous;
+      Dashboard_cache.invalidate_all ())
+    (fun () ->
+      Broadcast_wakeup.install_workspace_message_mutation_invalidation
+        ~invalidate_full_health_snapshot:(fun () ->
+          incr full_health_invalidations)
+        ();
+      (Atomic.get Workspace_hooks.on_workspace_message_mutation_fn)
+        config
+        ~request_id:"wmsg-00health00000001"
+        ~mention_delivery:Masc_domain.Mention_accepted;
+      ignore (read dashboard_key dashboard_projection);
+      ignore (read workspace_key workspace_projection);
+      ignore (read "unrelated:message-mutation" unrelated_projection);
+      check int "dashboard workspace projection recomputed" 2 !dashboard_projection;
+      check int "workspace projection recomputed" 2 !workspace_projection;
+      check int "unrelated projection preserved" 1 !unrelated_projection;
+      check int "full health invalidated once" 1 !full_health_invalidations)
+;;
+
 let () =
   run
     "broadcast_wakeup_policy"
@@ -530,5 +571,7 @@ let () =
             test_hyphenated_names_do_not_collide_on_the_author
         ; test_case "projection waits for the mention transcript" `Quick
             test_projection_waits_for_the_mention_transcript
+        ; test_case "message mutation invalidates workspace and health" `Quick
+            test_workspace_message_mutation_invalidates_workspace_and_health
         ] )
     ]

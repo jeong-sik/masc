@@ -132,7 +132,7 @@ let test_uses_backend_respects_profile () =
     (fun () ->
        let config = Workspace.default_config base in
        let docker_meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Docker in
-       let local_meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Local in
+       let local_meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Remote_ssh in
        let docker_cwd =
          Keeper_sandbox.host_root_abs_of_meta ~config docker_meta
        in
@@ -166,7 +166,7 @@ let test_playground_root_uses_config_base_path () =
     (fun () ->
        Unix.putenv "MASC_BASE_PATH" env_base;
        let config = Workspace.default_config config_base in
-       let meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Local in
+       let meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Remote_ssh in
        let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        check bool "host root under config base_path" true
          (string_starts_with ~prefix:(config_base ^ "/") host_root);
@@ -175,36 +175,6 @@ let test_playground_root_uses_config_base_path () =
        check string "host root suffix"
          (Filename.concat config_base ".masc/playground/runner-test")
          (Keeper_alerting_path.strip_trailing_slashes host_root))
-
-let test_local_route_does_not_force_backend_cwd () =
-  let base = temp_dir "keeper_sandbox_runner_lazy_cwd_" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base)
-    (fun () ->
-       let config = Workspace.default_config base in
-       let meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Local in
-       let cwd = Keeper_sandbox.host_root_abs_of_meta ~config meta in
-       let result =
-         Keeper_sandbox_runner.run_command_with_status
-           ~config ~meta ~timeout_sec:5.0
-           ~host:
-             { env = None
-             ; cwd = Some cwd
-             ; argv = [ "true" ]
-             }
-           ~backend:
-             { route_cwd = cwd
-             ; cwd = (fun () -> failwith "backend cwd evaluated on host route")
-             ; command_text = "true"
-             ; network_mode = Keeper_types_profile_sandbox.Network_none
-             ; trust = Keeper_sandbox_runner.User_shell
-             }
-       in
-       match result with
-       | Error e -> Alcotest.fail e
-       | Ok result ->
-         check string "via" "host" result.via;
-         check bool "no backend error" true (Option.is_none result.backend_error))
 
 let test_remote_ssh_route_fails_closed () =
   let base = temp_dir "keeper_sandbox_runner_remote_ssh_" in
@@ -249,10 +219,6 @@ let () =
             "playground root uses config base_path"
             `Quick
             test_playground_root_uses_config_base_path
-        ; test_case
-            "local route does not force backend cwd"
-            `Quick
-            test_local_route_does_not_force_backend_cwd
         ; test_case
             "remote_ssh route fails closed"
             `Quick

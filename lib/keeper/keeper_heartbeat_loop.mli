@@ -120,8 +120,8 @@ val decide_keepalive_cycle_action :
     record success or failure and leaves selected stimuli pending.
     [Turn_cycle_crashed] means the cycle's catch-all swallowed an exception to
     keep the keeper fiber alive (T6 audit), or a durable event-queue transition
-    did not commit. The failure has already been recorded via
-    [Keeper_registry.increment_turn_failures], so the caller dispatches
+    did not commit. The failure has already been recorded via the durable
+    [Keeper_turn_failure_streak] boundary, so the caller dispatches
     [Turn_failed]. [Turn_cycle_busy] preserves its typed admission reason and
     must not dispatch either turn status or refresh the work-as-heartbeat
     lease. *)
@@ -154,14 +154,17 @@ type connector_attention_outcome =
 type batch_disposition =
   | Batch_ack_completed of
       { connector_attention_outcome : connector_attention_outcome }
+  | Batch_ack_durable_stimulus_yield
   | Batch_no_action
 
 val batch_disposition_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome option -> batch_disposition
-(** The single queue action a turn's [cycle_outcome] implies for every
-    admitted stimulus. Completed turns ACK the whole batch; every incomplete,
-    failed, cancelled, or checkpointed outcome leaves the whole batch pending.
-    Provider/runtime failure is not authority to discard input. *)
+(** The queue action a turn's [cycle_outcome] implies. Completed turns ACK the
+    whole batch. A durable-stimulus yield ACKs attention-only sources so the
+    newer source can advance, but preserves Connector_attention until an exact
+    reply/ignore settlement exists. Every other incomplete, failed, cancelled,
+    or checkpointed outcome leaves the whole batch pending. Provider/runtime
+    failure is not authority to discard input. *)
 
 type connector_attention_settlement =
   | Settle_resolved

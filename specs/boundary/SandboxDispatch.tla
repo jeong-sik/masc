@@ -6,19 +6,19 @@
 \* Keeper_sandbox_runner.effective_sandbox_profile):
 \*
 \*   - [meta_profile] is the keeper's declared sandbox preference
-\*     (Local | Docker | Remote_ssh).
-\*   - [in_playground] gates whether playground-host fallback is even a
-\*     candidate route. The runtime decides this by effective profile
-\*     (Local -> host, Docker -> container), not by testing whether the
-\*     working directory sits under the keeper's host root; the OCaml
-\*     predicate that did the latter had no caller and was deleted.
+\*     (Docker | Micro_vm | Remote_ssh). There is no host arm: the
+\*     [Local] profile was removed, so Host is reachable only as the
+\*     bug below.
+\*   - [in_playground] went with it. It gated whether the playground-host
+\*     fallback was a candidate route, and with no host route there is
+\*     nothing left for it to gate.
 \*   - [dispatched_via] records how the most recent typed Execute request was
 \*     resolved: None (no dispatch yet), Host, DockerReuse (existing
 \*     container), DockerColdstart (new container), Ssh (Phase 1 remote
 \*     lane).
 \*
 \* The contract this spec proves:
-\*   meta_profile = Docker => dispatched_via ∉ {None, Host} once a
+\*   meta_profile \in {Docker, Micro_vm} => dispatched_via ∉ {None, Host} once a
 \*   request resolves. PR #11594 (Execute dispatch SSOT) and
 \*   PR #11610 (effective_sandbox_profile invariant) close the silent
 \*   host-fallback path at the runtime; this spec proves the routing
@@ -34,9 +34,9 @@
 \*
 \* Bug Model (memory: TLA+ Bug Model pattern):
 \*   - Spec       (clean): all dispatches respect the profile contract.
-\*   - SpecBuggy:  ExecuteHostFallback action lets a Docker- or
-\*     Remote_ssh-declared keeper resolve to Host. DockerImpliesDockerVia
-\*     or RemoteSshImpliesSshVia MUST flag it.
+\*   - SpecBuggy:  ExecuteHostFallback action lets any declared keeper
+\*     resolve to Host. BackendImpliesBackendVia or
+\*     RemoteSshImpliesSshVia MUST flag it.
 \*
 \* Reference: issue #11611 part 2.
 
@@ -44,34 +44,31 @@ EXTENDS TLC
 
 VARIABLES
     meta_profile,
-    in_playground,
     request_pending,
     dispatched_via
 
-vars == << meta_profile, in_playground, request_pending, dispatched_via >>
+vars == << meta_profile, request_pending, dispatched_via >>
 
-ProfileSet == {"Local", "Docker", "Remote_ssh"}
+ProfileSet == {"Docker", "Micro_vm", "Remote_ssh"}
+BackendProfiles == {"Docker", "Micro_vm"}
 ViaSet == {"None", "Host", "DockerReuse", "DockerColdstart", "Ssh"}
 
 TypeOK ==
     /\ meta_profile \in ProfileSet
-    /\ in_playground \in BOOLEAN
     /\ request_pending \in BOOLEAN
     /\ dispatched_via \in ViaSet
 
 Init ==
     /\ meta_profile \in ProfileSet
-    /\ in_playground \in BOOLEAN
     /\ request_pending = FALSE
     /\ dispatched_via = "None"
 
 \* Operator (or supervisor) updates the effective sandbox preference.
 \* Only allowed when no request is in flight; otherwise we'd be racing
 \* the runtime's decision.
-EffectiveResolve(p, ip) ==
+EffectiveResolve(p) ==
     /\ ~ request_pending
     /\ meta_profile' = p
-    /\ in_playground' = ip
     /\ dispatched_via' = "None"
     /\ UNCHANGED << request_pending >>
 
@@ -80,30 +77,31 @@ SubmitExecute ==
     /\ ~ request_pending
     /\ request_pending' = TRUE
     /\ dispatched_via' = "None"
-    /\ UNCHANGED << meta_profile, in_playground >>
+    /\ UNCHANGED << meta_profile >>
 
 \* Clean dispatch: routing matches the profile contract.
-\*   Local      => Host
 \*   Docker     => DockerReuse | DockerColdstart
+\*   Micro_vm   => DockerReuse | DockerColdstart
+\*                 (the guest is a backend the same way the container is;
+\*                 [Keeper_sandbox_runner.uses_backend] classifies both)
 \*   Remote_ssh => Ssh
+\* No arm produces Host.
 \* DockerColdstart is the cold-path branch when no reusable container
 \* is present; DockerReuse is the warm-path branch.
 DispatchClean(via) ==
     /\ request_pending
     /\ dispatched_via = "None"
     /\ via \in ViaSet \ {"None"}
-    /\ \/ /\ meta_profile = "Local"
-          /\ via = "Host"
-       \/ /\ meta_profile = "Docker"
+    /\ \/ /\ meta_profile \in BackendProfiles
           /\ via \in {"DockerReuse", "DockerColdstart"}
        \/ /\ meta_profile = "Remote_ssh"
           /\ via = "Ssh"
     /\ dispatched_via' = via
     /\ request_pending' = FALSE
-    /\ UNCHANGED << meta_profile, in_playground >>
+    /\ UNCHANGED << meta_profile >>
 
 Next ==
-    \/ \E p \in ProfileSet, ip \in BOOLEAN : EffectiveResolve(p, ip)
+    \/ \E p \in ProfileSet : EffectiveResolve(p)
     \/ SubmitExecute
     \/ \E via \in ViaSet \ {"None"} : DispatchClean(via)
 
@@ -111,7 +109,8 @@ Spec == Init /\ [][Next]_vars
 
 \* ── Invariants ────────────────────────────────────────────────────────────
 
-\* I1: DockerImpliesDockerVia. When the keeper declares Docker profile
+\* I1: BackendImpliesBackendVia. When the keeper declares a backend
+\* profile (Docker or Micro_vm)
 \* AND a request has already resolved (request_pending = FALSE), the
 \* dispatch route MUST be one of {None (no dispatch yet), DockerReuse,
 \* DockerColdstart}; never Host. This catches the silent host-fallback
@@ -120,8 +119,8 @@ Spec == Init /\ [][Next]_vars
 \* The "None" branch is permitted because the model starts in that
 \* state and EffectiveResolve resets it; only resolutions where the
 \* runtime actually chose a route are constrained.
-DockerImpliesDockerVia ==
-    (meta_profile = "Docker" /\ ~ request_pending) =>
+BackendImpliesBackendVia ==
+    (meta_profile \in BackendProfiles /\ ~ request_pending) =>
         dispatched_via \in {"None", "DockerReuse", "DockerColdstart"}
 
 \* I2: RemoteSshImpliesSshVia. Same contract for the Phase 1 SSH lane:
@@ -135,18 +134,18 @@ RemoteSshImpliesSshVia ==
 
 \* ── Bug actions (used only by SpecBuggy) ──────────────────────────────────
 
-\* B1: ExecuteHostFallback. The regression class: a Docker- or
-\* Remote_ssh-declared keeper hits a legacy host-fallback path in the
-\* typed Execute dispatch layer and resolves the request via Host. This
-\* is the silent fallback that makes containment a soft contract; the
-\* spec catches it as an invariant violation in <=3 steps.
+\* B1: ExecuteHostFallback. The regression class: a keeper hits a legacy
+\* host-fallback path in the typed Execute dispatch layer and resolves the
+\* request via Host. Every declared profile is a candidate now, because
+\* none of them names a host route; the spec catches it as an invariant
+\* violation in <=3 steps.
 ExecuteHostFallback ==
     /\ request_pending
     /\ dispatched_via = "None"
-    /\ meta_profile \in {"Docker", "Remote_ssh"}
+    /\ meta_profile \in ProfileSet
     /\ dispatched_via' = "Host"
     /\ request_pending' = FALSE
-    /\ UNCHANGED << meta_profile, in_playground >>
+    /\ UNCHANGED << meta_profile >>
 
 NextBuggy ==
     \/ Next

@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T17:24:40+09:00",
+  "source_change_commit": "08e56f3cb02c15f759c58f68972ef8ea4a3bb2fc",
+  "measurement_source_commit": "7991c5f022ff3a8c2f70f3b1d8094790dd82cbcc",
+  "image_digest": "sha256:1d4151e50ffe31808551e74d45588fe64300263d3b895ee108b0db070fb3ac0a",
+  "binary_sha256": "8151f9db68043a56139adb79aa8460d8d85ff772b953c2500f52d9c46a565227",
+  "runtime_instance_ids": [
+    "01a051c3-b8bb-7000-b422-be04aaf7194a",
+    "01a051c4-6a7f-7000-82f4-edac0c19733d"
+  ],
+  "effective_base_path": "/app",
+  "effective_masc_root": "/app/.masc",
+  "provider_turn_executed": false,
+  "keeper_created": false,
+  "baseline": {
+    "measurement_source_commit": "bc24e2872aba9effc70cab75b23ae23656ff9c00",
+    "image_digest": "sha256:7688c5ab6c64f9ae4db31de0c9e0f20e622d0729cb6d89fc6c645182d9fd9eda",
+    "binary_sha256": "d3e7c5e13f79c8ad6e00e3132621884fe3019b8b74fba700ad3998cd5055ce65",
+    "missing_git_spawn_error_count": 1
+  },
+  "fixed": {
+    "fresh_refresh_started": true,
+    "fresh_refresh_warm_completed": true,
+    "fresh_missing_git_spawn_error_count": 0,
+    "restart_refresh_started": true,
+    "restart_refresh_warm_completed": true,
+    "restart_missing_git_spawn_error_count": 0,
+    "container_stopped": true,
+    "volume_preserved": true
+  },
+  "focused_checks": {
+    "build": "pass",
+    "dashboard_cache_concurrency_group": "6/6",
+    "missing_command_capability": false
+  },
+  "artifact_sha256": {
+    "image-identity.json": "0c15b195c2e64442221aeb2b8dee1800be0c943ba5aff0527d25e9f7d8b6ce41",
+    "health-final.json": "438a2401a8bff7685eeb3d42edc8a593cc16a54406b0b8208521ddf5d08a58b8",
+    "container-build-commit.txt": "928f5fdb91e5484f7d4f26e2ea66941eb32d4a698102edab7fd9faecd525f4d7",
+    "container-binary-sha256.txt": "a4912f7d4e299378b9d47c2d79d48076316075b0f782983c03af76e783cde6d7",
+    "initial-window.log": "505d7f19462940c308d5ce349f9e5c330db48bd40235e57a896b354357004a2e",
+    "restart-window.log": "eaa78d1594b83774ce28aff365698612a4c347b5e7f784ffb4ba2116c4f8bd1d",
+    "initial-git-error-count.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "restart-git-error-count.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "baseline-server-full.log": "b4eee5a64d72a993c1a8c7432c87bcc06bbe481c310bd4db0380228a96a08f36"
+  },
+  "performance_claim": false
+}

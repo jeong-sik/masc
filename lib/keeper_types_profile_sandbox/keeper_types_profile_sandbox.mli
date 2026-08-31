@@ -1,12 +1,11 @@
 type sandbox_profile =
-  | Local
   | Docker
   | Micro_vm
   | Remote_ssh
+(** The profiles a keeper may run under.  There is no host arm. *)
 
 module Sandbox_profile_tla : sig
   type t = sandbox_profile =
-    | Local [@tla.symbol "Local"]
     | Docker [@tla.symbol "Docker"]
     | Micro_vm [@tla.symbol "Micro_vm"]
     | Remote_ssh [@tla.symbol "Remote_ssh"]
@@ -26,7 +25,6 @@ val network_mode_to_string : network_mode -> string
 val network_mode_of_string : string -> network_mode option
 val all_network_modes : network_mode list
 val valid_network_mode_strings : string list
-val default_sandbox_profile : sandbox_profile
 val default_network_mode_for_profile : sandbox_profile -> network_mode
 
 val backend_unimplemented_message : sandbox_profile -> string

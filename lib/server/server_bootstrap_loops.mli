@@ -116,6 +116,7 @@ val keeper_persistence_start_error_to_string :
 
 val start_keeper_loops :
   claimed_persistence:claimed_keeper_persistence ->
+  invalidate_full_health_snapshot:(unit -> unit) ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
@@ -157,6 +158,9 @@ module For_testing : sig
 
   val mention_transcript_settled : Workspace_broadcast.mention_delivery -> bool
 
+  val install_workspace_message_mutation_invalidation :
+    invalidate_full_health_snapshot:(unit -> unit) -> unit -> unit
+
   val reset_keeper_persistence_lifecycle : unit -> unit
 
   val prepared_base_paths : prepared_keeper_persistence -> string * string
@@ -169,6 +173,12 @@ module For_testing : sig
   val finish_keeper_loops_start :
     keeper_loops_start_ownership ->
     (unit, keeper_persistence_start_error) result
+
+  val refresh_dashboard_for_keeper_lifecycle :
+    config:Workspace.config ->
+    keeper_name:string ->
+    Keeper_lifecycle_events.lifecycle_event ->
+    unit
 end
 
 val start_background_maintenance :

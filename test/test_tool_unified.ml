@@ -5,6 +5,14 @@ module Tool_catalog = Tool_catalog
 module Tool_dispatch = Tool_dispatch
 module Tool_registry = Tool_registry
 
+let make_completed ~name ~duration_ms =
+  Tool_result.Completed
+    { Tool_result.tool_name = name
+    ; data = `Null
+    ; metadata = None
+    ; duration_ms
+    }
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -58,5 +66,34 @@ let () =
               let _ = dist |> member "visible" |> to_int in
               let _ = dist |> member "hidden" |> to_int in
               ());
+          test_case "report uses restart-safe metrics snapshot" `Quick (fun () ->
+              Tool_registry.reset ();
+              Tool_metrics.clear ();
+              Fun.protect
+                ~finally:(fun () ->
+                  Tool_registry.reset ();
+                  Tool_metrics.clear ())
+                (fun () ->
+                  Tool_metrics.record
+                    (make_completed ~name:"masc_status" ~duration_ms:12.0);
+                  Tool_metrics.record
+                    (make_completed ~name:"masc_status" ~duration_ms:18.0);
+                  check int
+                    "registry intentionally empty"
+                    0
+                    (Tool_registry.total_calls ());
+                  let report = Tool_unified.summary_report () in
+                  let open Yojson.Safe.Util in
+                  check int "metrics total" 2
+                    (report |> member "total_calls" |> to_int);
+                  check int "metrics distinct" 1
+                    (report |> member "distinct_tools_called" |> to_int);
+                  match report |> member "top_20" |> to_list with
+                  | first :: _ ->
+                    check string "top tool" "masc_status"
+                      (first |> member "name" |> to_string);
+                    check int "top count" 2
+                      (first |> member "call_count" |> to_int)
+                  | [] -> fail "expected one top tool"));
         ] );
     ]

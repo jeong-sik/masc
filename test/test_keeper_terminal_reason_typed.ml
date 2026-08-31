@@ -26,6 +26,7 @@ module Health_fleet = Server_routes_http_runtime_health_fleet
 module KMC = Masc.Keeper_meta_contract
 module KMS = Masc.Keeper_meta_store
 module Keeper_identity = Masc.Keeper_identity
+module Agent_run_receipt = Masc.Keeper_agent_run_receipt.For_testing
 
 let failures = ref []
 let check name cond = if not cond then failures := name :: !failures
@@ -212,7 +213,7 @@ let frozen_operator_disposition (receipt : R.t)
   else if String.equal terminal_reason "terminal_effect_failed"
   then R.Disp_unknown, R.Reason_terminal_effect_failed
   else if preflight_config_failure
-  then R.Disp_fail_open_next_runtime, R.Reason_preflight_config_error
+  then R.Disp_operator_action_required, R.Reason_preflight_config_error
   else if
     provider_runtime_failure
     && (receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime)
@@ -225,9 +226,9 @@ let frozen_operator_disposition (receipt : R.t)
   else if
     provider_runtime_failure
     && frozen_is_transient_provider_runtime_failure terminal_reason
-  then R.Disp_fail_open_next_runtime, R.Reason_transient_runtime_retry
+  then R.Disp_retry_later, R.Reason_transient_runtime_retry
   else if provider_runtime_failure
-  then R.Disp_fail_open_next_runtime, R.Reason_provider_runtime_error
+  then R.Disp_retry_later, R.Reason_provider_runtime_error
   else if
     String.equal terminal_reason "internal_error"
     || String.equal terminal_reason "internal_unhandled_exception"
@@ -278,7 +279,7 @@ let base_receipt : R.t =
   ; completion_contract_result = R.Completion_observation_unknown
   ; actionable_signal = Some C.No_actionable_signal
   ; tool_surface = base_tool_surface
-  ; sandbox_kind = Keeper_types_profile_sandbox.Local
+  ; sandbox_kind = Keeper_types_profile_sandbox.Remote_ssh
   ; sandbox_root = None
   ; network_mode = Keeper_types_profile_sandbox.Network_none
   ; runtime_id = "runtime-1"
@@ -330,9 +331,12 @@ let () =
       { base_receipt with terminal_reason_code = "config_error" }
   in
   check
-    "canonical typed config wire keeps its explicit route"
-    (canonical = (R.Disp_fail_open_next_runtime, R.Reason_preflight_config_error))
+    "canonical typed config wire requires operator action"
+    (canonical = (R.Disp_operator_action_required, R.Reason_preflight_config_error))
   ;
+  check
+    "canonical typed config wire emits operator broadcast"
+    (R.needs_operator_broadcast (fst canonical));
   let transcript_corruption =
     R.operator_disposition
       { base_receipt with
@@ -546,7 +550,9 @@ let disp_pair_to_string (d, r) =
 let operator_disposition_kinds =
   [ R.Disp_pass
   ; R.Disp_fail_open_next_runtime
+  ; R.Disp_retry_later
   ; R.Disp_pass_next_model
+  ; R.Disp_operator_action_required
   ; R.Disp_user_cancelled
   ; R.Disp_skipped
   ; R.Disp_unknown
@@ -729,13 +735,17 @@ let () =
     }
   in
   let got = R.operator_disposition receipt in
-  let want = R.Disp_fail_open_next_runtime, R.Reason_transient_runtime_retry in
+  let want = R.Disp_retry_later, R.Reason_transient_runtime_retry in
   check
     (Printf.sprintf
        "provider timeout marker disposition want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want)
+  ;
+  check
+    "terminal transient retry-later does not page the operator"
+    (not (R.needs_operator_broadcast (fst got)))
 ;;
 
 let () =
@@ -757,13 +767,16 @@ let () =
     }
   in
   let got = R.operator_disposition receipt in
-  let want = R.Disp_fail_open_next_runtime, R.Reason_provider_runtime_error in
+  let want = R.Disp_retry_later, R.Reason_provider_runtime_error in
   check
     (Printf.sprintf
        "provider parse marker disposition want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
-    (got = want)
+    (got = want);
+  check
+    "terminal provider rejection retry-later does not page the operator"
+    (not (R.needs_operator_broadcast (fst got)))
 ;;
 
 let () =
@@ -1257,6 +1270,39 @@ let () =
    said 1. The two counts answer different questions and both have to survive
    the projection. *)
 let () =
+  let failed_count, failed_fallback =
+    Agent_run_receipt.lane_attempt_facts
+      ~turn_succeeded:false
+      ~last_attempt_index:1
+  in
+  check
+    "a failed two-candidate lane retains both attempts"
+    (failed_count = 2);
+  check
+    "a failed second candidate is not a successful fallback"
+    (not failed_fallback);
+  let failed_third_count, failed_third_fallback =
+    Agent_run_receipt.lane_attempt_facts
+      ~turn_succeeded:false
+      ~last_attempt_index:2
+  in
+  check
+    "a failed three-candidate lane retains all routed attempts"
+    (failed_third_count = 3);
+  check
+    "a failed third candidate is not a successful fallback"
+    (not failed_third_fallback);
+  let successful_count, successful_fallback =
+    Agent_run_receipt.lane_attempt_facts
+      ~turn_succeeded:true
+      ~last_attempt_index:1
+  in
+  check
+    "a successful two-candidate lane retains both attempts"
+    (successful_count = 2);
+  check
+    "a successful second candidate remains a fallback"
+    successful_fallback;
   let failed_over =
     { base_receipt with
       runtime_attempt_count = 1

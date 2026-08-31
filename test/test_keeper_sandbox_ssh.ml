@@ -354,18 +354,27 @@ instructions = "remote test keeper"
 sandbox_profile = "remote_ssh"
 remote_endpoint = "build-box"
 |};
-  save (Filename.concat base_path ".masc/runtime.toml")
-    {|[exec.ssh.endpoints.build-box]
-host = "build.example"
-user = "masc"
-port = 2222
-identity_file = ".masc/ssh/build-box.key"
-known_hosts_file = ".masc/ssh/known_hosts.d/build-box"
-remote_root = "/srv/masc/playground"
-connect_timeout_sec = 1
-max_concurrent_sessions = 2
-env_allowlist = ["LANG"]
-|};
+  (* RFC-0121: the resolver reads .masc/config/runtime.toml — the path the
+     live layout uses — not the .masc root this fixture used to write to. *)
+    save
+    (Filename.concat base_path ".masc/config/runtime.toml")
+    (* R00: derive the fixture table from the typed record via
+       Exec_ssh_endpoint.to_toml, the strict decoder mirror, so the
+       fixture cannot drift from what Runtime_toml accepts. *)
+    (Exec_ssh_endpoint.to_toml
+       Exec_ssh_endpoint.
+         { name = "build-box"
+         ; host = "build.example"
+         ; user = "masc"
+         ; port = 2222
+         ; identity_file = ".masc/ssh/build-box.key"
+         ; known_hosts_file = ".masc/ssh/known_hosts.d/build-box"
+         ; remote_root = "/srv/masc/playground"
+         ; connect_timeout_sec = 1
+         ; max_concurrent_sessions = 2
+         ; env_allowlist = [ "LANG" ]
+         ; capabilities = []
+         });
   let ssh_bin, _ = make_stub ~dir:base_path ~mode:"exit3" in
   let meta =
     match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String "keeper-a" ]) with

@@ -5,9 +5,27 @@
     kept as two readings because one may be unavailable without licensing the
     other to disappear. *)
 
+type tool_surface_entry = Turn_record.tool_surface_entry =
+  { name : string
+  ; schema_bytes : int
+  }
+(** Re-exported rather than restated: the shape is owned by {!Turn_record},
+    beside the field that points at the blob holding it. *)
+
+(** Whether the Tool_schemas row can name its tools, and why not when it
+    cannot. Three closed outcomes rather than an option: a turn that recorded
+    no reference and a reference that could not be read are different facts,
+    and folding them together would report a failed read as "this request
+    carried no tools". *)
+type tool_surface =
+  | Surface_not_recorded
+  | Surface_unresolved of { detail : string }
+  | Surface_resolved of tool_surface_entry list
+
 type reading =
   { turn : (Turn_record.t, string) result
   ; prompt : (Masc.Keeper_prompt_capture.capture, string) result
+  ; tool_surface : tool_surface
   }
 
 type tab =
@@ -34,9 +52,22 @@ val decode_prompt_capture :
 
 val input_component_label : Turn_record.input_component_id -> string
 val prompt_block_label : Prompt_block_id.t -> string
+val tool_surface_sha256 : Turn_record.t -> (string, string) result option
+(** The content address the turn recorded for its tool surface. [None] when the
+    record carries no reference; [Some (Error _)] when it carries one that is
+    not a readable marker. The marker grammar is owned by {!Tool_output}; this
+    reads it rather than restating it. *)
+
+val decode_tool_surface :
+  Yojson.Safe.t -> (tool_surface_entry list, string) result
+(** Strictly decode the [GET /api/v1/artifacts/<sha256>] envelope into the
+    listing the producer stored. One malformed entry fails the whole listing;
+    dropping it would understate the surface that was actually sent. *)
+
 val input_map_rows :
   Turn_record.t ->
   Masc.Keeper_prompt_capture.capture option ->
+  tool_surface:tool_surface ->
   input_map_row list
 (** Join exact component attribution to the prompt capture only when both
     observations name the same turn and the captured text matches the turn

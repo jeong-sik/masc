@@ -39,6 +39,7 @@ services:
       OTEL_SERVICE_NAME: "masc"
     volumes:
       - masc-state:/app/.masc
+      - masc-data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 30s
@@ -70,11 +71,14 @@ services:
     environment:
       PORT: "8080"
       MASC_BASE_PATH: /app
+      # Admit the same public identity that the host-port mapping advertises.
+      MASC_HTTP_BASE_URL: "http://localhost:${MASC_HOST_PORT:-8935}"
       MASC_TEAM_PRESET: "${MASC_TEAM_PRESET:-classic}"
       # Passed through from the host shell; required for the default flash model.
       OLLAMA_CLOUD_API_KEY: "${OLLAMA_CLOUD_API_KEY:-}"
     volumes:
       - masc-oneclick-state:/app/.masc
+      - masc-oneclick-data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 30s
@@ -150,7 +154,11 @@ services:
 volumes:
   masc-state:
     driver: local
+  masc-data:
+    driver: local
   masc-oneclick-state:
+    driver: local
+  masc-oneclick-data:
     driver: local
   victoriametrics-data:
     driver: local

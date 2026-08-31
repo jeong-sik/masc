@@ -11,6 +11,14 @@ related: ["0213", "0208", "0001"]
 
 # RFC-0394 — Local playground fail-closed; off-host execution
 
+> **2026-08-31.** The relocation this RFC describes finished, and the profile
+> went with it: `Local` is no longer a `sandbox_profile`, and
+> `MASC_EXEC_ALLOW_LOCAL_PLAYGROUND` no longer exists. A keeper declares
+> `docker`, `microvm`, or `remote_ssh`, and one that declares nothing is
+> refused at config load rather than resolved to a host default. The
+> fail-closed gate specified below has no subject left; what remains of this
+> RFC is the reasoning that removed it.
+
 - Supersedes RFC-0213 §5's durable recommendation (B1 seatbelt). Rationale:
   seatbelt is a deprecated Apple API and still shares the host kernel; the
   workspace trust boundary we actually want is a machine boundary.

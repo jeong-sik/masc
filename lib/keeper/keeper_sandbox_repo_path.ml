@@ -110,7 +110,6 @@ let host_execution_location_json
 let execution_location_json ~config ~meta ~args ~cwd =
   let host_location = host_execution_location_json ~config ~meta ~args ~cwd in
   match meta.sandbox_profile with
-  | Keeper_types_profile_sandbox.Local -> host_location
   (* Phase 1: no container or remote projection exists for remote_ssh
      yet; the execution location is the host bookkeeping bundle, and
      dispatch itself fails closed upstream. *)

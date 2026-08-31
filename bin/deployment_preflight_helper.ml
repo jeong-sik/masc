@@ -303,8 +303,12 @@ let verify_base_path_lease_owner base_path owner_pid =
   if owner_pid <= 0
   then errorf "lease owner PID must be positive"
   else
-    let run_dir = (Host_config.host ()).run_dir in
-    match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+    let lease_dir = (Host_config.host ()).base_path_lease_dir in
+    match
+      Server_startup_takeover.acquire_base_path_lock
+        ~run_dir:lease_dir
+        base_path
+    with
     | Server_startup_takeover.Base_path_already_owned { pid = Some actual_pid }
       when actual_pid = owner_pid -> Ok ()
     | Server_startup_takeover.Base_path_already_owned { pid } ->
@@ -354,8 +358,12 @@ let run_under_base_path_lease base_path command =
   match command with
   | [] -> errorf "lease-run requires a command"
   | _ :: _ ->
-    let run_dir = (Host_config.host ()).run_dir in
-    (match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+    let lease_dir = (Host_config.host ()).base_path_lease_dir in
+    (match
+       Server_startup_takeover.acquire_base_path_lock
+         ~run_dir:lease_dir
+         base_path
+     with
      | Server_startup_takeover.Base_path_already_owned { pid } ->
        errorf
          "workspace writer lease is already owned base_path=%s pid=%s"
@@ -380,8 +388,12 @@ let run_under_base_path_lease base_path command =
 ;;
 
 let run_tool_blob_maintenance base_path delete_previous_candidates =
-  let run_dir = (Host_config.host ()).run_dir in
-  match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+  let lease_dir = (Host_config.host ()).base_path_lease_dir in
+  match
+    Server_startup_takeover.acquire_base_path_lock
+      ~run_dir:lease_dir
+      base_path
+  with
   | Server_startup_takeover.Base_path_already_owned { pid } ->
     errorf
       "workspace writer lease is already owned base_path=%s pid=%s"
@@ -446,8 +458,12 @@ let handoff_base_path_lease
   match prepare_command with
   | [] -> errorf "lease-handoff requires a preparation command"
   | _ ->
-    let run_dir = (Host_config.host ()).run_dir in
-    (match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+    let lease_dir = (Host_config.host ()).base_path_lease_dir in
+    (match
+       Server_startup_takeover.acquire_base_path_lock
+         ~run_dir:lease_dir
+         base_path
+     with
      | Server_startup_takeover.Base_path_already_owned { pid } ->
        errorf
          "workspace writer lease is already owned base_path=%s pid=%s"
@@ -782,6 +798,33 @@ let memory_os_current_store =
   }
 ;;
 
+let memory_source_current_store =
+  { store = "memory-source current claims"
+  ; on_refusal =
+      "keeper_memory_write and recall both refuse the claim for that source        path, and neither writer repairs it because the upsert reads first"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir =
+           Config_dir_resolver.keepers_dir_for_base_path ~base_path
+         in
+         Ok
+           (Masc.Keeper_memory_source_current.list_keeper_ids_for_keepers_dir
+              ~keepers_dir
+            |> List.fold_left
+                 (fun report keeper_id ->
+                    match
+                      Masc.Keeper_memory_source_current.read_for_keepers_dir
+                        ~keepers_dir
+                        ~keeper_id
+                    with
+                    | Ok None -> report
+                    | Ok (Some _) -> count_row report (Ok ())
+                    | Error detail ->
+                      count_row report (Error (keeper_id ^ ": " ^ detail)))
+                 empty_report))
+  }
+;;
+
 let disposition_receipt_store =
   { store = "paused-work disposition receipts"
   ; on_refusal =
@@ -936,6 +979,7 @@ let durable_stores =
   [ keeper_meta_store
   ; official_client_session_store
   ; memory_os_current_store
+  ; memory_source_current_store
   ; disposition_receipt_store
   ; board_posts_store
   ; turn_record_store
@@ -1086,8 +1130,12 @@ let cut_run_registries base_path ~execute =
   if not execute
   then cut_run_registries_report ~execute (scan_run_registries base_path ~execute)
   else (
-    let run_dir = (Host_config.host ()).run_dir in
-    match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+    let lease_dir = (Host_config.host ()).base_path_lease_dir in
+    match
+      Server_startup_takeover.acquire_base_path_lock
+        ~run_dir:lease_dir
+        base_path
+    with
     | Server_startup_takeover.Base_path_already_owned { pid } ->
       errorf
         "workspace writer lease is already owned base_path=%s pid=%s"

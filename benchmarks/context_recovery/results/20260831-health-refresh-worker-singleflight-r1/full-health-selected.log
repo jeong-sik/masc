@@ -1,0 +1,137 @@
+[2026-08-30 17:19:34] [DEBUG] [Dashboard] full_health_snapshot warm cache delayed 0s
+[2026-08-30 17:19:35] [DEBUG] [Dashboard] full_health_snapshot refreshed (0.2s)
+[2026-08-30 17:19:35] [INFO] [Dashboard] full_health_snapshot warm cache done (0.0s)
+[2026-08-30 17:19:52] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:19:52] [DEBUG] [Dashboard] full_health_snapshot refreshed (0.0s)
+[2026-08-30 17:20:25] [DEBUG] [Dashboard] full_health_snapshot refreshed (0.5s)
+[2026-08-30 17:21:02] [DEBUG] [Dashboard] full_health_snapshot refreshed (0.9s)
+[2026-08-30 17:21:08] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:21:12] [INFO] [Dashboard] full_health_snapshot refreshed (3.5s)
+[2026-08-30 17:21:15] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:21:18] [INFO] [Dashboard] full_health_snapshot refreshed (3.5s)
+[2026-08-30 17:21:19] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:21:21] [INFO] [Dashboard] full_health_snapshot refreshed (1.9s)
+[2026-08-30 17:21:24] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:21:26] [INFO] [Dashboard] full_health_snapshot refreshed (2.1s)
+[2026-08-30 17:21:28] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:21:30] [INFO] [Dashboard] full_health_snapshot refreshed (2.2s)
+[2026-08-30 17:21:32] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:21:33] [INFO] [Dashboard] full_health_snapshot refreshed (1.1s)
+[2026-08-30 17:21:37] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:21:38] [INFO] [Dashboard] full_health_snapshot refreshed (1.3s)
+[2026-08-30 17:21:42] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:21:46] [INFO] [Dashboard] full_health_snapshot refreshed (3.9s)
+[2026-08-30 17:21:48] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:21:49] [INFO] [Dashboard] full_health_snapshot refreshed (1.8s)
+[2026-08-30 17:21:52] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:21:54] [INFO] [Dashboard] full_health_snapshot refreshed (1.9s)
+[2026-08-30 17:21:57] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:22:00] [INFO] [Dashboard] full_health_snapshot refreshed (2.9s)
+[2026-08-30 17:22:01] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:22:03] [INFO] [Dashboard] full_health_snapshot refreshed (2.5s)
+[2026-08-30 17:22:06] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:22:08] [INFO] [Dashboard] full_health_snapshot refreshed (1.7s)
+[2026-08-30 17:22:10] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:22:13] [INFO] [Dashboard] full_health_snapshot refreshed (2.8s)
+[2026-08-30 17:22:16] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:22:19] [INFO] [Dashboard] full_health_snapshot refreshed (3.5s)
+[2026-08-30 17:22:21] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:22:22] [INFO] [Dashboard] full_health_snapshot refreshed (1.1s)
+[2026-08-30 17:22:26] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:22:27] [INFO] [Dashboard] full_health_snapshot refreshed (1.2s)
+[2026-08-30 17:22:29] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:22:31] [INFO] [Dashboard] full_health_snapshot refreshed (1.8s)
+[2026-08-30 17:22:34] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:22:35] [INFO] [Dashboard] full_health_snapshot refreshed (1.3s)
+[2026-08-30 17:22:38] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:22:40] [INFO] [Dashboard] full_health_snapshot refreshed (1.6s)
+[2026-08-30 17:22:42] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:22:46] [INFO] [Dashboard] full_health_snapshot refreshed (3.4s)
+[2026-08-30 17:22:49] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:22:50] [INFO] [Dashboard] full_health_snapshot refreshed (1.9s)
+[2026-08-30 17:22:54] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:22:56] [INFO] [Dashboard] full_health_snapshot refreshed (1.9s)
+[2026-08-30 17:22:58] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:23:00] [INFO] [Dashboard] full_health_snapshot refreshed (2.3s)
+[2026-08-30 17:23:02] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:23:05] [INFO] [Dashboard] full_health_snapshot refreshed (2.9s)
+[2026-08-30 17:23:07] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:23:10] [INFO] [Dashboard] full_health_snapshot refreshed (2.7s)
+[2026-08-30 17:23:11] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:23:14] [INFO] [Dashboard] full_health_snapshot refreshed (2.2s)
+[2026-08-30 17:23:16] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:23:19] [INFO] [Dashboard] full_health_snapshot refreshed (2.8s)
+[2026-08-30 17:23:22] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:23:26] [INFO] [Dashboard] full_health_snapshot refreshed (3.8s)
+[2026-08-30 17:23:27] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:23:29] [INFO] [Dashboard] full_health_snapshot refreshed (1.8s)
+[2026-08-30 17:23:31] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:23:32] [DEBUG] [Dashboard] full_health_snapshot refreshed (0.7s)
+[2026-08-30 17:23:36] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:23:37] [INFO] [Dashboard] full_health_snapshot refreshed (1.6s)
+[2026-08-30 17:23:40] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:23:43] [INFO] [Dashboard] full_health_snapshot refreshed (2.5s)
+[2026-08-30 17:23:46] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:23:47] [DEBUG] [Dashboard] full_health_snapshot refreshed (0.8s)
+[2026-08-30 17:23:51] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:23:55] [INFO] [Dashboard] full_health_snapshot refreshed (4.0s)
+[2026-08-30 17:23:57] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:23:59] [INFO] [Dashboard] full_health_snapshot refreshed (1.8s)
+[2026-08-30 17:24:02] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:24:06] [INFO] [Dashboard] full_health_snapshot refreshed (3.7s)
+[2026-08-30 17:24:06] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:24:09] [INFO] [Dashboard] full_health_snapshot refreshed (2.1s)
+[2026-08-30 17:24:11] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:24:14] [INFO] [Dashboard] full_health_snapshot refreshed (2.3s)
+[2026-08-30 17:24:16] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:24:18] [INFO] [Dashboard] full_health_snapshot refreshed (2.3s)
+[2026-08-30 17:24:21] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:24:24] [INFO] [Dashboard] full_health_snapshot refreshed (2.4s)
+[2026-08-30 17:24:27] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:24:29] [INFO] [Dashboard] full_health_snapshot refreshed (1.5s)
+[2026-08-30 17:24:32] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:24:34] [INFO] [Dashboard] full_health_snapshot refreshed (2.1s)
+[2026-08-30 17:24:36] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:24:38] [INFO] [Dashboard] full_health_snapshot refreshed (2.0s)
+[2026-08-30 17:24:41] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:24:46] [INFO] [Dashboard] full_health_snapshot refreshed (4.5s)
+[2026-08-30 17:24:47] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:24:49] [INFO] [Dashboard] full_health_snapshot refreshed (2.0s)
+[2026-08-30 17:24:56] [DEBUG] [Dashboard] full_health_snapshot discarded worker 52 result after generation change
+[2026-08-30 17:24:56] [INFO] [Dashboard] full_health_snapshot refreshed (3.2s)
+[2026-08-30 17:24:56] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:24:58] [INFO] [Dashboard] full_health_snapshot refreshed (2.4s)
+[2026-08-30 17:24:59] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:25:02] [INFO] [Dashboard] full_health_snapshot refreshed (2.9s)
+[2026-08-30 17:25:04] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:25:07] [INFO] [Dashboard] full_health_snapshot refreshed (2.9s)
+[2026-08-30 17:25:10] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:25:12] [INFO] [Dashboard] full_health_snapshot refreshed (2.1s)
+[2026-08-30 17:25:15] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:25:18] [INFO] [Dashboard] full_health_snapshot refreshed (3.4s)
+[2026-08-30 17:25:19] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:25:24] [INFO] [Dashboard] full_health_snapshot refreshed (4.5s)
+[2026-08-30 17:25:25] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:25:27] [INFO] [Dashboard] full_health_snapshot refreshed (1.8s)
+[2026-08-30 17:25:30] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:25:33] [INFO] [Dashboard] full_health_snapshot refreshed (2.8s)
+[2026-08-30 17:25:35] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:25:37] [INFO] [Dashboard] full_health_snapshot refreshed (1.9s)
+[2026-08-30 17:25:40] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:26:00] [DEBUG] [Dashboard] full_health_snapshot refresh failed (1 consecutive, next in 30s, 20.0s): Failure("refresh_timeout label=full_health_snapshot phase=refresh timeout_s=20.0 elapsed_s=20.0")
+[2026-08-30 17:26:34] [DEBUG] [Dashboard] full_health_snapshot joined active worker 62
+[2026-08-30 17:26:43] [INFO] [Dashboard] full_health_snapshot refreshed (8.7s)
+[2026-08-30 17:26:46] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:27:06] [DEBUG] [Dashboard] full_health_snapshot refresh failed (1 consecutive, next in 30s, 20.0s): Failure("refresh_timeout label=full_health_snapshot phase=refresh timeout_s=20.0 elapsed_s=20.0")
+[2026-08-30 17:27:25] [DEBUG] [Dashboard] full_health_snapshot discarded worker 64 result after generation change
+[2026-08-30 17:27:25] [INFO] [Dashboard] full_health_snapshot refreshed (3.7s)
+[2026-08-30 17:27:25] [DEBUG] [Dashboard] full_health_snapshot coalesced 2 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:27:28] [INFO] [Dashboard] full_health_snapshot refreshed (2.4s)
+[2026-08-30 17:27:30] [DEBUG] [Dashboard] full_health_snapshot coalesced 2 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:27:33] [INFO] [Dashboard] full_health_snapshot refreshed (2.3s)
+[2026-08-30 17:27:35] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:27:37] [INFO] [Dashboard] full_health_snapshot refreshed (1.9s)
+[2026-08-30 17:27:39] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 17:27:41] [INFO] [Dashboard] full_health_snapshot refreshed (1.9s)
+[2026-08-30 17:28:26] [INFO] [Dashboard] full_health_snapshot refreshed (8.0s)
+[2026-08-30 17:28:59] [DEBUG] [Dashboard] full_health_snapshot refreshed (0.5s)

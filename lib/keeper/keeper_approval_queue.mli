@@ -372,8 +372,11 @@ val retire_summary_owner :
 
 val store_revision_for_workspace : base_path:string -> int
 (** Monotonic process-local revision of the workspace queue authority.
-    Installation and every transition to unavailable advance the revision so
-    projections cannot reuse a cache entry from an older authority state. *)
+
+    Every published durable snapshot advances it, as does each transition into
+    or out of unavailable. A projection cached under this number therefore
+    cannot outlive the write that changed what the queue publishes: an
+    enqueued ask, a resolution, and a completed delivery each move it. *)
 (** Read one workspace's pending rows without collapsing an unavailable,
     malformed, or reset-required durable store into an empty projection. *)
 val get_pending_entry_for_workspace :
@@ -491,6 +494,24 @@ val mark_summary_attempt_pre_worker_unavailable :
     closed reason code and exact non-blank operator detail are persisted in the
     same snapshot and are retryable only through
     [reserve_summary_attempt_retry]. *)
+
+val release_orphaned_start_reservation :
+  base_path:string ->
+  id:string ->
+  input_hash:string ->
+  sequence:int ->
+  (bool, exact_attempt_error) result
+(** Boot-recovery reclaim of a start reservation orphaned by a hard process
+    restart. The graceful settle to [Summary_attempt_identity_unbound] runs only
+    in memory, so a process death in the reserve->bind window strands the
+    durable [Summary_pre_worker_start_reserved] row with no restart handler.
+    This reverses that reservation: an unbound start reservation returns to
+    [Summary_attempt_ready] so boot recovery re-activates a worker. Distinct
+    from [reserve_summary_attempt_retry], the operator path that never reclaims
+    a start reservation. Safe only for a reservation whose in-memory admission
+    is gone; the boot-recovery caller guards against reclaiming a live
+    reservation via the process-local admission set. Returns [false] for any row
+    that is not an unbound start reservation, leaving it untouched. *)
 
 val summary_attempt_start_reserved_operator_detail : string
 

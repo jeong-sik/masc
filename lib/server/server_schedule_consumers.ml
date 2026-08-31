@@ -1053,6 +1053,34 @@ let dispatch_keeper_wake
       | Wake_required | Already_acked | Already_failed _ | Already_cancelled ->
         keeper_name
     in
+    let* () =
+      match activation_outcome with
+      | Keeper_wake_activation_deferred
+          ((Keeper_wake_activation_not_running _) as reason) ->
+        let reason_label, reason_detail =
+          keeper_wake_activation_deferred_reason_fields reason
+        in
+        Log.Keeper.info
+          "schedule stimulus retained; owner activation deferred, dispatch \
+           will retry schedule_id=%s keeper=%s reason=%s%s"
+          request.schedule_id
+          activation_keeper_name
+          reason_label
+          (match reason_detail with
+           | Some detail -> " detail=" ^ detail
+           | None -> "");
+        retryable_dispatch_failure
+          (Printf.sprintf
+             "scheduled keeper wake deferred owner-not-running \
+              schedule_id=%s keeper=%s reason=%s%s"
+             request.schedule_id
+             activation_keeper_name
+             reason_label
+             (match reason_detail with
+              | Some detail -> " detail=" ^ detail
+              | None -> ""))
+      | _ -> Ok ()
+    in
     log_activation_outcome
       ~schedule_id:request.schedule_id
       ~keeper_name:activation_keeper_name

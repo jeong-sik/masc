@@ -1,0 +1,36 @@
+{
+  "schema": "masc.docker_bulk_data.container_replacement.v1",
+  "product_head": "a895984f6861001d697424945afcf249543136e0",
+  "image_id": "sha256:7f2273de44f03e63a7d6b2de9609fda05d4a6fcb646928e9d44cfc1b65cee979",
+  "declared_volumes": [
+    "/app/.masc",
+    "/app/data"
+  ],
+  "compose_named_volumes": [
+    "masc-state:/app/.masc",
+    "masc-data:/app/data",
+    "masc-oneclick-state:/app/.masc",
+    "masc-oneclick-data:/app/data"
+  ],
+  "first": {
+    "runtime": "01a05442-1a35-7000-8e92-c5e824529392",
+    "startup": "ready",
+    "auth": "ok",
+    "clean_exit": 0
+  },
+  "replacement": {
+    "runtime": "01a05442-273f-7000-b82e-947dbc11d687",
+    "startup": "ready",
+    "auth": "ok",
+    "clean_exit": 0
+  },
+  "runtime_ids_unique": true,
+  "rows_after_first": 1,
+  "rows_visible_before_replacement_call": 1,
+  "rows_after_replacement": 2,
+  "payload_unchanged_across_replacement_before_new_call": true,
+  "api_read_after_replacement": false,
+  "api_endpoint_reachable": true,
+  "api_total_calls_before_replacement_call": 0,
+  "api_hydrates_persisted_rows": false
+}

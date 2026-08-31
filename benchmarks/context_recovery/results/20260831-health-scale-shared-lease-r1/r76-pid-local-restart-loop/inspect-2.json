@@ -1,0 +1,30 @@
+{
+  "Id": "12ed6bad3026fa8c3b3182550171ab545b7e91e2670983dc45d83acdb0f3a3ec",
+  "Name": "/masc-r76-pid-local-2",
+  "State": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 137,
+    "Error": "",
+    "StartedAt": "2026-08-30T19:05:01.25145626Z",
+    "FinishedAt": "2026-08-30T19:05:03.066316469Z",
+    "Health": {
+      "Status": "unhealthy",
+      "FailingStreak": 0,
+      "Log": []
+    }
+  },
+  "Mounts": [
+    {
+      "Type": "volume",
+      "Name": "masc-r76-pid-local-loop",
+      "Destination": "/app/.masc",
+      "RW": true
+    }
+  ]
+}

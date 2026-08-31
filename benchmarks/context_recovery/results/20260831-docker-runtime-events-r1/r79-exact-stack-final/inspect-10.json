@@ -1,0 +1,30 @@
+{
+  "Id": "ddcac8420bbaf72fb16c36669701486ce9727956b5cfbcbfdc863440b27f8d04",
+  "Name": "/masc-r79-runtime-events-10",
+  "State": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 137,
+    "Error": "",
+    "StartedAt": "2026-08-30T19:27:38.809316972Z",
+    "FinishedAt": "2026-08-30T19:27:41.4925655Z",
+    "Health": {
+      "Status": "unhealthy",
+      "FailingStreak": 0,
+      "Log": []
+    }
+  },
+  "Mounts": [
+    {
+      "Type": "volume",
+      "Name": "masc-r79-runtime-events-final",
+      "Destination": "/app/.masc",
+      "RW": true
+    }
+  ]
+}

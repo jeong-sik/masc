@@ -100,12 +100,8 @@ let make_meta ~name ~sandbox =
 
 (* ── should_route_read profile policy ────────────────────────────── *)
 
-let test_legacy_keeper_never_routes () =
-  let meta = make_meta ~name:"alice" ~sandbox:Keeper_types_profile_sandbox.Local in
-  Alcotest.(check bool) "legacy keeper never routes through docker"
-    false
-    (Keeper_sandbox_read_backend.should_route_read ~meta)
-
+(* The case that answered [false] was the [Local] profile, and it is gone:
+   every profile a keeper may declare routes reads through its backend. *)
 let test_docker_keeper_routes () =
   let meta =
     make_meta ~name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -369,13 +365,31 @@ let test_run_command_remote_ssh_endpoint_error_before_image_guard () =
          in
          loop 0)
 
+(* The trailer the fake shim writes, rendered by the same function the real
+   shim renders it with. It was a hand-typed string carrying ["v":1] while
+   the wire had moved to 2, and nothing caught that because the fixture sat
+   on a dead path (task-888). Typing the current version in its place would
+   arm the same drift for the next one -- the version, the field names and
+   the framing all come from [Exec_ssh_protocol] now, so a wire change either
+   updates this fixture or fails to compile.
+
+   [printf '%%s'] rather than the trailer as a format: the renderer escapes
+   what belongs to JSON, not what belongs to printf. *)
 let fake_ssh_success_script =
-  {|#!/bin/sh
+  Printf.sprintf
+    {|#!/bin/sh
 cat >/dev/null 2>/dev/null &
 printf 'remote-file-content'
-printf '\036{"masc_exec_result":{"v":1,"exit":0,"signal":null,"timed_out":false,"shim_error":null}}\036' >&2
+printf '%%s' '%s' >&2
 exit 0
 |}
+    (Exec_ssh_protocol.render_trailer
+       { v = Exec_ssh_protocol.protocol_version
+       ; exit = Some 0
+       ; signal = None
+       ; timed_out = false
+       ; shim_error = None
+       })
 
 let test_remote_ssh_read_skips_host_existence_preflight () =
   let base, config, meta = setup_config "remote-reader" in
@@ -392,14 +406,27 @@ instructions = "remote read test"
 sandbox_profile = "remote_ssh"
 remote_endpoint = "fixture"
 |};
-  write_file (Filename.concat base ".masc/runtime.toml")
-    {|[exec.ssh.endpoints.fixture]
-host = "fixture.invalid"
-user = "masc"
-remote_root = "/srv/masc/playground"
-connect_timeout_sec = 1
-max_concurrent_sessions = 2
-|};
+  (* RFC-0121: the endpoint resolver reads .masc/config/runtime.toml — the live
+     layout — not the .masc root this fixture used to write to. *)
+    write_file
+    (Filename.concat base ".masc/config/runtime.toml")
+    (* R00: derive the fixture table from the typed record via
+       Exec_ssh_endpoint.to_toml, the strict decoder mirror, so the
+       fixture cannot drift from what Runtime_toml accepts. *)
+    (Exec_ssh_endpoint.to_toml
+       Exec_ssh_endpoint.
+         { name = "fixture"
+         ; host = "fixture.invalid"
+         ; user = "masc"
+         ; port = default_port
+         ; identity_file = default_identity_file ~name:"fixture"
+         ; known_hosts_file = default_known_hosts_file ~name:"fixture"
+         ; remote_root = "/srv/masc/playground"
+         ; connect_timeout_sec = 1
+         ; max_concurrent_sessions = 2
+         ; env_allowlist = []
+         ; capabilities = []
+         });
   let missing_host_path =
     Filename.concat
       (Keeper_sandbox.host_root_abs_of_meta ~config meta)
@@ -1389,9 +1416,11 @@ let test_maybe_cleanup_disappearance_allows_next_interval () =
       ~timeout_sec:5.0 ()
   in
   (match first with
-   | Some result ->
+   | Some (Keeper_sandbox_runtime.Cleanup_completed result) ->
      Alcotest.(check int) "first sweep records both races" 2 result.already_absent;
      Alcotest.(check (list string)) "first sweep has no errors" [] result.errors
+   | Some (Keeper_sandbox_runtime.Cleanup_skipped_command_unavailable command) ->
+     Alcotest.failf "cleanup unexpectedly skipped unavailable command %s" command
    | None -> Alcotest.fail "expected first cleanup sweep to run");
   let second =
     Keeper_sandbox_runtime.maybe_cleanup_stale_containers
@@ -1432,7 +1461,9 @@ let test_maybe_cleanup_stale_containers_runs_once_per_interval () =
   let ran =
     List.fold_left
       (fun acc -> function
-         | Some _ -> acc + 1
+         | Some (Keeper_sandbox_runtime.Cleanup_completed _) -> acc + 1
+         | Some (Keeper_sandbox_runtime.Cleanup_skipped_command_unavailable command) ->
+           Alcotest.failf "cleanup unexpectedly skipped unavailable command %s" command
          | None -> acc)
       0
       !results
@@ -1470,9 +1501,11 @@ let test_maybe_cleanup_stale_containers_retries_next_explicit_interval () =
       ~now:1000.0 ~base_path:base ~timeout_sec:5.0 ()
   in
   (match first with
-   | Some result ->
+   | Some (Keeper_sandbox_runtime.Cleanup_completed result) ->
        Alcotest.(check bool) "first cleanup records daemon error" true
          (result.errors <> [])
+   | Some (Keeper_sandbox_runtime.Cleanup_skipped_command_unavailable command) ->
+       Alcotest.failf "cleanup unexpectedly skipped unavailable command %s" command
    | None -> Alcotest.fail "expected first cleanup to run");
   let retried =
     Keeper_sandbox_runtime.maybe_cleanup_stale_containers
@@ -1488,6 +1521,51 @@ let test_maybe_cleanup_stale_containers_retries_next_explicit_interval () =
   in
   Alcotest.(check int) "two configured intervals run two cleanup attempts" 2
     ps_count
+
+let test_maybe_cleanup_skips_unavailable_command_without_spawn () =
+  with_fake_docker fake_docker_cleanup_script @@ fun () ->
+  let base = temp_dir () in
+  let log_path = fake_docker_log_path () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
+      cleanup_dir base)
+  @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC" "10" @@ fun () ->
+  Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
+  let observed_command = ref None in
+  let first =
+    Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+      ~now:1000.0
+      ~command_available:(fun command ->
+        observed_command := Some command;
+        false)
+      ~base_path:base
+      ~timeout_sec:5.0
+      ()
+  in
+  (match first with
+   | Some (Keeper_sandbox_runtime.Cleanup_skipped_command_unavailable command) ->
+     Alcotest.(check (option string))
+       "availability probe receives the resolved command"
+       (Some command)
+       !observed_command
+   | Some (Keeper_sandbox_runtime.Cleanup_completed _) ->
+     Alcotest.fail "unavailable command ran cleanup"
+   | None -> Alcotest.fail "eligible unavailable command did not return a typed skip");
+  Alcotest.(check bool) "unavailable command is never spawned" false
+    (Sys.file_exists log_path);
+  let throttled =
+    Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+      ~now:1001.0
+      ~command_available:(fun _ -> false)
+      ~base_path:base
+      ~timeout_sec:5.0
+      ()
+  in
+  Alcotest.(check bool) "typed skip still consumes the interval gate" true
+    (Option.is_none throttled)
 
 let test_docker_preflight_reports_ready_image () =
   with_fake_docker fake_docker_preflight_ok_script @@ fun () ->
@@ -2305,8 +2383,6 @@ let run_tests ~clock () =
     [
       ( "should_route_read",
         [
-          Alcotest.test_case "legacy never routes" `Quick
-            test_legacy_keeper_never_routes;
           Alcotest.test_case "docker keeper routes" `Quick
             test_docker_keeper_routes;
           Alcotest.test_case "docker second keeper also routes" `Quick
@@ -2433,6 +2509,8 @@ let run_tests ~clock () =
             test_maybe_cleanup_stale_containers_runs_once_per_interval;
           Alcotest.test_case "cleanup failure retries next explicit interval" `Quick
             test_maybe_cleanup_stale_containers_retries_next_explicit_interval;
+          Alcotest.test_case "cleanup skips unavailable command without spawn" `Quick
+            test_maybe_cleanup_skips_unavailable_command_without_spawn;
         ] );
     ]
 

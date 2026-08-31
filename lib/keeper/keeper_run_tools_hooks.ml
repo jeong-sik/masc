@@ -767,18 +767,21 @@ let assemble_hooks
                  then
                    match
                      (* Memory OS recall — advisory block rendered from every
-                        persisted current fact in stored order (read side; the
-                        write side is the librarian current-selection pass).
-                        Opt-in via MASC_KEEPER_MEMORY_OS_RECALL. The read is
-                        skipped, not just filtered, on post-tool rounds: the
-                        block would be dropped at assembly anyway and the file
-                        I/O is per round. *)
-                     (* Off-main: recall reads the current snapshot via synchronous
-                        file I/O, which would starve the main Eio domain and HOL
-                        sibling keepers. Read-side only, no module-level mutable
-                        state, so it is domain-safe on the shared pool. *)
+                        persisted current fact in stored order. Source-bound
+                        facts are revalidated here; a changed source atomically
+                        replaces its fact with an invalidation before the block
+                        is rendered. Opt-in via MASC_KEEPER_MEMORY_OS_RECALL.
+                        The work is skipped, not just filtered, on post-tool
+                        rounds: the block would be dropped at assembly anyway. *)
+                     (* Off-main: ordinary recall and source revalidation use
+                        synchronous file I/O. The source snapshot writer is
+                        file-locked and has no module-level mutable state, so
+                        concurrent first-round assemblies serialize at that
+                        file instead of starving the main Eio domain. *)
                      Domain_pool_ref.submit_io_or_inline (fun () ->
                        Keeper_memory_os_recall.render_if_enabled
+                         ~config
+                         ~meta
                          ~keepers_dir:memory_os_keepers_dir
                          ~keeper_id:meta.name
                          ~now:(Time_compat.now ())

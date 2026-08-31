@@ -3,8 +3,23 @@ open Masc_tui_ansi
 open Masc_tui_render
 open Masc_tui_loader
 
+(* One place decides how an aborted $EDITOR form reads. Only the cancel
+   differs by caller, because only the action's own name belongs in it; an
+   editor that never ran and a temp file that could not be read are the same
+   fact wherever they happen, and neither is the operator saying no. *)
+let report_editor_abort state ~action ?cancelled (abort : Masc_tui_editor.abort)
+  =
+  match abort with
+  | Masc_tui_editor.Cancelled ->
+    report_action state "system"
+      (match cancelled with Some text -> text | None -> action ^ " cancelled")
+  | Masc_tui_editor.Editor_unavailable _ | Masc_tui_editor.Form_unreadable _ ->
+    report_action state "error"
+      (action ^ ": " ^ Masc_tui_editor.abort_detail abort)
+
 module Approval = Masc_tui_operator_projection
 module Board_detail = Masc_tui_board_detail
+module Board_hearth = Masc_tui_board_hearth
 module Board_selection = Masc_tui_board_selection
 module Frame_presenter = Masc_tui_frame_presenter
 module Approval_authority = Masc_tui_approval_authority
@@ -944,7 +959,12 @@ let own_typed_messages (state : state) =
     state.msg_history
     |> List.filter (fun entry ->
            (match entry.me_role with
-            | Message_user label -> String.equal label "you"
+            (* Asked of the type, not of the label. [String.equal label "you"]
+               was false for the operator's own lines that came in on any
+               surface but the dashboard -- those read "you \xc2\xb7 agent" --
+               so the up-arrow recall silently skipped them. *)
+            | Message_user (Sent_by_operator _) -> true
+            | Message_user (Sent_by_other _) -> false
             | Message_keeper | Message_autonomous | Message_status
             | Message_error | Message_tool
             | Message_thinking | Message_memory ->
@@ -1254,6 +1274,10 @@ type http_scoped_surface_results = {
      dropping it. *)
   http_asks: (Tui_decode.asks_snapshot, string) result option;
   http_board: (board_post list, string) result option;
+  (* The board's hearth census rides with its listing: the two are read for
+     one surface and a cycle keyed on a census the listing has outgrown walks
+     names that are no longer there. *)
+  http_board_hearths: ((string * int) list, string) result option;
   http_planning: (planning_snapshot, string) result option;
   http_system_logs: (system_log_snapshot, string) result option;
   http_fleet_safety: (Tui_decode.fleet_safety, string) result option;
@@ -1525,7 +1549,9 @@ let append_user_history_once state (request : Keeper_chat.request) =
       state.msg_history
   in
   if not already_present then
-    append_chat_history state request (Message_user "you") request.message
+    append_chat_history state request
+      (Message_user (Sent_by_operator "you"))
+      request.message
 
 let enqueue_dispatch_ack mailbox make_message =
   let acknowledged, acknowledge = Eio.Promise.create () in
@@ -3770,7 +3796,10 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
           let error = Error (Printexc.to_string exn) in
-          { Masc_tui_context_inspector.turn = error; prompt = error }
+          { Masc_tui_context_inspector.turn = error
+          ; prompt = error
+          ; tool_surface = Masc_tui_context_inspector.Surface_not_recorded
+          }
     in
     enqueue_async mailbox
       (Context_inspector_loaded (generation, keeper_name, reading))
@@ -3786,7 +3815,10 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
         (Context_inspector_loaded
            ( generation
            , keeper_name
-           , { Masc_tui_context_inspector.turn = error; prompt = error } ))
+           , { Masc_tui_context_inspector.turn = error
+             ; prompt = error
+             ; tool_surface = Masc_tui_context_inspector.Surface_not_recorded
+             } ))
 
 let open_context_inspector state ~mailbox ~keeper_name =
   state.context_inspector_open <- true;
@@ -3885,9 +3917,16 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
   let role, text, tool_block =
     match row.Keeper_chat_history.kind with
     | Keeper_chat_history.Addressed_to_keeper { speaker; surface } ->
-        ( Message_user (Keeper_chat_history.addressed_label speaker surface)
-        , row.text
-        , None )
+        (* The label is what the row draws; the speaker is what it is. Both
+           come from the same decode, and only the label used to survive. *)
+        let label = Keeper_chat_history.addressed_label speaker surface in
+        let author =
+          match speaker with
+          | Keeper_chat_history.Operator -> Sent_by_operator label
+          | Keeper_chat_history.Named _
+          | Keeper_chat_history.Unresolved _ -> Sent_by_other label
+        in
+        (Message_user author, row.text, None)
     | Keeper_chat_history.Said_by_keeper -> (Message_keeper, row.text, None)
     | Keeper_chat_history.Autonomous_reply ->
         ( Message_autonomous
@@ -4757,6 +4796,52 @@ let close_image state =
       state.image_open <- None;
       write_to_terminal Masc_tui_graphics.delete_all
 
+(* [/find] and its arg-less repeat, which differ only in where the walk starts.
+
+   The pane is moved by [set_msg_scroll], the one seam that also pins the row
+   the scroll counts back from -- a search that wrote [msg_scroll] directly
+   would leave the pin unset and the position would drift under the next
+   message that arrived.
+
+   Every outcome says something. A search that silently did nothing and a key
+   that did nothing look the same, which is the failure this surface keeps
+   having; and running out of older matches is a different fact from having
+   none at all, because only one of the two is fixed by starting over. *)
+let seek_in_chat state ~target ~restart =
+  let notice = chat_notice state ~keeper_name:target in
+  match target with
+  | None ->
+      notice ~role:Message_error "/find needs a Keeper selected on the roster"
+  | Some keeper_name -> (
+      let older_than = if restart then None else state.msg_find_at in
+      (* Normalised here, at the door the operator's text comes through.
+         [msg_find] keeps what they typed, because that is what the pane
+         echoes back to them. *)
+      match
+        Masc_tui_render.keeper_message_find_scroll state ~keeper_name
+          ~needle:(String.lowercase_ascii (String.trim state.msg_find))
+          ~older_than
+      with
+      | Some (scroll, at) ->
+          state.msg_find_at <- Some at;
+          set_msg_scroll state scroll;
+          notice ~role:Message_status
+            (Printf.sprintf "/find %s \xe2\x80\x94 %d row(s) back (/find repeats)"
+               state.msg_find scroll)
+      | None ->
+          if restart then
+            notice ~role:Message_status
+              (Printf.sprintf "/find %s \xe2\x80\x94 nothing in this conversation"
+                 state.msg_find)
+          else
+            (* The walk is over, not empty. Said apart from the case above
+               because starting again is what fixes this one and not that
+               one. *)
+            notice ~role:Message_status
+              (Printf.sprintf
+                 "/find %s \xe2\x80\x94 no older match; /find %s starts again"
+                 state.msg_find state.msg_find))
+
 let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   let target =
     match keeper_name with
@@ -4870,6 +4955,19 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (if state.msg_memory_visible
          then "Librarian/Memory timeline shown (/memory to hide)"
          else "Librarian/Memory timeline hidden (/memory to show)")
+  | Masc_tui_command.Find_in_chat query ->
+      (* A new query starts at the newest message; [Find_next] below carries on
+         from wherever this landed. *)
+      Buffer.clear state.msg_input;
+      state.msg_find <- String.trim query;
+      state.msg_find_at <- None;
+      seek_in_chat state ~target ~restart:true
+  | Masc_tui_command.Find_next ->
+      Buffer.clear state.msg_input;
+      if String.equal state.msg_find "" then
+        notice ~role:Message_error
+          "/find needs text the first time; /find on its own repeats it"
+      else seek_in_chat state ~target ~restart:false
   | Masc_tui_command.Inspect_context ->
       (match target with
        | Some keeper_name ->
@@ -5077,6 +5175,14 @@ let leave_missing_board_detail state =
       leave_board_detail state
   | Board_list | Board_read _ | Board_compose -> ()
 
+let apply_board_hearths_load state = function
+  | Ok census -> state.board_hearths <- census
+  | Error _ ->
+      (* The census is what [f] walks. A failed read keeps the last one rather
+         than emptying it: a cycle that has gone quiet because one request
+         failed is worse than a cycle one refresh out of date. *)
+      ()
+
 let apply_board_list_load state = function
   | Ok posts ->
       replace_board_posts state posts;
@@ -5256,7 +5362,7 @@ let refresh_status results =
   | _ -> Masc_tui_types.Degraded
 
 let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
-    ~(needs : Masc_tui_types.surface_needs) =
+    ~board_hearth ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
   (* Only the Overview row shows this, so a refresh on another surface does not
      spend a request on it. [None] leaves whatever the last read observed. *)
@@ -5276,7 +5382,11 @@ let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
   in
   let http_board =
     when_needed needs.needs_board (fun () ->
-        load_board_list ~host ~port ~sort_by:(board_sort_label board_sort))
+        load_board_list ~host ~port ~sort_by:(board_sort_label board_sort)
+          ~hearth:board_hearth)
+  in
+  let http_board_hearths =
+    when_needed needs.needs_board (fun () -> load_board_hearths ~host ~port)
   in
   let http_planning =
     when_needed needs.needs_planning (fun () -> load_planning ~host ~port)
@@ -5296,6 +5406,7 @@ let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
   ; http_approvals
   ; http_asks
   ; http_board
+  ; http_board_hearths
   ; http_planning
   ; http_system_logs
   ; http_fleet_safety
@@ -5303,7 +5414,7 @@ let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
   }
 
 let load_http_surfaces ~host ~port ~approval_generation ~board_sort
-    ~(needs : Masc_tui_types.surface_needs) =
+    ~board_hearth ~(needs : Masc_tui_types.surface_needs) =
   let http_overview = load_overview ~host ~port in
   let http_approvals =
     Option.map
@@ -5317,7 +5428,7 @@ let load_http_surfaces ~host ~port ~approval_generation ~board_sort
   let http_server_identity = load_server_identity ~host ~port in
   let http_scoped =
     load_http_scoped_surfaces ~host ~port ~approval_generation:None ~board_sort
-      ~needs
+      ~board_hearth ~needs
   in
   { http_overview; http_approvals; http_scoped; http_server_identity }
 
@@ -5326,6 +5437,7 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_approval_observation state) results.http_approvals;
   Option.iter (apply_asks_load state) results.http_asks;
   Option.iter (apply_board_list_load state) results.http_board;
+  Option.iter (apply_board_hearths_load state) results.http_board_hearths;
   Option.iter (apply_planning_load state) results.http_planning;
   Option.iter (apply_system_logs_load state) results.http_system_logs;
   Option.iter (apply_fleet_safety_load state) results.http_fleet_safety;
@@ -5672,7 +5784,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         enqueue_async mailbox
           (Http_refresh_done
              (load_http_surfaces ~host ~port ~approval_generation
-                ~board_sort:state.board_sort ~needs))
+                ~board_sort:state.board_sort
+                ~board_hearth:state.board_hearth ~needs))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -5690,7 +5803,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
           (fun () ->
              apply_http_surfaces state
                (load_http_surfaces ~host ~port ~approval_generation
-                  ~board_sort:state.board_sort ~needs))
+                  ~board_sort:state.board_sort
+                ~board_hearth:state.board_hearth ~needs))
   end
 
 let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
@@ -5718,7 +5832,8 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
         enqueue_async mailbox
           (Http_scoped_refresh_done
              (load_http_scoped_surfaces ~host ~port
-                ~approval_generation ~board_sort:state.board_sort ~needs))
+                ~approval_generation ~board_sort:state.board_sort
+                ~board_hearth:state.board_hearth ~needs))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -5736,7 +5851,8 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
           (fun () ->
              apply_http_scoped_surfaces state
                (load_http_scoped_surfaces ~host ~port
-                  ~approval_generation ~board_sort:state.board_sort ~needs))
+                  ~approval_generation ~board_sort:state.board_sort
+                ~board_hearth:state.board_hearth ~needs))
   end
 
 let start_scoped_refresh_followup state ~host ~port ~refresh_inflight
@@ -5836,6 +5952,24 @@ let move_board_posts_pane state ~mailbox ~delta =
       (open_board_post state ~mailbox ~focus:Left_pane)
       (List.nth_opt state.board_posts next)
   end
+
+(* The next post without leaving the one being read. Reading a board meant
+   Esc, move, Enter for every post, which is three keys to do what one does on
+   Changes and on the Keeper detail tabs -- both of which already spell it
+   [ / ]. Focus is carried rather than reset: an operator reading in the wide
+   detail stays there, and one browsing from the list pane stays in the list. *)
+let step_board_read state ~mailbox ~delta =
+  match state.board_mode with
+  | Board_list | Board_compose -> ()
+  | Board_read _ ->
+      let count = List.length state.board_posts in
+      let next = max 0 (min (count - 1) (state.board_cursor + delta)) in
+      if count > 0 && next <> state.board_cursor then begin
+        state.board_cursor <- next;
+        Option.iter
+          (open_board_post state ~mailbox ~focus:state.board_focus)
+          (List.nth_opt state.board_posts next)
+      end
 
 let apply_approval_decision_result state approval decision approvals result =
   (match result with
@@ -6491,6 +6625,107 @@ let verification_cursor_row state =
    verdict. The task id is captured at arm time, so moving the cursor between
    presses re-arms for the new row rather than approving the one the operator
    left. Reject is not armed -- its $EDITOR reason form is the confirmation. *)
+(* Opening a detail is one move -- read the row under the cursor, name it, put
+   the pane at the top of it, fetch what the detail needs -- and each surface
+   spelled that move inside its own Enter arm, guarded on the detail not being
+   open yet.
+
+   [ / ] needs the same move with the opposite guard: the detail IS open and
+   the cursor just moved. Spelled twice, the two would drift, and the shape
+   that drifts here is "which loads run on open" -- a step that forgot one
+   draws the previous row's evidence under the new row's title.
+
+   So the move comes out, ungated, and the two callers bring their own guard.
+   The list each reads is the list its own surface draws: Planning filters and
+   sorts before indexing, and indexing the unsorted goals would open whichever
+   goal happens to sit at that position in the store. *)
+
+let open_planning_detail state ~mailbox =
+  let goals =
+    match state.planning with
+    | None -> []
+    | Some p ->
+        planning_visible_goals ~filter:state.planning_filter
+          ~sort:state.planning_sort p.pl_goals
+  in
+  match List.nth_opt goals state.planning_cursor with
+  | None -> ()
+  | Some g ->
+      state.planning_mode <- Planning_detail g.pg_id;
+      state.planning_scroll <- 0;
+      state.goal_timeline <- None;
+      launch_goal_timeline_load state ~mailbox g.pg_id
+
+let open_schedule_detail state =
+  match state.schedules with
+  | None -> ()
+  | Some snapshot ->
+      Option.iter
+        (fun row ->
+          state.schedule_detail_id <- Some row.sch_schedule_id;
+          state.schedule_scroll <- 0)
+        (List.nth_opt snapshot.scs_rows state.schedule_cursor)
+
+let open_verification_detail state ~mailbox =
+  let requests =
+    match state.verification with
+    | None -> []
+    | Some s -> s.Masc.Tui_decode.vs_requests
+  in
+  match List.nth_opt requests state.verification_cursor with
+  | None -> ()
+  | Some row ->
+      state.verification_detail_request_id <-
+        Some row.Masc.Tui_decode.vr_request_id;
+      state.verification_detail_scroll <- 0;
+      state.verification_evidence <- None;
+      launch_verification_evidence_load state ~mailbox
+        row.Masc.Tui_decode.vr_task_id
+
+let open_harness_detail state =
+  match state.harness with
+  | None -> ()
+  | Some snapshot ->
+      Option.iter
+        (fun verdict ->
+          state.harness_detail <-
+            Some (verdict.Masc.Tui_decode.hv_task_id, verdict.hv_at);
+          state.harness_detail_scroll <- 0)
+        (List.nth_opt snapshot.Masc.Tui_decode.hs_verdicts
+           state.harness_cursor)
+
+let open_fusion_detail state ~mailbox =
+  let runs =
+    match state.fusion_runs with
+    | None -> []
+    | Some snapshot -> snapshot.fus_runs
+  in
+  match List.nth_opt runs state.fusion_cursor with
+  | None -> ()
+  | Some run ->
+      state.fusion_mode <- Fusion_detail run.fur_run_id;
+      state.fusion_scroll <- 0;
+      state.fusion_detail <- None;
+      state.fusion_detail_error <- None;
+      launch_fusion_detail_load state ~mailbox ~run_id:run.fur_run_id
+
+(* One step through the list a detail was opened from, without closing it.
+   Reading a queue meant Esc, move, Enter for every row -- three keys to do
+   what one does on Changes and the Keeper detail tabs, both of which already
+   spell it [ / ].
+
+   [count] is the surface's own list length, so a step past either end stays
+   put rather than wrapping: a reader walking a queue wants to arrive at the
+   end and know it, not to reappear at the top. *)
+let step_detail_cursor ~count ~cursor ~delta ~set_cursor ~reopen =
+  if count > 0 then begin
+    let next = max 0 (min (count - 1) (cursor + delta)) in
+    if next <> cursor then begin
+      set_cursor next;
+      reopen ()
+    end
+  end
+
 let handle_verification_approve_key state ~mailbox =
   match verification_cursor_row state with
   | None -> ()
@@ -6675,6 +6910,9 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Open_settings
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Set_thinking _
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Toggle_memory
+       (* [/find] moves the pane on purpose, so unlike every other command it
+          must not be followed by the reset to the newest row above. *)
+       | Masc_tui_command.Find_in_chat _ | Masc_tui_command.Find_next
        | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Attach_image _ | Masc_tui_command.Attach_image_missing_path
@@ -8850,18 +9088,18 @@ let main () =
   let handle_connector_form ~action ~stem ~post () =
     match Masc_tui_editor.editor_command () with
     | None ->
-      add_event state "error"
+      report_action state "error"
         ("no $EDITOR set; export EDITOR to " ^ action ^ " here")
     | Some _ -> (
       match
         Masc_tui_editor.roundtrip ~restore:restore_terminal
           ~reenter:reenter_terminal stem
       with
-      | None -> add_event state "system" (action ^ " cancelled")
-      | Some body -> (
+      | Error abort -> report_editor_abort state ~action abort
+      | Ok body -> (
         match Yojson.Safe.from_string body with
         | exception Yojson.Json_error e ->
-          add_event state "error" (action ^ ": body is not JSON: " ^ e)
+          report_action state "error" (action ^ ": body is not JSON: " ^ e)
         | json -> (
           let field key =
             match json with
@@ -8873,13 +9111,13 @@ let main () =
             | _ -> None
           in
           match field "name" with
-          | None -> add_event state "error" (action ^ ": \"name\" is required")
+          | None -> report_action state "error" (action ^ ": \"name\" is required")
           | Some connector -> (
             match post ~connector ~json with
             | Ok _ ->
-              add_event state "system" (action ^ ": ok (" ^ connector ^ ")");
+              report_action state "system" (action ^ ": ok (" ^ connector ^ ")");
               launch_connectors_load state ~mailbox:async_messages
-            | Error detail -> add_event state "error" (action ^ ": " ^ detail)))))
+            | Error detail -> report_action state "error" (action ^ ": " ^ detail)))))
   in
   let handle_connector_bind () =
     let host = server_peer_host in
@@ -8911,11 +9149,11 @@ let main () =
     | None -> ()
     | Some (path, _) -> (
         match code_scope_codebase state with
-        | Error why -> add_event state "system" ("notes: " ^ why)
+        | Error why -> report_action state "system" ("notes: " ^ why)
         | Ok codebase -> (
             match Masc_tui_editor.editor_command () with
             | None ->
-                add_event state "error"
+                report_action state "error"
                   "no $EDITOR set; export EDITOR to add a note here"
             | Some _ -> (
                 let stem =
@@ -8925,11 +9163,11 @@ let main () =
                   Masc_tui_editor.roundtrip ~restore:restore_terminal
                     ~reenter:reenter_terminal stem
                 with
-                | None -> add_event state "system" "note cancelled"
-                | Some body -> (
+                | Error abort -> report_editor_abort state ~action:"note" abort
+                | Ok body -> (
                     match Yojson.Safe.from_string body with
                     | exception Yojson.Json_error e ->
-                        add_event state "error"
+                        report_action state "error"
                           ("note: body is not JSON: " ^ e)
                     | json ->
                         let field key =
@@ -8953,7 +9191,7 @@ let main () =
                           | Some _ | None -> "Comment"
                         in
                         if String.equal content "" then
-                          add_event state "system"
+                          report_action state "system"
                             "note cancelled (empty content)"
                         else (
                           match
@@ -8964,7 +9202,7 @@ let main () =
                                 ~mailbox:async_messages ~codebase ~path
                                 ~line_start ~line_end ~kind ~content
                           | _ ->
-                              add_event state "error"
+                              report_action state "error"
                                 "note: line_start and line_end must be \
                                  integers")))))
   in
@@ -9020,7 +9258,7 @@ let main () =
     | Some row -> (
         match Masc_tui_editor.editor_command () with
         | None ->
-            add_event state "error"
+            report_action state "error"
               "no $EDITOR set; export EDITOR to overrule here"
         | Some _ -> (
             let stem = "{\n  \"reason\": \"\"\n}\n" in
@@ -9028,11 +9266,11 @@ let main () =
               Masc_tui_editor.roundtrip ~restore:restore_terminal
                 ~reenter:reenter_terminal stem
             with
-            | None -> add_event state "system" "overrule cancelled"
-            | Some body -> (
+            | Error abort -> report_editor_abort state ~action:"overrule" abort
+            | Ok body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
-                    add_event state "error" ("overrule: body is not JSON: " ^ e)
+                    report_action state "error" ("overrule: body is not JSON: " ^ e)
                 | json ->
                     let reason =
                       match json with
@@ -9043,7 +9281,7 @@ let main () =
                       | _ -> ""
                     in
                     if String.equal reason "" then
-                      add_event state "system"
+                      report_action state "system"
                         "overrule cancelled (empty reason)"
                     else
                       let approved = harness_machine_approved row in
@@ -9067,7 +9305,7 @@ let main () =
         let task_id = row.Masc.Tui_decode.vr_task_id in
         match Masc_tui_editor.editor_command () with
         | None ->
-            add_event state "error"
+            report_action state "error"
               "no $EDITOR set; export EDITOR to reject here"
         | Some _ -> (
             let stem = "{\n  \"reason\": \"\"\n}\n" in
@@ -9075,11 +9313,11 @@ let main () =
               Masc_tui_editor.roundtrip ~restore:restore_terminal
                 ~reenter:reenter_terminal stem
             with
-            | None -> add_event state "system" "reject cancelled"
-            | Some body -> (
+            | Error abort -> report_editor_abort state ~action:"reject" abort
+            | Ok body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
-                    add_event state "error" ("reject: body is not JSON: " ^ e)
+                    report_action state "error" ("reject: body is not JSON: " ^ e)
                 | json ->
                     let reason =
                       match json with
@@ -9090,7 +9328,7 @@ let main () =
                       | _ -> ""
                     in
                     if String.equal reason "" then
-                      add_event state "system" "reject cancelled (empty reason)"
+                      report_action state "system" "reject cancelled (empty reason)"
                     else
                       start_verification_verdict state
                         ~mailbox:async_messages ~task_id
@@ -9106,7 +9344,7 @@ let main () =
     | Some task_id -> (
         match Masc_tui_editor.editor_command () with
         | None ->
-            add_event state "error"
+            report_action state "error"
               "no $EDITOR set; export EDITOR to cancel here"
         | Some _ -> (
             let stem = "{\n  \"reason\": \"\"\n}\n" in
@@ -9114,11 +9352,11 @@ let main () =
               Masc_tui_editor.roundtrip ~restore:restore_terminal
                 ~reenter:reenter_terminal stem
             with
-            | None -> add_event state "system" "cancel cancelled"
-            | Some body -> (
+            | Error abort -> report_editor_abort state ~action:"cancel" abort
+            | Ok body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
-                    add_event state "error" ("cancel: body is not JSON: " ^ e)
+                    report_action state "error" ("cancel: body is not JSON: " ^ e)
                 | json ->
                     let reason =
                       match json with
@@ -9129,7 +9367,7 @@ let main () =
                       | _ -> ""
                     in
                     if String.equal reason "" then
-                      add_event state "system" "cancel cancelled (empty reason)"
+                      report_action state "system" "cancel cancelled (empty reason)"
                     else
                       launch_task_cancel state ~mailbox:async_messages
                         ~task_id ~reason)))
@@ -9171,11 +9409,11 @@ let main () =
   in
   let handle_runtime_config_edit () =
     match state.runtime_config_view with
-    | None -> add_event state "error" "config not loaded yet; r to reload"
+    | None -> report_action state "error" "config not loaded yet; r to reload"
     | Some (_, rows) -> (
       match Masc_tui_editor.editor_command () with
       | None ->
-        add_event state "error"
+        report_action state "error"
           "no $EDITOR set; export EDITOR to edit runtime.toml here"
       | Some _ -> (
         (* Rebuilt from the rows on screen rather than kept as a second copy.
@@ -9192,15 +9430,17 @@ let main () =
           Masc_tui_editor.roundtrip ~restore:restore_terminal
             ~reenter:reenter_terminal stem
         with
-        | None -> add_event state "system" "runtime.toml unchanged"
-        | Some edited -> (
+        | Error abort ->
+          report_editor_abort state ~action:"runtime.toml"
+            ~cancelled:"runtime.toml unchanged" abort
+        | Ok edited -> (
           let host = server_peer_host in
           let port = state.port in
           match
             Masc_tui_http.post_runtime_config_preview ~host ~port
               ~source_text:edited
           with
-          | Error detail -> add_event state "error" ("preview failed: " ^ detail)
+          | Error detail -> report_action state "error" ("preview failed: " ^ detail)
           | Ok preview -> (
             let ok =
               match preview with
@@ -9218,7 +9458,7 @@ let main () =
             in
             match ok with
             | Some false ->
-              add_event state "error"
+              report_action state "error"
                 ("preview rejected the edit: "
                  ^ Terminal_text.single_line
                      (Yojson.Safe.to_string preview))
@@ -9228,11 +9468,11 @@ let main () =
                   ~source_text:edited
               with
               | Ok receipt ->
-                add_event state "system"
+                report_action state "system"
                   ("runtime.toml saved · "
                    ^ Masc_tui_http.runtime_config_commit_receipt_summary receipt);
                 launch_runtime_config_load state ~mailbox:async_messages
-              | Error detail -> add_event state "error" ("save failed: " ^ detail))))))
+              | Error detail -> report_action state "error" ("save failed: " ^ detail))))))
   in
   let selected_runtime_param () =
     List.nth_opt state.runtime_params state.runtime_params_cursor
@@ -9344,11 +9584,11 @@ and is loaded on demand through keeper_skill.
     let host = server_peer_host in
     let port = state.port in
     match Masc_tui_http.fetch_skill_editor_sources ~host ~port with
-    | Error detail -> add_event state "error" ("Skill sources failed: " ^ detail)
-    | Ok [] -> add_event state "error" "no ready read-write Skill source"
+    | Error detail -> report_action state "error" ("Skill sources failed: " ^ detail)
+    | Ok [] -> report_action state "error" "no ready read-write Skill source"
     | Ok (source_id :: _) ->
       (match Masc_tui_editor.editor_command () with
-       | None -> add_event state "error" "no $EDITOR set; export EDITOR to create Skills"
+       | None -> report_action state "error" "no $EDITOR set; export EDITOR to create Skills"
        | Some _ ->
          (match
             Masc_tui_editor.roundtrip
@@ -9357,12 +9597,13 @@ and is loaded on demand through keeper_skill.
               ~suffix:".md"
               (skill_template ~composition)
           with
-          | None -> add_event state "system" "Skill creation cancelled"
-          | Some source_text ->
+          | Error abort ->
+            report_editor_abort state ~action:"Skill creation" abort
+          | Ok source_text ->
             (match skill_name_from_source source_text with
-             | None -> add_event state "error" "Skill template has no name frontmatter"
+             | None -> report_action state "error" "Skill template has no name frontmatter"
              | Some "new-skill" ->
-               add_event state "error" "change new-skill to a real unique name before creating"
+               report_action state "error" "change new-skill to a real unique name before creating"
              | Some package_id ->
                (match
                   Masc_tui_http.post_skill_editor_create
@@ -9372,7 +9613,7 @@ and is loaded on demand through keeper_skill.
                     ~package_id
                     ~source_text
                 with
-                | Error detail -> add_event state "error" ("Skill create failed: " ^ detail)
+                | Error detail -> report_action state "error" ("Skill create failed: " ^ detail)
                 | Ok json ->
                   (* The server answers exactly created_and_published or
                      created_but_unpublished(+reason). The old "created"
@@ -9440,7 +9681,7 @@ and is loaded on demand through keeper_skill.
   in
   let handle_skill_edit () =
     match selected_tools_skill_profile state with
-    | None -> add_event state "error" "no published Skill selected"
+    | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
       let name = profile.Masc.Tui_decode.esp_name in
       let host = server_peer_host in
@@ -9451,13 +9692,13 @@ and is loaded on demand through keeper_skill.
            ~port
            profile.esp_reference
        with
-       | Error detail -> add_event state "error" ("Skill read failed: " ^ detail)
+       | Error detail -> report_action state "error" ("Skill read failed: " ^ detail)
        | Ok loaded when not (String.equal loaded.sel_access "read_write") ->
-         add_event state "error" (name ^ " belongs to a read-only Skill source")
+         report_action state "error" (name ^ " belongs to a read-only Skill source")
        | Ok loaded ->
          (match Masc_tui_editor.editor_command () with
           | None ->
-            add_event state "error" "no $EDITOR set; export EDITOR to edit Skills"
+            report_action state "error" "no $EDITOR set; export EDITOR to edit Skills"
           | Some _ ->
             (match
                Masc_tui_editor.roundtrip
@@ -9466,10 +9707,11 @@ and is loaded on demand through keeper_skill.
                  ~suffix:".md"
                  loaded.sel_source_text
              with
-             | None -> add_event state "system" (name ^ " edit cancelled")
-             | Some edited when String.equal edited loaded.sel_source_text ->
-               add_event state "system" (name ^ " unchanged")
-             | Some edited ->
+             | Error abort ->
+               report_editor_abort state ~action:(name ^ " edit") abort
+             | Ok edited when String.equal edited loaded.sel_source_text ->
+               report_action state "system" (name ^ " unchanged")
+             | Ok edited ->
                (match
                   Masc_tui_http.post_skill_editor_preview
                     ~host
@@ -9478,7 +9720,7 @@ and is loaded on demand through keeper_skill.
                     ~source_text:edited
                 with
                 | Error detail ->
-                  add_event state "error" ("Skill preview rejected: " ^ detail)
+                  report_action state "error" ("Skill preview rejected: " ^ detail)
                 | Ok _ ->
                   (match
                      Masc_tui_http.post_skill_editor_save
@@ -9488,11 +9730,11 @@ and is loaded on demand through keeper_skill.
                        ~source_text:edited
                    with
                    | Error detail ->
-                     add_event state "error" ("Skill save failed: " ^ detail)
+                     report_action state "error" ("Skill save failed: " ^ detail)
                    | Ok receipt ->
                      (match receipt.ses_status with
                       | Masc_tui_http.Skill_unchanged ->
-                        add_event state "system" (name ^ " unchanged")
+                        report_action state "system" (name ^ " unchanged")
                       | Skill_saved_and_published ->
                         let revision =
                           Skill_reference.content_revision_to_string
@@ -9501,7 +9743,7 @@ and is loaded on demand through keeper_skill.
                         let revision_short =
                           String.sub revision 0 (min 12 (String.length revision))
                         in
-                        add_event state "system"
+                        report_action state "system"
                           (Printf.sprintf
                              "%s saved + published · %s%s"
                              name
@@ -9513,7 +9755,7 @@ and is loaded on demand through keeper_skill.
                                 ^ String.sub snapshot 0 (min 12 (String.length snapshot))));
                         launch_tools_load state ~mailbox:async_messages
                       | Skill_saved_but_unpublished reason ->
-                        add_event state "error"
+                        report_action state "error"
                           (name ^ " was saved but NOT published: " ^ reason)))))))
   in
   (* A prompt is edited the way runtime.toml is: $EDITOR over the text a turn
@@ -9538,30 +9780,32 @@ and is loaded on demand through keeper_skill.
   in
   let handle_prompt_edit () =
     match selected_prompt () with
-    | None -> add_event state "error" "prompts not loaded yet; r to reload"
+    | None -> report_action state "error" "prompts not loaded yet; r to reload"
     | Some row -> (
       match Masc_tui_editor.editor_command () with
       | None ->
-        add_event state "error"
+        report_action state "error"
           "no $EDITOR set; export EDITOR to edit prompts here"
       | Some _ -> (
         match
           Masc_tui_editor.roundtrip ~restore:restore_terminal
             ~reenter:reenter_terminal row.Tui_decode.pr_effective
         with
-        | None ->
-          add_event state "system"
-            (row.Tui_decode.pr_key ^ ": prompt unchanged")
-        | Some edited ->
+        | Error abort ->
+          report_editor_abort state
+            ~action:(row.Tui_decode.pr_key ^ " prompt")
+            ~cancelled:(row.Tui_decode.pr_key ^ ": prompt unchanged")
+            abort
+        | Ok edited ->
           (match
              Masc_tui_http.post_prompt_override ~host:server_peer_host
                ~port:state.port ~key:row.Tui_decode.pr_key ~value:edited
            with
            | Ok _ ->
-             add_event state "system" (row.Tui_decode.pr_key ^ ": prompt saved");
+             report_action state "system" (row.Tui_decode.pr_key ^ ": prompt saved");
              launch_prompts_load state ~mailbox:async_messages
            | Error detail ->
-             add_event state "error"
+             report_action state "error"
                (row.Tui_decode.pr_key ^ ": save failed: " ^ detail))))
   in
   (* Clearing is not editing to empty: it returns the prompt to the file's
@@ -9593,37 +9837,40 @@ and is loaded on demand through keeper_skill.
          failure, unparseable JSON, an empty patch. This one returned silently,
          so pressing the key with an empty or stale roster looked exactly like
          a feature that is not there. *)
-      add_event state "system" no_keeper_under_cursor
+      report_action state "system" no_keeper_under_cursor
     | Some keeper -> (
       match Masc_tui_editor.editor_command () with
       | None ->
-        add_event state "error"
+        report_action state "error"
           "no $EDITOR set; export EDITOR to edit keeper settings here"
       | Some _ -> (
         match
           Masc_tui_loader.load_keeper_config_editor ~host ~port
             ~keeper_name:keeper.k_name
         with
-        | Error detail -> add_event state "error" detail
+        | Error detail -> report_action state "error" detail
         | Ok (observed, stem) -> (
           match
             Masc_tui_editor.roundtrip ~restore:restore_terminal
               ~reenter:reenter_terminal stem
           with
-          | None ->
-              add_event state "system" (keeper.k_name ^ ": settings unchanged")
-          | Some edited -> (
+          | Error abort ->
+              report_editor_abort state
+                ~action:(keeper.k_name ^ " settings")
+                ~cancelled:(keeper.k_name ^ ": settings unchanged")
+                abort
+          | Ok edited -> (
             match Yojson.Safe.from_string edited with
             | exception Yojson.Json_error detail ->
-                add_event state "error" ("settings are not JSON: " ^ detail)
+                report_action state "error" ("settings are not JSON: " ^ detail)
             | edited_json -> (
               match
                 Masc_tui_keeper_config.patch_of_edit ~before:observed
                   ~after:edited_json
               with
-              | Error detail -> add_event state "error" detail
+              | Error detail -> report_action state "error" detail
               | Ok (`Assoc []) ->
-                  add_event state "system"
+                  report_action state "system"
                     (keeper.k_name ^ ": no settings changed")
               | Ok patch -> (
                 match
@@ -9636,14 +9883,14 @@ and is loaded on demand through keeper_skill.
                      | Masc_tui_http.Keeper_config_reconciliation_required _
                      | Masc_tui_http.Keeper_config_runtime_sync_failed _ ) as
                      error) ->
-                  add_event state "error"
+                  report_action state "error"
                     (Masc_tui_http.keeper_config_post_error_to_string error);
                   state.keeper_config_view <- None;
                   state.keeper_config_view_error <- None;
                   launch_keeper_config_view state
                     ~mailbox:async_messages keeper.k_name
                 | Error error ->
-                  add_event state "error"
+                  report_action state "error"
                     (Masc_tui_http.keeper_config_post_error_to_string error)
                 | Ok response ->
                     (match
@@ -9651,10 +9898,10 @@ and is loaded on demand through keeper_skill.
                          ~keeper_name:keeper.k_name response
                      with
                      | Error detail ->
-                       add_event state "error"
+                       report_action state "error"
                          (keeper.k_name ^ ": invalid config write receipt: " ^ detail)
                      | Ok (severity, message) ->
-                       add_event state severity message);
+                       report_action state severity message);
                     if
                       state.view = Keepers Keeper_detail
                       && state.detail_tab = Detail_instructions
@@ -9667,7 +9914,7 @@ and is loaded on demand through keeper_skill.
   let handle_keeper_create () =
     match Masc_tui_editor.editor_command () with
     | None ->
-      add_event state "error" "no $EDITOR set; export EDITOR to create a keeper here"
+      report_action state "error" "no $EDITOR set; export EDITOR to create a keeper here"
     | Some _ -> (
       (* The stem names the only two fields a keeper cannot come up without;
          the name is edited in place and the route name comes from it. *)
@@ -9678,8 +9925,8 @@ and is loaded on demand through keeper_skill.
         Masc_tui_editor.roundtrip ~restore:restore_terminal
           ~reenter:reenter_terminal stem
       with
-      | None -> add_event state "system" "create cancelled"
-      | Some declaration -> (
+      | Error abort -> report_editor_abort state ~action:"create" abort
+      | Ok declaration -> (
         let declared_name =
           match Yojson.Safe.from_string declaration with
           | `Assoc fields -> (
@@ -9689,15 +9936,15 @@ and is loaded on demand through keeper_skill.
           | _ -> ""
         in
         if String.length declared_name = 0 then
-          add_event state "error"
+          report_action state "error"
             "declaration needs a non-empty \"name\" string; nothing was created"
         else
           match
             Masc_tui_http.post_keeper_up ~host ~port ~keeper_name:declared_name
               ~declaration_json:declaration
           with
-          | Ok _ -> add_event state "system" (declared_name ^ ": keeper created")
-          | Error detail -> add_event state "error" detail))
+          | Ok _ -> report_action state "system" (declared_name ^ ": keeper created")
+          | Error detail -> report_action state "error" detail))
   in
   (* Same shape as [handle_keeper_create]: several fields at once go through
      $EDITOR rather than a modal the TUI does not otherwise have. The stem
@@ -9706,7 +9953,7 @@ and is loaded on demand through keeper_skill.
   let handle_repository_add () =
     match Masc_tui_editor.editor_command () with
     | None ->
-      add_event state "error"
+      report_action state "error"
         "no $EDITOR set; export EDITOR to add a repository here"
     | Some _ -> (
       let stem =
@@ -9724,8 +9971,8 @@ and is loaded on demand through keeper_skill.
         Masc_tui_editor.roundtrip ~restore:restore_terminal
           ~reenter:reenter_terminal stem
       with
-      | None -> add_event state "system" "add cancelled"
-      | Some declaration -> (
+      | Error abort -> report_editor_abort state ~action:"add" abort
+      | Ok declaration -> (
         let declared field =
           match Yojson.Safe.from_string declaration with
           | `Assoc fields -> (
@@ -9737,7 +9984,7 @@ and is loaded on demand through keeper_skill.
         let name = declared "name" in
         let url = declared "url" in
         if String.length name = 0 || String.length url = 0 then
-          add_event state "error"
+          report_action state "error"
             "declaration needs non-empty \"name\" and \"url\" strings; nothing was added"
         else
           match
@@ -9745,9 +9992,9 @@ and is loaded on demand through keeper_skill.
               ~declaration_json:declaration
           with
           | Ok _ ->
-            add_event state "system" (name ^ ": repository added");
+            report_action state "system" (name ^ ": repository added");
             launch_repositories_load state ~mailbox:async_messages
-          | Error detail -> add_event state "error" detail))
+          | Error detail -> report_action state "error" detail))
   in
   let consume_resize_request () =
     if Atomic.exchange resize_requested false then
@@ -10111,9 +10358,11 @@ and is loaded on demand through keeper_skill.
                  ( _
                  , { Masc_tui_context_inspector.turn = Ok record
                    ; prompt
+                   ; tool_surface
                    } ) ->
                  let capture = match prompt with Ok value -> Some value | Error _ -> None in
                  Masc_tui_context_inspector.input_map_rows record capture
+                   ~tool_surface
              | Some _ | None -> []
            in
            let close () =
@@ -10747,6 +10996,91 @@ and is loaded on demand through keeper_skill.
                 state.identity_view_error <- None;
                 launch_identity_view state ~mailbox:async_messages keeper.k_name
             | _, Detail_info | _, Detail_secrets | None, _ -> ())
+       (* One step through the list a detail was opened from, on every surface
+          that has one. Each reuses the same open the Enter arm uses, so a
+          step cannot fetch less than an open does. Guarded on the detail
+          being open: with the list showing, [ / ] is free for the surface to
+          mean something else, and on Changes and the Keeper detail tabs it
+          already does. *)
+       | Some (("[" | "]") as bracket)
+         when state.view = Schedules && Option.is_some state.schedule_detail_id ->
+           step_detail_cursor
+             ~count:
+               (match state.schedules with
+                | None -> 0
+                | Some snapshot -> List.length snapshot.scs_rows)
+             ~cursor:state.schedule_cursor
+             ~delta:(if bracket = "]" then 1 else -1)
+             ~set_cursor:(fun n -> state.schedule_cursor <- n)
+             ~reopen:(fun () -> open_schedule_detail state)
+       | Some (("[" | "]") as bracket)
+         when state.view = Verification
+              && Option.is_some state.verification_detail_request_id ->
+           step_detail_cursor
+             ~count:
+               (match state.verification with
+                | None -> 0
+                | Some s -> List.length s.Masc.Tui_decode.vs_requests)
+             ~cursor:state.verification_cursor
+             ~delta:(if bracket = "]" then 1 else -1)
+             ~set_cursor:(fun n -> state.verification_cursor <- n)
+             ~reopen:(fun () ->
+               open_verification_detail state ~mailbox:async_messages)
+       | Some (("[" | "]") as bracket)
+         when state.view = Harness && Option.is_some state.harness_detail ->
+           step_detail_cursor
+             ~count:
+               (match state.harness with
+                | None -> 0
+                | Some s -> List.length s.Masc.Tui_decode.hs_verdicts)
+             ~cursor:state.harness_cursor
+             ~delta:(if bracket = "]" then 1 else -1)
+             ~set_cursor:(fun n -> state.harness_cursor <- n)
+             ~reopen:(fun () -> open_harness_detail state)
+       | Some (("[" | "]") as bracket)
+         when state.view = Planning
+              && (match state.planning_mode with
+                  | Planning_detail _ -> true
+                  | Planning_list -> false) ->
+           step_detail_cursor
+             ~count:
+               (match state.planning with
+                | None -> 0
+                | Some p ->
+                    List.length
+                      (planning_visible_goals ~filter:state.planning_filter
+                         ~sort:state.planning_sort p.pl_goals))
+             ~cursor:state.planning_cursor
+             ~delta:(if bracket = "]" then 1 else -1)
+             ~set_cursor:(fun n -> state.planning_cursor <- n)
+             ~reopen:(fun () ->
+               open_planning_detail state ~mailbox:async_messages)
+       | Some (("[" | "]") as bracket)
+         when state.view = Fusion
+              && (match state.fusion_mode with
+                  | Fusion_detail _ -> true
+                  | Fusion_list -> false) ->
+           step_detail_cursor
+             ~count:
+               (match state.fusion_runs with
+                | None -> 0
+                | Some snapshot -> List.length snapshot.fus_runs)
+             ~cursor:state.fusion_cursor
+             ~delta:(if bracket = "]" then 1 else -1)
+             ~set_cursor:(fun n -> state.fusion_cursor <- n)
+             ~reopen:(fun () -> open_fusion_detail state ~mailbox:async_messages)
+       (* Approvals holds no id -- the detail is a flag over the row under the
+          cursor -- so stepping is the cursor move, and the pane follows. *)
+       | Some (("[" | "]") as bracket)
+         when state.view = Approvals && state.approval_detail_open ->
+           step_detail_cursor ~count:(List.length (approval_items state))
+             ~cursor:state.approval_cursor
+             ~delta:(if bracket = "]" then 1 else -1)
+             ~set_cursor:(fun n -> state.approval_cursor <- n)
+             ~reopen:(fun () -> state.approval_detail_scroll <- 0)
+       | Some (("[" | "]") as bracket) when state.view = Board ->
+           step_board_read state ~mailbox:async_messages
+             ~delta:(if bracket = "]" then 1 else -1)
        | Some (("[" | "]") as bracket) when state.view = Changes ->
            cycle_changes_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
@@ -11209,11 +11543,19 @@ and is loaded on demand through keeper_skill.
             | System_logs -> ())
        | Some k when Masc_tui_keys.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
-       (* Ctrl-] follows the reference under the cursor; Ctrl-T comes back.
-          vim's tag keys, because that is the move: the screen names a thing
-          somewhere else and this goes there and back. [Y] already copies the
-          same reference -- following it is what an operator did with the copy
-          anyway, by hand. *)
+       (* Ctrl-] follows the reference under the cursor, and Esc on the surface
+          it lands on comes back. vim's tag key for the going; for the coming
+          back it was Ctrl-T, which never ran: the mouse-tracking toggle
+          claims the same byte 1200 lines above this in the same ordered
+          match, and its [when] guard stops the compiler from calling the
+          later arm unreachable. So following worked and returning did not.
+
+          Esc rather than another chord. It is what a reader presses to leave
+          a screen anyway, and where they were is a better answer than
+          Overview -- which is where Esc used to drop them, having thrown away
+          the fact that they had come from somewhere. [Y] already copies the
+          same reference; following it is what an operator did with the copy
+          by hand. *)
        | Some "\x1d" ->
            (match
               Option.bind (presented_surface_reference ()) (fun reference ->
@@ -11261,13 +11603,6 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | _, _ -> ());
                 add_event state "system" ("followed " ^ reference))
-       | Some "\x14" ->
-           (match state.followed_from with
-            | None -> ()
-            | Some (origin, _) ->
-                state.followed_from <- None;
-                goto_surface state ~mailbox:async_messages origin;
-                add_event state "system" "back")
        | Some "Y" ->
            (match presented_surface_reference () with
             | Some reference ->
@@ -11495,6 +11830,21 @@ and is loaded on demand through keeper_skill.
        | Some "\t" | Some "shift-tab" ->
            cycle_surface state ~mailbox:async_messages
              ~backwards:(key = Some "shift-tab")
+       (* A followed reference is the outermost thing Esc can return from, and
+          the only one that knows a destination other than this surface's own
+          default. Checked before the per-surface arms because those answer
+          "leave this screen" with a fixed answer, and this one has the
+          reader's actual origin. A surface with its own inner state to close
+          -- an open detail, a preview -- is not reached this way: the follow
+          landed on the row, and closing the row first would need two presses
+          to undo one. *)
+       | Some "esc" when Option.is_some state.followed_from ->
+           (match state.followed_from with
+            | None -> ()
+            | Some (origin, _) ->
+                state.followed_from <- None;
+                goto_surface state ~mailbox:async_messages origin;
+                add_event state "system" "back")
        | Some "esc" ->
            (* Esc goes back *)
            (* A running preview is the innermost thing Esc can go back from:
@@ -12571,77 +12921,27 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | Board_read _ | Board_compose -> ())
             | Schedules ->
-                (match state.schedule_detail_id, state.schedules with
-                 | None, Some snapshot ->
-                     Option.iter
-                       (fun row ->
-                          state.schedule_detail_id <- Some row.sch_schedule_id;
-                          state.schedule_scroll <- 0)
-                       (List.nth_opt snapshot.scs_rows state.schedule_cursor)
-                 | Some _, _ | None, None -> ())
+                (match state.schedule_detail_id with
+                 | None -> open_schedule_detail state
+                 | Some _ -> ())
             | Verification ->
                 (match state.verification_detail_request_id with
                  | Some _ -> ()
                  | None ->
-                     Option.iter
-                       (fun row ->
-                          state.verification_detail_request_id <-
-                            Some row.Masc.Tui_decode.vr_request_id;
-                          state.verification_detail_scroll <- 0;
-                          state.verification_evidence <- None;
-                          launch_verification_evidence_load state
-                            ~mailbox:async_messages
-                            row.Masc.Tui_decode.vr_task_id)
-                       (verification_cursor_row state))
+                     open_verification_detail state ~mailbox:async_messages)
             | Harness ->
-                (match state.harness_detail, state.harness with
-                 | None, Some snapshot ->
-                     Option.iter
-                       (fun verdict ->
-                          state.harness_detail <-
-                            Some
-                              ( verdict.Masc.Tui_decode.hv_task_id
-                              , verdict.hv_at );
-                          state.harness_detail_scroll <- 0)
-                       (List.nth_opt snapshot.Masc.Tui_decode.hs_verdicts
-                          state.harness_cursor)
-                 | Some _, _ | None, None -> ())
+                (match state.harness_detail with
+                 | None -> open_harness_detail state
+                 | Some _ -> ())
             | Planning ->
                 (match state.planning_mode with
                  | Planning_list ->
-                     let goals =
-                       match state.planning with
-                       | None -> []
-                       | Some p ->
-                           planning_visible_goals ~filter:state.planning_filter
-                             ~sort:state.planning_sort p.pl_goals
-                     in
-                     (match List.nth_opt goals state.planning_cursor with
-                      | Some g ->
-                          state.planning_mode <- Planning_detail g.pg_id;
-                          state.planning_scroll <- 0;
-                          state.goal_timeline <- None;
-                          launch_goal_timeline_load state
-                            ~mailbox:async_messages g.pg_id
-                      | None -> ())
+                     open_planning_detail state ~mailbox:async_messages
                  | Planning_detail _ -> ())
             | Fusion ->
                 (match state.fusion_mode with
                  | Fusion_list ->
-                     let runs =
-                       match state.fusion_runs with
-                       | None -> []
-                       | Some snapshot -> snapshot.fus_runs
-                     in
-                     (match List.nth_opt runs state.fusion_cursor with
-                      | Some run ->
-                          state.fusion_mode <- Fusion_detail run.fur_run_id;
-                          state.fusion_scroll <- 0;
-                          state.fusion_detail <- None;
-                          state.fusion_detail_error <- None;
-                          launch_fusion_detail_load state
-                            ~mailbox:async_messages ~run_id:run.fur_run_id
-                      | None -> ())
+                     open_fusion_detail state ~mailbox:async_messages
                  | Fusion_detail _ -> ())
             | Changes -> (
                 (* The row under the cursor, read as the lines it removed and
@@ -12700,6 +13000,25 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages Changes
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
+       | Some "f" | Some "F"
+         when state.view = Board && state.board_mode <> Board_compose ->
+           (* All, then each hearth the unnarrowed list showed, busiest first,
+              then all again. The narrowing is the server's -- see
+              [fetch_board] -- so this refetches rather than filtering the
+              page in hand. *)
+           state.board_hearth <-
+             Board_hearth.next ~current:state.board_hearth
+               ~census:state.board_hearths;
+           state.board_cursor <- 0;
+           state.board_mode <- Board_list;
+           add_event state "system"
+             (match state.board_hearth with
+              | None -> "Board: every hearth"
+              | Some hearth -> "Board hearth: " ^ hearth);
+           start_http_refresh state ~host:server_peer_host ~port:state.port
+             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+             ~scoped_refresh_inflight:http_scoped_refresh_inflight
+             ~scoped_refresh_followup ~mailbox:async_messages
        | Some "f" | Some "F" when state.view = Planning ->
            (* Client-side over the loaded goals: no refetch. *)
            state.planning_filter <- next_planning_filter state.planning_filter;
@@ -12807,11 +13126,18 @@ and is loaded on demand through keeper_skill.
                         launch_git_diff_load state ~mailbox:async_messages
                           ~keeper:(Some change.Masc.Tui_decode.fc_keeper) ~path)))
        | Some "v" | Some "V"
-         when state.view = Planning || state.view = Verification ->
-           (* Planning is the parent workspace; [v] switches its two child
-              modes without adding Task Review back to the top-level ring. *)
+         when state.view = Planning || state.view = Verification
+              || state.view = Harness ->
+           (* Planning is the parent workspace; [v] walks its three child
+              modes without putting any of them back on the top-level ring.
+              The order is the life of one task verdict: the goals the work
+              hangs off, the queue waiting for a ruling, and the rulings the
+              judge recorded. *)
            goto_surface state ~mailbox:async_messages
-             (if state.view = Planning then Verification else Planning)
+             (match state.view with
+              | Planning -> Verification
+              | Verification -> Harness
+              | Harness | _ -> Planning)
        | Some "v" when state.view = Changes ->
            (* View the selected change on the Code surface. The clone-relative
               address resolves through the same ?keeper= axis the git-diff

@@ -1,14 +1,17 @@
-(** Render the exact LLM-selected current Memory OS snapshot.
+(** Render current ordinary and source-bound Memory OS facts.
 
-    Recall reads the same snapshot as the dashboard and injects every current
-    fact in stored order when the exact rendered fact payload fits the Memory OS
-    byte budget. Recall never truncates, ranks, or partially injects facts.
+    Ordinary facts come from the same snapshot as the dashboard. Source-bound
+    facts are revalidated against their exact file bytes before injection;
+    changed or unavailable sources contribute a typed invalidation instead of
+    their old claim. Recall never truncates, ranks, or partially injects facts.
 
-    Oversized persisted state, a read error, and an empty store all produce the
-    same turn: no recall block. The reason is emitted to the operator as the
-    [MemoryOsRecallUnavailable] counter and a warn log; it is not stated to the
-    keeper, which is never told that its memory is missing. *)
+    An oversized combined payload produces no recall block. A source-store read
+    error falls back to ordinary recall after recording the operator-visible
+    failure. An empty ordinary store still produces a block when a pending
+    source invalidation exists. *)
 
+(** Render only the ordinary snapshot. Kept as the focused ordinary-store
+    projection; production prompt assembly calls [render_if_enabled]. *)
 val render_context
   :  keepers_dir:string
   -> keeper_id:string
@@ -19,7 +22,9 @@ val render_context
 val enabled : unit -> bool
 
 val render_if_enabled
-  :  keepers_dir:string
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> keepers_dir:string
   -> keeper_id:string
   -> now:float
   -> unit

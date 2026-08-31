@@ -281,7 +281,19 @@ let fact_of_json ~now (json : Yojson.Safe.t) : fact option =
           | Some (`String raw) -> category_of_string raw
           | Some _ | None -> None)
      with
-     | Some claim, Some category -> Some { claim; category; first_seen = now }
+     | Some claim, Some category ->
+       (* Origin is the extraction itself: this row is a copy of something
+          the keeper already saw. [trace_id] is empty by construction — the
+          committing journal entry (snapshot-level source) carries the exact
+          trace; the row never guesses one. *)
+       Some
+         { claim
+         ; category
+         ; first_seen = now
+         ; last_seen = now
+         ; reinforcement = 0
+         ; origin = { kind = Keeper_memory_os_types.Injected; trace_id = "" }
+         }
      | (Some _, None) | (None, _) -> None)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;

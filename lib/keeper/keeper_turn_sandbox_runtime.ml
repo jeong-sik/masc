@@ -803,15 +803,14 @@ let start_microvm_container ?timeout_sec t =
     start_microvm_container_unlocked ?timeout_sec t)
 ;;
 
-(* Takes the name rather than the meta: shutdown finalization holds
-   [operation.keeper_name] and no meta by the time the registry entry is
-   gone, and both teardown targets -- the microvm guest name and the
-   persistent-container label selection -- are derived from the name
-   alone. *)
+(* Shutdown finalization retains the typed backend through registry removal.
+   A Local or remote-SSH keeper owns no local container, while Docker and
+   microVM names project to different runtimes and must not probe each other. *)
 let teardown_keeper_sandbox_by_name
       ?timeout_sec
       ~(config : Workspace.config)
       ~(keeper_name : string)
+      ~(backend : Keeper_sandbox.backend)
       ()
   =
   let timeout_sec =
@@ -822,27 +821,22 @@ let teardown_keeper_sandbox_by_name
            ~bucket:Env_config_sandbox.Shell_timeout.Cleanup_rm
            ())
   in
-  let guest_name = microvm_container_name ~config ~keeper_name in
-  let guest_outcome =
+  match backend with
+  | Keeper_sandbox.Remote_ssh -> Ok ()
+  | Keeper_sandbox.Docker ->
+    Keeper_sandbox_runtime.remove_persistent_containers
+      ~keeper_name
+      ~base_path:config.base_path
+      ~timeout_sec
+      ()
+  | Keeper_sandbox.Micro_vm ->
+    let guest_name = microvm_container_name ~config ~keeper_name in
     with_microvm_lifecycle_lock (fun () ->
       match stop_and_delete_microvm_container ~timeout_sec guest_name with
       | Error _ as error -> error
       | Ok () ->
         release_registered_microvm_identity guest_name;
         Ok ())
-  in
-  let docker_outcome =
-    Keeper_sandbox_runtime.remove_persistent_containers
-      ~keeper_name
-      ~base_path:config.base_path
-      ~timeout_sec
-      ()
-  in
-  (match guest_outcome, docker_outcome with
-   | Ok (), Ok () -> Ok ()
-   | Error guest, Ok () -> Error guest
-   | Ok (), Error docker -> Error docker
-   | Error guest, Error docker -> Error (guest ^ "; " ^ docker))
 ;;
 
 let teardown_keeper_sandbox
@@ -851,7 +845,18 @@ let teardown_keeper_sandbox
       ~(meta : keeper_meta)
       ()
   =
-  teardown_keeper_sandbox_by_name ?timeout_sec ~config ~keeper_name:meta.name ()
+  let backend =
+    match meta.sandbox_profile with
+    | Docker -> Keeper_sandbox.Docker
+    | Micro_vm -> Keeper_sandbox.Micro_vm
+    | Remote_ssh -> Keeper_sandbox.Remote_ssh
+  in
+  teardown_keeper_sandbox_by_name
+    ?timeout_sec
+    ~config
+    ~keeper_name:meta.name
+    ~backend
+    ()
 ;;
 
 let start_container ?timeout_sec (t : t) =

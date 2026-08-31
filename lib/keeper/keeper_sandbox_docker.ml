@@ -113,7 +113,6 @@ let effective_sandbox_profile ~(meta : keeper_meta) =
   match meta.sandbox_profile with
   | Docker -> Docker, meta.network_mode
   | Micro_vm -> Micro_vm, meta.network_mode
-  | Local -> Local, meta.network_mode
   | Remote_ssh -> Remote_ssh, meta.network_mode
 ;;
 
@@ -250,7 +249,7 @@ let ensure_shell_image_available ~(meta : keeper_meta) ~image ~timeout_sec =
       "remote_ssh_dispatch_unavailable: sandbox_profile=remote_ssh has no \
        host-side shell image; the remote endpoint carries its own, and \
        there is no fallback to docker or host image stores"
-  | Keeper_types_profile_sandbox.Local | Keeper_types_profile_sandbox.Docker ->
+  | Keeper_types_profile_sandbox.Docker ->
   match
     Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class
       ~image
@@ -347,7 +346,7 @@ let docker_run_argv
       "remote_ssh_dispatch_unavailable: docker_run_argv called for \
        sandbox_profile=remote_ssh; SSH runner not wired yet (Phase 1 \
        task 6); no fallback to docker or host dispatch"
-  | Keeper_types_profile_sandbox.Local | Keeper_types_profile_sandbox.Docker ->
+  | Keeper_types_profile_sandbox.Docker ->
   Keeper_sandbox_runtime.docker_command_argv ()
   @ [ "run"; "--rm"; "--name"; container_name ]
   @ Keeper_sandbox_runtime.docker_label_args

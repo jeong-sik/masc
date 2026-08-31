@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T22:08:59+09:00",
+  "issue": 31966,
+  "source_base_head": "027574a822f4cd9487a90b2bbe334d130eeceefd",
+  "source_change_head": "6f84b17696833b9fdd5b206d8a6a3587186a418a",
+  "measurement_source_commit": "90a182640f4b77624a3efe34eadd161d867fd093",
+  "image_digest": "sha256:1620ec955be1bb43f1dc3b1dc1d0c7612accda5aee0a3989fec436ea69f0ad9e",
+  "binary_sha256": "e2c8028c534287990e663bba436703fd37b70a2734c9729cff8a5fabbc29fa39",
+  "provider_response": {
+    "status": 200,
+    "shape": "thinking_only",
+    "external_request_count": 0
+  },
+  "baseline": {
+    "measurement_source_commit": "8ca359b870c7bb78c01f762717ad3eead00e480b",
+    "first_failure_count": 1,
+    "restart_failure_count": 1
+  },
+  "fixed": {
+    "first_start": {
+      "started_at": "2026-08-30T13:03:27Z",
+      "provider_chat_post_count": 4,
+      "provider_model": "glm-5.3-flash",
+      "durable_streak_count": 4,
+      "durable_streak_value": 1
+    },
+    "restart": {
+      "restarted_at": "2026-08-30T13:05:53Z",
+      "live_failure_count_before_provider_post": 1,
+      "provider_chat_post_count": 4,
+      "provider_model": "deepseek-v4-flash",
+      "failed_primary_provider_post_count": 0,
+      "durable_streak_count": 4,
+      "durable_streak_value_after_failure": 2,
+      "live_failure_count_after_failure": 2,
+      "durable_suffix_count_after_outcome": 0
+    },
+    "health": {
+      "overall_status": "degraded",
+      "blocker": "turn_failure_recovering",
+      "failing_keeper_count": 4,
+      "recovering_keeper_count": 4,
+      "executable_keeper_count": 4,
+      "operator_action_required": false,
+      "effective_base_path": "/app",
+      "effective_masc_root": "/app/.masc"
+    }
+  },
+  "focused_checks": {
+    "turn_failure_test_count": 6,
+    "turn_failure_test_failures": 0,
+    "direct_keepalive_test_count": 1,
+    "direct_keepalive_test_failures": 0,
+    "typed_terminal_matrix_cases": 147200,
+    "typed_terminal_matrix_mismatches": 0,
+    "unknown_schema_fail_closed": "pass",
+    "diff_check": "pass",
+    "ocamlformat_check": "pass",
+    "full_heartbeat_suite_claimed_pass": false
+  },
+  "shutdown": {
+    "app_exit_code": 0,
+    "app_stopped": true,
+    "fake_provider_exit_code": 137,
+    "fake_provider_stopped": true,
+    "volume_preserved": true
+  },
+  "artifact_sha256": {
+    "image-build.log": "dc74c2fc5aa3a4d80e9f592758e0b92a40856fb1410d5167d0cf899eafc72fca",
+    "container-binary-sha256.txt": "ebe1b8f874251af9dc9cf7e1707340b12018525c1d875ed273e54c3cf205119e",
+    "provider-all-posts.log": "5c49638d330bc51441e1ccfe9bc132e821a79a8d632667e21d86c25894eaf535",
+    "failure-streak-first.jsonl": "0563a0c878b5c815c6f2716a9962eaa011c86bafec8de22ff1cb64545cfbd3c6",
+    "failure-streak-restart.jsonl": "b264f5ba934a44d6b95e240aed82657fb6a85336e00a8cfc592cf69c3547f72d",
+    "durable-suffix-after-restart.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "keeper-status-backend-before-turn.json": "59044b9cb43452cbbcd6604bc901d94dde199592fb31cd06b2a56e4530f580b0",
+    "keeper-status-backend-after-turn.json": "c39df0040490471ef8de17766b066ce23d265ef4e48e2a9c5f4339c42732c351",
+    "receipts-summary.jsonl": "9f3134e4d0f763e5d265d11d464c592bd2932f0cdfb21fbc41876cf485f39e80",
+    "health-restart-after-turn.json": "1a4f01cb02db00f5ce3a4e26d1be81480e3526bf2803ddc80556778f40b058b7"
+  },
+  "performance_claim": false
+}

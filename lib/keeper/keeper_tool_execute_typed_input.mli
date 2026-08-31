@@ -79,6 +79,20 @@ type conditional =
   | And_then  (** run the next program only if the one before it exited zero *)
   | Or_else  (** run the next program only if the one before it did not *)
 
+type script = {
+  shell : string;
+      (** the shell that runs [text], as one of the names
+          {!Keeper_tooling.Shell_costume.names_a_shell} recognises, with any
+          directory stripped. *)
+  text : string;  (** handed to that shell after [-c] *)
+}
+(** A command line and the shell that runs it.
+
+    The shell is carried rather than fixed because
+    [argv:\["bash";"-c";S\]] normalises to this form and must keep the shell it
+    named. Resolving a bash expansion under a container's [sh] is dash, and
+    the corpus has 656 of them. *)
+
 type source =
   | Staged of {
       program : program;
@@ -88,10 +102,14 @@ type source =
               whatever ran last, so a run of them reads left to right, as a
               shell reads [a && b || c]. *)
     }
-  | Script of string
-      (** one command line, lowered by the bash parser to the same
-          {!Masc_exec.Shell_ir.t} the staged form builds. A construct the IR
-          cannot represent is refused by name; nothing reaches a shell. *)
+  | Script of script
+      (** one command line, run by a real shell inside the keeper's sandbox.
+
+          RFC execute-boundary-is-the-sandbox: the field the caller chose names
+          the execution model. [argv] and [pipeline] are typed and reach no
+          shell; [script] is a shell. The bash subset still parses this text,
+          but as a judge — for path classification, telemetry, and the rewrite
+          advice that rides back — rather than as the thing that runs. *)
 (** Where the work comes from. The schema says [argv], [pipeline] and [script]
     exclude each other; saying it here too makes "both" and "neither"
     unrepresentable rather than something {!validate} has to catch. *)
@@ -133,14 +151,6 @@ type validation_error =
           relative paths are rejected to
           mirror {!Cwd_not_absolute} semantics. *)
   | Cwd_not_absolute of string
-  | Script_not_a_command_line of {
-      token : string;
-      expected : string list;
-    }
-  | Script_unreadable of Masc_exec.Parsed.reason_aborted
-  | Script_outside_the_subset of Masc_exec.Parsed.reason_too_complex
-  | Script_nested_pipeline
-  | Script_rejected_by_the_gate of string
   | Redirect_fd_unknown of {
       fd : int;
       target : int;

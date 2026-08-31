@@ -16,6 +16,7 @@ type fit =
   | Exceeds of measurement
 
 val render_facts : Keeper_memory_os_types.fact list -> string
+val render_fact : Keeper_memory_os_types.fact -> string
 val rendered_bytes : Keeper_memory_os_types.fact list -> int
 (** Exact byte count of {!render_facts}, computed without allocating the
     combined rendered payload. Saturates at [Int.max_int]. *)

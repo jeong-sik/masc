@@ -75,6 +75,11 @@ type event = {
   content: string;
 }
 
+(* How long the footer keeps saying what the last keypress did. Long enough
+   to read after coming back from $EDITOR, short enough that it is still
+   about the key the operator just pressed. *)
+let last_action_window_s = 12.0
+
 (* The one key the Overview event panel folds identical neighbours by; the
    renderer and both scroll handlers must count the same folded rows or the
    scroll range and the drawn range drift apart. *)
@@ -89,13 +94,30 @@ type keeper_runtime = Tui_decode.keeper_runtime
 (** A single metrics/log entry (from Tui_decode) *)
 type log_entry = Tui_decode.log_entry
 
+(** Who addressed the keeper, on a row the keeper did not write.
+
+    The server has always said which of the two this is -- [speaker_authority]
+    on the wire, {!Masc_tui_keeper_chat_history.speaker} after decoding -- and
+    the pane collapsed both into the display label. Everything downstream then
+    had to ask the label: the style did not ask at all and drew the two alike,
+    and the message recall asked with [String.equal label "you"], which is
+    false for the operator's own lines that arrived on any surface but the
+    dashboard.
+
+    Each arm carries the label to draw. The label is a rendering of the fact;
+    the constructor is the fact. *)
+type message_author =
+  | Sent_by_operator of string
+      (** The person reading this pane. ["you"], or ["you \xc2\xb7 <surface>"]
+          where the line came in from somewhere other than the dashboard. *)
+  | Sent_by_other of string
+      (** Anyone else: another agent's broadcast, a connector, a second
+          operator. Named as the server named them, with the surface it
+          arrived on. *)
+
 type msg_role =
-  | Message_user of string
-      (** A row addressed to the keeper, carrying the name to draw beside it.
-          ["you"] for what this pane sent; otherwise whoever the server named,
-          with the surface it arrived on. The role alone used to be the label,
-          which is why an agent's broadcast and the operator's own line were
-          indistinguishable. *)
+  | Message_user of message_author
+      (** A row addressed to the keeper by a person or another agent. *)
   | Message_keeper
   | Message_autonomous
       (** A keeper reply produced by an autonomous turn rather than a message
@@ -264,6 +286,12 @@ type board_post = {
   bp_votes: int;
   bp_comment_count: int;
   bp_created_at: string;
+  bp_updated_at: float;
+      (** Unix seconds of the last move on the post or its comments. The server
+          has always sent it; the list drew neither timestamp, so the one
+          question a board answers -- what is still alive -- had no column, and
+          two of the sort orders ([recent], [updated]) ranked by a number the
+          reader could not see. *)
   bp_hearth: string option;
       (** The sub-board it lives in. 24 of them here, and 1550 of 2171 posts
           sit in [verification] alone — a flat list is 71% one topic with
@@ -277,6 +305,11 @@ type board_post = {
 (** Board comment *)
 type board_comment = {
   bc_id: string;
+  bc_parent_id: string option;
+      (** The comment this one answers, when it answers one. The store and the
+          wire have carried it since comments existed; the pane decoded a flat
+          list, so a reply and the thing it replied to sat at the same
+          indent and a thread read as unrelated remarks in clock order. *)
   bc_author: string;
   bc_content: string;
   bc_created_at: string;
@@ -311,6 +344,22 @@ type schedule_row = {
   sch_queue_pending_count: int option;
   sch_reaction_projection_status: string option;
   sch_reaction_latest_at_iso: string option;
+  sch_reaction_kind: string option;
+  sch_wake_seen: bool option;
+      (** Whether the woken Keeper's ledger recorded the stimulus arriving.
+          [None] is "the ledger did not say", which is not [Some false] --
+          only one of those means something went wrong. Same for the three
+          below. *)
+  sch_turn_started: bool option;
+      (** Whether a turn actually began. This is the field that separates a
+          wake that was delivered from one that was acted on; the pane had
+          only [sch_reaction_projection_status], a single word for all four
+          of these at once. *)
+  sch_queue_ack_seen: bool option;
+  sch_wake_cancelled: bool option;
+  sch_reaction_quarantined: int option;
+      (** Ledger records the projection could not match. Nonzero is why a
+          status reads worse than the steps below it look. *)
 }
 
 (** Schedule list snapshot. [scs_request_count] is [None] exactly when the
@@ -997,9 +1046,12 @@ type surface =
 (* The Tab cycle and the strip drawn above every surface share this order,
    so the strip cannot disagree with where Tab actually goes. Labels are the
    strip's spelling. Keepers stands for every keeper sub-mode; Planning owns
-   both its Goal view and the Task Review queue. The latter remains a distinct
-   internal surface because it has a different API and permission boundary,
-   but it is not a second top-level destination. *)
+   its Goal view, the Task Review queue, and the Verdicts the judge recorded.
+   Those two remain distinct internal surfaces because each has a different
+   API and permission boundary, but neither is a second top-level
+   destination. Verdicts is the far half of Task Review -- one lists what is
+   waiting for a ruling and the other what was ruled -- and a top-level tab
+   called "Harness" said neither. *)
 let surface_ring : (surface * string) list =
   [ (Overview, "Overview");
     (Acting, "Acting");
@@ -1009,7 +1061,6 @@ let surface_ring : (surface * string) list =
     (Board, "Board");
     (Planning, "Planning");
     (Schedules, "Schedules");
-    (Harness, "Harness");
     (Fusion, "Fusion");
     (Repositories, "Repos");
     (Code, "Code");
@@ -1022,14 +1073,14 @@ let surface_ring : (surface * string) list =
   ]
 
 (* Ring position of the family a view belongs to. Keeper sub-modes collapse
-   onto Keepers, Task Review collapses onto Planning, and Changes collapses
-   onto Keepers -- its rows are one keeper's file writes, chosen by the
-   roster cursor, so it was never a destination of its own. *)
+   onto Keepers, Task Review and Verdicts collapse onto Planning, and Changes
+   collapses onto Keepers -- its rows are one keeper's file writes, chosen by
+   the roster cursor, so it was never a destination of its own. *)
 let surface_ring_index (view : surface) =
   let family =
     match view with
     | Keepers _ -> Keepers Keeper_list
-    | Verification -> Planning
+    | Verification | Harness -> Planning
     | Changes -> Keepers Keeper_list
     | v -> v
   in
@@ -1532,6 +1583,15 @@ type state = {
   (* A top-level [q] arms exit instead of ending the TUI immediately. The next
      unrelated input clears it; a second [q] exits. *)
   mutable quit_armed: bool;
+  (* What the last key the operator pressed actually did, and the clock
+     reading it was set at. These outcomes go to [add_event], and the event
+     log is drawn by Overview alone -- so the operator who pressed [a] on
+     Repos stood on the one surface that could not answer them, and a
+     registration that succeeded looked the same as an editor that never
+     started. The footer every surface draws answers instead, and only for
+     [last_action_window_s]: an outcome that stayed would go on claiming a
+     keypress the operator has since forgotten making. *)
+  mutable last_action: (string * float) option;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
      fleet's own reading of what is missing. *)
@@ -1658,7 +1718,33 @@ type state = {
     (board_post * board_comment list) Masc_tui_board_detail.t;
   mutable board_list_error: string option;
   mutable board_cursor: int;
+  mutable msg_find: string;
+      (** What [/find] was last given on this pane, or [""] before it is used.
+          Kept so the arg-less form continues the same search instead of
+          asking for the text again. *)
+  mutable msg_find_at: int option;
+      (** The index in the conversation of the message [/find] last landed on,
+          counted from the oldest. The next search starts strictly older than
+          it, which is what makes repeating [/find] walk backwards through the
+          matches rather than returning to the newest one. *)
   mutable board_sort: board_sort;
+  mutable board_hearth: string option;
+      (** Which sub-board the list is narrowed to, or [None] for all of them.
+          Sent to the server rather than filtered here: the listing is paged,
+          and 1550 of this workspace's 2171 posts sit in [verification] alone,
+          so a filter over one page would show a handful of rows and call them
+          the hearth. *)
+  mutable board_hearths: (string * int) list;
+      (** Every hearth on the board and how many posts it holds, busiest
+          first, as [/api/v1/board/hearths] counts them.
+
+          This was read off whichever listing had last arrived, which made it
+          two things at once and both of them wrong. It could not offer a
+          hearth whose posts all fell outside the page, and it had to be
+          refreshed only from unnarrowed loads or the cycle collapsed to the
+          one hearth already chosen. The board's own census has neither
+          problem, and it carries the counts -- so [f] stops being a walk
+          through names a reader cannot see the size of. *)
   mutable board_scroll: int;
   mutable board_mode: board_mode;
   mutable board_focus: pane_focus;
@@ -2244,6 +2330,7 @@ let create_state
   keeper_action_serial = 0;
   composer_focused = false;
   quit_armed = false;
+  last_action = None;
   fleet_safety = None;
   fleet_safety_error = None;
   connection_status = Disconnected;
@@ -2308,7 +2395,11 @@ let create_state
   board_detail = Masc_tui_board_detail.initial;
   board_list_error = None;
   board_cursor = 0;
+  msg_find = "";
+  msg_find_at = None;
   board_sort = Board_hot;
+  board_hearth = None;
+  board_hearths = [];
   board_scroll = 0;
   board_mode = Board_list;
   board_focus = Right_pane;
@@ -3109,6 +3200,20 @@ let surface_row_texts (state : state) : surface -> string list option = function
   | Fusion | Resources | Changes | Config | Tools ->
       None
 
+(* Whether the chat pane is parked somewhere other than the newest row.
+
+   One reader, because two sides act on it: the row budget below reserves a
+   line for the notice, and the pane draws it. Counting a row nothing draws
+   floats the footer, and drawing one nothing counted pushes a line of
+   conversation off the bottom -- the pair of defects the queue rows already
+   taught this pane (#29818). Restating the condition in both places is how
+   they come apart.
+
+   The fact itself used to live in the footer alone, seventh of nine hints,
+   and the footer drops hints from its tail on a narrow terminal: the one
+   thing that changes what the arrow keys do was among the first to go. *)
+let keeper_message_reading_back (state : state) = state.msg_scroll > 0
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -3145,6 +3250,7 @@ let keeper_message_status_rows (state : state) =
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
   + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
      else 0)
+  + (if keeper_message_reading_back state then 1 else 0)
   + composer_extra_rows state
 
 (* One list under one cursor: the calls keepers are holding first (they run

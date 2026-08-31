@@ -1,0 +1,30 @@
+{
+  "Id": "6c521714175ad55723d4e7932675f3dd13048d2886a027fe58e3c9bcd645eb3e",
+  "Name": "/masc-r82-release-3",
+  "State": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 137,
+    "Error": "",
+    "StartedAt": "2026-08-30T19:50:57.203366216Z",
+    "FinishedAt": "2026-08-30T19:51:00.158335426Z",
+    "Health": {
+      "Status": "unhealthy",
+      "FailingStreak": 0,
+      "Log": []
+    }
+  },
+  "Mounts": [
+    {
+      "Type": "volume",
+      "Name": "masc-r82-release-data",
+      "Destination": "/app/.masc",
+      "RW": true
+    }
+  ]
+}

@@ -60,6 +60,7 @@ let read_current_facts ~keepers_dir ~keeper_id =
    preserving snapshot order. Search does not assign value scores or introduce
    a recency authority. *)
 let search_durable_facts
+      ~(config : Workspace.config)
       ~(keepers_dir : string)
       ~(meta : keeper_meta)
       ~(query : string)
@@ -67,7 +68,20 @@ let search_durable_facts
   : fact_match list * int
   =
   let facts = read_current_facts ~keepers_dir ~keeper_id:meta.name in
-  let total_candidates = List.length facts in
+  let source_projection =
+    match
+      Keeper_memory_source_current.revalidate
+        ~config
+        ~meta
+        ~keepers_dir
+        ~now:(Time_compat.now ())
+        ()
+    with
+    | Ok projection -> projection
+    | Error detail -> failwith detail
+  in
+  let source_facts = source_projection.facts in
+  let total_candidates = List.length facts + List.length source_facts in
   let matched =
     if String.equal query ""
     then facts
@@ -77,14 +91,29 @@ let search_durable_facts
           String_util.contains_substring_ci fact.claim query)
         facts
   in
-  let matches =
+  let source_matched =
+    if String.equal query ""
+    then source_facts
+    else
+      List.filter
+        (fun (fact : Keeper_memory_source_current.fact) ->
+           String_util.contains_substring_ci fact.claim query)
+        source_facts
+  in
+  let ordinary_matches =
     matched
     |> List.map (fun (fact : Keeper_memory_os_types.fact) ->
       { claim = fact.claim
       ; category = Keeper_memory_os_types.category_to_string fact.category
       })
   in
-  take limit matches, total_candidates
+  let source_matches =
+    List.map
+      (fun (fact : Keeper_memory_source_current.fact) ->
+         { claim = fact.claim; category = "fact" })
+      source_matched
+  in
+  take limit (ordinary_matches @ source_matches), total_candidates
 ;;
 
 let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
@@ -228,7 +257,7 @@ let keeper_memory_search_with_outcome
          @ if no_match then [ "no_match", `Bool true ] else [])
     | All ->
       let fact_matches, fact_total =
-        search_durable_facts ~keepers_dir ~meta ~query ~limit
+        search_durable_facts ~config ~keepers_dir ~meta ~query ~limit
       in
       let history_limit = max 0 (limit - List.length fact_matches) in
       let history_matches =
@@ -258,7 +287,7 @@ let keeper_memory_search_with_outcome
          @ if no_match then [ "no_match", `Bool true ] else [])
     | Memory ->
       let matches, total_candidates =
-        search_durable_facts ~keepers_dir ~meta ~query ~limit
+        search_durable_facts ~config ~keepers_dir ~meta ~query ~limit
       in
       let no_match = matches = [] in
       let match_jsons = List.map fact_match_to_json matches in
@@ -323,6 +352,23 @@ let keeper_context_status_json
   let memory_facts_total =
     read_current_facts ~keepers_dir ~keeper_id:meta.name |> List.length
   in
+  let source_memory_facts_total, source_memory_invalidations_total =
+    match
+      Keeper_memory_source_current.revalidate
+        ~config
+        ~meta
+        ~keepers_dir
+        ~now:(Time_compat.now ())
+        ()
+    with
+    | Ok projection -> List.length projection.facts, List.length projection.invalidations
+    | Error detail ->
+      Log.Keeper.warn
+        ~keeper_name:meta.name
+        "source-bound memory status unavailable: %s"
+        detail;
+      0, 0
+  in
   (* Give the keeper sandbox-relative paths from the SSOT so it never needs
      to interpolate host storage paths such as ".masc/playground/<name>/". *)
   let sandbox = Keeper_sandbox.of_meta ~config ~meta in
@@ -345,6 +391,9 @@ let keeper_context_status_json
          @ Keeper_sandbox.context_status_fields sandbox
          @ [ "sandbox_live", sandbox_live
            ; "memory_facts_total", `Int memory_facts_total
+           ; "source_memory_facts_total", `Int source_memory_facts_total
+           ; ( "source_memory_invalidations_total"
+             , `Int source_memory_invalidations_total )
            ]))
 ;;
 
@@ -356,6 +405,7 @@ let keeper_memory_write_max_title_chars = 120
    claim, not a document; the bound matches the cap the retired bank enforced
    so existing producers see the same boundary. *)
 let keeper_memory_write_max_body_chars = 4096
+let keeper_memory_write_max_source_path_chars = 4096
 
 (** Pure validation result for a [keeper_memory_write] call. Splitting
     this from the persistence step lets tests pin the error_kind
@@ -364,6 +414,9 @@ type memory_write_error_kind =
   | Title_too_long
   | Content_empty
   | Content_too_long
+  | Source_path_invalid
+  | Source_path_too_long
+  | Source_read_failed
   | Persistence_failed
   | No_memory_write_error
 
@@ -371,13 +424,18 @@ let memory_write_error_kind_to_string = function
   | Title_too_long -> "title_too_long"
   | Content_empty -> "content_empty"
   | Content_too_long -> "content_too_long"
+  | Source_path_invalid -> "source_path_invalid"
+  | Source_path_too_long -> "source_path_too_long"
+  | Source_read_failed -> "source_read_failed"
   | Persistence_failed -> "persistence_failed"
   | No_memory_write_error -> ""
 ;;
 
 type memory_write_validation =
   | Memory_write_ok of
-      { body : string }
+      { body : string
+      ; source_path : string option
+      }
   | Memory_write_invalid of
       { error_kind : memory_write_error_kind
       ; extras : (string * Yojson.Safe.t) list
@@ -386,6 +444,21 @@ type memory_write_validation =
 let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation =
   let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
   let content = Safe_ops.json_string ~default:"" "content" args |> String.trim in
+  let source_path =
+    match Safe_ops.safe_member "source_path" args with
+    | `Null -> Ok None
+    | `String raw ->
+      let path = String.trim raw in
+      if
+        String.equal path ""
+        || String.contains path '\n'
+        || String.contains path '\r'
+      then Error Source_path_invalid
+      else if String.length path > keeper_memory_write_max_source_path_chars
+      then Error Source_path_too_long
+      else Ok (Some path)
+    | _ -> Error Source_path_invalid
+  in
   if String.length title > keeper_memory_write_max_title_chars
   then
     Memory_write_invalid
@@ -394,21 +467,31 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
           [ "max_chars", `Int keeper_memory_write_max_title_chars
           ]
       }
-  else if content = ""
-  then Memory_write_invalid { error_kind = Content_empty; extras = [] }
   else
-    let body =
-      if title = "" then content else Printf.sprintf "**%s** %s" title content
-    in
-    if String.length body > keeper_memory_write_max_body_chars
-    then
+    match source_path with
+    | Error error_kind ->
       Memory_write_invalid
-        { error_kind = Content_too_long
+        { error_kind
         ; extras =
-            [ "max_chars", `Int keeper_memory_write_max_body_chars
-            ]
+            (match error_kind with
+             | Source_path_too_long ->
+               [ "max_chars", `Int keeper_memory_write_max_source_path_chars ]
+             | _ -> [])
         }
-    else Memory_write_ok { body }
+    | Ok source_path ->
+      if content = ""
+      then Memory_write_invalid { error_kind = Content_empty; extras = [] }
+      else
+        let body =
+          if title = "" then content else Printf.sprintf "**%s** %s" title content
+        in
+        if String.length body > keeper_memory_write_max_body_chars
+        then
+          Memory_write_invalid
+            { error_kind = Content_too_long
+            ; extras = [ "max_chars", `Int keeper_memory_write_max_body_chars ]
+            }
+        else Memory_write_ok { body; source_path }
 ;;
 
 (* An explicit write is a claim a later turn reads back; the current Memory OS
@@ -425,10 +508,14 @@ let upsert_explicit_fact
   =
   let keeper_id = meta.name in
   let now = Time_compat.now () in
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let fact : Keeper_memory_os_types.fact =
     { claim = body
     ; category = Keeper_memory_os_types.Fact
     ; first_seen = now
+    ; last_seen = now
+    ; reinforcement = 0
+    ; origin = { kind = Keeper_memory_os_types.Authored; trace_id }
     }
   in
   let result =
@@ -438,7 +525,7 @@ let upsert_explicit_fact
       ~now
       ~source:
         { kind = Keeper_memory_os_current.Explicit_write
-        ; trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
+        ; trace_id
         }
       fact
   in
@@ -491,11 +578,89 @@ let keeper_memory_write_with_outcome
       ~ok:false
       ~error_kind
       extras
-  | Memory_write_ok { body } ->
+  | Memory_write_ok { body; source_path } ->
     let keepers_dir =
       Config_dir_resolver.keepers_dir_for_base_path
         ~base_path:config.Workspace.base_path
     in
+    (match source_path with
+     | Some source_path ->
+       (match
+          Keeper_memory_source_current.upsert_file_fact
+            ~config
+            ~meta
+            ~keepers_dir
+            ~ordinary_payload:(fun () ->
+              match
+                Keeper_memory_os_current.read_for_keepers_dir
+                  ~keepers_dir
+                  ~keeper_id:meta.name
+              with
+              | Ok None -> Ok ""
+              | Ok (Some snapshot) ->
+                Ok (Keeper_memory_os_budget.render_facts snapshot.facts)
+              | Error detail -> Error detail)
+            ~now:(Time_compat.now ())
+            ~claim:body
+            ~source_path
+            ()
+        with
+        | Ok snapshot ->
+          (match
+            List.find_map
+              (fun fact ->
+                 if String.equal fact.Keeper_memory_source_current.source.path source_path
+                 then Some fact.source.sha256
+                 else None)
+              snapshot.facts
+           with
+           | Some source_sha256 ->
+             respond
+               ~memory_revision:snapshot.revision
+               ~ok:true
+               ~error_kind:No_memory_write_error
+               [ "rows_written", `Int 1
+               ; "revision", `Int snapshot.revision
+               ; "outcome", `String "persisted_source_bound_current"
+               ; "store", `String "source_bound_current_memory"
+               ; "source_path", `String source_path
+               ; "source_sha256", `String source_sha256
+               ]
+           | None ->
+             let detail =
+               Printf.sprintf
+                 "source-bound memory commit omitted its written path: %s"
+                 source_path
+             in
+             Log.Keeper.warn
+               "explicit source-bound memory write invariant failed keeper=%s: %s"
+               meta.name
+               detail;
+             respond
+               ~ok:false
+               ~error_kind:Persistence_failed
+               [ "detail", `String detail ])
+        | Error (Keeper_memory_source_current.Source_read_failed detail) ->
+          respond
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            ~ok:false
+            ~error_kind:Source_read_failed
+            [ "detail", `String detail ]
+        | Error (Keeper_memory_source_current.Store_write_failed detail) ->
+          Log.Keeper.warn
+            "explicit source-bound memory write failed keeper=%s: %s"
+            meta.name
+            detail;
+          respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ]
+        | exception (Eio.Cancel.Cancelled _ as error) -> raise error
+        | exception exn ->
+          let detail = Printexc.to_string exn in
+          Log.Keeper.warn
+            "explicit source-bound memory write failed keeper=%s: %s"
+            meta.name
+            detail;
+          respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ])
+     | None ->
     (match upsert_explicit_fact ~keepers_dir ~meta ~body with
      | Ok snapshot ->
        respond
@@ -523,5 +688,5 @@ let keeper_memory_write_with_outcome
          "explicit current Memory write failed keeper=%s: %s"
          meta.name
          detail;
-       respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ])
+       respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ]))
 ;;

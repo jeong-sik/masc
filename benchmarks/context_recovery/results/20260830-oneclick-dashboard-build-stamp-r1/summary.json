@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T17:14:24+09:00",
+  "source_change_commit": "5dff3418b93a2d42e700ab0637fca7da66718de7",
+  "measurement_source_commit": "f0177475827fe7de25cd78edd6182607a628f8f0",
+  "image_digest": "sha256:cbfd831f9fbfe856ac55485ee4adc47fbb5a8c2f39fe06817a9c20dcce8cff3f",
+  "binary_sha256": "55221b8df5ecc16110a81b912bd2138b26dbf9ae88e024033534f2c43b384af5",
+  "runtime_instance_ids": [
+    "01a051bb-10eb-7000-a5a4-30c73f14838d",
+    "01a051bb-5d5c-7000-b244-e7ada5003250"
+  ],
+  "effective_base_path": "/app",
+  "effective_masc_root": "/app/.masc",
+  "provider_turn_executed": false,
+  "keeper_created": false,
+  "baseline": {
+    "measurement_source_commit": "bc24e2872aba9effc70cab75b23ae23656ff9c00",
+    "image_digest": "sha256:7688c5ab6c64f9ae4db31de0c9e0f20e622d0729cb6d89fc6c645182d9fd9eda",
+    "binary_sha256": "d3e7c5e13f79c8ad6e00e3132621884fe3019b8b74fba700ad3998cd5055ce65",
+    "dashboard_surface_status": "missing",
+    "index_present": true,
+    "recovery_kind": "build_in_place",
+    "recovery_reason": "unbound_assets_missing",
+    "fresh_and_restart_warning_count": 2
+  },
+  "fixed": {
+    "fresh_dashboard_surface_status": "ok",
+    "fresh_recovery_kind": "none",
+    "fresh_warning_count": 0,
+    "restart_dashboard_surface_status": "ok",
+    "restart_recovery_kind": "none",
+    "restart_warning_count": 0,
+    "binary_mtime": 1788077592,
+    "build_stamp_mtime": 1788077593,
+    "index_sha256": "aec4425c27f2f8a3de910fa00f5064190ee472e2fbdab0e6d392fd17e68a9eda",
+    "container_stopped": true,
+    "volume_preserved": true
+  },
+  "focused_checks": {
+    "build": "pass",
+    "oneclick_stamp_exact_test": "1/1",
+    "config_seed_group": "10/11",
+    "config_seed_group_failure": "existing force-refresh test lacked local main_eio executable"
+  },
+  "artifact_sha256": {
+    "image-identity.json": "6ce6a6ec97f1efe938c8b18b9af680b577b004ccc54916c2a8492ac19eeaab9f",
+    "health-final.json": "c5db24546449b38ae43251a136cadd93454585120ddfc55e18fd99bda7e36522",
+    "container-build-commit.txt": "0a8c73861a1a87dead3680f56000a9289514bfac32b3d16be0e8b610b932878c",
+    "container-binary-sha256.txt": "270e321898b2b9f319af0749b8e505d492921d8b0a45209406a7fd1468605b41",
+    "initial-window.log": "031f17588cbb01b218fe65d3546666680d6fb0679cd211c5bb37a7a61bd22f8b",
+    "restart-window.log": "9bc38c021be9e9cb27ce3ae396f74ecb3117c1de66be2117763d35d9676262d1",
+    "initial-warning-count.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "restart-warning-count.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "mtime-after-restart-probe.txt": "150a037ac17b44ecb313c44fb2e39dc3d193ec71b7e74deb54c2e16726d4a8ba",
+    "baseline-health-final.json": "d28594686ad8130ea2b64643cc8967bfee0b0d64be8844f2c235fc8126b153e8",
+    "baseline-server-full.log": "b4eee5a64d72a993c1a8c7432c87bcc06bbe481c310bd4db0380228a96a08f36"
+  },
+  "performance_claim": false
+}

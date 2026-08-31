@@ -68,3 +68,15 @@ type t =
         warned about and ignored at parse time. Default [[]]. *)
   }
 [@@deriving show, eq]
+
+val to_toml : t -> string
+(** Serialize one endpoint as the standard TOML text of its
+    [exec.ssh.endpoints.<name>] table, ready to be a section of runtime.toml.
+
+    R00 serialization contract: derived from [t] itself instead of hand-writing
+    it per test. [Runtime_toml]'s decoder is the consumer SSOT; this encoder is
+    its type-derived mirror, so a field rename or a new knob cannot drift
+    between what tests write and what the loader reads. The table body carries
+    ONLY the keys the strict decoder accepts — the endpoint name is the table
+    header key, not a field, and a stray [name] entry would fail the whole
+    load. *)

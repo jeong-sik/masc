@@ -1090,9 +1090,53 @@ let () =
     | _ -> None)
 ;;
 
+let refresh_dashboard_for_keeper_lifecycle ~config ~keeper_name event =
+  Server_dashboard_http_keeper_api.refresh_keeper_execution_surfaces
+    ~config
+    ~name:keeper_name
+    event
+;;
+
+let install_workspace_message_mutation_invalidation
+      ~invalidate_full_health_snapshot
+      ()
+  =
+  Atomic.set Workspace_hooks.on_workspace_message_mutation_fn
+    (fun config ~request_id ~mention_delivery ->
+       (try
+          Dashboard_cache.invalidate_prefix
+            (Printf.sprintf "dashboard.workspace:%s;" config.Workspace.base_path);
+          Dashboard_cache.invalidate_prefix
+            (Printf.sprintf "workspace:%s:" config.base_path);
+          Sse.broadcast
+            (`Assoc
+               [ "type", `String "workspace_message_delivery_changed"
+               ; "request_id", `String request_id
+               ; ( "mention_delivery"
+                 , `String
+                     (Masc_domain.message_mention_delivery_to_string
+                        mention_delivery) )
+               ])
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Log.Keeper.warn
+            "workspace message projection invalidation failed request_id=%s: %s"
+            request_id
+            (Printexc.to_string exn));
+       try invalidate_full_health_snapshot () with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.warn
+           "workspace message full-health invalidation failed request_id=%s: %s"
+           request_id
+           (Printexc.to_string exn))
+;;
+
 let start_keeper_loops_owned
       ~claimed_persistence
       ~workspace_scope
+      ~invalidate_full_health_snapshot
       ~sw
       ~clock
       ~net
@@ -1328,6 +1372,7 @@ let start_keeper_loops_owned
     ~sw
     ~on_error:(log_dashboard_fiber_crash "keeper lifecycle listener")
     (fun () ->
+    let config = Mcp_server.workspace_config state in
     let rec loop () =
       (try
          let events = Runtime_event_bus.drain keeper_lifecycle_sub in
@@ -1346,9 +1391,16 @@ let start_keeper_loops_owned
                         ~phase:(Safe_ops.json_string_opt "phase" payload)
                     with
                     | Some event ->
-                      Server_dashboard_http.patch_keeper_dependent_caches
+                      (* Lifecycle events also arrive from MCP and shutdown
+                         completion, not only the dashboard POST handlers.
+                         Drop their source snapshot and parameterized caches
+                         before patching the current execution row, so a
+                         purged Keeper cannot be rebuilt from the five-second
+                         snapshot that still names its removed meta. *)
+                      refresh_dashboard_for_keeper_lifecycle
+                        ~config
                         ~keeper_name
-                        ~event
+                        event
                     | None ->
                       Otel_metric_store.inc_counter
                         Otel_metric_store.metric_keeper_lifecycle_malformed
@@ -1551,28 +1603,9 @@ let start_keeper_loops_owned
     mention_outcome
   in
   Workspace_broadcast.set_on_broadcast_mention broadcast_mention_handler;
-  Atomic.set Workspace_hooks.on_workspace_message_mutation_fn
-    (fun config ~request_id ~mention_delivery ->
-       try
-         Dashboard_cache.invalidate_prefix
-           (Printf.sprintf "dashboard.workspace:%s;" config.base_path);
-         Dashboard_cache.invalidate_prefix
-           (Printf.sprintf "workspace:%s:" config.base_path);
-         Sse.broadcast
-           (`Assoc
-              [ "type", `String "workspace_message_delivery_changed"
-              ; "request_id", `String request_id
-              ; ( "mention_delivery"
-                , `String
-                    (Masc_domain.message_mention_delivery_to_string mention_delivery) )
-              ])
-       with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn ->
-         Log.Keeper.warn
-           "workspace message projection invalidation failed request_id=%s: %s"
-           request_id
-           (Printexc.to_string exn));
+  install_workspace_message_mutation_invalidation
+    ~invalidate_full_health_snapshot
+    ();
   let workspace_config = Mcp_server.workspace_config state in
   fork_logged_fiber
     ~sw
@@ -1877,6 +1910,7 @@ let start_keeper_loops_owned
 
 let start_keeper_loops
       ~claimed_persistence
+      ~invalidate_full_health_snapshot
       ~sw
       ~clock
       ~net
@@ -1901,6 +1935,7 @@ let start_keeper_loops
         start_keeper_loops_owned
           ~claimed_persistence
           ~workspace_scope
+          ~invalidate_full_health_snapshot
           ~sw
           ~clock
           ~net
@@ -1946,6 +1981,10 @@ let start_keeper_loops
 module For_testing = struct
   include Projection_for_testing
 
+  let install_workspace_message_mutation_invalidation =
+    install_workspace_message_mutation_invalidation
+  ;;
+
   type nonrec keeper_loops_start_ownership = keeper_loops_start_ownership
 
   let reset_keeper_persistence_lifecycle () = Atomic.set persistence_lifecycle Idle
@@ -1956,6 +1995,8 @@ module For_testing = struct
 
   let begin_keeper_loops_start = acquire_keeper_loops_start
   let finish_keeper_loops_start = finish_keeper_loops_start
+  let refresh_dashboard_for_keeper_lifecycle =
+    refresh_dashboard_for_keeper_lifecycle
 end
 
 

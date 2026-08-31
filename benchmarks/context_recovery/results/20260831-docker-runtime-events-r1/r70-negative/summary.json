@@ -1,0 +1,31 @@
+{
+  "schema": "masc.release_runtime_events.negative_and_diagnostic.v1",
+  "source_head": "9b17b1c6eb63a53d7d3a4598aea42e036ab9d65b",
+  "image_id": "sha256:d831b61d99f28b66d645a2616bd61c789e35dc28dd34418732eadfef3cd99f2a",
+  "binary_sha256": "dc2efc123d2052d00ce0cb578230fb9c7bfff08bb13940a34fc9613e3eeeba75",
+  "preflight_helper_sha256": "10e76b3801729f95d8aa832e4bf3745d69c4151d8d5db6310c49b7205dddf7bc",
+  "image_kind": "production-shaped locally-built; not a published release artifact",
+  "negative": {
+    "started_at": "2026-08-30T18:34:11.996494334Z",
+    "finished_at": "2026-08-30T18:34:12.289844459Z",
+    "exit_code": 134,
+    "oom_killed": false,
+    "preflight_passed": true,
+    "error": "Could not open ring buffer loc: 6.events",
+    "working_directory": "/app",
+    "working_directory_writable_by_appuser": false,
+    "ocaml_runtime_events_dir": null
+  },
+  "diagnostic_override": {
+    "ocaml_runtime_events_dir": "/app/.masc/runtime/host-run",
+    "runtime": "01a053f4-934a-7000-9f1b-8589b33177ac",
+    "startup_elapsed_sec": 1.0987608432769775,
+    "full": "ready",
+    "auth": "ok",
+    "event_file": "7.events",
+    "exit_code": 0,
+    "oom_killed": false,
+    "accepted_as_final_layout": false,
+    "reason": "runtime-events files must remain separate from lease and PID files"
+  }
+}

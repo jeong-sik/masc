@@ -183,7 +183,7 @@ let test_docker_keeper_blocks_rg_outside () =
     (blocked_by_sandbox_boundary raw)
 
 let test_local_keeper_rg_file_path_uses_parent_workdir () =
-  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Local
+  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
   @@ fun ~base:_ ~config ~meta ~playground ->
   if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
   else (
@@ -220,7 +220,7 @@ let test_local_keeper_rg_file_path_uses_parent_workdir () =
    keeper_tool_runtime.ml returns verbatim to the keeper, so what we
    assert here is exactly what the keeper receives — no producer-only gap. *)
 let test_local_keeper_rg_invalid_type_surfaces_stderr () =
-  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Local
+  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
   @@ fun ~base:_ ~config ~meta ~playground ->
   if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
   else (
@@ -460,7 +460,7 @@ let test_docker_other_container_root_stays_blocked () =
       (String_util.contains_substring e "path_outside_sandbox")
 
 let test_readonly_execute_omitted_cwd_does_not_create_write_root () =
-  setup ~keeper_name:"readonly-exec" ~sandbox:Keeper_types_profile_sandbox.Local
+  setup ~keeper_name:"readonly-exec" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
   @@ fun ~base:_ ~config ~meta ~playground ->
   cleanup_dir playground;
   let args = `Assoc [] in

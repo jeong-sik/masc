@@ -566,7 +566,12 @@
  (name masc_tui_context_inspector)
  (wrapped false)
  (modules masc_tui_context_inspector)
- (libraries digestif masc masc.masc_types yojson))
+ ; masc_tool_blob_store is linked for Tool_output alone: the blob marker
+ ; grammar has one owner, and restating it here is how a second grammar
+ ; starts. Tool_blob_store itself is a filesystem store and must not be
+ ; called from this side -- the inspector reads blobs over HTTP, so a
+ ; direct read would work only when the TUI runs on the server's host.
+ (libraries digestif masc masc.masc_tool_blob_store masc.masc_types yojson))
 
 (library
  (name masc_tui_observation_layout)
@@ -679,6 +684,23 @@
  (name masc_tui_board_detail)
  (wrapped false)
  (modules masc_tui_board_detail))
+
+(library
+ (name masc_tui_magnitude)
+ (wrapped false)
+ (modules masc_tui_magnitude))
+
+(library
+ (name masc_tui_board_comment_thread)
+ (wrapped false)
+ (modules masc_tui_board_comment_thread)
+ (libraries masc_tui_types))
+
+(library
+ (name masc_tui_board_hearth)
+ (wrapped false)
+ (modules masc_tui_board_hearth)
+ (libraries masc_tui_types))
 
 (library
  (name masc_tui_terminal_write_repair)
@@ -874,6 +896,9 @@
   masc_tui_operator_projection
   masc_tui_approval_authority
   masc_tui_board_detail
+  masc_tui_magnitude
+  masc_tui_board_comment_thread
+  masc_tui_board_hearth
   masc_tui_board_selection
   masc_tui_board_score
   masc_tui_model_runtime_table

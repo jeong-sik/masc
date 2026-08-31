@@ -14,6 +14,7 @@ let counterpart_observations_before ~base_dir ~keeper_name ~before =
       | Keeper_chat_store.Role.User, Some _ -> true
       | Keeper_chat_store.Role.User, None
       | Keeper_chat_store.Role.Assistant, _
+      | Keeper_chat_store.Role.System, _
       | Keeper_chat_store.Role.Tool, _ -> false)
   in
   let external_items =

@@ -221,6 +221,52 @@ val record_consumed_resolution_replay :
   outcome:resolution_replay_outcome ->
   (replay_recording, grant_error) result
 
+(** Idempotently project durable approval truth into the originating Keeper's
+    visible chat. These receipts never authorize or replay an effect; they are
+    the presentation acknowledgement required before the wake event may be
+    drained. *)
+val ensure_resolution_chat_projection :
+  base_path:string ->
+  keeper_name:string ->
+  approval_id:string ->
+  tool_name:string option ->
+  decision:decision ->
+  (unit, string) result
+
+val ensure_replay_chat_projection :
+  base_path:string ->
+  keeper_name:string ->
+  approval_id:string ->
+  tool_name:string option ->
+  outcome:resolution_replay_outcome ->
+  (unit, string) result
+
+val ensure_continuation_chat_projection :
+  base_path:string ->
+  keeper_name:string ->
+  approval_id:string ->
+  tool_name:string option ->
+  (unit, string) result
+
+val continuation_chat_projection_present :
+  base_path:string ->
+  keeper_name:string ->
+  approval_id:string ->
+  bool
+
+type continuation_projection_result =
+  | Continuation_projection_recorded
+  | Continuation_projection_not_ready
+
+(** Record the post-resolution continuation receipt only when the turn can
+    truthfully settle it: rejections need no replay; approvals require a
+    consumed grant with a durable replay outcome. *)
+val ensure_settled_continuation_chat_projection :
+  base_path:string ->
+  keeper_name:string ->
+  resolution:Keeper_event_queue.hitl_resolution ->
+  (continuation_projection_result, string) result
+
 val generate_id : unit -> string
 
 module For_testing : sig

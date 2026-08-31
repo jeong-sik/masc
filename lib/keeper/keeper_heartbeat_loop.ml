@@ -468,6 +468,8 @@ let run_keepalive_unified_turn
       ref []
     in
     let cycle_outcome_ref = ref None in
+    let hitl_resolution_for_cycle = ref None in
+    let hitl_continuation_projection_ok = ref true in
     let selection_acked = ref false in
     let stimuli_acked = ref false in
     let event_queue_failed = ref false in
@@ -758,6 +760,7 @@ let run_keepalive_unified_turn
                    meta_after_triage.name;
                  Some resolution)
           in
+          hitl_resolution_for_cycle := hitl_resolution;
           (* The event intake is the exact turn input. Keep its attribution in
              the existing wake record even when the cadence, rather than a
              direct wake signal, discovered it. An empty [Woken] still means a
@@ -834,6 +837,39 @@ let run_keepalive_unified_turn
           ~selection
         |> record_terminal_selection_result ~label:"turn completion"
       in
+      let cycle_recorded_continuation =
+        match !cycle_outcome_ref with
+        | Some (Cycle.Completed _) -> true
+        | Some
+            (Cycle.Checkpointed
+               { checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived
+               ; _
+               }) ->
+          true
+        | Some
+            ( Cycle.Failed _
+            | Cycle.Checkpointed _
+            | Cycle.Input_required _
+            | Cycle.Cancelled _
+            | Cycle.Skipped _ )
+        | None -> false
+      in
+      (match cycle_recorded_continuation, !hitl_resolution_for_cycle with
+       | true, Some resolution ->
+         (match
+            Keeper_approval_queue.ensure_settled_continuation_chat_projection
+              ~base_path:ctx.config.base_path
+              ~keeper_name:meta_after_triage.name
+              ~resolution
+          with
+          | Ok Keeper_approval_queue.Continuation_projection_recorded -> ()
+          | Ok Keeper_approval_queue.Continuation_projection_not_ready ->
+            hitl_continuation_projection_ok := false
+          | Error detail ->
+            hitl_continuation_projection_ok := false;
+            record_event_queue_failure
+              ("approval continuation projection failed: " ^ detail))
+       | false, _ | true, None -> ());
       (match !cycle_outcome_ref with
        | Some (Cycle.Failed _)
        | Some
@@ -871,6 +907,14 @@ let run_keepalive_unified_turn
              | Settle_pending_in_queue -> ()
            in
            let remove_completed_selections ~should_ack ~settlement =
+             let should_ack selection =
+               should_ack selection
+               &&
+               match selection.Keeper_event_queue_state.source.payload with
+               | Keeper_event_queue.Hitl_resolved _ ->
+                 !hitl_continuation_projection_ok
+               | _ -> true
+             in
              let selections_to_ack, retained_selections =
                List.partition should_ack selections
              in

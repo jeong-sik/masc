@@ -525,43 +525,123 @@ let reconcile_spent_selection
        [Keeper_gate_replay] keeps the raw result in-process and needs this wake
        to repair publication without running the effect again.
 
-       Retire only [consumed + durable outcome]. The transition to that state is
-       monotonic, so the ACK cannot race a result becoming unavailable. A read
-       error, an unconsumed grant, or a consumed grant without its outcome stays
-       actionable. *)
+       Retire only [consumed + durable outcome + continuation receipt]. The
+       final receipt is written after the replay-owning model turn completed or
+       durably checkpointed; without it, a crash between effect journaling and
+       model continuation must replay the evidence into a fresh turn instead of
+       silently draining the wake. A read error, an unconsumed grant, or a
+       consumed grant without its outcome stays actionable. *)
     (match Keeper_approval_queue.approved_resolution_delivery
              ~base_path:config.Workspace_utils.base_path
              ~id:approval_id
      with
      | Ok
-         { state = Keeper_approval_queue.Resolution_consumed
-         ; replay_outcome = Some _
+         { request
+         ; state = Keeper_approval_queue.Resolution_consumed
+         ; replay_outcome = Some replay_outcome
          ; _
          } ->
        (match
-          Keeper_registry_event_queue.ack_pending_result
+          Keeper_approval_queue.ensure_resolution_chat_projection
             ~base_path:config.Workspace_utils.base_path
-            keeper_name
-            ~selection
+            ~keeper_name
+            ~approval_id
+            ~tool_name:(Some request.tool_name)
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
         with
-        | Error message ->
-           Error ("spent grant replay ack failed: " ^ message)
-        | Ok () -> Ok Spent_grant_replay_acknowledged)
+        | Error message -> Error ("approval resolution projection failed: " ^ message)
+        | Ok () ->
+          (match
+             Keeper_approval_queue.ensure_replay_chat_projection
+               ~base_path:config.Workspace_utils.base_path
+               ~keeper_name
+               ~approval_id
+               ~tool_name:(Some request.tool_name)
+               ~outcome:replay_outcome
+           with
+           | Error message -> Error ("approval replay projection failed: " ^ message)
+           | Ok () ->
+             if
+               not
+                 (Keeper_approval_queue.continuation_chat_projection_present
+                    ~base_path:config.Workspace_utils.base_path
+                    ~keeper_name
+                    ~approval_id)
+             then Ok Selection_actionable
+             else
+               (match
+                  Keeper_registry_event_queue.ack_pending_result
+                    ~base_path:config.Workspace_utils.base_path
+                    keeper_name
+                    ~selection
+                with
+                | Error message ->
+                  Error ("spent grant replay ack failed: " ^ message)
+                | Ok () -> Ok Spent_grant_replay_acknowledged)))
      | Ok
-         { state =
+         { request
+         ; state =
              ( Keeper_approval_queue.Resolution_unconsumed
              | Keeper_approval_queue.Resolution_consumed )
          ; replay_outcome = None
          ; _
          }
      | Ok
-         { state = Keeper_approval_queue.Resolution_unconsumed
+         { request
+         ; state = Keeper_approval_queue.Resolution_unconsumed
          ; replay_outcome = Some _
          ; _
-         }
+         } ->
+       (match
+          Keeper_approval_queue.ensure_resolution_chat_projection
+            ~base_path:config.Workspace_utils.base_path
+            ~keeper_name
+            ~approval_id
+            ~tool_name:(Some request.tool_name)
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+        with
+        | Ok () -> Ok Selection_actionable
+        | Error message -> Error ("approval resolution projection failed: " ^ message))
      | Error _ ->
-       Ok Selection_actionable)
-  | Hitl_resolved { decision = Keeper_event_queue.Hitl_rejected _; _ }
+       (match
+          Keeper_approval_queue.ensure_resolution_chat_projection
+            ~base_path:config.Workspace_utils.base_path
+            ~keeper_name
+            ~approval_id
+            ~tool_name:None
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+        with
+        | Ok () -> Ok Selection_actionable
+        | Error message -> Error ("approval resolution projection failed: " ^ message)))
+  | Hitl_resolved
+      { approval_id; decision = Keeper_event_queue.Hitl_rejected rationale; _ } ->
+    (match
+       Keeper_approval_queue.ensure_resolution_chat_projection
+         ~base_path:config.Workspace_utils.base_path
+         ~keeper_name
+         ~approval_id
+         ~tool_name:None
+         ~decision:(Keeper_approval_queue_rules_types.Decision.Reject rationale)
+     with
+     | Ok () ->
+       if
+         not
+           (Keeper_approval_queue.continuation_chat_projection_present
+              ~base_path:config.Workspace_utils.base_path
+              ~keeper_name
+              ~approval_id)
+       then Ok Selection_actionable
+       else
+         (match
+            Keeper_registry_event_queue.ack_pending_result
+              ~base_path:config.Workspace_utils.base_path
+              keeper_name
+              ~selection
+          with
+          | Error message ->
+            Error ("rejected approval continuation ack failed: " ^ message)
+          | Ok () -> Ok Spent_grant_replay_acknowledged)
+     | Error message -> Error ("approval resolution projection failed: " ^ message))
   | Ask_answered _
   | Board_signal _
   | Board_attention _

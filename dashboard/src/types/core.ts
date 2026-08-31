@@ -618,6 +618,22 @@ export interface KeeperDiagnostic {
 
 export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 'other'
 
+export type KeeperApprovalLifecyclePhase =
+  | 'resolved_approved'
+  | 'resolved_rejected'
+  | 'replay_applied'
+  | 'replay_applied_with_warning'
+  | 'replay_failed'
+  | 'replay_indeterminate'
+  | 'continuation_recorded'
+
+export interface KeeperApprovalLifecycle {
+  approvalId: string
+  toolName: string | null
+  phase: KeeperApprovalLifecyclePhase
+  artifactSha256: string | null
+}
+
 /** Canonical actor name for system-originated entries (backend convention).
  *  Used when an actor field is null/missing and the entry came from a
  *  system source rather than a real user/agent. */
@@ -1002,6 +1018,7 @@ export interface KeeperConversationEntry {
   speakerName?: string | null
   speakerAuthority?: string | null
   audio?: KeeperConversationAudioClip | null
+  approvalLifecycle?: KeeperApprovalLifecycle | null
 }
 
 export interface KeeperStatusDetail {

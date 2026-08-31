@@ -18,6 +18,8 @@ import type {
   KeeperConversationAudioClip,
   KeeperConversationEntry,
   KeeperConversationRole,
+  KeeperApprovalLifecycle,
+  KeeperApprovalLifecyclePhase,
   KeeperConversationSource,
   KeeperConversationStreamContract,
   KeeperConversationStreamState,
@@ -183,9 +185,11 @@ function capThreadEntries(entries: KeeperConversationEntry[]): KeeperConversatio
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index]
     if (!entry) continue
-    if (isAutonomousTurnEntry(entry) || conversationSlots > 0) {
+    const doesNotConsumeConversationSlot =
+      isAutonomousTurnEntry(entry) || entry.approvalLifecycle != null
+    if (doesNotConsumeConversationSlot || conversationSlots > 0) {
       kept.push(entry)
-      if (!isAutonomousTurnEntry(entry)) conversationSlots -= 1
+      if (!doesNotConsumeConversationSlot) conversationSlots -= 1
     }
   }
   return kept.reverse()
@@ -206,6 +210,33 @@ export function isDefaultVisibleConversationEntry(entry: KeeperConversationEntry
   return isVisibleDirectConversationEntry(entry)
     || isToolConversationEntry(entry)
     || isAutonomousTurnEntry(entry)
+    || entry.approvalLifecycle != null
+}
+
+const APPROVAL_LIFECYCLE_PHASES = new Set<KeeperApprovalLifecyclePhase>([
+  'resolved_approved',
+  'resolved_rejected',
+  'replay_applied',
+  'replay_applied_with_warning',
+  'replay_failed',
+  'replay_indeterminate',
+  'continuation_recorded',
+])
+
+function normalizeApprovalLifecycle(raw: unknown): KeeperApprovalLifecycle | null {
+  if (!isRecord(raw)) return null
+  const approvalId = asString(raw.approval_id)?.trim() ?? ''
+  const phase = asString(raw.phase) as KeeperApprovalLifecyclePhase | undefined
+  if (!approvalId || !phase || !APPROVAL_LIFECYCLE_PHASES.has(phase)) return null
+  const artifact = isRecord(raw.artifact_ref) && isRecord(raw.artifact_ref._blob)
+    ? raw.artifact_ref._blob
+    : null
+  return {
+    approvalId,
+    toolName: asString(raw.tool_name) ?? null,
+    phase,
+    artifactSha256: artifact ? asString(artifact.sha256) ?? null : null,
+  }
 }
 
 // --- Audio helpers (RFC-0235 P1/P3) ---
@@ -891,14 +922,17 @@ function normalizeHistoryEntry(
     ?? ((role === 'assistant' || role === 'system') && text
       ? parseTextToChatBlocks(text)
       : undefined)
-  const streamContract = deliveryProvenance.status === 'invalid'
-    ? keeperStreamContract('rest_history', 'contract_gap', {
-        reason: 'history row carries malformed or incomplete delivery provenance',
-      })
-    : normalizeStreamContract(raw.stream_contract)
-      ?? keeperStreamContract('rest_history', 'history_without_stream_events', {
-        reason: 'history rows do not carry stream lifecycle events',
-      })
+  const approvalLifecycle = normalizeApprovalLifecycle(raw.approval_lifecycle)
+  const streamContract = approvalLifecycle
+    ? null
+    : deliveryProvenance.status === 'invalid'
+      ? keeperStreamContract('rest_history', 'contract_gap', {
+          reason: 'history row carries malformed or incomplete delivery provenance',
+        })
+      : normalizeStreamContract(raw.stream_contract)
+        ?? keeperStreamContract('rest_history', 'history_without_stream_events', {
+          reason: 'history rows do not carry stream lifecycle events',
+        })
   return {
     id,
     role,
@@ -922,6 +956,7 @@ function normalizeHistoryEntry(
     speakerName,
     speakerAuthority,
     audio,
+    approvalLifecycle,
     attachments,
     blocks,
   }
@@ -1570,6 +1605,8 @@ interface RestChatHistoryMessage {
   }>
   // Row kind; 'transport_failure' distinguishes a persisted failed request.
   kind?: string
+  // Typed durable Gate approval/replay status projected by keeper_chat_store.
+  approval_lifecycle?: unknown
   // RFC-0235 P3: backend-parsed rich chat blocks. When present the dashboard
   // prefers them over its local parser.
   blocks?: unknown
@@ -1709,6 +1746,7 @@ export function chatHistoryEntriesFromRest(
         audio: message.audio,
         attachments: message.attachments,
         kind: message.kind,
+        approval_lifecycle: message.approval_lifecycle,
         blocks: message.blocks,
         turn_ref: message.turn_ref,
         delivery_provenance: message.delivery_provenance,

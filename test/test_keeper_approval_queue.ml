@@ -22,6 +22,7 @@ module Gate = Masc.Keeper_gate
 module Registry_queue = Masc.Keeper_registry_event_queue
 module Event_queue_persistence = Keeper_event_queue_persistence
 module Reaction_ledger = Masc.Keeper_reaction_ledger
+module Chat_store = Masc.Keeper_chat_store
 
 (* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
    reproduces its unit projection over [resolve_with_policy] so these
@@ -316,6 +317,31 @@ let test_dedup_never_merges_distinct_origins () =
        Alcotest.(check bool) "distinct origin has its own request" true
          (not (String.equal first another_channel));
        List.iter (reject_and_cleanup ~base_path) [ first; another_channel ])
+;;
+
+let test_multiple_resolution_projections_keep_fifo_order () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-projection-fifo" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let first =
+         submit ~base_path ~keeper_name ~input:(`Assoc [ "target", `String "first" ])
+       in
+       let second =
+         submit ~base_path ~keeper_name ~input:(`Assoc [ "target", `String "second" ])
+       in
+       List.iter (reject_and_cleanup ~base_path) [ first; second ];
+       let projected_ids =
+         Chat_store.load_all ~base_dir:base_path ~keeper_name
+         |> List.filter_map (fun (message : Chat_store.chat_message) ->
+           Option.map
+             (fun lifecycle -> lifecycle.Chat_store.approval_id)
+             message.approval_lifecycle)
+       in
+       Alcotest.(check (list string)) "chat projection preserves resolution FIFO"
+         [ first; second ] projected_ids)
 ;;
 
 (* The measured 2026-08-16 incident, end to end: the retry lands after the
@@ -1304,6 +1330,18 @@ let test_resolution_is_durable_and_origin_scoped () =
          (Option.is_some resolution_result.remembered_rule);
        Alcotest.(check bool) "pending removed" false
          (Option.is_some (AQ.For_testing.get_pending_entry_unchecked ~id));
+       (match Chat_store.load_all ~base_dir:base_path ~keeper_name with
+        | [ { role = Chat_store.Role.System
+            ; approval_lifecycle = Some lifecycle
+            ; _
+            } ] ->
+          Alcotest.(check string) "approved status carries approval id" id
+            lifecycle.approval_id;
+          Alcotest.(check bool) "approval is not yet effect-applied" true
+            (lifecycle.phase = Chat_store.Approval_resolved_approved)
+        | rows ->
+          Alcotest.failf "expected one durable approval status row, got %d"
+            (List.length rows));
        let resolution =
          match durable_resolution_opt ~base_path ~keeper_name ~approval_id:id with
          | None -> Alcotest.fail "origin Keeper did not receive durable resolution"
@@ -4266,6 +4304,16 @@ let test_nonapproved_resolution_payload_is_delivered () =
          "rejection is not a grant"
          true
          (Option.is_none (Gate.cycle_grant_of_resolution rejected));
+       (match Chat_store.load_all ~base_dir:base_path ~keeper_name with
+        | [ { role = Chat_store.Role.System
+            ; approval_lifecycle = Some lifecycle
+            ; _
+            } ] ->
+          Alcotest.(check bool) "rejection status is durable" true
+            (lifecycle.phase = Chat_store.Approval_resolved_rejected)
+        | rows ->
+          Alcotest.failf "expected one durable rejection status row, got %d"
+            (List.length rows));
        drop_resolution ~base_path ~keeper_name rejected)
 ;;
 
@@ -4765,6 +4813,10 @@ let () =
             "same owner drains by durable sequence"
             `Quick
             test_same_owner_drain_uses_sequence_not_wall_clock
+        ; Alcotest.test_case
+            "multiple resolution projections keep FIFO order"
+            `Quick
+            test_multiple_resolution_projections_keep_fifo_order
         ; Alcotest.test_case
             "terminal head does not stall the owner queue"
             `Quick

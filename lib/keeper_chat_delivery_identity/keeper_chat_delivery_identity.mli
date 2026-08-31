@@ -14,6 +14,7 @@ type delivery_key =
   | Operation of Request_id.t
   | Fusion_run of Request_id.t
   | Workspace_message of Request_id.t
+  | Approval_lifecycle of Request_id.t
 
 (** [Workspace_message] identifies one producer-minted workspace broadcast.
     It lets a mentioned Keeper append that exact broadcast to its durable
@@ -27,6 +28,9 @@ type transcript_slot =
       }
   | Tool_delivery of { ordinal : int }
   | Terminal_assistant
+  | Approval_resolution
+  | Approval_replay
+  | Approval_continuation
 
 (** [Tool_call] identifies a row by the canonical execution committed by the
     tool log. [Tool_delivery] is the store-owned ordinal used only when no

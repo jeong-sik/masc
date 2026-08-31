@@ -83,6 +83,7 @@ let of_chat_message (message : Keeper_chat_store.chat_message) =
       }
   | Keeper_chat_store.Role.User, None
   | Keeper_chat_store.Role.Assistant, _
+  | Keeper_chat_store.Role.System, _
   | Keeper_chat_store.Role.Tool, _ -> None
 ;;
 

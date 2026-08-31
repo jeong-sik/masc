@@ -2104,6 +2104,14 @@ let replay_result_ref () =
   | Error detail -> fail (Tool_output.make_error_to_string detail)
 ;;
 
+let approval_lifecycle_phases ~base_path ~keeper_name =
+  Keeper_chat_store.load_all ~base_dir:base_path ~keeper_name
+  |> List.filter_map (fun (message : Keeper_chat_store.chat_message) ->
+    Option.map
+      (fun lifecycle -> lifecycle.Keeper_chat_store.phase)
+      message.approval_lifecycle)
+;;
+
 let test_consumed_grant_without_outcome_stays_actionable () =
   with_workspace
   @@ fun config ->
@@ -2128,6 +2136,19 @@ let test_consumed_grant_without_outcome_stays_actionable () =
    | Error error -> fail (Keeper_approval_queue.grant_error_to_string error));
   check_single_queued_replay ~base_path ~keeper_name;
   let selection = pending_selection_exn ~base_path ~keeper_name in
+  (match
+     match selection.Keeper_event_queue_state.source.payload with
+     | Keeper_event_queue.Hitl_resolved resolution ->
+       Keeper_approval_queue.ensure_settled_continuation_chat_projection
+         ~base_path
+         ~keeper_name
+         ~resolution
+     | _ -> fail "fixture selection was not an approval resolution"
+   with
+   | Ok Keeper_approval_queue.Continuation_projection_not_ready -> ()
+   | Ok Keeper_approval_queue.Continuation_projection_recorded ->
+     fail "continuation was recorded before replay outcome durability"
+   | Error detail -> fail detail);
   (match
      Keeper_heartbeat_stimulus_intake.reconcile_spent_selection
        ~config
@@ -2175,8 +2196,38 @@ let test_consumed_grant_with_outcome_retires_without_a_turn () =
    | Ok Keeper_approval_queue.Replay_already_recorded ->
      fail "replay outcome was already recorded before the test"
    | Error error -> fail (Keeper_approval_queue.grant_error_to_string error));
+  Keeper_approval_queue.For_testing.reset_runtime_state ();
+  (match Keeper_approval_queue.install_persistence ~base_path with
+   | Ok _ -> ()
+   | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
   check_single_queued_replay ~base_path ~keeper_name;
   let selection = pending_selection_exn ~base_path ~keeper_name in
+  (match
+     Keeper_heartbeat_stimulus_intake.reconcile_spent_selection
+       ~config
+       ~keeper_name
+       selection
+   with
+   | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
+   | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
+     fail "replay drained before the continuation turn was recorded"
+   | Error detail -> fail detail);
+  check int "replay waits for continuation receipt" 1
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  (match
+     match selection.Keeper_event_queue_state.source.payload with
+     | Keeper_event_queue.Hitl_resolved resolution ->
+       Keeper_approval_queue.ensure_settled_continuation_chat_projection
+         ~base_path
+         ~keeper_name
+         ~resolution
+     | _ -> fail "fixture selection was not an approval resolution"
+   with
+   | Ok Keeper_approval_queue.Continuation_projection_recorded -> ()
+   | Ok Keeper_approval_queue.Continuation_projection_not_ready ->
+     fail "durable replay was not ready for continuation projection"
+   | Error detail -> fail detail);
   (match
      Keeper_heartbeat_stimulus_intake.reconcile_spent_selection
        ~config
@@ -2188,6 +2239,130 @@ let test_consumed_grant_with_outcome_retires_without_a_turn () =
      fail "durable replay outcome was left at the queue head"
    | Error detail -> fail detail);
   check int "spent grant replay left the queue" 0
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  check int "drain committed resolution, replay, and continuation receipts" 3
+    (approval_lifecycle_phases ~base_path ~keeper_name |> List.length)
+;;
+
+let test_projection_failure_keeps_spent_replay_queued () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  let keeper_name = "spent-grant-projection-failure" in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
+  let input = `Assoc [ "target", `String "projection-failure" ] in
+  let approval_id = approved_grant_fixture ~base_path ~keeper_name ~input in
+  (match
+     Keeper_approval_queue.consume_approved_resolution
+       ~base_path
+       ~id:approval_id
+       ~keeper_name
+       ~tool_name:"external-effect"
+       ~input
+   with
+   | Ok (Keeper_approval_queue.Consumption_committed _) -> ()
+   | Ok _ | Error _ -> fail "fixture grant was not consumed");
+  (match
+     Keeper_approval_queue.record_consumed_resolution_replay
+       ~base_path
+       ~id:approval_id
+       ~outcome:(Keeper_approval_queue.Replay_applied (replay_result_ref ()))
+   with
+   | Ok Keeper_approval_queue.Replay_recorded -> ()
+   | Ok _ | Error _ -> fail "fixture replay outcome was not recorded");
+  let chat_path = Keeper_chat_store.chat_path ~base_dir:base_path ~keeper_name in
+  let channel = open_out_gen [ Open_append; Open_text ] 0o600 chat_path in
+  output_string channel
+    ({|{"id":"malformed-projection","role":"system","content":"bad","ts":9999999999.0,"delivery_key":{"kind":"approval_lifecycle","approval_id":"appr_bad"}}|}
+     ^ "\n");
+  close_out channel;
+  let selection = pending_selection_exn ~base_path ~keeper_name in
+  (match
+     Keeper_heartbeat_stimulus_intake.reconcile_spent_selection
+       ~config
+       ~keeper_name
+       selection
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "spent replay drained without a readable chat projection receipt");
+  check int "projection failure keeps replay queued" 1
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length)
+;;
+
+let test_rejected_resolution_projection_precedes_turn_intake () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  let keeper_name = "rejected-grant-projection" in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
+  (match Keeper_approval_queue.install_persistence ~base_path with
+   | Ok _ -> ()
+   | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
+  let approval_id =
+    match
+      Keeper_approval_queue.submit_pending
+        ~keeper_name
+        ~tool_name:"external-effect"
+        ~input:(`Assoc [ "target", `String "reject" ])
+        ~base_path
+        ()
+    with
+    | Ok submission -> submission.approval_id
+    | Error error -> fail (Keeper_approval_queue.storage_error_to_string error)
+  in
+  (match
+     Keeper_approval_queue.resolve_with_policy
+       ~base_path
+       ~id:approval_id
+       ~decision:(Keeper_approval_queue_rules_types.Decision.Reject "operator denied")
+       ()
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Keeper_approval_queue.resolve_error_to_string error));
+  let selection = pending_selection_exn ~base_path ~keeper_name in
+  (match
+     Keeper_heartbeat_stimulus_intake.reconcile_spent_selection
+       ~config
+       ~keeper_name
+       selection
+   with
+   | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
+   | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
+     fail "rejection was drained before its Keeper turn consumed it"
+   | Error detail -> fail detail);
+  check int "rejection owns one visible resolution receipt" 1
+    (approval_lifecycle_phases ~base_path ~keeper_name |> List.length);
+  (match
+     match selection.Keeper_event_queue_state.source.payload with
+     | Keeper_event_queue.Hitl_resolved resolution ->
+       Keeper_approval_queue.ensure_settled_continuation_chat_projection
+         ~base_path
+         ~keeper_name
+         ~resolution
+     | _ -> fail "fixture selection was not an approval resolution"
+   with
+   | Ok Keeper_approval_queue.Continuation_projection_recorded -> ()
+   | Ok Keeper_approval_queue.Continuation_projection_not_ready ->
+     fail "rejection incorrectly waited for a replay outcome"
+   | Error detail -> fail detail);
+  check int "completed rejection turn owns a continuation receipt" 2
+    (approval_lifecycle_phases ~base_path ~keeper_name |> List.length);
+  check int "rejection stays queued for the continuation turn" 1
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  (match
+     Keeper_heartbeat_stimulus_intake.reconcile_spent_selection
+       ~config
+       ~keeper_name
+       selection
+   with
+   | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged -> ()
+   | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable ->
+     fail "recorded rejection continuation was delivered to a second turn"
+   | Error detail -> fail detail);
+  check int "recorded rejection continuation drains after restart" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.length)
 ;;
@@ -2288,6 +2463,10 @@ let () =
             test_consumed_grant_without_outcome_stays_actionable
         ; test_case "consumed grant with outcome retires without a turn" `Quick
             test_consumed_grant_with_outcome_retires_without_a_turn
+        ; test_case "projection failure keeps spent replay queued" `Quick
+            test_projection_failure_keeps_spent_replay_queued
+        ; test_case "rejection projection precedes turn intake" `Quick
+            test_rejected_resolution_projection_precedes_turn_intake
         ; test_case "unconsumed grant replay stays actionable" `Quick
             test_unconsumed_grant_replay_stays_actionable
         ] )

@@ -35,6 +35,7 @@ type delivery_key =
   | Operation of Request_id.t
   | Fusion_run of Request_id.t
   | Workspace_message of Request_id.t
+  | Approval_lifecycle of Request_id.t
 
 type transcript_slot =
   | Accepted_user
@@ -44,6 +45,9 @@ type transcript_slot =
       }
   | Tool_delivery of { ordinal : int }
   | Terminal_assistant
+  | Approval_resolution
+  | Approval_replay
+  | Approval_continuation
 
 type delivery_provenance =
   { delivery_key : delivery_key
@@ -97,6 +101,11 @@ let delivery_key_to_yojson = function
       [ "kind", `String "workspace_message"
       ; "request_id", `String (Request_id.to_string request_id)
       ]
+  | Approval_lifecycle approval_id ->
+    `Assoc
+      [ "kind", `String "approval_lifecycle"
+      ; "approval_id", `String (Request_id.to_string approval_id)
+      ]
 ;;
 
 let delivery_key_of_yojson = function
@@ -133,6 +142,16 @@ let delivery_key_of_yojson = function
        let* request_id = string_field "request_id" fields in
        let* request_id = Request_id.of_string request_id in
        Ok (Workspace_message request_id)
+     | "approval_lifecycle" ->
+       let* () =
+         validate_fields
+           ~context:"approval lifecycle delivery identity"
+           ~expected:[ "kind"; "approval_id" ]
+           fields
+       in
+       let* approval_id = string_field "approval_id" fields in
+       let* approval_id = Request_id.of_string approval_id in
+       Ok (Approval_lifecycle approval_id)
      | _ -> Error (Printf.sprintf "unsupported delivery identity kind %S" kind))
   | _ -> Error "delivery identity must be an object"
 ;;
@@ -142,14 +161,18 @@ let delivery_key_equal left right =
   | Operation left, Operation right -> Request_id.equal left right
   | Fusion_run left, Fusion_run right -> Request_id.equal left right
   | Workspace_message left, Workspace_message right -> Request_id.equal left right
-  | (Operation _ | Fusion_run _ | Workspace_message _),
-    (Operation _ | Fusion_run _ | Workspace_message _) ->
+  | Approval_lifecycle left, Approval_lifecycle right -> Request_id.equal left right
+  | (Operation _ | Fusion_run _ | Workspace_message _ | Approval_lifecycle _),
+    (Operation _ | Fusion_run _ | Workspace_message _ | Approval_lifecycle _) ->
     false
 ;;
 
 let transcript_slot_to_yojson = function
   | Accepted_user -> `Assoc [ "kind", `String "accepted_user" ]
   | Terminal_assistant -> `Assoc [ "kind", `String "terminal_assistant" ]
+  | Approval_resolution -> `Assoc [ "kind", `String "approval_resolution" ]
+  | Approval_replay -> `Assoc [ "kind", `String "approval_replay" ]
+  | Approval_continuation -> `Assoc [ "kind", `String "approval_continuation" ]
   | Tool_call { execution_id; ordinal } ->
     `Assoc
       [ "kind", `String "tool_call"
@@ -187,6 +210,30 @@ let transcript_slot_of_yojson = function
            fields
        in
        Ok Terminal_assistant
+     | "approval_resolution" ->
+       let* () =
+         validate_fields
+           ~context:"approval resolution transcript slot"
+           ~expected:[ "kind" ]
+           fields
+       in
+       Ok Approval_resolution
+     | "approval_replay" ->
+       let* () =
+         validate_fields
+           ~context:"approval replay transcript slot"
+           ~expected:[ "kind" ]
+           fields
+       in
+       Ok Approval_replay
+     | "approval_continuation" ->
+       let* () =
+         validate_fields
+           ~context:"approval continuation transcript slot"
+           ~expected:[ "kind" ]
+           fields
+       in
+       Ok Approval_continuation
      | "tool_call" ->
        let* () =
          validate_fields
@@ -218,15 +265,21 @@ let transcript_slot_of_yojson = function
 let transcript_slot_equal left right =
   match left, right with
   | Accepted_user, Accepted_user
-  | Terminal_assistant, Terminal_assistant -> true
+  | Terminal_assistant, Terminal_assistant
+  | Approval_resolution, Approval_resolution
+  | Approval_replay, Approval_replay
+  | Approval_continuation, Approval_continuation -> true
   | Tool_call left, Tool_call right ->
     Ids.Execution_id.equal left.execution_id right.execution_id
     && Int.equal left.ordinal right.ordinal
   | Tool_delivery left, Tool_delivery right -> Int.equal left.ordinal right.ordinal
-  | Accepted_user, (Terminal_assistant | Tool_call _ | Tool_delivery _)
-  | Terminal_assistant, (Accepted_user | Tool_call _ | Tool_delivery _)
-  | Tool_call _, (Accepted_user | Terminal_assistant | Tool_delivery _)
-  | Tool_delivery _, (Accepted_user | Terminal_assistant | Tool_call _) -> false
+  | Accepted_user, (Terminal_assistant | Tool_call _ | Tool_delivery _ | Approval_resolution | Approval_replay | Approval_continuation)
+  | Terminal_assistant, (Accepted_user | Tool_call _ | Tool_delivery _ | Approval_resolution | Approval_replay | Approval_continuation)
+  | Tool_call _, (Accepted_user | Terminal_assistant | Tool_delivery _ | Approval_resolution | Approval_replay | Approval_continuation)
+  | Tool_delivery _, (Accepted_user | Terminal_assistant | Tool_call _ | Approval_resolution | Approval_replay | Approval_continuation)
+  | Approval_resolution, (Accepted_user | Terminal_assistant | Tool_call _ | Tool_delivery _ | Approval_replay | Approval_continuation)
+  | Approval_replay, (Accepted_user | Terminal_assistant | Tool_call _ | Tool_delivery _ | Approval_resolution | Approval_continuation)
+  | Approval_continuation, (Accepted_user | Terminal_assistant | Tool_call _ | Tool_delivery _ | Approval_resolution | Approval_replay) -> false
 ;;
 
 let delivery_provenance_fields { delivery_key; transcript_slot } =

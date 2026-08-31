@@ -219,10 +219,11 @@ let refresh ?post ~base_path ~keeper_name ~(provider : Provider.t) ~now () =
   Ok catalog
 ;;
 
-(* -32601 read through the typed sum rather than the bare integer — the
-   same reading {!Keeper_identity_gate.rpc_rejects_before_execution} gives
-   it, so "the tool was never dispatched" has one answer everywhere. *)
-let is_unknown_tool_error = function
+(* -32601 read through the typed sum rather than the bare integer.  The code
+   proves only that the server rejected a method/name; it does not by itself
+   prove that the requested tool disappeared.  A fresh catalog supplies that
+   second fact below. *)
+let is_method_not_found_error = function
   | Mcp_client.Rpc { code; _ } ->
     (match Mcp_error_code.of_wire_code code with
      | Some Mcp_error_code.Method_not_found -> true
@@ -244,6 +245,12 @@ let drift_of ~previous ~fresh =
     List.filter (fun name -> not (List.mem name previous_names)) fresh_names
   in
   (lost, gained)
+;;
+
+let catalog_contains tools name =
+  List.exists
+    (fun (tool : Mcp_client.tool) -> String.equal tool.Mcp_client.name name)
+    tools
 ;;
 
 type offered_tool = {
@@ -443,20 +450,24 @@ let run_call ?post ~base_path ~keeper_name ~(provider : Provider.t)
       | Error error -> Error (Mcp { phase = Before_send; error })
       | Ok client -> (
         match Mcp_client.call_tool ?post client ~name:remote_name ~arguments with
-        | Error error when is_unknown_tool_error error -> (
-          (* The catalog this call was assembled from named a tool the
-             service says it has never heard of. Expected for a name nobody
-             offered; drift when the last catalog carried it. One
-             rediscovery on the session that is already up, one retry —
-             not a loop, and never a silently shortened answer. *)
+        | Error error when is_method_not_found_error error -> (
+          (* The wire error alone does not distinguish an unknown tools/call
+             method from a stale tool name.  Only investigate when the
+             catalog used to assemble this call advertised the name, then
+             ask the live session once.  A removed name is not called again;
+             a still-advertised name gets one bounded retry. *)
           match load ~base_path ~keeper_name ~provider_id:provider.Provider.id with
           | Ok (Some previous_catalog)
-            when List.exists
-                   (fun (tool : Mcp_client.tool) ->
-                      String.equal tool.Mcp_client.name remote_name)
-                   previous_catalog.tools -> (
+            when catalog_contains previous_catalog.tools remote_name -> (
             match Mcp_client.list_tools ?post client with
-            | Error _ -> Error (Mcp { phase = After_send; error })
+            | Error rediscovery_error ->
+              Log.Keeper.emit Log.Warn ~keeper_name
+                (Printf.sprintf
+                   "keeper_identity_tools: %s catalog rediscovery after a \
+                    method-not-found for %s failed: %s"
+                   provider.Provider.id remote_name
+                   (Mcp_client.error_to_string rediscovery_error));
+              Error (Mcp { phase = After_send; error })
             | Ok tools ->
               let fresh =
                 { provider_id = provider.Provider.id
@@ -470,8 +481,8 @@ let run_call ?post ~base_path ~keeper_name ~(provider : Provider.t)
                  [LOGGER.emit]; the format-taking [info] is for literals. *)
               Log.Keeper.emit Log.Info ~keeper_name
                 (Printf.sprintf
-                   "keeper_identity_tools: %s catalog rediscovered after an \
-                    unexpected not-found for %s — %d tools before, %d after \
+                   "keeper_identity_tools: %s catalog rediscovered after a \
+                    method-not-found for %s — %d tools before, %d after \
                     (lost %d, gained %d), catalog time %.0f"
                    provider.Provider.id remote_name
                    (List.length previous_catalog.tools) (List.length tools)
@@ -484,10 +495,25 @@ let run_call ?post ~base_path ~keeper_name ~(provider : Provider.t)
                       "keeper_identity_tools: rediscovered %s catalog could \
                        not be saved: %s"
                       provider.Provider.id problem));
-              match Mcp_client.call_tool ?post client ~name:remote_name ~arguments with
-              | Error retry_error -> Error (Mcp { phase = After_send; error = retry_error })
-              | Ok result -> Ok result)
-          | _ -> Error (Mcp { phase = After_send; error }))
+              if not (catalog_contains tools remote_name)
+              then
+                (* Rediscovery proved that the old offer was stale.  Retrying
+                   a name the server no longer advertises would be a second
+                   predictable failure, not recovery. *)
+                Error (Mcp { phase = After_send; error })
+              else
+                match Mcp_client.call_tool ?post client ~name:remote_name ~arguments with
+                | Error retry_error ->
+                  Error (Mcp { phase = After_send; error = retry_error })
+                | Ok result -> Ok result)
+          | Error problem ->
+            Log.Keeper.emit Log.Warn ~keeper_name
+              (Printf.sprintf
+                 "keeper_identity_tools: %s catalog could not be read while \
+                  investigating method-not-found for %s: %s"
+                 provider.Provider.id remote_name problem);
+            Error (Mcp { phase = After_send; error })
+          | Ok None | Ok (Some _) -> Error (Mcp { phase = After_send; error }))
         | Error error -> Error (Mcp { phase = After_send; error })
         | Ok result -> Ok result)))
 ;;

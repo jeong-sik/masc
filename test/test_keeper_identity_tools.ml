@@ -606,10 +606,10 @@ let test_the_projected_token_is_the_one_sent () =
       check str "and the tool's answer comes back" "PK-1"
         output.Agent_core.Types.content
 
-(* ── unexpected not-found: catalog drift recovery ─────────────────── *)
+(* ── method-not-found: catalog reconciliation ────────────────────── *)
 
-(* Says -32601 for the first tools/call, lists a catalog with one more
-   tool than the fixture wrote, then answers the retry. Nothing reaches a
+(* Says -32601 for the first tools/call, then still advertises that tool with
+   one more catalog entry and answers the single retry. Nothing reaches a
    network. *)
 let drifting_transport () =
   let sent = ref [] in
@@ -649,12 +649,11 @@ let project_token ~base_path =
   | Ok () -> ()
   | Error message -> Alcotest.failf "could not project a token: %s" message
 
-let test_an_unexpected_not_found_rediscovers_and_retries () =
-  (* The catalog the turn was assembled from still names the tool, and the
-     service says it does not exist. What recovery owes: one tools/list on
-     the live session, one retry, the drift written back so the next turn
-     is assembled from what the service actually has, and a catalog time
-     an operator can read. *)
+let test_a_still_advertised_tool_is_retried_once () =
+  (* The old and fresh catalogs both name the tool, so the -32601 is
+     inconsistent with the server's live advertisement. What recovery owes:
+     one tools/list on the live session, one retry, the fresh catalog written
+     back, and a catalog time an operator can read. *)
   let base_path = temp_base () in
   Unix.putenv "ATLASSIAN_ACCESS_TOKEN" "this-process-token";
   write_catalog ~base_path ~keeper_name:"acme-daycare" [ tool ~read_only:true "getJiraIssue" ];
@@ -682,6 +681,64 @@ let test_an_unexpected_not_found_rediscovers_and_retries () =
        check Alcotest.bool "and the catalog time moved off the fixture" true
          (catalog.Identity_tools.discovered_at > 1786000000.0)
      | Ok None | Error _ -> Alcotest.fail "no catalog after rediscovery")
+
+let disappeared_transport () =
+  let sent = ref [] in
+  let calls = ref 0 in
+  let post ~url ~headers ~body =
+    sent := (url, headers, body) :: !sent;
+    let answer =
+      if String.length body > 0 && Str.string_match (Str.regexp ".*initialize") body 0
+      then
+        Printf.sprintf
+          {|{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":%S,"capabilities":{}}}|}
+          Mcp_transport_protocol.default_protocol_version
+      else if String.length body > 0 && Str.string_match (Str.regexp ".*tools/list") body 0
+      then
+        {|{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"searchIssues","description":"does searchIssues"}]}}|}
+      else (
+        incr calls;
+        {|{"jsonrpc":"2.0","id":3,"error":{"code":-32601,"message":"Method not found"}}|})
+    in
+    Ok
+      { Masc_http_client.status = 200
+      ; headers = [ "content-type", "application/json" ]
+      ; body = answer
+      }
+  in
+  (post, sent, calls)
+;;
+
+let test_a_removed_tool_is_not_called_twice () =
+  (* Here rediscovery supplies the fact the wire error could not: the tool
+     disappeared from the live catalog. Save that truth, but do not issue a
+     second call that is already known to fail. *)
+  let base_path = temp_base () in
+  Unix.putenv "ATLASSIAN_ACCESS_TOKEN" "this-process-token";
+  write_catalog ~base_path ~keeper_name:"acme-daycare"
+    [ tool ~read_only:true "getJiraIssue" ];
+  project_token ~base_path;
+  let post, sent, calls = disappeared_transport () in
+  (match execute_offered ~post ~base_path (single_offered ~base_path) (`Assoc []) with
+   | Ok _ -> Alcotest.fail "a removed tool unexpectedly returned an answer"
+   | Error _ -> ());
+  check Alcotest.int "the removed tool is called only once" 1 !calls;
+  check Alcotest.bool "the live catalog was consulted" true
+    (List.exists
+       (fun (_, _, body) -> Str.string_match (Str.regexp ".*tools/list") body 0)
+       (List.rev !sent));
+  match
+    Identity_tools.load ~base_path ~keeper_name:"acme-daycare"
+      ~provider_id:"atlassian"
+  with
+  | Ok (Some catalog) ->
+    check Alcotest.bool "the removed tool is gone from the saved catalog" false
+      (List.exists
+         (fun (t : Mcp_client.tool) ->
+            String.equal t.Mcp_client.name "getJiraIssue")
+         catalog.Identity_tools.tools)
+  | Ok None | Error _ -> Alcotest.fail "no catalog after rediscovery"
+;;
 
 let test_an_expected_not_found_does_not_reach_for_the_catalog () =
   (* A name no catalog ever carried is the model guessing, not drift. The
@@ -972,8 +1029,10 @@ let () =
             test_an_oauth_provider_ignores_the_gh_credential;
           Alcotest.test_case "the projected token is the one sent" `Quick
             test_the_projected_token_is_the_one_sent;
-          Alcotest.test_case "an unexpected not-found rediscovers and retries"
-            `Quick test_an_unexpected_not_found_rediscovers_and_retries;
+          Alcotest.test_case "a still-advertised tool is retried once" `Quick
+            test_a_still_advertised_tool_is_retried_once;
+          Alcotest.test_case "a removed tool is not called twice" `Quick
+            test_a_removed_tool_is_not_called_twice;
           Alcotest.test_case "an expected not-found leaves the catalog alone"
             `Quick test_an_expected_not_found_does_not_reach_for_the_catalog;
         ] );

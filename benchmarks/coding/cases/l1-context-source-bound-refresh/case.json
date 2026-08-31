@@ -1,0 +1,10 @@
+{
+  "id": "l1-context-source-bound-refresh",
+  "level": "L1",
+  "lang": "text",
+  "timeout_sec": 600,
+  "verify": "verify.sh",
+  "test_files": ["check.sh", "service.toml"],
+  "prompt": "service.toml은 수정하면 안 되는 read-only 권위 원본입니다. 먼저 live service.toml을 직접 읽고, 오직 current_region.txt만 그 파일의 현재 region과 정확히 같아지게 고치세요. check.sh도 수정하지 마세요. 파일을 고친 뒤 검사를 실행하세요. 검사가 통과하면 service.toml이 뒷받침하는 현재 리전 주장을 keeper_memory_write에 source_path='workspace/service.toml'을 넣어 기록하세요. source_path 없는 메모리 기록은 하지 마세요.",
+  "description": "Source-bound recovery: discard a stale claim after the authoritative file changes, solve from the live file, then recreate the claim with a fresh digest."
+}

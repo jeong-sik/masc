@@ -50,8 +50,27 @@ scripts/harness_coding_eval.sh \
   --models ollama:qwen3:8b \
   --case-ids l1-context-state-resolution,l1-context-premise-resistance,l2-context-policy-adaptation \
   --memory-mode filtered --repeats 1 --out /tmp/context-recovery-filtered
+
+scripts/harness_coding_eval.sh \
+  --models ollama:qwen3:8b \
+  --case-ids l1-context-source-bound-refresh \
+  --memory-mode source-bound --repeats 1 --out /tmp/context-recovery-source-bound
 ```
 
 The report pass rate answers whether the final workspace is right.  The
 `memory-seed.json` and `last-prompt.json` beside each run prove that the stale
 claim was both written and injected.
+
+`source-bound` uses `source-memory.json` instead of the ordinary snapshot. It
+seeds a claim with the SHA-256 of the old source bytes, then copies a workspace
+whose authoritative file has changed. The run is accepted only when:
+
+- `last-prompt.json` contains no stale claim and does contain a typed
+  `source_changed` invalidation,
+- the ordinary workspace verifier passes, and
+- `memory-source-final.json` contains one recreated fact whose source path and
+  digest match the live file, with no pending invalidation.
+
+This separates deterministic stale removal from model behavior. A model can
+fix the workspace yet still fail the run by ignoring the requested
+`keeper_memory_write(source_path=...)` recreation step.

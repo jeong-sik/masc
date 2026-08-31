@@ -38,7 +38,7 @@ Usage:
   scripts/harness_coding_eval.sh --models provider:model[,provider:model]
                                  [--cases DIR] [--case-ids CSV] [--repeats N]
                                  [--out DIR] [--k N] [--port N]
-                                 [--memory-mode seeded|verified|filtered|off]
+                                 [--memory-mode seeded|verified|filtered|source-bound|off]
 
 Runs each selected coding case against each model, records one evidence row
 per run into <out>/runs.jsonl, and summarizes with coding_eval_report_cli.
@@ -73,8 +73,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "${MEMORY_MODE}" != "seeded" && "${MEMORY_MODE}" != "verified" && "${MEMORY_MODE}" != "filtered" && "${MEMORY_MODE}" != "off" ]]; then
-  echo "--memory-mode must be seeded, verified, filtered, or off, got: ${MEMORY_MODE}" >&2
+if [[ "${MEMORY_MODE}" != "seeded" && "${MEMORY_MODE}" != "verified" && "${MEMORY_MODE}" != "filtered" && "${MEMORY_MODE}" != "source-bound" && "${MEMORY_MODE}" != "off" ]]; then
+  echo "--memory-mode must be seeded, verified, filtered, source-bound, or off, got: ${MEMORY_MODE}" >&2
   exit 2
 fi
 
@@ -124,7 +124,7 @@ selected_case_dirs() {
 context_recovery_cases_selected() {
   local case_dir
   while IFS= read -r case_dir; do
-    if [[ -f "${case_dir}/memory.json" ]]; then
+    if [[ -f "${case_dir}/memory.json" || -f "${case_dir}/source-memory.json" ]]; then
       return 0
     fi
   done < <(selected_case_dirs)
@@ -367,6 +367,50 @@ seed_case_memory() {
   return 0
 }
 
+seed_case_source_memory() {
+  local case_dir="$1" keeper_name="$2" run_dir="$3"
+  local declaration="${case_dir}/source-memory.json"
+  [[ "${MEMORY_MODE}" == "source-bound" && -f "${declaration}" ]] || return 1
+  if ! jq -e '
+      (.age_sec | type == "number" and . >= 0)
+      and (.source_path | type == "string" and length > 0)
+      and (.stale_source | type == "string")
+      and (.claim | type == "string" and length > 0)
+    ' "${declaration}" >/dev/null; then
+    echo "invalid source-bound memory declaration: ${declaration}" >&2
+    return 2
+  fi
+
+  local age_sec observed_at source_path claim digest snapshot_path
+  age_sec="$(jq -r '.age_sec | floor' "${declaration}")"
+  observed_at=$(( $(date +%s) - age_sec ))
+  source_path="$(jq -r '.source_path' "${declaration}")"
+  claim="$(jq -r '.claim' "${declaration}")"
+  # Keep the declared bytes exact. Command substitution strips trailing
+  # newlines, so only the digest output may cross that boundary; the source
+  # bytes stream directly from jq into shasum.
+  digest="sha256:$(jq -rj '.stale_source' "${declaration}" | shasum -a 256 | awk '{print $1}')"
+  snapshot_path="${CONFIG_DIR}/keepers/${keeper_name}.memory-source-current.json"
+  mkdir -p "$(dirname "${snapshot_path}")"
+  jq -n \
+    --argjson observed_at "${observed_at}" \
+    --arg source_path "${source_path}" \
+    --arg digest "${digest}" \
+    --arg claim "${claim}" \
+    '{
+      revision: 1,
+      updated_at: $observed_at,
+      trace_id: "context-recovery-source-seed",
+      facts: [{
+        claim: $claim,
+        first_seen: $observed_at,
+        source: {kind: "file", path: $source_path, sha256: $digest}
+      }],
+      invalidations: []
+    }' > "${snapshot_path}"
+  cp "${snapshot_path}" "${run_dir}/memory-source-seed.json"
+}
+
 capture_last_prompt() {
   local case_dir="$1" keeper_name="$2" run_dir="$3"
   local declaration="${case_dir}/memory.json"
@@ -375,6 +419,18 @@ capture_last_prompt() {
     "http://127.0.0.1:${PORT}/api/v1/keepers/${keeper_name}/last-prompt" \
     -H "Authorization: Bearer ${MCP_TOKEN}" > "${capture_path}"; then
     return 1
+  fi
+  if [[ "${MEMORY_MODE}" == "source-bound" ]]; then
+    declaration="${case_dir}/source-memory.json"
+    local stale_claim source_path
+    stale_claim="$(jq -r '.claim' "${declaration}")"
+    source_path="$(jq -r '.source_path' "${declaration}")"
+    jq -e --arg claim "${stale_claim}" --arg source_path "${source_path}" '
+      ([.. | strings | select(contains($claim))] | length) == 0
+      and ([.. | strings | select(contains("reason=source_changed"))] | length) > 0
+      and ([.. | strings | select(contains($source_path))] | length) > 0
+    ' "${capture_path}" >/dev/null
+    return
   fi
   while IFS= read -r claim; do
     local matches
@@ -396,6 +452,24 @@ capture_last_prompt() {
       return 1
     fi
   fi
+}
+
+capture_recreated_source_memory() {
+  local case_dir="$1" keeper_name="$2" run_dir="$3" workspace="$4"
+  local declaration="${case_dir}/source-memory.json"
+  local snapshot_path="${CONFIG_DIR}/keepers/${keeper_name}.memory-source-current.json"
+  local source_path host_source_path digest
+  source_path="$(jq -r '.source_path' "${declaration}")"
+  host_source_path="${workspace}/${source_path#workspace/}"
+  [[ -f "${snapshot_path}" && -f "${host_source_path}" ]] || return 1
+  digest="sha256:$(shasum -a 256 "${host_source_path}" | awk '{print $1}')"
+  cp "${snapshot_path}" "${run_dir}/memory-source-final.json"
+  jq -e --arg source_path "${source_path}" --arg digest "${digest}" '
+    (.invalidations | length) == 0
+    and (.facts | length) == 1
+    and .facts[0].source.path == $source_path
+    and .facts[0].source.sha256 == $digest
+  ' "${snapshot_path}" >/dev/null
 }
 
 apply_live_probe() {
@@ -596,7 +670,7 @@ run_one() {
   build_rel="$(jq -r '.build // empty' "${case_dir}/case.json")"
 
   local run_id run_dir workspace evidence_path mode_suffix=""
-  if [[ -f "${case_dir}/memory.json" ]]; then
+  if [[ -f "${case_dir}/memory.json" || -f "${case_dir}/source-memory.json" ]]; then
     mode_suffix="-${MEMORY_MODE}"
   fi
   run_id="$(printf '%s-%s-%s%s-r%d' "${provider}" "${model}" "${case_id}" "${mode_suffix}" "${repeat_index}" \
@@ -660,12 +734,20 @@ run_one() {
       finish_status="transport_error"
       error_text="tool-approval-mode yolo set failed for ${keeper_name}"
     fi
-    if [[ "${finish_status}" == "ok" && -f "${case_dir}/memory.json" && "${MEMORY_MODE}" != "off" ]]; then
+    if [[ "${finish_status}" == "ok" && -f "${case_dir}/memory.json" && "${MEMORY_MODE}" != "off" && "${MEMORY_MODE}" != "source-bound" ]]; then
       if seed_case_memory "${case_dir}" "${keeper_name}" "${run_dir}"; then
         memory_seeded=1
       else
         finish_status="transport_error"
         error_text="failed to seed stale Memory OS fact for ${keeper_name}"
+      fi
+    fi
+    if [[ "${finish_status}" == "ok" && -f "${case_dir}/source-memory.json" && "${MEMORY_MODE}" == "source-bound" ]]; then
+      if seed_case_source_memory "${case_dir}" "${keeper_name}" "${run_dir}"; then
+        memory_seeded=1
+      else
+        finish_status="transport_error"
+        error_text="failed to seed source-bound Memory OS fact for ${keeper_name}"
       fi
     fi
   fi
@@ -760,6 +842,13 @@ run_one() {
         finish_status="transport_error"
         error_text="seeded Memory OS fact was absent from last-prompt evidence"
       fi
+    fi
+  fi
+
+  if [[ "${finish_status}" == "ok" && "${MEMORY_MODE}" == "source-bound" && -f "${case_dir}/source-memory.json" ]]; then
+    if ! capture_recreated_source_memory "${case_dir}" "${keeper_name}" "${run_dir}" "${workspace}"; then
+      finish_status="provider_error"
+      error_text="source-bound memory was not recreated from the live source"
     fi
   fi
 

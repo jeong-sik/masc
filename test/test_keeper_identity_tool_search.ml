@@ -439,6 +439,49 @@ let two_offered =
 (* The turn that made a load is the only one it reaches, so a Keeper working
    on one thing across several turns re-asks every time. Live 2026-08-30: one
    Keeper asked for [github_issue_read] on five consecutive turns. *)
+(* The listing's bytes are charged to every request of the turn, so a tool
+   handed over with its schema must not also spend a line saying it exists.
+   Measured over three days of live surfaces, that duplication was a median 7
+   of the listed tools and reached 24 -- a third of one listing. *)
+let test_a_carried_tool_is_not_also_named_in_the_listing () =
+  let tool =
+    match search ~history:[ called "atlassian_jira_search" ] (offered two_offered) with
+    | Some tool -> tool
+    | None -> fail "expected a listing tool"
+  in
+  let description = tool.Agent_core.Tool.schema.description in
+  check bool "the carried tool is not listed again" false
+    (contains description "- atlassian_jira_search:");
+  check bool "the tool that was not carried is still listed" true
+    (contains description "- atlassian_confluence_search:")
+;;
+
+(* Omitted from the prose, not from the surface: a model that names a tool it
+   already has must be answered, not refused, or the omission would turn a
+   redundant line into a dead end. *)
+let test_a_carried_tool_can_still_be_named () =
+  Eio_main.run
+  @@ fun env ->
+  let agent =
+    Agent_core.Agent.create
+      ~config:(Agent_core.Types.default_config ~model:"test-model")
+      ~net:env#net
+      ()
+  in
+  let agent_cell = ref (Some agent) in
+  let tool =
+    match
+      search ~agent_cell ~history:[ called "atlassian_jira_search" ] (offered two_offered)
+    with
+    | Some tool -> tool
+    | None -> fail "expected a listing tool"
+  in
+  match execute tool (names_input [ "atlassian_jira_search" ]) with
+  | Ok _ -> ()
+  | Error e ->
+    failf "naming an already-carried tool was refused: %s" e.Agent_core.Types.message
+;;
+
 let test_a_tool_this_conversation_ran_comes_back_with_its_schema () =
   check
     (list string)
@@ -526,6 +569,10 @@ let () =
             test_repeated_calls_place_the_tool_once
         ; test_case "a built-in call is not mistaken for an attached one" `Quick
             test_a_builtin_call_is_not_mistaken_for_an_attached_one
+        ; test_case "a carried tool is not also named in the listing" `Quick
+            test_a_carried_tool_is_not_also_named_in_the_listing
+        ; test_case "a carried tool can still be named" `Quick
+            test_a_carried_tool_can_still_be_named
         ] )
     ; ( "loading"
       , [ test_case "makes a named tool callable in the running agent" `Quick

@@ -444,7 +444,7 @@ Keeper work budget.
 
 ### 9.2 TOML Configuration
 
-`config/keepers/*.toml`로 keeper를 선언적으로 정의. 파일명이 keeper 이름. 지원 타입: string, int, float, bool, string array. 테이블은 dotted key로 평탄화. 예시: `config/keepers/janitor.toml`.
+`config/keepers/*.toml`로 keeper를 선언적으로 정의. 파일명이 keeper 이름. 지원 타입: string, int, float, bool, string array. 테이블은 dotted key로 평탄화. 예시: `config/keepers/code-reviewer.toml`.
 
 ### 9.3 Keeper Runtime Spec
 
@@ -568,5 +568,5 @@ External memory projection은 제거됐다. 남은 경계 이슈는 keeper conte
 | Trajectory | `lib/trajectory/trajectory.ml` |
 | Supervisor | `lib/keeper/keeper_supervisor.ml` |
 | Config | `lib/keeper/keeper_config.ml` |
-| TOML Example | `config/keepers/janitor.toml` |
+| TOML Example | `config/keepers/code-reviewer.toml` |
 | Memory: keeper 재설계 | `memory/project_dashboard-keeper-detail-redesign.md` |

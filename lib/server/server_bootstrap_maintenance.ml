@@ -2,6 +2,17 @@
    (GC, session purge, state machine housekeeping).
    Extracted from server_bootstrap_loops.ml during godfile decomposition. *)
 
+(* How often the loop below wakes: durable demand recovery, mention
+   reconciliation, SSE and session eviction, retention pruning.
+
+   A constant rather than MASC_JANITOR_INTERVAL_SEC, which this replaces. The
+   variable named a concept masc no longer has -- the goal and approval
+   janitors are gone, and there is no janitor Keeper -- and nothing set it:
+   not runtime.toml, not the deployed environment, not a script. A knob
+   nobody turns, named after something that does not exist, is read once at
+   boot to produce the number written here. *)
+let maintenance_tick_sec = 60.0
+
 let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
 let log_server_fiber_crash =
   Server_bootstrap_loops_fiber.log_server_fiber_crash
@@ -820,7 +831,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      | exn ->
        Log.Server.warn "session restore failed: %s" (Printexc.to_string exn));
     let rec loop () =
-      Eio.Time.sleep clock Env_config_runtime.InternalTimers.janitor_interval_sec;
+      Eio.Time.sleep clock maintenance_tick_sec;
       recover_durable_demand_owners Maintenance_projection;
       reconcile_broadcast_mentions ();
       (try
@@ -876,8 +887,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          (* Keeper sandbox: remove Docker containers when owner_pid is dead,
              the container is stopped, or its explicit ttl_sec has elapsed.
              Containers without an explicit TTL do not expire by age. Throttled by
-             MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC (default 5min); janitor
-             ticks faster but the helper short-circuits when called too soon. *)
+             MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC (default 5min); this
+             loop ticks faster but the helper short-circuits when called too
+             soon. *)
          (match
             Keeper_sandbox_runtime.maybe_cleanup_stale_containers
               ~command_available:Executable_path.command_available

@@ -74,9 +74,9 @@ type stimulus_payload =
   | Ask_answered of ask_answered
       (* A nonblocking HITL approval this keeper enqueued was resolved. Wakes
          the keeper so it re-evaluates and proceeds on its next independent
-         cycle instead of waiting for unrelated stimulus, no-progress recovery,
-         or the 30-minute approval janitor. Blocking approvals resume their
-         resolver directly and do not emit this duplicate wake. Mirrors
+         cycle instead of waiting for unrelated stimulus or no-progress
+         recovery. Blocking approvals resume their resolver directly and do
+         not emit this duplicate wake. Mirrors
          [Fusion_completed]: a HITL decision is an async completion the
          waiting keeper must be notified of. *)
   | Completion_authority_rejected of completion_authority_rejection

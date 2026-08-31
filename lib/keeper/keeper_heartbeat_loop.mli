@@ -120,8 +120,8 @@ val decide_keepalive_cycle_action :
     record success or failure and leaves selected stimuli pending.
     [Turn_cycle_crashed] means the cycle's catch-all swallowed an exception to
     keep the keeper fiber alive (T6 audit), or a durable event-queue transition
-    did not commit. The failure has already been recorded via the durable
-    [Keeper_turn_failure_streak] boundary, so the caller dispatches
+    did not commit. The failure has already been recorded via
+    [Keeper_registry.increment_turn_failures], so the caller dispatches
     [Turn_failed]. [Turn_cycle_busy] preserves its typed admission reason and
     must not dispatch either turn status or refresh the work-as-heartbeat
     lease. *)
@@ -132,6 +132,13 @@ type keepalive_turn_outcome = {
       (** The cycle admitted at least one event-queue stimulus and acked
           every entry of that batch on completion. The loop reads it to
           skip the cadence sleep while more entries are pending. *)
+  rate_limited_retry_after : float option;
+      (** [Some retry_after] when the cycle's turn failure routed as a
+          provider rate-limit/capacity retry ([Retry_after_observed] with a
+          [Rate_limited] / [Hard_quota] / [Capacity_backpressure] class) —
+          carrying the route's own [Retry-After] hint when the provider sent
+          one. The loop replaces the plain cadence with a capped backoff for
+          such a cycle (#26068); [None] keeps the cadence. *)
 }
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:
@@ -154,17 +161,14 @@ type connector_attention_outcome =
 type batch_disposition =
   | Batch_ack_completed of
       { connector_attention_outcome : connector_attention_outcome }
-  | Batch_ack_durable_stimulus_yield
   | Batch_no_action
 
 val batch_disposition_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome option -> batch_disposition
-(** The queue action a turn's [cycle_outcome] implies. Completed turns ACK the
-    whole batch. A durable-stimulus yield ACKs attention-only sources so the
-    newer source can advance, but preserves Connector_attention until an exact
-    reply/ignore settlement exists. Every other incomplete, failed, cancelled,
-    or checkpointed outcome leaves the whole batch pending. Provider/runtime
-    failure is not authority to discard input. *)
+(** The single queue action a turn's [cycle_outcome] implies for every
+    admitted stimulus. Completed turns ACK the whole batch; every incomplete,
+    failed, cancelled, or checkpointed outcome leaves the whole batch pending.
+    Provider/runtime failure is not authority to discard input. *)
 
 type connector_attention_settlement =
   | Settle_resolved
@@ -188,14 +192,6 @@ val connector_attention_settlement_of_disposition :
     [0] maps to [Turn_succeeded]. *)
 val turn_status_event :
   turn_fail_count:int -> Keeper_state_machine.event
-
-val failure_reason_after_turn_status :
-  turn_fail_count:int ->
-  Keeper_registry.failure_reason option ->
-  Keeper_registry.failure_reason option
-(** Preserve a typed configuration root cause when the post-turn heartbeat
-    records its generic consecutive-failure observation. Other failures keep
-    the existing consecutive-count projection. *)
 
 (** Runs one keepalive turn (event intake, scheduling, optional cycle dispatch).
     The caller classifies lifecycle state and fd/disk pressure
@@ -257,14 +253,25 @@ val run_heartbeat_loop :
 
 module For_testing : sig
   (** During autoboot warmup, the next cycle runs at the warmup boundary rather
-      than one full heartbeat cadence later. *)
+      than one full heartbeat cadence later. [rate_limited_backoff_sec] is the
+      already-capped backoff to sleep instead of the plain cadence after a
+      rate-limited failure cycle; pass [cadence_sec] to preserve the plain
+      cadence behavior. *)
   val next_keepalive_sleep_duration_sec :
     proactive_warmup_sec:int ->
     proactive_warmup_elapsed:bool ->
     keepalive_started_ts:float ->
     now_ts:float ->
     cadence_sec:float ->
+    rate_limited_backoff_sec:float ->
     float
+
+  (** Capped backoff for a rate-limited failure route (#26068). Prefers the
+      provider's [Retry-After] hint when above the cadence, falls back to a
+      bounded default, and clamps the result to [cap_sec] so a misread header
+      can never park the lane. *)
+  val rate_limited_backoff_sec :
+    cap_sec:float -> retry_after_hint:float option -> cadence_sec:float -> float
 
   (** Deferred runtime lane hints have nothing to do with continuation
       delivery; they only shared this module with it. The implementation and

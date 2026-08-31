@@ -97,7 +97,7 @@ let rec ensure_dir path =
     if p <> path then ensure_dir p;
     Unix.mkdir path 0o755)
 
-let make_meta ?(sandbox = Keeper_types_profile_sandbox.Remote_ssh) name =
+let make_meta ?(sandbox = Keeper_types_profile_sandbox.Docker) name =
   let json =
     `Assoc
       [
@@ -121,7 +121,7 @@ let with_eio_fs f =
     ~clock:(Eio.Stdenv.clock env);
   f ~fs ~sw ()
 
-let setup ?(sandbox = Keeper_types_profile_sandbox.Remote_ssh) f =
+let setup ?(sandbox = Keeper_types_profile_sandbox.Docker) f =
   with_eio_fs @@ fun ~fs ~sw () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);

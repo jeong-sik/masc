@@ -528,6 +528,26 @@ let optional_nested_string_field json object_field field =
         (Printf.sprintf "schedule %s must be an object or null: %s"
            object_field (Yojson.Safe.to_string value))
 
+(* Whether a step of the wake actually happened, as the reaction ledger
+   recorded it. Absent reads as [None] and not as [false]: "the ledger did not
+   say" and "the ledger said no" are different answers, and only one of them
+   means something went wrong. *)
+let optional_nested_bool_field json object_field field =
+  match Yojson.Safe.Util.member object_field json with
+  | `Null -> Ok None
+  | `Assoc _ as nested -> (
+      match Yojson.Safe.Util.member field nested with
+      | `Null -> Ok None
+      | `Bool value -> Ok (Some value)
+      | value ->
+          Error
+            (Printf.sprintf "schedule %s.%s must be a boolean or null: %s"
+               object_field field (Yojson.Safe.to_string value)))
+  | value ->
+      Error
+        (Printf.sprintf "schedule %s must be an object or null: %s"
+           object_field (Yojson.Safe.to_string value))
+
 let optional_nested_int_field json object_field field =
   match Yojson.Safe.Util.member object_field json with
   | `Null -> Ok None
@@ -591,6 +611,32 @@ let decode_schedule_row json =
     optional_nested_string_field json "keeper_reaction_evidence"
       "latest_recorded_at_iso"
   in
+  (* What became of the wake, step by step, as the reaction ledger recorded
+     it. [projection_status] above is the verdict on all four at once; these
+     are the four, and they are what tells a stalled wake from a delivered
+     one that nobody acted on. *)
+  let* sch_reaction_kind =
+    optional_nested_string_field json "keeper_reaction_evidence" "reaction_kind"
+  in
+  let* sch_wake_seen =
+    optional_nested_bool_field json "keeper_reaction_evidence" "stimulus_seen"
+  in
+  let* sch_turn_started =
+    optional_nested_bool_field json "keeper_reaction_evidence"
+      "turn_started_seen"
+  in
+  let* sch_queue_ack_seen =
+    optional_nested_bool_field json "keeper_reaction_evidence"
+      "event_queue_ack_seen"
+  in
+  let* sch_wake_cancelled =
+    optional_nested_bool_field json "keeper_reaction_evidence"
+      "event_queue_cancelled_seen"
+  in
+  let* sch_reaction_quarantined =
+    optional_nested_int_field json "keeper_reaction_evidence"
+      "quarantined_record_count"
+  in
   Ok
     { sch_schedule_instance_id
     ; sch_schedule_id
@@ -615,6 +661,12 @@ let decode_schedule_row json =
     ; sch_queue_projection_status
     ; sch_queue_pending_count
     ; sch_reaction_projection_status
+    ; sch_reaction_kind
+    ; sch_wake_seen
+    ; sch_turn_started
+    ; sch_queue_ack_seen
+    ; sch_wake_cancelled
+    ; sch_reaction_quarantined
     ; sch_reaction_latest_at_iso
     }
 

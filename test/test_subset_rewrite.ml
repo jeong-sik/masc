@@ -1,9 +1,13 @@
-(** RFC execute-subset-dispositions §3.1: a refusal is a rewrite.
+(** RFC execute-boundary-is-the-sandbox: the shell runs the line, so most
+    constructs need no advice at all.
 
-    The claim these tests carry is narrow and checkable -- of the constructs
-    the subset excludes, exactly one has no call to suggest instead. If that
-    stops being true, either a rewrite was lost or one was invented for a
-    construct that has none. *)
+    §3.1 of the parent RFC wrote this taxonomy while the subset was what ran,
+    and the claim was that exactly one construct had no call to suggest. That
+    inverted when [script] became a shell. The claim these tests carry now is
+    the other way round: exactly three constructs have a move, and inventing
+    one for the rest sends a caller to rewrite code that works -- which
+    happened on 2026-08-31 to a keeper told "this tool runs no shell" about a
+    working [$PWD]. *)
 
 module Rewrite = Keeper_tooling.Subset_rewrite
 module Gate = Masc_exec_command_gate.Shell_command_gate
@@ -49,22 +53,60 @@ let _every_construct_is_listed : Masc_exec.Parsed.reason_too_complex -> unit
 
 let rewrite_of construct = Rewrite.of_reason (Gate.Unsupported_construct construct)
 
-let test_only_the_unnameable_has_no_rewrite () =
+let mentions ~needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
+  n > 0 && at 0
+;;
+
+
+(* The three that keep a move, named here so adding a fourth is a decision
+   rather than a drift. *)
+let has_a_move : Masc_exec.Parsed.reason_too_complex list =
+  [ `Heredoc; `Here_string; `Background ]
+;;
+
+let test_only_three_constructs_have_a_move () =
   List.iter
     (fun construct ->
-       match rewrite_of construct with
-       | Rewrite.Unrepresentable _ ->
+       let expected_move = List.mem construct has_a_move in
+       match rewrite_of construct, expected_move with
+       | Rewrite.Unrepresentable _, false -> ()
+       | Rewrite.Unrepresentable _, true ->
          Alcotest.failf
-           "%s has a call to suggest, so it must not be a refusal"
+           "%s lost the move it still has"
            (Rewrite.tag (rewrite_of construct))
-       | _ -> ())
+       | other, true -> ignore other
+       | other, false ->
+         Alcotest.failf
+           "a shell runs this construct, so advising %s sends the caller to \
+            rewrite working code"
+           (Rewrite.tag other))
     every_construct;
   match rewrite_of (`Unknown_construct "whatever this is") with
   | Rewrite.Unrepresentable _ -> ()
   | other ->
     Alcotest.failf
-      "a construct the parser could not name has no call to suggest, got %s"
+      "a construct the parser could not name has nothing to suggest, got %s"
       (Rewrite.tag other)
+;;
+
+(* The sentence a caller reads must not claim the tool cannot run what they
+   wrote. That claim was true until [script] became a shell, and it is the
+   exact wording a keeper acted on. *)
+let test_no_advice_claims_there_is_no_shell () =
+  List.iter
+    (fun construct ->
+       let sentence = Rewrite.to_string (rewrite_of construct) in
+       List.iter
+         (fun claim ->
+            Alcotest.(check bool)
+              (Printf.sprintf "%s must not say %S: %S"
+                 (Rewrite.tag (rewrite_of construct)) claim sentence)
+              false
+              (mentions ~needle:claim sentence))
+         [ "runs no shell"; "does not run"; "no shell" ])
+    (`Unknown_construct "unnamed" :: every_construct)
 ;;
 
 let tag_is construct expected =
@@ -73,44 +115,41 @@ let tag_is construct expected =
 ;;
 
 let test_each_rewrite_names_the_right_move () =
-  (* stdin is a field, and a heredoc is stdin *)
+  (* The stdin field takes the body as bytes, so it does not have to survive
+     the shell's quoting. That is a reason even when the shell would cope. *)
   tag_is `Heredoc "move_to_field:stdin";
   tag_is `Here_string "move_to_field:stdin";
-  (* a program belongs in a file *)
-  tag_is `Control_flow "call_this_instead:write-then-execute";
-  tag_is `Function_def "call_this_instead:write-then-execute";
-  tag_is `Subshell "call_this_instead:write-then-execute";
-  (* a process that outlives the call needs the handle, not this tool *)
+  (* The shell running the line exits when the line does, so a backgrounded
+     child is left with no handle. Spawn returns one. *)
   tag_is `Background "call_this_instead:spawn";
-  (* one command feeding another is two calls, and so is a value the shell
-     would have substituted before the command ran *)
-  tag_is `Cmd_subst "call_this_instead:execute-twice";
-  tag_is `Param_expansion "call_this_instead:execute-twice";
-  (* [>] and [>>] are in the subset, so what is left under this construct is a
-     spelling this tool does not have -- the same call, written out *)
-  tag_is `Redirect "spell_it_as"
+  (* A shell runs each of these, so there is no other call to name. *)
+  List.iter
+    (fun construct -> tag_is construct "unrepresentable")
+    [ `Cmd_subst
+    ; `Param_expansion
+    ; `Arith_expansion
+    ; `Glob_brace
+    ; `Subshell
+    ; `Proc_subst
+    ; `Control_flow
+    ; `Function_def
+    ; `Redirect
+    ]
 ;;
 
-let mentions ~needle haystack =
-  let n = String.length needle and h = String.length haystack in
-  let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
-  n > 0 && at 0
-;;
-
-(* The advice a caller acts on has to be about the construct they wrote.
-   [`Redirect] used to answer "use the stdin field", which is not a move for
-   [&>out] or for any output redirect, and it was reached by scripts whose
-   redirects were fine. *)
-let test_the_redirect_advice_is_about_redirecting () =
+(* [`Redirect] is reached by [&>], [>|], [<>] and [>&-] -- forms bash takes.
+   It used to answer "this tool has no operator that joins two streams", which
+   stopped being true, and before that "use the stdin field", which was never
+   a move for an output redirect. It answers with neither now. *)
+let test_the_redirect_advice_does_not_forbid_what_bash_takes () =
   let sentence = Rewrite.to_string (rewrite_of `Redirect) in
-  Alcotest.(check bool)
-    (Printf.sprintf "names the spelling this tool takes: %S" sentence)
-    true
-    (mentions ~needle:"> file 2>&1" sentence);
-  Alcotest.(check bool)
-    "does not send an output redirect to the stdin field"
-    false
-    (mentions ~needle:"stdin" sentence)
+  List.iter
+    (fun claim ->
+       Alcotest.(check bool)
+         (Printf.sprintf "must not say %S: %S" claim sentence)
+         false
+         (mentions ~needle:claim sentence))
+    [ "stdin"; "has no operator" ]
 ;;
 
 let test_a_nested_pipeline_is_flattened_not_refused () =
@@ -140,9 +179,8 @@ let test_the_background_advice_names_a_registered_tool () =
   Alcotest.(check string)
     "the sentence names the spawn tool as it is registered"
     (Printf.sprintf
-       "call %s instead: [&] backgrounds nothing here -- the child inherits this call's \
-        output pipe, so the call waits for it anyway, and a timeout leaves it running \
-        with no handle to stop it"
+       "call %s instead: the shell running this line exits when the line does, so [&] \
+        leaves a child with no handle to wait on, read from, or stop"
        spawn)
     sentence
 ;;
@@ -152,17 +190,21 @@ let () =
     "subset_rewrite"
     [ ( "taxonomy"
       , [ Alcotest.test_case
-            "only the unnameable has no rewrite"
+            "only three constructs have a move"
             `Quick
-            test_only_the_unnameable_has_no_rewrite
+            test_only_three_constructs_have_a_move
+        ; Alcotest.test_case
+            "no advice claims there is no shell"
+            `Quick
+            test_no_advice_claims_there_is_no_shell
         ; Alcotest.test_case
             "each rewrite names the right move"
             `Quick
             test_each_rewrite_names_the_right_move
         ; Alcotest.test_case
-            "the redirect advice is about redirecting"
+            "the redirect advice does not forbid what bash takes"
             `Quick
-            test_the_redirect_advice_is_about_redirecting
+            test_the_redirect_advice_does_not_forbid_what_bash_takes
         ; Alcotest.test_case
             "a nested pipeline is flattened, not refused"
             `Quick

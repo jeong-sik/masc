@@ -863,7 +863,7 @@ let test_summary_tool_metric_surface_points_to_raw_metrics () =
     ~finally:Tool_metrics_persist.reset_for_testing
     (fun () ->
       Tool_metrics_persist.enqueue
-        ~base_path:dir
+        ~masc_root:(masc_root dir)
         (Tool_result.Completed
            { tool_name = "tool_read_file"
            ; data = `Null
@@ -1492,6 +1492,46 @@ let test_cluster_keeper_metrics () =
   in
   Alcotest.(check int) "cluster keeper metric found" 1 (List.length entries)
 
+let test_cluster_tool_metrics () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_cluster_tool_metrics" in
+  let cluster_masc = Filename.concat dir ".masc/clusters/prod" in
+  Tool_metrics_persist.reset_for_testing ();
+  Fun.protect
+    ~finally:Tool_metrics_persist.reset_for_testing
+    (fun () ->
+      Tool_metrics_persist.enqueue
+        ~masc_root:cluster_masc
+        (Tool_result.Completed
+           { tool_name = "cluster_tool"
+           ; data = `Null
+           ; metadata = None
+           ; duration_ms = 4.0
+           });
+      let cluster_entries =
+        Telemetry_unified.read_unified
+          ~base_path:dir
+          ~masc_root:cluster_masc
+          ~sources:[ Telemetry_unified.Tool_metric ]
+          ()
+      in
+      Alcotest.(check int)
+        "cluster tool metric found"
+        1
+        (List.length cluster_entries);
+      let default_entries =
+        Telemetry_unified.read_unified
+          ~base_path:dir
+          ~masc_root:(masc_root dir)
+          ~sources:[ Telemetry_unified.Tool_metric ]
+          ()
+      in
+      Alcotest.(check int)
+        "default root misses cluster tool metric"
+        0
+        (List.length default_entries))
+
 (* ── Trajectory summary incremental cache ─────────── *)
 
 let trajectory_row ~ts ~tool_name =
@@ -1783,5 +1823,6 @@ let () =
         [
           Alcotest.test_case "cluster-aware read" `Quick test_cluster_aware_read;
           Alcotest.test_case "cluster keeper metrics" `Quick test_cluster_keeper_metrics;
+          Alcotest.test_case "cluster tool metrics" `Quick test_cluster_tool_metrics;
         ] );
     ]

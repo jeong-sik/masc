@@ -6,7 +6,7 @@
 
     @since 2.108.0 — Issue #3280 *)
 
-val enqueue : base_path:string -> Tool_result.result -> unit
+val enqueue : masc_root:string -> Tool_result.result -> unit
 (** Persist one completed tool invocation. This call writes directly to
     SQLite before returning; there is no process-local write queue. Storage
     failures are logged and counted, but do not raise into tool dispatch.
@@ -19,34 +19,11 @@ type hydrate_report = {
 }
 
 val hydrate :
-  base_path:string ->
+  masc_root:string ->
   retention_days:int ->
   (hydrate_report, string) result
 (** Delete rows older than [retention_days], then replace the in-memory
     aggregate with the retained rows. Call before installing live producers. *)
-
-type store_summary = {
-  path : string;
-  exists : bool;
-  entry_count : int;
-  latest_ts : float option;
-}
-
-val store_summary : base_path:string -> (store_summary, string) result
-(** Return the persisted row count and latest timestamp without changing the
-    in-memory aggregate. A missing database is an empty, healthy store. *)
-
-val read_recent :
-  base_path:string ->
-  ?since_ts:float ->
-  ?until_ts:float ->
-  n:int ->
-  unit ->
-  (Yojson.Safe.t list, string) result
-(** Read at most [n] newest rows, newest first. [n <= 0] returns [[]]. *)
-
-val database_path : base_path:string -> string
-(** Canonical SQLite path under the cluster-aware MASC runtime root. *)
 
 val reset_for_testing : unit -> unit
 (** Close the cached database handle. Tests must call this only after all

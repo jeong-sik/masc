@@ -552,11 +552,13 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      order prevents startup hydration from overwriting a call that completed
      concurrently. A failed read leaves the current snapshot unchanged and is
      visible to operators; persistence remains best-effort. *)
-  let tool_metrics_base_path = (Mcp_server.workspace_config state).base_path in
+  let tool_metrics_masc_root =
+    Workspace.masc_dir (Mcp_server.workspace_config state)
+  in
   (try
      match
        Tool_metrics_persist.hydrate
-         ~base_path:tool_metrics_base_path
+         ~masc_root:tool_metrics_masc_root
          ~retention_days:(Env_config_core.jsonl_retention_days ())
      with
      | Ok report ->
@@ -580,7 +582,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     match outcome, result with
     | Dispatch_outcome.Handled, Some r ->
       Tool_metrics.record r;
-      Tool_metrics_persist.enqueue ~base_path:tool_metrics_base_path r
+      Tool_metrics_persist.enqueue ~masc_root:tool_metrics_masc_root r
     | _ -> ());
   (* RFC-0234 scheduled automation runner.  Public schedule tools and the
      dashboard-only approval route only mutate the durable ledger; this loop is

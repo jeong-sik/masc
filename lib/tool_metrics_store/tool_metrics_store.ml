@@ -14,7 +14,7 @@ type summary = {
 }
 
 type store = {
-  base_path : string;
+  masc_root : string;
   db : Sqlite3.db;
 }
 
@@ -22,10 +22,7 @@ let store_mu = Stdlib.Mutex.create ()
 let current_store : store option ref = ref None
 let ( let* ) = Result.bind
 
-let database_path ~base_path =
-  Filename.concat
-    (Config_dir_resolver.masc_root ~base_path)
-    "tool-metrics.sqlite3"
+let database_path ~masc_root = Filename.concat masc_root "tool-metrics.sqlite3"
 
 let sqlite_error db operation rc =
   Printf.sprintf
@@ -159,8 +156,8 @@ let configure db =
         "CREATE INDEX IF NOT EXISTS tool_metric_events_ts \
          ON tool_metric_events(ts)"
 
-let open_store ~base_path =
-  let path = database_path ~base_path in
+let open_store ~masc_root =
+  let path = database_path ~masc_root in
   try
     Fs_compat.mkdir_p (Filename.dirname path);
     let db = Sqlite3.db_open path in
@@ -169,7 +166,7 @@ let open_store ~base_path =
       Error error
     in
     (match configure db with
-     | Ok () -> Ok { base_path; db }
+     | Ok () -> Ok { masc_root; db }
      | Error error -> fail error
      | exception Sqlite3.Error detail -> fail ("configure database: " ^ detail)
      | exception Sys_error detail -> fail ("configure database: " ^ detail)
@@ -198,22 +195,22 @@ let close_current_store_locked () =
     current_store := None;
     ignore (close_db store.db : bool)
 
-let get_or_open_locked ~base_path =
+let get_or_open_locked ~masc_root =
   match !current_store with
-  | Some store when String.equal store.base_path base_path -> Ok store
+  | Some store when String.equal store.masc_root masc_root -> Ok store
   | Some _ ->
     close_current_store_locked ();
-    let* store = open_store ~base_path in
+    let* store = open_store ~masc_root in
     current_store := Some store;
     Ok store
   | None ->
-    let* store = open_store ~base_path in
+    let* store = open_store ~masc_root in
     current_store := Some store;
     Ok store
 
-let with_store ~base_path f =
+let with_store ~masc_root f =
   Stdlib.Mutex.protect store_mu (fun () ->
-    let* store = get_or_open_locked ~base_path in
+    let* store = get_or_open_locked ~masc_root in
     try f store with
     | Sqlite3.Error detail -> Error ("SQLite operation: " ^ detail)
     | Sys_error detail -> Error ("storage operation: " ^ detail)
@@ -228,8 +225,8 @@ let with_store ~base_path f =
 let reset_for_testing () =
   Stdlib.Mutex.protect store_mu close_current_store_locked
 
-let insert ~base_path row =
-  with_store ~base_path (fun store ->
+let insert ~masc_root row =
+  with_store ~masc_root (fun store ->
     with_statement
       store.db
       ~operation:"insert tool metric"
@@ -251,11 +248,11 @@ let insert ~base_path row =
         in
         expect_done store.db statement ~operation:"insert tool metric"))
 
-let prune ~base_path ~retention_days =
+let prune ~masc_root ~retention_days =
   if retention_days <= 0
   then Ok 0
   else
-    with_store ~base_path (fun store ->
+    with_store ~masc_root (fun store ->
       let cutoff =
         Unix.gettimeofday ()
         -. (Float.of_int retention_days *. Masc_time_constants.day)
@@ -285,8 +282,8 @@ let row_of_statement statement =
   ; duration_ms = Sqlite3.column_double statement 4
   }
 
-let iter_all ~base_path ~f =
-  with_store ~base_path (fun store ->
+let iter_all ~masc_root ~f =
+  with_store ~masc_root (fun store ->
     with_statement
       store.db
       ~operation:"read retained tool metrics"
@@ -329,12 +326,12 @@ let latest_ts db =
           Error
             (sqlite_error db "read latest tool metric timestamp completion" rc))
 
-let summary ~base_path =
-  let path = database_path ~base_path in
+let summary ~masc_root =
+  let path = database_path ~masc_root in
   if not (Sys.file_exists path)
   then Ok { path; exists = false; entry_count = 0; latest_ts = None }
   else
-    with_store ~base_path (fun store ->
+    with_store ~masc_root (fun store ->
       let* entry_count =
         single_int
           store.db
@@ -344,15 +341,15 @@ let summary ~base_path =
       let* latest_ts = latest_ts store.db in
       Ok { path; exists = true; entry_count; latest_ts })
 
-let read_recent ~base_path ?since_ts ?until_ts ~n () =
+let read_recent ~masc_root ?since_ts ?until_ts ~n () =
   if n <= 0
   then Ok []
   else
-    let path = database_path ~base_path in
+    let path = database_path ~masc_root in
     if not (Sys.file_exists path)
     then Ok []
     else
-      with_store ~base_path (fun store ->
+      with_store ~masc_root (fun store ->
         with_statement
           store.db
           ~operation:"read recent tool metrics"

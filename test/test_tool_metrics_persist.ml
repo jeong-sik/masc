@@ -32,6 +32,8 @@ let with_tmp_dir f =
       Fs_compat.remove_tree dir)
     (fun () -> f dir)
 
+let masc_root base_path = Filename.concat base_path ".masc"
+
 let get_ok label = function
   | Ok value -> value
   | Error error -> Alcotest.failf "%s: %s" label error
@@ -44,13 +46,13 @@ let string_field key json =
 let test_enqueue_writes_directly_to_sqlite () =
   with_tmp_dir (fun base_path ->
     P.enqueue
-      ~base_path
+      ~masc_root:(masc_root base_path)
       (make_result ~name:"alpha" ~success:true ~duration_ms:10.0);
     P.enqueue
-      ~base_path
+      ~masc_root:(masc_root base_path)
       (make_result ~name:"alpha" ~success:false ~duration_ms:5.0);
     P.enqueue
-      ~base_path
+      ~masc_root:(masc_root base_path)
       (R.Deferred
          { R.tool_name = "alpha"
          ; data = `Null
@@ -58,9 +60,12 @@ let test_enqueue_writes_directly_to_sqlite () =
          ; duration_ms = 3.0
          });
     P.enqueue
-      ~base_path
+      ~masc_root:(masc_root base_path)
       (make_result ~name:"beta" ~success:true ~duration_ms:20.0);
-    let summary = P.store_summary ~base_path |> get_ok "store summary" in
+    let summary =
+      Tool_metrics_store.summary ~masc_root:(masc_root base_path)
+      |> get_ok "store summary"
+    in
     Alcotest.(check bool) "database exists" true summary.exists;
     Alcotest.(check int) "four rows committed" 4 summary.entry_count;
     Alcotest.(check string)
@@ -72,7 +77,12 @@ let test_enqueue_writes_directly_to_sqlite () =
       false
       (Sys.file_exists (Filename.concat base_path "data/tool-metrics"));
     let rows =
-      P.read_recent ~base_path ~n:10 () |> get_ok "read recent rows"
+      Tool_metrics_store.read_recent
+        ~masc_root:(masc_root base_path)
+        ~n:10
+        ()
+      |> Result.map (List.map Tool_metrics_store.row_to_json)
+      |> get_ok "read recent rows"
     in
     Alcotest.(check int) "four rows readable" 4 (List.length rows);
     Alcotest.(check (list string))
@@ -85,10 +95,10 @@ let test_enqueue_writes_directly_to_sqlite () =
 let test_restart_hydrates_without_duplicates () =
   with_tmp_dir (fun base_path ->
     P.enqueue
-      ~base_path
+      ~masc_root:(masc_root base_path)
       (make_result ~name:"alpha" ~success:true ~duration_ms:10.0);
     P.enqueue
-      ~base_path
+      ~masc_root:(masc_root base_path)
       (R.Deferred
          { R.tool_name = "alpha"
          ; data = `Null
@@ -96,12 +106,13 @@ let test_restart_hydrates_without_duplicates () =
          ; duration_ms = 20.0
          });
     P.enqueue
-      ~base_path
+      ~masc_root:(masc_root base_path)
       (make_result ~name:"beta" ~success:false ~duration_ms:30.0);
     P.reset_for_testing ();
     Tool_metrics.clear ();
     let report =
-      P.hydrate ~base_path ~retention_days:30 |> get_ok "first hydrate"
+      P.hydrate ~masc_root:(masc_root base_path) ~retention_days:30
+      |> get_ok "first hydrate"
     in
     Alcotest.(check int) "three rows loaded" 3 report.loaded_records;
     Alcotest.(check int) "nothing pruned" 0 report.pruned_records;
@@ -112,7 +123,8 @@ let test_restart_hydrates_without_duplicates () =
     let beta = Option.get (Tool_metrics.stats_for "beta") in
     Alcotest.(check int) "beta failed restored" 1 beta.failure_count;
     let second =
-      P.hydrate ~base_path ~retention_days:30 |> get_ok "second hydrate"
+      P.hydrate ~masc_root:(masc_root base_path) ~retention_days:30
+      |> get_ok "second hydrate"
     in
     Alcotest.(check int) "second load sees same rows" 3 second.loaded_records;
     Alcotest.(check int)
@@ -123,7 +135,7 @@ let test_restart_hydrates_without_duplicates () =
 let insert_old_row ~base_path =
   P.reset_for_testing ();
   Tool_metrics_store.insert
-    ~base_path
+    ~masc_root:(masc_root base_path)
     { record_id = "old-record"
     ; ts = 1.0
     ; tool_name = "expired"
@@ -135,11 +147,12 @@ let insert_old_row ~base_path =
 let test_hydrate_prunes_expired_rows () =
   with_tmp_dir (fun base_path ->
     P.enqueue
-      ~base_path
+      ~masc_root:(masc_root base_path)
       (make_result ~name:"current" ~success:true ~duration_ms:2.0);
     insert_old_row ~base_path;
     let report =
-      P.hydrate ~base_path ~retention_days:30 |> get_ok "hydrate after prune"
+      P.hydrate ~masc_root:(masc_root base_path) ~retention_days:30
+      |> get_ok "hydrate after prune"
     in
     Alcotest.(check int) "one expired row pruned" 1 report.pruned_records;
     Alcotest.(check int) "one current row loaded" 1 report.loaded_records;
@@ -150,18 +163,19 @@ let test_hydrate_prunes_expired_rows () =
     Alcotest.(check int)
       "database contains current row only"
       1
-      (P.store_summary ~base_path |> get_ok "summary after prune").entry_count)
+      (Tool_metrics_store.summary ~masc_root:(masc_root base_path)
+       |> get_ok "summary after prune").entry_count)
 
 let test_multidomain_writes_are_serialized () =
   with_tmp_dir (fun base_path ->
     P.enqueue
-      ~base_path
+      ~masc_root:(masc_root base_path)
       (make_result ~name:"seed" ~success:true ~duration_ms:1.0);
     let spawn producer =
       Domain.spawn (fun () ->
         for i = 1 to 250 do
           P.enqueue
-            ~base_path
+            ~masc_root:(masc_root base_path)
             (make_result
                ~name:(Printf.sprintf "domain-%d-tool-%03d" producer i)
                ~success:true
@@ -171,7 +185,8 @@ let test_multidomain_writes_are_serialized () =
     let domains = List.init 4 spawn in
     List.iter Domain.join domains;
     let summary =
-      P.store_summary ~base_path |> get_ok "multidomain store summary"
+      Tool_metrics_store.summary ~masc_root:(masc_root base_path)
+      |> get_ok "multidomain store summary"
     in
     Alcotest.(check int) "all concurrent rows committed" 1001 summary.entry_count)
 
@@ -185,31 +200,34 @@ let test_duplicate_record_id_is_idempotent () =
       ; duration_ms = 1.0
       }
     in
-    Tool_metrics_store.insert ~base_path row |> get_ok "first insert";
-    Tool_metrics_store.insert ~base_path row |> get_ok "duplicate insert";
+    Tool_metrics_store.insert ~masc_root:(masc_root base_path) row
+    |> get_ok "first insert";
+    Tool_metrics_store.insert ~masc_root:(masc_root base_path) row
+    |> get_ok "duplicate insert";
     Alcotest.(check int)
       "duplicate record id keeps one row"
       1
-      (P.store_summary ~base_path |> get_ok "summary after duplicate").entry_count)
+      (Tool_metrics_store.summary ~masc_root:(masc_root base_path)
+       |> get_ok "summary after duplicate").entry_count)
 
 let test_write_failure_does_not_raise () =
   with_tmp_dir (fun base_path ->
     let masc_path = Filename.concat base_path ".masc" in
     Fs_compat.append_file masc_path "not-a-directory";
     P.enqueue
-      ~base_path
+      ~masc_root:masc_path
       (make_result ~name:"unpersisted" ~success:true ~duration_ms:1.0);
     Alcotest.(check bool)
       "database was not created"
       false
-      (Sys.file_exists (P.database_path ~base_path)))
+      (Sys.file_exists (Tool_metrics_store.database_path ~masc_root:masc_path)))
 
 let crash_child_arg = "--tool-metrics-crash-child"
 let crash_child_rows = 250
 
 let test_sigkill_recovery () =
   with_tmp_dir (fun base_path ->
-    let argv = [| Sys.executable_name; crash_child_arg; base_path |] in
+    let argv = [| Sys.executable_name; crash_child_arg; masc_root base_path |] in
     let pid =
       Unix.create_process
         Sys.executable_name
@@ -231,7 +249,7 @@ let test_sigkill_recovery () =
        Alcotest.failf "crash child stopped by signal %d" signal);
     Tool_metrics.clear ();
     let report =
-      P.hydrate ~base_path ~retention_days:30
+      P.hydrate ~masc_root:(masc_root base_path) ~retention_days:30
       |> get_ok "hydrate after SIGKILL"
     in
     Alcotest.(check int)
@@ -239,12 +257,12 @@ let test_sigkill_recovery () =
       crash_child_rows
       report.loaded_records)
 
-let run_crash_child base_path =
+let run_crash_child masc_root =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   for i = 1 to crash_child_rows do
     P.enqueue
-      ~base_path
+      ~masc_root
       (make_result
          ~name:(Printf.sprintf "crash-tool-%03d" i)
          ~success:true

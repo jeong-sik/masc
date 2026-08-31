@@ -10,10 +10,8 @@ let test_now = 1_700_000_000.0
 let fresh_dir prefix = Filename.temp_dir prefix ""
 
 let fact claim : Types.fact =
-  { claim
-  ; category = Types.Fact
-  ; first_seen = test_now
-  }
+  Types.observed ~claim ~category:Types.Fact ~now:test_now
+    ~origin:{ kind = Types.Legacy; trace_id = "" }
 ;;
 
 let source =

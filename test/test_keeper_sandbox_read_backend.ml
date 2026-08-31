@@ -369,13 +369,31 @@ let test_run_command_remote_ssh_endpoint_error_before_image_guard () =
          in
          loop 0)
 
+(* The trailer the fake shim writes, rendered by the same function the real
+   shim renders it with. It was a hand-typed string carrying ["v":1] while
+   the wire had moved to 2, and nothing caught that because the fixture sat
+   on a dead path (task-888). Typing the current version in its place would
+   arm the same drift for the next one -- the version, the field names and
+   the framing all come from [Exec_ssh_protocol] now, so a wire change either
+   updates this fixture or fails to compile.
+
+   [printf '%%s'] rather than the trailer as a format: the renderer escapes
+   what belongs to JSON, not what belongs to printf. *)
 let fake_ssh_success_script =
-  {|#!/bin/sh
+  Printf.sprintf
+    {|#!/bin/sh
 cat >/dev/null 2>/dev/null &
 printf 'remote-file-content'
-printf '\036{"masc_exec_result":{"v":1,"exit":0,"signal":null,"timed_out":false,"shim_error":null}}\036' >&2
+printf '%%s' '%s' >&2
 exit 0
 |}
+    (Exec_ssh_protocol.render_trailer
+       { v = Exec_ssh_protocol.protocol_version
+       ; exit = Some 0
+       ; signal = None
+       ; timed_out = false
+       ; shim_error = None
+       })
 
 let test_remote_ssh_read_skips_host_existence_preflight () =
   let base, config, meta = setup_config "remote-reader" in
@@ -392,14 +410,27 @@ instructions = "remote read test"
 sandbox_profile = "remote_ssh"
 remote_endpoint = "fixture"
 |};
-  write_file (Filename.concat base ".masc/runtime.toml")
-    {|[exec.ssh.endpoints.fixture]
-host = "fixture.invalid"
-user = "masc"
-remote_root = "/srv/masc/playground"
-connect_timeout_sec = 1
-max_concurrent_sessions = 2
-|};
+  (* RFC-0121: the endpoint resolver reads .masc/config/runtime.toml — the live
+     layout — not the .masc root this fixture used to write to. *)
+    write_file
+    (Filename.concat base ".masc/config/runtime.toml")
+    (* R00: derive the fixture table from the typed record via
+       Exec_ssh_endpoint.to_toml, the strict decoder mirror, so the
+       fixture cannot drift from what Runtime_toml accepts. *)
+    (Exec_ssh_endpoint.to_toml
+       Exec_ssh_endpoint.
+         { name = "fixture"
+         ; host = "fixture.invalid"
+         ; user = "masc"
+         ; port = default_port
+         ; identity_file = default_identity_file ~name:"fixture"
+         ; known_hosts_file = default_known_hosts_file ~name:"fixture"
+         ; remote_root = "/srv/masc/playground"
+         ; connect_timeout_sec = 1
+         ; max_concurrent_sessions = 2
+         ; env_allowlist = []
+         ; capabilities = []
+         });
   let missing_host_path =
     Filename.concat
       (Keeper_sandbox.host_root_abs_of_meta ~config meta)

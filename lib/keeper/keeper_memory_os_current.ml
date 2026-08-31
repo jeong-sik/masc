@@ -705,15 +705,30 @@ let upsert_fact
            if String.equal (memory_id existing) incoming_identity
            then (
              found := true;
-             { incoming with first_seen = existing.first_seen })
+             (* Byte-identical re-observation of an existing row. The exact
+                claim bytes were already on file, so this is reinforcement,
+                not a new fact: preserve the authoritative insertion time and
+                the original origin (an injected copy re-observed must not
+                repaint an authored row), refresh the observation time, and
+                count the re-observation. This is the measurable damper on
+                byte-identical reinjection: the loop accumulates a count, not
+                rows. *)
+             { incoming with
+               first_seen = existing.first_seen
+             ; last_seen = Float.max existing.last_seen incoming.last_seen
+             ; reinforcement = existing.reinforcement + 1
+             ; origin = existing.origin
+             })
            else existing)
         current_facts
     in
     let facts = if !found then facts else facts @ [ incoming ] in
-    (* When the rendered payload exceeds the byte budget, evict the oldest
-       facts (by [first_seen]) other than the incoming one until it fits, so an
-       explicit write never deadlocks a full memory. A single incoming fact
-       larger than the whole budget still fails closed below. *)
+    (* When the rendered payload exceeds the byte budget, evict the stalest
+       facts (by [last_seen], the most recent re-observation of the same claim
+       bytes) other than the incoming one until it fits, so an explicit write
+       never deadlocks a full memory and a fact that keeps proving relevant
+       outlives budget pressure instead of dying of insertion age. A single
+       incoming fact larger than the whole budget still fails closed below. *)
     let facts =
       match
         combined_measure ~max_bytes:max_fact_bytes ~source_payload facts
@@ -728,7 +743,7 @@ let upsert_fact
         in
         let others =
           List.sort
-            (fun a b -> Float.compare a.first_seen b.first_seen)
+            (fun a b -> Float.compare a.last_seen b.last_seen)
             others
         in
         let rec evict_oldest remaining =

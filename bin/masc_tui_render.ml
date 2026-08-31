@@ -6284,6 +6284,31 @@ let render_keeper_message (state : state) =
          (Printf.sprintf
             "  %d memory journal row(s) could not be read and are not shown"
             state.msg_memory_dropped));
+    (* Where the pane is, when it is not at the newest row. The distance and
+       the key back are what the footer used to carry seventh of nine hints,
+       and the footer drops hints from its tail: on a narrow pane the one
+       fact that changes what the arrow keys do was among the first to go.
+       The row is drawn from [scroll], which is the clamped position the
+       frame actually used, so it cannot claim a distance the pane did not
+       move. [keeper_message_status_rows] reserves it on the same condition.
+
+       At the oldest row with nothing more to fetch the distance says less
+       than "start" does, which is the same reading [scroll_hint] takes. *)
+    (* Drawn on the stored position, which is what the budget above counted;
+       worded from the clamped one, which is where the frame actually is. The
+       two agree except on the single frame after a shrinking history forces a
+       clamp, and there the row says so rather than reporting a distance the
+       pane did not move. *)
+    (if Masc_tui_types.keeper_message_reading_back state then
+       box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
+         (if scroll <= 0 then
+            "  \xe2\x86\x93 back at the newest row"
+          else if state.msg_older_exist then
+            Printf.sprintf
+              "  \xe2\x86\x91 reading back %d row(s) \xc2\xb7 Ctrl-E returns to the newest"
+              scroll
+          else
+            "  \xe2\x86\x91 the start of this conversation \xc2\xb7 Ctrl-E returns to the newest"));
     (* The row [keeper_message_status_rows] reserves for the older-page
        fetch. Counting it without drawing it floated the footer a row up,
        and a failed page load was silent -- the one thing it must not be. *)

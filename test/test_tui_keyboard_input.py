@@ -1234,6 +1234,12 @@ def approval_selection_http_fixtures() -> tuple[
     fixtures["/api/v1/operator?view=summary&include_messages=0&include_keepers=0"] = (
         approval_selection_snapshot(initial_items)
     )
+    # The surface also polls the held tool calls. An unanswered poll is not a
+    # quiet zero here: the header says ", held calls stale" beside the count,
+    # because a list that survived a failed refresh is the one an operator
+    # decides against. This scenario is about selection, so it answers the
+    # poll with the honest empty queue.
+    fixtures["/api/v1/keepers/tool-approvals"] = (200, {"pending": []})
     return fixtures, initial_items, approval_new
 
 
@@ -3149,7 +3155,7 @@ def approval_selection_identity_interaction(
             master_fd,
             output,
             screen_header(
-                b"MASC Approvals", b" (3/3, hidden 0, actor masc-tui)"
+                b"MASC Approvals", b" (3)"
             ),
         )
         selected = send_and_wait(process, master_fd, output, b"j", b"keeper_probe")
@@ -3173,13 +3179,13 @@ def approval_selection_identity_interaction(
             output,
             b"r",
             screen_header(
-                b"MASC Approvals", b" (4/4, hidden 0, actor masc-tui)"
+                b"MASC Approvals", b" (4)"
             ),
         )
         refreshed_frame = frame_containing(
             refreshed,
             screen_header(
-                b"MASC Approvals", b" (4/4, hidden 0, actor masc-tui)"
+                b"MASC Approvals", b" (4)"
             ),
         )
         refreshed_plain = CSI_RE.sub(b"", refreshed_frame)

@@ -1163,6 +1163,45 @@ let test_each_owner_claims_bounded_parallel_workers () =
        Gate.For_testing.release_auto_judge entry_b1)
 ;;
 
+(* The Gate projection is cached under a key built from
+   [store_revision_for_workspace], so any write that changes what the queue
+   publishes has to move that number. It did not: only the availability
+   transitions moved it, and the dashboard kept serving a resolved approval as
+   still pending for the cache's whole life. Operators answered the same row
+   again on the next poll -- one live approval carries three [resolved] audit
+   rows from a single actor. Both halves are asserted, because an enqueue that
+   never reaches a reader and a resolution that never leaves one are the same
+   defect from opposite ends. *)
+let test_queue_writes_advance_the_projection_revision () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-revision-cache" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let installed = AQ.store_revision_for_workspace ~base_path in
+       let approval_id =
+         submit_with_context
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "target", `String "revision" ])
+           ()
+       in
+       let after_enqueue = AQ.store_revision_for_workspace ~base_path in
+       Alcotest.(check bool)
+         "an enqueued ask advances the projection revision"
+         true
+         (after_enqueue > installed);
+       (match aq_resolve ~base_path ~id:approval_id
+                ~decision:Rule_types.Decision.Approve with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       Alcotest.(check bool)
+         "a resolved ask advances the projection revision"
+         true
+         (AQ.store_revision_for_workspace ~base_path > after_enqueue))
+;;
+
 let test_delivery_wire_shape_drops_request_context () =
   let base_path = temp_dir () in
   let keeper_name = "queue-delivery-context" in
@@ -4828,6 +4867,10 @@ let () =
             "delivery wire shape drops the request context"
             `Quick
             test_delivery_wire_shape_drops_request_context
+        ; Alcotest.test_case
+            "queue writes advance the projection revision"
+            `Quick
+            test_queue_writes_advance_the_projection_revision
         ] )
     ]
 ;;

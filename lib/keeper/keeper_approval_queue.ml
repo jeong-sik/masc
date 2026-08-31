@@ -627,6 +627,25 @@ let save_replay_results_file_unlocked ~base_path ~delivery_map =
   | exn -> Error { path; reason = Printexc.to_string exn }
 ;;
 
+(* Both publish paths below end the same way: a write that landed changed what
+   this queue publishes, and a write that failed took the store out of service.
+   The revision they move is what {!store_revision_for_workspace} answers, and
+   the dashboard's Gate projection is cached under a key built from it.
+
+   Until 2026-08-31 only the two availability transitions moved it, so a
+   landed write -- an enqueue, a resolution, a completed delivery -- left the
+   key unchanged and every reader kept the pre-write snapshot for the cache's
+   whole life. A resolved approval was therefore republished as still pending,
+   and an operator answering it from the TUI saw the row come back on the next
+   poll and answered it again: one approval in the live workspace carries three
+   [resolved] audit rows from a single actor minutes apart. *)
+let publish_snapshot_outcome ~base_path result =
+  (match result with
+   | Ok _ -> bump_store_revision_unlocked ~base_path
+   | Error error -> mark_store_unavailable_unlocked ~base_path error);
+  result
+;;
+
 let persist_snapshot_with_sequence_unlocked
       ~base_path
       ~next_sequence
@@ -636,17 +655,13 @@ let persist_snapshot_with_sequence_unlocked
   match SMap.find_opt base_path (Atomic.get unavailable_stores) with
   | Some error -> Error error
   | None ->
-    (match
-       save_snapshot_file_unlocked
+    publish_snapshot_outcome
+      ~base_path
+      (save_snapshot_file_unlocked
          ~base_path
          ~next_sequence
          ~pending_map
-         ~delivery_map
-     with
-     | Ok () as ok -> ok
-     | Error error ->
-       mark_store_unavailable_unlocked ~base_path error;
-       Error error)
+         ~delivery_map)
 ;;
 
 type store_lifecycle =
@@ -689,18 +704,14 @@ let persist_snapshot_exact_unlocked
   =
   match next_sequence_lifecycle ~base_path with
   | Ready next_sequence ->
-    (match
-       save_snapshot_file_strict_staged_unlocked
+    publish_snapshot_outcome
+      ~base_path
+      (save_snapshot_file_strict_staged_unlocked
          ~save_file_atomic_strict_staged
          ~base_path
          ~next_sequence
          ~pending_map
-         ~delivery_map
-     with
-     | Ok _ as ok -> ok
-     | Error error ->
-       mark_store_unavailable_unlocked ~base_path error;
-       Error error)
+         ~delivery_map)
   | Uninstalled ->
     Error
       { path = pending_store_path ~base_path

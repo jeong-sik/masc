@@ -24,6 +24,7 @@ module Code = Masc.Keeper_turn_terminal_code
 module Legacy = Masc.Keeper_turn_terminal
 module Registry = Masc.Keeper_registry
 module Unified_types = Masc.Keeper_unified_turn_types
+module Status_blocker = Masc.Keeper_status_bridge_blocker
 
 (* ===== Byte-compat oracle ====================================== *)
 (* For every legacy wire code, build the corresponding disposition,
@@ -267,36 +268,140 @@ let test_registry_failure_reason_does_not_classify_free_form_detail () =
 ;;
 
 let test_registry_failure_reason_preserves_typed_configuration_error () =
-  let core_error =
-    Agent_core.Error.Config
-      (Agent_core.Error.InvalidConfig
-         { field = "provider_credential"
-         ; detail = "required provider credential is missing"
-         })
-  in
-  let raw_error = Agent_core.Error.to_string core_error in
-  let terminal = Legacy.of_failure ~raw_error core_error in
-  match
+  let classify core_error =
+    let raw_error = Agent_core.Error.to_string core_error in
+    let terminal = Legacy.of_failure ~raw_error core_error in
     Unified_types.registry_failure_reason_of_terminal_reason
       ~core_error
       terminal
       ~raw_error
-  with
+  in
+  let missing_env =
+    Agent_core.Error.Config
+      (Agent_core.Error.MissingEnvVar { var_name = "OLLAMA_CLOUD_API_KEY" })
+  in
+  (match classify missing_env with
   | Some (Registry.Turn_configuration_error { code; field; detail }) ->
-    Alcotest.(check string) "configuration code" "invalid_config" code;
+    Alcotest.(check string) "configuration code" "missing_env_var" code;
     Alcotest.(check (option string))
       "configuration field"
-      (Some "provider_credential")
+      (Some "OLLAMA_CLOUD_API_KEY")
       field;
     Alcotest.(check string)
       "configuration detail"
-      "required provider credential is missing"
+      "required environment variable is missing"
       detail
   | Some other ->
     Alcotest.failf
       "expected Turn_configuration_error, got %s"
       (Registry.failure_reason_to_string other)
-  | None -> Alcotest.fail "expected typed configuration failure reason"
+  | None -> Alcotest.fail "expected typed configuration failure reason");
+  let secret = "must-not-reach-health" in
+  let sensitive =
+    Agent_core.Error.Config
+      (Agent_core.Error.SensitiveValueInConfig { detail = secret })
+  in
+  (match classify sensitive with
+   | Some (Registry.Turn_configuration_error { code; detail; _ }) ->
+     Alcotest.(check string)
+       "sensitive configuration code"
+       "sensitive_value_in_config"
+       code;
+     Alcotest.(check string)
+       "sensitive detail is redacted"
+       "configuration contains a sensitive inline value"
+       detail;
+     Alcotest.(check bool)
+       "raw sensitive detail is absent"
+       false
+       (String_util.contains_substring detail secret)
+   | Some other ->
+     Alcotest.failf
+       "expected sensitive Turn_configuration_error, got %s"
+       (Registry.failure_reason_to_string other)
+   | None -> Alcotest.fail "expected sensitive configuration failure reason");
+  let unsupported =
+    Agent_core.Error.Config
+      (Agent_core.Error.UnsupportedProvider { detail = secret })
+  in
+  (match classify unsupported with
+   | Some (Registry.Turn_configuration_error { code; detail; _ }) ->
+     Alcotest.(check string)
+       "unsupported provider code"
+       "unsupported_provider"
+       code;
+     Alcotest.(check string)
+       "unsupported provider detail is redacted"
+       "configured provider is unsupported"
+       detail
+   | Some other ->
+     Alcotest.failf
+       "expected unsupported-provider Turn_configuration_error, got %s"
+       (Registry.failure_reason_to_string other)
+   | None -> Alcotest.fail "expected unsupported-provider failure reason");
+  let unavailable =
+    Runtime.dispatch_credential_error_to_core_error
+      (Runtime.Declared_credential_unavailable
+         { provider_id = "file-provider"
+         ; carrier = Agent_core.Error.FileCredential
+         })
+  in
+  (match classify unavailable with
+   | Some (Registry.Turn_configuration_error { code; field; detail }) ->
+     Alcotest.(check string)
+       "credential unavailable code"
+       "credential_unavailable"
+       code;
+     Alcotest.(check (option string))
+       "credential unavailable field"
+       (Some "credentials")
+       field;
+     Alcotest.(check string)
+       "credential unavailable safe detail"
+       "declared credential carrier is unavailable"
+       detail
+   | Some other ->
+     Alcotest.failf
+       "expected credential-unavailable Turn_configuration_error, got %s"
+       (Registry.failure_reason_to_string other)
+   | None -> Alcotest.fail "expected credential-unavailable failure reason");
+  let secret = "invalid-config-must-not-reach-operator" in
+  let marker_shaped_detail =
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Capacity_backpressure
+         { runtime_id = "runtime.marker-injection"
+         ; source = Keeper_internal_error.Runtime_slot
+         ; detail = secret
+         ; retry_after = Keeper_internal_error.No_retry_hint
+         })
+    |> Agent_core.Error.to_string
+  in
+  let broad_invalid =
+    Agent_core.Error.Config
+      (Agent_core.Error.InvalidConfig
+         { field = "user_blocks"; detail = marker_shaped_detail })
+  in
+  match classify broad_invalid with
+  | Some (Registry.Turn_configuration_error _) ->
+    Alcotest.fail "broad InvalidConfig was misclassified as terminal configuration"
+  | Some (Registry.Provider_runtime_error { detail; _ } as reason) ->
+    Alcotest.(check string)
+      "broad InvalidConfig detail is redacted"
+      "provider configuration failed"
+      detail;
+    let surface =
+      Status_blocker.runtime_blocker_surface_of_failure_reason reason
+      |> Option.get
+    in
+    Alcotest.(check bool)
+      "operator summary excludes raw InvalidConfig detail"
+      false
+      (String_util.contains_substring surface.summary secret)
+  | Some other ->
+    Alcotest.failf
+      "expected redacted Provider_runtime_error, got %s"
+      (Registry.failure_reason_to_string other)
+  | None -> Alcotest.fail "expected redacted generic failure reason"
 ;;
 
 let empty_turn_state : Unified_types.turn_state =

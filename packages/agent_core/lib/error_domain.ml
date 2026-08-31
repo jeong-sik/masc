@@ -49,6 +49,7 @@ type agent_error =
 type config_error =
   [ `Missing_env_var of string
   | `Unsupported_provider of string
+  | `Credential_unavailable of string * Error.credential_carrier
   | `Invalid_config of string * string
   | `Sensitive_value_in_config of string
   ]
@@ -163,6 +164,8 @@ let of_core_error (err : Error.t) : core_error_poly =
     `Tool_round_limit_exceeded (r.rounds, r.limit)
   | Error.Config (MissingEnvVar r) -> `Missing_env_var r.var_name
   | Error.Config (UnsupportedProvider r) -> `Unsupported_provider r.detail
+  | Error.Config (CredentialUnavailable r) ->
+    `Credential_unavailable (r.provider_id, r.carrier)
   | Error.Config (InvalidConfig r) -> `Invalid_config (r.field, r.detail)
   | Error.Config (SensitiveValueInConfig r) -> `Sensitive_value_in_config r.detail
   | Error.Mcp (ServerStartFailed r) -> `Mcp_server_start_failed (r.command, r.detail)
@@ -250,6 +253,8 @@ let to_core_error (err : core_error_poly) : Error.t =
     Error.Agent (ToolRoundLimitExceeded { rounds; limit })
   | `Missing_env_var var -> Error.Config (MissingEnvVar { var_name = var })
   | `Unsupported_provider detail -> Error.Config (UnsupportedProvider { detail })
+  | `Credential_unavailable (provider_id, carrier) ->
+    Error.Config (CredentialUnavailable { provider_id; carrier })
   | `Invalid_config (field, detail) -> Error.Config (InvalidConfig { field; detail })
   | `Sensitive_value_in_config detail -> Error.Config (SensitiveValueInConfig { detail })
   | `Mcp_server_start_failed (command, detail) ->
@@ -323,6 +328,7 @@ let is_retryable (err : [< core_error_poly ]) : bool =
   | `Tool_round_limit_exceeded _
   | `Missing_env_var _
   | `Unsupported_provider _
+  | `Credential_unavailable _
   | `Invalid_config _
   | `Sensitive_value_in_config _
   | `Mcp_server_start_failed _

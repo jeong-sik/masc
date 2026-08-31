@@ -277,6 +277,15 @@ let core_config_error_fields = function
     [ "variant", `String "missing_env_var"; "var_name", `String var_name ]
   | Agent_core.Error.UnsupportedProvider { detail } ->
     [ "variant", `String "unsupported_provider"; "detail", `String detail ]
+  | Agent_core.Error.CredentialUnavailable { provider_id; carrier } ->
+    [ "variant", `String "credential_unavailable"
+    ; "provider_id", `String provider_id
+    ; ( "carrier"
+      , `String
+          (match carrier with
+           | Agent_core.Error.InlineCredential -> "inline"
+           | Agent_core.Error.FileCredential -> "file") )
+    ]
   | Agent_core.Error.InvalidConfig { field; detail } ->
     [ "variant", `String "invalid_config"
     ; "field", `String field

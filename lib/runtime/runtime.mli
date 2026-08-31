@@ -28,10 +28,17 @@ type dispatch_credential_error =
       }
   | Declared_credential_unavailable of
       { provider_id : string
-      ; carrier : string
+      ; carrier : Agent_core.Error.credential_carrier
       }
 
 val dispatch_credential_error_to_string : dispatch_credential_error -> string
+
+val dispatch_credential_error_to_core_error :
+  dispatch_credential_error -> Agent_core.Error.t
+(** Preserve a missing environment credential as the existing typed
+    [MissingEnvVar] configuration error. Other unavailable credential carriers
+    use the closed [CredentialUnavailable] variant, so consumers never infer
+    terminal configuration state from broad [InvalidConfig] text. *)
 
 val validate_dispatch_credential :
   provider_config:Llm_provider.Provider_config.t ->

@@ -83,10 +83,20 @@ type mcp_error =
       ; detail : string
       }
 
+(** Credential carriers whose declaration cannot be materialized for a provider
+    dispatch. The constructors deliberately carry no credential value. *)
+type credential_carrier =
+  | InlineCredential
+  | FileCredential
+
 (** Configuration errors. *)
 type config_error =
   | MissingEnvVar of { var_name : string }
   | UnsupportedProvider of { detail : string }
+  | CredentialUnavailable of
+      { provider_id : string
+      ; carrier : credential_carrier
+      }
   | InvalidConfig of
       { field : string
       ; detail : string
@@ -255,6 +265,13 @@ let mcp_error_to_string = function
 let config_error_to_string = function
   | MissingEnvVar r -> Printf.sprintf "Missing env var: %s" r.var_name
   | UnsupportedProvider r -> Printf.sprintf "Unsupported provider: %s" r.detail
+  | CredentialUnavailable r ->
+    Printf.sprintf
+      "Provider %S has an unavailable %s credential"
+      r.provider_id
+      (match r.carrier with
+       | InlineCredential -> "inline"
+       | FileCredential -> "file")
   | InvalidConfig r -> Printf.sprintf "Invalid config '%s': %s" r.field r.detail
   | SensitiveValueInConfig r -> Printf.sprintf "Sensitive value in config: %s" r.detail
 ;;

@@ -175,11 +175,27 @@
   },
   "ci": {
     "workflow": "ci.yml",
-    "trigger": "workflow_dispatch (ci.yml has no pull_request/push triggers; dispatch forces all surfaces)",
-    "run_id": 33438579513,
-    "run_url": "https://github.com/jeong-sik/masc/actions/runs/33438579513",
+    "trigger": "workflow_dispatch (ci.yml defines no pull_request/push triggers; dispatch forces every surface)",
     "branch": "polish/task-362-official-client-live-truth",
-    "status_at_index_time": "in_progress"
+    "runs": [
+      {
+        "run_id": 33438579513,
+        "url": "https://github.com/jeong-sik/masc/actions/runs/33438579513",
+        "dispatched_at_head": "0b6a46b62ea8b7de639943912638c1936134c441",
+        "state_at_submission": "in_progress (55+ min)",
+        "note": "dispatched before the bundle commit landed; superseded by the run below for head truth"
+      },
+      {
+        "run_id": 33440469892,
+        "url": "https://github.com/jeong-sik/masc/actions/runs/33440469892",
+        "dispatched_at_head": "13e2619ce5926bf826c81d4dbc258acb0a0119ee (final evidence head)",
+        "state_at_submission": "in_progress; jobs completed: Detect Changed Surfaces/OCaml Structure Ratchet/Health/Shell IR Consumption Ratchet/Meta Guards = success; Lint = failure; Dashboard/Full validation still running"
+      }
+    ],
+    "lint_failure_investigation": {
+      "ci_observation": "Lint job failed on run 33440469892 while the same job passed on run 33438579513 (older head, same tree minus docs/evidence bundle); logs are only downloadable after the run completes, so the failing step text was not yet retrievable at submission time",
+      "local_reproduction": "on the exact pushed tree 13e2619: scripts/ci/run-lint-suite.sh blocking -> all 32 lints passed; blocking with no base (workflow_dispatch shape) -> all 39 lints passed; all six standalone Lint-job steps (no-unknown-permissive-default, yojson-option-default, no-docstring-escape-quote, no-hardcoded-colors-dashboard, dashboard-ssot-keeper-state, dashboard-ssot-agent-status) -> exit 0. The CI Lint failure did not reproduce locally; recorded as an open discrepancy, not explained away."
+    }
   },
   "completion_triggers": [
     {
@@ -214,8 +230,8 @@
     },
     {
       "id": "ci-required-checks",
-      "status": "in_progress",
-      "detail": "run 33438579513 dispatched; final state recorded in PR before verification"
+      "status": "pending_terminal_state",
+      "detail": "two dispatch runs linked; final-head run 33440469892 still in_progress at submission with Lint=failure observed and not reproducible locally (see ci.lint_failure_investigation); terminal state to be recorded on the PR"
     }
   ],
   "bundle_manifest": "task-362-bundle/SHA256SUMS",

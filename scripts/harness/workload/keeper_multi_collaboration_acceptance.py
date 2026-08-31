@@ -1412,6 +1412,15 @@ class MissionRun:
                 "mention_targets": [keeper, role],
                 "proactive_enabled": False,
                 "autoboot_enabled": True,
+                # masc_keeper_up refuses a keeper with no sandbox_profile
+                # ("sandbox_profile is required (allowed: local, docker,
+                # microvm, remote_ssh)"). The campaign runs against an isolated
+                # base path and writes only inside its own playground, so the
+                # local profile is the one that matches what the missions do;
+                # it is also what MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1 admits on
+                # the campaign server. Without this the fleet never boots and
+                # the run aborts on the first keeper.
+                "sandbox_profile": "local",
             }
             runtime_id = self.runtime_for_role(role)
             if runtime_id:
@@ -2208,7 +2217,14 @@ class MissionRun:
                 "coordinator shutdown did not clear the admission fence within "
                 "90 seconds"
             )
-        arguments: dict[str, Any] = {"name": self.roles["coordinator"]}
+        # Same required field as create_fleet: masc_keeper_up refuses a keeper
+        # with no sandbox_profile. Restating it here rather than reusing the
+        # create path keeps the restart a restart; the two call sites differ in
+        # everything else (no instructions, no mention targets).
+        arguments: dict[str, Any] = {
+            "name": self.roles["coordinator"],
+            "sandbox_profile": "local",
+        }
         runtime_id = self.runtime_for_role("coordinator")
         if runtime_id:
             arguments["runtime_id"] = runtime_id

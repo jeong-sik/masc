@@ -136,7 +136,14 @@ let validate_agent_alias alias =
     Error (Printf.sprintf "invalid exact agent purge owner %S: %s" alias detail)
 ;;
 
-let exact_agent_aliases agent_names =
+let validate_keeper_agent_alias alias =
+  match Keeper_id.Keeper_name.of_string alias with
+  | Ok keeper_name -> Ok (Keeper_id.Keeper_name.to_string keeper_name)
+  | Error detail ->
+    Error (Printf.sprintf "invalid exact Keeper purge owner %S: %s" alias detail)
+;;
+
+let exact_agent_aliases ~validate_alias agent_names =
   let aliases =
     agent_names
     |> List.filter_map String_util.trim_nonempty
@@ -145,7 +152,7 @@ let exact_agent_aliases agent_names =
   let rec validate acc = function
     | [] -> Ok (List.rev acc)
     | alias :: rest ->
-      (match validate_agent_alias alias with
+      (match validate_alias alias with
        | Error _ as error -> error
        | Ok alias -> validate (alias :: acc) rest)
   in
@@ -180,7 +187,11 @@ let plain_agent_artifacts_exist config agent_name =
 ;;
 
 let resolve_plain_agent_target config requested_name =
-  match exact_agent_aliases (plain_agent_candidate_names requested_name) with
+  match
+    exact_agent_aliases
+      ~validate_alias:validate_agent_alias
+      (plain_agent_candidate_names requested_name)
+  with
   | Error detail -> Error (Invalid_plain_agent_name detail)
   | Ok [] -> Ok None
   | Ok (agent_name :: _) ->
@@ -318,8 +329,8 @@ let unbind_exact_workspace_agents config aliases =
          (Printexc.to_string exn))
 ;;
 
-let purge_agent_filesystem_artifacts config agent_names =
-  match exact_agent_aliases agent_names with
+let purge_agent_filesystem_artifacts ~validate_alias config agent_names =
+  match exact_agent_aliases ~validate_alias agent_names with
   | Error _ as error -> error
   | Ok aliases ->
     (match credential_plan config aliases with
@@ -382,6 +393,13 @@ let keeper_artifact_path config keeper_name artifact =
            (Config_dir_resolver.keepers_dir_for_base_path
               ~base_path:config.Workspace.base_path)
          ~keeper_id:keeper_name)
+  | Keeper_memory_source_current_artifact ->
+    Some
+      (Keeper_memory_source_current.path_for_keepers_dir
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:keeper_name)
   | Keeper_memory_journal_artifact ->
     Some
       (Keeper_memory_os_current.journal_path_for_keepers_dir
@@ -389,6 +407,7 @@ let keeper_artifact_path config keeper_name artifact =
            (Config_dir_resolver.keepers_dir_for_base_path
               ~base_path:config.Workspace.base_path)
          ~keeper_id:keeper_name)
+  | Keeper_playground_bundles_artifact -> None
   | Keeper_configuration_artifact ->
     Some
       (Filename.concat
@@ -403,6 +422,15 @@ let keeper_artifact_path config keeper_name artifact =
   | Agent_artifact_bundle _ -> None
 ;;
 
+let keeper_playground_paths config keeper_name =
+  Keeper_types_profile.all_sandbox_profiles
+  |> List.map (fun profile ->
+       Filename.concat
+         config.Workspace.base_path
+         (Keeper_sandbox.host_root_rel_of_profile profile keeper_name))
+  |> List.sort_uniq String.compare
+;;
+
 let purge_dashboard_keeper_artifacts config operation =
   let open Keeper_shutdown_types in
   match operation.Keeper_shutdown_types.cleanup_intent.reason with
@@ -415,9 +443,21 @@ let purge_dashboard_keeper_artifacts config operation =
     let rec remove = function
       | [] -> Ok ()
       | Agent_artifact_bundle aliases :: rest ->
-        (match purge_agent_filesystem_artifacts config aliases with
+        (match
+           purge_agent_filesystem_artifacts
+             ~validate_alias:validate_keeper_agent_alias
+             config
+             aliases
+         with
          | Error _ as error -> error
          | Ok _ -> remove rest)
+      | Keeper_playground_bundles_artifact :: rest ->
+        (match
+           remove_paths_strict
+             (keeper_playground_paths config operation.keeper_name)
+         with
+         | Error _ as error -> error
+         | Ok () -> remove rest)
       | artifact :: rest ->
         (match keeper_artifact_path config operation.keeper_name artifact with
          | None ->
@@ -442,6 +482,8 @@ let purge_dashboard_keeper_artifacts config operation =
             | Keeper_feedback_log_artifact
             | Keeper_runtime_directory_artifact
             | Keeper_memory_current_artifact
+            | Keeper_memory_source_current_artifact
+            | Keeper_playground_bundles_artifact
             | Keeper_configuration_artifact
             | Keeper_chat_store_artifact
             | Agent_artifact_bundle _ -> ());
@@ -455,7 +497,9 @@ let purge_dashboard_keeper_artifacts config operation =
                | Keeper_decision_log_artifact
                | Keeper_feedback_log_artifact
                | Keeper_memory_current_artifact
+               | Keeper_memory_source_current_artifact
                | Keeper_memory_journal_artifact
+               | Keeper_playground_bundles_artifact
                | Keeper_configuration_artifact
                | Keeper_chat_store_artifact
                | Agent_artifact_bundle _ -> ());
@@ -782,7 +826,9 @@ let add_delete_action_routes router =
                         (plain_agent_resolve_error_to_string error)
                     | Ok (Some agent_name) ->
                       (match
-                         purge_agent_filesystem_artifacts config
+                         purge_agent_filesystem_artifacts
+                           ~validate_alias:validate_agent_alias
+                           config
                            [ agent_name ]
                        with
                        | Error msg ->

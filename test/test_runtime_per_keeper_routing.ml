@@ -265,6 +265,16 @@ max-request-body-bytes = 65536
   |}
 ;;
 
+let runtime_config_missing_openai_env_credential =
+  runtime_config
+  ^ {|
+
+[providers.openai.credentials]
+type = "env"
+key = "MASC_TEST_RUNTIME_RUNNER_MISSING_CREDENTIAL_9C8B1A72"
+|}
+;;
+
 let runtime_config_messages_http =
   {|
 [runtime]
@@ -1198,7 +1208,38 @@ let test_rerank_resolver_errors_on_unknown_runtime_id () =
       Alcotest.(check bool)
         "error names the unknown runtime id"
         true
-        (string_contains msg "bogus.binding"))
+      (string_contains msg "bogus.binding"))
+;;
+
+let test_rerank_resolver_rejects_missing_declared_env_credential () =
+  let env_key = "MASC_TEST_RUNTIME_RUNNER_MISSING_CREDENTIAL_9C8B1A72" in
+  let original = Sys.getenv_opt env_key in
+  Fun.protect
+    ~finally:(fun () ->
+      match original with
+      | Some value -> Unix.putenv env_key value
+      | None -> Unix.putenv env_key "")
+    (fun () ->
+      Unix.putenv env_key "";
+      with_runtime_file (fun path ->
+        (match
+           Runtime.save_config_text
+             ~runtime_config_path:path
+             runtime_config_missing_openai_env_credential
+         with
+         | Ok _ -> ()
+         | Error msg -> Alcotest.failf "credential fixture reload failed: %s" msg);
+        match
+          Runtime_agent_core_runner.For_testing.resolve_runtime_providers
+            ~runtime_id:"openai.gpt"
+            ()
+        with
+        | Ok _ -> Alcotest.fail "missing declared credential reached Agent Core runner"
+        | Error detail ->
+          Alcotest.(check bool)
+            "error names the required env credential"
+            true
+            (string_contains detail env_key)))
 ;;
 
 let test_context_budget_uses_selected_runtime () =
@@ -2215,6 +2256,10 @@ let () =
             "rerank resolver errors on unknown runtime id, no default substitution"
             `Quick
             test_rerank_resolver_errors_on_unknown_runtime_id
+        ; Alcotest.test_case
+            "rerank resolver rejects a missing declared env credential"
+            `Quick
+            test_rerank_resolver_rejects_missing_declared_env_credential
         ; Alcotest.test_case
             "context budget uses selected runtime max-context"
             `Quick

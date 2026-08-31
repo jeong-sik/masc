@@ -1178,9 +1178,8 @@ let test_a_narrow_inline_margin_keeps_the_source () =
     [ 13; 16; 24 ]
 
 (* A normal pane has room for both pieces. Pin the exact bytes, including the
-   aligned badge, and the existing continuation rule: keep the clock, replace
-   the repeated source with the quiet mark, and retain the first gutter's
-   width. *)
+   aligned badge, and the continuation rule: keep the clock, drop the repeated
+   source, keep the speaker's own mark, and retain the first gutter's width. *)
 let test_normal_inline_margin_bytes_stay_stable () =
   let role =
     (* The column is [align_role_label]'s own default, so it is left to it:
@@ -1202,7 +1201,7 @@ let test_normal_inline_margin_bytes_stay_stable () =
         ("12:34 " ^ Layout.speaker_mark Layout.Keeper ^ "     keeper.one")
         first.Layout.gutter;
       check string "normal continuation bytes"
-        ("12:35 " ^ Layout.speaker_mark Layout.Thinking ^ String.make 15 ' ')
+        ("12:35 " ^ Layout.speaker_mark Layout.Keeper ^ String.make 15 ' ')
         second.Layout.gutter;
       check int "normal gutter keeps clock plus mark boundary" 8
         first.Layout.gutter_label_at;
@@ -1259,8 +1258,9 @@ let test_a_second_message_from_one_speaker_stays_blank () =
       (* A continuation drops the name and keeps the clock. The name is what
          repeats and says nothing; the gap between two things one speaker said
          is what a reader checks in this column, and blanking the whole margin
-         took that away too. The mark drops to the quietest glyph so the row
-         still reads as lower than the one that started. *)
+         took that away too. The mark stays the speaker's own -- the renderer
+         draws the whole continuation gutter quiet, and that is what says the
+         row is lower than the one that started it. *)
       check int "the second keeps the column's width" 
         (Layout.display_width first.Layout.gutter)
         (Layout.display_width second.Layout.gutter);
@@ -1277,6 +1277,85 @@ let test_a_second_message_from_one_speaker_stays_blank () =
    cells drew the clock's first digit twice. On the Keepers pane a row sent at
    22:32 read "222:32": the layout was right and the drawing was not, which is
    why the test above could not see it. *)
+(* A continuation used to borrow [Thinking]'s dot on the argument that reusing
+   a glyph keeps the alphabet closed. It closed nothing: the dot then meant
+   both "reasoning" and "the same speaker is still talking", and a second
+   autonomous message read as a block of reasoning -- same glyph, same grey,
+   and no name, because a continuation drops the name too. *)
+let test_a_continuation_does_not_borrow_the_reasoning_glyph () =
+  let continued style =
+    match
+      Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:40
+        ~height:20
+        [ entry style "auto" "tui-..cccccccc" "first"
+        ; entry style "auto" "tui-..cccccccc" "second"
+        ]
+    with
+    | [ _; second ] ->
+        (* The gutter is "<clock> <mark>" once the padding is trimmed; the mark
+           is what this is about. *)
+        let trimmed = String.trim second.Layout.gutter in
+        (match String.rindex_opt trimmed ' ' with
+         | Some index ->
+             String.sub trimmed (index + 1) (String.length trimmed - index - 1)
+         | None -> trimmed)
+    | _ -> failwith "expected two rows"
+  in
+  check string "a keeper's continuation keeps the keeper's mark"
+    (Layout.speaker_mark Layout.Keeper)
+    (continued Layout.Keeper);
+  check string "a tool block's continuation keeps the tool mark"
+    (Layout.speaker_mark Layout.Tool)
+    (continued Layout.Tool);
+  check bool "and so is not the reasoning mark" true
+    (not
+       (String.equal
+          (Layout.speaker_mark Layout.Thinking)
+          (continued Layout.Keeper)));
+  (* Reasoning's own continuation still draws a dot, because that is what it
+     is. The glyph is ambiguous only when it is borrowed. *)
+  check string "reasoning continues as reasoning"
+    (Layout.speaker_mark Layout.Thinking)
+    (continued Layout.Thinking)
+
+(* Every speaker draws a different mark. A shared glyph is how the pane came to
+   say two things with one shape. *)
+let test_every_speaker_mark_is_distinct () =
+  let marks =
+    List.map Layout.speaker_mark
+      [ Layout.User; Layout.Inbound; Layout.Keeper; Layout.Status
+      ; Layout.Error; Layout.Tool; Layout.Thinking
+      ]
+  in
+  check int "no two speakers share a mark" (List.length marks)
+    (List.length (List.sort_uniq String.compare marks))
+
+(* The badge is drawn in reverse video, and a right-aligned label carries its
+   alignment as leading spaces. Reversing the two together painted a dozen
+   cells of highlighted nothing in front of a four-letter name. *)
+let test_alignment_padding_is_kept_apart_from_the_name () =
+  let aligned = Layout.align_role_label ~column:16 ~style:Layout.Keeper "AUTO" in
+  let mark, alignment, name =
+    Layout.split_aligned_role_label ~style:Layout.Keeper aligned
+  in
+  check bool "the mark leads" true
+    (String.starts_with ~prefix:(Layout.speaker_mark Layout.Keeper) mark);
+  check bool "the alignment is only spaces" true
+    (String.length alignment > 0
+     && String.for_all (fun c -> Char.equal c ' ') alignment);
+  check string "the name is the label alone" "AUTO" name;
+  check string "the three pieces rebuild the label" aligned
+    (mark ^ alignment ^ name);
+  (* A column too narrow for both drops the mark, and the split says so rather
+     than colouring the first byte of a name as though it were one. *)
+  let narrow = Layout.align_role_label ~column:2 ~style:Layout.Keeper "AUTO" in
+  let mark, alignment, name =
+    Layout.split_aligned_role_label ~style:Layout.Keeper narrow
+  in
+  check string "a markless label reports no mark" "" mark;
+  check string "the three pieces still rebuild it" narrow
+    (mark ^ alignment ^ name)
+
 let test_a_continuation_survives_the_renderer_cut () =
   let entries =
     [ entry ~timestamp:"22:32:07" Layout.Keeper "keeper.one" "tui-..bbbbbbbb"
@@ -1530,6 +1609,12 @@ let () =
             test_wrapped_rows_indent_under_the_first
         ; test_case "a second message from one speaker stays blank" `Quick
             test_a_second_message_from_one_speaker_stays_blank
+        ; test_case "a continuation does not borrow the reasoning glyph" `Quick
+            test_a_continuation_does_not_borrow_the_reasoning_glyph
+        ; test_case "every speaker mark is distinct" `Quick
+            test_every_speaker_mark_is_distinct
+        ; test_case "alignment padding is kept apart from the name" `Quick
+            test_alignment_padding_is_kept_apart_from_the_name
         ; test_case "a continuation survives the renderer cut" `Quick
             test_a_continuation_survives_the_renderer_cut
         ; test_case "the two link readers agree" `Quick

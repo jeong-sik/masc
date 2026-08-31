@@ -18,12 +18,22 @@ type t = private {
 }
 
 val names_a_shell : string -> bool
-(** Whether a program name is one of the shells this module recognises.
+(** Whether a program is one of the shells this module recognises.  The
+    argument is the program as written, with or without a directory:
+    ["/bin/zsh"] and ["zsh"] both answer true.
 
     Exposed so a reader asking "did this call end up lowered, or is it still a
     shell?" answers with the same list {!of_argv} recognises by. Two copies of
     that list drift, and the number the second one prints would then be about
-    itself. *)
+    itself. The directory is stripped here for the same reason -- a caller that
+    had to remember to strip it was the caller that did not. *)
+
+val ir_keeps_a_shell : Masc_exec.Shell_ir.t -> bool
+(** Whether any stage of [ir] still invokes a shell.
+
+    The tap asks this of the dispatch result to report whether the costume came
+    off. Every stage answers, because lowering rewrites one costume and leaves a
+    sibling stage's [bash -c] where it was. *)
 
 val of_argv : string list -> t option
 (** [Some t] when [argv] is a shell invoked with [-c] and a script argument.

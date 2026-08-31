@@ -247,6 +247,10 @@ let git_rev_parse_short_probe_argv dir =
   [ "git"; "-C"; dir; "--no-optional-locks"; "rev-parse"; "--short"; "HEAD" ]
 ;;
 
+let git_probe_command_available ?(getenv = Sys.getenv_opt) () =
+  Executable_path.command_available ~getenv "git"
+;;
+
 (* Bumped 5s → 15s for large repos (#9765, #9775).
    `~/me` repeatedly trips the 5s budget on first probe after TTL
    expiry (3 occurrences in issue #9775 logs at 18:29/18:41/18:50).
@@ -262,6 +266,7 @@ let git_rev_parse_short_probe_timeout_sec = 15.0
 let git_rev_parse_short_probe dir =
   match Atomic.get Rev_parse_cache.probe_hook_for_tests with
   | Some hook -> hook dir
+  | None when not (git_probe_command_available ()) -> None
   | None ->
     let argv = git_rev_parse_short_probe_argv dir in
     (match
@@ -388,6 +393,7 @@ let git_default_origin_head dir =
 let git_upstream_status_probe dir =
   match Atomic.get Upstream_status_cache.probe_hook_for_tests with
   | Some hook -> hook dir
+  | None when not (git_probe_command_available ()) -> None
   | None ->
     let branch = git_probe_trimmed dir [ "rev-parse"; "--abbrev-ref"; "HEAD" ] in
     let upstream_ref =

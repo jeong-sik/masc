@@ -72,6 +72,7 @@ module Theme = struct
     ; info : string
     ; muted : string
     ; user : string
+    ; inbound : string
     ; keeper : string
     ; tool : string
     ; quiet : string
@@ -99,6 +100,10 @@ module Theme = struct
         ; info = of_state Masc_tui_theme.Info
         ; muted = of_state Masc_tui_theme.Muted
         ; user = of_colour Masc_tui_theme.Bright_cyan
+        (* Green against the operator's cyan: two lines addressed to the same
+           Keeper, and the pane has to say which of them the reader wrote.
+           Not a status colour -- a broadcast is neither good news nor bad. *)
+        ; inbound = of_colour Masc_tui_theme.Bright_green
         ; keeper = of_colour Masc_tui_theme.Bright_blue
         ; tool = of_colour Masc_tui_theme.Bright_magenta
         ; quiet = of_colour Masc_tui_theme.Bright_black
@@ -122,6 +127,7 @@ module Theme = struct
      trail's bright black at 1.69:1 on Nord, which is the row an operator
      scans to see what a keeper just did. *)
   let user_origin () = (resolved ()).user
+  let inbound_origin () = (resolved ()).inbound
   let keeper_origin () = (resolved ()).keeper
   let tool_origin () = (resolved ()).tool
   let quiet_origin () = (resolved ()).quiet
@@ -209,6 +215,7 @@ module Chat_theme = struct
 
   let origin : Masc_tui_message_layout.style -> string = function
     | Masc_tui_message_layout.User -> Theme.user_origin ()
+    | Masc_tui_message_layout.Inbound -> Theme.inbound_origin ()
     | Masc_tui_message_layout.Keeper -> Theme.keeper_origin ()
     | Masc_tui_message_layout.Status -> Theme.warn ()
     | Masc_tui_message_layout.Error -> Theme.bad ()
@@ -216,7 +223,8 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Thinking -> Theme.quiet_origin ()
 
   let body : Masc_tui_message_layout.style -> string = function
-    | Masc_tui_message_layout.User | Masc_tui_message_layout.Keeper -> Ansi.reset
+    | Masc_tui_message_layout.User | Masc_tui_message_layout.Inbound
+    | Masc_tui_message_layout.Keeper -> Ansi.reset
     | Masc_tui_message_layout.Status -> Theme.warn ()
     | Masc_tui_message_layout.Error -> Theme.bad ()
     | Masc_tui_message_layout.Tool -> Ansi.reset
@@ -225,8 +233,9 @@ module Chat_theme = struct
   let link_foreground : Masc_tui_message_layout.style -> string = function
     | Masc_tui_message_layout.Status -> Theme.warn ()
     | Masc_tui_message_layout.Error -> Theme.bad ()
-    | Masc_tui_message_layout.User | Masc_tui_message_layout.Keeper
-    | Masc_tui_message_layout.Tool | Masc_tui_message_layout.Thinking ->
+    | Masc_tui_message_layout.User | Masc_tui_message_layout.Inbound
+    | Masc_tui_message_layout.Keeper | Masc_tui_message_layout.Tool
+    | Masc_tui_message_layout.Thinking ->
       Ansi.default_fg
 
   let link_style_restore style =
@@ -277,7 +286,11 @@ module Chat_theme = struct
       ; palette_generation = snapshot.palette_generation
       ; ambient_background = false
       }
-    | ( Masc_tui_message_layout.Keeper
+    (* The ambient background is the reader's own voice on the page, so it
+       belongs to {!User} alone. An inbound line is prose like a Keeper's and
+       takes the plain ground; its mark and colour say where it came from. *)
+    | ( Masc_tui_message_layout.Inbound
+      | Masc_tui_message_layout.Keeper
       | Masc_tui_message_layout.Status
       | Masc_tui_message_layout.Error
       | Masc_tui_message_layout.Tool

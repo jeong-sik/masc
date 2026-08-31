@@ -300,13 +300,17 @@ let handle_cycle_exception ~base_path ~(meta : keeper_meta) exn =
 
 
 (* The queue records attention that a Keeper must observe, not provider health.
-   A source leaves only after a completed turn has observed the admitted batch.
-   Provider/config/context failures therefore leave every source untouched;
-   otherwise one runtime failure can terminally discard an arbitrary batch of
-   unrelated Board, Schedule, Task, or completion-authority facts. *)
+   A source normally leaves only after a completed turn has observed the
+   admitted batch. The narrow exception is a checkpoint caused by a newer
+   durable source: attention-only rows advance while the checkpoint preserves
+   the model continuation. Provider/config/context failures therefore leave
+   every source untouched; otherwise one runtime failure can terminally discard
+   an arbitrary batch of unrelated Board, Schedule, Task, or
+   completion-authority facts. *)
 type batch_disposition =
   | Batch_ack_completed of
       { connector_attention_outcome : connector_attention_outcome }
+  | Batch_ack_durable_stimulus_yield
   | Batch_no_action
 
 let batch_disposition_of_cycle_outcome
@@ -319,6 +323,18 @@ let batch_disposition_of_cycle_outcome
       { connector_attention_outcome =
           connector_attention_outcome_of_route completion.continuation_route
       }
+  | Some
+      (Cycle.Checkpointed
+         { checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived
+         ; continuation_route = _
+         ; _
+         }) ->
+    (* The admitted batch is an attention layer, not the continuation store.
+       This checkpoint exists specifically because a newer durable source
+       arrived; retaining the older batch would replay it ahead of the new
+       source forever under continuous arrivals. Connector attention remains
+       pending until it has an exact reply/ignore settlement. *)
+    Batch_ack_durable_stimulus_yield
   | Some
       ( Cycle.Failed _
       | Cycle.Checkpointed _
@@ -341,7 +357,7 @@ let connector_attention_settlement_of_disposition = function
     Settle_ignored
   (* The entry stays pending, so the turn that finally drains it owns the
      terminal event. Settling here would retire a row that is still live. *)
-  | Batch_no_action -> Settle_pending_in_queue
+  | Batch_ack_durable_stimulus_yield | Batch_no_action -> Settle_pending_in_queue
 ;;
 
 
@@ -844,26 +860,38 @@ let run_keepalive_unified_turn
                  event_ids
              | Settle_pending_in_queue -> ()
            in
-           let remove_completed_selections ~settlement =
+           let remove_completed_selections ~should_ack ~settlement =
+             let selections_to_ack, retained_selections =
+               List.partition should_ack selections
+             in
              let all_acked =
                List.fold_left
                  (fun all_acked selection ->
                     let acked = terminalize_completed_selection ~selection in
                     all_acked && acked)
                  true
-                 selections
+                 selections_to_ack
              in
-             stimuli_acked := all_acked;
+             stimuli_acked := all_acked && List.is_empty retained_selections;
              (* A failed queue ack leaves the entry live, so the row it carries
                 is still someone's to settle. *)
-             if all_acked then settle_connector_attention settlement
+             if all_acked && List.is_empty retained_selections
+             then settle_connector_attention settlement
            in
            let disposition = batch_disposition_of_cycle_outcome !cycle_outcome_ref in
            let settlement =
              connector_attention_settlement_of_disposition disposition
            in
            match disposition with
-           | Batch_ack_completed _ -> remove_completed_selections ~settlement
+           | Batch_ack_completed _ ->
+             remove_completed_selections ~should_ack:(fun _ -> true) ~settlement
+           | Batch_ack_durable_stimulus_yield ->
+             remove_completed_selections
+               ~should_ack:(fun selection ->
+                 match selection.Keeper_event_queue_state.source.payload with
+                 | Keeper_event_queue.Connector_attention _ -> false
+                 | _ -> true)
+               ~settlement
            | Batch_no_action -> ());
       { meta = meta_after_cycle
       ; cycle_status =

@@ -89,6 +89,7 @@ let submit_strict ?(weight = 1.0) f =
     Re-raises [Eio.Cancel.Cancelled] to preserve structured concurrency. *)
 let submit_or_inline ?(weight = 1.0) f =
   match Atomic.get pool, Eio_guard.execution_context () with
+  | Some _, _ when in_worker_context () -> f ()
   | Some p, Eio_guard.Eio_fiber ->
       (try Eio.Executor_pool.submit_exn p ~weight (fun () ->
          with_worker_context (fun () -> Eio.Switch.run (fun _sw -> f ())))

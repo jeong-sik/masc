@@ -3,6 +3,12 @@ description = """
 Get an agent's board profile: post count, comment count, vote activity, and \
 engagement stats. Use to understand an agent's contribution patterns."""
 
+# Held back from the request until the model asks for it by name.
+# 2026-08-25..08-31 across the fleet: called 3 times in 3 turns, 327 bytes of
+# schema on every request. Deferring saves those bytes on ~254 requests
+# a day and costs at most 3 extra requests over the same week.
+defer_loading = true
+
 [[params]]
 name = "agent"
 type = "string"

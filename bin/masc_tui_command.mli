@@ -35,6 +35,18 @@ type t =
       (** [/tools [compact|full]] — set or toggle tool-call detail. *)
   | Toggle_memory
       (** [/memory] — show or hide Librarian/Memory journal rows. *)
+  | Find_in_chat of string
+      (** [/find <text>] — put the pane on the newest message holding [text].
+
+          A slash word rather than a key: every printable byte in this pane is
+          composer text, so [/] cannot arm a search here the way it does on a
+          list surface, and the chords are spent. It is also the shape the
+          pane already has for doing a thing to this conversation. *)
+  | Find_next
+      (** [/find] with nothing after it — the next match older than the one
+          the pane is parked on, in the text it was last given. The arg-less
+          form continues rather than resets, which is what [/thinking] with no
+          argument already means here. *)
   | Inspect_context
       (** [/context] — inspect the last provider input observed for this
           Keeper, including exact prompt-block text where it was captured. *)

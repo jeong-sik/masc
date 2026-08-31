@@ -1662,6 +1662,10 @@ val decode_asks_snapshot : Yojson.Safe.t -> (asks_snapshot, string) result
 type goal_timeline_event = {
   gt_ts : string;
   gt_kind : string;
+  gt_lane : string;
+      (** The row's subject as a typed reference: ["task:task-1013"],
+          ["approval:appr-…"], ["keeper:<name>"], ["goal"]. *)
+  gt_title : string;
   gt_summary : string;
   gt_severity : string;  (** producer emits ok | warn | bad; open for renderers *)
 }

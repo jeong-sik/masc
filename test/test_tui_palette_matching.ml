@@ -65,6 +65,7 @@ let test_the_palette_lists_tasks_and_posts () =
       ; bp_votes = 0
       ; bp_comment_count = 0
       ; bp_created_at = "2026-08-25T00:00:00Z"
+      ; bp_updated_at = 0.
       ; bp_hearth = None
       ; bp_kind = None
       } ];
@@ -203,6 +204,7 @@ let test_a_label_starting_with_the_query_leads () =
     ; bp_votes = 0
     ; bp_comment_count = 0
     ; bp_created_at = "2026-08-26T00:00:00Z"
+    ; bp_updated_at = 0.
     ; bp_hearth = None
     ; bp_kind = None
     }

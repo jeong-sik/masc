@@ -3,7 +3,8 @@
     Provider, configuration, context-window, and tool failures describe the
     runtime attempt, not the independent Board/Schedule/Task facts admitted to
     that attempt. Every such outcome therefore maps to [Batch_no_action]; only
-    a completed turn can ACK the batch. *)
+    a completed turn or a yield specifically caused by a newer durable source
+    can advance admitted attention. *)
 
 open Alcotest
 
@@ -52,7 +53,7 @@ let deferred_lane =
 let assert_no_queue_action label outcome =
   match Loop.batch_disposition_of_cycle_outcome (Some outcome) with
   | Loop.Batch_no_action -> ()
-  | Loop.Batch_ack_completed _ ->
+  | Loop.Batch_ack_completed _ | Loop.Batch_ack_durable_stimulus_yield ->
     failf "%s incorrectly authorized ACK of failed-turn input" label
 ;;
 
@@ -85,7 +86,12 @@ let test_every_failure_route_preserves_batch () =
 let test_nonterminal_outcomes_preserve_batch () =
   let meta = test_meta () in
   [ None
-  ; Some (Cycle.Checkpointed meta)
+  ; Some
+      (Cycle.Checkpointed
+         { meta
+         ; checkpoint_reason = Turn.Awaiting_external_effect
+         ; continuation_route = Turn.Continuation_route_not_addressed
+         })
   ; Some (Cycle.Input_required meta)
   ; Some (Cycle.Cancelled meta)
   ; Some (Cycle.Skipped meta)
@@ -93,8 +99,26 @@ let test_nonterminal_outcomes_preserve_batch () =
   |> List.iter (fun outcome ->
     match Loop.batch_disposition_of_cycle_outcome outcome with
     | Loop.Batch_no_action -> ()
-    | Loop.Batch_ack_completed _ ->
+    | Loop.Batch_ack_completed _ | Loop.Batch_ack_durable_stimulus_yield ->
       fail "an unfinished turn incorrectly authorized Event Queue ACK")
+;;
+
+let test_durable_stimulus_checkpoint_acks_admitted_batch () =
+  let meta = test_meta () in
+  match
+    Loop.batch_disposition_of_cycle_outcome
+      (Some
+         (Cycle.Checkpointed
+            { meta
+            ; checkpoint_reason = Turn.Durable_stimulus_arrived
+            ; continuation_route = Turn.Continuation_route_not_addressed
+            }))
+  with
+  | Loop.Batch_ack_durable_stimulus_yield -> ()
+  | Loop.Batch_ack_completed _ ->
+    fail "a checkpoint was treated as a fully completed connector disposition"
+  | Loop.Batch_no_action ->
+    fail "a newer durable stimulus left the already-admitted batch pending"
 ;;
 
 let () =
@@ -109,6 +133,10 @@ let () =
             "nonterminal outcomes leave the batch pending"
             `Quick
             test_nonterminal_outcomes_preserve_batch
+        ; test_case
+            "durable-stimulus yield advances the admitted batch"
+            `Quick
+            test_durable_stimulus_checkpoint_acks_admitted_batch
         ] )
     ]
 ;;

@@ -209,6 +209,12 @@ val git_rev_parse_short_probe_argv : string -> string list
     [test/test_dashboard_cache] asserts on the exact
     argv shape to guard against accidental flag drift. *)
 
+val git_probe_command_available :
+  ?getenv:(string -> string option) -> unit -> bool
+(** Shell-free capability check shared by the rev-parse and upstream probes.
+    A deployment without Git returns [false] before either probe spawns a
+    process. [getenv] is injectable for deterministic tests. *)
+
 val set_git_rev_parse_short_probe_hook_for_tests :
   (string -> string option) -> unit
 (** Installs a hook that bypasses the production

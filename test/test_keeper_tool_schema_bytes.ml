@@ -48,7 +48,12 @@ open Alcotest
    unverified — no direct API key on hand — and codex lanes are
    unprobed, so a collapse must either expand for unverified
    providers or wait until they are probed. *)
-let ceiling_bytes = 85_000
+(* Lowered from 85,000 on 2026-08-30, banking what naming Execute's repeated
+   exec-stage shapes gave back: the surface measures 71,691 bytes across 83
+   tools, down 2,925 from 74,616. Execute itself went 9,049 -> 6,118. That is
+   the whole of it -- no other tool repeats a shape, so this is not a lever to
+   pull again, and the next reduction has to come from somewhere else. *)
+let ceiling_bytes = 75_000
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -58,11 +63,23 @@ let schema_json (schema : Masc_domain.tool_schema) =
     ]
 ;;
 
+(* Measured after [Json_schema_shared_defs.collapse], because that is what
+   [Tool_bridge] hands the provider and so what the model is charged for. The
+   descriptor's own schema stays expanded for argument validation; counting it
+   here would report a surface nothing sends. *)
 let measured () =
   let schemas = Masc.Keeper_tool_descriptor.model_visible_schemas () in
   let bytes =
     List.fold_left
-      (fun acc schema -> acc + String.length (Yojson.Safe.to_string (schema_json schema)))
+      (fun acc (schema : Masc_domain.tool_schema) ->
+         acc
+         + String.length
+             (Yojson.Safe.to_string
+                (schema_json
+                   { schema with
+                     input_schema =
+                       Json_schema_shared_defs.collapse schema.input_schema
+                   })))
       0
       schemas
   in

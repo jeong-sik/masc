@@ -26,9 +26,31 @@ let run_editor editor path =
 (** [roundtrip ~restore ~reenter content] hands [content] to $EDITOR and
     returns [Some edited] when the editor exited 0, [None] when it did not
     (or no editor is configured) — in which case the settings are untouched. *)
-let roundtrip ~restore ~reenter ?(suffix = ".json") (content : string) : string option =
+(* Why the form came back with nothing in it. All three used to be [None],
+   so a caller could only say "cancelled" -- and an editor that never started
+   read to the operator as a decision they had made. *)
+type abort =
+  | Cancelled
+  (* The editor ran and exited non-zero: [:cq] and its equivalents, which is
+     the operator saying no. *)
+  | Editor_unavailable of string
+  (* The command never ran, or died on a signal. /bin/sh answers 127 for a
+     command it cannot find, which is what an [$EDITOR] naming a binary that
+     is not installed looks like from here. *)
+  | Form_unreadable of string
+(* The temp file could not be written or read back. Nothing to do with the
+   editor or the operator. *)
+
+let abort_detail = function
+  | Cancelled -> "cancelled"
+  | Editor_unavailable detail -> detail
+  | Form_unreadable detail -> detail
+
+let roundtrip ~restore ~reenter ?(suffix = ".json") (content : string)
+  : (string, abort) result =
   match editor_command () with
-  | None -> None
+  | None ->
+    Error (Editor_unavailable "no $EDITOR or $VISUAL is set")
   | Some editor ->
     let path = Filename.temp_file "masc-editor" suffix in
     let finally () = (try Sys.remove path with _ -> ()) in
@@ -47,10 +69,19 @@ let roundtrip ~restore ~reenter ?(suffix = ".json") (content : string) : string 
               let n = in_channel_length ic in
               let really = really_input_string ic n in
               close_in ic;
-              Some really
-            with _ -> None)
-         | _ -> None)
-      with _ -> None
+              Ok really
+            with e ->
+              Error (Form_unreadable (Printexc.to_string e)))
+         | Unix.WEXITED 127 ->
+           Error (Editor_unavailable (editor ^ ": command not found"))
+         | Unix.WEXITED code ->
+           ignore code;
+           Error Cancelled
+         | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+           Error
+             (Editor_unavailable
+                (Printf.sprintf "%s was stopped by signal %d" editor signal)))
+      with e -> Error (Form_unreadable (Printexc.to_string e))
     in
     finally ();
     outcome

@@ -212,7 +212,7 @@ let frozen_operator_disposition (receipt : R.t)
   else if String.equal terminal_reason "terminal_effect_failed"
   then R.Disp_unknown, R.Reason_terminal_effect_failed
   else if preflight_config_failure
-  then R.Disp_fail_open_next_runtime, R.Reason_preflight_config_error
+  then R.Disp_operator_action_required, R.Reason_preflight_config_error
   else if
     provider_runtime_failure
     && (receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime)
@@ -225,9 +225,9 @@ let frozen_operator_disposition (receipt : R.t)
   else if
     provider_runtime_failure
     && frozen_is_transient_provider_runtime_failure terminal_reason
-  then R.Disp_fail_open_next_runtime, R.Reason_transient_runtime_retry
+  then R.Disp_retry_later, R.Reason_transient_runtime_retry
   else if provider_runtime_failure
-  then R.Disp_fail_open_next_runtime, R.Reason_provider_runtime_error
+  then R.Disp_retry_later, R.Reason_provider_runtime_error
   else if
     String.equal terminal_reason "internal_error"
     || String.equal terminal_reason "internal_unhandled_exception"
@@ -330,9 +330,12 @@ let () =
       { base_receipt with terminal_reason_code = "config_error" }
   in
   check
-    "canonical typed config wire keeps its explicit route"
-    (canonical = (R.Disp_fail_open_next_runtime, R.Reason_preflight_config_error))
+    "canonical typed config wire requires operator action"
+    (canonical = (R.Disp_operator_action_required, R.Reason_preflight_config_error))
   ;
+  check
+    "canonical typed config wire emits operator broadcast"
+    (R.needs_operator_broadcast (fst canonical));
   let transcript_corruption =
     R.operator_disposition
       { base_receipt with
@@ -546,7 +549,9 @@ let disp_pair_to_string (d, r) =
 let operator_disposition_kinds =
   [ R.Disp_pass
   ; R.Disp_fail_open_next_runtime
+  ; R.Disp_retry_later
   ; R.Disp_pass_next_model
+  ; R.Disp_operator_action_required
   ; R.Disp_user_cancelled
   ; R.Disp_skipped
   ; R.Disp_unknown
@@ -729,13 +734,17 @@ let () =
     }
   in
   let got = R.operator_disposition receipt in
-  let want = R.Disp_fail_open_next_runtime, R.Reason_transient_runtime_retry in
+  let want = R.Disp_retry_later, R.Reason_transient_runtime_retry in
   check
     (Printf.sprintf
        "provider timeout marker disposition want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want)
+  ;
+  check
+    "terminal transient retry-later does not page the operator"
+    (not (R.needs_operator_broadcast (fst got)))
 ;;
 
 let () =
@@ -757,13 +766,16 @@ let () =
     }
   in
   let got = R.operator_disposition receipt in
-  let want = R.Disp_fail_open_next_runtime, R.Reason_provider_runtime_error in
+  let want = R.Disp_retry_later, R.Reason_provider_runtime_error in
   check
     (Printf.sprintf
        "provider parse marker disposition want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
-    (got = want)
+    (got = want);
+  check
+    "terminal provider rejection retry-later does not page the operator"
+    (not (R.needs_operator_broadcast (fst got)))
 ;;
 
 let () =

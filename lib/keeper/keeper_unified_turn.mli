@@ -137,21 +137,37 @@ type continuation_route_disposition =
     channel that woke it. The connector-attention ledger maps addressed to a
     resolved mention and not-addressed to an ignored one. *)
 
+type checkpoint_reason =
+  | Operation_queued
+  | Durable_stimulus_arrived
+  | Awaiting_external_effect
+  | Repeated_tool_call
+  | Repeated_assistant_text
+(** Why a healthy turn checkpointed before [Completed]. Only
+    [Durable_stimulus_arrived] proves that a newer durable source, rather than
+    unfinished work in the admitted source, caused the yield. *)
+
 type turn_success =
   | Turn_completed of
       { meta : Keeper_meta_contract.keeper_meta
       ; continuation_route : continuation_route_disposition
       }
-  | Turn_checkpointed of Keeper_meta_contract.keeper_meta
+  | Turn_checkpointed of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; checkpoint_reason : checkpoint_reason
+      ; continuation_route : continuation_route_disposition
+      }
   | Turn_input_required of Keeper_meta_contract.keeper_meta
   | Turn_cancelled of Keeper_meta_contract.keeper_meta
   | Turn_skipped of Keeper_meta_contract.keeper_meta
 (** Typed non-error result of the unified turn boundary. Only
     [Turn_completed] proves that the requested action path finished.
-    [Turn_checkpointed] and [Turn_input_required] are healthy runtime exits but
-    preserve the durable source for continuation. Supervisor cancellation and a
-    non-executable phase remain distinct so a durable source cannot be
-    acknowledged as completed work. *)
+    [Turn_checkpointed] and [Turn_input_required] are healthy runtime exits.
+    The checkpoint reason lets the heartbeat retire an admitted attention
+    batch only when a newer durable source caused the yield; other checkpoints
+    preserve it for continuation. Supervisor cancellation and a non-executable
+    phase remain distinct so a durable source cannot be acknowledged as
+    completed work. *)
 
 val hitl_replay_preemption_request
   :  resolution_deliverable:(Keeper_event_queue.hitl_resolution -> bool)

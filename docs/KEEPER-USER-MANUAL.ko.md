@@ -119,6 +119,18 @@ Keeper–런타임 연결이 정해지는 곳은 이 표 하나뿐입니다. 다
 5,706개는 실패했습니다. 그중 5,405개의 운영자 판정이 `fail_open_next_runtime`
 이었습니다 — 레인의 다음 후보로 넘어가서 계속 갔다는 뜻입니다.
 
+현재 영수증은 최종 preflight 설정 오류에 이 값을 쓰지 않습니다.
+`operator_action_required`와 `preflight_config_error`를 기록합니다. 운영자가 설정을
+고치기 전에는 다음 런타임으로 넘어갔다고 주장하지 않습니다.
+
+fallback이 관측되지 않은 최종 network/timeout 오류는 `retry_later`와
+`transient_runtime_retry`를 기록합니다. 현재 턴은 끝났고 Keeper는 살아 있어 이후
+keepalive 주기에 다시 시도할 수 있지만, 다른 레인 후보를 실행했다고 주장하지 않습니다.
+
+invalid request나 response parse failure처럼 fallback이 관측되지 않은 다른 최종 provider
+오류도 `retry_later`를 씁니다. 사유는 `provider_runtime_error`로 유지해 transient network
+recovery로 가장하지 않습니다.
+
 실패의 대부분은 버그가 아니었습니다. 가장 많았던 사유는 `config_error`,
 `api_error_invalid_request`, `api_error_payment_required`,
 `api_error_rate_limited` 입니다. 전부 후보가 하나뿐인 레인이 못 버티는 상황입니다.

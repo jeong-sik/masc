@@ -22,6 +22,11 @@ val start_background_maintenance :
   env:Eio_unix.Stdenv.base ->
   Mcp_server.server_state -> string * string
 
+module Otel_for_testing : sig
+  val start_exporter_background : sw:Eio.Switch.t -> (unit -> unit) -> unit
+  (** Fork [setup] under [sw] and return without waiting for it. *)
+end
+
 (** Why a Keeper with durable work has no runnable owner. [Owner_unknown] is a
     lookup that did not answer; [Owner_absent] is a lookup that answered and
     holds no such Keeper. Only the second is an orphan queue directory. *)

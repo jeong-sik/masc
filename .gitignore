@@ -43,7 +43,14 @@ data/tool-metrics/
 
 # Test artifacts
 *.log
-benchmarks/results/
+# Every runner's output, at whatever depth it writes. This was
+# benchmarks/results/ alone, and a pattern with an inner slash is anchored --
+# it reached that one directory and not benchmarks/<suite>/results/, where the
+# suites actually write. 35 of 44 open PRs were carrying run output because of
+# that, one of them 678 files of it under a two-line change; 16 files have
+# already landed on main. The leading ** matches zero directories too, so the
+# path the old line named is still covered.
+benchmarks/**/results/
 _coverage/
 .health/
 

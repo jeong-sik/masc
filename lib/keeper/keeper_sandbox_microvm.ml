@@ -309,25 +309,39 @@ type sweep_outcome =
     Returns what it did rather than raising: a guest that refuses to stop is
     worth reporting, and is not a reason to fail whatever asked for the
     sweep. A listing that cannot be read removes nothing. *)
-let sweep_abandoned_guests ~timeout_sec ~is_pid_alive ~run_argv =
-  let listing = command_argv () @ [ "list"; "-a"; "--format"; "json" ] in
-  match run_argv ~timeout_sec listing with
-  | Unix.WEXITED 0, out ->
-    let candidates =
-      match Yojson.Safe.from_string out with
-      | json -> sweep_candidates_of_json ~is_pid_alive json
-      | exception Yojson.Json_error _ -> []
-    in
-    List.fold_left
-      (fun acc candidate ->
-         match
-           run_argv ~timeout_sec (delete_force_argv ~container_name:candidate.container_id)
-         with
-         | Unix.WEXITED 0, _ ->
-           { acc with removed = candidate.container_id :: acc.removed }
-         | _, detail ->
-           { acc with failed = (candidate.container_id, detail) :: acc.failed })
-      { removed = []; failed = [] }
-      candidates
-  | _, _ -> { removed = []; failed = [] }
+let sweep_abandoned_guests
+      ~command_available
+      ~timeout_sec
+      ~is_pid_alive
+      ~run_argv
+  =
+  match command_argv () with
+  | [] -> invalid_arg "microvm CLI argv is empty"
+  | command :: _ when not (command_available command) -> None
+  | _ ->
+    let listing = command_argv () @ [ "list"; "-a"; "--format"; "json" ] in
+    Some
+      (match run_argv ~timeout_sec listing with
+       | Unix.WEXITED 0, out ->
+         let candidates =
+           match Yojson.Safe.from_string out with
+           | json -> sweep_candidates_of_json ~is_pid_alive json
+           | exception Yojson.Json_error _ -> []
+         in
+         List.fold_left
+           (fun acc candidate ->
+              match
+                run_argv
+                  ~timeout_sec
+                  (delete_force_argv ~container_name:candidate.container_id)
+              with
+              | Unix.WEXITED 0, _ ->
+                { acc with removed = candidate.container_id :: acc.removed }
+              | _, detail ->
+                { acc with
+                  failed = (candidate.container_id, detail) :: acc.failed
+                })
+           { removed = []; failed = [] }
+           candidates
+       | _, _ -> { removed = []; failed = [] })
 ;;

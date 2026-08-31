@@ -762,6 +762,17 @@ let test_runtime_git_probe_argv_disables_optional_locks () =
     [ "git"; "-C"; "/tmp/demo"; "--no-optional-locks"; "rev-parse"; "--short"; "HEAD" ]
     (Runtime.git_rev_parse_short_probe_argv "/tmp/demo")
 
+let test_runtime_git_probes_skip_when_command_is_unavailable () =
+  let module Runtime = Server_dashboard_http_runtime_info in
+  let getenv = function
+    | "PATH" -> Some ""
+    | _ -> None
+  in
+  Alcotest.(check bool)
+    "empty deployment PATH has no Git probe capability"
+    false
+    (Runtime.git_probe_command_available ~getenv ())
+
 (* RFC-0372 Phase 5 — the compute must leave the caller's domain.
 
    HTTP connections are fibers on one domain, and a pure compute never yields,
@@ -826,6 +837,27 @@ let test_nested_shared_pool_submission_does_not_starve ~clock ~sw ~dm () =
             Domain_pool_ref.submit_io_or_inline (fun () -> `String "ok"))
       in
       check_json "nested shared-pool submit completes" (`String "ok") result)
+
+let test_nested_dashboard_cache_compute_does_not_starve ~clock ~sw ~dm () =
+  Dashboard_cache.invalidate_all ();
+  let pool = Domain_pool.create ~sw ~domain_count:1 dm in
+  Executor_pool_ref.For_testing.with_pool (Domain_pool.executor_pool pool)
+  @@ fun () ->
+  let result =
+    Dashboard_cache.get_or_compute_with_timeout
+      "nested-dashboard-cache-outer"
+      ~ttl:60.0
+      ~clock
+      ~timeout_sec:0.2
+      (fun () ->
+         Dashboard_cache.get_or_compute_with_timeout
+           "nested-dashboard-cache-inner"
+           ~ttl:60.0
+           ~clock
+           ~timeout_sec:0.05
+           (fun () -> `String "ok"))
+  in
+  check_json "nested dashboard cache compute completes" (`String "ok") result
 
 (* -- The timeout envelope has one producer and one recognizer -------------- *)
 
@@ -896,6 +928,9 @@ let () =
           test_case "nested shared-pool submit does not starve" `Quick
             (test_nested_shared_pool_submission_does_not_starve ~clock ~sw
                ~dm:(Eio.Stdenv.domain_mgr env));
+          test_case "nested dashboard cache compute does not starve" `Quick
+            (test_nested_dashboard_cache_compute_does_not_starve ~clock ~sw
+               ~dm:(Eio.Stdenv.domain_mgr env));
         ] );
       ( "correctness",
         [
@@ -933,6 +968,8 @@ let () =
             (test_runtime_git_upstream_cache_returns_stale_and_refreshes ~clock);
           test_case "runtime git probe disables optional locks" `Quick
             test_runtime_git_probe_argv_disables_optional_locks;
+          test_case "runtime git probes skip an unavailable command" `Quick
+            test_runtime_git_probes_skip_when_command_is_unavailable;
         ] );
       ( "timeout",
         [

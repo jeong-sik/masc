@@ -22,6 +22,30 @@ let reads ~binding_name ~fields =
   Ast_grep.count_field_accesses_outside_calls_in_value_binding
     ~module_path:render ~binding_name ~callees:[] ~fields
 
+(* The detail under the list is three rows, and [boxed_surface_chrome_rows]
+   budgets one for the selected row's own line. Every kind takes that one
+   except a held tool call, which answers two questions -- what is being asked,
+   and why it was held -- and the ask runs the width of the pane, so at eighty
+   columns they cannot share a row.
+
+   That second row used to be spelled as a literal ["\\n"]: backslash and n,
+   printed to the operator as those two characters, because a real newline
+   would have drawn a row nobody had counted. Both halves live in one place
+   now -- the budget asks [approval_detail_line] how tall its line is before
+   spending the rows on it -- and this pins that they stay one place. A height
+   declared beside the drawing instead of read off it is how the footer floats
+   a row, which is the defect the queue rows already taught the chat pane
+   (#29818). *)
+let test_the_detail_height_is_read_off_the_line_it_draws () =
+  let calls callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render
+      ~binding_name:"render_approvals" ~callee
+  in
+  Alcotest.(check int) "the surface builds the detail line once" 1
+    (calls "approval_detail_line");
+  Alcotest.(check int) "and asks that same line for its height" 1
+    (calls "approval_detail_rows")
+
 (* Where a command runs decides what it means: [git clone] into a container is
    not [git clone] onto the host. The decoder carries both, and the detail
    pane is the only surface with room for them. *)
@@ -165,6 +189,8 @@ let () =
     [ ( "approvals"
       , [ Alcotest.test_case "the detail pane says where the command would run"
             `Quick test_the_detail_pane_says_where_the_command_would_run
+        ; Alcotest.test_case "the detail height is read off the line it draws"
+            `Quick test_the_detail_height_is_read_off_the_line_it_draws
         ; Alcotest.test_case "the title does not count another queue" `Quick
             test_the_title_does_not_count_another_queue
         ; Alcotest.test_case "the operation is compared before repeating"

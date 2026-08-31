@@ -29,9 +29,13 @@ WORKDIR /src
 
 # Copy the external pin script + opam metadata first so the expensive
 # dependency layer is cached across ordinary source edits.
-COPY --chown=opam:opam scripts/opam-pin-external-deps.sh scripts/
+COPY --chown=opam:opam \
+    scripts/opam-pin-external-deps.sh \
+    scripts/opam-switch-rw-lock.sh \
+    scripts/
 COPY --chown=opam:opam dune-project masc.opam ./
-RUN opam update -y \
+RUN opam repository set-url default https://opam.ocaml.org \
+    && opam update -y \
     && chmod +x scripts/opam-pin-external-deps.sh \
     && scripts/opam-pin-external-deps.sh --with-compact-protocol
 RUN ok=0; for attempt in 1 2 3; do \
@@ -43,7 +47,8 @@ RUN ok=0; for attempt in 1 2 3; do \
 COPY --chown=opam:opam . .
 RUN opam exec -- dune build --release bin/main_eio.exe \
     && cp _build/default/bin/main_eio.exe /tmp/masc \
-    && (strip /tmp/masc || true)
+    && chmod u+w /tmp/masc \
+    && strip /tmp/masc
 
 # ---- Stage 2: dashboard SPA -------------------------------------------------
 FROM node:22-slim AS dashboard-builder

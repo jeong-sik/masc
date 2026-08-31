@@ -1569,6 +1569,15 @@ let fetch_repositories ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/repositories"
 
+(** Fetch the Git working-tree changes for one registered repository. *)
+let fetch_repository_changes ~(host : string) ~(port : int)
+    ~(repository_id : string) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:
+      ("/api/v1/repositories/"
+       ^ percent_encode_path_segment repository_id
+       ^ "/changes")
+
 (** Fetch /api/v1/dashboard/harness-health. No window is passed: the surface
     shows what the harness decided recently, and a window is a question an
     operator asks in the dashboard rather than a default. *)

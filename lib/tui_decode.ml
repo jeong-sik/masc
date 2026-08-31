@@ -1791,6 +1791,20 @@ type repository_snapshot = {
   rs_total : int;
 }
 
+type repository_change = {
+  rc_path : string;
+  rc_staged : bool;
+  rc_unstaged : bool;
+  rc_untracked : bool;
+  rc_conflicted : bool;
+}
+
+type repository_change_snapshot = {
+  rcs_repository_id : string;
+  rcs_changes : repository_change list;
+  rcs_total : int;
+}
+
 type harness_verdict = {
   hv_at : float;
   hv_task_id : string;
@@ -3297,6 +3311,23 @@ let decode_repository_snapshot json =
   in
   let* rs_total = required_int_field json "total" in
   Ok { rs_repositories; rs_total }
+
+let decode_repository_change json =
+  let* rc_path = required_string_field json "path" in
+  let* rc_staged = required_bool_field json "staged" in
+  let* rc_unstaged = required_bool_field json "unstaged" in
+  let* rc_untracked = required_bool_field json "untracked" in
+  let* rc_conflicted = required_bool_field json "conflicted" in
+  Ok { rc_path; rc_staged; rc_unstaged; rc_untracked; rc_conflicted }
+
+let decode_repository_change_snapshot json =
+  let* rcs_repository_id = required_string_field json "repository_id" in
+  let* changes_json = required_list_field json "changes" in
+  let* rcs_changes =
+    decode_list "changes" decode_repository_change changes_json
+  in
+  let* rcs_total = required_int_field json "total" in
+  Ok { rcs_repository_id; rcs_changes; rcs_total }
 
 let decode_harness_verdict json =
   let* hv_task_id = required_string_field json "task_id" in

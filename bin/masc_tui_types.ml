@@ -1857,6 +1857,12 @@ type state = {
   mutable repositories_error: string option;
   mutable repositories_scroll: int;
   mutable repositories_cursor: int;
+  mutable repository_changes_open: bool;
+  mutable repository_changes_repo_id: string option;
+  mutable repository_changes: Tui_decode.repository_change_snapshot option;
+  mutable repository_changes_error: string option;
+  mutable repository_changes_scroll: int;
+  mutable repository_changes_cursor: int;
   (* Code surface: one directory level at a time through the lazy /children
      route; the file arrives whole and is lexed once at load. *)
   mutable code_dir: string;
@@ -2475,6 +2481,12 @@ let create_state
   repositories_error = None;
   repositories_scroll = 0;
   repositories_cursor = 0;
+  repository_changes_open = false;
+  repository_changes_repo_id = None;
+  repository_changes = None;
+  repository_changes_error = None;
+  repository_changes_scroll = 0;
+  repository_changes_cursor = 0;
   code_dir = "";
   code_entries = [];
   code_entries_error = None;
@@ -3024,10 +3036,16 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
            | None -> 0
            | Some s -> List.length s.Tui_decode.hs_verdicts)
   | Repositories ->
-      listing ~error:state.repositories_error
-        (match state.repositories with
-         | None -> 0
-         | Some s -> List.length s.Tui_decode.rs_repositories)
+      if state.repository_changes_open then
+        listing ~error:state.repository_changes_error
+          (match state.repository_changes with
+           | None -> 0
+           | Some s -> List.length s.Tui_decode.rcs_changes)
+      else
+        listing ~error:state.repositories_error
+          (match state.repositories with
+           | None -> 0
+           | Some s -> List.length s.Tui_decode.rs_repositories)
   | Changes ->
       Some
         { sc_count =
@@ -3143,13 +3161,19 @@ let surface_row_texts (state : state) : surface -> string list option = function
             s.Tui_decode.hs_verdicts)
         state.harness
   | Repositories ->
-      Option.map
-        (fun s ->
-          List.map
-            (fun r ->
-              r.Tui_decode.rp_name ^ " " ^ r.Tui_decode.rp_default_branch)
-            s.Tui_decode.rs_repositories)
-        state.repositories
+      if state.repository_changes_open then
+        Option.map
+          (fun s ->
+            List.map (fun row -> row.Tui_decode.rc_path) s.Tui_decode.rcs_changes)
+          state.repository_changes
+      else
+        Option.map
+          (fun s ->
+            List.map
+              (fun r ->
+                r.Tui_decode.rp_name ^ " " ^ r.Tui_decode.rp_default_branch)
+              s.Tui_decode.rs_repositories)
+          state.repositories
   | Connectors ->
       Option.map
         (fun s ->

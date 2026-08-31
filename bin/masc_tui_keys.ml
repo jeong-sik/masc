@@ -228,9 +228,12 @@ let for_surface = function
   | Repositories ->
       [ b Navigate "j/k" "scroll"
       ; b Act "Enter" "browse"
-          ~help:"open this repository's tree on the Code surface"
+          ~help:"open the repository tree, or the selected changed file"
+      ; b Act "d" "Git changes"
+          ~help:"show the selected repository's current working-tree changes"
       ; b Act "a" "add" ~help:"register a repository; opens $EDITOR"
-      ; b Act "Esc" "overview"
+      ; b Act "Left / Esc" "back"
+          ~help:"leave Git changes, or return to Overview"
       ]
       @ listing_meta
   | Changes ->

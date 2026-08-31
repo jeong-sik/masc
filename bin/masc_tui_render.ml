@@ -8218,7 +8218,7 @@ let repository_context_lines ~width (repo : Masc.Tui_decode.repository) =
   @ stored_path
   @ wrap "Keepers" keepers
 
-let render_repositories (state : state) =
+let render_repository_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let repos =
     match state.repositories with
@@ -8312,6 +8312,84 @@ let render_repositories (state : state) =
        | lines ->
            c.push_divider ();
            List.iter (c.push_styled ~style:(Theme.recede ())) lines))
+
+let repository_change_status (row : Masc.Tui_decode.repository_change) =
+  if row.rc_conflicted then "conflict"
+  else if row.rc_untracked then "untracked"
+  else
+    match row.rc_staged, row.rc_unstaged with
+    | true, true -> "staged+worktree"
+    | true, false -> "staged"
+    | false, true -> "worktree"
+    | false, false -> "unknown"
+
+let render_repository_changes (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let changes =
+    match state.repository_changes with
+    | Some snapshot -> snapshot.Masc.Tui_decode.rcs_changes
+    | None -> []
+  in
+  let repo_name =
+    match state.repository_changes_repo_id, state.repositories with
+    | Some id, Some snapshot ->
+        (match
+           List.find_opt
+             (fun (repo : Masc.Tui_decode.repository) ->
+               String.equal repo.rp_id id)
+             snapshot.rs_repositories
+         with
+         | Some repo -> repo.rp_name
+         | None -> id)
+    | Some id, None -> id
+    | None, _ -> "repository"
+  in
+  let title =
+    Printf.sprintf " MASC Repository Changes — %s (%d)  %s"
+      (Terminal_text.single_line repo_name) (List.length changes)
+      (connection_badge state)
+  in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"repository-changes"
+    ~title ~hints:(Masc_tui_keys.footer_hints state.view)
+    ~body:(fun ~budget c ->
+      c.push_styled ~style:(Theme.recede ())
+        (Printf.sprintf "  %-18s %s" "State" "Path");
+      c.push_divider ();
+      (match state.repository_changes_error with
+       | None -> ()
+       | Some detail ->
+           c.push_styled ~style:(Theme.bad ())
+             ("  " ^ Keeper_chat.terminal_safe_text detail);
+           c.push_divider ());
+      let fixed =
+        2 + (if Option.is_some state.repository_changes_error then 2 else 0)
+      in
+      let room = max 1 (budget - fixed) in
+      if changes = [] then
+        c.push_styled ~style:(Theme.recede ())
+          (match state.repository_changes, state.repository_changes_error with
+           | None, None -> "  (loading Git changes)"
+           | Some _, None -> "  (working tree clean)"
+           | _, Some _ -> "  (Git changes unavailable)")
+      else
+        for i = 0 to room - 1 do
+          let idx = state.repository_changes_scroll + i in
+          match List.nth_opt changes idx with
+          | None -> c.push_empty ()
+          | Some row ->
+              let line =
+                Printf.sprintf "  %-18s %s"
+                  (repository_change_status row)
+                  (Message_layout.fit_middle (max 8 (cols - 28))
+                     (Terminal_text.single_line row.rc_path))
+              in
+              if idx = state.repository_changes_cursor then c.push_selected line
+              else c.push line
+        done)
+
+let render_repositories (state : state) =
+  if state.repository_changes_open then render_repository_changes state
+  else render_repository_list state
 
 let change_row_address (change : Masc.Tui_decode.file_change) =
   match change.Masc.Tui_decode.fc_location with

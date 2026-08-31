@@ -151,6 +151,18 @@ let test_repositories_show_the_server_resolved_checkout_path () =
   Alcotest.(check bool) "and keeps assignment in the selected-row context" true
     (reads ~binding_name:"repository_context_lines" ~fields:[ "rp_keepers" ] > 0)
 
+let test_repository_changes_keep_the_git_axes () =
+  let producer = "lib/server/server_routes_http_routes_repositories.ml" in
+  Alcotest.(check int) "the route reads exact Git status rows" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:producer
+       ~binding_name:"handle_list_repository_changes"
+       ~callee:"Repo_git.status_files");
+  List.iter
+    (fun field ->
+      Alcotest.(check bool) ("renderer reads " ^ field) true
+        (reads ~binding_name:"repository_change_status" ~fields:[ field ] > 0))
+    [ "rc_staged"; "rc_unstaged"; "rc_untracked"; "rc_conflicted" ]
+
 (* The Lanes summary drew one mark for four states while the style beside it
    was green, red or grey. On a column of identical marks the lane failing 133
    of 1095 runs looked exactly like the four that were fine, and the only two
@@ -254,6 +266,8 @@ let () =
             `Quick test_the_schedule_detail_says_what_became_of_the_wake
         ; Alcotest.test_case "Repositories show the server-resolved path"
             `Quick test_repositories_show_the_server_resolved_checkout_path
+        ; Alcotest.test_case "Repository changes keep the Git axes" `Quick
+            test_repository_changes_keep_the_git_axes
         ; Alcotest.test_case "a turn on a keeper that is not running stops"
             `Quick test_a_turn_on_a_keeper_that_is_not_running_stops_moving
         ; Alcotest.test_case "a lane that cannot admit says why" `Quick

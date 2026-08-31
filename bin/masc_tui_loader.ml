@@ -1039,6 +1039,14 @@ let load_repositories ~(host : string) ~(port : int) :
   | Error err -> Error ("repository load failed: " ^ err)
   | Ok json -> Tui_decode.decode_repository_snapshot json
 
+(** Load one repository's current Git working-tree changes. *)
+let load_repository_changes ~(host : string) ~(port : int)
+    ~(repository_id : string) :
+    (Tui_decode.repository_change_snapshot, string) result =
+  match fetch_repository_changes ~host ~port ~repository_id with
+  | Error err -> Error ("repository changes load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_repository_change_snapshot json
+
 (** Load a keeper's file changes from /api/v1/keepers/:name/file-changes. *)
 let load_keeper_file_changes ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(window_hours : float) :

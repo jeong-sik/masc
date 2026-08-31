@@ -2570,6 +2570,33 @@ let test_decode_repository_requires_resolved_local_path () =
       Alcotest.fail
         "a repository without the server-resolved path must not be guessed"
 
+let test_decode_repository_changes_keeps_git_axes () =
+  let json =
+    `Assoc
+      [ ("repository_id", `String "masc")
+      ; ( "changes"
+        , `List
+            [ `Assoc
+                [ ("path", `String "lib/a file.ml")
+                ; ("staged", `Bool true)
+                ; ("unstaged", `Bool true)
+                ; ("untracked", `Bool false)
+                ; ("conflicted", `Bool false)
+                ]
+            ] )
+      ; ("total", `Int 1)
+      ]
+  in
+  match Tui_decode.decode_repository_change_snapshot json with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok { Tui_decode.rcs_repository_id = "masc"; rcs_changes = [ row ]; rcs_total = 1 } ->
+      Alcotest.(check string) "path" "lib/a file.ml" row.rc_path;
+      Alcotest.(check bool) "staged" true row.rc_staged;
+      Alcotest.(check bool) "unstaged" true row.rc_unstaged;
+      Alcotest.(check bool) "not untracked" false row.rc_untracked;
+      Alcotest.(check bool) "not conflicted" false row.rc_conflicted
+  | Ok _ -> Alcotest.fail "unexpected repository changes shape"
+
 (* Keeper lane rows. Shape is the light projection the TUI reads from
    [GET /api/v1/keepers/composite]. *)
 let keeper_lane_json ?(phase = "running") ?(turn_phase = "executing")
@@ -5538,6 +5565,8 @@ let () =
           test_decode_repository_with_no_keepers;
         Alcotest.test_case "resolved path is required" `Quick
           test_decode_repository_requires_resolved_local_path;
+        Alcotest.test_case "repository changes keep Git axes" `Quick
+          test_decode_repository_changes_keeps_git_axes;
       ] );
     ( "decode_keeper_lanes",
       [

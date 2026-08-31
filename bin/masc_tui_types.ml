@@ -1689,6 +1689,17 @@ type state = {
   mutable board_list_error: string option;
   mutable board_cursor: int;
   mutable board_sort: board_sort;
+  mutable board_hearth: string option;
+      (** Which sub-board the list is narrowed to, or [None] for all of them.
+          Sent to the server rather than filtered here: the listing is paged,
+          and 1550 of this workspace's 2171 posts sit in [verification] alone,
+          so a filter over one page would show a handful of rows and call them
+          the hearth. *)
+  mutable board_hearths: string list;
+      (** The hearths the unnarrowed list last showed, which is what [f]
+          cycles. Refreshed only from an unnarrowed load: taking it from every
+          load would collapse the cycle to the one hearth already selected,
+          and there would be no key back out to a third. *)
   mutable board_scroll: int;
   mutable board_mode: board_mode;
   mutable board_focus: pane_focus;
@@ -2339,6 +2350,8 @@ let create_state
   board_list_error = None;
   board_cursor = 0;
   board_sort = Board_hot;
+  board_hearth = None;
+  board_hearths = [];
   board_scroll = 0;
   board_mode = Board_list;
   board_focus = Right_pane;

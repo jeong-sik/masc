@@ -140,6 +140,8 @@ let for_surface = function
       ; b Navigate "[ / ]" "previous / next post"
           ~help:"while reading, open the post before or after this one"
       ; b Navigate "s" "sort" ~help:"cycle hot / trending / recent / updated / discussed"
+      ; b Search "f" "hearth"
+          ~help:"narrow to one sub-board, busiest first; again for the next"
       ; b Navigate "z" "wide detail" ~help:"hide or show the post list while reading"
       ; b Act "Y" "copy link" ~help:"copy the selected post reference"
       ; b Navigate "Ctrl-W" "pane" ~help:"switch between the post list and detail pane"

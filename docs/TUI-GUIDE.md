@@ -254,6 +254,7 @@ Every keeper under `.masc/keepers/`, sorted by name.
     HEALTH       KEEPER             A P S   LAST LIFECYCLE / RUNTIME             TASK
  >  ● healthy    adm-race-cf-001    A P D  4m12s running anthropic.claude-opus-5 task-471
     ● idle       analyst            A - M  2h08m paused kimi.kimi-k2.5           task-464
+   OPERATIONS  lifecycle running · turn executing · idle 7m · last done · deepseek-v4 · running_fiber_alive
   j/k move  p pause  w wake  s shutdown  g yolo  c chat  right/enter detail
 ```
 
@@ -274,6 +275,13 @@ it keeps both the shared head and distinguishing tail around a middle ellipsis.
 Phase and runtime identity stay neutral so an ordinary row does not turn into a
 strip of competing colours.
 
+The fixed `OPERATIONS` line follows the selected Keeper. It comes from
+`GET /api/v1/keepers/composite` and keeps the current lifecycle, turn step,
+idle age, last runtime/model outcome, and producer diagnosis together on the
+surface that owns Keeper operations. A failed refresh preserves the previous
+typed reading and marks it unavailable rather than replacing it with guessed
+zeros.
+
 `g` toggles the selected Keeper's tool gate. The footer names the action that
 will happen next: `g yolo` from the approval policy and `g auto` while YOLO is
 active, so the safe return path is visible.
@@ -287,39 +295,21 @@ restart puts every Keeper back on `auto`.
 
 ### Lanes
 
-The current composite lifecycle and turn-cycle reading for every Keeper. Open
-it with `Tab` immediately after Keepers.
+Standalone execution lanes only. Keeper lifecycle and turn-cycle facts live on
+Keepers, so this surface no longer repeats a second Keeper table.
 
 ```
- MASC Lanes (10 keepers)  17:02:53  [connected]
-  KEEPER             LIFECYCLE   TURN STEP   IDLE   LAST OUTCOME         DIAGNOSIS
-  taskmaster         ● running   executing   7m     done · deepseek-v4   running_fiber_alive
-  kidsnote           × failing   executing   59m    done                 failing_unhealthy
+ MASC Lanes · Standalone (6 lanes)  17:02:53  [connected]
+  Standalone LLM lanes · READ-ONLY OBSERVATION · observed 17:02:52
+ >● Librarian       running 12s    slots librarian-exact  active 1  runs 50  ok/fail/cancel 47/2/1
 ```
 
-The rows come from `GET /api/v1/keepers/composite`. `LIFECYCLE` is the Keeper
-process state, `TURN STEP` is the current autonomous or requested turn step,
-and `IDLE` is the producer's idle
-duration in seconds rendered as seconds, minutes, hours, or days. `LAST
-OUTCOME` keeps the latest runtime state and model when one exists.
-`DIAGNOSIS` is the condition the producer says determined the lifecycle
-phase. A phase or turn value this TUI does not know is shown verbatim with a
-`?`; it is never changed into a familiar state.
-The lifecycle glyph alone carries its semantic colour. The exact phase word
-uses the terminal foreground, so a healthy fleet does not turn the table green
-and an attention glyph remains easy to find. Under `NO_COLOR`, the same glyph
-shape and phase word remain.
-
-Before the first response the page says `(not loaded yet)`. A successful empty
-response says `(no keeper lane snapshots)`. A failed refresh leaves the prior
-rows on screen, adds the error in red, and says that an empty body is not a
-reading. Move the lane cursor with `j` / `k`. Right or `Enter` opens that
-Keeper in the existing Keeper detail view. `c` or `m` opens its chat directly;
-`Esc` returns to the same Lanes selection. Both paths join the lane's Keeper
-name exactly to the current local roster. If that Keeper is absent, the keys do
-not open another row; the Lanes pane keeps its selection and names the missing
-Keeper in an action error. Moving the lane cursor, receiving a new lane
-reading, or observing a changed roster clears that target-specific error.
+Rows come from `GET /api/v1/dashboard/standalone-lanes`. They show admission slots,
+current activity, retained run counts, execution outcomes, latency, and the
+slots actually selected. `j` / `k` moves the lane cursor; Right or `Enter`
+opens that lane's recent exact runs. A standalone lane has no Keeper identity,
+so `c` / `m` explains that chat belongs on Keepers instead of silently opening
+an unrelated Keeper.
 
 ### Keeper detail
 
@@ -455,6 +445,11 @@ The folded tool row retains exact outcome counts and ends with
 `Ctrl-D: details / diffs`, so the hidden change view is discoverable from the
 row that owns it. The typed calls themselves stay attached to the message, so
 changing the view does not reconstruct facts from rendered glyphs. Expanded
+Tool folds also retain operational kinds (`Skill`, `Keeper`, and `Fusion`), so
+a mixed block does not collapse into an anonymous tool count. A held tool call
+uses decision vocabulary independently of execution: `approval approved`,
+`approval denied`, `approval timed out`, or `approval displaced`. Its later
+tool row still reports whether execution returned or failed.
 calls use the finished glyph for a call that
 returned, `✗` for one that returned an error, `·` for one the trace never saw
 finish, and `?` for one whose outcome the trace did not record. A finished call
@@ -1025,8 +1020,8 @@ Per surface:
 | `j` / `k` | Runtime, System Logs | Scroll the page |
 | `j` / `k` | Keeper detail, logs, Board read, Planning detail, Fusion detail | Scroll content |
 | Right / `Enter` | Keepers | Open keeper detail |
-| Right / `Enter` | Lanes | Open the selected lane's Keeper detail |
-| `c` / `m` | Lanes | Open the selected lane's Keeper chat; `Esc` returns to Lanes |
+| Right / `Enter` | Lanes | Open the selected standalone lane's exact runs |
+| `c` / `m` | Lanes | Explain that standalone lanes have no Keeper chat target |
 | Right / `Enter` | Board | Open post body |
 | `Ctrl-W` | Board read, Resources | Switch the focused pane |
 | `[` / `]` | Resources detail | Open the previous / next resource |
@@ -1073,16 +1068,14 @@ Per surface:
 ```
 Tab cycles the surfaces:
 
-  Overview -> Acting -> Keepers -> Lanes -> Approvals -> Board -> Planning
-           -> Schedules -> Verify -> Harness -> Fusion -> Repos -> Code
-           -> Changes -> Connectors -> Runtime -> Config -> Resources
-           -> Tools -> Logs -> Overview
+  Overview -> Acting -> Keepers -> Memory -> Lanes -> Approvals -> Board
+           -> Planning -> Schedules -> Fusion -> Repos -> Code -> Connectors
+           -> Runtime -> Config -> Resources -> Tools -> Logs -> Overview
 
 Within a surface:
 
   Keepers   --Right/Enter-->  Keeper detail  --l-->  Keeper logs
-  Lanes     --Right/Enter--^
-  Lanes     --c/m----------->  Message input  --Esc-->  Lanes
+  Lanes     --Right/Enter-->  Standalone exact runs
 
   Keeper list/detail  --c-->  Message input
 

@@ -4436,6 +4436,67 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
     ; (running_without_turn, "running, cannot take a turn", (Theme.warn ()))
     ]
 
+let keeper_operations_idle_text seconds =
+  let seconds = max 0 seconds in
+  if seconds < 60 then Printf.sprintf "%ds" seconds
+  else if seconds < 3600 then Printf.sprintf "%dm" (seconds / 60)
+  else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
+  else Printf.sprintf "%dd" (seconds / 86400)
+
+let keeper_operations_outcome_text = function
+  | None -> "—"
+  | Some (outcome : Tui_decode.keeper_lane_last_outcome) ->
+      let state = Terminal_text.single_line outcome.klo_runtime_state in
+      (match outcome.klo_selected_model with
+       | Some model when String.trim model <> "" ->
+           state ^ " · " ^ Terminal_text.single_line model
+       | Some _ | None -> state)
+
+(* The Keeper composite used to live only in Lanes. Keep the roster compact,
+   then give the selected Keeper one exact operational line: no lifecycle fact
+   is dropped, and Lanes no longer has to repeat the whole Keeper table. *)
+let keeper_operations_preview (state : state) =
+  match selected_keeper state with
+  | None -> Ansi.dim ^ "  Keeper operations: no Keeper selected" ^ Ansi.reset
+  | Some keeper ->
+      (match state.lanes with
+       | Some snapshot ->
+           (match
+              List.find_opt
+                (fun (lane : Tui_decode.keeper_lane) ->
+                  String.equal lane.kl_keeper keeper.k_name)
+                snapshot.kls_lanes
+            with
+            | Some lane ->
+                String.concat ""
+                  [ Ansi.cyan
+                  ; "  OPERATIONS"
+                  ; Ansi.reset
+                  ; "  lifecycle "
+                  ; Terminal_text.single_line
+                      (Tui_decode.keeper_lane_phase_to_string lane.kl_phase)
+                  ; " · turn "
+                  ; Terminal_text.single_line
+                      (Tui_decode.keeper_lane_turn_phase_to_string
+                         lane.kl_turn_phase)
+                  ; " · idle "
+                  ; keeper_operations_idle_text lane.kl_idle_seconds
+                  ; " · last "
+                  ; keeper_operations_outcome_text lane.kl_last_outcome
+                  ; " · "
+                  ; Terminal_text.single_line_or ~default:"no diagnosis"
+                      lane.kl_diagnosis
+                  ]
+            | None ->
+                Ansi.dim ^ "  OPERATIONS  no composite row for "
+                ^ Terminal_text.single_line keeper.k_name ^ Ansi.reset)
+       | None ->
+           (match state.lanes_error with
+            | Some detail ->
+                (Theme.warn ()) ^ "  OPERATIONS unavailable · "
+                ^ Terminal_text.single_line detail ^ Ansi.reset
+            | None -> Ansi.dim ^ "  OPERATIONS loading…" ^ Ansi.reset))
+
 let render_keeper_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -4564,7 +4625,7 @@ let render_keeper_list (state : state) =
      arithmetic copy of its height would drift from what was just emitted and
      scroll the frame. *)
   let chrome_rows = List.length (frame_lines buf) in
-  let footer_rows = 2 in
+  let footer_rows = 3 in
   let keeper_rows = max 0 (rows - chrome_rows - footer_rows) in
   let keeper_count = List.length state.keepers in
   let scroll_offset =
@@ -4618,6 +4679,7 @@ let render_keeper_list (state : state) =
       | Some _, None | None, Some _ | None, None -> box_empty buf cols
     done;
 
+  box_line buf cols (keeper_operations_preview state);
   Buffer.add_string buf
     (Printf.sprintf "%s%s%s%s%s\n" Ansi.gray Ansi.box_bl (draw_hline (cols - 2))
        Ansi.box_br Ansi.reset);
@@ -4628,151 +4690,6 @@ let render_keeper_list (state : state) =
   finish_surface state ~surface_key:"keeper-list" ~rows:terminal_rows
       ~cols buf
 
-let keeper_lane_phase_style (phase : Tui_decode.keeper_lane_phase) =
-  match phase with
-  | Lane_phase_running -> ((Theme.ok ()), "\xe2\x97\x8f")
-  | Lane_phase_failing | Lane_phase_crashed -> ((Theme.bad ()), "\xc3\x97")
-  | Lane_phase_draining
-  | Lane_phase_restarting ->
-      ((Theme.warn ()), "\xe2\x97\x90")
-  | Lane_phase_paused -> ((Theme.warn ()), "\xe2\x97\x8b")
-  | Lane_phase_offline | Lane_phase_stopped -> (Ansi.gray, "\xc3\x97")
-  | Lane_phase_unknown _ -> ((Theme.warn ()), "?")
-
-let keeper_lane_turn_style (phase : Tui_decode.keeper_lane_turn_phase) =
-  match phase with
-  | Lane_turn_executing | Lane_turn_prompting | Lane_turn_routing -> Ansi.cyan
-  | Lane_turn_finalizing -> (Theme.warn ())
-  | Lane_turn_exhausted -> (Theme.bad ())
-  | Lane_turn_idle -> Ansi.gray
-  | Lane_turn_unknown _ -> (Theme.warn ())
-
-let keeper_lane_outcome_text = function
-  | None -> "\xe2\x80\x94"
-  | Some (outcome : Tui_decode.keeper_lane_last_outcome) ->
-      let state = Terminal_text.single_line outcome.klo_runtime_state in
-      (match outcome.klo_selected_model with
-       | Some model when String.trim model <> "" ->
-           state ^ " \xc2\xb7 " ^ Terminal_text.single_line model
-       | Some _ | None -> state)
-
-type keeper_lane_columns = {
-  lane_keeper_width : int;
-  lane_phase_width : int;
-  lane_turn_width : int;
-  lane_idle_width : int;
-  lane_outcome_width : int;
-  lane_diagnosis_width : int;
-  lane_show_outcome : bool;
-  lane_show_diagnosis : bool;
-}
-
-(* The four left columns are always present. Outcome appears next; diagnosis
-   is the first column a narrow terminal drops. At 100 columns -- the PTY
-   contract -- all six still have enough room to carry a useful value. *)
-let keeper_lane_columns inner =
-  let lane_phase_width = 11 in
-  let lane_turn_width = 11 in
-  let lane_idle_width = 6 in
-  let lane_show_outcome = inner >= 68 in
-  let lane_show_diagnosis = inner >= 84 in
-  let lane_outcome_width = if lane_show_outcome then 20 else 0 in
-  let fixed_without_keeper =
-    2 + lane_phase_width + lane_turn_width + lane_idle_width + 3
-    + (if lane_show_outcome then 1 + lane_outcome_width else 0)
-    + (if lane_show_diagnosis then 1 else 0)
-  in
-  let available = max 1 (inner - fixed_without_keeper) in
-  let lane_keeper_width =
-    if lane_show_diagnosis then min 18 (max 10 (available / 2))
-    else min 22 available
-  in
-  let lane_diagnosis_width =
-    if lane_show_diagnosis then max 1 (available - lane_keeper_width) else 0
-  in
-  { lane_keeper_width
-  ; lane_phase_width
-  ; lane_turn_width
-  ; lane_idle_width
-  ; lane_outcome_width
-  ; lane_diagnosis_width
-  ; lane_show_outcome
-  ; lane_show_diagnosis
-  }
-
-let keeper_lane_header (columns : keeper_lane_columns) =
-  String.concat ""
-    [ "  "
-    ; fit_width "KEEPER" columns.lane_keeper_width
-    ; " "
-    ; fit_width "LIFECYCLE" columns.lane_phase_width
-    ; " "
-    ; fit_width "TURN STEP" columns.lane_turn_width
-    ; " "
-    ; fit_width "IDLE" columns.lane_idle_width
-    ; (if columns.lane_show_outcome then
-         " " ^ fit_width "LAST OUTCOME" columns.lane_outcome_width
-       else "")
-    ; (if columns.lane_show_diagnosis then
-         " " ^ fit_width "DIAGNOSIS" columns.lane_diagnosis_width
-       else "")
-    ]
-
-let keeper_lane_row (columns : keeper_lane_columns)
-    (lane : Tui_decode.keeper_lane) =
-  let phase_color, phase_glyph = keeper_lane_phase_style lane.kl_phase in
-  (* Colour points at the lifecycle mark; the producer-owned word beside it
-     already names the exact state. Keeping the colour open across both made a
-     healthy fleet turn most of the table green and left no stronger signal
-     for the rows that need attention. The glyph retains the semantic colour
-     and the word remains readable in the terminal's default foreground. *)
-  let phase =
-    phase_color ^ phase_glyph ^ Ansi.reset ^ " "
-    ^ fit_width
-        (Terminal_text.single_line
-           (Tui_decode.keeper_lane_phase_to_string lane.kl_phase))
-        (max 1 (columns.lane_phase_width - 2))
-  in
-  let turn =
-    keeper_lane_turn_style lane.kl_turn_phase
-    ^ fit_width
-        (Terminal_text.single_line
-           (Tui_decode.keeper_lane_turn_phase_to_string lane.kl_turn_phase))
-        columns.lane_turn_width
-    ^ Ansi.reset
-  in
-  String.concat ""
-    [ "  "
-    ; fit_width (Terminal_text.single_line lane.kl_keeper)
-        columns.lane_keeper_width
-    ; " "
-    ; phase
-    ; " "
-    ; turn
-    ; " "
-    ; Ansi.dim
-    ; fit_width (keeper_lane_idle_text lane.kl_idle_seconds)
-        columns.lane_idle_width
-    ; Ansi.reset
-    ; (if columns.lane_show_outcome then
-         " " ^ Ansi.gray
-         ^ fit_width (keeper_lane_outcome_text lane.kl_last_outcome)
-             columns.lane_outcome_width
-         ^ Ansi.reset
-       else "")
-    ; (if columns.lane_show_diagnosis then
-         " " ^ Ansi.dim
-         ^ fit_width
-             (Terminal_text.single_line_or ~default:"\xe2\x80\x94"
-                lane.kl_diagnosis)
-             columns.lane_diagnosis_width
-         ^ Ansi.reset
-       else "")
-    ]
-
-(** Render one current composite row per Keeper. This is a read-only operator
-    view: the endpoint owns the phase diagnosis and this surface only makes
-    the six facts scannable together. *)
 (* Through the semantic names, not the colour names. A raw [Ansi.red] is the
    terminal's red whatever the page behind it is; [Theme.bad ()] is the same
    reading lifted until it clears the readable floor on the scheme in force.
@@ -4875,30 +4792,23 @@ let render_lanes_overview (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let inner = max 1 (framed_inner_width cols) in
   let buf = Buffer.create 4096 in
-  let lanes =
-    match state.lanes with
-    | None -> []
-    | Some snapshot -> snapshot.Tui_decode.kls_lanes
-  in
-  let layout = lanes_scrolled state in
-  let shown = layout.sc_count in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
       now.Unix.tm_sec
   in
   let header =
-    match state.lanes with
+    match state.standalone_lanes with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Lanes") timestamp
+          (screen_title " MASC Lanes · Standalone") timestamp
           (connection_badge state)
     | Some snapshot ->
-        Printf.sprintf "%s (%d keepers)  %s  %s"
-          (screen_title " MASC Lanes") snapshot.kls_count timestamp
+        Printf.sprintf "%s (%d lanes)  %s  %s"
+          (screen_title " MASC Lanes · Standalone")
+          (List.length snapshot.sls_lanes) timestamp
           (connection_badge state)
   in
-  let columns = keeper_lane_columns inner in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
@@ -4924,11 +4834,13 @@ let render_lanes_overview (state : state) =
                ~frame:state.activity_frame inner lane
            in
            if
-             state.lanes_section = Lanes_section_standalone
-             && index = state.lanes_standalone_cursor
+             index = state.lanes_standalone_cursor
            then box_line_selected buf cols (Masc_tui_theme.strip_sgr row)
            else box_line buf cols row)
          snapshot.Tui_decode.sls_lanes;
+       if snapshot.sls_lanes = [] then
+         box_line_styled buf cols ~style:(Theme.recede ())
+           "  (no standalone lane observations)";
        if snapshot.sls_exact_run_projection_truncated then
          box_line buf cols
            (Printf.sprintf
@@ -4948,58 +4860,15 @@ let render_lanes_overview (state : state) =
           | Some detail ->
               (Theme.bad ()) ^ "  standalone lane observation unavailable: "
               ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset));
-  box_divider buf cols;
-  box_line_styled buf cols ~style:(Theme.recede ()) (keeper_lane_header columns);
-  box_divider buf cols;
-  (match state.lanes_error with
-   | None -> ()
-   | Some detail ->
-       box_line_styled buf cols ~style:(Theme.bad ())
-         ("  " ^ Keeper_chat.terminal_safe_text detail);
-       box_divider buf cols);
   (match state.lanes_action_error with
    | None -> ()
    | Some detail ->
        box_line_styled buf cols ~style:(Theme.warn ())
-         ("  " ^ Keeper_chat.terminal_safe_text detail);
-       box_divider buf cols);
-  (* The overflow indicator spends a content row rather than growing the
-     frame past its budget, where the truncation's casualty was the footer. *)
-  let content_height =
-    Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
-      ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
-      ~overflow_takes_row:layout.sc_overflow_takes_row
-  in
-  let max_scroll = max 0 (shown - content_height) in
-  let scroll = max 0 (min state.lanes_scroll max_scroll) in
-  if shown = 0 then begin
-    let empty =
-      match empty_page_of ~snapshot:state.lanes ~error:state.lanes_error with
-      | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note
-      | Page_empty -> "  (no keeper lane snapshots)"
-    in
-    box_line_styled buf cols ~style:(Theme.recede ()) empty;
-    for _ = 1 to content_height - 1 do
-      box_empty buf cols
-    done
-  end
-  else
-    for index = 0 to content_height - 1 do
-      match List.nth_opt lanes (index + scroll) with
-      | None -> box_empty buf cols
-      | Some lane ->
-          let row = keeper_lane_row columns lane in
-          if
-            state.lanes_section = Lanes_section_keeper
-            && index + scroll = state.lanes_cursor
-          then
-            box_line_selected buf cols (Masc_tui_theme.strip_sgr row)
-          else box_line buf cols row
-    done;
-  if shown > content_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%d keepers, scroll %d]" shown scroll);
+         ("  " ^ Keeper_chat.terminal_safe_text detail));
+  let used_rows = List.length (frame_lines buf) in
+  for _ = 1 to max 0 (rows - used_rows - 2) do
+    box_empty buf cols
+  done;
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
@@ -6813,7 +6682,17 @@ let render_keeper_message (state : state) =
                     ("  " ^ spinner ^ " " ^ Ansi.bold ^ "ACTIVE TURN"
                      ^ Ansi.reset ^ Ansi.cyan ^ " · " ^ text)
               | Keeper_chat_transcript.Attention ->
-                  box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text)))
+                  box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text)
+              | Keeper_chat_transcript.Approval outcome ->
+                  let style =
+                    match outcome with
+                    | Keeper_chat_transcript.Approved -> Theme.ok ()
+                    | Keeper_chat_transcript.Denied
+                    | Keeper_chat_transcript.Timed_out
+                    | Keeper_chat_transcript.Displaced
+                    | Keeper_chat_transcript.Approval_other _ -> Theme.warn ()
+                  in
+                  box_line_styled chat_buf chat_cols ~style ("  " ^ text)))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
      | Some _ | None -> ());
     if not target_registered then begin

@@ -197,9 +197,22 @@ val tool_rows : t -> string list
     and history consumers carry {!tool_block} to the render boundary and call
     {!project_tool_block} explicitly. *)
 (** How a status row reads. *)
+type approval_outcome =
+  | Approved
+  | Denied
+  | Timed_out
+  | Displaced
+  | Approval_other of string
+
+val approval_outcome_to_string : approval_outcome -> string
+
 type status_kind =
   | Progress  (** How the turn is going. *)
   | Attention  (** Something an operator has to know about. *)
+  | Approval of approval_outcome
+      (** How a held tool decision settled. This is deliberately not a tool
+          success/failure: approval answers whether execution was allowed,
+          while the tool row separately says whether execution returned. *)
 
 val awaiting_approval : t -> awaiting_approval option
 (** The call the turn is held at, if any. One at a time: the turn cannot reach

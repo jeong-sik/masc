@@ -58,9 +58,9 @@ let test_plain_listing_footer_shape () =
   check str "the plain listing keeps its footer" canonical
     (Masc_tui_keys.footer_hints System_logs)
 
-let test_lanes_footer_opens_the_selected_keeper () =
-  check str "Lanes names its Keeper detail and chat jumps"
-    "j/k:move  Right / Enter:detail  c / m:chat  Esc:overview  r:refresh  Tab:next  q:quit"
+let test_lanes_footer_opens_standalone_runs () =
+  check str "Lanes names its standalone run drill-down"
+    "j/k:move  Right / Enter:runs  Esc:overview  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =
@@ -538,10 +538,10 @@ let test_lane_notice_says_what_is_recorded () =
 let test_lanes_search_texts_lead_with_the_standalone_labels () =
   let state = lanes_state () in
   Alcotest.(check (option (list string)))
-    "standalone labels first, then Keeper names"
+    "only standalone labels are searchable"
     (Some
        [ "Board Attention"; "HITL Auto Judge"; "Librarian"
-       ; "Verifier"; "alpha"; "beta" ])
+       ; "Verifier" ])
     (surface_row_texts state Lanes)
 
 let test_lanes_sub_modes_stay_unsearchable () =
@@ -555,7 +555,6 @@ let test_lanes_sub_modes_stay_unsearchable () =
 
 let hit_to_string = function
   | Lanes_hit_standalone index -> Printf.sprintf "standalone %d" index
-  | Lanes_hit_keeper index -> Printf.sprintf "keeper %d" index
   | Lanes_hit_none -> "none"
 
 let check_hit state ~terminal_rows ~row expected =
@@ -563,8 +562,8 @@ let check_hit state ~terminal_rows ~row expected =
     (hit_to_string (lanes_overview_hit state ~terminal_rows ~row))
 
 (* The overview frame, row by row: 1 strip, 2 box top, 3 header, 4 divider,
-   5 matrix heading, 6-9 the four standalone rows, 10 divider, 11 Keeper
-   column header, 12 divider, 13 on the Keeper rows. *)
+   5 matrix heading, and 6-9 the four standalone rows. Everything below is
+   note/padding/footer chrome, never a hidden Keeper table. *)
 let test_overview_hit_reads_the_frame_rows () =
   let state = lanes_state () in
   check_hit state ~terminal_rows:40 ~row:5 "none";
@@ -572,19 +571,19 @@ let test_overview_hit_reads_the_frame_rows () =
   check_hit state ~terminal_rows:40 ~row:9 "standalone 3";
   check_hit state ~terminal_rows:40 ~row:10 "none";
   check_hit state ~terminal_rows:40 ~row:12 "none";
-  check_hit state ~terminal_rows:40 ~row:13 "keeper 0";
-  check_hit state ~terminal_rows:40 ~row:14 "keeper 1";
+  check_hit state ~terminal_rows:40 ~row:13 "none";
+  check_hit state ~terminal_rows:40 ~row:14 "none";
   check_hit state ~terminal_rows:40 ~row:15 "none"
 
 let test_overview_hit_pays_for_the_error_rows () =
   let state = lanes_state () in
   state.lanes_error <- Some "lane fixture failed";
-  (* One load error spends a row and a divider before the first Keeper row. *)
+  (* Keeper-composite errors are not part of the Standalone frame geometry. *)
   check_hit state ~terminal_rows:40 ~row:14 "none";
-  check_hit state ~terminal_rows:40 ~row:15 "keeper 0";
+  check_hit state ~terminal_rows:40 ~row:15 "none";
   state.lanes_action_error <- Some "Cannot open detail: no lane is selected";
   check_hit state ~terminal_rows:40 ~row:16 "none";
-  check_hit state ~terminal_rows:40 ~row:17 "keeper 0"
+  check_hit state ~terminal_rows:40 ~row:17 "none"
 
 let test_overview_hit_waits_for_the_matrix () =
   (* The matrix's single loading note is not a lane row. *)
@@ -592,15 +591,7 @@ let test_overview_hit_waits_for_the_matrix () =
   state.standalone_lanes <- None;
   check_hit state ~terminal_rows:40 ~row:6 "none";
   check_hit state ~terminal_rows:40 ~row:9 "none";
-  check_hit state ~terminal_rows:40 ~row:10 "keeper 0"
-
-let test_overview_hit_follows_the_window () =
-  (* A scrolled window: content height 1, scroll 1, so the one visible Keeper
-     row names the second Keeper. *)
-  let state = lanes_state ~keepers:[ "alpha"; "beta"; "gamma" ] () in
-  state.lanes_scroll <- 1;
-  check_hit state ~terminal_rows:16 ~row:13 "keeper 1";
-  check_hit state ~terminal_rows:16 ~row:14 "none"
+  check_hit state ~terminal_rows:40 ~row:10 "none"
 
 (* The detail tabs used to draw a hand-written hint string in the renderer,
    a second key list this module did not own. The strip must project the
@@ -698,8 +689,8 @@ let () =
             test_tools_footer_carries_the_keeper_axis
         ; Alcotest.test_case "Resources steps through detail" `Quick
             test_resources_footer_steps_through_detail
-        ; Alcotest.test_case "Lanes opens the selected Keeper" `Quick
-            test_lanes_footer_opens_the_selected_keeper
+        ; Alcotest.test_case "Lanes opens standalone runs" `Quick
+            test_lanes_footer_opens_standalone_runs
         ; Alcotest.test_case "Lanes reserves standalone matrix rows" `Quick
             test_lanes_scroll_reserves_standalone_matrix_rows
         ; Alcotest.test_case "Harness links to Overview task" `Quick
@@ -762,7 +753,5 @@ let () =
             test_overview_hit_pays_for_the_error_rows
         ; Alcotest.test_case "a click waits for the matrix" `Quick
             test_overview_hit_waits_for_the_matrix
-        ; Alcotest.test_case "a click follows the window" `Quick
-            test_overview_hit_follows_the_window
         ] )
     ]

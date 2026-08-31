@@ -5107,6 +5107,8 @@ def chat_visibility_modes_interaction() -> Interaction:
         for needle in (
             b"AUTO",
             b"gate:auto_judge",
+            b"Skill 1",
+            b"Fusion 1",
             b"Ctrl-D: details / diffs",
         ):
             wait_for_output(
@@ -5153,12 +5155,12 @@ def chat_visibility_modes_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"masc_task_history",
+            b"keeper_skill",
             start=tools_start,
             timeout=5.0,
         )
         tools += bytes(output[tools_start:])
-        for needle in (b"masc_task_history", b"tool_execute"):
+        for needle in (b"keeper_skill", b"masc_fusion"):
             if needle not in tools:
                 raise AssertionError(
                     f"full tool view did not restore {needle!r}: {tools!r}"
@@ -5171,7 +5173,14 @@ def chat_visibility_modes_interaction() -> Interaction:
 
 def chat_clarity_http_fixtures() -> HttpFixtures:
     fixtures = context_inspector_fixtures()
-    fixtures["/api/v1/keepers/alpha/chat/history"] = autonomous_turn_history_fixture()
+    history = autonomous_turn_history_fixture()
+    history_rows = history[1]
+    if not isinstance(history_rows, list):
+        raise AssertionError("chat clarity history fixture is not a list")
+    trace = history_rows[0]["blocks"][0]["trace"]
+    trace[1]["name"] = "keeper_skill"
+    trace[3]["name"] = "masc_fusion"
+    fixtures["/api/v1/keepers/alpha/chat/history"] = history
     fixtures["/api/v1/dashboard/gate"] = (
         200,
         {
@@ -5263,7 +5272,7 @@ def skills_usage_clarity_interaction() -> Interaction:
             columns=160,
             needle=b"MASC Overview",
         )
-        send_and_wait(process, master_fd, output, b"\t" * 15, b"MASC Tools")
+        send_and_wait(process, master_fd, output, b"\t" * 16, b"MASC Tools")
         usage = send_and_wait(
             process,
             master_fd,
@@ -6989,6 +6998,79 @@ def keeper_lanes_interaction(
             raise AssertionError(
                 f"moving after the action error lost its selected row: {moved_from_error!r}"
             )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def keeper_lanes_ia_interaction(gate: GatedHttpResponse) -> Interaction:
+    """Keeper composite facts live on Keepers; Lanes is Standalone-only."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Keepers")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"j",
+            keeper_row_selected(b"beta"),
+        )
+        if not wait_for_fixture_event(
+            process, master_fd, output, gate.requested, timeout=10.0
+        ):
+            raise AssertionError("Keepers did not request the composite snapshot")
+        keepers = release_and_wait_for_frame(
+            process, master_fd, output, gate, b"OPERATIONS"
+        )
+        keepers_plain = CSI_RE.sub(b"", keepers).decode("utf-8")
+        for needle in (
+            "OPERATIONS",
+            "lifecycle failing",
+            "turn executing",
+            "idle 59m",
+            "last done",
+            "failing_unhealthy",
+        ):
+            if needle not in keepers_plain:
+                raise AssertionError(
+                    f"Keepers did not draw composite fact {needle!r}: "
+                    f"{keepers_plain!r}"
+                )
+
+        tab_until(process, master_fd, output, b"MASC Lanes")
+        lanes = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=140,
+            needle=b"Standalone LLM lanes",
+            controls=(FULL_REDRAW,),
+        )
+        lanes_plain = CSI_RE.sub(b"", lanes).decode("utf-8")
+        if "MASC Lanes · Standalone" not in lanes_plain:
+            raise AssertionError(
+                f"Lanes did not name the standalone scope: {lanes_plain!r}"
+            )
+        for duplicate in ("TURN STEP", "LAST OUTCOME", "DIAGNOSIS"):
+            if duplicate in lanes_plain:
+                raise AssertionError(
+                    f"Lanes still repeated Keeper column {duplicate!r}: "
+                    f"{lanes_plain!r}"
+                )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"c",
+            b"Standalone lanes have no Keeper; use Keepers",
+        )
         os.write(master_fd, b"q")
 
     return interact
@@ -8901,15 +8983,32 @@ def run_keyboard_regression(executable: str) -> None:
     message_switch_fixtures, alpha_history = keeper_message_switch_http_fixtures()
     chat_visibility_fixtures = chat_clarity_http_fixtures()
     lanes_fixtures = keeper_runtime_http_fixtures()
-    lanes_gate = GatedHttpResponse(keeper_lanes_response([]))
+    lanes_gate = GatedHttpResponse(
+        keeper_lanes_response(
+            [
+                keeper_lane_row(
+                    "alpha",
+                    phase="running",
+                    turn_phase="idle",
+                    idle_seconds=75,
+                    runtime_state="done",
+                    selected_model="claude-opus-5",
+                    diagnosis="running_fiber_alive",
+                ),
+                keeper_lane_row(
+                    "beta",
+                    phase="failing",
+                    turn_phase="executing",
+                    idle_seconds=3599,
+                    runtime_state="done",
+                    selected_model=None,
+                    diagnosis="failing_unhealthy",
+                ),
+            ]
+        )
+    )
     lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
     lanes_fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
-    lanes_history = SequencedHttpResponse([(200, [])])
-    lanes_memory = SequencedHttpResponse([(200, {"keeper": "alpha", "entries": []})])
-    lanes_file_changes = SequencedHttpResponse([file_changes_alpha_response()])
-    lanes_fixtures["/api/v1/keepers/alpha/chat/history"] = lanes_history
-    lanes_fixtures["/api/v1/keepers/alpha/memory-journal?limit=20"] = lanes_memory
-    lanes_fixtures[FILE_CHANGES_ALPHA_PATH] = lanes_file_changes
     runtime_fixtures, runtime_initial_probe, runtime_force_probe = (
         runtime_http_fixtures()
     )
@@ -9043,16 +9142,9 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
-        description="Keeper lanes readings, detail, and exact chat navigation",
-        interact=keeper_lanes_interaction(
-            lanes_fixtures,
-            lanes_gate,
-            lanes_history,
-            lanes_memory,
-            lanes_file_changes,
-        ),
+        description="Keepers operations and Standalone-only Lanes",
+        interact=keeper_lanes_ia_interaction(lanes_gate),
         http_fixtures=lanes_fixtures,
-        extra_args=("--tool-view", "full"),
     )
     run_terminal_scenario(
         executable,
@@ -9776,6 +9868,42 @@ def run_resources_regression(executable: str) -> None:
     )
 
 
+def run_keeper_lanes_regression(executable: str) -> None:
+    fixtures = keeper_runtime_http_fixtures()
+    gate = GatedHttpResponse(
+        keeper_lanes_response(
+            [
+                keeper_lane_row(
+                    "alpha",
+                    phase="running",
+                    turn_phase="idle",
+                    idle_seconds=75,
+                    runtime_state="done",
+                    selected_model="claude-opus-5",
+                    diagnosis="running_fiber_alive",
+                ),
+                keeper_lane_row(
+                    "beta",
+                    phase="failing",
+                    turn_phase="executing",
+                    idle_seconds=3599,
+                    runtime_state="done",
+                    selected_model=None,
+                    diagnosis="failing_unhealthy",
+                ),
+            ]
+        )
+    )
+    fixtures[KEEPER_LANES_PATH] = gate
+    fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
+    run_terminal_scenario(
+        executable,
+        description="Keepers operations and Standalone-only Lanes",
+        interact=keeper_lanes_ia_interaction(gate),
+        http_fixtures=fixtures,
+    )
+
+
 def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
         run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
@@ -9809,10 +9937,15 @@ def main() -> None:
         run_resources_regression(os.path.abspath(sys.argv[1]))
         print("tui Resources regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "keepers-lanes":
+        run_keeper_lanes_regression(os.path.abspath(sys.argv[1]))
+        print("tui Keepers/Lanes regression: PASS")
+        return
     if len(sys.argv) != 2:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
-            "[cli-base-path|planning-review|repositories|project-changes|config|chat-clarity|runtime|resources]"
+            "[cli-base-path|planning-review|repositories|project-changes|config|"
+            "chat-clarity|runtime|resources|keepers-lanes]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

@@ -129,6 +129,56 @@ let test_redirect_now_means_only_the_forms_the_subset_lacks () =
   case "echo hi >| out.txt" "redirect"
 ;;
 
+(* The tap reports [lowered] from the dispatch result, and both of its readings
+   said a costume had come off when it had not.  Live records on 2026-08-29
+   carried [finding=cmd_subst lowered=true] for [/bin/zsh -lc "x=$(...)"]: the
+   script was outside the subset, so nothing lowered it, and the shell was
+   still there under a path the predicate did not recognise. *)
+let simple bin =
+  match Masc_exec.Exec_program.of_string bin with
+  | Ok program ->
+    Masc_exec.Shell_ir.Simple
+      { bin = program
+      ; args = []
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Masc_exec.Sandbox_target.host ()
+      }
+  | Error _ -> Alcotest.fail ("not a program: " ^ bin)
+;;
+
+let test_a_shell_by_path_is_still_a_shell () =
+  Alcotest.(check bool) "zsh" true (Costume.names_a_shell "zsh");
+  Alcotest.(check bool) "/bin/zsh" true (Costume.names_a_shell "/bin/zsh");
+  Alcotest.(check bool) "/usr/local/bin/bash" true (Costume.names_a_shell "/usr/local/bin/bash");
+  Alcotest.(check bool) "/usr/bin/git" false (Costume.names_a_shell "/usr/bin/git")
+;;
+
+let test_one_lowered_stage_does_not_lower_its_sibling () =
+  Alcotest.(check bool)
+    "a lowered simple keeps no shell"
+    false
+    (Costume.ir_keeps_a_shell (simple "ls"));
+  Alcotest.(check bool)
+    "a pipeline whose second stage is still a shell"
+    true
+    (Costume.ir_keeps_a_shell
+       (Masc_exec.Shell_ir.Pipeline [ simple "ls"; simple "/bin/bash" ]));
+  Alcotest.(check bool)
+    "a sequence whose tail is still a shell"
+    true
+    (Costume.ir_keeps_a_shell
+       (Masc_exec.Shell_ir.Sequence
+          { head = simple "ls"; tail = [ Masc_exec.Shell_ir.And_if, simple "sh" ] }));
+  Alcotest.(check bool)
+    "a sequence of ordinary programs"
+    false
+    (Costume.ir_keeps_a_shell
+       (Masc_exec.Shell_ir.Sequence
+          { head = simple "ls"; tail = [ Masc_exec.Shell_ir.And_if, simple "dune" ] }))
+;;
+
 let () =
   Alcotest.run
     "shell_costume"
@@ -148,6 +198,16 @@ let () =
             "redirect means only the forms the subset lacks"
             `Quick
             test_redirect_now_means_only_the_forms_the_subset_lacks
+        ] )
+    ; ( "lowered is a fact about every stage"
+      , [ Alcotest.test_case
+            "a shell by path is still a shell"
+            `Quick
+            test_a_shell_by_path_is_still_a_shell
+        ; Alcotest.test_case
+            "one lowered stage does not lower its sibling"
+            `Quick
+            test_one_lowered_stage_does_not_lower_its_sibling
         ] )
     ; ( "classifier"
       , [ Alcotest.test_case

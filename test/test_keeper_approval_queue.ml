@@ -1163,6 +1163,45 @@ let test_each_owner_claims_bounded_parallel_workers () =
        Gate.For_testing.release_auto_judge entry_b1)
 ;;
 
+(* The Gate projection is cached under a key built from
+   [store_revision_for_workspace], so any write that changes what the queue
+   publishes has to move that number. It did not: only the availability
+   transitions moved it, and the dashboard kept serving a resolved approval as
+   still pending for the cache's whole life. Operators answered the same row
+   again on the next poll -- one live approval carries three [resolved] audit
+   rows from a single actor. Both halves are asserted, because an enqueue that
+   never reaches a reader and a resolution that never leaves one are the same
+   defect from opposite ends. *)
+let test_queue_writes_advance_the_projection_revision () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-revision-cache" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let installed = AQ.store_revision_for_workspace ~base_path in
+       let approval_id =
+         submit_with_context
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "target", `String "revision" ])
+           ()
+       in
+       let after_enqueue = AQ.store_revision_for_workspace ~base_path in
+       Alcotest.(check bool)
+         "an enqueued ask advances the projection revision"
+         true
+         (after_enqueue > installed);
+       (match aq_resolve ~base_path ~id:approval_id
+                ~decision:Rule_types.Decision.Approve with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       Alcotest.(check bool)
+         "a resolved ask advances the projection revision"
+         true
+         (AQ.store_revision_for_workspace ~base_path > after_enqueue))
+;;
+
 let test_delivery_wire_shape_drops_request_context () =
   let base_path = temp_dir () in
   let keeper_name = "queue-delivery-context" in
@@ -3047,6 +3086,80 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
        reject_and_cleanup ~base_path id)
 ;;
 
+let test_orphaned_start_reservation_reclaims_to_ready () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name:"queue-orphan-start"
+           ~input:(`String "orphan-start")
+       in
+       check_update
+         "mark orphan-start pending"
+         true
+         (AQ.mark_summary_pending ~id);
+       let entry = pending_entry_exn id in
+       (* Reserve the worker start exactly as [reserve_pre_worker_start] does, then
+          treat a hard restart as leaving the durable row stranded: the in-memory
+          settle to identity-unbound never ran. *)
+       (match
+          AQ.mark_summary_attempt_pre_worker_unavailable
+            ~base_path
+            ~id
+            ~input_hash:entry.input_hash
+            ~sequence:entry.sequence
+            ~reason_code:Rule_types.Summary_pre_worker_start_reserved
+            ~operator_detail:AQ.summary_attempt_start_reserved_operator_detail
+        with
+        | Ok true -> ()
+        | Ok false -> Alcotest.fail "start reservation was not stored"
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error));
+       let reserved = pending_entry_exn id in
+       (match
+          AQ.release_orphaned_start_reservation
+            ~base_path
+            ~id
+            ~input_hash:reserved.input_hash
+            ~sequence:reserved.sequence
+        with
+        | Ok true -> ()
+        | Ok false ->
+          Alcotest.fail "orphaned start reservation was not reclaimed"
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error));
+       (match AQ.For_testing.get_pending_entry_unchecked ~id with
+        | Some
+            { summary_status = Rule_types.Summary_pending
+            ; exact_attempt = Rule_types.Exact_unbound
+            ; summary_attempt_disposition = Rule_types.Summary_attempt_ready
+            ; _
+            } ->
+          ()
+        | Some _ ->
+          Alcotest.fail "reclaim did not restore the ready disposition"
+        | None -> Alcotest.fail "reclaim removed the pending row");
+       (* A ready row is not a start reservation: a second reclaim is a no-op and
+          never disturbs a row it should not own. *)
+       let ready = pending_entry_exn id in
+       (match
+          AQ.release_orphaned_start_reservation
+            ~base_path
+            ~id
+            ~input_hash:ready.input_hash
+            ~sequence:ready.sequence
+        with
+        | Ok false -> ()
+        | Ok true ->
+          Alcotest.fail "reclaim touched a row that was not a start reservation"
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error));
+       reject_and_cleanup ~base_path id)
+;;
+
 let test_operator_recovery_skips_terminal_exact_failure () =
   let base_path = temp_dir () in
   let keeper_name = "queue-summary-operator-recovery" in
@@ -4745,6 +4858,10 @@ let () =
             `Quick
             test_blocked_disposition_requires_operator_rearm_before_bind
         ; Alcotest.test_case
+            "orphaned start reservation reclaims to ready"
+            `Quick
+            test_orphaned_start_reservation_reclaims_to_ready
+        ; Alcotest.test_case
             "malformed snapshot is explicit"
             `Quick
             test_malformed_snapshot_fails_install_and_is_observed
@@ -4828,6 +4945,10 @@ let () =
             "delivery wire shape drops the request context"
             `Quick
             test_delivery_wire_shape_drops_request_context
+        ; Alcotest.test_case
+            "queue writes advance the projection revision"
+            `Quick
+            test_queue_writes_advance_the_projection_revision
         ] )
     ]
 ;;

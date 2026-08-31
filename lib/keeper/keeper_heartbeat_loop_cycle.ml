@@ -41,7 +41,11 @@ type cycle_outcome =
       ; continuation_route :
           Keeper_unified_turn.continuation_route_disposition
       }
-  | Checkpointed of keeper_meta
+  | Checkpointed of
+      { meta : keeper_meta
+      ; checkpoint_reason : Keeper_unified_turn.checkpoint_reason
+      ; continuation_route : Keeper_unified_turn.continuation_route_disposition
+      }
   | Input_required of keeper_meta
   | Cancelled of keeper_meta
   | Skipped of keeper_meta
@@ -52,7 +56,7 @@ type cycle_outcome =
 
 let meta = function
   | Completed { meta; _ }
-  | Checkpointed meta
+  | Checkpointed { meta; _ }
   | Input_required meta
   | Cancelled meta
   | Skipped meta
@@ -164,7 +168,10 @@ let run_keeper_cycle_admitted
       (Keeper_unified_turn.Turn_completed
         { meta; continuation_route }) ->
     Completed { meta; continuation_route }
-  | Ok (Keeper_unified_turn.Turn_checkpointed updated) -> Checkpointed updated
+  | Ok
+      (Keeper_unified_turn.Turn_checkpointed
+         { meta; checkpoint_reason; continuation_route }) ->
+    Checkpointed { meta; checkpoint_reason; continuation_route }
   | Ok (Keeper_unified_turn.Turn_input_required updated) -> Input_required updated
   | Ok (Keeper_unified_turn.Turn_cancelled meta) -> Cancelled meta
   | Ok (Keeper_unified_turn.Turn_skipped meta) -> Skipped meta

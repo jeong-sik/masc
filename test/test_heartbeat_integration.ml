@@ -2735,6 +2735,30 @@ let test_dashboard_purge_resolution_is_fail_closed () =
        | Ok None -> ()
        | Ok (Some _) -> fail "plain agent was classified as a Keeper"
        | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
+      (match Dashboard_purge.resolve config "plain:agent" with
+       | Ok None -> ()
+       | Ok (Some _) -> fail "namespaced plain agent was classified as a Keeper"
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
+      let long_name = String.make 75 'k' in
+      let long_meta = { (make_meta "dashboard-purge-long") with name = long_name } in
+      create_owner_meta_exn config long_meta;
+      (match Dashboard_purge.existing_operation config long_name with
+       | Ok None -> ()
+       | Ok (Some _) -> fail "long-name Keeper unexpectedly had a purge operation"
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
+      (match Dashboard_purge.resolve config long_name with
+       | Ok (Some target) ->
+         check string "resolved long Keeper name" long_name target.keeper_name
+       | Ok None -> fail "long-name Keeper fell through to plain-agent purge"
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
+      (match
+         Dashboard_purge.resolve
+           config
+           (String.make (Keeper_id.Keeper_name.max_length + 1) 'k')
+       with
+       | Error (Dashboard_purge.Invalid_requested_name _) -> ()
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error)
+       | Ok _ -> fail "Keeper name beyond the creation limit was accepted");
       let persisted = make_meta "dashboard-purge-persisted" in
       create_owner_meta_exn config persisted;
       let persisted =
@@ -3740,7 +3764,9 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       let (_init_message : string) =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
-      let initial = make_meta "dashboard-purge-finalize" in
+      let initial =
+        { (make_meta "dashboard-purge-finalize") with name = String.make 75 'p' }
+      in
       (match Keeper_meta_store.replace_snapshot config initial with
        | Ok () -> ()
        | Error detail -> fail detail);
@@ -3779,6 +3805,23 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
           (meta.name ^ ".toml")
       in
       write_file configuration_path "[keeper]\nautoboot = false\n";
+      let playground_paths =
+        Keeper_types_profile.all_sandbox_profiles
+        |> List.map (fun profile ->
+             Filename.concat
+               config.base_path
+               (Masc.Keeper_sandbox.host_root_rel_of_profile profile meta.name))
+        |> List.sort_uniq String.compare
+      in
+      List.iter
+        (fun path -> write_file (Filename.concat path "workspace/stale.txt") "stale")
+        playground_paths;
+      let unrelated_playground_path =
+        Filename.concat
+          config.base_path
+          ".masc/playground/unrelated/workspace/keep.txt"
+      in
+      write_file unrelated_playground_path "keep";
       let agent_path =
         Filename.concat
           (Workspace.agents_dir config)
@@ -3918,6 +3961,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         ; Auth.credential_file config.base_path meta.name
         ]
         @ sidecar_paths
+        @ playground_paths
       in
       List.iter
         (fun path ->
@@ -3925,6 +3969,8 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         removed_paths;
       check bool "unrelated agent artifact preserved" true
         (Sys.file_exists unrelated_path);
+      check bool "unrelated playground preserved" true
+        (Sys.file_exists unrelated_playground_path);
       check bool
         "exact workspace owner unbound"
         false

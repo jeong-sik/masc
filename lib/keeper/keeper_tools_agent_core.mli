@@ -34,6 +34,45 @@ type gate_replay_delivery =
       Keeper_tool_execution.terminal_effect_receipt option
   }
 
+(** What a Keeper is attached to, before the turn decides how to show it.
+
+    The bundle takes this rather than a finished listing because deciding what
+    to hold back is its job: an attached tool is held by default, and a
+    built-in is held when its own tool file declares it, and those two have to
+    end up in one listing. *)
+type attached_surface =
+  { offered : Keeper_identity_tools.offered_tool list
+  ; agent_cell : Agent_core.Agent.t option ref
+        (** Filled by [Runtime_agent.run] at agent creation, before any tool
+            of that agent can run. Travels with [offered] because tools
+            without a cell are tools that can be named and never called. *)
+  ; history : Agent_core.Types.message list
+        (** The conversation this turn continues, read to find which held
+            tools it has already run. *)
+  }
+
+(** Whether this turn placed a listing tool on the Agent Core surface, and if
+    so which built-ins it left out to do so.
+
+    One value rather than a flag beside a list: a turn with no listing has
+    nothing behind it, and two fields let that state be written down. Both are
+    read together at both call sites anyway.
+
+    Reported rather than derived. "Is anything attached" stopped answering the
+    first question once built-ins declared their own loading, and reading
+    either back off the surface would make the projection check expect exactly
+    what is there -- which is not a check. A listing that went missing, or a
+    tool that left the request for some other reason, is what it has to catch. *)
+type listing_placement =
+  | No_listing
+  | Listing of
+      { deferred_builtin_names : string list
+        (** The built-ins this surface actually left out. A tool declaring
+            [defer_loading = true] is not enough to be here: one this
+            conversation has run is placed with its schema again, so a declared
+            tool the Keeper uses is on the surface after all. *)
+      }
+
 type tool_bundle =
   { tools : Agent_core.Tool.t list
     (** Every tool this turn can run, attached-service tools included as
@@ -45,6 +84,8 @@ type tool_bundle =
         schemas replaced by one listing tool that hands them over on request
         (RFC-attached-service-tool-scoping). Only this lane can widen a
         running turn's tool set. *)
+  ; listing : listing_placement
+        (** What this turn put behind the listing, if it placed one. *)
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
   ; gate_replay_delivery : gate_replay_delivery option

@@ -3,6 +3,12 @@ description = """
 Delete a board post and its associated comments and votes. Use for cleanup \
 of stale, test, or expired posts."""
 
+# Held back from the request until the model asks for it by name.
+# 2026-08-25..08-31 across the fleet: called 9 times in 4 turns, 307 bytes of
+# schema on every request. Deferring saves those bytes on ~254 requests
+# a day and costs at most 4 extra requests over the same week.
+defer_loading = true
+
 [[params]]
 name = "post_id"
 type = "string"

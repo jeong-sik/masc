@@ -27,6 +27,63 @@ type t =
         (PR #28219 review). *)
   }
 
+type dispatch_credential_error =
+  | Required_env_credential_missing of
+      { provider_id : string
+      ; env_key : string
+      }
+  | Declared_credential_unavailable of
+      { provider_id : string
+      ; carrier : string
+      }
+
+let dispatch_credential_error_to_string = function
+  | Required_env_credential_missing { provider_id; env_key } ->
+    Printf.sprintf
+      "provider %S requires non-empty credential env %S"
+      provider_id
+      env_key
+  | Declared_credential_unavailable { provider_id; carrier } ->
+    Printf.sprintf
+      "provider %S declares an unavailable %s credential"
+      provider_id
+      carrier
+;;
+
+let validate_dispatch_credential
+    ~(provider_config : Llm_provider.Provider_config.t)
+    (runtime : t)
+  =
+  match runtime.execution with
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Antigravity_cli _ ->
+    Ok ()
+  | Runtime_execution.Agent_core _ ->
+    let credential =
+      Runtime_adapter.effective_credential_reference
+        ~provider_id:runtime.provider.id
+        runtime.provider.credentials
+    in
+    if not (Llm_provider.Secret.is_empty provider_config.api_key)
+    then Ok ()
+    else
+      match credential with
+      | None -> Ok ()
+      | Some (Env env_key) ->
+        Error
+          (Required_env_credential_missing
+             { provider_id = runtime.provider.id; env_key })
+      | Some (Inline _) ->
+        Error
+          (Declared_credential_unavailable
+             { provider_id = runtime.provider.id; carrier = "inline" })
+      | Some (File _) ->
+        Error
+          (Declared_credential_unavailable
+             { provider_id = runtime.provider.id; carrier = "file" })
+;;
+
 type config_source_revision = Config_source_revision of string
 type config_commit_order = Config_commit_order of int64
 

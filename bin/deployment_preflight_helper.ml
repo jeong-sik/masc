@@ -798,6 +798,33 @@ let memory_os_current_store =
   }
 ;;
 
+let memory_source_current_store =
+  { store = "memory-source current claims"
+  ; on_refusal =
+      "keeper_memory_write and recall both refuse the claim for that source        path, and neither writer repairs it because the upsert reads first"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir =
+           Config_dir_resolver.keepers_dir_for_base_path ~base_path
+         in
+         Ok
+           (Masc.Keeper_memory_source_current.list_keeper_ids_for_keepers_dir
+              ~keepers_dir
+            |> List.fold_left
+                 (fun report keeper_id ->
+                    match
+                      Masc.Keeper_memory_source_current.read_for_keepers_dir
+                        ~keepers_dir
+                        ~keeper_id
+                    with
+                    | Ok None -> report
+                    | Ok (Some _) -> count_row report (Ok ())
+                    | Error detail ->
+                      count_row report (Error (keeper_id ^ ": " ^ detail)))
+                 empty_report))
+  }
+;;
+
 let disposition_receipt_store =
   { store = "paused-work disposition receipts"
   ; on_refusal =
@@ -952,6 +979,7 @@ let durable_stores =
   [ keeper_meta_store
   ; official_client_session_store
   ; memory_os_current_store
+  ; memory_source_current_store
   ; disposition_receipt_store
   ; board_posts_store
   ; turn_record_store

@@ -2,6 +2,10 @@ name = "keeper_composition_cancel"
 description = "Request cancellation of one async Keeper composition by its exact durable request id."
 additional_properties = false
 
+# Held back from the request until the model asks for it by name. Not
+# called once on 2026-08-29 or 2026-08-30 across the fleet.
+defer_loading = true
+
 [[params]]
 name = "request_id"
 type = "string"

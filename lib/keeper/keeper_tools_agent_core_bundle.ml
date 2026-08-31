@@ -50,7 +50,7 @@ let make_tool_bundle_for_descriptors_with_policy
       ?gate_context
       ?hitl_resolution
       ?(skill_catalog = Keeper_skill_catalog.empty)
-      ?(identity_surface : Keeper_identity_tool_search.surface option)
+      ?(identity_surface : Keeper_tools_agent_core.attached_surface option)
       ?composition_plan_index
       ?skill_activation_context
       ?(allow_unrecorded_skill_surface = false)
@@ -539,63 +539,122 @@ let make_tool_bundle_for_descriptors_with_policy
      They reach the model through the listing rather than directly: an
      attached service offers more tools than a request can carry, and the
      Gate wrapper is the same either way. *)
+  let gate_wrapped offered =
+    Keeper_identity_gate.agent_tool
+      ~config
+      ~meta
+      ?continuation_channel
+      ?gate_context:gate_context_provider
+      ?gate_grant
+      offered
+  in
+  (* Attached tools, as schemas. What the lanes that cannot widen a running
+     turn are given: they pin their tool set at process spawn or thread start,
+     and that set is part of a resumable session's identity, so a listing
+     would name tools they can never make callable. *)
+  let identity_agent_tools =
+    List.map
+      gate_wrapped
+      (match identity_surface with
+       | None -> []
+       | Some surface -> surface.Keeper_tools_agent_core.offered)
+  in
+  (* What the model is shown by name instead of by schema.
+
+     Two sources, one answer. An attached tool is held back by default: a
+     Keeper is handed its services' entire lists, 145 tools and 142,257 bytes
+     on the Keeper the RFC measured. A built-in is held back when its own
+     [config/tools/<name>.toml] declares [defer_loading = true] -- of 89
+     built-ins on one Keeper, 33 went a whole day uncalled, 21,601 bytes
+     charged to every request of every turn.
+
+     The listing does not record which source a tool came from, and the model
+     is not told. Holding a tool back is a property of the tool. *)
+  let deferred_builtin_tools, always_loaded_builtin_tools =
+    (* Both families, because both are declared the same way. Splitting only
+       the descriptors would leave a [defer_loading = true] in a composition
+       tool's file that nothing honours and nothing reports -- a declaration
+       is either read wherever it can be written or it is a trap. *)
+    List.partition
+      (fun (tool : Agent_core.Tool.t) ->
+         match
+           Tool_loading_declarations.loading_of_tool tool.Agent_core.Tool.schema.name
+         with
+         | Tool_definition_toml.Deferrable -> true
+         | Tool_definition_toml.Always_loaded -> false)
+      (descriptor_tools @ composition_tools)
+  in
+  let deferred_of tool =
+    { Keeper_identity_tool_search.tool
+    ; summary =
+        Keeper_identity_tool_search.summary_of
+          tool.Agent_core.Tool.schema.description
+    }
+  in
   let identity_listing =
     match identity_surface with
-    | None -> None
+    | None ->
+      (match deferred_builtin_tools with
+       | [] -> None
+       | _ :: _ ->
+         Keeper_identity_tool_search.make
+           ~keeper_name:meta.Keeper_meta_contract.name
+           { Keeper_identity_tool_search.deferred =
+               List.map deferred_of deferred_builtin_tools
+           ; agent_cell = ref None
+           ; history = []
+           })
     | Some surface ->
       Keeper_identity_tool_search.make
         ~keeper_name:meta.Keeper_meta_contract.name
-        ~build:(fun offered ->
-          Keeper_identity_gate.agent_tool
-            ~config
-            ~meta
-            ?continuation_channel
-            ?gate_context:gate_context_provider
-            ?gate_grant
-            offered)
-        surface
+        { Keeper_identity_tool_search.deferred =
+            List.map
+              (fun offered -> deferred_of (gate_wrapped offered))
+              surface.Keeper_tools_agent_core.offered
+            @ List.map deferred_of deferred_builtin_tools
+        ; agent_cell = surface.Keeper_tools_agent_core.agent_cell
+        ; history = surface.Keeper_tools_agent_core.history
+        }
   in
-  (* The listing can only be turned back into callable tools by
-     [Agent_core.Agent.extend_tools], and only the Agent Core lane can do that:
-     the official-client lanes pin their tool set at process spawn or thread
-     start, and the surface is part of a resumable session's identity. A
-     Keeper on one of those lanes that was handed the listing would read a
-     name and be told there is no agent to make it callable in, with no other
-     way to reach the service.
-
-     So both shapes are built and the lane picks. The wrapped tools are built
-     twice, which costs a closure each: only one shape reaches a given turn,
-     so no call can observe the difference. *)
-  let identity_agent_tools =
-    List.map
-      (fun offered ->
-         Keeper_identity_gate.agent_tool
-           ~config
-           ~meta
-           ?continuation_channel
-           ?gate_context:gate_context_provider
-           ?gate_grant
-           offered)
-      (match identity_surface with
-       | None -> []
-       | Some surface -> surface.Keeper_identity_tool_search.offered)
-  in
-  let always_loaded = descriptor_tools @ composition_tools in
-  { tools = always_loaded @ identity_agent_tools
+  (* The lanes that cannot widen a turn get every tool as a schema: holding
+     one back there would name a tool nothing can load. *)
+  let always_loaded = always_loaded_builtin_tools in
+  { tools = descriptor_tools @ composition_tools @ identity_agent_tools
   ; agent_core_tools =
       always_loaded
       @ (match identity_listing with
          | None -> []
          | Some listing ->
-           (* The listing, plus what this conversation already asked for. A
-              load reaches the agent of the turn that made it and no further,
-              so without the second part the model asks again every turn:
-              one Keeper asked for [github_issue_read] on five consecutive
-              turns. Placing them here rather than widening after the agent
-              exists means the first request of the turn already carries
-              them, so no round trip is spent re-asking. *)
+           (* The listing, plus the attached tools this conversation has
+              run. A load reaches the agent of the turn that made it and no
+              further, so without the second part the model asks again every
+              turn: one Keeper asked for [github_issue_read] on five
+              consecutive turns. Placing them here rather than widening after
+              the agent exists means the first request of the turn already
+              carries them, so no round trip is spent re-asking. *)
            listing.Keeper_identity_tool_search.tool
-           :: listing.Keeper_identity_tool_search.already_loaded)
+           :: listing.Keeper_identity_tool_search.already_used)
+  ; listing =
+      (match identity_listing with
+       | None -> Keeper_tools_agent_core.No_listing
+       | Some listing ->
+         (* What is missing from the surface, not what declared itself. A tool
+            this conversation has run is placed with its schema again, so a
+            declared tool can be present after all -- and reporting the
+            declaration would have the projection check expect it gone. *)
+         let carried =
+           List.map
+             (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
+             listing.Keeper_identity_tool_search.already_used
+         in
+         Keeper_tools_agent_core.Listing
+           { deferred_builtin_names =
+               List.filter_map
+                 (fun (tool : Agent_core.Tool.t) ->
+                    let name = tool.Agent_core.Tool.schema.name in
+                    if List.exists (String.equal name) carried then None else Some name)
+                 deferred_builtin_tools
+           })
   ; cleanup =
       (fun () ->
         (* Turn end on both the ordinary and the raised path -- this thunk is

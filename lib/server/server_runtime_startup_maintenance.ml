@@ -272,25 +272,31 @@ let startup_sweep_microvm_guests (_state : Mcp_server.server_state) =
     let timeout_sec = Env_config_sandbox.Runtime.microvm_remove_timeout_sec () in
     let outcome =
       Keeper_sandbox_microvm.sweep_abandoned_guests
+        ~command_available:Executable_path.command_available
         ~timeout_sec
         ~is_pid_alive:Keeper_sandbox_runtime.pid_alive
         ~run_argv:(fun ~timeout_sec argv ->
           Process_eio.run_argv_with_status ~timeout_sec argv)
     in
-    (match outcome.removed with
-     | [] -> ()
-     | removed ->
-       Log.Misc.info
-         "startup sweep: removed %d microvm guest(s) whose server is gone: %s"
-         (List.length removed)
-         (String.concat ", " removed));
-    List.iter
-      (fun (container_id, detail) ->
-         Log.Misc.warn
-           "startup sweep: microvm guest %s survived removal: %s"
-           container_id
-           detail)
-      outcome.failed
+    match outcome with
+    | None ->
+      Log.Misc.info
+        "startup microvm sweep skipped: `container` CLI is not available on PATH"
+    | Some outcome ->
+      (match outcome.removed with
+       | [] -> ()
+       | removed ->
+         Log.Misc.info
+           "startup sweep: removed %d microvm guest(s) whose server is gone: %s"
+           (List.length removed)
+           (String.concat ", " removed));
+      List.iter
+        (fun (container_id, detail) ->
+           Log.Misc.warn
+             "startup sweep: microvm guest %s survived removal: %s"
+             container_id
+             detail)
+        outcome.failed
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

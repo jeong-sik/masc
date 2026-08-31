@@ -126,6 +126,20 @@ finished; 5,706 failed. Of those, the operator disposition on 5,405 was
 `fail_open_next_runtime` — the turn fell through to the next candidate in its
 lane and carried on.
 
+Current receipts do not use that label for a terminal preflight configuration
+error. They use `operator_action_required` with reason `preflight_config_error`:
+no next runtime is claimed until an operator repairs the configuration.
+
+Terminal transient network and timeout failures with no observed fallback use
+`retry_later` with reason `transient_runtime_retry`. The current turn ended;
+the Keeper remains live and may try again on a later keepalive cycle, but the
+receipt does not claim that another lane candidate ran.
+
+Other terminal provider rejections with no observed fallback, such as an
+invalid request or response parse failure, also use `retry_later`; their reason
+remains `provider_runtime_error` so they do not masquerade as transient network
+recovery.
+
 The failures were not mostly bugs. The largest reason codes were
 `config_error`, `api_error_invalid_request`, `api_error_payment_required`, and
 `api_error_rate_limited`. Those are the states a single-candidate lane cannot

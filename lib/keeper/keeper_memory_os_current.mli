@@ -1,8 +1,10 @@
-(** Keeper-owned current Memory OS snapshot.
+(** Keeper-owned ordinary current Memory OS snapshot.
 
-    This is the only production persistence authority for Memory OS content.
-    A missing file means fresh empty state. Historical facts/event JSONL files,
-    episode directories, and alternate store layouts are never read.
+    This is the persistence authority for LLM-selected and source-unbound
+    facts. Source-bound explicit claims live in
+    [Keeper_memory_source_current]. A missing file means fresh empty state.
+    Historical facts/event JSONL files, episode directories, and alternate
+    store layouts are never read.
 
     Librarian updates replace the complete current fact set. The same atomic
     write records the exact added/removed delta that the dashboard projects.
@@ -132,11 +134,13 @@ val replace
   -> unit
   -> (t, string) result
 (** Atomically replace the complete current snapshot only when its revision
-    still equals [expected_revision]. Duplicate fact identities and a rendered
-    fact payload above [max_fact_bytes] reject before writing. The bound is
-    floored to 1 byte; its default is the Memory OS capacity policy. Existing state must parse as the exact
-    current schema; malformed, non-current, or concurrently changed state fails
-    closed and is not overwritten.
+    still equals [expected_revision]. Duplicate fact identities and an
+    ordinary + source-bound rendered payload above [max_fact_bytes] reject
+    before writing. Both stores share an outer commit lock, so the source
+    reservation cannot change between measurement and commit. The bound is
+    floored to 1 byte; its default is the Memory OS capacity policy. Existing
+    state must parse as the exact current schema; malformed, non-current, or
+    concurrently changed state fails closed and is not overwritten.
 
     [dropped_statements], when present, is the writer's own account of every
     drop in this commit (the librarian's totality output) and is recorded on
@@ -156,8 +160,8 @@ val upsert_fact
 (** Atomically insert or replace one explicit keeper-authored fact while
     preserving the rest of the current snapshot. A matching identity is
     updated from the explicit incoming fact while preserving its original
-    [first_seen]. The same rendered-fact byte budget and 1-byte floor as
-    [replace] apply; no
-    local importance, recency, or echo heuristic participates. *)
+    [first_seen]. The same combined rendered-payload byte budget and 1-byte
+    floor as [replace] apply; no local importance, recency, or echo heuristic
+    participates. *)
 
 val to_json : t -> Yojson.Safe.t

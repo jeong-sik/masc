@@ -576,9 +576,9 @@ let test_journal_recreated_after_purge_sequence () =
     (List.length (read_journal_lines ~keepers_dir))
 ;;
 
-(* Both Memory OS sidecars live in the config keepers directory, outside the
-   runtime directory the purge already removes: without plan entries a purged
-   keeper leaks its facts and journal to a later keeper with the same name. *)
+(* Memory OS snapshots and the journal live in the config keepers directory,
+   outside the runtime directory the purge already removes: without plan
+   entries a purged keeper leaks them to a later keeper with the same name. *)
 let test_purge_plan_removes_memory_sidecars () =
   let module Shutdown = Masc.Keeper_shutdown_types in
   let context =
@@ -588,6 +588,8 @@ let test_purge_plan_removes_memory_sidecars () =
   let contains artifact = List.exists (fun entry -> entry = artifact) plan in
   check bool "plan removes the fact snapshot" true
     (contains Shutdown.Keeper_memory_current_artifact);
+  check bool "plan removes the source-bound snapshot" true
+    (contains Shutdown.Keeper_memory_source_current_artifact);
   check bool "plan removes the memory journal" true
     (contains Shutdown.Keeper_memory_journal_artifact)
 ;;

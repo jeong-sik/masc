@@ -2319,6 +2319,8 @@
 
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
 
+(include stanzas/test_json_schema_shared_defs.inc)
+
 (include stanzas/test_keeper_tool_plan_executor.inc)
 (include stanzas/test_keeper_tool_progress_identity.inc)
 
@@ -3354,6 +3356,16 @@
  (name test_tui_board_read_scroll)
  (modules test_tui_board_read_scroll)
  (libraries alcotest masc_tui_board_detail masc_tui_render_schedule))
+
+(test
+ (name test_tui_board_comment_thread)
+ (modules test_tui_board_comment_thread)
+ (libraries alcotest masc_tui_board_comment_thread masc_tui_types))
+
+(test
+ (name test_tui_board_hearth)
+ (modules test_tui_board_hearth)
+ (libraries alcotest masc_tui_board_hearth masc_tui_types))
 
 (test
  (name test_tui_board_score)

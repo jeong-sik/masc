@@ -205,7 +205,7 @@ let reserved_non_listening_loopback_base_url ~sw =
   | Unix.ADDR_UNIX _ -> assert false
 ;;
 
-let publish_lane ?(api_key_envs = []) fixtures =
+let publish_lane ?(api_key_envs = []) ?(cli_slot_ids = []) fixtures =
   let snapshot =
     Fixture.resolver_snapshot
       ~api_key_envs
@@ -216,6 +216,7 @@ let publish_lane ?(api_key_envs = []) fixtures =
   in
   ignore
     (Fixture.publish_registry
+       ~cli_slot_ids
        ~lane_id:Exact_flow.lane_id
        ~slot_ids:(List.map (fun (fixture : Fixture.target_fixture) -> fixture.id) fixtures)
        snapshot
@@ -357,13 +358,15 @@ let test_explicit_lane_failover_and_success_provenance () =
           true
           (String.equal third_bound.slot_id third.id
            && String.equal judgment.slot_id third_bound.slot_id
-           && String.equal judgment.call_id third_bound.call_id
-           && String.equal
-                judgment.plan_fingerprint
-                third_bound.plan_fingerprint
-           && String.equal
-                judgment.request_body_sha256
-                third_bound.request_body_sha256)
+           &&
+           match judgment.source with
+           | Candidate.Cli_lane_slot -> false
+           | Candidate.Exact_attempt attempt ->
+             String.equal attempt.call_id third_bound.call_id
+             && String.equal attempt.plan_fingerprint third_bound.plan_fingerprint
+             && String.equal
+                  attempt.request_body_sha256
+                  third_bound.request_body_sha256)
       | _ ->
         Alcotest.fail
           "expected Bound(A), Advancing(A->B), Advancing(B->C), Bound(C), Completed(C)"))
@@ -585,6 +588,142 @@ let test_prepare_resumable_status_gate () =
 ;;
 
 
+
+(* --- cli tail (RFC cli-runtimes-as-lane-slots) --------------------------- *)
+
+let cli_base_path = "/tmp/masc-board-attention-exact-flow"
+
+let contains_substring ~needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
+  n = 0 || at 0
+;;
+
+(* Records what the walk handed the client so the test can assert the schema
+   actually travelled, not just that an answer came back. *)
+let recording_runner reply =
+  let seen = ref None in
+  let runner ~runtime_id ~system_prompt:_ ~output_schema ~prompt =
+    seen := Some (runtime_id, output_schema, prompt);
+    reply runtime_id
+  in
+  runner, seen
+;;
+
+let prepared_with_cli_tail ~net ~cli_slot_ids candidate =
+  let server_url = "http://127.0.0.1:1" in
+  publish_lane ~cli_slot_ids [ target "board-attention-primary" server_url ];
+  ignore net;
+  match prepare_exact ~net candidate with
+  | Ok prepared -> prepared
+  | Error _ -> Alcotest.fail "board attention flow did not prepare"
+;;
+
+let test_cli_tail_judges_with_its_own_provenance () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw:_ ~net ~clock:_ ->
+      let candidate = candidate "board-attention-cli-tail" in
+      let prepared =
+        prepared_with_cli_tail
+          ~net:(Some net)
+          ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+          candidate
+      in
+      Alcotest.(check (list string))
+        "the lane's declared tail is carried onto the prepared flow"
+        [ Fixture.cli_primary_runtime ]
+        (Exact_flow.cli_slots prepared);
+      let runner, seen =
+        recording_runner (fun _ ->
+          Ok
+            (Yojson.Safe.to_string
+               (judgment_output ~candidate_id:candidate.Candidate.candidate_id)))
+      in
+      match Exact_flow.run_cli_tail ~runner ~base_path:cli_base_path prepared with
+      | Error error ->
+        Alcotest.failf
+          "cli tail did not judge: %s"
+          (Exact_flow.cli_tail_error_to_string error)
+      | Ok (slot_id, judgment) ->
+        Alcotest.(check string)
+          "the answering client is named"
+          Fixture.cli_primary_runtime
+          slot_id;
+        Alcotest.(check string)
+          "the slot id is that client, not a catalog slot"
+          Fixture.cli_primary_runtime
+          judgment.Candidate.slot_id;
+        (match judgment.Candidate.source with
+         | Candidate.Cli_lane_slot -> ()
+         | Candidate.Exact_attempt _ ->
+           Alcotest.fail "a cli judgment must not claim an exact attempt");
+        (match !seen with
+         | None -> Alcotest.fail "the runner was never called"
+         | Some (_, output_schema, prompt) ->
+           Alcotest.(check bool)
+             "the lane schema travelled on the client's own channel"
+             true
+             (output_schema <> `Null);
+           Alcotest.(check bool)
+             "the judge prompt travelled too"
+             true
+             (String.length prompt > 0)))))
+;;
+
+let test_cli_tail_without_declared_slots_is_typed () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw:_ ~net ~clock:_ ->
+      let candidate = candidate "board-attention-cli-tail-empty" in
+      let prepared =
+        prepared_with_cli_tail ~net:(Some net) ~cli_slot_ids:[] candidate
+      in
+      let runner, _ = recording_runner (fun _ -> Ok "{}") in
+      match Exact_flow.run_cli_tail ~runner ~base_path:cli_base_path prepared with
+      | Error Exact_flow.No_cli_slots -> ()
+      | Error other ->
+        Alcotest.failf
+          "an undeclared tail must say so: %s"
+          (Exact_flow.cli_tail_error_to_string other)
+      | Ok _ -> Alcotest.fail "a lane with no declared tail must not produce a judgment")))
+;;
+
+let test_cli_tail_rejects_a_verdict_for_another_candidate () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw:_ ~net ~clock:_ ->
+      let candidate = candidate "board-attention-cli-tail-mismatch" in
+      let prepared =
+        prepared_with_cli_tail
+          ~net:(Some net)
+          ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+          candidate
+      in
+      let runner, _ =
+        recording_runner (fun _ ->
+          Ok
+            (Yojson.Safe.to_string
+               (judgment_output ~candidate_id:"some-other-candidate")))
+      in
+      match Exact_flow.run_cli_tail ~runner ~base_path:cli_base_path prepared with
+      | Error (Exact_flow.Cli_output_invalid { slot_id; detail }) ->
+        Alcotest.(check string)
+          "the rejecting slot is named"
+          Fixture.cli_primary_runtime
+          slot_id;
+        Alcotest.(check bool)
+          "the identity mismatch is reported"
+          true
+          (contains_substring ~needle:"identity mismatch" detail)
+      | Error other ->
+        Alcotest.failf
+          "a verdict for another candidate must be rejected as invalid output: %s"
+          (Exact_flow.cli_tail_error_to_string other)
+      | Ok _ ->
+        Alcotest.fail "a verdict naming another candidate must not become this judgment")))
+;;
+
 let () =
   Alcotest.run
     "Keeper Board-attention exact flow"
@@ -609,6 +748,20 @@ let () =
             "missing lane is setup error without dispatch"
             `Quick
             test_missing_lane_is_setup_error_without_dispatch
+        ] )
+    ; ( "cli tail"
+      , [ Alcotest.test_case
+            "a cli slot judges under its own provenance"
+            `Quick
+            test_cli_tail_judges_with_its_own_provenance
+        ; Alcotest.test_case
+            "an undeclared tail is a typed refusal"
+            `Quick
+            test_cli_tail_without_declared_slots_is_typed
+        ; Alcotest.test_case
+            "a verdict naming another candidate is rejected"
+            `Quick
+            test_cli_tail_rejects_a_verdict_for_another_candidate
         ] )
     ]
 ;;

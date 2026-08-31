@@ -11,6 +11,7 @@
 #   3. <remote_root>/<keeper>/       (one directory per keeper)
 #   4. <keeper>/.config/gh identity  (copied from the local keeper bundle)
 #   5. git available                 (gh too, for the identity preflight)
+#   6. rg available                  (Grep always dispatches ripgrep remotely)
 #
 # plus the local half: endpoint keypair, pinned host key, and the
 # runtime.toml [exec.ssh.endpoints.<name>] block (printed for explicit review;
@@ -181,20 +182,21 @@ else
   chmod 600 "$known_hosts"
 fi
 
-# --- 3. packages: git + gh -------------------------------------------------
-step "ensuring git and gh"
+# --- 3. packages: git + gh + ripgrep ---------------------------------------
+step "ensuring git, gh, and ripgrep"
 op_ssh "$SUDO sh -c '
   set -e
   need() { ! command -v \"\$1\" >/dev/null 2>&1; }
-  if need git || need gh; then
-    if command -v apt-get >/dev/null; then apt-get update -qq && apt-get install -y -qq git gh
-    elif command -v dnf >/dev/null; then dnf install -y -q git gh || dnf install -y -q git
-    elif command -v apk >/dev/null; then apk add -q git github-cli
-    elif command -v zypper >/dev/null; then zypper -q install -y git gh
-    else echo \"no known package manager; install git and gh manually\" >&2; exit 1
+  if need git || need gh || need rg; then
+    if command -v apt-get >/dev/null; then apt-get update -qq && apt-get install -y -qq git gh ripgrep
+    elif command -v dnf >/dev/null; then dnf install -y -q git gh ripgrep || dnf install -y -q git ripgrep
+    elif command -v apk >/dev/null; then apk add -q git github-cli ripgrep
+    elif command -v zypper >/dev/null; then zypper -q install -y git gh ripgrep
+    else echo \"no known package manager; install git, gh, and ripgrep manually\" >&2; exit 1
     fi
   fi
   command -v gh >/dev/null 2>&1 || { echo \"gh not installable from base repos; add the GitHub CLI repo for this distro and re-run\" >&2; exit 1; }
+  command -v rg >/dev/null 2>&1 || { echo \"ripgrep not installable from base repos; install rg and re-run\" >&2; exit 1; }
 '"
 
 # --- 4. shim binary --------------------------------------------------------
@@ -231,7 +233,7 @@ for keeper in "${KEEPERS[@]:-}"; do
   fi
 done
 
-# --- 6. verify over the endpoint key: the five preflight probes ------------
+# --- 6. verify over the endpoint key: the full preflight contract -----------
 step "verifying with the server's connection shape"
 probe="$(ep_ssh 'masc-exec-shim --probe')"
 case "$probe" in
@@ -239,6 +241,7 @@ case "$probe" in
   *) echo "unexpected probe output: $probe" >&2; exit 1 ;;
 esac
 ep_ssh 'git --version' >/dev/null && step "  git: ok"
+ep_ssh 'rg --version' >/dev/null && step "  ripgrep: ok"
 ep_ssh "test -d '$REMOTE_ROOT'" && step "  remote_root: ok"
 ep_ssh "df -Pk '$REMOTE_ROOT' >/dev/null" && step "  disk probe: ok"
 for keeper in "${KEEPERS[@]:-}"; do

@@ -81,6 +81,40 @@ val prepare :
 (** Freeze one complete ordered AGENT_CORE flow. Missing network context fails before
     AGENT_CORE allocates an attempt. *)
 
+type cli_tail_error =
+  | No_cli_slots
+  | Cli_slots_exhausted of Keeper_lane_cli_oneshot.failure list
+  | Cli_output_invalid of
+      { slot_id : string
+      ; detail : string
+      }
+
+val cli_tail_error_to_string : cli_tail_error -> string
+
+val cli_slots : prepared -> string list
+(** The lane's declared official-client tail, in declaration order. Empty when
+    the lane declares none. *)
+
+val run_cli_tail :
+  ?runner:Keeper_lane_cli_oneshot.runner ->
+  base_path:string ->
+  prepared ->
+  ( string * Keeper_board_attention_candidate.judgment
+  , cli_tail_error )
+  result
+(** Walk [cli_slots] as one-shots and return the first slot whose answer judges
+    this candidate, as [(slot_id, judgment)].
+
+    Call this only after {!execute} reported [Exact_execution_failed], which is
+    the provider-exhaustion arm. The persistence and provenance arms keep their
+    terminal: they say the durable record is in doubt, and a second transport
+    does not settle that (RFC cli-runtimes-as-lane-slots, the same split the
+    librarian and HITL lanes apply).
+
+    The judgment carries [Cli_lane_slot], so completing with it is checked
+    against an exhausted exact binding rather than against an attempt receipt
+    that does not exist. *)
+
 val execute :
   ?clock:_ Eio.Time.clock ->
   before_dispatch:

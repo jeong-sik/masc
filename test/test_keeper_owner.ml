@@ -2144,6 +2144,67 @@ let latest_log_seq () =
   | [] -> -1
 ;;
 
+let test_same_process_recreate_reopens_purged_operation_store () =
+  Eio_main.run @@ fun _env ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let keeper_name = "same-process-recreate" in
+       let keeper_dir = Filename.concat base_path keeper_name in
+       mkdir_p keeper_dir;
+       let operation_store_path =
+         Filename.concat keeper_dir Keeper_chat_operation_store.database_file
+       in
+       let persisted = ref None in
+       let store : Owner.store =
+         { replace = (fun meta -> persisted := Some meta; Ok ())
+         ; remove = (fun _meta -> persisted := None; Ok ())
+         }
+       in
+       let meta = make_meta keeper_name in
+       let owner =
+         owner_ok
+           (Owner.start
+              ~sw
+              ~store
+              ~operation_store_path
+              ~now:(fun () -> 42.0)
+              ~operation_runner:None
+              ~on_turn_slot_released:None
+              ~keeper_name
+              ~initial_meta:(Some meta))
+       in
+       let digest = Keeper_meta_json.Snapshot_digest.of_meta meta in
+       (match
+          owner_ok
+            (Owner.apply_meta owner (Reducer.Delete_if_snapshot digest))
+        with
+        | None -> ()
+        | Some _ -> fail "purge fixture retained Keeper metadata");
+       remove_tree keeper_dir;
+       (match owner_ok (Owner.apply_meta owner (Reducer.Create meta)) with
+        | Some recreated -> check string "recreated Keeper" keeper_name recreated.name
+        | None -> fail "same-process recreation did not restore Keeper metadata");
+       let operation_id = operation_id "kmsg-same-process-recreate" in
+       ignore
+         (owner_ok
+            (Owner.submit_operation
+               owner
+               ~operation_id
+               ~source:operation_source
+               ~input:(operation_input "fresh request")));
+       check bool
+         "recreated operation store exists"
+         true
+         (Sys.file_exists operation_store_path);
+       check bool
+         "fresh operation is readable"
+         true
+         (Option.is_some (owner_ok (Owner.exact_operation owner operation_id))))
+;;
+
 let test_root_inventory_loads_and_extends_exactly_once () =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2977,6 +3038,10 @@ let () =
             "root inventory loads and extends exactly once"
             `Quick
             test_root_inventory_loads_and_extends_exactly_once
+        ; test_case
+            "same-process recreate reopens purged operation store"
+            `Quick
+            test_same_process_recreate_reopens_purged_operation_store
         ; test_case
             "agent delegate submits owner operation without waiting"
             `Quick

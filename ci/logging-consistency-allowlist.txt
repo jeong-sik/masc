@@ -83,6 +83,7 @@ bin/keeper_canary_run.ml
 bin/keeper_canary_http.ml
 bin/fusion_run.ml
 bin/keeper_capability_probe_cli.ml
+bin/masc_lane_cli_probe.ml
 bin/masc_checkpoint_purge.ml
 bin/deployment_preflight_helper.ml
 

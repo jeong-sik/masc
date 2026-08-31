@@ -1567,7 +1567,48 @@ let prepare_exact ~base_path ~keeper_name ~net =
   Exact_flow.prepare ~base_path ~keeper_name ~net
 ;;
 
-let execute_exact ~clock = Exact_flow.execute ~clock
+(* Provider exhaustion is the one terminal a second transport can answer. The
+   persistence and provenance arms say the durable record is in doubt, and
+   asking another model does not settle that; a domain-invalid answer is a
+   contract failure, not an unreachable provider. This is the split the
+   librarian and HITL lanes already apply (RFC cli-runtimes-as-lane-slots).
+
+   Every arm is written out so that a new terminal has to be classified here
+   rather than silently inheriting the fallback. *)
+let cli_tail_may_answer : _ Exact_flow.execution_error -> bool = function
+  | Exact_flow.Exact_execution_failed _ -> true
+  | Exact_flow.Flow_already_started _
+  | Exact_flow.Before_dispatch_persistence_failed _
+  | Exact_flow.Before_advance_persistence_failed _
+  | Exact_flow.Provenance_mismatch _
+  | Exact_flow.Domain_output_invalid _ -> false
+;;
+
+let execute_exact
+      ~clock
+      ~base_path
+      ~keeper_name
+      ~before_dispatch
+      ~before_advance
+      prepared
+  =
+  match Exact_flow.execute ~clock ~before_dispatch ~before_advance prepared with
+  | Error exhausted when cli_tail_may_answer exhausted ->
+    (match Exact_flow.run_cli_tail ~base_path prepared with
+     | Ok (slot_id, judgment) ->
+       Log.Keeper.info
+         "board_attention_cli_tail_judged keeper=%s slot=%s"
+         keeper_name
+         slot_id;
+       Ok judgment
+     | Error reason ->
+       Log.Keeper.warn
+         "board_attention_cli_tail_failed keeper=%s reason=%s"
+         keeper_name
+         (Exact_flow.cli_tail_error_to_string reason);
+       Error exhausted)
+  | outcome -> outcome
+;;
 
 let process_next_exact ~clock ~net ~now ~worker_epoch ~base_path ~keeper_name =
   process_next_current
@@ -1576,7 +1617,7 @@ let process_next_exact ~clock ~net ~now ~worker_epoch ~base_path ~keeper_name =
     ~base_path
     ~keeper_name
     ~prepare:(prepare_exact ~base_path ~keeper_name ~net)
-    ~execute:(execute_exact ~clock)
+    ~execute:(execute_exact ~clock ~base_path ~keeper_name)
 ;;
 
 let completed_in_order ~base_path ~keeper_name =
@@ -1935,7 +1976,7 @@ let run
            let prepare =
              prepare_exact ~base_path ~keeper_name ~net
            in
-           let execute = execute_exact ~clock in
+           let execute = execute_exact ~clock ~base_path ~keeper_name in
            let contention_rearms =
              make_contention_rearm_scheduler
                ~fork:(fun task -> Eio.Fiber.fork ~sw task)
@@ -1985,6 +2026,8 @@ let run
 ;;
 
 module For_testing = struct
+  let cli_tail_may_answer = cli_tail_may_answer
+
   type nonrec rearm_scheduler = rearm_scheduler
 
   let reconcile_quarantines = reconcile_quarantines

@@ -172,9 +172,12 @@ let candidate ?(context = keeper_context ()) signal :
 let judgment decision : A.judgment =
   { verdict = { J.decision; rationale = "typed structured verdict" }
   ; slot_id = "board-attention-primary"
-  ; call_id = "call-board-attention"
-  ; plan_fingerprint = "plan-board-attention"
-  ; request_body_sha256 = "request-board-attention"
+  ; source =
+      A.Exact_attempt
+        { call_id = "call-board-attention"
+        ; plan_fingerprint = "plan-board-attention"
+        ; request_body_sha256 = "request-board-attention"
+        }
   ; judged_at = 2.0
   }
 ;;
@@ -228,9 +231,33 @@ let invalid_judgment_fixtures () =
         verdict = { valid.verdict with rationale = " \t" }
       } )
   ; "blank slot_id", { valid with slot_id = "\n" }
-  ; "blank call_id", { valid with call_id = " " }
-  ; "blank plan_fingerprint", { valid with plan_fingerprint = "\t" }
-  ; "blank request_body_sha256", { valid with request_body_sha256 = "\r\n" }
+  ; ( "blank call_id"
+    , { valid with
+        source =
+          A.Exact_attempt
+            { call_id = " "
+            ; plan_fingerprint = "plan-board-attention"
+            ; request_body_sha256 = "request-board-attention"
+            }
+      } )
+  ; ( "blank plan_fingerprint"
+    , { valid with
+        source =
+          A.Exact_attempt
+            { call_id = "call-board-attention"
+            ; plan_fingerprint = "\t"
+            ; request_body_sha256 = "request-board-attention"
+            }
+      } )
+  ; ( "blank request_body_sha256"
+    , { valid with
+        source =
+          A.Exact_attempt
+            { call_id = "call-board-attention"
+            ; plan_fingerprint = "plan-board-attention"
+            ; request_body_sha256 = "\r\n"
+            }
+      } )
   ; "NaN judged_at", { valid with judged_at = Float.nan }
   ; "+Infinity judged_at", { valid with judged_at = Float.infinity }
   ; "-Infinity judged_at", { valid with judged_at = Float.neg_infinity }
@@ -583,6 +610,45 @@ let test_judgment_write_invariant_rejects_blank_provenance () =
   | A.Consumed _
   | A.Quarantine _ ->
     Alcotest.fail "rejected judgment changed the durable Pending candidate"
+;;
+
+(* A cli-slot judgment carries no receipt, so the decoder must accept it
+   without one -- and must still refuse the receipt keys, which would say an
+   AGENT_CORE attempt happened when none did. *)
+let test_cli_lane_slot_judgment_round_trips_without_a_receipt () =
+  let judgment : A.judgment =
+    { verdict = { J.decision = J.Relevant; rationale = "answered by a cli slot" }
+    ; slot_id = "claude_code.claude-sonnet-5"
+    ; source = A.Cli_lane_slot
+    ; judged_at = 3.0
+    }
+  in
+  (match A.judgment_of_yojson (A.judgment_to_yojson judgment) with
+   | Error detail -> Alcotest.failf "cli judgment did not round-trip: %s" detail
+   | Ok decoded ->
+     Alcotest.(check string)
+       "the answering client survives the round trip"
+       judgment.slot_id
+       decoded.slot_id;
+     (match decoded.source with
+      | A.Cli_lane_slot -> ()
+      | A.Exact_attempt _ ->
+        Alcotest.fail "a cli judgment decoded as an exact attempt"));
+  let with_receipt =
+    match A.judgment_to_yojson judgment with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "source", `Assoc source ->
+               "source", `Assoc (source @ [ "call_id", `String "call-invented" ])
+             | field -> field)
+           fields)
+    | other -> other
+  in
+  (match A.judgment_of_yojson with_receipt with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "a cli source carrying a receipt key was accepted")
 ;;
 
 let test_direct_judgment_decoder_enforces_invariant () =
@@ -1045,6 +1111,10 @@ let () =
             "direct judgment decoder enforces invariant"
             `Quick
             test_direct_judgment_decoder_enforces_invariant
+        ; Alcotest.test_case
+            "a cli-slot judgment round trips without a receipt"
+            `Quick
+            test_cli_lane_slot_judgment_round_trips_without_a_receipt
         ; Alcotest.test_case
             "non-finite lifecycle times are rejected"
             `Quick

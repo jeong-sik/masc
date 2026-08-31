@@ -52,7 +52,9 @@ type dashboard_purge_artifact =
   | Keeper_feedback_log_artifact
   | Keeper_runtime_directory_artifact
   | Keeper_memory_current_artifact
+  | Keeper_memory_source_current_artifact
   | Keeper_memory_journal_artifact
+  | Keeper_playground_bundles_artifact
   | Keeper_configuration_artifact
   | Keeper_chat_store_artifact
   | Agent_artifact_bundle of string list
@@ -450,11 +452,16 @@ let dashboard_purge_artifact_plan ~keeper_name context =
   ; Keeper_runtime_directory_artifact
     (* Memory OS sidecars live next to the toml in the config keepers
        directory, outside the runtime directory removed above: without
-       explicit entries a purged keeper leaves its fact snapshot and
-       journal behind, and a later keeper with the same name inherits
-       them. *)
+       explicit entries a purged keeper leaves its ordinary/source-bound
+       snapshots and journal behind, and a later keeper with the same name
+       inherits them. *)
   ; Keeper_memory_current_artifact
+  ; Keeper_memory_source_current_artifact
   ; Keeper_memory_journal_artifact
+    (* A Keeper can change sandbox profiles across lifetimes. Remove every
+       backend-scoped root for the exact name so a same-name successor cannot
+       inherit files from an earlier Local, Docker, microVM, or SSH lane. *)
+  ; Keeper_playground_bundles_artifact
   ; Keeper_configuration_artifact
     (* The chat store is a top-level per-keeper file
        (.masc/keeper_chat/<name>.jsonl), so it sits outside the runtime

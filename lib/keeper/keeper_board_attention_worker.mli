@@ -132,6 +132,14 @@ module For_testing : sig
   (** The level the drain line is emitted at, derived from the outcome.
       [Retry_later] leaves the partition undrained, so it is not routine. *)
 
+  val cli_tail_may_answer : _ Keeper_board_attention_exact_flow.execution_error -> bool
+  (** Whether an exact-flow terminal is one the lane's official-client tail may
+      answer. True only for provider exhaustion: the persistence and provenance
+      terminals mean the durable record is in doubt, and a domain-invalid
+      answer is a contract failure rather than an unreachable provider.
+      Exposed because the production path reaches it only with live providers
+      and live clients. *)
+
   val process_next_exact
     :  clock:_ Eio.Time.clock
     -> net:Eio_context.eio_net option

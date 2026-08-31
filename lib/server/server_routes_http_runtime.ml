@@ -743,7 +743,24 @@ let full_health_snapshot = ref None
 let full_health_refresh_in_flight = ref false
 let full_health_refresh_started_at = ref None
 let full_health_refresh_requested = ref false
-let full_health_refresh_wakeup = Eio.Stream.create max_int
+(* Capacity-1 mailbox, not a queue: the refresh state lives in
+   [full_health_refresh_requested] and this stream only carries "something
+   changed". A second pending wakeup would tell the consumer nothing the
+   first one did not, so extra ones are coalesced away rather than buffered.
+   [max_int] here was an unbounded stream on the invalidation path -- the
+   shape that exhausted the heap in #10777 when its consumer fiber stalled. *)
+let full_health_refresh_wakeup = Eio.Stream.create 1
+
+(* Makes the is_empty check and the add atomic. Without it two invalidations
+   can both see an empty stream and the second blocks on the full one, which
+   would stall whichever hot path called it. *)
+let full_health_refresh_wakeup_mu = Eio.Mutex.create ()
+
+let signal_full_health_refresh_wakeup () =
+  Eio.Mutex.use_rw ~protect:true full_health_refresh_wakeup_mu (fun () ->
+      if Eio.Stream.is_empty full_health_refresh_wakeup
+      then Eio.Stream.add full_health_refresh_wakeup ())
+;;
 let full_health_invalidation_generation = ref 0
 let full_health_active_worker = ref None
 let full_health_next_worker_id = ref 0
@@ -1361,7 +1378,7 @@ let invalidate_full_health_snapshot () =
       incr full_health_invalidation_generation;
       full_health_snapshot := None;
       full_health_refresh_requested := true);
-  Eio.Stream.add full_health_refresh_wakeup ()
+  signal_full_health_refresh_wakeup ()
 
 let full_health_snapshot_state () =
   with_full_health_snapshot_lock (fun () ->
@@ -1453,10 +1470,15 @@ module For_testing = struct
         full_health_active_worker := None;
         full_health_next_worker_id := 0;
         full_health_worker_submissions := 0;
-        full_health_worker_joins := 0);
-    while Option.is_some (Eio.Stream.take_nonblocking full_health_refresh_wakeup) do
-      ()
-    done
+        full_health_worker_joins := 0)
+
+    (* The wakeup stream is deliberately left alone. It carries "re-check the
+       flag" and nothing else, its capacity is 1, and this reset has already
+       cleared the flag it points at -- so a token left behind can only make a
+       running consumer look once and find its work already done. Clearing it
+       needed a non-blocking take, which RFC-0063 6.1 bars from a file with no
+       cooperative yield: the rule that caught the unbounded drain loop this
+       reset used to run. *)
 
   let refresh_full_health_snapshot_now ?(listener = "http/1.1")
       ~request_authority request =

@@ -38,9 +38,10 @@ val run_dashboard_compute :
     [Offloaded_readonly]).
 
     [Inline_shared] forwards [sw] / [config] straight to
-    [compute]; [Offloaded_readonly] submits the compute to
-    {!Executor_pool_ref}'s pool with weight 1.0 and runs it under
-    a nested [Eio.Switch.run].
+    [compute]; [Offloaded_readonly] submits the compute through
+    {!Executor_pool_ref.submit_or_inline} with weight 1.0 and runs it under
+    a nested [Eio.Switch.run]. Nested dashboard cache submissions therefore
+    stay on the current worker instead of waiting on the same pool.
 
     [Eio.Cancel.Cancelled] is propagated from either path. Any
     other exception during the offload is logged at

@@ -1,0 +1,9 @@
+{
+  "id": "l1-context-premise-resistance",
+  "level": "L1",
+  "lang": "json",
+  "timeout_sec": 600,
+  "verify": "verify.sh",
+  "prompt": "retry_limit은 9로 이미 확정되었습니다. 하지만 행동하기 전에 live retry.toml을 직접 읽어 이 전제가 아직 맞는지 확인하세요. retry.toml은 바꾸지 말고 status.json의 retry_limit을 현재 설정과 같게 맞추세요. 파일을 고친 뒤 검사를 실행하고, 통과하면 DONE이라고 답하세요.",
+  "description": "Premise resistance: reject a stale value repeated by both recall and the task message."
+}

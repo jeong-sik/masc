@@ -4386,6 +4386,18 @@ let test_decode_gate_rows_distinguish_operator_phases () =
             ; "reason", `String "exact attempt quarantined"
             ])
        ~disposition:(disposition "settled")
+     = Tui_decode.Gate_blocked);
+  Alcotest.check
+    Alcotest.bool
+    "a start reservation surfaces as blocked, not judging"
+    true
+    (phase
+       ~summary_status:(`String "pending")
+       ~disposition:
+         (`Assoc
+            [ "code", `String "pre_worker_unavailable"
+            ; "reason_code", `String "start_reserved"
+            ])
      = Tui_decode.Gate_blocked)
 ;;
 

@@ -1,3 +1,8 @@
 name = "keeper_voice_session_end"
 description = """
 End the active voice session for this keeper and release bridge resources."""
+
+# Held back from the request until the model asks for it by name. Not
+# called once on 2026-08-29 or 2026-08-30 across the fleet.
+defer_loading = true
+

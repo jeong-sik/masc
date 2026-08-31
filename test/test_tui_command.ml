@@ -26,6 +26,8 @@ let describe = function
          | `Compact -> "compact"
          | `Full -> "full")
   | Command.Toggle_memory -> "toggle-memory"
+  | Command.Find_in_chat text -> "find:" ^ text
+  | Command.Find_next -> "find-next"
   | Command.Inspect_context -> "inspect-context"
   (* [describe] is total on purpose: it is what makes a new command show up
      here as a compile error instead of silently going untested. #30234 added
@@ -71,6 +73,10 @@ let test_pane_commands_parse_by_word () =
     ; "tools:compact"
     ; "tools:full"
     ; "toggle-memory"
+    ; "find:caret"
+    ; "find:two words"
+    ; "find-next"
+    ; "find-next"
     ; "inspect-context"
     ; "image:shots/frame.png"
     ; "image-missing-path"
@@ -90,6 +96,14 @@ let test_pane_commands_parse_by_word () =
        ; "/tools compact"
        ; "/tools full"
        ; "/memory"
+       (* The text is the rest of the line, spaces and all: a search phrase is
+          not one word, and quoting it would be a second grammar. *)
+       ; "/find caret"
+       ; "/find two words"
+       (* Arg-less repeats rather than resetting, the same shape [/thinking]
+          with no argument already has here. Blanks are not a query. *)
+       ; "/find"
+       ; "/find   "
        ; "/context"
        ; "/image shots/frame.png"
        ; "/image   "
@@ -105,7 +119,7 @@ let test_every_command_has_a_help_line () =
            (fun line -> String.starts_with ~prefix:("/" ^ word) line)
            Command.help_lines))
     [ "task"; "keeper"; "settings"; "interrupt"; "thinking"; "tools"; "memory"
-    ; "context"; "help" ]
+    ; "find"; "context"; "help" ]
 
 let test_keeper_names_resolve_by_unique_prefix () =
   let names = [ "orbiter"; "orbit"; "lantern"; "zephyr" ] in
@@ -337,13 +351,42 @@ let test_the_typed_run_is_what_was_pressed () =
   check string "a prefix highlights through the slash"
     "T[/ta]U[sk]D[ <title>]" (spans "/ta");
   (* Three left, so names only -- and each carries the same typed run. The
-     separator is one space. The bare slash draws its shared prefix once so
-     the complete command catalog still fits the 80-column composer. *)
+     separator is one space. *)
   check string "one glyph, three candidates"
     "T[/t]U[ask]D[ ]T[/t]U[hinking]D[ ]T[/t]U[ools]" (spans "/t");
+  (* The bare slash draws its shared prefix once, then what fits. The catalog
+     outgrew an 80-column composer, so the row says how many words it could
+     not carry and points at the list that is complete by definition. *)
   check string "the bare slash highlights only itself"
-    "T[/]U[task keeper settings interrupt thinking tools memory context image attach help]"
+    "T[/]U[task keeper settings interrupt thinking tools memory find]D[ +4 more (/help)]"
     (spans "/")
+
+(* The row an operator types knowing nothing is the one that must not run off
+   the pane, and it used to be sized by how many commands happened to exist:
+   compacted once when /settings joined the catalog, over again at /find. The
+   contract is the width, not the wording -- so this asserts the bound and
+   that an elided row says it elided, rather than pinning a word list that
+   every new command would have to come back and edit. *)
+let test_the_bare_slash_row_is_bounded_by_its_width () =
+  match Command.hint_line (Command.hint "/") with
+  | None -> fail "the bare slash must offer a hint"
+  | Some line ->
+      check bool
+        (Printf.sprintf "the row fits 80 columns (it is %d)" (String.length line))
+        true
+        (String.length line <= 80);
+      check bool "it leads with the slash" true
+        (String.starts_with ~prefix:"/" line);
+      let pieces = String.split_on_char ' ' line in
+      let words = List.map (fun (e : Command.command_help) -> e.word) Command.catalog in
+      let carried =
+        List.filter (fun word -> List.exists (String.equal word) pieces) words
+      in
+      check bool "it carries at least one command" true (carried <> []);
+      if List.length carried < List.length words then
+        check bool "an elided row says so and names where the rest are" true
+          (List.exists (String.equal "more") pieces
+           && List.exists (String.equal "(/help)") pieces)
 
 (* Splitting the word for colour must not lose or duplicate a glyph. *)
 let test_colour_boundaries_keep_every_glyph () =
@@ -460,6 +503,8 @@ let () =
             test_a_complete_word_needs_no_untyped_run
         ; test_case "an unknown word is marked wrong" `Quick
             test_an_unknown_word_is_marked_wrong
+        ; test_case "the bare slash row is bounded by its width" `Quick
+            test_the_bare_slash_row_is_bounded_by_its_width
         ; test_case "the line is the spans joined" `Quick
             test_the_line_is_the_spans_joined
         ] )

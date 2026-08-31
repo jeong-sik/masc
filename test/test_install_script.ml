@@ -218,6 +218,10 @@ let docker_entrypoint () =
   read_file (Filename.concat (source_root ()) "scripts/docker-entrypoint.sh")
 ;;
 
+let oneclick_entrypoint () =
+  read_file (Filename.concat (source_root ()) "scripts/docker-entrypoint.sh")
+;;
+
 let dockerignore () = read_file (Filename.concat (source_root ()) ".dockerignore")
 
 let project_version () =
@@ -698,6 +702,18 @@ let test_runtime_image_enforces_preflight_before_main () =
     "Docker context includes the deployment preflight helper"
     context
     "!masc-deployment-preflight-helper"
+;;
+
+let test_oneclick_empty_key_disables_implicit_classic_autoboot () =
+  let entrypoint = oneclick_entrypoint () in
+  assert_contains
+    "classic empty-key guard preserves explicit bootstrap override"
+    entrypoint
+    {|[ "$TEAM" = "classic" ] && [ -z "${MASC_KEEPER_BOOTSTRAP_ENABLED:-}" ]|};
+  assert_contains
+    "classic empty-key guard disables implicit autoboot"
+    entrypoint
+    "export MASC_KEEPER_BOOTSTRAP_ENABLED=false"
 ;;
 
 let test_binary_checks_use_install_environment () =
@@ -1492,6 +1508,10 @@ let () =
             "runtime image enforces preflight before main"
             `Quick
             test_runtime_image_enforces_preflight_before_main
+        ; test_case
+            "one-click empty key disables implicit classic autoboot"
+            `Quick
+            test_oneclick_empty_key_disables_implicit_classic_autoboot
         ; test_case
             "installer fetches deployment preflight companions"
             `Quick

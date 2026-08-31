@@ -84,6 +84,20 @@ val handle_file_write_with_outcome :
     root proceed after the capability and root-identity checks without an
     approval Gate. Writes through every other allowed root retain the Gate. *)
 
+val default_owned_target :
+  ownership_root:string -> path:string -> string * string
+(** The [(cwd_abs, target_path)] pair [handle_owned_read_file_with_outcome]
+    uses when the tool call omits [cwd]. Falls back to
+    [(ownership_root, path)] unless the root holds exactly one
+    sub-directory whose name matches the first segment of [path] — in
+    that case the sub-directory is returned as [cwd_abs] and the
+    matching first segment is stripped from [target_path] so the
+    subsequent [Filename.concat cwd_abs target_path] does not
+    overshoot. Zero, several, or non-matching sub-directories all
+    fall back to [(ownership_root, path)], so the helper never
+    guesses. Exposed for testing so [test_owned_read_cwd] can pin
+    the contract directly. *)
+
 module For_testing : sig
   type created_directory_fault_stage =
     | Before_create_directory

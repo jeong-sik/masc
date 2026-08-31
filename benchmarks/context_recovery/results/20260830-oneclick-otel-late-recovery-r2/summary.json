@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T17:49:26+09:00",
+  "source_change_commit": "10e994faa6fe332c5e2902a09119685309dee879",
+  "measurement_source_commit": "5f5b3086349ba5c3206dc473beba50af4c377717",
+  "image_digest": "sha256:0ca5b40b770641023cab274980f4f0d5effef0eba3c2a44aea7859de995d4ce2",
+  "binary_sha256": "adfaca2806c57fafcfb13a201fd692feac01998f84f8f2abbb0d2346b4d8200f",
+  "collector_image_digest": "sha256:d09d15e60962ca365d1cd544a48773bac9d33f2fb1b00f2aa0deec78ade7dc31",
+  "runtime_instance_ids": [
+    "01a051d8-d31a-7000-93e4-c8f718943af4",
+    "01a051db-23d1-7000-b6c2-d73b8d3afd92"
+  ],
+  "late_recovery": {
+    "recovery_mode_at": "2026-08-30T08:46:31.035236970Z",
+    "collector_running_at": "2026-08-30T08:46:45.954458000Z",
+    "exporter_started_at": "2026-08-30T08:47:01.048060554Z",
+    "collector_to_exporter_seconds": 15.093603,
+    "recovery_mode_to_exporter_seconds": 30.012824,
+    "health_status": "ok",
+    "exporter_active": true,
+    "exporter_degraded": false,
+    "consecutive_failures": 0
+  },
+  "restart": {
+    "listener_to_dashboard_ms": 0.483458,
+    "dashboard_to_exporter_ms": 3.691417,
+    "startup_lifecycle": "serving",
+    "startup_readiness": "ready",
+    "exporter_active": true
+  },
+  "collector_requests": {
+    "metrics_posts": 41,
+    "trace_posts": 1,
+    "trace_body_bytes": 849
+  },
+  "public_tool_boundary": {
+    "advertised_tool_count": 39,
+    "advertised_keeper_internal_tool_count": 0,
+    "undisclosed_keeper_tool_rejected": true
+  },
+  "shutdown": {
+    "masc_exit_code": 0,
+    "synthetic_collector_exit_code": 137,
+    "collector_exit_note": "Python synthetic collector had no SIGTERM handler",
+    "containers_stopped": true,
+    "volume_preserved": true,
+    "network_preserved": true
+  },
+  "artifact_sha256": {
+    "server-before-collector.log": "1b9a2141ba63d959625423a9c3e30a32899938c6db0662a2efc2b7d4172832fd",
+    "server-after-collector.log": "bb61ebd69117c852d6cd1e49e40f5bd9cee1a7abfa82e40eff66829b40c54090",
+    "collector-after-tool.log": "1fe0fa0cd6e6ad8035d487003d6b7dce44a073aa78768648f78ac2f0b8c54bf7",
+    "health-after-collector.json": "cb7b4cb72840e019b37a9ce81c3c1a36a99617ac3d6a45b5632b0586378e24b3",
+    "health-before-restart.json": "ccc14568e3dc4549b243a59b7444eca6d1b6078166bbf446834f650e3a8b1400",
+    "health-after-restart.json": "428ffbfa5b57f9c778b9bab677f8c0290a5e27f5878c9c5eff6f74e470138799",
+    "restart-window.log": "94c2270ee420345024e7cddf49e5e0d0dcfc6a02a3e9a5b1fada1c2945701c0e",
+    "collector-final.log": "ea0e06108fa8b9abf35756717ecd1af43e444a306cf4235792e53d380ced81e8",
+    "server-final.log": "91c2a05e9734b1f54107574e6c781b5309bd8ccb2fb26052e6dbd3860dae0767"
+  },
+  "performance_claim": false
+}

@@ -1805,6 +1805,39 @@ type repository_change_snapshot = {
   rcs_total : int;
 }
 
+type memory_alert = {
+  ma_code : string;
+  ma_severity : string;
+  ma_label : string;
+  ma_message : string;
+}
+
+type memory_keeper_health = {
+  mkh_keeper_id : string;
+  mkh_revision : int;
+  mkh_facts : int;
+  mkh_snapshot_bytes : int;
+  mkh_added : int;
+  mkh_removed : int;
+  mkh_snapshot_present : bool;
+  mkh_librarian_lane_busy : int;
+  mkh_librarian_failures : int;
+  mkh_read_error : string option;
+  mkh_alerts : memory_alert list;
+}
+
+type memory_health_snapshot = {
+  mhs_generated_at : float;
+  mhs_keepers : memory_keeper_health list;
+  mhs_total_facts : int;
+  mhs_total_snapshot_bytes : int;
+  mhs_total_librarian_failures : int;
+  mhs_total_read_errors : int;
+  mhs_warn_alerts : int;
+  mhs_error_alerts : int;
+  mhs_starving_keepers : int;
+}
+
 type harness_verdict = {
   hv_at : float;
   hv_task_id : string;
@@ -3328,6 +3361,73 @@ let decode_repository_change_snapshot json =
   in
   let* rcs_total = required_int_field json "total" in
   Ok { rcs_repository_id; rcs_changes; rcs_total }
+
+let decode_memory_alert json =
+  let* ma_code = required_string_field json "code" in
+  let* ma_severity = required_string_field json "severity" in
+  let* ma_label = required_string_field json "label" in
+  let* ma_message = required_string_field json "message" in
+  Ok { ma_code; ma_severity; ma_label; ma_message }
+
+let decode_memory_keeper_health json =
+  let* mkh_keeper_id = required_string_field json "keeper_id" in
+  let* mkh_revision = required_int_field json "revision" in
+  let* mkh_facts = required_int_field json "facts" in
+  let* mkh_snapshot_bytes = required_int_field json "snapshot_bytes" in
+  let* mkh_added = required_int_field json "added" in
+  let* mkh_removed = required_int_field json "removed" in
+  let* mkh_snapshot_present = required_bool_field json "snapshot_present" in
+  let* mkh_librarian_lane_busy = required_int_field json "librarian_lane_busy" in
+  let* mkh_librarian_failures = required_int_field json "librarian_failures" in
+  let* mkh_read_error = optional_string json "read_error" in
+  let* alerts_json = required_list_field json "alerts" in
+  let* mkh_alerts = decode_list "alerts" decode_memory_alert alerts_json in
+  Ok
+    { mkh_keeper_id
+    ; mkh_revision
+    ; mkh_facts
+    ; mkh_snapshot_bytes
+    ; mkh_added
+    ; mkh_removed
+    ; mkh_snapshot_present
+    ; mkh_librarian_lane_busy
+    ; mkh_librarian_failures
+    ; mkh_read_error
+    ; mkh_alerts
+    }
+
+let decode_memory_health_snapshot json =
+  let* mhs_generated_at = require_float_field json "generated_at" in
+  let* keepers_json = required_list_field json "keepers" in
+  let* mhs_keepers =
+    decode_list "keepers" decode_memory_keeper_health keepers_json
+  in
+  let* totals_json = required_member json "totals" in
+  let* mhs_total_facts = required_int_field totals_json "facts" in
+  let* mhs_total_snapshot_bytes =
+    required_int_field totals_json "snapshot_bytes"
+  in
+  let* mhs_total_librarian_failures =
+    required_int_field totals_json "librarian_failures"
+  in
+  let* mhs_total_read_errors = required_int_field totals_json "read_errors" in
+  let* summary_json = required_member json "alert_summary" in
+  let* mhs_warn_alerts = required_int_field summary_json "warn_alerts" in
+  let* mhs_error_alerts = required_int_field summary_json "error_alerts" in
+  let* mhs_starving_keepers =
+    required_int_field summary_json "librarian_starving_keepers"
+  in
+  Ok
+    { mhs_generated_at
+    ; mhs_keepers
+    ; mhs_total_facts
+    ; mhs_total_snapshot_bytes
+    ; mhs_total_librarian_failures
+    ; mhs_total_read_errors
+    ; mhs_warn_alerts
+    ; mhs_error_alerts
+    ; mhs_starving_keepers
+    }
 
 let decode_harness_verdict json =
   let* hv_task_id = required_string_field json "task_id" in

@@ -243,9 +243,9 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let current_keeper_mode =
     match state.view with
     | Keepers mode -> Some mode
-    | Overview | Acting | Lanes | Board | Approvals | Planning | Schedules
-    | Verification | Harness | Fusion | Repositories | Code | Changes
-    | Connectors | Runtime | Config | Resources | Tools
+    | Overview | Acting | Memory | Lanes | Board | Approvals | Planning
+    | Schedules | Verification | Harness | Fusion | Repositories | Code
+    | Changes | Connectors | Runtime | Config | Resources | Tools
     | System_logs -> None
   in
   let current_navigation =
@@ -1046,6 +1046,12 @@ let load_repository_changes ~(host : string) ~(port : int)
   match fetch_repository_changes ~host ~port ~repository_id with
   | Error err -> Error ("repository changes load failed: " ^ err)
   | Ok json -> Tui_decode.decode_repository_change_snapshot json
+
+let load_memory_health ~(host : string) ~(port : int) :
+    (Tui_decode.memory_health_snapshot, string) result =
+  match fetch_keeper_memory_health ~host ~port with
+  | Error err -> Error ("memory health load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_memory_health_snapshot json
 
 (** Load a keeper's file changes from /api/v1/keepers/:name/file-changes. *)
 let load_keeper_file_changes ~(host : string) ~(port : int)

@@ -473,9 +473,9 @@ let awaiting_approval_notice (state : state) =
             match state.view with
             | Keepers Keeper_message -> ""
             | Overview | Acting | Keepers _ | Lanes | Board | Approvals | Planning
-            | Schedules | Verification | Harness | Fusion | Repositories | Code
-            | Changes | Connectors | Runtime | Config | Resources | Tools
-            | System_logs ->
+            | Memory | Schedules | Verification | Harness | Fusion
+            | Repositories | Code | Changes | Connectors | Runtime | Config
+            | Resources | Tools | System_logs ->
                 "  (2 then m to answer)"
           in
           Some
@@ -8387,6 +8387,156 @@ let render_repository_changes (state : state) =
               else c.push line
         done)
 
+(* Full health of the row the cursor names: fields the fleet table
+   abbreviates, plus every alert the server already graded. *)
+let memory_context_lines (k : Masc.Tui_decode.memory_keeper_health) =
+  let open Masc.Tui_decode in
+  let bytes_line =
+    Printf.sprintf "  snapshot r%d · %d bytes · %s" k.mkh_revision
+      k.mkh_snapshot_bytes
+      (if k.mkh_snapshot_present then "present" else "absent")
+  in
+  let facts_line =
+    Printf.sprintf "  facts %d · last change +%d / -%d" k.mkh_facts k.mkh_added
+      k.mkh_removed
+  in
+  let librarian_line =
+    Printf.sprintf "  librarian lane-busy %d · failures %d"
+      k.mkh_librarian_lane_busy k.mkh_librarian_failures
+  in
+  let alert_lines =
+    List.map
+      (fun (a : memory_alert) ->
+        Printf.sprintf "  [%s] %s — %s" a.ma_severity a.ma_label
+          (Terminal_text.single_line a.ma_message))
+      k.mkh_alerts
+  in
+  let read_error_lines =
+    match k.mkh_read_error with
+    | None -> []
+    | Some message -> [ "  read error: " ^ Terminal_text.single_line message ]
+  in
+  bytes_line :: facts_line :: librarian_line :: (read_error_lines @ alert_lines)
+
+let memory_row_line (k : Masc.Tui_decode.memory_keeper_health) =
+  let open Masc.Tui_decode in
+  let state_label =
+    if (not k.mkh_snapshot_present) && k.mkh_librarian_failures > 0
+    then "STARVING"
+    else if not k.mkh_snapshot_present
+    then "no-snapshot"
+    else if k.mkh_librarian_failures > 0
+    then "degraded"
+    else "ok"
+  in
+  Printf.sprintf "  %-18s r%-6d %6d %+5d/-%-4d %8d B  %s" k.mkh_keeper_id
+    k.mkh_revision k.mkh_facts k.mkh_added k.mkh_removed k.mkh_snapshot_bytes
+    state_label
+
+(* A starving keeper is an error the server graded; a keeper with a config
+   but no snapshot yet is quiet, not bad. *)
+let memory_row_style (k : Masc.Tui_decode.memory_keeper_health) =
+  let open Masc.Tui_decode in
+  if (not k.mkh_snapshot_present) && k.mkh_librarian_failures > 0
+  then Some (Theme.bad ())
+  else if not k.mkh_snapshot_present || k.mkh_librarian_failures > 0
+  then Some (Theme.warn ())
+  else None
+
+let render_memory (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let open Masc.Tui_decode in
+  let keepers =
+    match state.memory_health with
+    | None -> []
+    | Some s -> s.mhs_keepers
+  in
+  let shown = List.length keepers in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let title =
+    match state.memory_health with
+    | None ->
+        Printf.sprintf "%s  (not loaded)  %s  %s"
+          (screen_title " MASC Memory") timestamp
+          (connection_badge state)
+    | Some s ->
+        Printf.sprintf "%s (%d keepers · %d starving · %d facts)  %s  %s"
+          (screen_title " MASC Memory") shown s.mhs_starving_keepers
+          s.mhs_total_facts timestamp
+          (connection_badge state)
+  in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"memory"
+    ~title ~hints:(Masc_tui_keys.footer_hints state.view)
+    ~body:(fun ~budget c ->
+      c.push_styled ~style:(Theme.recede ())
+        (Printf.sprintf
+           "  %-18s %-7s %6s %11s %10s  %s"
+           "Keeper" "Rev" "Facts" "+/-" "Snapshot" "State");
+      c.push_divider ();
+      (match state.memory_health_error with
+       | None -> ()
+       | Some detail ->
+           c.push_styled ~style:(Theme.bad ())
+             ("  " ^ Keeper_chat.terminal_safe_text detail);
+           c.push_divider ());
+      let context_lines =
+        match List.nth_opt keepers state.memory_health_cursor with
+        | None -> []
+        | Some k -> memory_context_lines k
+      in
+      let context_rows =
+        match context_lines with [] -> 0 | _ -> 1 + List.length context_lines
+      in
+      let fixed =
+        2 + context_rows
+        + (if Option.is_some state.memory_health_error then 2 else 0)
+      in
+      let room = max 1 (budget - fixed) in
+      let overflowing = shown > room in
+      let content_height = if overflowing then max 1 (room - 1) else room in
+      let max_scroll = max 0 (shown - content_height) in
+      let scroll = max 0 (min state.memory_health_scroll max_scroll) in
+      if shown = 0 then
+        let empty =
+          match
+            empty_page_of ~snapshot:state.memory_health
+              ~error:state.memory_health_error
+          with
+          | Page_failed -> page_failed_note
+          | Page_unread -> page_unread_note
+          | Page_empty -> "  (no keepers with a memory config or snapshot)"
+        in
+        c.push_styled ~style:(Theme.recede ()) empty
+      else begin
+        for i = 0 to content_height - 1 do
+          let idx = i + scroll in
+          match List.nth_opt keepers idx with
+          | None -> c.push_empty ()
+          | Some k ->
+              (* The cursor row is marked by selection; a graded-bad or
+                 graded-warn keeper keeps its health color on every other
+                 row. *)
+              if idx = state.memory_health_cursor then
+                c.push_selected (memory_row_line k)
+              else
+                match memory_row_style k with
+                | Some style -> c.push_styled ~style (memory_row_line k)
+                | None -> c.push (memory_row_line k)
+        done;
+        if overflowing then
+          c.push_styled ~style:(Theme.recede ())
+            (Printf.sprintf "[%d keepers, scroll %d]" shown scroll)
+      end;
+      (match context_lines with
+       | [] -> ()
+       | lines ->
+           c.push_divider ();
+           List.iter (c.push_styled ~style:(Theme.recede ())) lines))
+
 let render_repositories (state : state) =
   if state.repository_changes_open then render_repository_changes state
   else render_repository_list state
@@ -12251,6 +12401,7 @@ let render_surface (state : state) =
       (match state.fusion_mode with
        | Fusion_list -> render_fusion_list state
        | Fusion_detail run_id -> render_fusion_detail state run_id)
+  | Memory -> render_memory state
   | Repositories -> render_repositories state
   | Changes -> render_changes state
   | Connectors -> render_connectors state
@@ -12947,8 +13098,9 @@ let render (state : state) =
       match state.view with
       | Approvals ->
           List.nth_opt (approval_items state) state.approval_cursor
-      | Overview | Acting | Keepers _ | Lanes | Board | Planning | Schedules
-      | Verification | Harness | Fusion | Repositories | Changes | Connectors
-      | Runtime | Config | Resources | Code | Tools | System_logs -> None
+      | Overview | Acting | Keepers _ | Memory | Lanes | Board | Planning
+      | Schedules | Verification | Harness | Fusion | Repositories | Changes
+      | Connectors | Runtime | Config | Resources | Code | Tools
+      | System_logs -> None
     in
     (frame, clamped, presented_approval)

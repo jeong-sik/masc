@@ -725,6 +725,18 @@ claim the post was never written, that the sink failed, or that retention
 expired. A failed refresh leaves the prior reading visible under an explicit
 error instead of redrawing it as an empty result.
 
+### Memory
+
+Keeper별 Memory OS 건강 상태를 한 표로 보여준다. 각 행은 revision, facts
+수, 최근 변화(+추가/-제거), 스냅샷 크기, 상태를 담는다. `STARVING`은
+Librarian 실행이 실패한 채 스냅샷이 없는 Keeper다 — 스스로 그 상태를
+벗어날 수 없으므로 가장 눈에 띄게 표시된다. `no-snapshot`은 아직 스냅샷이
+없을 뿐인 조용한 상태, `degraded`는 스냅샷은 있지만 Librarian 갱신이
+실패 중인 상태다.
+
+커서가 가리키는 행의 전체 상태와 서버가 매긴 경고(alert) 목록이 표
+아래에 함께 나온다. `r`로 다시 불러온다.
+
 ### Repositories
 
 등록된 저장소와 서버가 실제로 해석한 체크아웃 경로를 보여준다. 목록의

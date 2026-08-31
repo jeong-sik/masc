@@ -225,6 +225,11 @@ let for_surface = function
       ; b Act "Esc" "back" ~help:"leave detail, or return to Overview"
       ]
       @ listing_meta
+  | Memory ->
+      [ b Navigate "j/k" "scroll"
+      ; b Navigate "[ / ]" "keeper" ~help:"previous / next keeper row"
+      ]
+      @ listing_meta
   | Repositories ->
       [ b Navigate "j/k" "scroll"
       ; b Act "Enter" "browse"
@@ -442,6 +447,7 @@ let help_surfaces : (string * surface) list =
   ; "Planning / Verdicts", Harness
   ; "Schedules", Schedules
   ; "Fusion", Fusion
+  ; "Memory", Memory
   ; "Repos", Repositories
   ; "Changes", Changes
   ; "Connectors", Connectors

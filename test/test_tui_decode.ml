@@ -2570,6 +2570,81 @@ let test_decode_repository_requires_resolved_local_path () =
       Alcotest.fail
         "a repository without the server-resolved path must not be guessed"
 
+(* A starving keeper — no snapshot and failed librarian runs — is the row
+   this surface exists to surface, so the decoder must keep every axis the
+   server grades: presence, counts, failures, and the alert list. *)
+let test_decode_memory_health_keeps_starvation_axes () =
+  let keeper id present failures =
+    `Assoc
+      [ ("keeper_id", `String id)
+      ; ("revision", `Int 3)
+      ; ("facts", `Int 12)
+      ; ("snapshot_bytes", `Int (if present then 4096 else 0))
+      ; ("added", `Int 2)
+      ; ("removed", `Int 1)
+      ; ("snapshot_present", `Bool present)
+      ; ("librarian_lane_busy", `Int 0)
+      ; ("librarian_failures", `Int failures)
+      ; ("read_error", `Null)
+      ; ( "alerts"
+        , `List
+            [ `Assoc
+                [ ("code", `String "librarian_starvation")
+                ; ("severity", `String "error")
+                ; ("target", `String "librarian_starvation")
+                ; ("label", `String "Librarian")
+                ; ( "message"
+                  , `String "running memoryless and cannot leave that state" )
+                ; ("value", `Float 4.0)
+                ; ("threshold", `Float 0.0)
+                ]
+            ] )
+      ]
+  in
+  let json =
+    `Assoc
+      [ ("schema", `String "keeper.memory_os.current_health.v1")
+      ; ("generated_at", `Float 1_775_000_000.0)
+      ; ("cadence_counter_entries", `Int 0)
+      ; ("keepers", `List [ keeper "starving" false 4; keeper "healthy" true 0 ])
+      ; ( "totals"
+        , `Assoc
+            [ ("facts", `Int 12)
+            ; ("snapshot_bytes", `Int 4096)
+            ; ("added", `Int 2)
+            ; ("removed", `Int 1)
+            ; ("librarian_lane_busy", `Int 0)
+            ; ("librarian_failures", `Int 4)
+            ; ("read_errors", `Int 0)
+            ] )
+      ; ( "alert_summary"
+        , `Assoc
+            [ ("total_alerts", `Int 1)
+            ; ("warn_alerts", `Int 0)
+            ; ("error_alerts", `Int 1)
+            ; ("keepers_with_alerts", `Int 1)
+            ; ("snapshot_read_error_keepers", `Int 0)
+            ; ("librarian_lane_busy_keepers", `Int 0)
+            ; ("librarian_starving_keepers", `Int 1)
+            ] )
+      ]
+  in
+  match Tui_decode.decode_memory_health_snapshot json with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check int) "keepers" 2 (List.length snapshot.mhs_keepers);
+      Alcotest.(check int) "starving keepers" 1 snapshot.mhs_starving_keepers;
+      Alcotest.(check int) "error alerts" 1 snapshot.mhs_error_alerts;
+      (match snapshot.mhs_keepers with
+       | starving :: _ ->
+           Alcotest.(check bool) "no snapshot" false starving.mkh_snapshot_present;
+           Alcotest.(check int) "failures" 4 starving.mkh_librarian_failures;
+           (match starving.mkh_alerts with
+            | { Tui_decode.ma_code = "librarian_starvation"; ma_severity = "error"; _ }
+              :: [] -> ()
+            | _ -> Alcotest.fail "expected one starvation alert")
+       | [] -> Alcotest.fail "expected the starving keeper row")
+
 let test_decode_repository_changes_keeps_git_axes () =
   let json =
     `Assoc
@@ -5567,6 +5642,8 @@ let () =
           test_decode_repository_requires_resolved_local_path;
         Alcotest.test_case "repository changes keep Git axes" `Quick
           test_decode_repository_changes_keeps_git_axes;
+        Alcotest.test_case "memory health keeps starvation axes" `Quick
+          test_decode_memory_health_keeps_starvation_axes;
       ] );
     ( "decode_keeper_lanes",
       [

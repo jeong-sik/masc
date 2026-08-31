@@ -1396,6 +1396,8 @@ let post_schedule_create ~(host : string) ~(port : int)
        ; ("message", `String message)
        ; ("requested_by_id", `String default_agent_name)
        ; ("requested_by_kind", `String "human_operator")
+       ; ("scheduled_by_id", `String default_agent_name)
+       ; ("scheduled_by_kind", `String "human_operator")
        ; ("source", `String "operator_request")
        ]
       @ timing_fields)

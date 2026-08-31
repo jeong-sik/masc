@@ -158,6 +158,15 @@ let wire_json_of_schema (schema : Types.tool_schema) =
      | None -> [])
 ;;
 
+(* What one tool costs the request that carries it. Exported so a caller
+   measuring the surface cannot reach for [Types.tool_schema_to_yojson]
+   instead: that one also emits [parameters], the derived validation view no
+   provider receives, which put masc's Execute at 10,396 bytes against the
+   7,239 it sends. *)
+let wire_bytes_of_schema schema =
+  String.length (Yojson.Safe.to_string (wire_json_of_schema schema))
+;;
+
 let schema_to_json tool = wire_json_of_schema tool.schema
 
 (** Wrap a tool to inject default arguments when not provided by the LLM.

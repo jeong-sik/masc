@@ -689,6 +689,59 @@ let test_payload_without_the_key_decodes () =
       schema.parameters
 ;;
 
+(* A surface measurement has two encodings within reach and only one is
+   billed. [Types.tool_schema_to_yojson] is storage: it emits [parameters],
+   the derived validation view, beside the authoritative schema. No provider
+   receives it -- a definition carrying both is rejected on the way out -- so
+   counting it reports a cost nobody pays. masc's turn record did exactly
+   that and put Execute at 10,396 bytes against the 7,239 it sends.
+
+   Pinned as an inequality, not a number: the fixture's byte counts move
+   whenever its descriptions do, and the fact worth keeping is that the two
+   encodings are not interchangeable for measurement. *)
+let test_the_billed_encoding_is_smaller_than_the_stored_one () =
+  match
+    Mcp.tool_of_input_schema_result
+      ~name:"read_file"
+      ~description:"Read a file"
+      ~input_schema:rich_input_schema
+      noop_handler
+  with
+  | Error detail -> failf "tool_of_input_schema_result: %s" detail
+  | Ok tool ->
+    let billed = Tool.wire_bytes_of_schema tool.schema in
+    let stored =
+      String.length
+        (Yojson.Safe.to_string (Types.tool_schema_to_yojson tool.schema))
+    in
+    check
+      bool
+      (Printf.sprintf
+         "the stored encoding carries more than the wire does (%d > %d)"
+         stored
+         billed)
+      true
+      (stored > billed);
+    check
+      int
+      "the billed count is the wire JSON's own length"
+      (String.length
+         (Yojson.Safe.to_string (Tool.wire_json_of_schema tool.schema)))
+      billed;
+    check
+      bool
+      "the wire form does not carry the derived parameter view"
+      false
+      (let wire =
+         Yojson.Safe.to_string (Tool.wire_json_of_schema tool.schema)
+       in
+       let rec contains i =
+         i + 12 <= String.length wire
+         && (String.sub wire i 12 = "\"parameters\"" || contains (i + 1))
+       in
+       contains 0)
+;;
+
 let () =
   run
     "tool_input_schema_fidelity"
@@ -697,6 +750,10 @@ let () =
             "authoritative schema reaches the wire"
             `Quick
             test_authoritative_schema_reaches_the_wire
+        ; test_case
+            "the billed encoding is smaller than the stored one"
+            `Quick
+            test_the_billed_encoding_is_smaller_than_the_stored_one
         ; test_case
             "authoritative schema rides an execution-env handler"
             `Quick

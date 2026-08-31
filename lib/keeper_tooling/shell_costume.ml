@@ -27,13 +27,33 @@ let rec script_after_dash_c = function
     else script_after_dash_c (next :: rest)
 ;;
 
-let names_a_shell name = List.exists (String.equal name) shells
+(* The program as written, path or bare.  [of_argv] stripped the directory
+   before asking, and the one other caller did not: a keeper writing
+   [/bin/zsh -lc ...] was counted as a call that had left its shell behind.
+   Stripping here rather than at each call site is the difference between a
+   contract a caller can forget and one it cannot. *)
+let names_a_shell program =
+  List.exists (String.equal (Filename.basename program)) shells
+;;
+
+(* Whether any stage of a lowered IR still invokes a shell.  The tap asks this
+   of the dispatch result to say whether the costume came off, so it has to
+   look at every stage: rewriting one costume leaves a sibling stage's
+   [bash -c] exactly where it was. *)
+let rec ir_keeps_a_shell (ir : Masc_exec.Shell_ir.t) =
+  match ir with
+  | Masc_exec.Shell_ir.Simple simple ->
+    names_a_shell (Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin)
+  | Masc_exec.Shell_ir.Pipeline stages -> List.exists ir_keeps_a_shell stages
+  | Masc_exec.Shell_ir.Sequence { head; tail } ->
+    ir_keeps_a_shell head || List.exists (fun (_, part) -> ir_keeps_a_shell part) tail
+;;
 
 let of_argv = function
   | [] -> None
   | program :: args ->
     let shell = Filename.basename program in
-    if not (names_a_shell shell) then None
+    if not (names_a_shell program) then None
     else (
       match script_after_dash_c args with
       | None -> None

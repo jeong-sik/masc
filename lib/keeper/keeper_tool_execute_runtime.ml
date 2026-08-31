@@ -694,17 +694,13 @@ let handle_tool_execute_typed
              records: 9 [representable], and no way to tell how many of them
              the gate actually took.
 
-             It is a property of the call rather than of the stage: a lowered
-             call has one stage, and a call that kept its shell has whatever
-             the caller wrote. *)
-          let lowered =
-            match ir with
-            | Masc_exec.Shell_ir.Simple simple ->
-              not
-                (Keeper_tooling.Shell_costume.names_a_shell
-                   (Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin))
-            | Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _ -> true
-          in
+             It is a property of the call rather than of the stage, so every
+             stage has to answer: lowering rewrites one costume, and a
+             multi-stage call whose second stage is still [bash -c] has not
+             left its shell behind because its first stage did.  Reading only
+             the [Simple] arm and calling the other two lowered said the
+             opposite. *)
+          let lowered = not (Keeper_tooling.Shell_costume.ir_keeps_a_shell ir) in
           let costume_findings =
             Keeper_tool_execute_typed_input.hidden_script_findings
               ~sandbox:dispatch_sandbox

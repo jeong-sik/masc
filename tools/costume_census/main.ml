@@ -75,19 +75,19 @@ let () =
                     (* Not an estimate of what step 4 lowers: the real
                        lowering is called, so the guards it applies are the
                        ones counted. A costume still wearing its shell after
-                       lowering was held back by one of them. *)
+                       lowering was held back by one of them.
+
+                       Every stage is asked, and by a predicate that strips the
+                       directory. Counting a [Pipeline] as lowered because it
+                       was not a [Simple], and reading [/bin/zsh] as a program
+                       that is not a shell, both counted up. *)
                     (match Yojson.Safe.Util.member "input" json with
                      | `Assoc _ as input ->
                        (match Execute_input.of_json input with
                         | Ok parsed ->
                           (match Execute_input.to_shell_ir_unvalidated parsed with
-                           | Ok (Masc_exec.Shell_ir.Simple simple) ->
-                             if not
-                                  (Costume.names_a_shell
-                                     (Masc_exec.Exec_program.to_string
-                                        simple.Masc_exec.Shell_ir.bin))
-                             then incr lowered
-                           | Ok _ -> incr lowered
+                           | Ok ir ->
+                             if not (Costume.ir_keeps_a_shell ir) then incr lowered
                            | Error _ -> ())
                         | Error _ -> ())
                      | _ -> ());

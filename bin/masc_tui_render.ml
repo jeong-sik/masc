@@ -4199,7 +4199,7 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
     ; (if columns.kcol_show_flags then
          " " ^ Printf.sprintf "%-*s" Render_schedule.keeper_flags_width "A P S"
        else "")
-    ; Printf.sprintf " %*s" Render_schedule.keeper_turns_width "TURNS"
+    ; Printf.sprintf " %*s" Render_schedule.keeper_last_turn_width "LAST"
     ; (if columns.kcol_show_runtime then
          " " ^ fit_width "LIFECYCLE / RUNTIME" columns.kcol_runtime
        else "")
@@ -4291,8 +4291,22 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
          with every other cell colour. *)
       (if yolo then (Theme.bad ()) ^ name ^ Ansi.reset else name)
     ; (if columns.kcol_show_flags then " " ^ keeper_flag_cell runtime else "")
-    ; Printf.sprintf " %s%*d%s" Ansi.dim Render_schedule.keeper_turns_width
-        keeper.k_total_turns Ansi.reset
+    ; (* The lifetime turn count said nothing an operator acts on; how long
+         since this keeper last turned does. A running row already carries
+         its elapsed time in the HEALTH cell, so this column answers the
+         idle rows. A keeper that never turned, or one whose last turn reads
+         from the future, draws the dash every unknown draws. The count
+         itself still lives on the detail pane. *)
+      (let last_turn_age =
+         match Masc_domain.parse_iso8601_opt keeper.k_last_turn_ts with
+         | None -> "\xe2\x80\x94"
+         | Some since -> (
+             match Message_layout.age_text ~now ~since with
+             | Some text -> text
+             | None -> "\xe2\x80\x94")
+       in
+       Printf.sprintf " %s%*s%s" Ansi.dim
+         Render_schedule.keeper_last_turn_width last_turn_age Ansi.reset)
     ; (if columns.kcol_show_runtime then
          " " ^ Ansi.gray
          ^ keeper_runtime_cell ~width:columns.kcol_runtime runtime
@@ -4531,7 +4545,9 @@ let render_keeper_list (state : state) =
 
   let columns = Render_schedule.allocate_keeper_columns ~inner_width:inner in
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  Health = heartbeat/readiness   Lifecycle = keeper process   A = autoboot   P = autonomous turns";
+    "  Health = heartbeat/readiness   Lifecycle = keeper process   Last = time since last turn";
+  box_line_styled buf cols ~style:(Theme.recede ())
+    "  A = autoboot   P = autonomous turns   S = sandbox (D docker \xc2\xb7 M microvm \xc2\xb7 L local)";
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
   Buffer.add_string buf
     (Printf.sprintf " %s%s%s\n" Ansi.gray (draw_hline (cols - 2)) Ansi.reset);

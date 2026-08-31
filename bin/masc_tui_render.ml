@@ -9912,11 +9912,11 @@ let tools_pane_strip (state : state) =
     else Ansi.dim ^ " " ^ label ^ Ansi.reset
   in
   String.concat (Ansi.dim ^ " |" ^ Ansi.reset)
-    [ name Masc_tui_types.Tools_surface "surface"
-    ; name Masc_tui_types.Tools_async "async"
-    ; name Masc_tui_types.Tools_activations "activations"
+    [ name Masc_tui_types.Tools_surface "available"
+    ; name Masc_tui_types.Tools_async "async runs"
+    ; name Masc_tui_types.Tools_activations "receipts"
     ; name Masc_tui_types.Tools_usage "usage"
-    ; name Masc_tui_types.Tools_catalog "catalog"
+    ; name Masc_tui_types.Tools_catalog "all tools"
     ]
   ^ Ansi.dim ^ "  p:next" ^ Ansi.reset
 ;;
@@ -10761,7 +10761,35 @@ let tools_display_lines (state : state) =
      the other four started past row 120 of a list a terminal shows twenty of.
      They were not missing; they were behind a section that never ends, with
      nothing saying so. *)
-  let display_lines =
+  let explanation =
+    match state.tools_pane with
+    | Masc_tui_types.Tools_surface ->
+        [ Theme.info (), " What this answers — what can this Keeper call now?"
+        ; Ansi.dim, "   Effective runtime delivery plus loaded Skills."
+        ; Ansi.dim, "   Available does not mean used; open usage for evidence."
+        ]
+    | Masc_tui_types.Tools_async ->
+        [ Theme.info (), " What this answers — what is the async composition broker doing?"
+        ; Ansi.dim, "   Live queued, running, and recovery state."
+        ; Ansi.dim, "   This is neither the tool catalog nor usage history."
+        ]
+    | Masc_tui_types.Tools_activations ->
+        [ Theme.info (), " What this answers — which Skill receipts exist in this Keeper session?"
+        ; Ansi.dim, "   Invocations, delivered bodies/resources, and observed actions."
+        ; Ansi.dim, "   Missing means not retained here; it does not prove never used."
+        ]
+    | Masc_tui_types.Tools_usage ->
+        [ Theme.info (), " What this answers — which Skills were actually used by each Keeper?"
+        ; Ansi.dim, "   Retained invocation/delivery/action totals and last-use time."
+        ; Ansi.dim, "   Skills with no retained use are omitted."
+        ]
+    | Masc_tui_types.Tools_catalog ->
+        [ Theme.info (), " What this answers — which tools are registered anywhere in MASC?"
+        ; Ansi.dim, "   Registration is not delivery. Surfaces names reachability."
+        ; Ansi.dim, "   A tool with surfaces=none is currently unreachable."
+        ]
+  in
+  let pane_lines =
     match state.tools_pane with
     | Masc_tui_types.Tools_surface -> Lazy.force effective_lines
     | Masc_tui_types.Tools_async -> async_request_observation_lines state
@@ -10769,7 +10797,7 @@ let tools_display_lines (state : state) =
     | Masc_tui_types.Tools_usage -> Lazy.force usage_matrix_lines
     | Masc_tui_types.Tools_catalog -> Lazy.force catalog_lines
   in
-  display_lines
+  explanation @ pane_lines
 ;;
 
 let tools_scrolled_for_lines state display_lines =
@@ -11800,6 +11828,41 @@ let render_code (state : state) =
              else "up")));
   finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf
 
+let resource_display_name (resource : Masc_tui_mcp.resource) =
+  match resource.title with
+  | Some title when String.trim title <> "" -> title
+  | Some _ | None -> resource.name
+
+let resource_detail_field ~width label value =
+  let prefix = "  " ^ label ^ ": " in
+  let continuation = String.make (Message_layout.display_width prefix) ' ' in
+  match
+    Message_layout.wrap_words
+      ~max_cells:(max 1 (width - Message_layout.display_width prefix))
+      (Terminal_text.single_line value)
+  with
+  | [] -> [ Ansi.dim, prefix ^ "not advertised" ]
+  | first :: rest ->
+      (Ansi.dim, prefix ^ first)
+      :: List.map (fun line -> Ansi.dim, continuation ^ line) rest
+
+let resource_metadata_lines (resource : Masc_tui_mcp.resource) ~width =
+  resource_detail_field ~width "Meaning"
+    "Read-only MCP context advertised by the connected server; reading it does not run a tool."
+  @ resource_detail_field ~width "URI" resource.uri
+  @ resource_detail_field ~width "Name" resource.name
+  @ (match resource.description with
+     | Some description when String.trim description <> "" ->
+         resource_detail_field ~width "Purpose" description
+     | Some _ | None -> resource_detail_field ~width "Purpose" "not advertised")
+  @ resource_detail_field ~width "Format"
+      (Option.value ~default:"not advertised" resource.mime_type)
+  @ (match resource.size with
+     | None -> []
+     | Some size ->
+         resource_detail_field ~width "Advertised size"
+           (Masc_tui_context_inspector.format_bytes size))
+
 let render_resources (state : state) =
   let drawn_resource_scroll = ref state.resource_scroll in
   let terminal_rows, cols = get_terminal_size () in
@@ -11852,8 +11915,9 @@ let render_resources (state : state) =
     in
     for i = 0 to list_rows_budget - 1 do
       match List.nth_opt rows_list (first + i) with
-      | Some (_, name) ->
+      | Some resource ->
           let selected = first + i = cursor in
+          let name = resource_display_name resource in
           let line =
             if selected then
               Theme.selection ^ " " ^ name
@@ -11870,10 +11934,27 @@ let render_resources (state : state) =
     framed_bottom pane_buf pane_cols
   in
   let content_pane pane_buf pane_cols =
+    let selected_resource = List.nth_opt rows_list cursor in
+    let error_uri = Option.map fst state.resource_content_error in
+    let content_uri = Option.map fst state.resource_content in
+    let shown_uri =
+      match state.resource_pending_uri, error_uri, content_uri with
+      | Some uri, _, _ -> Some uri
+      | None, Some uri, _ -> Some uri
+      | None, None, Some uri -> Some uri
+      | None, None, None -> Option.map (fun resource -> resource.Masc_tui_mcp.uri) selected_resource
+    in
+    let shown_resource =
+      Option.bind shown_uri (fun uri ->
+          List.find_opt
+            (fun (resource : Masc_tui_mcp.resource) ->
+               String.equal resource.uri uri)
+            rows_list)
+    in
     let title =
-      match state.resource_content with
-      | Some (uri, _) -> Terminal_text.single_line uri
-      | None -> "(Enter reads the selected resource)"
+      match shown_resource with
+      | Some resource -> "Resource · " ^ resource_display_name resource
+      | None -> "Resource detail"
     in
     box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
@@ -11883,34 +11964,52 @@ let render_resources (state : state) =
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = framed_content_height ~rows in
-    (match state.resource_content_error, state.resource_content with
-     | Some detail, _ ->
-         box_line pane_buf pane_cols
-           ((Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset);
-         for _ = 2 to content_height do
-           box_empty pane_buf pane_cols
-         done
-     | None, None ->
-         for _ = 1 to content_height do
-           box_empty pane_buf pane_cols
-         done
-     | None, Some (_, lines) ->
-         let rendered =
-           Message_layout.wrap_body ~markdown:document_markdown
-             ~max_cells:(max 1 (pane_cols - 8))
-             ~sanitize:Terminal_text.single_line (String.concat "\n" lines)
-         in
-         let total_lines = List.length rendered in
-         let max_scroll = max 0 (total_lines - content_height) in
-         let scroll = max 0 (min state.resource_scroll max_scroll) in
-         (* The pane is the only place that knows how many rows the text
-            actually used, so it reports the row it could draw back out. *)
-         drawn_resource_scroll := scroll;
-         for i = 0 to content_height - 1 do
-           match List.nth_opt rendered (scroll + i) with
-           | Some line -> box_line pane_buf pane_cols ("  " ^ line)
-           | None -> box_empty pane_buf pane_cols
-         done);
+    let width = max 1 (pane_cols - 8) in
+    let metadata =
+      match shown_resource with
+      | None ->
+          [ Ansi.dim,
+            "  Select a server-advertised resource and press Enter to read its current contents."
+          ]
+      | Some resource -> resource_metadata_lines resource ~width
+    in
+    let body =
+      match state.resource_pending_uri, state.resource_content_error,
+            state.resource_content, shown_uri with
+      | Some pending_uri, _, _, Some uri when String.equal pending_uri uri ->
+          [ Theme.info (), "  Loading current contents…" ]
+      | None, Some (error_uri, detail), _, Some uri
+        when String.equal error_uri uri ->
+          [ Theme.bad (), "  Read failed: " ^ Terminal_text.single_line detail ]
+      | None, None, Some (content_uri, lines), Some uri
+        when String.equal content_uri uri ->
+          let source = String.concat "\n" lines in
+          let source =
+            match shown_resource with
+            | None -> source
+            | Some resource ->
+                Masc_tui_mcp.resource_body_for_markdown resource source
+          in
+          (Ansi.dim, "  Contents")
+          :: (Message_layout.wrap_body ~markdown:document_markdown
+                ~max_cells:width ~sanitize:Terminal_text.single_line source
+              |> List.map (fun line -> Ansi.reset, "  " ^ line))
+      | Some _, _, _, _ | None, Some _, _, _ | None, None, Some _, _
+      | None, None, None, _ ->
+          [ Ansi.dim, "  Enter reads the selected resource's current contents." ]
+    in
+    let rendered = metadata @ [ Ansi.dim, "" ] @ body in
+    let total_lines = List.length rendered in
+    let max_scroll = max 0 (total_lines - content_height) in
+    let scroll = max 0 (min state.resource_scroll max_scroll) in
+    (* The pane is the only place that knows how many rows the metadata and
+       text actually used, so it reports the row it could draw back out. *)
+    drawn_resource_scroll := scroll;
+    for i = 0 to content_height - 1 do
+      match List.nth_opt rendered (scroll + i) with
+      | Some (style, line) -> box_line_styled pane_buf pane_cols ~style line
+      | None -> box_empty pane_buf pane_cols
+    done;
     box_bottom pane_buf pane_cols
   in
   (if split then begin
@@ -11928,9 +12027,8 @@ let render_resources (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Printf.sprintf
-            "j/k:%s  h/l:pane  Enter:read  Ctrl-W:pane  Esc:list  r:reload  Tab:next"
-            (if state.resource_focus = Right_pane then "scroll text" else "move")));
+         (Masc_tui_keys.footer_hints_resources
+            ~detail_focus:(state.resource_focus = Right_pane)));
   finish_surface state ~clamped:(Resource_scroll !drawn_resource_scroll)
     ~surface_key:"resources" ~rows:terminal_rows ~cols buf
 

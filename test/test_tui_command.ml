@@ -228,6 +228,65 @@ let test_the_request_names_the_tool_and_its_arguments () =
        | _ -> fail "params missing")
   | _ -> fail "request is not an object"
 
+let resources_answer ~id resources =
+  Yojson.Safe.to_string
+    (`Assoc
+      [ ("jsonrpc", `String "2.0")
+      ; ("id", `String id)
+      ; ("result", `Assoc [ ("resources", `List resources) ])
+      ])
+
+let test_resource_catalog_keeps_explanatory_metadata () =
+  let body =
+    resources_answer ~id:"res-1"
+      [ `Assoc
+          [ ("uri", `String "masc://status.json")
+          ; ("name", `String "MASC Status JSON")
+          ; ("title", `String "Project Status")
+          ; ("description", `String "Current project status snapshot")
+          ; ("mimeType", `String "application/json")
+          ; ("size", `Int 4096)
+          ]
+      ; `Assoc [ ("uri", `String "masc://minimal") ]
+      ]
+  in
+  match Mcp.resources_of_body ~request_id:"res-1" body with
+  | Error detail -> failf "expected resources, got %s" detail
+  | Ok [ full; minimal ] ->
+      check string "uri" "masc://status.json" full.Mcp.uri;
+      check string "name" "MASC Status JSON" full.name;
+      check (option string) "title" (Some "Project Status") full.title;
+      check (option string) "purpose" (Some "Current project status snapshot")
+        full.description;
+      check (option string) "format" (Some "application/json") full.mime_type;
+      check (option int) "size" (Some 4096) full.size;
+      check string "missing name falls back to uri" "masc://minimal" minimal.name;
+      check (option string) "missing purpose stays absent" None minimal.description
+  | Ok rows -> failf "expected two resources, got %d" (List.length rows)
+
+let test_json_resource_body_is_pretty_fenced () =
+  let resource : Mcp.resource =
+    { uri = "masc://status.json"
+    ; name = "status"
+    ; title = None
+    ; description = None
+    ; mime_type = Some "application/problem+json; charset=utf-8"
+    ; size = None
+    }
+  in
+  let rendered = Mcp.resource_body_for_markdown resource "{\"answer\":42,\"ok\":true}" in
+  let prefix = "```json\n" and suffix = "\n```" in
+  check bool "json fence opens" true (String.starts_with ~prefix rendered);
+  check bool "json fence closes" true (String.ends_with ~suffix rendered);
+  let body_length = String.length rendered - String.length prefix - String.length suffix in
+  let inside = String.sub rendered (String.length prefix) body_length in
+  check bool "pretty body remains the same JSON" true
+    (Yojson.Safe.from_string inside
+     = `Assoc [ ("answer", `Int 42); ("ok", `Bool true) ]);
+  let plain = { resource with mime_type = Some "text/markdown" } in
+  check string "markdown remains authored text" "# Status\nready"
+    (Mcp.resource_body_for_markdown plain "# Status\nready")
+
 let describe_hint = function
   | Command.No_command -> "none"
   | Command.Chosen entry -> "chosen:" ^ entry.Command.word
@@ -519,5 +578,11 @@ let () =
             test_answers_this_cannot_use_say_why
         ; test_case "the request names the tool and its arguments" `Quick
             test_the_request_names_the_tool_and_its_arguments
+        ] )
+    ; ( "resources"
+      , [ test_case "catalog keeps explanatory metadata" `Quick
+            test_resource_catalog_keeps_explanatory_metadata
+        ; test_case "JSON body is pretty fenced" `Quick
+            test_json_resource_body_is_pretty_fenced
         ] )
     ]

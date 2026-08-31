@@ -292,6 +292,8 @@ let for_surface = function
       ; b Navigate "h/l" "pane" ~help:"focus the resource list or text"
       ; b Navigate "Ctrl-W" "focus" ~help:"switch between resource list and text"
       ; b Navigate "J / K" "scroll text"
+      ; b Navigate "[ / ]" "previous / next"
+          ~help:"while the detail is focused, read the adjacent resource"
       ; b Act "Enter" "read" ~help:"read the selected resource"
       ; b Act "Esc" "list" ~help:"back to the list"
       ; b Meta "r" "reload"
@@ -347,7 +349,7 @@ let for_surface = function
       [ b Navigate "j/k" "scroll"
       ; b Navigate "Home/End" "top/bottom"
       ; b Navigate "p" "section"
-          ~help:"surface / async / activations / usage / catalog"
+          ~help:"available / async runs / receipts / usage / all tools"
       ; b Navigate "J/K" "Skill" ~help:"select a published Skill"
       ; b Navigate "[/]" "Keeper" ~help:"change the effective Keeper surface"
       ; b Act "e" "edit Skill"
@@ -389,6 +391,14 @@ let footer_hints_overview ~task_focus =
          if b.key = "j/k" then
            { b with label = (if task_focus then "tasks" else "events") }
          else b)
+  |> hints_of_bindings
+
+let footer_hints_resources ~detail_focus =
+  for_surface Resources
+  |> List.map (fun binding ->
+         if String.equal binding.key "j/k" then
+           { binding with label = (if detail_focus then "scroll text" else "move") }
+         else binding)
   |> hints_of_bindings
 
 let opens_keepers ~message_mode key =

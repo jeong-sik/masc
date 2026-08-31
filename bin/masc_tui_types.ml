@@ -1510,12 +1510,14 @@ type state = {
   (* The Config surface: runtime.toml's path and text as the server read
      them, refreshed on entry and after every save. *)
   (* The Resources surface: the MCP resource inventory, and the one read
-     the content pane shows, stamped with its uri. *)
-  mutable resources_list: (string * string) list option;
+     the content pane shows, stamped with its uri. [resource_pending_uri]
+     rejects a slow reply after the operator has stepped to another row. *)
+  mutable resources_list: Masc_tui_mcp.resource list option;
   mutable resources_error: string option;
   mutable resources_cursor: int;
   mutable resource_content: (string * string list) option;
-  mutable resource_content_error: string option;
+  mutable resource_content_error: (string * string) option;
+  mutable resource_pending_uri: string option;
   mutable resource_scroll: int;
   mutable resource_focus: pane_focus;
   (* The Config surface owns the files the server reads. runtime.toml is one;
@@ -2332,6 +2334,7 @@ let create_state
   resources_cursor = 0;
   resource_content = None;
   resource_content_error = None;
+  resource_pending_uri = None;
   resource_scroll = 0;
   resource_focus = Left_pane;
   config_pane = Config_runtime;

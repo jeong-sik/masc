@@ -106,6 +106,16 @@ let test_tools_footer_carries_the_keeper_axis () =
     "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [/]:Keeper  e:edit Skill  Esc:overview  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Tools)
 
+let test_resources_footer_steps_through_detail () =
+  let tail =
+    "  h/l:pane  Ctrl-W:focus  J / K:scroll text  [ / ]:previous / next  Enter:read  Esc:list  r:reload  Tab:next"
+  in
+  check str "list names adjacent detail navigation" ("j/k:move" ^ tail)
+    (Masc_tui_keys.footer_hints_resources ~detail_focus:false);
+  check str "detail names scrolling and adjacent navigation"
+    ("j/k:scroll text" ^ tail)
+    (Masc_tui_keys.footer_hints_resources ~detail_focus:true)
+
 let test_repositories_footer_offers_code_and_git_changes () =
   check str "repositories names the Code and Git changes paths"
     "j/k:scroll  Enter:browse  d:Git changes  a:add  Left / Esc:back  r:refresh  Tab:next  q:quit"
@@ -592,6 +602,8 @@ let () =
             test_plain_listing_footer_shape
         ; Alcotest.test_case "Tools carries the Keeper axis" `Quick
             test_tools_footer_carries_the_keeper_axis
+        ; Alcotest.test_case "Resources steps through detail" `Quick
+            test_resources_footer_steps_through_detail
         ; Alcotest.test_case "Lanes opens the selected Keeper" `Quick
             test_lanes_footer_opens_the_selected_keeper
         ; Alcotest.test_case "Lanes reserves standalone matrix rows" `Quick

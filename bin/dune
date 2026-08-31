@@ -751,6 +751,7 @@
  (libraries
   masc
   masc_tui_model_runtime_table
+  masc_tui_mcp
   masc.masc_goal
   masc.masc_types
   masc_tui_acting

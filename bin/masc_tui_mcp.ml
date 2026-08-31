@@ -15,9 +15,23 @@ type outcome = {
   is_error : bool;
 }
 
+type resource = {
+  uri : string;
+  name : string;
+  title : string option;
+  description : string option;
+  mime_type : string option;
+  size : int option;
+}
+
 let string_field fields name =
   match List.assoc_opt name fields with
   | Some (`String value) -> Some value
+  | Some _ | None -> None
+
+let int_field fields name =
+  match List.assoc_opt name fields with
+  | Some (`Int value) -> Some value
   | Some _ | None -> None
 
 (* The response object, whichever framing carried it. An SSE body holds it
@@ -208,7 +222,14 @@ let resources_of_body ~request_id body =
                        | Some name when String.trim name <> "" -> name
                        | Some _ | None -> uri
                      in
-                     Some (uri, name)
+                     Some
+                       { uri
+                       ; name
+                       ; title = string_field fields "title"
+                       ; description = string_field fields "description"
+                       ; mime_type = string_field fields "mimeType"
+                       ; size = int_field fields "size"
+                       }
                  | None -> None)
              | _ -> None)
            rows)
@@ -239,6 +260,32 @@ let resource_text_of_body ~request_id body =
       in
       Ok (String.concat "\n" rendered)
   | Some _ | None -> Error "resources/read answered with no contents"
+
+let resource_body_for_markdown resource text =
+  let media_type =
+    resource.mime_type
+    |> Option.map (fun value ->
+           let media_type =
+             match String.split_on_char ';' value with
+             | first :: _ -> first
+             | [] -> value
+           in
+           media_type |> String.trim |> String.lowercase_ascii)
+  in
+  let is_json =
+    match media_type with
+    | Some "application/json" -> true
+    | Some value -> String.ends_with ~suffix:"+json" value
+    | None -> false
+  in
+  if is_json then
+    let pretty =
+      match Yojson.Safe.from_string text with
+      | json -> Yojson.Safe.pretty_to_string json
+      | exception Yojson.Json_error _ -> text
+    in
+    "```json\n" ^ pretty ^ "\n```"
+  else text
 
 (* Cancel is an exit-class action on the masc_transition contract: it wants
    [reason] and a non-empty [handoff_context.summary]. The one operator-typed

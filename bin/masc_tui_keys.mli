@@ -48,6 +48,10 @@ val footer_hints_overview : task_focus:bool -> string
     j/k by focus and drops the keys dead in the other mode — the table
     stays the SSOT, no second key list. *)
 
+val footer_hints_resources : detail_focus:bool -> string
+(** The Resources footer, with [j/k] relabelled for the focused pane. All
+    other keys still project from {!for_surface}. *)
+
 val footer_hints_fusion_detail : scroll:int -> max_scroll:int -> string
 (** The Fusion detail footer. Separate from {!footer_hints} because it appends
     the live scroll position, which the static per-surface table cannot know. *)

@@ -1503,7 +1503,7 @@ type async_msg =
       (Tui_decode.runtime_param_row list, string) result
   | Prompts_loaded of (Tui_decode.prompts_snapshot, string) result
   | Librarian_input_loaded of string * (string list, string) result
-  | Resources_listed of ((string * string) list, string) result
+  | Resources_listed of (Masc_tui_mcp.resource list, string) result
   | Code_entries_loaded of
       string * (Masc.Tui_decode.workspace_tree_node list, string) result
   | Code_file_loaded of string * (string, string) result
@@ -2346,6 +2346,10 @@ let launch_resources_list state ~mailbox =
       enqueue_async mailbox (Resources_listed (Error "Eio switch is unavailable"))
 
 let launch_resource_read state ~mailbox ~uri =
+  state.resource_pending_uri <- Some uri;
+  state.resource_content <- None;
+  state.resource_content_error <- None;
+  state.resource_scroll <- 0;
   let host = server_peer_host in
   let port = state.port in
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
@@ -6876,6 +6880,16 @@ let open_fusion_detail state ~mailbox =
       state.fusion_detail_error <- None;
       launch_fusion_detail_load state ~mailbox ~run_id:run.fur_run_id
 
+let open_selected_resource state ~mailbox =
+  match
+    Option.bind state.resources_list (fun resources ->
+        List.nth_opt resources state.resources_cursor)
+  with
+  | None -> ()
+  | Some resource ->
+      state.resource_focus <- Right_pane;
+      launch_resource_read state ~mailbox ~uri:resource.Masc_tui_mcp.uri
+
 (* One step through the list a detail was opened from, without closing it.
    Reading a queue meant Esc, move, Enter for every row -- three keys to do
    what one does on Changes and the Keeper detail tabs, both of which already
@@ -7747,23 +7761,62 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       | Ok rows ->
           let rows =
             List.map
-              (fun (uri, name) ->
-                ( Masc.Tui_decode.sanitize_terminal_text uri,
-                  Masc.Tui_decode.sanitize_terminal_text name ))
+              (fun (resource : Masc_tui_mcp.resource) ->
+                { resource with
+                  uri = Masc.Tui_decode.sanitize_terminal_text resource.uri
+                ; name = Masc.Tui_decode.sanitize_terminal_text resource.name
+                ; title =
+                    Option.map Masc.Tui_decode.sanitize_terminal_text
+                      resource.title
+                ; description =
+                    Option.map Masc.Tui_decode.sanitize_terminal_text
+                      resource.description
+                ; mime_type =
+                    Option.map Masc.Tui_decode.sanitize_terminal_text
+                      resource.mime_type
+                })
               rows
           in
           state.resources_list <- Some rows;
           state.resources_error <- None;
-          state.resources_cursor <-
-            max 0 (min state.resources_cursor (List.length rows - 1))
+          let open_uri =
+            match state.resource_pending_uri, state.resource_content_error,
+                  state.resource_content with
+            | Some uri, _, _ -> Some uri
+            | None, Some (uri, _), _ -> Some uri
+            | None, None, Some (uri, _) -> Some uri
+            | None, None, None -> None
+          in
+          let rec index_of_uri index uri = function
+            | [] -> None
+            | (resource : Masc_tui_mcp.resource) :: rest ->
+                if String.equal resource.uri uri then Some index
+                else index_of_uri (index + 1) uri rest
+          in
+          (match Option.bind open_uri (fun uri -> index_of_uri 0 uri rows) with
+           | Some cursor -> state.resources_cursor <- cursor
+           | None ->
+               state.resources_cursor <-
+                 max 0 (min state.resources_cursor (List.length rows - 1));
+               if Option.is_some open_uri then begin
+                 state.resource_pending_uri <- None;
+                 state.resource_content <- None;
+                 state.resource_content_error <- None;
+                 state.resource_scroll <- 0
+               end)
       | Error detail -> state.resources_error <- Some detail)
   | Resource_read (uri, result) -> (
-      match result with
-      | Ok lines ->
-          state.resource_content <- Some (uri, lines);
-          state.resource_content_error <- None;
-          state.resource_scroll <- 0
-      | Error detail -> state.resource_content_error <- Some detail)
+      match state.resource_pending_uri with
+      | Some pending_uri when String.equal pending_uri uri ->
+          state.resource_pending_uri <- None;
+          (match result with
+           | Ok lines ->
+               state.resource_content <- Some (uri, lines);
+               state.resource_content_error <- None;
+               state.resource_scroll <- 0
+           | Error detail ->
+               state.resource_content_error <- Some (uri, detail))
+      | Some _ | None -> ())
   | Github_identity_view_loaded (keeper_name, result) -> (
       let still_selected =
         match List.nth_opt state.keepers state.keeper_cursor with
@@ -11275,6 +11328,18 @@ and is loaded on demand through keeper_skill.
        | Some (("[" | "]") as bracket) when state.view = Changes ->
            cycle_changes_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
+       | Some (("[" | "]") as bracket)
+         when state.view = Resources && state.resource_focus = Right_pane ->
+           step_detail_cursor
+             ~count:
+               (match state.resources_list with
+                | None -> 0
+                | Some resources -> List.length resources)
+             ~cursor:state.resources_cursor
+             ~delta:(if bracket = "]" then 1 else -1)
+             ~set_cursor:(fun cursor -> state.resources_cursor <- cursor)
+             ~reopen:(fun () ->
+               open_selected_resource state ~mailbox:async_messages)
        | Some (("[" | "]") as bracket) when state.view = Tools ->
            cycle_tools_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
@@ -11336,14 +11401,7 @@ and is loaded on demand through keeper_skill.
                    ~keeper_name:keeper.k_name ~provider_ids:attached
            | Some _, (Some _ | None) | None, _ -> ())
        | Some "\r" when state.view = Resources ->
-           (match
-              Option.bind state.resources_list (fun rows ->
-                  List.nth_opt rows state.resources_cursor)
-            with
-            | Some (uri, _) ->
-                state.resource_focus <- Right_pane;
-                launch_resource_read state ~mailbox:async_messages ~uri
-            | None -> ())
+           open_selected_resource state ~mailbox:async_messages
        | Some "J" when state.view = Resources ->
            state.resource_scroll <- state.resource_scroll + 1
        | Some "K" when state.view = Resources ->

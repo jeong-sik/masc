@@ -40,13 +40,30 @@ val resources_list_request_body : request_id:string -> string
 val resources_read_request_body : request_id:string -> uri:string -> string
 (** The [resources/read] request for one resource. *)
 
+type resource = {
+  uri : string;
+  name : string;
+  title : string option;
+  description : string option;
+  mime_type : string option;
+  size : int option;
+}
+(** Metadata advertised by [resources/list]. Optional fields remain optional:
+    absence is different from an empty value supplied by the server. *)
+
 val resources_of_body :
-  request_id:string -> string -> ((string * string) list, string) result
-(** Read a [resources/list] answer into [(uri, name)] rows, in server order. *)
+  request_id:string -> string -> (resource list, string) result
+(** Read a [resources/list] answer in server order without discarding the
+    fields that explain what each resource contains. *)
 
 val resource_text_of_body :
   request_id:string -> string -> (string, string) result
 (** Read a [resources/read] answer's concatenated text contents. *)
+
+val resource_body_for_markdown : resource -> string -> string
+(** Prepare text for the document renderer. JSON resources are parsed,
+    pretty-printed, and fenced as [json] so the shared syntax lexer can colour
+    them; other resources retain the server's text. *)
 
 val task_cancel_arguments :
   task_id:string -> reason:string -> (string * Yojson.Safe.t) list

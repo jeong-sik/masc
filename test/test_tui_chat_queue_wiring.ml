@@ -251,6 +251,31 @@ let test_the_header_names_only_unusual_modes () =
     (String.length (summary false full tools_full))
 ;;
 
+let test_chat_header_resolves_the_effective_modes () =
+  let labels ?keeper ?workspace yolo =
+    Tui_types.keeper_chat_mode_labels ~yolo ~keeper_gate_mode:keeper
+      ~workspace_gate_mode:workspace
+  in
+  check (pair string string) "defaults are explicit"
+    ("AUTO", "auto_judge")
+    (labels ~workspace:"auto_judge" false);
+  check (pair string string) "YOLO does not hide inherited Gate mode"
+    ("YOLO", "manual")
+    (labels ~keeper:"workspace" ~workspace:"manual" true);
+  check (pair string string) "Keeper override wins"
+    ("AUTO", "always_allow")
+    (labels ~keeper:"always_allow" ~workspace:"manual" false);
+  check (pair string string) "unread Gate mode stays unknown"
+    ("AUTO", "?") (labels false)
+;;
+
+let test_skill_usage_time_does_not_invent_never () =
+  check string "observed time stays exact" "2026-08-28T03:04:05Z"
+    (Tui_types.skill_last_used_label (Some "2026-08-28T03:04:05Z"));
+  check string "missing retained coverage is not lifetime absence"
+    "time unavailable" (Tui_types.skill_last_used_label None)
+;;
+
 let test_chat_visibility_defaults_and_cycles () =
   let default =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
@@ -676,6 +701,10 @@ let () =
             test_chat_visibility_defaults_and_cycles
         ; test_case "the header names only unusual modes" `Quick
             test_the_header_names_only_unusual_modes
+        ; test_case "chat header resolves effective modes" `Quick
+            test_chat_header_resolves_the_effective_modes
+        ; test_case "Skill usage time stays honest" `Quick
+            test_skill_usage_time_does_not_invent_never
         ; test_case "chat shortcuts reach visibility state" `Quick
             test_chat_shortcuts_reach_visibility_state
         ; test_case "the budget and the pane agree about queue rows" `Quick

@@ -130,7 +130,7 @@ let context_summary = function
 
 let context_header_item ~max_cells observation =
   match context_summary observation with
-  | Context_measured { ratio; _ } ->
+  | Context_measured { ratio; tokens; maximum; _ } ->
       (* The key travels with the number. This line was the only place the
          pane said how full the context is, and there was no way in from it:
          the breakdown lived behind [/context], which is in [/help] and
@@ -139,9 +139,23 @@ let context_header_item ~max_cells observation =
          Dropped first when the header runs out of room -- the figure is what
          the line is for, and a reader who has met the key once does not need
          it printed again. *)
+      let grouped_int value =
+        let digits = string_of_int value in
+        let length = String.length digits in
+        let grouped = Buffer.create (length + (length / 3)) in
+        String.iteri
+          (fun index char ->
+            if index > 0 && (length - index) mod 3 = 0 then
+              Buffer.add_char grouped ',';
+            Buffer.add_char grouped char)
+          digits;
+        Buffer.contents grouped
+      in
       let figure = Printf.sprintf "Context %.0f%% used" (ratio *. 100.0) in
-      let with_key = figure ^ " \xc2\xb7 ^X" in
-      if max_cells >= cells with_key then Some with_key
-      else if max_cells >= cells figure then Some figure
-      else None
+      let measured =
+        Printf.sprintf "Context %.0f%% \xc2\xb7 %s/%s tok" (ratio *. 100.0)
+          (grouped_int tokens) (grouped_int maximum)
+      in
+      [ measured ^ " \xc2\xb7 ^X"; measured; figure ^ " \xc2\xb7 ^X"; figure ]
+      |> List.find_opt (fun candidate -> max_cells >= cells candidate)
   | Context_partial _ | Context_unavailable _ -> None

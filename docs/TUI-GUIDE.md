@@ -401,9 +401,15 @@ when chat opened from detail.
 
 The header joins the selected Keeper's published status with its typed runtime
 phase and producer-owned canonical `runtime_id`, using the same roster reading
-as the Keepers table. It never derives a model by parsing the id. In a narrow
-split pane, only the displayed id is middle-fitted so active reasoning and tool
-visibility modes remain truthful in the header. While no
+as the Keepers table. It also always names the chat approval stance
+(`AUTO` or `YOLO`) and the effective durable Gate mode (`gate:auto_judge`,
+`gate:manual`, or `gate:always_allow`). A Keeper that inherits `workspace`
+shows the observed workspace mode rather than the word `workspace`; an unread
+Gate observation stays `gate:?`. It never derives a model by parsing the id.
+When there is room, the Context item includes percentage, current/maximum token
+counts, and `^X`; narrower panes progressively keep the percentage before
+dropping the whole item. In a narrow split pane, only the displayed runtime id
+is middle-fitted so operational modes remain truthful in the header. While no
 turn is starting or running, `Ctrl-G` selects the next readable Keeper and
 wraps at the end of the roster. Each Keeper keeps its own draft. Every history
 GET carries a load generation, so a response that finishes after the operator
@@ -428,9 +434,11 @@ and full; `Ctrl-D` toggles compact and full tool details. `/thinking` and
 `/tools` expose the same choices by name. `--reasoning` and `--tool-view` can
 override the initial modes.
 
-The folded tool row retains exact outcome counts. The typed calls themselves
-stay attached to the message, so changing the view does not reconstruct facts
-from rendered glyphs. Expanded calls use the finished glyph for a call that
+The folded tool row retains exact outcome counts and ends with
+`Ctrl-D: details / diffs`, so the hidden change view is discoverable from the
+row that owns it. The typed calls themselves stay attached to the message, so
+changing the view does not reconstruct facts from rendered glyphs. Expanded
+calls use the finished glyph for a call that
 returned, `✗` for one that returned an error, `·` for one the trace never saw
 finish, and `?` for one whose outcome the trace did not record. A finished call
 carries its server-recorded duration; an open call has none.
@@ -820,6 +828,18 @@ in place:
 One overlay at a time — opening any of them closes the others, so
 `j`/`k` always has one owner. `Esc` closes the overlay first, then the
 file, then climbs directories.
+
+### Tools
+
+The Tools surface has five panes. Press `p` to move through the selected
+Keeper's effective Tool surface, async requests, Skill activations, cross-Keeper
+Skill usage, and the registered Tool catalog. This keeps the Skill views from
+being buried below a long Tool list.
+
+The Skill Usage pane shows each Keeper's invocation/delivery/action counts and
+the producer-recorded `last_used_at` value. If retained usage coverage has no
+time, it says `time unavailable`; it does not turn bounded evidence into a
+`never used` claim.
 
 ### Runtime
 

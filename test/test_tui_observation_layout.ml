@@ -64,10 +64,10 @@ let test_log_rows_keep_stable_columns () =
   check string "heartbeat channel offset" "hb      "
     (String.sub heartbeat_row 16 8)
 
-let observed ?ratio ?maximum () =
+let observed ?ratio ?(tokens = 100) ?maximum () =
   Decode.Context_observed
     { ratio;
-      tokens = 100;
+      tokens;
       maximum;
       observed_at = "2026-08-21T12:00:00Z";
       turn_ref = "trace-current#4";
@@ -125,7 +125,7 @@ let test_context_header_item_is_measured_and_atomic () =
      the only place the pane said how full the context is, and there was no
      way in from it. *)
   check (option string) "wide enough carries the way in"
-    (Some "Context 50% used \xc2\xb7 ^X")
+    (Some "Context 50% \xc2\xb7 100/200 tok \xc2\xb7 ^X")
     (Layout.context_header_item ~max_cells:40 measured);
   check (option string) "exactly wide enough" (Some "Context 50% used \xc2\xb7 ^X")
     (Layout.context_header_item ~max_cells:21 measured);
@@ -134,6 +134,10 @@ let test_context_header_item_is_measured_and_atomic () =
   check (option string) "one cell short of the key keeps the figure"
     (Some "Context 50% used")
     (Layout.context_header_item ~max_cells:20 measured);
+  let large = observed ~ratio:0.089 ~maximum:1_048_576 ~tokens:93_213 () in
+  check (option string) "large token counts are grouped"
+    (Some "Context 9% \xc2\xb7 93,213/1,048,576 tok \xc2\xb7 ^X")
+    (Layout.context_header_item ~max_cells:38 large);
   check (option string) "one cell short omits the whole item" None
     (Layout.context_header_item ~max_cells:15 measured);
   check (option string) "partial measurement is omitted" None

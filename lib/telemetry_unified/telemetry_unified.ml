@@ -504,10 +504,10 @@ let read_fixed_source dir source ~n ?since_ts ?until_ts () : Yojson.Safe.t list 
       observe_source_read_failure_exn source ~site:"read_fixed_source" exn;
       []
 
-let read_tool_metrics ~base_path ~n ?since_ts ?until_ts () =
+let read_tool_metrics ~masc_root ~n ?since_ts ?until_ts () =
   match
     Tool_metrics_store.read_recent
-      ~base_path
+      ~masc_root
       ?since_ts
       ?until_ts
       ~n
@@ -798,7 +798,7 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
       | Goal_event ->
         read_goal_events ~masc_root ?since_ts ?until_ts ~n:per_source ()
       | Tool_metric ->
-        read_tool_metrics ~base_path ~n:per_source ?since_ts ?until_ts ()
+        read_tool_metrics ~masc_root ~n:per_source ?since_ts ?until_ts ()
       (* Fixed-path sources: Agent_event, Tool_call_io, Tool_usage,
          Agent_core_event use directory-based storage. *)
       | Agent_event | Tool_call_io | Tool_usage | Agent_core_event ->
@@ -1301,9 +1301,9 @@ let summary_json ?keeper_keepalive_interval_s
               ?coverage_gap ()),
         count )
     | Tool_metric ->
-      let path = Tool_metrics_store.database_path ~base_path in
+      let path = Tool_metrics_store.database_path ~masc_root in
       let summary, read_error =
-        match Tool_metrics_store.summary ~base_path with
+        match Tool_metrics_store.summary ~masc_root with
         | Ok summary -> summary, false
         | Error error ->
           observe_source_read_failure

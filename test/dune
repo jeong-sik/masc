@@ -765,7 +765,10 @@
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
-  masc.skill_config masc.skill_reference masc.skill_snapshot))
+  masc.skill_config masc.skill_reference masc.skill_snapshot
+  ;; The fake ssh shim renders its result trailer with the same function
+  ;; the real shim uses, so the wire version cannot be typed in by hand.
+  exec_ssh_protocol))
 
 ; Extracted from the big (tests ...) group above: the fixtures run the typed
 ; dispatch on a keeper meta whose sandbox_profile resolves to Local (the

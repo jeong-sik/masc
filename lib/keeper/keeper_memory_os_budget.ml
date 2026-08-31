@@ -20,9 +20,10 @@ let recorded_at fact = Masc_domain.iso8601_of_unix_seconds fact.first_seen
 
 let render_fact fact =
   Printf.sprintf
-    "- [category=%s recorded=%s] %s"
+    "- [category=%s recorded=%s origin=%s] %s"
     (category_to_string fact.category)
     (recorded_at fact)
+    (origin_kind_to_string fact.origin.kind)
     fact.claim
 ;;
 
@@ -45,6 +46,8 @@ let rendered_bytes facts =
     |> saturated_add (String.length (category_to_string fact.category))
     |> saturated_add (String.length " recorded=")
     |> saturated_add (String.length (recorded_at fact))
+    |> saturated_add (String.length " origin=")
+    |> saturated_add (String.length (origin_kind_to_string fact.origin.kind))
     |> saturated_add (String.length "] ")
     |> saturated_add (String.length fact.claim)
   in

@@ -66,12 +66,17 @@ val read_source :
 
 (** Upsert the single current claim for [source_path]. The exact source bytes
     are read inside this call; callers cannot supply their own digest. A
-    successful replacement clears the pending invalidation for that path. *)
+    successful replacement clears the pending invalidation for that path.
+
+    [ordinary_payload] is evaluated while the shared aggregate lock is held.
+    It must read, but not write or lock, the ordinary current snapshot and
+    return its exact rendered fact payload. *)
 val upsert_file_fact :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> keepers_dir:string
+  -> ordinary_payload:(unit -> (string, string) result)
   -> now:float
   -> claim:string
   -> source_path:string
@@ -81,7 +86,10 @@ val upsert_file_fact :
 (** Re-read every current source under the same sandbox resolver used by the
     write path. Unchanged facts remain current. Changed or unreadable sources
     are atomically removed and replaced by pending invalidations. Invalidations
-    survive subsequent turns until [upsert_file_fact] recreates that path. *)
+    survive subsequent turns until [upsert_file_fact] recreates that path.
+    Revalidation takes only the source-store lock: its invalidation rendering
+    is strictly shorter than the fact it replaces, so it cannot overcommit the
+    aggregate byte reservation. *)
 val revalidate :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> config:Workspace.config
@@ -94,4 +102,5 @@ val revalidate :
 val invalidation_reason_to_string : invalidation_reason -> string
 val render_fact : fact -> string
 val render_invalidation : invalidation -> string
+val render_payload : fact list -> invalidation list -> string
 val to_json : t -> Yojson.Safe.t

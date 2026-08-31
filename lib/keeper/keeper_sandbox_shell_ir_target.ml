@@ -69,10 +69,6 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd ?timeout_sec () =
     Error
       (target_error
          "typed Shell IR Docker dispatch requires a turn sandbox factory (no factory provided)")
-  | Local_profile ->
-    Error
-      (target_error
-         "typed Shell IR Docker dispatch requires a turn sandbox factory (sandbox profile is Local)")
   | Remote_ssh_profile ->
     (* Unreachable from typed dispatch (the Remote_ssh arm there fails
        closed first), but fail closed here too: never improvise a Docker

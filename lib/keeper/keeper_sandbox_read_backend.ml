@@ -208,13 +208,13 @@ let run_command_with_status ?turn_sandbox_factory
        through the SSH path above, not through here. The match below fails
        closed on it before the image guard or any Docker fallback can claim
        the call. *)
-    | No_factory | Local_profile | Remote_ssh_profile -> true
+    | No_factory | Remote_ssh_profile -> true
   in
   match resolve_result with
   | Remote_ssh_profile ->
     Error
       "remote_ssh_read_internal_error: SSH profile reached Docker backend resolution"
-  | Runtime _ | No_factory | Local_profile ->
+  | Runtime _ | No_factory ->
   if no_runtime && String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
   else
@@ -228,7 +228,7 @@ let run_command_with_status ?turn_sandbox_factory
     | Remote_ssh_profile ->
       Error
         "remote_ssh_read_internal_error: SSH profile reached Docker backend dispatch"
-    | No_factory | Local_profile ->
+    | No_factory ->
       match Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present ~image ~timeout_sec with
       | Error err ->
         let typed = Keeper_sandbox_error.Image_not_found { image } in

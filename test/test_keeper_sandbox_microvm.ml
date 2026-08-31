@@ -238,7 +238,7 @@ let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
         it, which the argv pins below and the docker-entrypoint refusals
         keep honest. *)
      ()
-   | No_factory | Local_profile ->
+   | No_factory ->
      Alcotest.fail "expected a runtime for Micro_vm"
    | Remote_ssh_profile ->
      Alcotest.fail "microvm meta must never resolve to Remote_ssh_profile");

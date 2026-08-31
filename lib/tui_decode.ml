@@ -1779,6 +1779,7 @@ type repository = {
   (* The remote as registered, for building links to it. *)
   rp_url : string;
   rp_local_path : string;
+  rp_resolved_local_path : string;
   rp_default_branch : string;
   rp_status : string;
   rp_keepers : string list;
@@ -3271,6 +3272,9 @@ let decode_repository json =
   let* rp_codebase = optional_string_field json "codebase" in
   let* rp_url = required_string_field json "url" in
   let* rp_local_path = required_string_field json "local_path" in
+  let* rp_resolved_local_path =
+    required_string_field json "resolved_local_path"
+  in
   let* rp_default_branch = required_string_field json "default_branch" in
   let* rp_status = required_string_field json "status" in
   let* rp_keepers = decode_string_name_list json "keepers" in
@@ -3282,6 +3286,7 @@ let decode_repository json =
   in
   Ok
     { rp_id; rp_name; rp_codebase; rp_url; rp_local_path
+    ; rp_resolved_local_path
     ; rp_default_branch; rp_status; rp_keepers; rp_auto_sync
     }
 

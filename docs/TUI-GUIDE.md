@@ -725,6 +725,17 @@ claim the post was never written, that the sink failed, or that retention
 expired. A failed refresh leaves the prior reading visible under an explicit
 error instead of redrawing it as an empty result.
 
+### Repositories
+
+등록된 저장소와 서버가 실제로 해석한 체크아웃 경로를 보여준다. 목록의
+`Path` 열은 폭이 부족하면 가운데를 줄여 표시하지만, 선택한 행 아래의
+`Path:`에는 전체 경로가 줄바꿈되어 나온다. 설정에 저장된 값이 상대 경로라면
+`Stored as:`가 함께 표시되고, 담당 Keeper는 `Keepers:`에서 확인할 수 있다.
+
+Right 또는 `Enter`를 누르면 선택한 저장소 범위의 Code 화면으로 이동한다.
+저장소의 Git 변경 사항과 Keeper가 남긴 작업 기록은 서로 다른 정보이므로,
+현재 Changes 화면은 아래 설명처럼 선택한 Keeper의 기록을 계속 보여준다.
+
 ### Changes
 
 Changes follows the Keeper selected on the Keepers surface. `[` and `]` move

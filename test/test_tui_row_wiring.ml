@@ -130,6 +130,27 @@ let test_the_schedule_subject_is_measured_not_given_the_line () =
        ~identifiers:[ "subject_width" ]
      > 0)
 
+(* The repository declaration stores a path that may be relative to the
+   workspace base.  The server owns that base path; a TUI running from a
+   different cwd cannot safely resolve the declaration itself.  Pin both
+   halves of the seam: the route publishes the resolved value, and the table
+   plus selected-row context read it while Keeper assignment moves out of the
+   space-constrained table column. *)
+let test_repositories_show_the_server_resolved_checkout_path () =
+  let producer = "lib/server/server_routes_http_routes_repositories.ml" in
+  Alcotest.(check int) "the route names one resolved path field" 1
+    (Ast_grep.count_string_literals_in_value_binding ~module_path:producer
+       ~binding_name:"repository_json" ~literals:[ "resolved_local_path" ]);
+  Alcotest.(check int) "the route resolves it against the server base" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:producer
+       ~binding_name:"repository_json" ~callee:"Repo_store.local_path");
+  Alcotest.(check bool) "the repository context reads the resolved path" true
+    (reads ~binding_name:"repository_context_lines"
+       ~fields:[ "rp_resolved_local_path" ]
+     > 0);
+  Alcotest.(check bool) "and keeps assignment in the selected-row context" true
+    (reads ~binding_name:"repository_context_lines" ~fields:[ "rp_keepers" ] > 0)
+
 (* The Lanes summary drew one mark for four states while the style beside it
    was green, red or grey. On a column of identical marks the lane failing 133
    of 1095 runs looked exactly like the four that were fine, and the only two
@@ -231,6 +252,8 @@ let () =
             test_the_schedule_subject_is_measured_not_given_the_line
         ; Alcotest.test_case "the schedule detail says what became of the wake"
             `Quick test_the_schedule_detail_says_what_became_of_the_wake
+        ; Alcotest.test_case "Repositories show the server-resolved path"
+            `Quick test_repositories_show_the_server_resolved_checkout_path
         ; Alcotest.test_case "a turn on a keeper that is not running stops"
             `Quick test_a_turn_on_a_keeper_that_is_not_running_stops_moving
         ; Alcotest.test_case "a lane that cannot admit says why" `Quick

@@ -214,6 +214,102 @@ type judge_role =
   | Final_meta
 [@@deriving yojson, show, eq]
 
+(** {1 Actual Fusion tool execution trace}
+
+    Tool availability is configuration, not proof of use. These records are
+    produced only from AGENT_CORE [ToolCalled]/[ToolCompleted] events emitted
+    by an executing panel or judge agent. Payloads are bounded previews with
+    exact original byte counts and an explicit truncation bit. *)
+
+type tool_judge_actor =
+  { role : judge_role
+  ; identity : string
+      (** Execution card identity, including the configured model where known. *)
+  }
+[@@deriving yojson, show, eq]
+
+type tool_trace_actor =
+  | Panel_actor of string
+  | Judge_actor of tool_judge_actor
+[@@deriving yojson, show, eq]
+
+type tool_trace_preview =
+  { text : string
+  ; bytes : int
+  ; truncated : bool
+  }
+[@@deriving yojson, show, eq]
+
+type tool_trace_error_class =
+  | Trace_transient
+  | Trace_deterministic
+  | Trace_unknown
+[@@deriving yojson, show, eq]
+
+type tool_trace_failure =
+  { output : tool_trace_preview
+  ; recoverable : bool
+  ; error_class : tool_trace_error_class option
+  }
+[@@deriving yojson, show, eq]
+
+type tool_trace_completion =
+  | Tool_trace_succeeded of tool_trace_preview
+  | Tool_trace_failed of tool_trace_failure
+[@@deriving yojson, show, eq]
+
+type tool_called_event =
+  { actor : tool_trace_actor
+  ; agent_name : string
+  ; tool_use_id : string
+  ; turn : int
+  ; planned_index : int
+  ; tool_name : string
+  ; input : tool_trace_preview
+  }
+[@@deriving yojson, show, eq]
+
+type tool_completed_event =
+  { actor : tool_trace_actor
+  ; agent_name : string
+  ; tool_use_id : string
+  ; turn : int
+  ; planned_index : int
+  ; tool_name : string
+  ; completion : tool_trace_completion
+  }
+[@@deriving yojson, show, eq]
+
+type tool_trace_event =
+  | Tool_called of tool_called_event
+  | Tool_completed of tool_completed_event
+[@@deriving yojson, show, eq]
+
+type tool_trace_gap_reason = Official_client_uninstrumented
+[@@deriving yojson, show, eq]
+
+type tool_trace_gap =
+  { actor : tool_trace_actor
+  ; reason : tool_trace_gap_reason
+  }
+[@@deriving yojson, show, eq]
+
+type tool_trace =
+  { observed_actors : tool_trace_actor list
+      (** Actors backed by a private AGENT_CORE Tool-event subscriber. *)
+  ; events : tool_trace_event list
+  ; dropped_events : int
+      (** EventBus overflow plus run-level ledger-cap drops. Non-zero means the
+          ledger is partial. *)
+  ; gaps : tool_trace_gap list
+      (** Actors whose execution substrate cannot publish AGENT_CORE tool events. *)
+  }
+[@@deriving yojson, show, eq]
+
+val max_tool_trace_events : int
+val empty_tool_trace : tool_trace
+val merge_tool_traces : tool_trace list -> tool_trace
+
 (** 심판(judge) 한 명이 실패하는 방식. {!panel_failure}와 동형인 닫힌 합이되, 심판
     도메인에만 존재하는 사유([Empty_result]/[Build_error]/[Parse_error])
     를 추가로 담는다. [panel_failure]를 literal하게 공유하지 않는 이유: 판(panel) 전용인
@@ -285,6 +381,9 @@ type deliberation_evidence =
   ; judge : (judge_synthesis, judge_failure) result
   ; judges : judge_outcome list
   ; judge_usage : usage
+  ; tool_trace : tool_trace option
+      (** [None] is legacy/unavailable evidence. [Some] with no events, drops,
+          or gaps proves that the instrumented actors made no tool calls. *)
   }
 [@@deriving yojson, show, eq]
 

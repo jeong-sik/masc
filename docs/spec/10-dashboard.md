@@ -90,6 +90,17 @@ answer summary; legacy success records without those additive fields remain
 valid. These previews improve scanning but do not replace the exact Board
 evidence join.
 
+Current Fusion Board evidence may also carry an actual Tool event ledger.
+Availability (`web_tools`) is never accepted as execution evidence. Each row is
+derived from AGENT_CORE `ToolCalled` or `ToolCompleted` and includes exact
+occurrence identity plus bounded input/output previews with source byte counts
+and truncation bits. The durable run ledger retains at most 256 events and
+reports every overflow in its drop count. A complete empty ledger proves no observed calls for the
+instrumented actors. EventBus overflow or a non-instrumented execution substrate
+makes the ledger partial and must expose its drop count or actor gap. Missing
+legacy data remains unavailable; clients must not normalize it to an empty
+complete ledger.
+
 ## 6. Transport isolation
 
 HTTP snapshots use cursor-based reads. SSE/WebSocket events carry typed event

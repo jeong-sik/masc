@@ -172,76 +172,91 @@ let apply_fusion_judge_output_contract provider_cfg =
    소비 전 실패(빌드/실행/빈 결과/provider 에러)는 [zero_usage]를 싣는다. 호출자는
    실패 경로에서도 비용을 회계할 수 있다. *)
 let run_composed ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
-    ~web_tools ~prompt () :
+    ~web_tools ~prompt ?tool_trace () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
   let tools = if web_tools then Fusion_agent_core.web_tool_bundle () else [] in
-  match
-    Fusion_agent_core.build_agent ~sw ~net ~system_prompt:judge_system_prompt ~tools
-      ?max_tokens ?timeout_s
-      ~provider_config_transform:apply_fusion_judge_output_contract
-      judge_model
-  with
-  | Error reason ->
-    Error
-      ( Fusion_types.Build_error
-          (Printf.sprintf "judge build failed: %s"
-             (Fusion_agent_core.panel_failure_detail ~runtime_id:judge_model reason))
-      , Fusion_types.zero_usage )
-  | Ok agent ->
-    (match
-       Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Fusion_judge (fun () ->
-         Ok
-           (Agent_core.Async_agent.all ~sw
-              ?clock:(Fusion_agent_core.deadline_clock ())
-              [ (agent, prompt) ]))
-     with
-     | Error e ->
-       Error
-         ( failure_of_core_error ~runtime_id:judge_model ~prefix:"judge run failed: " e
-         , Fusion_types.zero_usage )
-     | Ok [] -> Error (Fusion_types.Empty_result, Fusion_types.zero_usage)
-     | Ok ((_name, Ok resp) :: _) ->
-       let text = Fusion_agent_core.answer_text resp in
-       (* 응답은 받았으므로 소비 토큰을 회계한다 — 빈 응답이든 파싱 실패든 동일. *)
-       let usage = Fusion_agent_core.usage_of resp in
-       if String.length (String.trim text) = 0 then
+  let observer =
+    Option.map
+      (fun (actor, _send) -> Fusion_agent_core.create_tool_observer ~actor)
+      tool_trace
+  in
+  let event_bus = Option.map Fusion_agent_core.tool_observer_event_bus observer in
+  let result =
+    match
+      Fusion_agent_core.build_agent ~sw ~net ~system_prompt:judge_system_prompt
+        ?event_bus ~tools ?max_tokens ?timeout_s
+        ~provider_config_transform:apply_fusion_judge_output_contract
+        judge_model
+    with
+    | Error reason ->
+      Error
+        ( Fusion_types.Build_error
+            (Printf.sprintf "judge build failed: %s"
+               (Fusion_agent_core.panel_failure_detail ~runtime_id:judge_model reason))
+        , Fusion_types.zero_usage )
+    | Ok agent ->
+      (match
+         Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Fusion_judge (fun () ->
+           Ok
+             (Agent_core.Async_agent.all ~sw
+                ?clock:(Fusion_agent_core.deadline_clock ())
+                [ (agent, prompt) ]))
+       with
+       | Error e ->
          Error
-           ( Empty_response ("judge: " ^ Fusion_agent_core.empty_response_detail resp)
-           , usage )
-       else
-         (* 성공 종합·파싱 실패 모두에 심판이 소비한 토큰을 묶는다(panel_answer.usage와 대칭). *)
-         attach_usage (Fusion_judge_parse.of_string text) usage
-     | Ok ((_name, Error e) :: _) ->
-       Error
-         ( failure_of_core_error ~runtime_id:judge_model
-             ~prefix:"judge provider error: " e
-         , Fusion_types.zero_usage ))
+           ( failure_of_core_error ~runtime_id:judge_model
+               ~prefix:"judge run failed: " e
+           , Fusion_types.zero_usage )
+       | Ok [] -> Error (Fusion_types.Empty_result, Fusion_types.zero_usage)
+       | Ok ((_name, Ok resp) :: _) ->
+         let text = Fusion_agent_core.answer_text resp in
+         (* 응답은 받았으므로 소비 토큰을 회계한다 — 빈 응답이든 파싱 실패든 동일. *)
+         let usage = Fusion_agent_core.usage_of resp in
+         if String.length (String.trim text) = 0 then
+           Error
+             ( Empty_response
+                 ("judge: " ^ Fusion_agent_core.empty_response_detail resp)
+             , usage )
+         else
+           (* 성공 종합·파싱 실패 모두에 심판이 소비한 토큰을 묶는다(panel_answer.usage와 대칭). *)
+           attach_usage (Fusion_judge_parse.of_string text) usage
+       | Ok ((_name, Error e) :: _) ->
+         Error
+           ( failure_of_core_error ~runtime_id:judge_model
+               ~prefix:"judge provider error: " e
+           , Fusion_types.zero_usage ))
+  in
+  (match observer, tool_trace with
+   | Some observer, Some (_actor, send) ->
+     send (Fusion_agent_core.finish_tool_observer observer)
+   | (Some _ | None), (Some _ | None) -> ());
+  result
 
 let run ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model ~question
-    ~panel ~web_tools () :
+    ~panel ~web_tools ?tool_trace () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
   run_composed ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
-    ~web_tools ~prompt:(compose_prompt ~question ~panel) ()
+    ~web_tools ~prompt:(compose_prompt ~question ~panel) ?tool_trace ()
 
 let run_refine ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
-    ~question ~panel ~prior ~web_tools () :
+    ~question ~panel ~prior ~web_tools ?tool_trace () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
   run_composed ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
-    ~web_tools ~prompt:(compose_refine_prompt ~question ~panel ~prior) ()
+    ~web_tools ~prompt:(compose_refine_prompt ~question ~panel ~prior) ?tool_trace ()
 
 let run_meta ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
-    ~question ~panel ~priors ~web_tools () :
+    ~question ~panel ~priors ~web_tools ?tool_trace () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
   run_composed ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
-    ~web_tools ~prompt:(compose_meta_prompt ~question ~panel ~priors) ()
+    ~web_tools ~prompt:(compose_meta_prompt ~question ~panel ~priors) ?tool_trace ()
 
 module For_testing = struct
   let apply_output_contract = apply_fusion_judge_output_contract

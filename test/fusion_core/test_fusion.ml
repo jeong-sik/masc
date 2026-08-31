@@ -1579,24 +1579,77 @@ let test_judge_error_node_timed_out () =
   | _ -> Alcotest.fail "expected Judge_failed roundtrip"
 
 let test_deliberation_evidence_roundtrip () =
+  let actor = Panel_actor "panel-a" in
+  let preview = { text = {|{"query":"fusion"}|}; bytes = 18; truncated = false } in
+  let called : tool_called_event =
+    { actor
+    ; agent_name = "panel-a"
+    ; tool_use_id = "tool-1"
+    ; turn = 1
+    ; planned_index = 0
+    ; tool_name = "masc_web_search"
+    ; input = preview
+    }
+  in
   let evidence : Fusion_types.deliberation_evidence =
     { question = "Which implementation is sound?"
     ; panel = []
     ; judge = Error Fusion_types.Empty_result
     ; judges = []
     ; judge_usage = { input_tokens = 11; output_tokens = 7 }
+    ; tool_trace =
+        Some
+          { observed_actors = [ actor ]
+          ; events = [ Tool_called called ]
+          ; dropped_events = 0
+          ; gaps = []
+          }
     }
   in
-  match
-    Fusion_types.deliberation_evidence_to_yojson evidence
-    |> Fusion_types.deliberation_evidence_of_yojson
-  with
+  let encoded = Fusion_types.deliberation_evidence_to_yojson evidence in
+  (match Fusion_types.deliberation_evidence_of_yojson encoded with
   | Ok decoded ->
     Alcotest.(check bool)
       "typed evidence is lossless"
       true
       (Fusion_types.equal_deliberation_evidence evidence decoded)
-  | Error detail -> Alcotest.fail detail
+  | Error detail -> Alcotest.fail detail);
+  let legacy =
+    match encoded with
+    | `Assoc fields ->
+      `Assoc (List.filter (fun (key, _) -> not (String.equal key "tool_trace")) fields)
+    | _ -> Alcotest.fail "deliberation evidence must encode as an object"
+  in
+  match Fusion_types.deliberation_evidence_of_yojson legacy with
+  | Ok { tool_trace = None; _ } -> ()
+  | Ok _ -> Alcotest.fail "legacy evidence fabricated a tool trace"
+  | Error detail -> Alcotest.failf "legacy evidence failed to decode: %s" detail
+;;
+
+let test_tool_trace_merge_caps_with_explicit_drops () =
+  let actor = Panel_actor "panel-a" in
+  let preview = { text = "{}"; bytes = 2; truncated = false } in
+  let events =
+    List.init (max_tool_trace_events + 1) (fun index ->
+      Tool_called
+        { actor
+        ; agent_name = "panel-a"
+        ; tool_use_id = "tool-" ^ string_of_int index
+        ; turn = 1
+        ; planned_index = index
+        ; tool_name = "masc_web_search"
+        ; input = preview
+        })
+  in
+  let merged =
+    merge_tool_traces
+      [ { observed_actors = [ actor ]; events; dropped_events = 0; gaps = [] } ]
+  in
+  Alcotest.(check int) "run ledger cap" max_tool_trace_events
+    (List.length merged.events);
+  Alcotest.(check int) "cap overflow is explicit" 1 merged.dropped_events;
+  Alcotest.(check int) "observed actor survives cap" 1
+    (List.length merged.observed_actors)
 ;;
 
 let () =
@@ -1712,6 +1765,8 @@ let () =
             test_judge_error_node_timed_out
         ; Alcotest.test_case "deliberation evidence roundtrip" `Quick
             test_deliberation_evidence_roundtrip
+        ; Alcotest.test_case "tool trace cap records drops" `Quick
+            test_tool_trace_merge_caps_with_explicit_drops
         ] )
     ; ( "panel_guard"
       , [ Alcotest.test_case "min_answered_range" `Quick test_validated_bad_min_answered

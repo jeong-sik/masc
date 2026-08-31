@@ -66,9 +66,15 @@ let bridge_failure_of_error (error : Agent_core.Error.t) : Fusion_types.panel_fa
   | Agent_core.Error.Provider (Llm_provider.Error.Timeout _) -> Fusion_types.Timeout
   | _ -> Fusion_types.Bridge_error (Agent_core.Error.to_string error)
 
-let run ~base_dir ~sw ~net ~groups ~prompt ()
+let run ~base_dir ~sw ~net ~groups ~prompt ?on_tool_trace ()
   : Fusion_types.panel_outcome list
   =
+  let traces = ref [] in
+  let record_observer = function
+    | Some observer ->
+      traces := Fusion_agent_core.finish_tool_observer observer :: !traces
+    | None -> ()
+  in
   (* 1. 각 그룹의 모델을 그 그룹 설정(system_prompt/tools/timeout)으로
         에이전트 빌드. 빌드 실패는 격리. 그룹순 × 그룹내 모델순으로 평탄화 —
         순서 보존(단일 그룹이면 원 모델 순서 = 오늘과 동일). *)
@@ -89,15 +95,27 @@ let run ~base_dir ~sw ~net ~groups ~prompt ()
             if Fusion_official_client.is_official_client ~runtime_id:model
             then (oks, (panelist, model, g.system_prompt, g.timeout_s) :: officials, fails)
             else (
+              let observer =
+                Option.map
+                  (fun _ ->
+                     Fusion_agent_core.create_tool_observer
+                       ~actor:(Fusion_types.Panel_actor panelist))
+                  on_tool_trace
+              in
+              let event_bus =
+                Option.map Fusion_agent_core.tool_observer_event_bus observer
+              in
               match
                 Fusion_agent_core.build_agent ~sw ~net ~system_prompt:g.system_prompt
-                  ~tools
+                  ?event_bus ~tools
                   ?max_tokens:g.max_output_tokens
                   ?timeout_s:g.timeout_s
                   ~name:panelist model
               with
-              | Ok agent -> ((agent, panelist, model) :: oks, officials, fails)
+              | Ok agent ->
+                ((agent, panelist, model, observer) :: oks, officials, fails)
               | Error reason ->
+                record_observer observer;
                 ( oks
                 , officials
                 , Fusion_types.Failed { failed_model = panelist; reason } :: fails )))
@@ -121,11 +139,14 @@ let run ~base_dir ~sw ~net ~groups ~prompt ()
         Ok
           (Agent_core.Async_agent.all ~sw
              ?clock:(Fusion_agent_core.deadline_clock ())
-             (List.map (fun (agent, _panelist, _model) -> (agent, prompt)) built)))
+             (List.map
+                (fun (agent, _panelist, _model, _observer) -> agent, prompt)
+                built)))
     with
     | Ok run_results ->
       List.map2
-        (fun (_agent, panelist, model) (_name, res) ->
+        (fun (_agent, panelist, model, observer) (_name, res) ->
+          record_observer observer;
           outcome_of_result ~panelist ~model res)
         built run_results
     | Error error ->
@@ -133,7 +154,8 @@ let run ~base_dir ~sw ~net ~groups ~prompt ()
          Timeout으로 오분류하지 않는다. *)
       let reason = bridge_failure_of_error error in
       List.map
-        (fun (_agent, panelist, _model) ->
+        (fun (_agent, panelist, _model, observer) ->
+          record_observer observer;
           Fusion_types.Failed { failed_model = panelist; reason })
         built
   in
@@ -167,6 +189,23 @@ let run ~base_dir ~sw ~net ~groups ~prompt ()
               { model = panelist; answer; usage = Fusion_types.zero_usage })
       official
   in
+  Option.iter
+    (fun send ->
+       let official_gaps =
+         List.map
+           (fun (panelist, _model, _system_prompt, _timeout_s) ->
+              { Fusion_types.actor = Fusion_types.Panel_actor panelist
+              ; reason = Fusion_types.Official_client_uninstrumented
+              })
+           official
+       in
+       let trace =
+         Fusion_types.merge_tool_traces
+           (List.rev !traces
+            @ [ { Fusion_types.empty_tool_trace with gaps = official_gaps } ])
+       in
+       send trace)
+    on_tool_trace;
   build_failures @ answered @ official_answered
 
 module For_testing = struct

@@ -30,6 +30,9 @@ val build_agent
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> system_prompt:string
+  -> ?event_bus:Agent_core.Event_bus.t
+       (** Caller-owned exact execution observer. Fusion uses a private bus per
+           panel/judge actor so Tool events cannot be confused across runs. *)
   -> ?tools:Agent_core.Tool.t list
   -> ?max_tokens:int
   -> ?timeout_s:float
@@ -45,6 +48,17 @@ val build_agent
         -> (Llm_provider.Provider_config.t, string) result)
   -> string
   -> (Agent_core.Agent.t, Fusion_types.panel_failure) result
+
+(** One bounded private EventBus subscriber for an executing Fusion actor. *)
+type tool_observer
+
+val create_tool_observer : actor:Fusion_types.tool_trace_actor -> tool_observer
+val tool_observer_event_bus : tool_observer -> Agent_core.Event_bus.t
+
+val finish_tool_observer : tool_observer -> Fusion_types.tool_trace
+(** Stop the subscriber and return FIFO [ToolCalled]/[ToolCompleted] facts.
+    Input/output bodies are bounded previews; subscriber overflow is retained
+    as [dropped_events] instead of silently presenting a complete ledger. *)
 
 (** Test seam for Fusion-local response diagnostics. *)
 module For_testing : sig

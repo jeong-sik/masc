@@ -1,0 +1,94 @@
+{
+  "schema": "masc.context_recovery.tool_metrics_loss_marker.v1",
+  "recorded_at": "2026-08-31T09:26:25+09:00",
+  "source": {
+    "base_head": "c7c4e56ef72ede3c51bc64a40bc78280013077e1",
+    "product_head": "9978e056220343c6690f161fda737274795a101e",
+    "baseline_image": "sha256:7bd2952dc38655301302d1867534b42b27e8997fab5b01efbd6be1ee113639a6",
+    "product_image": "sha256:e73fda83aef5a9b9c6d2088a00e4575a41610e2188c8dc19127c82a28eb2d70a",
+    "binary_sha256": "d1adf8323125c69b52f798fe17191a33c064e9984afbdaa2aa097705e261291f",
+    "preflight_helper_sha256": "f4e311d6590fbcf86206b035762964db6709cfa134d7b8f0b7953ae2838b100d"
+  },
+  "focused_validation": {
+    "tool_metrics_persist": { "passed": 14, "failed": 0 },
+    "tool_unified": { "passed": 6, "failed": 0 },
+    "format_check": "passed"
+  },
+  "r116_queue_full": {
+    "runtime_instance_id": "01a05533-d8c8-7000-b684-2688a0b62651",
+    "parallelism": 256,
+    "calls": 5000,
+    "http_200": 5000,
+    "body_ok": 5000,
+    "elapsed_seconds": 12.529526,
+    "throughput_per_second": 399.057,
+    "mean_latency_ms": 584.025,
+    "p95_latency_ms": 2492.025,
+    "p99_latency_ms": 3832.421,
+    "max_latency_ms": 8325.064,
+    "aggregate_calls": 5000,
+    "queue_depth": 4096,
+    "spool_backed_queue_depth": 4096,
+    "queue_full_dropped_records": 904,
+    "loss_marker_write_failed_records": 0,
+    "pending_files": 4096,
+    "final_rows": 0,
+    "aggregate_integrity": {
+      "status": "known_incomplete",
+      "reason": "queue_full",
+      "loss_observed_at_unix": 1788135885.146729,
+      "loss_runtime_instance_id": "01a05533-d8c8-7000-b684-2688a0b62651"
+    },
+    "marker": { "mode": "0600", "bytes": 166 }
+  },
+  "r114_baseline_without_marker": {
+    "calls": 5000,
+    "http_200": 5000,
+    "body_ok": 5000,
+    "elapsed_seconds": 10.923281,
+    "throughput_per_second": 457.738,
+    "mean_latency_ms": 507.809,
+    "p95_latency_ms": 2192.432,
+    "p99_latency_ms": 3790.646,
+    "max_latency_ms": 8658.102
+  },
+  "restart": {
+    "termination": { "signal": "SIGKILL", "exit_code": 137, "oom_killed": false },
+    "replacement_runtime_instance_id": "01a05535-50d9-7000-a2eb-59a869409ed6",
+    "recovered_pending_records": 4096,
+    "aggregate_calls": 4096,
+    "current_process_dropped_records": 0,
+    "aggregate_integrity_status": "known_incomplete",
+    "loss_runtime_instance_id": "01a05533-d8c8-7000-b684-2688a0b62651",
+    "pending_files": 0,
+    "final_rows": 4096,
+    "final_sha256": "68b799d6dfbb889f03f9d9f10b1ff59a08c65037eda4a1575b743deac78e1f48",
+    "graceful_exit_code": 0,
+    "oom_killed": false
+  },
+  "invalid_marker_restart": {
+    "aggregate_calls": 4096,
+    "hydrate_invalid_loss_marker": true,
+    "aggregate_integrity_status": "invalid_marker",
+    "loss_reason": null,
+    "loss_observed_at_unix": null,
+    "loss_runtime_instance_id": null,
+    "graceful_exit_code": 0,
+    "oom_killed": false
+  },
+  "scope": {
+    "platform": "Linux/arm64 Docker Desktop",
+    "filesystem": "Docker local named volume",
+    "integrity_statuses": ["unknown", "known_incomplete", "invalid_marker"],
+    "excluded": [
+      "complete-history inference",
+      "exact lifetime dropped count",
+      "host power loss",
+      "network filesystem",
+      "Kubernetes PVC",
+      "multi-process writers",
+      "full test suite",
+      "GitHub CI"
+    ]
+  }
+}

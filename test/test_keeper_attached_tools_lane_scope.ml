@@ -113,7 +113,7 @@ let with_bundle ?(history = []) f =
           }
       ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"test")
       ~identity_surface:
-        { Keeper_identity_tool_search.offered =
+        { Keeper_tools_agent_core.offered =
             offered [ "jira_search"; "confluence_search" ]
         ; agent_cell = ref None
         ; history
@@ -164,16 +164,67 @@ let test_the_agent_core_lane_gets_the_listing_instead () =
            false
            (List.mem name listed))
       [ "atlassian_jira_search"; "atlassian_confluence_search" ];
-    (* Both shapes carry the same built-ins, so what the lane view drops is
-       exactly the attached tools and what it gains is the listing. *)
+    (* What the lane view drops is every tool held back, whatever its source:
+       the attached ones, which are held by default, and the built-ins whose
+       own tool file declares [defer_loading = true]. What it gains in their
+       place is one listing. *)
     let dropped = List.filter (fun n -> not (List.mem n listed)) sent in
     check
+      bool
+      "the attached tools are among what the lane view drops"
+      true
+      (List.for_all
+         (fun n -> List.mem n dropped)
+         [ "atlassian_confluence_search"; "atlassian_jira_search" ]);
+    check
       (list string)
-      "the lane view drops the attached tools and nothing else"
-      [ "atlassian_confluence_search"; "atlassian_jira_search" ]
-      (List.sort String.compare dropped);
+      "and every other dropped tool is one that declared itself deferrable"
+      []
+      (List.filter
+         (fun n ->
+            (not (List.mem n [ "atlassian_confluence_search"; "atlassian_jira_search" ]))
+            &&
+            match Tool_loading_declarations.loading_of_tool n with
+            | Tool_definition_toml.Deferrable -> false
+            | Tool_definition_toml.Always_loaded -> true)
+         dropped);
     let gained = List.filter (fun n -> not (List.mem n sent)) listed in
     check int "and gains exactly one tool in their place" 1 (List.length gained))
+;;
+
+(* The axis this change adds: a built-in leaves the request because its own
+   file says so, not because of where it came from. Of 89 built-ins on one
+   Keeper, 33 went a whole day uncalled -- 21,601 bytes on every request of
+   every turn, and a turn is many requests. *)
+let test_a_builtin_that_declares_deferral_leaves_the_request () =
+  with_bundle (fun bundle ->
+    let listed = tool_names bundle.Keeper_tools_agent_core.agent_core_tools in
+    let sent = tool_names bundle.Keeper_tools_agent_core.tools in
+    let declared_deferrable =
+      List.filter
+        (fun n ->
+           match Tool_loading_declarations.loading_of_tool n with
+           | Tool_definition_toml.Deferrable -> true
+           | Tool_definition_toml.Always_loaded -> false)
+        sent
+    in
+    check
+      bool
+      "at least one built-in declares deferral, or this proves nothing"
+      true
+      (declared_deferrable <> []);
+    check
+      (list string)
+      "no tool that declared deferral is sent as a schema on this lane"
+      []
+      (List.filter (fun n -> List.mem n listed) declared_deferrable);
+    (* And the lanes that cannot widen a turn still get every one of them:
+       a name they cannot load is a name they cannot reach. *)
+    check
+      bool
+      "the lanes that cannot widen a turn still get them as schemas"
+      true
+      (List.for_all (fun n -> List.mem n sent) declared_deferrable))
 ;;
 
 (* [Keeper_run_tools_setup] compares the bundle against what the descriptor
@@ -186,6 +237,7 @@ let test_the_agent_core_shape_is_what_the_projection_expects () =
   with_bundle (fun bundle ->
     let expected =
       Keeper_run_tools_setup.expected_model_tool_names
+        ~deferred_names:bundle.Keeper_tools_agent_core.deferred_builtin_names
         ~skill_catalog:Keeper_skill_catalog.empty
         ~identity_names:[ Keeper_identity_tool_search.tool_name ]
         ~model_visible_descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
@@ -251,6 +303,10 @@ let () =
             "hands the agent core lane the listing instead"
             `Quick
             test_the_agent_core_lane_gets_the_listing_instead
+        ; test_case
+            "holds back a built-in that declares deferral"
+            `Quick
+            test_a_builtin_that_declares_deferral_leaves_the_request
         ; test_case
             "builds the agent core shape the projection expects"
             `Quick

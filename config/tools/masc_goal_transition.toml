@@ -8,6 +8,10 @@ tool. A Goal whose criterion was judged unreachable is refused on \
 request_complete."""
 additional_properties = false
 
+# Held back from the request until the model asks for it by name. Not
+# called once on 2026-08-29 or 2026-08-30 across the fleet.
+defer_loading = true
+
 [[params]]
 name = "goal_id"
 type = "string"

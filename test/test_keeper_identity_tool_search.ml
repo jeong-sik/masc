@@ -70,8 +70,19 @@ let build (offer : Keeper_identity_tools.offered_tool) =
 let placement ?(agent_cell = ref None) ?(history = []) offering =
   Keeper_identity_tool_search.make
     ~keeper_name:"search-test"
-    ~build
-    { Keeper_identity_tool_search.offered = offering; agent_cell; history }
+    { Keeper_identity_tool_search.deferred =
+        List.map
+          (fun (offer : Keeper_identity_tools.offered_tool) ->
+             let tool = build offer in
+             { Keeper_identity_tool_search.tool
+             ; summary =
+                 Keeper_identity_tool_search.summary_of
+                   tool.Agent_core.Tool.schema.description
+             })
+          offering
+    ; agent_cell
+    ; history
+    }
 ;;
 
 let search ?agent_cell ?history offering =

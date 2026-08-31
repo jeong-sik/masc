@@ -4,6 +4,10 @@ Scan board posts matching filter criteria and delete or report them. \
 Defaults to dry_run=true (report only). Set dry_run=false to delete. Safety: \
 never deletes posts with comments or votes unless filters are overridden."""
 
+# Held back from the request until the model asks for it by name. Not
+# called once on 2026-08-29 or 2026-08-30 across the fleet.
+defer_loading = true
+
 [[params]]
 name = "max_age_hours"
 type = "integer"

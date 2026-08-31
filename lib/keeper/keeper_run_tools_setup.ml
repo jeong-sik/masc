@@ -98,11 +98,21 @@ let gate_causal_initial
 ;;
 
 let expected_model_tool_names
+      ?(deferred_names = [])
       ~skill_catalog
       ~identity_names
       ~model_visible_descriptors
       ()
   =
+  (* [deferred_names] are the built-ins this surface holds behind the listing.
+     Empty for the surface that carries every tool as a schema, and for every
+     caller that predates the axis.
+
+     Subtracted rather than the check being widened: a tool leaving the
+     request is the thing this whole change does, so an invariant that stopped
+     noticing it would stop being an invariant. What it still catches is a
+     tool that left for any other reason. *)
+  let is_deferred name = List.exists (String.equal name) deferred_names in
   let descriptor_names =
     model_visible_descriptors
     |> List.concat_map Keeper_tool_descriptor.keeper_model_names
@@ -125,10 +135,9 @@ let expected_model_tool_names
   in
   List.sort_uniq
     String.compare
-    (descriptor_names
-         @ composition_names
-         @ instruction_names
-         @ control_names
+    (List.filter
+       (fun name -> not (is_deferred name))
+       (descriptor_names @ composition_names @ instruction_names @ control_names)
          (* What the work services this Keeper is attached to offer, as this
             surface names them: the official-client lanes carry the tools
             themselves, the Agent Core lane carries the one listing tool that
@@ -361,6 +370,7 @@ let prepare_agent_setup
   let
     { Keeper_tools_agent_core.tools = keeper_tools
     ; agent_core_tools = keeper_agent_core_tools
+    ; deferred_builtin_names = keeper_deferred_builtin_names
     ; cleanup = keeper_tools_cleanup
     ; terminal_effect_state
     ; gate_replay_delivery
@@ -376,7 +386,7 @@ let prepare_agent_setup
       ~gate_context
       ?hitl_resolution
       ~identity_surface:
-        { Keeper_identity_tool_search.offered =
+        { Keeper_tools_agent_core.offered =
             identity_offering.Keeper_identity_tools.offered
         ; agent_cell
         ; history = history_messages
@@ -517,10 +527,11 @@ let prepare_agent_setup
      check over one of them would leave the other free to drift: they differ
      only in how the attached tools appear, which is exactly the part being
      changed. *)
-  let check_projection ~surface ~identity_names tools =
+  let check_projection ?deferred_names ~surface ~identity_names tools =
     let actual = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools in
     let expected =
       expected_model_tool_names
+        ?deferred_names
         ~skill_catalog
         ~identity_names
         ~model_visible_descriptors:turn_model_visible_descriptors
@@ -550,6 +561,7 @@ let prepare_agent_setup
   in
   check_projection
     ~surface:"agent_core_tools"
+    ~deferred_names:keeper_deferred_builtin_names
     ~identity_names:
       (agent_core_identity_names
          ~attached_names

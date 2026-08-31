@@ -1,6 +1,7 @@
 ---
-description: Judge one durable Board signal for one Keeper
+description: 한 Keeper에게 들어온 Board 신호의 관련성을 판정
 category: judge
+operator_surface: primary
 template_variables: [judgment_request_json]
 ---
 

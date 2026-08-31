@@ -923,6 +923,16 @@ section in `runtime.toml`, whose preview-checked editor remains the one write
 path. Params are different: they come from the typed live registry, and
 `Enter` edits one value while `x` restores its registered default.
 
+Prompt overrides open as a reduced operator catalog: the six complete prompts
+for Keeper, Librarian, verification, and judges are visible by default. The
+other fourteen files are still live, editable assembly fragments; `a` toggles
+them into the list without presenting headings and row snippets as complete
+prompts. The list uses Korean category and purpose labels, while exact keys and
+template-variable names remain unchanged. The detail pane renders the effective
+body as Markdown (including fenced-code syntax highlighting), names whether it
+came from a file or an override, and keeps `PgUp`/`PgDn` paging. `e` edits the
+effective prompt through `$EDITOR`, and `x` clears only its persisted override.
+
 ### System Logs
 
 The server's log ring, the same source the dashboard `logs` tab reads.

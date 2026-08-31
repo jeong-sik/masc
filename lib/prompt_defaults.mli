@@ -4,7 +4,7 @@
     [bootstrap_runtime] is called once during server startup; it
     resolves the prompt markdown directory, points
     {!Prompt_registry} at it, loads every markdown file with YAML
-    frontmatter ([description] / [category] /
+    frontmatter ([description] / [category] / [operator_surface] /
     [template_variables]), and replays any persisted operator
     overrides. The signature is memoised so a re-call with the
     same [(workspace_path, prompt_markdown_dir)] pair is a no-op

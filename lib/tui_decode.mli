@@ -1213,9 +1213,14 @@ type server_identity = {
 
 val decode_server_identity : Yojson.Safe.t -> (server_identity, string) result
 
+type prompt_operator_surface =
+  | Prompt_primary
+  | Prompt_fragment
+
 type prompt_row = {
   pr_key : string;
   pr_category : string;
+  pr_operator_surface : prompt_operator_surface;
   pr_description : string;
   pr_effective : string;
       (** What a turn actually gets: the override when there is one, the file
@@ -1233,6 +1238,10 @@ type prompt_row = {
 
 type prompts_snapshot = { ps_rows : prompt_row list }
 (** GET /api/v1/prompts. *)
+
+val prompt_rows_for_operator : show_fragments:bool -> prompts_snapshot -> prompt_row list
+(** Primary prompts by default; [show_fragments] exposes the still-editable
+    assembly fragments without flattening them into the main catalog. *)
 
 val decode_prompts : Yojson.Safe.t -> (prompts_snapshot, string) result
 

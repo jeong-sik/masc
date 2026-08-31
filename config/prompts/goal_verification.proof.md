@@ -1,6 +1,7 @@
 ---
-description: Goal completion proof review (RFC-0387 B3)
+description: 목표의 선언된 측정값이 목표치에 도달했는지 판정
 category: verification
+operator_surface: primary
 template_variables: [goal_title, metric, target_value, lookup_section]
 ---
 

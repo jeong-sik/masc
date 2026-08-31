@@ -8,9 +8,17 @@ type prompt_entry = {
   created_at : float;
 }
 
+type operator_surface =
+  | Primary
+  | Fragment
+
+val operator_surface_to_string : operator_surface -> string
+val operator_surface_of_string : string -> operator_surface option
+
 type prompt_meta = {
   description : string;
   category : string;
+  operator_surface : operator_surface;
   required_file : bool;
   template_variables : string list;
 }

@@ -4913,9 +4913,14 @@ let decode_server_identity json =
     }
 ;;
 
+type prompt_operator_surface =
+  | Prompt_primary
+  | Prompt_fragment
+
 type prompt_row = {
   pr_key : string;
   pr_category : string;
+  pr_operator_surface : prompt_operator_surface;
   pr_description : string;
   pr_effective : string;
   pr_has_override : bool;
@@ -4926,6 +4931,15 @@ type prompt_row = {
 }
 
 type prompts_snapshot = { ps_rows : prompt_row list }
+
+let prompt_rows_for_operator ~show_fragments snapshot =
+  if show_fragments
+  then snapshot.ps_rows
+  else
+    List.filter
+      (fun row -> row.pr_operator_surface = Prompt_primary)
+      snapshot.ps_rows
+;;
 
 (* A prompt with no description, or none on disk, is still a prompt the
    registry serves; only the key has to be there for a row to name itself. *)
@@ -4953,9 +4967,19 @@ let decode_prompt_row json =
              (Yojson.Safe.to_string value))
   in
   let* pr_template_variables = string_list_or_empty "template_variables" in
+  let* pr_operator_surface =
+    match member "operator_surface" json with
+    | `Null -> Ok Prompt_primary
+    | `String "primary" -> Ok Prompt_primary
+    | `String "fragment" -> Ok Prompt_fragment
+    | `String value ->
+      Error (Printf.sprintf "unknown prompt operator_surface %S" value)
+    | value -> field_type_error "operator_surface" "a string" value
+  in
   Ok
     { pr_key
     ; pr_category = string_or "category"
+    ; pr_operator_surface
     ; pr_description = string_or "description"
     ; pr_effective = string_or "effective"
     ; pr_has_override = bool_or "has_override"

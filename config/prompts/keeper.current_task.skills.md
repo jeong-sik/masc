@@ -1,6 +1,7 @@
 ---
-description: Keeper current-task exact Skill references and the tool that serves their bodies
+description: 현재 Task의 정확한 Skill 참조와 본문 조회 도구를 조립하는 내부 조각
 category: keeper
+operator_surface: fragment
 template_variables: [skill_surfaces]
 ---
 

@@ -6,9 +6,25 @@ type prompt_entry = {
   created_at : float;
 }
 
+type operator_surface =
+  | Primary
+  | Fragment
+
+let operator_surface_to_string = function
+  | Primary -> "primary"
+  | Fragment -> "fragment"
+;;
+
+let operator_surface_of_string = function
+  | "primary" -> Some Primary
+  | "fragment" -> Some Fragment
+  | _ -> None
+;;
+
 type prompt_meta = {
   description : string;
   category : string;
+  operator_surface : operator_surface;
   required_file : bool;
   template_variables : string list;
 }

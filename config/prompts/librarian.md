@@ -1,6 +1,7 @@
 ---
-description: Memory OS librarian current-memory selection prompt
+description: Memory OS 현재 기억 선별 — 유지·삭제·신규 사실을 구조화 판정
 category: librarian
+operator_surface: primary
 template_variables: [current_memory, conversation_history, counterpart_observations, keeper_instructions, max_recall_fact_bytes, turn_tool_observations]
 ---
 

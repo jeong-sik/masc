@@ -1536,6 +1536,7 @@ type state = {
   mutable prompts_snapshot: Tui_decode.prompts_snapshot option;
   mutable prompts_error: string option;
   mutable prompts_cursor: int;
+  mutable prompts_show_fragments: bool;
   mutable prompts_librarian_input: (string * string list) option;
   mutable prompts_librarian_input_error: string option;
   mutable prompts_librarian_input_loading: bool;
@@ -2342,6 +2343,7 @@ let create_state
   prompts_snapshot = None;
   prompts_error = None;
   prompts_cursor = 0;
+  prompts_show_fragments = false;
   prompts_librarian_input = None;
   prompts_librarian_input_error = None;
   prompts_librarian_input_loading = false;

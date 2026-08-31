@@ -1,6 +1,7 @@
 ---
-description: Goal proof lookup surface — read-only tools over the shared workspace playground
+description: 목표 증명 판정자가 공유 작업공간에서 사용할 읽기 전용 조회 도구 설명
 category: verification
+operator_surface: fragment
 template_variables: [lookup_tools, lookup_root_layout]
 ---
 

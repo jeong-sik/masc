@@ -1,6 +1,7 @@
 ---
-description: keeper shared system prompt — scope, concise output, issue filing
+description: Keeper 공통 시스템 지침 — 범위, 결과 우선, 현재 상태 재확인, 이슈 작성
 category: keeper
+operator_surface: primary
 template_variables: []
 ---
 

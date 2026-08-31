@@ -1,6 +1,7 @@
 ---
-description: Review lookup surface — read-only tools bound to one producer sandbox root
+description: 한 producer sandbox에 묶인 읽기 전용 조회 도구를 설명하는 내부 검증 섹션
 category: verification
+operator_surface: fragment
 template_variables: [lookup_tools, lookup_root_layout]
 ---
 

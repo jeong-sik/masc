@@ -12128,17 +12128,26 @@ let render_prompts (state : state) =
   let buf = Buffer.create 8192 in
   let prompt_rows =
     match state.prompts_snapshot with
-    | Some snapshot -> snapshot.Tui_decode.ps_rows
+    | Some snapshot ->
+        Tui_decode.prompt_rows_for_operator
+          ~show_fragments:state.prompts_show_fragments snapshot
     | None -> []
+  in
+  let all_prompt_count =
+    match state.prompts_snapshot with
+    | Some snapshot -> List.length snapshot.Tui_decode.ps_rows
+    | None -> 0
   in
   let total = List.length prompt_rows in
   let cursor = max 0 (min state.prompts_cursor (total - 1)) in
   let selected = List.nth_opt prompt_rows cursor in
   box_top buf cols;
   box_line buf cols
-    (Printf.sprintf "%s  %s%d prompt(s)%s  %s  %s"
-       (screen_title " MASC Prompts")
-       Ansi.dim total Ansi.reset
+    (Printf.sprintf "%s  %s%d/%d개 · %s%s  %s  %s"
+       (screen_title " MASC 프롬프트")
+       Ansi.dim total all_prompt_count
+       (if state.prompts_show_fragments then "내부 조각 포함" else "주 프롬프트")
+       Ansi.reset
        (config_pane_strip state)
        (connection_badge state));
   box_divider buf cols;
@@ -12163,14 +12172,30 @@ let render_prompts (state : state) =
           else if row.Tui_decode.pr_file_exists then " "
           else (Theme.bad ()) ^ "!" ^ Ansi.reset
         in
+        let category =
+          match row.Tui_decode.pr_category with
+          | "keeper" -> "키퍼"
+          | "librarian" -> "기억"
+          | "verification" -> "검증"
+          | "judge" -> "판정"
+          | "general" -> "일반"
+          | category -> Terminal_text.single_line category
+        in
+        let surface =
+          match row.Tui_decode.pr_operator_surface with
+          | Tui_decode.Prompt_primary -> ""
+          | Tui_decode.Prompt_fragment -> "조각"
+        in
         let label =
-          Printf.sprintf "%s %s  %s"
+          Printf.sprintf "%s %-4s %-4s %s  %s"
             mark
-            (fit_width (Terminal_text.single_line row.Tui_decode.pr_key) 34)
+            (fit_width category 4)
+            surface
+            (fit_width (Terminal_text.single_line row.Tui_decode.pr_key) 30)
             (Ansi.dim
              ^ fit_width
                  (Terminal_text.single_line row.Tui_decode.pr_description)
-                 (max 4 (cols - 46))
+                 (max 4 (cols - 52))
              ^ Ansi.reset)
         in
         if index = cursor then
@@ -12184,8 +12209,8 @@ let render_prompts (state : state) =
   box_divider buf cols;
   (match selected with
    | None ->
-       box_line_styled buf cols ~style:(Theme.recede ()) "  no prompt selected";
-       box_line_styled buf cols ~style:(Theme.recede ()) "  input contract unavailable";
+       box_line_styled buf cols ~style:(Theme.recede ()) "  선택한 프롬프트가 없습니다";
+       box_line_styled buf cols ~style:(Theme.recede ()) "  입력 계약을 표시할 수 없습니다";
        box_divider buf cols;
        for _ = 1 to detail_height do
          box_empty buf cols
@@ -12193,43 +12218,46 @@ let render_prompts (state : state) =
    | Some row ->
        let source =
          if String.equal row.Tui_decode.pr_source "" then
-           if row.pr_has_override then "override"
-           else if row.pr_file_exists then "file"
-           else "missing"
-         else row.pr_source
+           if row.pr_has_override then "재정의"
+           else if row.pr_file_exists then "파일"
+           else "없음"
+         else
+           match row.pr_source with
+           | "override" -> "재정의"
+           | "file" -> "파일"
+           | "missing" -> "없음"
+           | source -> source
        in
        box_line buf cols
-         (Printf.sprintf "  EFFECTIVE  %s \xc2\xb7 %s \xc2\xb7 %s"
+         (Printf.sprintf "  유효 템플릿  %s \xc2\xb7 %s \xc2\xb7 %s"
             (Terminal_text.single_line row.pr_key)
             (Terminal_text.single_line source)
             (Terminal_text.single_line row.pr_file_path));
        let input_contract =
          if String.equal row.pr_category "librarian" then
-           "Librarian input: keeper instructions | current memory | bounded conversation | counterpart observations | max fact bytes"
+           "입력: Keeper 지침 | 현재 기억 | 제한된 대화 | 상대 관측 | 사실 최대 바이트"
          else
            match row.pr_template_variables with
-           | [] -> "Template input: none"
-           | variables -> "Template input: " ^ String.concat " | " variables
+           | [] -> "템플릿 입력: 없음"
+           | variables -> "템플릿 입력: " ^ String.concat " | " variables
        in
        box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ input_contract);
        box_divider buf cols;
        let body_width = max 1 (cols - 6) in
        let effective_lines =
-         String.split_on_char '\n' row.pr_effective
-         |> List.concat_map (fun raw ->
-              let safe = Terminal_text.single_line raw in
-              if String.equal safe "" then [ "" ]
-              else Message_layout.wrap_words ~max_cells:body_width safe)
+         Message_layout.wrap_body ~markdown:document_markdown
+           ~max_cells:body_width ~sanitize:Terminal_text.single_line
+           row.pr_effective
        in
        let actual_input_lines =
          if not (String.equal row.pr_category "librarian") then []
          else if state.prompts_librarian_input_loading then
-           [ "LATEST ACTUAL LIBRARIAN INPUT"; "(loading Admin exact-run detail...)"; "" ]
+           [ "최근 실제 Librarian 입력"; "(Admin 실행 상세를 불러오는 중...)"; "" ]
          else
            match state.prompts_librarian_input_error with
            | Some detail ->
-               [ "LATEST ACTUAL LIBRARIAN INPUT"
-               ; "unavailable: " ^ Terminal_text.single_line detail
+               [ "최근 실제 Librarian 입력"
+               ; "불러올 수 없음: " ^ Terminal_text.single_line detail
                ; ""
                ]
            | None ->
@@ -12238,7 +12266,7 @@ let render_prompts (state : state) =
                     lines @ [ "" ]
                 | Some _ | None -> [])
        in
-       let rendered = actual_input_lines @ ("EFFECTIVE TEMPLATE" :: effective_lines) in
+       let rendered = actual_input_lines @ ("유효 템플릿 본문" :: effective_lines) in
        let max_scroll = max 0 (List.length rendered - detail_height) in
        let scroll = max 0 (min state.config_scroll max_scroll) in
        for index = 0 to detail_height - 1 do
@@ -12250,7 +12278,7 @@ let render_prompts (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         "j/k:select  PgUp/PgDn:read  i:latest input  e:edit  x:clear  c:runtime.toml");
+         "j/k:선택  PgUp/PgDn:읽기  a:내부 조각  i:최근 입력  e:편집  x:재정의 삭제  c:runtime.toml");
   finish_surface state ~surface_key:"prompts" ~rows:terminal_rows ~cols buf
 
 (* The row the reader is on. A check rather than a colour, because the point

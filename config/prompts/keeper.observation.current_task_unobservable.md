@@ -1,6 +1,7 @@
 ---
-description: Keeper turn observation — the task could not be read at all
+description: 현재 Task 자체를 읽지 못했음을 알리는 내부 관측 조각
 category: keeper
+operator_surface: fragment
 template_variables: [task_id]
 ---
 

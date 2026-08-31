@@ -1123,6 +1123,21 @@ let run_turn
                       ?event_bus
                       ?trace_link
                       ~on_runtime_attempt:s.Keeper_run_tools.on_runtime_attempt
+                      ~on_runtime_attempt_error:
+                        (fun ~runtime_id:_ ~attempt _error ->
+                           (* [on_runtime_attempt] observes only materialized
+                              runtimes immediately before provider dispatch.
+                              A candidate that disappeared from the runtime
+                              catalog is still a routed lane attempt and emits
+                              a typed attempt error without reaching that
+                              callback. Preserve its index too, so total
+                              failure cannot collapse the manifest's routed
+                              candidates back to one. [max] makes the duplicate
+                              observation of an ordinary failed provider
+                              idempotent. *)
+                           Keeper_run_tools_setup.record_lane_attempt_index
+                             receipt_lane_attempt_index_ref
+                             attempt)
                       ~on_runtime_observation:
                         (fun observation ->
                            receipt_runtime_observation_ref := Some observation)

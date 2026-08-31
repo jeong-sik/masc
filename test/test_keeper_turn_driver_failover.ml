@@ -1,6 +1,8 @@
 module Runtime_manifest = Masc.Keeper_runtime_manifest
 module Driver = Masc.Keeper_turn_driver
 module Deferred_store = Masc.Keeper_deferred_runtime_lane_store
+module Agent_run_receipt = Masc.Keeper_agent_run_receipt.For_testing
+module Run_tools_setup = Masc.Keeper_run_tools_setup
 
 let contains ~needle haystack =
   let needle_len = String.length needle in
@@ -1109,6 +1111,44 @@ let test_attempt_loop_stops_on_nonretryable_failure () =
     "manifest runtime ids"
     [ "primary.test_model"; "primary.test_model" ]
     (List.map decision_runtime_id events)
+
+let test_failed_lane_receipt_counts_missing_tail () =
+  let last_attempt_index = ref 0 in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~on_attempt_error:(fun ~runtime_id:_ ~attempt _error ->
+        Run_tools_setup.record_lane_attempt_index last_attempt_index attempt)
+      ~run_attempt:(fun ~idx ~runtime_id:_ candidate ->
+        match candidate with
+        | "resolved.test_model" ->
+          (* Production's [on_runtime_attempt] sees this materialized runtime
+             before dispatch. *)
+          Run_tools_setup.record_lane_attempt_index last_attempt_index idx;
+          attempt_without_effect
+            (Error (retryable_network_error "resolved candidate failed"))
+            None
+        | "missing.test_model" ->
+          (* A disappeared runtime never reaches [on_runtime_attempt]; its
+             typed attempt error is the only receipt observation. *)
+          attempt_without_effect
+            (Error (Agent_core.Error.Internal "runtime candidate missing"))
+            None
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "resolved.test_model"; "missing.test_model" ]
+  in
+  (match result with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "a lane with no winning candidate must fail");
+  let count, fallback =
+    Agent_run_receipt.lane_attempt_facts
+      ~turn_succeeded:false
+      ~last_attempt_index:!last_attempt_index
+  in
+  Alcotest.(check int) "receipt retains both routed candidates" 2 count;
+  Alcotest.(check bool) "total failure is not a successful fallback" false fallback
 
 let test_attempt_loop_retries_transport_failure_before_checkpoint () =
   let attempts = ref [] in
@@ -2364,6 +2404,10 @@ let () =
             "attempt loop stops on nonretryable failure"
             `Quick
             test_attempt_loop_stops_on_nonretryable_failure;
+          Alcotest.test_case
+            "failed lane receipt counts missing tail"
+            `Quick
+            test_failed_lane_receipt_counts_missing_tail;
           Alcotest.test_case
             "transport failure before checkpoint safely falls back"
             `Quick

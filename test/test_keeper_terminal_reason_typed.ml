@@ -26,6 +26,7 @@ module Health_fleet = Server_routes_http_runtime_health_fleet
 module KMC = Masc.Keeper_meta_contract
 module KMS = Masc.Keeper_meta_store
 module Keeper_identity = Masc.Keeper_identity
+module Agent_run_receipt = Masc.Keeper_agent_run_receipt.For_testing
 
 let failures = ref []
 let check name cond = if not cond then failures := name :: !failures
@@ -1269,6 +1270,39 @@ let () =
    said 1. The two counts answer different questions and both have to survive
    the projection. *)
 let () =
+  let failed_count, failed_fallback =
+    Agent_run_receipt.lane_attempt_facts
+      ~turn_succeeded:false
+      ~last_attempt_index:1
+  in
+  check
+    "a failed two-candidate lane retains both attempts"
+    (failed_count = 2);
+  check
+    "a failed second candidate is not a successful fallback"
+    (not failed_fallback);
+  let failed_third_count, failed_third_fallback =
+    Agent_run_receipt.lane_attempt_facts
+      ~turn_succeeded:false
+      ~last_attempt_index:2
+  in
+  check
+    "a failed three-candidate lane retains all routed attempts"
+    (failed_third_count = 3);
+  check
+    "a failed third candidate is not a successful fallback"
+    (not failed_third_fallback);
+  let successful_count, successful_fallback =
+    Agent_run_receipt.lane_attempt_facts
+      ~turn_succeeded:true
+      ~last_attempt_index:1
+  in
+  check
+    "a successful two-candidate lane retains both attempts"
+    (successful_count = 2);
+  check
+    "a successful second candidate remains a fallback"
+    successful_fallback;
   let failed_over =
     { base_receipt with
       runtime_attempt_count = 1

@@ -2979,6 +2979,86 @@ let harness_snapshot_json verdicts =
     ; ("calibration", `Assoc [])
     ]
 
+(* The pane drew the recent page and nothing else, so its own opening line --
+   "where a fallback answered instead" -- was the one thing it could not
+   answer. The live workspace: 4,197 verdicts ruled, 1,983 of them by the
+   fallback gate, and the header said "(8 verdicts)".
+
+   The gate counts are sorted highest first so a reader sees what actually
+   decided most of them; ties by name so two reads of the same numbers agree.
+   An entry that is not a count is dropped rather than read as zero, because
+   the pane states proportions from this section. *)
+let test_decode_harness_reads_the_whole_ledger () =
+  let json =
+    `Assoc
+      [ ("generated_at", `Float 1755950001.0)
+      ; ("recent_verdicts", `List [ harness_verdict_json () ])
+      ; ( "overview"
+        , `Assoc
+            [ ("evaluator_status", `String "healthy")
+            ; ("last_signal_at", `Float 1755950000.0)
+            ] )
+      ; ( "calibration"
+        , `Assoc
+            [ ("total_verdicts", `Int 4197)
+            ; ("approve_count", `Int 2652)
+            ; ("reject_count", `Int 1545)
+            ; ("labeled_count", `Int 0)
+            ; ( "gate_distribution"
+              , `Assoc
+                  [ ("structured_tool", `Int 454)
+                  ; ("fallback", `Int 1983)
+                  ; ("evidence", `Int 23)
+                  ; ("llm", `Int 23)
+                  ; ("malformed", `String "not a count")
+                  ] )
+            ] )
+      ]
+  in
+  match Tui_decode.decode_harness_snapshot json with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot -> (
+      match snapshot.Tui_decode.hs_calibration with
+      | None -> Alcotest.fail "the calibration section was dropped"
+      | Some c ->
+          Alcotest.(check int) "the ledger total, not the page" 4197
+            c.Tui_decode.hcal_total;
+          Alcotest.(check int) "approvals" 2652 c.Tui_decode.hcal_approve;
+          Alcotest.(check int) "rejections" 1545 c.Tui_decode.hcal_reject;
+          (* Zero labelled is what makes the agreement rate meaningless rather
+             than perfect, so the count has to survive the decode for the pane
+             to be able to say which it is. *)
+          Alcotest.(check int) "nothing labelled" 0 c.Tui_decode.hcal_labeled;
+          Alcotest.(check (list (pair string int)))
+            "gates, busiest first and ties by name"
+            [ ("fallback", 1983)
+            ; ("structured_tool", 454)
+            ; ("evidence", 23)
+            ; ("llm", 23)
+            ]
+            c.Tui_decode.hcal_gates;
+          (match snapshot.Tui_decode.hs_overview with
+           | None -> Alcotest.fail "the overview section was dropped"
+           | Some o ->
+               Alcotest.(check string) "evaluator status" "healthy"
+                 o.Tui_decode.hov_evaluator_status))
+
+(* An older server sends neither section. The pane draws the page alone rather
+   than a ledger of zeroes, so the absence has to reach it as absence. *)
+let test_decode_harness_without_a_ledger_says_so () =
+  match
+    Tui_decode.decode_harness_snapshot
+      (harness_snapshot_json [ harness_verdict_json () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check bool) "an empty calibration object carries no total" true
+        (match snapshot.Tui_decode.hs_calibration with
+         | Some c -> c.Tui_decode.hcal_total = 0
+         | None -> true);
+      Alcotest.(check bool) "and a missing overview is None" true
+        (snapshot.Tui_decode.hs_overview = None)
+
 let test_decode_harness_snapshot_reads_the_live_shape () =
   match
     Tui_decode.decode_harness_snapshot
@@ -5474,6 +5554,10 @@ let () =
       [
         Alcotest.test_case "reads the live shape" `Quick
           test_decode_harness_snapshot_reads_the_live_shape;
+        Alcotest.test_case "reads the whole ledger" `Quick
+          test_decode_harness_reads_the_whole_ledger;
+        Alcotest.test_case "without a ledger says so" `Quick
+          test_decode_harness_without_a_ledger_says_so;
         Alcotest.test_case "keeps the fallback reason" `Quick
           test_decode_harness_keeps_the_fallback_reason;
         Alcotest.test_case "an empty harness is a reading" `Quick

@@ -7242,6 +7242,64 @@ let render_verification (state : state) =
    for, so the row says which evaluator answered and marks the ones that were
    not the intended one. Reading a column of "approve" without that would say
    the gate is working when it may only be degrading quietly. *)
+(* What the judge has decided over its whole life. The pane drew the recent
+   page and nothing else, so the line promising to say "where a fallback
+   answered instead" was the one thing it could not answer: 1,983 of this
+   workspace's 4,197 verdicts came from the fallback gate and the screen
+   showed a page of eight.
+
+   Rates are stated against what they were computed from. [labeled_count] is
+   zero here, which makes the agreement rate and the false-positive and
+   false-negative counts zero for want of ground truth rather than for want
+   of disagreement -- drawn as "0.0" they would read as a judge that never
+   errs. The pane says which of the two it is instead of printing the
+   number. *)
+let harness_ledger_lines ~cols snapshot =
+  match snapshot with
+  | None -> []
+  | Some snapshot -> (
+      match snapshot.Masc.Tui_decode.hs_calibration with
+      | None -> []
+      | Some calibration ->
+          let open Masc.Tui_decode in
+          if calibration.hcal_total <= 0 then []
+          else
+            let share count =
+              100. *. float_of_int count /. float_of_int calibration.hcal_total
+            in
+            let gates =
+              calibration.hcal_gates
+              |> List.filteri (fun index _ -> index < 4)
+              |> List.map (fun (gate, count) ->
+                     Printf.sprintf "%s %d (%.0f%%)" gate count (share count))
+              |> String.concat "  \xc2\xb7  "
+            in
+            let remaining = max 0 (List.length calibration.hcal_gates - 4) in
+            let gates =
+              if remaining = 0 then gates
+              else Printf.sprintf "%s  \xc2\xb7  +%d more" gates remaining
+            in
+            let evaluator =
+              match snapshot.hs_overview with
+              | None -> ""
+              | Some overview ->
+                  Printf.sprintf "  \xc2\xb7  evaluator %s"
+                    (Terminal_text.single_line overview.hov_evaluator_status)
+            in
+            [ Printf.sprintf "  %sledger%s  %d ruled  \xc2\xb7  approve %d  \xc2\xb7  reject %d%s"
+                Ansi.dim Ansi.reset calibration.hcal_total
+                calibration.hcal_approve calibration.hcal_reject evaluator
+            ; Printf.sprintf "  %sgate%s    %s" Ansi.dim Ansi.reset
+                (fit_width gates (max 8 (cols - 12)))
+            ; (if calibration.hcal_labeled > 0 then
+                 Printf.sprintf "  %slabelled%s %d" Ansi.dim Ansi.reset
+                   calibration.hcal_labeled
+               else
+                 Printf.sprintf
+                   "  %slabelled%s none \xe2\x80\x94 agreement and the error counts have no ground truth"
+                   Ansi.dim Ansi.reset)
+            ])
+
 let render_harness_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -7270,16 +7328,26 @@ let render_harness_list (state : state) =
         Printf.sprintf "%s  (not loaded)  %s  %s"
           (planning_workspace_title state ~tab:Planning_verdicts) timestamp
           (connection_badge state)
-    | Some _ when fallbacks > 0 ->
-        (* The count is the reading an operator opens this for: verdicts that
-           came from something other than the evaluator the gate names. *)
-        Printf.sprintf "%s (%d, %d by fallback)  %s  %s"
+    | Some snapshot ->
+        (* The page and the ledger, apart. This read "(8 verdicts)" while the
+           server was reporting 4,197: the eight are the recent page, and
+           every proportion below is computed over the rest. A page count
+           worn as the total is the one number on this screen a reader would
+           act on. *)
+        let of_total =
+          match snapshot.Masc.Tui_decode.hs_calibration with
+          | Some calibration when calibration.Masc.Tui_decode.hcal_total > 0 ->
+              Printf.sprintf " of %d"
+                calibration.Masc.Tui_decode.hcal_total
+          | Some _ | None -> ""
+        in
+        let by_fallback =
+          if fallbacks > 0 then Printf.sprintf ", %d by fallback" fallbacks
+          else ""
+        in
+        Printf.sprintf "%s (%d%s%s)  %s  %s"
           (planning_workspace_title state ~tab:Planning_verdicts)
-          shown fallbacks timestamp (connection_badge state)
-    | Some _ ->
-        Printf.sprintf "%s (%d)  %s  %s"
-          (planning_workspace_title state ~tab:Planning_verdicts) shown
-          timestamp (connection_badge state)
+          shown of_total by_fallback timestamp (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -7292,6 +7360,7 @@ let render_harness_list (state : state) =
   box_line_styled buf cols ~style:(Theme.recede ())
     "  Rulings on the tasks Task Review was waiting on \xe2\x80\x94 who judged \
      each one, and where a fallback answered instead.";
+  List.iter (box_line buf cols) (harness_ledger_lines ~cols state.harness);
   (* A ledger that quietly stopped is this screen's own failure mode: it once
      starved for a month while the judge kept running, and the stale rows
      read as a working gate. Say the age instead of letting old rows pass as

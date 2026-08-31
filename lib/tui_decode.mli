@@ -555,8 +555,37 @@ type harness_verdict = {
           and the surface says so rather than showing them alike. *)
 }
 
+(** What the judge has decided over its whole life, not the page of it the
+    pane draws. The screen said "(8 verdicts)" while the server was reporting
+    4,197 -- the eight are the recent page, and every rate a reader would
+    weigh is computed over the rest. *)
+type harness_calibration = {
+  hcal_total : int;
+  hcal_approve : int;
+  hcal_reject : int;
+  hcal_labeled : int;
+      (** Verdicts a person has labelled. Zero means the agreement rate and
+          the false-positive and false-negative counts beside it have no
+          ground truth to be computed against -- not that they are zero. The
+          pane must say which of those two it is. *)
+  hcal_gates : (string * int) list;
+      (** Which gate produced each verdict, highest count first. This is what
+          the surface exists to answer -- its own opening line promises to
+          say where a fallback answered instead of the evaluator -- and it
+          was the field the pane did not read. *)
+}
+
+type harness_overview = {
+  hov_evaluator_status : string;
+  hov_last_signal_at : float option;
+}
+
 type harness_snapshot = {
   hs_verdicts : harness_verdict list;  (** newest first, as the server sends *)
+  hs_calibration : harness_calibration option;
+      (** [None] when the server did not send the section, which an older
+          build does; the pane draws the page alone rather than zeroes. *)
+  hs_overview : harness_overview option;
 }
 
 (** One task waiting on a verdict, as the verification surface lists it. *)

@@ -1802,7 +1802,24 @@ type harness_verdict = {
   hv_notes_hash : string;
 }
 
-type harness_snapshot = { hs_verdicts : harness_verdict list }
+type harness_calibration = {
+  hcal_total : int;
+  hcal_approve : int;
+  hcal_reject : int;
+  hcal_labeled : int;
+  hcal_gates : (string * int) list;
+}
+
+type harness_overview = {
+  hov_evaluator_status : string;
+  hov_last_signal_at : float option;
+}
+
+type harness_snapshot = {
+  hs_verdicts : harness_verdict list;
+  hs_calibration : harness_calibration option;
+  hs_overview : harness_overview option;
+}
 
 type verification_request = {
   vr_request_id : string;
@@ -3298,12 +3315,65 @@ let decode_harness_verdict json =
     ; hv_notes_hash
     }
 
+(* Counts keyed by gate name, highest first and ties by name so two reads of
+   the same numbers order them the same. An entry that is not a count is
+   dropped rather than read as zero: the pane reports proportions from this
+   section, and a malformed entry counted as nothing moves every one of
+   them. *)
+let decode_gate_distribution json =
+  match member "gate_distribution" json with
+  | `Assoc fields ->
+      fields
+      |> List.filter_map (fun (gate, value) ->
+             match value with `Int count -> Some (gate, count) | _ -> None)
+      |> List.sort (fun (left_gate, left) (right_gate, right) ->
+             match Int.compare right left with
+             | 0 -> String.compare left_gate right_gate
+             | order -> order)
+  | _ -> []
+
+let decode_harness_calibration json =
+  match member "calibration" json with
+  | `Assoc _ as calibration ->
+      let count key =
+        match member key calibration with `Int value -> value | _ -> 0
+      in
+      Some
+        { hcal_total = count "total_verdicts"
+        ; hcal_approve = count "approve_count"
+        ; hcal_reject = count "reject_count"
+        ; hcal_labeled = count "labeled_count"
+        ; hcal_gates = decode_gate_distribution calibration
+        }
+  | _ -> None
+
+let decode_harness_overview json =
+  match member "overview" json with
+  | `Assoc _ as overview ->
+      let status =
+        match member "evaluator_status" overview with
+        | `String value -> value
+        | _ -> "unknown"
+      in
+      let last_signal_at =
+        match member "last_signal_at" overview with
+        | `Float value -> Some value
+        | `Int value -> Some (Float.of_int value)
+        | _ -> None
+      in
+      Some { hov_evaluator_status = status; hov_last_signal_at = last_signal_at }
+  | _ -> None
+
 let decode_harness_snapshot json =
   let* verdicts_json = required_list_field json "recent_verdicts" in
   let* hs_verdicts =
     decode_list "recent_verdicts" decode_harness_verdict verdicts_json
   in
-  Ok { hs_verdicts }
+  Ok
+    { hs_verdicts
+    ; hs_calibration = decode_harness_calibration json
+    ; hs_overview = decode_harness_overview json
+    }
 
 let decode_verification_request json =
   let* vr_request_id = required_string_field json "request_id" in

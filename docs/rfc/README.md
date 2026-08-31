@@ -241,7 +241,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0398 | Edit addresses lines and proves freshness; the substring search goes away | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
-| RFC-attached-service-tool-scoping | 부착 서비스 도구를 매 턴 전량 싣는 것을 그만둔다 | Draft | - |
+| RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
 | RFC-claude-code-context-overflow-bounded-restart | Admit Claude Code bootstrap input without replaying rejected episodes | Draft | - |
 | RFC-claude-setting-sources-opt-in | Claude Code settings layers as a keeper-profile opt-in | Implemented | - |
@@ -250,6 +250,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-dashboard-dev-token-configured-role | Loopback dashboard dev-token issues Admin | Draft | - |
 | RFC-event-queue-admit-all-ready | 이벤트 큐 — 준비된 자극은 한 턴이 전부 본다, 턴 실패는 자극을 버리지 않는다 | Draft | - |
 | RFC-exact-lane-delivery-channel | exact 레인이 답을 받는 통로를 고른다 — 본문 JSON 이 후보를 절반 떨어뜨린다 | Draft | - |
+| RFC-execute-boundary-is-the-sandbox | The subset judges; the sandbox contains | Draft | - |
 | RFC-execute-subset-dispositions | Execute subset dispositions: resolve it, spawn it, or name the replacement | Draft | - |
 | RFC-keeper-conversation-hitl-flow | Keeper conversation and non-blocking HITL | Implemented | - |
 | RFC-keeper-external-tools-and-produced-artifacts | Keeper 외부 도구와 생성 이미지 증거를 선언형 계약으로 연결한다 | Draft | - |

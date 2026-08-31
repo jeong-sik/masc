@@ -296,7 +296,7 @@ let connector_attention_outcome_of_route
 let record_crashed_cycle_failure ~base_path ~keeper_name exn =
   (* Capture the backtrace before any other call can clobber it. *)
   let backtrace = Printexc.get_backtrace () in
-  Keeper_registry.increment_turn_failures ~base_path keeper_name;
+  ignore (Keeper_turn_failure_streak.increment ~base_path ~keeper_name);
   Health.record_failure
     ~agent_name:keeper_name
     ~reason:(Keeper_types_profile.short_preview (Printexc.to_string exn));
@@ -339,13 +339,17 @@ let handle_cycle_exception ~base_path ~(meta : keeper_meta) exn =
 
 
 (* The queue records attention that a Keeper must observe, not provider health.
-   A source leaves only after a completed turn has observed the admitted batch.
-   Provider/config/context failures therefore leave every source untouched;
-   otherwise one runtime failure can terminally discard an arbitrary batch of
-   unrelated Board, Schedule, Task, or completion-authority facts. *)
+   A source normally leaves only after a completed turn has observed the
+   admitted batch. The narrow exception is a checkpoint caused by a newer
+   durable source: attention-only rows advance while the checkpoint preserves
+   the model continuation. Provider/config/context failures therefore leave
+   every source untouched; otherwise one runtime failure can terminally discard
+   an arbitrary batch of unrelated Board, Schedule, Task, or
+   completion-authority facts. *)
 type batch_disposition =
   | Batch_ack_completed of
       { connector_attention_outcome : connector_attention_outcome }
+  | Batch_ack_durable_stimulus_yield
   | Batch_no_action
 
 let batch_disposition_of_cycle_outcome
@@ -358,6 +362,18 @@ let batch_disposition_of_cycle_outcome
       { connector_attention_outcome =
           connector_attention_outcome_of_route completion.continuation_route
       }
+  | Some
+      (Cycle.Checkpointed
+         { checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived
+         ; continuation_route = _
+         ; _
+         }) ->
+    (* The admitted batch is an attention layer, not the continuation store.
+       This checkpoint exists specifically because a newer durable source
+       arrived; retaining the older batch would replay it ahead of the new
+       source forever under continuous arrivals. Connector attention remains
+       pending until it has an exact reply/ignore settlement. *)
+    Batch_ack_durable_stimulus_yield
   | Some
       ( Cycle.Failed _
       | Cycle.Checkpointed _
@@ -380,7 +396,7 @@ let connector_attention_settlement_of_disposition = function
     Settle_ignored
   (* The entry stays pending, so the turn that finally drains it owns the
      terminal event. Settling here would retire a row that is still live. *)
-  | Batch_no_action -> Settle_pending_in_queue
+  | Batch_ack_durable_stimulus_yield | Batch_no_action -> Settle_pending_in_queue
 ;;
 
 
@@ -391,6 +407,15 @@ let turn_status_event ~turn_fail_count : Keeper_state_machine.event =
   if turn_fail_count > 0
   then Keeper_state_machine.Turn_failed { consecutive = turn_fail_count }
   else Keeper_state_machine.Turn_succeeded
+;;
+
+let failure_reason_after_turn_status ~turn_fail_count current =
+  if turn_fail_count <= 0
+  then current
+  else
+    match current with
+    | Some (Keeper_registry.Turn_configuration_error _) -> current
+    | Some _ | None -> Some (Keeper_registry.Turn_consecutive_failures turn_fail_count)
 ;;
 
 (* Whether the event queue still holds any pending entry. Read errors are
@@ -506,6 +531,8 @@ let run_keepalive_unified_turn
       ref []
     in
     let cycle_outcome_ref = ref None in
+    let hitl_resolution_for_cycle = ref None in
+    let hitl_continuation_projection_ok = ref true in
     let selection_acked = ref false in
     let stimuli_acked = ref false in
     let event_queue_failed = ref false in
@@ -796,6 +823,7 @@ let run_keepalive_unified_turn
                    meta_after_triage.name;
                  Some resolution)
           in
+          hitl_resolution_for_cycle := hitl_resolution;
           (* The event intake is the exact turn input. Keep its attribution in
              the existing wake record even when the cadence, rather than a
              direct wake signal, discovered it. An empty [Woken] still means a
@@ -872,6 +900,39 @@ let run_keepalive_unified_turn
           ~selection
         |> record_terminal_selection_result ~label:"turn completion"
       in
+      let cycle_recorded_continuation =
+        match !cycle_outcome_ref with
+        | Some (Cycle.Completed _) -> true
+        | Some
+            (Cycle.Checkpointed
+               { checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived
+               ; _
+               }) ->
+          true
+        | Some
+            ( Cycle.Failed _
+            | Cycle.Checkpointed _
+            | Cycle.Input_required _
+            | Cycle.Cancelled _
+            | Cycle.Skipped _ )
+        | None -> false
+      in
+      (match cycle_recorded_continuation, !hitl_resolution_for_cycle with
+       | true, Some resolution ->
+         (match
+            Keeper_approval_queue.ensure_settled_continuation_chat_projection
+              ~base_path:ctx.config.base_path
+              ~keeper_name:meta_after_triage.name
+              ~resolution
+          with
+          | Ok Keeper_approval_queue.Continuation_projection_recorded -> ()
+          | Ok Keeper_approval_queue.Continuation_projection_not_ready ->
+            hitl_continuation_projection_ok := false
+          | Error detail ->
+            hitl_continuation_projection_ok := false;
+            record_event_queue_failure
+              ("approval continuation projection failed: " ^ detail))
+       | false, _ | true, None -> ());
       (match !cycle_outcome_ref with
        | Some (Cycle.Failed _)
        | Some
@@ -908,26 +969,46 @@ let run_keepalive_unified_turn
                  event_ids
              | Settle_pending_in_queue -> ()
            in
-           let remove_completed_selections ~settlement =
+           let remove_completed_selections ~should_ack ~settlement =
+             let should_ack selection =
+               should_ack selection
+               &&
+               match selection.Keeper_event_queue_state.source.payload with
+               | Keeper_event_queue.Hitl_resolved _ ->
+                 !hitl_continuation_projection_ok
+               | _ -> true
+             in
+             let selections_to_ack, retained_selections =
+               List.partition should_ack selections
+             in
              let all_acked =
                List.fold_left
                  (fun all_acked selection ->
                     let acked = terminalize_completed_selection ~selection in
                     all_acked && acked)
                  true
-                 selections
+                 selections_to_ack
              in
-             stimuli_acked := all_acked;
+             stimuli_acked := all_acked && List.is_empty retained_selections;
              (* A failed queue ack leaves the entry live, so the row it carries
                 is still someone's to settle. *)
-             if all_acked then settle_connector_attention settlement
+             if all_acked && List.is_empty retained_selections
+             then settle_connector_attention settlement
            in
            let disposition = batch_disposition_of_cycle_outcome !cycle_outcome_ref in
            let settlement =
              connector_attention_settlement_of_disposition disposition
            in
            match disposition with
-           | Batch_ack_completed _ -> remove_completed_selections ~settlement
+           | Batch_ack_completed _ ->
+             remove_completed_selections ~should_ack:(fun _ -> true) ~settlement
+           | Batch_ack_durable_stimulus_yield ->
+             remove_completed_selections
+               ~should_ack:(fun selection ->
+                 match selection.Keeper_event_queue_state.source.payload with
+                 | Keeper_event_queue.Connector_attention _ -> false
+                 | _ -> true)
+               ~settlement
            | Batch_no_action -> ());
       { meta = meta_after_cycle
       ; cycle_status =
@@ -1314,11 +1395,19 @@ let run_heartbeat_loop
                (turn_status_event
                   ~turn_fail_count);
              if turn_fail_count > 0
-             then
+             then (
+               let current_failure_reason =
+                 Keeper_registry.get
+                   ~base_path:ctx.config.base_path
+                   m.name
+                 |> fun entry -> Option.bind entry (fun entry -> entry.last_failure_reason)
+               in
                Keeper_registry.set_failure_reason
                  ~base_path:ctx.config.base_path
                  m.name
-                 (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
+                 (failure_reason_after_turn_status
+                    ~turn_fail_count
+                    current_failure_reason));
              (* Phase 1: work-as-heartbeat — renew point (b).
                 After turn, call Workspace.heartbeat to prove workspace I/O health.
                 On success: reset consecutive_failures.

@@ -1015,6 +1015,175 @@ let identity_app_form_rows form =
     ; ""
     ]
 
+(** The schedule-create form, in the identity form's idiom: sequential
+    fields, enter to advance, enter on the last field to submit, esc to
+    abandon. Tab cycles the wake's shape because the shape decides which
+    fields exist at all. *)
+type schedule_create_field =
+  | Schedule_field_keeper
+  | Schedule_field_message
+  | Schedule_field_when
+  | Schedule_field_timezone
+
+(** The four timing shapes [masc_schedule_create] accepts. The [when] field's
+    meaning follows the kind; daily and cron also carry a fixed-offset
+    timezone. *)
+type schedule_create_kind =
+  | Schedule_kind_one_shot
+  | Schedule_kind_interval
+  | Schedule_kind_daily
+  | Schedule_kind_cron
+
+type schedule_create_form = {
+  scf_kind: schedule_create_kind;
+  scf_field: schedule_create_field;
+  scf_keeper: string;
+  scf_message: string;
+  scf_when: string;
+  scf_timezone: string;
+}
+
+let schedule_create_kind_label = function
+  | Schedule_kind_one_shot -> "one-shot"
+  | Schedule_kind_interval -> "interval"
+  | Schedule_kind_daily -> "daily"
+  | Schedule_kind_cron -> "cron"
+
+let schedule_create_kind_next = function
+  | Schedule_kind_one_shot -> Schedule_kind_interval
+  | Schedule_kind_interval -> Schedule_kind_daily
+  | Schedule_kind_daily -> Schedule_kind_cron
+  | Schedule_kind_cron -> Schedule_kind_one_shot
+
+(* What the [when] field means under each kind, spelled beside where the
+   operator types it. *)
+let schedule_create_when_hint = function
+  | Schedule_kind_one_shot -> "RFC3339, 예: 2026-09-01T09:00:00+09:00"
+  | Schedule_kind_interval -> "N초마다, 예: 3600"
+  | Schedule_kind_daily -> "HH:MM, 예: 09:00"
+  | Schedule_kind_cron -> "분 시 일 월 요일, 예: 0 9 * * 1-5"
+
+let schedule_create_kind_needs_timezone = function
+  | Schedule_kind_daily | Schedule_kind_cron -> true
+  | Schedule_kind_one_shot | Schedule_kind_interval -> false
+
+(* Field order is kind-dependent: one-shot and interval carry no timezone
+   field, so [when] is their last field and enter there submits. *)
+let schedule_create_next_field form =
+  match form.scf_field with
+  | Schedule_field_keeper -> Some Schedule_field_message
+  | Schedule_field_message -> Some Schedule_field_when
+  | Schedule_field_when ->
+      if schedule_create_kind_needs_timezone form.scf_kind then
+        Some Schedule_field_timezone
+      else None
+  | Schedule_field_timezone -> None
+
+(* The terminal's own fixed UTC offset, in the +09:00 spelling the tool's
+   timezone parameter accepts. Both [localtime] and [gmtime] are re-read as
+   local wall clock by [mktime], so their difference is the offset. It only
+   prefills an editable field. *)
+let local_utc_offset_label () =
+  let now = Unix.gettimeofday () in
+  let local_epoch, _ = Unix.mktime (Unix.localtime now) in
+  let utc_epoch, _ = Unix.mktime (Unix.gmtime now) in
+  let offset = int_of_float (local_epoch -. utc_epoch) in
+  let sign = if offset < 0 then '-' else '+' in
+  let offset = abs offset in
+  Printf.sprintf "%c%02d:%02d" sign (offset / 3600) (offset mod 3600 / 60)
+
+let schedule_create_form_initial () =
+  { scf_kind = Schedule_kind_one_shot;
+    scf_field = Schedule_field_keeper;
+    scf_keeper = "";
+    scf_message = "";
+    scf_when = "";
+    scf_timezone = local_utc_offset_label ();
+  }
+
+(** The form's rows, built where the key handler can count the same preamble
+    the renderer draws — the identity form's arrangement. *)
+let schedule_create_form_rows form =
+  match form with
+  | None -> []
+  | Some f ->
+    let mark field = if f.scf_field = field then ">" else " " in
+    let timezone_rows =
+      if schedule_create_kind_needs_timezone f.scf_kind then
+        [ Printf.sprintf "  %s timezone  %s" (mark Schedule_field_timezone)
+            f.scf_timezone ]
+      else []
+    in
+    [ Printf.sprintf "  new wake — kind: %s  (tab: 종류 바꿈)"
+        (schedule_create_kind_label f.scf_kind)
+    ; Printf.sprintf "  %s keeper    %s" (mark Schedule_field_keeper) f.scf_keeper
+    ; Printf.sprintf "  %s message   %s" (mark Schedule_field_message) f.scf_message
+    ; Printf.sprintf "  %s when      %s  (%s)" (mark Schedule_field_when)
+        f.scf_when (schedule_create_when_hint f.scf_kind)
+    ]
+    @ timezone_rows
+    @ [ "  enter 다음 칸 · 마지막 칸에서 enter 생성 · esc 취소"
+      ; ""
+      ]
+
+(** Typed timing arguments for [masc_schedule_create], built from the form.
+    The one-shot timestamp text passes through untouched: time syntax is the
+    tool's contract to validate. The other kinds parse locally only because
+    their wire fields are numbers, which JSON cannot carry as raw text. *)
+type schedule_create_spec =
+  | Schedule_spec_one_shot of { due_at_iso: string }
+  | Schedule_spec_interval of { interval_sec: int }
+  | Schedule_spec_daily of { hour: int; minute: int; timezone: string }
+  | Schedule_spec_cron of { cron: string; timezone: string }
+
+type schedule_create_request = {
+  scr_keeper: string;
+  scr_message: string;
+  scr_spec: schedule_create_spec;
+}
+
+let schedule_create_request_of_form (f : schedule_create_form) :
+    (schedule_create_request, string) result =
+  let keeper = String.trim f.scf_keeper in
+  let message = String.trim f.scf_message in
+  let when_text = String.trim f.scf_when in
+  let timezone = String.trim f.scf_timezone in
+  if String.equal keeper "" then Error "keeper 칸이 비어 있습니다"
+  else if String.equal message "" then Error "message 칸이 비어 있습니다"
+  else if String.equal when_text "" then Error "when 칸이 비어 있습니다"
+  else
+    let with_timezone build =
+      if String.equal timezone "" then
+        Error "timezone 칸이 비어 있습니다 (예: +09:00)"
+      else Ok (build timezone)
+    in
+    let spec =
+      match f.scf_kind with
+      | Schedule_kind_one_shot ->
+          Ok (Schedule_spec_one_shot { due_at_iso = when_text })
+      | Schedule_kind_interval -> (
+          match int_of_string_opt when_text with
+          | Some interval_sec when interval_sec > 0 ->
+              Ok (Schedule_spec_interval { interval_sec })
+          | Some _ | None -> Error "interval 은 양의 정수 초여야 합니다")
+      | Schedule_kind_daily -> (
+          match String.split_on_char ':' when_text with
+          | [ hh; mm ] -> (
+              match (int_of_string_opt hh, int_of_string_opt mm) with
+              | Some hour, Some minute
+                when hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 ->
+                  with_timezone (fun timezone ->
+                      Schedule_spec_daily { hour; minute; timezone })
+              | _ -> Error "daily 는 HH:MM 이어야 합니다 (예: 09:00)")
+          | _ -> Error "daily 는 HH:MM 이어야 합니다 (예: 09:00)")
+      | Schedule_kind_cron ->
+          with_timezone (fun timezone ->
+              Schedule_spec_cron { cron = when_text; timezone })
+    in
+    Result.map
+      (fun scr_spec -> { scr_keeper = keeper; scr_message = message; scr_spec })
+      spec
+
 type identity_login_started = {
   ils_keeper: string;
   ils_provider: string;
@@ -1841,6 +2010,10 @@ type state = {
      press on a different row re-arms for that row. *)
   mutable schedule_cancel_armed: string option;
   mutable schedule_cancel_error: string option;
+  (* The open create form, or [None]. The form takes keys ahead of the
+     composer while open, exactly the way [runtime_param_edit] does. *)
+  mutable schedule_create_form: schedule_create_form option;
+  mutable schedule_create_error: string option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
@@ -2485,6 +2658,8 @@ let create_state
   schedule_detail_id = None;
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
+  schedule_create_form = None;
+  schedule_create_error = None;
   lanes = None;
   standalone_lanes = None;
   standalone_lanes_error = None;

@@ -211,14 +211,7 @@ let test_a_builtin_that_declares_deferral_leaves_the_request () =
   with_bundle (fun bundle ->
     let listed = tool_names bundle.Keeper_tools_agent_core.agent_core_tools in
     let sent = tool_names bundle.Keeper_tools_agent_core.tools in
-    let declared_deferrable =
-      List.filter
-        (fun n ->
-           match Tool_loading_declarations.loading_of_tool n with
-           | Tool_definition_toml.Deferrable -> true
-           | Tool_definition_toml.Always_loaded -> false)
-        sent
-    in
+    let declared_deferrable = declared_deferrable bundle in
     check
       bool
       "at least one built-in declares deferral, or this proves nothing"

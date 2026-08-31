@@ -156,35 +156,46 @@ let expected_model_tool_names
          @ identity_names)
 ;;
 
-(* The Agent Core lane always carries the attached-tool listing and may also
-   carry attached schemas that its conversation used on an earlier turn.
-   Those carried names are a subset of the current attachment offering; an
-   unknown actual name must stay outside the expectation so the projection
-   check still reports it. The listing remains expected even when it is
-   accidentally absent from the actual surface. *)
-(* Which declared-deferrable built-ins this surface actually left out.
+(* One question, asked from both sides: of the names this surface was built to
+   treat specially, which ones did the turn actually place?
 
-   Sibling of [agent_core_identity_names] and the same rule: read what the turn
-   built, not what a declaration asked for. A tool declaring
-   [defer_loading = true] is not enough to be here -- a tool this conversation
-   has run is placed with its schema again, so a declared tool the Keeper uses
-   is on the surface after all.
+   Both callers face the same trap. The Agent Core lane always carries the
+   attached-tool listing and may also carry attached schemas its conversation
+   used on an earlier turn; and a built-in that declares [defer_loading = true]
+   is placed with its schema again once this conversation has run it. So
+   neither "attached" nor "declared deferrable" predicts presence, and a check
+   built on the declaration expects a tool that is legitimately there.
 
-   Reading the declaration instead cost 60
+   Reading the declaration instead of the surface cost 60
    [keeper_model_tool_projection_mismatch] errors in an hour on 2026-08-31, all
    on [keeper_ide_annotate]: declared deferrable, called once the day before,
-   and legitimately present ever since. *)
-let deferred_names_absent_from ~declared_names ~actual_names =
-  List.filter (fun name -> not (List.mem name actual_names)) declared_names
+   and carried ever since.
+
+   An unknown actual name stays outside either answer, so the projection check
+   still reports it. *)
+let partition_by_presence ~names ~actual_names =
+  List.partition (fun name -> List.mem name actual_names) names
 ;;
 
+(* Present: the listing plus whatever attached schemas were carried in. The
+   listing is expected even when it is accidentally absent from the actual
+   surface, which is the one thing the check must still catch. *)
 let agent_core_identity_names ~attached_names ~actual_names =
   match attached_names with
   | [] -> []
   | _ :: _ ->
-    Keeper_identity_tool_search.tool_name
-    :: List.filter (fun name -> List.mem name attached_names) actual_names
-    |> List.sort_uniq String.compare
+    let present, (_ : string list) =
+      partition_by_presence ~names:attached_names ~actual_names
+    in
+    Keeper_identity_tool_search.tool_name :: present |> List.sort_uniq String.compare
+;;
+
+(* Absent: the declared built-ins this surface really did leave out. *)
+let deferred_names_absent_from ~declared_names ~actual_names =
+  let (_ : string list), absent =
+    partition_by_presence ~names:declared_names ~actual_names
+  in
+  absent
 ;;
 
 let prepare_agent_setup

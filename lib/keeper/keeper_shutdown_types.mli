@@ -35,6 +35,7 @@ type dashboard_purge_artifact =
   | Keeper_feedback_log_artifact
   | Keeper_runtime_directory_artifact
   | Keeper_memory_current_artifact
+  | Keeper_memory_source_current_artifact
   | Keeper_memory_journal_artifact
   | Keeper_configuration_artifact
   | Keeper_chat_store_artifact

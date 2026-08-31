@@ -134,6 +134,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_sandbox.mli` - sandbox-runtime
 - `lib/keeper/keeper_tool_execute_input.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_input.mli` - shell-surface
+- `lib/keeper/keeper_tool_execute_exit_report.ml` - shell-surface
+- `lib/keeper/keeper_tool_execute_exit_report.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime.mli` - shell-surface
 - `lib/keeper_tool_execute_shell_ir/keeper_tool_execute_shell_ir.ml` - shell-surface

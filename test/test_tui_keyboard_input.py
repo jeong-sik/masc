@@ -7196,7 +7196,14 @@ def runtime_probe_response(*, fresh: bool) -> HttpResponse:
             "refresh_state": "fresh" if fresh else "served_stale",
             "probe": {
                 "source": "runtime.toml",
-                "status": "reachable" if fresh else "degraded",
+                # The overall probe status is written from Health_status, which
+                # spells the healthy reading "ok". "reachable" belongs to the
+                # per-provider vocabulary a few lines below and is not a word
+                # this field can carry, so a fixture using it here fails the
+                # snapshot decode -- and that failure is an inner result, so
+                # the surface keeps the previous reading and only marks the
+                # header "read failed" rather than saying what broke.
+                "status": "ok" if fresh else "degraded",
                 "probe_ok": fresh,
                 "checked_at": "2026-08-24T10:20:00Z",
                 "summary": {
@@ -7393,8 +7400,11 @@ def runtime_surface_interaction(
                 process,
                 master_fd,
                 output,
+                # The header writes the overall reading back with the word the
+                # producer sent -- Health_status spells the healthy one "ok".
+                # "reachable" is the per-provider word and never appears here.
                 re.compile(
-                    rb"reachable(?:\x1b\[[0-9;]*m)* / "
+                    rb"ok(?:\x1b\[[0-9;]*m)* / "
                     rb"(?:\x1b\[[0-9;]*m)*fresh"
                 ),
                 start=fresh_start,

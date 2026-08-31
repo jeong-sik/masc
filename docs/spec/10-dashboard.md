@@ -82,6 +82,14 @@ be `pending`. Clients must not recover this join by searching post titles,
 bodies, or `meta_json`. `absent` means no current Board projection; it does not
 claim whether a post never existed or expired after its retention window.
 
+Running registry rows also expose a typed process-local stage (`accepted`,
+`panel`, `judge`, `computed`, or `recording_evidence`) and producer-observed
+panel counts. Stage observation is not resumable: replay drops stale running
+workers. Current successful completions may add a bounded decision and resolved
+answer summary; legacy success records without those additive fields remain
+valid. These previews improve scanning but do not replace the exact Board
+evidence join.
+
 ## 6. Transport isolation
 
 HTTP snapshots use cursor-based reads. SSE/WebSocket events carry typed event

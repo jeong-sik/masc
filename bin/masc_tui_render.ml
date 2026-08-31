@@ -7833,6 +7833,38 @@ let fusion_run_status_color = function
   | Fusion_completed -> (Theme.ok ())
   | Fusion_failed _ -> (Theme.bad ())
 
+let fusion_run_stage_compact = function
+  | Fusion_stage_accepted -> "accepted"
+  | Fusion_stage_panel { frs_expected } ->
+      Printf.sprintf "panel(%d)" frs_expected
+  | Fusion_stage_judge { frs_answered; frs_failed; _ } ->
+      Printf.sprintf "judge(%d/%d)" frs_answered frs_failed
+  | Fusion_stage_computed { frs_answered; frs_failed; _ } ->
+      Printf.sprintf "computed(%d/%d)" frs_answered frs_failed
+  | Fusion_stage_recording_evidence { frs_answered; frs_failed; _ } ->
+      Printf.sprintf "recording(%d/%d)" frs_answered frs_failed
+  | Fusion_stage_completed -> "completed"
+  | Fusion_stage_failed -> "failed"
+
+let fusion_run_progress_text = function
+  | Fusion_stage_accepted -> "accepted; waiting for panel dispatch"
+  | Fusion_stage_panel { frs_expected } ->
+      Printf.sprintf "panel deliberation running across %d model(s)" frs_expected
+  | Fusion_stage_judge { frs_expected; frs_answered; frs_failed } ->
+      Printf.sprintf
+        "panel complete: %d answered / %d failed of %d; judge running"
+        frs_answered frs_failed frs_expected
+  | Fusion_stage_computed { frs_expected; frs_answered; frs_failed } ->
+      Printf.sprintf
+        "compute complete: %d answered / %d failed of %d; awaiting durable projection"
+        frs_answered frs_failed frs_expected
+  | Fusion_stage_recording_evidence { frs_expected; frs_answered; frs_failed } ->
+      Printf.sprintf
+        "recording evidence: %d answered / %d failed of %d"
+        frs_answered frs_failed frs_expected
+  | Fusion_stage_completed -> "completed"
+  | Fusion_stage_failed -> "failed"
+
 let fusion_run_clock run =
   Terminal_text.clock_timestamp
     (Masc_domain.iso8601_of_unix_seconds run.fur_started_at)
@@ -7845,10 +7877,16 @@ let fusion_run_summary run =
   let flow = "Flow: Question \xe2\x86\x92 Panel \xe2\x86\x92 Judge \xe2\x86\x92 Evidence" in
   match run.fur_status with
   | Fusion_running ->
-      (Ansi.cyan, flow ^ " \xc2\xb7 collecting exact evidence")
+      (Ansi.cyan, flow ^ " \xc2\xb7 " ^ fusion_run_progress_text run.fur_stage)
   | Fusion_completed ->
-      ( (Theme.ok ())
-      , flow ^ " \xc2\xb7 evidence retained; Enter opens panel and judge" )
+      (match run.fur_decision, run.fur_summary with
+       | Some decision, Some summary ->
+           ( (Theme.ok ())
+           , Terminal_text.single_line decision ^ " \xc2\xb7 "
+             ^ Terminal_text.single_line summary )
+       | (Some _ | None), (Some _ | None) ->
+           ( (Theme.ok ())
+           , flow ^ " \xc2\xb7 evidence retained; Enter opens panel and judge" ))
   | Fusion_failed failure ->
       ( (Theme.bad ())
       , Printf.sprintf "%s \xc2\xb7 failed [%s]: %s" flow
@@ -7901,7 +7939,7 @@ let render_fusion_list (state : state) =
   box_line buf cols header;
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  %-8s %-7s %-9s %-*s %-10s %s" "TIME" "AGE" "STATUS"
+    (Printf.sprintf "  %-8s %-7s %-18s %-*s %-10s %s" "TIME" "AGE" "STATE"
        keeper_width "KEEPER" "PRESET" "RUN");
   box_divider buf cols;
   (match state.fusion_error with
@@ -7940,13 +7978,18 @@ let render_fusion_list (state : state) =
       | None -> box_empty buf cols
       | Some run ->
           let status = fusion_run_status_to_string run.fur_status in
+          let state_text =
+            match run.fur_status with
+            | Fusion_running -> fusion_run_stage_compact run.fur_stage
+            | Fusion_completed | Fusion_failed _ -> status
+          in
           let line =
             (* [fit_width] pads, so the cell is already the column's width. *)
-            Printf.sprintf "%-8s %-7s %s%-9s%s %s %-10s %s"
+            Printf.sprintf "%-8s %-7s %s%-18s%s %s %-10s %s"
               (fusion_run_clock run)
               (fit_width (fusion_run_age ~now:now_epoch run) 7)
               (fusion_run_status_color run.fur_status)
-              status Ansi.reset
+              (fit_width state_text 18) Ansi.reset
               (fit_width (Terminal_text.single_line run.fur_keeper) keeper_width)
               (fit_width (Terminal_text.single_line run.fur_preset) 10)
               (fit_width (Terminal_text.single_line run.fur_run_id) 14)
@@ -7978,9 +8021,16 @@ let fusion_wrapped_block ~width ~indent text =
            |> List.map (fun line -> indent ^ line))
   |> List.map (fun line -> Ansi.reset, line)
 
-let fusion_labeled_block ~width ~label text =
+let fusion_markdown_block ~width ~indent text =
+  let body_width = max 1 (width - Message_layout.display_width indent) in
+  if String.equal (String.trim text) "" then [ Ansi.dim, indent ^ "(empty)" ]
+  else
+    document_markdown ~width:body_width text
+    |> List.map (fun line -> Ansi.reset, indent ^ line)
+
+let fusion_labeled_markdown ~width ~label text =
   (Ansi.bold, "  " ^ label)
-  :: fusion_wrapped_block ~width ~indent:"    " text
+  :: fusion_markdown_block ~width ~indent:"    " text
 
 let fusion_detail_lines ~width (detail : fusion_detail) =
   let run = detail.fud_run in
@@ -7997,6 +8047,8 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
         ^ Link.reference Keeper
             (Terminal_text.single_line run.fur_keeper) )
     ; fusion_run_status_color run.fur_status, "  Status: " ^ status
+    ; Ansi.cyan, "  Stage: " ^ fusion_run_stage_to_string run.fur_stage
+    ; Ansi.dim, "  Progress: " ^ fusion_run_progress_text run.fur_stage
     ; ( Ansi.reset
     , "  Configuration: " ^ Terminal_text.single_line run.fur_preset ^ " \xc2\xb7 "
       ^ Fusion_types.fusion_topology_to_string run.fur_topology )
@@ -8004,7 +8056,13 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
     ]
     @
     match run.fur_status with
-    | Fusion_running | Fusion_completed -> []
+    | Fusion_running -> []
+    | Fusion_completed ->
+        (match run.fur_decision, run.fur_summary with
+         | Some decision, Some summary ->
+             [ (Theme.ok ()), "  Outcome: " ^ Terminal_text.single_line decision ]
+             @ fusion_labeled_markdown ~width ~label:"Outcome summary" summary
+         | (Some _ | None), (Some _ | None) -> [])
     | Fusion_failed failure ->
         [ (Theme.bad ())
         , Printf.sprintf "  Registry failure [%s]: %s"
@@ -8046,7 +8104,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
                            (Terminal_text.single_line answer.fpa_model)
                            answer.fpa_input_tokens answer.fpa_output_tokens )
                      ]
-                     @ fusion_wrapped_block ~width ~indent:"    "
+                     @ fusion_markdown_block ~width ~indent:"    "
                          answer.fpa_answer
                  | Fusion_panel_failed failure ->
                      [ ( (Theme.bad ())
@@ -8066,9 +8124,9 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
                 , "  Judge [synthesized] "
                   ^ Terminal_text.single_line judge.fj_decision )
               ]
-              @ fusion_labeled_block ~width ~label:"Resolved"
+              @ fusion_labeled_markdown ~width ~label:"Resolved"
                   judge.fj_resolved_answer
-              @ fusion_labeled_block ~width ~label:"Reason" judge.fj_reason
+              @ fusion_labeled_markdown ~width ~label:"Reason" judge.fj_reason
           | Fusion_judge_failed failure ->
               [ ( (Theme.bad ())
                 , "  Judge [failed] ["
@@ -8081,7 +8139,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
         ; Ansi.dim, ""
         ; Ansi.bold, "  1  QUESTION"
         ]
-        @ fusion_wrapped_block ~width ~indent:"    " evidence.fe_question
+        @ fusion_markdown_block ~width ~indent:"    " evidence.fe_question
         @ [ Ansi.dim, ""
           ; Ansi.bold, "  2  PANEL RESPONSES"
           ; ( Ansi.dim

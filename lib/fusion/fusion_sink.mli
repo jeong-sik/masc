@@ -137,5 +137,6 @@ val emit_failure :
     (same shape as the HTTP list endpoint). Best-effort: an unknown [run_id] is a
     no-op, and every exception except [Eio.Cancel.Cancelled] is swallowed +
     logged so a broadcast failure never aborts the fusion tool/sink. Callers
-    invoke it right after [register_running] / [mark_completed]. *)
+    invoke it right after [register_running], [mark_progress], or
+    [mark_completed]. *)
 val broadcast_run_status : registry:Fusion_run_registry.t -> run_id:string -> unit

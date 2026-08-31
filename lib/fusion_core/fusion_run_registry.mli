@@ -2,6 +2,10 @@
 
 type outcome =
   | Succeeded
+  | Succeeded_with_summary of
+      { decision : string
+      ; summary : string
+      }
   | Failed of
       { reason : string
       ; code : string
@@ -10,6 +14,25 @@ type outcome =
 type run_status =
   | Running
   | Completed of outcome
+
+type progress =
+  | Progress_accepted
+  | Progress_panel_running of { expected : int }
+  | Progress_judge_running of
+      { expected : int
+      ; answered : int
+      ; failed : int
+      }
+  | Progress_computed of
+      { expected : int
+      ; answered : int
+      ; failed : int
+      }
+  | Progress_recording_evidence of
+      { expected : int
+      ; answered : int
+      ; failed : int
+      }
 
 type run =
   { run_id : string
@@ -21,6 +44,10 @@ type run =
           topology 를 담지 않은 예전 replay 레코드는 스킵된다(레거시 폴백 없음). *)
   ; started_at : float
   ; status : run_status
+  ; progress : progress option
+      (** Process-local live observation. Replay drops running workers, so an
+          intermediate stage is deliberately not persisted as resumable
+          state. Completed runs always carry [None]. *)
   }
 
 type t
@@ -40,6 +67,10 @@ val register_running
 val mark_completed : t -> run_id:string -> outcome:outcome -> unit
 (** Complete a registered run. An unknown [run_id] is logged and is not written
     to the append-only log. *)
+
+val mark_progress : t -> run_id:string -> progress:progress -> unit
+(** Update the live stage only while the exact run remains [Running]. Unknown
+    and terminal ids are ignored. *)
 
 val list_runs : t -> run list
 val get : t -> run_id:string -> run option

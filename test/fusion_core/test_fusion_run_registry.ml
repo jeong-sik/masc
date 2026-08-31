@@ -10,7 +10,7 @@ let status_running = function
 ;;
 
 let status_succeeded = function
-  | R.Completed R.Succeeded -> Some true
+  | R.Completed (R.Succeeded | R.Succeeded_with_summary _) -> Some true
   | R.Completed (R.Failed _) -> Some false
   | R.Running -> None
 ;;
@@ -27,6 +27,12 @@ let yojson_str j k =
   | _ -> Printf.ksprintf failwith "missing string field %s" k
 ;;
 
+let yojson_int j k =
+  match yojson_field j k with
+  | Some (`Int value) -> value
+  | _ -> Printf.ksprintf failwith "missing int field %s" k
+;;
+
 let test_register_then_query () =
   let t = R.create () in
   R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"balanced" ~topology:Fusion_types.Simple ~started_at:10.0;
@@ -34,7 +40,11 @@ let test_register_then_query () =
    | Some run ->
      check string "keeper" "k" run.R.keeper;
      check string "preset" "balanced" run.R.preset;
-     check bool "is running" true (status_running run.R.status)
+     check bool "is running" true (status_running run.R.status);
+     check bool "accepted progress is installed" true
+       (match run.R.progress with
+        | Some R.Progress_accepted -> true
+        | Some _ | None -> false)
    | None -> fail "registered run must be retrievable");
   check int "one run tracked" 1 (List.length (R.list_runs t))
 ;;
@@ -102,6 +112,38 @@ let test_mark_unknown_is_noop () =
   let t = R.create () in
   R.mark_completed t ~run_id:"ghost" ~outcome:R.Succeeded;
   check int "unknown run_id does not create an entry" 0 (List.length (R.list_runs t))
+;;
+
+let test_progress_is_typed_and_terminal_safe () =
+  let t = R.create () in
+  R.register_running t ~run_id:"r-progress" ~keeper:"k" ~preset:"trio"
+    ~topology:Fusion_types.Simple ~started_at:4.0;
+  R.mark_progress t ~run_id:"r-progress"
+    ~progress:(R.Progress_judge_running { expected = 3; answered = 2; failed = 1 });
+  (match R.get t ~run_id:"r-progress" with
+   | Some { R.progress = Some (R.Progress_judge_running counts); _ } ->
+     check int "judge expected" 3 counts.expected;
+     check int "judge answered" 2 counts.answered;
+     check int "judge failed" 1 counts.failed
+   | Some _ -> fail "running run must retain typed judge progress"
+   | None -> fail "running run disappeared");
+  R.mark_completed t ~run_id:"r-progress"
+    ~outcome:
+      (R.Succeeded_with_summary
+         { decision = "recommend — ship"; summary = "Two panels support it." });
+  R.mark_progress t ~run_id:"r-progress"
+    ~progress:(R.Progress_panel_running { expected = 99 });
+  match R.get t ~run_id:"r-progress" with
+  | Some
+      { R.status =
+          R.Completed
+            (R.Succeeded_with_summary { decision = "recommend — ship"; summary })
+      ; progress = None
+      ; _
+      } ->
+    check string "summary remains terminal" "Two panels support it." summary
+  | Some _ -> fail "terminal progress update must be ignored"
+  | None -> fail "completed run disappeared"
 ;;
 
 let test_list_newest_first () =
@@ -189,6 +231,33 @@ let test_run_to_yojson_success_has_no_failure_fields () =
       (Option.is_none (yojson_field j "failure_code"))
 ;;
 
+let test_run_to_yojson_progress_and_summary () =
+  let t = R.create () in
+  R.register_running t ~run_id:"r-rich" ~keeper:"kx" ~preset:"trio"
+    ~topology:Fusion_types.Simple ~started_at:5.0;
+  R.mark_progress t ~run_id:"r-rich"
+    ~progress:(R.Progress_computed { expected = 3; answered = 2; failed = 1 });
+  let running = Option.get (R.get t ~run_id:"r-rich") |> R.run_to_yojson in
+  check string "running stage" "computed" (yojson_str running "stage");
+  (match yojson_field running "progress" with
+   | Some (`Assoc _ as progress) ->
+     check int "progress expected" 3 (yojson_int progress "panel_expected");
+     check int "progress answered" 2 (yojson_int progress "panel_answered");
+     check int "progress failed" 1 (yojson_int progress "panel_failed")
+   | Some _ | None -> fail "running progress must serialize as an object");
+  R.mark_completed t ~run_id:"r-rich"
+    ~outcome:
+      (R.Succeeded_with_summary
+         { decision = "answer"; summary = "Use the typed projection." });
+  let completed = Option.get (R.get t ~run_id:"r-rich") |> R.run_to_yojson in
+  check string "completed stage" "completed" (yojson_str completed "stage");
+  check string "decision" "answer" (yojson_str completed "decision");
+  check string "summary" "Use the typed projection."
+    (yojson_str completed "summary");
+  check bool "completed progress is null" true
+    (yojson_field completed "progress" = Some `Null)
+;;
+
 let () =
   run
     "fusion_run_registry"
@@ -200,6 +269,8 @@ let () =
             `Quick
             test_finalize_before_suspend_keeps_completed
         ; test_case "mark unknown run_id is a no-op" `Quick test_mark_unknown_is_noop
+        ; test_case "progress is typed and terminal-safe" `Quick
+            test_progress_is_typed_and_terminal_safe
         ; test_case "list_runs is newest-first" `Quick test_list_newest_first
         ; test_case "prune keeps Running + recent completed" `Quick test_prune_keeps_running_and_recent
         ] )
@@ -208,6 +279,8 @@ let () =
         ; test_case "run_to_yojson shape + label" `Quick test_run_to_yojson_shape
         ; test_case "run_to_yojson success omits failure fields" `Quick
             test_run_to_yojson_success_has_no_failure_fields
+        ; test_case "run_to_yojson exposes progress and summary" `Quick
+            test_run_to_yojson_progress_and_summary
         ] )
     ]
 ;;

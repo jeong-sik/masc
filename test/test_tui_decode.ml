@@ -2943,7 +2943,20 @@ let test_decode_standalone_lanes_rejects_duplicate_ids () =
            detail)
 
 let fusion_run_json ?(status = "completed") ?(topology = "simple")
-    ?(failure_fields = []) run_id =
+    ?(failure_fields = []) ?(outcome_fields = []) ?stage ?progress run_id =
+  let stage =
+    Option.value stage
+      ~default:
+        (match status with
+         | "running" -> "accepted"
+         | "completed" -> "completed"
+         | "failed" -> "failed"
+         | _ -> "unknown")
+  in
+  let progress =
+    Option.value progress
+      ~default:(if String.equal status "running" then `Assoc [] else `Null)
+  in
   `Assoc
     ([ "run_id", `String run_id
      ; "keeper", `String "fusion-keeper"
@@ -2951,8 +2964,10 @@ let fusion_run_json ?(status = "completed") ?(topology = "simple")
      ; "topology", `String topology
      ; "started_at", `Float 1787557669.715736
      ; "status", `String status
+     ; "stage", `String stage
+     ; "progress", progress
      ]
-    @ failure_fields)
+    @ failure_fields @ outcome_fields)
 
 let fusion_recorded_detail_json ?(source = "fusion")
     ?(origin_run_id = "fusion-recorded-501") () =
@@ -3028,6 +3043,8 @@ let test_decode_fusion_list_and_exact_detail () =
         | [ first; second ] ->
             Alcotest.(check string) "source order" "fusion-recorded-501"
               first.Tui_decode.fur_run_id;
+            Alcotest.(check string) "completed stage" "completed"
+              (Tui_decode.fusion_run_stage_to_string first.fur_stage);
             (match second.Tui_decode.fur_status with
              | Tui_decode.Fusion_failed failure ->
                  Alcotest.(check string) "typed failure code" "panel_failed"
@@ -3111,6 +3128,70 @@ let test_decode_fusion_list_and_exact_detail () =
         (String.starts_with
            ~prefix:"runs[0]: unknown fusion topology \"recursive\""
            detail)
+
+let test_decode_fusion_progress_and_completion_summary () =
+  let running =
+    fusion_run_json ~status:"running" ~stage:"judge"
+      ~progress:
+        (`Assoc
+          [ "panel_expected", `Int 3
+          ; "panel_answered", `Int 2
+          ; "panel_failed", `Int 1
+          ])
+      "fusion-progress"
+  in
+  let completed =
+    fusion_run_json
+      ~outcome_fields:
+        [ "decision", `String "recommend — ship"
+        ; "summary", `String "Two panels support the change."
+        ]
+      "fusion-summary"
+  in
+  let snapshot runs =
+    `Assoc
+      [ "generated_at", `String "2026-09-01T00:00:00Z"
+      ; "count", `Int (List.length runs)
+      ; "runs", `List runs
+      ]
+  in
+  (match Tui_decode.decode_fusion_snapshot (snapshot [ running; completed ]) with
+   | Error detail -> Alcotest.fail detail
+   | Ok { Tui_decode.fus_runs = [ running; completed ]; _ } ->
+       (match running.fur_stage with
+        | Tui_decode.Fusion_stage_judge progress ->
+            Alcotest.(check int) "answered" 2 progress.frs_answered;
+            Alcotest.(check int) "failed" 1 progress.frs_failed
+        | _ -> Alcotest.fail "running judge stage was not retained");
+       Alcotest.(check (option string)) "decision" (Some "recommend — ship")
+         completed.fur_decision;
+       Alcotest.(check (option string)) "summary"
+         (Some "Two panels support the change.") completed.fur_summary
+   | Ok _ -> Alcotest.fail "expected running and completed rows");
+  let bad_counts =
+    fusion_run_json ~status:"running" ~stage:"computed"
+      ~progress:
+        (`Assoc
+          [ "panel_expected", `Int 3
+          ; "panel_answered", `Int 1
+          ; "panel_failed", `Int 1
+          ])
+      "fusion-bad-counts"
+  in
+  (match Tui_decode.decode_fusion_snapshot (snapshot [ bad_counts ]) with
+   | Ok _ -> Alcotest.fail "incomplete progress counts decoded"
+   | Error detail ->
+       Alcotest.(check bool) "count disagreement is explicit" true
+         (String_util.contains_substring detail
+            "answered + failed counts must equal"));
+  let bad_stage =
+    fusion_run_json ~stage:"judge" ~progress:(`Assoc []) "fusion-bad-stage"
+  in
+  match Tui_decode.decode_fusion_snapshot (snapshot [ bad_stage ]) with
+  | Ok _ -> Alcotest.fail "completed run decoded with a running stage"
+  | Error detail ->
+      Alcotest.(check bool) "status/stage mismatch is explicit" true
+        (String_util.contains_substring detail "status/stage/progress disagree")
 
 (* Harness verdicts. Shape is [Dashboard_harness_health.verdict_item_json]. *)
 let harness_verdict_json ?(fallback = `Null) () =
@@ -5711,6 +5792,8 @@ let () =
       [
         Alcotest.test_case "keeps typed origin and panel-to-judge order" `Quick
           test_decode_fusion_list_and_exact_detail;
+        Alcotest.test_case "keeps live progress and completion summary" `Quick
+          test_decode_fusion_progress_and_completion_summary;
       ] );
     ( "decode_harness",
       [

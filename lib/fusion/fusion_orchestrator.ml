@@ -5,7 +5,9 @@ type compute_outcome =
   | Compute_denied of Fusion_types.deny_reason
   | Computed of Fusion_types.deliberation_evidence
 
-let compute ~base_dir ~sw ~net ~policy ~topology ~request () : compute_outcome =
+let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
+    compute_outcome =
+  let publish progress = Option.iter (fun send -> send progress) on_progress in
   match Fusion_policy.decide ~policy request with
   | Fusion_types.Deny reason ->
     Fusion_metrics.record_invocation ~topology `Denied;
@@ -26,10 +28,32 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request () : compute_outcome =
                 })
               groups
           in
+          let panel_expected =
+            List.fold_left
+              (fun total (group : Fusion_policy.panel_group) ->
+                 total + List.length group.models)
+              0 effective_groups
+          in
+          publish
+            (Fusion_run_registry.Progress_panel_running
+               { expected = panel_expected });
           let panel =
             Fusion_panel.run ~base_dir ~sw ~net
               ~groups:effective_groups ~prompt:req.Fusion_types.prompt ()
           in
+          let panel_answered, panel_failed =
+            List.fold_left
+              (fun (answered, failed) -> function
+                 | Fusion_types.Answered _ -> answered + 1, failed
+                 | Fusion_types.Failed _ -> answered, failed + 1)
+              (0, 0) panel
+          in
+          publish
+            (Fusion_run_registry.Progress_judge_running
+               { expected = panel_expected
+               ; answered = panel_answered
+               ; failed = panel_failed
+               });
           let judge_web_tools =
             Fusion_policy.judge_web_tools_of ~req_web_tools:req.Fusion_types.web_tools
               groups
@@ -370,6 +394,12 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request () : compute_outcome =
             | Error (_, u) -> u
           in
           List.iter (Fusion_metrics.record_judge_execution ~topology) judge_nodes;
+          publish
+            (Fusion_run_registry.Progress_computed
+               { expected = panel_expected
+               ; answered = panel_answered
+               ; failed = panel_failed
+               });
           Computed
             { Fusion_types.question = req.prompt
             ; panel
@@ -386,6 +416,18 @@ let project
     ~(request : Fusion_types.fusion_request)
     (deliberation : Fusion_types.deliberation_evidence)
   =
+  let expected, answered, failed =
+    List.fold_left
+      (fun (expected, answered, failed) -> function
+         | Fusion_types.Answered _ -> expected + 1, answered + 1, failed
+         | Fusion_types.Failed _ -> expected + 1, answered, failed + 1)
+      (0, 0, 0) deliberation.panel
+  in
+  Fusion_run_registry.mark_progress registry ~run_id:request.run_id
+    ~progress:
+      (Fusion_run_registry.Progress_recording_evidence
+         { expected; answered; failed });
+  Fusion_sink.broadcast_run_status ~registry ~run_id:request.run_id;
   match
     Fusion_sink.emit ~registry ~base_dir ~keeper:request.keeper ~run_id:request.run_id
       ~channel ~question:deliberation.question ~panel:deliberation.panel

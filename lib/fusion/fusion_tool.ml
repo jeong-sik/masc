@@ -149,13 +149,21 @@ let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
 ;;
 
 let handle_result ~sw ~net ~base_dir ~keeper ~now_unix ~policy ?continuation_channel
-      ~args () =
+      ?(registry = Fusion_run_registry.global ()) ~args () =
   (* base_dir 를 여기서 부분 적용한다. [compute_runner] 계약을 넓히지 않으면서
      official-client 패널리스트가 spawn 될 디렉터리를 orchestrator 아래로
      내려보내는 유일한 지점이다 — MASC base path 에는 전역 접근자가 없다. *)
-  handle_with_compute_result ~compute:(Fusion_orchestrator.compute ~base_dir) ~sw
-    ~net ~base_dir
-    ~keeper ~now_unix ~policy ?continuation_channel ~args ()
+  let compute ~sw ~net ~policy ~topology ~request () =
+    let on_progress progress =
+      Fusion_run_registry.mark_progress registry ~run_id:request.Fusion_types.run_id
+        ~progress;
+      Fusion_sink.broadcast_run_status ~registry ~run_id:request.run_id
+    in
+    Fusion_orchestrator.compute ~base_dir ~sw ~net ~policy ~topology ~request
+      ~on_progress ()
+  in
+  handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
+    ~policy ?continuation_channel ~registry ~args ()
 ;;
 
 let handle ~sw ~net ~base_dir ~keeper ~now_unix ~policy ?continuation_channel

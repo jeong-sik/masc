@@ -13,7 +13,9 @@ type compute_outcome =
 
 (** Run panel and judge computation without Board, chat, wake, or run-registry
     projection. The caller can durably claim the semantic terminal before
-    passing a [Computed] value to {!project}. *)
+    passing a [Computed] value to {!project}. [on_progress], when supplied,
+    receives process-local panel, judge, and computed stage transitions; it is
+    observation only and is not resumable after restart. *)
 val compute
   :  base_dir:string
   -> sw:Eio.Switch.t
@@ -21,6 +23,7 @@ val compute
   -> policy:Fusion_policy.t
   -> topology:Fusion_types.fusion_topology
   -> request:Fusion_types.fusion_request
+  -> ?on_progress:(Fusion_run_registry.progress -> unit)
   -> unit
   -> compute_outcome
 

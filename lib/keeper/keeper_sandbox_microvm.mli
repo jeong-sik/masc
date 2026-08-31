@@ -38,6 +38,12 @@ val image_present : image:string -> timeout_sec:float -> (unit, string) result
     has no [--pull=never]: without this, a missing image is fetched from a
     registry rather than refused. *)
 
+val image_present_result :
+  image:string -> Unix.process_status * string -> (unit, string) result
+(** Pure classification seam for [container image inspect]. Exit 1 is only
+    [image missing] when the CLI output explicitly says so; service/XPC
+    failures use the probe-failed result. *)
+
 (** Turn-container argv. Same lifecycle as the Docker turn lane: detached
     guest holding [tail -f /dev/null], commands by [exec], removed on
     [stop] via [--rm]. The playground is mounted here; everything else the

@@ -108,21 +108,19 @@ let network_args ~dns (mode : Keeper_types_profile_sandbox.network_mode) =
     [container image inspect] answers from the local store without touching
     the network -- verified against a present and an absent image -- so the
     check is a gate, not a probe that itself fetches. *)
-let image_present ~image ~timeout_sec =
-  let argv = command_argv () @ [ "image"; "inspect"; image ] in
-  match
-    Process_eio.run_argv_with_status ~timeout_sec argv
-  with
-  (* Exit status separates the answers, so none of them is guessed.
-     Measured against container 1.3.0 on 2026-08-28: 0 for a present image,
-     1 for an absent one, 127 when the CLI is not on PATH.
+let output_reports_image_not_found out =
+  String.split_on_char '\n' out
+  |> List.exists (fun line ->
+    String.starts_with ~prefix:"Error: image not found:" (String.trim line))
+;;
 
-     The first version collapsed everything that was not 0 into "image
-     missing". A dead daemon, a timeout and an uninstalled CLI all told the
-     operator to build an image they already had -- the unknown-to-convenient
-     -default shape this module was written to avoid. *)
+let image_present_result ~image = function
+  (* Exit status alone does not separate an absent image from a dead service:
+     container 1.3.0 exits 1 for both. Only the absent-image response names
+     that condition (measured 2026-08-31 as [Error: image not found: ...]); an
+     XPC/service error must remain an unknown probe failure. *)
   | Unix.WEXITED 0, _ -> Ok ()
-  | Unix.WEXITED 1, _ ->
+  | Unix.WEXITED 1, out when output_reports_image_not_found out ->
     Error
       (Printf.sprintf
          "microvm_image_missing: %s is not in the container image store. \
@@ -151,6 +149,11 @@ let image_present ~image ~timeout_sec =
           | Unix.WEXITED code -> Printf.sprintf "exit %d: %s" code detail
           | Unix.WSIGNALED n -> Printf.sprintf "signal %d: %s" n detail
           | Unix.WSTOPPED n -> Printf.sprintf "stopped %d: %s" n detail))
+;;
+
+let image_present ~image ~timeout_sec =
+  let argv = command_argv () @ [ "image"; "inspect"; image ] in
+  Process_eio.run_argv_with_status ~timeout_sec argv |> image_present_result ~image
 ;;
 
 (* ── Turn-container argv ─────────────────────────────────────────────

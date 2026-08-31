@@ -117,6 +117,25 @@ let test_image_and_shell_come_last () =
       "argv must end with <image> bash -l -s, got: %s"
       (String.concat " " (List.rev rest))
 
+let test_image_inspect_exit_one_requires_missing_evidence () =
+  (match
+     M.image_present_result
+       ~image:"masc-keeper-sandbox:local"
+       (Unix.WEXITED 1, "Error: image not found: masc-keeper-sandbox:local")
+   with
+   | Error message when String.starts_with ~prefix:"microvm_image_missing:" message -> ()
+   | Error message -> Alcotest.failf "expected missing-image result, got: %s" message
+   | Ok () -> Alcotest.fail "an explicit image-not-found response must fail");
+  match
+    M.image_present_result
+      ~image:"masc-keeper-sandbox:local"
+      ( Unix.WEXITED 1
+      , "Error: interrupted: XPC connection error: Connection invalid" )
+  with
+  | Error message when String.starts_with ~prefix:"microvm_image_probe_failed:" message -> ()
+  | Error message -> Alcotest.failf "expected probe-failed result, got: %s" message
+  | Ok () -> Alcotest.fail "a dead container service must not report image present"
+
 (* ── Refusal wiring ─────────────────────────────────────────────
    The profile parses, the argv builder exists, and nothing starts the
    guest yet. These pin the contract of that gap: every dispatch surface
@@ -640,6 +659,8 @@ let () =
             test_closed_network_is_spelled_on_the_command
         ; Alcotest.test_case "image and shell come last" `Quick
             test_image_and_shell_come_last
+        ; Alcotest.test_case "exit one needs image-missing evidence" `Quick
+            test_image_inspect_exit_one_requires_missing_evidence
         ; Alcotest.test_case "sweeps only guests whose owner is gone" `Quick
             test_only_guests_whose_owner_is_gone
         ; Alcotest.test_case "leaves containers that are not guests" `Quick

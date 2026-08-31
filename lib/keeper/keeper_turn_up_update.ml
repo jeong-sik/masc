@@ -392,8 +392,9 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
     (* Same precedence as [effective_meta_of_profile_defaults]: the TOML owns
        this field, and [old.sandbox_profile] is only a fallback. Reading [old]
        first meant a keeper whose meta came back from JSON carried the
-       decoder's placeholder [Local] -- so updating a keeper that states
-       "microvm" in its TOML was refused with "local is disabled". *)
+       decoder's placeholder rather than its declaration -- so updating a
+       keeper that states "microvm" in its TOML was refused for a profile it
+       never asked for. *)
     | None ->
       (match p.profile_defaults.sandbox_profile with
        | Some profile -> Ok profile

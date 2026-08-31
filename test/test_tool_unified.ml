@@ -56,6 +56,89 @@ let () =
               let _ = report |> member "tool_distribution" in
               (* RFC-0084 host-config-cleanup-J — dispatch_v2_enabled removed *)
               let _ = report |> member "registered_count" |> to_int in
+              let persistence = report |> member "persistence" in
+              check string
+                "persistence schema"
+                "masc.tool_metrics.persistence.v1"
+                (persistence |> member "schema" |> to_string);
+              check string
+                "persistence scope"
+                "current_process"
+                (persistence |> member "scope" |> to_string);
+              check bool
+                "runtime identity present"
+                true
+                (persistence |> member "runtime_instance_id" |> to_string |> String.length > 0);
+              check bool
+                "process start present"
+                true
+                (persistence |> member "process_started_at" |> to_string |> String.length > 0);
+              let _ = persistence |> member "queue_depth" |> to_int in
+              let _ = persistence |> member "retry_queue_depth" |> to_int in
+              let _ = persistence |> member "in_flight_records" |> to_int in
+              let _ = persistence |> member "spooling_records" |> to_int in
+              let _ = persistence |> member "spool_backed_queue_depth" |> to_int in
+              let _ =
+                persistence |> member "fallback_spool_backed_queue_depth" |> to_int
+              in
+              let _ = persistence |> member "queue_full_dropped_records" |> to_int in
+              let _ = persistence |> member "append_failed_records" |> to_int in
+              let _ = persistence |> member "spool_write_failed_records" |> to_int in
+              let _ =
+                persistence |> member "spool_fallback_write_failed_records" |> to_int
+              in
+              let _ = persistence |> member "spool_delete_failed_records" |> to_int in
+              let _ = persistence |> member "loss_marker_write_failed_records" |> to_int in
+              let _ =
+                persistence
+                |> member "loss_marker_fallback_write_failed_records"
+                |> to_int
+              in
+              check bool
+                "missing last trigger remains null"
+                true
+                (persistence |> member "last_flush_trigger" = `Null);
+              check bool
+                "missing last error remains null"
+                true
+                (persistence |> member "last_append_error" = `Null);
+              check bool
+                "missing last spool error remains null"
+                true
+                (persistence |> member "last_spool_error" = `Null);
+              check bool
+                "missing last spool fallback error remains null"
+                true
+                (persistence |> member "last_spool_fallback_error" = `Null);
+              check bool
+                "missing last loss marker error remains null"
+                true
+                (persistence |> member "last_loss_marker_error" = `Null);
+              check bool
+                "missing last loss marker fallback error remains null"
+                true
+                (persistence |> member "last_loss_marker_fallback_error" = `Null);
+              let integrity = report |> member "aggregate_integrity" in
+              check string
+                "aggregate integrity schema"
+                "masc.tool_metrics.aggregate_integrity.v1"
+                (integrity |> member "schema" |> to_string);
+              check string
+                "aggregate integrity never infers complete"
+                "unknown"
+                (integrity |> member "status" |> to_string);
+              check bool
+                "unknown integrity has no marker source"
+                true
+                (integrity |> member "loss_marker_source" = `Null);
+              check int
+                "unknown integrity has no invalid marker sources"
+                0
+                (integrity |> member "invalid_loss_marker_sources" |> to_list |> List.length);
+              check bool
+                "unknown integrity has no fabricated loss time"
+                true
+                (integrity |> member "loss_observed_at_unix" = `Null);
               ());
           test_case "tool_distribution has visibility buckets" `Quick (fun () ->
               let report = Tool_unified.summary_report () in

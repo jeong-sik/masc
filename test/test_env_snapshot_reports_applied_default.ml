@@ -81,6 +81,23 @@ let test_base_path_lease_directory_is_visible () =
   | many -> failf "MASC_BASE_PATH_LEASE_DIR appears %d times" (List.length many)
 ;;
 
+let test_metrics_flush_matches_the_runtime_default () =
+  match entry_default ~env_name:"MASC_METRICS_FLUSH_SEC" with
+  | [ reported ] ->
+    check
+      string
+      "the snapshot reports the metrics flush cadence the server applies"
+      (string_of_float Env_config.InternalTimers.default_metrics_flush_sec)
+      reported;
+    check
+      (float 1e-12)
+      "the runtime applies the burst-safe default"
+      Env_config.InternalTimers.default_metrics_flush_sec
+      Env_config.InternalTimers.metrics_flush_sec
+  | [] -> fail "MASC_METRICS_FLUSH_SEC is absent from the operator snapshot"
+  | many -> failf "MASC_METRICS_FLUSH_SEC appears %d times" (List.length many)
+;;
+
 let test_collector_reads_environment_once () =
   let reads = ref 0 in
   let getenv name =
@@ -146,6 +163,10 @@ let () =
             "base path lease directory is visible"
             `Quick
             test_base_path_lease_directory_is_visible
+        ; test_case
+            "metrics flush snapshot matches runtime default"
+            `Quick
+            test_metrics_flush_matches_the_runtime_default
         ; test_case
             "collector reads environment once"
             `Quick

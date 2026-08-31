@@ -1,0 +1,62 @@
+{
+  "schema": "masc.tool_metrics_persist.flush_cadence.v1",
+  "base_head": "e405eced97b6d7dd25120ff025faeb81ffb749e1",
+  "product_head": "64e4f705cab92d120cd47d9dbf51f771105f0f1f",
+  "image_id": "sha256:080d7c8f61614df10031d3cab54936549973d16f3585a21e4bc3b7740ce97a83",
+  "binary_sha256": "69b35ad527bb073857c62d21a433feee4bf5bb9df395b8d792d85b5e2d8597eb",
+  "preflight_helper_sha256": "418d01c0185260a8457229b8de1b2e61d9ca7446128ea0ef27529fce2131d7de",
+  "rejected_r97": {
+    "attempted_requests": 5000,
+    "accepted_calls": 285,
+    "rejected_requests": 4715,
+    "reason": "default HTTP rate limits rejected requests before tool dispatch"
+  },
+  "counterexample_r98": {
+    "flush_interval_s": 300.0,
+    "accepted_calls": 5000,
+    "live_total_calls": 5000,
+    "burst_elapsed_s": 29.976377,
+    "queue_capacity": 4096,
+    "persisted_rows": 4096,
+    "replacement_total_calls": 4096,
+    "lost_calls": 904,
+    "disk_bytes": 451059,
+    "disk_sha256": "b8c0a961fb2b2701cacef9b3e553a918d2fb221ccd3755e5f9f81aaa779022d3",
+    "clean_exit": 0,
+    "oom_killed": false
+  },
+  "override_poc_r99": {
+    "flush_interval_s": 0.5,
+    "accepted_calls": 5000,
+    "live_total_calls": 5000,
+    "burst_elapsed_s": 31.190877,
+    "drop_log_lines": 0,
+    "persisted_rows": 5000,
+    "replacement_total_calls": 5000,
+    "disk_bytes": 550357,
+    "disk_sha256": "8f231a711a9199f274a26bf72949152ea705b8a8bdc8ea93b35bca0b0cc6639a",
+    "clean_exit": 0,
+    "oom_killed": false
+  },
+  "final_default_r100": {
+    "flush_interval_s": 0.5,
+    "first_container_id": "a8aedda11ea9e7ec2ee2c26ee54a03c429799c8f7a4f19bf79a9a98478945580",
+    "first_runtime_instance_id": "01a0549d-606a-7000-8528-d3f183d7fb6f",
+    "accepted_calls": 5000,
+    "live_total_calls": 5000,
+    "burst_elapsed_s": 30.609742,
+    "rows_visible_before_stop": 4976,
+    "last_periodic_flush_rows": 24,
+    "drop_log_lines": 0,
+    "persisted_rows": 5000,
+    "disk_bytes": 550553,
+    "disk_sha256": "e1f6bd5945d1584fbd7c74d3cba6c1caa538cb6714b0ab873588d022c805aa8a",
+    "replacement_container_id": "8ae8c8c04145062d84d12bb91e27a2a6d5ebf076db5a7ee2d14d43d2628d7d2c",
+    "replacement_total_calls": 5000,
+    "first_exit_code": 0,
+    "replacement_exit_code": 0,
+    "oom_killed": false
+  },
+  "result": "pass",
+  "verified_at": "2026-08-31T06:41:30+09:00"
+}

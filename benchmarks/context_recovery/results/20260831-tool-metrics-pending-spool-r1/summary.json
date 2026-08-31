@@ -1,0 +1,168 @@
+{
+  "schema": "masc.context_recovery.tool_metrics_pending_spool.v1",
+  "recorded_at": "2026-08-31T09:02:33+09:00",
+  "source": {
+    "base_head": "1cdf8d1e9bb84f04302a39866b20cf1d5167e49b",
+    "product_head": "f2d5269e7ed97dff819641bc6f8a3618b207c3a2",
+    "baseline_image": "sha256:6271fed1c232a91890f4ec45e87ce3c09a3a2da51ec5b234bb6c187d461a04fa",
+    "product_image": "sha256:7bd2952dc38655301302d1867534b42b27e8997fab5b01efbd6be1ee113639a6",
+    "binary_sha256": "1ea4b93b5b9699c80f94eb343b3d055cbd8c722c5cfc800873540b421f10ce9b",
+    "preflight_helper_sha256": "9575193b389a5bce9ffe9776330d68e26e82bb66028380b0d0b07222bd721b90"
+  },
+  "focused_validation": {
+    "tool_metrics_persist": { "passed": 11, "failed": 0 },
+    "tool_unified": { "passed": 6, "failed": 0 },
+    "targets": [
+      "lib/masc.cmxa",
+      "test/test_tool_metrics_persist.exe",
+      "test/test_tool_unified.exe"
+    ]
+  },
+  "r111_process_crash": {
+    "aggregate_observed_calls": 401,
+    "stored_body_ok_checks": 201,
+    "before_kill": {
+      "runtime_instance_id": "01a05518-84f8-7000-b7bc-72bcd9d2d7ca",
+      "aggregate_calls": 401,
+      "queue_depth": 401,
+      "spool_backed_queue_depth": 401,
+      "pending_files": 401,
+      "final_rows": 0,
+      "queue_full_dropped_records": 0,
+      "spool_write_failed_records": 0
+    },
+    "termination": { "signal": "SIGKILL", "exit_code": 137, "oom_killed": false },
+    "replacement": {
+      "runtime_instance_id": "01a0551b-64db-7000-aa24-41cff70a769f",
+      "recovered_pending_records": 401,
+      "aggregate_calls": 401,
+      "flushed_records": 401,
+      "pending_files": 0,
+      "final_rows": 401,
+      "final_sha256": "919614b67fe833a2d09eeee0e0b41cf4221a34865e410c99fb076b04276f2f26"
+    }
+  },
+  "r111_append_delete_crash_window": {
+    "before_shutdown": { "aggregate_calls": 402, "queue_depth": 1, "pending_files": 1 },
+    "shutdown": {
+      "final_append_rows": 1,
+      "pending_delete_failed": true,
+      "exit_code": 0,
+      "oom_killed": false,
+      "pending_files": 1,
+      "final_rows": 402
+    },
+    "replacement": {
+      "runtime_instance_id": "01a0551c-27ca-7000-8dac-46106ecd881e",
+      "loaded_records": 402,
+      "recovered_pending_records": 0,
+      "deduplicated_pending_records": 1,
+      "aggregate_calls": 402,
+      "pending_files": 0,
+      "final_rows": 402,
+      "final_sha256": "704bfad139f392a55e047d28f791965c25eac1fb77134c3d94c8f700d99805f4"
+    }
+  },
+  "r112_concurrent_load": {
+    "parallelism": 256,
+    "calls": 1000,
+    "product": {
+      "http_200": 1000,
+      "body_ok": 1000,
+      "elapsed_seconds": 3.502401,
+      "throughput_per_second": 285.518,
+      "mean_latency_ms": 598.825,
+      "p95_latency_ms": 2115.920,
+      "p99_latency_ms": 2582.855,
+      "max_latency_ms": 3109.525,
+      "pending_files": 1000,
+      "final_rows_before_kill": 0,
+      "queue_full_dropped_records": 0,
+      "spool_write_failed_records": 0
+    },
+    "fresh_baseline": {
+      "http_200": 1000,
+      "body_ok": 1000,
+      "elapsed_seconds": 3.303561,
+      "throughput_per_second": 302.704,
+      "mean_latency_ms": 590.135,
+      "p95_latency_ms": 2008.874,
+      "p99_latency_ms": 2548.915,
+      "max_latency_ms": 3282.011
+    },
+    "rejected_attempt": {
+      "reason": "session id was not exported into xargs children",
+      "http_400": 1000,
+      "accepted_calls": 0,
+      "used_as_evidence": false
+    },
+    "replacement": {
+      "termination_exit_code": 137,
+      "oom_killed": false,
+      "recovered_pending_records": 1000,
+      "aggregate_calls": 1000,
+      "pending_files": 0,
+      "final_rows": 1000,
+      "final_sha256": "3d596739e1915545662bba2d31e6e2fba0a0dfbeb4009f3fb04b500a8016e100"
+    }
+  },
+  "r114_capacity_bound": {
+    "parallelism": 256,
+    "calls": 5000,
+    "http_200": 5000,
+    "body_ok": 5000,
+    "elapsed_seconds": 10.923281,
+    "throughput_per_second": 457.738,
+    "mean_latency_ms": 507.809,
+    "p95_latency_ms": 2192.432,
+    "p99_latency_ms": 3790.646,
+    "max_latency_ms": 8658.102,
+    "before_kill": {
+      "aggregate_calls": 5000,
+      "queue_depth": 4096,
+      "spool_backed_queue_depth": 4096,
+      "pending_files": 4096,
+      "pending_bytes": 672015,
+      "final_rows": 0,
+      "queue_full_dropped_records": 904,
+      "append_failed_records": 31,
+      "spool_write_failed_records": 0
+    },
+    "snapshot_read_latency": {
+      "reads": 1000,
+      "full_queue_mean_ms": 0.249,
+      "full_queue_p95_ms": 0.385,
+      "full_queue_p99_ms": 1.033,
+      "full_queue_max_ms": 2.097,
+      "empty_queue_mean_ms": 0.144,
+      "empty_queue_p95_ms": 0.208,
+      "empty_queue_p99_ms": 0.492,
+      "empty_queue_max_ms": 1.781
+    },
+    "termination": { "signal": "SIGKILL", "exit_code": 137, "oom_killed": false },
+    "replacement": {
+      "runtime_instance_id": "01a05525-1acb-7000-b16a-9cd6ec6f79f6",
+      "recovered_pending_records": 4096,
+      "aggregate_calls": 4096,
+      "flushed_records": 4096,
+      "pending_files": 0,
+      "final_rows": 4096,
+      "final_sha256": "755361f4bed02f1dda5e3c99a90f8afc8034667fae54516a1d0fe1f755644fe6",
+      "exit_code": 0,
+      "oom_killed": false
+    }
+  },
+  "scope": {
+    "platform": "Linux/arm64 Docker Desktop",
+    "filesystem": "Docker local named volume",
+    "durability_claim": "process termination after successful pending publication",
+    "excluded": [
+      "host power loss",
+      "network filesystem",
+      "Kubernetes PVC",
+      "multi-process writers",
+      "full test suite",
+      "GitHub CI"
+    ]
+  }
+}

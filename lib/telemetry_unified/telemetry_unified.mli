@@ -12,7 +12,7 @@
     - [<masc_root>/keepers/<name>/execution-receipts/]
                                               — Keeper execution receipts
     - [<masc_root>/goal_events.jsonl]       — Goal FSM lifecycle events
-    - [<masc_root>/tool-metrics.sqlite3]    — Tool duration/success metrics
+    - [<base_path>/data/tool-metrics/]      — Tool duration/success metrics
 
     Each returned entry is tagged with a ["source"] field for discrimination.
     No write paths are modified; this module is purely a read-side fan-in.

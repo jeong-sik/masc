@@ -15,7 +15,7 @@
     - [<masc_root>/agent-core-events/]              — Durable AGENT_CORE native/custom events
     - [<masc_root>/keepers/<name>/execution-receipts/]
                                              — Keeper execution receipts
-    - [<masc_root>/tool-metrics.sqlite3]     — Tool duration/success metrics
+    - [<base_path>/data/tool-metrics/]       — Tool duration/success metrics
     @since 2.251.0 *)
 
 type source = Telemetry_unified_source.source =
@@ -504,26 +504,6 @@ let read_fixed_source dir source ~n ?since_ts ?until_ts () : Yojson.Safe.t list 
       observe_source_read_failure_exn source ~site:"read_fixed_source" exn;
       []
 
-let read_tool_metrics ~base_path ~n ?since_ts ?until_ts () =
-  match
-    Tool_metrics_store.read_recent
-      ~base_path
-      ?since_ts
-      ?until_ts
-      ~n
-      ()
-  with
-  | Ok rows ->
-    List.map
-      (fun row -> Tool_metrics_store.row_to_json row |> tag_entry Tool_metric)
-      rows
-  | Error error ->
-    observe_source_read_failure
-      Tool_metric
-      ~site:"read_tool_metrics"
-      ~error;
-    []
-
 (* The probe stage of [read_keeper_metrics_fast_top] needs one number per
    keeper directory: the newest timestamp that directory can offer. Reading its
    rows and keeping them made the resident set scale with keeper count — up to
@@ -797,11 +777,9 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
           ~n:per_source ()
       | Goal_event ->
         read_goal_events ~masc_root ?since_ts ?until_ts ~n:per_source ()
-      | Tool_metric ->
-        read_tool_metrics ~base_path ~n:per_source ?since_ts ?until_ts ()
       (* Fixed-path sources: Agent_event, Tool_call_io, Tool_usage,
-         Agent_core_event use directory-based storage. *)
-      | Agent_event | Tool_call_io | Tool_usage | Agent_core_event ->
+         Agent_core_event, Tool_metric use directory-based storage. *)
+      | Agent_event | Tool_call_io | Tool_usage | Agent_core_event | Tool_metric ->
         match fixed_store_dir ~masc_root ~base_path source with
         | Some dir ->
           read_fixed_source dir source ~n:per_source ?since_ts ?until_ts ()
@@ -1300,44 +1278,9 @@ let summary_json ?keeper_keepalive_interval_s
               ~optional_when_missing:(source_optional_when_missing source)
               ?coverage_gap ()),
         count )
-    | Tool_metric ->
-      let path = Tool_metrics_store.database_path ~base_path in
-      let summary, read_error =
-        match Tool_metrics_store.summary ~base_path with
-        | Ok summary -> summary, false
-        | Error error ->
-          observe_source_read_failure
-            Tool_metric
-            ~site:"summary_tool_metrics"
-            ~error;
-          ( { Tool_metrics_store.path
-            ; exists = Sys.file_exists path
-            ; entry_count = 0
-            ; latest_ts = None
-            }
-          , true )
-      in
-      let count = summary.Tool_metrics_store.entry_count in
-      let latest_ts = summary.latest_ts in
-      let coverage_gap_fields, coverage_gap =
-        coverage_gap_status_fields coverage_gaps source ~latest_ts
-      in
-      ( `Assoc
-          ([ ("source", `String (source_to_string source))
-           ; ("path", `String summary.path)
-           ; ("exists", `Bool summary.exists)
-           ; ("entry_count", `Int count)
-           ]
-          @ metadata_fields
-          @ coverage_gap_fields
-          @ freshness_fields ~now latest_ts
-          @ source_health_fields ~now ~exists:summary.exists
-              ~entry_count:count ~latest_ts ~freshness_slo_s ~read_error
-              ?coverage_gap ()),
-        count )
-    (* Fixed-path sources: Agent_event, Tool_call_io, Tool_usage, and
-       Agent_core_event use directory-based storage. *)
-    | Agent_event | Tool_call_io | Tool_usage | Agent_core_event ->
+    (* Fixed-path sources: Agent_event, Tool_call_io, Tool_usage,
+       Agent_core_event, Tool_metric use directory-based storage. *)
+    | Agent_event | Tool_call_io | Tool_usage | Agent_core_event | Tool_metric ->
       let dir = match fixed_store_dir ~masc_root ~base_path source with
         | Some d -> d | None -> "" in
       let dir_state =

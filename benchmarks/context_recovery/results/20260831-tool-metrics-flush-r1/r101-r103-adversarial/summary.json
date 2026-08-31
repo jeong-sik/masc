@@ -1,0 +1,64 @@
+{
+  "schema": "masc.tool_metrics_persist.flush_cadence.adversarial.v1",
+  "product_head": "64e4f705cab92d120cd47d9dbf51f771105f0f1f",
+  "image_id": "sha256:080d7c8f61614df10031d3cab54936549973d16f3585a21e4bc3b7740ce97a83",
+  "clock_ticks_per_second": 100,
+  "idle_ab_r101": {
+    "sample_wall_seconds": 68,
+    "default_0_5s": {
+      "container_id": "7ad6be70868964ecb778c0c49d8f85170d5c311a1688f34a18afbb3d814c28c5",
+      "cpu_ticks_delta": 67,
+      "cpu_seconds": 0.67,
+      "voluntary_context_switches_delta": 2934,
+      "nonvoluntary_context_switches_delta": 37,
+      "write_bytes_delta": 1261568,
+      "rss_end_kib": 134376,
+      "exit_code": 0,
+      "oom_killed": false
+    },
+    "control_300s": {
+      "container_id": "4e5de3d5a111946b897b3b2ffd5062e731a79097941ac365496b16cd13eef6f5",
+      "cpu_ticks_delta": 60,
+      "cpu_seconds": 0.60,
+      "voluntary_context_switches_delta": 2870,
+      "nonvoluntary_context_switches_delta": 29,
+      "write_bytes_delta": 1265664,
+      "rss_end_kib": 134588,
+      "exit_code": 0,
+      "oom_killed": false
+    },
+    "observed_cpu_overhead_seconds": 0.07,
+    "observed_cpu_overhead_percent_of_one_core": 0.103,
+    "result": "no_material_short_idle_regression_observed"
+  },
+  "rejected_r102": {
+    "reason": "xargs placeholder replaced both request id and the empty arguments object, so HTTP 200 did not represent handled tool calls",
+    "http_200": 5000,
+    "accepted_calls": 0,
+    "result": "discarded"
+  },
+  "bind_mount_concurrent_r103": {
+    "first_container_id": "63a9430eae426da2007293bf8d73a5a96c83cef9eb0cebfbe30e98df23f90cb4",
+    "replacement_container_id": "bbc995a761d87e0e302ad6d94ed313beeacd273aa65f631358417c59b2a8233e",
+    "parallelism": 256,
+    "attempted_calls": 5000,
+    "http_200": 5000,
+    "accepted_response_bodies": 5000,
+    "live_total_calls": 5000,
+    "elapsed_seconds": 9.664638,
+    "mean_throughput_calls_per_second": 517.35,
+    "periodic_flush_count": 17,
+    "drop_log_lines": 0,
+    "persisted_rows": 5000,
+    "persisted_bytes": 565263,
+    "persisted_sha256": "69ef89c4d21ed581f3479296ef1d86aac87170d841d98c20b93e7428eaae759a",
+    "replacement_hydrated_records": 5000,
+    "replacement_total_calls": 5000,
+    "first_exit_code": 0,
+    "replacement_exit_code": 0,
+    "oom_killed": false,
+    "result": "pass_at_measured_throughput"
+  },
+  "remaining_boundary": "A burst exceeding 4096 handled calls between drains, or storage throughput below sustained admitted call throughput, can still drop records.",
+  "verified_at": "2026-08-31T06:56:11+09:00"
+}

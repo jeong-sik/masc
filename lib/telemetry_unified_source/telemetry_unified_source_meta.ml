@@ -40,8 +40,8 @@ let fixed_store_dir ~masc_root ~base_path = function
   | Tool_call_io -> Some (Filename.concat masc_root "tool_calls")
   | Tool_usage   -> Some (Filename.concat masc_root "tool_usage")
   | Agent_core_event    -> Some (Filename.concat masc_root "agent-core-events")
-  | Keeper_metric | Trajectory_tool_call | Execution_receipt | Goal_event
-  | Tool_metric ->
+  | Tool_metric  -> Some (Filename.concat base_path "data/tool-metrics")
+  | Keeper_metric | Trajectory_tool_call | Execution_receipt | Goal_event ->
       None
     (* handled separately *)
 
@@ -91,7 +91,6 @@ let source_durable_store ~masc_root ~base_path = function
   | Trajectory_tool_call -> Filename.concat masc_root "trajectories/*/*.jsonl"
   | Execution_receipt -> Filename.concat masc_root "keepers/*/execution-receipts"
   | Goal_event -> Filename.concat masc_root "goal_events.jsonl"
-  | Tool_metric -> Filename.concat masc_root "tool-metrics.sqlite3"
   | source -> (
       match fixed_store_dir ~masc_root ~base_path source with
       | Some dir -> dir
@@ -145,7 +144,7 @@ let replay_retention_json
              sources) );
       ( "cache_policy",
         `String
-          "uncached; reads persisted source rows; sorts newest first; n<=0 returns the full filtered window"
+          "uncached; reads persisted JSONL rows; sorts newest first; n<=0 returns the full filtered window"
       );
     ]
 

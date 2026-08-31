@@ -14,7 +14,6 @@
   masc.jsonl_writer
   masc.telemetry_coverage_gap
   masc.telemetry_unified_source
-  masc.tool_metrics_store
   masc_core
   masc_log
   masc_types

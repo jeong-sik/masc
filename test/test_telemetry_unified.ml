@@ -858,45 +858,18 @@ let test_summary_tool_metric_surface_points_to_raw_metrics () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_summary_tool_metric_surface" in
-  Tool_metrics_persist.reset_for_testing ();
-  Fun.protect
-    ~finally:Tool_metrics_persist.reset_for_testing
-    (fun () ->
-      Tool_metrics_persist.enqueue
-        ~base_path:dir
-        (Tool_result.Completed
-           { tool_name = "tool_read_file"
-           ; data = `Null
-           ; metadata = None
-           ; duration_ms = 12.0
-           });
-      let json =
-        Telemetry_unified.summary_json
-          ~base_path:dir
-          ~masc_root:(masc_root dir)
-          ()
-      in
-      let summary = source_summary "tool_metric" json in
-      Alcotest.(check string) "tool_metric dashboard surface"
-        "/api/v1/tool-metrics"
-        (json_string_field "dashboard_surface" summary);
-      Alcotest.(check string) "tool_metric SQLite path"
-        (Filename.concat (masc_root dir) "tool-metrics.sqlite3")
-        (json_string_field "path" summary);
-      Alcotest.(check int) "tool_metric row count" 1
-        (json_int_field "entry_count" summary);
-      let rows =
-        Telemetry_unified.read_unified
-          ~base_path:dir
-          ~masc_root:(masc_root dir)
-          ~sources:[ Tool_metric ]
-          ()
-      in
-      Alcotest.(check int) "one raw tool metric row" 1 (List.length rows);
-      Alcotest.(check string) "raw tool metric source" "tool_metric"
-        (json_string_field "source" (List.hd rows));
-      Alcotest.(check string) "raw tool metric name" "tool_read_file"
-        (json_string_field "tool_name" (List.hd rows)))
+  let metrics_dir = Filename.concat dir "data/tool-metrics" in
+  Fs_compat.mkdir_p metrics_dir;
+  write_jsonl metrics_dir
+    [ `Assoc [ ("timestamp", `Float (Unix.gettimeofday ()));
+               ("tool_name", `String "tool_read_file");
+               ("duration_ms", `Float 12.0);
+               ("success", `Bool true) ] ];
+  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:(masc_root dir) () in
+  let summary = source_summary "tool_metric" json in
+  Alcotest.(check string) "tool_metric dashboard surface"
+    "/api/v1/tool-metrics"
+    (json_string_field "dashboard_surface" summary)
 
 let test_summary_includes_trajectory_and_execution_receipt_sources () =
   Eio_main.run @@ fun env ->

@@ -4,7 +4,8 @@
     extracted from [server_routes_http_routes_dashboard.ml]:
 
     - [GET /api/v1/agent-activity] — per-agent tool call stats from telemetry
-    - [GET /api/v1/tool-metrics] — aggregate tool metrics
+    - [GET /api/v1/tool-metrics] — aggregate tool metrics plus a
+      current-process persistence queue snapshot
     - [GET /api/v1/agent-timeline] — per-agent timeline view
     - [GET /api/v1/agent-relations] — agent-relation graph
 

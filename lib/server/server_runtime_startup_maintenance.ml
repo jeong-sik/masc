@@ -121,8 +121,8 @@ let prune_keeper_scoped_flat_stores ~days ~masc_root =
    startup pass and the 24h periodic pass. SSOT: replaces the two inline
    sums that had already drifted apart — the startup pass lacked
    tool_calls/transition-audit while the periodic pass lacked
-   resilience_audit. Tool metrics now prune their SQLite rows while hydrating,
-   so this list contains JSONL stores only.
+   resilience_audit. data/tool-metrics stays startup-only (it lives under
+   base_path, not the masc root), so it remains at the caller.
    agent-core-events joined 2026-07-31: 434 MB accumulated with no retention.
    costs and audit-approvals joined 2026-08-05: both write the same
    [YYYY-MM/DD.jsonl] shape through [Dated_jsonl.create]
@@ -241,8 +241,12 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
          Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days
        else 0
      in
+     let tool_metrics_dir =
+       Filename.concat (Mcp_server.workspace_config state).base_path "data/tool-metrics"
+     in
      let total =
-       prune_shared_jsonl_stores ~prune_dir ~days ~masc_root:masc
+       prune_dir tool_metrics_dir
+       + prune_shared_jsonl_stores ~prune_dir ~days ~masc_root:masc
      in
      if total > 0 then
          Log.Misc.info "startup prune: pruned %d old JSONL day-files (retention=%dd)"

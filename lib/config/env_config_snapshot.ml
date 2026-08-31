@@ -265,6 +265,11 @@ let internal_timer_entries =
       "Dashboard label quiet threshold (seconds, 5 min)";
     entry ~default:"900.0" "MASC_LABEL_STUCK_THRESHOLD_SEC"
       "Dashboard label stuck threshold (seconds, 15 min)";
+    entry
+      ~default:
+        (string_of_float Env_config_runtime.InternalTimers.default_metrics_flush_sec)
+      "MASC_METRICS_FLUSH_SEC"
+      "Tool metrics flush interval (seconds)";
     entry ~default:"300.0" "MASC_SSE_BUFFER_TTL_SEC"
       "SSE buffer TTL (seconds, 5 min)";
     entry ~default:"300.0" "MASC_STALLED_SESSION_THRESHOLD_SEC"

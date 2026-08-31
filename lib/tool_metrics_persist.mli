@@ -1,53 +1,176 @@
-(** SQLite persistence for tool metrics.
 
-    [.masc/tool-metrics.sqlite3] is the only durable copy. The in-memory
-    {!Tool_metrics} value is a projection rebuilt from this database at
-    startup. Writes are best-effort and never change a completed tool result.
+(** Tool_metrics_persist — JSONL disk persistence for tool metrics.
+
+    Restores current-format tool invocation records at startup and periodically
+    flushes new in-memory records to
+    [data/tool-metrics/YYYY-MM/DD.jsonl] via {!Dated_jsonl}.
+
+    Flush failures are logged but do not affect server operation. The
+    process-scoped snapshot keeps queue loss and recovery visible separately
+    from the hydrated aggregate tool statistics.
 
     @since 2.108.0 — Issue #3280 *)
 
 val enqueue : base_path:string -> Tool_result.result -> unit
-(** Persist one completed tool invocation. This call writes directly to
-    SQLite before returning; there is no process-local write queue. Storage
-    failures are logged and counted, but do not raise into tool dispatch.
-    WAL with [synchronous=NORMAL] preserves committed rows across process
-    crashes; host power-loss durability is outside this contract. *)
+(** [enqueue ~base_path result] publishes an atomic pending-spool file before
+    buffering the invocation record for eventual batched JSONL flush.
+    A successful publication survives process termination after [enqueue]
+    returns; this is not a host power-loss or network-filesystem guarantee.
+    Safe to call from any fiber. Records are batched and written periodically.
+    Reaching half of the bounded queue wakes the background writer early.
+    If the bounded best-effort queue is full, the record is dropped instead of
+    blocking the tool completion path. A record whose disk append fails stays
+    inside the same capacity bound and is retried before newer records. The
+    background writer applies a bounded retry delay rather than spinning while
+    storage remains unavailable. If the bulk-data pending publication fails,
+    [enqueue] attempts an independent runtime-state pending file under [.masc]
+    before falling back to memory only. Both failures remain visible in
+    [persistence_snapshot]. *)
+
+type loss_marker_source =
+  [ `Bulk_data
+  | `Runtime_state_fallback
+  ]
 
 type hydrate_report = {
   loaded_records : int;
-  pruned_records : int;
+  malformed_records : int;
+  invalid_records : int;
+  pruned_files : int;
+  recovered_pending_records : int;
+  recovered_fallback_pending_records : int;
+  deduplicated_pending_records : int;
+  invalid_pending_files : int;
+  invalid_fallback_pending_files : int;
+  invalid_loss_marker_sources : loss_marker_source list;
 }
+
+type persistence_snapshot = {
+  runtime_instance_id : string;
+  process_started_at : string;
+  observed_at_unix : float;
+  writer_active : bool;
+  queue_depth : int;
+  retry_queue_depth : int;
+  in_flight_records : int;
+  spooling_records : int;
+  spool_backed_queue_depth : int;
+  fallback_spool_backed_queue_depth : int;
+  queue_capacity : int;
+  queue_high_watermark : int;
+  queue_full_dropped_records : int;
+  append_failed_records : int;
+  spool_write_failed_records : int;
+  spool_fallback_write_failed_records : int;
+  spool_delete_failed_records : int;
+  loss_marker_write_failed_records : int;
+  loss_marker_fallback_write_failed_records : int;
+  flushed_records : int;
+  flush_batches : int;
+  last_flush_trigger : string option;
+  last_flush_rows : int option;
+  last_flush_failed_rows : int option;
+  last_flush_at_unix : float option;
+  last_append_error : string option;
+  last_spool_error : string option;
+  last_spool_fallback_error : string option;
+  last_loss_marker_error : string option;
+  last_loss_marker_fallback_error : string option;
+}
+
+val persistence_snapshot : unit -> persistence_snapshot
+(** Current-process observation of the bounded persistence queue and writer.
+    [queue_depth] includes ready, retry, in-flight, and still-publishing spool
+    records. [spool_backed_queue_depth] is the subset already represented by
+    an atomic pending file; [fallback_spool_backed_queue_depth] is the subset
+    stored under the independent runtime-state root. Counters start at zero on
+    process start and are not hydrated from JSONL.
+
+    [append_failed_records] counts failed append attempts; the same retained
+    record can contribute more than once while storage remains unavailable. *)
+
+val persistence_snapshot_to_json : persistence_snapshot -> Yojson.Safe.t
+(** Current-only JSON projection. Absent last-event fields are JSON [null]. *)
+
+type aggregate_integrity_snapshot = {
+  observed_at_unix : float;
+  retention_days : int option;
+  status : [ `Invalid_marker | `Known_incomplete | `Unknown ];
+  loss_marker_source : loss_marker_source option;
+  invalid_loss_marker_sources : loss_marker_source list;
+  loss_reason : string option;
+  loss_observed_at_unix : float option;
+  loss_runtime_instance_id : string option;
+}
+
+val aggregate_integrity_snapshot : unit -> aggregate_integrity_snapshot
+(** Retention-scoped durable evidence about aggregate completeness. [Unknown]
+    means no current loss marker was found; it never claims completeness from
+    absence alone. [Invalid_marker] keeps a corrupt marker distinct from
+    absence. [Known_incomplete] means at least one queue-full loss marker falls
+    inside the configured hydration retention window. [loss_marker_source]
+    identifies whether the selected marker came from the bulk data root or the
+    independent runtime-state fallback. [invalid_loss_marker_sources] preserves
+    read or format failures from either location even when the other location
+    still contains a valid marker. *)
+
+val aggregate_integrity_snapshot_to_json : aggregate_integrity_snapshot -> Yojson.Safe.t
+(** Current-format JSON projection with schema
+    [masc.tool_metrics.aggregate_integrity.v1]. *)
 
 val hydrate :
   base_path:string ->
   retention_days:int ->
-  (hydrate_report, string) result
-(** Delete rows older than [retention_days], then replace the in-memory
-    aggregate with the retained rows. Call before installing live producers. *)
+  (hydrate_report, Dated_jsonl.read_error) result
+(** [hydrate ~base_path ~retention_days] prunes expired day files, streams the
+    remaining current-format rows into a replacement {!Tool_metrics} snapshot,
+    and publishes that snapshot only after the complete store was read.
+    Malformed JSON and rows that do not match the current record format are
+    counted and skipped. Repeating hydration replaces rather than appends, so
+    persisted calls are not double-counted. Call before installing live metric
+    producers. *)
 
-type store_summary = {
-  path : string;
-  exists : bool;
-  entry_count : int;
-  latest_ts : float option;
-}
+val start_flush_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
+(** [start_flush_fiber ~sw ~clock ~base_path] spawns a background fiber that
+    drains buffered records to JSONL on the configured interval (0.5 seconds
+    by default) or when the queue reaches its high watermark. Also registers a
+    shutdown hook to flush remaining records.
+    [base_path] is the workspace root (e.g. [state.workspace_config.base_path]). *)
 
-val store_summary : base_path:string -> (store_summary, string) result
-(** Return the persisted row count and latest timestamp without changing the
-    in-memory aggregate. A missing database is an empty, healthy store. *)
-
-val read_recent :
-  base_path:string ->
-  ?since_ts:float ->
-  ?until_ts:float ->
-  n:int ->
-  unit ->
-  (Yojson.Safe.t list, string) result
-(** Read at most [n] newest rows, newest first. [n <= 0] returns [[]]. *)
-
-val database_path : base_path:string -> string
-(** Canonical SQLite path under the cluster-aware MASC runtime root. *)
+val flush_now : base_path:string -> unit
+(** [flush_now ~base_path] immediately drains the write queue to the
+    current JSONL store. Intended for shutdown hooks and testing. *)
 
 val reset_for_testing : unit -> unit
-(** Close the cached database handle. Tests must call this only after all
-    concurrent users have stopped. *)
+(** Clear cached store state and drop any queued records held in memory.
+
+    This does not cancel or modify any background flush fiber or shutdown
+    hook previously started via [start_flush_fiber]; those may still flush
+    records based on the store instance they captured.
+
+    For reliable test isolation, call this either before
+    [start_flush_fiber] is invoked, or only after the [Eio.Switch.t]
+    passed to [start_flush_fiber] has been cancelled so that no flush
+    fiber is active. *)
+
+module For_testing : sig
+  val high_watermark : int
+  val queued_record_count : unit -> int
+
+  val await_flush_trigger :
+    clock:_ Eio.Time.clock ->
+    interval_s:float ->
+    [ `High_watermark | `Timer ]
+
+  val set_pending_write_guard :
+    (string -> string -> (unit, string) result) -> unit
+
+  val set_pending_fallback_write_guard :
+    (string -> string -> (unit, string) result) -> unit
+
+  val set_loss_marker_write_guard :
+    (string -> string -> (unit, string) result) -> unit
+
+  val set_loss_marker_fallback_write_guard :
+    (string -> string -> (unit, string) result) -> unit
+end

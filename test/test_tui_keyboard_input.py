@@ -5245,7 +5245,7 @@ def skills_usage_clarity_interaction() -> Interaction:
             columns=160,
             needle=b"MASC Overview",
         )
-        send_and_wait(process, master_fd, output, b"\t" * 15, b"MASC Tools")
+        send_and_wait(process, master_fd, output, b"\t" * 16, b"MASC Tools")
         usage = send_and_wait(
             process,
             master_fd,

@@ -265,8 +265,6 @@ let internal_timer_entries =
       "Dashboard label quiet threshold (seconds, 5 min)";
     entry ~default:"900.0" "MASC_LABEL_STUCK_THRESHOLD_SEC"
       "Dashboard label stuck threshold (seconds, 15 min)";
-    entry ~default:"300.0" "MASC_METRICS_FLUSH_SEC"
-      "Tool metrics flush interval (seconds, 5 min)";
     entry ~default:"300.0" "MASC_SSE_BUFFER_TTL_SEC"
       "SSE buffer TTL (seconds, 5 min)";
     entry ~default:"300.0" "MASC_STALLED_SESSION_THRESHOLD_SEC"
@@ -333,6 +331,8 @@ let path_entries =
       "Config directory override; None when unset";
     entry ~default:"(none)" Env_config_core.data_dir_env_key
       "Data directory override; None=<base_path>/data";
+    entry ~default:"(host temp directory)" "MASC_BASE_PATH_LEASE_DIR"
+      "Cross-process BasePath ownership lease directory";
   ]
 
 let session_entries =

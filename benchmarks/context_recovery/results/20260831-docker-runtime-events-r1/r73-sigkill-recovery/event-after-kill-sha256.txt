@@ -1,0 +1,1 @@
+48aa65b6783aeebce9aaef6cf0318422c66c84be226e7393573247dfd67710e1  /app/.masc/runtime/events/6.events

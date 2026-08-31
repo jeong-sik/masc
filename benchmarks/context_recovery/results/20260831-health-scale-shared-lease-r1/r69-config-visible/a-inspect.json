@@ -1,0 +1,32 @@
+[
+  {
+    "Id": "bb2ab95008ec4904f9771e58b6de0b69b745159bf0c235e0bba7ff72fcbecad6",
+    "Created": "2026-08-30T18:28:59.401328009Z",
+    "Image": "sha256:50632be4481bf8b8184855b4bd918be2d5a0fe3d9c9dd7e4a7fc41c0f8c13d47",
+    "Config": {
+      "Image": "masc-oneclick:docker-shared-basepath-lease-r69-9b17b1c"
+    },
+    "State": {
+      "Status": "exited",
+      "Running": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-08-30T18:28:59.571729801Z",
+      "FinishedAt": "2026-08-30T18:30:02.701824802Z"
+    },
+    "Mounts": [
+      {
+        "Type": "volume",
+        "Name": "masc-health-shared-r69-data",
+        "Source": "/var/lib/docker/volumes/masc-health-shared-r69-data/_data",
+        "Destination": "/app/.masc",
+        "Driver": "local",
+        "Mode": "z",
+        "RW": true,
+        "Propagation": ""
+      }
+    ]
+  }
+]

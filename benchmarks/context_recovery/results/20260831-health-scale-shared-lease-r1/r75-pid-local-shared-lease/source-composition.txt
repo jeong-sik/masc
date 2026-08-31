@@ -1,0 +1,3 @@
+product_head=407288a23a624514a3aa97fde976d1450e57ece8
+measurement_head=962541b20b
+measurement_composition=product_head_plus_main_oneclick_build_fixes_6c53626_b832d34_962541b

@@ -1,0 +1,16 @@
+{"event":"runtime_started","container":"masc-r89-a","runtime_instance_id":"01a05466-8b32-7000-89af-4f54168add74","binary_sha256":"e494ec0eaaa4bc36739505b6e92c122f599968436dc558535b79ab8a596cd6d3","hydrated_records":0}
+{"event":"api_read","container":"masc-r89-a","phase":"before_call","total_calls":0,"distinct_tools_called":0}
+{"event":"tool_call","container":"masc-r89-a","tool":"masc_config","http_status":200,"is_error":false,"count":1}
+{"event":"api_read","container":"masc-r89-a","phase":"after_call","observations":[1,1],"distinct_tools_called":1}
+{"event":"runtime_stopped","container":"masc-r89-a","exit_code":0,"oom_killed":false}
+{"event":"disk_snapshot","phase":"after_a","rows":1,"sha256":"581f8e7b2eb38a827bc3009d3c5b8eaaee7e11e9e38be469fbf80aa0482d4761"}
+{"event":"runtime_started","container":"masc-r89-b","runtime_instance_id":"01a05467-5693-7000-9991-0ea079eb28e7","binary_sha256":"e494ec0eaaa4bc36739505b6e92c122f599968436dc558535b79ab8a596cd6d3","hydrated_records":1}
+{"event":"api_read","container":"masc-r89-b","phase":"before_call","observations":[1,1],"distinct_tools_called":1}
+{"event":"tool_call","container":"masc-r89-b","tool":"masc_config","http_status":200,"is_error":false,"count":1}
+{"event":"api_read","container":"masc-r89-b","phase":"after_call","observations":[2,2],"distinct_tools_called":1}
+{"event":"runtime_stopped","container":"masc-r89-b","exit_code":0,"oom_killed":false}
+{"event":"disk_snapshot","phase":"after_b","rows":2,"sha256":"ec1288632f7f3743e9e40c4dec5bd706812329225b5f94173b0812e17d6e69ac"}
+{"event":"runtime_started","container":"masc-r89-c","runtime_instance_id":"01a05468-0279-7000-a10f-e1032fd86561","binary_sha256":"e494ec0eaaa4bc36739505b6e92c122f599968436dc558535b79ab8a596cd6d3","hydrated_records":2}
+{"event":"api_read","container":"masc-r89-c","phase":"before_call","observations":[2,2],"distinct_tools_called":1}
+{"event":"runtime_stopped","container":"masc-r89-c","exit_code":0,"oom_killed":false}
+{"event":"disk_snapshot","phase":"after_c","rows":2,"sha256":"ec1288632f7f3743e9e40c4dec5bd706812329225b5f94173b0812e17d6e69ac"}

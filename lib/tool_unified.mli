@@ -27,8 +27,9 @@ val tool_info_to_json : tool_info -> Yojson.Safe.t
 
 (** {1 Dashboard summary} *)
 
-(** [summary_report ?runtime_metrics ()] aggregates total/top-20 call counts,
-    never-called tools, visibility distribution, dispatch registration
-    counts, and optional runtime metrics for the dashboard. *)
+(** [summary_report ?runtime_metrics ()] aggregates total/top-20 call counts
+    and latency from {!Tool_metrics}, plus never-called tools, visibility
+    distribution, dispatch registration counts, and optional runtime metrics
+    for the dashboard. *)
 val summary_report :
   ?runtime_metrics:(unit -> Yojson.Safe.t) -> unit -> Yojson.Safe.t

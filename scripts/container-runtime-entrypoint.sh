@@ -3,8 +3,13 @@
 set -euo pipefail
 
 BASE_PATH="${MASC_BASE_PATH:?MASC_BASE_PATH is required}"
+LEASE_DIR="${MASC_BASE_PATH_LEASE_DIR:?MASC_BASE_PATH_LEASE_DIR is required}"
+RUNTIME_EVENTS_DIR="${OCAML_RUNTIME_EVENTS_DIR:?OCAML_RUNTIME_EVENTS_DIR is required}"
 HELPER=/app/masc-deployment-preflight-helper
 GATE=/app/masc-check-runtime-deployment-preflight
+
+mkdir -p "$LEASE_DIR" "$RUNTIME_EVENTS_DIR"
+chmod 0700 "$LEASE_DIR" "$RUNTIME_EVENTS_DIR"
 
 if [[ $# -eq 0 ]]; then
   set -- /app/masc --port "${PORT:-8080}" --base-path "$BASE_PATH"

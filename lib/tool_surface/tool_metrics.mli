@@ -20,16 +20,34 @@ type tool_stats = {
   mean_ms : float;
 }
 
+type disposition =
+  | Completed
+  | Deferred
+  | Failed
+
+type sample = {
+  tool_name : string;
+  disposition : disposition;
+  duration_ms : float;
+}
+
 (** [record result] records a tool invocation from a
     {!Tool_result.result}. *)
 val record : Tool_result.result -> unit
+
+val replace_samples : ((sample -> unit) -> ('a, 'error) result) -> ('a, 'error) result
+(** [replace_samples produce] builds a new metrics snapshot from streamed
+    samples and publishes it only when [produce] returns [Ok]. It leaves the
+    current snapshot unchanged on [Error]. Call this before installing live
+    producers so a concurrent record cannot be overwritten. *)
 
 (** [stats_for tool_name] returns metrics for a specific tool.
     Returns [None] if no calls have been recorded. *)
 val stats_for : string -> tool_stats option
 
-(** [all_stats ()] returns metrics for all recorded tools,
-    sorted by call count descending. *)
+(** [all_stats ()] returns an immutable metrics snapshot sorted by call count
+    descending. Repeated and concurrent reads reuse the snapshot until
+    [record], [replace_samples], or [clear] changes the metrics. *)
 val all_stats : unit -> tool_stats list
 
 (** [to_json stats] serializes a [tool_stats] to JSON. *)

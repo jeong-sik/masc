@@ -228,6 +228,11 @@ val make_health_response_json :
     synchronously run durable keeper scans; the Eio refresh loop started by
     {!start_full_health_snapshot_refresh_loop} performs those scans. *)
 
+val invalidate_full_health_snapshot : unit -> unit
+(** Drop the cached full-health fields and request a background refresh after a
+    live state mutation. Until refresh completes, [full=1] returns bounded
+    warming placeholders instead of a previously ready snapshot. *)
+
 val start_full_health_snapshot_refresh_loop :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
@@ -255,6 +260,18 @@ module For_testing : sig
 
   val full_health_refresh_timing : unit -> float * float * float
   (** Returns [(interval_sec, timeout_sec, ttl_sec)] for full-health refresh. *)
+
+  val full_health_refresh_wakeup_coalesce_sec : unit -> float
+  (** Returns the fixed leading-edge coalescing bound for mutation wakes. *)
+
+  val run_full_health_refresh_worker :
+    sw:Eio.Switch.t -> compute:(unit -> unit) -> unit
+  (** Runs an injected compute through the production full-health singleflight
+      coordinator.  The worker is attached to [sw], not to a caller timeout. *)
+
+  val full_health_refresh_worker_stats : unit -> int * int * bool * int * bool * bool
+  (** Returns [(submissions, joins, active, invalidation_generation,
+      snapshot_present, refresh_requested)]. *)
 end
 
 val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) list

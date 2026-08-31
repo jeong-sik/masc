@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-31T02:30:04+09:00",
+  "issue": 31992,
+  "stacked_base": "67a6654914ecef8cf10105bafc2d3125c7ca220c",
+  "product_change": "c1f6a013ad04570d49ed2aaafcbddb02f500fb9f",
+  "measurement_source_commit": "ac8e5d44264cfa5d1f80e946b38abfbd67c57952",
+  "image_digest": "sha256:870546f09fe7596523475ac485440a8e65f86a7db901d1614db1c2c85df9f38c",
+  "binary_sha256": "0dd6883dbebb12c4b32f45188f77d43cddb6f6a29554cf5983effdbed5b3243a",
+  "runtime_instance_id": "01a053ae-16a4-7000-a0d6-b2bb618107ae",
+  "fault": {
+    "platform": "linux/arm64",
+    "cpu_quota": 0.05,
+    "volume_source": "read-only clone of stopped r59 volume",
+    "deployed_8935_untouched": true
+  },
+  "load": {
+    "schedule_attempt_count": 61,
+    "schedule_accepted_count": 61,
+    "schedule_http_error_count": 0,
+    "due_at_unix": 1788110450,
+    "ledger_row_count": 61,
+    "ledger_unique_stimulus_count": 61,
+    "ledger_unique_schedule_count": 61,
+    "ledger_first_recorded_at_unix": 1788110468.288173,
+    "ledger_last_recorded_at_unix": 1788110859.790674,
+    "ledger_span_sec": 391.5025010108948,
+    "queue_count_before": 187,
+    "queue_count_after": 248,
+    "latest_stimulus_id": "e7148c81aaf61164f53064a290403132d889114b861d9191cfbff354ffea796c",
+    "latest_stimulus_matches_final_health": true
+  },
+  "worker_evidence": {
+    "refresh_timeout_log_count": 2,
+    "refresh_timeout_log_times_utc": [
+      "2026-08-30T17:26:00Z",
+      "2026-08-30T17:27:06Z"
+    ],
+    "first_timeout": {
+      "observed_at": "2026-08-30T17:26:02.043812Z",
+      "worker_submissions_total": 62,
+      "worker_joins_total": 0,
+      "worker_active": true,
+      "refresh_in_flight": true,
+      "invalidation_generation": 115
+    },
+    "joined_same_worker": {
+      "observed_at": "2026-08-30T17:26:34.748051Z",
+      "worker_submissions_total": 62,
+      "worker_joins_total": 1,
+      "worker_active": true,
+      "refresh_in_flight": true,
+      "joined_worker_id": 62,
+      "joined_waiter_elapsed_sec": 8.7
+    },
+    "late_publish_without_successor": {
+      "timeout_observed_at": "2026-08-30T17:27:08.272857Z",
+      "ready_observed_at": "2026-08-30T17:27:19.147526Z",
+      "worker_submissions_total_at_timeout": 63,
+      "worker_submissions_total_at_ready": 63,
+      "ready_computed_at_unix": 1788110839.088318
+    },
+    "dirty_result_discard_count": 2,
+    "final": {
+      "status": "ready",
+      "computed_at_unix": 1788110861.200741,
+      "duration_ms": 1409,
+      "worker_submissions_total": 68,
+      "worker_joins_total": 1,
+      "worker_active": false,
+      "refresh_in_flight": false,
+      "refresh_requested": false,
+      "invalidation_generation": 127,
+      "stale_or_error": false
+    }
+  },
+  "focused_checks": {
+    "server_runtime_bootstrap_build": "pass",
+    "health_cases": "6/6",
+    "ocamlformat_check": "pass",
+    "diff_check": "pass"
+  },
+  "shutdown": {
+    "app_exit_code": 0,
+    "oom_killed": false,
+    "volume_preserved": true
+  },
+  "artifact_sha256": {
+    "accepted-manifest.jsonl": "d59ab7f40045d22ce5e45f8732c988db4d839539b3f19111148d6622759519b2",
+    "ledger-rows.jsonl": "ade2ec4641f4fce608b7f94f48830564e95242a0020ab0060de3f05b85024d40",
+    "health-timeseries.jsonl": "4db4be4466d7df573ff0facd397d635db4af22b9ff7acb6ace711cdfcfaabb89",
+    "full-health-selected.log": "5d9d739aa727658615a5980f7a0f5c5da811616214934d22fa0329913fa5058f",
+    "health-final.json": "7c0f94c08ae08f564e099e072dc6b704280758efaf5579b225cf6bd7a9b23c18"
+  },
+  "runtime_claim": true,
+  "ci_claim": false
+}

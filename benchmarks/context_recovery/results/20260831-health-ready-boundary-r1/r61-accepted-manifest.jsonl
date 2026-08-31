@@ -1,0 +1,4 @@
+{"response_file":"response-1.txt","jsonrpc":"2.0","id":6101,"status":"accepted","schedule_id":"r61-restart-1","schedule_instance_id":"01a053bd-713e-7000-832b-9ddb93830377","due_at":1788111329.0,"is_error":false}
+{"response_file":"response-2.txt","jsonrpc":"2.0","id":6102,"status":"accepted","schedule_id":"r61-restart-2","schedule_instance_id":"01a053bd-7166-7000-b443-8a83400ee77f","due_at":1788111329.0,"is_error":false}
+{"response_file":"response-3.txt","jsonrpc":"2.0","id":6103,"status":"accepted","schedule_id":"r61-restart-3","schedule_instance_id":"01a053bd-718e-7000-befd-9de7361a4bc1","due_at":1788111329.0,"is_error":false}
+{"response_file":"response-4.txt","jsonrpc":"2.0","id":6104,"status":"accepted","schedule_id":"r61-restart-4","schedule_instance_id":"01a053bd-71b9-7000-8449-3f47c6d6372a","due_at":1788111329.0,"is_error":false}

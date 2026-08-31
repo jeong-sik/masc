@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T23:29:06+09:00",
+  "issue": 31974,
+  "source_change_head": "4efc64e0f29ae1ce435dbfc8e0d04ae870e5b736",
+  "measurement_source_commit": "7810e6adab8f2e567018d292902dedc8467fc957",
+  "image_digest": "sha256:ac6eb4dd2dc2b68bcf07ceb2f947f516b0fbafefe3f35960be233dc5e22661b5",
+  "binary_sha256": "9faae9fd888e991fb56ffd98cd1cbcdc2b86139e9a571445f94988ce0fc4ee38",
+  "baseline": {
+    "transition": "running_to_failing",
+    "snapshot_age_ms": 27526,
+    "ttl_ms": 60000,
+    "overall_status": "ok",
+    "fleet_status": "ok",
+    "stale_reason": null,
+    "refresh_requested": false
+  },
+  "failed_poc": {
+    "boundary": "lifecycle_event_bus_listener",
+    "accepted": false,
+    "reason": "turn_failed was not published on that listener"
+  },
+  "fixed": {
+    "transition": "running_to_failing",
+    "terminal_reason": "accept_rejected",
+    "immediate": {
+      "overall_status": "warming",
+      "fleet_status": "warming",
+      "snapshot_status": "warming",
+      "refresh_requested": true,
+      "computed_at_unix": null,
+      "snapshot_age_ms": null
+    },
+    "after_refresh": {
+      "failing_keeper_count": 1,
+      "recovering_keeper_count": 1,
+      "executable_keeper_count": 1,
+      "health_policy_claimed": false
+    },
+    "event_driven_refresh": {
+      "transition_at": "2026-08-30T14:37:41Z",
+      "snapshot_computed_at_unix": 1788100661.15809,
+      "same_second_as_transition": true,
+      "periodic_wait_required": false
+    }
+  },
+  "focused_checks": {
+    "server_build": "pass",
+    "snapshot_cache_case": "1/1",
+    "diff_check": "pass",
+    "ocamlformat_check": "pass"
+  },
+  "shutdown": {
+    "app_exit_code": 0,
+    "provider_exit_code": 137,
+    "volume_preserved": true
+  },
+  "artifact_sha256": {
+    "health-before-failure.json": "afca89b58e0b9042207bb36a25022e4fffd5cb16022579b3b564f4bd1aec0766",
+    "health-immediate-after-transition.json": "e17ef2c85c1e1d955d5bb3a3700b8479e895e3e389538c973ae22ffa25c658e6",
+    "health-after-refresh.json": "ed7df7f2d828ea3ca62684e9ad62b690e080fef011a07615fc6d35f609e1d607",
+    "transition-selected.log": "c12b14406696087d1b9d76aa5eb9aaf32e9348c0da21524446ec70adfd1965ad",
+    "wakeup-health-before-failure.json": "bdf6c0bede0c9ef2f59cca0655595b62d9a9796707b95f2dae362eaf99b50e47",
+    "wakeup-health-immediate-after-transition.json": "2d0dfe90b977adfdbb4f23ac441dfa8a640bfc477d1e673ac0056deffaaf4eb4",
+    "wakeup-health-ready-after-wakeup.json": "9cf2775d636b572d50da44074507afb033085149fc6f17a0648500185bcfc76f",
+    "wakeup-timeline.log": "8205ef03adbb49b7c24b6cfc0afcd9c985f0d61ef2d11f38f34369acf1406d4d"
+  },
+  "performance_claim": false
+}

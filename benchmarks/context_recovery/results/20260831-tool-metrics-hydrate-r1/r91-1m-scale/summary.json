@@ -1,0 +1,40 @@
+{
+  "schema": "masc.tool_metrics_hydration.scale.v1",
+  "product_head": "4dd5fc316520460f5f52795bced68b552744da28",
+  "image_id": "sha256:0ea91a347442b5b8399a379906b5db65b1d93f7b3dae34e3b7f1c81ea00315b4",
+  "input": {
+    "bytes": 89019000,
+    "physical_rows": 1002000,
+    "valid_rows": 1000000,
+    "malformed_json_rows": 1000,
+    "invalid_format_rows": 1000,
+    "sha256": "f5c69359be1ae7ecaab1b3b6757b2a10d911ab9ed64cdf1401bc5bf34e1d414d"
+  },
+  "first_start": {
+    "container_id": "3f4d33e10e712268f411799edf2a8cc25b6391cd4154b9553fb67a0d78feb1a3",
+    "container_start_to_hydration_log_s": 1.845619,
+    "memory_before_api_mib": 116.0,
+    "memory_after_two_api_reads_mib": 131.6,
+    "api_time_s": [0.186017, 0.192343],
+    "api_totals": [1000000, 1000000],
+    "exit_code": 0,
+    "oom_killed": false
+  },
+  "replacement_start": {
+    "container_id": "a892bff2aa8c61d98e150b96c53905d14c4bc0df33de2b831b4dc6b72c85a836",
+    "container_start_to_hydration_log_s": 1.898473,
+    "memory_after_api_mib": 123.9,
+    "api_time_s": [0.205667],
+    "api_totals": [1000000],
+    "exit_code": 0,
+    "oom_killed": false
+  },
+  "percentiles": {
+    "p50_ms": 51.0,
+    "p95_ms": 95.0,
+    "p99_ms": 99.0
+  },
+  "tested_ceiling_rows": 1000000,
+  "result": "pass",
+  "verified_at": "2026-08-31T05:49:38+09:00"
+}

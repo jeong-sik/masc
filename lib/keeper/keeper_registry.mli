@@ -18,6 +18,11 @@ open Keeper_types_profile
     [Keeper_registry.packed_turn_phase] etc. unchanged. *)
 include module type of Keeper_registry_types
 
+val install_state_change_observer : (unit -> unit) -> unit
+(** Install the process-wide non-yielding observer called after a successful
+    registry event CAS. Observer failures are logged and never roll back the
+    committed transition. *)
+
 
 
 (** Register a fresh keeper before its first keepalive fiber launch.

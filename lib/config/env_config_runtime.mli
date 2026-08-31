@@ -199,7 +199,6 @@ end
 (** {1 Internal timers / cache TTLs} *)
 
 module InternalTimers : sig
-  val metrics_flush_sec : float
   val label_quiet_threshold_sec : float
   val label_stuck_threshold_sec : float
   val briefing_cache_ttl_sec : float

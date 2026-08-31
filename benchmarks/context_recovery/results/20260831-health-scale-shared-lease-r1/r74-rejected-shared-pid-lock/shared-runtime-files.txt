@@ -1,0 +1,13 @@
+/app/.masc/runtime/host-run/masc-8080.pid.takeover-kill.json
+--- /app/.masc/runtime/host-run/masc-8080.pid.takeover-kill.json
+644 999:999 109
+/app/.masc/runtime/host-run/masc-8080.pid
+--- /app/.masc/runtime/host-run/masc-8080.pid
+644 999:999 2
+7
+/app/.masc/runtime/host-run/masc-base-path-leases-v1-999/masc-base-path-owner-v1-f53b52ad6d21cceb72dfa78fb67614fe14f110c58e68412b01508d6a485501c3.lease
+--- /app/.masc/runtime/host-run/masc-base-path-leases-v1-999/masc-base-path-owner-v1-f53b52ad6d21cceb72dfa78fb67614fe14f110c58e68412b01508d6a485501c3.lease
+600 999:999 2
+/app/.masc/runtime/events/7.events
+--- /app/.masc/runtime/events/7.events
+600 999:999 68167744

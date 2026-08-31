@@ -46,6 +46,8 @@ type config = {
   failure_threshold : int;
   timeout_s : float;
   on_failure : (failure -> unit) option;
+  wakeup : unit Eio.Stream.t option;
+  wakeup_coalesce_s : float;
   warm_delay_s : float;
   warn_first_failure : bool;
 }
@@ -58,6 +60,8 @@ let default_config ~label ~interval_s =
     failure_threshold = 3;
     timeout_s = 10.0;
     on_failure = None;
+    wakeup = None;
+    wakeup_coalesce_s = 0.0;
     warm_delay_s = 0.0;
     warn_first_failure = true;
   }
@@ -159,9 +163,39 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
     Log.Dashboard.info "starting %s refresh loop" config.label;
     let consecutive_failures = ref 0 in
     let current_interval = ref config.interval_s in
+    let wait_for_interval_or_wakeup seconds =
+      match config.wakeup with
+      | None -> Eio.Time.sleep clock seconds
+      | Some stream ->
+        let reason =
+          Eio.Fiber.first
+            (fun () ->
+               Eio.Time.sleep clock seconds;
+               `Interval)
+            (fun () ->
+               Eio.Stream.take stream;
+               `Wakeup)
+        in
+        (match reason with
+         | `Interval -> ()
+         | `Wakeup ->
+           let coalesce_s = max 0.0 config.wakeup_coalesce_s in
+           if coalesce_s > 0.0 then Eio.Time.sleep clock coalesce_s;
+           let siblings = ref 0 in
+           while Option.is_some (Eio.Stream.take_nonblocking stream) do
+             incr siblings
+           done;
+           if !siblings > 0
+           then
+             Log.Dashboard.debug
+               "%s coalesced %d sibling wakeup signal(s) over %.3fs"
+               config.label
+               !siblings
+               coalesce_s)
+    in
     let rec loop () =
       let jitter = Random.float (!current_interval *. 0.25) in
-      Eio.Time.sleep clock (!current_interval +. jitter);
+      wait_for_interval_or_wakeup (!current_interval +. jitter);
       let t0 = Time_compat.now () in
       (try
          match

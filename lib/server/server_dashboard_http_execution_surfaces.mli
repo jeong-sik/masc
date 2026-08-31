@@ -115,9 +115,11 @@ val invalidate_execution_cache : unit -> unit
     through
     {!Keeper_metrics.(to_string LifecycleCallbackFailures)}. *)
 
-val install_task_mutation_cache_invalidation : unit -> unit
-(** Connects task mutation commits to {!invalidate_execution_cache}. Server
-    bootstrap installs this before Workspace mutation hooks become available. *)
+val install_task_mutation_cache_invalidation :
+  invalidate_full_health_snapshot:(unit -> unit) -> unit -> unit
+(** Connects task mutation commits to {!invalidate_execution_cache} and the
+    supplied full-health snapshot invalidator. Server bootstrap installs the
+    composed callback before Workspace mutation hooks become available. *)
 
 module For_testing : sig
   val execution_publication_generation : unit -> int

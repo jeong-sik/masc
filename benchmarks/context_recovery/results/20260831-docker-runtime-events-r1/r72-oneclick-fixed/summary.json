@@ -1,0 +1,17 @@
+{
+  "schema": "masc.oneclick_runtime_events.runtime_proof.v1",
+  "source_head": "dee02ce57e556aa91f342e2701f5319fe0db7292",
+  "image_id": "sha256:283acd754e507fcea2a47300bda75fa6e0ad05d6fab25982663cf0b7dffbabef",
+  "binary_sha256": "dc2efc123d2052d00ce0cb578230fb9c7bfff08bb13940a34fc9613e3eeeba75",
+  "runtime": "01a053fc-df3b-7000-b293-2dc7b4101730",
+  "startup_elapsed_sec": 1.1850190162658691,
+  "full": "ready",
+  "auth": "ok",
+  "runtime_events": {
+    "directory": "/app/.masc/runtime/events",
+    "mode": "700",
+    "file": "6.events"
+  },
+  "exit_code": 0,
+  "oom_killed": false
+}

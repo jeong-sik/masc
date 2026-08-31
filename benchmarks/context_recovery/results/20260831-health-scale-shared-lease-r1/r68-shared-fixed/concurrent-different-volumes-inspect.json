@@ -1,0 +1,62 @@
+[
+  {
+    "Id": "e921b6d479927d568f85d27cfc0e17969d426ed317a013606efe124b3f370e32",
+    "Created": "2026-08-30T18:17:42.378901168Z",
+    "Image": "sha256:b732b674773a732be91bbaf41a4b9342d08a2e16bd6a6cccfbb3f53b16261eb3",
+    "Config": {
+      "Image": "masc-oneclick:docker-shared-basepath-lease-da6f0b6"
+    },
+    "State": {
+      "Status": "running",
+      "Running": true,
+      "OOMKilled": false,
+      "Dead": false,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-08-30T18:17:42.501211709Z",
+      "FinishedAt": "0001-01-01T00:00:00Z"
+    },
+    "Mounts": [
+      {
+        "Type": "volume",
+        "Name": "masc-health-shared-r68-data",
+        "Source": "/var/lib/docker/volumes/masc-health-shared-r68-data/_data",
+        "Destination": "/app/.masc",
+        "Driver": "local",
+        "Mode": "z",
+        "RW": true,
+        "Propagation": ""
+      }
+    ]
+  },
+  {
+    "Id": "1fddd91b10c1fca37548206e9bef6130c63be4bd2d838e22ec15f34c3d8170ca",
+    "Created": "2026-08-30T18:18:41.310104334Z",
+    "Image": "sha256:b732b674773a732be91bbaf41a4b9342d08a2e16bd6a6cccfbb3f53b16261eb3",
+    "Config": {
+      "Image": "masc-oneclick:docker-shared-basepath-lease-da6f0b6"
+    },
+    "State": {
+      "Status": "running",
+      "Running": true,
+      "OOMKilled": false,
+      "Dead": false,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-08-30T18:18:41.432127875Z",
+      "FinishedAt": "0001-01-01T00:00:00Z"
+    },
+    "Mounts": [
+      {
+        "Type": "volume",
+        "Name": "masc-health-shared-r68-different-data",
+        "Source": "/var/lib/docker/volumes/masc-health-shared-r68-different-data/_data",
+        "Destination": "/app/.masc",
+        "Driver": "local",
+        "Mode": "z",
+        "RW": true,
+        "Propagation": ""
+      }
+    ]
+  }
+]

@@ -1,0 +1,32 @@
+[
+  {
+    "Id": "8fe34af8546324aae180462a155ec5e456cfa5d7947e6754ac8ca1aefd38044d",
+    "Created": "2026-08-30T18:02:21.90728063Z",
+    "Image": "sha256:111b409d8764b1d9f28318a1e7824a75e967f986883a07a66924ea24de7f883f",
+    "Config": {
+      "Image": "masc-oneclick:health-ready-boundary-linux-79a3254"
+    },
+    "State": {
+      "Status": "exited",
+      "Running": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-08-30T18:02:22.041798631Z",
+      "FinishedAt": "2026-08-30T18:04:08.791503264Z"
+    },
+    "Mounts": [
+      {
+        "Type": "volume",
+        "Name": "masc-health-scale32-r65-data",
+        "Source": "/var/lib/docker/volumes/masc-health-scale32-r65-data/_data",
+        "Destination": "/app/.masc",
+        "Driver": "local",
+        "Mode": "z",
+        "RW": true,
+        "Propagation": ""
+      }
+    ]
+  }
+]

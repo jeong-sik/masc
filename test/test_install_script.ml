@@ -201,6 +201,23 @@ let release_workflow () =
 ;;
 
 let dockerfile () = read_file (Filename.concat (source_root ()) "Dockerfile")
+
+let dockerfile_oneclick () =
+  read_file (Filename.concat (source_root ()) "Dockerfile.oneclick")
+;;
+
+let docker_compose () =
+  read_file (Filename.concat (source_root ()) "docker-compose.yml")
+;;
+
+let container_runtime_entrypoint () =
+  read_file (Filename.concat (source_root ()) "scripts/container-runtime-entrypoint.sh")
+;;
+
+let docker_entrypoint () =
+  read_file (Filename.concat (source_root ()) "scripts/docker-entrypoint.sh")
+;;
+
 let oneclick_entrypoint () =
   read_file (Filename.concat (source_root ()) "scripts/docker-entrypoint.sh")
 ;;
@@ -614,6 +631,10 @@ let test_installer_fetches_deployment_preflight_companions () =
 
 let test_runtime_image_enforces_preflight_before_main () =
   let image = dockerfile () in
+  let oneclick_image = dockerfile_oneclick () in
+  let compose = docker_compose () in
+  let release_entrypoint = container_runtime_entrypoint () in
+  let oneclick_entrypoint = docker_entrypoint () in
   let context = dockerignore () in
   assert_contains
     "image ships the read-only deployment preflight gate"
@@ -623,6 +644,56 @@ let test_runtime_image_enforces_preflight_before_main () =
     "image enters through the lease handoff wrapper"
     image
     {|ENTRYPOINT ["/usr/bin/tini", "--", "/app/masc-runtime-entrypoint"]|};
+  assert_contains
+    "release image creates the RFC-0121 bulk data sibling"
+    image
+    "mkdir -p /app/.masc /app/data";
+  assert_contains
+    "release image grants the runtime user access to bulk data"
+    image
+    "chown -R appuser:appgroup /app/.masc /app/data";
+  List.iter
+    (fun source ->
+       assert_contains
+         "runtime image declares identity and bulk-data volumes"
+         source
+         {|VOLUME ["/app/.masc", "/app/data"]|})
+    [ image; oneclick_image ];
+  assert_contains
+    "one-click image creates bulk data before declaring its volume"
+    oneclick_image
+    "mkdir -p /app/.masc /app/data";
+  assert_contains
+    "compose persists release bulk data"
+    compose
+    "- masc-data:/app/data";
+  assert_contains
+    "compose persists one-click bulk data"
+    compose
+    "- masc-oneclick-data:/app/data";
+  assert_contains "compose declares release bulk volume" compose "masc-data:";
+  assert_contains
+    "compose declares one-click bulk volume"
+    compose
+    "masc-oneclick-data:";
+  List.iter
+    (fun source ->
+       assert_contains
+         "runtime events use writable volume storage"
+         source
+         "OCAML_RUNTIME_EVENTS_DIR=/app/.masc/runtime/events")
+    [ image; oneclick_image ];
+  List.iter
+    (fun source ->
+       assert_contains
+         "entrypoint prepares the runtime-events directory"
+         source
+         {|mkdir -p "$LEASE_DIR" "$RUNTIME_EVENTS_DIR"|};
+       assert_contains
+         "entrypoint restricts the runtime-events directory"
+         source
+         {|chmod 0700 "$LEASE_DIR" "$RUNTIME_EVENTS_DIR"|})
+    [ release_entrypoint; oneclick_entrypoint ];
   assert_contains
     "Docker context includes the main release executable"
     context

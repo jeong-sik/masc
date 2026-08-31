@@ -23,6 +23,11 @@ val snapshot_filename : string
 
 val transition_wal_filename : string
 
+val install_state_change_observer : (unit -> unit) -> unit
+(** Install the process-wide non-yielding observer invoked after each durable
+    event-queue snapshot or transition-WAL commit. Observer failures are logged
+    and never change the already committed queue result. *)
+
 type owner_identity
 type owner_identity_error
 

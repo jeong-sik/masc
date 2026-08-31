@@ -36,6 +36,7 @@ type t =
   ; test_mode : test_mode_kind
   ; log_dir : string
   ; run_dir : string
+  ; base_path_lease_dir : string
   ; policy_dir : string
   ; base_path : string option
   ; base_path_raw : string option
@@ -88,6 +89,8 @@ let host () =
        else Production)
   ; log_dir = tmp
   ; run_dir = tmp
+  ; base_path_lease_dir =
+      Option.value (get_opt "MASC_BASE_PATH_LEASE_DIR") ~default:tmp
   ; policy_dir = tmp
   ; base_path =
       (* RFC-0085 PR-9 — base_path field carries the *normalised* value
@@ -201,6 +204,8 @@ let resolve ?base_path () =
     ; test_mode
     ; log_dir = tmp
     ; run_dir = tmp
+    ; base_path_lease_dir =
+        Option.value (get_opt "MASC_BASE_PATH_LEASE_DIR") ~default:tmp
     ; policy_dir = tmp
     ; base_path =
         get_opt "MASC_BASE_PATH"

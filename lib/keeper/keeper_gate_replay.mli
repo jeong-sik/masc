@@ -206,6 +206,13 @@ module For_testing : sig
     string ->
     (Tool_output.artifact_ref, string) result
 
+  val settle_pre_effect_failure :
+    base_path:string ->
+    approval_id:string ->
+    operation:string ->
+    detail:string ->
+    (replay_execution, string) result
+
   val with_replay_evidence_persister :
     ( base_path:string
       -> string

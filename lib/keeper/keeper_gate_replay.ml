@@ -422,7 +422,15 @@ let replayed_outcome
        replay_execution
          ?terminal_effect_receipt
          (Repair_required { operation; stage = Replay_journal; detail })
-     | Ok journal ->
+     | Ok Replay_grant_not_consumed ->
+       replay_execution
+         ?terminal_effect_receipt
+         (Repair_required
+            { operation
+            ; stage = Stale_grant_retirement
+            ; detail = replay_journal_to_string Replay_grant_not_consumed
+            })
+     | Ok (Replay_journal_recorded | Replay_journal_already_recorded as journal) ->
        forget_pending_repair ~base_path ~approval_id;
        project_replay_outcome_to_chat ~base_path ~approval_id replay_outcome;
        let outcome =
@@ -437,6 +445,41 @@ let replayed_outcome
            Indeterminate { operation; detail_ref; journal }
        in
        replay_execution ?terminal_effect_receipt outcome)
+;;
+
+let settle_replay_effect
+      ~base_path
+      ~approval_id
+      ~(request : Keeper_approval_queue.approved_resolution_request)
+      ?terminal_effect_receipt
+      ~operation
+      replay_effect
+  =
+  (* A producer normally consumes the one-shot grant immediately before its
+     exact effect. A proven pre-effect failure can return before that boundary
+     (for example, while creating its sandbox). Retire any such still-
+     unconsumed grant before publishing a terminal replay result so the same
+     failed operation is not attempted on every queued wake. *)
+  remember_pending_repair
+    ~base_path
+    ~approval_id
+    { operation; replay_effect; terminal_effect_receipt };
+  match retire_stale_grant ~base_path ~approval_id request with
+  | Error detail ->
+    replay_execution
+      ?terminal_effect_receipt
+      (Repair_required
+         { operation
+         ; stage = Stale_grant_retirement
+         ; detail
+         })
+  | Ok () ->
+    replayed_outcome
+      ~base_path
+      ~approval_id
+      ~operation
+      ?terminal_effect_receipt
+      replay_effect
 ;;
 
 let durable_replay_execution
@@ -926,6 +969,12 @@ let replay_approved_effect_with_receipt
       ; state = Keeper_approval_queue.Resolution_unconsumed
       ; replay_outcome = None
       } ->
+    let settle_effect =
+      settle_replay_effect
+        ~base_path:config.base_path
+        ~approval_id
+        ~request
+    in
     let run_effect ?terminal_effect_receipt operation run =
       let execution =
         try Ok (run ()) with
@@ -938,39 +987,14 @@ let replay_approved_effect_with_receipt
       in
       match execution with
       | Error detail ->
-        replayed_outcome
-          ~base_path:config.base_path
-          ~approval_id
+        settle_effect
+          ?terminal_effect_receipt
           ~operation
           (Effect_indeterminate detail)
-      | Ok
-          ({ Keeper_tool_execution.disposition = Tool_result.Deferred _; _ }
-          as execution) ->
-        (match
-           retire_stale_grant
-             ~base_path:config.base_path
-             ~approval_id
-             request
-         with
-         | Error detail ->
-           replay_execution
-             (Repair_required
-                { operation
-                ; stage = Stale_grant_retirement
-                ; detail
-                })
-         | Ok () ->
-           replayed_outcome
-             ~base_path:config.base_path
-             ~approval_id
-             ~operation
-             (summarize_execution ~operation execution))
       | Ok execution ->
-        replayed_outcome
-          ~base_path:config.base_path
-          ~approval_id
-          ~operation
+        settle_effect
           ?terminal_effect_receipt
+          ~operation
           (summarize_execution ~operation execution)
     in
     let replay ?terminal_effect_receipt_of_args operation decode run =
@@ -986,7 +1010,11 @@ let replay_approved_effect_with_receipt
         in
         run_effect ?terminal_effect_receipt operation (fun () -> run args)
     in
-    (match replayable_of_operation request.tool_name with
+    (match find_pending_repair ~base_path:config.base_path ~approval_id with
+     | Some { operation; replay_effect; terminal_effect_receipt } ->
+       settle_effect ?terminal_effect_receipt ~operation replay_effect
+     | None ->
+       (match replayable_of_operation request.tool_name with
      | None -> replay_execution Not_applicable
      | Some Replay_write ->
        replay write_operation write_args_of_gate_input (fun args ->
@@ -1061,7 +1089,7 @@ let replay_approved_effect_with_receipt
            ?continuation_channel
            ?gate_context
            ~gate_grant:grant
-           call))
+           call)))
 ;;
 
 let replay_approved_effect
@@ -1090,6 +1118,28 @@ let replay_approved_effect
 
 module For_testing = struct
   let persist_replay_artifact = persist_replay_artifact
+
+  let settle_pre_effect_failure ~base_path ~approval_id ~operation ~detail =
+    match
+      Keeper_approval_queue.approved_resolution_delivery
+        ~base_path
+        ~id:approval_id
+    with
+    | Ok
+        { request
+        ; state = Keeper_approval_queue.Resolution_unconsumed
+        ; replay_outcome = None
+        } ->
+      Ok
+        (settle_replay_effect
+           ~base_path
+           ~approval_id
+           ~request
+           ~operation
+           (Effect_failed detail))
+    | Ok _ -> Error "invalid_state"
+    | Error error -> Error (Keeper_approval_queue.grant_error_to_string error)
+  ;;
 
   let with_replay_evidence_persister persist f =
     let previous =

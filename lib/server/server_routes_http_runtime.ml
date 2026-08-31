@@ -736,7 +736,24 @@ let full_health_snapshot = ref None
 let full_health_refresh_in_flight = ref false
 let full_health_refresh_started_at = ref None
 let full_health_refresh_requested = ref false
-let full_health_refresh_wakeup = Eio.Stream.create max_int
+(* Capacity-1 mailbox, not a queue: the refresh state lives in
+   [full_health_refresh_requested] and this stream only carries "something
+   changed". A second pending wakeup would tell the consumer nothing the
+   first one did not, so extra ones are coalesced away rather than buffered.
+   [max_int] here was an unbounded stream on the invalidation path -- the
+   shape that exhausted the heap in #10777 when its consumer fiber stalled. *)
+let full_health_refresh_wakeup = Eio.Stream.create 1
+
+(* Makes the is_empty check and the add atomic. Without it two invalidations
+   can both see an empty stream and the second blocks on the full one, which
+   would stall whichever hot path called it. *)
+let full_health_refresh_wakeup_mu = Eio.Mutex.create ()
+
+let signal_full_health_refresh_wakeup () =
+  Eio.Mutex.use_rw ~protect:true full_health_refresh_wakeup_mu (fun () ->
+      if Eio.Stream.is_empty full_health_refresh_wakeup
+      then Eio.Stream.add full_health_refresh_wakeup ())
+;;
 (* Consecutive [/health?full=1] refresh failures (timeouts or
    exceptions).  Reset to 0 on every successful
    [store_full_health_snapshot]; incremented inside
@@ -1243,7 +1260,7 @@ let invalidate_full_health_snapshot () =
   with_full_health_snapshot_lock (fun () ->
       full_health_snapshot := None;
       full_health_refresh_requested := true);
-  Eio.Stream.add full_health_refresh_wakeup ()
+  signal_full_health_refresh_wakeup ()
 
 let full_health_snapshot_state () =
   with_full_health_snapshot_lock (fun () ->

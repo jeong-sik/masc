@@ -1364,6 +1364,17 @@ let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojso
 let fetch_schedules ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/scheduled-automation"
 
+(** Create or atomically modify a schedule from the JSON form the TUI handed
+    to [$EDITOR]. The server validates each against its canonical Tool schema;
+    update requires [schedule_id] and refuses running or terminal rows. *)
+let post_schedule_create ~(host : string) ~(port : int) ~(body_json : string) =
+  post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_create"
+    ~body:body_json
+
+let post_schedule_update ~(host : string) ~(port : int) ~(body_json : string) =
+  post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_update"
+    ~body:body_json
+
 (** POST /api/v1/tools/masc_schedule_cancel. The payload is the tool's own
     argument contract, so validation is the tool's, not duplicated here.
     [cancelled_by_kind] is omitted: the tool defaults it to human operator,

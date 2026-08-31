@@ -124,6 +124,7 @@
     "masc_schedule_create.toml",
     "masc_schedule_get.toml",
     "masc_schedule_list.toml",
+    "masc_schedule_update.toml",
     "masc_start.toml",
     "masc_status.toml",
     "masc_task_history.toml",

@@ -83,6 +83,16 @@ val insert_request :
   Schedule_domain.schedule_request ->
   (Schedule_domain.schedule_request, store_error) result
 
+val update_request :
+  Workspace_utils.config ->
+  Schedule_domain.schedule_request ->
+  (Schedule_domain.schedule_request, store_error) result
+(** Atomically replaces an existing [Scheduled] or [Due] request. The caller
+    supplies a newly validated request with the same stable [schedule_id] and
+    a fresh [schedule_instance_id], so wakes from the previous definition do
+    not become evidence for the replacement. Running and terminal requests
+    are immutable. *)
+
 val cancel_request :
   Workspace_utils.config ->
   schedule_id:string ->

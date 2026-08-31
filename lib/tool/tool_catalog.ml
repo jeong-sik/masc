@@ -380,6 +380,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_run_init", broadcast_tool);
     ("masc_run_plan", broadcast_tool);
     ("masc_schedule_create", broadcast_tool);
+    ("masc_schedule_update", broadcast_tool);
     ("masc_schedule_list", read_state_tool);
     ("masc_schedule_get", read_state_tool);
     ("masc_schedule_cancel", broadcast_tool);

@@ -96,6 +96,99 @@ let test_harness_footer_links_to_overview_task () =
     "j/k:move  v:next Planning tab  PgUp/PgDn:page  [ / ]:previous / next  Right / Enter:verdict  Left / Esc:back  y:agree  n:overrule  Y:copy task  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Harness)
 
+let test_schedules_footer_names_write_and_read_controls () =
+  check str "Schedules names create and modify"
+    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  Right / Enter:details  Left / Esc:back  n:new  e:modify  x:cancel  Y:copy link  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Schedules)
+
+let schedule_form_row : schedule_row =
+  { sch_schedule_id = "daily-check"
+  ; sch_schedule_instance_id = "instance-old"
+  ; sch_status = "scheduled"
+  ; sch_source = "operator_request"
+  ; sch_requested_by = "operator (human_operator)"
+  ; sch_scheduled_by = "operator (human_operator)"
+  ; sch_requested_at_iso = "2026-09-01T00:00:00Z"
+  ; sch_due_at_iso = Some "2026-09-02T00:00:00Z"
+  ; sch_next_due_at_iso = Some "2026-09-02T00:00:00Z"
+  ; sch_expires_at_iso = Some "2026-09-30T00:00:00Z"
+  ; sch_recurrence_summary = "daily 09:30:05 Asia/Seoul"
+  ; sch_recurrence =
+      `Assoc
+        [ "kind", `String "daily"
+        ; "hour", `Int 9
+        ; "minute", `Int 30
+        ; "second", `Int 5
+        ; "timezone", `String "Asia/Seoul"
+        ]
+  ; sch_payload_digest = "digest"
+  ; sch_payload =
+      `Assoc
+        [ "kind", `String "masc.keeper_wake"
+        ; ( "body"
+          , `Assoc
+              [ "keeper_name", `String "edgar.a.poe"
+              ; "message", `String "inspect the latest work"
+              ; "title", `String "daily inspection"
+              ; "urgency", `String "low"
+              ] )
+        ]
+  ; sch_payload_kind = Some "masc.keeper_wake"
+  ; sch_payload_support = "supported"
+  ; sch_payload_dispatch_tool = Some "masc_keeper_wakeup"
+  ; sch_payload_target = Some "keeper:edgar.a.poe"
+  ; sch_payload_summary = Some "daily inspection"
+  ; sch_last_wake_status = None
+  ; sch_last_wake_started_at_iso = None
+  ; sch_last_wake_error = None
+  ; sch_queue_projection_status = None
+  ; sch_queue_pending_count = None
+  ; sch_reaction_projection_status = None
+  ; sch_reaction_latest_at_iso = None
+  ; sch_reaction_kind = None
+  ; sch_wake_seen = None
+  ; sch_turn_started = None
+  ; sch_queue_ack_seen = None
+  ; sch_wake_cancelled = None
+  ; sch_reaction_quarantined = None
+  }
+
+let test_schedule_create_form_names_the_canonical_required_fields () =
+  let open Yojson.Safe.Util in
+  let form =
+    Masc_tui_types.schedule_create_form_json () |> Yojson.Safe.from_string
+  in
+  check str "keeper is explicit" "" (form |> member "keeper_name" |> to_string);
+  check str "message is explicit" "" (form |> member "message" |> to_string);
+  check str "one-shot is the visible default" "one_shot"
+    (form |> member "recurrence_kind" |> to_string);
+  check int "interval alternative is discoverable" 3600
+    (form |> member "recurrence_interval_sec" |> to_int);
+  check str "cron alternative is discoverable" "0 9 * * *"
+    (form |> member "recurrence_cron" |> to_string)
+
+let test_schedule_update_form_preserves_exact_editable_definition () =
+  let open Yojson.Safe.Util in
+  let form =
+    Masc_tui_types.schedule_update_form_json schedule_form_row
+    |> Yojson.Safe.from_string
+  in
+  check str "stable id" "daily-check" (form |> member "schedule_id" |> to_string);
+  check str "keeper" "edgar.a.poe" (form |> member "keeper_name" |> to_string);
+  check str "full message" "inspect the latest work"
+    (form |> member "message" |> to_string);
+  check str "urgency" "low" (form |> member "urgency" |> to_string);
+  check str "daily kind" "daily" (form |> member "recurrence_kind" |> to_string);
+  check int "hour" 9 (form |> member "recurrence_hour" |> to_int);
+  check int "minute" 30 (form |> member "recurrence_minute" |> to_int);
+  check int "second" 5 (form |> member "recurrence_second" |> to_int);
+  check str "timezone" "Asia/Seoul"
+    (form |> member "recurrence_timezone" |> to_string);
+  check str "due timestamp" "2026-09-02T00:00:00Z"
+    (form |> member "due_at_iso" |> to_string);
+  check bool "expiry remains present" true
+    (form |> member "expires_at_unix" <> `Null)
+
 (* Tools left the plain group when it grew a per-Keeper axis: the pane now
    shows one Keeper's effective tool surface, so it needs a key to change
    which Keeper that is. Pinned on its own rather than dropped from the list
@@ -598,6 +691,12 @@ let () =
             test_lanes_scroll_reserves_standalone_matrix_rows
         ; Alcotest.test_case "Harness links to Overview task" `Quick
             test_harness_footer_links_to_overview_task
+        ; Alcotest.test_case "Schedules names write and read controls" `Quick
+            test_schedules_footer_names_write_and_read_controls
+        ; Alcotest.test_case "schedule create form names required fields" `Quick
+            test_schedule_create_form_names_the_canonical_required_fields
+        ; Alcotest.test_case "schedule update form preserves definition" `Quick
+            test_schedule_update_form_preserves_exact_editable_definition
         ; Alcotest.test_case "Repositories offers Code and Git changes" `Quick
             test_repositories_footer_offers_code_and_git_changes
         ; Alcotest.test_case "Git changes has changed-file actions only" `Quick

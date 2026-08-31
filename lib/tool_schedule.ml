@@ -346,7 +346,11 @@ let request_result ~tool_name ~start_time = function
    [Tool_dispatch] paths; [Server_bootstrap_maintenance] installs the canonical
    dispatch observer that records tool telemetry and metrics once for keeper and
    MCP calls. *)
-let handle_create ~tool_name ~start_time ctx args =
+type write_action =
+  | Create_schedule
+  | Update_schedule
+
+let handle_write ~action ~tool_name ~start_time ctx args =
   let result =
     let* payload = payload_from_args args in
     let* payload = ctx.stamp_keeper_wake_result_delivery ~payload in
@@ -370,40 +374,47 @@ let handle_create ~tool_name ~start_time ctx args =
       actor_from_args args ~prefix:"scheduled_by" ~default_id:ctx.agent_name
         ~default_kind:Schedule_domain.Automated_actor
     in
-    let schedule_id = string_opt args "schedule_id" in
+    let* schedule_id =
+      match action, string_opt args "schedule_id" with
+      | Create_schedule, schedule_id -> Ok schedule_id
+      | Update_schedule, Some schedule_id -> Ok (Some schedule_id)
+      | Update_schedule, None -> Error "schedule_id is required"
+    in
     let expires_at = optional_float args "expires_at_unix" in
-    let create_request () =
+    let write_request () =
       let* () =
         validate_keeper_wake_target ctx ~keeper_wake_target args
         |> Result.map_error (fun detail ->
           Schedule_service.Creation_rejected detail)
       in
-      Schedule_service.create
-          ctx.config
-          ?schedule_id
-          ~requested_at
-          ?expires_at
-          ~requested_by
-          ~scheduled_by
-          ~due_at
-          ~payload
-          ~source
-          ~recurrence
-          ()
+      match action, schedule_id with
+      | Create_schedule, schedule_id ->
+        Schedule_service.create
+          ctx.config ?schedule_id ~requested_at ?expires_at ~requested_by
+          ~scheduled_by ~due_at ~payload ~source ~recurrence ()
+      | Update_schedule, Some schedule_id ->
+        Schedule_service.update
+          ctx.config ~schedule_id ~requested_at ?expires_at ~requested_by
+          ~scheduled_by ~due_at ~payload ~source ~recurrence ()
+      | Update_schedule, None ->
+        Error (Schedule_service.Invalid_request "schedule_id is required")
     in
     (match keeper_wake_target with
-     | None -> create_request ()
+     | None -> write_request ()
      | Some keeper_name ->
        ctx.admit_keeper_wake_creation
          ctx.config
          ~keeper_name
-         create_request)
+         write_request)
     |> Result.map_error Schedule_service.service_error_to_string
   in
   match result with
   | Error msg -> workflow_error ~tool_name ~start_time msg
   | Ok request -> request_result ~tool_name ~start_time (Ok request)
 ;;
+
+let handle_create = handle_write ~action:Create_schedule
+let handle_update = handle_write ~action:Update_schedule
 
 let take limit items =
   let rec loop acc remaining = function
@@ -528,6 +539,7 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   let open Tool_schemas_schedule in
   match find_definition name with
   | Some { action = Create_request; _ } -> handle handle_create
+  | Some { action = Update_request; _ } -> handle handle_update
   | Some { action = List_requests; _ } -> handle handle_list
   | Some { action = Get_request; _ } -> handle handle_get
   | Some { action = Cancel_request; _ } ->

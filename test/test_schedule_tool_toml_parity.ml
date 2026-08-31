@@ -20,6 +20,11 @@
     literal fails there rather than shipping a schema that never offers the
     value.
 
+    [masc_schedule_update] was added after the migration. It deliberately
+    shares the create field set and makes [schedule_id] mandatory; a separate
+    structural assertion below pins that relationship instead of pretending
+    it has pre-migration bytes.
+
     Compared as parsed JSON with keys sorted, per RFC §4 -- object key order is
     not part of a JSON object's meaning, and TOML cannot place a sub-table
     before its parent's scalar keys. *)
@@ -80,8 +85,37 @@ let test_the_published_order_is_unchanged () =
   check
     (list string)
     "Tool_schemas_schedule.schemas in order"
-    (List.map (fun (name, _, _) -> name) expected)
+    [ "masc_schedule_create"
+    ; "masc_schedule_update"
+    ; "masc_schedule_list"
+    ; "masc_schedule_get"
+    ; "masc_schedule_cancel"
+    ]
     (List.map (fun (s : Masc_domain.tool_schema) -> s.name) published)
+;;
+
+let object_fields key schema =
+  match Yojson.Safe.Util.member key schema with
+  | `Assoc fields -> List.map fst fields |> List.sort_uniq String.compare
+  | _ -> []
+;;
+
+let required_fields schema =
+  match Yojson.Safe.Util.member "required" schema with
+  | `List values ->
+    List.filter_map (function `String value -> Some value | _ -> None) values
+  | _ -> []
+;;
+
+let test_update_reuses_create_fields_and_requires_identity () =
+  let create = (find "masc_schedule_create").input_schema in
+  let update = (find "masc_schedule_update").input_schema in
+  check (list string) "same editable fields"
+    (object_fields "properties" create)
+    (object_fields "properties" update);
+  check (list string) "update additionally requires the stable id"
+    [ "schedule_id"; "keeper_name"; "message" ]
+    (required_fields update)
 ;;
 
 let () =
@@ -94,6 +128,8 @@ let () =
             `Quick
             test_input_schemas_match_with_keys_sorted
         ; test_case "published order" `Quick test_the_published_order_is_unchanged
+        ; test_case "update shares fields and requires identity" `Quick
+            test_update_reuses_create_fields_and_requires_identity
         ] )
     ]
 ;;

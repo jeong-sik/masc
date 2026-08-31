@@ -52,14 +52,16 @@ let reaction_raw_auth_request header value =
     "/api/v1/board/reactions"
 
 (* /api/v1/tools/* endpoints called by dashboard/src/api/board.ts, plus the
-   goal lifecycle and schedule cancel routes the TUI consumes (#29684). Kept
-   in sync with those consumers — see module doc. *)
+   goal lifecycle and schedule write routes the TUI consumes. Kept in sync
+   with those consumers — see module doc. *)
 let dashboard_board_tool_routes =
   [ "/api/v1/tools/masc_board_vote"
   ; "/api/v1/tools/masc_board_post"
   ; "/api/v1/tools/masc_board_comment"
   ; "/api/v1/tools/masc_board_comment_vote"
   ; "/api/v1/tools/masc_goal_transition"
+  ; "/api/v1/tools/masc_schedule_create"
+  ; "/api/v1/tools/masc_schedule_update"
   ; "/api/v1/tools/masc_schedule_cancel"
   ]
 
@@ -122,6 +124,29 @@ let test_no_tools_route_drift () =
       "registered /api/v1/tools/* routes match dashboard-consumed set"
       expected
       registered)
+
+let test_schedule_write_actor_is_stamped_from_auth () =
+  let open Yojson.Safe.Util in
+  let stamped =
+    Server_routes_http_routes_activity.schedule_stamp_operator_actor
+      ~agent_name:"tui-operator"
+      (`Assoc
+        [ "scheduled_by_id", `String "spoofed"
+        ; "requested_by_kind", `String "system"
+        ; "message", `String "keep me"
+        ])
+  in
+  check string "scheduled actor" "tui-operator"
+    (stamped |> member "scheduled_by_id" |> to_string);
+  check string "requested actor" "tui-operator"
+    (stamped |> member "requested_by_id" |> to_string);
+  check string "scheduled kind" "human_operator"
+    (stamped |> member "scheduled_by_kind" |> to_string);
+  check string "requested kind" "human_operator"
+    (stamped |> member "requested_by_kind" |> to_string);
+  check string "form fields survive" "keep me"
+    (stamped |> member "message" |> to_string)
+;;
 
 let test_dashboard_board_reaction_routes_registered () =
   with_router (fun router ->
@@ -342,6 +367,8 @@ let () =
             "no /api/v1/tools/* route drift"
             `Quick
             test_no_tools_route_drift
+        ; test_case "schedule write actor comes from auth" `Quick
+            test_schedule_write_actor_is_stamped_from_auth
         ; test_case
             "dashboard board reaction routes registered"
             `Quick

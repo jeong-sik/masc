@@ -180,10 +180,14 @@ let for_surface = function
       @ listing_meta
   | Schedules ->
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the payload"
+      ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Right / Enter" "details" ~help:"open schedule details"
       ; b Act "Left / Esc" "back" ~help:"back to the schedule list"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
+      ; b Act "n" "new" ~help:"create a schedule through a $EDITOR JSON form"
+      ; b Act "e" "modify"
+          ~help:"edit the selected active schedule; running/finished rows refuse"
       ; b Act "x" "cancel" ~help:"arm / confirm cancellation"
       ; b Act "Y" "copy link" ~help:"copy the selected schedule reference"
       ]

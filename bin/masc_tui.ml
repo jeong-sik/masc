@@ -6717,25 +6717,25 @@ let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
   | Some sw -> Eio.Fiber.fork ~sw run_cancel
   | None -> run_cancel ()
 
-(* The cancel key on the row under the cursor. Two presses, like the vote
-   keys: the first names the schedule, the same press again sends it. The
-   schedule id is captured at arm time, so moving the cursor between presses
-   re-arms for the new row rather than cancelling the one the operator left. *)
-let handle_schedule_cancel_key state ~mailbox =
+let selected_schedule_row state =
   let rows =
     match state.schedules with
     | None -> []
     | Some snapshot -> snapshot.scs_rows
   in
-  let selected =
-    match state.schedule_detail_id with
-    | Some schedule_id ->
-        List.find_opt
-          (fun row -> String.equal row.sch_schedule_id schedule_id)
-          rows
-    | None -> List.nth_opt rows state.schedule_cursor
-  in
-  match selected with
+  match state.schedule_detail_id with
+  | Some schedule_id ->
+      List.find_opt
+        (fun row -> String.equal row.sch_schedule_id schedule_id)
+        rows
+  | None -> List.nth_opt rows state.schedule_cursor
+
+(* The cancel key on the row under the cursor. Two presses, like the vote
+   keys: the first names the schedule, the same press again sends it. The
+   schedule id is captured at arm time, so moving the cursor between presses
+   re-arms for the new row rather than cancelling the one the operator left. *)
+let handle_schedule_cancel_key state ~mailbox =
+  match selected_schedule_row state with
   | None -> ()
   | Some row -> (
       match state.schedule_cancel_armed with
@@ -10186,6 +10186,55 @@ and is loaded on demand through keeper_skill.
             launch_repositories_load state ~mailbox:async_messages
           | Error detail -> report_action state "error" detail))
   in
+  let handle_schedule_form ~action ~stem ~post =
+    match Masc_tui_editor.editor_command () with
+    | None ->
+      report_action state "error"
+        ("no $EDITOR set; export EDITOR to " ^ action ^ " a schedule here")
+    | Some _ ->
+      (match
+         Masc_tui_editor.roundtrip ~restore:restore_terminal
+           ~reenter:reenter_terminal stem
+       with
+       | Error abort -> report_editor_abort state ~action abort
+       | Ok declaration ->
+         (match Yojson.Safe.from_string declaration with
+          | exception Yojson.Json_error message ->
+            report_action state "error"
+              (action ^ ": body is not JSON: " ^ message)
+          | `Assoc _ ->
+            (match post declaration with
+             | Error detail -> report_action state "error" (action ^ ": " ^ detail)
+             | Ok response ->
+               (match Masc.Tui_decode.tool_envelope_outcome response with
+                | Error detail ->
+                  report_action state "error" (action ^ ": " ^ detail)
+                | Ok message ->
+                  report_action state "system" (action ^ ": " ^ message);
+                  state.schedule_cancel_armed <- None;
+                  state.schedule_cancel_error <- None;
+                  launch_schedules_load state ~mailbox:async_messages))
+          | _ ->
+            report_action state "error"
+              (action ^ ": the editor form must be a JSON object")))
+  in
+  let handle_schedule_create () =
+    handle_schedule_form ~action:"create"
+      ~stem:(Masc_tui_types.schedule_create_form_json ())
+      ~post:(fun body_json ->
+        Masc_tui_http.post_schedule_create ~host:server_peer_host
+          ~port:state.port ~body_json)
+  in
+  let handle_schedule_modify () =
+    match selected_schedule_row state with
+    | None -> report_action state "error" "modify: no schedule under the cursor"
+    | Some row ->
+      handle_schedule_form ~action:"modify"
+        ~stem:(Masc_tui_types.schedule_update_form_json row)
+        ~post:(fun body_json ->
+          Masc_tui_http.post_schedule_update ~host:server_peer_host
+            ~port:state.port ~body_json)
+  in
   let consume_resize_request () =
     if Atomic.exchange resize_requested false then
       invalidate_frame_for_resize frame_presenter render_schedule
@@ -11813,6 +11862,7 @@ and is loaded on demand through keeper_skill.
            (match state.view with
             | Approvals -> answer_presented_approval Deny
             | Harness -> handle_harness_overrule ()
+            | Schedules -> handle_schedule_create ()
             | _ -> ())
        | Some "home" when state.view = Tools -> state.tools_scroll <- 0
        | Some "end" when state.view = Tools ->
@@ -13937,6 +13987,7 @@ and is loaded on demand through keeper_skill.
                  | Config_models -> handle_config_models_open_source ()
                  | Config_themes -> ())
             | Tools -> handle_skill_edit ()
+            | Schedules -> handle_schedule_modify ()
             | Approvals ->
                 (* Cycle the external-services Gate lane: what happens to a
                    Keeper's call into an attached outside service. Its own

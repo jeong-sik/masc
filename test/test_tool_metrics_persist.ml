@@ -51,6 +51,23 @@ let pending_records ~base_path =
   let dir = Filename.concat base_path "data/tool-metrics-pending" in
   if Sys.file_exists dir then Fs_compat.read_dir dir else []
 
+let write_loss_marker ~base_path ~observed_at_unix =
+  let path = Filename.concat base_path "data/tool-metrics-loss-marker.json" in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  match
+    Fs_compat.save_file_atomic path
+      (Yojson.Safe.to_string
+         (`Assoc
+            [ "schema", `String "masc.tool_metrics.loss_marker.v1"
+            ; "reason", `String "queue_full"
+            ; "observed_at_unix", `Float observed_at_unix
+            ; "runtime_instance_id", `String "test-runtime"
+            ])
+       ^ "\n")
+  with
+  | Ok () -> ()
+  | Error error -> Alcotest.failf "loss marker write failed: %s" error
+
 let string_field key json =
   match Safe_ops.json_string_opt key json with
   | Some value -> value
@@ -169,6 +186,14 @@ let test_enqueue_drops_when_queue_full () =
       "five queue-full drops visible"
       5
       full_snapshot.queue_full_dropped_records;
+    Alcotest.(check int)
+      "loss marker publication succeeded"
+      0
+      full_snapshot.loss_marker_write_failed_records;
+    Alcotest.(check bool)
+      "aggregate is known incomplete"
+      true
+      ((P.aggregate_integrity_snapshot ()).status = `Known_incomplete);
     P.flush_now ~base_path;
     Alcotest.(check int)
       "bounded queue persists only capacity"
@@ -179,11 +204,26 @@ let test_enqueue_drops_when_queue_full () =
     Alcotest.(check int)
       "queue-full drops remain visible after drain"
       5
-      drained_snapshot.queue_full_dropped_records)
+      drained_snapshot.queue_full_dropped_records;
+    P.reset_for_testing ();
+    let report =
+      match P.hydrate ~base_path ~retention_days:30 with
+      | Ok report -> report
+      | Error error ->
+        Alcotest.failf
+          "hydrate failed: %s"
+          (Dated_jsonl.read_error_to_string error)
+    in
+    Alcotest.(check bool) "loss marker is current format" false report.invalid_loss_marker;
+    Alcotest.(check bool)
+      "durable loss marker survives memory reset"
+      true
+      ((P.aggregate_integrity_snapshot ()).status = `Known_incomplete))
 
 let test_enqueue_multidomain_drop_is_bounded () =
   with_tmp_dir (fun base_path ->
     P.For_testing.set_pending_write_guard (fun _path _content -> Ok ());
+    P.For_testing.set_loss_marker_write_guard (fun _path _content -> Ok ());
     let spawn producer =
       Domain.spawn (fun () ->
         for i = 1 to 1500 do
@@ -201,6 +241,70 @@ let test_enqueue_multidomain_drop_is_bounded () =
       "multi-domain producers persist only capacity"
       4096
       (List.length (read_records ~base_path)))
+
+let test_expired_loss_marker_is_not_current_evidence () =
+  with_tmp_dir (fun base_path ->
+    write_loss_marker ~base_path ~observed_at_unix:1.0;
+    let report =
+      match P.hydrate ~base_path ~retention_days:30 with
+      | Ok report -> report
+      | Error error ->
+        Alcotest.failf
+          "hydrate failed: %s"
+          (Dated_jsonl.read_error_to_string error)
+    in
+    Alcotest.(check bool) "expired marker is valid" false report.invalid_loss_marker;
+    let integrity = P.aggregate_integrity_snapshot () in
+    Alcotest.(check bool) "expired marker does not stay current" true
+      (integrity.status = `Unknown);
+    Alcotest.(check (option int))
+      "retention window visible"
+      (Some 30)
+      integrity.retention_days)
+
+let test_invalid_loss_marker_is_explicit () =
+  with_tmp_dir (fun base_path ->
+    let path = Filename.concat base_path "data/tool-metrics-loss-marker.json" in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    Fs_compat.save_file path "not-json";
+    let report =
+      match P.hydrate ~base_path ~retention_days:30 with
+      | Ok report -> report
+      | Error error ->
+        Alcotest.failf
+          "hydrate failed: %s"
+          (Dated_jsonl.read_error_to_string error)
+    in
+    Alcotest.(check bool) "invalid marker reported" true report.invalid_loss_marker;
+    Alcotest.(check bool) "invalid marker stays distinct from absence" true
+      ((P.aggregate_integrity_snapshot ()).status = `Invalid_marker))
+
+let test_loss_marker_write_failure_is_observable () =
+  with_tmp_dir (fun base_path ->
+    P.For_testing.set_pending_write_guard (fun _path _content -> Ok ());
+    P.For_testing.set_loss_marker_write_guard (fun _path _content ->
+      Error "forced loss marker failure");
+    for i = 1 to 4097 do
+      P.enqueue ~base_path
+        (make_result
+           ~name:(Printf.sprintf "loss-marker-failure-%04d" i)
+           ~success:true
+           ~duration_ms:1.0)
+    done;
+    let snapshot = P.persistence_snapshot () in
+    Alcotest.(check int) "one queue-full row" 1 snapshot.queue_full_dropped_records;
+    Alcotest.(check int)
+      "marker failure counted"
+      1
+      snapshot.loss_marker_write_failed_records;
+    Alcotest.(check bool)
+      "marker error visible"
+      true
+      (Option.is_some snapshot.last_loss_marker_error);
+    Alcotest.(check bool)
+      "failed marker does not fabricate integrity evidence"
+      true
+      ((P.aggregate_integrity_snapshot ()).status = `Unknown))
 
 let test_append_failure_and_recovery_are_observable () =
   with_tmp_dir (fun base_path ->
@@ -528,6 +632,15 @@ let () =
         ; eio_test
             "spool failures stay observable with memory fallback"
             test_spool_failure_falls_back_to_observable_memory_queue
+        ; eio_test
+            "expired loss markers are not current evidence"
+            test_expired_loss_marker_is_not_current_evidence
+        ; eio_test
+            "invalid loss markers remain explicit"
+            test_invalid_loss_marker_is_explicit
+        ; eio_test
+            "loss marker write failures stay observable"
+            test_loss_marker_write_failure_is_observable
         ; eio_clock_test
             "cross-domain high watermark wakes the flush waiter"
             test_high_watermark_wakes_flush_waiter

@@ -550,11 +550,12 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      with
      | Ok report ->
        Log.Metrics.info
-         "tool_metrics_persist: hydrated %d record(s), recovered pending=%d deduplicated pending=%d invalid pending=%d, skipped malformed=%d invalid=%d, pruned=%d file(s)"
+         "tool_metrics_persist: hydrated %d record(s), recovered pending=%d deduplicated pending=%d invalid pending=%d invalid loss marker=%b, skipped malformed=%d invalid=%d, pruned=%d file(s)"
          report.loaded_records
          report.recovered_pending_records
          report.deduplicated_pending_records
          report.invalid_pending_files
+         report.invalid_loss_marker
          report.malformed_records
          report.invalid_records
          report.pruned_files

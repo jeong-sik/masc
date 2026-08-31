@@ -82,6 +82,7 @@ let () =
               let _ = persistence |> member "append_failed_records" |> to_int in
               let _ = persistence |> member "spool_write_failed_records" |> to_int in
               let _ = persistence |> member "spool_delete_failed_records" |> to_int in
+              let _ = persistence |> member "loss_marker_write_failed_records" |> to_int in
               check bool
                 "missing last trigger remains null"
                 true
@@ -94,6 +95,23 @@ let () =
                 "missing last spool error remains null"
                 true
                 (persistence |> member "last_spool_error" = `Null);
+              check bool
+                "missing last loss marker error remains null"
+                true
+                (persistence |> member "last_loss_marker_error" = `Null);
+              let integrity = report |> member "aggregate_integrity" in
+              check string
+                "aggregate integrity schema"
+                "masc.tool_metrics.aggregate_integrity.v1"
+                (integrity |> member "schema" |> to_string);
+              check string
+                "aggregate integrity never infers complete"
+                "unknown"
+                (integrity |> member "status" |> to_string);
+              check bool
+                "unknown integrity has no fabricated loss time"
+                true
+                (integrity |> member "loss_observed_at_unix" = `Null);
               ());
           test_case "tool_distribution has visibility buckets" `Quick (fun () ->
               let report = Tool_unified.summary_report () in

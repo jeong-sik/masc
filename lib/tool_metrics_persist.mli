@@ -33,6 +33,7 @@ type hydrate_report = {
   recovered_pending_records : int;
   deduplicated_pending_records : int;
   invalid_pending_files : int;
+  invalid_loss_marker : bool;
 }
 
 type persistence_snapshot = {
@@ -51,6 +52,7 @@ type persistence_snapshot = {
   append_failed_records : int;
   spool_write_failed_records : int;
   spool_delete_failed_records : int;
+  loss_marker_write_failed_records : int;
   flushed_records : int;
   flush_batches : int;
   last_flush_trigger : string option;
@@ -59,6 +61,7 @@ type persistence_snapshot = {
   last_flush_at_unix : float option;
   last_append_error : string option;
   last_spool_error : string option;
+  last_loss_marker_error : string option;
 }
 
 val persistence_snapshot : unit -> persistence_snapshot
@@ -73,6 +76,26 @@ val persistence_snapshot : unit -> persistence_snapshot
 
 val persistence_snapshot_to_json : persistence_snapshot -> Yojson.Safe.t
 (** Current-only JSON projection. Absent last-event fields are JSON [null]. *)
+
+type aggregate_integrity_snapshot = {
+  observed_at_unix : float;
+  retention_days : int option;
+  status : [ `Invalid_marker | `Known_incomplete | `Unknown ];
+  loss_reason : string option;
+  loss_observed_at_unix : float option;
+  loss_runtime_instance_id : string option;
+}
+
+val aggregate_integrity_snapshot : unit -> aggregate_integrity_snapshot
+(** Retention-scoped durable evidence about aggregate completeness. [Unknown]
+    means no current loss marker was found; it never claims completeness from
+    absence alone. [Invalid_marker] keeps a corrupt marker distinct from
+    absence. [Known_incomplete] means at least one queue-full loss marker falls
+    inside the configured hydration retention window. *)
+
+val aggregate_integrity_snapshot_to_json : aggregate_integrity_snapshot -> Yojson.Safe.t
+(** Current-format JSON projection with schema
+    [masc.tool_metrics.aggregate_integrity.v1]. *)
 
 val hydrate :
   base_path:string ->
@@ -119,5 +142,8 @@ module For_testing : sig
     [ `High_watermark | `Timer ]
 
   val set_pending_write_guard :
+    (string -> string -> (unit, string) result) -> unit
+
+  val set_loss_marker_write_guard :
     (string -> string -> (unit, string) result) -> unit
 end

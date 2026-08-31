@@ -127,4 +127,7 @@ let summary_report ?(runtime_metrics = fun () -> `Null) () : Yojson.Safe.t =
     ("runtime_metrics", runtime_metrics ());
     ( "persistence"
     , Tool_metrics_persist.(persistence_snapshot () |> persistence_snapshot_to_json) );
+    ( "aggregate_integrity"
+    , Tool_metrics_persist.(
+        aggregate_integrity_snapshot () |> aggregate_integrity_snapshot_to_json) );
   ]

@@ -48,6 +48,16 @@ let path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ suffix)
 ;;
 
+let list_keeper_ids_for_keepers_dir ~keepers_dir =
+  if not (Sys.file_exists keepers_dir && Sys.is_directory keepers_dir)
+  then []
+  else
+    Sys.readdir keepers_dir
+    |> Array.to_list
+    |> List.filter_map (Filename.chop_suffix_opt ~suffix)
+    |> List.sort String.compare
+;;
+
 let invalidation_reason_to_string = function
   | Source_changed -> "source_changed"
   | Source_unavailable -> "source_unavailable"

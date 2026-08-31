@@ -2970,8 +2970,13 @@ let fusion_run_json ?(status = "completed") ?(topology = "simple")
     @ failure_fields @ outcome_fields)
 
 let fusion_recorded_detail_json ?(source = "fusion")
-    ?(origin_run_id = "fusion-recorded-501") () =
+    ?(origin_run_id = "fusion-recorded-501") ?tool_trace () =
   let run_id = "fusion-recorded-501" in
+  let tool_trace_fields =
+    match tool_trace with
+    | Some trace -> [ "tool_trace", trace ]
+    | None -> []
+  in
   `Assoc
     [ "generated_at", `String "2026-08-24T09:00:00Z"
     ; "run", fusion_run_json run_id
@@ -2989,7 +2994,7 @@ let fusion_recorded_detail_json ?(source = "fusion")
                       ] )
                 ; ( "meta"
                   , `Assoc
-                      [ "question", `String "question-501"
+                      ([ "question", `String "question-501"
                       ; ( "panel"
                         , `List
                             [ `Assoc
@@ -3013,7 +3018,8 @@ let fusion_recorded_detail_json ?(source = "fusion")
                             ; "resolved_answer", `String "judge-answer-501"
                             ; "synthesis", `String "judge-reason-501"
                             ] )
-                      ] )
+                      ]
+                       @ tool_trace_fields) )
                 ] )
           ] )
     ]
@@ -3192,6 +3198,115 @@ let test_decode_fusion_progress_and_completion_summary () =
   | Error detail ->
       Alcotest.(check bool) "status/stage mismatch is explicit" true
         (String_util.contains_substring detail "status/stage/progress disagree")
+
+let fusion_tool_preview_json text bytes truncated =
+  `Assoc
+    [ "text", `String text
+    ; "bytes", `Int bytes
+    ; "truncated", `Bool truncated
+    ]
+
+let fusion_tool_event_fields event =
+  [ "event", `String event
+  ; "phase", `String "panel"
+  ; "actor", `String "panel-first"
+  ; "agent_name", `String "panel-first"
+  ; "tool_use_id", `String "tool-1"
+  ; "turn", `Int 1
+  ; "planned_index", `Int 0
+  ; "tool_name", `String "masc_web_search"
+  ]
+
+let fusion_tool_trace_json ?(status = "complete") ?(dropped_events = 0)
+    ?(gaps = []) ?events () =
+  let events =
+    Option.value events
+      ~default:
+        [ `Assoc
+            (fusion_tool_event_fields "called"
+             @ [ "input", fusion_tool_preview_json {|{"query":"x"}|} 13 false ])
+        ; `Assoc
+            (fusion_tool_event_fields "completed"
+             @ [ "status", `String "succeeded"
+               ; "output", fusion_tool_preview_json {|{"ok":true}|} 11 false
+               ])
+        ]
+  in
+  `Assoc
+    [ "status", `String status
+    ; ( "observed_actors"
+      , `List
+          [ `Assoc
+              [ "phase", `String "panel"
+              ; "actor", `String "panel-first"
+              ]
+          ] )
+    ; "dropped_events", `Int dropped_events
+    ; "gaps", `List gaps
+    ; "events", `List events
+    ]
+
+let test_decode_fusion_actual_tool_trace () =
+  let detail_json =
+    fusion_recorded_detail_json ~tool_trace:(fusion_tool_trace_json ()) ()
+  in
+  (match Tui_decode.decode_fusion_detail detail_json with
+   | Error detail -> Alcotest.fail detail
+   | Ok { Tui_decode.fud_evidence = Some evidence; _ } ->
+       (match evidence.fe_tool_trace with
+        | Some
+            { ftt_complete = true
+            ; ftt_observed_actors = [ _ ]
+            ; ftt_dropped_events = 0
+            ; ftt_gaps = []
+            ; ftt_events =
+                [ Tui_decode.Fusion_tool_called called
+                ; Tui_decode.Fusion_tool_completed completed
+                ]
+            } ->
+          Alcotest.(check string) "actual tool name" "masc_web_search"
+            called.fte_tool_name;
+          Alcotest.(check string) "exact tool input" {|{"query":"x"}|}
+            called.fte_input.ftp_text;
+          (match completed.fte_completion with
+           | Tui_decode.Fusion_tool_succeeded output ->
+             Alcotest.(check string) "exact tool output" {|{"ok":true}|}
+               output.ftp_text
+           | Tui_decode.Fusion_tool_failed _ ->
+             Alcotest.fail "successful Tool completion decoded as failed")
+        | Some _ -> Alcotest.fail "complete Tool ledger shape changed"
+        | None -> Alcotest.fail "current Tool ledger decoded as unavailable")
+   | Ok _ -> Alcotest.fail "recorded Fusion evidence disappeared");
+  let gap =
+    `Assoc
+      [ "phase", `String "panel"
+      ; "actor", `String "claude-code"
+      ; "reason", `String "official_client_uninstrumented"
+      ]
+  in
+  let partial =
+    fusion_recorded_detail_json
+      ~tool_trace:
+        (fusion_tool_trace_json ~status:"partial" ~gaps:[ gap ] ~events:[] ())
+      ()
+  in
+  (match Tui_decode.decode_fusion_detail partial with
+   | Ok
+       { Tui_decode.fud_evidence =
+           Some { fe_tool_trace = Some { ftt_complete = false; ftt_gaps = [ _ ]; _ }; _ }
+       ; _
+       } -> ()
+   | Ok _ -> Alcotest.fail "partial Tool coverage lost its explicit gap"
+   | Error detail -> Alcotest.fail detail);
+  let dishonest_complete =
+    fusion_recorded_detail_json
+      ~tool_trace:(fusion_tool_trace_json ~dropped_events:1 ()) ()
+  in
+  match Tui_decode.decode_fusion_detail dishonest_complete with
+  | Ok _ -> Alcotest.fail "complete Tool ledger accepted a dropped event"
+  | Error detail ->
+      Alcotest.(check bool) "coverage disagreement is explicit" true
+        (String_util.contains_substring detail "disagrees with drops/gaps")
 
 (* Harness verdicts. Shape is [Dashboard_harness_health.verdict_item_json]. *)
 let harness_verdict_json ?(fallback = `Null) () =
@@ -5794,6 +5909,8 @@ let () =
           test_decode_fusion_list_and_exact_detail;
         Alcotest.test_case "keeps live progress and completion summary" `Quick
           test_decode_fusion_progress_and_completion_summary;
+        Alcotest.test_case "keeps actual Tool events and coverage gaps" `Quick
+          test_decode_fusion_actual_tool_trace;
       ] );
     ( "decode_harness",
       [

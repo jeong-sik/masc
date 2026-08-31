@@ -16,6 +16,8 @@ quickstart_log="$tmp/quickstart.log"
 unauth_body="$tmp/unauth.body"
 initialize_body="$tmp/initialize.body"
 initialize_payload="$tmp/initialize.json"
+dashboard_body="$tmp/dashboard.body"
+dashboard_fixture_path=""
 server_pid=""
 
 capture_server_pid() {
@@ -33,6 +35,10 @@ cleanup() {
       sleep 0.1
     done
     kill -9 "$server_pid" 2>/dev/null || true
+  fi
+  if [[ -n "$dashboard_fixture_path" ]]; then
+    rm -f "$dashboard_fixture_path"
+    rmdir "$(dirname "$dashboard_fixture_path")" 2>/dev/null || true
   fi
   rm -rf "$tmp"
 }
@@ -58,6 +64,22 @@ file_mode() {
 }
 
 port="${MASC_QUICKSTART_SMOKE_PORT:-$(pick_free_port)}"
+
+# Full validation deliberately skips the expensive dashboard build in this
+# source-onboarding smoke. A clean checkout therefore has no ignored
+# assets/dashboard bundle at all. Install one exact test-owned index so the
+# smoke verifies the server's dashboard routing and asset read boundary
+# without accidentally depending on files left by a developer's prior Vite
+# build. The dedicated Dashboard job owns the production SPA build and tests.
+if [[ ! -f "$repo_root/assets/dashboard/index.html" ]]; then
+  dashboard_fixture_path="$repo_root/assets/dashboard/index.html"
+  mkdir -p "$(dirname "$dashboard_fixture_path")"
+  printf '%s\n' \
+    '<!doctype html><html><body>masc-quickstart-smoke-dashboard</body></html>' \
+    >"$dashboard_fixture_path"
+  chmod 600 "$dashboard_fixture_path"
+fi
+
 if ! env -u OLLAMA_CLOUD_API_KEY \
   MASC_SKIP_DASHBOARD_BUILD=1 \
   MASC_GRPC_ENABLED=0 \
@@ -149,12 +171,18 @@ while :; do
   sleep 1
 done
 
-dashboard_code="$(curl -sS -o /dev/null -w '%{http_code}' \
+dashboard_code="$(curl -sS -o "$dashboard_body" -w '%{http_code}' \
   "http://127.0.0.1:${port}/dashboard")"
 [[ "$dashboard_code" == "200" ]] || {
   echo "quickstart-smoke: dashboard returned HTTP $dashboard_code" >&2
   exit 1
 }
+if [[ -n "$dashboard_fixture_path" ]] \
+  && ! grep -q 'masc-quickstart-smoke-dashboard' "$dashboard_body"
+then
+  echo "quickstart-smoke: dashboard did not return the exact test fixture" >&2
+  exit 1
+fi
 
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"quickstart-smoke","version":"1.0"}}}' \

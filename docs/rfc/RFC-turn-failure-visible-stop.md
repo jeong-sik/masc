@@ -1,16 +1,16 @@
 ---
 rfc: "turn-failure-visible-stop"
-title: "턴 실패는 멈추고 그 상태를 보여준다 — 실패 면제와 예산 계정을 걷어낸다"
-status: Draft
+title: "턴 실패를 숨기지 않고 상태로 보여준다 — 실패 면제와 예산 계정을 걷어낸다"
+status: Implemented
 created: 2026-08-31
-updated: 2026-08-31
+updated: 2026-09-01
 author: claude
 supersedes: []
 superseded_by: null
 related: []
 ---
 
-# RFC: 턴 실패는 멈추고 그 상태를 보여준다 (turn-failure-visible-stop)
+# RFC: 턴 실패를 숨기지 않고 상태로 보여준다 (turn-failure-visible-stop)
 
 ## 0. 요약
 
@@ -20,18 +20,19 @@ related: []
 면제한다"는 설계와, 그 면제를 봉합하는 클래스별 예산 장치다.
 
 이 RFC는 그 방향을 폐기한다. 실패 클래스를 분류해 면제하고 예산으로 봉합하는
-대신, CLI 에이전트(Claude Code, Codex)와 같은 모양을 무인 fleet에 옮긴다:
+대신, 실패한 턴을 즉시 가시화하고 재시도 권한을 각 실행 레인에 남긴다:
 
-**유한한 재시도는 하부 계층에 맡기고, 턴이 실패하면 원인 불문 crash 계정에
-센다. 첫 실패부터 상태머신은 Failing이 되고 fleet health에 보이며, 다음
-성공(또는 운영자 clear)이 되돌린다.**
+**각 실행 레인이 소유한 유한한 시도가 끝나 턴이 실패하면 원인 불문 crash
+계정에 센다. 첫 실패부터 상태머신은 Failing이 되고 fleet health에 보이며,
+다음 성공(또는 운영자 clear)이 되돌린다.**
 
 면제, 클래스별 예산, 예산의 내구 저장(`keeper_failure_exemption_store`)은
-걷어낸다. 구현은 #32109로 main에 들어왔다(dc75fd8aff). 회귀 테스트는 #32112.
+걷어냈다. 구현은 #32109로 main에 들어왔고(`dc75fd8aff`), 프로덕션 체인
+회귀 테스트 #32112도 main에 들어왔다(`e2638513a6`). #31958은 종결됐다.
 
 ## 1. 문제
 
-### 1.1 현재 구조
+### 1.1 변경 전 구조
 
 턴 실패 처리는 세 겹이다.
 
@@ -53,7 +54,7 @@ related: []
 
 - 네트워크/타임아웃에는 예산 항이 없다. `account_failure_counting`의 어느
   항과도 성립하지 않으므로 영원히 면제다. #31958의 무한 루프가 여기서
-  난다. 이슈는 아직 열려 있다.
+  났다. 이슈는 구현과 실측 뒤 종결됐다.
 - 면제된 실패는 streak가 0인 채 3번으로 전달돼 **실패한 턴이 상태머신에는
   성공으로 보고된다.** 침묵의 직접 원인이다.
 - `keeper_error_classify.ml`의 불변식 주석("면제에는 보상 회계가 따라온다")은
@@ -64,24 +65,26 @@ related: []
   늘어난다. #31960(draft)은 네트워크 예산을 세 번째로 추가하는 방향이었고,
   그 15초(예산 3 × 케이던스 5초)를 위해 내구 카운터 전체를 하나 더 복제한다.
 
-### 1.3 같은 문제를 남들은 어떻게 푸나
+### 1.3 실행 레인별 재시도 소유권
 
 - Claude Code: Anthropic SDK가 `maxRetries` 기본 2회, 0.5초 시작 지터 백오프로
   재시도한 뒤 포기하고 사용자에게 에러를 보여준 뒤 멈춘다.
 - Codex CLI: 재시도 5회 상한(`retrying 3/5 in 863ms`), 초과하면 정지하고
   에러를 보여준다.
 
-둘 다 crash 계정도, 원인 분류 면제도, 예산 내구화도 없다. 사람이 터미널 앞에
-있기 때문에 "유한 재시도 → 정지 → 보여주기"로 충분하다. 무인 fleet에서 정지가
-안전하려면 두 역할만 더 필요하다: 실패 상태의 가시성(fleet health), 재개
-판단(다음 성공 또는 운영자).
+Claude Code와 Codex 레인은 각 공식 클라이언트가 유한 재시도를 소유한다. 반면
+MASC direct-provider HTTP 레인은 내부 재시도 루프가 없어 턴당 한 번만 시도한다.
+세 레인을 "하부 재시도가 항상 있다"고 묶어 말할 수는 없다. 공통 계약은 각
+레인이 정한 유한한 시도 뒤 실패를 턴 경계로 올리고, MASC가 그 실패를 숨기거나
+즉시 자체 재시도 루프로 감싸지 않는다는 것이다.
 
 ## 2. 설계
 
 ### 2.1 원칙
 
-- **재시도는 한 곳에서만.** 전송 계층 재시도는 이미 하부에 있다(Claude SDK
-  기본 2회, Codex 5회). MASC 턴 레벨은 실패한 턴을 즉시 재시도하지 않는다.
+- **재시도 권한은 실행 레인이 소유한다.** Claude Code와 Codex 공식 클라이언트
+  레인은 자체 상한을 사용한다. direct-provider 레인은 내부 재시도 없이 한 번
+  시도한다. MASC 턴 레벨은 어느 레인도 즉시 재시도 루프로 다시 감싸지 않는다.
 - **원인 불문.** streak에 실패 원인을 넣지 않는다. 분류가 틀려도 시스템이
   거짓을 보고하는 일이 없어진다.
 - **가시성은 계정에서 유도한다.** 별도 상태가 아니라 streak/`turn_healthy`가
@@ -97,9 +100,9 @@ related: []
    속도의 상한이다.
 3. 턴이 성공하면(완료 및 모든 정상 yield 정지 사유) streak가 리셋되고
    Keeper는 Failing에서 회복된다. 운영자 clear도 같다.
-4. 블립 보호는 면제가 아니라 구조가 담당한다: 하부의 유한 재시도가 순간
-   장애를 흡수하고, 성공이 streak를 지운다. 기존에도 면제가 아니었던 클래스
-   (runtime exhausted, parse rejection)가 수년간 이 모양으로 동작했다.
+4. 블립 보호는 면제가 아니라 레인 구조가 담당한다. 자체 재시도가 있는 레인은
+   그 유한 상한 안에서 순간 장애를 흡수하고, direct-provider 레인은 첫 실패를
+   즉시 가시화한다. 어느 경우든 다음 성공이 streak를 지운다.
 
 ### 2.3 왜 백오프 스케줄링(not-before-T)을 넣지 않는가
 
@@ -175,14 +178,17 @@ streak(#31969)는 그대로 유지된다.
   attribution 2/2, terminal reason 8/8, context overflow 8/8, supervisor
   48/48, work-as-heartbeat 24/24, `@default` 전체 빌드, ocamlformat
   --check.
-- #31958 재현(Linux exact-source, 이슈 종결 조건): DNS 차단 시 매 실패가
-  streak에 오르고 fleet이 Failing/degraded로 보이며, 59초 44턴
-  `consecutive=0` 무음 루프가 재현되지 않아야 한다. 성공 시 회복.
-- 재시작: streak 내구(#31969 유지)로 예산 리셋 악용 경로 자체가 없어진다.
+- #31958 Linux exact-source 관찰: DNS 차단 부팅 턴에서 실패 4건 모두
+  `consecutive=1`, phase `failing`으로 기록됐고 면제 로그는 0건이었다. 반복
+  누적과 성공 리셋은 #32112 회귀 테스트가 고정한다. 원시 제약과 exact identity는
+  `docs/research/2026-08-31-turn-failure-visible-stop-linux-r1.md`에 남겼다.
+- 재시작: 예산 store가 삭제돼 예산 리셋 악용 경로는 없어졌다. 다만 Linux
+  관찰에서 persisted streak의 재등록 적용은 확인되지 않았으므로 #31969 복원
+  시맨틱은 별도 후속 항목이며, 이 RFC의 구현 완료 주장에 포함하지 않는다.
 
 ## 5. 폐기하는 방향
 
 - #31960(네트워크 예산 추가) — 닫았다. 예산 확장은 이 RFC가 폐기하는
   방향이다.
 - #31971의 예산 내구 장치 — 이 RFC 구현과 함께 삭제됐다(§3.2).
-- #31958은 구현 measurement로 닫는다.
+- #31958은 구현과 Linux measurement 뒤 닫혔다.

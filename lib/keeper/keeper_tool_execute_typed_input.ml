@@ -42,12 +42,27 @@ type conditional =
   | And_then
   | Or_else
 
+(* The shell a script runs under, as a name the closed list in
+   [Shell_costume] recognises. It is data rather than a constant because
+   [argv:["bash";"-c";S]] normalises to this form and has to keep the shell it
+   named: the corpus's 656 [param_expansion] scripts are bash expansions, and
+   resolving them under a container's [sh] would be dash. *)
+type script = {
+  shell : string;
+  text : string;
+}
+
+(* POSIX, because a script that says nothing should get the shell every image
+   has. A caller that needs bash says so, and a normalised costume says what
+   its argv said. *)
+let default_script_shell = "sh"
+
 type source =
   | Staged of {
       program : program;
       next : (conditional * program) list;
     }
-  | Script of string
+  | Script of script
 
 type execute_input = {
   source : source;
@@ -73,14 +88,6 @@ type validation_error =
       path : string;
     }
   | Cwd_not_absolute of string
-  | Script_not_a_command_line of {
-      token : string;
-      expected : string list;
-    }
-  | Script_unreadable of Masc_exec.Parsed.reason_aborted
-  | Script_outside_the_subset of Masc_exec.Parsed.reason_too_complex
-  | Script_nested_pipeline
-  | Script_rejected_by_the_gate of string
   | Redirect_fd_unknown of {
       fd : int;
       target : int;
@@ -462,7 +469,21 @@ let source_of_fields ~path fields =
            "%s.then belongs to the staged form; a script writes && and || \
             itself"
            path
-       else Ok (Script script))
+       else
+         let* shell = optional_string ~path fields "shell" in
+         let shell = Option.value shell ~default:default_script_shell in
+         (* A closed list, and the same one [Shell_costume.of_argv] recognises,
+            because an argv-shaped shell normalises into this field and the two
+            have to agree on what a shell is. An arbitrary string here would be
+            an arbitrary program name. *)
+         if not (Keeper_tooling.Shell_costume.names_a_shell shell)
+         then
+           result_errorf
+             "%s.shell is %S; a script runs under one of: %s"
+             path
+             shell
+             (String.concat ", " Keeper_tooling.Shell_costume.shells)
+         else Ok (Script { shell; text = script }))
   | false, true ->
     let* program = program_of_fields ~path fields in
     let* next = optional_next ~path fields in
@@ -494,7 +515,7 @@ let of_json (json : Yojson.Safe.t) =
       ~path:"$"
       ~allowed:
         (program_fields
-        @ [ "then"; "cwd"; "env"; "timeout_sec"; "script" ])
+        @ [ "then"; "cwd"; "env"; "timeout_sec"; "script"; "shell" ])
       fields
   in
   let* cwd = optional_string ~path:"$" fields "cwd" in
@@ -740,44 +761,6 @@ let redirects_of_stage ~namespace ~cwd { argv = _; stdin; stdout; stderr } =
   Ok (List.filter_map (fun x -> x) [ stdin_entry; stdout_entry; stderr_entry ])
 ;;
 
-(* The parser hands back an IR whose simples carry no sandbox and no working
-   directory: the string never said. The staged path stamps both while it
-   builds each simple, so the script path stamps them afterwards, over the same
-   [Shell_ir.t]. Env entries the script assigns itself stay ahead of the
-   call's [env], so a script that sets a variable still sees its own value. *)
-let rec stamp_context ~sandbox ~cwd ~env (ir : Masc_exec.Shell_ir.t) =
-  match ir with
-  | Masc_exec.Shell_ir.Simple simple ->
-    Masc_exec.Shell_ir.Simple
-      { simple with
-        sandbox
-      ; cwd =
-          (match simple.cwd with
-           | Some _ as own -> own
-           | None ->
-             Option.map
-               (fun c -> Masc_exec.Path_scope.classify ~raw:c ~cwd:c)
-               cwd)
-      ; env =
-          simple.env
-          @ List.map
-              (fun (k, v) ->
-                 k, Masc_exec.Shell_ir.Lit (v, Masc_exec.Shell_ir.default_meta))
-              env
-      }
-  | Masc_exec.Shell_ir.Pipeline stages ->
-    Masc_exec.Shell_ir.Pipeline
-      (List.map (stamp_context ~sandbox ~cwd ~env) stages)
-  | Masc_exec.Shell_ir.Sequence { head; tail } ->
-    Masc_exec.Shell_ir.Sequence
-      { head = stamp_context ~sandbox ~cwd ~env head
-      ; tail =
-          List.map
-            (fun (c, ir) -> c, stamp_context ~sandbox ~cwd ~env ir)
-            tail
-      }
-;;
-
 (* Through the gate, not around it. [Bash.parse_string] ownership sits inside
    the command-gate library on purpose -- its own interface says so, and a
    ratchet counts the caller files -- so the shell form crosses the same
@@ -790,11 +773,14 @@ let rec stamp_context ~sandbox ~cwd ~env (ir : Masc_exec.Shell_ir.t) =
    the staged form, recognises the ones that are a script in an argv costume,
    and says what the gate would have made of each.
 
-   Recognition and classification only: nothing here changes what runs.  It
-   builds the gate context the same way {!script_to_shell_ir} does, on purpose
-   -- a tap that constructs its own policy would drift from the path it is
-   meant to measure.  [Script] sources yield nothing, because they already
-   crossed the gate and are not hiding anything. *)
+   Recognition and classification only: nothing here changes what runs.
+
+   RFC execute-boundary-is-the-sandbox §6 adds the [Script] source. It used to
+   yield nothing on the grounds that it "already crossed the gate", which was
+   true while crossing the gate decided whether it ran. It no longer does, so
+   a script that says [<<EOF] would otherwise be told nothing at all -- and
+   the advice ("that is the stdin field") is the whole of what the judge is
+   for now. *)
 let hidden_script_findings ~sandbox { source; _ } =
   let gate_sandbox = { Shell_gate.target = sandbox } in
   let syntax_policy =
@@ -812,31 +798,29 @@ let hidden_script_findings ~sandbox { source; _ } =
   in
   let of_program { head; tail } = List.filter_map of_stage (head :: tail) in
   match source with
-  | Script _ -> []
+  | Script { shell; text } ->
+    (* Through [of_argv], not around it: the classifier's idea of a shell form
+       is the one the normalisation in [to_shell_ir_unvalidated] uses, and two
+       of them would drift. *)
+    (match Keeper_tooling.Shell_costume.of_argv [ shell; "-c"; text ] with
+     | None -> []
+     | Some costume ->
+       [ ( shell
+         , Keeper_tooling.Shell_costume.classify
+             ~syntax_policy
+             ~sandbox:gate_sandbox
+             costume )
+       ])
   | Staged { program; next } ->
     of_program program @ List.concat_map (fun (_, p) -> of_program p) next
 ;;
 
-let script_to_shell_ir ~sandbox ~cwd ~env script =
-  let gate_sandbox = { Shell_gate.target = sandbox } in
-  let syntax_policy =
-    { Shell_gate.redirect_allowed = true; allow_pipes = true }
-  in
-  match Shell_gate.gate_raw ~text:script ~syntax_policy ~sandbox:gate_sandbox () with
-  | Shell_gate.Allow { ast; _ } -> Ok (stamp_context ~sandbox ~cwd ~env ast)
-  | Shell_gate.Reject { diagnostic; _ } ->
-    Error (Script_rejected_by_the_gate diagnostic)
-  | Shell_gate.Cannot_parse { reason = Shell_gate.Parse_error } ->
-    Error (Script_not_a_command_line { token = ""; expected = [] })
-  | Shell_gate.Cannot_parse { reason = Shell_gate.Parse_aborted reason } ->
-    Error (Script_unreadable reason)
-  (* Carried, not flattened: [reason_too_complex] is the value the corpus tap
-     counts to decide which construct the subset takes next, and a script
-     hidden inside [argv:["bash";"-c";...]] is counted as nothing at all. *)
-  | Shell_gate.Too_complex { reason = Shell_gate.Unsupported_construct reason } ->
-    Error (Script_outside_the_subset reason)
-  | Shell_gate.Too_complex { reason = Shell_gate.Unsupported_nested_pipeline } ->
-    Error (Script_nested_pipeline)
+(* RFC execute-boundary-is-the-sandbox §4. The script goes to a real shell on
+   the far side of the keeper's boundary, which is what [argv:["bash";"-c";S]]
+   has always reached. [shell_simple] builds the same [Simple] that form
+   builds, so the two fields produce the same child for the same text. *)
+let script_to_shell ~sandbox ~cwd ~env { shell; text } =
+  shell_simple ~sandbox ?cwd ~env [ shell; "-c"; text ]
 ;;
 
 let to_shell_ir_unvalidated
@@ -881,60 +865,35 @@ let to_shell_ir_unvalidated
      from the child's, which [Env_keeper_scrub] has filtered. Lowering a script
      that mentions a variable would quietly change the value, in the direction
      of the unfiltered one. *)
-  let rec arg_mentions_a_variable = function
-    | Masc_exec.Shell_ir.Var _ -> true
-    | Masc_exec.Shell_ir.Lit _ -> false
-    | Masc_exec.Shell_ir.Concat parts -> List.exists arg_mentions_a_variable parts
-  in
-  let rec mentions_a_variable (ir : Masc_exec.Shell_ir.t) =
-    match ir with
-    | Masc_exec.Shell_ir.Simple simple ->
-      List.exists arg_mentions_a_variable simple.Masc_exec.Shell_ir.args
-      || List.exists
-           (fun (_, value) -> arg_mentions_a_variable value)
-           simple.Masc_exec.Shell_ir.env
-    | Masc_exec.Shell_ir.Pipeline stages -> List.exists mentions_a_variable stages
-    | Masc_exec.Shell_ir.Sequence { head; tail } ->
-      mentions_a_variable head
-      || List.exists (fun (_, part) -> mentions_a_variable part) tail
-  in
-  let script_worth_lowering stage =
+  (* RFC execute-boundary-is-the-sandbox §4.1. An argv whose program is a
+     shell with [-c] is a script wearing an argv costume: it normalises to the
+     script form and takes the same shell, so there is no second way to reach
+     one. Nothing is classified here any more. Whether the subset can
+     represent the text decided which of two execution models it got, and that
+     decision is now the field's, so the classifier speaks as a judge
+     (telemetry, [escaped_shell] advice) rather than as a router.
+
+     A stage that declares its own streams keeps today's path: the script
+     would have to merge them with whatever it declares, which is a different
+     question. *)
+  let costume_as_script stage =
     match stage.stdin, stage.stdout, stage.stderr with
-    (* A stage that declares its own streams would have to merge them with
-       whatever the script declares, which is a different question. *)
     | Inherit_input, Inherit_output, Inherit_output ->
-      Option.bind
+      Option.map
+        (fun (costume : Keeper_tooling.Shell_costume.t) ->
+           { shell = costume.Keeper_tooling.Shell_costume.shell
+           ; text = costume.Keeper_tooling.Shell_costume.script
+           })
         (Keeper_tooling.Shell_costume.of_argv stage.argv)
-        (fun costume ->
-           let gate_sandbox = { Shell_gate.target = sandbox } in
-           let syntax_policy =
-             { Shell_gate.redirect_allowed = true; allow_pipes = true }
-           in
-           match
-             Keeper_tooling.Shell_costume.classify
-               ~syntax_policy
-               ~sandbox:gate_sandbox
-               costume
-           with
-           | Keeper_tooling.Shell_costume.Representable ->
-             Some costume.Keeper_tooling.Shell_costume.script
-           | Keeper_tooling.Shell_costume.Refused_by_policy _
-           | Keeper_tooling.Shell_costume.Outside_the_subset _
-           | Keeper_tooling.Shell_costume.Unparsable _ -> None)
     | _ -> None
   in
-  let lowered_costume =
+  let normalised_costume =
     match source with
-    | Staged { program = { head; tail = [] }; next = [] } ->
-      Option.bind (script_worth_lowering head) (fun script ->
-        match script_to_shell_ir ~sandbox ~cwd ~env script with
-        | Ok ir when not (mentions_a_variable ir) -> Some ir
-        | Ok _ | Error _ -> None)
+    | Staged { program = { head; tail = [] }; next = [] } -> costume_as_script head
     | Staged _ | Script _ -> None
   in
-  match lowered_costume, source with
-  | Some ir, _ -> Ok ir
-  | None, Script script -> script_to_shell_ir ~sandbox ~cwd ~env script
+  match normalised_costume, source with
+  | Some script, _ | None, Script script -> script_to_shell ~sandbox ~cwd ~env script
   | None, Staged { program; next } ->
   let* head = lower_program program in
   match next with
@@ -1014,53 +973,4 @@ let pp_validation_error ppf = function
       target
   | Env_key_invalid k ->
     Format.fprintf ppf "env key %S is not [A-Za-z0-9_]+" k
-  | Script_not_a_command_line { token; expected } ->
-    Format.fprintf
-      ppf
-      "script is not a command line: unexpected %S%s"
-      token
-      (match expected with
-       | [] -> ""
-       | _ -> ", expected " ^ String.concat " or " expected)
-  | Script_unreadable reason ->
-    Format.fprintf
-      ppf
-      "script could not be read: %s"
-      (match reason with
-       | `Timeout_50ms -> "it took too long to parse"
-       | `Depth_limit -> "it nests too deeply"
-       | `Token_limit_50k -> "it is too long")
-  | Script_outside_the_subset reason ->
-    (* The tail used to be "Say it with argv or pipeline instead" for every
-       construct, and it is wrong for most of them: a heredoc is stdin, a loop
-       is a file, a background job is a different tool. One answer for
-       fourteen constructs leaves [sh -c] as the only move the caller can
-       work out, which is the escape this tool exists to remove. *)
-    Format.fprintf
-      ppf
-      "script uses %s, which this tool does not run. %s."
-      (match reason with
-       | `Heredoc -> "a heredoc"
-       | `Here_string -> "a here-string"
-       | `Cmd_subst -> "command substitution"
-       | `Proc_subst -> "process substitution"
-       | `Subshell -> "a subshell"
-       | `Arith_expansion -> "arithmetic expansion"
-       | `Param_expansion -> "a shell expansion"
-       | `Control_flow -> "control flow"
-       | `Function_def -> "a function definition"
-       | `Glob_brace -> "brace expansion"
-       | `Background -> "a background job"
-       | `Redirect -> "a redirection"
-       | `Unknown_construct name -> name)
-      (Keeper_tooling.Subset_rewrite.to_string
-         (Keeper_tooling.Subset_rewrite.of_reason
-            (Masc_exec_command_gate.Shell_command_gate.Unsupported_construct reason)))
-  | Script_nested_pipeline ->
-    Format.fprintf
-      ppf
-      "script nests a pipeline inside a pipeline; write the stages in one \
-       pipeline instead."
-  | Script_rejected_by_the_gate diagnostic ->
-    Format.fprintf ppf "script was refused: %s" diagnostic
 ;;

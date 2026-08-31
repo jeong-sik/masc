@@ -520,134 +520,211 @@ let test_of_json_keeps_empty_pipeline_stage_for_validation () =
      | _ -> Alcotest.fail "expected exactly two stages")
 ;;
 
-(* The shell form. What a keeper actually wrote over 2026-08-21..23 was
-   [argv:["bash";"-c";"..."]] on 30% of its Execute calls, where the body was
-   an opaque argument the gate could not read. The same line as [script] is a
-   [Shell_ir.t]. *)
-let test_script_lowers_a_pipeline () =
+(* RFC execute-boundary-is-the-sandbox §4. The shell form is a shell: the text
+   goes to [sh -c] whole, rather than being taken apart into an IR whose stages
+   this process spawns. The pipe below used to become a two-stage
+   [Shell_ir.Pipeline]; it is now one argument to one shell, which is what
+   [argv:["bash";"-c";...]] has always produced for the same line. *)
+let test_script_goes_to_a_shell_whole () =
   let input = parse_json_exn (`Assoc [ "script", `String "cat a.txt | wc -l" ]) in
   match input.Execute_input.source with
-  | Execute_input.Script text ->
+  | Execute_input.Script { shell; text } ->
     Alcotest.(check string) "carried verbatim" "cat a.txt | wc -l" text;
+    Alcotest.(check string) "sh unless the caller says otherwise" "sh" shell;
     (match Execute_input.to_shell_ir input with
-     | Ok (Masc_exec.Shell_ir.Pipeline stages) ->
-       Alcotest.(check int) "two stages" 2 (List.length stages)
-     | Ok _ -> Alcotest.fail "a pipe must lower to Pipeline"
+     | Ok (Masc_exec.Shell_ir.Simple simple) ->
+       Alcotest.(check string)
+         "the program is the shell"
+         "sh"
+         (Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin);
+       Alcotest.(check (list string))
+         "the line is one argument"
+         [ "-c"; "cat a.txt | wc -l" ]
+         (List.map Masc_exec.Exec_dispatch.resolve_arg simple.Masc_exec.Shell_ir.args)
+     | Ok _ -> Alcotest.fail "the shell form lowers to one Simple"
      | Error e ->
        Alcotest.failf "%a" Execute_input.pp_validation_error e)
   | Execute_input.Staged _ -> Alcotest.fail "expected the script form"
 ;;
 
-let test_script_carries_cwd_onto_every_stage () =
+(* §4.1, one door: the same text through either field produces the same child,
+   and the costume keeps the shell its argv named. *)
+let test_an_argv_shaped_shell_normalises_to_the_script_form () =
+  let line = "ls *.ml && echo $(pwd)" in
+  let via_costume =
+    parse_json_exn
+      (`Assoc [ "argv", `List [ `String "bash"; `String "-c"; `String line ] ])
+  in
+  let via_script =
+    parse_json_exn (`Assoc [ "script", `String line; "shell", `String "bash" ])
+  in
+  let argv_of input =
+    match Execute_input.to_shell_ir input with
+    | Ok (Masc_exec.Shell_ir.Simple simple) ->
+      Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin
+      :: List.map Masc_exec.Exec_dispatch.resolve_arg simple.Masc_exec.Shell_ir.args
+    | Ok _ -> Alcotest.fail "expected one Simple"
+    | Error e -> Alcotest.failf "%a" Execute_input.pp_validation_error e
+  in
+  Alcotest.(check (list string))
+    "the costume and the field produce the same child"
+    (argv_of via_script)
+    (argv_of via_costume);
+  Alcotest.(check (list string))
+    "and it is the shell the caller named"
+    [ "bash"; "-c"; line ]
+    (argv_of via_costume)
+;;
+
+(* An unknown shell is a program name, so the closed list is the answer. *)
+let test_an_unknown_shell_is_refused () =
+  match
+    Execute_input.of_json
+      (`Assoc [ "script", `String "true"; "shell", `String "python3" ])
+  with
+  | Ok _ -> Alcotest.fail "python3 is not a shell this tool runs"
+  | Error message ->
+    Alcotest.(check bool)
+      "the message names what is allowed"
+      true
+      (Astring.String.is_infix ~affix:"sh, bash, zsh, dash, ksh" message)
+;;
+
+let test_script_carries_cwd_to_the_shell () =
   let input =
     parse_json_exn
       (`Assoc
         [ "script", `String "cat a.txt | wc -l"; "cwd", `String "/tmp" ])
   in
   match Execute_input.to_shell_ir input with
-  | Ok (Masc_exec.Shell_ir.Pipeline stages) ->
+  | Ok (Masc_exec.Shell_ir.Simple simple) ->
     Alcotest.(check bool)
-      "every stage received the call's cwd"
+      "the shell is started in the call's cwd"
       true
-      (List.for_all
-         (function
-           | Masc_exec.Shell_ir.Simple s -> Option.is_some s.cwd
-           | _ -> false)
-         stages)
-  | Ok _ -> Alcotest.fail "a pipe must lower to Pipeline"
+      (Option.is_some simple.Masc_exec.Shell_ir.cwd)
+  | Ok _ -> Alcotest.fail "the shell form lowers to one Simple"
   | Error e -> Alcotest.failf "%a" Execute_input.pp_validation_error e
 ;;
 
 (* 83% of the shell escapes measured over 2026-08-21..23 used a logic
-   operator. It lowers to the Sequence the IR already had. *)
-let test_script_lowers_a_guarded_run () =
-  let input =
-    parse_json_exn (`Assoc [ "script", `String "test -w /tmp && echo ok" ])
-  in
-  match Execute_input.to_shell_ir input with
-  | Ok (Masc_exec.Shell_ir.Sequence { tail = [ (And_if, _) ]; _ }) -> ()
-  | Ok _ -> Alcotest.fail "&& must lower to a Sequence guarded on success"
-  | Error e -> Alcotest.failf "%a" Execute_input.pp_validation_error e
+   operator. The IR still has [Sequence] and [argv]/[then] still build it; what
+   changed is that the shell form no longer takes the operator apart, because
+   the shell it runs is what reads it. *)
+let test_the_shell_reads_its_own_operators () =
+  List.iter
+    (fun line ->
+       let input = parse_json_exn (`Assoc [ "script", `String line ]) in
+       match Execute_input.to_shell_ir input with
+       | Ok (Masc_exec.Shell_ir.Simple simple) ->
+         Alcotest.(check (list string))
+           (Printf.sprintf "%S goes to the shell whole" line)
+           [ "-c"; line ]
+           (List.map
+              Masc_exec.Exec_dispatch.resolve_arg
+              simple.Masc_exec.Shell_ir.args)
+       | Ok _ ->
+         Alcotest.failf "%S must not be taken apart into stages" line
+       | Error e -> Alcotest.failf "%a" Execute_input.pp_validation_error e)
+    [ "test -w /tmp && echo ok"; "grep x f || echo none"; "a; b" ]
 ;;
 
-let test_script_lowers_an_alternative_run () =
-  let input =
-    parse_json_exn (`Assoc [ "script", `String "grep x f || echo none" ])
-  in
-  match Execute_input.to_shell_ir input with
-  | Ok (Masc_exec.Shell_ir.Sequence { tail = [ (Or_if, _) ]; _ }) -> ()
-  | Ok _ -> Alcotest.fail "|| must lower to a Sequence guarded on failure"
-  | Error e -> Alcotest.failf "%a" Execute_input.pp_validation_error e
-;;
-
-(* A construct outside the subset is refused by name rather than run. The name
-   is the point: inside [bash -c] it was counted as nothing. *)
-let test_script_outside_the_subset_is_named () =
-  let input =
-    parse_json_exn (`Assoc [ "script", `String "cat $(echo foo)" ])
-  in
-  match Execute_input.to_shell_ir input with
-  | Ok _ -> Alcotest.fail "command substitution is outside the subset"
-  | Error (Execute_input.Script_outside_the_subset `Cmd_subst) -> ()
-  | Error e ->
-    Alcotest.failf "expected a named subset refusal, got %a"
-      Execute_input.pp_validation_error e
+(* RFC execute-boundary-is-the-sandbox. A construct outside the subset used to
+   be refused by name; it now runs, and the name reaches the caller as advice
+   instead. Both halves matter: the script has to execute, and the judge still
+   has to say what is in it. *)
+let test_a_construct_outside_the_subset_runs_and_is_still_named () =
+  let input = parse_json_exn (`Assoc [ "script", `String "cat $(echo foo)" ]) in
+  (match Execute_input.to_shell_ir input with
+   | Ok (Masc_exec.Shell_ir.Simple _) -> ()
+   | Ok _ -> Alcotest.fail "the shell form lowers to one Simple"
+   | Error e ->
+     Alcotest.failf
+       "command substitution is a shell's job, not a refusal: %a"
+       Execute_input.pp_validation_error
+       e);
+  match
+    Execute_input.hidden_script_findings
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      input
+  with
+  | [ (_, Keeper_tooling.Shell_costume.Outside_the_subset (Masc_exec_command_gate.Shell_command_gate.Unsupported_construct `Cmd_subst)) ] -> ()
+  | findings ->
+    Alcotest.failf
+      "the judge must still name it; got %d finding(s)"
+      (List.length findings)
 ;;
 
 (* The sentence a caller acts on names the construct their script contains.
 
    sangsu sent this on 2026-08-30 and was told the script "uses a redirection,
    which this tool does not run. use the stdin field". Every redirect in it is
-   one the subset takes; the [$?] is what the lexer stopped on. Acting on that
-   sentence means rewriting four working redirects and arriving back here. *)
-let test_the_refusal_names_the_construct_the_script_contains () =
+   one the subset takes; the [$?] is what the lexer stopped on. The script runs
+   now, so nobody is sent to rewrite four working redirects — but the advice
+   that rides back still has to name the expansion rather than the redirect. *)
+let test_the_advice_names_the_construct_the_script_contains () =
   let script =
     "echo cmd=build > ev.txt && git rev-parse HEAD >> ev.txt 2>&1; dune build \
      >> ev.txt 2>&1; echo exit=$? >> ev.txt"
   in
   let input = parse_json_exn (`Assoc [ "script", `String script ]) in
-  match Execute_input.to_shell_ir input with
-  | Ok _ -> Alcotest.fail "[$?] is outside the subset"
-  | Error (Execute_input.Script_outside_the_subset `Redirect) ->
+  (match Execute_input.to_shell_ir input with
+   | Ok _ -> ()
+   | Error e ->
+     Alcotest.failf
+       "this script runs; it is not the tool's business to refuse it: %a"
+       Execute_input.pp_validation_error
+       e);
+  match
+    Execute_input.hidden_script_findings
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      input
+  with
+  | [ (_, Keeper_tooling.Shell_costume.Outside_the_subset (Masc_exec_command_gate.Shell_command_gate.Unsupported_construct `Redirect)) ] ->
     Alcotest.fail
       "the redirects in this script are all ones the subset takes; naming one \
        sends the caller to rewrite working code"
-  | Error (Execute_input.Script_outside_the_subset `Param_expansion) ->
+  | [ (_, Keeper_tooling.Shell_costume.Outside_the_subset (Masc_exec_command_gate.Shell_command_gate.Unsupported_construct `Param_expansion)) ] ->
     let msg =
-      Format.asprintf
-        "%a"
-        Execute_input.pp_validation_error
-        (Execute_input.Script_outside_the_subset `Param_expansion)
+      Keeper_tooling.Subset_rewrite.to_string
+        (Keeper_tooling.Subset_rewrite.of_reason
+           (Masc_exec_command_gate.Shell_command_gate.Unsupported_construct
+              `Param_expansion))
     in
     Alcotest.(check bool)
       (Printf.sprintf "does not send an expansion to the stdin field: %S" msg)
       false
       (String_util.contains_substring_ci msg "stdin")
-  | Error e ->
+  | findings ->
     Alcotest.failf
-      "expected the expansion to be named, got %a"
-      Execute_input.pp_validation_error
-      e
+      "expected the expansion to be named; got %d finding(s)"
+      (List.length findings)
 ;;
 
 (* A separated list carries a redirect often enough that naming the redirect
    was the classifier's usual answer. Measured over the 548 command lines the
    runtime produced 2026-08-21..23, all 31 refusals reported as a redirect
    were this. *)
-let test_a_separator_is_lowered_to_sequence () =
-  let input =
-    parse_json_exn
-      (`Assoc [ "script", `String "ls docs 2>/dev/null; echo done" ])
-  in
+(* [;] was the largest live escape and the one construct [Shell_ir.connector]
+   deliberately cannot say. It is not a refusal any more and it is not a
+   [Sequence] either: the shell that runs the line is what reads the
+   separator. *)
+let test_a_separator_goes_to_the_shell () =
+  let line = "ls docs 2>/dev/null; echo done" in
+  let input = parse_json_exn (`Assoc [ "script", `String line ]) in
   match Execute_input.to_shell_ir input with
-  | Ok (Masc_exec.Shell_ir.Sequence { head = Masc_exec.Shell_ir.Simple s1; tail = [ (Masc_exec.Shell_ir.Seq, Masc_exec.Shell_ir.Simple s2) ] }) ->
-    Alcotest.(check string) "first bin" "ls" (Masc_exec.Exec_program.to_string s1.bin);
-    Alcotest.(check string) "second bin" "echo" (Masc_exec.Exec_program.to_string s2.bin);
-    Alcotest.(check int) "first has redirect" 1 (List.length s1.redirects)
-  | Ok _ -> Alcotest.fail "expected Sequence with Seq connector"
+  | Ok (Masc_exec.Shell_ir.Simple simple) ->
+    Alcotest.(check (list string))
+      "the separator stays inside the line"
+      [ "-c"; line ]
+      (List.map
+         Masc_exec.Exec_dispatch.resolve_arg
+         simple.Masc_exec.Shell_ir.args)
+  | Ok _ -> Alcotest.fail "the shell form lowers to one Simple"
   | Error e ->
-    Alcotest.failf "expected sequence to parse, got %a"
-      Execute_input.pp_validation_error e
+    Alcotest.failf
+      "a separated list is a shell's business: %a"
+      Execute_input.pp_validation_error
+      e
 ;;
 
 let script_description () =
@@ -1718,13 +1795,19 @@ let test_hidden_script_findings_ignores_what_hides_nothing () =
   Alcotest.(check int)
     "plain argv"
     0
-    (List.length (findings_of (`Assoc [ "argv", `List [ `String "rg"; `String "x" ] ])));
-  (* A script source already crossed the gate; there is nothing hidden to count,
-     and counting it here would double every script call. *)
-  Alcotest.(check int)
-    "script source"
-    0
-    (List.length (findings_of (`Assoc [ "script", `String "ls {a,b}.txt" ])))
+    (List.length (findings_of (`Assoc [ "argv", `List [ `String "rg"; `String "x" ] ])))
+;;
+
+(* RFC execute-boundary-is-the-sandbox §6. A script source used to yield
+   nothing here, on the grounds that it had already crossed the gate. It no
+   longer crosses one — it goes to a shell — so this is the only place its
+   construct gets named, and the advice that rides back is the whole of what
+   the judge is for. *)
+let test_hidden_script_findings_judges_the_script_field () =
+  Alcotest.(check (list (pair string string)))
+    "the script field is judged, and the construct is named"
+    [ "sh", "glob_brace" ]
+    (findings_of (`Assoc [ "script", `String "ls {a,b}.txt" ]))
 ;;
 
 (* A heredoc is stdin, and until [literal] existed the tool could tell a caller
@@ -1778,10 +1861,21 @@ let costume script =
   `Assoc [ "argv", `List [ `String "sh"; `String "-c"; `String script ] ]
 ;;
 
-let test_a_representable_costume_is_lowered () =
-  (* The shell disappears: what runs is the command it would have run. *)
-  Alcotest.(check string) "echo hi" "echo" (lowered_bin (costume "echo hi"));
-  Alcotest.(check string) "false; echo hi" "false" (lowered_bin (costume "false; echo hi"))
+(* RFC execute-boundary-is-the-sandbox §4.1. The costume used to be taken
+   apart when the subset could represent it, so [sh -c "echo hi"] became
+   [echo hi] and [sh -c "false; echo hi"] became a [Sequence]. Both are one
+   shell now, whichever the argv named: the caller asked for a shell, and
+   which text it happens to contain is not what decides. *)
+let test_a_costume_keeps_its_shell () =
+  Alcotest.(check string) "echo hi" "sh" (lowered_bin (costume "echo hi"));
+  Alcotest.(check string)
+    "false; echo hi"
+    "sh"
+    (lowered_bin (costume "false; echo hi"));
+  Alcotest.(check string)
+    "cat $(echo foo)"
+    "sh"
+    (lowered_bin (costume "cat $(echo foo)"))
 ;;
 
 let test_what_the_ir_cannot_hold_keeps_todays_path () =
@@ -2002,32 +2096,37 @@ let suite =
           `Quick
           test_of_json_pipeline_preserves_duplicate_stage_argv0
       ; Alcotest.test_case
-          "script_lowers_a_pipeline"
+          "script_goes_to_a_shell_whole"
           `Quick
-          test_script_lowers_a_pipeline
+          test_script_goes_to_a_shell_whole
       ; Alcotest.test_case
-          "script_carries_cwd_onto_every_stage"
+          "an_argv_shaped_shell_normalises_to_the_script_form"
           `Quick
-          test_script_carries_cwd_onto_every_stage
+          test_an_argv_shaped_shell_normalises_to_the_script_form
       ; Alcotest.test_case
-          "script_lowers_a_guarded_run"
+          "an_unknown_shell_is_refused"
           `Quick
-          test_script_lowers_a_guarded_run
+          test_an_unknown_shell_is_refused
       ; Alcotest.test_case
-          "script_lowers_an_alternative_run"
+          "script_carries_cwd_to_the_shell"
           `Quick
-          test_script_lowers_an_alternative_run      ; Alcotest.test_case
-          "script_outside_the_subset_is_named"
-          `Quick
-          test_script_outside_the_subset_is_named
+          test_script_carries_cwd_to_the_shell
       ; Alcotest.test_case
-          "the_refusal_names_the_construct_the_script_contains"
+          "the_shell_reads_its_own_operators"
           `Quick
-          test_the_refusal_names_the_construct_the_script_contains
+          test_the_shell_reads_its_own_operators
       ; Alcotest.test_case
-          "a_separator_is_lowered_to_sequence"
+          "a_construct_outside_the_subset_runs_and_is_still_named"
           `Quick
-          test_a_separator_is_lowered_to_sequence
+          test_a_construct_outside_the_subset_runs_and_is_still_named
+      ; Alcotest.test_case
+          "the_advice_names_the_construct_the_script_contains"
+          `Quick
+          test_the_advice_names_the_construct_the_script_contains
+      ; Alcotest.test_case
+          "a_separator_goes_to_the_shell"
+          `Quick
+          test_a_separator_goes_to_the_shell
       ; Alcotest.test_case
           "script_and_argv_together_are_refused"
           `Quick
@@ -2145,6 +2244,10 @@ let suite =
           "hidden_script_findings ignores what hides nothing"
           `Quick
           test_hidden_script_findings_ignores_what_hides_nothing
+      ; Alcotest.test_case
+          "hidden_script_findings_judges_the_script_field"
+          `Quick
+          test_hidden_script_findings_judges_the_script_field
       ; Alcotest.test_case "stdin takes a literal" `Quick test_stdin_takes_a_literal
       ; Alcotest.test_case
           "stdin literal excludes the other shapes"
@@ -2153,7 +2256,7 @@ let suite =
       ; Alcotest.test_case
           "a representable costume is lowered"
           `Quick
-          test_a_representable_costume_is_lowered
+          test_a_costume_keeps_its_shell
       ; Alcotest.test_case
           "what the IR cannot hold keeps today's path"
           `Quick

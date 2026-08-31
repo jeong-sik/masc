@@ -17,6 +17,11 @@ type t = private {
   script : string;  (** the argument after the [-c] flag *)
 }
 
+val shells : string list
+(** The shells this module recognises, for a caller that has to name them in a
+    message or an enum. {!names_a_shell} is the predicate over the same list;
+    a second copy of it would drift. *)
+
 val names_a_shell : string -> bool
 (** Whether a program is one of the shells this module recognises.  The
     argument is the program as written, with or without a directory:

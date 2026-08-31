@@ -8,7 +8,8 @@
 - 적용 대상: `Keeper_unified_turn_failure`, `Keeper_error_classify`,
   `keeper_failure_exemption_store`(삭제), `Keeper_unified_turn_success`,
   `Keeper_tool_surface`
-- 결정 상태: 확정(main `dc75fd8aff`, #32109). RFC는
+- 결정 상태: 확정(main `dc75fd8aff`, #32109). fleet 관찰 완료
+  (`2026-08-31-turn-failure-visible-stop-linux-r1.md`). RFC는
   `docs/rfc/RFC-turn-failure-visible-stop.md`(#32105).
 
 ## 근거
@@ -45,12 +46,22 @@
 
 ## 불확실성
 
-- 미확인 항목: Linux exact-source fleet 관찰(DNS 차단 → 매 실패 streak
-  상승 → fleet Failing 표시 → 무음 루프 미재현). #31958 종결 조건.
+- Linux fleet 관찰(6차): DNS 단절(`turn-failure-measurement.invalid`)에서 매
+  실패가 `turn failure observed (consecutive=N)`로 세워지고 4개 keeper 모두
+  `phase=failing` 전이가 기록됐다. 면제 라인(`not counted toward crash
+  threshold`)은 전체 로그에서 0건 — 수정 전에는 DNS 실패마다 이 라인이 나오고
+  streak가 0에 고정됐다. 종결 조건 충족. 상세는 `-linux-r1.md`.
 - 영향: 면제가 사라져 짧은 장애(수 턴) 동안 phase가 `failing`으로
   떨릴 수 있다. 다음 성공 또는 운영자 clear에서 회복되고, 기존 비면제
   클래스가 수년간 같은 모양으로 동작했다.
-- 추가 확인 필요: Linux fleet measurement(`-linux-r1.md` 문서로 남긴다).
+- 추가 확인 필요: (1) 연속 실패 누적·성공 리셋의 fleet 관찰 — keeper 턴이
+  자극 기반이라 이번 창에선 부팅 턴만 관찰됐고, 누적은 회귀 테스트가 증명한다.
+  (2) 컨테이너 재시작 후 streak가 이어지지 않은 관찰(파일 `count=1` → 재시작
+  후 첫 실패 `consecutive=1`) — #31969 복원 시맨틱(등록 시 적용 vs
+  fiber 수명 초기화)의 후속 확인 항목. 이 변경은 복원 경로를 건드리지
+  않았다.
+- 측정 환경 제약: classic 프리셋의 `sandbox_profile = "local"`이 #32078 이후
+  무효(#32115)라 keeper 부팅을 위해 프로파일을 `docker`로 바꿨다.
 
 ## 적용범위
 

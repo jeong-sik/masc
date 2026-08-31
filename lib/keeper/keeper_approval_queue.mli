@@ -372,8 +372,11 @@ val retire_summary_owner :
 
 val store_revision_for_workspace : base_path:string -> int
 (** Monotonic process-local revision of the workspace queue authority.
-    Installation and every transition to unavailable advance the revision so
-    projections cannot reuse a cache entry from an older authority state. *)
+
+    Every published durable snapshot advances it, as does each transition into
+    or out of unavailable. A projection cached under this number therefore
+    cannot outlive the write that changed what the queue publishes: an
+    enqueued ask, a resolution, and a completed delivery each move it. *)
 (** Read one workspace's pending rows without collapsing an unavailable,
     malformed, or reset-required durable store into an empty projection. *)
 val get_pending_entry_for_workspace :

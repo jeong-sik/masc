@@ -91,4 +91,9 @@ val agent_key_of_token_or_name :
 
 val start_global_cleanup_loop : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
 (** Start cleanup loops for both the per-IP and per-agent global limiters.
-    Call once at server startup. *)
+    Call once at server startup.
+
+    Contract: each cleanup loop is a never-ending fiber forked on [sw].
+    [sw] must be ended by cancellation (e.g. server shutdown), never by
+    drain — a caller that returns normally from [Switch.run] with this
+    loop forked will hang until the CI wall-clock cutoff. *)

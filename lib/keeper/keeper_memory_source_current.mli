@@ -50,6 +50,12 @@ type write_error =
 
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
+val list_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
+(** Every keeper id this store holds a file for, sorted. Read by the deploy
+    preflight: this module's decoder refuses a row carrying an unknown field,
+    so a deploy that changes the shape has to be told before it switches
+    over, and nothing else reads the whole store. *)
+
 val read_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> (t option, string) result
 

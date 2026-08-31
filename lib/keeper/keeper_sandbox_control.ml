@@ -125,7 +125,6 @@ let start_managed_container
               | Ok () ->
               let _cleanup =
                 Keeper_sandbox_runtime.maybe_cleanup_stale_containers
-                  ~base_path:config.base_path
 
                   ()
               in
@@ -246,7 +245,6 @@ let stop_containers ?keeper_name ~scope ~(config : Workspace.config)
 
 let cleanup_stale ~(config : Workspace.config) ~(timeout_sec : float) () =
   Keeper_sandbox_runtime.cleanup_stale_containers
-    ~base_path:config.base_path
     ~timeout_sec
     ()
 

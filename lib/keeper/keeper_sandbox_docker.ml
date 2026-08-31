@@ -548,7 +548,6 @@ let run_docker_shell_command_with_status_internal
               | Ok () -> (
                 let _cleanup =
                   Keeper_sandbox_runtime.maybe_cleanup_stale_containers
-                    ~base_path:config.base_path
                     ~timeout_sec
                     ()
                 in

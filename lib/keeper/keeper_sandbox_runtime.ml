@@ -450,11 +450,24 @@ let remove_cleanup_container ~container_id ~timeout_sec =
 
 let cleanup_stale_containers
       ?(now = Unix.gettimeofday ())
-      ~base_path
       ~timeout_sec
       ()
   =
   try
+    (* Every keeper sandbox on the host, not only this base path's.
+       [should_remove_container] is what decides, and it refuses anything
+       running; the base-path label was narrowing reach without adding a
+       guard. A container's own base path dies with the run that made it --
+       a benchmark or a test spawns masc under a scratch root, and once that
+       process is gone no future sweep hashes to it again. Measured
+       2026-08-31: 18 stopped keeper sandboxes across 16 distinct base-path
+       hashes, none matching any of the four then live, the oldest from
+       2026-06-11.
+
+       Safe because a stopped container is worth nothing to its owner
+       either: [Keeper_turn_sandbox_runtime] answers
+       [Docker_container_stopped] with [`Boot], which force-deletes the name
+       and starts fresh. There is no adoption path a sweep could race. *)
     let argv =
       docker_command_argv ()
       @ [ "ps"
@@ -462,8 +475,6 @@ let cleanup_stale_containers
         ; "--no-trunc"
         ; "--filter"
         ; "label=" ^ sandbox_component_label_key ^ "=" ^ sandbox_component_label_value
-        ; "--filter"
-        ; "label=" ^ sandbox_base_path_hash_label_key ^ "=" ^ base_path_hash base_path
         ]
     in
     let st, out =
@@ -717,7 +728,6 @@ let reset_last_cleanup_for_tests () =
 let maybe_cleanup_stale_containers
       ?(now = Unix.gettimeofday ())
       ?(command_available = fun _ -> true)
-      ~base_path
       ~timeout_sec
       ()
   =
@@ -735,7 +745,7 @@ let maybe_cleanup_stale_containers
       then
         Some
           (Cleanup_completed
-             (cleanup_stale_containers ~now ~base_path ~timeout_sec ()))
+             (cleanup_stale_containers ~now ~timeout_sec ()))
       else Some (Cleanup_skipped_command_unavailable command))
     else None)
 ;;

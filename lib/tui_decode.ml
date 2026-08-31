@@ -4242,7 +4242,11 @@ let gate_pending_phase_of_json json =
   in
   match disposition_code, pre_worker_reason, summary_status, judgment with
   | ("identity_unbound" | "persistence_uncertain"), _, _, _ -> Gate_blocked
-  | "pre_worker_unavailable", "start_reserved", _, _ -> Gate_judging
+  (* A start reservation is a pre-worker state like its siblings: the worker is
+     not judging yet. Rendering it as judging hid reservations that a restart
+     stranded (now recovered by [release_orphaned_start_reservation]) behind a
+     healthy-looking in-progress row. Blocked surfaces a lingering one; a healthy
+     reservation clears within a poll. *)
   | "pre_worker_unavailable", _, _, _ -> Gate_blocked
   | _, _, "failed", _ -> Gate_blocked
   | _, _, "available", "require_human" -> Gate_human_required

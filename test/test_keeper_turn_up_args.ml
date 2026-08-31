@@ -74,6 +74,21 @@ let with_test_context f =
       in
       f ctx)
 
+(* Every case below is about some other argument. The tool schema defaults
+   [sandbox_profile] to "docker", and [parse] is called directly here, so the
+   fixture states what a caller would rather than leaving it out. That the
+   argument is required at all is pinned once, by
+   [test_parse_requires_a_sandbox_profile], instead of being restated in each
+   case. *)
+let parse_stating_a_profile ctx json =
+  let json =
+    match json with
+    | `Assoc fields when not (List.mem_assoc "sandbox_profile" fields) ->
+      `Assoc (fields @ [ "sandbox_profile", `String "docker" ])
+    | other -> other
+  in
+  Keeper_turn_up_args.parse ctx json
+;;
 let test_remote_endpoint_validation () =
   with_test_context @@ fun ctx ->
   let preflight_key = "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" in
@@ -99,7 +114,7 @@ user = "masc"
 remote_root = "/srv/masc/playground"
 |});
   let parse fields =
-    Keeper_turn_up_args.parse ctx (`Assoc (("name", `String "remote-new") :: fields))
+    parse_stating_a_profile ctx (`Assoc (("name", `String "remote-new") :: fields))
   in
   (match parse [ "sandbox_profile", `String "remote_ssh" ] with
    | Ok _ -> fail "remote_ssh without endpoint was accepted"
@@ -253,7 +268,7 @@ remote_root = "/srv/masc/playground"
     | Error error -> failf "meta fixture: %s" error
   in
   let parse_or_fail json =
-    match Keeper_turn_up_args.parse ctx json with
+    match parse_stating_a_profile ctx json with
     | Ok parsed -> parsed
     | Error result -> failf "parse: %s" (Keeper_types_profile.tool_result_body result)
   in
@@ -317,7 +332,7 @@ let test_tools_patch_round_trips_and_rejects_invalid_values () =
     | Ok meta -> meta
     | Error error -> failf "meta fixture: %s" error
   in
-  let parse json = Keeper_turn_up_args.parse ctx json in
+  let parse json = parse_stating_a_profile ctx json in
   let parse_or_fail json =
     match parse json with
     | Ok parsed -> parsed
@@ -407,7 +422,7 @@ let test_skills_names_patch_round_trips_three_states () =
     | Error error -> failf "meta fixture: %s" error
   in
   let parse_or_fail json =
-    match Keeper_turn_up_args.parse ctx json with
+    match parse_stating_a_profile ctx json with
     | Ok parsed -> parsed
     | Error result -> failf "parse: %s" (Keeper_types_profile.tool_result_body result)
   in
@@ -471,7 +486,7 @@ let test_manifest_revision_allows_only_one_stale_writer () =
   in
   let parse instructions =
     match
-      Keeper_turn_up_args.parse ctx
+      parse_stating_a_profile ctx
         (`Assoc
           [ "name", `String name
           ; "instructions", `String instructions
@@ -587,7 +602,7 @@ let test_rejected_create_publication_removes_manifest () =
   in
   let parsed =
     match
-      Keeper_turn_up_args.parse ctx
+      parse_stating_a_profile ctx
         (`Assoc
           [ "name", `String name
           ; "instructions", `String "fixture instructions"
@@ -645,7 +660,7 @@ let test_publication_rollback_restores_manifest_and_runtime_bytes () =
   in
   let parse instructions =
     match
-      Keeper_turn_up_args.parse ctx
+      parse_stating_a_profile ctx
         (`Assoc [ "name", `String name; "instructions", `String instructions ])
     with
     | Ok parsed -> parsed
@@ -793,7 +808,7 @@ let run_cas_child base name expected_hex instructions ready_path start_path =
   in
   let parsed =
     match
-      Keeper_turn_up_args.parse ctx
+      parse_stating_a_profile ctx
         (`Assoc
            [ "name", `String name; "instructions", `String instructions ])
     with
@@ -838,7 +853,7 @@ let test_two_processes_same_revision_have_one_winner () =
   in
   let parsed =
     match
-      Keeper_turn_up_args.parse ctx
+      parse_stating_a_profile ctx
         (`Assoc
            [ "name", `String name; "instructions", `String "initial" ])
     with
@@ -925,7 +940,7 @@ let test_revision_projection_holds_manifest_lock () =
   in
   let parse instructions =
     match
-      Keeper_turn_up_args.parse ctx
+      parse_stating_a_profile ctx
         (`Assoc
            [ "name", `String name; "instructions", `String instructions ])
     with
@@ -1013,7 +1028,7 @@ let test_release_failure_preserves_committed_receipt () =
   in
   let parsed =
     match
-      Keeper_turn_up_args.parse ctx
+      parse_stating_a_profile ctx
         (`Assoc
            [ "name", `String name; "instructions", `String "committed" ])
     with
@@ -1073,7 +1088,7 @@ let test_rollback_after_rename_failure_requires_reconciliation () =
   in
   let parse instructions =
     match
-      Keeper_turn_up_args.parse ctx
+      parse_stating_a_profile ctx
         (`Assoc [ "name", `String name; "instructions", `String instructions ])
     with
     | Ok parsed -> parsed
@@ -1128,7 +1143,7 @@ let test_publication_exception_restores_missing_manifest () =
   in
   let parsed =
     match
-      Keeper_turn_up_args.parse ctx
+      parse_stating_a_profile ctx
         (`Assoc [ "name", `String name; "instructions", `String "initial" ])
     with
     | Ok parsed -> parsed
@@ -1168,7 +1183,7 @@ let test_post_write_revision_failure_restores_missing_manifest () =
   in
   let parsed =
     match
-      Keeper_turn_up_args.parse ctx
+      parse_stating_a_profile ctx
         (`Assoc [ "name", `String name; "instructions", `String "initial" ])
     with
     | Ok parsed -> parsed
@@ -1256,6 +1271,23 @@ let contains needle haystack =
   let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
   scan 0
 
+let test_parse_requires_a_sandbox_profile () =
+  with_test_context @@ fun ctx ->
+  match
+    Keeper_turn_up_args.parse ctx (`Assoc [ "name", `String "no-profile-fixture" ])
+  with
+  | Error result ->
+    check
+      bool
+      "the rejection names the three profiles"
+      true
+      (contains
+         "docker, microvm, remote_ssh"
+         (Keeper_types_profile.tool_result_body result))
+  | Ok _ ->
+    fail "a keeper_up call that states no sandbox_profile must be rejected"
+;;
+
 (* task-895: parse used to read its fields and silently drop the rest — a
    caller sending merge_existing / keep_warm / stash_untracked watched the
    field vanish with no error. The gate must reject every key the parse body
@@ -1266,7 +1298,7 @@ let test_parse_rejects_unknown_keys () =
   List.iter
     (fun (label, field) ->
        match
-         Keeper_turn_up_args.parse ctx
+         parse_stating_a_profile ctx
            (`Assoc [ "name", `String "unknown-args-fixture"; field ])
        with
        | Error result ->
@@ -1286,7 +1318,7 @@ let test_parse_rejects_unknown_keys () =
        ])
     (List.sort String.compare Keeper_turn_up_args.known_turn_up_args);
   (match
-     Keeper_turn_up_args.parse ctx
+     parse_stating_a_profile ctx
        (`Assoc
           [ "name", `String "unknown-args-fixture"
           ; "zzz_late", `Bool true
@@ -1299,7 +1331,7 @@ let test_parse_rejects_unknown_keys () =
        (contains "aaa_early" body && contains "zzz_late" body)
    | Ok _ -> fail "multiple unknown keys were silently accepted");
   (match
-     Keeper_turn_up_args.parse ctx
+     parse_stating_a_profile ctx
        (`Assoc
           [ "name", `String "unknown-args-fixture"
           (* The tool schema defaults this to "docker"; [parse] is called
@@ -1353,6 +1385,10 @@ let () =
             "requested profile wins over the TOML fallback"
             `Quick
             test_requested_sandbox_profile_wins_over_the_toml_fallback
+        ; test_case
+            "a call that states no sandbox_profile is rejected"
+            `Quick
+            test_parse_requires_a_sandbox_profile
         ; test_case
             "remote endpoint required and registry-resolved"
             `Quick

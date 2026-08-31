@@ -415,7 +415,11 @@ let decode_current_meta fields =
       ; instructions
       ; sandbox_profile
       ; sandbox_image = None
-      ; network_mode = default_network_mode_for_profile sandbox_profile
+      (* Not derived from the placeholder above: deriving one placeholder from
+         another gave this field [Network_none], and a profile resolved later
+         as [remote_ssh] rejects that outright. [Network_inherit] is the value
+         every profile accepts, which is what a placeholder has to be. *)
+      ; network_mode = Keeper_types_profile.Network_inherit
       ; mention_targets = []
       ; proactive = { enabled = default_proactive_enabled }
       ; always_allow = None

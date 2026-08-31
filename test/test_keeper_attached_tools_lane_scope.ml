@@ -262,6 +262,7 @@ let test_a_carried_tool_is_part_of_the_agent_core_identity_projection () =
     let actual = tool_names bundle.Keeper_tools_agent_core.agent_core_tools in
     let identity_names =
       Keeper_run_tools_setup.agent_core_identity_names
+        ~deferred_builtin_names:bundle.Keeper_tools_agent_core.deferred_builtin_names
         ~attached_names:[ jira; "atlassian_confluence_search" ]
         ~actual_names:actual
     in
@@ -298,6 +299,7 @@ let test_an_unknown_actual_tool_stays_out_of_the_identity_expectation () =
     "a configured carried tool is expected, an unknown actual tool is not"
     [ jira; Keeper_identity_tool_search.tool_name ]
     (Keeper_run_tools_setup.agent_core_identity_names
+       ~deferred_builtin_names:[]
        ~attached_names:[ jira ]
        ~actual_names:[ jira; "unconfigured_service_tool" ])
 ;;
@@ -342,6 +344,8 @@ let test_a_declared_tool_this_conversation_ran_is_not_reported_as_held () =
         ~skill_catalog:Keeper_skill_catalog.empty
         ~identity_names:
           (Keeper_run_tools_setup.agent_core_identity_names
+             ~deferred_builtin_names:
+               bundle.Keeper_tools_agent_core.deferred_builtin_names
              ~attached_names:[ "atlassian_jira_search"; "atlassian_confluence_search" ]
              ~actual_names:listed)
         ~model_visible_descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
@@ -354,6 +358,16 @@ let test_a_declared_tool_this_conversation_ran_is_not_reported_as_held () =
       (List.sort_uniq String.compare listed))
 ;;
 
+let test_deferred_builtins_require_the_listing_without_an_attached_service () =
+  check
+    (list string)
+    "the shared listing is projected for a deferred built-in alone"
+    [ Keeper_identity_tool_search.tool_name ]
+    (Keeper_run_tools_setup.agent_core_identity_names
+       ~deferred_builtin_names:[ "keeper_ide_annotate" ]
+       ~attached_names:[]
+       ~actual_names:[ Keeper_identity_tool_search.tool_name ])
+;;
 let () =
   run
     "attached tools lane scope"
@@ -386,6 +400,10 @@ let () =
             "does not explain an unknown actual tool"
             `Quick
             test_an_unknown_actual_tool_stays_out_of_the_identity_expectation
+        ; test_case
+            "projects the listing for a deferred built-in alone"
+            `Quick
+            test_deferred_builtins_require_the_listing_without_an_attached_service
         ] )
     ]
 ;;

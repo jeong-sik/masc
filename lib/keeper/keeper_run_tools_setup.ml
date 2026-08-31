@@ -178,12 +178,18 @@ let partition_by_presence ~names ~actual_names =
 ;;
 
 (* Present: the listing plus whatever attached schemas were carried in. The
-   listing is expected even when it is accidentally absent from the actual
-   surface, which is the one thing the check must still catch. *)
-let agent_core_identity_names ~attached_names ~actual_names =
-  match attached_names with
-  | [] -> []
-  | _ :: _ ->
+   listing is shared by deferred built-ins and attached services, so either
+   kind requires it even when no attached schema was carried. It remains
+   expected when accidentally absent from the actual surface, which is the
+   one thing the check must still catch. *)
+let agent_core_identity_names
+      ~deferred_builtin_names
+      ~attached_names
+      ~actual_names
+  =
+  match deferred_builtin_names, attached_names with
+  | [], [] -> []
+  | _ ->
     let present, (_ : string list) =
       partition_by_presence ~names:attached_names ~actual_names
     in
@@ -605,6 +611,7 @@ let prepare_agent_setup
               keeper_agent_core_tools))
     ~identity_names:
       (agent_core_identity_names
+         ~deferred_builtin_names:keeper_deferred_builtin_names
          ~attached_names
          ~actual_names:agent_core_actual_names)
     keeper_agent_core_tools;

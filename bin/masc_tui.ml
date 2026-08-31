@@ -1395,6 +1395,7 @@ type async_msg =
   | Fusion_detail_loaded of
       int * string * (Masc.Tui_decode.fusion_detail, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
+  | Memory_loaded of (Masc.Tui_decode.memory_health_snapshot, string) result
   | Repository_changes_loaded of
       string * (Masc.Tui_decode.repository_change_snapshot, string) result
   (* Carries the keeper it was asked about. The surface can be pointed at a
@@ -3164,6 +3165,25 @@ let launch_repositories_load state ~mailbox =
       enqueue_async mailbox
         (Repositories_loaded (Error "Eio switch is unavailable"))
 
+let launch_memory_health_load state ~mailbox =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_memory_health ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Memory_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox (Memory_loaded (Error "Eio switch is unavailable"))
+
 let launch_repository_changes_load state ~mailbox ~repository_id =
   let host = server_peer_host in
   let port = state.port in
@@ -3568,6 +3588,7 @@ let search_row_cursor state =
       if Option.is_some state.verification_detail_request_id then None
       else Some state.verification_cursor
   | Harness -> Some state.harness_cursor
+  | Memory -> Some state.memory_health_cursor
   | Repositories ->
       Some
         (if state.repository_changes_open then state.repository_changes_cursor
@@ -3622,6 +3643,9 @@ let search_land state index =
   | Harness ->
       state.harness_cursor <- index;
       follow state.harness_scroll (fun s -> state.harness_scroll <- s)
+  | Memory ->
+      state.memory_health_cursor <- index;
+      follow state.memory_health_scroll (fun s -> state.memory_health_scroll <- s)
   | Repositories ->
       if state.repository_changes_open then begin
         state.repository_changes_cursor <- index;
@@ -3731,6 +3755,7 @@ let goto_surface state ~mailbox (destination : surface) =
         | Fusion_list -> ()
         | Fusion_detail run_id ->
             launch_fusion_detail_load state ~mailbox ~run_id)
+   | Memory -> launch_memory_health_load state ~mailbox
    | Repositories -> launch_repositories_load state ~mailbox
    | Changes -> (
        (* The surface follows whoever is selected on Keepers. Arriving with a
@@ -4742,7 +4767,7 @@ let selected_surface_reference state =
         (List.nth_opt (approval_items state) state.approval_cursor)
         approval_row_reference
   | Acting
-  | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
+  | Memory | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
   | Code | System_logs -> None
 
 let next_board_sort = function
@@ -8303,6 +8328,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.repositories <- Some snapshot;
           state.repositories_error <- None
       | Error detail -> state.repositories_error <- Some detail)
+  | Memory_loaded result -> (
+      match result with
+      | Ok snapshot ->
+          state.memory_health <- Some snapshot;
+          state.memory_health_error <- None
+      | Error detail -> state.memory_health_error <- Some detail)
   | Repository_changes_loaded (repository_id, result) ->
       if
         state.repository_changes_open
@@ -8618,7 +8649,7 @@ let terminal_title_visible_keeper state =
       Option.map
         (fun (keeper : keeper) -> keeper.k_name)
         (selected_keeper state)
-  | Overview | Acting | Lanes | Board | Approvals | Planning | Schedules
+  | Overview | Acting | Memory | Lanes | Board | Approvals | Planning | Schedules
   | Verification | Harness | Fusion | Repositories | Changes | Connectors
   | Runtime | Config | Resources | Tools | System_logs -> None
 ;;
@@ -9043,7 +9074,7 @@ let main () =
     match state.view with
     | Approvals -> Option.bind !presented_approval approval_row_reference
     | Overview | Acting | Keepers _ | Lanes | Board | Planning | Schedules
-    | Verification | Harness | Fusion | Repositories | Changes | Connectors
+    | Memory | Verification | Harness | Fusion | Repositories | Changes | Connectors
     | Runtime | Config | Resources | Code | Tools | System_logs ->
         selected_surface_reference state
   in
@@ -11610,7 +11641,7 @@ and is loaded on demand through keeper_skill.
                   | Code -> Option.is_some state.code_file
                   | Acting | Keepers _ | Lanes | Approvals | Planning
                   | Schedules | Verification | Harness | Fusion
-                  | Repositories | Changes | Connectors | Runtime | Config
+                  | Memory | Repositories | Changes | Connectors | Runtime | Config
                   | Tools | System_logs -> false) ->
            let focus = if key = Some "h" then Left_pane else Right_pane in
            (match state.view with
@@ -11624,7 +11655,7 @@ and is loaded on demand through keeper_skill.
             | Code when Option.is_some state.code_file ->
                 state.code_focus_file <- focus
             | Acting | Keepers _ | Lanes | Approvals | Planning | Schedules
-            | Verification | Harness | Fusion | Repositories | Changes
+            | Memory | Verification | Harness | Fusion | Repositories | Changes
             | Connectors | Runtime | Config | Code | Tools
             | System_logs -> ())
        | Some k when Masc_tui_keys.opens_keepers ~message_mode k ->
@@ -11830,7 +11861,7 @@ and is loaded on demand through keeper_skill.
                  (* The notice is a static pane; there is nothing to page. *)
                  | Lanes_lane_notice _ | Lanes_overview -> ())
             | Overview | Acting | Keepers _ | Approvals | Planning
-            | Repositories | Changes | Connectors
+            | Memory | Repositories | Changes | Connectors
             | Runtime | Config | Tools | Resources | System_logs -> ())
        | Some "r" | Some "R" ->
            state.pending_approval_action <- None;
@@ -11893,6 +11924,7 @@ and is loaded on demand through keeper_skill.
                  | Fusion_detail run_id ->
                      launch_fusion_detail_load state ~mailbox:async_messages
                        ~run_id)
+            | Memory -> launch_memory_health_load state ~mailbox:async_messages
             | Repositories ->
                 if state.repository_changes_open then
                   (match state.repository_changes_repo_id with
@@ -12129,7 +12161,7 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_scroll <- 0
                 end
                 else state.view <- Overview
-            | Connectors | Runtime
+            | Memory | Connectors | Runtime
             | Config | Tools
             | System_logs -> state.view <- Overview)
        | Some "left" ->
@@ -12237,7 +12269,7 @@ and is loaded on demand through keeper_skill.
                  | Lanes_overview -> ())
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
             | Keepers Keeper_list | Acting | Approvals
-            | Repositories | Connectors | Runtime | Config | Tools
+            | Memory | Repositories | Connectors | Runtime | Config | Tools
             | System_logs -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
@@ -12490,6 +12522,14 @@ and is loaded on demand through keeper_skill.
                    in
                    state.harness_cursor <- cursor;
                    state.harness_scroll <- scroll)
+            | Memory ->
+                let cursor, scroll =
+                  move_row_cursor state ~delta:1
+                    ~cursor:state.memory_health_cursor
+                    ~scroll:state.memory_health_scroll
+                in
+                state.memory_health_cursor <- cursor;
+                state.memory_health_scroll <- scroll
             | Repositories ->
                 if state.repository_changes_open then
                   let cursor, scroll =
@@ -12798,6 +12838,14 @@ and is loaded on demand through keeper_skill.
                    in
                    state.harness_cursor <- cursor;
                    state.harness_scroll <- scroll)
+            | Memory ->
+                let cursor, scroll =
+                  move_row_cursor state ~delta:(-1)
+                    ~cursor:state.memory_health_cursor
+                    ~scroll:state.memory_health_scroll
+                in
+                state.memory_health_cursor <- cursor;
+                state.memory_health_scroll <- scroll
             | Repositories ->
                 if state.repository_changes_open then
                   let cursor, scroll =
@@ -13126,6 +13174,10 @@ and is loaded on demand through keeper_skill.
                          launch_code_file_load state ~mailbox:async_messages
                            ~path:change.rc_path)
                 | _ -> ())
+            | Memory -> (
+                (* The detail panel already follows the cursor, so Enter has
+                   no second view to open here. *)
+                ())
             | Repositories -> (
                 (* Enter opens the repository's own tree on the Code surface,
                    through the ?repo_id= axis its row already names. *)
@@ -13287,7 +13339,7 @@ and is loaded on demand through keeper_skill.
                  | None -> ())
             | Overview | Acting | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
             | Lanes | Board | Approvals | Planning | Schedules
-            | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
+            | Memory | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
             | System_logs -> ())
        | Some "d" when state.view = Changes ->
            (* The same file, read from the tree instead of from the log. Two
@@ -13543,7 +13595,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_params ->
            handle_runtime_param_clear ()
@@ -13653,7 +13705,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
             | Code -> ()
@@ -13696,7 +13748,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Schedules | Verification | Harness
-            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
@@ -13719,7 +13771,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs
+            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs
             -> ())
        | Some "E"
          when state.view = Config && state.config_pane = Config_params ->
@@ -13780,7 +13832,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs -> ())
+            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs -> ())
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_prompts ->
            handle_prompt_clear ()
@@ -13806,7 +13858,7 @@ and is loaded on demand through keeper_skill.
                    so answering a Keeper's question opens as its own mode. *)
                 enter_ask_answering state
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
-            | Keepers Keeper_message | Lanes
+            | Keepers Keeper_message | Memory | Lanes
             | Board | Planning | Schedules | Harness
             | Fusion | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
       | _ -> ());
@@ -13955,6 +14007,10 @@ and is loaded on demand through keeper_skill.
               | Fusion_detail run_id ->
                   launch_fusion_detail_load state ~mailbox:async_messages
                     ~run_id)
+         | Memory ->
+             (* Fleet memory health is a reading, so the tick refreshes it
+                like the listings above. *)
+             launch_memory_health_load state ~mailbox:async_messages
          | Repositories ->
              (* Registration and keeper assignment change from elsewhere, so
                 the list is refreshed on the tick like the surfaces above. *)

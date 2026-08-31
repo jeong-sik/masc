@@ -558,6 +558,39 @@ type repository_change_snapshot = {
   rcs_total : int;
 }
 
+type memory_alert = {
+  ma_code : string;
+  ma_severity : string;
+  ma_label : string;
+  ma_message : string;
+}
+
+type memory_keeper_health = {
+  mkh_keeper_id : string;
+  mkh_revision : int;
+  mkh_facts : int;
+  mkh_snapshot_bytes : int;
+  mkh_added : int;
+  mkh_removed : int;
+  mkh_snapshot_present : bool;
+  mkh_librarian_lane_busy : int;
+  mkh_librarian_failures : int;
+  mkh_read_error : string option;
+  mkh_alerts : memory_alert list;
+}
+
+type memory_health_snapshot = {
+  mhs_generated_at : float;
+  mhs_keepers : memory_keeper_health list;
+  mhs_total_facts : int;
+  mhs_total_snapshot_bytes : int;
+  mhs_total_librarian_failures : int;
+  mhs_total_read_errors : int;
+  mhs_warn_alerts : int;
+  mhs_error_alerts : int;
+  mhs_starving_keepers : int;
+}
+
 (** One verdict the harness recorded: which gate ran on which task, what it
     decided, and which evaluator decided it. *)
 type harness_verdict = {
@@ -1398,6 +1431,12 @@ val decode_repository_snapshot :
 
 val decode_repository_change_snapshot :
   Yojson.Safe.t -> (repository_change_snapshot, string) result
+
+val decode_memory_health_snapshot :
+  Yojson.Safe.t -> (memory_health_snapshot, string) result
+(** Decode the fleet memory-health snapshot served at
+    [/api/v1/dashboard/keeper-memory-health]. Every consumed field is
+    required: a keeper the server left out is invisible here, not defaulted. *)
 
 val decode_harness_snapshot :
   Yojson.Safe.t -> (harness_snapshot, string) result

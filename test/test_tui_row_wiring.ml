@@ -151,6 +151,18 @@ let test_repositories_show_the_server_resolved_checkout_path () =
   Alcotest.(check bool) "and keeps assignment in the selected-row context" true
     (reads ~binding_name:"repository_context_lines" ~fields:[ "rp_keepers" ] > 0)
 
+let test_memory_surface_keeps_the_starvation_axes () =
+  (* The renderer must keep reading the two fields the server grades a
+     starving keeper by: a row that stops reading one of them would render
+     starvation as ordinary health. *)
+  List.iter
+    (fun field ->
+      Alcotest.(check bool) ("memory_row_style reads " ^ field) true
+        (reads ~binding_name:"memory_row_style" ~fields:[ field ] > 0))
+    [ "mkh_snapshot_present"; "mkh_librarian_failures" ];
+  Alcotest.(check bool) "the title names the starving count" true
+    (reads ~binding_name:"render_memory" ~fields:[ "mhs_starving_keepers" ] > 0)
+
 let test_repository_changes_keep_the_git_axes () =
   let producer = "lib/server/server_routes_http_routes_repositories.ml" in
   Alcotest.(check int) "the route reads exact Git status rows" 1
@@ -268,6 +280,8 @@ let () =
             `Quick test_repositories_show_the_server_resolved_checkout_path
         ; Alcotest.test_case "Repository changes keep the Git axes" `Quick
             test_repository_changes_keep_the_git_axes
+        ; Alcotest.test_case "Memory surface keeps the starvation axes" `Quick
+            test_memory_surface_keeps_the_starvation_axes
         ; Alcotest.test_case "a turn on a keeper that is not running stops"
             `Quick test_a_turn_on_a_keeper_that_is_not_running_stops_moving
         ; Alcotest.test_case "a lane that cannot admit says why" `Quick

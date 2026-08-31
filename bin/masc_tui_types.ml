@@ -1025,6 +1025,7 @@ type surface =
   | Overview
   | Acting
   | Keepers of keeper_mode
+  | Memory
   | Lanes
   | Board
   | Approvals
@@ -1056,6 +1057,7 @@ let surface_ring : (surface * string) list =
   [ (Overview, "Overview");
     (Acting, "Acting");
     (Keepers Keeper_list, "Keepers");
+    (Memory, "Memory");
     (Lanes, "Lanes");
     (Approvals, "Approvals");
     (Board, "Board");
@@ -1155,7 +1157,7 @@ let surface_needs : surface -> surface_needs = function
      different machinery. *)
   | Approvals ->
       { nothing with needs_operator_approvals = true; needs_asks = true }
-  | Lanes | Schedules | Verification | Harness | Fusion
+  | Memory | Lanes | Schedules | Verification | Harness | Fusion
   | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
   | Tools ->
       nothing
@@ -1861,6 +1863,10 @@ type state = {
   mutable repositories_error: string option;
   mutable repositories_scroll: int;
   mutable repositories_cursor: int;
+  mutable memory_health: Tui_decode.memory_health_snapshot option;
+  mutable memory_health_error: string option;
+  mutable memory_health_scroll: int;
+  mutable memory_health_cursor: int;
   mutable repository_changes_open: bool;
   mutable repository_changes_repo_id: string option;
   mutable repository_changes: Tui_decode.repository_change_snapshot option;
@@ -2486,6 +2492,10 @@ let create_state
   repositories_error = None;
   repositories_scroll = 0;
   repositories_cursor = 0;
+  memory_health = None;
+  memory_health_error = None;
+  memory_health_scroll = 0;
+  memory_health_cursor = 0;
   repository_changes_open = false;
   repository_changes_repo_id = None;
   repository_changes = None;
@@ -3051,6 +3061,14 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
           (match state.repositories with
            | None -> 0
            | Some s -> List.length s.Tui_decode.rs_repositories)
+  | Memory ->
+      (* Fleet rows plus the detail panel of the row the cursor names. The
+         panel is one scroll unit: its own height follows the render, and
+         search only needs to land on rows that exist. *)
+      listing ~error:state.memory_health_error
+        (match state.memory_health with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.mhs_keepers + 1)
   | Changes ->
       Some
         { sc_count =
@@ -3179,6 +3197,12 @@ let surface_row_texts (state : state) : surface -> string list option = function
                 r.Tui_decode.rp_name ^ " " ^ r.Tui_decode.rp_default_branch)
               s.Tui_decode.rs_repositories)
           state.repositories
+  | Memory ->
+      Option.map
+        (fun s ->
+          List.map (fun k -> k.Tui_decode.mkh_keeper_id) s.Tui_decode.mhs_keepers
+          @ [ "memory detail" ])
+        state.memory_health
   | Connectors ->
       Option.map
         (fun s ->

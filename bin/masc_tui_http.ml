@@ -1578,6 +1578,13 @@ let fetch_repository_changes ~(host : string) ~(port : int)
        ^ percent_encode_path_segment repository_id
        ^ "/changes")
 
+(** Fetch /api/v1/dashboard/keeper-memory-health: one fleet snapshot with a
+    row per keeper, including keepers with a config but no snapshot — the
+    starvation rows this endpoint exists to expose. *)
+let fetch_keeper_memory_health ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/keeper-memory-health"
+
 (** Fetch /api/v1/dashboard/harness-health. No window is passed: the surface
     shows what the harness decided recently, and a window is a question an
     operator asks in the dashboard rather than a default. *)

@@ -1976,7 +1976,12 @@ def wheel_scrolls_and_clicks_do_not(
         controls=(b"\x1b[2J",),
         final_cursor=b"\x1b[?25l",
     )
-    send_and_wait(process, master_fd, output, b"/", b"/  j/k:move")
+    # An armed search prefixes the footer with its query at the one seam
+    # every surface shares (footer_line). What follows it is the surface's
+    # own hint text -- Keepers spells its first hint "j/k move", and at 100
+    # columns the strip is elided anyway. The prefix is what says the
+    # search is armed.
+    send_and_wait(process, master_fd, output, b"/", b"/  ")
     resize_and_wait(
         process,
         master_fd,

@@ -1160,17 +1160,6 @@ let run_keeper_cycle
                       ~raw_error:e_str
                       err
                   in
-                  (match
-                     registry_failure_reason_of_terminal_reason
-                       terminal_reason
-                       ~raw_error:e_str
-                   with
-                   | Some failure_reason ->
-                     Keeper_registry.set_failure_reason
-                       ~base_path:config.base_path
-                       meta.name
-                       (Some failure_reason)
-                   | None -> ());
                   Keeper_unified_metrics.append_decision_record
                     ~config
                     ~meta:updated_meta
@@ -1190,6 +1179,22 @@ let run_keeper_cycle
                     ~before:meta
                     ~after:updated_meta
                   |> ignore;
+                  (* Finish the Keeper Owner commit and its exact registry
+                     projection before storing the live failure observation.
+                     The two registry writes must not race on different entry
+                     snapshots. *)
+                  (match
+                     registry_failure_reason_of_terminal_reason
+                       ~core_error:err
+                       terminal_reason
+                       ~raw_error:e_str
+                   with
+                   | Some failure_reason ->
+                     Keeper_registry.set_failure_reason
+                       ~base_path:config.base_path
+                       meta.name
+                       (Some failure_reason)
+                   | None -> ());
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string WriteMetaCycleFailures)
                     ~labels:[ "keeper", meta.name; "site", Keeper_write_meta_cycle_failure_site.(to_label Turn_failure) ]

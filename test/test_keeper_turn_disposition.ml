@@ -266,6 +266,39 @@ let test_registry_failure_reason_does_not_classify_free_form_detail () =
   check_runtime_failure_reason raw_error "runtime_exhausted_provider_failure"
 ;;
 
+let test_registry_failure_reason_preserves_typed_configuration_error () =
+  let core_error =
+    Agent_core.Error.Config
+      (Agent_core.Error.InvalidConfig
+         { field = "provider_credential"
+         ; detail = "required provider credential is missing"
+         })
+  in
+  let raw_error = Agent_core.Error.to_string core_error in
+  let terminal = Legacy.of_failure ~raw_error core_error in
+  match
+    Unified_types.registry_failure_reason_of_terminal_reason
+      ~core_error
+      terminal
+      ~raw_error
+  with
+  | Some (Registry.Turn_configuration_error { code; field; detail }) ->
+    Alcotest.(check string) "configuration code" "invalid_config" code;
+    Alcotest.(check (option string))
+      "configuration field"
+      (Some "provider_credential")
+      field;
+    Alcotest.(check string)
+      "configuration detail"
+      "required provider credential is missing"
+      detail
+  | Some other ->
+    Alcotest.failf
+      "expected Turn_configuration_error, got %s"
+      (Registry.failure_reason_to_string other)
+  | None -> Alcotest.fail "expected typed configuration failure reason"
+;;
+
 let empty_turn_state : Unified_types.turn_state =
   { cycle_completed = false
   ; manifest_seq = 0
@@ -351,6 +384,10 @@ let () =
             "free-form runtime detail stays generic"
             `Quick
             test_registry_failure_reason_does_not_classify_free_form_detail
+        ; Alcotest.test_case
+            "typed configuration error stays typed"
+            `Quick
+            test_registry_failure_reason_preserves_typed_configuration_error
         ] )
     ; ( "turn finalization"
       , [ Alcotest.test_case

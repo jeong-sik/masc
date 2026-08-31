@@ -15,6 +15,8 @@ type failure_reason =
       agent_core_timeout : Keeper_turn_terminal_code.agent_core_timeout option;
       reason : Keeper_meta_contract.runtime_exhaustion_reason option;
     }
+  | Turn_configuration_error of { code : string; field : string option;
+      detail : string; }
   | Fiber_unresolved of fiber_drop_cause
   | Exception of string
   | Turn_overflow_failure

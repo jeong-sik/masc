@@ -80,6 +80,7 @@ val turn_event_bus_manifest_decision :
     (Success, External_cancel, timeouts, etc.). [raw_error] is truncated
     via [Keeper_types_profile.short_preview]. *)
 val registry_failure_reason_of_terminal_reason :
+  ?core_error:Agent_core.Error.t ->
   Keeper_turn_terminal.t ->
   raw_error:string ->
   Keeper_registry.failure_reason option

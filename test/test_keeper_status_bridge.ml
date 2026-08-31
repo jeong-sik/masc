@@ -368,6 +368,11 @@ let every_failure_reason : Keeper_registry.failure_reason list =
       ; agent_core_timeout = None
       ; reason = Some Keeper_meta_contract.Connection_refused
       }
+  ; Keeper_registry.Turn_configuration_error
+      { code = "invalid_config"
+      ; field = Some "provider_credential"
+      ; detail = "required provider credential is missing"
+      }
   ; Keeper_registry.Turn_overflow_failure
   ; Keeper_registry.Operator_interrupt
   ; Keeper_registry.Exception "boom"
@@ -445,6 +450,7 @@ let test_undecodable_blocker_classes_are_named_not_counted () =
     ; "provider_runtime_error"
     ; "stale_termination_storm"
     ; "turn_failures"
+    ; "turn_configuration_error"
     ; "turn_overflow_failure"
     ]
     undecodable

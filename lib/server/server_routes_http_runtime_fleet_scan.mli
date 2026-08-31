@@ -69,6 +69,7 @@ type keeper_phase_snapshot = {
   counts : keeper_phase_counts;
   running_names : string list;
   recovering_names : string list;
+  configuration_blocked_names : string list;
   phase_values : (string * Keeper_state_machine.phase) list;
   phase_details : (string * keeper_phase_detail) list;
 }

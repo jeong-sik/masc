@@ -7565,7 +7565,10 @@ def schedule_detail_interaction() -> Interaction:
         listing_plain = CSI_RE.sub(b"", listing)
         for needle in (
             b"wake:succeeded",
-            b"dispatch:running",
+            # The list used to carry a dispatch chip beside these. #31562
+            # dropped it because it only ever repeated the row's own status,
+            # which the identity line above the delivery row already names.
+            b"status:running",
             b"queue:matched_pending/2 pending",
             b"reaction:matched_recorded",
         ):

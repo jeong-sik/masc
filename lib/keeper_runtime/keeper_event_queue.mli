@@ -108,9 +108,9 @@ type stimulus_payload =
           remember to go and look — which is why no keeper had asked. *)
       (** A nonblocking HITL approval this keeper enqueued was resolved. Wakes
           the keeper so it re-evaluates immediately instead of waiting for an
-          unrelated stimulus, no-progress recovery, or the 30-minute approval
-          janitor. Blocking approvals resume their resolver directly and do not
-          emit this duplicate wake. Mirrors [Fusion_completed]. *)
+          unrelated stimulus or no-progress recovery. Blocking approvals
+          resume their resolver directly and do not emit this duplicate
+          wake. Mirrors [Fusion_completed]. *)
   | Completion_authority_rejected of completion_authority_rejection
       (** A system completion authority rejected this Keeper's submitted
           evidence. The event is delivered to the producer Keeper as typed

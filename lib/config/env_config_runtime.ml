@@ -575,14 +575,6 @@ module InternalTimers = struct
   let stalled_session_threshold_sec =
     get_float ~default:300.0 "MASC_STALLED_SESSION_THRESHOLD_SEC"
 
-  (** Bootstrap janitor tick interval (seconds). Drives the SSE/session/
-      rate-limit reaper loop in [server_bootstrap_loops]. Default:
-      60 (1 min). Shorter interval reclaims stale connections faster at
-      the cost of more wake-ups; longer interval is fine if the process
-      is sized for the steady-state connection count. *)
-  let janitor_interval_sec =
-    get_float ~default:60.0 "MASC_JANITOR_INTERVAL_SEC"
-
   (** Repository auto-sync interval (seconds). The repo_sync fiber in
       [server_bootstrap_loops] wakes at this cadence to fetch repositories
       with [auto_sync = true]. Default: 300 (5 min). *)
@@ -591,7 +583,7 @@ module InternalTimers = struct
     if value > 0.0 then value else 300.0
 
   (** Rate-limit bucket staleness TTL (seconds). Buckets with no traffic for
-      this long are reaped by the janitor loop. Default: 300 (5 min). Raise
+      this long are dropped by the maintenance loop. Default: 300 (5 min). Raise
       for longer client quiet periods; lower to free memory faster under
       churn. [Rate_limit.cleanup] takes an int, so this is int-typed. *)
   let rate_limit_bucket_ttl_sec =

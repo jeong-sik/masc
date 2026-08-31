@@ -529,6 +529,20 @@ let rec release_auto_judge (entry : Keeper_approval_queue_rules_types.pending_ap
   | Some _ | None -> ()
 ;;
 
+(* Whether this process holds a live in-memory admission for [entry]. Because
+   [claim_auto_judge] precedes every [reserve_pre_worker_start] and the set is
+   reset empty on process start, a durable start reservation is live iff its id
+   is admitted here. A stranded reservation (its claiming process gone) is
+   absent, which is what boot recovery relies on to reclaim only orphans. *)
+let auto_judge_entry_claimed
+      (entry : Keeper_approval_queue_rules_types.pending_approval)
+  =
+  let active = Atomic.get active_auto_judges in
+  match Auto_judge_owners.find_opt (auto_judge_owner entry) active with
+  | Some active_ids -> Auto_judge_ids.mem entry.id active_ids
+  | None -> false
+;;
+
 let active_auto_judges_for_owner ~base_path ~keeper_name =
   Auto_judge_owners.find_opt
     (base_path, keeper_name)
@@ -1287,6 +1301,50 @@ type recovered_work =
       Keeper_approval_queue_rules_types.pending_approval
       * Keeper_approval_queue_rules_types.hitl_context_summary
 
+(* Reclaim a start reservation orphaned by a hard restart: the graceful settle
+   to identity-unbound runs only in memory, so a process death in the
+   reserve->bind window strands the durable start-reserved row. Only a row this
+   process does not hold a live admission for is reclaimed, so a reservation
+   still in flight is never disturbed. On success the in-memory entry is
+   advanced to ready so the caller's classification re-activates a worker. *)
+let reclaim_orphaned_start_reservation
+      (entry : Keeper_approval_queue_rules_types.pending_approval)
+  =
+  match entry.summary_attempt_disposition with
+  | Keeper_approval_queue_rules_types.Summary_attempt_pre_worker_unavailable
+      { reason_code =
+          Keeper_approval_queue_rules_types.Summary_pre_worker_start_reserved
+      ; _
+      }
+    when not (auto_judge_entry_claimed entry) ->
+    (match
+       Keeper_approval_queue.release_orphaned_start_reservation
+         ~base_path:entry.audit_base_path
+         ~id:entry.id
+         ~input_hash:entry.input_hash
+         ~sequence:entry.sequence
+     with
+     | Ok true ->
+       Log.Keeper.warn
+         ~keeper_name:entry.keeper_name
+         "reclaimed orphaned Auto Judge start reservation approval=%s at boot \
+          recovery"
+         entry.id;
+       { entry with
+         summary_attempt_disposition =
+           Keeper_approval_queue_rules_types.Summary_attempt_ready
+       }
+     | Ok false -> entry
+     | Error error ->
+       Log.Keeper.error
+         ~keeper_name:entry.keeper_name
+         "orphaned Auto Judge start reservation reclaim failed approval=%s: %s"
+         entry.id
+         (Keeper_approval_queue.exact_attempt_error_to_string error);
+       entry)
+  | _ -> entry
+;;
+
 let recovered_work_for_base_path ~base_path =
   (* Boot recovery admits owners by their EFFECTIVE mode, mirroring
      [drain_auto_judges]: a keeper override held in auto_judge above a
@@ -1307,6 +1365,7 @@ let recovered_work_for_base_path ~base_path =
   else
     Keeper_approval_queue.list_pending_entries_for_workspace ~base_path
     |> Result.map (fun entries ->
+    let entries = List.map reclaim_orphaned_start_reservation entries in
     let owners =
       List.fold_left
         (fun owners (entry : Keeper_approval_queue_rules_types.pending_approval) ->

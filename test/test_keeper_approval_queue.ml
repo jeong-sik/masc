@@ -3086,6 +3086,80 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
        reject_and_cleanup ~base_path id)
 ;;
 
+let test_orphaned_start_reservation_reclaims_to_ready () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name:"queue-orphan-start"
+           ~input:(`String "orphan-start")
+       in
+       check_update
+         "mark orphan-start pending"
+         true
+         (AQ.mark_summary_pending ~id);
+       let entry = pending_entry_exn id in
+       (* Reserve the worker start exactly as [reserve_pre_worker_start] does, then
+          treat a hard restart as leaving the durable row stranded: the in-memory
+          settle to identity-unbound never ran. *)
+       (match
+          AQ.mark_summary_attempt_pre_worker_unavailable
+            ~base_path
+            ~id
+            ~input_hash:entry.input_hash
+            ~sequence:entry.sequence
+            ~reason_code:Rule_types.Summary_pre_worker_start_reserved
+            ~operator_detail:AQ.summary_attempt_start_reserved_operator_detail
+        with
+        | Ok true -> ()
+        | Ok false -> Alcotest.fail "start reservation was not stored"
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error));
+       let reserved = pending_entry_exn id in
+       (match
+          AQ.release_orphaned_start_reservation
+            ~base_path
+            ~id
+            ~input_hash:reserved.input_hash
+            ~sequence:reserved.sequence
+        with
+        | Ok true -> ()
+        | Ok false ->
+          Alcotest.fail "orphaned start reservation was not reclaimed"
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error));
+       (match AQ.For_testing.get_pending_entry_unchecked ~id with
+        | Some
+            { summary_status = Rule_types.Summary_pending
+            ; exact_attempt = Rule_types.Exact_unbound
+            ; summary_attempt_disposition = Rule_types.Summary_attempt_ready
+            ; _
+            } ->
+          ()
+        | Some _ ->
+          Alcotest.fail "reclaim did not restore the ready disposition"
+        | None -> Alcotest.fail "reclaim removed the pending row");
+       (* A ready row is not a start reservation: a second reclaim is a no-op and
+          never disturbs a row it should not own. *)
+       let ready = pending_entry_exn id in
+       (match
+          AQ.release_orphaned_start_reservation
+            ~base_path
+            ~id
+            ~input_hash:ready.input_hash
+            ~sequence:ready.sequence
+        with
+        | Ok false -> ()
+        | Ok true ->
+          Alcotest.fail "reclaim touched a row that was not a start reservation"
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error));
+       reject_and_cleanup ~base_path id)
+;;
+
 let test_operator_recovery_skips_terminal_exact_failure () =
   let base_path = temp_dir () in
   let keeper_name = "queue-summary-operator-recovery" in
@@ -4783,6 +4857,10 @@ let () =
             "blocked disposition requires operator rearm before bind"
             `Quick
             test_blocked_disposition_requires_operator_rearm_before_bind
+        ; Alcotest.test_case
+            "orphaned start reservation reclaims to ready"
+            `Quick
+            test_orphaned_start_reservation_reclaims_to_ready
         ; Alcotest.test_case
             "malformed snapshot is explicit"
             `Quick

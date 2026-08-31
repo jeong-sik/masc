@@ -2766,6 +2766,34 @@ let mark_summary_attempt_pre_worker_unavailable
          | _ -> None)
 ;;
 
+let release_orphaned_start_reservation ~base_path ~id ~input_hash ~sequence =
+  (* Boot-recovery reclaim of a start reservation that a hard process restart
+     orphaned. [mark_summary_attempt_pre_worker_unavailable] writes the durable
+     [Summary_pre_worker_start_reserved] row; the graceful in-memory settle to
+     [Summary_attempt_identity_unbound] (worker terminates before binding) never
+     runs when the whole process dies in the reserve->bind window, so the row is
+     stranded. This is that arm's exact reverse: an unbound start reservation
+     returns to [Summary_attempt_ready] so boot recovery re-activates a worker.
+     Distinct from [reserve_summary_attempt_retry], the operator path that never
+     reclaims a start reservation. Any other row shape is left untouched. *)
+  transition_summary_attempt
+    ~base_path
+    ~id
+    ~input_hash
+    ~sequence
+    (fun (entry : pending_approval) ->
+       match
+         entry.summary_status,
+         entry.exact_attempt,
+         entry.summary_attempt_disposition
+       with
+       | (Summary_not_requested | Summary_pending), Exact_unbound,
+         Summary_attempt_pre_worker_unavailable
+           { reason_code = Summary_pre_worker_start_reserved; _ } ->
+         Some { entry with summary_attempt_disposition = Summary_attempt_ready }
+       | _ -> None)
+;;
+
 let reserve_summary_attempt_retry
       ~base_path
       ~id

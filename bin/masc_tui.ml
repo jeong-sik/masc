@@ -12807,11 +12807,18 @@ and is loaded on demand through keeper_skill.
                         launch_git_diff_load state ~mailbox:async_messages
                           ~keeper:(Some change.Masc.Tui_decode.fc_keeper) ~path)))
        | Some "v" | Some "V"
-         when state.view = Planning || state.view = Verification ->
-           (* Planning is the parent workspace; [v] switches its two child
-              modes without adding Task Review back to the top-level ring. *)
+         when state.view = Planning || state.view = Verification
+              || state.view = Harness ->
+           (* Planning is the parent workspace; [v] walks its three child
+              modes without putting any of them back on the top-level ring.
+              The order is the life of one task verdict: the goals the work
+              hangs off, the queue waiting for a ruling, and the rulings the
+              judge recorded. *)
            goto_surface state ~mailbox:async_messages
-             (if state.view = Planning then Verification else Planning)
+             (match state.view with
+              | Planning -> Verification
+              | Verification -> Harness
+              | Harness | _ -> Planning)
        | Some "v" when state.view = Changes ->
            (* View the selected change on the Code surface. The clone-relative
               address resolves through the same ?keeper= axis the git-diff

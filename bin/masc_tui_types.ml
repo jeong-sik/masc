@@ -997,9 +997,12 @@ type surface =
 (* The Tab cycle and the strip drawn above every surface share this order,
    so the strip cannot disagree with where Tab actually goes. Labels are the
    strip's spelling. Keepers stands for every keeper sub-mode; Planning owns
-   both its Goal view and the Task Review queue. The latter remains a distinct
-   internal surface because it has a different API and permission boundary,
-   but it is not a second top-level destination. *)
+   its Goal view, the Task Review queue, and the Verdicts the judge recorded.
+   Those two remain distinct internal surfaces because each has a different
+   API and permission boundary, but neither is a second top-level
+   destination. Verdicts is the far half of Task Review -- one lists what is
+   waiting for a ruling and the other what was ruled -- and a top-level tab
+   called "Harness" said neither. *)
 let surface_ring : (surface * string) list =
   [ (Overview, "Overview");
     (Acting, "Acting");
@@ -1009,7 +1012,6 @@ let surface_ring : (surface * string) list =
     (Board, "Board");
     (Planning, "Planning");
     (Schedules, "Schedules");
-    (Harness, "Harness");
     (Fusion, "Fusion");
     (Repositories, "Repos");
     (Code, "Code");
@@ -1022,14 +1024,14 @@ let surface_ring : (surface * string) list =
   ]
 
 (* Ring position of the family a view belongs to. Keeper sub-modes collapse
-   onto Keepers, Task Review collapses onto Planning, and Changes collapses
-   onto Keepers -- its rows are one keeper's file writes, chosen by the
-   roster cursor, so it was never a destination of its own. *)
+   onto Keepers, Task Review and Verdicts collapse onto Planning, and Changes
+   collapses onto Keepers -- its rows are one keeper's file writes, chosen by
+   the roster cursor, so it was never a destination of its own. *)
 let surface_ring_index (view : surface) =
   let family =
     match view with
     | Keepers _ -> Keepers Keeper_list
-    | Verification -> Planning
+    | Verification | Harness -> Planning
     | Changes -> Keepers Keeper_list
     | v -> v
   in

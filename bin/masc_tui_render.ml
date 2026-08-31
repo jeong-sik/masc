@@ -2738,26 +2738,35 @@ let planning_phase_color = function
   | Goal_phase.Completed -> (Theme.ok ())
   | Goal_phase.Dropped -> Ansi.gray
 
-(* Planning is one operator workspace with two different authorities behind
-   it: Goal lifecycle and the Task verdict queue. Keep their APIs separate,
-   but make the hierarchy visible in the title instead of presenting two
-   unrelated top-level destinations. *)
-let planning_workspace_title (state : state) ~task_review =
+(* Planning is one operator workspace with three authorities behind it: Goal
+   lifecycle, the Task verdict queue, and the verdicts the judge recorded.
+   Keep their APIs separate, but make the hierarchy visible in the title
+   instead of presenting unrelated top-level destinations.
+
+   Verdicts arrived here from a top-level tab called "Harness", which named a
+   mechanism rather than a thing an operator wants. It is the far half of Task
+   Review: one lists what is waiting for a ruling and the other what was
+   ruled, and they were a screen apart with nothing saying they were the same
+   subject. *)
+type planning_tab = Planning_goals | Planning_task_review | Planning_verdicts
+
+let planning_workspace_title (state : state) ~(tab : planning_tab) =
   let review_count =
     match state.verification with
     | Some snapshot when snapshot.vs_total > 0 ->
         Printf.sprintf "\xc2\xb7%d" snapshot.vs_total
     | Some _ | None -> ""
   in
-  let tab ~active label =
+  let draw ~active label =
     if active then
       (Theme.info ()) ^ Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
     else Ansi.dim ^ label ^ Ansi.reset
   in
-  Printf.sprintf "%s  %s  %s"
+  Printf.sprintf "%s  %s  %s  %s"
     (screen_title " MASC Planning")
-    (tab ~active:(not task_review) "Goals")
-    (tab ~active:task_review ("Task Review" ^ review_count))
+    (draw ~active:(tab = Planning_goals) "Goals")
+    (draw ~active:(tab = Planning_task_review) ("Task Review" ^ review_count))
+    (draw ~active:(tab = Planning_verdicts) "Verdicts")
 
 (* Where the goal stands with the completion judge, in one column. The phase
    reads [executing] both for a goal nobody asked about and for one the judge
@@ -2845,7 +2854,7 @@ let render_planning_list (state : state) =
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let header = Printf.sprintf "%s  order:%s  show:%s  %s  %s"
-    (planning_workspace_title state ~task_review:false)
+    (planning_workspace_title state ~tab:Planning_goals)
     (planning_sort_label state.planning_sort)
     (planning_filter_label state.planning_filter)
     timestamp
@@ -3040,7 +3049,7 @@ let planning_detail_pane (state : state)
   let status_color = planning_phase_color goal.pg_phase in
   let status_label = planning_phase_label goal.pg_phase in
   let header = Printf.sprintf "%s  %s[%s]%s  %s"
-    (planning_workspace_title state ~task_review:false)
+    (planning_workspace_title state ~tab:Planning_goals)
     status_color (fit_width status_label planning_phase_column) Ansi.reset
     (fit_width (Terminal_text.single_line goal.pg_id) 20)
   in
@@ -6636,13 +6645,13 @@ let render_verification_list (state : state) =
     match state.verification with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (planning_workspace_title state ~task_review:true) timestamp
+          (planning_workspace_title state ~tab:Planning_task_review) timestamp
           (connection_badge state)
     | Some snapshot ->
         (* Both numbers, for the same reason the log surface shows both: "12"
            beside a list of 12 would read as "that is all of them". *)
         Printf.sprintf "%s (%d of %d)  %s  %s"
-          (planning_workspace_title state ~task_review:true) shown
+          (planning_workspace_title state ~tab:Planning_task_review) shown
           snapshot.Masc.Tui_decode.vs_total timestamp
           (connection_badge state)
   in
@@ -6881,7 +6890,7 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s"
-       (planning_workspace_title state ~task_review:true ^ " \xe2\x96\xb8 details")
+       (planning_workspace_title state ~tab:Planning_task_review ^ " \xe2\x96\xb8 details")
        (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id));
   box_divider buf cols;
   let width = max 1 (framed_inner_width cols) in
@@ -6986,26 +6995,30 @@ let render_harness_list (state : state) =
     match state.harness with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Harness") timestamp
+          (planning_workspace_title state ~tab:Planning_verdicts) timestamp
           (connection_badge state)
     | Some _ when fallbacks > 0 ->
         (* The count is the reading an operator opens this for: verdicts that
            came from something other than the evaluator the gate names. *)
-        Printf.sprintf "%s (%d verdicts, %d by fallback)  %s  %s"
-          (screen_title " MASC Harness")
+        Printf.sprintf "%s (%d, %d by fallback)  %s  %s"
+          (planning_workspace_title state ~tab:Planning_verdicts)
           shown fallbacks timestamp (connection_badge state)
     | Some _ ->
-        Printf.sprintf "%s (%d verdicts)  %s  %s"
-          (screen_title " MASC Harness") shown timestamp
-          (connection_badge state)
+        Printf.sprintf "%s (%d)  %s  %s"
+          (planning_workspace_title state ~tab:Planning_verdicts) shown
+          timestamp (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  (* The tab name alone says nothing; the surface introduces itself. *)
+  (* The tab name alone says nothing; the surface introduces itself. Said in
+     terms of the queue next door, because that is the other half of it: Task
+     Review is what is still waiting for a ruling and this is what was ruled,
+     by whom, and where a fallback answered instead of the evaluator the Gate
+     names. *)
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  Task verification verdicts \xe2\x80\x94 which evaluator judged each one, \
-     and which rows a fallback answered for.";
+    "  Rulings on the tasks Task Review was waiting on \xe2\x80\x94 who judged \
+     each one, and where a fallback answered instead.";
   (* A ledger that quietly stopped is this screen's own failure mode: it once
      starved for a month while the judge kept running, and the stale rows
      read as a working gate. Say the age instead of letting old rows pass as
@@ -7249,7 +7262,8 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s  %s"
-       (screen_title " MASC Harness \xe2\x96\xb8 verdict")
+       (planning_workspace_title state ~tab:Planning_verdicts
+        ^ " \xe2\x96\xb8 verdict")
        (Terminal_text.single_line verdict.Masc.Tui_decode.hv_task_id)
        (connection_badge state));
   box_divider buf cols;
@@ -7296,7 +7310,7 @@ let render_harness_detail (state : state) verdict =
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
-      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Harness"
+      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Verdicts"
         ~focused:false ~labels ~selected:state.harness_cursor;
       let answer =
         harness_detail_pane state ~rows ~cols:(cols - left_cols) verdict

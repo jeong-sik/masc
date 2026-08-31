@@ -7,6 +7,7 @@ open Masc_tui_ansi
 module Frame_presenter = Masc_tui_frame_presenter
 module Ask_projection = Masc_tui_ask_projection
 module Board_detail = Masc_tui_board_detail
+module Magnitude = Masc_tui_magnitude
 module Board_comment_thread = Masc_tui_board_comment_thread
 module Message_layout = Masc_tui_message_layout
 module Metrics_tail = Masc_tui_metrics_tail
@@ -2955,6 +2956,14 @@ let planning_updated_age ~now (goal : planning_goal) =
         (Masc_domain.parse_iso8601_opt iso)
 
 (** Render the Planning surface (list view). *)
+(* Three steps for three bands, from the palette every other reading on this
+   screen draws through. Emphasis only ever restates what the count beside it
+   already says, so NO_COLOR costs a reader nothing they cannot read. *)
+let magnitude_tone = function
+  | Magnitude.Leading -> Masc_tui_theme.tone Masc_tui_theme.Accent
+  | Magnitude.Ordinary -> Ansi.reset
+  | Magnitude.Below_even_share -> Ansi.dim
+
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -3007,13 +3016,26 @@ let render_planning_list (state : state) =
            p.pl_rollup.pr_verifying p.pl_rollup.pr_done
            p.pl_rollup.pr_dropped
        in
+       (* The five statuses partition one backlog, and every one of them was
+          drawn in the same dim: 486 todo against 9 running read alike until
+          the digits were compared. Each keeps its own count beside it, so a
+          terminal without colour loses the emphasis and no fact. *)
        let backlog =
-         Printf.sprintf "  Backlog: todo=%d  claimed=%d  running=%d  done=%d  cancelled=%d"
-           p.pl_backlog.pb_todo p.pl_backlog.pb_claimed p.pl_backlog.pb_running
-           p.pl_backlog.pb_done p.pl_backlog.pb_cancelled
+         [ "todo", p.pl_backlog.pb_todo
+         ; "claimed", p.pl_backlog.pb_claimed
+         ; "running", p.pl_backlog.pb_running
+         ; "done", p.pl_backlog.pb_done
+         ; "cancelled", p.pl_backlog.pb_cancelled
+         ]
+         |> Magnitude.of_counts
+         |> List.map (fun (label, value, band) ->
+                Printf.sprintf "%s%s=%d%s" (magnitude_tone band) label value
+                  Ansi.reset)
+         |> String.concat "  "
        in
        box_line buf cols (Ansi.bold ^ rollup ^ Ansi.reset);
-       box_line buf cols (Ansi.dim ^ backlog ^ Ansi.reset);
+       box_line buf cols
+         (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
        box_divider buf cols;
 
        if count = 0 then begin

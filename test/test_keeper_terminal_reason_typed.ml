@@ -1281,6 +1281,17 @@ let () =
   check
     "a failed second candidate is not a successful fallback"
     (not failed_fallback);
+  let failed_third_count, failed_third_fallback =
+    Agent_run_receipt.lane_attempt_facts
+      ~turn_succeeded:false
+      ~last_attempt_index:2
+  in
+  check
+    "a failed three-candidate lane retains all routed attempts"
+    (failed_third_count = 3);
+  check
+    "a failed third candidate is not a successful fallback"
+    (not failed_third_fallback);
   let successful_count, successful_fallback =
     Agent_run_receipt.lane_attempt_facts
       ~turn_succeeded:true

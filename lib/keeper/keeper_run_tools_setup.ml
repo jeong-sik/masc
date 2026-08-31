@@ -33,6 +33,11 @@ open Keeper_agent_prompt_metrics
    comment rests on cannot decay on one axis while the other holds. *)
 let gate_history_budget_bytes = Keeper_gate_causal_context.evidence_budget_bytes
 
+let record_lane_attempt_index receipt_lane_attempt_index_ref lane_attempt_index =
+  receipt_lane_attempt_index_ref :=
+    max !receipt_lane_attempt_index_ref lane_attempt_index
+;;
+
 let tool_use_ids_of_message (message : Agent_core.Types.message) =
   List.filter_map
     (fun (block : Agent_core.Types.content_block) ->
@@ -264,8 +269,9 @@ let prepare_agent_setup
     =
     active_checkpoint_owner := Some attempt.checkpoint_owner;
     Atomic.set active_runtime_id (Some attempt.runtime_id);
-    receipt_lane_attempt_index_ref :=
-      max !receipt_lane_attempt_index_ref attempt.lane_attempt_index;
+    record_lane_attempt_index
+      receipt_lane_attempt_index_ref
+      attempt.lane_attempt_index;
     Option.iter
       (fun observe ->
          observe

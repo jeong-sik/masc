@@ -5837,6 +5837,24 @@ let move_board_posts_pane state ~mailbox ~delta =
       (List.nth_opt state.board_posts next)
   end
 
+(* The next post without leaving the one being read. Reading a board meant
+   Esc, move, Enter for every post, which is three keys to do what one does on
+   Changes and on the Keeper detail tabs -- both of which already spell it
+   [ / ]. Focus is carried rather than reset: an operator reading in the wide
+   detail stays there, and one browsing from the list pane stays in the list. *)
+let step_board_read state ~mailbox ~delta =
+  match state.board_mode with
+  | Board_list | Board_compose -> ()
+  | Board_read _ ->
+      let count = List.length state.board_posts in
+      let next = max 0 (min (count - 1) (state.board_cursor + delta)) in
+      if count > 0 && next <> state.board_cursor then begin
+        state.board_cursor <- next;
+        Option.iter
+          (open_board_post state ~mailbox ~focus:state.board_focus)
+          (List.nth_opt state.board_posts next)
+      end
+
 let apply_approval_decision_result state approval decision approvals result =
   (match result with
    | Ok (Approval.Completed _) ->
@@ -10747,6 +10765,9 @@ and is loaded on demand through keeper_skill.
                 state.identity_view_error <- None;
                 launch_identity_view state ~mailbox:async_messages keeper.k_name
             | _, Detail_info | _, Detail_secrets | None, _ -> ())
+       | Some (("[" | "]") as bracket) when state.view = Board ->
+           step_board_read state ~mailbox:async_messages
+             ~delta:(if bracket = "]" then 1 else -1)
        | Some (("[" | "]") as bracket) when state.view = Changes ->
            cycle_changes_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)

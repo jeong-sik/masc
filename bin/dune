@@ -681,6 +681,12 @@
  (modules masc_tui_board_detail))
 
 (library
+ (name masc_tui_board_comment_thread)
+ (wrapped false)
+ (modules masc_tui_board_comment_thread)
+ (libraries masc_tui_types))
+
+(library
  (name masc_tui_terminal_write_repair)
  (wrapped false)
  (modules masc_tui_terminal_write_repair)
@@ -874,6 +880,7 @@
   masc_tui_operator_projection
   masc_tui_approval_authority
   masc_tui_board_detail
+  masc_tui_board_comment_thread
   masc_tui_board_selection
   masc_tui_board_score
   masc_tui_model_runtime_table

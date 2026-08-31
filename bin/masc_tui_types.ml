@@ -264,6 +264,12 @@ type board_post = {
   bp_votes: int;
   bp_comment_count: int;
   bp_created_at: string;
+  bp_updated_at: float;
+      (** Unix seconds of the last move on the post or its comments. The server
+          has always sent it; the list drew neither timestamp, so the one
+          question a board answers -- what is still alive -- had no column, and
+          two of the sort orders ([recent], [updated]) ranked by a number the
+          reader could not see. *)
   bp_hearth: string option;
       (** The sub-board it lives in. 24 of them here, and 1550 of 2171 posts
           sit in [verification] alone — a flat list is 71% one topic with
@@ -277,6 +283,11 @@ type board_post = {
 (** Board comment *)
 type board_comment = {
   bc_id: string;
+  bc_parent_id: string option;
+      (** The comment this one answers, when it answers one. The store and the
+          wire have carried it since comments existed; the pane decoded a flat
+          list, so a reply and the thing it replied to sat at the same
+          indent and a thread read as unrelated remarks in clock order. *)
   bc_author: string;
   bc_content: string;
   bc_created_at: string;

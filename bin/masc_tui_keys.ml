@@ -135,6 +135,8 @@ let for_surface = function
       ; b Act "w" "write" ~help:"write a post"
       ; b Act "v / V" "vote up / down"
       ; b Act "c" "reply" ~help:"reply (while reading)"
+      ; b Navigate "[ / ]" "previous / next post"
+          ~help:"while reading, open the post before or after this one"
       ; b Navigate "s" "sort" ~help:"cycle hot / trending / recent / updated / discussed"
       ; b Navigate "z" "wide detail" ~help:"hide or show the post list while reading"
       ; b Act "Y" "copy link" ~help:"copy the selected post reference"

@@ -7,6 +7,7 @@ open Masc_tui_ansi
 module Frame_presenter = Masc_tui_frame_presenter
 module Ask_projection = Masc_tui_ask_projection
 module Board_detail = Masc_tui_board_detail
+module Board_comment_thread = Masc_tui_board_comment_thread
 module Message_layout = Masc_tui_message_layout
 module Metrics_tail = Masc_tui_metrics_tail
 module Observation_layout = Masc_tui_observation_layout
@@ -2233,14 +2234,19 @@ let render_approvals (state : state) =
 let board_score_w = 5
 let board_replies_w = 7
 
+(* The widest [span_text] draws: "1d00h". A board's oldest live threads are
+   days old, so the day tier is the one this column is sized for. *)
+let board_age_w = 6
+
 (* 4 lead + 1 mark + 1 gap + 12 id + 2 + 12 hearth + 2 + 16 author + 2
-   + 2 + score + 2 + replies, and 2 more for the frame the box draws around
-   all of it, measured rather than assumed: at eighty columns a row built
-   to 78 still overflowed, so the frame takes four. The old 68 accounted for
-   none of it, which is why REPLIES sat past the right edge no matter how
+   + 2 + age + 2 + score + 2 + replies, and 2 more for the frame the box draws
+   around all of it, measured rather than assumed: at eighty columns a row
+   built to 78 still overflowed, so the frame takes four. The old 68 accounted
+   for none of it, which is why REPLIES sat past the right edge no matter how
    the title was sized. *)
 let board_row_fixed_cols = 4 + 1 + 1 + 12 + 2 + 12 + 2 + 16 + 2 + 2
-                           + board_score_w + 2 + board_replies_w + 4
+                           + board_age_w + 2 + board_score_w + 2
+                           + board_replies_w + 4
 
 let board_row_layout ~cols = (1, 12, 12, 16, max 1 (cols - board_row_fixed_cols))
 
@@ -2360,8 +2366,9 @@ let render_board_list (state : state) =
      [board_row_layout] is the one place either of them asks. *)
   let mark_pad, id_w, hearth_w, author_w, title_w = board_row_layout ~cols in
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "    %-*s %-*s  %-*s  %-*s  %-*s  %s  %s" mark_pad ""
+    (Printf.sprintf "    %-*s %-*s  %-*s  %-*s  %-*s  %s  %s  %s" mark_pad ""
        id_w "ID" hearth_w "HEARTH" author_w "AUTHOR" title_w "TITLE"
+       (Printf.sprintf "%-*s" board_age_w "AGE")
        (Printf.sprintf "%-*s" board_score_w "SCORE")
        (Printf.sprintf "%-*s" board_replies_w "REPLIES"));
   box_divider buf cols;
@@ -2389,6 +2396,9 @@ let render_board_list (state : state) =
         state.board_cursor - content_height + 1
       else 0
     in
+    (* One clock read for the whole page, so two rows drawn in the same frame
+       cannot report ages a tick apart. *)
+    let now_unix = Unix.gettimeofday () in
     for i = 0 to content_height - 1 do
       let idx = i + scroll_offset in
       if idx < count then begin
@@ -2424,13 +2434,25 @@ let render_board_list (state : state) =
               (Printf.sprintf "c%d" p.bp_comment_count)
           ^ Ansi.reset
         in
+        (* Since the post or one of its comments last moved. A board's list
+           had no timestamp at all, so "what is still alive" -- the question
+           the [recent] and [updated] sort orders answer -- could only be read
+           off the order the rows happened to arrive in. Spelled with the same
+           ladder the Approvals queue uses, so a span reads the same on both. *)
+        let age =
+          Ansi.dim
+          ^ Printf.sprintf "%-*s" board_age_w
+              (Message_layout.span_text (now_unix -. p.bp_updated_at))
+          ^ Ansi.reset
+        in
         let line =
-          Printf.sprintf "  %s %s  %s  %s  %s  %s  %s"
+          Printf.sprintf "  %s %s  %s  %s  %s  %s  %s  %s"
             (board_kind_mark p.bp_kind)
             id
             hearth
             author
             (fit_width (Terminal_text.single_line p.bp_title) title_w)
+            age
             score
             replies
         in
@@ -2582,24 +2604,34 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
           ^ Ansi.reset
         ]
     | Board_detail.Ready (_, comments) ->
-        List.concat_map
-          (fun c ->
+        (* A reply and the thing it answers used to sit at one indent in clock
+           order, so a thread read as unrelated remarks. [parent_id] has been
+           on the wire since comments existed -- 152 of this workspace's 1364
+           comments carry one -- and the pane simply never decoded it. *)
+        Board_comment_thread.order comments
+        |> List.concat_map
+          (fun (depth, c) ->
+             let rail = Board_comment_thread.rail ~depth in
              let author = Terminal_text.single_line c.bc_author in
              let created_at = Terminal_text.single_line c.bc_created_at in
              let heading =
-               Printf.sprintf "  %s@%s%s%s  %s%s" Ansi.cyan author Ansi.reset
-                 Ansi.dim created_at Ansi.reset
+               Printf.sprintf "  %s%s@%s%s%s  %s%s" rail Ansi.cyan author
+                 Ansi.reset Ansi.dim created_at Ansi.reset
              in
              let body =
                Message_layout.wrap_body ~markdown:document_markdown
-                 ~max_cells:(max 1 (cols - 10))
+                 ~max_cells:
+                   (max 1
+                      (cols - 10 - Message_layout.display_width rail))
                  ~sanitize:Terminal_text.single_line c.bc_content
              in
              match body with
              | [ line ] -> [ heading ^ "  " ^ line ]
              | [] -> [ heading ^ "  " ^ Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset ]
-             | lines -> heading :: List.map (fun line -> "    " ^ line) lines)
-          comments
+             | lines ->
+                 heading
+                 :: List.map
+                      (fun line -> "  " ^ rail ^ "  " ^ line) lines)
   in
   let detail_line_count = List.length detail_lines in
   let row_budget =
@@ -2666,7 +2698,7 @@ let render_board_read (state : state) (list_post : board_post) =
     footer_line state ~max_cells:cols
       ~hints:
         (Printf.sprintf
-           "j/k:%s  PgUp/PgDn:page%s  z:wide  Y:copy link  left/Esc:back  c:reply  r:refresh  Tab:next"
+           "j/k:%s  [/]:post  PgUp/PgDn:page%s  z:wide  Y:copy link  left/Esc:back  c:reply  r:refresh  Tab:next"
            (if state.board_focus = Left_pane then "posts" else "scroll")
            pane_hint)
   in

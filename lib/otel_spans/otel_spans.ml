@@ -110,8 +110,22 @@ let probe_endpoint ~(env : Eio_unix.Stdenv.base) endpoint =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> false
 
-let setup_exporter ~sw (env : Eio_unix.Stdenv.base) =
-  let endpoint = Otel_config.endpoint in
+(* Stop flag of the currently installed export backend. The backend fiber
+   polls this flag; setting it true ends the fiber's export attempts. Each
+   exporter (re)start creates a fresh flag so a retired fiber can never
+   resume alongside its replacement. *)
+let current_export_stop : bool Atomic.t Atomic.t = Atomic.make (Atomic.make false)
+
+let stop_current_export_backend () =
+  Atomic.set (Atomic.get current_export_stop) true
+;;
+
+let setup_exporter
+      ?(endpoint = Otel_config.endpoint)
+      ?(probe_interval = 30.0)
+      ~sw
+      (env : Eio_unix.Stdenv.base)
+  =
   let clock = Eio.Stdenv.clock env in
   Opentelemetry_client_cohttp_eio.reset_tick_health ();
   (* Shared setup: init library, register OTLP backend, fork health-check fiber.
@@ -121,19 +135,40 @@ let setup_exporter ~sw (env : Eio_unix.Stdenv.base) =
        Calling [init] before probe would start the internal tick loop even
        when no collector exists, producing WARN spam on every export cycle. *)
     init ();
+    let stop = Atomic.make false in
     let config =
       Opentelemetry_client_cohttp_eio.Config.make ~url:endpoint ()
     in
-    Opentelemetry_client_cohttp_eio.setup ~sw ~config env;
+    Opentelemetry_client_cohttp_eio.setup ~sw ~stop ~config env;
+    Atomic.set current_export_stop stop;
     Atomic.set exporter_active true;
     Atomic.set _last_successful_export (Some (Unix.gettimeofday ()));
     Atomic.set _consecutive_failures 0;
     Log.Otel.info "OTLP exporter started -> %s" endpoint;
     let rec health_loop () =
-      Eio.Time.sleep clock 30.0;
+      Eio.Time.sleep clock probe_interval;
       if probe_endpoint ~env endpoint then begin
-        Atomic.set _consecutive_failures 0;
-        health_loop ()
+        if not (Atomic.get exporter_active) then begin
+          (* A mid-run outage marked the exporter inactive and stopped its
+             backend. The collector is back: install a fresh backend. *)
+          Log.Otel.info "OTLP collector reachable again, restarting exporter -> %s"
+            endpoint;
+          (try start_exporter () with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+             Atomic.set exporter_active false;
+             Log.Otel.warn
+               "OTLP exporter restart failed (%s): %s; retrying on next probe"
+               endpoint (Printexc.to_string exn));
+          (* A successful restart forked its own health loop; this one
+             retires so exactly one probe loop runs. On restart failure no
+             new loop exists — keep probing here. *)
+          if Atomic.get exporter_active then () else health_loop ()
+        end
+        else begin
+          Atomic.set _consecutive_failures 0;
+          health_loop ()
+        end
       end else begin
         let failures = Atomic.get _consecutive_failures + 1 in
         Atomic.set _consecutive_failures failures;
@@ -142,7 +177,11 @@ let setup_exporter ~sw (env : Eio_unix.Stdenv.base) =
         if Atomic.get exporter_active && failures >= 3 then begin
           Log.Otel.error "OTLP exporter marked inactive after %d consecutive failures -> %s"
             failures endpoint;
-          Atomic.set exporter_active false
+          Atomic.set exporter_active false;
+          (* Stop the export backend's send loop: with the collector down
+             every attempt fails and logs a full transport backtrace. The
+             probe above is the only collector check while inactive. *)
+          stop_current_export_backend ()
         end;
         health_loop ()
       end

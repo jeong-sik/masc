@@ -7797,6 +7797,76 @@ def runtime_surface_interaction(
                 timeout=3.0,
             )
 
+            lane_detail = send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"\r",
+                b"MASC Runtime detail",
+            )
+            lane_detail_plain = CSI_RE.sub(b"", lane_detail)
+            for needle in (
+                b"primary / runtime-a",
+                b"Runtime ID: runtime-a",
+                b"Provider: Resolved A",
+                b"Model: model-a",
+                b"Used by lanes: primary",
+                b"Lane position: 1 of 2",
+                b"Probe status: reachable",
+                b"Probe transport: http",
+                b"Checked at: 2026-08-24T10:20:00Z",
+                b"Reachable: yes",
+                b"HTTP status: 200",
+                b"Latency: 18ms",
+            ):
+                if needle not in lane_detail_plain:
+                    raise AssertionError(
+                        f"Runtime lane detail omitted {needle!r}: "
+                        f"{lane_detail_plain!r}"
+                    )
+
+            lane_list = send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"\x1b[D",
+                b"1/2 runtime-a",
+            )
+            if b"MASC Runtime detail" in CSI_RE.sub(b"", lane_list):
+                raise AssertionError("Runtime left arrow did not return to the lane list")
+
+            all_list = send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"p",
+                b"All runtimes (4)",
+            )
+            if b"runtime-a" not in CSI_RE.sub(b"", all_list):
+                raise AssertionError("Runtime catalog did not keep the selected runtime")
+            catalog_detail = send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"\r",
+                b"MASC Runtime detail",
+            )
+            catalog_detail_plain = CSI_RE.sub(b"", catalog_detail)
+            for needle in (
+                b"Runtime ID: runtime-a",
+                b"Provider: Resolved A",
+                b"Model: model-a",
+                b"Used by lanes: primary",
+                b"Probe status: reachable",
+            ):
+                if needle not in catalog_detail_plain:
+                    raise AssertionError(
+                        f"Runtime catalog detail omitted {needle!r}: "
+                        f"{catalog_detail_plain!r}"
+                    )
+            send_and_wait(process, master_fd, output, b"\x1b", b"All runtimes (4)")
+            send_and_wait(process, master_fd, output, b"p", b"Lanes (3 lanes, 4 slots)")
+
             # The overflow scroll hint is unreachable with this fixture: it
             # renders only when candidates exceed the listing height, but the
             # compact-frame gate (minimum_fixed_chrome_rows = 14) replaces any
@@ -9396,6 +9466,17 @@ def run_chat_clarity_regression(executable: str) -> None:
     )
 
 
+def run_runtime_regression(executable: str) -> None:
+    fixtures, initial_probe, force_probe = runtime_http_fixtures()
+    run_terminal_scenario(
+        executable,
+        description="Runtime lane and catalog exact detail",
+        interact=runtime_surface_interaction(fixtures, initial_probe, force_probe),
+        refresh=0.05,
+        http_fixtures=fixtures,
+    )
+
+
 def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
         run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
@@ -9417,10 +9498,14 @@ def main() -> None:
         run_chat_clarity_regression(os.path.abspath(sys.argv[1]))
         print("tui chat clarity regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "runtime":
+        run_runtime_regression(os.path.abspath(sys.argv[1]))
+        print("tui Runtime regression: PASS")
+        return
     if len(sys.argv) != 2:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
-            "[cli-base-path|planning-review|repositories|config|chat-clarity]"
+            "[cli-base-path|planning-review|repositories|config|chat-clarity|runtime]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

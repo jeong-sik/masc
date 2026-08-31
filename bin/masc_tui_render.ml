@@ -9204,6 +9204,165 @@ let runtime_name_column width text =
       (max 0 (width - Message_layout.display_width clipped))
       ' '
 
+let runtime_all_rows (snapshot : Masc.Tui_decode.runtime_surface_snapshot) =
+  let open Masc.Tui_decode in
+  List.map
+    (fun (runtime : runtime_option) ->
+       let lanes =
+         snapshot.rss_resolved.rrs_lanes
+         |> List.filter (fun (lane : runtime_resolved_lane) ->
+                List.exists (String.equal runtime.ro_id) lane.rrl_runtime_ids)
+         |> List.map (fun (lane : runtime_resolved_lane) -> lane.rrl_id)
+       in
+       runtime, lanes)
+    snapshot.rss_resolved.rrs_runtimes
+
+let runtime_detail_field ~width ~style label value =
+  let prefix = "  " ^ label ^ ": " in
+  let continuation = String.make (Message_layout.display_width prefix) ' ' in
+  let lines =
+    Message_layout.wrap_words
+      ~max_cells:(max 1 (width - Message_layout.display_width prefix))
+      (Terminal_text.single_line value)
+  in
+  match lines with
+  | [] -> [ style, prefix ^ "—" ]
+  | first :: rest ->
+      (style, prefix ^ first)
+      :: List.map (fun line -> style, continuation ^ line) rest
+
+let runtime_bool = function true -> "yes" | false -> "no"
+
+let runtime_detail_lines state target ~width =
+  let open Masc.Tui_decode in
+  let reading =
+    match state.runtime_surface, target with
+    | None, _ -> None
+    | Some snapshot, Runtime_lane_candidate { lane_id; runtime_id } ->
+        snapshot.rss_candidates
+        |> List.find_opt (fun row ->
+               String.equal row.rcr_lane_id lane_id
+               && String.equal row.rcr_runtime.ro_id runtime_id)
+        |> Option.map (fun row ->
+               ( row.rcr_runtime
+               , [ row.rcr_lane_id ]
+               , Some (row.rcr_position, row.rcr_candidate_count)
+               , row.rcr_preferred_at_ts
+               , row.rcr_probe ))
+    | Some snapshot, Runtime_catalog_entry { runtime_id } ->
+        runtime_all_rows snapshot
+        |> List.find_opt (fun (runtime, _) -> String.equal runtime.ro_id runtime_id)
+        |> Option.map (fun (runtime, lanes) ->
+               let probe =
+                 Option.bind snapshot.rss_probe (fun probe_snapshot ->
+                     List.find_opt
+                       (fun row -> String.equal row.rpp_runtime_id runtime.ro_id)
+                       probe_snapshot.rps_providers)
+               in
+               runtime, lanes, None, None, probe)
+  in
+  match reading with
+  | None ->
+      [ Theme.warn (),
+        "  This runtime row is no longer present in the refreshed projection"
+      ]
+  | Some (runtime, lanes, position, preferred_at, probe) ->
+      let fields =
+        runtime_detail_field ~width ~style:Ansi.reset "Runtime ID" runtime.ro_id
+        @ runtime_detail_field ~width ~style:Ansi.reset "Provider" runtime.ro_provider
+        @ runtime_detail_field ~width ~style:Ansi.reset "Model" runtime.ro_model
+        @ runtime_detail_field ~width ~style:Ansi.reset "Used by lanes"
+            (match lanes with [] -> "unassigned" | values -> String.concat ", " values)
+        @ runtime_detail_field ~width ~style:Ansi.reset "Dispatchable"
+            (runtime_bool runtime.ro_dispatchable)
+        @ runtime_detail_field ~width ~style:Ansi.reset "Default runtime"
+            (runtime_bool runtime.ro_is_default)
+      in
+      let candidate =
+        match position with
+        | None -> []
+        | Some (at, total) ->
+            runtime_detail_field ~width ~style:Ansi.reset "Lane position"
+              (Printf.sprintf "%d of %d" at total)
+      in
+      let blocker =
+        match runtime.ro_blocked_reason with
+        | None -> []
+        | Some reason ->
+            runtime_detail_field ~width ~style:(Theme.bad ()) "Blocked because" reason
+      in
+      let sticky =
+        match preferred_at with
+        | None -> []
+        | Some at ->
+            runtime_detail_field ~width ~style:Ansi.dim "Last successful at"
+              (Masc_domain.iso8601_of_unix_seconds at)
+      in
+      let probe_lines =
+        match probe with
+        | None -> [ Ansi.dim, "  Probe: unobserved" ]
+        | Some row ->
+            let transport =
+              match row.rpp_transport with
+              | Runtime_probe_http -> "http"
+              | Runtime_probe_cli -> "cli"
+            in
+            runtime_detail_field ~width ~style:Ansi.reset "Probe status"
+              (runtime_provider_status_to_string row.rpp_status)
+            @ runtime_detail_field ~width ~style:Ansi.reset "Probe transport" transport
+            @ runtime_detail_field ~width ~style:Ansi.reset "Checked at" row.rpp_checked_at
+            @ (match row.rpp_reachable with
+               | None -> []
+               | Some value ->
+                   runtime_detail_field ~width ~style:Ansi.reset "Reachable"
+                     (runtime_bool value))
+            @ (match row.rpp_http_status with
+               | None -> []
+               | Some value ->
+                   runtime_detail_field ~width ~style:Ansi.reset "HTTP status"
+                     (string_of_int value))
+            @ (match row.rpp_latency_ms with
+               | None -> []
+               | Some value ->
+                   runtime_detail_field ~width ~style:Ansi.reset "Latency"
+                     (Printf.sprintf "%.0fms" value))
+            @ (match row.rpp_error with
+               | None -> []
+               | Some error ->
+                   runtime_detail_field ~width ~style:(Theme.bad ()) "Probe error" error)
+      in
+      fields @ candidate @ blocker @ sticky @ probe_lines
+
+let render_runtime_detail (state : state) target =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let target_label =
+    match target with
+    | Runtime_lane_candidate { lane_id; runtime_id } -> lane_id ^ " / " ^ runtime_id
+    | Runtime_catalog_entry { runtime_id } -> runtime_id
+  in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %s  %s" (screen_title " MASC Runtime detail")
+       (Terminal_text.single_line target_label) (connection_badge state));
+  box_divider buf cols;
+  let lines = runtime_detail_lines state target ~width:(max 1 (cols - 8)) in
+  let content_height = max 1 (rows - 5) in
+  let max_scroll = max 0 (List.length lines - content_height) in
+  let scroll = max 0 (min state.runtime_detail_scroll max_scroll) in
+  for index = 0 to content_height - 1 do
+    match List.nth_opt lines (scroll + index) with
+    | None -> box_empty buf cols
+    | Some (style, line) -> box_line_styled buf cols ~style line
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:"j/k:scroll  PgUp/PgDn:page  left/Esc:list  r:refresh  Tab:next");
+  finish_surface state ~clamped:(Runtime_detail_scroll scroll)
+    ~surface_key:"runtime-detail" ~rows:terminal_rows ~cols buf
+
 (* Lane candidates come from /runtime/resolved; reachability comes from the
    cached runtime-probe document. Exact runtime-id joining happened in the
    decoder module, so drawing never parses ids or reconstructs a lane. *)
@@ -9229,18 +9388,7 @@ let render_runtime (state : state) =
   let all_runtimes =
     match state.runtime_surface with
     | None -> []
-    | Some snapshot ->
-        let open Masc.Tui_decode in
-        List.map
-          (fun (runtime : runtime_option) ->
-             let lanes =
-               snapshot.rss_resolved.rrs_lanes
-               |> List.filter (fun (lane : runtime_resolved_lane) ->
-                    List.exists (String.equal runtime.ro_id) lane.rrl_runtime_ids)
-               |> List.map (fun (lane : runtime_resolved_lane) -> lane.rrl_id)
-             in
-             runtime, lanes)
-          snapshot.rss_resolved.rrs_runtimes
+    | Some snapshot -> runtime_all_rows snapshot
   in
   let shown =
     match state.runtime_mode with
@@ -9480,16 +9628,19 @@ let render_runtime (state : state) =
                        | None -> [])
                     @ (match lanes with [] -> [] | l -> [ String.concat ", " l ]))
                in
-               box_line buf cols
-                 ("  "
-                  ^ runtime_column runtime_lane_width used_by ^ " "
-                  ^ runtime_column runtime_candidate_width
-                      (Terminal_text.single_line runtime.ro_id) ^ " "
-                  ^ runtime_column runtime_identity_width
-                      (Terminal_text.single_line
-                         (runtime.ro_provider ^ " / " ^ runtime.ro_model)) ^ " "
-                  ^ runtime_column runtime_status_width (runtime_route_badge runtime)
-                  ^ " " ^ Ansi.dim ^ detail ^ Ansi.reset))
+               let line =
+                 "  " ^ runtime_column runtime_lane_width used_by ^ " "
+                 ^ runtime_column runtime_candidate_width
+                     (Terminal_text.single_line runtime.ro_id) ^ " "
+                 ^ runtime_column runtime_identity_width
+                     (Terminal_text.single_line
+                        (runtime.ro_provider ^ " / " ^ runtime.ro_model)) ^ " "
+                 ^ runtime_column runtime_status_width (runtime_route_badge runtime)
+                 ^ " " ^ Ansi.dim ^ detail ^ Ansi.reset
+               in
+               if index + scroll = state.runtime_cursor then
+                 box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+               else box_line buf cols line)
       | Masc_tui_types.Runtime_lanes ->
       match List.nth_opt candidates (index + scroll) with
       | None -> box_empty buf cols
@@ -9554,7 +9705,7 @@ let render_runtime (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Printf.sprintf "%sj/k:scroll  p:%s  Tab:next  q:quit  r:live refresh"
+         (Printf.sprintf "%sj/k:scroll  Enter:detail  p:%s  Tab:next  q:quit  r:live refresh"
             scroll_hint
             (match state.runtime_mode with
              | Masc_tui_types.Runtime_lanes -> "all runtimes"
@@ -12408,7 +12559,10 @@ let render_surface (state : state) =
   | Repositories -> render_repositories state
   | Changes -> render_changes state
   | Connectors -> render_connectors state
-  | Runtime -> render_runtime state
+  | Runtime ->
+      (match state.runtime_detail_target with
+       | None -> render_runtime state
+       | Some target -> render_runtime_detail state target)
   | Config -> (
     match state.config_pane with
     | Config_prompts -> render_prompts state

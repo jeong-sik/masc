@@ -263,7 +263,13 @@ let for_surface = function
       ]
       @ listing_meta
   | Runtime ->
-      [ b Navigate "j/k" "scroll"; b Act "Esc" "overview" ] @ listing_meta
+      [ b Navigate "j/k" "move / scroll"
+      ; b Navigate "PgUp/PgDn" "detail page"
+      ; b Act "Right / Enter" "detail"
+          ~help:"show the full runtime, lane, dispatch, and probe fields"
+      ; b Act "Left / Esc" "back"
+      ]
+      @ listing_meta
   | Config ->
       [ b Navigate "j/k" "select / scroll"
         (* Config combines persisted files, typed live params, and the local

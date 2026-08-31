@@ -111,7 +111,7 @@ val project_board_read_scroll :
 val keeper_marker_width : int
 val keeper_status_width : int
 val keeper_flags_width : int
-val keeper_turns_width : int
+val keeper_last_turn_width : int
 
 type keeper_columns = {
   kcol_show_flags : bool;

@@ -326,7 +326,10 @@ let keeper_status_width = 10
    task cells, and the row grows past the frame at exactly the widths where
    flags first appear. *)
 let keeper_flags_width = 5
-let keeper_turns_width = 6
+
+(* Six cells fit [Message_layout.span_text]'s widest reading under a hundred
+   days ("99d23h"). *)
+let keeper_last_turn_width = 6
 let keeper_minimum_name_width = 16
 let keeper_maximum_name_width = 32
 let keeper_minimum_runtime_width = 20
@@ -346,7 +349,7 @@ type keeper_columns = {
 let keeper_columns_used_width columns =
   keeper_marker_width + keeper_status_width + 1 + columns.kcol_name
   + (if columns.kcol_show_flags then 1 + keeper_flags_width else 0)
-  + 1 + keeper_turns_width
+  + 1 + keeper_last_turn_width
   + (if columns.kcol_show_runtime then 1 + columns.kcol_runtime else 0)
   + 1 + columns.kcol_task
 

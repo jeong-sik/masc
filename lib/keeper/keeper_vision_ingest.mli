@@ -65,3 +65,9 @@ val evict_message
 (** Site 2. Same transform applied to a message's content blocks at the
     checkpoint write boundary. Use [Store_only] here — checkpoint writes must
     not block the turn fiber on a provider call. *)
+
+val error_reasons : string list
+(** Every reason an image eviction can fail with. Closed by construction —
+    the only producers are the store-path validations and the eager-read
+    outcome mapping in this module. Health surfaces aggregate per-keeper
+    vision errors by walking this list. *)

@@ -184,6 +184,7 @@ type t =
   | VisionAnalyze
   | VisionCandidateAttempts
   | VisionIngestEvictions
+  | VisionIngestErrors
   (* Instruction monitoring metrics *)
   | PromptSegmentBytes          (* histogram: bytes per prompt segment *)
   | PromptTemplateRenderOutcome (* counter: template render ok/fallback/empty *)
@@ -394,6 +395,7 @@ let to_string = function
   | VisionAnalyze -> "masc_keeper_vision_analyze_total"
   | VisionCandidateAttempts -> "masc_keeper_vision_candidate_attempts_total"
   | VisionIngestEvictions -> "masc_keeper_vision_ingest_evictions_total"
+  | VisionIngestErrors -> "masc_keeper_vision_ingest_errors_total"
   | PromptSegmentBytes -> "masc_keeper_prompt_segment_bytes"
   | PromptTemplateRenderOutcome -> "masc_keeper_prompt_template_render_outcome_total"
   | ToolCallParamCompleteness -> "masc_keeper_tool_call_param_completeness_total"

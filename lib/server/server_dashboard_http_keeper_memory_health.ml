@@ -10,6 +10,8 @@ type keeper_health =
   ; snapshot_present : bool
   ; librarian_lane_busy : int
   ; librarian_failures : int
+  ; vision_ingest_errors : int
+  ; vision_ingest_error_reasons : (string * int) list
   ; read_error : string option
   }
 
@@ -72,6 +74,32 @@ let health_keeper_ids ~keepers_dir =
   |> List.sort_uniq String.compare
 ;;
 
+let vision_ingest_error_metric =
+  Keeper_metrics.(to_string VisionIngestErrors)
+;;
+
+(* #32126: per-keeper image-ingest failures, by the closed reason set the
+   ingest module owns. Only nonzero reasons ride along, so the row says why,
+   not just how many. *)
+let vision_errors_for_keeper keeper_id =
+  List.filter_map
+    (fun reason ->
+       let count =
+         Otel_metric_store.metric_value_or_zero
+           vision_ingest_error_metric
+           ~labels:[ "keeper", keeper_id; "reason", reason ]
+           ()
+         |> int_of_float
+       in
+       if count > 0 then Some (reason, count) else None)
+    Keeper_vision_ingest.error_reasons
+;;
+
+let vision_ingest_error_count_for_keeper keeper_id =
+  List.fold_left (fun total (_, count) -> total + count) 0
+    (vision_errors_for_keeper keeper_id)
+;;
+
 let keeper_health ~keepers_dir keeper_id =
   let snapshot_path =
     Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id
@@ -89,6 +117,9 @@ let keeper_health ~keepers_dir keeper_id =
     ; snapshot_present = false
     ; librarian_lane_busy = librarian_lane_busy_for_keeper keeper_id
     ; librarian_failures = librarian_failures_for_keeper keeper_id
+    ; vision_ingest_errors =
+        vision_ingest_error_count_for_keeper keeper_id
+    ; vision_ingest_error_reasons = vision_errors_for_keeper keeper_id
     ; read_error = None
     }
   | Ok (Some snapshot) ->
@@ -101,6 +132,9 @@ let keeper_health ~keepers_dir keeper_id =
     ; snapshot_present = true
     ; librarian_lane_busy = librarian_lane_busy_for_keeper keeper_id
     ; librarian_failures = librarian_failures_for_keeper keeper_id
+    ; vision_ingest_errors =
+        vision_ingest_error_count_for_keeper keeper_id
+    ; vision_ingest_error_reasons = vision_errors_for_keeper keeper_id
     ; read_error = None
     }
   | Error message ->
@@ -113,6 +147,9 @@ let keeper_health ~keepers_dir keeper_id =
     ; snapshot_present = false
     ; librarian_lane_busy = librarian_lane_busy_for_keeper keeper_id
     ; librarian_failures = librarian_failures_for_keeper keeper_id
+    ; vision_ingest_errors =
+        vision_ingest_error_count_for_keeper keeper_id
+    ; vision_ingest_error_reasons = vision_errors_for_keeper keeper_id
     ; read_error = Some message
     }
 ;;
@@ -182,7 +219,28 @@ let alerts h =
           ~value:(float_of_int h.librarian_failures)
       ]
   in
-  read_error_alert @ lane_busy_alert @ failure_alert
+  let vision_ingest_alert =
+    if h.vision_ingest_errors <= 0
+    then []
+    else
+      [ alert_json
+          ~code:"vision_ingest_errors"
+          ~severity:"warn"
+          ~target:"vision_ingest_errors"
+          ~label:"Vision"
+          ~message:
+            (Printf.sprintf
+               "Image ingestion failed %d times; those images reached the                 keeper as text placeholders. Reasons: %s."
+               h.vision_ingest_errors
+               (String.concat ", "
+                  (List.map
+                     (fun (reason, count) ->
+                        Printf.sprintf "%s x%d" reason count)
+                     h.vision_ingest_error_reasons)))
+          ~value:(float_of_int h.vision_ingest_errors)
+      ]
+  in
+  read_error_alert @ lane_busy_alert @ failure_alert @ vision_ingest_alert
 ;;
 
 let alert_severity = function
@@ -204,6 +262,13 @@ let keeper_health_entry_to_json h =
     ; "snapshot_present", `Bool h.snapshot_present
     ; "librarian_lane_busy", `Int h.librarian_lane_busy
     ; "librarian_failures", `Int h.librarian_failures
+    ; "vision_ingest_errors", `Int h.vision_ingest_errors
+    ; ( "vision_ingest_error_reasons"
+      , `List
+          (List.map
+             (fun (reason, count) ->
+                `Assoc [ ("reason", `String reason); ("count", `Int count) ])
+             h.vision_ingest_error_reasons) )
     ; ( "read_error"
       , match h.read_error with
         | Some message -> `String message
@@ -249,6 +314,8 @@ let keeper_memory_health_http_json ~base_path =
             , `Int (sum (fun entry -> entry.librarian_lane_busy)) )
           ; ( "librarian_failures"
             , `Int (sum (fun entry -> entry.librarian_failures)) )
+          ; ( "vision_ingest_errors"
+            , `Int (sum (fun entry -> entry.vision_ingest_errors)) )
           ; ( "read_errors"
             , `Int
                 (sum (fun entry ->

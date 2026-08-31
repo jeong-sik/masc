@@ -87,10 +87,19 @@ One rule, stated per profile:
 |---|---|
 | `Micro_vm` | delegate to a real shell in the guest |
 | `Docker` | delegate to a real shell in the container |
-| `Remote_ssh` | **open — see §6** |
+| `Remote_ssh` | delegate to a real shell on the endpoint |
 
 Delegation means what every surveyed product does: hand the original text to
 `sh -c` on the far side of the boundary, and let the boundary be the boundary.
+
+All three, and the reason is narrower than "the boundary is good enough". A
+shell already runs on each of them. `Keeper_sandbox_ssh.runner` takes `~argv`
+and runs it on the endpoint verbatim; the Docker and guest runners do the
+same. So `argv:["bash";"-c";S]` is a real shell on every profile today, and
+the only thing this RFC changes about *reach* is nothing. What it changes is
+whether that shell arrives through the gate or around it.
+
+Which is why the proposal is not complete without its other half.
 
 What does **not** change:
 
@@ -128,22 +137,42 @@ What it does not get is a boundary for the other 17%, because those already
 run — through the side door, unjudged. This RFC does not lower the boundary
 for them. It raises it from "nothing" to "the guest kernel."
 
-## 6. Open questions
+## 6. The other half: the side door closes
 
-**`Remote_ssh` is the majority and the least contained.** Five of nine keepers.
-The endpoints are all `127.0.0.1:2222` — one `masc-ssh-testbed` container, one
-unix user and one `/opt/masc-playground-<name>` root per keeper. So a shell
-there cannot touch this host, which is the property that matters most. But
-`network_mode = "none"` is *rejected* for this profile (`remote_ssh_no_network_mode`),
-so the guest has network, and keepers are separated from each other by unix
-permissions rather than by a kernel.
+Delegation on its own is relabelling. `argv:["bash";"-c";S]` reaches the same
+shell it reaches today, and the gate learns nothing. The change is only worth
+making if the same commit removes the way around it: a costume whose script the
+subset cannot represent is delegated *by the gate*, on the profile's authority,
+rather than smuggled past it as an opaque program.
 
-Three possible answers, and this RFC does not pick one:
+That is what makes the profile the routing key rather than a label. It is also
+what `RFC-execute-subset-dispositions` §3.5 already called "one door" — step 4
+walked through it for the representable, and this is the rest of the same
+sentence.
 
-1. Delegate there too — the host is safe, and that was the point.
-2. Do not, until per-endpoint isolation is per-keeper.
-3. Delegate, but only when the endpoint declares it (a new endpoint field),
-   which makes the operator state it once per endpoint rather than per call.
+The rule that made a blanket flip wrong there still holds and is satisfied
+here: §3.7 declined to route the non-representable through the gate because
+the gate would have *refused* them, breaking work that runs. Delegation does
+not refuse them. It runs them, in the place they already run.
+
+## 7. Open questions
+
+**`Remote_ssh` was open in the first draft of this RFC and is not any more.**
+The hesitation was that it is the least isolated of the three: five of nine
+keepers, all on `127.0.0.1:2222`, one `masc-ssh-testbed` container with a unix
+user and a `/opt/masc-playground-<name>` root each, and `network_mode = "none"`
+*rejected* for the profile (`remote_ssh_no_network_mode`), so the endpoint has
+network and keepers are separated from each other by file permissions rather
+than by a kernel.
+
+All of that is true and none of it is about this decision. The question is not
+whether the endpoint is isolated enough to host a shell — it hosts one now,
+for every keeper on the profile, through the same `~argv` the runner has always
+taken. Declining to delegate there would leave the side door as the only way to
+run those scripts, which is the situation this RFC exists to end.
+
+Its isolation is worth improving. That is a different RFC, and it does not gate
+this one.
 
 **What does the tap record?** `shell_costume` currently reports `finding` and
 `lowered`. A delegated script is neither lowered nor escaped; it is a third
@@ -155,7 +184,7 @@ count it.
 becomes a routing signal. `Subset_rewrite` still has a job (it writes the
 advice), but the arms that exist to *refuse* would want re-reading.
 
-## 7. What would have to be true first
+## 8. What would have to be true first
 
 - A keeper's profile is available at the Execute dispatch site. It already is
   (`dispatch_sandbox`, `sandbox_profile_label` in `keeper_tool_execute_runtime.ml`).
@@ -165,15 +194,16 @@ advice), but the arms that exist to *refuse* would want re-reading.
 - The census can tell delegated from lowered from escaped, so the effect is
   measurable after the fact rather than argued before it.
 
-## 8. Workaround self-check (CLAUDE.md bar)
+## 9. Workaround self-check (CLAUDE.md bar)
 
 - **Telemetry-as-fix?** No. §6 asks for a third disposition in the tap, but the
   change is what executes, not what is counted.
 - **String/substring classifier?** None added. The routing key is a typed
   `sandbox_profile`, and the parse result stays the closed
   `reason_too_complex`.
-- **N-of-M?** The rule is stated for all three profiles; `Remote_ssh` is
-  explicitly open rather than quietly skipped.
+- **N-of-M?** The rule is stated for all three profiles and none is deferred.
+  §6 is the reason: delegating on some profiles while the side door stays open
+  on the rest would be exactly the partial migration this bar forbids.
 - **Catch-all added?** No. The per-profile match is exhaustive by construction.
 - **Cap/cooldown/dedup/repair?** None.
 - **Test backdoor?** None.
@@ -182,9 +212,15 @@ advice), but the arms that exist to *refuse* would want re-reading.
 - **Acknowledged risk.** Delegation gives up path scope and redirect policy for
   the scripts it covers. Today those scripts have neither, so the change is
   not a loss — but if step 4's coverage ever grew to include them, delegation
-  would be the weaker of the two and should lose.
+  would be the weaker of the two and should lose. The ordering has to be
+  lower-first, always, or the subset quietly stops being the first path.
+- **Acknowledged risk, second.** Closing the side door (§6) makes
+  `argv:["bash";"-c";S]` route by profile rather than run as written. On a
+  profile that delegates, that is the same shell; there is no profile left that
+  does not, because `Local` is gone (#32078). If a non-containing profile is
+  ever added, this RFC's rule has to be answered for it before it ships.
 
-## 9. Sources
+## 10. Sources
 
 Product behaviour in §2 and §5 was read from source on 2026-08-31: Claude Code
 (leaked 2026-03-31 tree, `utils/bash/ast.ts`, `sandbox-adapter.ts`),

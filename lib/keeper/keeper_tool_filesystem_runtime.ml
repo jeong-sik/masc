@@ -419,6 +419,78 @@ let handle_read_file_with_outcome
          (error_json ~fields:[ "path", `String target ] msg))
 ;;
 
+(** Resolve a [path] when the tool caller omits [cwd]. The verifier
+    tool_read_file path is supposed to be repository-relative, and
+    most live tool calls in this codebase are produced by a
+    Repository actor whose checkout lives at [<ownership_root>/<repo>/]
+    rather than at [<ownership_root>/] itself; honour that single
+    sub-repo layout without guessing when the playground holds more
+    than one.
+
+    The returned pair is (cwd_abs, target_path) so the caller can
+    apply the same [Filename.concat cwd_abs target_path] regardless
+    of whether [path] already names the sub-repo as its first
+    segment — the helper strips the redundant prefix when it
+    descends.
+
+    Returns [(ownership_root, path)] when:
+    - the root cannot be read (no permission, race, ...);
+    - the root itself is the repository (no sub-directory);
+    - the root contains zero or several sub-directories, so a silent
+      choice would be a lie;
+    - the single sub-directory's name does not match the first
+      segment of [path].
+
+    Exposed for testing so [test_owned_read_cwd] can pin the
+    contract directly. *)
+let default_owned_target ~ownership_root ~path =
+  let entries =
+    match Sys.readdir ownership_root with
+    | e -> Array.to_list e
+    | exception _ -> []
+  in
+  let subdirs =
+    List.filter
+      (fun name ->
+        let p = Filename.concat ownership_root name in
+        match Sys.is_directory p with
+        | true -> not (String.equal name (Filename.basename ownership_root))
+        | _ -> false)
+      entries
+  in
+  let first_segment path =
+    let stripped =
+      if Filename.is_relative path then path else Filename.basename path
+    in
+    let seg =
+      match String.split_on_char '/' stripped with
+      | "" :: rest -> rest
+      | rest -> rest
+    in
+    match seg with
+    | first :: _ when not (String.equal first "") -> Some first
+    | _ -> None
+  in
+  let strip_prefix prefix p =
+    let plen = String.length prefix in
+    let p_without_leading =
+      if String.length p >= plen + 1
+         && String.sub p 0 plen = prefix
+         && p.[plen] = '/'
+      then String.sub p (plen + 1) (String.length p - plen - 1)
+      else p
+    in
+    p_without_leading
+  in
+  match subdirs with
+  | [ single ] ->
+    (match first_segment path with
+     | Some first when String.equal first single ->
+       (Filename.concat ownership_root single, strip_prefix single path)
+     | _ -> (ownership_root, path))
+  | _ -> (ownership_root, path)
+[@@coverage off]
+
 let handle_owned_read_file_with_outcome
       ~ownership_root
       ~(args : Yojson.Safe.t)
@@ -430,13 +502,13 @@ let handle_owned_read_file_with_outcome
     if String.equal path ""
     then Error "path is required"
     else
-      let cwd_abs =
+      let cwd_abs, target_rel =
         match cwd with
-        | None -> ownership_root
+        | None -> default_owned_target ~ownership_root ~path
         | Some cwd ->
           if Filename.is_relative cwd
-          then Filename.concat ownership_root cwd
-          else cwd
+          then (Filename.concat ownership_root cwd, path)
+          else (cwd, path)
       in
       match Fs_compat.inspect_owned_directory_chain ~ownership_root cwd_abs with
       | Error rejection ->
@@ -448,7 +520,9 @@ let handle_owned_read_file_with_outcome
              cwd_abs)
       | Ok (Fs_compat.Owned_directory _) ->
         let target =
-          if Filename.is_relative path then Filename.concat cwd_abs path else path
+          if Filename.is_relative target_rel
+          then Filename.concat cwd_abs target_rel
+          else target_rel
         in
         Ok target
   in

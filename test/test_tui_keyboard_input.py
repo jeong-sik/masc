@@ -2679,7 +2679,7 @@ def assert_row_budgeted_surfaces(
     os.write(master_fd, b"q")
 
 
-EVENT_RANGE_RE = re.compile(rb"Recent Events (\d+)-(\d+)/(\d+)")
+EVENT_RANGE_RE = re.compile(rb"TUI Session Events (\d+)-(\d+)/(\d+)")
 
 
 def event_total(frame: bytes, where: str) -> int:
@@ -2698,7 +2698,7 @@ def event_total(frame: bytes, where: str) -> int:
 
 
 def event_range(first: int, last: int, total: int) -> bytes:
-    return f"Recent Events {first}-{last}/{total}".encode()
+    return f"TUI Session Events {first}-{last}/{total}".encode()
 
 
 def newest_window(height: int, total: int) -> bytes:
@@ -2957,7 +2957,7 @@ def assert_overview_event_rows(
         master_fd,
         output,
         b"r",
-        re.compile(rb"Recent Events \d+-\d+/\d+"),
+        re.compile(rb"TUI Session Events \d+-\d+/\d+"),
     )
     drain_until_quiet(process, master_fd, output)
     anchored = resize_and_wait(
@@ -6302,7 +6302,7 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
             "reason": "needs a repro",
         }:
             raise AssertionError(f"reject body: {reject_payload!r}")
-        # The verdict events live on the Overview's Recent Events pane, so
+        # The verdict events live on the Overview's TUI Session Events pane, so
         # the visible trace is asserted there, not on the Verification frame.
         tab_until(process, master_fd, output, b"MASC Overview")
         wait_for_output(

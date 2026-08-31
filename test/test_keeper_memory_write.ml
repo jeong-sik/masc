@@ -121,10 +121,9 @@ let contains ~needle haystack =
 
 let fact claim : Masc.Keeper_memory_os_types.fact =
   let now = Time_compat.now () in
-  { claim
-  ; category = Masc.Keeper_memory_os_types.Fact
-  ; first_seen = now
-  }
+  Masc.Keeper_memory_os_types.observed ~claim
+    ~category:Masc.Keeper_memory_os_types.Fact ~now
+    ~origin:{ kind = Masc.Keeper_memory_os_types.Legacy; trace_id = "" }
 ;;
 
 let current_facts ~keepers_dir ~keeper_id =

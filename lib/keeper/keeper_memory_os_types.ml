@@ -222,6 +222,10 @@ let non_empty_string value = not (String.equal (String.trim value) "")
 (* The exact claim bytes are the only memory-content authority. The digest is a
    bounded derived identifier for retention and observability; it does not
    normalize or classify prose. *)
+let observed ~claim ~category ~now ~origin =
+  { claim; category; first_seen = now; last_seen = now; reinforcement = 0; origin }
+;;
+
 let memory_id (f : fact) =
   "sha256:" ^ Digestif.SHA256.(digest_string f.claim |> to_hex)
 ;;

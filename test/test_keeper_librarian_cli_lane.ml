@@ -38,7 +38,8 @@ let () =
 ;;
 
 let fact ~claim : Memory.fact =
-  { claim; category = Memory.Fact; first_seen = 1_000_000. }
+  Memory.observed ~claim ~category:Memory.Fact ~now:1_000_000.
+    ~origin:{ kind = Memory.Legacy; trace_id = "" }
 ;;
 
 let current_a = fact ~claim:"keep A"

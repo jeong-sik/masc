@@ -43,9 +43,21 @@ let exact_fields allowed fields =
 ## 4. 검증 증거
 
 - 상영(빌드+실행 파이프라인): `dune build test/test_keeper_memory_os_current.exe` 성공 후 `_build/default/test/test_keeper_memory_os_current.exe` 직접 실행 — **run ID `BZU2CU0M`, 24 tests run, 전부 초록.** 22번 "legacy three-field row decodes as legacy" [OK], 23번 "re-observation reinforces instead of duplicating" [OK] 확인. (재생 필름 dff34ebe, appr_01a04fb3.)
-- 소비자 안전: `lib/` 내 `fact_of_json` 직접 호출 0건(grep 실측). 호출 표면은 이 시험 파일이 사실상 전부.
+- 소비자 안전: **정정.** `lib/` 내 호출은 0건이 아니다 —
+  `lib/keeper/keeper_memory_os_current.ml:134` 의 `facts_of_json` 이 부른다.
+  그 파일이 3행에서 `open Keeper_memory_os_types` 를 하므로 정규화된 이름으로
+  grep 하면 안 잡힌다. **그 호출이 스토어 리더**이고, 이 워크스페이스의 fact 행
+  572개(10개 keeper, 전부 3필드 legacy 모양)를 실제로 읽는 경로다. 즉 legacy
+  팔은 곁다리가 아니라 라이브 데이터 100% 를 받는다.
 - `origin` 주입 지점: `lib/keeper/keeper_tool_memory_runtime.ml:494` (`Keeper_memory_os_current.upsert_fact`) — 배선의 실제 호출자.
-- 컴파일 폐쇄: lib 전체 의존폐쇄가 exe 빌드 성공으로 증명됨. (저장소 루트 `dune build` 전체는 이 docker 샌드박스에서 exit 137 SIGKILL 로 환경적 사망 — 재생 필름 a85252de. 원인 규명 불요, 좁은 타깃으로 검증함.)
+- 컴파일 폐쇄: **정정.** 좁은 타깃 빌드는 이 변경의 폐쇄를 증명하지 못했다.
+  `fact` 레코드에 필드 3개가 붙었으므로 그 레코드를 짓는 **모든** 자리가 바뀐다.
+  호스트에서 `dune build @all` 을 돌리자 시험 파일 6개가 `Some record fields are
+  undefined: last_seen reinforcement origin` 로 깨졌다 —
+  `test_librarian_journal_failures`, `test_keeper_memory_write`,
+  `test_keeper_memory_journal_projection`, `test_keeper_librarian_retry`,
+  `test_server_dashboard_http_keeper_memory_health`,
+  `test_keeper_librarian_cli_lane`. 좁은 타깃만 돌린 것이 이걸 가렸다.
 
 ## 5. 검증 방법 (재현)
 
@@ -55,4 +67,10 @@ env MASC_TEST_ALLOW_HOME_BASE_PATH=1 dune build test/test_keeper_memory_os_curre
 env MASC_TEST_ALLOW_HOME_BASE_PATH=1 _build/default/test/test_keeper_memory_os_current.exe
 ```
 
-`@test/...runtest` 별칭은 이 저장소에 없다("Alias is empty"). 루트 전체 빌드는 SIGKILL 로 죽는다. 위 좁은 타깃만 쓸 것.
+**정정: `@test/runtest` 별칭은 있다.** 호스트에서 돌렸다 —
+`dune build --root . @test/runtest` exit 0, 320초, 실패 0. 2026-08-25 부터 CI 가
+`scripts/ci-run-test-suite.sh` 로 이 별칭을 쓴다. 샌드박스의 SIGKILL 은 그
+샌드박스의 메모리 한계이지 저장소가 그 타깃을 갖고 있지 않다는 뜻이 아니었다.
+
+레코드 모양을 넓히는 변경은 좁은 타깃으로 검증할 수 없다. 전체 빌드가
+그 변경이 닿는 자리를 세는 유일한 방법이다.

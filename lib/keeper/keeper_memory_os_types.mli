@@ -90,6 +90,22 @@ type fact =
   ; origin : origin
   }
 
+(** A claim observed for the first time. [first_seen] and [last_seen] are both
+    [now] and [reinforcement] is zero, because a row seen once has been seen
+    once.
+
+    The three identity fields move together, and this is the one place that
+    says how. Spelled at each construction site instead, the invariant would
+    live in as many copies as there are fixtures -- and a later row that
+    forgot [last_seen = first_seen] would sort wrong in eviction without
+    failing anything. *)
+val observed
+  :  claim:string
+  -> category:category
+  -> now:float
+  -> origin:origin
+  -> fact
+
 (** SHA-256 of the exact claim bytes. This derived identifier is used only for
     retention, duplicate rejection, and observability. *)
 val memory_id : fact -> string

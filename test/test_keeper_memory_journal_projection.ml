@@ -71,7 +71,8 @@ let test_failure_and_commit_project_to_different_shapes () =
       ~snapshot_present:true
       ~cadence_deferred:true;
     let fact : Types.fact =
-      { claim = "a claim"; category = Fact; first_seen = 1_700_000_000.0 }
+      Types.observed ~claim:"a claim" ~category:Fact ~now:1_700_000_000.0
+        ~origin:{ kind = Legacy; trace_id = "" }
     in
     (match
        Current.replace
@@ -178,7 +179,8 @@ let test_untagged_legacy_line_is_reported_not_reinterpreted () =
 let test_drop_reasons_survive_the_projection () =
   with_keepers_dir (fun keepers_dir ->
     let fact : Types.fact =
-      { claim = "kept"; category = Fact; first_seen = 1_700_000_000.0 }
+      Types.observed ~claim:"kept" ~category:Fact ~now:1_700_000_000.0
+        ~origin:{ kind = Legacy; trace_id = "" }
     in
     match
       Current.replace

@@ -3,6 +3,20 @@ open Masc_tui_ansi
 open Masc_tui_render
 open Masc_tui_loader
 
+(* One place decides how an aborted $EDITOR form reads. Only the cancel
+   differs by caller, because only the action's own name belongs in it; an
+   editor that never ran and a temp file that could not be read are the same
+   fact wherever they happen, and neither is the operator saying no. *)
+let report_editor_abort state ~action ?cancelled (abort : Masc_tui_editor.abort)
+  =
+  match abort with
+  | Masc_tui_editor.Cancelled ->
+    report_action state "system"
+      (match cancelled with Some text -> text | None -> action ^ " cancelled")
+  | Masc_tui_editor.Editor_unavailable _ | Masc_tui_editor.Form_unreadable _ ->
+    report_action state "error"
+      (action ^ ": " ^ Masc_tui_editor.abort_detail abort)
+
 module Approval = Masc_tui_operator_projection
 module Board_detail = Masc_tui_board_detail
 module Board_selection = Masc_tui_board_selection
@@ -8889,8 +8903,8 @@ let main () =
         Masc_tui_editor.roundtrip ~restore:restore_terminal
           ~reenter:reenter_terminal stem
       with
-      | None -> report_action state "system" (action ^ " cancelled")
-      | Some body -> (
+      | Error abort -> report_editor_abort state ~action abort
+      | Ok body -> (
         match Yojson.Safe.from_string body with
         | exception Yojson.Json_error e ->
           report_action state "error" (action ^ ": body is not JSON: " ^ e)
@@ -8957,8 +8971,8 @@ let main () =
                   Masc_tui_editor.roundtrip ~restore:restore_terminal
                     ~reenter:reenter_terminal stem
                 with
-                | None -> report_action state "system" "note cancelled"
-                | Some body -> (
+                | Error abort -> report_editor_abort state ~action:"note" abort
+                | Ok body -> (
                     match Yojson.Safe.from_string body with
                     | exception Yojson.Json_error e ->
                         report_action state "error"
@@ -9060,8 +9074,8 @@ let main () =
               Masc_tui_editor.roundtrip ~restore:restore_terminal
                 ~reenter:reenter_terminal stem
             with
-            | None -> report_action state "system" "overrule cancelled"
-            | Some body -> (
+            | Error abort -> report_editor_abort state ~action:"overrule" abort
+            | Ok body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
                     report_action state "error" ("overrule: body is not JSON: " ^ e)
@@ -9107,8 +9121,8 @@ let main () =
               Masc_tui_editor.roundtrip ~restore:restore_terminal
                 ~reenter:reenter_terminal stem
             with
-            | None -> report_action state "system" "reject cancelled"
-            | Some body -> (
+            | Error abort -> report_editor_abort state ~action:"reject" abort
+            | Ok body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
                     report_action state "error" ("reject: body is not JSON: " ^ e)
@@ -9146,8 +9160,8 @@ let main () =
               Masc_tui_editor.roundtrip ~restore:restore_terminal
                 ~reenter:reenter_terminal stem
             with
-            | None -> report_action state "system" "cancel cancelled"
-            | Some body -> (
+            | Error abort -> report_editor_abort state ~action:"cancel" abort
+            | Ok body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
                     report_action state "error" ("cancel: body is not JSON: " ^ e)
@@ -9224,8 +9238,10 @@ let main () =
           Masc_tui_editor.roundtrip ~restore:restore_terminal
             ~reenter:reenter_terminal stem
         with
-        | None -> report_action state "system" "runtime.toml unchanged"
-        | Some edited -> (
+        | Error abort ->
+          report_editor_abort state ~action:"runtime.toml"
+            ~cancelled:"runtime.toml unchanged" abort
+        | Ok edited -> (
           let host = server_peer_host in
           let port = state.port in
           match
@@ -9389,8 +9405,9 @@ and is loaded on demand through keeper_skill.
               ~suffix:".md"
               (skill_template ~composition)
           with
-          | None -> report_action state "system" "Skill creation cancelled"
-          | Some source_text ->
+          | Error abort ->
+            report_editor_abort state ~action:"Skill creation" abort
+          | Ok source_text ->
             (match skill_name_from_source source_text with
              | None -> report_action state "error" "Skill template has no name frontmatter"
              | Some "new-skill" ->
@@ -9498,10 +9515,11 @@ and is loaded on demand through keeper_skill.
                  ~suffix:".md"
                  loaded.sel_source_text
              with
-             | None -> report_action state "system" (name ^ " edit cancelled")
-             | Some edited when String.equal edited loaded.sel_source_text ->
+             | Error abort ->
+               report_editor_abort state ~action:(name ^ " edit") abort
+             | Ok edited when String.equal edited loaded.sel_source_text ->
                report_action state "system" (name ^ " unchanged")
-             | Some edited ->
+             | Ok edited ->
                (match
                   Masc_tui_http.post_skill_editor_preview
                     ~host
@@ -9581,10 +9599,12 @@ and is loaded on demand through keeper_skill.
           Masc_tui_editor.roundtrip ~restore:restore_terminal
             ~reenter:reenter_terminal row.Tui_decode.pr_effective
         with
-        | None ->
-          report_action state "system"
-            (row.Tui_decode.pr_key ^ ": prompt unchanged")
-        | Some edited ->
+        | Error abort ->
+          report_editor_abort state
+            ~action:(row.Tui_decode.pr_key ^ " prompt")
+            ~cancelled:(row.Tui_decode.pr_key ^ ": prompt unchanged")
+            abort
+        | Ok edited ->
           (match
              Masc_tui_http.post_prompt_override ~host:server_peer_host
                ~port:state.port ~key:row.Tui_decode.pr_key ~value:edited
@@ -9642,9 +9662,12 @@ and is loaded on demand through keeper_skill.
             Masc_tui_editor.roundtrip ~restore:restore_terminal
               ~reenter:reenter_terminal stem
           with
-          | None ->
-              report_action state "system" (keeper.k_name ^ ": settings unchanged")
-          | Some edited -> (
+          | Error abort ->
+              report_editor_abort state
+                ~action:(keeper.k_name ^ " settings")
+                ~cancelled:(keeper.k_name ^ ": settings unchanged")
+                abort
+          | Ok edited -> (
             match Yojson.Safe.from_string edited with
             | exception Yojson.Json_error detail ->
                 report_action state "error" ("settings are not JSON: " ^ detail)
@@ -9710,8 +9733,8 @@ and is loaded on demand through keeper_skill.
         Masc_tui_editor.roundtrip ~restore:restore_terminal
           ~reenter:reenter_terminal stem
       with
-      | None -> report_action state "system" "create cancelled"
-      | Some declaration -> (
+      | Error abort -> report_editor_abort state ~action:"create" abort
+      | Ok declaration -> (
         let declared_name =
           match Yojson.Safe.from_string declaration with
           | `Assoc fields -> (
@@ -9756,8 +9779,8 @@ and is loaded on demand through keeper_skill.
         Masc_tui_editor.roundtrip ~restore:restore_terminal
           ~reenter:reenter_terminal stem
       with
-      | None -> report_action state "system" "add cancelled"
-      | Some declaration -> (
+      | Error abort -> report_editor_abort state ~action:"add" abort
+      | Ok declaration -> (
         let declared field =
           match Yojson.Safe.from_string declaration with
           | `Assoc fields -> (

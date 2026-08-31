@@ -25,6 +25,11 @@ val enqueue : base_path:string -> Tool_result.result -> unit
     storage remains unavailable. If pending publication fails, the record stays
     in the memory queue and the failure is visible in [persistence_snapshot]. *)
 
+type loss_marker_source =
+  [ `Bulk_data
+  | `Runtime_state_fallback
+  ]
+
 type hydrate_report = {
   loaded_records : int;
   malformed_records : int;
@@ -33,7 +38,7 @@ type hydrate_report = {
   recovered_pending_records : int;
   deduplicated_pending_records : int;
   invalid_pending_files : int;
-  invalid_loss_marker : bool;
+  invalid_loss_marker_sources : loss_marker_source list;
 }
 
 type persistence_snapshot = {
@@ -53,6 +58,7 @@ type persistence_snapshot = {
   spool_write_failed_records : int;
   spool_delete_failed_records : int;
   loss_marker_write_failed_records : int;
+  loss_marker_fallback_write_failed_records : int;
   flushed_records : int;
   flush_batches : int;
   last_flush_trigger : string option;
@@ -62,6 +68,7 @@ type persistence_snapshot = {
   last_append_error : string option;
   last_spool_error : string option;
   last_loss_marker_error : string option;
+  last_loss_marker_fallback_error : string option;
 }
 
 val persistence_snapshot : unit -> persistence_snapshot
@@ -81,6 +88,8 @@ type aggregate_integrity_snapshot = {
   observed_at_unix : float;
   retention_days : int option;
   status : [ `Invalid_marker | `Known_incomplete | `Unknown ];
+  loss_marker_source : loss_marker_source option;
+  invalid_loss_marker_sources : loss_marker_source list;
   loss_reason : string option;
   loss_observed_at_unix : float option;
   loss_runtime_instance_id : string option;
@@ -91,7 +100,11 @@ val aggregate_integrity_snapshot : unit -> aggregate_integrity_snapshot
     means no current loss marker was found; it never claims completeness from
     absence alone. [Invalid_marker] keeps a corrupt marker distinct from
     absence. [Known_incomplete] means at least one queue-full loss marker falls
-    inside the configured hydration retention window. *)
+    inside the configured hydration retention window. [loss_marker_source]
+    identifies whether the selected marker came from the bulk data root or the
+    independent runtime-state fallback. [invalid_loss_marker_sources] preserves
+    read or format failures from either location even when the other location
+    still contains a valid marker. *)
 
 val aggregate_integrity_snapshot_to_json : aggregate_integrity_snapshot -> Yojson.Safe.t
 (** Current-format JSON projection with schema
@@ -145,5 +158,8 @@ module For_testing : sig
     (string -> string -> (unit, string) result) -> unit
 
   val set_loss_marker_write_guard :
+    (string -> string -> (unit, string) result) -> unit
+
+  val set_loss_marker_fallback_write_guard :
     (string -> string -> (unit, string) result) -> unit
 end

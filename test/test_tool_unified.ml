@@ -83,6 +83,11 @@ let () =
               let _ = persistence |> member "spool_write_failed_records" |> to_int in
               let _ = persistence |> member "spool_delete_failed_records" |> to_int in
               let _ = persistence |> member "loss_marker_write_failed_records" |> to_int in
+              let _ =
+                persistence
+                |> member "loss_marker_fallback_write_failed_records"
+                |> to_int
+              in
               check bool
                 "missing last trigger remains null"
                 true
@@ -99,6 +104,10 @@ let () =
                 "missing last loss marker error remains null"
                 true
                 (persistence |> member "last_loss_marker_error" = `Null);
+              check bool
+                "missing last loss marker fallback error remains null"
+                true
+                (persistence |> member "last_loss_marker_fallback_error" = `Null);
               let integrity = report |> member "aggregate_integrity" in
               check string
                 "aggregate integrity schema"
@@ -108,6 +117,14 @@ let () =
                 "aggregate integrity never infers complete"
                 "unknown"
                 (integrity |> member "status" |> to_string);
+              check bool
+                "unknown integrity has no marker source"
+                true
+                (integrity |> member "loss_marker_source" = `Null);
+              check int
+                "unknown integrity has no invalid marker sources"
+                0
+                (integrity |> member "invalid_loss_marker_sources" |> to_list |> List.length);
               check bool
                 "unknown integrity has no fabricated loss time"
                 true

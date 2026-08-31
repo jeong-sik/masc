@@ -37,6 +37,11 @@ let record_to_json ~record_id (r : Tool_result.result) : Yojson.Safe.t =
     ; ("ts", `Float (Time_compat.now ()))
     ]
 
+type loss_marker_source =
+  [ `Bulk_data
+  | `Runtime_state_fallback
+  ]
+
 type hydrate_report = {
   loaded_records : int;
   malformed_records : int;
@@ -45,7 +50,7 @@ type hydrate_report = {
   recovered_pending_records : int;
   deduplicated_pending_records : int;
   invalid_pending_files : int;
-  invalid_loss_marker : bool;
+  invalid_loss_marker_sources : loss_marker_source list;
 }
 
 type persistence_snapshot = {
@@ -65,6 +70,7 @@ type persistence_snapshot = {
   spool_write_failed_records : int;
   spool_delete_failed_records : int;
   loss_marker_write_failed_records : int;
+  loss_marker_fallback_write_failed_records : int;
   flushed_records : int;
   flush_batches : int;
   last_flush_trigger : string option;
@@ -74,6 +80,7 @@ type persistence_snapshot = {
   last_append_error : string option;
   last_spool_error : string option;
   last_loss_marker_error : string option;
+  last_loss_marker_fallback_error : string option;
 }
 
 type loss_marker = {
@@ -82,10 +89,17 @@ type loss_marker = {
   runtime_instance_id : string;
 }
 
+type sourced_loss_marker = {
+  marker : loss_marker;
+  source : loss_marker_source;
+}
+
 type aggregate_integrity_snapshot = {
   observed_at_unix : float;
   retention_days : int option;
   status : [ `Invalid_marker | `Known_incomplete | `Unknown ];
+  loss_marker_source : loss_marker_source option;
+  invalid_loss_marker_sources : loss_marker_source list;
   loss_reason : string option;
   loss_observed_at_unix : float option;
   loss_runtime_instance_id : string option;
@@ -150,6 +164,7 @@ let append_failed_records = Atomic.make 0
 let spool_write_failed_records = Atomic.make 0
 let spool_delete_failed_records = Atomic.make 0
 let loss_marker_write_failed_records = Atomic.make 0
+let loss_marker_fallback_write_failed_records = Atomic.make 0
 let flushed_records = Atomic.make 0
 let flush_batches = Atomic.make 0
 let writer_active = Atomic.make false
@@ -160,6 +175,7 @@ let last_flush_at_unix = Atomic.make None
 let last_append_error = Atomic.make None
 let last_spool_error = Atomic.make None
 let last_loss_marker_error = Atomic.make None
+let last_loss_marker_fallback_error = Atomic.make None
 
 let default_pending_write path content =
   Eio_guard.run_in_systhread (fun () ->
@@ -168,8 +184,10 @@ let default_pending_write path content =
 
 let pending_write = Atomic.make default_pending_write
 let loss_marker_write = Atomic.make default_pending_write
-let current_loss_marker : loss_marker option Atomic.t = Atomic.make None
-let current_loss_marker_invalid = Atomic.make false
+let loss_marker_fallback_write = Atomic.make default_pending_write
+let current_loss_marker : sourced_loss_marker option Atomic.t = Atomic.make None
+let current_loss_marker_invalid_sources : loss_marker_source list Atomic.t =
+  Atomic.make []
 let loss_marker_retention_days : int option Atomic.t = Atomic.make None
 let loss_marker_published_this_process = Atomic.make false
 
@@ -252,6 +270,8 @@ let persistence_snapshot () =
   ; spool_write_failed_records = Atomic.get spool_write_failed_records
   ; spool_delete_failed_records = Atomic.get spool_delete_failed_records
   ; loss_marker_write_failed_records = Atomic.get loss_marker_write_failed_records
+  ; loss_marker_fallback_write_failed_records =
+      Atomic.get loss_marker_fallback_write_failed_records
   ; flushed_records = Atomic.get flushed_records
   ; flush_batches = Atomic.get flush_batches
   ; last_flush_trigger = Atomic.get last_flush_trigger
@@ -261,6 +281,7 @@ let persistence_snapshot () =
   ; last_append_error = Atomic.get last_append_error
   ; last_spool_error = Atomic.get last_spool_error
   ; last_loss_marker_error = Atomic.get last_loss_marker_error
+  ; last_loss_marker_fallback_error = Atomic.get last_loss_marker_fallback_error
   }
 
 let option_to_json encode = function
@@ -288,6 +309,8 @@ let persistence_snapshot_to_json (snapshot : persistence_snapshot) =
     ; "spool_delete_failed_records", `Int snapshot.spool_delete_failed_records
     ; ( "loss_marker_write_failed_records"
       , `Int snapshot.loss_marker_write_failed_records )
+    ; ( "loss_marker_fallback_write_failed_records"
+      , `Int snapshot.loss_marker_fallback_write_failed_records )
     ; "flushed_records", `Int snapshot.flushed_records
     ; "flush_batches", `Int snapshot.flush_batches
     ; ( "last_flush_trigger"
@@ -303,6 +326,10 @@ let persistence_snapshot_to_json (snapshot : persistence_snapshot) =
       , option_to_json (fun value -> `String value) snapshot.last_spool_error )
     ; ( "last_loss_marker_error"
       , option_to_json (fun value -> `String value) snapshot.last_loss_marker_error )
+    ; ( "last_loss_marker_fallback_error"
+      , option_to_json
+          (fun value -> `String value)
+          snapshot.last_loss_marker_fallback_error )
     ]
 
 let marker_is_fresh ~now ~retention_days (marker : loss_marker) =
@@ -314,26 +341,36 @@ let aggregate_integrity_snapshot () =
   let retention_days = Atomic.get loss_marker_retention_days in
   let marker =
     match Atomic.get current_loss_marker, retention_days with
-    | Some marker, Some days when marker_is_fresh ~now:observed_at_unix ~retention_days:days marker ->
-      Some marker
-    | Some marker, None -> Some marker
+    | Some sourced, Some days
+      when marker_is_fresh
+             ~now:observed_at_unix
+             ~retention_days:days
+             sourced.marker ->
+      Some sourced
+    | Some sourced, None -> Some sourced
     | Some _, Some _ | None, _ -> None
   in
   let status =
     match marker with
     | Some _ -> `Known_incomplete
-    | None when Atomic.get current_loss_marker_invalid -> `Invalid_marker
+    | None when Atomic.get current_loss_marker_invalid_sources <> [] -> `Invalid_marker
     | None -> `Unknown
   in
   { observed_at_unix
   ; retention_days
   ; status
-  ; loss_reason = Option.map (fun marker -> marker.reason) marker
+  ; loss_marker_source = Option.map (fun sourced -> sourced.source) marker
+  ; invalid_loss_marker_sources = Atomic.get current_loss_marker_invalid_sources
+  ; loss_reason = Option.map (fun sourced -> sourced.marker.reason) marker
   ; loss_observed_at_unix =
-      Option.map (fun (marker : loss_marker) -> marker.observed_at_unix) marker
+      Option.map (fun sourced -> sourced.marker.observed_at_unix) marker
   ; loss_runtime_instance_id =
-      Option.map (fun (marker : loss_marker) -> marker.runtime_instance_id) marker
+      Option.map (fun sourced -> sourced.marker.runtime_instance_id) marker
   }
+
+let loss_marker_source_to_string = function
+  | `Bulk_data -> "bulk_data"
+  | `Runtime_state_fallback -> "runtime_state_fallback"
 
 let aggregate_integrity_snapshot_to_json
     (snapshot : aggregate_integrity_snapshot) =
@@ -349,6 +386,15 @@ let aggregate_integrity_snapshot_to_json
            | `Invalid_marker -> "invalid_marker"
            | `Known_incomplete -> "known_incomplete"
            | `Unknown -> "unknown") )
+    ; ( "loss_marker_source"
+      , option_to_json
+          (fun source -> `String (loss_marker_source_to_string source))
+          snapshot.loss_marker_source )
+    ; ( "invalid_loss_marker_sources"
+      , `List
+          (List.map
+             (fun source -> `String (loss_marker_source_to_string source))
+             snapshot.invalid_loss_marker_sources) )
     ; "loss_reason", option_to_json (fun value -> `String value) snapshot.loss_reason
     ; ( "loss_observed_at_unix"
       , option_to_json (fun value -> `Float value) snapshot.loss_observed_at_unix )
@@ -385,6 +431,7 @@ let reset_for_testing () =
   Atomic.set spool_write_failed_records 0;
   Atomic.set spool_delete_failed_records 0;
   Atomic.set loss_marker_write_failed_records 0;
+  Atomic.set loss_marker_fallback_write_failed_records 0;
   Atomic.set flushed_records 0;
   Atomic.set flush_batches 0;
   Atomic.set writer_active false;
@@ -395,10 +442,12 @@ let reset_for_testing () =
   Atomic.set last_append_error None;
   Atomic.set last_spool_error None;
   Atomic.set last_loss_marker_error None;
+  Atomic.set last_loss_marker_fallback_error None;
   Atomic.set pending_write default_pending_write;
   Atomic.set loss_marker_write default_pending_write;
+  Atomic.set loss_marker_fallback_write default_pending_write;
   Atomic.set current_loss_marker None;
-  Atomic.set current_loss_marker_invalid false;
+  Atomic.set current_loss_marker_invalid_sources [];
   Atomic.set loss_marker_retention_days None;
   Atomic.set loss_marker_published_this_process false;
   Atomic.set store None;
@@ -434,6 +483,11 @@ let loss_marker_path ~base_path =
     (Config_dir_resolver.data_dir ~base_path)
     "tool-metrics-loss-marker.json"
 
+let loss_marker_fallback_path ~base_path =
+  Filename.concat
+    (Config_dir_resolver.masc_root ~base_path)
+    "tool-metrics-loss-marker.json"
+
 let loss_marker_to_json (marker : loss_marker) =
   `Assoc
     [ "schema", `String "masc.tool_metrics.loss_marker.v1"
@@ -457,16 +511,21 @@ let loss_marker_of_json json =
     Some { reason = "queue_full"; observed_at_unix; runtime_instance_id }
   | _ -> None
 
-let load_loss_marker ~base_path ~retention_days =
-  let path = loss_marker_path ~base_path in
+type loss_marker_load =
+  | Missing
+  | Expired
+  | Invalid
+  | Current of loss_marker
+
+let load_loss_marker_at ~path ~retention_days =
   let content =
     try Ok (Fs_compat.load_file_opt path) with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Sys_error _ | Unix.Unix_error _ -> Error ()
   in
   match content with
-  | Ok None -> None, false
-  | Error () -> None, true
+  | Ok None -> Missing
+  | Error () -> Invalid
   | Ok (Some content) ->
     (match
        try
@@ -475,17 +534,68 @@ let load_loss_marker ~base_path ~retention_days =
          |> Option.to_result ~none:()
        with Yojson.Json_error _ -> Error ()
      with
-     | Error () -> None, true
+     | Error () -> Invalid
      | Ok marker ->
        if marker_is_fresh ~now:(Time_compat.now ()) ~retention_days marker
-       then Some marker, false
-       else None, false)
+       then Current marker
+       else Expired)
+
+let load_loss_markers ~base_path ~retention_days =
+  let loaded =
+    [ ( `Bulk_data
+      , load_loss_marker_at
+          ~path:(loss_marker_path ~base_path)
+          ~retention_days )
+    ; ( `Runtime_state_fallback
+      , load_loss_marker_at
+          ~path:(loss_marker_fallback_path ~base_path)
+          ~retention_days )
+    ]
+  in
+  let invalid_sources =
+    List.filter_map
+      (function
+        | source, Invalid -> Some source
+        | _, (Missing | Expired | Current _) -> None)
+      loaded
+  in
+  let marker =
+    List.fold_left
+      (fun selected -> function
+        | source, Current marker ->
+          (match selected with
+           | Some current
+             when current.marker.observed_at_unix >= marker.observed_at_unix ->
+             selected
+           | Some _ | None -> Some { marker; source })
+        | _, (Missing | Expired | Invalid) -> selected)
+      None
+      loaded
+  in
+  marker, invalid_sources
+
+let write_loss_marker write ~path marker =
+  try
+    write path (Yojson.Safe.to_string (loss_marker_to_json marker) ^ "\n")
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | (Sys_error _ | Unix.Unix_error _ | Failure _) as exn ->
+    Error (Printexc.to_string exn)
+
+let rec clear_invalid_loss_marker_source source =
+  let current = Atomic.get current_loss_marker_invalid_sources in
+  if List.mem source current
+  then
+    let updated = List.filter (fun candidate -> candidate <> source) current in
+    if not (Atomic.compare_and_set current_loss_marker_invalid_sources current updated)
+    then clear_invalid_loss_marker_source source
 
 let publish_loss_marker ~base_path =
   let now = Time_compat.now () in
   let marker_is_current =
     match Atomic.get current_loss_marker, Atomic.get loss_marker_retention_days with
-    | Some marker, Some retention_days -> marker_is_fresh ~now ~retention_days marker
+    | Some sourced, Some retention_days ->
+      marker_is_fresh ~now ~retention_days sourced.marker
     | Some _, None -> true
     | None, _ -> false
   in
@@ -499,21 +609,15 @@ let publish_loss_marker ~base_path =
       ; runtime_instance_id = build.runtime_instance_id
       }
     in
-    let path = loss_marker_path ~base_path in
-    let write_result =
-      try
-        Atomic.get loss_marker_write
-          path
-          (Yojson.Safe.to_string (loss_marker_to_json marker) ^ "\n")
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | (Sys_error _ | Unix.Unix_error _ | Failure _) as exn ->
-        Error (Printexc.to_string exn)
-    in
-    match write_result with
+    match
+      write_loss_marker
+        (Atomic.get loss_marker_write)
+        ~path:(loss_marker_path ~base_path)
+        marker
+    with
     | Ok () ->
-      Atomic.set current_loss_marker (Some marker);
-      Atomic.set current_loss_marker_invalid false;
+      clear_invalid_loss_marker_source `Bulk_data;
+      Atomic.set current_loss_marker (Some { marker; source = `Bulk_data });
       Atomic.set loss_marker_published_this_process true;
       Atomic.set last_loss_marker_error None
     | Error error ->
@@ -524,7 +628,30 @@ let publish_loss_marker ~base_path =
         Log.Metrics.error
           "tool_metrics_persist: durable queue-loss marker write failed %d time(s): %s"
           failed
-          error
+          error;
+      (match
+         write_loss_marker
+           (Atomic.get loss_marker_fallback_write)
+           ~path:(loss_marker_fallback_path ~base_path)
+           marker
+       with
+       | Ok () ->
+         clear_invalid_loss_marker_source `Runtime_state_fallback;
+         Atomic.set current_loss_marker
+           (Some { marker; source = `Runtime_state_fallback });
+         Atomic.set loss_marker_published_this_process true;
+         Atomic.set last_loss_marker_fallback_error None
+       | Error fallback_error ->
+         let failed =
+           Atomic.fetch_and_add loss_marker_fallback_write_failed_records 1 + 1
+         in
+         Atomic.set last_loss_marker_fallback_error (Some fallback_error);
+         if failed = 1 || failed mod 1024 = 0
+         then
+           Log.Metrics.error
+             "tool_metrics_persist: runtime-state queue-loss marker fallback write failed %d time(s): %s"
+             failed
+             fallback_error)
 
 let remove_pending_file path =
   try
@@ -597,12 +724,12 @@ let enqueue_recovered_record record =
 let hydrate ~base_path ~retention_days =
   let store = get_or_create_store ~base_path in
   let pruned_files = Dated_jsonl.prune store ~days:retention_days in
-  let loss_marker, invalid_loss_marker =
-    load_loss_marker ~base_path ~retention_days
+  let loss_marker, invalid_loss_marker_sources =
+    load_loss_markers ~base_path ~retention_days
   in
   Atomic.set loss_marker_retention_days (Some retention_days);
   Atomic.set current_loss_marker loss_marker;
-  Atomic.set current_loss_marker_invalid invalid_loss_marker;
+  Atomic.set current_loss_marker_invalid_sources invalid_loss_marker_sources;
   Atomic.set loss_marker_published_this_process false;
   let pending_records, invalid_pending_files = load_pending_records ~base_path in
   let pending_ids = Hashtbl.create (List.length pending_records) in
@@ -653,7 +780,7 @@ let hydrate ~base_path ~retention_days =
          ; recovered_pending_records = !recovered_pending_records
          ; deduplicated_pending_records = !deduplicated_pending_records
          ; invalid_pending_files
-         ; invalid_loss_marker
+         ; invalid_loss_marker_sources
          })
       read_result)
 
@@ -835,4 +962,6 @@ module For_testing = struct
   let await_flush_trigger = await_flush_trigger
   let set_pending_write_guard guard = Atomic.set pending_write guard
   let set_loss_marker_write_guard guard = Atomic.set loss_marker_write guard
+  let set_loss_marker_fallback_write_guard guard =
+    Atomic.set loss_marker_fallback_write guard
 end

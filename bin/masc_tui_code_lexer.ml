@@ -992,3 +992,11 @@ let rows_of_source ~language text =
     | None -> [ (text, kind_code) ]
   in
   rows_of_segments segments
+
+(* Strings and comments are already separate runs, so examples such as
+   [note = "a=b"] and [# example = false] do not create phantom fields. *)
+let row_has_assignment row =
+  List.exists
+    (fun (text, kind) ->
+       String.equal kind kind_code && String.contains text '=')
+    row

@@ -1523,6 +1523,10 @@ type state = {
      positioned at this row's [models.NAME]. *)
   mutable config_models_cursor: int;
   mutable runtime_config_view_error: string option;
+  (* Absolute source row selected in runtime.toml. The viewport remains
+     [config_scroll]; keeping the cursor separate lets j/k skip prose while
+     PgUp/PgDn still move by a visible page. *)
+  mutable runtime_config_cursor: int;
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
@@ -2306,6 +2310,7 @@ let create_state
   config_models_rows = [];
   config_models_cursor = 0;
   runtime_config_view_error = None;
+  runtime_config_cursor = 0;
   config_scroll = 0;
   detail_tab = Detail_info;
   keeper_sandbox_view = None;

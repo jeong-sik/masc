@@ -12038,8 +12038,8 @@ let render_themes (state : state) =
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"themes" ~rows:terminal_rows ~cols buf
 
-(* The two knobs a model binding carries sit in different tables --
-   [reasoning-effort] under [models.NAME], [max-tokens] under
+(* The model knobs sit in different tables -- [reasoning-effort] and
+   [temperature] under [models.NAME], [max-tokens] under
    [PROVIDER.NAME] -- and runtime.toml is 2,300 lines, so reading it top to
    bottom never puts them side by side. On 2026-08-29 nine of ten
    ollama_cloud bindings carried neither; a request with no reasoning_effort
@@ -12120,9 +12120,12 @@ let render_config_models (state : state) =
        ~hints:"j/k:row  e:open in runtime.toml  p:next pane  r:reload  Tab:next");
   finish_surface state ~surface_key:"config_models" ~rows:terminal_rows ~cols buf
 
+let config_content_height (state : state) =
+  let terminal_rows, _ = get_terminal_size () in
+  max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 7)
+
 let render_config (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
   let path_note =
@@ -12152,7 +12155,7 @@ let render_config (state : state) =
             (binary_age_text identity.Tui_decode.sid_binary_commit_age_s)
             Ansi.reset));
   box_divider buf cols;
-  let content_height = max 1 (rows - 7) in
+  let content_height = config_content_height state in
   (match state.runtime_config_view_error, state.runtime_config_view with
    | Some detail, _ ->
        box_line buf cols ((Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset);
@@ -12175,15 +12178,20 @@ let render_config (state : state) =
                 The runtime config is TOML and the lexer already answers for it;
                 what was missing was anyone asking. *)
              let line = String.concat "" (List.map lexed_span segments) in
-             box_line buf cols
-               (Printf.sprintf "%s%4d%s  %s" Ansi.dim (scroll + i + 1)
-                  Ansi.reset line)
+             let line =
+               Printf.sprintf "%s%4d%s  %s" Ansi.dim (scroll + i + 1)
+                 Ansi.reset line
+             in
+             if scroll + i = state.runtime_config_cursor then
+               box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+             else box_line buf cols line
          | None -> box_empty buf cols
        done);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  e:edit (preview-checked)  r:reload  Tab:next");
+       ~hints:
+         "j/k:value field  PgUp/PgDn:page  e:edit (preview-checked)  r:reload  Tab:next");
   finish_surface state ~surface_key:"config" ~rows:terminal_rows ~cols buf
 
 let render_surface (state : state) =

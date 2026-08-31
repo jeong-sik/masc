@@ -859,6 +859,23 @@ probe read fails, resolved lanes still render: a last-good probe is retained,
 or cold candidates are `unobserved`. If the resolved identity read fails, the
 last joined rows stay visible under the error.
 
+### Config
+
+Config is five views over the runtime's settings. Press `p` to move through
+`runtime.toml`, `models`, typed `params`, prompt overrides, and themes.
+
+The `runtime.toml` view keeps comments and section headings on screen, while
+`j`/`k` select only rows that contain actual assignments. `PgUp`/`PgDn` jump
+by a visible page and land on the nearest assignment. The selected row is a
+full-width band, so navigation always has a visible position.
+
+Models is a read-only index over the same file. It puts each binding's
+`reasoning-effort`, `temperature`, and provider `max-tokens` beside the model
+name; `-` means the field is genuinely absent. `e` returns to that model's
+section in `runtime.toml`, whose preview-checked editor remains the one write
+path. Params are different: they come from the typed live registry, and
+`Enter` edits one value while `x` restores its registered default.
+
 ### System Logs
 
 The server's log ring, the same source the dashboard `logs` tab reads.

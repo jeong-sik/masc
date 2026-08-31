@@ -10,6 +10,7 @@ let sample =
   ; "api-name = \"alpha-v2\""
   ; "# reasoning-effort = \"high\"   <- commented out, not a value"
   ; "reasoning-effort = \"low\""
+  ; "temperature = 0.7"
   ; ""
   ; "[models.alpha.capabilities]"
   ; "max-tokens = 999"
@@ -44,11 +45,14 @@ let test_reads_both_tables () =
     "effort comes from the models table"
     "low"
     (Option.get alpha.T.reasoning_effort);
+  check string "temperature comes from the models table" "0.7"
+    (Option.get alpha.T.temperature);
   check int "max-tokens comes from the binding" 16384 (Option.get alpha.T.max_tokens)
 
 let test_absent_knobs_stay_absent () =
   let beta = row_named (T.parse sample) "beta" in
   check bool "no effort" true (Option.is_none beta.T.reasoning_effort);
+  check bool "no temperature" true (Option.is_none beta.T.temperature);
   check bool "no max-tokens" true (Option.is_none beta.T.max_tokens)
 
 (* [providers.X] and [voice.Y] have the same two-part shape as a binding.

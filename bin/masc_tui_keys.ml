@@ -263,7 +263,7 @@ let for_surface = function
       [ b Navigate "j/k" "select / scroll"
         (* Config combines persisted files, typed live params, and the local
            theme choice.  The pane strip says which meaning each key has. *)
-      ; b Navigate "p" "runtime.toml / params / prompts / themes"
+      ; b Navigate "p" "runtime.toml / models / params / prompts / themes"
       ; b Act "e" "edit"
           ~help:"params use a type-aware field; runtime.toml previews; prompts save an override"
       ; b Act "E" "advanced JSON"

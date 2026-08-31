@@ -3,6 +3,7 @@ type row =
   ; provider : string
   ; api_name : string option
   ; reasoning_effort : string option
+  ; temperature : string option
   ; max_tokens : int option
   }
 
@@ -104,6 +105,7 @@ let parse lines =
           ; provider
           ; api_name = List.assoc_opt "api-name" model_fields
           ; reasoning_effort = List.assoc_opt "reasoning-effort" model_fields
+          ; temperature = List.assoc_opt "temperature" model_fields
           ; max_tokens = Option.bind (List.assoc_opt "max-tokens" fields) int_of_value
           }
           :: acc)
@@ -138,6 +140,7 @@ let pad s n =
 let clip s n = if String.length s <= n then s else String.sub s 0 (max 0 (n - 1)) ^ "~"
 
 let effort_width = 8
+let temperature_width = 11
 let tokens_width = 11
 let gutter = 2
 
@@ -145,7 +148,10 @@ let render ~width rows =
   let provider_width =
     List.fold_left (fun acc r -> max acc (String.length r.provider)) (String.length "provider") rows
   in
-  let fixed = provider_width + gutter + effort_width + gutter + tokens_width + gutter in
+  let fixed =
+    provider_width + gutter + effort_width + gutter + temperature_width
+    + gutter + tokens_width + gutter
+  in
   let model_width = max 8 (width - fixed) in
   let header =
     pad "provider" provider_width
@@ -153,6 +159,8 @@ let render ~width rows =
     ^ pad "model" model_width
     ^ String.make gutter ' '
     ^ pad "effort" effort_width
+    ^ String.make gutter ' '
+    ^ pad "temperature" temperature_width
     ^ String.make gutter ' '
     ^ "max-tokens"
   in
@@ -167,6 +175,8 @@ let render ~width rows =
     ^ pad (clip name model_width) model_width
     ^ String.make gutter ' '
     ^ pad (effort_text r.reasoning_effort) effort_width
+    ^ String.make gutter ' '
+    ^ pad (Option.value ~default:absent r.temperature) temperature_width
     ^ String.make gutter ' '
     ^ tokens_text r.max_tokens
   in

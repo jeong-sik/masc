@@ -174,6 +174,43 @@ let surface_rows (state : state) =
    the result against their exact wrapped-line count. *)
 let surface_page_rows (state : state) = max 1 (surface_rows state - 8)
 
+let runtime_config_assignment_rows (state : state) =
+  match state.runtime_config_view with
+  | None -> []
+  | Some (_, rows) ->
+      rows
+      |> List.filter_mapi (fun index row ->
+             if Masc_tui_code_lexer.row_has_assignment row then Some index
+             else None)
+
+(* Pick an actual value row at or beyond [target] in the requested direction.
+   The cursor never lands on a comment, table heading, or blank line; those
+   rows stay visible as context around the selected field. *)
+let runtime_config_row_near rows ~direction ~target =
+  match rows with
+  | [] -> 0
+  | first :: _ when direction >= 0 ->
+      Option.value ~default:(List.hd (List.rev rows))
+        (List.find_opt (fun row -> row >= target) rows)
+  | first :: _ ->
+      List.fold_left
+        (fun selected row -> if row <= target then row else selected)
+        first rows
+
+let set_runtime_config_cursor_near state ~direction ~target =
+  let rows = runtime_config_assignment_rows state in
+  let cursor = runtime_config_row_near rows ~direction ~target in
+  state.runtime_config_cursor <- cursor;
+  state.config_scroll <-
+    Masc_tui_scroll.ensure_visible ~cursor
+      ~height:(Masc_tui_render.config_content_height state)
+      state.config_scroll
+
+let move_runtime_config_cursor state ~delta =
+  let direction = if delta >= 0 then 1 else -1 in
+  set_runtime_config_cursor_near state ~direction
+    ~target:(state.runtime_config_cursor + direction)
+
 (* The columns the Identity pane wraps its notice at. Asked of the terminal
    the same way {!surface_rows} asks for its rows, so the key handler counts
    the lines the renderer is about to draw. *)
@@ -7428,6 +7465,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              the keys on a reload. *)
           state.config_models_rows <-
             Masc_tui_model_runtime_table.parse lines;
+          set_runtime_config_cursor_near state ~direction:1
+            ~target:state.runtime_config_cursor;
           state.runtime_config_view_error <- None
       | Error detail -> state.runtime_config_view_error <- Some detail)
   | Code_entries_loaded (dir, result) ->
@@ -9445,10 +9484,11 @@ let main () =
         state.config_pane <- Config_runtime;
         (* Land a few rows above the header so the section reads as a block
            rather than starting at the top edge. *)
-        state.config_scroll <-
-          (match config_models_source_line ~row source_rows with
-           | Some i -> max 0 (i - 3)
-           | None -> state.config_scroll);
+        (match config_models_source_line ~row source_rows with
+         | Some i ->
+             set_runtime_config_cursor_near state ~direction:1 ~target:i;
+             state.config_scroll <- max 0 (i - 3)
+         | None -> ());
         add_event state "info"
           (Printf.sprintf "runtime.toml at [models.%s] - e to edit"
              row.Masc_tui_model_runtime_table.model))
@@ -11753,6 +11793,9 @@ and is loaded on demand through keeper_skill.
             | Config when state.config_pane = Config_prompts ->
                 state.config_scroll <-
                   max 0 (state.config_scroll + (direction * page))
+            | Config when state.config_pane = Config_runtime ->
+                set_runtime_config_cursor_near state ~direction
+                  ~target:(state.runtime_config_cursor + (direction * page))
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
@@ -12504,6 +12547,8 @@ and is loaded on demand through keeper_skill.
                 state.config_scroll <-
                   move_surface_scroll state ~rows:(surface_rows state) ~delta:1
                     ~current:state.config_scroll
+            | Config when state.config_pane = Config_runtime ->
+                move_runtime_config_cursor state ~delta:1
             | Config -> state.config_scroll <-
                   move_surface_scroll state ~rows:(surface_rows state) ~delta:1
                     ~current:state.config_scroll
@@ -12809,6 +12854,8 @@ and is loaded on demand through keeper_skill.
                   state.config_scroll <-
                   move_surface_scroll state ~rows:(surface_rows state) ~delta:(-1)
                     ~current:state.config_scroll
+            | Config when state.config_pane = Config_runtime ->
+                move_runtime_config_cursor state ~delta:(-1)
             | Config ->
                 if state.config_scroll > 0 then
                   state.config_scroll <-
@@ -13556,6 +13603,7 @@ and is loaded on demand through keeper_skill.
               | Config_themes -> Config_runtime);
            state.prompts_cursor <- 0;
            state.config_scroll <- 0;
+           state.runtime_config_cursor <- 0;
            state.runtime_params_cursor <- 0;
            state.runtime_param_edit <- None;
            state.runtime_params_notice <- None;
@@ -13579,7 +13627,9 @@ and is loaded on demand through keeper_skill.
             | Config_models ->
               if state.runtime_config_view = None
               then launch_runtime_config_load state ~mailbox:async_messages
-            | Config_runtime | Config_themes -> ())
+            | Config_runtime ->
+              set_runtime_config_cursor_near state ~direction:1 ~target:0
+            | Config_themes -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one

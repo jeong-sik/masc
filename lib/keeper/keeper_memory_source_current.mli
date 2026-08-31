@@ -99,7 +99,6 @@ val revalidate :
   -> unit
   -> (projection, string) result
 
-val invalidation_reason_to_string : invalidation_reason -> string
 val render_fact : fact -> string
 val render_invalidation : invalidation -> string
 val render_payload : fact list -> invalidation list -> string

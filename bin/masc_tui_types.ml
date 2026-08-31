@@ -89,13 +89,30 @@ type keeper_runtime = Tui_decode.keeper_runtime
 (** A single metrics/log entry (from Tui_decode) *)
 type log_entry = Tui_decode.log_entry
 
+(** Who addressed the keeper, on a row the keeper did not write.
+
+    The server has always said which of the two this is -- [speaker_authority]
+    on the wire, {!Masc_tui_keeper_chat_history.speaker} after decoding -- and
+    the pane collapsed both into the display label. Everything downstream then
+    had to ask the label: the style did not ask at all and drew the two alike,
+    and the message recall asked with [String.equal label "you"], which is
+    false for the operator's own lines that arrived on any surface but the
+    dashboard.
+
+    Each arm carries the label to draw. The label is a rendering of the fact;
+    the constructor is the fact. *)
+type message_author =
+  | Sent_by_operator of string
+      (** The person reading this pane. ["you"], or ["you \xc2\xb7 <surface>"]
+          where the line came in from somewhere other than the dashboard. *)
+  | Sent_by_other of string
+      (** Anyone else: another agent's broadcast, a connector, a second
+          operator. Named as the server named them, with the surface it
+          arrived on. *)
+
 type msg_role =
-  | Message_user of string
-      (** A row addressed to the keeper, carrying the name to draw beside it.
-          ["you"] for what this pane sent; otherwise whoever the server named,
-          with the surface it arrived on. The role alone used to be the label,
-          which is why an agent's broadcast and the operator's own line were
-          indistinguishable. *)
+  | Message_user of message_author
+      (** A row addressed to the keeper by a person or another agent. *)
   | Message_keeper
   | Message_autonomous
       (** A keeper reply produced by an autonomous turn rather than a message

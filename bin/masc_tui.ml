@@ -944,7 +944,12 @@ let own_typed_messages (state : state) =
     state.msg_history
     |> List.filter (fun entry ->
            (match entry.me_role with
-            | Message_user label -> String.equal label "you"
+            (* Asked of the type, not of the label. [String.equal label "you"]
+               was false for the operator's own lines that came in on any
+               surface but the dashboard -- those read "you \xc2\xb7 agent" --
+               so the up-arrow recall silently skipped them. *)
+            | Message_user (Sent_by_operator _) -> true
+            | Message_user (Sent_by_other _) -> false
             | Message_keeper | Message_autonomous | Message_status
             | Message_error | Message_tool
             | Message_thinking | Message_memory ->
@@ -1525,7 +1530,9 @@ let append_user_history_once state (request : Keeper_chat.request) =
       state.msg_history
   in
   if not already_present then
-    append_chat_history state request (Message_user "you") request.message
+    append_chat_history state request
+      (Message_user (Sent_by_operator "you"))
+      request.message
 
 let enqueue_dispatch_ack mailbox make_message =
   let acknowledged, acknowledge = Eio.Promise.create () in
@@ -3885,9 +3892,16 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
   let role, text, tool_block =
     match row.Keeper_chat_history.kind with
     | Keeper_chat_history.Addressed_to_keeper { speaker; surface } ->
-        ( Message_user (Keeper_chat_history.addressed_label speaker surface)
-        , row.text
-        , None )
+        (* The label is what the row draws; the speaker is what it is. Both
+           come from the same decode, and only the label used to survive. *)
+        let label = Keeper_chat_history.addressed_label speaker surface in
+        let author =
+          match speaker with
+          | Keeper_chat_history.Operator -> Sent_by_operator label
+          | Keeper_chat_history.Named _
+          | Keeper_chat_history.Unresolved _ -> Sent_by_other label
+        in
+        (Message_user author, row.text, None)
     | Keeper_chat_history.Said_by_keeper -> (Message_keeper, row.text, None)
     | Keeper_chat_history.Autonomous_reply ->
         ( Message_autonomous

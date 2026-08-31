@@ -1,5 +1,12 @@
 type style =
-  | User
+  | User  (** The operator of this workspace -- what you sent. *)
+  | Inbound
+      (** A line addressed to this Keeper by anyone else: another agent's
+          broadcast, a connector, a second operator. Apart from {!User}
+          because the two are different facts and the pane drew them alike --
+          same mark, same colour, same ambient background -- with only the
+          name text between them. On one live transcript that was 31 rows
+          from six senders wearing the reader's own colours. *)
   | Keeper
   | Status
   | Error
@@ -233,6 +240,14 @@ val speaker_mark : style -> string
 (** One glyph per speaker. Colour says the same thing more legibly, and
     NO_COLOR removes colour, so this is what still answers "who said this"
     when there is none. *)
+
+val split_aligned_role_label :
+  style:style -> string -> string * string * string
+(** An {!align_role_label} result taken back apart into its mark, the
+    alignment between mark and name, and the name. The alignment is layout and
+    the name is content: a renderer that reverses the whole label paints the
+    alignment as though it were the badge. The mark is empty for a label
+    narrow enough that {!align_role_label} dropped it. *)
 
 val align_role_label : ?column:int -> style:style -> string -> string
 (** Right-align a role label in [column] cells, defaulting to

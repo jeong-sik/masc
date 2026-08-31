@@ -5,8 +5,6 @@ type field =
   | Connector
 
 type call =
-  | Write_then_execute
-  | Execute_twice
   | Spawn
 
 type t =
@@ -32,79 +30,60 @@ type t =
     }
 
 let stdin_is_a_field because = Move_to_field { field = Stdin; because }
-let a_program_belongs_in_a_file because = Call_this_instead { call = Write_then_execute; because }
+
+(* RFC execute-boundary-is-the-sandbox. Every sentence below was written while
+   the subset was what ran, so "this tool does not do that" was a fact about
+   the tool. It is not one any more: [script] is a shell, and an argv-shaped
+   shell normalises into it, so a caller who wrote [$(...)] or [$PWD] or a
+   loop wrote something that works.
+
+   Advising against it is not merely stale, it is the failure this module was
+   written to end -- 2026-08-31, lane-smith was told "this tool runs no shell"
+   for a working [$PWD] and rewrote it into an absolute path. What is left is
+   the two constructs where a typed field is still the better call, and for
+   the rest the honest answer is that there is nothing to say. *)
+let a_shell_is_the_answer construct because =
+  Unrepresentable { construct; because }
+;;
 
 (* Exhaustive on purpose.  A construct cannot join the excluded list without
-   someone choosing what the caller should have done instead. *)
+   someone choosing whether the caller should have done something else. *)
 let of_construct : Masc_exec.Parsed.reason_too_complex -> t = function
+  (* Still worth saying: the field takes the body as bytes, so it does not have
+     to survive the shell's quoting on the way in. *)
   | `Heredoc ->
     stdin_is_a_field "a heredoc is the child's stdin, and stdin is a typed field"
   | `Here_string ->
     stdin_is_a_field "a here-string is the child's stdin, and stdin is a typed field"
-  | `Cmd_subst ->
-    Call_this_instead
-      { call = Execute_twice
-      ; because =
-          "a substitution is one command feeding another, which is two calls \
-           and not one"
-      }
+  (* Still true, and not about the subset: the shell that runs the line exits
+     when the line ends, so [&] leaves a child with no handle to wait on or
+     stop. Spawn is the tool that returns one. *)
   | `Background ->
     Call_this_instead
       { call = Spawn
       ; because =
-          "[&] backgrounds nothing here -- the child inherits this call's \
-           output pipe, so the call waits for it anyway, and a timeout leaves \
-           it running with no handle to stop it"
+          "the shell running this line exits when the line does, so [&] \
+           leaves a child with no handle to wait on, read from, or stop"
       }
-  | `Control_flow -> a_program_belongs_in_a_file "a loop or a branch is a program, not a command line"
-  | `Function_def -> a_program_belongs_in_a_file "a function definition is a program, not a command line"
-  | `Subshell -> a_program_belongs_in_a_file "a subshell is a program, not a command line"
-  | `Proc_subst ->
-    a_program_belongs_in_a_file
-      "process substitution needs the inner output on disk before the outer \
-       command can name it"
-  | `Arith_expansion ->
-    Call_this_instead
-      { call = Execute_twice
-      ; because = "compute the value first and pass the result as an argument"
-      }
-  | `Glob_brace ->
-    (* Not stdin and not a file: the expansion is argv, and the caller already
-       has the expanded form.  Kept here rather than as a Move_to_field because
-       the field it would name is the argv it is already using. *)
-    Call_this_instead
-      { call = Execute_twice
-      ; because =
-          "a shell expands this before the command runs. List the arguments, \
-           or produce them with a first call"
-      }
-  | `Param_expansion ->
-    Call_this_instead
-      { call = Execute_twice
-      ; because =
-          "a shell would expand this before the command runs, and this tool \
-           runs no shell. Read the value with a first call and pass it as an \
-           argument -- and for [$?], this call already reports whether the \
-           command succeeded"
-      }
-  | `Redirect ->
-    (* [>], [>>], [<] and [n>&m] are in the subset, so what reaches here is one
-       of the forms that are not: [&>], [>|], [<>], [>&-]. The move is the
-       same call spelled differently, which is why this is not a field or
-       another tool. *)
-    Spell_it_as
-      { spelling = "> file 2>&1"
-      ; because =
-          "this tool takes [>], [>>], [<] and [n>&m]. It has no operator that \
-           joins two streams, overrides noclobber, or closes a descriptor"
-      }
+  | ( `Cmd_subst
+    | `Param_expansion
+    | `Arith_expansion
+    | `Glob_brace
+    | `Subshell
+    | `Proc_subst
+    | `Control_flow
+    | `Function_def
+    | `Redirect ) as construct ->
+    a_shell_is_the_answer
+      construct
+      "a shell runs this line, so it does what you wrote. The typed argv and \
+       pipeline forms cannot say it, and they are the ones that get path \
+       scope -- use them when the line does not need a shell"
   | `Unknown_construct _ as construct ->
-    Unrepresentable
-      { construct
-      ; because =
-          "the parser could not name this construct, so there is no call to \
-           suggest instead"
-      }
+    a_shell_is_the_answer
+      construct
+      "the parser could not name this construct. The shell still runs the \
+       line; only the classification is missing"
 ;;
 
 let of_reason : Gate.too_complex_reason -> t = function
@@ -127,8 +106,6 @@ let field_name = function
    its corpus table on these, so they stay put when what the caller types is
    renamed. *)
 let call_name = function
-  | Write_then_execute -> "write-then-execute"
-  | Execute_twice -> "execute-twice"
   | Spawn -> "spawn"
 ;;
 
@@ -138,8 +115,6 @@ let call_name = function
    sent the reader looking for a tool nobody has. This library cannot see the
    tool schemas, so a test at a layer that sees both holds the two together. *)
 let call_instruction = function
-  | Write_then_execute -> "write-then-execute"
-  | Execute_twice -> "execute-twice"
   | Spawn -> "keeper_spawn"
 ;;
 

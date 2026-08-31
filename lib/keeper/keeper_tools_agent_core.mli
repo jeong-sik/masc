@@ -51,6 +51,28 @@ type attached_surface =
             tools it has already run. *)
   }
 
+(** Whether this turn placed a listing tool on the Agent Core surface, and if
+    so which built-ins it left out to do so.
+
+    One value rather than a flag beside a list: a turn with no listing has
+    nothing behind it, and two fields let that state be written down. Both are
+    read together at both call sites anyway.
+
+    Reported rather than derived. "Is anything attached" stopped answering the
+    first question once built-ins declared their own loading, and reading
+    either back off the surface would make the projection check expect exactly
+    what is there -- which is not a check. A listing that went missing, or a
+    tool that left the request for some other reason, is what it has to catch. *)
+type listing_placement =
+  | No_listing
+  | Listing of
+      { deferred_builtin_names : string list
+        (** The built-ins this surface actually left out. A tool declaring
+            [defer_loading = true] is not enough to be here: one this
+            conversation has run is placed with its schema again, so a declared
+            tool the Keeper uses is on the surface after all. *)
+      }
+
 type tool_bundle =
   { tools : Agent_core.Tool.t list
     (** Every tool this turn can run, attached-service tools included as
@@ -62,14 +84,8 @@ type tool_bundle =
         schemas replaced by one listing tool that hands them over on request
         (RFC-attached-service-tool-scoping). Only this lane can widen a
         running turn's tool set. *)
-  ; deferred_builtin_names : string list
-        (** The built-ins this turn holds behind the listing, because their
-            own tool files declare [defer_loading = true].
-
-            Reported so the projection check can subtract them: a tool leaving
-            the request is what this does, and an invariant that stopped
-            noticing would stop being one. Empty on the surface that carries
-            every tool as a schema. *)
+  ; listing : listing_placement
+        (** What this turn put behind the listing, if it placed one. *)
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
   ; gate_replay_delivery : gate_replay_delivery option

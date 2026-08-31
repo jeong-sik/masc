@@ -179,15 +179,28 @@ let partition_by_presence ~names ~actual_names =
 
 (* Present: the listing plus whatever attached schemas were carried in. The
    listing is expected even when it is accidentally absent from the actual
-   surface, which is the one thing the check must still catch. *)
-let agent_core_identity_names ~attached_names ~actual_names =
-  match attached_names with
-  | [] -> []
-  | _ :: _ ->
+   surface, which is the one thing the check must still catch.
+
+   [listed] is whether the turn placed a listing at all, reported by the bundle
+   that placed it. It is not the same question as "is anything attached": since
+   built-ins declare their own loading, a Keeper with no attached service still
+   gets a listing when one of its built-ins declares [defer_loading = true].
+   Deriving it from [attached_names] left code-reviewer -- no attachment, one
+   declared built-in -- reporting keeper_tool_search as a tool the projection
+   did not expect.
+
+   Deriving it from the actual surface instead would be worse than either: the
+   check would expect the listing exactly when the listing is there, which is
+   the same as not checking. A listing that went missing is the one thing this
+   must still catch. *)
+let agent_core_identity_names ~listed ~attached_names ~actual_names =
+  if not listed
+  then []
+  else (
     let present, (_ : string list) =
       partition_by_presence ~names:attached_names ~actual_names
     in
-    Keeper_identity_tool_search.tool_name :: present |> List.sort_uniq String.compare
+    Keeper_identity_tool_search.tool_name :: present |> List.sort_uniq String.compare)
 ;;
 
 (* Absent: the declared built-ins this surface really did leave out. *)
@@ -405,7 +418,7 @@ let prepare_agent_setup
   let
     { Keeper_tools_agent_core.tools = keeper_tools
     ; agent_core_tools = keeper_agent_core_tools
-    ; deferred_builtin_names = keeper_deferred_builtin_names
+    ; listing = keeper_listing
     ; cleanup = keeper_tools_cleanup
     ; terminal_effect_state
     ; gate_replay_delivery
@@ -597,14 +610,21 @@ let prepare_agent_setup
   check_projection
     ~surface:"agent_core_tools"
     ~deferred_names:
-      (deferred_names_absent_from
-         ~declared_names:keeper_deferred_builtin_names
-         ~actual_names:
-           (List.map
-              (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
-              keeper_agent_core_tools))
+      (match keeper_listing with
+       | Keeper_tools_agent_core.No_listing -> []
+       | Keeper_tools_agent_core.Listing { deferred_builtin_names } ->
+         deferred_names_absent_from
+           ~declared_names:deferred_builtin_names
+           ~actual_names:
+             (List.map
+                (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
+                keeper_agent_core_tools))
     ~identity_names:
       (agent_core_identity_names
+         ~listed:
+           (match keeper_listing with
+            | Keeper_tools_agent_core.No_listing -> false
+            | Keeper_tools_agent_core.Listing _ -> true)
          ~attached_names
          ~actual_names:agent_core_actual_names)
     keeper_agent_core_tools;

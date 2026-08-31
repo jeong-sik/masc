@@ -634,10 +634,27 @@ let make_tool_bundle_for_descriptors_with_policy
               carries them, so no round trip is spent re-asking. *)
            listing.Keeper_identity_tool_search.tool
            :: listing.Keeper_identity_tool_search.already_used)
-  ; deferred_builtin_names =
-      List.map
-        (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
-        deferred_builtin_tools
+  ; listing =
+      (match identity_listing with
+       | None -> Keeper_tools_agent_core.No_listing
+       | Some listing ->
+         (* What is missing from the surface, not what declared itself. A tool
+            this conversation has run is placed with its schema again, so a
+            declared tool can be present after all -- and reporting the
+            declaration would have the projection check expect it gone. *)
+         let carried =
+           List.map
+             (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
+             listing.Keeper_identity_tool_search.already_used
+         in
+         Keeper_tools_agent_core.Listing
+           { deferred_builtin_names =
+               List.filter_map
+                 (fun (tool : Agent_core.Tool.t) ->
+                    let name = tool.Agent_core.Tool.schema.name in
+                    if List.exists (String.equal name) carried then None else Some name)
+                 deferred_builtin_tools
+           })
   ; cleanup =
       (fun () ->
         (* Turn end on both the ordinary and the raised path -- this thunk is

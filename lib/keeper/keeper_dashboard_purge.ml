@@ -108,9 +108,19 @@ let canonical_requested_name requested_name =
   if String.equal requested_name ""
   then Error Empty_requested_name
   else
-    match Workspace.validate_agent_name requested_name with
-    | Error detail -> Error (Invalid_requested_name { requested_name; detail })
-    | Ok _ -> Ok requested_name
+    match Keeper_id.Keeper_name.of_string requested_name with
+    | Ok keeper_name -> Ok (Keeper_id.Keeper_name.to_string keeper_name)
+    | Error keeper_detail ->
+      (* This resolver runs before the plain-agent purge boundary. Keep its
+         namespaced identity grammar available for fallthrough, but never let
+         that generic 64-character gate reject a Keeper name that the Keeper
+         creation contract already admitted up to [Keeper_name.max_length]. *)
+      (match Workspace.validate_agent_name requested_name with
+       | Ok _ -> Ok requested_name
+       | Error _ ->
+         Error
+           (Invalid_requested_name
+              { requested_name; detail = keeper_detail }))
 ;;
 
 let resolve (config : Workspace.config) requested_name =

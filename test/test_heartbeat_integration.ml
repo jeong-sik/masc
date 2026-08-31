@@ -2735,6 +2735,30 @@ let test_dashboard_purge_resolution_is_fail_closed () =
        | Ok None -> ()
        | Ok (Some _) -> fail "plain agent was classified as a Keeper"
        | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
+      (match Dashboard_purge.resolve config "plain:agent" with
+       | Ok None -> ()
+       | Ok (Some _) -> fail "namespaced plain agent was classified as a Keeper"
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
+      let long_name = String.make 75 'k' in
+      let long_meta = { (make_meta "dashboard-purge-long") with name = long_name } in
+      create_owner_meta_exn config long_meta;
+      (match Dashboard_purge.existing_operation config long_name with
+       | Ok None -> ()
+       | Ok (Some _) -> fail "long-name Keeper unexpectedly had a purge operation"
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
+      (match Dashboard_purge.resolve config long_name with
+       | Ok (Some target) ->
+         check string "resolved long Keeper name" long_name target.keeper_name
+       | Ok None -> fail "long-name Keeper fell through to plain-agent purge"
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
+      (match
+         Dashboard_purge.resolve
+           config
+           (String.make (Keeper_id.Keeper_name.max_length + 1) 'k')
+       with
+       | Error (Dashboard_purge.Invalid_requested_name _) -> ()
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error)
+       | Ok _ -> fail "Keeper name beyond the creation limit was accepted");
       let persisted = make_meta "dashboard-purge-persisted" in
       create_owner_meta_exn config persisted;
       let persisted =
@@ -3740,7 +3764,9 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       let (_init_message : string) =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
-      let initial = make_meta "dashboard-purge-finalize" in
+      let initial =
+        { (make_meta "dashboard-purge-finalize") with name = String.make 75 'p' }
+      in
       (match Keeper_meta_store.replace_snapshot config initial with
        | Ok () -> ()
        | Error detail -> fail detail);

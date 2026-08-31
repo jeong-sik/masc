@@ -27,7 +27,7 @@ related: []
 성공(또는 운영자 clear)이 되돌린다.**
 
 면제, 클래스별 예산, 예산의 내구 저장(`keeper_failure_exemption_store`)은
-걷어낸다. 구현 PR은 #32107.
+걷어낸다. 구현 PR은 #32109.
 
 ## 1. 문제
 

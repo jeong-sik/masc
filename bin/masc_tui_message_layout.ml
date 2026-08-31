@@ -1,5 +1,6 @@
 type style =
   | User
+  | Inbound
   | Keeper
   | Status
   | Error
@@ -585,6 +586,7 @@ let fit_middle column label =
    with no colour at all. *)
 let speaker_mark : style -> string = function
   | User -> "\xe2\x96\xb6"      (* the operator sends *)
+  | Inbound -> "\xe2\x97\x80"   (* someone else sent this here *)
   | Keeper -> "\xe2\x97\x8f"    (* a keeper speaks *)
   | Status -> "?"
   | Error -> "\xe2\x9c\x97"
@@ -619,6 +621,37 @@ let align_role_label ?(column = chat_role_label_column) ~style label =
        talking costs more than losing the shorthand for it. *)
     fit_name column label
   else mark ^ " " ^ fit_name inner label
+
+(* The inverse of {!align_role_label}: the mark, the alignment that follows it,
+   and the name. Written here because this is where the three are joined, and a
+   renderer taking them apart by measuring again is how the two drift.
+
+   The renderer draws the name in reverse video. Reversing the aligned label
+   whole painted the alignment as though it were the badge, so "AUTO" -- four
+   letters -- arrived as an eighteen-cell inverted block with a dozen cells of
+   highlighted nothing between the glyph and the name.
+
+   Tolerant of a label that carries no mark: {!align_role_label} drops it on a
+   column too narrow to hold both, and that label is all name. *)
+let split_aligned_role_label ~style label =
+  let mark = speaker_mark style in
+  let prefix = mark ^ " " in
+  let after_mark =
+    if String.starts_with ~prefix label then
+      String.sub label (String.length prefix)
+        (String.length label - String.length prefix)
+    else label
+  in
+  let mark = if String.equal after_mark label then "" else prefix in
+  let limit = String.length after_mark in
+  let rec walk index =
+    if index < limit && Char.equal after_mark.[index] ' ' then walk (index + 1)
+    else index
+  in
+  let boundary = walk 0 in
+  ( mark
+  , String.sub after_mark 0 boundary
+  , String.sub after_mark boundary (limit - boundary) )
 
 let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
   (* At thirteen columns the frame leaves nine content cells: two for the
@@ -816,10 +849,18 @@ let short_clock timestamp =
    the body still reads as a block. [Origin_bare] drops the clock and keeps
    the speaker, never the other way round -- losing track of who is talking
    costs more than losing track of when. *)
-(* The quietest glyph in the speaker vocabulary, used where a row continues the
-   speaker above it. [Thinking] already draws it, and reusing it keeps the
-   column's alphabet closed rather than inventing a mark for continuation. *)
-let continued_mark = speaker_mark Thinking
+(* A continuation keeps its own speaker's mark, drawn in the quiet tone the
+   renderer gives the whole gutter here.
+
+   It used to borrow [Thinking]'s dot, on the argument that reusing a glyph
+   keeps the column's alphabet closed. It did the opposite: the dot then meant
+   two things, and a second AUTO message in the same second read as a block of
+   reasoning -- same glyph, same grey, no name, because a continuation drops
+   the name as well. The alphabet is closed when each mark means one thing.
+   Bright against quiet is what separates a new speaker from the same one
+   still talking, and a Thinking continuation still draws a dot because that
+   is what it is. *)
+let continued_mark style = speaker_mark style
 
 (* A tool's output and a recalled memory arrive as text the Keeper did not
    write, so they are quoted rather than said. Everything else the pane draws
@@ -828,7 +869,7 @@ let continued_mark = speaker_mark Thinking
    Reasoning is the Keeper's own, not a quotation, however folded it is. *)
 let shade_of_style : style -> shade = function
   | Tool | Status -> Shade_quoted
-  | User | Keeper | Error | Thinking -> Shade_none
+  | User | Inbound | Keeper | Error | Thinking -> Shade_none
 
 let origin_gutter ~origin ~previous ~inner_width entry =
   match origin with
@@ -897,7 +938,7 @@ let origin_gutter ~origin ~previous ~inner_width entry =
            than the row that started. What is left is the speaker column doing
            the telling -- a name appears only where the speaker changes. *)
         (* No label to hold back on a row that draws no name. *)
-        let continued = clock ^ continued_mark ^ " " in
+        let continued = clock ^ continued_mark entry.style ^ " " in
         Some (fit_width continued (display_width filled), 0)
       else Some (filled, label_at)
 

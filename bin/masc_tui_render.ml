@@ -426,16 +426,32 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
            box_line_styled buf cols ~style:(Theme.recede ())
              (Printf.sprintf "[%s]  %s  %s" timestamp
                 (String.trim role_label) request_label)
-       | Message_layout.User | Message_layout.Keeper | Message_layout.Status
-       | Message_layout.Error ->
+       | Message_layout.User | Message_layout.Inbound | Message_layout.Keeper
+       | Message_layout.Status | Message_layout.Error ->
+           (* [role_label] arrives right-aligned in a sixteen-to-twenty-four
+              cell column so the request column stays put down the pane. The
+              reverse span used to swallow that alignment, so "AUTO" -- four
+              letters -- drew an eighteen-cell inverted block with a dozen
+              cells of highlighted nothing in front of it. The padding is
+              spent outside the badge now: the column still lines up and the
+              reversed run is the name.
+
+              "From" went with it. It was five cells that named no field and
+              said nothing the badge does not: the row already reads
+              [clock] [who] [request]. *)
+           let mark, alignment, name =
+             Message_layout.split_aligned_role_label ~style:row.style role_label
+           in
+           (* The mark keeps its colour and stays out of the badge, the way the
+              inline gutter already draws it, so the two origin modes agree
+              about what a speaker mark looks like. *)
            let badge =
-             Printf.sprintf "%s%s %s %s" (Chat_theme.origin row.style)
-               Ansi.reverse role_label Ansi.reset
+             Printf.sprintf "%s%s%s%s %s %s" (Chat_theme.origin row.style) mark
+               alignment Ansi.reverse name Ansi.reset
            in
            box_line buf cols
-             (Printf.sprintf "%s[%s]%s %sFrom%s %s %s%s%s" Ansi.dim timestamp
-                Ansi.reset Ansi.dim Ansi.reset badge Ansi.dim request_label
-                Ansi.reset))
+             (Printf.sprintf "%s[%s]%s  %s %s%s%s" Ansi.dim timestamp Ansi.reset
+                badge Ansi.dim request_label Ansi.reset))
 
 let composer_prompt_text composer =
   Printf.sprintf " %s %s " "\xe2\x80\xba" (Composer.prompt composer)
@@ -3812,6 +3828,34 @@ let keeper_message_identity ~max_cells state keeper_name =
       let status_color =
         keeper_action_color (Keeper_control.next_action reading)
       in
+      (* Two stances that decide what this Keeper does with a tool call, on
+         the row an operator reads before typing to it. They lived on the
+         detail pane's Gate section only, so the pane where the asking
+         actually happens never said whether anything would be asked.
+
+         [g] is the key that flips the first of them, and it is on the roster
+         and the detail -- naming it here says the stance is a stance rather
+         than a property of the keeper. Silent when both are the default:
+         "asks, under the workspace lane" is what a reader assumes, and a
+         header that says so on every keeper spends width on nothing. *)
+      let stance =
+        let yolo = List.mem keeper.k_name state.keeper_yolo_names in
+        let gate =
+          match List.assoc_opt keeper.k_name state.keeper_gate_modes with
+          | Some mode when not (String.equal mode "workspace") ->
+              Some (Terminal_text.single_line mode)
+          | Some _ | None -> None
+        in
+        match yolo, gate with
+        | false, None -> ""
+        | true, None ->
+            Printf.sprintf " %sYOLO%s" (Theme.bad ()) Ansi.reset
+        | false, Some gate ->
+            Printf.sprintf " %sgate:%s%s" Ansi.cyan gate Ansi.reset
+        | true, Some gate ->
+            Printf.sprintf " %sYOLO%s %sgate:%s%s" (Theme.bad ()) Ansi.reset
+              Ansi.cyan gate Ansi.reset
+      in
       let status =
         String.concat ""
           [ status_color
@@ -3819,6 +3863,7 @@ let keeper_message_identity ~max_cells state keeper_name =
           ; " "
           ; keeper_health_word health
           ; Ansi.reset
+          ; stance
           ]
       in
       (match runtime with
@@ -5886,9 +5931,9 @@ let render_keeper_message (state : state) =
        measures is the badge it draws. *)
     let base_role_label_of (message : Masc_tui_types.msg_entry) =
       match message.me_role with
-      | Message_user speaker ->
-          if not (String.equal speaker "you") then speaker
-          else if
+      | Message_user (Sent_by_other name) -> name
+      | Message_user (Sent_by_operator label) ->
+          if
             (* A line the operator typed during a turn sits in the
                conversation from the moment it is typed, in its place in the
                order. Marked, because a waiting line drawn like a sent one is
@@ -5899,7 +5944,11 @@ let render_keeper_message (state : state) =
             Masc_tui_keeper_chat_queue.holds state.msg_queued
               ~request_id:message.me_request_id
           then "QUEUED"
-          else "YOU"
+            (* A bare ["you"] is drawn as the shout it always was; a label that
+               names the surface it came in on keeps that, because "you, from
+               Slack" is a different fact from "you, here". *)
+          else if String.equal label "you" then "YOU"
+          else label
       | Message_keeper -> Keeper_chat.terminal_safe_text message.me_keeper_name
       | Message_autonomous -> "AUTO"
       | Message_status -> "STATUS"
@@ -5995,7 +6044,8 @@ let render_keeper_message (state : state) =
           in
           let style =
             match message.me_role with
-            | Message_user _ -> Message_layout.User
+            | Message_user (Sent_by_operator _) -> Message_layout.User
+            | Message_user (Sent_by_other _) -> Message_layout.Inbound
             | Message_keeper | Message_autonomous -> Message_layout.Keeper
             | Message_status | Message_memory -> Message_layout.Status
             | Message_error -> Message_layout.Error

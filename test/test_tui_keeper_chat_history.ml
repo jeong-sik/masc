@@ -315,6 +315,42 @@ let test_autonomous_trace_rows_keep_the_turn_ref () =
    distinct speakers — a keeper, an MCP client, the exact-lane verifier, a
    dozen canaries — and the pane drew every one as "you", which told the
    operator they had said things they had never seen. *)
+(* Who sent a row and what the row is labelled are different answers, and the
+   pane used to keep only the second. Everything downstream then asked the
+   label: the chat's message recall asked [String.equal label "you"], which is
+   false for the operator's own lines that came in on any surface but the
+   dashboard, so the up-arrow walked past them.
+
+   One live transcript: 23 rows the store calls the owner's, 2 of them on the
+   agent surface, against 31 broadcasts from six other senders. *)
+let test_an_addressed_row_says_who_sent_it_not_only_what_to_draw () =
+  let speaker json =
+    match (List.hd (decode (`List [ json ])).History.rows).History.kind with
+    | History.Addressed_to_keeper { speaker; _ } -> speaker
+    | History.Said_by_keeper | History.Autonomous_reply
+    | History.Delivery_failed _ | History.Tool_calls _
+    | History.Reasoning _ | History.Memory_activity ->
+        failf "expected an addressed row"
+  in
+  let is_operator json =
+    match speaker json with
+    | History.Operator -> true
+    | History.Named _ | History.Unresolved _ -> false
+  in
+  let surface kind = `Assoc [ "kind", `String kind ] in
+  check bool "an owner row is the operator" true (is_operator (addressed "hi"));
+  (* The label here reads "you . agent", which is why asking the label was
+     wrong: the row is still the operator's. *)
+  check bool "an owner row that came in on the agent surface is still the operator"
+    true
+    (is_operator (addressed ~surface:(surface "agent") "hi"));
+  check bool "a named broadcast is not the operator" false
+    (is_operator
+       (addressed ~speaker_authority:"external" ~speaker_name:"sangsu"
+          ~surface:(surface "broadcast") "hi"));
+  check bool "an unnamed external row is not the operator either" false
+    (is_operator (addressed ~speaker_authority:"external" "hi"))
+
 let test_an_addressed_row_is_labelled_by_who_sent_it () =
   let label json =
     match (List.hd (decode (`List [ json ])).History.rows).History.kind with
@@ -1104,6 +1140,8 @@ let () =
             test_consecutive_tools_from_different_turns_do_not_merge
         ; test_case "autonomous trace rows retain turn_ref" `Quick
             test_autonomous_trace_rows_keep_the_turn_ref
+        ; test_case "an addressed row says who sent it" `Quick
+            test_an_addressed_row_says_who_sent_it_not_only_what_to_draw
         ; test_case "an addressed row is labelled by who sent it" `Quick
             test_an_addressed_row_is_labelled_by_who_sent_it
         ; test_case "consecutive tool rows become one block" `Quick

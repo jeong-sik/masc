@@ -5381,7 +5381,10 @@ let system_log_page = 300
 let apply_system_logs_load state = function
   | Ok snapshot ->
       state.system_logs <- Some snapshot;
-      state.system_logs_error <- None
+      state.system_logs_error <- None;
+      let visible = Masc_tui_types.visible_system_log_entries state in
+      state.system_logs_cursor <-
+        max 0 (min state.system_logs_cursor (List.length visible - 1))
   | Error detail ->
       (* The previous page stays on screen; the error line says the count above
          it is stale rather than letting it read as a fresh zero. *)
@@ -6985,6 +6988,16 @@ let open_selected_resource state ~mailbox =
       state.resource_focus <- Right_pane;
       launch_resource_read state ~mailbox ~uri:resource.Masc_tui_mcp.uri
 
+let open_selected_system_log state =
+  match
+    List.nth_opt
+      (Masc_tui_types.visible_system_log_entries state)
+      state.system_logs_cursor
+  with
+  | None -> ()
+  | Some entry ->
+      state.system_logs_detail_seq <- Some entry.Tui_decode.sl_seq;
+      state.system_logs_detail_scroll <- 0
 (* One step through the list a detail was opened from, without closing it.
    Reading a queue meant Esc, move, Enter for every row -- three keys to do
    what one does on Changes and the Keeper detail tabs, both of which already
@@ -11582,6 +11595,16 @@ and is loaded on demand through keeper_skill.
              ~delta:(if bracket = "]" then 1 else -1)
              ~set_cursor:(fun n -> state.approval_cursor <- n)
              ~reopen:(fun () -> state.approval_detail_scroll <- 0)
+       | Some (("[" | "]") as bracket)
+         when state.view = System_logs
+              && Option.is_some state.system_logs_detail_seq ->
+           step_detail_cursor
+             ~count:
+               (List.length (Masc_tui_types.visible_system_log_entries state))
+             ~cursor:state.system_logs_cursor
+             ~delta:(if bracket = "]" then 1 else -1)
+             ~set_cursor:(fun cursor -> state.system_logs_cursor <- cursor)
+             ~reopen:(fun () -> open_selected_system_log state)
        | Some (("[" | "]") as bracket) when state.view = Board ->
            step_board_read state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
@@ -12233,6 +12256,9 @@ and is loaded on demand through keeper_skill.
             | Runtime when Option.is_some state.runtime_detail_target ->
                 state.runtime_detail_scroll <-
                   max 0 (state.runtime_detail_scroll + (direction * page))
+            | System_logs when Option.is_some state.system_logs_detail_seq ->
+                state.system_logs_detail_scroll <-
+                  max 0 (state.system_logs_detail_scroll + (direction * page))
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
@@ -12566,8 +12592,13 @@ and is loaded on demand through keeper_skill.
                   state.runtime_detail_scroll <- 0
                 end
                 else state.view <- Overview
-            | Memory | Connectors | Config | Tools
-            | System_logs -> state.view <- Overview)
+            | System_logs ->
+                if Option.is_some state.system_logs_detail_seq then begin
+                  state.system_logs_detail_seq <- None;
+                  state.system_logs_detail_scroll <- 0
+                end
+                else state.view <- Overview
+            | Memory | Connectors | Config | Tools -> state.view <- Overview)
        | Some "left" ->
            (* Left is the non-destructive structural back key. Unlike Esc it
               never interrupts a live chat turn; it only closes a detail the
@@ -12671,10 +12702,12 @@ and is loaded on demand through keeper_skill.
             | Runtime ->
                 state.runtime_detail_target <- None;
                 state.runtime_detail_scroll <- 0
+            | System_logs ->
+                state.system_logs_detail_seq <- None;
+                state.system_logs_detail_scroll <- 0
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
             | Keepers Keeper_list | Acting | Approvals
-            | Memory | Repositories | Connectors | Config | Tools
-            | System_logs -> ())
+            | Memory | Repositories | Connectors | Config | Tools -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
             | Code ->
@@ -13016,12 +13049,18 @@ and is loaded on demand through keeper_skill.
                   if state.resources_cursor < total - 1 then
                     state.resources_cursor <- state.resources_cursor + 1
             | Acting -> state.acting_scroll <- state.acting_scroll + 1
-            | System_logs -> (let cursor, scroll =
-                   move_row_cursor state ~delta:(1)
-                     ~cursor:state.system_logs_cursor ~scroll:state.system_logs_scroll
-                 in
-                 state.system_logs_cursor <- cursor;
-                 state.system_logs_scroll <- scroll)
+            | System_logs ->
+                if Option.is_some state.system_logs_detail_seq then
+                  state.system_logs_detail_scroll <-
+                    state.system_logs_detail_scroll + 1
+                else
+                  (let cursor, scroll =
+                     move_row_cursor state ~delta:1
+                       ~cursor:state.system_logs_cursor
+                       ~scroll:state.system_logs_scroll
+                   in
+                   state.system_logs_cursor <- cursor;
+                   state.system_logs_scroll <- scroll)
             | Keepers Keeper_runtime_pick ->
                 let dispatchable =
                   List.length
@@ -13345,12 +13384,17 @@ and is loaded on demand through keeper_skill.
                   if state.acting_scroll = 0 then state.acting_unseen <- 0
                 end
             | System_logs ->
-                (let cursor, scroll =
-                   move_row_cursor state ~delta:(-1)
-                     ~cursor:state.system_logs_cursor ~scroll:state.system_logs_scroll
-                 in
-                 state.system_logs_cursor <- cursor;
-                 state.system_logs_scroll <- scroll)
+                if Option.is_some state.system_logs_detail_seq then
+                  state.system_logs_detail_scroll <-
+                    max 0 (state.system_logs_detail_scroll - 1)
+                else
+                  (let cursor, scroll =
+                     move_row_cursor state ~delta:(-1)
+                       ~cursor:state.system_logs_cursor
+                       ~scroll:state.system_logs_scroll
+                   in
+                   state.system_logs_cursor <- cursor;
+                   state.system_logs_scroll <- scroll)
             | Keepers Keeper_runtime_pick ->
                 if state.runtime_pick_cursor > 0 then
                   state.runtime_pick_cursor <- state.runtime_pick_cursor - 1
@@ -13655,11 +13699,11 @@ and is loaded on demand through keeper_skill.
                                  { runtime_id = runtime.ro_id });
                           state.runtime_detail_scroll <- 0)
                  | None, _ -> ())
+            | System_logs -> open_selected_system_log state
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting
-            | Connectors | Config | Resources | Tools
-            | System_logs -> ())
+            | Connectors | Config | Resources | Tools -> ())
        (* Changes reads one keeper's file writes and already binds to the
           roster cursor on entry, so it opens from the roster rather than
           from the Tab ring. *)

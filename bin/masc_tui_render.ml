@@ -7014,29 +7014,107 @@ let system_log_level_mark : Masc.Tui_decode.system_log_level -> string = functio
   | System_error -> "\xc3\x97"
   | System_level_unknown _ -> "?"
 
+let system_log_category_text (entry : Masc.Tui_decode.system_log_entry) =
+  match entry.sl_category with
+  | None -> "-"
+  | Some category -> category
+
+let system_log_detail_field ~width ~style label value =
+  let prefix = "  " ^ label ^ ": " in
+  let continuation = String.make (Message_layout.display_width prefix) ' ' in
+  match
+    Message_layout.wrap_words
+      ~max_cells:(max 1 (width - Message_layout.display_width prefix))
+      (Terminal_text.single_line value)
+  with
+  | [] -> [ style, prefix ^ "-" ]
+  | first :: rest ->
+      (style, prefix ^ first)
+      :: List.map (fun line -> style, continuation ^ line) rest
+
+let system_log_detail_lines (state : state) ~seq ~width =
+  let entry =
+    Option.bind state.system_logs (fun snapshot ->
+        List.find_opt
+          (fun entry -> entry.Masc.Tui_decode.sl_seq = seq)
+          snapshot.Masc.Tui_decode.sys_entries)
+  in
+  match entry with
+  | None ->
+      [ Theme.warn (),
+        "  This log entry is no longer present in the retained page; reload or return to the list."
+      ]
+  | Some entry ->
+      let level_style = system_log_level_style entry.sl_level in
+      let keeper = Option.value ~default:"system" entry.sl_keeper in
+      let turn = Option.map string_of_int entry.sl_turn |> Option.value ~default:"-" in
+      let fields =
+        system_log_detail_field ~width ~style:Ansi.dim "Sequence"
+          (string_of_int entry.sl_seq)
+        @ system_log_detail_field ~width ~style:Ansi.dim "Timestamp" entry.sl_ts
+        @ system_log_detail_field ~width ~style:level_style "Level"
+            (Masc.Tui_decode.system_log_level_label entry.sl_level |> String.trim)
+        @ system_log_detail_field ~width ~style:Ansi.dim "Category"
+            (system_log_category_text entry)
+        @ system_log_detail_field ~width ~style:Ansi.dim "Source"
+            (Masc.Tui_decode.system_log_source_label entry.sl_source)
+        @ system_log_detail_field ~width ~style:Ansi.dim "Module" entry.sl_module
+        @ system_log_detail_field ~width ~style:Ansi.dim "Keeper" keeper
+        @ system_log_detail_field ~width ~style:Ansi.dim "Turn" turn
+        @ system_log_detail_field ~width ~style:Ansi.reset "Message"
+            entry.sl_message
+      in
+      let details =
+        match entry.sl_details with
+        | `Null -> [ Ansi.dim, "  Details: none" ]
+        | json ->
+            let source =
+              "```json\n" ^ Yojson.Safe.pretty_to_string json ^ "\n```"
+            in
+            (Ansi.bold, "  Structured details")
+            :: (document_markdown ~width source
+                |> List.map (fun line -> Ansi.reset, "  " ^ line))
+      in
+      fields @ details
+
+let render_system_log_detail (state : state) seq =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  seq %d  %s" (screen_title " MASC Log detail") seq
+       (connection_badge state));
+  box_divider buf cols;
+  let lines = system_log_detail_lines state ~seq ~width:(max 1 (cols - 8)) in
+  let content_height = max 1 (rows - 5) in
+  let max_scroll = max 0 (List.length lines - content_height) in
+  let scroll = max 0 (min state.system_logs_detail_scroll max_scroll) in
+  for index = 0 to content_height - 1 do
+    match List.nth_opt lines (scroll + index) with
+    | None -> box_empty buf cols
+    | Some (style, line) -> box_line_styled buf cols ~style line
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints System_logs));
+  finish_surface state ~clamped:(System_log_detail_scroll scroll)
+    ~surface_key:"system-log-detail" ~rows:terminal_rows ~cols buf
+
 let render_system_logs (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let entries =
-    match state.system_logs with None -> [] | Some s -> s.sys_entries
-  in
-  (* The level floor already trimmed what the server sent; the category trims
-     what this page shows. Rows without a category never match a named one. *)
-  let entries =
-    match state.system_logs_category with
-    | None -> entries
-    | Some category ->
-        List.filter
-          (fun entry ->
-            match entry.sl_category with
-            | Some value -> String.equal value category
-            | None -> false)
-          entries
-  in
+  let entries = Masc_tui_types.visible_system_log_entries state in
   let total_entries = List.length entries in
+  let loaded_entries =
+    match state.system_logs with
+    | None -> 0
+    | Some snapshot -> List.length snapshot.sys_entries
+  in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
@@ -7103,6 +7181,8 @@ let render_system_logs (state : state) =
       with
       | Page_failed -> "  (load failed; the count above is not a reading)"
       | Page_unread -> page_unread_note
+      | Page_empty when loaded_entries > 0 ->
+          "  (no entries match the current category filter)"
       | Page_empty -> "  (no entries)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -7119,9 +7199,7 @@ let render_system_logs (state : state) =
           let keeper =
             match e.sl_keeper with None -> "-" | Some name -> name
           in
-          let category =
-            match e.sl_category with None -> "-" | Some name -> name
-          in
+          let category = system_log_category_text e in
           let level_style = system_log_level_style e.sl_level in
           (* Module and keeper are fitted rather than only padded: a long
              module name used to push every column right of it out of line
@@ -13067,7 +13145,10 @@ let render_surface (state : state) =
       else render_code state
   | Tools -> render_tools state
   | Acting -> render_acting state
-  | System_logs -> render_system_logs state
+  | System_logs ->
+      (match state.system_logs_detail_seq with
+       | None -> render_system_logs state
+       | Some seq -> render_system_log_detail state seq)
   | Schedules -> render_schedules state
 
 (* The [?] help screen: every binding, grouped by the surface that answers

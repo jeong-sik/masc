@@ -2321,6 +2321,8 @@ type state = {
      vocabulary being whatever categories the loaded rows carry. *)
   mutable system_logs_min_level: Tui_decode.system_log_level option;
   mutable system_logs_category: string option;
+  mutable system_logs_detail_seq: int option;
+  mutable system_logs_detail_scroll: int;
   mutable msg_input: Buffer.t;
   (* Images staged with :attach, sent with the next message and cleared by the
      send. Held next to the draft because they are part of the same unsent
@@ -2887,6 +2889,8 @@ let create_state
   system_logs_cursor = 0;
   system_logs_min_level = None;
   system_logs_category = None;
+  system_logs_detail_seq = None;
+  system_logs_detail_scroll = 0;
   msg_input = Buffer.create 256;
   msg_attachments = [];
   msg_target_keeper_name = None;
@@ -2933,6 +2937,20 @@ let create_state
   port;
   refresh_interval;
 }
+
+let visible_system_log_entries (state : state) =
+  match state.system_logs with
+  | None -> []
+  | Some snapshot -> (
+      match state.system_logs_category with
+      | None -> snapshot.Tui_decode.sys_entries
+      | Some wanted ->
+          List.filter
+            (fun entry ->
+               match entry.Tui_decode.sl_category with
+               | Some observed -> String.equal wanted observed
+               | None -> false)
+            snapshot.Tui_decode.sys_entries)
 
 (* The row the renderer draws and the row this counts have to come from one
    predicate. A roster that failed to load leaves stale entries behind, so
@@ -3053,6 +3071,7 @@ type clamped_scroll =
   | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
   | Runtime_detail_scroll of int
+  | System_log_detail_scroll of int
   | Planning_detail_scroll of int
   | Lane_run_detail_scroll of int
   (* An open diff's rows are built by the drawing, out of the recorded before
@@ -3082,6 +3101,7 @@ let apply_clamped_scroll (state : state) = function
   | Harness_detail_scroll value -> state.harness_detail_scroll <- value
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Runtime_detail_scroll value -> state.runtime_detail_scroll <- value
+  | System_log_detail_scroll value -> state.system_logs_detail_scroll <- value
   | Planning_detail_scroll value -> state.planning_scroll <- value
   | Lane_run_detail_scroll value -> state.lane_run_detail_scroll <- value
   | Changes_diff_scroll value -> state.changes_diff_scroll <- value
@@ -3337,11 +3357,12 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
   in
   function
   | System_logs ->
-      Some
+      if Option.is_some state.system_logs_detail_seq then None
+      else Some
         { sc_count =
             (match state.system_logs with
              | None -> 0
-             | Some s -> List.length s.Tui_decode.sys_entries)
+             | Some _ -> List.length (visible_system_log_entries state))
         ; sc_chrome = system_log_listing_chrome ~error:state.system_logs_error
         ; sc_overflow_takes_row = false
         ; sc_preview_keep = None
@@ -3541,13 +3562,13 @@ let surface_row_texts (state : state) : surface -> string list option = function
         state.runtime_surface
   | System_logs ->
       Option.map
-        (fun s ->
-          List.map
+        (fun _ ->
+          visible_system_log_entries state
+          |> List.map
             (fun e ->
               e.Tui_decode.sl_module ^ " "
               ^ Option.value ~default:"" e.Tui_decode.sl_keeper
-              ^ " " ^ e.Tui_decode.sl_message)
-            s.Tui_decode.sys_entries)
+              ^ " " ^ e.Tui_decode.sl_message))
         state.system_logs
   | Code ->
       if state.repository_changes_open then

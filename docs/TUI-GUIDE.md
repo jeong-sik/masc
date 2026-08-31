@@ -986,17 +986,24 @@ effective prompt through `$EDITOR`, and `x` clears only its persisted override.
 The server's log ring, the same source the dashboard `logs` tab reads.
 
 ```
- MASC System Logs (300 of 774273, seq 774272)  03:09:37  [connected]
-   Time     Level Module           Keeper       Message
-   03:09:21 INFO  Discord          system       presence update: idle
-   03:09:18 WARN  Keeper           alpha        turn budget exceeded, deferring
-   03:08:57 ERROR Board            system       board post write failed: ...
-  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: 8935
+ MASC System Logs (247 of 774273, seq 774272)  level≥INFO
+   Time     Level   Module           Keeper       Category  Message
+   03:09:21 INFO    Discord          system       routine   presence update: idle
+   03:09:18 WARN    Keeper           alpha        turn      turn budget exceeded
+   03:08:57 ERROR   Board            system       boundary  board post write failed
 ```
 
-The header counts two different things. `300` is what this page holds; `774273`
-is what the ring has seen. A page count on its own would read as "that is all
-there is".
+The first count is what the fetched page shows after its category filter;
+`774273` is what the ring has seen. A page count on its own would read as
+"that is all there is".
+
+`l` raises the server-side level floor through INFO, WARN, and ERROR, then opens
+it back to every level; changing it refetches the page. `c` cycles `all` and
+each category observed on the loaded page. Right or `Enter` opens the exact
+sequence under the cursor with its untruncated timestamp, level, category,
+source, module, keeper, turn, message, and pretty syntax-highlighted JSON
+details. `[`/`]` steps through adjacent visible entries while detail is open;
+Left or `Esc` returns to the filtered list.
 
 Levels are coloured: `ERROR` red, `WARN` yellow, `DEBUG` dim. A level the
 server emits that this build does not name keeps its own text and renders
@@ -1022,7 +1029,7 @@ Per surface:
 |-----|---------|--------|
 | `j` / `k` | Overview | Scroll Recent Events |
 | `j` / `k` | Keepers, Lanes, Approvals, Board, Planning, Schedules, Fusion list | Move cursor |
-| `j` / `k` | Runtime, System Logs | Scroll the page |
+| `j` / `k` | Runtime, System Logs | Move the list cursor; scroll when detail is open |
 | `j` / `k` | Keeper detail, logs, Board read, Planning detail, Fusion detail | Scroll content |
 | Right / `Enter` | Keepers | Open keeper detail |
 | Right / `Enter` | Lanes | Open the selected lane's Keeper detail |
@@ -1031,7 +1038,7 @@ Per surface:
 | `Ctrl-W` | Board read, Resources | Switch the focused pane |
 | `[` / `]` | Resources detail | Open the previous / next resource |
 | `h` / `l` | Wide Board read | Focus post list / post detail |
-| `PgUp` / `PgDn` | Board, Schedules, Fusion | Move the active list or detail by a page |
+| `PgUp` / `PgDn` | Board, Schedules, Fusion, System Logs detail | Move the active list or detail by a page |
 | Right / `Enter` | Schedules | Open schedule details |
 | Right / `Enter` | Planning | Open goal detail |
 | Right / `Enter` | Fusion | Open exact run evidence detail |

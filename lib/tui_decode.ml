@@ -1578,6 +1578,13 @@ type system_log_level =
   | System_error
   | System_level_unknown of string
 
+type system_log_source =
+  | System_structured
+  | System_legacy_stderr
+  | System_legacy_traceln
+  | System_client_tool_host
+  | System_source_unknown of string
+
 type keeper_call = {
   kc_at : float;
   kc_tool : string;
@@ -1604,9 +1611,12 @@ type system_log_entry = {
   sl_seq : int;
   sl_ts : string;
   sl_level : system_log_level;
+  sl_source : system_log_source;
   sl_module : string;
   sl_keeper : string option;
+  sl_turn : int option;
   sl_message : string;
+  sl_details : Yojson.Safe.t;
   sl_category : string option;
 }
 
@@ -1637,21 +1647,42 @@ let system_log_level_label = function
       if String.length raw >= 5 then String.sub raw 0 5
       else raw ^ String.make (5 - String.length raw) ' '
 
+let system_log_source_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "structured" -> System_structured
+  | "legacy_stderr" -> System_legacy_stderr
+  | "legacy_traceln" -> System_legacy_traceln
+  | "client_tool_host" -> System_client_tool_host
+  | _ -> System_source_unknown raw
+
+let system_log_source_label = function
+  | System_structured -> "structured"
+  | System_legacy_stderr -> "legacy stderr"
+  | System_legacy_traceln -> "legacy traceln"
+  | System_client_tool_host -> "client tool host"
+  | System_source_unknown raw -> raw
+
 let decode_system_log_entry json =
   let* sl_seq = required_int_field json "seq" in
   let* sl_ts = required_string_field json "ts" in
   let* level_raw = required_string_field json "level" in
+  let* source_raw = required_string_field json "source" in
   let* sl_module = required_string_field json "module" in
   let* sl_message = required_string_field json "message" in
   let* sl_keeper = optional_string_field json "keeper_name" in
+  let* sl_turn = optional_int_field json "turn_id" in
+  let* sl_details = required_member json "details" in
   let* sl_category = optional_string_field json "category" in
   Ok
     { sl_seq
     ; sl_ts
     ; sl_level = system_log_level_of_string level_raw
+    ; sl_source = system_log_source_of_string source_raw
     ; sl_module
     ; sl_keeper
+    ; sl_turn
     ; sl_message
+    ; sl_details
     ; sl_category
     }
 

@@ -51,6 +51,10 @@ val submit_or_inline : ?weight:float -> (unit -> 'a) -> 'a
     [Eio.Switch.run], so effect-based ops keep their handlers), or inline
     in the current fiber when no pool is installed (tests, pre-init).
 
+    A nested call already running on this shared pool also runs inline. Its
+    worker has a live Eio context, while submitting back to a saturated pool
+    would wait for the worker currently occupied by the outer call.
+
     Unlike [Eio_unix.run_in_systhread], the closure runs with a live
     [Cancel.Get_context] handler, so code that takes an [Eio.Mutex]
     (e.g. via [Keeper_fs.ensure_dir]) does not raise [Effect.Unhandled]

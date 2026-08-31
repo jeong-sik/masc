@@ -5056,7 +5056,7 @@ def chat_visibility_modes_interaction() -> Interaction:
             master_fd,
             output,
             rows=30,
-            columns=110,
+            columns=180,
             needle=b"MASC Overview",
         )
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
@@ -5086,6 +5086,19 @@ def chat_visibility_modes_interaction() -> Interaction:
             start=pane_start,
             timeout=5.0,
         )
+        for needle in (
+            b"AUTO",
+            b"gate:auto_judge",
+            b"Ctrl-D: details / diffs",
+        ):
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                needle,
+                start=pane_start,
+                timeout=5.0,
+            )
         initial += bytes(output[pane_start:])
         if b"2 reasoning steps, content withheld" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
@@ -5133,6 +5146,123 @@ def chat_visibility_modes_interaction() -> Interaction:
                     f"full tool view did not restore {needle!r}: {tools!r}"
                 )
         send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def chat_clarity_http_fixtures() -> HttpFixtures:
+    fixtures = context_inspector_fixtures()
+    fixtures["/api/v1/keepers/alpha/chat/history"] = autonomous_turn_history_fixture()
+    fixtures["/api/v1/dashboard/gate"] = (
+        200,
+        {
+            "approval_queue": [],
+            "approval_queue_state": None,
+            "hitl": {
+                "gate_mode": {"mode": "auto_judge"},
+                "external_gate_mode": {"mode": "manual"},
+            },
+            "approval_rules": None,
+            "approval_rules_state": None,
+        },
+    )
+    fixtures["/api/v1/dashboard/gate/keeper-settings"] = (
+        200,
+        {"modes": [], "judges": []},
+    )
+    fixtures["/api/v1/keepers/tool-approval-mode"] = (200, {"overrides": []})
+    return fixtures
+
+
+def skills_usage_clarity_http_fixtures() -> HttpFixtures:
+    fixtures = keeper_runtime_http_fixtures()
+    fixtures["/api/v1/dashboard/tools?keeper=alpha"] = (
+        200,
+        {
+            "tool_inventory": {"tools": [], "count": 0},
+            "effective_keeper_surface": None,
+            "skill_activations": None,
+        },
+    )
+    fixtures["/api/v1/async-requests"] = (200, {"requests": []})
+    fixtures["/api/v1/skills"] = (
+        200,
+        {
+            "schema": "masc.skill-snapshot/v1",
+            "state": "ready",
+            "snapshot": {
+                "snapshot_revision": "snapshot-rev1",
+                "catalog_revision": "catalog-rev1",
+                "config": {"kind": "unreadable"},
+                "sources": [],
+                "skills": [],
+                "effective_skills": [],
+                "shadows": [],
+                "rejections": [],
+            },
+            "surfaces": [
+                {
+                    "reference": {
+                        "identity": {
+                            "source_id": "workspace",
+                            "package_id": "pkg",
+                            "name": "work-intake",
+                        },
+                        "content_revision": "rev1",
+                    },
+                    "kind": "instruction",
+                    "usage": [
+                        {
+                            "keeper": "alpha",
+                            "invocations": 12,
+                            "deliveries": 12,
+                            "actions": 9,
+                            "last_used_at": "2026-08-28T03:04:05Z",
+                        }
+                    ],
+                    "profile": {"flow": None, "plan": {}, "context": {}},
+                }
+            ],
+        },
+    )
+    return fixtures
+
+
+def skills_usage_clarity_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=160,
+            needle=b"MASC Overview",
+        )
+        send_and_wait(process, master_fd, output, b"\t" * 15, b"MASC Tools")
+        usage = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"p" * 3,
+            b"Skill Usage",
+        )
+        rendered = CSI_RE.sub(b"", usage)
+        for needle in (
+            b"work-intake",
+            b"alpha 12/12/9",
+            b"2026-08-28T03:04:05Z",
+        ):
+            if needle not in rendered:
+                raise AssertionError(
+                    f"Skill usage did not show {needle!r}: {usage!r}"
+                )
         os.write(master_fd, b"q")
 
     return interact
@@ -8626,10 +8756,7 @@ def run_keyboard_regression(executable: str) -> None:
     board_detail_fixtures, b_failure = board_detail_isolation_http_fixtures()
     missing_target_fixtures, late_b = board_missing_target_http_fixtures()
     message_switch_fixtures, alpha_history = keeper_message_switch_http_fixtures()
-    chat_visibility_fixtures = keeper_runtime_http_fixtures()
-    chat_visibility_fixtures["/api/v1/keepers/alpha/chat/history"] = (
-        autonomous_turn_history_fixture()
-    )
+    chat_visibility_fixtures = chat_clarity_http_fixtures()
     lanes_fixtures = keeper_runtime_http_fixtures()
     lanes_gate = GatedHttpResponse(keeper_lanes_response([]))
     lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
@@ -9254,6 +9381,21 @@ def run_config_regression(executable: str) -> None:
     )
 
 
+def run_chat_clarity_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="Keeper chat mode and Tool detail clarity",
+        interact=chat_visibility_modes_interaction(),
+        http_fixtures=chat_clarity_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="Skill usage date clarity",
+        interact=skills_usage_clarity_interaction(),
+        http_fixtures=skills_usage_clarity_http_fixtures(),
+    )
+
+
 def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
         run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
@@ -9271,10 +9413,14 @@ def main() -> None:
         run_config_regression(os.path.abspath(sys.argv[1]))
         print("tui Config regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "chat-clarity":
+        run_chat_clarity_regression(os.path.abspath(sys.argv[1]))
+        print("tui chat clarity regression: PASS")
+        return
     if len(sys.argv) != 2:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
-            "[cli-base-path|planning-review|repositories|config]"
+            "[cli-base-path|planning-review|repositories|config|chat-clarity]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

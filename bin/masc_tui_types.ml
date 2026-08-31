@@ -228,6 +228,30 @@ let toggle_tool_visibility = function
   | Tools_full -> Tools_compact
 ;;
 
+(* The chat header shows the effective stances, including their defaults. A
+   blank label here is worse than repetition: this is the surface where the
+   operator decides whether to send work, and AUTO/YOLO plus the Gate mode
+   change what can happen after that send. A Keeper-level [workspace] value is
+   inheritance, so resolve it through the workspace observation rather than
+   printing a setting that is not itself a mode. *)
+let keeper_chat_mode_labels ~yolo ~keeper_gate_mode ~workspace_gate_mode =
+  let chat_mode = if yolo then "YOLO" else "AUTO" in
+  let gate_mode =
+    match keeper_gate_mode with
+    | Some mode when not (String.equal mode "workspace") -> mode
+    | Some _ | None -> Option.value ~default:"?" workspace_gate_mode
+  in
+  chat_mode, gate_mode
+;;
+
+(* Usage coverage can be warming independently of the catalog. Missing time
+   therefore means unavailable, not "never used" -- the latter would claim a
+   lifetime fact from a bounded retained ledger. *)
+let skill_last_used_label = function
+  | Some value when String.trim value <> "" -> value
+  | Some _ | None -> "time unavailable"
+;;
+
 (** Request-correlated message history entry. *)
 type msg_entry = {
   me_role: msg_role;

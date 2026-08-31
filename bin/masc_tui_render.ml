@@ -4042,32 +4042,25 @@ let keeper_message_identity ~max_cells state keeper_name =
         keeper_action_color (Keeper_control.next_action reading)
       in
       (* Two stances that decide what this Keeper does with a tool call, on
-         the row an operator reads before typing to it. They lived on the
-         detail pane's Gate section only, so the pane where the asking
-         actually happens never said whether anything would be asked.
-
-         [g] is the key that flips the first of them, and it is on the roster
-         and the detail -- naming it here says the stance is a stance rather
-         than a property of the keeper. Silent when both are the default:
-         "asks, under the workspace lane" is what a reader assumes, and a
-         header that says so on every keeper spends width on nothing. *)
+         the row an operator reads before typing to it. Show defaults too:
+         this is operational state, and an absent label made AUTO look like
+         unknown while a visible YOLO label looked like the only real mode. *)
       let stance =
         let yolo = List.mem keeper.k_name state.keeper_yolo_names in
-        let gate =
-          match List.assoc_opt keeper.k_name state.keeper_gate_modes with
-          | Some mode when not (String.equal mode "workspace") ->
-              Some (Terminal_text.single_line mode)
-          | Some _ | None -> None
+        let workspace_gate_mode =
+          Option.map
+            (fun modes -> modes.Tui_decode.glm_workspace)
+            state.gate_modes
         in
-        match yolo, gate with
-        | false, None -> ""
-        | true, None ->
-            Printf.sprintf " %sYOLO%s" (Theme.bad ()) Ansi.reset
-        | false, Some gate ->
-            Printf.sprintf " %sgate:%s%s" Ansi.cyan gate Ansi.reset
-        | true, Some gate ->
-            Printf.sprintf " %sYOLO%s %sgate:%s%s" (Theme.bad ()) Ansi.reset
-              Ansi.cyan gate Ansi.reset
+        let chat_mode, gate_mode =
+          keeper_chat_mode_labels ~yolo
+            ~keeper_gate_mode:(List.assoc_opt keeper.k_name state.keeper_gate_modes)
+            ~workspace_gate_mode
+        in
+        Printf.sprintf " %s%s%s %s\xc2\xb7 gate:%s%s"
+          (if yolo then (Theme.bad ()) else Ansi.cyan)
+          chat_mode Ansi.reset Ansi.dim
+          (Terminal_text.single_line gate_mode) Ansi.reset
       in
       let status =
         String.concat ""
@@ -5971,10 +5964,17 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
     then state.msg_file_change_index
     else Keeper_chat_diff.empty
   in
-  Keeper_chat_diff.rows
-    ~mode:(tool_projection_mode state)
+  let mode = tool_projection_mode state in
+  let rows =
+    Keeper_chat_diff.rows
+    ~mode
     ~max_line_cells:(max 24 (min 120 (chat_cols - role_label_column - 8)))
     file_change_index projection
+  in
+  match mode, projection.hidden_activity_rows, rows with
+  | Keeper_chat_transcript.Compact, hidden, row :: rest when hidden > 0 ->
+      (row ^ " \xc2\xb7 Ctrl-D: details / diffs") :: rest
+  | (Keeper_chat_transcript.Compact | Keeper_chat_transcript.Full), _, _ -> rows
 
 (* Every committed row of one keeper's conversation, as the layout entries the
    pane draws -- the grouping, the aligned badges, the tool projections, and
@@ -10532,7 +10532,8 @@ let tools_display_lines (state : state) =
               (List.length used)
               (if List.length used = 1 then "" else "s")
           ; Ansi.dim,
-            Printf.sprintf "   %-24s %s" "Skill" "Keeper  inv/delivered/actions" ]
+            Printf.sprintf "   %-24s %s" "Skill"
+              "Keeper  inv/delivered/actions \xc2\xb7 last used" ]
         in
         let rows =
           List.concat_map
@@ -10540,9 +10541,11 @@ let tools_display_lines (state : state) =
                let keepers =
                  surface.scs_usage
                  |> List.map (fun (row : Masc.Tui_decode.skill_usage_row) ->
-                        Printf.sprintf "%s %d/%d/%d"
+                        Printf.sprintf "%s %d/%d/%d \xc2\xb7 %s"
                           (Terminal_text.single_line row.su_keeper)
-                          row.su_invocations row.su_deliveries row.su_actions)
+                          row.su_invocations row.su_deliveries row.su_actions
+                          (Terminal_text.single_line
+                             (skill_last_used_label row.su_last_used_at)))
                  |> String.concat " · "
                in
                [ ( Ansi.bold,

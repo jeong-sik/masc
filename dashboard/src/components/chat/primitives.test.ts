@@ -388,6 +388,66 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.chat-bubble')).toBeNull()
   })
 
+  it('renders approval resolution, replay, and continuation as distinct typed cards', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'approval-resolved',
+            role: 'system',
+            source: 'system',
+            label: 'System',
+            text: '승인됨 · Execute',
+            approvalLifecycle: {
+              approvalId: 'appr_01typed',
+              toolName: 'Execute',
+              phase: 'resolved_approved',
+              artifactSha256: null,
+            },
+          }),
+          entry({
+            id: 'approval-continuation',
+            role: 'system',
+            source: 'system',
+            label: 'System',
+            text: '승인 후 후속 작업 이어가기 기록됨 · Execute',
+            approvalLifecycle: {
+              approvalId: 'appr_01typed',
+              toolName: 'Execute',
+              phase: 'continuation_recorded',
+              artifactSha256: null,
+            },
+          }),
+          entry({
+            id: 'approval-replayed',
+            role: 'system',
+            source: 'system',
+            label: 'System',
+            text: '승인 작업 적용 완료 · Execute',
+            approvalLifecycle: {
+              approvalId: 'appr_01typed',
+              toolName: 'Execute',
+              phase: 'replay_applied',
+              artifactSha256: 'a'.repeat(64),
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const resolved = container.querySelector('[data-chat-approval-lifecycle="resolved_approved"]')
+    const replayed = container.querySelector('[data-chat-approval-lifecycle="replay_applied"]')
+    const continued = container.querySelector('[data-chat-approval-lifecycle="continuation_recorded"]')
+    expect(resolved?.textContent).toContain('외부 효과는 아직 적용 확인 전')
+    expect(replayed?.textContent).toContain('승인된 작업이 적용')
+    expect(replayed?.textContent).toContain('aaaaaaaaaaaa')
+    expect(continued?.textContent).toContain('후속 작업을 이어갔습니다')
+    expect(container.querySelectorAll('[data-chat-approval-id="appr_01typed"]')).toHaveLength(3)
+  })
+
   it('renders failure rows as a typed card with collapsed diagnostic detail', async () => {
     const text = 'Keeper request failed: Internal error: [masc_agent_core_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress"}'
     render(

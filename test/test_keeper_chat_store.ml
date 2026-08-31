@@ -760,7 +760,7 @@ let test_unknown_role_row_dropped () =
       let before = drop_value invalid_payload in
       write_file path
         ({|{"id":"role-user","role":"user","content":"hi","ts":1.0}|} ^ "\n"
-        ^ {|{"id":"role-system","role":"system","content":"injected","ts":2.0}|} ^ "\n"
+        ^ {|{"id":"role-unknown","role":"operator","content":"injected","ts":2.0}|} ^ "\n"
         ^ {|{"id":"role-assistant","role":"assistant","content":"done","ts":3.0}|} ^ "\n");
       let messages = K.load ~base_dir ~keeper_name in
       Alcotest.(check (list string)) "unknown role row dropped"
@@ -807,10 +807,26 @@ let test_window_keeps_tool_lines_of_retained_turns () =
           ~assistant_content:(Printf.sprintf "a%d" i)
           ()
       done;
+      let lifecycle : K.approval_lifecycle =
+        { approval_id = "appr_window"
+        ; tool_name = Some "Execute"
+        ; phase = K.Approval_resolved_approved
+        ; artifact_ref = None
+        }
+      in
+      (match K.append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) | Error _ ->
+         Alcotest.fail "window fixture lifecycle row was not appended");
       let messages = K.load ~base_dir ~keeper_name in
-      Alcotest.(check int) "50 full turns survive" 150 (List.length messages);
+      Alcotest.(check int) "50 full turns and system receipt survive" 151
+        (List.length messages);
       let primaries =
-        List.filter (fun (m : K.chat_message) -> not (K.Role.equal m.role K.Role.Tool)) messages
+        List.filter
+          (fun (m : K.chat_message) ->
+            K.Role.equal m.role K.Role.User
+            || K.Role.equal m.role K.Role.Assistant)
+          messages
       in
       Alcotest.(check int) "primary window is 100" 100 (List.length primaries);
       match messages with
@@ -2761,6 +2777,184 @@ let test_transcript_absent_returns_empty () =
       Alcotest.(check bool) "found=false when no rows match" true
         (String_util.contains_substring (Yojson.Safe.to_string json) "\"found\":false"))
 
+let test_approval_lifecycle_rows_are_typed_idempotent_system_receipts () =
+  let base_dir = temp_base_path "keeper-chat-approval-lifecycle" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-approval-lifecycle" in
+      let approval_id = "appr_01test" in
+      let resolved : K.approval_lifecycle =
+        { approval_id
+        ; tool_name = Some "Execute"
+        ; phase = K.Approval_resolved_approved
+        ; artifact_ref = None
+        }
+      in
+      (match K.append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle:resolved with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) | Error _ -> Alcotest.fail "first resolution was not appended");
+      (match K.append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle:resolved with
+       | Ok (K.Already_present _) -> ()
+       | Ok (K.Appended _) | Error _ -> Alcotest.fail "resolution retry was not idempotent");
+      let resolved_without_optional_tool = { resolved with tool_name = None } in
+      (match
+         K.append_approval_lifecycle_once
+           ~base_dir
+           ~keeper_name
+           ~lifecycle:resolved_without_optional_tool
+       with
+       | Ok (K.Already_present _) -> ()
+       | Ok (K.Appended _) | Error _ ->
+         Alcotest.fail "resolution retry without display metadata conflicted");
+      let conflicting = { resolved with phase = K.Approval_resolved_rejected } in
+      (match K.append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle:conflicting with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "conflicting resolution reused the lifecycle slot");
+      let artifact_ref =
+        Tool_output.make_artifact_ref
+          ~sha256:(String.make 64 'a')
+          ~bytes:7
+          ~preview:"applied"
+          ~mime:"text/plain"
+        |> Result.get_ok
+      in
+      let replay : K.approval_lifecycle =
+        { approval_id
+        ; tool_name = Some "Execute"
+        ; phase = K.Approval_replay_applied
+        ; artifact_ref = Some artifact_ref
+        }
+      in
+      (match K.append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle:replay with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) | Error _ -> Alcotest.fail "replay receipt was not appended");
+      let continuation : K.approval_lifecycle =
+        { approval_id
+        ; tool_name = Some "Execute"
+        ; phase = K.Approval_continuation_recorded
+        ; artifact_ref = None
+        }
+      in
+      (match
+         K.append_approval_lifecycle_once
+           ~base_dir
+           ~keeper_name
+           ~lifecycle:continuation
+       with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) | Error _ ->
+         Alcotest.fail "continuation receipt was not appended");
+      let messages = K.load_all ~base_dir ~keeper_name in
+      Alcotest.(check (list string)) "system rows are durable and ordered"
+        [ "system"; "system"; "system" ] (roles messages);
+      let phases =
+        List.filter_map
+          (fun (message : K.chat_message) ->
+            Option.map (fun lifecycle -> lifecycle.K.phase) message.approval_lifecycle)
+          messages
+      in
+      Alcotest.(check int) "three typed phases" 3 (List.length phases);
+      let json = K.to_json_array messages |> Yojson.Safe.to_string in
+      Alcotest.(check bool) "history exposes lifecycle metadata" true
+        (String_util.contains_substring json "\"approval_lifecycle\"");
+      Alcotest.(check bool) "history exposes replay artifact identity" true
+        (String_util.contains_substring json (String.make 64 'a'));
+      let turn_ref = Ids.Turn_ref.make ~trace_id:"approval-system" ~absolute_turn:1 in
+      let transcript = K.transcript_of_messages messages ~turn_ref in
+      Alcotest.(check int) "system receipt is not keeper transcript" 0
+        (List.length transcript.assistant))
+;;
+
+let test_approval_lifecycle_redacts_and_compares_artifact_preview () =
+  let base_dir = temp_base_path "keeper-chat-approval-lifecycle-redact" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      with_env "MASC_SECRET_DIR" "" @@ fun () ->
+      let keeper_name = "keeper-chat-approval-lifecycle-redact" in
+      let secret = "approval.preview.secret!" in
+      let root = secret_root_default ~base_dir ~keeper_name in
+      write_file (Filename.concat (Filename.concat root "env") "APPROVAL_SECRET") secret;
+      let artifact_ref =
+        Tool_output.make_artifact_ref
+          ~sha256:(String.make 64 'c')
+          ~bytes:23
+          ~preview:("result " ^ secret)
+          ~mime:"text/plain"
+        |> Result.get_ok
+      in
+      let lifecycle : K.approval_lifecycle =
+        { approval_id = "appr_preview_redaction"
+        ; tool_name = Some ("Execute " ^ secret)
+        ; phase = K.Approval_replay_applied
+        ; artifact_ref = Some artifact_ref
+        }
+      in
+      (match K.append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) | Error _ ->
+         Alcotest.fail "redacted lifecycle was not appended");
+      (match K.append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle with
+       | Ok (K.Already_present _) -> ()
+       | Ok (K.Appended _) | Error _ ->
+         Alcotest.fail "redacted lifecycle retry was not idempotent");
+      let raw = read_file (chat_path ~base_dir ~keeper_name) in
+      Alcotest.(check bool) "lifecycle secret is not persisted" false
+        (String_util.contains_substring raw secret);
+      Alcotest.(check bool) "lifecycle redaction marker is persisted" true
+        (String_util.contains_substring raw "[REDACTED]");
+      let conflicting_ref = Tool_output.with_preview artifact_ref "different preview" in
+      let conflicting = { lifecycle with artifact_ref = Some conflicting_ref } in
+      (match K.append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle:conflicting with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "conflicting artifact preview reused the replay slot"))
+;;
+
+let test_all_replay_terminal_phases_roundtrip () =
+  let base_dir = temp_base_path "keeper-chat-approval-terminal-phases" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-approval-terminal-phases" in
+      let artifact_ref =
+        Tool_output.make_artifact_ref
+          ~sha256:(String.make 64 'b')
+          ~bytes:9
+          ~preview:"terminal"
+          ~mime:"text/plain"
+        |> Result.get_ok
+      in
+      let phases =
+        [ K.Approval_replay_applied
+        ; K.Approval_replay_applied_with_warning
+        ; K.Approval_replay_failed
+        ; K.Approval_replay_indeterminate
+        ]
+      in
+      List.iteri
+        (fun index phase ->
+          let lifecycle : K.approval_lifecycle =
+            { approval_id = Printf.sprintf "appr_phase_%d" index
+            ; tool_name = Some "Execute"
+            ; phase
+            ; artifact_ref = Some artifact_ref
+            }
+          in
+          match K.append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle with
+          | Ok (K.Appended _) -> ()
+          | Ok (K.Already_present _) | Error _ ->
+            Alcotest.failf "terminal phase %d was not appended" index)
+        phases;
+      let actual =
+        K.load_all ~base_dir ~keeper_name
+        |> List.filter_map (fun (message : K.chat_message) ->
+          Option.map (fun lifecycle -> lifecycle.K.phase) message.approval_lifecycle)
+      in
+      Alcotest.(check int) "all terminal phases survived" 4 (List.length actual);
+      Alcotest.(check bool) "terminal phase order preserved" true (actual = phases))
+;;
+
 (* The chat store is a top-level per-keeper file, outside the runtime
    directory the purge plan removes, so it needs its own entry. Without one a
    purged keeper leaves its conversation on disk and a later keeper with the
@@ -2847,6 +3041,20 @@ let () =
             test_kind_absent_reads_utterance;
           Alcotest.test_case "unknown kind reported, reads utterance" `Quick
             test_unknown_kind_reported_reads_utterance;
+        ] );
+      ( "approval_lifecycle",
+        [ Alcotest.test_case
+            "typed system receipts are idempotent and transcript-neutral"
+            `Quick
+            test_approval_lifecycle_rows_are_typed_idempotent_system_receipts
+        ; Alcotest.test_case
+            "artifact previews are redacted and compared"
+            `Quick
+            test_approval_lifecycle_redacts_and_compares_artifact_preview
+        ; Alcotest.test_case
+            "all replay terminal phases roundtrip"
+            `Quick
+            test_all_replay_terminal_phases_roundtrip
         ] );
       ( "speaker_identity",
         [

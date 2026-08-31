@@ -327,7 +327,8 @@ let turn_id_of_fields fields =
         match provenance.Delivery_identity.delivery_key with
         | Delivery_identity.Operation request_id
         | Delivery_identity.Fusion_run request_id
-        | Delivery_identity.Workspace_message request_id ->
+        | Delivery_identity.Workspace_message request_id
+        | Delivery_identity.Approval_lifecycle request_id ->
             request_id
       in
       Some (Delivery_identity.Request_id.to_string request_id)
@@ -817,6 +818,19 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                   ]
               in
               trace_rows @ said)
+      | Some "system" ->
+          (* Durable approval lifecycle rows are server-owned status, never
+             Keeper speech. The TUI's existing [Memory_activity] presentation
+             is the neutral system lane: it renders the typed row without
+             advancing reply/recovery semantics. *)
+          [ Utterance
+              { at
+              ; turn_id
+              ; kind = Memory_activity
+              ; text = content
+              ; attachments = []
+              }
+          ]
       | Some "tool" -> (
           (* A row with no tool name would draw as a marker and nothing else,
              which says less than no row -- the same call the connector trail

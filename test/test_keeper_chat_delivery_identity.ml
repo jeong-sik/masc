@@ -37,6 +37,20 @@ let test_fusion_roundtrip () =
     (Identity.delivery_key_equal key (Identity.Operation request_id))
 ;;
 
+let test_approval_lifecycle_roundtrip () =
+  let approval_id =
+    Identity.Request_id.of_string "appr_01typed" |> expect_ok
+  in
+  let key = Identity.Approval_lifecycle approval_id in
+  let decoded =
+    Identity.delivery_key_to_yojson key
+    |> Identity.delivery_key_of_yojson
+    |> expect_ok
+  in
+  check bool "approval lifecycle identity roundtrips" true
+    (Identity.delivery_key_equal key decoded)
+;;
+
 let test_transcript_slot_roundtrip () =
   let slots =
     [ Identity.Accepted_user
@@ -46,6 +60,9 @@ let test_transcript_slot_roundtrip () =
         }
     ; Identity.Tool_delivery { ordinal = 3 }
     ; Identity.Terminal_assistant
+    ; Identity.Approval_resolution
+    ; Identity.Approval_replay
+    ; Identity.Approval_continuation
     ]
   in
   List.iter
@@ -155,6 +172,10 @@ let () =
             "Fusion run roundtrip"
             `Quick
             test_fusion_roundtrip
+        ; test_case
+            "approval lifecycle roundtrip"
+            `Quick
+            test_approval_lifecycle_roundtrip
         ; test_case
             "transcript slots roundtrip"
             `Quick

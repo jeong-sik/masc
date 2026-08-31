@@ -368,6 +368,35 @@ let replay_journal_status ~base_path ~approval_id replay_outcome =
     Error (Keeper_approval_queue.grant_error_to_string error)
 ;;
 
+let project_replay_outcome_to_chat ~base_path ~approval_id replay_outcome =
+  match
+    Keeper_approval_queue.approved_resolution_delivery
+      ~base_path
+      ~id:approval_id
+  with
+  | Error error ->
+    Log.Keeper.warn
+      "approved Gate replay chat projection lookup failed approval=%s: %s"
+      approval_id
+      (Keeper_approval_queue.grant_error_to_string error)
+  | Ok { request; _ } ->
+    (match
+       Keeper_approval_queue.ensure_replay_chat_projection
+         ~base_path
+         ~keeper_name:request.keeper_name
+         ~approval_id
+         ~tool_name:(Some request.tool_name)
+         ~outcome:replay_outcome
+     with
+     | Ok () -> ()
+     | Error detail ->
+       Log.Keeper.warn
+         ~keeper_name:request.keeper_name
+         "approved Gate replay chat projection deferred approval=%s: %s"
+         approval_id
+         detail)
+;;
+
 let replayed_outcome
       ~base_path
       ~approval_id
@@ -395,6 +424,7 @@ let replayed_outcome
          (Repair_required { operation; stage = Replay_journal; detail })
      | Ok journal ->
        forget_pending_repair ~base_path ~approval_id;
+       project_replay_outcome_to_chat ~base_path ~approval_id replay_outcome;
        let outcome =
          match replay_outcome with
          | Keeper_approval_queue.Replay_applied output_ref ->

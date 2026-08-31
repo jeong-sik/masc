@@ -139,14 +139,22 @@ let test_roles_map_to_what_the_pane_draws () =
          [ row ~ts:1.0 ~role:"user" "고쳐줘"
          ; row ~ts:2.0 ~role:"assistant" "고쳤어요"
          ; row ~ts:3.0 ~role:"assistant" ~kind:"transport_failure" "slack 5xx"
+         ; row ~ts:4.0 ~role:"system"
+             ~delivery_key:
+               (`Assoc
+                  [ "kind", `String "approval_lifecycle"
+                  ; "approval_id", `String "appr_01typed"
+                  ])
+             ~transcript_slot:(transcript_slot "approval_resolution")
+             "승인됨 · Execute"
          ])
   in
   check int "nothing was dropped" 0 decoded.History.dropped;
   check (list string) "each role lands where it belongs"
-    [ "addressed(you)"; "keeper"; "delivery_failed" ]
+    [ "addressed(you)"; "keeper"; "delivery_failed"; "memory" ]
     (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows);
   check (list string) "and the text comes through"
-    [ "고쳐줘"; "고쳤어요"; "slack 5xx" ]
+    [ "고쳐줘"; "고쳤어요"; "slack 5xx"; "승인됨 · Execute" ]
     (List.map (fun r -> r.History.text) decoded.History.rows)
 
 (* The pane writes its own row when a turn fails, because most error rows are

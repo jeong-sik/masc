@@ -167,7 +167,8 @@ let recent_direct_conversation_of_messages
                { role = Tool_call
                ; speaker_label = None
                ; content = name
-               }))
+               })
+      | Keeper_chat_store.Role.System -> None)
   |> take_last limit
 ;;
 
@@ -225,6 +226,7 @@ let acknowledged_turn_refs messages =
         Keeper_chat_store.Row_kind.Utterance,
         None
       | Keeper_chat_store.Role.User, _, _
+      | Keeper_chat_store.Role.System, _, _
       | Keeper_chat_store.Role.Tool, _, _ -> refs)
     StringSet.empty
     messages
@@ -245,6 +247,7 @@ let answered_delivery_keys messages =
         Keeper_chat_store.Row_kind.Utterance,
         None
       | Keeper_chat_store.Role.User, _, _
+      | Keeper_chat_store.Role.System, _, _
       | Keeper_chat_store.Role.Tool, _, _ ->
         None)
     messages
@@ -288,7 +291,9 @@ let pending_user_lines ?ack_id (messages : Keeper_chat_store.chat_message list) 
         (exact_delivery_was_answered
            answered_deliveries
            message.delivery_provenance)
-    | Keeper_chat_store.Role.Assistant, _ | Keeper_chat_store.Role.Tool, _ -> false)
+    | Keeper_chat_store.Role.Assistant, _
+    | Keeper_chat_store.Role.System, _
+    | Keeper_chat_store.Role.Tool, _ -> false)
 ;;
 
 let is_owner_authored (m : Keeper_chat_store.chat_message) : bool =
@@ -389,6 +394,7 @@ let fleet_messages_of_messages
             | Surface_ref.Gate _ ) )
       | Keeper_chat_store.Role.User, None
       | Keeper_chat_store.Role.Assistant, _
+      | Keeper_chat_store.Role.System, _
       | Keeper_chat_store.Role.Tool, _ -> false)
     |> List.rev
     |> List.take limit

@@ -24,7 +24,7 @@ import { isFailedDelivery } from '../../lib/keeper-delivery'
 import { memo } from 'preact/compat'
 import { readKeeperDraft, writeKeeperDraft } from '../../keeper-chat-store'
 import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, ChatIssueBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatSuggestionsBlock, ChatTableBlock, ChatTraceStep, ChatTraceToolStep, ChatVoiceBlock, KeeperUserInputBlock } from '../../types'
-import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
+import type { KeeperApprovalLifecycle, KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
 import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
 import { fetchBoardPost } from '../../api/board'
 import { lookupToolCallOutput, toolCallOutputsByExecutionId } from '../../tool-call-output-store'
@@ -2283,6 +2283,48 @@ function ChatFailureCard({ diagnostic }: { diagnostic: string }) {
   `
 }
 
+function ApprovalLifecycleCard({ lifecycle }: { lifecycle: KeeperApprovalLifecycle }) {
+  const spec = (() => {
+    switch (lifecycle.phase) {
+      case 'resolved_approved':
+        return { badge: '승인됨', title: '실행 권한이 승인되었습니다', detail: '외부 효과는 아직 적용 확인 전입니다.', tone: 'var(--color-status-info)' }
+      case 'resolved_rejected':
+        return { badge: '거절됨', title: '실행 요청이 거절되었습니다', detail: '외부 효과는 실행되지 않습니다.', tone: 'var(--color-status-error)' }
+      case 'replay_applied':
+        return { badge: '적용 완료', title: '승인된 작업이 적용되었습니다', detail: '호스트 replay 결과가 영속 기록되었습니다.', tone: 'var(--color-status-success)' }
+      case 'replay_applied_with_warning':
+        return { badge: '적용 경고', title: '작업은 적용됐지만 경고가 있습니다', detail: '상세 결과는 replay 증거를 확인하세요.', tone: 'var(--color-status-warning)' }
+      case 'replay_failed':
+        return { badge: '적용 실패', title: '승인된 작업을 적용하지 못했습니다', detail: '실패 결과가 영속 기록되었으며 자동 재실행하지 않습니다.', tone: 'var(--color-status-error)' }
+      case 'replay_indeterminate':
+        return { badge: '적용 불명', title: '작업 적용 여부를 확정할 수 없습니다', detail: '효과가 이미 발생했을 수 있어 자동 재실행하지 않습니다.', tone: 'var(--color-status-warning)' }
+      case 'continuation_recorded':
+        return { badge: '이어감', title: '승인 후 후속 작업을 이어갔습니다', detail: 'replay 결과를 받은 Keeper 턴이 완료되거나 안전하게 checkpoint되었습니다.', tone: 'var(--color-status-success)' }
+    }
+  })()
+  return html`
+    <div
+      class="flex flex-col gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
+      data-chat-approval-lifecycle=${lifecycle.phase}
+      data-chat-approval-id=${lifecycle.approvalId}
+    >
+      <div class="flex flex-wrap items-center gap-2">
+        <span
+          class="inline-flex items-center rounded-[var(--r-0)] px-2 py-0.5 text-2xs font-bold uppercase tracking-[var(--track-caps)]"
+          style=${{ color: spec.tone, backgroundColor: `color-mix(in srgb, ${spec.tone} 15%, transparent)` }}
+        >${spec.badge}</span>
+        <span class="text-sm font-semibold text-[var(--color-fg-primary)]">${spec.title}</span>
+      </div>
+      <p class="m-0 text-sm leading-airy text-[var(--color-fg-secondary)]">${spec.detail}</p>
+      <div class="flex flex-wrap gap-2 text-2xs text-[var(--color-fg-muted)]">
+        <code>${lifecycle.approvalId}</code>
+        ${lifecycle.toolName ? html`<span>${lifecycle.toolName}</span>` : null}
+        ${lifecycle.artifactSha256 ? html`<code>${lifecycle.artifactSha256.slice(0, 12)}</code>` : null}
+      </div>
+    </div>
+  `
+}
+
 function AttachmentCard({ attachment }: { attachment: KeeperConversationAttachment }) {
   const [open, setOpen] = useState(false)
   const canDownload = isSafeAttachmentHref(attachment)
@@ -2993,7 +3035,9 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       ${liveLabel
         ? html`<${LiveMessagePlaceholder} label=${liveLabel} />`
         : html`
-            ${isFailureMessage
+            ${entry.approvalLifecycle
+              ? html`<${ApprovalLifecycleCard} lifecycle=${entry.approvalLifecycle} />`
+              : isFailureMessage
               ? html`<${ChatFailureCard}
                   diagnostic=${entry.error?.trim() ? entry.error : messageText}
                 />`

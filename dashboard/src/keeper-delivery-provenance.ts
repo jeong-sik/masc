@@ -2,10 +2,14 @@ export type KeeperChatDeliveryKey =
   | { readonly kind: 'operation'; readonly operation_id: string }
   | { readonly kind: 'fusion_run'; readonly request_id: string }
   | { readonly kind: 'workspace_message'; readonly request_id: string }
+  | { readonly kind: 'approval_lifecycle'; readonly approval_id: string }
 
 export type KeeperChatTranscriptSlot =
   | { readonly kind: 'accepted_user' }
   | { readonly kind: 'terminal_assistant' }
+  | { readonly kind: 'approval_resolution' }
+  | { readonly kind: 'approval_replay' }
+  | { readonly kind: 'approval_continuation' }
   | {
       readonly kind: 'tool_call'
       readonly execution_id: string
@@ -76,6 +80,8 @@ function sameDeliveryKey(left: KeeperChatDeliveryKey, right: KeeperChatDeliveryK
       return right.kind === 'fusion_run' && left.request_id === right.request_id
     case 'workspace_message':
       return right.kind === 'workspace_message' && left.request_id === right.request_id
+    case 'approval_lifecycle':
+      return right.kind === 'approval_lifecycle' && left.approval_id === right.approval_id
   }
 }
 
@@ -87,6 +93,9 @@ function sameTranscriptSlot(
   switch (left.kind) {
     case 'accepted_user':
     case 'terminal_assistant':
+    case 'approval_resolution':
+    case 'approval_replay':
+    case 'approval_continuation':
       return true
     case 'tool_call':
       return right.kind === 'tool_call'

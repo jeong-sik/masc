@@ -17,7 +17,7 @@ let lines_for ~base_dir ~keeper_name : Tool_agent_timeline.chat_line list =
   Keeper_chat_store.load ~base_dir ~keeper_name
   |> List.filter_map (fun (m : Keeper_chat_store.chat_message) ->
          match m.role with
-         | Keeper_chat_store.Role.Tool -> None
+         | Keeper_chat_store.Role.Tool | Keeper_chat_store.Role.System -> None
          | Keeper_chat_store.Role.User | Keeper_chat_store.Role.Assistant ->
              Some
                {

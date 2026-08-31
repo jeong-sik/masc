@@ -71,23 +71,26 @@ module Role = struct
   type t =
     | User
     | Assistant
+    | System
     | Tool
 
   let to_label = function
     | User -> "user"
     | Assistant -> "assistant"
+    | System -> "system"
     | Tool -> "tool"
 
   let of_label = function
     | "user" -> Some User
     | "assistant" -> Some Assistant
+    | "system" -> Some System
     | "tool" -> Some Tool
     | _ -> None
 
   let equal a b =
     match a, b with
-    | User, User | Assistant, Assistant | Tool, Tool -> true
-    | (User | Assistant | Tool), _ -> false
+    | User, User | Assistant, Assistant | System, System | Tool, Tool -> true
+    | (User | Assistant | System | Tool), _ -> false
 end
 
 (* What an assistant line *is*, declared by the writer at append time.
@@ -126,6 +129,22 @@ type stream_lifecycle_event =
   | Run_finished
   | Run_error
 
+type approval_lifecycle_phase =
+  | Approval_resolved_approved
+  | Approval_resolved_rejected
+  | Approval_replay_applied
+  | Approval_replay_applied_with_warning
+  | Approval_replay_failed
+  | Approval_replay_indeterminate
+  | Approval_continuation_recorded
+
+type approval_lifecycle =
+  { approval_id : string
+  ; tool_name : string option
+  ; phase : approval_lifecycle_phase
+  ; artifact_ref : Tool_output.artifact_ref option
+  }
+
 type append_once_result =
   | Appended of { row_id : string }
   | Already_present of { row_id : string }
@@ -149,6 +168,27 @@ let stream_lifecycle_event_of_label = function
   | "RUN_FINISHED" -> Some Run_finished
   | "RUN_ERROR" -> Some Run_error
   | _ -> None
+
+let approval_lifecycle_phase_to_label = function
+  | Approval_resolved_approved -> "resolved_approved"
+  | Approval_resolved_rejected -> "resolved_rejected"
+  | Approval_replay_applied -> "replay_applied"
+  | Approval_replay_applied_with_warning -> "replay_applied_with_warning"
+  | Approval_replay_failed -> "replay_failed"
+  | Approval_replay_indeterminate -> "replay_indeterminate"
+  | Approval_continuation_recorded -> "continuation_recorded"
+;;
+
+let approval_lifecycle_phase_of_label = function
+  | "resolved_approved" -> Some Approval_resolved_approved
+  | "resolved_rejected" -> Some Approval_resolved_rejected
+  | "replay_applied" -> Some Approval_replay_applied
+  | "replay_applied_with_warning" -> Some Approval_replay_applied_with_warning
+  | "replay_failed" -> Some Approval_replay_failed
+  | "replay_indeterminate" -> Some Approval_replay_indeterminate
+  | "continuation_recorded" -> Some Approval_continuation_recorded
+  | _ -> None
+;;
 
 type speaker_authority =
   | Owner
@@ -231,6 +271,7 @@ type chat_message = {
          stream response represented by this row. [None] means pre-K1f row or
          no lifecycle proof. Malformed persisted values are reported and read
          as [None], keeping the row valid. *)
+  approval_lifecycle : approval_lifecycle option;
   delivery_provenance :
     Keeper_chat_delivery_identity.delivery_provenance option;
       (* The exact delivery identity and transcript slot persisted atomically
@@ -428,17 +469,35 @@ let redact_audio redaction a =
     message_text = redact_string redaction a.message_text;
   }
 
+let redact_approval_lifecycle redaction lifecycle =
+  let artifact_ref =
+    Option.map
+      (fun artifact_ref ->
+        Tool_output.with_preview
+          artifact_ref
+          (redact_string redaction artifact_ref.Tool_output.preview))
+      lifecycle.artifact_ref
+  in
+  { lifecycle with
+    tool_name = Option.map (redact_string redaction) lifecycle.tool_name
+  ; artifact_ref
+  }
+
 let redact_message redaction msg =
   let attachments =
     Option.map (List.map (redact_attachment redaction)) msg.attachments
   in
   let blocks = redact_blocks redaction msg.blocks in
   let audio = Option.map (redact_audio redaction) msg.audio in
+  let approval_lifecycle =
+    Option.map (redact_approval_lifecycle redaction) msg.approval_lifecycle
+  in
   { msg with
     content = Keeper_secret_redaction.redact_text redaction msg.content;
     attachments;
     blocks;
     audio;
+    approval_lifecycle;
   }
 
 let speaker_fields = function
@@ -498,6 +557,23 @@ let stream_lifecycle_fields = function
                events) );
       ]
 
+let approval_lifecycle_to_json lifecycle =
+  `Assoc
+    ([ "approval_id", `String lifecycle.approval_id
+     ; "phase", `String (approval_lifecycle_phase_to_label lifecycle.phase)
+     ]
+     @ Json_util.string_field_if_present "tool_name" lifecycle.tool_name
+     @ (match lifecycle.artifact_ref with
+        | None -> []
+        | Some artifact_ref ->
+          [ "artifact_ref", Tool_output.normalized_artifact_ref_to_json artifact_ref ]))
+;;
+
+let approval_lifecycle_fields = function
+  | None -> []
+  | Some lifecycle -> [ "approval_lifecycle", approval_lifecycle_to_json lifecycle ]
+;;
+
 let parse_stream_lifecycle ~path json =
   let invalid detail =
     report_persistence_read_drop
@@ -519,6 +595,62 @@ let parse_stream_lifecycle ~path json =
   | `List items -> parse_items [] items
   | _ -> invalid "stream_lifecycle field is not a list"
 
+let parse_approval_lifecycle ~path = function
+  | `Assoc fields ->
+    let invalid detail =
+      report_persistence_read_drop
+        ~reason:Read_drop_reason.Invalid_payload
+        ~path
+        ~detail;
+      None
+    in
+    let string_field name =
+      match List.assoc_opt name fields with
+      | Some (`String value) when String.trim value <> "" -> Some value
+      | Some _ | None -> None
+    in
+    (match string_field "approval_id", string_field "phase" with
+     | Some approval_id, Some phase_label ->
+       (match approval_lifecycle_phase_of_label phase_label with
+        | None ->
+          invalid (Printf.sprintf "unknown approval lifecycle phase %S" phase_label)
+        | Some phase ->
+          let tool_name = string_field "tool_name" in
+          let artifact_ref =
+            match List.assoc_opt "artifact_ref" fields with
+            | None -> Ok None
+            | Some json ->
+              (match Tool_output.normalized_artifact_ref_of_json json with
+               | Tool_output.Decoded_normalized_artifact_ref value -> Ok (Some value)
+               | Tool_output.Not_normalized_artifact_ref ->
+                 Error "approval lifecycle artifact_ref is not a normalized reference"
+               | Tool_output.Invalid_normalized_artifact_ref { detail } -> Error detail)
+          in
+          (match artifact_ref with
+           | Error detail -> invalid detail
+           | Ok artifact_ref ->
+             let phase_requires_artifact =
+               match phase with
+               | Approval_resolved_approved
+               | Approval_resolved_rejected
+               | Approval_continuation_recorded -> false
+               | Approval_replay_applied
+               | Approval_replay_applied_with_warning
+               | Approval_replay_failed
+               | Approval_replay_indeterminate -> true
+             in
+             if phase_requires_artifact <> Option.is_some artifact_ref
+             then invalid "approval lifecycle artifact_ref does not match its phase"
+             else Some { approval_id; tool_name; phase; artifact_ref }))
+     | None, _ | _, None ->
+       invalid "approval lifecycle is missing approval_id or phase")
+  | _ ->
+    report_persistence_read_drop
+      ~reason:Read_drop_reason.Invalid_payload
+      ~path
+      ~detail:"approval_lifecycle field is not an object";
+    None
+
 (* R3: producer-assigned message id.  [encode_line] is the sole writer, so
    minting here makes it impossible to persist a row without an id.  The
    process-monotonic counter disambiguates the user/tool/assistant rows of
@@ -535,7 +667,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
     ?execution_id ?tool_call_name ?surface ?conversation_id ?external_message_id ?workspace_id
     ?speaker
     ?audio ?blocks ?(mentions = []) ?(kind = Row_kind.Utterance) ?turn_ref
-    ?stream_lifecycle ?provenance ()
+    ?stream_lifecycle ?approval_lifecycle ?provenance ()
     : string =
   let surface_field =
     match surface with
@@ -618,6 +750,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
     @ blocks_fields blocks
     @ Json_util.string_field_if_present "turn_ref" (Option.map Ids.Turn_ref.to_string turn_ref)
     @ stream_lifecycle_fields stream_lifecycle
+    @ approval_lifecycle_fields approval_lifecycle
     @ (match provenance with
        | None -> []
        | Some value ->
@@ -659,11 +792,17 @@ let validate_delivery_execution_identity ~execution_id
       | Keeper_chat_delivery_identity.Tool_delivery _, Some _ ->
           Error "tool_delivery transcript slot forbids row execution_id"
       | ( Keeper_chat_delivery_identity.Accepted_user
-        | Keeper_chat_delivery_identity.Terminal_assistant ),
+        | Keeper_chat_delivery_identity.Terminal_assistant
+        | Keeper_chat_delivery_identity.Approval_resolution
+        | Keeper_chat_delivery_identity.Approval_replay
+        | Keeper_chat_delivery_identity.Approval_continuation ),
         None ->
           Ok ()
       | ( Keeper_chat_delivery_identity.Accepted_user
-        | Keeper_chat_delivery_identity.Terminal_assistant ),
+        | Keeper_chat_delivery_identity.Terminal_assistant
+        | Keeper_chat_delivery_identity.Approval_resolution
+        | Keeper_chat_delivery_identity.Approval_replay
+        | Keeper_chat_delivery_identity.Approval_continuation ),
         Some _ ->
           Error "non-tool transcript slot forbids row execution_id")
 ;;
@@ -673,6 +812,10 @@ let validate_delivery_role ~role_label
   match provenance.transcript_slot, role_label with
   | Keeper_chat_delivery_identity.Accepted_user, "user"
   | Keeper_chat_delivery_identity.Terminal_assistant, "assistant"
+  | ( Keeper_chat_delivery_identity.Approval_resolution
+    | Keeper_chat_delivery_identity.Approval_replay
+    | Keeper_chat_delivery_identity.Approval_continuation ),
+    "system"
   | ( Keeper_chat_delivery_identity.Tool_call _
     | Keeper_chat_delivery_identity.Tool_delivery _ ),
     "tool" ->
@@ -681,6 +824,11 @@ let validate_delivery_role ~role_label
     Error "accepted_user transcript slot requires a user row"
   | Keeper_chat_delivery_identity.Terminal_assistant, _ ->
     Error "terminal_assistant transcript slot requires an assistant row"
+  | ( Keeper_chat_delivery_identity.Approval_resolution
+    | Keeper_chat_delivery_identity.Approval_replay
+    | Keeper_chat_delivery_identity.Approval_continuation ),
+    _ ->
+    Error "approval lifecycle transcript slot requires a system row"
   | ( Keeper_chat_delivery_identity.Tool_call _
     | Keeper_chat_delivery_identity.Tool_delivery _ ),
     _ ->
@@ -863,7 +1011,10 @@ let provenance_index_of_existing existing =
       | Keeper_chat_delivery_identity.Tool_call { ordinal; _ }
       | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
       | Keeper_chat_delivery_identity.Accepted_user
-      | Keeper_chat_delivery_identity.Terminal_assistant -> None
+      | Keeper_chat_delivery_identity.Terminal_assistant
+      | Keeper_chat_delivery_identity.Approval_resolution
+      | Keeper_chat_delivery_identity.Approval_replay
+      | Keeper_chat_delivery_identity.Approval_continuation -> None
     in
     Option.iter
       (fun ordinal ->
@@ -888,7 +1039,10 @@ let provenance_index_of_existing existing =
         ~ordinal execution_id
     | Keeper_chat_delivery_identity.Accepted_user
     | Keeper_chat_delivery_identity.Tool_delivery _
-    | Keeper_chat_delivery_identity.Terminal_assistant -> ()
+    | Keeper_chat_delivery_identity.Terminal_assistant
+    | Keeper_chat_delivery_identity.Approval_resolution
+    | Keeper_chat_delivery_identity.Approval_replay
+    | Keeper_chat_delivery_identity.Approval_continuation -> ()
   in
   existing
   |> String.split_on_char '\n'
@@ -945,7 +1099,10 @@ let find_indexed_provenance index ~provenance =
              "canonical Keeper execution_id is reused by multiple deliveries or tool ordinals")
       | Keeper_chat_delivery_identity.Accepted_user
       | Keeper_chat_delivery_identity.Tool_delivery _
-      | Keeper_chat_delivery_identity.Terminal_assistant -> Ok ()
+      | Keeper_chat_delivery_identity.Terminal_assistant
+      | Keeper_chat_delivery_identity.Approval_resolution
+      | Keeper_chat_delivery_identity.Approval_replay
+      | Keeper_chat_delivery_identity.Approval_continuation -> Ok ()
     in
     let ( let* ) = Result.bind in
     let* () = execution_identity_available in
@@ -954,7 +1111,10 @@ let find_indexed_provenance index ~provenance =
       | Keeper_chat_delivery_identity.Tool_call { ordinal; _ }
       | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
       | Keeper_chat_delivery_identity.Accepted_user
-      | Keeper_chat_delivery_identity.Terminal_assistant -> None
+      | Keeper_chat_delivery_identity.Terminal_assistant
+      | Keeper_chat_delivery_identity.Approval_resolution
+      | Keeper_chat_delivery_identity.Approval_replay
+      | Keeper_chat_delivery_identity.Approval_continuation -> None
     in
     (match
        Option.bind ordinal (fun ordinal ->
@@ -1305,7 +1465,10 @@ let transcript_slot_ordinal = function
   | Keeper_chat_delivery_identity.Tool_call { ordinal; _ }
   | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
   | Keeper_chat_delivery_identity.Accepted_user
-  | Keeper_chat_delivery_identity.Terminal_assistant -> None
+  | Keeper_chat_delivery_identity.Terminal_assistant
+  | Keeper_chat_delivery_identity.Approval_resolution
+  | Keeper_chat_delivery_identity.Approval_replay
+  | Keeper_chat_delivery_identity.Approval_continuation -> None
 ;;
 
 let validate_append_once_lines lines =
@@ -1334,7 +1497,10 @@ let validate_append_once_lines lines =
           Some execution_id
         | Keeper_chat_delivery_identity.Accepted_user
         | Keeper_chat_delivery_identity.Tool_delivery _
-        | Keeper_chat_delivery_identity.Terminal_assistant -> None
+        | Keeper_chat_delivery_identity.Terminal_assistant
+        | Keeper_chat_delivery_identity.Approval_resolution
+        | Keeper_chat_delivery_identity.Approval_replay
+        | Keeper_chat_delivery_identity.Approval_continuation -> None
       in
       let* () =
         match execution_id with
@@ -1907,6 +2073,12 @@ let parse_line ~file_path (line : string) : chat_message option =
       | Some stream_lifecycle_json ->
           parse_stream_lifecycle ~path:file_path stream_lifecycle_json
     in
+    let approval_lifecycle =
+      match Json_util.assoc_member_opt "approval_lifecycle" json with
+      | None -> None
+      | Some lifecycle_json ->
+        parse_approval_lifecycle ~path:file_path lifecycle_json
+    in
     let delivery_provenance =
       (* Same read-drop convention as [turn_ref]: a malformed persisted
          value is surfaced and reads as [None] — the row stays valid.
@@ -2024,7 +2196,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                  { id; role; content; ts; attachments; tool_call_id; execution_id;
                    tool_call_name; surface; conversation_id;
                    external_message_id; workspace_id; speaker; audio; blocks;
-                   mentions; kind; turn_ref; stream_lifecycle;
+                   mentions; kind; turn_ref; stream_lifecycle; approval_lifecycle;
                    delivery_provenance })
   with Yojson.Json_error detail ->
     report_persistence_read_drop
@@ -2041,6 +2213,10 @@ let max_history = 100
 let max_total_lines = 400
 
 let is_tool_message (msg : chat_message) = Role.equal msg.role Role.Tool
+
+let is_history_primary (msg : chat_message) =
+  Role.equal msg.role Role.User || Role.equal msg.role Role.Assistant
+;;
 
 (* Old rows without either causal identity can become unrenderable when a
    window evicts their owning user row. Current tool-only continuations carry
@@ -2155,7 +2331,7 @@ let load_page ~base_dir ~keeper_name ?before () : page =
     let pop_front () =
       evicted := true;
       let popped = Queue.pop q in
-      if not (is_tool_message popped) then decr primary_count
+      if is_history_primary popped then decr primary_count
     in
     List.iter
       (fun line ->
@@ -2164,7 +2340,7 @@ let load_page ~base_dir ~keeper_name ?before () : page =
           match parse_line ~file_path:path trimmed with
           | Some msg when keep msg ->
               Queue.push msg q;
-              if not (is_tool_message msg) then incr primary_count;
+              if is_history_primary msg then incr primary_count;
               while
                 !primary_count > max_history
                 || Queue.length q > max_total_lines
@@ -2219,6 +2395,122 @@ let load_all ~base_dir ~keeper_name : chat_message list =
         let trimmed = String.trim line in
         if trimmed = "" then None else parse_line ~file_path:path trimmed)
       |> List.map (redact_message redaction)
+
+let approval_lifecycle_equal left right =
+  let artifact_equal left right =
+    match left, right with
+    | None, None -> true
+    | Some left, Some right ->
+      String.equal left.Tool_output.sha256 right.Tool_output.sha256
+      && Int.equal left.bytes right.bytes
+      && String.equal left.mime right.mime
+      && String.equal left.preview right.preview
+    | None, Some _ | Some _, None -> false
+  in
+  let tool_name_equal left right =
+    match left, right with
+    | Some left, Some right -> String.equal left right
+    | None, _ | _, None -> true
+  in
+  String.equal left.approval_id right.approval_id
+  && tool_name_equal left.tool_name right.tool_name
+  && left.phase = right.phase
+  && artifact_equal left.artifact_ref right.artifact_ref
+;;
+
+let approval_lifecycle_content lifecycle =
+  let tool =
+    match lifecycle.tool_name with
+    | None -> "Gate operation"
+    | Some tool_name -> tool_name
+  in
+  match lifecycle.phase with
+  | Approval_resolved_approved ->
+    Printf.sprintf
+      "승인됨 · %s\n외부 효과는 아직 적용 확인 전입니다."
+      tool
+  | Approval_resolved_rejected -> Printf.sprintf "승인 거절됨 · %s" tool
+  | Approval_replay_applied -> Printf.sprintf "승인 작업 적용 완료 · %s" tool
+  | Approval_replay_applied_with_warning ->
+    Printf.sprintf "승인 작업 적용 완료(경고 있음) · %s" tool
+  | Approval_replay_failed -> Printf.sprintf "승인 작업 적용 실패 · %s" tool
+  | Approval_replay_indeterminate ->
+    Printf.sprintf "승인 작업 적용 여부 불명 · %s" tool
+  | Approval_continuation_recorded ->
+    Printf.sprintf "승인 후 후속 작업 이어가기 기록됨 · %s" tool
+;;
+
+let append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
+  let open Keeper_chat_delivery_identity in
+  match Request_id.of_string lifecycle.approval_id with
+  | Error detail -> Error detail
+  | Ok approval_id ->
+    (try
+       ensure_dir_once ~base_dir;
+       let redaction = redaction_for ~base_dir ~keeper_name in
+       let lifecycle = redact_approval_lifecycle redaction lifecycle in
+       let delivery_key = Approval_lifecycle approval_id in
+       let transcript_slot =
+         match lifecycle.phase with
+         | Approval_resolved_approved | Approval_resolved_rejected ->
+           Approval_resolution
+         | Approval_replay_applied
+         | Approval_replay_applied_with_warning
+         | Approval_replay_failed
+         | Approval_replay_indeterminate -> Approval_replay
+         | Approval_continuation_recorded -> Approval_continuation
+       in
+       let provenance = { delivery_key; transcript_slot } in
+       let path = chat_path ~base_dir ~keeper_name in
+       let ts = Time_compat.now () in
+       let row_id = mint_message_id ~ts in
+       let content = approval_lifecycle_content lifecycle in
+       let line =
+         encode_line
+           ~role:Role.System
+           ~content
+           ~ts
+           ~message_id:row_id
+           ~approval_lifecycle:lifecycle
+           ~provenance
+           ()
+       in
+       match append_line_once path ~provenance ~row_id line with
+       | Error _ as error -> error
+       | Ok (Appended _ as result) -> Ok result
+       | Ok (Already_present { row_id } as result) ->
+         (match
+            load_all ~base_dir ~keeper_name
+            |> List.find_opt (fun message -> String.equal message.id row_id)
+          with
+          | Some { approval_lifecycle = Some existing; _ }
+            when approval_lifecycle_equal existing lifecycle -> Ok result
+          | Some _ ->
+            Error "approval lifecycle provenance exists with conflicting content"
+          | None -> Error "approval lifecycle provenance row is unreadable")
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       let detail = Printexc.to_string exn in
+       Log.Keeper.warn
+         "keeper_chat_store: approval lifecycle append failed for %s: %s"
+         (sanitize_name keeper_name)
+         detail;
+       Error detail)
+
+let approval_lifecycle_phase_present
+      ~base_dir
+      ~keeper_name
+      ~approval_id
+      ~phase
+  =
+  load_all ~base_dir ~keeper_name
+  |> List.exists (fun message ->
+    match message.approval_lifecycle with
+    | Some lifecycle ->
+      String.equal lifecycle.approval_id approval_id && lifecycle.phase = phase
+    | None -> false)
+;;
 
 (* RFC-0235 P3: the history endpoint can tell the dashboard that a clip
    has been reaped by checking the same audio directory the synthesis side
@@ -2390,6 +2682,7 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
               @ blocks_fields_of_list (blocks_with_trace_block ~trace_block m)
               @ Json_util.string_field_if_present "turn_ref"
                   (Option.map Ids.Turn_ref.to_string m.turn_ref)
+              @ approval_lifecycle_fields m.approval_lifecycle
               (* Preserve the persisted provenance pair at the HTTP boundary.
                  Dashboard convergence uses the same atomic identity as the
                  append-once store instead of reconstructing a slot from role. *)
@@ -2429,7 +2722,7 @@ let transcript_of_messages (messages : chat_message list) ~turn_ref :
                } )
            when matches_turn_ref m ->
            Some delivery_key
-         | (Role.Assistant | Role.User | Role.Tool), _ -> None)
+         | (Role.Assistant | Role.System | Role.User | Role.Tool), _ -> None)
       messages
   in
   let matches_accepted_user_delivery (m : chat_message) =
@@ -2442,7 +2735,7 @@ let transcript_of_messages (messages : chat_message list) ~turn_ref :
       List.exists
         (Keeper_chat_delivery_identity.delivery_key_equal delivery_key)
         assistant_delivery_keys
-    | (Role.Assistant | Role.User | Role.Tool), _ -> false
+    | (Role.Assistant | Role.System | Role.User | Role.Tool), _ -> false
   in
   let user, assistant =
     List.fold_left
@@ -2451,7 +2744,7 @@ let transcript_of_messages (messages : chat_message list) ~turn_ref :
          | Role.User when matches_turn_ref m || matches_accepted_user_delivery m ->
            m :: user, assistant
          | Role.Assistant when matches_turn_ref m -> user, m :: assistant
-         | Role.User | Role.Assistant | Role.Tool ->
+         | Role.User | Role.Assistant | Role.System | Role.Tool ->
            (* Tool rows join via execution_id in the tool-call store, not
               via the transcript. *)
            user, assistant)

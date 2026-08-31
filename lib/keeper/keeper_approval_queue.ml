@@ -2984,8 +2984,151 @@ let deliver_resolution ~base_path (entry : pending_approval) decision =
     ~channel:entry.continuation_channel
 ;;
 
+let append_chat_projection ~base_path ~keeper_name lifecycle =
+  match
+    Keeper_chat_store.append_approval_lifecycle_once
+      ~base_dir:base_path
+      ~keeper_name
+      ~lifecycle
+  with
+  | Error _ as error -> error
+  | Ok (Keeper_chat_store.Already_present _) -> Ok ()
+  | Ok (Keeper_chat_store.Appended _) ->
+    Keeper_chat_broadcast.chat_appended
+      ~keeper_name
+      ~source:"approval_lifecycle"
+      ();
+    Ok ()
+;;
+
+let ensure_resolution_chat_projection
+      ~base_path
+      ~keeper_name
+      ~approval_id
+      ~tool_name
+      ~decision
+  =
+  let phase =
+    match decision with
+    | Decision.Approve -> Keeper_chat_store.Approval_resolved_approved
+    | Decision.Reject _ -> Keeper_chat_store.Approval_resolved_rejected
+  in
+  append_chat_projection
+    ~base_path
+    ~keeper_name
+    { Keeper_chat_store.approval_id
+    ; tool_name
+    ; phase
+    ; artifact_ref = None
+    }
+;;
+
+let ensure_replay_chat_projection
+      ~base_path
+      ~keeper_name
+      ~approval_id
+      ~tool_name
+      ~outcome
+  =
+  let phase, artifact_ref =
+    match outcome with
+    | Replay_applied artifact_ref ->
+      Keeper_chat_store.Approval_replay_applied, artifact_ref
+    | Replay_applied_with_warning artifact_ref ->
+      Keeper_chat_store.Approval_replay_applied_with_warning, artifact_ref
+    | Replay_failed artifact_ref ->
+      Keeper_chat_store.Approval_replay_failed, artifact_ref
+    | Replay_indeterminate artifact_ref ->
+      Keeper_chat_store.Approval_replay_indeterminate, artifact_ref
+  in
+  append_chat_projection
+    ~base_path
+    ~keeper_name
+    { Keeper_chat_store.approval_id
+    ; tool_name
+    ; phase
+    ; artifact_ref = Some artifact_ref
+    }
+;;
+
+let ensure_continuation_chat_projection
+      ~base_path
+      ~keeper_name
+      ~approval_id
+      ~tool_name
+  =
+  append_chat_projection
+    ~base_path
+    ~keeper_name
+    { Keeper_chat_store.approval_id
+    ; tool_name
+    ; phase = Keeper_chat_store.Approval_continuation_recorded
+    ; artifact_ref = None
+    }
+;;
+
+let continuation_chat_projection_present
+      ~base_path
+      ~keeper_name
+      ~approval_id
+  =
+  Keeper_chat_store.approval_lifecycle_phase_present
+    ~base_dir:base_path
+    ~keeper_name
+    ~approval_id
+    ~phase:Keeper_chat_store.Approval_continuation_recorded
+;;
+
+type continuation_projection_result =
+  | Continuation_projection_recorded
+  | Continuation_projection_not_ready
+
+let ensure_settled_continuation_chat_projection
+      ~base_path
+      ~keeper_name
+      ~(resolution : Keeper_event_queue.hitl_resolution)
+  =
+  let approval_id = resolution.approval_id in
+  let ready_tool_name =
+    match resolution.decision with
+    | Keeper_event_queue.Hitl_rejected _ -> Ok (Some None)
+    | Keeper_event_queue.Hitl_approved ->
+      (match approved_resolution_delivery ~base_path ~id:approval_id with
+       | Ok
+           { request
+           ; state = Resolution_consumed
+           ; replay_outcome = Some _
+           } ->
+         Ok (Some (Some request.tool_name))
+       | Ok
+           { state = (Resolution_unconsumed | Resolution_consumed)
+           ; replay_outcome = None
+           ; _
+           }
+       | Ok
+           { state = Resolution_unconsumed
+           ; replay_outcome = Some _
+           ; _
+           } ->
+         Ok None
+       | Error error -> Error (grant_error_to_string error))
+  in
+  match ready_tool_name with
+  | Error _ as error -> error
+  | Ok None -> Ok Continuation_projection_not_ready
+  | Ok (Some tool_name) ->
+    Result.map
+      (fun () -> Continuation_projection_recorded)
+      (ensure_continuation_chat_projection
+         ~base_path
+         ~keeper_name
+         ~approval_id
+         ~tool_name)
+;;
+
 let resolve_entry
       ?(before_terminal_publish = fun () -> ())
+      ?(project_chat = true)
       ~base_path
       (entry : pending_approval)
       ~(source : decision_source)
@@ -3016,6 +3159,22 @@ let resolve_entry
       ~exact_attempt:entry.exact_attempt
       ()
   in
+  (if project_chat
+   then
+     match
+       ensure_resolution_chat_projection
+         ~base_path
+         ~keeper_name:entry.keeper_name
+         ~approval_id:entry.id
+         ~tool_name:(Some entry.tool_name)
+         ~decision
+     with
+     | Ok () -> ()
+     | Error reason ->
+       record_resolution_delivery_failure
+         ~keeper_name:entry.keeper_name
+         ~approval_id:entry.id
+         ("chat projection: " ^ reason));
   before_terminal_publish ();
   (try
      Sse.broadcast
@@ -3478,6 +3637,7 @@ let complete_delivery delivery =
             in
             let resolution_audit_receipt =
               resolve_entry
+                ~project_chat:false
                 ~base_path
                 delivery.entry
                 ~source:delivery.source

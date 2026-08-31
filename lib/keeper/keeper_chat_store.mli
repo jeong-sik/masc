@@ -42,13 +42,14 @@ type tool_call = {
 
 (** Lane line role as a closed sum (RFC-0232 P1). Parsed once at the
     read boundary; a line whose persisted label is none of
-    ["user"] / ["assistant"] / ["tool"] is reported as a persistence
+    ["user"] / ["assistant"] / ["system"] / ["tool"] is reported as a persistence
     read drop and excluded — it can participate in no lane semantics
     (watermark, pending, rendering). On-disk labels are unchanged. *)
 module Role : sig
   type t =
     | User
     | Assistant
+    | System
     | Tool
 
   val to_label : t -> string
@@ -85,6 +86,25 @@ type stream_lifecycle_event =
   | Text_message_end
   | Run_finished
   | Run_error
+
+(** Durable operator-visible lifecycle of one Gate approval. Resolution and
+    replay are distinct phases: an approved request has permission, but its
+    effect is not reported as applied until a replay row exists. *)
+type approval_lifecycle_phase =
+  | Approval_resolved_approved
+  | Approval_resolved_rejected
+  | Approval_replay_applied
+  | Approval_replay_applied_with_warning
+  | Approval_replay_failed
+  | Approval_replay_indeterminate
+  | Approval_continuation_recorded
+
+type approval_lifecycle =
+  { approval_id : string
+  ; tool_name : string option
+  ; phase : approval_lifecycle_phase
+  ; artifact_ref : Tool_output.artifact_ref option
+  }
 
 type append_once_result =
   | Appended of { row_id : string }
@@ -208,6 +228,10 @@ type chat_message = {
           the writer could not prove lifecycle events. Malformed persisted
           values are reported as persistence read drops and read as [None];
           the row stays valid. *)
+  approval_lifecycle : approval_lifecycle option;
+      (** Present only on system-owned Gate lifecycle rows. The typed phase
+          keeps "approved" separate from "effect applied" and carries the
+          exact replay artifact reference when an effect has settled. *)
   delivery_provenance :
     Keeper_chat_delivery_identity.delivery_provenance option;
       (** The exact delivery identity and transcript slot persisted atomically
@@ -224,6 +248,22 @@ type chat_message = {
           not merely cosmetic: it blocks every later append to that keeper's
           file until the row is repaired or removed. *)
 }
+
+(** Append one system-owned approval lifecycle row exactly once. The delivery
+    identity is [approval_id + phase family] so retries and restart recovery
+    converge without turning the row into Keeper speech. *)
+val append_approval_lifecycle_once :
+  base_dir:string ->
+  keeper_name:string ->
+  lifecycle:approval_lifecycle ->
+  (append_once_result, string) result
+
+val approval_lifecycle_phase_present :
+  base_dir:string ->
+  keeper_name:string ->
+  approval_id:string ->
+  phase:approval_lifecycle_phase ->
+  bool
 
 (** {1 I/O} *)
 

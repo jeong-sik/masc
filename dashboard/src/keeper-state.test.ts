@@ -166,6 +166,21 @@ describe('default conversation visibility (tool calls vs internal)', () => {
     expect(isDefaultVisibleConversationEntry(mk({ role: 'user', source: 'direct_user' }))).toBe(true)
     expect(isDefaultVisibleConversationEntry(mk({ role: 'assistant', source: 'direct_assistant' }))).toBe(true)
   })
+
+  it('surfaces typed approval lifecycle system receipts by default', () => {
+    const receipt = mk({
+      role: 'system',
+      source: 'system',
+      approvalLifecycle: {
+        approvalId: 'appr_01typed',
+        toolName: 'Execute',
+        phase: 'resolved_approved',
+        artifactSha256: null,
+      },
+    })
+    expect(isVisibleDirectConversationEntry(receipt)).toBe(false)
+    expect(isDefaultVisibleConversationEntry(receipt)).toBe(true)
+  })
 })
 
 describe('thread history merge & persistence', () => {
@@ -1042,6 +1057,66 @@ describe('thread history merge & persistence', () => {
     expect(ok[0]?.delivery).toBe('history')
   })
 
+  it('rehydrates typed approval and replay lifecycle receipts', () => {
+    const sha256 = 'a'.repeat(64)
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'system',
+        content: '승인됨 · Execute',
+        ts: 1_780_000_000,
+        delivery_provenance: {
+          delivery_key: { kind: 'approval_lifecycle', approval_id: 'appr_01typed' },
+          transcript_slot: { kind: 'approval_resolution' },
+        },
+        delivery_provenance_status: 'valid',
+        approval_lifecycle: {
+          approval_id: 'appr_01typed',
+          tool_name: 'Execute',
+          phase: 'resolved_approved',
+        },
+      },
+      {
+        role: 'system',
+        content: '승인 작업 적용 완료 · Execute',
+        ts: 1_780_000_001,
+        delivery_provenance: {
+          delivery_key: { kind: 'approval_lifecycle', approval_id: 'appr_01typed' },
+          transcript_slot: { kind: 'approval_replay' },
+        },
+        delivery_provenance_status: 'valid',
+        approval_lifecycle: {
+          approval_id: 'appr_01typed',
+          tool_name: 'Execute',
+          phase: 'replay_applied',
+          artifact_ref: { _blob: { sha256, bytes: 7, mime: 'text/plain', preview: 'applied' } },
+        },
+      },
+      {
+        role: 'system',
+        content: '승인 후 후속 작업 이어가기 기록됨 · Execute',
+        ts: 1_780_000_002,
+        delivery_provenance: {
+          delivery_key: { kind: 'approval_lifecycle', approval_id: 'appr_01typed' },
+          transcript_slot: { kind: 'approval_continuation' },
+        },
+        delivery_provenance_status: 'valid',
+        approval_lifecycle: {
+          approval_id: 'appr_01typed',
+          tool_name: 'Execute',
+          phase: 'continuation_recorded',
+        },
+      },
+    ])
+    expect(entries.map(entry => entry.approvalLifecycle?.phase)).toEqual([
+      'resolved_approved',
+      'replay_applied',
+      'continuation_recorded',
+    ])
+    expect(entries[1]?.approvalLifecycle?.artifactSha256).toBe(sha256)
+    expect(entries.every(isDefaultVisibleConversationEntry)).toBe(true)
+    expect(entries.every(entry => entry.deliveryProvenance != null)).toBe(true)
+  })
+
   it('prefers server-provided rich blocks for assistant rows', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'assistant', content: 'hello', ts: 1_780_000_000, blocks: [{ t: 'image', src: 'https://x.com/a.png' }] },
@@ -1378,6 +1453,33 @@ describe('thread history merge & persistence', () => {
     const thread = keeperThreads.value.echo ?? []
     expect(thread.filter(item => item.source !== 'autonomous_turn')).toHaveLength(THREAD_ENTRY_CAP)
     expect(thread.filter(item => item.source === 'autonomous_turn')).toHaveLength(25)
+    expect(thread.some(item => item.id === 'direct-0')).toBe(true)
+  })
+
+  it('does not let approval lifecycle receipts consume direct-conversation slots', () => {
+    const direct = Array.from({ length: THREAD_ENTRY_CAP }, (_, i) =>
+      entry({ id: `direct-${i}`, text: `d${i}`, delivery: 'history' }),
+    )
+    const receipts = Array.from({ length: 12 }, (_, i) =>
+      entry({
+        id: `approval-${i}`,
+        role: 'system',
+        source: 'system',
+        text: '승인됨',
+        approvalLifecycle: {
+          approvalId: `appr_${i}`,
+          toolName: 'Execute',
+          phase: 'resolved_approved',
+          artifactSha256: null,
+        },
+      }),
+    )
+
+    mergeServerHistoryEntries('echo', [...direct, ...receipts])
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.filter(item => item.approvalLifecycle == null)).toHaveLength(THREAD_ENTRY_CAP)
+    expect(thread.filter(item => item.approvalLifecycle != null)).toHaveLength(12)
     expect(thread.some(item => item.id === 'direct-0')).toBe(true)
   })
 

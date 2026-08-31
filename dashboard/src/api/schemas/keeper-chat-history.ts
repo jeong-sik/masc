@@ -334,6 +334,10 @@ export const KeeperChatHistoryMessageSchema = object({
   // so a reload can tell a failed request apart from a real keeper reply;
   // open string() per the same deploy-window rationale as `role`.
   kind: optional(string()),
+  // Durable typed Gate lifecycle projection. Kept unknown at this transport
+  // edge and decoded by keeper-state so a malformed status cannot delete the
+  // surrounding history row during a rolling deploy.
+  approval_lifecycle: optional(unknown()),
   // K1e read model: backend-owned provenance for what a history row can prove
   // about the stream/turn lifecycle. Kept optional for deploy windows and
   // legacy endpoints; consumers fall back to explicit "history without stream
@@ -350,6 +354,7 @@ export type KeeperChatHistoryMessage = Omit<
 > & {
   delivery_provenance: KeeperChatDeliveryProvenance | null
   delivery_provenance_status: KeeperChatDeliveryProvenanceDecode['status']
+  approval_lifecycle?: unknown
 }
 
 export function safeParseKeeperChatHistoryMessage(

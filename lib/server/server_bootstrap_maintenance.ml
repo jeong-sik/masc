@@ -189,6 +189,13 @@ type durable_demand_owner_error =
    buries real errors. *)
 let owner_absent_reported : (string, unit) Hashtbl.t = Hashtbl.create 4
 
+(* Same standing-condition discipline for a store we could not read: the
+   durable work stays where it is either way, and the 2026-08-25
+   keeper-taskmaster-agent incident retried this ERROR 881 times in fifteen
+   hours because every maintenance cycle re-visited the same unreadable
+   owner. Say it once per process; the next distinct detail still logs. *)
+let owner_unknown_reported : (string, unit) Hashtbl.t = Hashtbl.create 4
+
 let load_durable_demand_meta ~base_path ~config ~keeper_name =
   match
     Executor_pool_ref.submit_strict (fun () ->
@@ -270,10 +277,19 @@ let recover_projected_durable_demand_owner
          keeper_name
          detail
      | Error (Owner_unknown detail) ->
-       Log.Server.error
-         "keeper durable demand recovery retained keeper=%s reason=owner_unknown detail=%s"
-         keeper_name
-         detail
+       (* [Owner_unknown] means the owner truth store could not be read -- a
+          standing condition the next cycle re-discovers, not a new event.
+          [Owner_absent] below already logs once per process for the same
+          reason; an unreadable store deserves the same discipline, or one
+          broken meta read repeats its ERROR every cycle (881 times for
+          keeper-taskmaster-agent on 2026-08-25). *)
+       let once_key = keeper_name ^ "\000" ^ detail in
+       if not (Hashtbl.mem owner_unknown_reported once_key) then (
+         Hashtbl.add owner_unknown_reported once_key ();
+         Log.Server.error
+           "keeper durable demand recovery retained keeper=%s reason=owner_unknown detail=%s"
+           keeper_name
+           detail)
      | Error Owner_absent ->
        (* This state waits on an operator decision (register the name or
           remove the directory) that no maintenance cycle can make for it.

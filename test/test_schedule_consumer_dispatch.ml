@@ -892,7 +892,27 @@ let test_cancelled_schedule_retained_wake_is_not_matched_pending () =
   check string "retained match still identifies the wake" request.schedule_id
     (queue_evidence |> member "matched_schedule_id" |> to_string);
   check int "retained wake still counts in pending" 1
-    (queue_evidence |> member "pending_count" |> to_int)
+    (queue_evidence |> member "pending_count" |> to_int);
+  (* Disposition at the cancel boundary (task-1198): the in-flight wake row
+     itself must be terminal, not left [Wake_running] forever. In this
+     scenario the runner already settled the occurrence to [succeeded]
+     before the cancel landed, so the row is terminal via the runner's own
+     disposition; a still-running row would have been disposed by the
+     cancel boundary with the same detail preserved. *)
+  let state = Schedule_store.read_state config in
+  let settled =
+    List.find_opt
+      (fun (w : Schedule_domain.wake_record) ->
+         String.equal w.schedule_id request.schedule_id)
+      state.Schedule_store.wakes
+  in
+  (match settled with
+   | None -> fail "cancelled schedule's wake row missing from ledger"
+   | Some w ->
+     check bool "cancelled schedule's wake is terminal" true
+       (match w.status with
+        | Wake_running -> false
+        | Wake_succeeded | Wake_failed -> true))
 ;;
 
 let test_keeper_purge_cancels_future_schedule_intent () =  with_workspace

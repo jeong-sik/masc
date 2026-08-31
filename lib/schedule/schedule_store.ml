@@ -367,15 +367,97 @@ let is_running_wake (wake : Schedule_domain.wake_record) =
   | Schedule_contract_values.Wake_succeeded | Schedule_contract_values.Wake_failed -> false
 ;;
 
-(* In-flight wakes are never dropped: they are live state the runner settles.
-   Only finished rows are trimmed, newest first within each schedule. *)
-let prune_wakes wakes =
-  let running, terminal = List.partition is_running_wake wakes in
+(* A running wake is live only while something can still settle it.
+   [cancel_request] refuses to cancel a Running schedule and the settle
+   paths ([accept_running] and its failure twin) only move a Running
+   request, so the moment a schedule lands in a terminal state its
+   still-[Wake_running] rows are orphaned: no runner will ever return for
+   them, yet [is_running_wake] kept classifying them as live state. That is
+   how a cancelled schedule's wake rows survived every prune (observed
+   2026-08-25, sched-0f061d3a: rows retained across restarts and builds).
+   A wake with no schedule row at all is the same fact one step earlier --
+   the owner left the store. Fold both into the terminal side below so the
+   per-schedule retention cap, not eternity, bounds them. *)
+let wake_is_settleable ~schedules (wake : Schedule_domain.wake_record) =
+  match
+    List.find_opt
+      (fun (request : Schedule_domain.schedule_request) ->
+         String.equal
+           request.Schedule_domain.schedule_id
+           wake.Schedule_domain.schedule_id)
+      schedules
+  with
+  | None -> false
+  | Some { Schedule_domain.status = Scheduled | Due | Running; _ } -> true
+  | Some { Schedule_domain.status = Succeeded | Failed | Cancelled | Expired; _ } -> false
+;;
+
+let settle_running_wake ~now ~reason (wake : wake_record) =
+  { wake with
+    status = Wake_failed
+  ; finished_at = Some now
+  ; error = Some reason
+  }
+;;
+
+(* Disposition at the cancel boundary: when a schedule lands in Cancelled,
+   its in-flight [Wake_running] rows can never be settled by the runner that
+   was handed them -- no future occurrence will ever consume them (task-370
+   live evidence: 17 cancelled rows held awaiting_ack up to 22.8 days across
+   four restarts and three builds). Terminating the wake rows at the cancel
+   boundary closes that infinite retain, while [detail] stays intact so the
+   queue-evidence projection keeps reporting the receipt (and its
+   awaiting_ack occurrence_status) it needs for [retained_terminal_wake].
+   [error] records the disposition origin; the per-schedule terminal
+   retention cap then bounds the history. *)
+let settle_wakes_for_cancelled_schedule ~now wakes ~schedule_id =
+  List.map
+    (fun (wake : wake_record) ->
+       if
+         String.equal wake.Schedule_domain.schedule_id schedule_id
+         && wake.status = Wake_running
+       then
+         settle_running_wake
+           ~now
+           ~reason:"cancelled schedule settles its in-flight wake"
+           wake
+       else wake)
+    wakes
+;;
+
+(* In-flight wakes are never dropped as running rows: they are live state
+   the runner settles. A running row whose schedule can no longer settle it
+   (cancelled, expired, succeeded, failed, or the schedule row itself gone)
+   is disposed into a terminal row here -- same boundary argument as cancel,
+   because no runner will ever arrive to claim it. [detail] survives so the
+   projection keeps its receipt; [error] names the origin. Only terminal
+   rows are trimmed, newest first within each schedule. *)
+let prune_wakes ~now ~schedules wakes =
+  let running, terminal =
+    List.partition
+      (fun wake -> is_running_wake wake)
+      wakes
+  in
+  let live, to_dispose =
+    List.partition
+      (fun wake -> wake_is_settleable ~schedules wake)
+      running
+  in
+  let dispositions =
+    List.map
+      (fun wake ->
+         settle_running_wake
+           ~now
+           ~reason:"schedule left running; wake disposed at store sweep"
+           wake)
+      to_dispose
+  in
+  let terminal' = dispositions @ terminal in
   let newest_first =
     List.stable_sort
       (fun (left : Schedule_domain.wake_record) (right : Schedule_domain.wake_record) ->
          Float.compare right.Schedule_domain.started_at left.Schedule_domain.started_at)
-      terminal
+      terminal'
   in
   let kept_per_schedule : (string, int) Hashtbl.t = Hashtbl.create 16 in
   let retained =
@@ -390,14 +472,15 @@ let prune_wakes wakes =
          else false)
       newest_first
   in
-  running @ retained
+  live @ retained
 ;;
 
 let bump_state state ~schedules ~wakes =
+  let stamp = now () in
   { version = state.version + 1
-  ; updated_at = now ()
+  ; updated_at = stamp
   ; schedules
-  ; wakes = prune_wakes wakes
+  ; wakes = prune_wakes ~now:stamp ~schedules wakes
   }
 ;;
 
@@ -515,8 +598,16 @@ let cancel_request config ~schedule_id =
           { request with Schedule_domain.status = Schedule_domain.Cancelled }
         in
         let schedules = replace_schedule state.schedules updated_request in
+        (* Disposition at the cancel boundary: settle this schedule's
+           in-flight wake rows here rather than sweeping them later, so the
+           awaiting_ack retain cannot outlive the cancel (22.8-day live
+           evidence). [bump_state] then sees finished rows, not orphaned
+           running ones. *)
+        let wakes =
+          settle_wakes_for_cancelled_schedule ~now:(now ()) state.wakes ~schedule_id
+        in
         let next_state =
-          bump_state state ~schedules ~wakes:state.wakes
+          bump_state state ~schedules ~wakes
         in
         let* () = write_state config next_state in
         Ok updated_request)
@@ -657,9 +748,22 @@ let cancel_matching config ~should_cancel =
     let* schedules, changed = cancel [] false state.schedules in
     if changed
     then
-      write_state
-        config
-        (bump_state state ~schedules ~wakes:state.wakes)
+      (* Disposition at the cancel boundary: the matched schedules just
+         landed in Cancelled, so their in-flight wake rows are settled
+         here -- same boundary, same argument as [cancel_request]. *)
+      let wakes =
+        List.fold_left
+          (fun wakes (request : schedule_request) ->
+             if should_cancel request then
+               settle_wakes_for_cancelled_schedule
+                 ~now:(now ())
+                 wakes
+                 ~schedule_id:request.schedule_id
+             else wakes)
+          state.wakes
+          schedules
+      in
+      write_state config (bump_state state ~schedules ~wakes)
     else Ok ())
 ;;
 

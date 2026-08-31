@@ -5982,6 +5982,13 @@ def standalone_lane_fixture(
         "configured": True,
         "configuration_state": "ready",
         "admitted_slots": ["glm-coding.glm-5-turbo"],
+        # The projection writes three slot lists, not one: what the lane
+        # admitted, what it reaches over a CLI, and what its admission
+        # dropped. Omitting the last two fails the row decode, and the whole
+        # snapshot with it, so the observation matrix simply never draws --
+        # the surface has no per-row gap to show.
+        "cli_slots": [],
+        "dropped_slots": [],
         "admission_error": None,
         "status": status,
         "retained_run_count": 12,

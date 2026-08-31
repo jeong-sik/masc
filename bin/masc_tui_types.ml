@@ -3139,6 +3139,20 @@ let surface_row_texts (state : state) : surface -> string list option = function
   | Fusion | Resources | Changes | Config | Tools ->
       None
 
+(* Whether the chat pane is parked somewhere other than the newest row.
+
+   One reader, because two sides act on it: the row budget below reserves a
+   line for the notice, and the pane draws it. Counting a row nothing draws
+   floats the footer, and drawing one nothing counted pushes a line of
+   conversation off the bottom -- the pair of defects the queue rows already
+   taught this pane (#29818). Restating the condition in both places is how
+   they come apart.
+
+   The fact itself used to live in the footer alone, seventh of nine hints,
+   and the footer drops hints from its tail on a narrow terminal: the one
+   thing that changes what the arrow keys do was among the first to go. *)
+let keeper_message_reading_back (state : state) = state.msg_scroll > 0
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -3175,6 +3189,7 @@ let keeper_message_status_rows (state : state) =
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
   + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
      else 0)
+  + (if keeper_message_reading_back state then 1 else 0)
   + composer_extra_rows state
 
 (* One list under one cursor: the calls keepers are holding first (they run

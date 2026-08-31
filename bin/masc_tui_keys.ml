@@ -32,6 +32,8 @@ let global =
   ; b Meta "?" "this help"
   ; b Meta "Ctrl-B" "show or hide a visible keeper roster pane"
   ; b Meta "Ctrl-T" "release the mouse so you can drag-select and copy"
+  ; b Navigate "Ctrl-]" "follow the reference under the cursor"
+      ~help:"and Esc on the surface it opens comes back here"
   ; b Meta "q" "quit"
   ]
 

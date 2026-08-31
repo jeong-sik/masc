@@ -386,6 +386,37 @@ let test_the_budget_and_the_pane_agree_about_queue_rows () =
       counted drawn
 ;;
 
+(* The same contract as the queue rows above, for the row that says the pane is
+   reading back. Both sides ask one predicate rather than restating
+   [msg_scroll > 0], and this pins that they each ask it once: a budget that
+   counts a row the pane does not draw floats the footer, and a pane that
+   draws one nothing counted pushes a line of conversation off the bottom. *)
+let test_the_budget_and_the_pane_agree_about_the_scrollback_row () =
+  let counted =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui_types.ml"
+      ~binding_name:"keeper_message_status_rows"
+      ~callee:"keeper_message_reading_back"
+  in
+  let drawn =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_keeper_message"
+      ~callee:"Masc_tui_types.keeper_message_reading_back"
+  in
+  if counted <> drawn then
+    failf
+      "the row budget and the pane disagree about the scrollback notice: \
+       keeper_message_status_rows asks %d time(s), render_keeper_message \
+       %d time(s)"
+      counted drawn;
+  if counted <> 1 then
+    failf
+      "the scrollback notice should be asked about exactly once on each side, \
+       not %d time(s)"
+      counted
+;;
+
 (* A queued line is shown as queued. Drawn like a sent one it would be the same
    silence that made a refused send look like a sent one -- the operator has to
    be able to tell which of their own messages has actually gone. The queue is
@@ -642,6 +673,9 @@ let () =
             test_chat_shortcuts_reach_visibility_state
         ; test_case "the budget and the pane agree about queue rows" `Quick
             test_the_budget_and_the_pane_agree_about_queue_rows
+        ; test_case "the budget and the pane agree about the scrollback row"
+            `Quick
+            test_the_budget_and_the_pane_agree_about_the_scrollback_row
         ; test_case "the pane marks what is still waiting" `Quick
             test_the_pane_marks_what_is_still_waiting
         ; test_case "queueing puts the line in the conversation" `Quick

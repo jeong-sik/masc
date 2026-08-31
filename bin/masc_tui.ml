@@ -11244,11 +11244,19 @@ and is loaded on demand through keeper_skill.
             | System_logs -> ())
        | Some k when Masc_tui_keys.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
-       (* Ctrl-] follows the reference under the cursor; Ctrl-T comes back.
-          vim's tag keys, because that is the move: the screen names a thing
-          somewhere else and this goes there and back. [Y] already copies the
-          same reference -- following it is what an operator did with the copy
-          anyway, by hand. *)
+       (* Ctrl-] follows the reference under the cursor, and Esc on the surface
+          it lands on comes back. vim's tag key for the going; for the coming
+          back it was Ctrl-T, which never ran: the mouse-tracking toggle
+          claims the same byte 1200 lines above this in the same ordered
+          match, and its [when] guard stops the compiler from calling the
+          later arm unreachable. So following worked and returning did not.
+
+          Esc rather than another chord. It is what a reader presses to leave
+          a screen anyway, and where they were is a better answer than
+          Overview -- which is where Esc used to drop them, having thrown away
+          the fact that they had come from somewhere. [Y] already copies the
+          same reference; following it is what an operator did with the copy
+          by hand. *)
        | Some "\x1d" ->
            (match
               Option.bind (presented_surface_reference ()) (fun reference ->
@@ -11296,13 +11304,6 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | _, _ -> ());
                 add_event state "system" ("followed " ^ reference))
-       | Some "\x14" ->
-           (match state.followed_from with
-            | None -> ()
-            | Some (origin, _) ->
-                state.followed_from <- None;
-                goto_surface state ~mailbox:async_messages origin;
-                add_event state "system" "back")
        | Some "Y" ->
            (match presented_surface_reference () with
             | Some reference ->
@@ -11530,6 +11531,21 @@ and is loaded on demand through keeper_skill.
        | Some "\t" | Some "shift-tab" ->
            cycle_surface state ~mailbox:async_messages
              ~backwards:(key = Some "shift-tab")
+       (* A followed reference is the outermost thing Esc can return from, and
+          the only one that knows a destination other than this surface's own
+          default. Checked before the per-surface arms because those answer
+          "leave this screen" with a fixed answer, and this one has the
+          reader's actual origin. A surface with its own inner state to close
+          -- an open detail, a preview -- is not reached this way: the follow
+          landed on the row, and closing the row first would need two presses
+          to undo one. *)
+       | Some "esc" when Option.is_some state.followed_from ->
+           (match state.followed_from with
+            | None -> ()
+            | Some (origin, _) ->
+                state.followed_from <- None;
+                goto_surface state ~mailbox:async_messages origin;
+                add_event state "system" "back")
        | Some "esc" ->
            (* Esc goes back *)
            (* A running preview is the innermost thing Esc can go back from:

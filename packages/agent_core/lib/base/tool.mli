@@ -146,6 +146,15 @@ val descriptor_to_yojson : descriptor option -> Yojson.Safe.t
     request rather than a checkpoint need this function. *)
 val wire_json_of_schema : Types.tool_schema -> Yojson.Safe.t
 
+val wire_bytes_of_schema : Types.tool_schema -> int
+(** Compact byte length of {!wire_json_of_schema}: what this one tool costs
+    every request that carries it.
+
+    Named here so a caller measuring the tool surface has a right answer
+    within reach. Measuring {!Types.tool_schema_to_yojson} instead counts
+    ["parameters"] too — the derived validation view that no provider
+    receives — and reports a surface nobody is charged for. *)
+
 (** Provider-facing tool definition. ["input_schema"] is the authoritative
     schema verbatim when the tool carries one, and
     [Types.params_to_input_schema] of the parameters otherwise. *)

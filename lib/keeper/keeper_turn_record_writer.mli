@@ -48,5 +48,6 @@ val write :
   execution_ids:Ids.Execution_id.t list ->
   blocks:Turn_record.prompt_block list ->
   input_components:Turn_record.input_component list option ->
+  tool_surface_ref:string option ->
   unit ->
   unit

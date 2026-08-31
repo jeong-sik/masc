@@ -43,6 +43,7 @@ let sample_record
         }
       ]
   ; input_components = Some [ { component = Turn_record.Tool_schemas; bytes = 8192 } ]
+  ; tool_surface_ref = None
   ; runtime_profile = "glm-coding.glm-5-turbo"
   ; selected_model = Some "glm-5-turbo"
   ; finish_reason = Some "completed"

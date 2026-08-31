@@ -313,8 +313,26 @@ let schedule_queue_match_fields ~now bucket (stimulus : Keeper_event_queue.stimu
 let schedule_keeper_queue_evidence_dashboard_json
   ~now
   ~evidence_snapshot
+  ~(schedule_status : Schedule_domain.schedule_status)
   (wake : Schedule_domain.wake_record option)
   =
+  (* A cancelled schedule is an explicit operator withdrawal: no future
+     occurrence will ever consume an already-enqueued wake, and the keeper it
+     was aimed at is often gone or unknown (task-370 live evidence: 17
+     cancelled rows stuck in awaiting_ack up to 22.8 days, across four
+     restarts and three builds). Matching such a wake against the pending
+     queue as [matched_pending] presents a withdrawn leftover as live
+     in-flight work — the dashboard-side face of the infinite retain. Only
+     Cancelled is reclassified: a Succeeded one-shot's awaiting-ack wake is
+     a legitimately delivered stimulus the keeper may still consume, and
+     Failed/Expired retain their current meaning. The wake stays visible
+     with its identity fields, but as a retained remainder, not pending
+     work. *)
+  let schedule_cancelled =
+    match schedule_status with
+    | Schedule_domain.Cancelled -> true
+    | _ -> false
+  in
   match wake with
   | None -> `Null
   | Some wake ->
@@ -381,11 +399,18 @@ let schedule_keeper_queue_evidence_dashboard_json
             ; "wake_due_at", `Float due_at
             ; "wake_due_at_iso", unix_iso_json due_at
             ; "wake_payload_digest", `String payload_digest
+            ; "schedule_status", `String (Schedule_domain.schedule_status_to_string schedule_status)
             ; "pending_count", `Int (Keeper_event_queue.length snapshot.pending)
             ; "read_errors", `List read_errors
             ]
           in
           (match pending_match, snapshot.read_errors with
+           | Some match_, _ when schedule_cancelled ->
+             `Assoc
+               (( "projection_status"
+                , `String "retained_terminal_wake" )
+                :: base_fields
+                @ schedule_queue_match_fields ~now "retained" match_)
            | Some match_, _ ->
              `Assoc
                (("projection_status", `String "matched_pending")
@@ -714,6 +739,7 @@ let schedule_request_dashboard_json
       , schedule_keeper_queue_evidence_dashboard_json
           ~now
           ~evidence_snapshot
+          ~schedule_status:request.status
           last_wake )
     ; ( "keeper_reaction_evidence"
       , schedule_keeper_reaction_evidence_dashboard_json

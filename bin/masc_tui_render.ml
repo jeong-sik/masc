@@ -1803,6 +1803,104 @@ let ask_section_rows buf =
   String.iter (fun c -> if c = '\n' then incr n) (Buffer.contents buf);
   !n
 
+(* The selected row's detail, and the only one of the three detail rows whose
+   height depends on which kind is selected. A held tool call answers two
+   questions -- what is being asked, and why it was held -- and the ask runs
+   the width of the pane, so at eighty columns the two cannot share a row.
+
+   Built here rather than inline so the surface can ask its height before it
+   spends the rows, the way [ask_section_rows] already measures the ask block
+   it is about to draw. The row budget and the drawing call this, so they
+   cannot disagree about how tall it is; until 2026-08-31 the second row was
+   spelled as a literal ["\\n"] -- backslash and n, printed as those two
+   characters -- because a real newline would have drawn a row nobody
+   counted. *)
+let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
+    match List.nth_opt approvals state.approval_cursor with
+    | Some (Operator_row a) -> (
+        if action_inflight then
+          Printf.sprintf "  %sApproval request in progress…%s" (Theme.warn ())
+            Ansi.reset
+        else
+          match state.pending_approval_action with
+          | Some { paa_token; paa_decision }
+            when String.equal paa_token a.ap_token ->
+              let key =
+                match paa_decision with
+                | Confirm -> "y"
+                | Deny -> "n"
+              in
+              Printf.sprintf "  %sPress %s again: %s%s" (Theme.warn ()) key
+                (fit_width (Terminal_text.single_line a.ap_summary) (cols - 22))
+                Ansi.reset
+          | _ ->
+              Printf.sprintf "  %s%s%s"
+                Ansi.dim
+                (fit_width (Terminal_text.single_line a.ap_summary) (cols - 6))
+                Ansi.reset)
+    | Some (Keeper_tool_row held) ->
+        (* One press answers a held call, matching the chat pane's [y]. The
+           question is the whole ask, so it is the row the eye lands on;
+           the because is why this call was held at all — an operator
+           repeating the same yes needs the reason visible, not the name
+           of a policy table they cannot open. *)
+        (* Two rows. This carried a literal "\\n" -- backslash and n, printed as
+           those two characters -- because a real newline would have drawn a
+           row nobody had budgeted for. [detail_extra_rows] above budgets it. *)
+        Printf.sprintf "  %s%s%s\n  %swhy: %s%s"
+          (Theme.warn ())
+          (fit_width
+             (Terminal_text.single_line held.kta_question)
+             (max 8 (cols - 8)))
+          Ansi.reset
+          Ansi.dim
+          (fit_width
+             (Terminal_text.single_line_or ~default:"(not provided)"
+                held.kta_because)
+             (max 8 (cols - 12)))
+          Ansi.reset
+    | Some (Gate_row pending) ->
+        (* A durable Gate ask: it keeps until answered, and the answer goes
+           through the dashboard resolve route. What the eye needs is who
+           wants to touch what, and that the decision spends here. *)
+        (* The name is not padded here. This is one line with nothing under
+           it to line up with, so a fixed twenty both cut
+           "rw-e0-r9-20260820-review" and left short names trailing spaces.
+           The list above it now sizes its column to the names it holds and
+           this line disagreed with it three rows apart.
+
+           What follows absorbs the difference, which is the same order the
+           list uses: the identifier is why the line exists. *)
+        let keeper =
+          Terminal_text.single_line pending.Tui_decode.gp_keeper
+        in
+        let phase, tone =
+          match pending.Tui_decode.gp_phase with
+          | Gate_queued -> "QUEUED", (Theme.warn ())
+          | Gate_judging -> "JUDGING", Ansi.cyan
+          | Gate_human_required -> "HUMAN REQUIRED", (Theme.warn ())
+          | Gate_blocked -> "AUTO JUDGE BLOCKED", (Theme.bad ())
+        in
+        Printf.sprintf "  %s%s → %s · %s%s"
+          tone
+          keeper
+          (fit_width
+             (Terminal_text.single_line pending.Tui_decode.gp_display_tool)
+             (max 8 (cols - 32 - Message_layout.display_width keeper
+                     - Message_layout.display_width phase)))
+          phase
+          Ansi.reset
+    | None -> ""
+;;
+
+
+(* Rows [approval_detail_line] draws. One newline is one extra row, counted the
+   same way [ask_section_rows] counts the block above it. *)
+let approval_detail_rows line =
+  let n = ref 1 in
+  String.iter (fun c -> if c = '\n' then incr n) line;
+  !n
+
 let render_approvals (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -1818,14 +1916,28 @@ let render_approvals (state : state) =
      the header and the divider: the Gate lane line, and the standing
      always-allow rule line under it. *)
   let gate_lane_rows = 2 in
+  let approvals = approval_items state in
+  let action_inflight =
+    Masc_tui_operator_projection.Flow.action_inflight state.approval_flow
+  in
+  (* Asked of the line itself, not declared beside it. [boxed_surface_chrome_rows]
+     budgets one row for this detail and every kind but one takes it; a held
+     tool call takes two. Reading the height off the string the pane is about
+     to draw is what keeps the two from drifting -- the same thing
+     [ask_section_rows] does for the block above. *)
+  let detail_line =
+    approval_detail_line state ~approvals ~cols ~action_inflight
+  in
+  let detail_extra_rows = approval_detail_rows detail_line - 1 in
   let approval_body_rows =
-    max 1 (rows - boxed_surface_chrome_rows - gate_lane_rows - ask_rows)
+    max 1
+      (rows - boxed_surface_chrome_rows - gate_lane_rows - ask_rows
+       - detail_extra_rows)
   in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let approvals = approval_items state in
   let count = List.length approvals in
   (* The count is what is on screen. It used to be the pending-confirm queue's
      own visible/total pair, and that queue is one of the three lists this
@@ -1855,9 +1967,6 @@ let render_approvals (state : state) =
     match state.keeper_tool_approvals_error with
     | Some _ -> ", held calls stale"
     | None -> ""
-  in
-  let action_inflight =
-    Masc_tui_operator_projection.Flow.action_inflight state.approval_flow
   in
   let action_badge = if action_inflight then "  [submitting]" else "" in
   let header =
@@ -2056,80 +2165,6 @@ let render_approvals (state : state) =
 
   box_bottom buf cols;
 
-  let detail_line =
-    match List.nth_opt approvals state.approval_cursor with
-    | Some (Operator_row a) -> (
-        if action_inflight then
-          Printf.sprintf "  %sApproval request in progress…%s" (Theme.warn ())
-            Ansi.reset
-        else
-          match state.pending_approval_action with
-          | Some { paa_token; paa_decision }
-            when String.equal paa_token a.ap_token ->
-              let key =
-                match paa_decision with
-                | Confirm -> "y"
-                | Deny -> "n"
-              in
-              Printf.sprintf "  %sPress %s again: %s%s" (Theme.warn ()) key
-                (fit_width (Terminal_text.single_line a.ap_summary) (cols - 22))
-                Ansi.reset
-          | _ ->
-              Printf.sprintf "  %s%s%s"
-                Ansi.dim
-                (fit_width (Terminal_text.single_line a.ap_summary) (cols - 6))
-                Ansi.reset)
-    | Some (Keeper_tool_row held) ->
-        (* One press answers a held call, matching the chat pane's [y]. The
-           question is the whole ask, so it is the row the eye lands on;
-           the because is why this call was held at all — an operator
-           repeating the same yes needs the reason visible, not the name
-           of a policy table they cannot open. *)
-        Printf.sprintf "  %s%s%s\\n  %swhy: %s%s"
-          (Theme.warn ())
-          (fit_width
-             (Terminal_text.single_line held.kta_question)
-             (max 8 (cols - 8)))
-          Ansi.reset
-          Ansi.dim
-          (fit_width
-             (Terminal_text.single_line_or ~default:"(not provided)"
-                held.kta_because)
-             (max 8 (cols - 12)))
-          Ansi.reset
-    | Some (Gate_row pending) ->
-        (* A durable Gate ask: it keeps until answered, and the answer goes
-           through the dashboard resolve route. What the eye needs is who
-           wants to touch what, and that the decision spends here. *)
-        (* The name is not padded here. This is one line with nothing under
-           it to line up with, so a fixed twenty both cut
-           "rw-e0-r9-20260820-review" and left short names trailing spaces.
-           The list above it now sizes its column to the names it holds and
-           this line disagreed with it three rows apart.
-
-           What follows absorbs the difference, which is the same order the
-           list uses: the identifier is why the line exists. *)
-        let keeper =
-          Terminal_text.single_line pending.Tui_decode.gp_keeper
-        in
-        let phase, tone =
-          match pending.Tui_decode.gp_phase with
-          | Gate_queued -> "QUEUED", (Theme.warn ())
-          | Gate_judging -> "JUDGING", Ansi.cyan
-          | Gate_human_required -> "HUMAN REQUIRED", (Theme.warn ())
-          | Gate_blocked -> "AUTO JUDGE BLOCKED", (Theme.bad ())
-        in
-        Printf.sprintf "  %s%s → %s · %s%s"
-          tone
-          keeper
-          (fit_width
-             (Terminal_text.single_line pending.Tui_decode.gp_display_tool)
-             (max 8 (cols - 32 - Message_layout.display_width keeper
-                     - Message_layout.display_width phase)))
-          phase
-          Ansi.reset
-    | None -> ""
-  in
   Buffer.add_string buf (Printf.sprintf "%s\n" detail_line);
 
   let metadata_line, payload_line =

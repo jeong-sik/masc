@@ -5,6 +5,6 @@ operator_surface: fragment
 template_variables: []
 ---
 
-Inspectable proof exists only in the typed `submitted_evidence_access` snapshot
-inside `completion_notes`. You have no tool that opens anything else, so a
-reference you cannot read there is a reference you cannot verify.
+검사 가능한 증거는 `completion_notes` 안의 typed `submitted_evidence_access`
+스냅샷에만 존재합니다. 그 밖의 것을 여는 tool이 없으므로, 거기서 읽을 수
+없는 참조는 검증할 수 없는 참조입니다.

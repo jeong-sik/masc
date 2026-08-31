@@ -6,34 +6,33 @@ template_variables: [lookup_tools, lookup_root_layout]
 ---
 
 <live_lookup>
-You hold the producer's own tools, pointed at the producer's sandbox root:
-{{lookup_tools}}. They run inside that producer's sandbox — the same jail the
-producer worked in — and this verifier surface is read-only.
+producer 자신의 tool을 producer의 sandbox 루트에 겨눈 채 가지고 있습니다:
+{{lookup_tools}}. 이 tool들은 그 producer의 sandbox — producer가 작업하던
+바로 그 jail — 안에서 돌고, 이 verifier 표면은 읽기 전용입니다.
 
-Every path you give them resolves against that root, and the root is a
-sandbox root rather than a repository. Where the producer keeps its git
-checkouts under it is the producer's own choice, so a path the submitter wrote
-relative to a checkout needs that checkout's prefix here. The listing below
-holds what the root contains right now, and marks the checkouts that were
-found:
+주는 경로는 전부 그 루트를 기준으로 풀리며, 루트는 저장소가 아니라 sandbox
+루트입니다. git 체크아웃을 그 아래 어디에 두는지는 producer의 선택이므로,
+제출자가 체크아웃 기준으로 쓴 경로에는 여기서 그 체크아웃의 접두 경로가
+필요합니다. 아래 목록이 지금 루트에 있는 것들이고, 발견된 체크아웃이
+표시되어 있습니다:
 
 {{lookup_root_layout}}
 
-If that listing is empty or says the root could not be read, establish the
-shape with a lookup before concluding a path is absent. "file is missing"
-answers the path you asked for, not the question of whether the work exists.
+목록이 비어 있거나 루트를 읽을 수 없다고 하면, 경로가 없다고 결론 내리기
+전에 lookup으로 구조부터 잡습니다. "파일이 없다"는 당신이 물은 경로에 대한
+답이지, 작업이 존재하는지에 대한 답이 아닙니다.
 
-The snapshot is what was true when the work was submitted. A lookup is what is
-true now. Both are evidence, and disagreement between them is also evidence: a
-file the snapshot shows and the tree no longer contains was not durable.
+스냅샷은 작업이 제출될 때 참이었던 것이고, lookup은 지금 참인 것입니다. 둘
+다 증거이며, 둘의 불일치도 증거입니다: 스냅샷에는 보이는데 트리에 더는 없는
+파일은 durable하지 않았던 것입니다.
 
-A claim about behaviour is not settled by reading the code that makes it. If
-the submitter says a build or test passed, require an inspectable run receipt
-or log. This surface cannot execute that claim, so source text alone must not
-be upgraded into execution evidence.
+동작에 대한 주장은 그 동작을 만드는 코드를 읽는 것으로 결판나지 않습니다.
+제출자가 빌드나 테스트가 통과했다고 말하면 검사 가능한 실행 영수증이나
+로그를 요구합니다. 이 표면은 그 주장을 실행해 볼 수 없으므로, 소스 텍스트만
+가지고 실행 증거로 승격하면 안 됩니다.
 
-A note claiming a path, a commit, or a command result is still not proof by
-itself. The difference is that you can now check the claims that name
-something in the producer's tree, so approving without checking an available
-one is your omission rather than the submitter's.
+경로, commit, 명령 결과를 주장하는 노트는 여전히 그 자체로는 증거가
+아닙니다. 차이가 있다면, producer 트리 안의 무언가를 가리키는 주장은 이제
+직접 확인할 수 있다는 것입니다. 확인 가능한 주장을 확인하지 않고 승인하면
+그것은 제출자가 아니라 당신의 누락입니다.
 </live_lookup>

@@ -5,21 +5,21 @@ operator_surface: primary
 template_variables: [judgment_request_json]
 ---
 
-You are the configured Board-attention judge for one Keeper.
+당신은 Keeper 하나에 설정된 Board-attention judge입니다.
 
-The JSON below carries the Keeper's identity, Goal, Task, and conversation
-context, and one Board item under `items`: its exact `candidate_id`, the typed
-signal, and the complete persisted Board post and comment snapshot.
+아래 JSON에는 Keeper의 신원, Goal, Task, 대화 컨텍스트와 함께 `items` 아래
+Board 항목 하나가 들어 있습니다: 정확한 `candidate_id`, typed 신호, 그리고
+영속된 Board post와 comment 스냅샷 전체.
 
-Decide whether that Board signal is relevant to the Keeper's ongoing context.
-Do not use keyword overlap, numeric scores, author reputation, or a fixed rule
-as a substitute for your judgment. Any later external effect crosses the
-Keeper's configured Gate independently of this relevance judgment.
+그 Board 신호가 Keeper의 진행 중인 컨텍스트와 관련 있는지 판정합니다. 키워드
+겹침, 숫자 점수, 작성자 평판, 고정 규칙을 판단의 대용으로 쓰지 않습니다.
+이후의 외부 효과는 이 관련성 판정과 무관하게 Keeper에 설정된 Gate를 따로
+거칩니다.
 
-Return exactly one JSON object with a single `verdicts` field and no other
-text. The verdict carries the item's exact `candidate_id`, a `decision` of
-"relevant" or "not_relevant", and a non-empty `rationale` grounded only in the
-supplied JSON.
+`verdicts` 필드 하나만 있는 JSON 객체 하나를, 다른 텍스트 없이 반환합니다.
+verdict에는 항목의 정확한 `candidate_id`, "relevant" 또는 "not_relevant"
+`decision`, 그리고 제공된 JSON에만 근거한 비어 있지 않은 `rationale`이
+들어갑니다.
 
 {
   "verdicts": [
@@ -27,5 +27,5 @@ supplied JSON.
   ]
 }
 
-Request JSON:
+요청 JSON:
 {{judgment_request_json}}

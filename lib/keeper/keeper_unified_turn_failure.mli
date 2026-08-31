@@ -1,44 +1,13 @@
 (** Failure-path post-processing for [Keeper_unified_turn]. *)
 
-val max_consecutive_invalid_request_failures : int
-(** Consecutive deterministic [InvalidRequest] failures one keeper may absorb
-    without crash accounting before the observation degrades to ordinary
-    consecutive-failure accounting. *)
-
-val note_invalid_request_failure : base_path:string -> keeper_name:string -> bool
-(** Record one deterministic [InvalidRequest] failure for [keeper_name];
-    returns [true] once the consecutive count exceeds
-    [max_consecutive_invalid_request_failures]. *)
-
-val empty_completion_exemption_budget : int
-(** Maximum number of consecutive empty-completion failures exempted from the
-    crash counter per keeper before the exemption is exhausted. *)
-
-val reset_failure_exemptions : base_path:string -> keeper_name:string -> bool
-(** Durably reset both exemption budgets after a successful turn or operator
-    context clear. [false] retains the record and keeps success health from
-    hiding the unresolved accounting state. *)
-
-val account_failure_counting
-  :  base_path:string
-  -> keeper_name:string
-  -> is_auto_recoverable:bool
-  -> Agent_core.Error.t
-  -> bool
-(** Compute whether this failure observation advances the crash counter,
-    consuming empty-completion exemption budget or invalid-request budget
-    when applicable.  Call exactly once per failure observation, before
-    {!record_failure_observation}. *)
-
 val record_failure_observation
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
-  -> counts_toward_crash:bool
   -> err:Agent_core.Error.t
   -> error_text:string
   -> unit
-(** Record explicit failure evidence without rewriting Keeper lifecycle or
-    escalating a numeric streak into pause/crash.
-    [counts_toward_crash] must come from {!account_failure_counting} so the
-    empty-completion exemption budget and the invalid-request consecutive
-    counter are each consumed exactly once. *)
+(** Record one turn failure: advance the durable crash-accounting streak and
+    health. Every failure class counts (RFC turn-failure-visible-stop,
+    #32105) — there is no exemption and no per-class budget. This does not
+    rewrite Keeper lifecycle: the phase machine derives visibility from the
+    streak, and the next successful turn (or an operator clear) resets it. *)

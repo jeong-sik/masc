@@ -1043,14 +1043,6 @@ let run_keeper_cycle
                       | _ -> ());
                   let is_server_parse_rejection = EC.is_server_rejected_parse_error err in
                   let is_provider_wire_error = EC.is_provider_wire_error err in
-                  let is_auto_recoverable = EC.is_auto_recoverable_turn_error err in
-                  let counts_toward_crash =
-                    Keeper_unified_turn_failure.account_failure_counting
-                      ~base_path:config.base_path
-                      ~keeper_name:meta.name
-                      ~is_auto_recoverable
-                      err
-                  in
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string Turns)
                     ~labels:[ "keeper", meta.name; "outcome", "failure" ]
@@ -1128,14 +1120,10 @@ let run_keeper_cycle
                      + String.length world_state
                      + String.length user_message)
                     latency_ms
-                    (if is_provider_wire_error && counts_toward_crash
+                    (if is_provider_wire_error
                     then " (provider wire error, counts toward crash threshold)"
-                    else if is_provider_wire_error
-                    then " (provider wire error, crash counting skipped)"
-                    else if is_server_parse_rejection && counts_toward_crash
-                     then " (server parse rejection, counts toward crash threshold)"
-                     else if is_server_parse_rejection
-                     then " (server parse rejection, auto-recoverable: crash counting skipped)"
+                    else if is_server_parse_rejection
+                      then " (server parse rejection, counts toward crash threshold)"
                      else if is_transient
                      then " (transient, cooldown preserved)"
                      else if EC.should_warn_keeper_cycle_failed err
@@ -1236,7 +1224,6 @@ let run_keeper_cycle
                   Keeper_unified_turn_failure.record_failure_observation
                     ~config
                     ~meta
-                    ~counts_toward_crash
                     ~err
                     ~error_text:e_str;
                   (* RFC-0221 §3.4: emit turn_completed telemetry on all exit paths

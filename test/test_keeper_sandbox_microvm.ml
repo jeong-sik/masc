@@ -595,6 +595,37 @@ let test_leaves_guests_it_cannot_account_for () =
     []
     (ids (M.sweep_candidates_of_json ~is_pid_alive listing))
 
+let test_sweep_skips_listing_when_cli_is_unavailable () =
+  let spawn_count = ref 0 in
+  let run_argv ~timeout_sec:_ _argv =
+    incr spawn_count;
+    Unix.WEXITED 0, "[]"
+  in
+  let unavailable =
+    M.sweep_abandoned_guests
+      ~command_available:(fun command ->
+        Alcotest.(check string) "microvm executable" "container" command;
+        false)
+      ~timeout_sec:1.0
+      ~is_pid_alive
+      ~run_argv
+  in
+  Alcotest.(check bool) "unavailable result" true (Option.is_none unavailable);
+  Alcotest.(check int) "unavailable spawn count" 0 !spawn_count;
+  let available =
+    M.sweep_abandoned_guests
+      ~command_available:(fun _ -> true)
+      ~timeout_sec:1.0
+      ~is_pid_alive
+      ~run_argv
+  in
+  Alcotest.(check int) "available listing count" 1 !spawn_count;
+  match available with
+  | None -> Alcotest.fail "available CLI did not run the sweep"
+  | Some outcome ->
+    Alcotest.(check (list string)) "available removed" [] outcome.M.removed;
+    Alcotest.(check int) "available failures" 0 (List.length outcome.M.failed)
+
 let () =
   Alcotest.run
     "keeper_sandbox_microvm"
@@ -615,6 +646,8 @@ let () =
             test_leaves_containers_that_are_not_guests
         ; Alcotest.test_case "leaves guests it cannot account for" `Quick
             test_leaves_guests_it_cannot_account_for
+        ; Alcotest.test_case "skips listing when CLI is unavailable" `Quick
+            test_sweep_skips_listing_when_cli_is_unavailable
         ] )
     ; ( "refusal"
       , [ Alcotest.test_case "docker shell entrypoint refuses" `Quick

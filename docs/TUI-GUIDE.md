@@ -116,16 +116,15 @@ remains marked when the detail has focus.
 The Config surface shows `runtime.toml` as the server reads it; `e` opens
 it in `$EDITOR` and the server's preview validation gates the write. The
 Resources surface lists every MCP resource; `Enter` reads one beside the
-list. `Ctrl-W` switches between the list and text, and `j`/`k` move whichever
-pane has focus. Resource text uses the same Markdown renderer as chat and
-Board. Its detail starts with the server-advertised title, purpose, URI,
-format, and size, so a resource can be understood before its contents are
-read. JSON is pretty-printed in a `json` code fence for syntax highlighting;
-binary parts are reported rather than decoded. With the detail focused,
-`[`/`]` reads the previous or next resource without returning to the list.
-Responses are URI-stamped, so a slow older read cannot replace the newer
-selection. On Connectors, `b`/`u` open an editor form that binds or unbinds a
-channel.
+list. The detail starts with the server's description, full URI, MIME type,
+and declared byte size, then the payload. JSON is pretty-printed; JSON, TOML,
+and YAML payloads use the shared code lexer, while Markdown uses the same
+renderer as chat and Board; binary parts report their encoded size instead of
+pretending to render content. With detail focused, `[`/`]` read the previous
+or next resource without returning to the list. Responses are URI-stamped, so
+a slow older read cannot replace a newer selection. `Ctrl-W` switches between
+list and detail, and `j`/`k` move whichever pane has focus. On Connectors,
+`b`/`u` open an editor form that binds or unbinds a channel.
 
 Tools has five deliberately different questions under `p`: `available` is
 the effective surface delivered to the selected Keeper now; `async runs` is
@@ -1020,6 +1019,7 @@ Per surface:
 | `c` / `m` | Lanes | Open the selected lane's Keeper chat; `Esc` returns to Lanes |
 | Right / `Enter` | Board | Open post body |
 | `Ctrl-W` | Board read, Resources | Switch the focused pane |
+| `[` / `]` | Resources detail | Open the previous / next resource |
 | `h` / `l` | Wide Board read | Focus post list / post detail |
 | `PgUp` / `PgDn` | Board, Schedules, Fusion | Move the active list or detail by a page |
 | Right / `Enter` | Schedules | Open schedule details |

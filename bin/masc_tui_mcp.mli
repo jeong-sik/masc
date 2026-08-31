@@ -56,14 +56,21 @@ val resources_of_body :
 (** Read a [resources/list] answer in server order without discarding the
     fields that explain what each resource contains. *)
 
-val resource_text_of_body :
-  request_id:string -> string -> (string, string) result
-(** Read a [resources/read] answer's concatenated text contents. *)
+type resource_content_kind =
+  | Resource_text of string
+  | Resource_blob of { base64_bytes : int }
 
-val resource_body_for_markdown : resource -> string -> string
-(** Prepare text for the document renderer. JSON resources are parsed,
-    pretty-printed, and fenced as [json] so the shared syntax lexer can colour
-    them; other resources retain the server's text. *)
+type resource_content = {
+  rc_uri : string option;
+  rc_mime_type : string option;
+  rc_kind : resource_content_kind;
+}
+(** One content part from [resources/read]. Blob bytes are not decoded or
+    rendered, but their encoded length remains visible to the operator. *)
+
+val resource_contents_of_body :
+  request_id:string -> string -> (resource_content list, string) result
+(** Read every [resources/read] content part without discarding its MIME type. *)
 
 val task_cancel_arguments :
   task_id:string -> reason:string -> (string * Yojson.Safe.t) list

@@ -1773,7 +1773,8 @@ type state = {
   mutable resources_list: Masc_tui_mcp.resource list option;
   mutable resources_error: string option;
   mutable resources_cursor: int;
-  mutable resource_content: (string * string list) option;
+  mutable resource_content:
+    (string * Masc_tui_mcp.resource_content list) option;
   mutable resource_content_error: (string * string) option;
   mutable resource_pending_uri: string option;
   mutable resource_scroll: int;

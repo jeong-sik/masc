@@ -12141,35 +12141,99 @@ let resource_display_name (resource : Masc_tui_mcp.resource) =
   | Some title when String.trim title <> "" -> title
   | Some _ | None -> resource.name
 
-let resource_detail_field ~width label value =
-  let prefix = "  " ^ label ^ ": " in
-  let continuation = String.make (Message_layout.display_width prefix) ' ' in
-  match
-    Message_layout.wrap_words
-      ~max_cells:(max 1 (width - Message_layout.display_width prefix))
-      (Terminal_text.single_line value)
-  with
-  | [] -> [ Ansi.dim, prefix ^ "not advertised" ]
-  | first :: rest ->
-      (Ansi.dim, prefix ^ first)
-      :: List.map (fun line -> Ansi.dim, continuation ^ line) rest
+let resource_mime_essence mime =
+  match String.split_on_char ';' (String.lowercase_ascii (String.trim mime)) with
+  | essence :: _ -> String.trim essence
+  | [] -> ""
 
-let resource_metadata_lines (resource : Masc_tui_mcp.resource) ~width =
-  resource_detail_field ~width "Meaning"
-    "Read-only MCP context advertised by the connected server; reading it does not run a tool."
-  @ resource_detail_field ~width "URI" resource.uri
-  @ resource_detail_field ~width "Name" resource.name
-  @ (match resource.description with
-     | Some description when String.trim description <> "" ->
-         resource_detail_field ~width "Purpose" description
-     | Some _ | None -> resource_detail_field ~width "Purpose" "not advertised")
-  @ resource_detail_field ~width "Format"
-      (Option.value ~default:"not advertised" resource.mime_type)
-  @ (match resource.size with
-     | None -> []
-     | Some size ->
-         resource_detail_field ~width "Advertised size"
-           (Masc_tui_context_inspector.format_bytes size))
+let resource_language_of_mime mime =
+  let mime = resource_mime_essence mime in
+  if
+    String.equal mime "application/json"
+    || String.equal mime "text/json"
+    || String.ends_with ~suffix:"+json" mime
+  then Some "json"
+  else if List.mem mime [ "application/toml"; "text/toml"; "text/x-toml" ]
+  then Some "toml"
+  else if
+    List.mem mime
+      [ "application/yaml"; "application/x-yaml"; "text/yaml"; "text/x-yaml" ]
+  then Some "yaml"
+  else None
+
+let resource_mime_is_markdown mime =
+  List.mem (resource_mime_essence mime)
+    [ "text/markdown"; "text/x-markdown"; "application/markdown" ]
+
+let fenced_resource_text ~language text =
+  match
+    Masc_tui_markdown.non_colliding_fence_marker
+      (String.split_on_char '\n' text)
+  with
+  | Some marker ->
+      String.concat "\n" [ marker ^ language; text; marker ]
+  | None -> text
+
+let pretty_resource_text ~mime text =
+  match resource_language_of_mime mime with
+  | Some "json" ->
+      let pretty =
+        match Yojson.Safe.from_string text with
+        | json -> Yojson.Safe.pretty_to_string json
+        | exception Yojson.Json_error _ -> text
+      in
+      fenced_resource_text ~language:"json" pretty
+  | Some language -> fenced_resource_text ~language text
+  | None when resource_mime_is_markdown mime -> text
+  | None -> text
+
+let resource_document (resource : Masc_tui_mcp.resource)
+    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested =
+  let present = function
+    | Some text when String.trim text <> "" -> text
+    | Some _ | None -> "not supplied"
+  in
+  let size =
+    match resource.size with
+    | Some bytes -> Printf.sprintf "%d bytes" bytes
+    | None -> "size unknown"
+  in
+  let mime = present resource.mime_type in
+  let metadata =
+    String.concat "\n\n"
+      [ "MCP resource — read-only data exposed by this server."
+      ; "**About:** " ^ present resource.description
+      ; "**URI:** `" ^ resource.uri ^ "`"
+      ; "**Name:** " ^ resource.name
+      ; "**Type:** `" ^ mime ^ "` · **Size:** " ^ size
+      ]
+  in
+  let part_document index (part : Masc_tui_mcp.resource_content) =
+    let part_mime = Option.value part.rc_mime_type ~default:mime in
+    let body =
+      match part.rc_kind with
+      | Masc_tui_mcp.Resource_text text ->
+          pretty_resource_text ~mime:part_mime text
+      | Masc_tui_mcp.Resource_blob { base64_bytes } ->
+          Printf.sprintf
+            "Binary data · `%s` · %d base64 bytes · preview unavailable"
+            part_mime base64_bytes
+    in
+    match contents with
+    | Some (_ :: _ :: _) ->
+        Printf.sprintf "### Part %d · %s\n\n%s" index part_mime body
+    | Some (_ :: []) | Some [] | None -> body
+  in
+  let body =
+    match (error, contents) with
+    | Some detail, _ -> "**Read failed:** " ^ detail
+    | None, None when requested -> "(reading resource…)"
+    | None, None -> "(Enter reads the selected resource.)"
+    | None, Some parts ->
+        parts |> List.mapi (fun index part -> part_document (index + 1) part)
+        |> String.concat "\n\n"
+  in
+  metadata ^ "\n\n---\n\n" ^ body
 
 let render_resources (state : state) =
   let drawn_resource_scroll = ref state.resource_scroll in
@@ -12272,52 +12336,46 @@ let render_resources (state : state) =
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = framed_content_height ~rows in
-    let width = max 1 (pane_cols - 8) in
-    let metadata =
-      match shown_resource with
-      | None ->
-          [ Ansi.dim,
-            "  Select a server-advertised resource and press Enter to read its current contents."
-          ]
-      | Some resource -> resource_metadata_lines resource ~width
-    in
-    let body =
-      match state.resource_pending_uri, state.resource_content_error,
-            state.resource_content, shown_uri with
-      | Some pending_uri, _, _, Some uri when String.equal pending_uri uri ->
-          [ Theme.info (), "  Loading current contents…" ]
-      | None, Some (error_uri, detail), _, Some uri
-        when String.equal error_uri uri ->
-          [ Theme.bad (), "  Read failed: " ^ Terminal_text.single_line detail ]
-      | None, None, Some (content_uri, lines), Some uri
-        when String.equal content_uri uri ->
-          let source = String.concat "\n" lines in
-          let source =
-            match shown_resource with
-            | None -> source
-            | Some resource ->
-                Masc_tui_mcp.resource_body_for_markdown resource source
-          in
-          (Ansi.dim, "  Contents")
-          :: (Message_layout.wrap_body ~markdown:document_markdown
-                ~max_cells:width ~sanitize:Terminal_text.single_line source
-              |> List.map (fun line -> Ansi.reset, "  " ^ line))
-      | Some _, _, _, _ | None, Some _, _, _ | None, None, Some _, _
-      | None, None, None, _ ->
-          [ Ansi.dim, "  Enter reads the selected resource's current contents." ]
-    in
-    let rendered = metadata @ [ Ansi.dim, "" ] @ body in
-    let total_lines = List.length rendered in
-    let max_scroll = max 0 (total_lines - content_height) in
-    let scroll = max 0 (min state.resource_scroll max_scroll) in
-    (* The pane is the only place that knows how many rows the metadata and
-       text actually used, so it reports the row it could draw back out. *)
-    drawn_resource_scroll := scroll;
-    for i = 0 to content_height - 1 do
-      match List.nth_opt rendered (scroll + i) with
-      | Some (style, line) -> box_line_styled pane_buf pane_cols ~style line
-      | None -> box_empty pane_buf pane_cols
-    done;
+    (match shown_resource with
+     | None ->
+         for _ = 1 to content_height do
+           box_empty pane_buf pane_cols
+         done
+     | Some resource ->
+         let contents =
+           match state.resource_content, shown_uri with
+           | Some (content_uri, parts), Some uri
+             when String.equal content_uri uri -> Some parts
+           | Some _, (Some _ | None) | None, _ -> None
+         in
+         let error =
+           match state.resource_content_error, shown_uri with
+           | Some (error_uri, detail), Some uri
+             when String.equal error_uri uri -> Some detail
+           | Some _, (Some _ | None) | None, _ -> None
+         in
+         let requested =
+           match state.resource_pending_uri, shown_uri with
+           | Some pending_uri, Some uri -> String.equal pending_uri uri
+           | Some _, None | None, _ -> false
+         in
+         let rendered =
+           Message_layout.wrap_body ~markdown:document_markdown
+             ~max_cells:(max 1 (pane_cols - 8))
+             ~sanitize:Terminal_text.single_line
+             (resource_document resource contents ~error ~requested)
+         in
+         let total_lines = List.length rendered in
+         let max_scroll = max 0 (total_lines - content_height) in
+         let scroll = max 0 (min state.resource_scroll max_scroll) in
+         (* The pane is the only place that knows how many rows the text
+            actually used, so it reports the row it could draw back out. *)
+         drawn_resource_scroll := scroll;
+         for i = 0 to content_height - 1 do
+           match List.nth_opt rendered (scroll + i) with
+           | Some line -> box_line pane_buf pane_cols ("  " ^ line)
+           | None -> box_empty pane_buf pane_cols
+         done);
     box_bottom pane_buf pane_cols
   in
   (if split then begin

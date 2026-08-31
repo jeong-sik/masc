@@ -118,8 +118,22 @@ it in `$EDITOR` and the server's preview validation gates the write. The
 Resources surface lists every MCP resource; `Enter` reads one beside the
 list. `Ctrl-W` switches between the list and text, and `j`/`k` move whichever
 pane has focus. Resource text uses the same Markdown renderer as chat and
-Board. On Connectors, `b`/`u` open an editor form that binds or unbinds a
+Board. Its detail starts with the server-advertised title, purpose, URI,
+format, and size, so a resource can be understood before its contents are
+read. JSON is pretty-printed in a `json` code fence for syntax highlighting;
+binary parts are reported rather than decoded. With the detail focused,
+`[`/`]` reads the previous or next resource without returning to the list.
+Responses are URI-stamped, so a slow older read cannot replace the newer
+selection. On Connectors, `b`/`u` open an editor form that binds or unbinds a
 channel.
+
+Tools has five deliberately different questions under `p`: `available` is
+the effective surface delivered to the selected Keeper now; `async runs` is
+the composition broker's live queue/recovery state; `receipts` is the current
+Keeper session's retained Skill activation ledger; `usage` is the workspace
+roll-up of actual Skill invocation/delivery/action counts; and `all tools` is
+the registered catalog. Registration or availability does not prove actual
+use, and a missing retained receipt does not prove a Skill was never used.
 
 At 110 columns and wider, the keeper detail view keeps a roster pane on its
 left with the cursor marked; keys keep their detail meaning. Narrower

@@ -804,7 +804,34 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
         (Masc_tui_context_inspector.decode_prompt_capture
            ~expected_keeper:keeper_name)
   in
-  { Masc_tui_context_inspector.turn; prompt }
+  (* The turn record names its tool surface by content address rather than
+     carrying the listing, so the listing costs a request only when a record
+     that has one is actually read. Serving it inside the turn-records page
+     would multiply that page by the surface for every one of its 50 rows. *)
+  let tool_surface =
+    match turn with
+    | Error _ -> Masc_tui_context_inspector.Surface_not_recorded
+    | Ok record ->
+        (match Masc_tui_context_inspector.tool_surface_sha256 record with
+         | None -> Masc_tui_context_inspector.Surface_not_recorded
+         | Some (Error detail) ->
+             Masc_tui_context_inspector.Surface_unresolved { detail }
+         | Some (Ok sha256) ->
+             (* The artifact endpoint is gated at CanAdmin, the same tier
+                the file-changes fetch above already clears, so an operator
+                who can read one pane can read this row. A lighter gate on
+                that endpoint is not the answer: it serves every externalized
+                tool output, not just this listing. *)
+             (match
+                fetch ~label:"tool surface"
+                  ~path:(Printf.sprintf "/api/v1/artifacts/%s" sha256)
+                  ~decode:Masc_tui_context_inspector.decode_tool_surface
+              with
+              | Ok entries -> Masc_tui_context_inspector.Surface_resolved entries
+              | Error detail ->
+                  Masc_tui_context_inspector.Surface_unresolved { detail }))
+  in
+  { Masc_tui_context_inspector.turn; prompt; tool_surface }
 
 (** Fetch one page of chat rows older than [before].
 

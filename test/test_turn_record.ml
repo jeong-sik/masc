@@ -138,7 +138,18 @@ let sample_record () : Turn_record.t =
    would not resolve, and the blob maintenance scan would stop counting the
    record as a reference and collect the bytes it points at. *)
 let test_tool_surface_ref_round_trips_and_stays_optional () =
-  let marker = "masc:artifact:v1:" ^ String.make 64 'a' ^ ":12:application/json" in
+  (* Built through the codec that owns the grammar, not spelled here: a
+     hand-typed marker would round-trip through JSON just as happily while
+     resolving to nothing, and this test would still pass. *)
+  let marker =
+    match
+      Tool_output.make_artifact_ref ~sha256:(String.make 64 'a') ~bytes:12
+        ~preview:"[{\"name\"" ~mime:"application/json"
+    with
+    | Ok reference ->
+        Tool_output.encode_for_agent_core (Tool_output.Stored reference)
+    | Error error -> failf "%s" (Tool_output.make_error_to_string error)
+  in
   let record = { (sample_record ()) with tool_surface_ref = Some marker } in
   (match Turn_record.of_json (Turn_record.to_json record) with
    | Error e -> failf "decode failed: %s" e
@@ -150,6 +161,45 @@ let test_tool_surface_ref_round_trips_and_stays_optional () =
   | Ok decoded ->
     check (option string) "a turn that recorded no surface stays absent" None
       decoded.tool_surface_ref
+;;
+
+(* The keeper writes this payload into the blob and the context inspector
+   reads it back in a different binary. They agree only because both go
+   through the codec declared here; this pins that the codec is in fact a
+   round trip, and that a listing with one bad entry fails whole rather than
+   arriving short. A short listing would understate the surface, which is the
+   one number the reader exists to report. *)
+let test_the_tool_surface_payload_round_trips () =
+  let entries =
+    [ { Turn_record.name = "masc_schedule_create"; schema_bytes = 4093 }
+    ; { Turn_record.name = "masc_gc"; schema_bytes = 0 }
+    ]
+  in
+  (match
+     Turn_record.tool_surface_of_json (Turn_record.tool_surface_to_json entries)
+   with
+   | Error detail -> failf "decode failed: %s" detail
+   | Ok decoded ->
+       check int "every entry survives" 2 (List.length decoded);
+       check string "the first name survives" "masc_schedule_create"
+         (List.hd decoded).Turn_record.name;
+       check int "a zero-byte schema is a size, not an absence" 0
+         (List.nth decoded 1).Turn_record.schema_bytes);
+  check bool "an empty surface decodes as an empty surface" true
+    (Turn_record.tool_surface_of_json (Turn_record.tool_surface_to_json [])
+     = Ok []);
+  List.iter
+    (fun (label, json) ->
+       check bool label true
+         (Result.is_error (Turn_record.tool_surface_of_json json)))
+    [ ( "a nameless entry fails the listing"
+      , `List [ `Assoc [ "schema_bytes", `Int 4 ] ] )
+    ; ( "an empty name fails the listing"
+      , `List [ `Assoc [ "name", `String ""; "schema_bytes", `Int 4 ] ] )
+    ; ( "a negative size fails the listing"
+      , `List [ `Assoc [ "name", `String "t"; "schema_bytes", `Int (-1) ] ] )
+    ; ("a non-array payload fails", `Assoc [ "name", `String "t" ])
+    ]
 ;;
 
 let test_cache_counts_round_trip_and_stay_optional () =
@@ -911,6 +961,8 @@ let () =
             test_context_window_absent_on_the_error_path
         ; test_case "tool surface ref round trips and stays optional" `Quick
             test_tool_surface_ref_round_trips_and_stays_optional
+        ; test_case "the tool surface payload round trips" `Quick
+            test_the_tool_surface_payload_round_trips
         ] )
     ; ( "turn_ref"
       , [ test_case "make/to_string/of_string roundtrip" `Quick

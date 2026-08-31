@@ -1,8 +1,19 @@
 module Prompt_capture = Masc.Keeper_prompt_capture
 
+type tool_surface_entry = Turn_record.tool_surface_entry =
+  { name : string
+  ; schema_bytes : int
+  }
+
+type tool_surface =
+  | Surface_not_recorded
+  | Surface_unresolved of { detail : string }
+  | Surface_resolved of tool_surface_entry list
+
 type reading =
   { turn : (Turn_record.t, string) result
   ; prompt : (Prompt_capture.capture, string) result
+  ; tool_surface : tool_surface
   }
 
 type tab =
@@ -119,6 +130,69 @@ let prompt_exact_text
        | None, _ | _, None -> None)
   | Some _ | None -> None
 
+let format_bytes bytes =
+  if bytes >= 1024 * 1024 then Printf.sprintf "%.1f MB" (float bytes /. 1048576.)
+  else if bytes >= 1024 then Printf.sprintf "%.1f KB" (float bytes /. 1024.)
+  else Printf.sprintf "%d B" bytes
+
+let tool_surface_sha256 (record : Turn_record.t) =
+  match record.tool_surface_ref with
+  | None -> None
+  | Some marker ->
+      (match Tool_output.decode_from_agent_core marker with
+       | Tool_output.Decoded reference ->
+           Some (Ok reference.Tool_output.sha256)
+       | Tool_output.Not_marker ->
+           Some (Error "tool surface reference is not a blob marker")
+       | Tool_output.Invalid_marker { detail } ->
+           Some (Error ("tool surface reference is malformed: " ^ detail)))
+
+(* The payload shape is owned by Turn_record, beside the field that points at
+   it, so the writing keeper and this reader cannot drift apart. *)
+let decode_tool_surface_payload content =
+  match Yojson.Safe.from_string content with
+  | json -> Turn_record.tool_surface_of_json json
+  | exception Yojson.Json_error detail ->
+      Error ("tool surface payload was not JSON: " ^ detail)
+
+let decode_tool_surface = function
+  | `Assoc fields ->
+      (match List.assoc_opt "content" fields with
+       | Some (`String content) -> decode_tool_surface_payload content
+       | Some _ -> Error "artifact content is not a string"
+       | None ->
+           (* The artifact endpoint answers its own failures in this envelope.
+              Its words name the sha256 it refused, which a generic message
+              here would throw away. *)
+           (match List.assoc_opt "error" fields with
+            | Some (`String detail) -> Error detail
+            | Some _ | None -> Error "artifact response carries no content"))
+  | _ -> Error "artifact response is not an object"
+
+(* Largest first: the operator reading this row is deciding what to hold back,
+   and config order answers a question nobody asked. *)
+let tool_surface_listing entries =
+  let by_size =
+    List.stable_sort
+      (fun left right -> compare right.schema_bytes left.schema_bytes)
+      entries
+  in
+  String.concat "\n"
+    (Printf.sprintf "%d tools went out on this request, largest schema first."
+       (List.length entries)
+     :: "Each size is that schema serialized alone, so they do not sum to the \
+         total above."
+     :: ""
+     :: List.map
+          (fun entry ->
+             Printf.sprintf "%s  %s" (format_bytes entry.schema_bytes) entry.name)
+          by_size)
+
+let tool_surface_exact_text = function
+  | Surface_not_recorded | Surface_unresolved _ -> None
+  | Surface_resolved [] -> Some "This request carried no tool schemas."
+  | Surface_resolved entries -> Some (tool_surface_listing entries)
+
 let input_map_metadata = function
   | Turn_record.Prompt_block _ -> "turn prompt assembly", "bytes only"
   | Turn_record.Tool_schemas -> "effective tool surface", "schema bytes only"
@@ -137,7 +211,7 @@ let input_map_metadata = function
   | Turn_record.Message_audio ->
       "provider message list", "media bytes only"
 
-let input_map_rows (record : Turn_record.t) capture =
+let input_map_rows (record : Turn_record.t) capture ~tool_surface =
   match record.input_components with
   | None -> []
   | Some components ->
@@ -146,11 +220,21 @@ let input_map_rows (record : Turn_record.t) capture =
            let included_by, default_retention =
              input_map_metadata item.component
            in
+           (* A reference that would not read is reported on the row that
+              wanted it. The column is the only place the operator learns the
+              listing exists at all, so the reason travels with it rather than
+              being swallowed into "bytes only". *)
+           let default_retention =
+             match item.component, tool_surface with
+             | Turn_record.Tool_schemas, Surface_unresolved { detail } ->
+                 "listing unreadable: " ^ detail
+             | _ -> default_retention
+           in
            let exact_text =
              match item.component with
              | Turn_record.Prompt_block block_id ->
                  prompt_exact_text record capture block_id item.bytes
-             | Turn_record.Tool_schemas
+             | Turn_record.Tool_schemas -> tool_surface_exact_text tool_surface
              | Turn_record.Message_user
              | Turn_record.Message_system
              | Turn_record.Message_assistant_text
@@ -180,11 +264,6 @@ let attributed_bytes (record : Turn_record.t) =
           total + component.bytes)
        0)
     record.input_components
-
-let format_bytes bytes =
-  if bytes >= 1024 * 1024 then Printf.sprintf "%.1f MB" (float bytes /. 1048576.)
-  else if bytes >= 1024 then Printf.sprintf "%.1f KB" (float bytes /. 1024.)
-  else Printf.sprintf "%d B" bytes
 
 let format_tokens tokens =
   if tokens >= 1_000_000 then Printf.sprintf "%.2fM" (float tokens /. 1_000_000.)

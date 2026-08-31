@@ -226,6 +226,29 @@ type t =
   ; ts : float
   }
 
+type tool_surface_entry =
+  { name : string
+  ; schema_bytes : int
+  }
+(** One tool as it went out on a request. [schema_bytes] is that schema
+    serialized alone, so entries do not sum to the request's Tool_schemas
+    byte count — the wire form carries array framing the parts do not. *)
+
+val tool_surface_to_json : tool_surface_entry list -> Yojson.Safe.t
+(** The exact payload the blob behind {!t.tool_surface_ref} holds.
+
+    Declared here, beside the field that points at it, because the writer
+    (the keeper turn) and the reader (the context inspector) sit in different
+    binaries and would otherwise each spell this shape by hand. Two hand-built
+    spellings of one payload is how a reader starts reporting an empty surface
+    for a request that carried 147 tools. *)
+
+val tool_surface_of_json :
+  Yojson.Safe.t -> (tool_surface_entry list, string) result
+(** Inverse of {!tool_surface_to_json}. One malformed entry fails the whole
+    listing: dropping it would understate the surface that was actually sent,
+    which is the single number the listing exists to report. *)
+
 val prompt_block_to_json : prompt_block -> Yojson.Safe.t
 val input_component_id_to_string : input_component_id -> string
 val turn_kind_to_string : turn_kind -> string

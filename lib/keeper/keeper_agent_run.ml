@@ -1550,18 +1550,16 @@ let run_turn
           | Some { tools = request_tools; _ } ->
             let payload =
               Yojson.Safe.to_string
-                (`List
+                (Turn_record.tool_surface_to_json
                    (List.map
                       (fun (tool : Agent_core.Tool.t) ->
-                         `Assoc
-                           [ "name", `String tool.Agent_core.Tool.schema.name
-                           ; ( "schema_bytes"
-                             , `Int
-                                 (String.length
-                                    (Yojson.Safe.to_string
-                                       (Agent_core.Types.tool_schema_to_yojson
-                                          tool.Agent_core.Tool.schema))) )
-                           ])
+                         { Turn_record.name = tool.Agent_core.Tool.schema.name
+                         ; schema_bytes =
+                             String.length
+                               (Yojson.Safe.to_string
+                                  (Agent_core.Types.tool_schema_to_yojson
+                                     tool.Agent_core.Tool.schema))
+                         })
                       request_tools))
             in
             let store = Tool_blob_store.create ~base_path:config.base_path in

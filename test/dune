@@ -763,7 +763,7 @@
   test_task_tool_toml_parity
   test_operator_surface_toml_parity)
  (libraries
-  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+ masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
   masc.skill_config masc.skill_reference masc.skill_snapshot))
 
@@ -1651,7 +1651,8 @@
   masc.jsonl_writer
   ; test_compression decodes its own gzip output with the library's reader
   decompress.de
-  decompress.gz)
+  decompress.gz
+  masc.tool_metrics_store)
  (deps ../bin/main_eio.exe))
 
 ; Extracted from the Group 3 (tests ...) list above: the read-model fixtures

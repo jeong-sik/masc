@@ -165,7 +165,7 @@ val run_ssh_dir : base_path:string -> string
     execution lane. *)
 
 val data_dir : base_path:string -> string
-(** [<base_path>/data/]. Bulk tool data (tool-events, tool-metrics).
+(** [<base_path>/data/]. Bulk tool data (tool-events).
     Sibling of [.masc/]; callers historically wrote here without going
     through [.masc/]. Layout preserved for backwards compatibility. *)
 

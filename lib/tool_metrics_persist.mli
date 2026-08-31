@@ -1,57 +1,53 @@
+(** SQLite persistence for tool metrics.
 
-(** Tool_metrics_persist — JSONL disk persistence for tool metrics.
-
-    Restores current-format tool invocation records at startup and periodically
-    flushes new in-memory records to
-    [data/tool-metrics/YYYY-MM/DD.jsonl] via {!Dated_jsonl}.
-
-    Flush failures are logged but do not affect server operation.
+    [.masc/tool-metrics.sqlite3] is the only durable copy. The in-memory
+    {!Tool_metrics} value is a projection rebuilt from this database at
+    startup. Writes are best-effort and never change a completed tool result.
 
     @since 2.108.0 — Issue #3280 *)
 
-val enqueue : Tool_result.result -> unit
-(** [enqueue result] buffers a tool invocation record for eventual disk flush.
-    Safe to call from any fiber. Records are batched and written periodically.
-    If the bounded best-effort queue is full, the record is dropped instead of
-    blocking the tool completion path. *)
+val enqueue : base_path:string -> Tool_result.result -> unit
+(** Persist one completed tool invocation. This call writes directly to
+    SQLite before returning; there is no process-local write queue. Storage
+    failures are logged and counted, but do not raise into tool dispatch.
+    WAL with [synchronous=NORMAL] preserves committed rows across process
+    crashes; host power-loss durability is outside this contract. *)
 
 type hydrate_report = {
   loaded_records : int;
-  malformed_records : int;
-  invalid_records : int;
-  pruned_files : int;
+  pruned_records : int;
 }
 
 val hydrate :
   base_path:string ->
   retention_days:int ->
-  (hydrate_report, Dated_jsonl.read_error) result
-(** [hydrate ~base_path ~retention_days] prunes expired day files, streams the
-    remaining current-format rows into a replacement {!Tool_metrics} snapshot,
-    and publishes that snapshot only after the complete store was read.
-    Malformed JSON and rows that do not match the current record format are
-    counted and skipped. Repeating hydration replaces rather than appends, so
-    persisted calls are not double-counted. Call before installing live metric
-    producers. *)
+  (hydrate_report, string) result
+(** Delete rows older than [retention_days], then replace the in-memory
+    aggregate with the retained rows. Call before installing live producers. *)
 
-val start_flush_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
-(** [start_flush_fiber ~sw ~clock ~base_path] spawns a background fiber that
-    drains buffered records to JSONL every 5 minutes.  Also registers a
-    shutdown hook to flush remaining records.
-    [base_path] is the workspace root (e.g. [state.workspace_config.base_path]). *)
+type store_summary = {
+  path : string;
+  exists : bool;
+  entry_count : int;
+  latest_ts : float option;
+}
 
-val flush_now : base_path:string -> unit
-(** [flush_now ~base_path] immediately drains the write queue to the
-    current JSONL store. Intended for shutdown hooks and testing. *)
+val store_summary : base_path:string -> (store_summary, string) result
+(** Return the persisted row count and latest timestamp without changing the
+    in-memory aggregate. A missing database is an empty, healthy store. *)
+
+val read_recent :
+  base_path:string ->
+  ?since_ts:float ->
+  ?until_ts:float ->
+  n:int ->
+  unit ->
+  (Yojson.Safe.t list, string) result
+(** Read at most [n] newest rows, newest first. [n <= 0] returns [[]]. *)
+
+val database_path : base_path:string -> string
+(** Canonical SQLite path under the cluster-aware MASC runtime root. *)
 
 val reset_for_testing : unit -> unit
-(** Clear cached store state and drop any queued records held in memory.
-
-    This does not cancel or modify any background flush fiber or shutdown
-    hook previously started via [start_flush_fiber]; those may still flush
-    records based on the store instance they captured.
-
-    For reliable test isolation, call this either before
-    [start_flush_fiber] is invoked, or only after the [Eio.Switch.t]
-    passed to [start_flush_fiber] has been cancelled so that no flush
-    fiber is active. *)
+(** Close the cached database handle. Tests must call this only after all
+    concurrent users have stopped. *)

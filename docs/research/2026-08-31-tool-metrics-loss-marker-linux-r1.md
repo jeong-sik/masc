@@ -31,12 +31,17 @@ absence를 `complete`로 바꾸는 alias나 fallback은 없다. marker가 retent
 current-process persistence snapshot의 `loss_marker_write_failed_records`와
 `last_loss_marker_error`에 남는다.
 
-## r116 exact runtime
+## exact runtime identity
 
 - base head: `c7c4e56ef72ede3c51bc64a40bc78280013077e1`
-- product head: `9978e056220343c6690f161fda737274795a101e`
-- image: `sha256:e73fda83aef5a9b9c6d2088a00e4575a41610e2188c8dc19127c82a28eb2d70a`
-- binary: `d1adf832...291f`, preflight helper: `f4e311d6...100d`
+- final product head: `ecba6acffb72f66f245c7ee6466883e691aecbf1`
+- final image: `sha256:68256617aa7bdea424b1631458a734ca8e150904b300c4516470c892b01c5976`
+- final binary: `bd61f90c...a089`, preflight helper: `ca741494...4b0e`
+- marker-success head/image: `9978e056...a101e` /
+  `sha256:e73fda83aef5a9b9c6d2088a00e4575a41610e2188c8dc19127c82a28eb2d70a`
+
+## r116 marker-success runtime
+
 - initial API: aggregate 0, integrity `unknown`, missing loss fields JSON `null`.
 - saturated API: aggregate 5,000, queue/pending 4,096, drop 904, final 0,
   marker write failure 0, integrity `known_incomplete`.
@@ -46,6 +51,24 @@ current-process persistence snapshot의 `loss_marker_write_failed_records`와
   integrity `known_incomplete`, origin runtime unchanged, final SHA-256 `68b799d6...e1f48`.
 - marker를 의도적으로 corrupt한 다음 restart: hydration `invalid loss marker=true`, aggregate 4,096,
   integrity `invalid_marker`, loss fields `null`, exit 0/OOM false.
+
+## r117 marker read-failure 격리
+
+self-review에서 marker path가 디렉터리이거나 unreadable하면 marker read 예외가 전체 hydration을
+중단해 pending recovery까지 막을 수 있는 결합을 발견했다. final head는 marker read의
+`Sys_error`/`Unix_error`만 `invalid_marker`로 격리하고 cancellation은 계속 전파한다.
+
+실제 Linux에서 marker target을 디렉터리로 만들고 final JSONL도 permission-denied로 막았다.
+
+- actual MCP HTTP/body success 5,000/5,000, 12.574112초(397.642/s)
+- aggregate 5,000, queue/pending 4,096, drop 904, marker write failure 904, final 0
+- marker를 쓸 수 없으므로 pre-kill integrity는 `unknown`; last marker error는 target directory를
+  직접 명시했다.
+- `SIGKILL` exit 137/OOM false 뒤 unreadable marker directory를 그대로 유지하고 final storage만
+  복구했다.
+- replacement는 hydration을 중단하지 않고 `invalid loss marker=true`, recovered/final 4,096,
+  pending 0, integrity `invalid_marker`를 반환했다. final SHA-256은 `2c9faf58...064b0`이다.
+- replacement는 graceful exit 0/OOM false였다.
 
 ## saturation 비용
 
@@ -76,8 +99,8 @@ complete로 승격하지 않는다.
 
 ## 근거
 
-- [근거] exact product/image/binary/helper, focused 14/14 및 6/6, 5,000 actual MCP body,
+- [근거] exact product/image/binary/helper, focused 15/15 및 6/6, 5,000 actual MCP body,
   queue/drop/marker, SIGKILL replacement, origin runtime identity, invalid-marker restart를
-  2026-08-31T09:26:25+09:00 확인, 신뢰도 High.
+  2026-08-31T09:33:33+09:00 확인, 신뢰도 High.
 - [근거] 같은 local Linux/arm64 256-way parent/new 단일 run latency를
   2026-08-31T09:26:25+09:00 비교, 신뢰도 Medium.

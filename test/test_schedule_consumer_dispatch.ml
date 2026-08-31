@@ -839,8 +839,63 @@ let test_reused_schedule_id_does_not_match_pruned_terminal_receipt () =
   | None -> fail "recreated wake missing"
 ;;
 
-let test_keeper_purge_cancels_future_schedule_intent () =
+let test_cancelled_schedule_retained_wake_is_not_matched_pending () =
+  (* task-370 live evidence: 17 cancelled schedules' enqueued wakes sat in
+     awaiting_ack for up to 22.8 days, surviving four restarts and three
+     builds. A cancelled schedule has no future occurrence that could consume
+     its leftover wake, so the queue-evidence projection must classify the
+     match as a retained terminal remainder, never as [matched_pending]. *)
   with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  (* Recurring, as in the live evidence (all 17 retained samples were
+     hourly/daily/cron/interval): a one-shot that fired is already Succeeded
+     and not cancellable, so it cannot produce this retained shape. *)
+  let request =
+    create_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+      config
+  in
+  (* Fire the occurrence: the wake is enqueued to the keeper queue and its
+     receipt lands in the schedule ledger (awaiting_ack, never consumed). *)
+  let _ = tick_ok config ~now:201.0 in
+  check int "wake is enqueued before cancellation" 1
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  (match Server_schedule_consumers.cancel_keeper_schedules config ~keeper_name with
+   | Ok () -> ()
+   | Error error -> fail (Schedule_store.store_error_to_string error));
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | Some stored ->
+     check string "schedule is cancelled" "cancelled"
+       (Schedule_domain.schedule_status_to_string stored.status)
+   | None -> fail "cancelled schedule missing");
+  (* The leftover wake is still pending in the durable queue — the exact
+     retained state observed live. *)
+  check int "leftover wake remains pending after cancellation" 1
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  let dashboard =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+  in
+  let row = dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id in
+  let open Yojson.Safe.Util in
+  let queue_evidence = row |> member "keeper_queue_evidence" in
+  check string "cancelled schedule wake is a retained remainder"
+    "retained_terminal_wake"
+    (queue_evidence |> member "projection_status" |> to_string);
+  check string "retained classification names the schedule status" "cancelled"
+    (queue_evidence |> member "schedule_status" |> to_string);
+  check string "retained match reports its bucket" "retained"
+    (queue_evidence |> member "matched_bucket" |> to_string);
+  check string "retained match still identifies the wake" request.schedule_id
+    (queue_evidence |> member "matched_schedule_id" |> to_string);
+  check int "retained wake still counts in pending" 1
+    (queue_evidence |> member "pending_count" |> to_int)
+;;
+
+let test_keeper_purge_cancels_future_schedule_intent () =  with_workspace
   @@ fun config ->
   let keeper_name = "purged-keeper" in
   let request =
@@ -2178,6 +2233,9 @@ let () =
             test_reused_schedule_id_does_not_match_pruned_terminal_receipt
         ; test_case "keeper purge cancels future schedule intent" `Quick
             test_keeper_purge_cancels_future_schedule_intent
+        ; test_case "cancelled schedule retained wake is not matched pending"
+            `Quick
+            test_cancelled_schedule_retained_wake_is_not_matched_pending
         ; test_case "shutdown fence rejects schedule intake before enqueue" `Quick
             test_shutdown_fence_rejects_schedule_intake_before_enqueue
         ; test_case "shutdown fence covers direct durable queue producers" `Quick

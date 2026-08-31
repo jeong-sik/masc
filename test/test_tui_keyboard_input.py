@@ -1028,6 +1028,23 @@ def overview_event_http_fixtures() -> HttpFixtures:
     }
 
 
+def keeper_roster_meta(name: str) -> dict[str, object]:
+    # The roster row nests the keeper's own declaration under [meta], and the
+    # decoder reads sandbox_profile from there rather than from a second
+    # top-level copy (lib/tui_decode.ml, decode_keeper_runtime). A row without
+    # [meta] is not a smaller server response -- keeper_brief_meta_json always
+    # writes it -- and dropping it fails the whole list decode, which the TUI
+    # reports as a malformed roster rather than as a per-row gap. Every runtime
+    # column then draws as absent.
+    return {
+        "name": name,
+        "trace_id": f"trace-{name}",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "sandbox_profile": "local",
+    }
+
+
 def keeper_runtime_http_fixtures(
     *,
     alpha_runtime_id: str = "anthropic.claude-opus-5",
@@ -1044,6 +1061,7 @@ def keeper_runtime_http_fixtures(
                 {
                     "runtime_class": "keeper",
                     "name": "alpha",
+                    "meta": keeper_roster_meta("alpha"),
                     "status": "active",
                     "health": "healthy",
                     "paused": False,
@@ -1056,6 +1074,7 @@ def keeper_runtime_http_fixtures(
                 {
                     "runtime_class": "keeper",
                     "name": "beta",
+                    "meta": keeper_roster_meta("beta"),
                     "status": "idle",
                     "health": "idle",
                     "paused": True,
@@ -1700,21 +1719,38 @@ def keeper_long_runtime_identity_interaction(
         columns=140,
         needle=b"MASC Overview",
     )
+    # Both keepers run the same provider subscription, so their ids differ
+    # only after a 25-character shared prefix. What has to hold is that the
+    # elision cuts the shared middle and leaves the tail that tells the two
+    # apart. Where exactly it cuts is a function of the column width, so
+    # pinning the cut point spells a needle that a wider column retires --
+    # the earlier b"antigrav\xe2\x80\xa6.gemini-3-7-flash" was written against a
+    # narrower column and stopped matching without the behaviour changing.
     send_and_wait(
         process,
         master_fd,
         output,
         b"2",
-        b"antigrav\xe2\x80\xa6.gemini-3-7-flash",
+        b".gemini-3-7-flash",
     )
     wait_for_output(
         process,
         master_fd,
         output,
-        b"\xe2\x80\xa6on.claude-sonnet-4",
+        b".claude-sonnet-4",
         start=0,
         timeout=3.0,
     )
+    frame = frame_containing(bytes(output), b".claude-sonnet-4")
+    for full_id in (
+        b"antigravity_subscription.gemini-3-7-flash",
+        b"antigravity_subscription.claude-sonnet-4",
+    ):
+        if full_id in frame:
+            raise AssertionError(
+                f"{full_id!r} was drawn whole, so this scenario is no longer "
+                f"exercising the elision it guards: {frame!r}"
+            )
     os.write(master_fd, b"q")
 
 

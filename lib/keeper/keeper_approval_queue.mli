@@ -241,13 +241,6 @@ val ensure_replay_chat_projection :
   outcome:resolution_replay_outcome ->
   (unit, string) result
 
-val ensure_continuation_chat_projection :
-  base_path:string ->
-  keeper_name:string ->
-  approval_id:string ->
-  tool_name:string option ->
-  (unit, string) result
-
 val continuation_chat_projection_present :
   base_path:string ->
   keeper_name:string ->

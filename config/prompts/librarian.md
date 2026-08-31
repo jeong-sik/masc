@@ -31,6 +31,8 @@ Capacity contract: the complete rendered fact payload (memory identity, category
 Retention criteria:
 - Retain an existing ID only when its exact fact is still true, important, non-duplicative, and worth occupying future context.
 - Drop stale, superseded, transient, or derivable existing memories. Dropping is the deletion operation, and each drop states its reason in one sentence (what made this memory stop earning its place).
+- Judge each existing memory against the Keeper's durable role, never against the current turn's blocker. "Less relevant to what is blocking right now" is not a valid drop reason: a fact about standing responsibilities, environment quirks, or learned limitations keeps earning its place even when the present task points elsewhere. Current-situation capture is what the turn context is for; the memory store is what survives it.
+- To mark a fact outdated, drop it with the reason in the same selection. Never keep an outdated fact by rewriting its claim with a STALE/RESOLVED-style prefix: a tombstone prefix still occupies the fact budget, still surfaces on recall, and can contradict the corrected fact added alongside it.
 - Never recreate a dropped existing fact as a new claim merely to reword it.
   This does not prohibit correcting a partially stale compound fact: drop the
   old ID, then add only a still-true clause when that narrower claim

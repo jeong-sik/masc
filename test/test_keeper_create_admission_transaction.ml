@@ -300,7 +300,7 @@ let test_config_only_keeper_materializes_without_rewriting_manifest () =
   let declarative_bytes =
     {|[keeper]
 instructions = "Materialize this declarative Keeper"
-sandbox_profile = "local"
+sandbox_profile = "docker"
 proactive_enabled = false
 autoboot_enabled = true
 |}

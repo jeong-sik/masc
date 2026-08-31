@@ -332,8 +332,14 @@ let effective_meta_of_profile_defaults
   let target_sandbox_profile =
     match defaults.sandbox_profile, defaults.manifest_path with
     | Some profile, _ -> Ok profile
-    | None, None -> Ok meta.sandbox_profile
-    | None, Some _ ->
+    (* No manifest and no declared profile used to fall through to
+       [meta.sandbox_profile], which the JSON decoder fills with a
+       placeholder it documents as never-decoded. That placeholder was
+       [Local], and the thing that stopped it from becoming host execution
+       was a feature flag defaulting to off. With no host arm left there is
+       nothing to fall through to: a keeper with no profile source has no
+       profile, and that is the answer. *)
+    | None, None | None, Some _ ->
       Error
         (missing_required_sandbox_profile_error
            ~keeper_name:meta.name
@@ -341,10 +347,6 @@ let effective_meta_of_profile_defaults
   in
   match target_sandbox_profile with
   | Error _ as err -> err
-  | Ok Local when not (Env_config_sandbox.Gate.allow_local_playground ()) ->
-      Error
-        (Printf.sprintf "keeper %s rejected: %s"
-           meta.name Env_config_sandbox.Gate.disabled_message)
   (* Phase 1 SSH lane: [Remote_ssh] is the intended new lane, so the local
      gate must NOT reject it — but it is undispatchable without the
      [remote_endpoint] naming its [exec.ssh.endpoints.<name>] registry

@@ -22,8 +22,7 @@ val keeper_enable_thinking : unit -> bool
 val ensure_runtime_params_init : unit -> unit
 type sandbox_profile =
   Keeper_types_profile_sandbox.sandbox_profile =
-    Local
-  | Docker
+    Docker
   | Micro_vm
   | Remote_ssh
 module Sandbox_profile_tla =
@@ -49,7 +48,6 @@ val network_mode_to_string : network_mode -> string
 val network_mode_of_string : string -> network_mode option
 val all_network_modes : network_mode list
 val valid_network_mode_strings : string list
-val default_sandbox_profile : sandbox_profile
 val default_network_mode_for_profile : sandbox_profile -> network_mode
 type keeper_profile_defaults =
   Keeper_types_profile_defaults.keeper_profile_defaults = {

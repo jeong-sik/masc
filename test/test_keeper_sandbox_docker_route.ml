@@ -310,7 +310,7 @@ let test_turn_sandbox_factory_ignores_mid_turn_registry_profile_drift () =
   @@ fun ~config ~meta ~playground:_ ->
   let local_meta =
     { meta with
-      Keeper_meta_contract.sandbox_profile = Keeper_types_profile_sandbox.Local
+      Keeper_meta_contract.sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh
     }
   in
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
@@ -483,7 +483,7 @@ let test_readonly_ops_route_through_docker () =
 
 let test_cat_legacy_keeper_skips_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup ~sandbox:Keeper_types_profile_sandbox.Local
+  setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
   @@ fun ~config ~meta ~playground ->
   let host_path = Filename.concat playground "scratch/x" in
   ensure_dir (Filename.dirname host_path);
@@ -728,7 +728,7 @@ let check_typed_validation_error needle raw =
     (response_mentions raw "error" needle)
 
 let test_execute_typed_env_wrapper_target_allowed () =
-  setup ~sandbox:Keeper_types_profile_sandbox.Local
+  setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
   @@ fun ~config ~meta ~playground ->
   let raw =
     Keeper_tool_execute_runtime.handle_tool_execute
@@ -748,7 +748,7 @@ let test_execute_typed_env_wrapper_target_allowed () =
    pipeline form and the argv form describe the same program now, so this
    runs instead of being refused for having too few stages. *)
 let test_execute_typed_single_stage_pipeline_runs () =
-  setup ~sandbox:Keeper_types_profile_sandbox.Local
+  setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
   @@ fun ~config ~meta ~playground ->
   let raw =
     Keeper_tool_execute_runtime.handle_tool_execute
@@ -765,7 +765,7 @@ let test_execute_typed_single_stage_pipeline_runs () =
   Alcotest.(check int) "exit status" 0 (parse_status_exit_code raw)
 
 let test_execute_typed_repeated_executable_arg_is_preserved () =
-  setup ~sandbox:Keeper_types_profile_sandbox.Local
+  setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
   @@ fun ~config ~meta ~playground ->
   let raw =
     Keeper_tool_execute_runtime.handle_tool_execute
@@ -809,7 +809,7 @@ let test_execute_typed_pipeline_requires_docker_factory () =
     (parse_string_field raw "sandbox_fallback")
 
 let test_execute_typed_pipeline_uses_local_shell_ir_dispatch () =
-  setup ~sandbox:Keeper_types_profile_sandbox.Local
+  setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
   @@ fun ~config ~meta ~playground ->
   Keeper_tool_execute_runtime.handle_tool_execute
     ~turn_sandbox_factory:None
@@ -863,7 +863,7 @@ let test_execute_routes_through_docker () =
 
 let test_execute_legacy_skips_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup ~sandbox:Keeper_types_profile_sandbox.Local
+  setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
   @@ fun ~config ~meta ~playground ->
   let outside_cwd = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir outside_cwd) @@ fun () ->
@@ -1252,7 +1252,7 @@ let test_execute_git_c_bare_worktrees_is_owned_by_cli () =
     (Sys.file_exists log_path)
 
 let test_execute_git_status_readonly () =
-  setup ~sandbox:Keeper_types_profile_sandbox.Local
+  setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
   @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;

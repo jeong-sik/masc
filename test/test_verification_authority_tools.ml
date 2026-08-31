@@ -43,7 +43,7 @@ let ensure_producer config name =
 ;;
 
 (* A workspace holding one producer keeper, and the surface bound to it. *)
-let with_surface ?(sandbox_profile = "local") f =
+let with_surface ?(sandbox_profile = "docker") f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);

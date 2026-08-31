@@ -39,7 +39,7 @@ let sample_repo =
   }
 ;;
 
-let make_meta ?(sandbox_profile = Keeper_types_profile_sandbox.Local) name =
+let make_meta ?(sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh) name =
   let json =
     `Assoc
       [ "name", `String name

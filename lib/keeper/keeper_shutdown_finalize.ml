@@ -697,7 +697,6 @@ let complete_cleanup
     | Ok meta ->
       Ok
         (match meta.Keeper_meta_contract.sandbox_profile with
-         | Keeper_types_profile.Local -> Keeper_sandbox.Local
          | Docker -> Keeper_sandbox.Docker
          | Micro_vm -> Keeper_sandbox.Micro_vm
          | Remote_ssh -> Keeper_sandbox.Remote_ssh)

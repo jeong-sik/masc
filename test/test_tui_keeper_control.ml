@@ -19,7 +19,7 @@ let health raw =
 let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = false)
     ?(next_action = None) ?(autoboot_enabled = true) ?(proactive_enabled = true)
     ?(runtime_id = "anthropic.claude-opus-5") ?(phase = phase "running")
-    ?(sandbox_profile = "local") name :
+    ?(sandbox_profile = "docker") name :
     Decode.keeper_runtime =
   { kr_name = name
   ; kr_health = health
@@ -496,7 +496,7 @@ let test_empty_error_body_names_the_status () =
    without a field the server always sends. *)
 let gate_row ?(health = "healthy") ?(paused = false)
     ?(next_action = "\"direct_message\"") ?(phase = "running")
-    ?(sandbox_profile = "local") name =
+    ?(sandbox_profile = "docker") name =
   Printf.sprintf
     {|{"runtime_class":"keeper","name":%S,"agent_name":"keeper-%s-agent",
        "meta":{"name":%S,"trace_id":"trace-1","created_at":"2026-08-21T17:32:29Z",

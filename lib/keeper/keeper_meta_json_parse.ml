@@ -403,14 +403,23 @@ let decode_current_meta fields =
        compiles, stores nothing and reads back [true] (#27357). Splitting
        config out of this record is the fix; until then the round-trip
        contract is pinned by test_keeper_meta_config_not_durable. *)
-    let sandbox_profile = default_sandbox_profile in
+    (* A placeholder, and now provably one: the resolver that used to promote
+       it ([Keeper_meta_contract.effective_meta_of_profile_defaults]) refuses
+       when there is no profile source, so no path reads this as authority.
+       It is a backend rather than the old host arm, so a reader that appears
+       later fails closed instead of open. *)
+    let sandbox_profile = Docker in
     let meta : keeper_meta =
       { id = None
       ; name
       ; instructions
       ; sandbox_profile
       ; sandbox_image = None
-      ; network_mode = default_network_mode_for_profile sandbox_profile
+      (* Not derived from the placeholder above: deriving one placeholder from
+         another gave this field [Network_none], and a profile resolved later
+         as [remote_ssh] rejects that outright. [Network_inherit] is the value
+         every profile accepts, which is what a placeholder has to be. *)
+      ; network_mode = Keeper_types_profile.Network_inherit
       ; mention_targets = []
       ; proactive = { enabled = default_proactive_enabled }
       ; always_allow = None

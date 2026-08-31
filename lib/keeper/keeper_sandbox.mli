@@ -8,7 +8,6 @@
 (** {1 Types} *)
 
 type backend =
-  | Local
   | Docker
   | Micro_vm
   | Remote_ssh

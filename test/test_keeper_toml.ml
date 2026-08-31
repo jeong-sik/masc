@@ -920,7 +920,7 @@ let read_text_file path =
 
 let test_bundled_profiles_reject_local_sandbox () =
   (* RFC-0394: the local playground is fail-closed, so no bundled keeper
-     profile may pin sandbox_profile = "local". *)
+     profile may pin sandbox_profile = "docker". *)
   let repo = repo_root () in
   let keepers_dir = Filename.concat repo "config/keepers" in
   Sys.readdir keepers_dir
@@ -1481,7 +1481,7 @@ let test_health_json_surfaces_keeper_toml_unknown_keys () =
     {|
 [keeper]
 name = "alpha"
-sandbox_profile = "local"
+sandbox_profile = "docker"
 typo_field = "unexpected"
 |};
   let request = health_request () in

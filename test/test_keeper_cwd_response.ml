@@ -31,8 +31,8 @@ let host_root_marker = "/tmp/HOST_ROOT_MARKER_NEVER_LEAK"
 let mk_local_sandbox () : Keeper_sandbox.t =
   { keeper_name = "test-local"
   ; sandbox_id = "keeper:test-local"
-  ; backend = Local
-  ; sandbox_profile = "local"
+  ; backend = Remote_ssh
+  ; sandbox_profile = "docker"
   ; network_mode = "inherit"
   ; host_root_rel = ".masc/playground/test-local/"
   ; host_root_abs = host_root_marker ^ "/.masc/playground/test-local"
@@ -67,7 +67,10 @@ let docker_response ~host_cwd ~container_cwd =
     ~container_cwd_for_docker:container_cwd
 ;;
 
-(* --- Local backend: passthrough semantics ------------------- *)
+(* --- Remote_ssh backend: passthrough semantics -------------- *)
+(* These were written against [Local], which no longer exists. Remote_ssh
+   answers with the host bookkeeping path the same way, so the contract
+   they pin still has a subject. *)
 
 let test_local_backend_passthrough () =
   let host_cwd =
@@ -80,7 +83,7 @@ let test_local_backend_passthrough () =
     (Keeper_cwd_response.operator_host r)
 
 let test_local_json_emits_host_path () =
-  (* For Local backend the host path IS the keeper-visible path,
+  (* For this backend the host path IS the keeper-visible path,
      so the JSON response will (correctly) contain it. The
      positive check here is that [to_yojson_response] returns
      exactly the host_cwd string. *)
@@ -132,7 +135,7 @@ let test_of_sandbox_local_dispatch () =
     Keeper_cwd_response.of_sandbox ~sandbox ~host_cwd
       ~container_cwd_for_docker:"IGNORED_FOR_LOCAL_BACKEND"
   in
-  check string "Local of_sandbox returns host path" host_cwd
+  check string "Remote_ssh of_sandbox returns host path" host_cwd
     (Keeper_cwd_response.keeper_visible r);
   let json_str =
     Keeper_cwd_response.to_yojson_response r |> Yojson.Safe.to_string
@@ -220,7 +223,7 @@ let () =
             test_local_backend_passthrough
         ; test_case "local JSON emits host path (== visible)" `Quick
             test_local_json_emits_host_path
-        ; test_case "of_sandbox dispatches Local to host path" `Quick
+        ; test_case "of_sandbox dispatches Remote_ssh to host path" `Quick
             test_of_sandbox_local_dispatch
         ] )
     ; ( "docker-backend"

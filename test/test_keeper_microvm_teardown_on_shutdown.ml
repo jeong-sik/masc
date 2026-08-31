@@ -54,7 +54,7 @@ let test_local_teardown_skips_container_runtimes () =
            ~timeout_sec:0.01
            ~config
            ~keeper_name:"local-teardown-never-probes-container-runtime"
-           ~backend:Masc.Keeper_sandbox.Local
+           ~backend:Masc.Keeper_sandbox.Remote_ssh
            ()
        with
        | Ok () -> ()

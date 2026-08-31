@@ -128,19 +128,6 @@ module Preflight : sig
       (1 GiB). *)
 end
 
-(** {1 Gate — local playground kill switch} *)
-module Gate : sig
-  val env_key : string
-  (** [MASC_EXEC_ALLOW_LOCAL_PLAYGROUND]. *)
-
-  val allow_local_playground : unit -> bool
-  (** Default [false]: the [Local] sandbox profile is rejected at config
-      load, keeper create, and dispatch.  Escape hatch for dev/test. *)
-
-  val disabled_message : string
-  (** Canonical rejection message shared by all gate surfaces. *)
-end
-
 (** {1 Shell_timeout — typed-bucket per-command timeout SSOT}
 
     Per-command-class timeout buckets for the keeper sandbox shell path.

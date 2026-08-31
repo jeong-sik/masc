@@ -57,10 +57,9 @@ let resolve (t : t) ~cwd =
       Option.value t.default_network_override ~default:effective_network
     in
     match effective_profile with
-    | Keeper_types_profile_sandbox.Local -> Local_profile
-    (* Distinct from [Local_profile]: callers must not read this as
-       "host execution is fine". Docker-shaped consumers fail closed on
-       this constructor; SSH dispatch has its own path. *)
+    (* Callers must not read this as "host execution is fine". Docker-shaped
+       consumers fail closed on this constructor; SSH dispatch has its own
+       path. *)
     | Keeper_types_profile_sandbox.Remote_ssh -> Remote_ssh_profile
     (* Both guest profiles share the runtime value; the runtime itself
        branches on [meta.sandbox_profile] for every CLI it builds (start,

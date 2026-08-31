@@ -5,17 +5,17 @@
     and it does not start Docker. *)
 
 type sandbox_profile =
-  | Local
   | Docker
   | Micro_vm
   | Remote_ssh
+(** The profiles a keeper may run under.  There is no host arm: execution
+    outside a boundary is not a profile the fleet offers. *)
 
 exception Invalid_keeper_sandbox_config of string
 
 val sandbox_profile_to_string : sandbox_profile -> string
 val sandbox_profile_of_string : string -> sandbox_profile option
 val valid_sandbox_profile_strings : string list
-val default_sandbox_profile : sandbox_profile
 
 val keeper_toml_path :
   base_path:string ->

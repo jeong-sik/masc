@@ -242,6 +242,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |
+| RFC-chat-references-are-recorded-not-guessed | 대화의 명시 참조와 해석된 언급을 구분해 기록한다 | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
 | RFC-claude-code-context-overflow-bounded-restart | Admit Claude Code bootstrap input without replaying rejected episodes | Draft | - |
 | RFC-claude-setting-sources-opt-in | Claude Code settings layers as a keeper-profile opt-in | Implemented | - |

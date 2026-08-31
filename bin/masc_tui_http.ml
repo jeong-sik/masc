@@ -1381,6 +1381,28 @@ let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_cancel"
     ~body:(Yojson.Safe.to_string payload)
 
+(** POST /api/v1/tools/masc_schedule_create. The payload is the tool's own
+    argument contract; the kind-specific timing fields arrive already
+    assembled by the caller (the form's typed spec builds them), and time
+    syntax, cron text, and timezone spellings stay the tool's to validate.
+    The requester rides as this process, a human operator's terminal. *)
+let post_schedule_create ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(message : string)
+    ~(timing_fields : (string * Yojson.Safe.t) list) :
+    (Yojson.Safe.t, string) result =
+  let payload =
+    `Assoc
+      ([ ("keeper_name", `String keeper_name)
+       ; ("message", `String message)
+       ; ("requested_by_id", `String default_agent_name)
+       ; ("requested_by_kind", `String "human_operator")
+       ; ("source", `String "operator_request")
+       ]
+      @ timing_fields)
+  in
+  post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_create"
+    ~body:(Yojson.Safe.to_string payload)
+
 (** POST /api/v1/verification/verdict — the operator's verdict on a task
     awaiting verification. The route demands a reason with a reject and takes
     none with an approve, so the variant carries it only where it rides. The

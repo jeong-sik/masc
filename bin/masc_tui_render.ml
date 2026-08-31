@@ -3523,6 +3523,23 @@ let render_schedule_list (state : state) =
   box_line buf cols header;
   box_divider buf cols;
 
+  (* The create form sits above the list, drawn from the same rows the key
+     handler counts. Its rejection row rides with it, and the list below
+     shrinks by exactly what the two of them drew. *)
+  let form_rows =
+    Masc_tui_types.schedule_create_form_rows state.schedule_create_form
+  in
+  List.iter (fun row -> box_line buf cols row) form_rows;
+  (match Terminal_text.optional_single_line state.schedule_create_error with
+   | Some err ->
+       box_line buf cols
+         ((Theme.bad ()) ^ "  " ^ fit_width err (cols - 8) ^ Ansi.reset)
+   | None -> ());
+  let form_row_count =
+    List.length form_rows
+    + (match state.schedule_create_error with Some _ -> 1 | None -> 0)
+  in
+
   (match state.schedules with
    | None ->
        (match Terminal_text.optional_single_line state.schedules_error with
@@ -3530,7 +3547,7 @@ let render_schedule_list (state : state) =
             box_line buf cols (data_unreliable_row ~cols err)
         | None ->
             box_line buf cols (Ansi.dim ^ page_unread_note ^ Ansi.reset));
-       for _ = 1 to rows - boxed_surface_chrome_rows do
+       for _ = 1 to rows - boxed_surface_chrome_rows - form_row_count do
          box_empty buf cols
        done
    | Some snapshot ->
@@ -3544,7 +3561,7 @@ let render_schedule_list (state : state) =
           | None ->
               box_line buf cols
                 ((Theme.bad ()) ^ "  (schedule store unreadable)" ^ Ansi.reset));
-         for _ = 1 to rows - boxed_surface_chrome_rows do
+         for _ = 1 to rows - boxed_surface_chrome_rows - form_row_count do
            box_empty buf cols
          done
        end else begin
@@ -3571,7 +3588,7 @@ let render_schedule_list (state : state) =
          let count = List.length snapshot.scs_rows in
          if count = 0 then begin
            box_line buf cols (Ansi.dim ^ "  (no scheduled automation)" ^ Ansi.reset);
-           for _ = 1 to rows - 12 do
+           for _ = 1 to rows - 12 - form_row_count do
              box_empty buf cols
            done
          end else begin
@@ -3588,7 +3605,7 @@ let render_schedule_list (state : state) =
                16 snapshot.scs_rows
              |> min 40
            in
-           let content_height = rows - 14 in
+           let content_height = rows - 14 - form_row_count in
            let scroll_offset =
              if state.schedule_cursor >= content_height then
                state.schedule_cursor - content_height + 1

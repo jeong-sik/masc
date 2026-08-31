@@ -185,6 +185,8 @@ let for_surface = function
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "x" "cancel" ~help:"arm / confirm cancellation"
+      ; b Act "a" "new wake"
+          ~help:"open the create form; enter advances, esc abandons"
       ; b Act "Y" "copy link" ~help:"copy the selected schedule reference"
       ]
       @ listing_meta

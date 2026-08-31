@@ -9,6 +9,12 @@ with the reason instead of retrying. Returns JSON {found, result} where \
 result is the page tool's MCP-style content."""
 additional_properties = false
 
+# Held back from the request until the model asks for it by name.
+# 2026-08-25..08-31 across the fleet: called 2 times in 2 turns, 1193 bytes of
+# schema on every request. Deferring saves those bytes on ~254 requests
+# a day and costs at most 2 extra requests over the same week.
+defer_loading = true
+
 [[params]]
 name = "page"
 type = "string"

@@ -378,6 +378,16 @@ let add_event (state : state) event_type content =
       state.overview_event_scroll;
   state.events <- events
 
+(* An outcome the operator pressed a key for, rather than something that
+   happened on its own. It goes to the event log like any other event, and to
+   the footer, because the log is drawn by Overview alone: the operator who
+   pressed [a] on Repos stood on the one surface that could not show them
+   whether the registration landed, the declaration was refused, or the
+   editor never started. *)
+let report_action (state : state) event_type content =
+  add_event state event_type content;
+  state.last_action <- Some (content, Unix.gettimeofday ())
+
 (** HTTP JSON decoding helpers. These intentionally fail closed for the TUI
     dashboard surfaces: an empty list means the API really returned an empty
     list, not that a malformed payload was silently dropped. *)
@@ -437,6 +447,17 @@ let decode_board_post ?(require_body = false) json =
   let* bp_created_at =
     required_display_any_field json [ "created_at_iso"; "created_at" ]
   in
+  (* The numeric field, not its ISO twin: the list draws an age, and parsing a
+     formatted timestamp back into one would be a second reading of the same
+     fact. Absent reads as the creation time, which is what an untouched post's
+     [updated_at] holds anyway -- so a server too old to send it degrades to
+     "as old as it looks" rather than to a blank column. *)
+  let updated_at =
+    match Yojson.Safe.Util.member "updated_at" json with
+    | `Float value -> Some value
+    | `Int value -> Some (Float.of_int value)
+    | _ -> None
+  in
   let* bp_hearth = optional_string_field json "hearth" in
   let* raw_kind = optional_string_field json "post_kind" in
   (* Optional, and an unknown value is carried rather than rejected: the list
@@ -459,6 +480,10 @@ let decode_board_post ?(require_body = false) json =
       bp_votes;
       bp_comment_count;
       bp_created_at;
+      bp_updated_at =
+        (match updated_at with
+         | Some updated_at -> updated_at
+         | None -> Option.value (float_of_string_opt bp_created_at) ~default:0.);
       bp_hearth;
       bp_kind;
     }
@@ -468,12 +493,15 @@ let decode_board_posts json_list =
 
 let decode_board_comment json =
   let* bc_id = required_string_field json "id" in
+  (* Optional because a top-level comment has none, not because the field may
+     be absent: the wire always carries the key and answers [null] there. *)
+  let* bc_parent_id = optional_string_field json "parent_id" in
   let* bc_author = required_string_field json "author" in
   let* bc_content = required_string_field json "content" in
   let* bc_created_at =
     required_display_any_field json [ "created_at_iso"; "created_at" ]
   in
-  Ok { bc_id; bc_author; bc_content; bc_created_at }
+  Ok { bc_id; bc_parent_id; bc_author; bc_content; bc_created_at }
 
 let decode_board_comments json_list =
   decode_list "comments" decode_board_comment json_list
@@ -654,9 +682,9 @@ let load_schedules ~(host : string) ~(port : int) :
 
 (** Load board post list from /api/v1/board *)
 let load_board_list ~(host : string) ~(port : int)
-    ~(sort_by : string) :
+    ~(sort_by : string) ~(hearth : string option) :
     (board_post list, string) result =
-  match fetch_board ~host ~port ~sort_by with
+  match fetch_board ~host ~port ~sort_by ~hearth with
   | Error err -> Error ("board load failed: " ^ err)
   | Ok json ->
       let* posts = required_list_field json "posts" in

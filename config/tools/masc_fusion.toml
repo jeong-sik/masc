@@ -14,6 +14,12 @@ web_search / web_fetch. Gated by runtime.toml [fusion] (disabled by \
 default)."""
 additional_properties = false
 
+# Held back from the request until the model asks for it by name.
+# 2026-08-25..08-31 across the fleet: called 5 times in 5 turns, 2653 bytes of
+# schema on every request. Deferring saves those bytes on ~254 requests
+# a day and costs at most 5 extra requests over the same week.
+defer_loading = true
+
 [[params]]
 name = "prompt"
 type = "string"

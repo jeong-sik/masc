@@ -67,6 +67,41 @@ let severity_tone = function
   | "bad" -> Refused
   | _ -> Note
 
+(* Which thing the row is about, and what it is.
+
+   The server sends six fields and the pane drew two of them -- the kind and
+   the summary -- so a goal with thirteen task rows drew "task  todo" thirteen
+   times. The id and the title were in the payload the whole time.
+
+   [lane] is the typed reference ("task:task-1013", "approval:appr-...",
+   "keeper:<name>", "goal"). Its id half is the subject where it has one; a
+   lane with no id is a goal's own event, and there the kind is what names it,
+   so that is what the column keeps rather than the bare word "goal". *)
+let subject (event : Tui_decode.goal_timeline_event) =
+  match String.index_opt event.gt_lane ':' with
+  | Some index ->
+      String.sub event.gt_lane (index + 1)
+        (String.length event.gt_lane - index - 1)
+  | None -> event.gt_kind
+
+(* Wide enough for "task-1013" and a uuid-shaped approval id's readable head.
+   The column is padded so the titles start at one place down the block; what
+   overruns is cut by [fit_width], which marks the cut. *)
+let subject_column = 18
+
+(* Title first, state after: the title names the row and the summary qualifies
+   it. A task's summary is its status ("todo"), an approval's is its input
+   preview, a keeper's is its event summary -- none of them identify the row on
+   their own, which is why the pane read as a list of statuses with nothing
+   attached. A summary that only repeats the title adds nothing and is
+   dropped. *)
+let headline (event : Tui_decode.goal_timeline_event) =
+  let title = String.trim event.gt_title in
+  let summary = String.trim event.gt_summary in
+  if String.equal summary "" || String.equal summary title then title
+  else if String.equal title "" then summary
+  else title ^ "  \xc2\xb7 " ^ summary
+
 (* The goal's merged event timeline, appended after [body] so it rides the
    same scroll. Loaded lazily on detail entry; every non-ready state says
    what it is instead of rendering as an empty history. *)
@@ -84,8 +119,9 @@ let timeline ~width ~goal_id
               (fun (event : Tui_decode.goal_timeline_event) ->
                 let tone = severity_tone event.gt_severity in
                 wrapped ~width tone
-                  (Printf.sprintf "  %s  %-14s %s" (short_ts event.gt_ts)
-                     event.gt_kind event.gt_summary))
+                  (Printf.sprintf "  %s  %s  %s" (short_ts event.gt_ts)
+                     (Message_layout.fit_width (subject event) subject_column)
+                     (headline event)))
               events
         | Ok (Tui_decode.Goal_timeline_unavailable detail) ->
             wrapped ~width Unreadable ("  timeline unavailable: " ^ detail)

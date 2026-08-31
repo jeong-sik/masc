@@ -6,6 +6,10 @@ MASC_VOICE_REALTIME_WS_URL points at a configured realtime audio bridge; \
 otherwise the tool fails closed instead of pretending a duplex stream \
 exists."""
 
+# Held back from the request until the model asks for it by name. Not
+# called once on 2026-08-29 or 2026-08-30 across the fleet.
+defer_loading = true
+
 [[params]]
 name = "session_name"
 type = "string"

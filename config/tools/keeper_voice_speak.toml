@@ -7,6 +7,10 @@ messages within 30s return status='dedup_skipped' without playing. TTS or \
 playback failures are returned as errors (ok=false), not silent successes. \
 Concurrent calls are serialized by a global lock."""
 
+# Held back from the request until the model asks for it by name. Not
+# called once on 2026-08-29 or 2026-08-30 across the fleet.
+defer_loading = true
+
 [[params]]
 name = "message"
 type = "string"

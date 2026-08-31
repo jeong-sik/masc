@@ -5729,13 +5729,20 @@ let decode_asks_snapshot json =
 
 (* Goal detail timeline (GET /api/v1/dashboard/goals/detail). The server
    merges task/approval/keeper/goal events into one list of uniform
-   six-field rows; the TUI carries the four it renders. [timeline] is
+   six-field rows, and the TUI carries all six. It used to keep four, which
+   dropped exactly the two that say which thing the row is about: a goal with
+   thirteen task rows drew "task  todo" thirteen times, and the id and title
+   the server had already sent were thrown away in the decoder. [timeline] is
    [`Null] exactly when the approval-queue store could not be read — the
    same discriminated failure the gate snapshot carries — so that case is
    an explicit constructor, never an empty list. *)
 type goal_timeline_event = {
   gt_ts : string;
   gt_kind : string;
+  gt_lane : string;
+      (** The row's subject as a typed reference: ["task:task-1013"],
+          ["approval:appr-…"], ["keeper:<name>"], ["goal"]. *)
+  gt_title : string;
   gt_summary : string;
   gt_severity : string;  (** producer emits ok | warn | bad; open for renderers *)
 }
@@ -5752,9 +5759,11 @@ let decode_goal_timeline_event json =
   in
   let* gt_ts = required "ts" in
   let* gt_kind = required "kind" in
+  let* gt_lane = required "lane" in
+  let* gt_title = required "title" in
   let* gt_summary = required "summary" in
   let* gt_severity = required "severity" in
-  Ok { gt_ts; gt_kind; gt_summary; gt_severity }
+  Ok { gt_ts; gt_kind; gt_lane; gt_title; gt_summary; gt_severity }
 
 let decode_goal_detail_timeline json =
   match member "timeline" json with

@@ -1090,6 +1090,13 @@ let () =
     | _ -> None)
 ;;
 
+let refresh_dashboard_for_keeper_lifecycle ~config ~keeper_name event =
+  Server_dashboard_http_keeper_api.refresh_keeper_execution_surfaces
+    ~config
+    ~name:keeper_name
+    event
+;;
+
 let install_workspace_message_mutation_invalidation
       ~invalidate_full_health_snapshot
       ()
@@ -1365,6 +1372,7 @@ let start_keeper_loops_owned
     ~sw
     ~on_error:(log_dashboard_fiber_crash "keeper lifecycle listener")
     (fun () ->
+    let config = Mcp_server.workspace_config state in
     let rec loop () =
       (try
          let events = Runtime_event_bus.drain keeper_lifecycle_sub in
@@ -1383,9 +1391,16 @@ let start_keeper_loops_owned
                         ~phase:(Safe_ops.json_string_opt "phase" payload)
                     with
                     | Some event ->
-                      Server_dashboard_http.patch_keeper_dependent_caches
+                      (* Lifecycle events also arrive from MCP and shutdown
+                         completion, not only the dashboard POST handlers.
+                         Drop their source snapshot and parameterized caches
+                         before patching the current execution row, so a
+                         purged Keeper cannot be rebuilt from the five-second
+                         snapshot that still names its removed meta. *)
+                      refresh_dashboard_for_keeper_lifecycle
+                        ~config
                         ~keeper_name
-                        ~event
+                        event
                     | None ->
                       Otel_metric_store.inc_counter
                         Otel_metric_store.metric_keeper_lifecycle_malformed
@@ -1980,6 +1995,8 @@ module For_testing = struct
 
   let begin_keeper_loops_start = acquire_keeper_loops_start
   let finish_keeper_loops_start = finish_keeper_loops_start
+  let refresh_dashboard_for_keeper_lifecycle =
+    refresh_dashboard_for_keeper_lifecycle
 end
 
 

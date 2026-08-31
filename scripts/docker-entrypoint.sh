@@ -39,9 +39,15 @@ if [ -n "$TEAM" ] && [ "$TEAM" != "none" ]; then
   fi
 fi
 
-# 3. Provider key sanity (non-fatal: the server also reports this on /health).
+# 3. Provider key sanity. Keep the server/dashboard available, but do not let
+# the shipped classic team send known-unauthenticated autonomous turns unless
+# the operator explicitly overrides the global keeper bootstrap gate.
 if [ -z "${OLLAMA_CLOUD_API_KEY:-}" ]; then
   log "warning: OLLAMA_CLOUD_API_KEY is unset; the default flash model will not authenticate"
+  if [ "$TEAM" = "classic" ] && [ -z "${MASC_KEEPER_BOOTSTRAP_ENABLED:-}" ]; then
+    export MASC_KEEPER_BOOTSTRAP_ENABLED=false
+    log "classic keeper autoboot disabled until OLLAMA_CLOUD_API_KEY is set"
+  fi
 fi
 
 # 4. Hand off to the server. MASC_CONFIG_DIR stays unset so config resolves to

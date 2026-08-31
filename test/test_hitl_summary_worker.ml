@@ -2243,6 +2243,77 @@ let test_require_human_head_does_not_stop_owner_drain () =
        check int "both same-owner entries judged once" 2 (F.post_count server))
 ;;
 
+let test_orphaned_start_reservation_recovers_a_worker () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-orphan-start-reservation" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       with_hitl_concurrency 1 @@ fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let server =
+         F.start_server
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       publish_lane
+         [ "hitl-orphan-start-reservation" ]
+         (F.resolver_snapshot
+            ~source:"hitl-orphan-start-reservation"
+            [ { id = "hitl-orphan-start-reservation"
+              ; base_url = server.base_url
+              }
+            ]);
+       select_auto_judge_mode base_path;
+       let entry = pending_entry ~input_tag:"orphan-start" ~base_path () in
+       (* A hard restart strands the durable start reservation: reserve wrote it,
+          but the in-memory admission and the settle-to-identity-unbound fiber
+          both died with the process, so no live claim remains. *)
+       (match
+          Q.mark_summary_attempt_pre_worker_unavailable
+            ~base_path
+            ~id:entry.id
+            ~input_hash:entry.input_hash
+            ~sequence:entry.sequence
+            ~reason_code:QT.Summary_pre_worker_start_reserved
+            ~operator_detail:Q.summary_attempt_start_reserved_operator_detail
+        with
+        | Ok true -> ()
+        | Ok false -> fail "start reservation was not stored"
+        | Error error -> fail (Q.exact_attempt_error_to_string error));
+       (match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
+        | Some
+            { summary_attempt_disposition =
+                QT.Summary_attempt_pre_worker_unavailable
+                  { reason_code = QT.Summary_pre_worker_start_reserved; _ }
+            ; _
+            } ->
+          ()
+        | _ -> fail "the orphan was not left in a start reservation");
+       let resumed = Gate.resume_persisted_auto_judges ~base_path in
+       check
+         (list string)
+         "boot recovery reclaims the orphaned reservation and starts a worker"
+         [ entry.id ]
+         resumed.started_ids;
+       await_condition
+         ~clock
+         ~remaining:100
+         ~failure:"reclaimed reservation did not reach the provider"
+         (fun () -> F.post_count server = 1);
+       await_condition
+         ~clock
+         ~remaining:100
+         ~failure:"reclaimed reservation did not complete"
+         (fun () ->
+            Option.is_none
+              (Q.For_testing.get_pending_entry_unchecked ~id:entry.id)))
+;;
+
 let test_judge_effect_prompt_comes_from_registry () =
   Prompt_registry.set_markdown_dir
     (Masc_test_deps.source_path "config/prompts");
@@ -2879,6 +2950,10 @@ let () =
             "Require_human head does not stop owner drain"
             `Quick
             test_require_human_head_does_not_stop_owner_drain
+        ; test_case
+            "orphaned start reservation recovers a worker on restart"
+            `Quick
+            test_orphaned_start_reservation_recovers_a_worker
         ] )
     ; ( "cli_lane_slots"
       , [ test_case

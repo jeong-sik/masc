@@ -4,3 +4,9 @@ List all documents in the agent knowledge library with title, source, \
 author, created date, and tags. Use when browsing available knowledge or \
 checking if a topic is already documented. Pair with masc_library_read to \
 fetch a specific document or masc_library_search to query by content."""
+
+# Held back from the request until the model asks for it by name.
+# 2026-08-25..08-31 across the fleet: called 3 times in 3 turns, 293 bytes of
+# schema on every request. Deferring saves those bytes on ~254 requests
+# a day and costs at most 3 extra requests over the same week.
+defer_loading = true

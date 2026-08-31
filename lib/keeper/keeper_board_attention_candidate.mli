@@ -20,14 +20,30 @@ type delivery_failure =
   ; failed_at : float
   }
 
+type judgment_source =
+  | Exact_attempt of
+      { call_id : string
+      ; plan_fingerprint : string
+      ; request_body_sha256 : string
+      }
+      (** An admitted catalog slot answered over HTTP. These three name the
+          AGENT_CORE receipt of that attempt, and completion matches them
+          against the durable pre-dispatch binding. *)
+  | Cli_lane_slot
+      (** A [cli_slots] official client answered as a one-shot after every
+          catalog slot was exhausted (RFC cli-runtimes-as-lane-slots). No
+          AGENT_CORE attempt was allocated, so no receipt exists to name and
+          none is invented: the slot id is the whole provenance. *)
+
 type judgment =
   { verdict : Keeper_board_attention_judgment.t
   ; slot_id : string
-  ; call_id : string
-  ; plan_fingerprint : string
-  ; request_body_sha256 : string
+  ; source : judgment_source
   ; judged_at : float
   }
+(** [slot_id] names whichever slot answered; [source] says which kind of slot
+    it was, because the two carry different evidence and only one of them has
+    a receipt to bind a completion to. *)
 
 type delivery =
   | Enqueued_to_keeper_lane

@@ -1,0 +1,87 @@
+{
+  "schema": "masc.context_recovery.runtime_poc.v1",
+  "collected_at": "2026-08-30T11:50:01+09:00",
+  "source_head": "b4e0f6073909b2f84f71f15957b9368e077cdbb9",
+  "source_ahead_of_origin_main": 0,
+  "collection_worktree_state": "The runtime binary source was b4e0f60739; harness, cases, and reports were an uncommitted worktree diff during collection and are carried by the later evidence commit.",
+  "baseline_binary_sha256": "5b27d8e914fe520ac0cefbff81f4fe9287321cd8b33e201960025d297a0a2cab",
+  "runtime_ports": [9471, 9472, 9473, 9474, 9475, 9476, 9477, 9478, 9479, 9480, 9481, 9482, 9483],
+  "runtime_ports_listening_after_collection": [],
+  "models": [
+    "ollama:qwen3:8b",
+    "ollama:hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL"
+  ],
+  "experiments": [
+    {
+      "id": "prompt-warning",
+      "model": "ollama:qwen3:8b",
+      "runs": 3,
+      "passes": 0,
+      "completed_runs": 2,
+      "provider_errors": 1,
+      "decision": "rejected",
+      "observation": "The completed state-resolution run still wrote us-west-1, identical to the seeded baseline.",
+      "report_sha256": "2d7ed78170c187b53e574852bf7ba37574f43aec847f65adf18c2d904d541749",
+      "prompt_sha256": "eb82eac3990e9a20b413c4a6198dee3ef96063b6d6b5c7d561b1d2cbf6c6bf56"
+    },
+    {
+      "id": "state-anchored-operator-note",
+      "model": "ollama:qwen3:8b",
+      "runs": 3,
+      "passes": 0,
+      "completed_runs": 2,
+      "provider_errors": 1,
+      "decision": "rejected",
+      "observation": "Prompt capture contained memory_os_recall followed by operator_note, but completed workspaces stayed red.",
+      "report_sha256": "2d7ed78170c187b53e574852bf7ba37574f43aec847f65adf18c2d904d541749",
+      "prompt_sha256": "2a19ac0d2faf0b5a7720fa5ae2444af3a55fa2fbb29512a8791a3c0a999c202a"
+    },
+    {
+      "id": "filter-retract-refresh",
+      "model": "ollama:qwen3:8b",
+      "runs": 1,
+      "passes": 0,
+      "completed_runs": 1,
+      "provider_errors": 0,
+      "decision": "mechanism-proven-outcome-failed",
+      "observation": "Revision 1 stale claim was removed in revision 2 and absent from last-prompt; the live ap-northeast-2 claim was present, but the model edited service.toml instead of current_region.txt.",
+      "report_sha256": "a49bd91c0abc0501eaae4557ded26c7d15b06f08570e6a561587a6b4c1ee99c8",
+      "prompt_sha256": "86b1982d6da153f44cca3aeac10d273dc858ae4de11003a8ee7eba8c35345699"
+    },
+    {
+      "id": "model-cross-check-control",
+      "model": "ollama:hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL",
+      "runs": 1,
+      "passes": 1,
+      "completed_runs": 1,
+      "provider_errors": 0,
+      "decision": "control-capable",
+      "observation": "The state-resolution control passed without recalled memory.",
+      "report_sha256": "3c65412d3ea29578ef6ac90ef60824e782091d76792a5245234accd0cafb5a81"
+    },
+    {
+      "id": "model-cross-check-seeded",
+      "model": "ollama:hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL",
+      "runs": 2,
+      "passes": 2,
+      "completed_runs": 2,
+      "provider_errors": 0,
+      "decision": "already-resistant-at-n1",
+      "observation": "State resolution and premise resistance each passed once with stale recall injected.",
+      "state_prompt_sha256": "cb486eb0cd9665f554bb04b670912d6c240dc0a1f54b9dd7ee6eed1a743a0b7c"
+    },
+    {
+      "id": "model-cross-check-filtered",
+      "model": "ollama:hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL",
+      "runs": 1,
+      "passes": 1,
+      "completed_runs": 1,
+      "provider_errors": 0,
+      "decision": "mechanism-and-outcome-proven-at-n1",
+      "observation": "Revision 2 contained only the live probe claim and the workspace verifier passed.",
+      "report_sha256": "3c65412d3ea29578ef6ac90ef60824e782091d76792a5245234accd0cafb5a81",
+      "prompt_sha256": "d7eff73e652804f8fde444514051d69d9b5aa7ad97aa456013dcbec753881c67"
+    }
+  ],
+  "conclusion": "Do not merge prompt-only wording as a fix. Keep the benchmark and pursue source-bound retraction before prompt assembly; separate memory-state correctness from tool-execution capability. All sample sizes are exploratory and below the report's min-runs threshold."
+}

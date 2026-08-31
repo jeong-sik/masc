@@ -1,0 +1,10 @@
+{
+  "id": "l3-py-cache-invalidation",
+  "level": "L3",
+  "lang": "python",
+  "timeout_sec": 600,
+  "verify": "verify.sh",
+  "build": "build.sh",
+  "prompt": "check.sh fails: Store in store.py memoizes size() but never invalidates the cache on put() or delete(), so after the size is read once it keeps returning a stale value. inventory.py warms the cache before inserting, exposing the bug. Fix store.py so size() reflects every mutation. Do not modify check.sh or inventory.py. Reply DONE once `bash check.sh` prints PASS.",
+  "description": "Bug fix: memoized size() is never invalidated on write, returning stale values."
+}

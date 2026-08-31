@@ -21,6 +21,27 @@ type t =
         dispatch never used (PR #28219 review). *)
   }
 
+type dispatch_credential_error =
+  | Required_env_credential_missing of
+      { provider_id : string
+      ; env_key : string
+      }
+  | Declared_credential_unavailable of
+      { provider_id : string
+      ; carrier : string
+      }
+
+val dispatch_credential_error_to_string : dispatch_credential_error -> string
+
+val validate_dispatch_credential :
+  provider_config:Llm_provider.Provider_config.t ->
+  t ->
+  (unit, dispatch_credential_error) result
+(** Fail closed immediately before an Agent Core dispatch when the runtime
+    declares a credential but the final provider config has no secret. A
+    credential-free provider remains valid. This check intentionally happens
+    after materialization so dashboard missing-auth projection stays intact. *)
+
 type config_source_revision = private Config_source_revision of string
 type config_commit_order = private Config_commit_order of int64
 

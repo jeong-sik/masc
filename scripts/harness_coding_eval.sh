@@ -20,6 +20,7 @@ MODELS="${CODING_EVAL_MODELS:-}"
 CASE_IDS="${CODING_EVAL_CASE_IDS:-}"
 REPEATS="${CODING_EVAL_REPEATS:-2}"
 PASS_AT_K="${CODING_EVAL_K:-1}"
+MEMORY_MODE="${CODING_EVAL_MEMORY_MODE:-seeded}"
 PORT="${CODING_EVAL_PORT:-}"
 POLL_INTERVAL_SEC="${CODING_EVAL_POLL_INTERVAL_SEC:-2}"
 TIMEOUT_SEC="${CODING_EVAL_MCP_TIMEOUT_SEC:-30}"
@@ -37,6 +38,7 @@ Usage:
   scripts/harness_coding_eval.sh --models provider:model[,provider:model]
                                  [--cases DIR] [--case-ids CSV] [--repeats N]
                                  [--out DIR] [--k N] [--port N]
+                                 [--memory-mode seeded|verified|filtered|source-bound|off]
 
 Runs each selected coding case against each model, records one evidence row
 per run into <out>/runs.jsonl, and summarizes with coding_eval_report_cli.
@@ -64,11 +66,17 @@ while [[ $# -gt 0 ]]; do
     --case-ids) CASE_IDS="$2"; shift 2 ;;
     --repeats) REPEATS="$2"; shift 2 ;;
     --k) PASS_AT_K="$2"; shift 2 ;;
+    --memory-mode) MEMORY_MODE="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage; exit 2 ;;
   esac
 done
+
+if [[ "${MEMORY_MODE}" != "seeded" && "${MEMORY_MODE}" != "verified" && "${MEMORY_MODE}" != "filtered" && "${MEMORY_MODE}" != "source-bound" && "${MEMORY_MODE}" != "off" ]]; then
+  echo "--memory-mode must be seeded, verified, filtered, source-bound, or off, got: ${MEMORY_MODE}" >&2
+  exit 2
+fi
 
 require_cmd jq
 require_cmd curl
@@ -111,6 +119,16 @@ selected_case_dirs() {
       printf '%s\n' "${dir%/}"
     fi
   done
+}
+
+context_recovery_cases_selected() {
+  local case_dir
+  while IFS= read -r case_dir; do
+    if [[ -f "${case_dir}/memory.json" || -f "${case_dir}/source-memory.json" ]]; then
+      return 0
+    fi
+  done < <(selected_case_dirs)
+  return 1
 }
 
 # Runtime and model ids must match [A-Za-z0-9._-]+; the raw provider tag
@@ -204,6 +222,10 @@ start_live_server() {
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_KEEPER_BOOTSTRAP_ENABLED="0"
+    if context_recovery_cases_selected; then
+      export MASC_KEEPER_MEMORY_OS_RECALL="1"
+      export MASC_KEEPER_MEMORY_OS_LIBRARIAN="0"
+    fi
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
@@ -229,6 +251,10 @@ start_live_server() {
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_KEEPER_BOOTSTRAP_ENABLED="0"
+    if context_recovery_cases_selected; then
+      export MASC_KEEPER_MEMORY_OS_RECALL="1"
+      export MASC_KEEPER_MEMORY_OS_LIBRARIAN="0"
+    fi
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
@@ -293,6 +319,212 @@ stop_keeper_best_effort() {
   local keeper_name="$1"
   call_mcp_tool 9000 "masc_keeper_down" \
     "$(jq -cn --arg name "${keeper_name}" '{name:$name}')" 20 >/dev/null 2>&1 || true
+}
+
+# A case-local memory.json lets the same real workspace run with and without a
+# stale Memory OS fact.  The file is harness input, not part of case.json, so
+# the coding case contract and pass authority stay unchanged.  The generated
+# snapshot is the production current-only wire shape and is copied into the run
+# directory before the keeper assembles its first task prompt.
+seed_case_memory() {
+  local case_dir="$1" keeper_name="$2" run_dir="$3"
+  local declaration="${case_dir}/memory.json"
+  if [[ "${MEMORY_MODE}" == "off" || ! -f "${declaration}" ]]; then
+    return 1
+  fi
+  if ! jq -e '
+      (.age_sec | type == "number" and . >= 0)
+      and (.claims | type == "array" and length > 0)
+      and all(.claims[]; type == "string" and length > 0)
+    ' "${declaration}" >/dev/null; then
+    echo "invalid context-recovery memory declaration: ${declaration}" >&2
+    return 2
+  fi
+
+  local age_sec observed_at facts snapshot_path
+  age_sec="$(jq -r '.age_sec | floor' "${declaration}")"
+  observed_at=$(( $(date +%s) - age_sec ))
+  facts="$(jq -c --argjson observed_at "${observed_at}" '
+    [.claims[] | {claim: ., category: "fact", first_seen: $observed_at}]
+  ' "${declaration}")"
+  # This harness sets MASC_CONFIG_DIR, and Config_dir_resolver deliberately
+  # resolves Keeper Memory OS beside the keeper profiles in that directory.
+  # Writing under TARGET_DIR/.masc/keepers would create a valid but unread
+  # shadow snapshot.
+  snapshot_path="${CONFIG_DIR}/keepers/${keeper_name}.memory-current.json"
+  mkdir -p "$(dirname "${snapshot_path}")"
+  jq -n \
+    --argjson observed_at "${observed_at}" \
+    --argjson facts "${facts}" \
+    '{
+      revision: 1,
+      updated_at: $observed_at,
+      source: {kind: "explicit_write", trace_id: "context-recovery-seed"},
+      facts: $facts,
+      change: {added: $facts, removed: [], retained: 0}
+    }' > "${snapshot_path}"
+  cp "${snapshot_path}" "${run_dir}/memory-seed.json"
+  return 0
+}
+
+seed_case_source_memory() {
+  local case_dir="$1" keeper_name="$2" run_dir="$3"
+  local declaration="${case_dir}/source-memory.json"
+  [[ "${MEMORY_MODE}" == "source-bound" && -f "${declaration}" ]] || return 1
+  if ! jq -e '
+      (.age_sec | type == "number" and . >= 0)
+      and (.source_path | type == "string" and length > 0)
+      and (.stale_source | type == "string")
+      and (.claim | type == "string" and length > 0)
+    ' "${declaration}" >/dev/null; then
+    echo "invalid source-bound memory declaration: ${declaration}" >&2
+    return 2
+  fi
+
+  local age_sec observed_at source_path claim digest snapshot_path
+  age_sec="$(jq -r '.age_sec | floor' "${declaration}")"
+  observed_at=$(( $(date +%s) - age_sec ))
+  source_path="$(jq -r '.source_path' "${declaration}")"
+  claim="$(jq -r '.claim' "${declaration}")"
+  # Keep the declared bytes exact. Command substitution strips trailing
+  # newlines, so only the digest output may cross that boundary; the source
+  # bytes stream directly from jq into shasum.
+  digest="sha256:$(jq -rj '.stale_source' "${declaration}" | shasum -a 256 | awk '{print $1}')"
+  snapshot_path="${CONFIG_DIR}/keepers/${keeper_name}.memory-source-current.json"
+  mkdir -p "$(dirname "${snapshot_path}")"
+  jq -n \
+    --argjson observed_at "${observed_at}" \
+    --arg source_path "${source_path}" \
+    --arg digest "${digest}" \
+    --arg claim "${claim}" \
+    '{
+      revision: 1,
+      updated_at: $observed_at,
+      trace_id: "context-recovery-source-seed",
+      facts: [{
+        claim: $claim,
+        first_seen: $observed_at,
+        source: {kind: "file", path: $source_path, sha256: $digest}
+      }],
+      invalidations: []
+    }' > "${snapshot_path}"
+  cp "${snapshot_path}" "${run_dir}/memory-source-seed.json"
+}
+
+capture_last_prompt() {
+  local case_dir="$1" keeper_name="$2" run_dir="$3"
+  local declaration="${case_dir}/memory.json"
+  local capture_path="${run_dir}/last-prompt.json"
+  if ! curl -fsS -m 20 \
+    "http://127.0.0.1:${PORT}/api/v1/keepers/${keeper_name}/last-prompt" \
+    -H "Authorization: Bearer ${MCP_TOKEN}" > "${capture_path}"; then
+    return 1
+  fi
+  if [[ "${MEMORY_MODE}" == "source-bound" ]]; then
+    declaration="${case_dir}/source-memory.json"
+    local stale_claim source_path
+    stale_claim="$(jq -r '.claim' "${declaration}")"
+    source_path="$(jq -r '.source_path' "${declaration}")"
+    jq -e --arg claim "${stale_claim}" --arg source_path "${source_path}" '
+      ([.. | strings | select(contains($claim))] | length) == 0
+      and ([.. | strings | select(contains("reason=source_changed"))] | length) > 0
+      and ([.. | strings | select(contains($source_path))] | length) > 0
+    ' "${capture_path}" >/dev/null
+    return
+  fi
+  while IFS= read -r claim; do
+    local matches
+    matches="$(jq --arg claim "${claim}" '
+      [.. | strings | select(contains($claim))] | length
+    ' "${capture_path}")"
+    if [[ "${MEMORY_MODE}" == "filtered" ]]; then
+      [[ "${matches}" == "0" ]] || return 1
+    else
+      [[ "${matches}" -gt 0 ]] || return 1
+    fi
+  done < <(jq -r '.claims[]' "${declaration}")
+  if [[ "${MEMORY_MODE}" == "verified" || "${MEMORY_MODE}" == "filtered" ]]; then
+    local probe_output="${run_dir}/live-probe.txt"
+    [[ -s "${probe_output}" ]] || return 1
+    if ! jq -e --rawfile probe "${probe_output}" '
+      [.. | strings | select(contains($probe | rtrimstr("\n")))] | length > 0
+    ' "${capture_path}" >/dev/null; then
+      return 1
+    fi
+  fi
+}
+
+capture_recreated_source_memory() {
+  local case_dir="$1" keeper_name="$2" run_dir="$3" workspace="$4"
+  local declaration="${case_dir}/source-memory.json"
+  local snapshot_path="${CONFIG_DIR}/keepers/${keeper_name}.memory-source-current.json"
+  local source_path host_source_path digest
+  source_path="$(jq -r '.source_path' "${declaration}")"
+  host_source_path="${workspace}/${source_path#workspace/}"
+  [[ -f "${snapshot_path}" && -f "${host_source_path}" ]] || return 1
+  digest="sha256:$(shasum -a 256 "${host_source_path}" | awk '{print $1}')"
+  cp "${snapshot_path}" "${run_dir}/memory-source-final.json"
+  jq -e --arg source_path "${source_path}" --arg digest "${digest}" '
+    (.invalidations | length) == 0
+    and (.facts | length) == 1
+    and .facts[0].source.path == $source_path
+    and .facts[0].source.sha256 == $digest
+  ' "${snapshot_path}" >/dev/null
+}
+
+apply_live_probe() {
+  local case_dir="$1" keeper_name="$2" run_dir="$3" workspace="$4"
+  local probe="${case_dir}/probe.sh"
+  if [[ ! -f "${probe}" ]]; then
+    echo "live-probe memory mode requires ${probe}" >&2
+    return 1
+  fi
+  local note
+  if ! note="$(bash "${probe}" "${workspace}")" || [[ -z "${note}" ]]; then
+    echo "live context probe failed for ${case_dir}" >&2
+    return 1
+  fi
+  printf '%s\n' "${note}" > "${run_dir}/live-probe.txt"
+  if [[ "${MEMORY_MODE}" == "verified" ]]; then
+    curl -fsS -m 20 -X POST \
+      "http://127.0.0.1:${PORT}/api/v1/keepers/${keeper_name}/operator-note" \
+      -H "Authorization: Bearer ${MCP_TOKEN}" \
+      -H 'Content-Type: application/json' \
+      -d "$(jq -cn --arg text "${note}" '{text:$text}')" \
+      > "${run_dir}/operator-note-response.json"
+  else
+    local now old_facts refreshed_fact snapshot_path journal_path
+    now="$(date +%s)"
+    old_facts="$(jq -c '.facts' "${run_dir}/memory-seed.json")"
+    refreshed_fact="$(jq -cn --arg claim "${note}" --argjson now "${now}" \
+      '{claim:$claim, category:"fact", first_seen:$now}')"
+    snapshot_path="${CONFIG_DIR}/keepers/${keeper_name}.memory-current.json"
+    journal_path="${CONFIG_DIR}/keepers/${keeper_name}.memory-journal.jsonl"
+    jq -n \
+      --argjson now "${now}" \
+      --argjson old_facts "${old_facts}" \
+      --argjson refreshed_fact "${refreshed_fact}" \
+      '{
+        revision: 2,
+        updated_at: $now,
+        source: {kind: "explicit_write", trace_id: "context-recovery-filtered"},
+        facts: [$refreshed_fact],
+        change: {added: [$refreshed_fact], removed: $old_facts, retained: 0}
+      }' > "${snapshot_path}"
+    jq -cn \
+      --argjson now "${now}" \
+      --argjson old_facts "${old_facts}" \
+      --argjson refreshed_fact "${refreshed_fact}" \
+      '{
+        outcome:"committed",
+        recorded_at:$now,
+        revision:2,
+        source:{kind:"explicit_write", trace_id:"context-recovery-filtered"},
+        change:{added:[$refreshed_fact], removed:$old_facts, retained:0}
+      }' >> "${journal_path}"
+    cp "${snapshot_path}" "${run_dir}/memory-refreshed.json"
+    cp "${journal_path}" "${run_dir}/memory-journal.jsonl"
+  fi
 }
 
 append_row() {
@@ -437,8 +669,11 @@ run_one() {
   # Optional build probe (case-relative). Empty when absent.
   build_rel="$(jq -r '.build // empty' "${case_dir}/case.json")"
 
-  local run_id run_dir workspace evidence_path
-  run_id="$(printf '%s-%s-%s-r%d' "${provider}" "${model}" "${case_id}" "${repeat_index}" \
+  local run_id run_dir workspace evidence_path mode_suffix=""
+  if [[ -f "${case_dir}/memory.json" || -f "${case_dir}/source-memory.json" ]]; then
+    mode_suffix="-${MEMORY_MODE}"
+  fi
+  run_id="$(printf '%s-%s-%s%s-r%d' "${provider}" "${model}" "${case_id}" "${mode_suffix}" "${repeat_index}" \
     | tr -c 'A-Za-z0-9._-' '-')"
   run_dir="${OUT_DIR}/runs/${run_id}"
   evidence_path="${run_dir}/evidence.json"
@@ -471,6 +706,7 @@ run_one() {
   local build_exit_json="null" edited_source_json="null" edited_target_json="null"
   local tool_calls_json='[]' input_tokens_json="null" output_tokens_json="null"
   local cost_usd_json="null"
+  local memory_seeded=0
 
   local create_args
   create_args="$(jq -cn \
@@ -498,6 +734,22 @@ run_one() {
       finish_status="transport_error"
       error_text="tool-approval-mode yolo set failed for ${keeper_name}"
     fi
+    if [[ "${finish_status}" == "ok" && -f "${case_dir}/memory.json" && "${MEMORY_MODE}" != "off" && "${MEMORY_MODE}" != "source-bound" ]]; then
+      if seed_case_memory "${case_dir}" "${keeper_name}" "${run_dir}"; then
+        memory_seeded=1
+      else
+        finish_status="transport_error"
+        error_text="failed to seed stale Memory OS fact for ${keeper_name}"
+      fi
+    fi
+    if [[ "${finish_status}" == "ok" && -f "${case_dir}/source-memory.json" && "${MEMORY_MODE}" == "source-bound" ]]; then
+      if seed_case_source_memory "${case_dir}" "${keeper_name}" "${run_dir}"; then
+        memory_seeded=1
+      else
+        finish_status="transport_error"
+        error_text="failed to seed source-bound Memory OS fact for ${keeper_name}"
+      fi
+    fi
   fi
 
   if [[ "${finish_status}" == "ok" ]]; then
@@ -513,63 +765,90 @@ run_one() {
     rm -rf "${workspace}"
     mkdir -p "${workspace}"
     cp -R "${case_dir}/workspace/." "${workspace}"
+    if [[ "${MEMORY_MODE}" == "verified" || "${MEMORY_MODE}" == "filtered" ]]; then
+      if ! apply_live_probe "${case_dir}" "${keeper_name}" "${run_dir}" "${workspace}"; then
+        finish_status="transport_error"
+        error_text="failed to inject live context probe for ${keeper_name}"
+      fi
+    fi
     local message request_json request_id
     message="$(printf '%s\n\nWorkspace directory (relative to your working root): workspace\nRun the check inside that directory.' \
       "${prompt}")"
-    if ! call_mcp_tool 4100 "masc_keeper_msg" \
-      "$(jq -cn --arg name "${keeper_name}" --arg message "${message}" \
-        '{name:$name, message:$message}')" 30; then
-      finish_status="transport_error"
-      error_text="keeper_msg: $(tool_error_text)"
-    else
-      request_json="$(tool_result_json)"
-      printf '%s' "${request_json}" > "${run_dir}/msg-submit.json"
+    if [[ "${finish_status}" == "ok" ]]; then
+      if ! call_mcp_tool 4100 "masc_keeper_msg" \
+        "$(jq -cn --arg name "${keeper_name}" --arg message "${message}" \
+          '{name:$name, message:$message}')" 30; then
+        finish_status="transport_error"
+        error_text="keeper_msg: $(tool_error_text)"
+      else
+        request_json="$(tool_result_json)"
+        printf '%s' "${request_json}" > "${run_dir}/msg-submit.json"
       # masc_keeper_msg submits an async chat operation; the settle signal is
       # masc_keeper_delegate_status with the same operation_id (the tool's own
       # description names this contract). Terminal states are Succeeded /
       # Failed / Cancelled.
-      local operation_id
-      operation_id="$(printf '%s' "${request_json}" | jq -r '.operation_id // empty')"
-      if [[ -z "${operation_id}" ]]; then
-        finish_status="transport_error"
-        error_text="keeper_msg returned no operation_id"
-      else
-        local poll_deadline result_json op_state
-        poll_deadline=$(( start_epoch + timeout_sec ))
-        result_json=""
-        while [[ "$(date +%s)" -lt "${poll_deadline}" ]]; do
-          if call_mcp_tool 4200 "masc_keeper_delegate_status" \
-            "$(jq -cn --arg name "${keeper_name}" --arg op "${operation_id}" \
-              '{target:{kind:"keeper", name:$name}, operation_id:$op}')" 20; then
-            local status_payload
-            status_payload="$(tool_result_json)"
-            op_state="$(printf '%s' "${status_payload}" | jq -r '.state // empty')"
-            case "${op_state}" in
-              Succeeded|Failed|Cancelled)
-                result_json="${status_payload}"
-                break
+        local operation_id
+        operation_id="$(printf '%s' "${request_json}" | jq -r '.operation_id // empty')"
+        if [[ -z "${operation_id}" ]]; then
+          finish_status="transport_error"
+          error_text="keeper_msg returned no operation_id"
+        else
+          local poll_deadline result_json op_state
+          poll_deadline=$(( start_epoch + timeout_sec ))
+          result_json=""
+          while [[ "$(date +%s)" -lt "${poll_deadline}" ]]; do
+            if call_mcp_tool 4200 "masc_keeper_delegate_status" \
+              "$(jq -cn --arg name "${keeper_name}" --arg op "${operation_id}" \
+                '{target:{kind:"keeper", name:$name}, operation_id:$op}')" 20; then
+              local status_payload
+              status_payload="$(tool_result_json)"
+              op_state="$(printf '%s' "${status_payload}" | jq -r '.state // empty')"
+              case "${op_state}" in
+                Succeeded|Failed|Cancelled)
+                  result_json="${status_payload}"
+                  break
+                  ;;
+              esac
+            fi
+            sleep "${POLL_INTERVAL_SEC}"
+          done
+          if [[ -z "${result_json}" ]]; then
+            finish_status="timeout"
+            error_text="episode did not finish within ${timeout_sec}s"
+          else
+            printf '%s' "${result_json}" > "${run_dir}/operation-final.json"
+            case "$(printf '%s' "${result_json}" | jq -r '.state')" in
+              Succeeded)
+                finish_status="ok"
+                ;;
+              *)
+                finish_status="provider_error"
+                error_text="$(printf '%s' "${result_json}" | jq -r \
+                  '[.state, (.failure_kind // empty), (.failure_detail // empty)] | map(select(. != "")) | join(": ")')"
                 ;;
             esac
           fi
-          sleep "${POLL_INTERVAL_SEC}"
-        done
-        if [[ -z "${result_json}" ]]; then
-          finish_status="timeout"
-          error_text="episode did not finish within ${timeout_sec}s"
-        else
-          printf '%s' "${result_json}" > "${run_dir}/operation-final.json"
-          case "$(printf '%s' "${result_json}" | jq -r '.state')" in
-            Succeeded)
-              finish_status="ok"
-              ;;
-            *)
-              finish_status="provider_error"
-              error_text="$(printf '%s' "${result_json}" | jq -r \
-                '[.state, (.failure_kind // empty), (.failure_detail // empty)] | map(select(. != "")) | join(": ")')"
-              ;;
-          esac
         fi
       fi
+    fi
+  fi
+
+  # Prompt capture exists only after the first turn has been assembled.  Keep
+  # this after the async operation settles; checking it before keeper_msg would
+  # turn the expected pre-turn 404 into a false transport failure.
+  if [[ "${memory_seeded}" == "1" ]]; then
+    if ! capture_last_prompt "${case_dir}" "${keeper_name}" "${run_dir}"; then
+      if [[ "${finish_status}" == "ok" ]]; then
+        finish_status="transport_error"
+        error_text="seeded Memory OS fact was absent from last-prompt evidence"
+      fi
+    fi
+  fi
+
+  if [[ "${finish_status}" == "ok" && "${MEMORY_MODE}" == "source-bound" && -f "${case_dir}/source-memory.json" ]]; then
+    if ! capture_recreated_source_memory "${case_dir}" "${keeper_name}" "${run_dir}" "${workspace}"; then
+      finish_status="provider_error"
+      error_text="source-bound memory was not recreated from the live source"
     fi
   fi
 

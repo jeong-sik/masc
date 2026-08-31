@@ -1,2 +1,7 @@
 name = "keeper_voice_sessions"
 description = "List active voice sessions from the voice bridge."
+
+# Held back from the request until the model asks for it by name. Not
+# called once on 2026-08-29 or 2026-08-30 across the fleet.
+defer_loading = true
+

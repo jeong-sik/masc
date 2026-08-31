@@ -6,7 +6,12 @@ type cycle_outcome =
       ; continuation_route :
           Keeper_unified_turn.continuation_route_disposition
       }
-  | Checkpointed of Keeper_meta_contract.keeper_meta
+  | Checkpointed of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; checkpoint_reason : Keeper_unified_turn.checkpoint_reason
+      ; continuation_route :
+          Keeper_unified_turn.continuation_route_disposition
+      }
   | Input_required of Keeper_meta_contract.keeper_meta
   | Cancelled of Keeper_meta_contract.keeper_meta
   | Skipped of Keeper_meta_contract.keeper_meta

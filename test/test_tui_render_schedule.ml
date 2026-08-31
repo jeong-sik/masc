@@ -365,6 +365,32 @@ let test_board_read_rows_reserve_comments_and_footer () =
   in
   check int "16-row board restores comment cap" 5
     full_comments.comment_rows;
+  (* A tall terminal is where the old flat five hurt: a forty-reply thread got
+     the same five rows on an eighty-row screen as on a twenty-row one. The
+     share grows with the height, and the post still keeps the larger half. *)
+  let tall =
+    Schedule.allocate_board_read ~terminal_rows:60 ~body_line_count:200
+      ~comment_count:40
+  in
+  check int "a tall pane gives comments a share, not a constant" 16
+    tall.comment_rows;
+  check bool "the post still keeps the larger part" true
+    (tall.body_rows > tall.comment_rows);
+  let few_comments =
+    Schedule.allocate_board_read ~terminal_rows:60 ~body_line_count:200
+      ~comment_count:3
+  in
+  check int "a short thread takes only what it has" 3
+    few_comments.comment_rows;
+  (* Rows the body cannot use are the comments'. This pane held twenty-four
+     rows of filler under a ten-line post while the thread was cut at five. *)
+  let short_post =
+    Schedule.allocate_board_read ~terminal_rows:60 ~body_line_count:10
+      ~comment_count:40
+  in
+  check int "a short post hands its unused rows to the thread" 40
+    short_post.comment_rows;
+  check int "the body keeps exactly the rows it has" 10 short_post.body_rows;
   for terminal_rows = 14 to 40 do
     for body_line_count = 0 to 10 do
       for comment_count = 0 to 10 do
@@ -380,9 +406,14 @@ let test_board_read_rows_reserve_comments_and_footer () =
         if body_line_count > 0 && allocation.body_rows < 1 then
           failf "board-read hid a nonempty body at rows=%d comments=%d"
             terminal_rows comment_count;
+        let ceiling =
+          let chrome = if comment_count > 0 then 2 else 0 in
+          let available = max 0 (terminal_rows - 8 - chrome) in
+          max 5 (max (available - body_line_count) (available / 3))
+        in
         if
           allocation.comment_rows < 0
-          || allocation.comment_rows > min 5 comment_count
+          || allocation.comment_rows > min ceiling comment_count
         then
           failf "board-read comment allocation escaped its cap";
         let last =

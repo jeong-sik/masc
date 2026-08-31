@@ -107,9 +107,11 @@ val sweep_candidates_of_json :
     worse than leaking one. *)
 
 val sweep_abandoned_guests :
+  command_available:(string -> bool) ->
   timeout_sec:float ->
   is_pid_alive:(int -> bool) ->
   run_argv:(timeout_sec:float -> string list -> Unix.process_status * string) ->
-  sweep_outcome
-(** Remove every abandoned guest, reporting what happened. An unreadable
-    listing removes nothing. *)
+  sweep_outcome option
+(** Remove every abandoned guest, reporting what happened. Return [None]
+    without spawning when the microVM CLI executable is absent. An unreadable
+    listing removes nothing and returns [Some] with an empty outcome. *)

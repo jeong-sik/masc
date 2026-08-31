@@ -57,11 +57,11 @@ let stub_main () =
       exit 255
     | "skew" ->
       write_all Unix.stdout
-        {|{"name":"masc-exec-shim","version":"2.0.0","capabilities":[]}|};
+        {|{"name":"masc-exec-shim","version":"1.0.0","capabilities":[]}|};
       exit 0
     | _ ->
       write_all Unix.stdout
-        {|{"name":"masc-exec-shim","version":"1.0.0","capabilities":[]}|};
+        {|{"name":"masc-exec-shim","version":"2.0.0","capabilities":[]}|};
       exit 0)
   else (
     let header = read_exact Unix.stdin 8 in
@@ -86,6 +86,11 @@ let stub_main () =
     match request.argv with
     | "git" :: _ ->
       write_all Unix.stdout "git version 2.50.0\n";
+      write_all Unix.stderr (trailer 0)
+    | "rg" :: _ when String.equal mode "rg-missing" ->
+      write_all Unix.stderr ("rg unavailable\n" ^ trailer 127)
+    | "rg" :: _ ->
+      write_all Unix.stdout "ripgrep 14.1.1\n";
       write_all Unix.stderr (trailer 0)
     | "test" :: _ -> write_all Unix.stderr (trailer 0)
     | "df" :: _ ->
@@ -183,13 +188,13 @@ let test_ready_ttl_and_force () =
   Keeper_sandbox_ssh.For_testing.clear_preflight_cache ();
   check (result unit string) "first ready" (Ok ())
     (Keeper_sandbox_ssh.check_preflight state);
-  check int "six probes" 6 (invocation_count count_path);
+  check int "seven probes" 7 (invocation_count count_path);
   check (result unit string) "cached ready" (Ok ())
     (Keeper_sandbox_ssh.check_preflight state);
-  check int "cache avoided respawn" 6 (invocation_count count_path);
+  check int "cache avoided respawn" 7 (invocation_count count_path);
   check (result unit string) "forced ready" (Ok ())
     (Keeper_sandbox_ssh.check_preflight ~force:true state);
-  check int "force respawned" 12 (invocation_count count_path)
+  check int "force respawned" 14 (invocation_count count_path)
 ;;
 
 let test_zero_ttl_rechecks () =
@@ -203,7 +208,7 @@ let test_zero_ttl_rechecks () =
     (Keeper_sandbox_ssh.check_preflight state);
   check (result unit string) "second ready" (Ok ())
     (Keeper_sandbox_ssh.check_preflight state);
-  check int "zero TTL respawned every probe" 12 (invocation_count count_path)
+  check int "zero TTL respawned every probe" 14 (invocation_count count_path)
 ;;
 
 let test_named_failures () =
@@ -219,6 +224,7 @@ let test_named_failures () =
            (Keeper_sandbox_ssh.check_preflight ~force:true state)))
     [ "unreachable", "remote_ssh_endpoint_unreachable:"
     ; "skew", "remote_shim_version_skew:"
+    ; "rg-missing", "remote_ripgrep_unavailable:"
     ; "disk-low", "remote_ssh_disk_low:"
     ; "gh-missing", "remote_github_identity_missing:"
     ]

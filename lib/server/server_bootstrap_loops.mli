@@ -173,6 +173,12 @@ module For_testing : sig
   val finish_keeper_loops_start :
     keeper_loops_start_ownership ->
     (unit, keeper_persistence_start_error) result
+
+  val refresh_dashboard_for_keeper_lifecycle :
+    config:Workspace.config ->
+    keeper_name:string ->
+    Keeper_lifecycle_events.lifecycle_event ->
+    unit
 end
 
 val start_background_maintenance :

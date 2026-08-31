@@ -13,6 +13,8 @@ type t =
   | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
   | Set_tools of [ `Toggle | `Compact | `Full ]
   | Toggle_memory
+  | Find_in_chat of string
+  | Find_next
   | Inspect_context
   | View_image of string
   | View_image_missing_path
@@ -60,6 +62,10 @@ let catalog =
   ; { word = "memory"
     ; args = ""
     ; summary = "show or hide Librarian/Memory journal rows"
+    }
+  ; { word = "find"
+    ; args = "[text]"
+    ; summary = "go to the newest message holding text; again for the next"
     }
   ; { word = "context"
     ; args = ""
@@ -133,6 +139,8 @@ let parse text =
     | "tools", "compact" -> Set_tools `Compact
     | "tools", "full" -> Set_tools `Full
     | "memory", _ -> Toggle_memory
+    | "find", "" -> Find_next
+    | "find", text -> Find_in_chat text
     | "context", _ -> Inspect_context
     | "image", "" -> View_image_missing_path
     | "image", path -> View_image path
@@ -196,6 +204,48 @@ let word_spans ~typed entry =
   in
   [ Typed ("/" ^ typed); Untyped remaining ]
 
+(* The bare slash is the row an operator types knowing nothing, so it is the
+   one that must not run off the pane.
+
+   It used to draw every command word, and it fit until it did not: the list
+   was compacted once when /settings joined the catalog and ran over again at
+   /find. A row sized by how many commands happen to exist is a row that
+   breaks on the next one, so this one carries what fits and says how many it
+   could not, pointing at the list that is complete by definition.
+
+   Command words are ASCII by construction -- they are spelled in [catalog]
+   above -- so bytes and cells are the same count here. *)
+let bare_slash_hint_cells = 80
+
+let bare_slash_spans entries =
+  let total = List.length entries in
+  let rendered kept_count =
+    let words =
+      entries
+      |> List.filteri (fun index _ -> index < kept_count)
+      |> List.map (fun entry -> entry.word)
+      |> String.concat " "
+    in
+    let dropped = total - kept_count in
+    let tail =
+      if dropped <= 0 then ""
+      else Printf.sprintf " +%d more (/help)" dropped
+    in
+    (words, tail, 1 + String.length words + String.length tail)
+  in
+  (* At most one row of candidates and a dozen words, so the fit is found by
+     trying rather than by solving for a marker whose own width depends on how
+     many words were dropped. *)
+  let rec choose kept_count =
+    if kept_count <= 0 then rendered 0
+    else
+      let (_, _, width) as attempt = rendered kept_count in
+      if width <= bare_slash_hint_cells then attempt else choose (kept_count - 1)
+  in
+  let words, tail, _ = choose total in
+  [ Typed "/"; Untyped words ]
+  @ (if String.equal tail "" then [] else [ Detail tail ])
+
 let hint_spans = function
   | No_command -> []
   | Chosen entry ->
@@ -209,13 +259,7 @@ let hint_spans = function
       word_spans ~typed entry
       @ (if String.equal entry.args "" then []
          else [ Detail (" " ^ entry.args) ])
-  | Candidates { typed = ""; entries } ->
-      (* The bare slash is already the shared prefix.  Draw it once, then all
-         command words: this keeps the complete discovery list inside an
-         80-column composer after /settings joined the catalog. *)
-      [ Typed "/"
-      ; Untyped (String.concat " " (List.map (fun entry -> entry.word) entries))
-      ]
+  | Candidates { typed = ""; entries } -> bare_slash_spans entries
   | Candidates { typed; entries } ->
       (* Names only. Every usage spelled out runs past a 120-column pane on
          the bare slash, and the commands that fell off the end were the ones

@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T16:19:05+09:00",
+  "source_change_commit": "f7f32513a81e8a0bcfc0c177dc052d87353f7172",
+  "measurement_source_commit": "babdccc8556a98b2ed9f787b55664b5d36792cab",
+  "image_digest": "sha256:0d9824a0e42539c4dedd9b32d59a66045eaad5f7d54ae9ddcbda3eb78df0c1de",
+  "binary_sha256": "c54461bf4171c240b9b7f9de419c690c46f3cf573a77549e838a29bb0ea6d9a9",
+  "runtime_instance_id": "01a05185-32e2-7000-89b1-b6f8fa6871cb",
+  "effective_base_path": "/app",
+  "effective_masc_root": "/app/.masc",
+  "provider_turn_executed": false,
+  "baseline": {
+    "measurement_source_commit": "131c61c6c05fcb9e135b06320ecd4a6bae4fdc4d",
+    "image_digest": "sha256:ba224b7ceacdbadb91c7331d63e9e2b267e182d3a26495dab3f1e87434dec1f4",
+    "continuity_incidents": 1,
+    "continuity_error_log_lines": 2
+  },
+  "fixed": {
+    "stop_operation_id": "shutdown-26a48710-c049-479c-9f17-fbd9146b8963",
+    "purge_http_status": 202,
+    "purge_operation_id": "shutdown-14ec09c0-d291-4666-9116-7df0f75bf4e9",
+    "purge_operation_phase": "finalized",
+    "purge_completion": "dashboard_keeper_purged",
+    "planned_artifact_paths_checked": 11,
+    "planned_artifact_paths_present_after_purge": 0,
+    "operator_rows_before_purge": 1,
+    "operator_prime_has_diagnostic": false,
+    "operator_rows_after_purge": 0,
+    "operator_after_purge_latency_ms": 4.303,
+    "execution_http_status": 200,
+    "execution_error": null,
+    "execution_keeper_count": 0,
+    "execution_continuity_count": 0,
+    "execution_latency_ms": 30022.656,
+    "observation_window_seconds": 70,
+    "purge_window_log_lines": 18,
+    "continuity_error_matches": 0,
+    "execution_refresh_failed_matches": 0
+  },
+  "focused_checks": {
+    "build": "pass",
+    "projection_invalidation_test": "1/1"
+  },
+  "follow_up_issues": [8822, 31934],
+  "artifact_sha256": {
+    "image-identity.json": "9bd5576c6c2add7800ffcf314aa2263c54ffd452b3d6de1efa9bad90023ef4d1",
+    "health-final.json": "8235087df3d8c16a39e6464280285a20c897f4a80436e7ab5366294d436386f4",
+    "operator-row-prime-before-purge.json": "c4737dd18d5d4b39a3c6a1df58741387b7568175cf9674d3e31c92d3e62a5f2b",
+    "operator-after-purge.json": "a2416dab38336129d3a2352ab2290efb032e95ddf37c015c599245ce0168731e",
+    "operator-row-after-purge.json": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "execution-after-purge.json": "47c1cf918d19c269c224d6971e8b068a5ba7d942fd711f19d2c12ba3f7b102d6",
+    "execution-after-purge-summary.json": "ae6e43704cee634d08d3ef61c9f26206de50be14888a7e0419b3cb0031ee7389",
+    "purge-response.json": "ed19f84da1226e927e48ea44d6c6dfa6c513dfbc3621789115b3f9c7225fb7f7",
+    "purge-operation-final.json": "258fe1e349ceeb82c7c2cbc7c04304a981be6b93cfc7359401cb95abdcd60d8b",
+    "planned-artifact-paths-after-purge.txt": "21ea5378f767c4a8a1af643217fcb64aac83ebec7cb9c9ae47938c2a72eac2c3",
+    "purge-window-with-explicit-refresh.log": "806592f36530478f047ae12b54530d01a0cae8259cb1845e4a4fba144b18f7e0",
+    "continuity-error-count.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "execution-refresh-failed-count.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "baseline-continuity-error-matches.log": "986789412f47f97d7e5bc3ccb3e976df3f542a8d59171bc6d9a1b2b442fcf423"
+  },
+  "performance_claim": false
+}

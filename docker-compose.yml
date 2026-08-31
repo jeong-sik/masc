@@ -70,6 +70,8 @@ services:
     environment:
       PORT: "8080"
       MASC_BASE_PATH: /app
+      # Admit the same public identity that the host-port mapping advertises.
+      MASC_HTTP_BASE_URL: "http://localhost:${MASC_HOST_PORT:-8935}"
       MASC_TEAM_PRESET: "${MASC_TEAM_PRESET:-classic}"
       # Passed through from the host shell; required for the default flash model.
       OLLAMA_CLOUD_API_KEY: "${OLLAMA_CLOUD_API_KEY:-}"

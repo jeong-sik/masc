@@ -107,22 +107,100 @@ let network_args ~dns (mode : Keeper_types_profile_sandbox.network_mode) =
 
     [container image inspect] answers from the local store without touching
     the network -- verified against a present and an absent image -- so the
-    check is a gate, not a probe that itself fetches. *)
-let image_present ~image ~timeout_sec =
-  let argv = command_argv () @ [ "image"; "inspect"; image ] in
-  match
-    Process_eio.run_argv_with_status ~timeout_sec argv
-  with
-  (* Exit status separates the answers, so none of them is guessed.
-     Measured against container 1.3.0 on 2026-08-28: 0 for a present image,
-     1 for an absent one, 127 when the CLI is not on PATH.
+    check is a gate, not a probe that itself fetches.
 
-     The first version collapsed everything that was not 0 into "image
-     missing". A dead daemon, a timeout and an uninstalled CLI all told the
-     operator to build an image they already had -- the unknown-to-convenient
-     -default shape this module was written to avoid. *)
-  | Unix.WEXITED 0, _ -> Ok ()
-  | Unix.WEXITED 1, _ ->
+    A missing image and a dead service both exit 1. Human error prose is not a
+    protocol, so a failed inspect is classified as missing only after
+    [container image list --format json] proves that the service and image
+    store are readable. *)
+type image_probe_phase =
+  | Image_inspect
+  | Image_list
+
+type image_probe_failure =
+  { phase : image_probe_phase
+  ; status : Unix.process_status
+  ; stdout : string
+  ; stderr : string
+  ; reason : string
+  }
+
+type image_probe_outcome =
+  | Image_present
+  | Image_missing
+  | Image_cli_unavailable
+  | Image_probe_failed of image_probe_failure
+
+let json_array_error raw =
+  match Yojson.Safe.from_string raw with
+  | `List _ -> None
+  | _ -> Some "expected a JSON array"
+  | exception Yojson.Json_error detail -> Some ("invalid JSON: " ^ detail)
+;;
+
+let probe_failure ~phase ~status ~stdout ~stderr ~reason =
+  Image_probe_failed { phase; status; stdout; stderr; reason }
+;;
+
+let classify_image_probe ~inspect:(inspect_status, inspect_stdout, inspect_stderr) ~listing =
+  match inspect_status with
+  | Unix.WEXITED 0 ->
+    (match json_array_error inspect_stdout with
+     | None -> Image_present
+     | Some reason ->
+       probe_failure
+         ~phase:Image_inspect
+         ~status:inspect_status
+         ~stdout:inspect_stdout
+         ~stderr:inspect_stderr
+         ~reason)
+  | Unix.WEXITED 127 -> Image_cli_unavailable
+  | Unix.WEXITED 1 ->
+    (match listing with
+     | Some (Unix.WEXITED 0 as status, stdout, stderr) ->
+       (match json_array_error stdout with
+        | None -> Image_missing
+        | Some reason ->
+          probe_failure ~phase:Image_list ~status ~stdout ~stderr ~reason)
+     | Some (status, stdout, stderr) ->
+       probe_failure
+         ~phase:Image_list
+         ~status
+         ~stdout
+         ~stderr
+         ~reason:"image store listing failed after inspect exited 1"
+     | None ->
+       probe_failure
+         ~phase:Image_inspect
+         ~status:inspect_status
+         ~stdout:inspect_stdout
+         ~stderr:inspect_stderr
+         ~reason:"image store listing evidence was not collected")
+  | status ->
+    probe_failure
+      ~phase:Image_inspect
+      ~status
+      ~stdout:inspect_stdout
+      ~stderr:inspect_stderr
+      ~reason:"image inspect failed"
+;;
+
+let output_for_log ~stdout ~stderr =
+  [ stdout; stderr ]
+  |> List.map String.trim
+  |> List.filter (fun part -> part <> "")
+  |> String.concat "\n"
+  |> Keeper_sandbox_runtime.docker_failure_output_for_log
+;;
+
+let phase_label = function
+  | Image_inspect -> "image inspect"
+  | Image_list -> "image list --format json"
+;;
+
+let image_present_result ~image = function
+  | Image_present -> Ok ()
+  | Image_missing ->
     Error
       (Printf.sprintf
          "microvm_image_missing: %s is not in the container image store. \
@@ -131,26 +209,39 @@ let image_present ~image ~timeout_sec =
           registry instead of failing. Next: build or load the image with \
           `container image` before starting a microvm keeper."
          image)
-  | Unix.WEXITED 127, _ ->
+  | Image_cli_unavailable ->
     Error
       "microvm_cli_unavailable: the `container` CLI is not on PATH. Next: \
        install Apple container, or move the keeper to sandbox_profile = \
        \"docker\"."
-  | status, out ->
-    (* Says what it saw rather than naming a cause it does not know. The
-       image may well be present; the probe could not find out. *)
+  | Image_probe_failed failure ->
     Error
       (Printf.sprintf
-         "microvm_image_probe_failed: `container image inspect %s` did not \
-          answer whether the image exists (%s). Next: check that the \
+         "microvm_image_probe_failed: `container %s` did not establish whether \
+          image %s exists (%s; %s: %s). Next: check that the \
           container system is running with `container system status`."
+         (phase_label failure.phase)
          image
-         (Keeper_sandbox_runtime.docker_failure_output_for_log out
-          |> fun detail ->
-          match status with
-          | Unix.WEXITED code -> Printf.sprintf "exit %d: %s" code detail
-          | Unix.WSIGNALED n -> Printf.sprintf "signal %d: %s" n detail
-          | Unix.WSTOPPED n -> Printf.sprintf "stopped %d: %s" n detail))
+         failure.reason
+         (Keeper_sandbox_exec_failure.status_label failure.status)
+         (output_for_log ~stdout:failure.stdout ~stderr:failure.stderr))
+;;
+
+let image_probe ~image ~timeout_sec =
+  let inspect_argv = command_argv () @ [ "image"; "inspect"; image ] in
+  let inspect = Process_eio.run_argv_with_status_split ~timeout_sec inspect_argv in
+  let listing =
+    match inspect with
+    | Unix.WEXITED 1, _, _ ->
+      let list_argv = command_argv () @ [ "image"; "list"; "--format"; "json" ] in
+      Some (Process_eio.run_argv_with_status_split ~timeout_sec list_argv)
+    | _ -> None
+  in
+  classify_image_probe ~inspect ~listing
+;;
+
+let image_present ~image ~timeout_sec =
+  image_probe ~image ~timeout_sec |> image_present_result ~image
 ;;
 
 (* ── Turn-container argv ─────────────────────────────────────────────

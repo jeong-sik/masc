@@ -117,6 +117,58 @@ let test_image_and_shell_come_last () =
       "argv must end with <image> bash -l -s, got: %s"
       (String.concat " " (List.rev rest))
 
+let inspect_result status stdout stderr = status, stdout, stderr
+
+let test_image_probe_uses_structured_evidence () =
+  let present =
+    M.classify_image_probe
+      ~inspect:(inspect_result (Unix.WEXITED 0) {|[{"configuration":{}}]|} "")
+      ~listing:None
+  in
+  (match present with
+   | M.Image_present -> ()
+   | _ -> Alcotest.fail "valid inspect JSON must establish image presence");
+  let missing =
+    M.classify_image_probe
+      ~inspect:(inspect_result (Unix.WEXITED 1) "any human prose" "any stderr")
+      ~listing:(Some (inspect_result (Unix.WEXITED 0) "[]" ""))
+  in
+  (match missing with
+   | M.Image_missing -> ()
+   | _ -> Alcotest.fail "a healthy structured listing must distinguish a missing image");
+  let service_dead =
+    M.classify_image_probe
+      ~inspect:(inspect_result (Unix.WEXITED 1) "same exit code" "")
+      ~listing:(Some (inspect_result (Unix.WEXITED 1) "" "service unavailable"))
+  in
+  (match service_dead with
+   | M.Image_probe_failed { phase = M.Image_list; _ } -> ()
+   | _ -> Alcotest.fail "an unreadable image store must stay probe-failed");
+  let malformed =
+    M.classify_image_probe
+      ~inspect:(inspect_result (Unix.WEXITED 0) "not json" "")
+      ~listing:None
+  in
+  (match malformed with
+   | M.Image_probe_failed { phase = M.Image_inspect; _ } -> ()
+   | _ -> Alcotest.fail "successful status with malformed JSON must fail closed");
+  let malformed_listing =
+    M.classify_image_probe
+      ~inspect:(inspect_result (Unix.WEXITED 1) "" "")
+      ~listing:(Some (inspect_result (Unix.WEXITED 0) "not json" ""))
+  in
+  (match malformed_listing with
+   | M.Image_probe_failed { phase = M.Image_list; _ } -> ()
+   | _ -> Alcotest.fail "malformed listing JSON must not establish image absence");
+  let cli_missing =
+    M.classify_image_probe
+      ~inspect:(inspect_result (Unix.WEXITED 127) "" "not found")
+      ~listing:None
+  in
+  match cli_missing with
+  | M.Image_cli_unavailable -> ()
+  | _ -> Alcotest.fail "exit 127 must preserve the CLI-unavailable class"
+
 (* ── Refusal wiring ─────────────────────────────────────────────
    The profile parses, the argv builder exists, and nothing starts the
    guest yet. These pin the contract of that gap: every dispatch surface
@@ -149,6 +201,26 @@ let with_eio_fs f =
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
   Fun.protect ~finally:Process_eio.reset_for_testing f
+
+let test_live_structured_image_probe () =
+  match Sys.getenv_opt "MASC_MICROVM_IMAGE_PROBE_LIVE" with
+  | None -> ()
+  | Some _ ->
+    with_eio_fs @@ fun () ->
+    (match
+       M.image_probe
+         ~image:"masc-keeper-sandbox:local"
+         ~timeout_sec:15.0
+     with
+     | M.Image_present -> ()
+     | _ -> Alcotest.fail "present image did not produce Image_present");
+    match
+      M.image_probe
+        ~image:"masc-proof-definitely-missing:never"
+        ~timeout_sec:15.0
+    with
+    | M.Image_missing -> ()
+    | _ -> Alcotest.fail "a definitely absent image did not produce Image_missing"
 
 let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
   with_eio_fs @@ fun () ->
@@ -640,6 +712,10 @@ let () =
             test_closed_network_is_spelled_on_the_command
         ; Alcotest.test_case "image and shell come last" `Quick
             test_image_and_shell_come_last
+        ; Alcotest.test_case "image probe uses structured evidence" `Quick
+            test_image_probe_uses_structured_evidence
+        ; Alcotest.test_case "live structured image probe" `Slow
+            test_live_structured_image_probe
         ; Alcotest.test_case "sweeps only guests whose owner is gone" `Quick
             test_only_guests_whose_owner_is_gone
         ; Alcotest.test_case "leaves containers that are not guests" `Quick

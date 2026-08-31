@@ -38,6 +38,38 @@ val image_present : image:string -> timeout_sec:float -> (unit, string) result
     has no [--pull=never]: without this, a missing image is fetched from a
     registry rather than refused. *)
 
+type image_probe_phase =
+  | Image_inspect
+  | Image_list
+
+type image_probe_failure =
+  { phase : image_probe_phase
+  ; status : Unix.process_status
+  ; stdout : string
+  ; stderr : string
+  ; reason : string
+  }
+
+type image_probe_outcome =
+  | Image_present
+  | Image_missing
+  | Image_cli_unavailable
+  | Image_probe_failed of image_probe_failure
+
+val classify_image_probe :
+  inspect:Unix.process_status * string * string ->
+  listing:(Unix.process_status * string * string) option ->
+  image_probe_outcome
+(** Classify [container image inspect] without reading human error prose.
+    Successful inspect output must be a JSON array. Exit 1 is [Image_missing]
+    only when a subsequent [container image list --format json] also succeeds
+    with a JSON array, proving that the service and image store were readable.
+    Every unavailable or malformed observation fails closed. *)
+
+val image_probe : image:string -> timeout_sec:float -> image_probe_outcome
+(** Run the structured probe and retain its typed outcome before the public
+    sandbox boundary renders an operator-facing error. *)
+
 (** Turn-container argv. Same lifecycle as the Docker turn lane: detached
     guest holding [tail -f /dev/null], commands by [exec], removed on
     [stop] via [--rm]. The playground is mounted here; everything else the

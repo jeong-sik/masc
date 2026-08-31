@@ -100,12 +100,23 @@ let summary_of description =
    the listing is built here, because only this turn knows what is attached. *)
 let declared = Tool_schemas_identity_tool_search.schema
 
-let description_of entries =
+(* [placed] are the entries this turn hands over with their schemas, so the
+   model reads them from its own tool list. Naming them here as well would
+   spend the listing's bytes -- charged to every request of the turn -- on a
+   line that says what the schema beside it already says. Measured over three
+   days, that duplication was a median 7 of the listed tools and reached 24,
+   a third of one listing. They stay in [entries]: asking for a tool that is
+   already callable answers rather than refuses. *)
+let description_of ~placed entries =
+  let omitted name = List.exists (String.equal name) placed in
   String.concat
     "\n"
     (declared.Masc_domain.description
-     :: List.map
-          (fun entry -> Printf.sprintf "- %s: %s" entry.name entry.summary)
+     :: List.filter_map
+          (fun entry ->
+             if omitted entry.name
+             then None
+             else Some (Printf.sprintf "- %s: %s" entry.name entry.summary))
           entries)
 ;;
 
@@ -279,11 +290,17 @@ let make ~keeper_name { deferred; agent_cell; history } =
            })
         deferred
     in
+    let already_used = already_used_from_history ~entries history in
+    let placed =
+      List.map
+        (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
+        already_used
+    in
     let schema =
       match
         Agent_core.Types.tool_schema_of_input_schema
           ~name:tool_name
-          ~description:(description_of entries)
+          ~description:(description_of ~placed entries)
           ~input_schema:declared.Masc_domain.input_schema
           ()
       with
@@ -313,7 +330,7 @@ let make ~keeper_name { deferred; agent_cell; history } =
           Agent_core.Tool.of_schema
             schema
             (Agent_core.Tool.ignoring_execution_env handler)
-      ; already_used = already_used_from_history ~entries history
+      ; already_used
       ; observe_turn = observe_turn ~keeper_name ~usage
       }
 ;;

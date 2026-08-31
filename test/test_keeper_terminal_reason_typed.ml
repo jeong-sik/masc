@@ -212,7 +212,7 @@ let frozen_operator_disposition (receipt : R.t)
   else if String.equal terminal_reason "terminal_effect_failed"
   then R.Disp_unknown, R.Reason_terminal_effect_failed
   else if preflight_config_failure
-  then R.Disp_fail_open_next_runtime, R.Reason_preflight_config_error
+  then R.Disp_operator_action_required, R.Reason_preflight_config_error
   else if
     provider_runtime_failure
     && (receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime)
@@ -330,9 +330,12 @@ let () =
       { base_receipt with terminal_reason_code = "config_error" }
   in
   check
-    "canonical typed config wire keeps its explicit route"
-    (canonical = (R.Disp_fail_open_next_runtime, R.Reason_preflight_config_error))
+    "canonical typed config wire requires operator action"
+    (canonical = (R.Disp_operator_action_required, R.Reason_preflight_config_error))
   ;
+  check
+    "canonical typed config wire emits operator broadcast"
+    (R.needs_operator_broadcast (fst canonical));
   let transcript_corruption =
     R.operator_disposition
       { base_receipt with
@@ -547,6 +550,7 @@ let operator_disposition_kinds =
   [ R.Disp_pass
   ; R.Disp_fail_open_next_runtime
   ; R.Disp_pass_next_model
+  ; R.Disp_operator_action_required
   ; R.Disp_user_cancelled
   ; R.Disp_skipped
   ; R.Disp_unknown

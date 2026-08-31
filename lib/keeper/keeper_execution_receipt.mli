@@ -177,6 +177,9 @@ type operator_disposition_kind =
   | Disp_pass
   | Disp_fail_open_next_runtime
   | Disp_pass_next_model
+  | Disp_operator_action_required
+  (** The turn is terminal and names a known operator-only repair. No runtime
+      continuation or fallback is claimed. *)
   | Disp_user_cancelled
   | Disp_skipped
   | Disp_unknown
@@ -190,6 +193,9 @@ type operator_disposition_reason =
   | Reason_healthy
   | Reason_runtime_exhausted
   | Reason_preflight_config_error
+  (** Terminal configuration or authorization failure before provider
+      dispatch. Paired with [Disp_operator_action_required]; the receipt does
+      not claim a fallback that did not happen. *)
   | Reason_degraded_retry
   | Reason_runtime_fallback
   | Reason_transient_runtime_retry

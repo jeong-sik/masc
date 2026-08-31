@@ -55,6 +55,7 @@ type operator_disposition_kind =
   | Disp_pass
   | Disp_fail_open_next_runtime
   | Disp_pass_next_model
+  | Disp_operator_action_required
   | Disp_user_cancelled
   | Disp_skipped
   | Disp_unknown
@@ -63,6 +64,7 @@ let operator_disposition_kind_to_string = function
   | Disp_pass -> "pass"
   | Disp_fail_open_next_runtime -> "fail_open_next_runtime"
   | Disp_pass_next_model -> "pass_next_model"
+  | Disp_operator_action_required -> "operator_action_required"
   | Disp_user_cancelled -> "user_cancelled"
   | Disp_skipped -> "skipped"
   | Disp_unknown -> "unknown"
@@ -72,6 +74,7 @@ let operator_disposition_kind_of_string = function
   | "pass" -> Some Disp_pass
   | "fail_open_next_runtime" -> Some Disp_fail_open_next_runtime
   | "pass_next_model" -> Some Disp_pass_next_model
+  | "operator_action_required" -> Some Disp_operator_action_required
   | "user_cancelled" -> Some Disp_user_cancelled
   | "skipped" -> Some Disp_skipped
   | "unknown" -> Some Disp_unknown
@@ -199,7 +202,7 @@ let operator_disposition (receipt : t)
        human. *)
     Disp_fail_open_next_runtime, Reason_capacity_backpressure
   | _ when preflight_config_failure ->
-    Disp_fail_open_next_runtime, Reason_preflight_config_error
+    Disp_operator_action_required, Reason_preflight_config_error
   | _
     when provider_runtime_failure
          && (receipt.degraded_retry_applied
@@ -469,7 +472,7 @@ let to_json receipt =
    receipt evidence; it makes no watchdog or liveness claim for a keeper that
    did not produce a receipt. *)
 let needs_operator_broadcast = function
-  | Disp_unknown -> true
+  | Disp_operator_action_required | Disp_unknown -> true
   | Disp_pass
   | Disp_fail_open_next_runtime
   | Disp_pass_next_model

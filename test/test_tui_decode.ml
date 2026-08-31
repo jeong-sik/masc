@@ -1418,9 +1418,10 @@ let test_bounded_parent_depth_stops_on_cycle () =
   in
   Alcotest.(check int) "cycle stops at first repeated parent" 1 depth
 
-let system_log_entry_json ?(level = "INFO") ?(keeper = `String "system") () =
+let system_log_entry_json ?(seq = 774272) ?(level = "INFO")
+    ?(keeper = `String "system") ?(category = `Null) () =
   `Assoc
-    [ ("seq", `Int 774272)
+    [ ("seq", `Int seq)
     ; ("ts", `String "2026-08-23T03:09:21Z")
     ; ("level", `String level)
     ; ("source", `String "structured")
@@ -1429,7 +1430,7 @@ let system_log_entry_json ?(level = "INFO") ?(keeper = `String "system") () =
     ; ("turn_id", `Null)
     ; ("message", `String "presence update: idle")
     ; ("details", `Null)
-    ; ("category", `Null)
+    ; ("category", category)
     ]
 
 let system_log_snapshot_json entries =
@@ -3346,10 +3347,59 @@ let test_decode_system_log_snapshot_reads_the_live_shape () =
              entry.Tui_decode.sl_module;
            Alcotest.(check (option string)) "keeper" (Some "system")
              entry.Tui_decode.sl_keeper;
+           Alcotest.(check (option string)) "a null category decodes as none"
+             None entry.Tui_decode.sl_category;
            Alcotest.(check string) "level label" "INFO "
              (Tui_decode.system_log_level_label entry.Tui_decode.sl_level)
        | entries ->
            Alcotest.failf "expected one entry, got %d" (List.length entries))
+
+let system_log_entries_of_categories categories =
+  match
+    Tui_decode.decode_system_log_snapshot
+      (system_log_snapshot_json
+         (List.mapi
+            (fun index category ->
+              system_log_entry_json ~seq:(774000 + index) ~category ())
+            categories))
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot -> snapshot.Tui_decode.sys_entries
+
+let test_system_log_category_filter_vocabulary_and_cycle () =
+  let entries =
+    system_log_entries_of_categories
+      [ `String "Tool"; `Null; `String "Heartbeat"; `String "Tool" ]
+  in
+  Alcotest.(check (list string))
+    "the vocabulary is the page's distinct categories, sorted"
+    [ "Heartbeat"; "Tool" ]
+    (Tui_decode.system_log_categories entries);
+  Alcotest.(check (option string)) "none steps to the first"
+    (Some "Heartbeat")
+    (Tui_decode.next_system_log_category ~current:None entries);
+  Alcotest.(check (option string)) "first steps to the next" (Some "Tool")
+    (Tui_decode.next_system_log_category ~current:(Some "Heartbeat") entries);
+  Alcotest.(check (option string)) "the last wraps back to everything" None
+    (Tui_decode.next_system_log_category ~current:(Some "Tool") entries);
+  Alcotest.(check (option string))
+    "a value the page no longer carries resets to everything" None
+    (Tui_decode.next_system_log_category ~current:(Some "Boundary") entries);
+  Alcotest.(check (option string)) "an empty page offers nothing" None
+    (Tui_decode.next_system_log_category ~current:None [])
+
+let test_system_log_level_ladder_cycles () =
+  let open Tui_decode in
+  Alcotest.(check bool) "none raises to info" true
+    (next_system_log_min_level None = Some System_info);
+  Alcotest.(check bool) "info raises to warn" true
+    (next_system_log_min_level (Some System_info) = Some System_warn);
+  Alcotest.(check bool) "warn raises to error" true
+    (next_system_log_min_level (Some System_warn) = Some System_error);
+  Alcotest.(check bool) "error opens back up" true
+    (next_system_log_min_level (Some System_error) = None);
+  Alcotest.(check string) "the wire spelling is the route's lowercase" "warn"
+    (system_log_level_query System_warn)
 
 let test_decode_system_log_accepts_both_warn_spellings () =
   let label spelling =
@@ -5759,6 +5809,10 @@ let () =
           test_decode_system_log_snapshot_reads_the_live_shape;
         Alcotest.test_case "warn and warning are one level" `Quick
           test_decode_system_log_accepts_both_warn_spellings;
+        Alcotest.test_case "category vocabulary and cycle" `Quick
+          test_system_log_category_filter_vocabulary_and_cycle;
+        Alcotest.test_case "level ladder cycles" `Quick
+          test_system_log_level_ladder_cycles;
         Alcotest.test_case "an unnamed level stays itself" `Quick
           test_decode_system_log_keeps_an_unnamed_level_as_itself;
         Alcotest.test_case "null keeper is absent" `Quick

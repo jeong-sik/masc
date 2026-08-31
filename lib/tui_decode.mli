@@ -139,6 +139,10 @@ type system_log_entry = {
   sl_module : string;
   sl_keeper : string option;
   sl_message : string;
+  sl_category : string option;
+      (** The producer's typed category, as its wire string ([Null] rows carry
+          none). The vocabulary is the server's closed set; this reader keeps
+          whatever spelling arrives rather than mirroring that set. *)
 }
 
 (** One tool call from a keeper's durable call log
@@ -1459,6 +1463,24 @@ val decode_system_log_snapshot :
 
 val system_log_level_label : system_log_level -> string
 (** Fixed-width label for the level column. *)
+
+val system_log_categories : system_log_entry list -> string list
+(** The distinct categories the given rows carry, sorted. The filter's
+    vocabulary is what the page actually shows, never a copy of the server's
+    category set. *)
+
+val next_system_log_category :
+  current:string option -> system_log_entry list -> string option
+(** One step of the category cycle: [None] -> first -> ... -> last -> [None].
+    A [current] the rows no longer carry steps to [None]. *)
+
+val next_system_log_min_level :
+  system_log_level option -> system_log_level option
+(** One step of the verbose ladder: [None] (server default, everything) ->
+    info -> warn -> error -> [None]. *)
+
+val system_log_level_query : system_log_level -> string
+(** The lowercase spelling the [/api/v1/dashboard/logs] route validates. *)
 
 val decode_planning_snapshot :
   Yojson.Safe.t -> (planning_snapshot, string) result

@@ -1526,6 +1526,7 @@ type system_log_entry = {
   sl_module : string;
   sl_keeper : string option;
   sl_message : string;
+  sl_category : string option;
 }
 
 type system_log_snapshot = {
@@ -1562,6 +1563,7 @@ let decode_system_log_entry json =
   let* sl_module = required_string_field json "module" in
   let* sl_message = required_string_field json "message" in
   let* sl_keeper = optional_string_field json "keeper_name" in
+  let* sl_category = optional_string_field json "category" in
   Ok
     { sl_seq
     ; sl_ts
@@ -1569,7 +1571,52 @@ let decode_system_log_entry json =
     ; sl_module
     ; sl_keeper
     ; sl_message
+    ; sl_category
     }
+
+(* The category vocabulary the Logs filter cycles through is the one the
+   loaded rows actually carry, so the TUI never duplicates the server's
+   closed category set and never offers a name the page cannot show.
+   Sorted for a cycle order that holds still across refreshes. *)
+let system_log_categories entries =
+  entries
+  |> List.filter_map (fun entry -> entry.sl_category)
+  |> List.sort_uniq String.compare
+
+(* None -> first -> ... -> last -> None. A current value the page no longer
+   carries steps back to None rather than to a neighbour it no longer has. *)
+let next_system_log_category ~current entries =
+  let categories = system_log_categories entries in
+  match current with
+  | None -> ( match categories with [] -> None | first :: _ -> Some first)
+  | Some current ->
+      (* Found at the last position and not found at all both come back
+         None: the wrap to "everything" and the vanished-value reset are
+         the same answer. *)
+      let rec step = function
+        | [] | [ _ ] -> None
+        | one :: (two :: _ as rest) ->
+            if String.equal one current then Some two else step rest
+      in
+      step categories
+
+(* The verbose ladder. [None] asks the server for everything (its own
+   default is debug); each press raises the floor. Debug and unknown
+   spellings are readings, not rungs this cycle produces. *)
+let next_system_log_min_level = function
+  | None -> Some System_info
+  | Some System_info -> Some System_warn
+  | Some System_warn -> Some System_error
+  | Some System_error -> None
+  | Some System_debug | Some (System_level_unknown _) -> None
+
+(* The wire spelling the /logs route validates (lowercase, fail-closed). *)
+let system_log_level_query = function
+  | System_debug -> "debug"
+  | System_info -> "info"
+  | System_warn -> "warn"
+  | System_error -> "error"
+  | System_level_unknown raw -> raw
 
 type tool_entry = {
   tl_name : string;

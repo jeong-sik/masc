@@ -1559,11 +1559,20 @@ let post_repository_add ~(host : string) ~(port : int)
   post_json ~host ~port ~path:"/api/v1/repositories" ~body:declaration_json
 
 (** Fetch /api/v1/dashboard/logs. The server caps [limit] at 3000; the TUI asks
-    for a screenful's worth of history rather than the whole ring. *)
-let fetch_dashboard_logs ~(host : string) ~(port : int) ~(limit : int) :
-    (Yojson.Safe.t, string) result =
+    for a screenful's worth of history rather than the whole ring. [level] is
+    the route's minimum-level floor in its own lowercase spelling; absent, the
+    server serves everything (its default floor is debug), and an invalid
+    spelling is the route's 400 to give, not this client's to pre-judge. *)
+let fetch_dashboard_logs ~(host : string) ~(port : int) ?level ~(limit : int)
+    () : (Yojson.Safe.t, string) result =
+  let level_query =
+    match level with None -> "" | Some level -> "&level=" ^ level
+  in
   get_json ~host ~port
-    ~path:(Printf.sprintf "/api/v1/dashboard/logs?limit=%d" (max 1 (min 3000 limit)))
+    ~path:
+      (Printf.sprintf "/api/v1/dashboard/logs?limit=%d%s"
+         (max 1 (min 3000 limit))
+         level_query)
 
 (** Fetch /api/v1/dashboard/tools, optionally including one Keeper's exact
     effective turn surface beside the global registered catalog. *)

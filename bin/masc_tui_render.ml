@@ -7023,11 +7023,42 @@ let render_system_logs (state : state) =
   let entries =
     match state.system_logs with None -> [] | Some s -> s.sys_entries
   in
+  (* The level floor already trimmed what the server sent; the category trims
+     what this page shows. Rows without a category never match a named one. *)
+  let entries =
+    match state.system_logs_category with
+    | None -> entries
+    | Some category ->
+        List.filter
+          (fun entry ->
+            match entry.sl_category with
+            | Some value -> String.equal value category
+            | None -> false)
+          entries
+  in
   let total_entries = List.length entries in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
       now.Unix.tm_sec
+  in
+  (* The active filters ride in the header, so a page trimmed to twelve rows
+     says why it is twelve rather than reading as a quiet ring. *)
+  let filter_note =
+    let level =
+      match state.system_logs_min_level with
+      | None -> ""
+      | Some floor ->
+          Printf.sprintf "  level\xe2\x89\xa5%s"
+            (String.trim (Masc.Tui_decode.system_log_level_label floor))
+    in
+    let category =
+      match state.system_logs_category with
+      | None -> ""
+      | Some category ->
+          "  category:" ^ Terminal_text.single_line category
+    in
+    level ^ category
   in
   let header =
     match state.system_logs with
@@ -7038,17 +7069,17 @@ let render_system_logs (state : state) =
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
-        Printf.sprintf "%s (%d of %d, seq %d)  %s  %s"
+        Printf.sprintf "%s (%d of %d, seq %d)%s  %s  %s"
           (screen_title " MASC System Logs")
-          total_entries snapshot.sys_total snapshot.sys_latest_seq timestamp
-          (connection_badge state)
+          total_entries snapshot.sys_total snapshot.sys_latest_seq filter_note
+          timestamp (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   let col_hdr =
-    Printf.sprintf "  %-8s %-7s %-16s %-12s %s" "Time" "Level" "Module" "Keeper"
-      "Message"
+    Printf.sprintf "  %-8s %-7s %-16s %-12s %-9s %s" "Time" "Level" "Module"
+      "Keeper" "Category" "Message"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -7088,14 +7119,24 @@ let render_system_logs (state : state) =
           let keeper =
             match e.sl_keeper with None -> "-" | Some name -> name
           in
+          let category =
+            match e.sl_category with None -> "-" | Some name -> name
+          in
           let level_style = system_log_level_style e.sl_level in
+          (* Module and keeper are fitted rather than only padded: a long
+             module name used to push every column right of it out of line
+             with the header. *)
           let line =
-            Printf.sprintf "  %s%-8s%s %s%s %-5s%s %s%-16s%s %s%-12s%s %s"
+            Printf.sprintf "  %s%-8s%s %s%s %-5s%s %s%s%s %s%s%s %s%s%s %s"
               Ansi.dim (Terminal_text.clock_timestamp e.sl_ts) Ansi.reset
               level_style (system_log_level_mark e.sl_level)
               (Masc.Tui_decode.system_log_level_label e.sl_level) Ansi.reset
-              Ansi.cyan (Terminal_text.single_line e.sl_module) Ansi.reset
-              Ansi.magenta (Terminal_text.single_line keeper) Ansi.reset
+              Ansi.cyan (fit_width (Terminal_text.single_line e.sl_module) 16)
+              Ansi.reset
+              Ansi.magenta (fit_width (Terminal_text.single_line keeper) 12)
+              Ansi.reset
+              Ansi.dim (fit_width (Terminal_text.single_line category) 9)
+              Ansi.reset
               (Terminal_text.single_line e.sl_message)
           in
           if idx = state.system_logs_cursor then

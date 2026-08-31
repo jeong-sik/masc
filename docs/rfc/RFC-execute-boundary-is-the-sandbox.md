@@ -241,6 +241,6 @@ Product behaviour read from source on 2026-08-31: Claude Code (leaked
 (`src/agents/bash-tools.exec.ts`, `src/infra/exec-approvals.ts`),
 NousResearch/hermes-agent (`tools/terminal_tool.py`), badlogic/pi-mono
 (`packages/coding-agent/src/core/tools/bash.ts`). Fleet figures from
-`~/me/.masc/config/keepers/*.toml`; corpus figures from
+`<base-path>/.masc/config/keepers/*.toml`; corpus figures from
 `tools/costume_census`; refusal counts from `shell_costume` records in
 `<base-path>/.masc/logs/`.

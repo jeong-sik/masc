@@ -5792,13 +5792,14 @@ def verification_request_row(task_id: str) -> dict[str, object]:
         "request_id": f"vr-{task_id}",
         "task_id": task_id,
         "task_title": f"finish {task_id}",
-        "request_kind": "completion",
-        "request_summary": "" if task_id == "task-901" else f"prove {task_id} is done",
+        # request_kind, request_summary and next_action are gone from the
+        # producer: Verification_protocol wrote them as the fixed literals
+        # "normal", "" and "", so three rows of the detail pane said the same
+        # thing on every request ever drawn. Nothing reads them now.
         "submitted_by": "keeper-alpha",
         "created_at": "2026-08-25T14:00:00+09:00",
         "required_artifacts": ["diff"],
         "submitted_evidence": ["diff"],
-        "next_action": "review the diff",
     }
 
 
@@ -5891,13 +5892,11 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
         for needle in (
             b"vr-task-901",
             b"finish task-901",
-            b"completion",
-            b"No request summary was recorded",
-            b"review the diff",
+            b"Submitted by",
             b"REQUIRED ARTIFACTS (1)",
             b"SUBMITTED EVIDENCE (1)",
             b"diff",
-            b"left/Esc:list",
+            b"Left / Esc:back",
         ):
             if needle not in detail_plain:
                 raise AssertionError(

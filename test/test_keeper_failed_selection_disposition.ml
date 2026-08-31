@@ -90,7 +90,7 @@ let test_nonterminal_outcomes_preserve_batch () =
       (Cycle.Checkpointed
          { meta
          ; checkpoint_reason = Turn.Awaiting_external_effect
-         ; continuation_route = Turn.Continuation_route_not_addressed
+         ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
          })
   ; Some (Cycle.Input_required meta)
   ; Some (Cycle.Cancelled meta)
@@ -111,7 +111,7 @@ let test_durable_stimulus_checkpoint_acks_admitted_batch () =
          (Cycle.Checkpointed
             { meta
             ; checkpoint_reason = Turn.Durable_stimulus_arrived
-            ; continuation_route = Turn.Continuation_route_not_addressed
+            ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
             }))
   with
   | Loop.Batch_ack_durable_stimulus_yield -> ()

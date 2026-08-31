@@ -166,11 +166,15 @@ type batch_disposition =
 
 val batch_disposition_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome option -> batch_disposition
-(** The queue action a turn's [cycle_outcome] implies. Completed turns ACK the
-    whole batch. A durable-stimulus yield ACKs attention-only sources so the
-    newer source can advance, but preserves Connector_attention until an exact
-    reply/ignore settlement exists. Every other incomplete, failed, cancelled,
-    or checkpointed outcome leaves the whole batch pending. Provider/runtime
+(** The queue action a turn's [cycle_outcome] implies. A completed turn ACKs
+    only when a surface-post receipt addresses the route, or a memory-write
+    receipt proves completion without a direct surface reply. A mismatched
+    surface route, absent terminal receipt, or inapplicable continuation route
+    leaves the batch pending; none is evidence of model intent. A
+    durable-stimulus yield ACKs attention-only sources so the newer source can
+    advance, but preserves Connector_attention until an exact reply/ignore
+    settlement exists. Every other incomplete, failed, cancelled, or
+    checkpointed outcome leaves the whole batch pending. Provider/runtime
     failure is not authority to discard input. *)
 
 type connector_attention_settlement =

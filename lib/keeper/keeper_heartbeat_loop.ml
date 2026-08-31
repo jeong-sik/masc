@@ -280,13 +280,6 @@ type connector_attention_outcome =
   | Attention_resolved
   | Attention_ignored
 
-let connector_attention_outcome_of_route
-    (route : Keeper_unified_turn.continuation_route_disposition) =
-  match route with
-  | Keeper_unified_turn.Continuation_route_addressed -> Attention_resolved
-  | Keeper_unified_turn.Continuation_route_not_addressed -> Attention_ignored
-;;
-
 (* T6 audit: record a swallowed cycle exception as a turn failure.
 
    Catch-and-survive is intentional (the fiber must outlive the
@@ -358,10 +351,22 @@ let batch_disposition_of_cycle_outcome
   =
   match cycle_outcome with
   | Some (Cycle.Completed completion) ->
-    Batch_ack_completed
-      { connector_attention_outcome =
-          connector_attention_outcome_of_route completion.continuation_route
-      }
+    (match completion.continuation_route with
+     | Keeper_unified_turn.Continuation_route_addressed ->
+       Batch_ack_completed
+         { connector_attention_outcome = Attention_resolved }
+     | Keeper_unified_turn.Continuation_memory_write_completed ->
+       (* The receipt proves a completed non-surface terminal effect.  The
+          external-attention ledger's Ignored reason is narrowly "turn
+          completed without direct reply"; it does not claim model intent. *)
+       Batch_ack_completed
+         { connector_attention_outcome = Attention_ignored }
+     | Keeper_unified_turn.Continuation_route_mismatch
+     | Keeper_unified_turn.Continuation_no_terminal_effect_receipt
+     | Keeper_unified_turn.Continuation_route_not_applicable ->
+       (* No exact direct-reply/ignore settlement exists. Leave the batch
+          pending rather than turning missing evidence into Ignored. *)
+       Batch_no_action)
   | Some
       (Cycle.Checkpointed
          { checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived

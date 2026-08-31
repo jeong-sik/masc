@@ -109,14 +109,20 @@ let test_the_timeout_field_names_its_source () =
 (* The other half. Whether a nonzero exit completes is not a property of the
    status -- it is which constructor the dispatch site reaches for, and reading
    a green test run cannot tell the two apart. masc#28983 was four turn deaths
-   from that site answering [make_error]. *)
+   from that site answering the failure disposition instead.
+
+   Exactly one, not "at least one". The module has one success constructor and
+   eight failure ones, and the one is the site that carries the finished
+   process's payload. Zero means it was routed to a failure again; two means a
+   second success path appeared, which is a decision rather than a refactor.
+   Either way the count is the thing to look at, so the check names it. *)
 let dispatch_site = "lib/keeper/keeper_tool_execute_runtime.ml"
 
-let test_the_dispatch_site_answers_ok_for_a_finished_process () =
-  Alcotest.(check bool)
-    "the site that builds the finished-process payload calls make_ok"
-    true
-    (Ast_grep.count_calls ~module_path:dispatch_site ~callee:"Tool_result.make_ok" > 0)
+let test_the_dispatch_site_answers_ok_once_for_a_finished_process () =
+  Alcotest.(check int)
+    "one success constructor, at the site that carries the payload"
+    1
+    (Ast_grep.count_calls ~module_path:dispatch_site ~callee:"Tool_result.make_ok")
 ;;
 
 let () =
@@ -140,9 +146,9 @@ let () =
         ] )
     ; ( "where the disposition is chosen"
       , [ Alcotest.test_case
-            "the dispatch site answers ok for a finished process"
+            "the dispatch site answers ok once for a finished process"
             `Quick
-            test_the_dispatch_site_answers_ok_for_a_finished_process
+            test_the_dispatch_site_answers_ok_once_for_a_finished_process
         ] )
     ]
 ;;

@@ -3,7 +3,7 @@
 - 날짜(ISO8601): `2026-08-30T11:50:01+09:00`
 - 작성자: `Codex`
 - 결정 ID: `context-recovery-r1`
-- 적용 대상: `~/me/.masc`, `~/me/workspace/yousleepwhen/masc`
+- 적용 대상: `MASC_BASE_PATH=~/me` 의 `.masc`, `~/me/workspace/yousleepwhen/masc`
 - 결정 상태: `추적 필요`
 - 런타임 바이너리 소스 HEAD: `b4e0f6073909b2f84f71f15957b9368e077cdbb9`
   (`HEAD..origin/main = 0`)

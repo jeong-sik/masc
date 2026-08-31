@@ -799,6 +799,9 @@ ordinary snapshot은 있지만 Librarian 갱신이 실패 중인 상태다. 두 
 Keeper 수다. 따라서 source-bound snapshot이 남아 `source-only`로 표시되는
 행도 이 수에 포함될 수 있다. 표의 상태는 남아 있는 저장소를 말하고, 경고
 색과 상세 alert는 Librarian 실패의 서버 severity를 그대로 보존한다.
+Vision ingest 오류가 있으면 상세에 구조화된 reason별 횟수를 표시하고, 해당
+행을 warning으로 그린다. 이미지가 text placeholder로 대체된 실패를 정상
+ingest로 보이지 않게 하기 위함이다.
 
 커서가 가리키는 행의 전체 상태와 서버가 매긴 경고(alert) 목록이 표
 아래에 함께 나온다. `r`로 다시 불러온다.

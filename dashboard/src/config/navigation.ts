@@ -472,7 +472,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'keeper-memory-health',
       label: '키퍼 메모리 상태',
-      description: 'Per-keeper ordinary/source snapshots, deltas, read failures, and cadence.',
+      description: 'Per-keeper ordinary/source snapshots, Vision ingest failures, deltas, and cadence.',
       params: { section: 'keeper-memory-health' },
     },
   ],

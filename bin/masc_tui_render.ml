@@ -8718,6 +8718,19 @@ let memory_context_lines (k : Masc.Tui_decode.memory_keeper_health) =
       (Masc_tui_context_inspector.format_bytes k.mkh_source_snapshot_bytes)
       (if k.mkh_source_snapshot_present then "present" else "absent")
   in
+  let vision_line =
+    let reasons =
+      match k.mkh_vision_ingest_error_reasons with
+      | [] -> "none"
+      | reasons ->
+        String.concat ", "
+          (List.map
+             (fun (reason, count) -> Printf.sprintf "%s x%d" reason count)
+             reasons)
+    in
+    Printf.sprintf "  vision ingest errors %d · reasons %s"
+      k.mkh_vision_ingest_errors reasons
+  in
   let alert_lines =
     List.map
       (fun (a : memory_alert) ->
@@ -8737,7 +8750,7 @@ let memory_context_lines (k : Masc.Tui_decode.memory_keeper_health) =
           k.mkh_source_read_error
       ]
   in
-  current_line :: facts_line :: source_line :: librarian_line
+  current_line :: facts_line :: source_line :: librarian_line :: vision_line
   :: (read_error_lines @ alert_lines)
 
 let memory_state_label (k : Masc.Tui_decode.memory_keeper_health) =
@@ -8755,6 +8768,8 @@ let memory_state_label (k : Masc.Tui_decode.memory_keeper_health) =
   then "no-current"
   else if k.mkh_librarian_failures > 0
   then "degraded"
+  else if List.exists (fun alert -> String.equal alert.ma_severity "warn") k.mkh_alerts
+  then "warning"
   else "ok"
 
 let memory_row_line (k : Masc.Tui_decode.memory_keeper_health) =
@@ -8788,6 +8803,9 @@ let memory_row_style (k : Masc.Tui_decode.memory_keeper_health) =
   let server_error =
     List.exists (fun alert -> String.equal alert.ma_severity "error") k.mkh_alerts
   in
+  let server_warn =
+    List.exists (fun alert -> String.equal alert.ma_severity "warn") k.mkh_alerts
+  in
   if server_error
      ||
      ((not k.mkh_snapshot_present)
@@ -8795,7 +8813,8 @@ let memory_row_style (k : Masc.Tui_decode.memory_keeper_health) =
       && not k.mkh_source_snapshot_present)
   then Some (Theme.bad ())
   else if
-    not k.mkh_snapshot_present
+    server_warn
+    || not k.mkh_snapshot_present
     || k.mkh_librarian_failures > 0
     || Option.is_some k.mkh_read_error
     || Option.is_some k.mkh_source_read_error

@@ -2608,6 +2608,15 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       ; ("snapshot_present", `Bool present)
       ; ("librarian_lane_busy", `Int 0)
       ; ("librarian_failures", `Int failures)
+      ; ("vision_ingest_errors", `Int (if id = "healthy" then 3 else 0))
+      ; ( "vision_ingest_error_reasons"
+        , if id = "healthy"
+          then
+            `List
+              [ `Assoc
+                  [ ("reason", `String "fetch_failed"); ("count", `Int 3) ]
+              ]
+          else `List [] )
       ; ("read_error", `Null)
       ; ("source_revision", `Int (if source_present then 7 else 0))
       ; ("source_facts", `Int (if source_present then 2 else 0))
@@ -2651,6 +2660,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("source_snapshot_bytes", `Int 1024)
             ; ("librarian_lane_busy", `Int 0)
             ; ("librarian_failures", `Int 4)
+            ; ("vision_ingest_errors", `Int 3)
             ; ("read_errors", `Int 0)
             ; ("source_read_errors", `Int 0)
             ] )
@@ -2677,6 +2687,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
         snapshot.mhs_total_source_facts;
       Alcotest.(check int) "source invalidations total" 1
         snapshot.mhs_total_source_invalidations;
+      Alcotest.(check int) "vision ingest errors total" 3
+        snapshot.mhs_total_vision_ingest_errors;
       (match snapshot.mhs_keepers with
        | source_only :: _ ->
            Alcotest.(check bool) "no ordinary snapshot" false

@@ -4,14 +4,6 @@ module KPB = Keeper_provider_runtime_boundary
 module KTD = Keeper_turn_driver
 module EC = Keeper_error_classify
 
-let with_temp_dir prefix f =
-  let dir = Filename.temp_dir prefix "" in
-  Fun.protect
-    ~finally:(fun () ->
-      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
-    (fun () -> f dir)
-;;
-
 let raw_provider_timeout_error ~phase =
   Agent_core.Error.Provider
     (Llm_provider.Error.Timeout
@@ -158,17 +150,11 @@ let test_attributed_empty_completion_is_auto_recoverable () =
    drift-guard anti-pattern RFC-0371 §5.4 removes. *)
 
 (* AGENT_CORE surfaces an empty completion with an unmodeled stop_reason as a
-   non-retryable [InvalidRequest].  It must NOT be promoted to the
-   empty-completion exemption: main (#25592) classifies [InvalidRequest] as
-   auto-recoverable at the type level, but this shape is not an
-   empty-completion error and must not consume the empty-completion budget.
-   Its deterministic recurrence is bounded by the per-keeper consecutive
-   [InvalidRequest] counter (companion change), not by the exemption
-   budget. *)
+   non-retryable [InvalidRequest].  This shape must stay classified as an
+   invalid request, not as an empty completion: the classes drive telemetry
+   and failure routing, and conflating them hides which boundary produced
+   the empty turn. *)
 let test_unmodeled_stop_reason_invalid_request_is_not_empty_completion () =
-  with_temp_dir "unmodeled-stop-reason" @@ fun base_path ->
-  let module KUF = Keeper_unified_turn_failure in
-  let keeper_name = "test-keeper-unmodeled-stop-reason" in
   let err =
     Agent_core.Error.Api
       (Llm_provider.Retry.InvalidRequest
@@ -185,22 +171,13 @@ let test_unmodeled_stop_reason_invalid_request_is_not_empty_completion () =
   Alcotest.(check bool)
     "unmodeled stop_reason shape is classified as invalid request"
     true
-    (EC.is_invalid_request_error err);
-  Alcotest.(check bool)
-    "invalid request does not consume the empty-completion exemption budget"
-    false
-    (KUF.account_failure_counting
-       ~base_path ~keeper_name ~is_auto_recoverable:true err)
+    (EC.is_invalid_request_error err)
 
-(* A generic 400 [InvalidRequest] is not an empty-completion exemption
-   either: main (#25592) classifies it as auto-recoverable, and its
-   deterministic recurrence is bounded by the per-keeper consecutive
-   [InvalidRequest] counter (companion change), not by the empty-completion
-   budget. *)
+(* A generic 400 [InvalidRequest] is not an empty completion either: the
+   classes stay distinct for telemetry and failure routing. Both count
+   toward the crash-accounting streak identically (RFC
+   turn-failure-visible-stop, #32105) — no class carries its own budget. *)
 let test_generic_invalid_request_is_not_empty_completion () =
-  with_temp_dir "generic-invalid-request" @@ fun base_path ->
-  let module KUF = Keeper_unified_turn_failure in
-  let keeper_name = "test-keeper-generic-invalid-request" in
   let err =
     Agent_core.Error.Api
       (Llm_provider.Retry.InvalidRequest
@@ -211,57 +188,7 @@ let test_generic_invalid_request_is_not_empty_completion () =
   Alcotest.(check bool)
     "generic InvalidRequest is not an empty completion error"
     false
-    (EC.is_empty_completion_error err);
-  Alcotest.(check bool)
-    "generic InvalidRequest does not consume the empty-completion budget"
-    false
-    (KUF.account_failure_counting
-       ~base_path ~keeper_name ~is_auto_recoverable:true err)
-
-(* Bounded compensating accounting: the empty-completion exemption is capped
-   per keeper; once the budget is exhausted the failure counts toward crash
-   again, and a success resets the budget. *)
-let test_empty_completion_exemption_budget_is_bounded () =
-  with_temp_dir "empty-completion-budget" @@ fun base_path ->
-  let module KUF = Keeper_unified_turn_failure in
-  let keeper_name = "test-keeper-empty-completion-budget" in
-  let empty_err =
-    Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderUnavailable
-         { provider = "ollama-cloud"
-         ; detail = "empty completion (stop_reason=end_turn): empty turn"
-         })
-  in
-  let transient_err =
-    Agent_core.Error.Api
-      (Llm_provider.Retry.Timeout { message = "timeout"; phase = None })
-  in
-  for i = 1 to KUF.empty_completion_exemption_budget do
-    Alcotest.(check bool)
-      (Printf.sprintf "exempted empty completion %d does not count toward crash" i)
-      false
-      (KUF.account_failure_counting
-         ~base_path ~keeper_name ~is_auto_recoverable:true empty_err)
-  done;
-  Alcotest.(check bool)
-    "a non-empty auto-recoverable failure does not consume the budget"
-    false
-    (KUF.account_failure_counting
-       ~base_path ~keeper_name ~is_auto_recoverable:true transient_err);
-  Alcotest.(check bool)
-    "empty completion past the budget counts toward crash"
-    true
-    (KUF.account_failure_counting
-       ~base_path ~keeper_name ~is_auto_recoverable:true empty_err);
-  Alcotest.(check bool)
-    "success reset commits"
-    true
-    (KUF.reset_failure_exemptions ~base_path ~keeper_name);
-  Alcotest.(check bool)
-    "success resets the exemption budget"
-    false
-    (KUF.account_failure_counting
-       ~base_path ~keeper_name ~is_auto_recoverable:true empty_err)
+    (EC.is_empty_completion_error err)
 
 let test_extra_system_context_preserves_typed_blocks () =
   let blocks =
@@ -305,8 +232,6 @@ let () =
         Alcotest.test_case
           "generic InvalidRequest is not empty completion" `Quick
           test_generic_invalid_request_is_not_empty_completion;
-        Alcotest.test_case "empty completion exemption budget is bounded" `Quick
-          test_empty_completion_exemption_budget_is_bounded;
         Alcotest.test_case "extra system context preserves typed blocks" `Quick
           test_extra_system_context_preserves_typed_blocks;
       ] );

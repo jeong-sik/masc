@@ -440,17 +440,10 @@ let persist_terminal_turn_meta ~config ~original_meta ~updated_meta =
 
 let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
   let reset_failure_state () =
-    let failure_streak_reset =
+    if
       Keeper_turn_failure_streak.reset
         ~base_path:config.Workspace.base_path
         ~keeper_name:updated_meta.name
-    in
-    let failure_exemptions_reset =
-      Keeper_unified_turn_failure.reset_failure_exemptions
-        ~base_path:config.Workspace.base_path
-        ~keeper_name:updated_meta.name
-    in
-    if failure_streak_reset && failure_exemptions_reset
     then Health.record_success ~agent_name:updated_meta.name
   in
   match result.Keeper_agent_run.stop_reason with

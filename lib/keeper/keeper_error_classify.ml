@@ -614,60 +614,32 @@ let is_context_overflow (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Api (InputCapacity _) -> false
   | _ -> false
 
-(* Invariant for this predicate: the exemption gate is
-   [Keeper_unified_turn_failure.account_failure_counting].  When it returns
-   [false], [record_failure_observation] skips the durable turn-failure streak
-   increment, so
-   every exempted class must carry its own compensating accounting.  Without
-   one, "not counted toward crash" means the keeper retries the same failure
-   forever with [consecutive] pinned at 0.
+(* Classification-only predicate: does this failure class describe a
+   condition a later turn could clear without operator action?
 
-   - runtime-exhausted ([Runtime_exhausted _] / [Resumable_cli_session _]):
-     NOT exempt.  [account_failure_counting] counts them toward the crash
-     threshold via its [is_runtime_exhausted_error] override, so the ordinary
-     consecutive-failure threshold bounds them.
-   - capacity backpressure: exempt; bounded by the runtime-rotation path —
-     [recoverable_runtime_failure_reason] maps it to [Capacity_backpressure]
-     and [degraded_rotation_after_recoverable_error] walks the untried
-     runtime catalog once, then stops (it never invents a timed retry cycle).
-   - transient network: exempt from Keeper crash accounting. Rotation does not
-     apply ([recoverable_runtime_failure_reason] returns [None] for
-     network/timeout errors and the failure route is [Retry_after_observed
-     Network_transient]). The heartbeat durably moves the exact source to its
-     urgency-lane tail, so a persistently failing transport cannot monopolize
-     other independent queued sources. The source is
-     retained with a new incarnation and may be retried after independent work.
-   - context overflow: NOT exempt (#26546). A provider overflow without a
-     state-changing successor has no evidence that
-     mechanical retry will fit. The ordinary consecutive-failure threshold
-     bounds it, and the heartbeat quarantines the selected source unless the
-     failure carries a deferred runtime lane
-     (the heartbeat loop keeps the source pending until a completed turn).
-   - 0-byte empty completion: bounded by
-     [Keeper_unified_turn_failure]'s per-keeper exemption budget — after
-     [empty_completion_exemption_budget] consecutive exempted empty
-     completions the failure counts toward the crash threshold again, and a
-     successful turn resets the budget.  Only the modeled, non-overflow
-     shapes are exempt via [is_empty_completion_error]; the unmodeled
-     stop_reason shape that AGENT_CORE reports as [InvalidRequest] is NOT an
-     empty-completion exemption — it falls under the [InvalidRequest] class
-     below.
-   - deterministic invalid request (400): bounded by the per-keeper
-     consecutive counter in
-     [Keeper_unified_turn_failure.note_invalid_request_failure]; after
-     [max_consecutive_invalid_request_failures] rejections without an
-     intervening success the observation degrades to ordinary crash
-     accounting, so a poisoned checkpoint cannot retry forever with the
-     counter pinned at 0.
+   RFC turn-failure-visible-stop (#32105): this predicate has NO crash
+   accounting authority. Every turn failure advances the durable
+   crash-accounting streak in [Keeper_unified_turn_failure] regardless of
+   class; the next successful turn (or an operator clear) resets it. The
+   historical design exempted "auto-recoverable" classes from crash
+   accounting and required each exemption to carry its own compensating
+   budget. That invariant lived only in this comment and drifted from the
+   code twice: a provider emitting a malformed stream looped 923 rejections
+   across five keepers in 1h41m on 2026-07-21, and a fleet-wide transport
+   outage retried forever with [consecutive] pinned at 0 and fleet health
+   [ok] (#31958, 44 failures in 59s). No classification decides whether a
+   failure is visible.
 
-   Provider parse rejections used to be listed here and had no such accounting.
-   A provider that keeps emitting a malformed stream (for example a tool_call
-   delta with a blank id, which the AGENT_CORE SSE parser rejects) produced an
-   unbounded retry loop: 923 rejections across five keepers in 1h41m on
-   2026-07-21, each attempt costing up to 70s, with no escalation because the
-   counter never advanced. They are no longer exempt, so the ordinary
-   consecutive-failure threshold bounds them; an isolated malformed response
-   still costs nothing, because a later success resets the counter. *)
+   What this predicate still feeds: telemetry labels and downstream failure
+   routing (see [Keeper_runtime_failure_route]). Capacity backpressure
+   rotates runtimes via [recoverable_runtime_failure_reason]
+   ([Capacity_backpressure] walks the untried runtime catalog once, then
+   stops — it never invents a timed retry cycle). The heartbeat durably
+   moves a failed source to its urgency-lane tail, so a persistently failing
+   transport cannot monopolize other independent queued sources; the source
+   is retained with a new incarnation and may be retried after independent
+   work. Those are handling choices for the next attempt, not visibility
+   decisions. *)
 let is_auto_recoverable_turn_error (err : Agent_core.Error.t) : bool =
   is_transient_network_error err
   || is_auto_recoverable_runtime_exhausted_error err

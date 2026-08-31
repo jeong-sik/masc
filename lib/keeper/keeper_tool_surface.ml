@@ -340,10 +340,6 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         (Keeper_turn_failure_streak.reset
            ~base_path:config.base_path
            ~keeper_name:name);
-      ignore
-        (Keeper_unified_turn_failure.reset_failure_exemptions
-           ~base_path:config.base_path
-           ~keeper_name:name);
       Log.Keeper.warn
         "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
         name reason preserve_system cleared_count;

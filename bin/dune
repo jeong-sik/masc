@@ -681,6 +681,11 @@
  (modules masc_tui_board_detail))
 
 (library
+ (name masc_tui_magnitude)
+ (wrapped false)
+ (modules masc_tui_magnitude))
+
+(library
  (name masc_tui_board_comment_thread)
  (wrapped false)
  (modules masc_tui_board_comment_thread)
@@ -886,6 +891,7 @@
   masc_tui_operator_projection
   masc_tui_approval_authority
   masc_tui_board_detail
+  masc_tui_magnitude
   masc_tui_board_comment_thread
   masc_tui_board_hearth
   masc_tui_board_selection

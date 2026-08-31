@@ -3279,6 +3279,11 @@
  (libraries alcotest masc_tui_board_hearth))
 
 (test
+ (name test_tui_magnitude)
+ (modules test_tui_magnitude)
+ (libraries alcotest masc_tui_magnitude))
+
+(test
  (name test_tui_board_score)
  (modules test_tui_board_score)
  (libraries alcotest masc_tui_board_score))

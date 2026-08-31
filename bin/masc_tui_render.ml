@@ -12371,9 +12371,9 @@ let context_prompt_lines state (capture : Masc.Keeper_prompt_capture.capture) =
         ]
 
 let context_input_map_lines state (record : Turn_record.t)
-    (capture : Masc.Keeper_prompt_capture.capture option) =
+    (capture : Masc.Keeper_prompt_capture.capture option) ~tool_surface =
   let module Inspector = Masc_tui_context_inspector in
-  let rows = Inspector.input_map_rows record capture in
+  let rows = Inspector.input_map_rows record capture ~tool_surface in
   match state.context_inspector_exact with
   | Some index ->
       (match List.nth_opt rows index with
@@ -12462,7 +12462,8 @@ let context_inspector_content_lines state =
                   | Ok capture -> Some capture
                   | Error _ -> None
                 in
-                context_input_map_lines state record capture))
+                context_input_map_lines state record capture
+                  ~tool_surface:reading.tool_surface))
 
 let context_inspector_viewport state =
   let terminal_rows, _ = get_terminal_size () in

@@ -113,6 +113,45 @@ let opt_field name to_json = function
   | Some value -> [ (name, to_json value) ]
   | None -> []
 
+type tool_surface_entry =
+  { name : string
+  ; schema_bytes : int
+  }
+
+let tool_surface_to_json entries : Yojson.Safe.t =
+  `List
+    (List.map
+       (fun entry ->
+          `Assoc
+            [ "name", `String entry.name
+            ; "schema_bytes", `Int entry.schema_bytes
+            ])
+       entries)
+
+let tool_surface_entry_of_json = function
+  | `Assoc fields ->
+      (match
+         List.assoc_opt "name" fields, List.assoc_opt "schema_bytes" fields
+       with
+       | Some (`String name), Some (`Int schema_bytes)
+         when String.length name > 0 && schema_bytes >= 0 ->
+           Ok { name; schema_bytes }
+       | _ ->
+           Error "tool surface entry needs a non-empty name and schema_bytes")
+  | _ -> Error "tool surface entry is not an object"
+
+let tool_surface_of_json = function
+  | `List items ->
+      let rec decode reversed = function
+        | [] -> Ok (List.rev reversed)
+        | item :: rest ->
+            (match tool_surface_entry_of_json item with
+             | Ok entry -> decode (entry :: reversed) rest
+             | Error detail -> Error detail)
+      in
+      decode [] items
+  | _ -> Error "tool surface payload is not a JSON array"
+
 let prompt_block_to_json (b : prompt_block) : Yojson.Safe.t =
   `Assoc
     [ ("block", `String (Prompt_block_id.to_string b.block))

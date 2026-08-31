@@ -3796,7 +3796,10 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
           let error = Error (Printexc.to_string exn) in
-          { Masc_tui_context_inspector.turn = error; prompt = error }
+          { Masc_tui_context_inspector.turn = error
+          ; prompt = error
+          ; tool_surface = Masc_tui_context_inspector.Surface_not_recorded
+          }
     in
     enqueue_async mailbox
       (Context_inspector_loaded (generation, keeper_name, reading))
@@ -3812,7 +3815,10 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
         (Context_inspector_loaded
            ( generation
            , keeper_name
-           , { Masc_tui_context_inspector.turn = error; prompt = error } ))
+           , { Masc_tui_context_inspector.turn = error
+             ; prompt = error
+             ; tool_surface = Masc_tui_context_inspector.Surface_not_recorded
+             } ))
 
 let open_context_inspector state ~mailbox ~keeper_name =
   state.context_inspector_open <- true;
@@ -10352,9 +10358,11 @@ and is loaded on demand through keeper_skill.
                  ( _
                  , { Masc_tui_context_inspector.turn = Ok record
                    ; prompt
+                   ; tool_surface
                    } ) ->
                  let capture = match prompt with Ok value -> Some value | Error _ -> None in
                  Masc_tui_context_inspector.input_map_rows record capture
+                   ~tool_surface
              | Some _ | None -> []
            in
            let close () =

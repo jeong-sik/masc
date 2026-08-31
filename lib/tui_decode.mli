@@ -976,12 +976,69 @@ type fusion_judge =
       fj_error : string;
     }
 
+type fusion_tool_phase =
+  | Fusion_tool_panel
+  | Fusion_tool_judge of string
+
+type fusion_tool_actor =
+  { fta_phase : fusion_tool_phase
+  ; fta_identity : string
+  }
+
+type fusion_tool_preview =
+  { ftp_text : string
+  ; ftp_bytes : int
+  ; ftp_truncated : bool
+  }
+
+type fusion_tool_completion =
+  | Fusion_tool_succeeded of fusion_tool_preview
+  | Fusion_tool_failed of
+      { ftc_output : fusion_tool_preview
+      ; ftc_recoverable : bool
+      ; ftc_error_class : string option
+      }
+
+type fusion_tool_event =
+  | Fusion_tool_called of
+      { fte_actor : fusion_tool_actor
+      ; fte_agent_name : string
+      ; fte_tool_use_id : string
+      ; fte_turn : int
+      ; fte_planned_index : int
+      ; fte_tool_name : string
+      ; fte_input : fusion_tool_preview
+      }
+  | Fusion_tool_completed of
+      { fte_actor : fusion_tool_actor
+      ; fte_agent_name : string
+      ; fte_tool_use_id : string
+      ; fte_turn : int
+      ; fte_planned_index : int
+      ; fte_tool_name : string
+      ; fte_completion : fusion_tool_completion
+      }
+
+type fusion_tool_gap =
+  { ftg_actor : fusion_tool_actor
+  ; ftg_reason : string
+  }
+
+type fusion_tool_trace =
+  { ftt_complete : bool
+  ; ftt_observed_actors : fusion_tool_actor list
+  ; ftt_dropped_events : int
+  ; ftt_gaps : fusion_tool_gap list
+  ; ftt_events : fusion_tool_event list
+  }
+
 type fusion_evidence = {
   fe_post_id : string;
   fe_title : string;
   fe_question : string;
   fe_panel : fusion_panel_result list;
   fe_judge : fusion_judge;
+  fe_tool_trace : fusion_tool_trace option;
 }
 
 type fusion_evidence_status =

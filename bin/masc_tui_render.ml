@@ -8150,6 +8150,131 @@ let fusion_labeled_markdown ~width ~label text =
   (Ansi.bold, "  " ^ label)
   :: fusion_markdown_block ~width ~indent:"    " text
 
+let fusion_tool_actor_text actor =
+  match actor.fta_phase with
+  | Fusion_tool_panel -> "panel/" ^ Terminal_text.single_line actor.fta_identity
+  | Fusion_tool_judge role ->
+      Printf.sprintf "judge/%s/%s" (Terminal_text.single_line role)
+        (Terminal_text.single_line actor.fta_identity)
+
+let fusion_tool_agent_suffix actor agent_name =
+  if String.equal actor.fta_identity agent_name
+  then ""
+  else "  agent=" ^ Terminal_text.single_line agent_name
+
+let fusion_tool_preview_lines ~width ~label preview =
+  let size =
+    if preview.ftp_truncated
+    then Printf.sprintf "%d bytes; preview truncated" preview.ftp_bytes
+    else Printf.sprintf "%d bytes" preview.ftp_bytes
+  in
+  let payload_text =
+    if preview.ftp_truncated
+    then preview.ftp_text
+    else
+      try
+        preview.ftp_text
+        |> Yojson.Safe.from_string
+        |> Yojson.Safe.pretty_to_string
+      with
+      | Yojson.Json_error _ -> preview.ftp_text
+  in
+  let trimmed = String.trim payload_text in
+  let body =
+    if String.starts_with ~prefix:"{" trimmed
+       || String.starts_with ~prefix:"[" trimmed
+    then "```json\n" ^ payload_text ^ "\n```"
+    else payload_text
+  in
+  [ Ansi.dim, Printf.sprintf "    %s (%s)" label size ]
+  @ fusion_markdown_block ~width ~indent:"      " body
+
+let fusion_tool_event_lines ~width = function
+  | Fusion_tool_called event ->
+      [ ( Ansi.cyan
+        , Printf.sprintf "  [called] %s%s  %s  turn %d/%d  id=%s"
+            (fusion_tool_actor_text event.fte_actor)
+            (fusion_tool_agent_suffix event.fte_actor event.fte_agent_name)
+            (Terminal_text.single_line event.fte_tool_name)
+            event.fte_turn event.fte_planned_index
+            (Terminal_text.single_line event.fte_tool_use_id) )
+      ]
+      @ fusion_tool_preview_lines ~width ~label:"Input" event.fte_input
+  | Fusion_tool_completed event ->
+      let status, style, output, failure =
+        match event.fte_completion with
+        | Fusion_tool_succeeded output -> "succeeded", Theme.ok (), output, None
+        | Fusion_tool_failed failure ->
+            "failed", Theme.bad (), failure.ftc_output, Some failure
+      in
+      let failure_suffix =
+        match failure with
+        | None -> ""
+        | Some failure ->
+            Printf.sprintf "  recoverable=%b%s" failure.ftc_recoverable
+              (match failure.ftc_error_class with
+               | Some class_ -> " class=" ^ Terminal_text.single_line class_
+               | None -> " class=unavailable")
+      in
+      [ ( style
+        , Printf.sprintf "  [%s] %s%s  %s  turn %d/%d  id=%s%s" status
+            (fusion_tool_actor_text event.fte_actor)
+            (fusion_tool_agent_suffix event.fte_actor event.fte_agent_name)
+            (Terminal_text.single_line event.fte_tool_name)
+            event.fte_turn event.fte_planned_index
+            (Terminal_text.single_line event.fte_tool_use_id)
+            failure_suffix )
+      ]
+      @ fusion_tool_preview_lines ~width ~label:"Output" output
+
+let fusion_tool_trace_lines ~width = function
+  | None ->
+      [ ( Theme.warn ()
+        , "  Trace unavailable: legacy evidence has no actual Tool event ledger" )
+      ]
+  | Some trace ->
+      let coverage =
+        if trace.ftt_complete
+        then
+          ( Theme.ok ()
+          , Printf.sprintf "  Coverage: complete across %d AGENT_CORE actor(s)"
+              (List.length trace.ftt_observed_actors) )
+        else
+          ( Theme.warn ()
+          , Printf.sprintf
+              "  Coverage: partial across %d actor(s) (%d dropped event(s), %d gap(s))"
+              (List.length trace.ftt_observed_actors)
+              trace.ftt_dropped_events (List.length trace.ftt_gaps) )
+      in
+      let observed =
+        match trace.ftt_observed_actors with
+        | [] -> [ Ansi.dim, "  Observed actors: (none)" ]
+        | actors ->
+            fusion_wrapped_block ~width ~indent:"  "
+              ("Observed actors: "
+               ^ String.concat ", " (List.map fusion_tool_actor_text actors))
+      in
+      let gaps =
+        List.map
+          (fun gap ->
+             ( Theme.warn ()
+             , Printf.sprintf "  Gap: %s [%s]"
+                 (fusion_tool_actor_text gap.ftg_actor)
+                 (Terminal_text.single_line gap.ftg_reason) ))
+          trace.ftt_gaps
+      in
+      let events =
+        match trace.ftt_events with
+        | [] when trace.ftt_complete ->
+            [ Ansi.dim, "  No Tool calls were observed for instrumented actors" ]
+        | [] -> [ Ansi.dim, "  No Tool events retained in this partial ledger" ]
+        | events ->
+            events
+            |> List.concat_map (fun event ->
+                   (Ansi.dim, "") :: fusion_tool_event_lines ~width event)
+      in
+      (coverage :: observed) @ gaps @ events
+
 let fusion_detail_lines ~width (detail : fusion_detail) =
   let run = detail.fud_run in
   let status = fusion_run_status_to_string run.fur_status in
@@ -8253,6 +8378,9 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
               ]
               @ fusion_wrapped_block ~width ~indent:"    " failure.fj_error
         in
+        let tool_lines =
+          fusion_tool_trace_lines ~width evidence.fe_tool_trace
+        in
         [ Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title
         ; Ansi.dim, ""
         ; Ansi.bold, "  1  QUESTION"
@@ -8272,7 +8400,11 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
           ]
         @ judge_lines
         @ [ Ansi.dim, ""
-          ; (Theme.ok ()), "  4  EVIDENCE RECORDED"
+          ; Ansi.bold, "  4  TOOL EXECUTIONS"
+          ]
+        @ tool_lines
+        @ [ Ansi.dim, ""
+          ; (Theme.ok ()), "  5  EVIDENCE RECORDED"
           ; ( Ansi.dim
             , "  Board link: "
               ^ Link.reference Board_post

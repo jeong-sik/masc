@@ -764,6 +764,18 @@ answer count, timeout verdict, cost verdict, or any other local conclusion.
 The open list and exact detail refresh on the existing two-second dashboard
 cadence; `PgUp`/`PgDn` scroll a page at a time.
 
+`TOOL EXECUTIONS` is an execution ledger, not a copy of the `web_tools`
+configuration flag. `called` and `succeeded`/`failed` rows come from the exact
+AGENT_CORE `ToolCalled`/`ToolCompleted` occurrence and retain actor, tool-use
+identity, turn/index, tool name, bounded input/output previews, original byte
+counts, and truncation state. `complete` with no rows means the instrumented
+actors made no calls. The run ledger retains at most 256 events; EventBus or
+run-ledger overflow increments the visible dropped count. `partial` names dropped rows and actors that
+cannot publish this evidence; an official-client panel is shown as
+`official_client_uninstrumented` instead of being misreported as “used no
+tools.” Older Board evidence has `Trace unavailable` rather than a fabricated
+empty ledger.
+
 `pending` is legal only while the Registry row is running. `absent` means the
 retained completed/failed run has no current Board projection; it does not
 claim the post was never written, that the sink failed, or that retention

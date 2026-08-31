@@ -265,12 +265,69 @@ type fusion_judge =
       fj_error : string;
     }
 
+type fusion_tool_phase =
+  | Fusion_tool_panel
+  | Fusion_tool_judge of string
+
+type fusion_tool_actor =
+  { fta_phase : fusion_tool_phase
+  ; fta_identity : string
+  }
+
+type fusion_tool_preview =
+  { ftp_text : string
+  ; ftp_bytes : int
+  ; ftp_truncated : bool
+  }
+
+type fusion_tool_completion =
+  | Fusion_tool_succeeded of fusion_tool_preview
+  | Fusion_tool_failed of
+      { ftc_output : fusion_tool_preview
+      ; ftc_recoverable : bool
+      ; ftc_error_class : string option
+      }
+
+type fusion_tool_event =
+  | Fusion_tool_called of
+      { fte_actor : fusion_tool_actor
+      ; fte_agent_name : string
+      ; fte_tool_use_id : string
+      ; fte_turn : int
+      ; fte_planned_index : int
+      ; fte_tool_name : string
+      ; fte_input : fusion_tool_preview
+      }
+  | Fusion_tool_completed of
+      { fte_actor : fusion_tool_actor
+      ; fte_agent_name : string
+      ; fte_tool_use_id : string
+      ; fte_turn : int
+      ; fte_planned_index : int
+      ; fte_tool_name : string
+      ; fte_completion : fusion_tool_completion
+      }
+
+type fusion_tool_gap =
+  { ftg_actor : fusion_tool_actor
+  ; ftg_reason : string
+  }
+
+type fusion_tool_trace =
+  { ftt_complete : bool
+  ; ftt_observed_actors : fusion_tool_actor list
+  ; ftt_dropped_events : int
+  ; ftt_gaps : fusion_tool_gap list
+  ; ftt_events : fusion_tool_event list
+  }
+
 type fusion_evidence = {
   fe_post_id : string;
   fe_title : string;
   fe_question : string;
   fe_panel : fusion_panel_result list;
   fe_judge : fusion_judge;
+  fe_tool_trace : fusion_tool_trace option;
 }
 
 type fusion_evidence_status =
@@ -4319,6 +4376,152 @@ let decode_fusion_judge json =
       Ok (Fusion_judge_failed { fj_failure_code; fj_error })
   | other -> Error (Printf.sprintf "unknown fusion judge status %S" other)
 
+let decode_fusion_tool_actor json =
+  let* phase = required_string_field json "phase" in
+  let* fta_identity = required_string_field json "actor" in
+  let* judge_role = optional_string_field json "judge_role" in
+  match phase, judge_role with
+  | "panel", None -> Ok { fta_phase = Fusion_tool_panel; fta_identity }
+  | "judge", Some role
+    when List.mem role
+           [ "single"; "refine"; "first"; "meta"; "stage_meta"; "final_meta" ] ->
+      Ok { fta_phase = Fusion_tool_judge role; fta_identity }
+  | "panel", Some _ -> Error "fusion panel tool actor cannot carry judge_role"
+  | "judge", None -> Error "fusion judge tool actor requires judge_role"
+  | "judge", Some role ->
+      Error (Printf.sprintf "unknown fusion tool judge_role %S" role)
+  | phase, _ -> Error (Printf.sprintf "unknown fusion tool phase %S" phase)
+
+let decode_fusion_tool_preview json =
+  let* ftp_text = required_string_field json "text" in
+  let* ftp_bytes = required_int_field json "bytes" in
+  let* ftp_truncated = required_bool_field json "truncated" in
+  let shown_bytes = String.length ftp_text in
+  if ftp_bytes < 0 then Error "fusion tool preview bytes must be non-negative"
+  else if (not ftp_truncated) && ftp_bytes <> shown_bytes then
+    Error "fusion complete tool preview byte count disagrees with text"
+  else if ftp_truncated && ftp_bytes <= shown_bytes then
+    Error "fusion truncated tool preview must report a larger source byte count"
+  else Ok { ftp_text; ftp_bytes; ftp_truncated }
+
+let decode_fusion_tool_common json =
+  let* fte_actor = decode_fusion_tool_actor json in
+  let* fte_agent_name = required_string_field json "agent_name" in
+  let* fte_tool_use_id = required_string_field json "tool_use_id" in
+  let* fte_turn = required_int_field json "turn" in
+  let* fte_planned_index = required_int_field json "planned_index" in
+  let* fte_tool_name = required_string_field json "tool_name" in
+  if fte_turn < 0 || fte_planned_index < 0 then
+    Error "fusion tool turn and planned_index must be non-negative"
+  else
+    Ok
+      ( fte_actor
+      , fte_agent_name
+      , fte_tool_use_id
+      , fte_turn
+      , fte_planned_index
+      , fte_tool_name )
+
+let decode_fusion_tool_event json =
+  let* event = required_string_field json "event" in
+  let* ( fte_actor
+       , fte_agent_name
+       , fte_tool_use_id
+       , fte_turn
+       , fte_planned_index
+       , fte_tool_name ) =
+    decode_fusion_tool_common json
+  in
+  match event with
+  | "called" ->
+      let* input = required_object_field json "input" in
+      let* fte_input = decode_fusion_tool_preview input in
+      Ok
+        (Fusion_tool_called
+           { fte_actor
+           ; fte_agent_name
+           ; fte_tool_use_id
+           ; fte_turn
+           ; fte_planned_index
+           ; fte_tool_name
+           ; fte_input
+           })
+  | "completed" ->
+      let* status = required_string_field json "status" in
+      let* output = required_object_field json "output" in
+      let* output = decode_fusion_tool_preview output in
+      let* recoverable = optional_bool_field json "recoverable" in
+      let* error_class = optional_string_field json "error_class" in
+      let* fte_completion =
+        match status, recoverable, error_class with
+        | "succeeded", None, None -> Ok (Fusion_tool_succeeded output)
+        | "failed", Some ftc_recoverable, ftc_error_class
+          when Option.for_all
+                 (fun class_ ->
+                    List.mem class_ [ "transient"; "deterministic"; "unknown" ])
+                 ftc_error_class ->
+          Ok
+            (Fusion_tool_failed
+               { ftc_output = output; ftc_recoverable; ftc_error_class })
+        | "succeeded", (Some _ | None), (Some _ | None) ->
+          Error "successful fusion tool completion cannot carry failure fields"
+        | "failed", None, _ ->
+          Error "failed fusion tool completion requires recoverable"
+        | "failed", Some _, Some class_ ->
+          Error (Printf.sprintf "unknown fusion tool error_class %S" class_)
+        | status, _, _ ->
+          Error (Printf.sprintf "unknown fusion tool completion status %S" status)
+      in
+      Ok
+        (Fusion_tool_completed
+           { fte_actor
+           ; fte_agent_name
+           ; fte_tool_use_id
+           ; fte_turn
+           ; fte_planned_index
+           ; fte_tool_name
+           ; fte_completion
+           })
+  | event -> Error (Printf.sprintf "unknown fusion tool event %S" event)
+
+let decode_fusion_tool_gap json =
+  let* ftg_actor = decode_fusion_tool_actor json in
+  let* ftg_reason = required_string_field json "reason" in
+  if String.equal ftg_reason "official_client_uninstrumented"
+  then Ok { ftg_actor; ftg_reason }
+  else Error (Printf.sprintf "unknown fusion tool trace gap %S" ftg_reason)
+
+let decode_fusion_tool_trace json =
+  let* status = required_string_field json "status" in
+  let* actor_json = required_list_field json "observed_actors" in
+  let* ftt_observed_actors =
+    decode_list "observed_actors" decode_fusion_tool_actor actor_json
+  in
+  let* ftt_dropped_events = required_int_field json "dropped_events" in
+  let* gap_json = required_list_field json "gaps" in
+  let* ftt_gaps = decode_list "gaps" decode_fusion_tool_gap gap_json in
+  let* event_json = required_list_field json "events" in
+  let* ftt_events = decode_list "events" decode_fusion_tool_event event_json in
+  if ftt_dropped_events < 0 then
+    Error "fusion tool dropped_events must be non-negative"
+  else
+    let expected_status =
+      if ftt_dropped_events = 0 && ftt_gaps = [] then "complete" else "partial"
+    in
+    if not (String.equal status expected_status) then
+      Error
+        (Printf.sprintf
+           "fusion tool trace status %S disagrees with drops/gaps; expected %S"
+           status expected_status)
+    else
+      Ok
+        { ftt_complete = String.equal status "complete"
+        ; ftt_observed_actors
+        ; ftt_dropped_events
+        ; ftt_gaps
+        ; ftt_events
+        }
+
 let decode_fusion_evidence ~run_id json =
   let* fe_post_id = required_string_field json "id" in
   let* fe_title = required_string_field json "title" in
@@ -4346,7 +4549,20 @@ let decode_fusion_evidence ~run_id json =
   let* fe_panel = decode_list "panel" decode_fusion_panel_result panel_json in
   let* judge_json = required_object_field meta "judge" in
   let* fe_judge = decode_fusion_judge judge_json in
-  Ok { fe_post_id; fe_title; fe_question; fe_panel; fe_judge }
+  let* tool_trace_json = optional_object_field meta "tool_trace" in
+  let* fe_tool_trace =
+    match tool_trace_json with
+    | Some tool_trace -> Result.map Option.some (decode_fusion_tool_trace tool_trace)
+    | None -> Ok None
+  in
+  Ok
+    { fe_post_id
+    ; fe_title
+    ; fe_question
+    ; fe_panel
+    ; fe_judge
+    ; fe_tool_trace
+    }
 
 let decode_fusion_detail json =
   let* fud_generated_at = required_string_field json "generated_at" in

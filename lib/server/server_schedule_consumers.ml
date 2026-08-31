@@ -1161,6 +1161,41 @@ let cancel_keeper_schedules config ~keeper_name =
             false))
     | Error _ -> false
   in
+  (* Cancel propagation (task-370): the queue drain must see the schedule
+     ledger before the schedules leave it, so it runs first. Removing the
+     ledger rows first would orphan pending queue stimuli whose only schedule
+     authority is the request being cancelled. *)
+  let schedule_ids =
+    let state = Schedule_store.read_state config in
+    List.filter_map
+      (fun (request : Schedule_domain.schedule_request) ->
+         if should_cancel request then Some request.schedule_id else None)
+      state.schedules
+  in
+  let applied_at = Unix.gettimeofday () in
+  (match schedule_ids with
+   | [] -> ()
+   | _ ->
+     (match
+        Keeper_registry_event_queue.cancel_scheduled_wakes_result
+          ~base_path:config.Workspace_utils.base_path
+          keeper_name
+          ~applied_at
+          ~schedule_ids
+          ~reason:"schedule cancelled; enqueued utterance withdrawn"
+      with
+      | Ok 0 -> ()
+      | Ok n ->
+        Log.Keeper.info
+          "cancel_keeper_schedules: withdrew %d pending queue stimulus for \
+           keeper=%s"
+          n
+          keeper_name
+      | Error detail ->
+        Log.Keeper.warn
+          "cancel_keeper_schedules: queue withdraw failed keeper=%s: %s"
+          keeper_name
+          detail));
   Schedule_store.cancel_matching config ~should_cancel
 ;;
 

@@ -683,6 +683,120 @@ let cancel_pending_accepted_result
     ()
 ;;
 
+let cancel_scheduled_wakes_result ~base_path name ~applied_at ~schedule_ids ~reason =
+  (* Cancel propagation (task-370): a cancelled schedule's already-enqueued
+     utterances must leave the durable queue at the cancel boundary, not ride
+     the wake path of an owner who will never be woken for them again. Each
+     removal goes through the exact accepted-cancellation transition, so the
+     WAL records it with a distinct operation id and the pending projection
+     republishes when the owner lane is live. Reads the durable state through
+     persistence directly: a schedule can outlive its keeper's registry
+     registration (the purge path cancels exactly such schedules), and the
+     queue directory remains the authority for pending stimuli either way. *)
+  let schedule_ids = Array.of_list schedule_ids in
+  let matching (stimulus : Keeper_event_queue.stimulus) =
+    match stimulus.payload with
+    | Schedule_due wake ->
+      Array.exists
+        (fun schedule_id -> String.equal wake.schedule_id schedule_id)
+        schedule_ids
+    | _ -> false
+  in
+  match
+    Keeper_event_queue_persistence.pending_selections_result
+      ~base_path
+      ~keeper_name:name
+  with
+  | Error _ as error -> error
+  | Ok selections ->
+    let cancelled =
+      List.filter_map
+        (fun (selection : Keeper_event_queue_state.pending_selection) ->
+           if matching selection.source then
+             let operation_id =
+               Printf.sprintf
+                 "schedule-cancel:%s:%s"
+                 name
+                 (string_of_float (Time_compat.now ()))
+             in
+             Some
+               { Keeper_event_queue_state.source = selection.source
+               ; source_incarnation = selection.admitted_revision
+               ; operator_operation_id = operation_id
+               ; reason
+               }
+           else None)
+        selections
+    in
+    List.fold_left
+      (fun acc cancellation ->
+         match acc with
+         | Error _ as error -> error
+         | Ok count ->
+           (match
+              Keeper_event_queue_persistence.cancel_pending_accepted_result
+                ~base_path
+                ~keeper_name:name
+                ~applied_at
+                ~cancellation
+                ()
+            with
+            | Ok _ -> Ok (count + 1)
+            | Error detail -> Error detail))
+      (Ok 0)
+      cancelled
+;;
+
+let drain_owner_absent_pending_result ~base_path name ~applied_at ~reason =
+  (* Owner-absent termination (task-370): when the Keeper store holds no
+     metadata for a name that owns durable pending work, no maintenance cycle
+     can make the wait productive -- the work can never execute until an
+     operator registers the name. The observed outcome of retaining it was a
+     913-error day for one stale tenant queue and 881 retained visits for
+     keeper-taskmaster-agent. Drain the pending entries now, through the same
+     exact accepted-cancellation transition, instead of re-visiting them
+     every cycle. [pending_selections_result] refuses unregistered names, but
+     an owner-absent queue is by definition unregistered, so this reads the
+     durable state directly through persistence. *)
+  match
+    Keeper_event_queue_persistence.pending_selections_result
+      ~base_path
+      ~keeper_name:name
+  with
+  | Error _ as error -> error
+  | Ok selections ->
+    List.fold_left
+      (fun acc (selection : Keeper_event_queue_state.pending_selection) ->
+         match acc with
+         | Error _ as error -> error
+         | Ok count ->
+           let operation_id =
+             Printf.sprintf
+               "owner-absent-drain:%s:%s"
+               name
+               (string_of_float (Time_compat.now ()))
+           in
+           let cancellation =
+             { Keeper_event_queue_state.source = selection.source
+             ; source_incarnation = selection.admitted_revision
+             ; operator_operation_id = operation_id
+             ; reason
+             }
+           in
+           (match
+              Keeper_event_queue_persistence.cancel_pending_accepted_result
+                ~base_path
+                ~keeper_name:name
+                ~applied_at
+                ~cancellation
+                ()
+            with
+            | Ok _ -> Ok (count + 1)
+            | Error detail -> Error detail))
+      (Ok 0)
+      selections
+;;
+
 let transfer_pending_accepted_result
       ?intake_token
       ~base_path

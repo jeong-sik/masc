@@ -839,7 +839,7 @@ let test_reused_schedule_id_does_not_match_pruned_terminal_receipt () =
   | None -> fail "recreated wake missing"
 ;;
 
-let test_cancelled_schedule_retained_wake_is_not_matched_pending () =
+let test_cancelled_schedule_enqueued_wake_is_removed_at_cancel_boundary () =
   (* task-370 live evidence: 17 cancelled schedules' enqueued wakes sat in
      awaiting_ack for up to 22.8 days, surviving four restarts and three
      builds. A cancelled schedule has no future occurrence that could consume
@@ -871,9 +871,14 @@ let test_cancelled_schedule_retained_wake_is_not_matched_pending () =
      check string "schedule is cancelled" "cancelled"
        (Schedule_domain.schedule_status_to_string stored.status)
    | None -> fail "cancelled schedule missing");
-  (* The leftover wake is still pending in the durable queue — the exact
-     retained state observed live. *)
-  check int "leftover wake remains pending after cancellation" 1
+  (* Cancel propagation (task-370 contract item 2): the cancel boundary must
+     remove the cancelled schedule's already-enqueued utterance from the
+     durable keeper queue. Retaining it produced the live evidence this test
+     used to assert: 17 cancelled schedules' enqueued wakes sat in
+     awaiting_ack for up to 22.8 days, surviving four restarts and three
+     builds, re-visited every maintenance cycle. A cancelled schedule has no
+     future occurrence that could consume its leftover wake. *)
+  check int "cancel boundary removes the enqueued wake" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.length);
   let dashboard =
@@ -882,16 +887,17 @@ let test_cancelled_schedule_retained_wake_is_not_matched_pending () =
   let row = dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id in
   let open Yojson.Safe.Util in
   let queue_evidence = row |> member "keeper_queue_evidence" in
-  check string "cancelled schedule wake is a retained remainder"
-    "retained_terminal_wake"
+  (* Cancel propagation: the queue-evidence projection must now report the
+     cancelled schedule with no pending remainder — the enqueued utterance
+     left the durable queue at the cancel boundary. *)
+  check string "cancelled schedule wake is withdrawn at cancel"
+    "withdrawn_at_cancel"
     (queue_evidence |> member "projection_status" |> to_string);
   check string "retained classification names the schedule status" "cancelled"
     (queue_evidence |> member "schedule_status" |> to_string);
-  check string "retained match reports its bucket" "retained"
-    (queue_evidence |> member "matched_bucket" |> to_string);
-  check string "retained match still identifies the wake" request.schedule_id
-    (queue_evidence |> member "matched_schedule_id" |> to_string);
-  check int "retained wake still counts in pending" 1
+  (* No pending match means no match fields: the utterance is withdrawn, and
+     [matched_bucket]/[matched_schedule_id] are absent rather than null. *)
+  check int "retained wake no longer counts in pending" 0
     (queue_evidence |> member "pending_count" |> to_int);
   (* Disposition at the cancel boundary (task-1198): the in-flight wake row
      itself must be terminal, not left [Wake_running] forever. In this
@@ -932,6 +938,86 @@ let test_keeper_purge_cancels_future_schedule_intent () =  with_workspace
     check string "future wake is cancelled" "cancelled"
       (Schedule_domain.schedule_status_to_string stored.status)
   | None -> fail "cancelled future schedule missing"
+;;
+
+let test_owner_absent_pending_demand_is_drained_not_retained () =
+  (* Owner-absent termination (task-370 contract item 1): durable pending
+     work under a name the Keeper store does not know used to be retained and
+     re-visited every maintenance cycle -- 881 retained visits for
+     keeper-taskmaster-agent on 2026-08-25, surviving restarts. No cycle can
+     make that wait productive: the work can never execute until the name is
+     registered. The recovery loop must drain it through the exact
+     accepted-cancellation transition instead of retaining it. *)
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  (* A queue directory for a name that was never registered in the Keeper
+     store -- the exact orphan shape the recovery loop discovers. *)
+  let orphan_name = "keeper-never-registered" in
+  let wake : Keeper_event_queue.scheduled_wake =
+    { occurrence_id = "orphan-occurrence"
+    ; schedule_instance_id = "orphan-instance"
+    ; schedule_id = "orphan-schedule"
+    ; due_at = 200.0
+    ; payload_digest = "orphan-digest"
+    ; title = None
+    ; message = "orphaned wake"
+    ; result_delivery = None
+    }
+  in
+  let stimulus : Keeper_event_queue.stimulus =
+    { post_id = "orphan-post"
+    ; urgency = Keeper_event_queue.Normal
+    ; arrived_at = 200.0
+    ; payload = Keeper_event_queue.Schedule_due wake
+    }
+  in
+  (match
+     Keeper_registry_event_queue.enqueue_stimulus_durable_result
+       ~base_path
+       orphan_name
+       stimulus
+   with
+   | Keeper_registry_event_queue.Stimulus_enqueued -> ()
+   | Keeper_registry_event_queue.Stimulus_already_present ->
+     fail "orphan stimulus already present in a fresh workspace"
+   | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+     fail ("orphan enqueue failed: " ^ detail));
+  let pending_before =
+    Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name:orphan_name
+    |> function
+    | Ok state -> Keeper_event_queue.length (Keeper_event_queue_state.pending state)
+    | Error detail -> fail detail
+  in
+  check int "orphan queue holds one pending stimulus before drain" 1 pending_before;
+  (match
+     Keeper_registry_event_queue.drain_owner_absent_pending_result
+       ~base_path
+       orphan_name
+       ~applied_at:201.0
+       ~reason:"owner absent from keeper store; pending demand cannot execute"
+   with
+   | Ok 1 -> ()
+   | Ok n -> failf "expected exactly one drained stimulus, got %d" n
+   | Error detail -> fail ("owner-absent drain failed: " ^ detail));
+  let pending_after =
+    Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name:orphan_name
+    |> function
+    | Ok state -> Keeper_event_queue.length (Keeper_event_queue_state.pending state)
+    | Error detail -> fail detail
+  in
+  check int "orphan queue is empty after drain" 0 pending_after;
+  (* The drain must be idempotent: a second visit finds nothing to retain. *)
+  (match
+     Keeper_registry_event_queue.drain_owner_absent_pending_result
+       ~base_path
+       orphan_name
+       ~applied_at:202.0
+       ~reason:"owner absent from keeper store; pending demand cannot execute"
+   with
+   | Ok 0 -> ()
+   | Ok n -> failf "second drain should find nothing, got %d" n
+   | Error detail -> fail ("second owner-absent drain failed: " ^ detail))
 ;;
 
 let test_shutdown_fence_rejects_schedule_intake_before_enqueue () =
@@ -2428,9 +2514,11 @@ let () =
             test_reused_schedule_id_does_not_match_pruned_terminal_receipt
         ; test_case "keeper purge cancels future schedule intent" `Quick
             test_keeper_purge_cancels_future_schedule_intent
-        ; test_case "cancelled schedule retained wake is not matched pending"
+        ; test_case "cancelled schedule enqueued wake leaves queue at cancel boundary"
             `Quick
-            test_cancelled_schedule_retained_wake_is_not_matched_pending
+            test_cancelled_schedule_enqueued_wake_is_removed_at_cancel_boundary
+        ; test_case "owner absent pending demand is drained not retained" `Quick
+            test_owner_absent_pending_demand_is_drained_not_retained
         ; test_case "shutdown fence rejects schedule intake before enqueue" `Quick
             test_shutdown_fence_rejects_schedule_intake_before_enqueue
         ; test_case "shutdown fence covers direct durable queue producers" `Quick

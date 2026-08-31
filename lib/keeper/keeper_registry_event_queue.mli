@@ -110,6 +110,30 @@ val cancel_pending_accepted_result :
 (** Commit an exact pending accepted cancellation and publish the post-commit
     pending projection when the owner currently has a live registry lane. *)
 
+val cancel_scheduled_wakes_result :
+  base_path:string ->
+  string ->
+  applied_at:float ->
+  schedule_ids:string list ->
+  reason:string ->
+  (int, string) result
+(** Cancel every pending [Schedule_due] stimulus whose [schedule_id] is in the
+    given set, through the exact accepted-cancellation transition. Returns the
+    number of pending entries removed. This is the cancel-propagation half of
+    task-370: a cancelled schedule's enqueued utterances leave the durable
+    queue at the cancel boundary instead of riding the wake path. *)
+
+val drain_owner_absent_pending_result :
+  base_path:string ->
+  string ->
+  applied_at:float ->
+  reason:string ->
+  (int, string) result
+(** Cancel every pending stimulus owned by a name the Keeper store does not
+    know. No maintenance cycle can make that wait productive; retaining it
+    produced 881 retained visits for one stale queue and a 913-error day.
+    Returns the number of pending entries removed. *)
+
 val transfer_pending_accepted_result :
   ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   base_path:string ->

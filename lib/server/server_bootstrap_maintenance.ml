@@ -291,23 +291,51 @@ let recover_projected_durable_demand_owner
            keeper_name
            detail)
      | Error Owner_absent ->
-       (* This state waits on an operator decision (register the name or
-          remove the directory) that no maintenance cycle can make for it.
-          The recovery loop visits every keeper every cycle, so an
-          unacknowledged orphan logged at ERROR every visit -- 167/hour for
-          one stale tenant queue on 2026-08-28. Say it once per process;
-          the durable work stays where it is either way. *)
-       if not (Hashtbl.mem owner_absent_reported keeper_name) then (
-         Hashtbl.add owner_absent_reported keeper_name ();
-         Log.Server.error
-           "keeper durable demand orphaned keeper=%s reason=owner_absent: durable \
-            work sits under %s but the Keeper store holds no metadata for that \
-            name, so the work cannot execute until the name is registered or the \
-            directory is removed"
-           keeper_name
-           (Filename.concat
-              (Common.keepers_runtime_dir_of_base ~base_path)
-              keeper_name))
+       (* Owner-absent termination (task-370): this state used to wait on an
+          operator decision (register the name or remove the directory) that
+          no maintenance cycle could make for it, so the recovery loop
+          re-visited it every cycle -- 167/hour for one stale tenant queue on
+          2026-08-28, and 881 retained visits for keeper-taskmaster-agent on
+          2026-08-25. Retention was the wrong default: the work can never
+          execute under a name no keeper owns. Drain the pending entries now
+          through the exact accepted-cancellation transition, say the outcome
+          once, and stop re-visiting. *)
+       (match
+          Keeper_registry_event_queue.drain_owner_absent_pending_result
+            ~base_path
+            keeper_name
+            ~applied_at:(Time_compat.now ())
+            ~reason:
+              "owner absent from keeper store; pending demand cannot execute"
+        with
+        | Ok 0 ->
+          if not (Hashtbl.mem owner_absent_reported keeper_name) then (
+            Hashtbl.add owner_absent_reported keeper_name ();
+            Log.Server.info
+              "keeper durable demand orphaned keeper=%s reason=owner_absent: no \
+               pending demand under a name the Keeper store does not know; nothing \
+               to drain at %s"
+              keeper_name
+              (Filename.concat
+                 (Common.keepers_runtime_dir_of_base ~base_path)
+                 keeper_name))
+        | Ok n ->
+          if not (Hashtbl.mem owner_absent_reported keeper_name) then
+            Hashtbl.add owner_absent_reported keeper_name ();
+          Log.Server.error
+            "keeper durable demand orphaned keeper=%s reason=owner_absent: durable \
+             work sat under %s but the Keeper store holds no metadata for that \
+             name; drained %d pending stimulus via accepted cancellation"
+            keeper_name
+            (Filename.concat
+               (Common.keepers_runtime_dir_of_base ~base_path)
+               keeper_name)
+            n
+        | Error detail ->
+          Log.Server.error
+            "keeper durable demand recovery drain failed keeper=%s detail=%s"
+            keeper_name
+            detail)
      | Error (Executor_unavailable error) ->
        Log.Server.error
          "keeper durable demand recovery retained keeper=%s reason=executor_unavailable detail=%s"

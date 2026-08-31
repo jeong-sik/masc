@@ -459,9 +459,15 @@ let loss_marker_of_json json =
 
 let load_loss_marker ~base_path ~retention_days =
   let path = loss_marker_path ~base_path in
-  match Fs_compat.load_file_opt path with
-  | None -> None, false
-  | Some content ->
+  let content =
+    try Ok (Fs_compat.load_file_opt path) with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Sys_error _ | Unix.Unix_error _ -> Error ()
+  in
+  match content with
+  | Ok None -> None, false
+  | Error () -> None, true
+  | Ok (Some content) ->
     (match
        try
          Yojson.Safe.from_string content

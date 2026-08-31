@@ -279,6 +279,35 @@ let test_invalid_loss_marker_is_explicit () =
     Alcotest.(check bool) "invalid marker stays distinct from absence" true
       ((P.aggregate_integrity_snapshot ()).status = `Invalid_marker))
 
+let test_unreadable_loss_marker_does_not_block_hydration () =
+  with_tmp_dir (fun base_path ->
+    let marker_path =
+      Filename.concat base_path "data/tool-metrics-loss-marker.json"
+    in
+    Fs_compat.mkdir_p marker_path;
+    let store =
+      Dated_jsonl.create
+        ~base_dir:(Filename.concat base_path "data/tool-metrics")
+        ()
+    in
+    Dated_jsonl.append store
+      (persisted_record
+         ~tool_name:"survives-marker-read-failure"
+         ~disposition:"completed"
+         ~duration_ms:1.0);
+    let report =
+      match P.hydrate ~base_path ~retention_days:30 with
+      | Ok report -> report
+      | Error error ->
+        Alcotest.failf
+          "hydrate failed: %s"
+          (Dated_jsonl.read_error_to_string error)
+    in
+    Alcotest.(check bool) "unreadable marker reported" true report.invalid_loss_marker;
+    Alcotest.(check int) "metric hydration continues" 1 report.loaded_records;
+    Alcotest.(check bool) "read failure projects invalid marker" true
+      ((P.aggregate_integrity_snapshot ()).status = `Invalid_marker))
+
 let test_loss_marker_write_failure_is_observable () =
   with_tmp_dir (fun base_path ->
     P.For_testing.set_pending_write_guard (fun _path _content -> Ok ());
@@ -638,6 +667,9 @@ let () =
         ; eio_test
             "invalid loss markers remain explicit"
             test_invalid_loss_marker_is_explicit
+        ; eio_test
+            "unreadable loss markers do not block metric hydration"
+            test_unreadable_loss_marker_does_not_block_hydration
         ; eio_test
             "loss marker write failures stay observable"
             test_loss_marker_write_failure_is_observable

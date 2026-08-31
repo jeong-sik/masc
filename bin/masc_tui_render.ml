@@ -8195,11 +8195,29 @@ let render_fusion_detail (state : state) run_id =
   finish_surface state ~clamped:(Fusion_detail_scroll scroll)
     ~surface_key:"fusion-detail" ~rows:terminal_rows ~cols buf
 
-(* The repositories a keeper can work in.
+(* The repositories a keeper can work in.  The server sends both the stored
+   path spelling and the absolute path it actually resolves.  The latter is
+   what an operator needs before opening a shell or comparing another
+   checkout; resolving the stored spelling again in the TUI would use the
+   TUI's cwd instead of the server's base path. *)
+let repository_context_lines ~width (repo : Masc.Tui_decode.repository) =
+  let wrap label value =
+    Message_layout.wrap_words ~max_cells:(max 1 width)
+      (Printf.sprintf "  %s: %s" label (Terminal_text.single_line value))
+  in
+  let stored_path =
+    if String.equal repo.rp_local_path repo.rp_resolved_local_path then []
+    else wrap "Stored as" repo.rp_local_path
+  in
+  let keepers =
+    match repo.rp_keepers with
+    | [] -> "none assigned"
+    | names -> String.concat ", " names
+  in
+  wrap "Path" repo.rp_resolved_local_path
+  @ stored_path
+  @ wrap "Keepers" keepers
 
-   Auto-sync and the assigned keepers are the two columns that change what an
-   operator does next: a repository nobody is assigned to will not move on its
-   own, and one that is not syncing is working from whatever was last pulled. *)
 let render_repositories (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let repos =
@@ -8227,9 +8245,10 @@ let render_repositories (state : state) =
   surface_chrome state ~terminal_rows ~cols ~surface_key:"repositories"
     ~title ~hints:(Masc_tui_keys.footer_hints state.view)
     ~body:(fun ~budget c ->
+      let path_width = max 8 (cols - 55) in
       c.push_styled ~style:(Theme.recede ())
         (Printf.sprintf "  %-18s %-12s %-9s %-6s %s" "Name" "Branch" "Status"
-           "Sync" "Keepers");
+           "Sync" "Path");
       c.push_divider ();
       (match state.repositories_error with
        | None -> ()
@@ -8237,7 +8256,18 @@ let render_repositories (state : state) =
            c.push_styled ~style:(Theme.bad ())
              ("  " ^ Keeper_chat.terminal_safe_text detail);
            c.push_divider ());
-      let fixed = 2 + (if Option.is_some state.repositories_error then 2 else 0) in
+      let context_lines =
+        match List.nth_opt repos state.repositories_cursor with
+        | None -> []
+        | Some repo -> repository_context_lines ~width:(cols - 6) repo
+      in
+      let context_rows =
+        match context_lines with [] -> 0 | _ -> 1 + List.length context_lines
+      in
+      let fixed =
+        2 + context_rows
+        + (if Option.is_some state.repositories_error then 2 else 0)
+      in
       let room = max 1 (budget - fixed) in
       let overflowing = shown > room in
       let content_height = if overflowing then max 1 (room - 1) else room in
@@ -8261,31 +8291,27 @@ let render_repositories (state : state) =
           | None -> c.push_empty ()
           | Some r ->
               let open Masc.Tui_decode in
-              let keepers =
-                match r.rp_keepers with
-                | [] -> "-"
-                | names -> String.concat ", " names
-              in
               let line =
                 Printf.sprintf "  %-18s %-12s %-9s %-6s %s"
                   (Terminal_text.single_line r.rp_name)
                   (Terminal_text.single_line r.rp_default_branch)
                   (Terminal_text.single_line r.rp_status)
                   (if r.rp_auto_sync then "auto" else "manual")
-                  (Terminal_text.single_line keepers)
-              in
-              (* A repository nobody works in is dim rather than absent: it is
-                 registered, and that it has no keeper is the thing to notice. *)
-              let style =
-                match r.rp_keepers with [] -> Ansi.dim | _ -> Ansi.reset
+                  (Message_layout.fit_middle path_width
+                     (Terminal_text.single_line r.rp_resolved_local_path))
               in
               if idx = state.repositories_cursor then c.push_selected line
-              else c.push_styled ~style line
+              else c.push line
         done;
         if overflowing then
           c.push_styled ~style:(Theme.recede ())
             (Printf.sprintf "[%d repositories, scroll %d]" shown scroll)
-      end)
+      end;
+      (match context_lines with
+       | [] -> ()
+       | lines ->
+           c.push_divider ();
+           List.iter (c.push_styled ~style:(Theme.recede ())) lines))
 
 let change_row_address (change : Masc.Tui_decode.file_change) =
   match change.Masc.Tui_decode.fc_location with

@@ -527,6 +527,12 @@ type repository = {
           [None] when the remote cannot canonicalize *)
   rp_url : string;  (** the remote as registered, for building links *)
   rp_local_path : string;
+      (** the path spelling persisted in repositories.toml; it may be
+          relative to the workspace base path *)
+  rp_resolved_local_path : string;
+      (** the server-resolved absolute checkout path used for file and Git
+          operations; clients display this value instead of guessing against
+          their own cwd *)
   rp_default_branch : string;
   rp_status : string;
   rp_keepers : string list;  (** Which keepers work in it. *)

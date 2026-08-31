@@ -101,6 +101,11 @@ let repository_json ~base_path (repo : Repo_manager_types.repository) =
         | Some slug -> `String slug
         | None -> `Null );
       ("local_path", `String repo.local_path);
+      (* [local_path] is the persisted declaration and may be relative.  The
+         server is the only process that knows which base path resolves it;
+         clients must not repeat that resolution against their own cwd. *)
+      ( "resolved_local_path"
+      , `String (Repo_store.local_path ~base_path repo) );
       ("aliases", `List (List.map (fun s -> `String s) repo.aliases));
       ("default_branch", `String repo.default_branch);
       ("keepers", `List (List.map (fun s -> `String s) repo.keepers));

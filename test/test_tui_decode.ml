@@ -2489,7 +2489,9 @@ let repository_json ?(keepers = [ "keeper.one" ]) ?(auto_sync = `Bool true) () =
     [ ("id", `String "repo-1")
     ; ("name", `String "masc")
     ; ("url", `String "https://github.com/jeong-sik/masc")
-    ; ("local_path", `String "/Users/dancer/me/workspace/yousleepwhen/masc")
+    ; ("local_path", `String "workspace/yousleepwhen/masc")
+    ; ( "resolved_local_path"
+      , `String "/Users/dancer/me/workspace/yousleepwhen/masc" )
     ; ("aliases", `List [])
     ; ("default_branch", `String "main")
     ; ("keepers", `List (List.map (fun k -> `String k) keepers))
@@ -2515,6 +2517,11 @@ let test_decode_repository_snapshot_reads_the_live_shape () =
            Alcotest.(check string) "name" "masc" r.Tui_decode.rp_name;
            Alcotest.(check string) "branch" "main"
              r.Tui_decode.rp_default_branch;
+           Alcotest.(check string) "stored path"
+             "workspace/yousleepwhen/masc" r.Tui_decode.rp_local_path;
+           Alcotest.(check string) "server-resolved absolute path"
+             "/Users/dancer/me/workspace/yousleepwhen/masc"
+             r.Tui_decode.rp_resolved_local_path;
            Alcotest.(check (list string)) "who works in it" [ "keeper.one" ]
              r.Tui_decode.rp_keepers;
            Alcotest.(check bool) "auto sync" true r.Tui_decode.rp_auto_sync
@@ -2543,6 +2550,25 @@ let test_decode_repository_with_no_keepers () =
         r.Tui_decode.rp_keepers
   | Ok _ -> Alcotest.fail "expected one repository"
   | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_repository_requires_resolved_local_path () =
+  let repository_without_resolved_path =
+    match repository_json () with
+    | `Assoc fields ->
+        `Assoc
+          (List.filter
+             (fun (key, _) -> key <> "resolved_local_path")
+             fields)
+    | _ -> assert false
+  in
+  match
+    Tui_decode.decode_repository_snapshot
+      (repository_snapshot_json [ repository_without_resolved_path ])
+  with
+  | Error _ -> ()
+  | Ok _ ->
+      Alcotest.fail
+        "a repository without the server-resolved path must not be guessed"
 
 (* Keeper lane rows. Shape is the light projection the TUI reads from
    [GET /api/v1/keepers/composite]. *)
@@ -5510,6 +5536,8 @@ let () =
           test_decode_repository_absent_auto_sync_is_off;
         Alcotest.test_case "a repository with no keepers" `Quick
           test_decode_repository_with_no_keepers;
+        Alcotest.test_case "resolved path is required" `Quick
+          test_decode_repository_requires_resolved_local_path;
       ] );
     ( "decode_keeper_lanes",
       [

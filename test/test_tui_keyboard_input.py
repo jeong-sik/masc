@@ -5727,7 +5727,9 @@ def repositories_fixture() -> tuple[int, dict[str, object]]:
                 {"id": "masc", "name": "masc",
                  "codebase": "github.com_jeong-sik_masc",
                  "url": "git@github.com:jeong-sik/masc.git",
-                 "local_path": "workspace/masc", "default_branch": "main",
+                 "local_path": "workspace/masc",
+                 "resolved_local_path": "/srv/masc/workspace/masc",
+                 "default_branch": "main",
                  "status": "ready", "keepers": ["alpha"], "auto_sync": True},
             ],
             "total": 1,
@@ -5795,6 +5797,51 @@ def repository_add_interaction(requests: HttpRequests) -> Interaction:
         os.write(master_fd, b"q")
 
     return interact
+
+
+def repositories_path_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """Show the resolved path at two widths, then enter the repository."""
+    tab_until(process, master_fd, output, b"MASC Repositories")
+    narrow = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=18,
+        columns=80,
+        needle=b"/srv/masc/workspace/masc",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    wide = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=140,
+        needle=b"/srv/masc/workspace/masc",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    for width, frame in ((80, narrow), (140, wide)):
+        plain = CSI_RE.sub(b"", frame).decode("utf-8")
+        for needle in ("Path", "Stored as: workspace/masc", "Keepers: alpha"):
+            if needle not in plain:
+                raise AssertionError(
+                    f"{width}-column Repositories omitted {needle!r}: {plain!r}"
+                )
+    code = send_and_wait(process, master_fd, output, b"\r", b"src")
+    code_plain = CSI_RE.sub(b"", code).decode("utf-8")
+    if "masc ▸ /" not in code_plain:
+        raise AssertionError(
+            f"the Code header does not name the repository: {code_plain!r}"
+        )
+    os.write(master_fd, b"q")
 
 
 def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
@@ -9049,6 +9096,25 @@ def run_planning_review_regression(executable: str) -> None:
     )
 
 
+def run_repositories_regression(executable: str) -> None:
+    fixtures = keeper_runtime_http_fixtures()
+    fixtures[REPOSITORIES_PATH] = repositories_fixture()
+    fixtures["/api/v1/workspace/children?path=&limit=2000&repo_id=masc"] = (
+        200,
+        [
+            {"path": "src", "label": "src", "depth": 0, "parent": "",
+             "hasChildren": True, "diff": None, "keeperId": None,
+             "hueIndex": None},
+        ],
+    )
+    run_terminal_scenario(
+        executable,
+        description="Repositories show resolved path and enter the Code tree",
+        interact=repositories_path_interaction,
+        http_fixtures=fixtures,
+    )
+
+
 def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
         run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
@@ -9058,10 +9124,14 @@ def main() -> None:
         run_planning_review_regression(os.path.abspath(sys.argv[1]))
         print("tui Planning Task Review regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "repositories":
+        run_repositories_regression(os.path.abspath(sys.argv[1]))
+        print("tui Repositories regression: PASS")
+        return
     if len(sys.argv) != 2:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
-            "[cli-base-path|planning-review]"
+            "[cli-base-path|planning-review|repositories]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

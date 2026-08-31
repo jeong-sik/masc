@@ -2414,6 +2414,14 @@ let render_board_compose (state : state) =
    on. *)
 let board_list_chrome_rows = 10
 
+(* Three steps for three bands, from the palette every other reading on this
+   screen draws through. Emphasis only ever restates what the count beside it
+   already says, so NO_COLOR costs a reader nothing they cannot read. *)
+let magnitude_tone = function
+  | Magnitude.Leading -> Masc_tui_theme.tone Masc_tui_theme.Accent
+  | Magnitude.Ordinary -> Ansi.reset
+  | Magnitude.Below_even_share -> Ansi.dim
+
 (* Every hearth on the board and how many posts it holds, with the one being
    read marked. [f] walked this list and drew none of it, so narrowing was a
    press into the dark: a reader could not see which hearths existed, which
@@ -2431,18 +2439,26 @@ let board_hearth_census_line ~cols (state : state) =
       ^ Ansi.reset
   | census ->
       let total = List.fold_left (fun sum (_, count) -> sum + count) 0 census in
-      let entry (name, count) =
+      (* Banded over the whole census, then cut to what fits. Banding the
+         visible slice would rank each hearth against the four that happened
+         to fit beside it, which is a different question from the one the row
+         asks. *)
+      let banded = Magnitude.of_counts census in
+      let entry (name, count, band) =
         let selected = Option.equal String.equal state.board_hearth (Some name) in
         let text = Printf.sprintf "%s %d" (Terminal_text.single_line name) count in
+        (* Selection wins over size: which hearth is being read is a different
+           axis from how big it is, and the reverse block says the first
+           without leaving the second unsaid -- the count is in the text. *)
         if selected then Ansi.reverse ^ text ^ Ansi.reset
-        else Ansi.dim ^ text ^ Ansi.reset
+        else magnitude_tone band ^ text ^ Ansi.reset
       in
       (* What fits, then how many it could not carry. The board here holds
          eleven hearths and a narrow pane holds four of them; a row sized by
          how many exist is a row that runs off the edge on the next one. *)
       let rec take kept used = function
         | [] -> (List.rev kept, 0)
-        | (name, count) :: rest ->
+        | ((name, count, _) as banded_entry) :: rest ->
             let width =
               Message_layout.display_width
                 (Printf.sprintf "%s %d" name count)
@@ -2450,9 +2466,9 @@ let board_hearth_census_line ~cols (state : state) =
             in
             if used + width > max 8 (cols - 26) then
               (List.rev kept, 1 + List.length rest)
-            else take ((name, count) :: kept) (used + width) rest
+            else take (banded_entry :: kept) (used + width) rest
       in
-      let kept, dropped = take [] 0 census in
+      let kept, dropped = take [] 0 banded in
       let shown =
         List.map entry kept |> String.concat (Ansi.dim ^ "  \xc2\xb7  " ^ Ansi.reset)
       in
@@ -3012,13 +3028,6 @@ let planning_updated_age ~now (goal : planning_goal) =
         (Masc_domain.parse_iso8601_opt iso)
 
 (** Render the Planning surface (list view). *)
-(* Three steps for three bands, from the palette every other reading on this
-   screen draws through. Emphasis only ever restates what the count beside it
-   already says, so NO_COLOR costs a reader nothing they cannot read. *)
-let magnitude_tone = function
-  | Magnitude.Leading -> Masc_tui_theme.tone Masc_tui_theme.Accent
-  | Magnitude.Ordinary -> Ansi.reset
-  | Magnitude.Below_even_share -> Ansi.dim
 
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -7397,11 +7406,15 @@ let harness_ledger_lines ~cols snapshot =
             let share count =
               100. *. float_of_int count /. float_of_int calibration.hcal_total
             in
+            (* Banded over every gate, then cut to the four that fit. The
+               tail is where the small ones are, so ranking only what is
+               drawn would rank four leaders out of four. *)
             let gates =
-              calibration.hcal_gates
+              Magnitude.of_counts calibration.hcal_gates
               |> List.filteri (fun index _ -> index < 4)
-              |> List.map (fun (gate, count) ->
-                     Printf.sprintf "%s %d (%.0f%%)" gate count (share count))
+              |> List.map (fun (gate, count, band) ->
+                     Printf.sprintf "%s%s %d (%.0f%%)%s" (magnitude_tone band)
+                       gate count (share count) Ansi.reset)
               |> String.concat "  \xc2\xb7  "
             in
             let remaining = max 0 (List.length calibration.hcal_gates - 4) in

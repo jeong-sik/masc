@@ -369,18 +369,31 @@ let test_run_command_remote_ssh_endpoint_error_before_image_guard () =
          in
          loop 0)
 
-(* The fake shim trailer must speak the current wire version:
-   Exec_ssh_protocol.protocol_version (= 2, rendered by
-   Exec_ssh_protocol.render_trailer). It carried v=1 and was never
-   exercised before RFC-0121 moved the fixture to the live runtime.toml
-   path — the dead-path fixture hid this drift (task-888). *)
+(* The trailer the fake shim writes, rendered by the same function the real
+   shim renders it with. It was a hand-typed string carrying ["v":1] while
+   the wire had moved to 2, and nothing caught that because the fixture sat
+   on a dead path (task-888). Typing the current version in its place would
+   arm the same drift for the next one -- the version, the field names and
+   the framing all come from [Exec_ssh_protocol] now, so a wire change either
+   updates this fixture or fails to compile.
+
+   [printf '%%s'] rather than the trailer as a format: the renderer escapes
+   what belongs to JSON, not what belongs to printf. *)
 let fake_ssh_success_script =
-  {|#!/bin/sh
+  Printf.sprintf
+    {|#!/bin/sh
 cat >/dev/null 2>/dev/null &
 printf 'remote-file-content'
-printf '\036{"masc_exec_result":{"v":2,"exit":0,"signal":null,"timed_out":false,"shim_error":null}}\036' >&2
+printf '%%s' '%s' >&2
 exit 0
 |}
+    (Exec_ssh_protocol.render_trailer
+       { v = Exec_ssh_protocol.protocol_version
+       ; exit = Some 0
+       ; signal = None
+       ; timed_out = false
+       ; shim_error = None
+       })
 
 let test_remote_ssh_read_skips_host_existence_preflight () =
   let base, config, meta = setup_config "remote-reader" in

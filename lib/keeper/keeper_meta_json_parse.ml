@@ -403,11 +403,16 @@ let decode_current_meta fields =
        compiles, stores nothing and reads back [true] (#27357). Splitting
        config out of this record is the fix; until then the round-trip
        contract is pinned by test_keeper_meta_config_not_durable. *)
-    (* A placeholder, and now provably one: the resolver that used to promote
-       it ([Keeper_meta_contract.effective_meta_of_profile_defaults]) refuses
-       when there is no profile source, so no path reads this as authority.
-       It is a backend rather than the old host arm, so a reader that appears
-       later fails closed instead of open. *)
+    (* A placeholder for the TOML-owned profile, never a stored value. The
+       old claim that no path reads it as authority was disproved: the
+       post-tool observer adopted durable meta whole and dispatched a
+       microvm keeper's Execute to the host docker daemon (#31178 drift,
+       observer site, 2026-09-01), and that failure is open — a dispatch to
+       a daemon that may be down — not closed. The contract: any adoption
+       of durable meta back into a live turn goes through
+       [Keeper_meta_contract.effective_meta_of_profile_defaults] and keeps
+       the admitted meta on overlay error. Reading this field as authority
+       is a bug regardless of the value being a safe backend. *)
     let sandbox_profile = Docker in
     let meta : keeper_meta =
       { id = None

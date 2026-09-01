@@ -166,7 +166,7 @@ type pending_approval_observation =
 type approval_authority_state =
   | Approval_authority_complete
   | Approval_authority_partial of { read_error_count : int }
-  | Approval_authority_unavailable of { reason : string }
+  | Approval_authority_unavailable
 
 type approval_authority_observation =
   { revision : int
@@ -194,13 +194,11 @@ let read_approval_authority_observation
     Keeper_approval_queue.pending_entries_snapshot_for_workspace
       ~base_path:config.base_path
   with
-  | Error error ->
+  | Error _error ->
     { revision =
         Keeper_approval_queue.store_revision_for_workspace
           ~base_path:config.base_path
-    ; state =
-        Approval_authority_unavailable
-          { reason = Keeper_approval_queue.storage_error_to_string error }
+    ; state = Approval_authority_unavailable
     ; pending = []
     }
   | Ok snapshot ->

@@ -995,7 +995,7 @@ let test_incomplete_approval_authority_forbids_resolution_inference () =
   in
   let unavailable : WO.approval_authority_observation =
     { revision = 93
-    ; state = WO.Approval_authority_unavailable { reason = "store unreadable" }
+    ; state = WO.Approval_authority_unavailable
     ; pending = []
     }
   in
@@ -1015,6 +1015,8 @@ let test_incomplete_approval_authority_forbids_resolution_inference () =
        partial_text);
   check bool "unavailable is not rendered as zero" true
     (contains_sub "state=unavailable" unavailable_text);
+  check bool "unavailable omits internal storage detail" false
+    (contains_sub "read_error" unavailable_text);
   check bool "unavailable forbids current inference" true
     (contains_sub
        "No pending/resolved inference is valid"

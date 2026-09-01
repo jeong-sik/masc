@@ -497,10 +497,8 @@ let format_approval_authority_observation
           read_error_count);
      Buffer.add_string buffer
        "- Missing IDs are unknown, not resolved; re-read Gate before changing conditional constraints.\n"
-   | Keeper_world_observation.Approval_authority_unavailable { reason } ->
+   | Keeper_world_observation.Approval_authority_unavailable ->
      Buffer.add_string buffer " state=unavailable\n";
-     Buffer.add_string buffer
-       (format_prompt_row [ "read_error", reason ] ^ "\n");
      Buffer.add_string buffer
        "- No pending/resolved inference is valid.\n");
   List.iter

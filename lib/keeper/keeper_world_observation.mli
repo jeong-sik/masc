@@ -152,7 +152,7 @@ type pending_approval_observation = {
 type approval_authority_state =
   | Approval_authority_complete
   | Approval_authority_partial of { read_error_count : int }
-  | Approval_authority_unavailable of { reason : string }
+  | Approval_authority_unavailable
 
 type approval_authority_observation = {
   revision : int;

@@ -382,7 +382,7 @@ let test_world_observation_reconciles_resolved_approval_out_of_pending () =
        in
        (match before.state with
         | World_observation.Approval_authority_complete -> ()
-        | Approval_authority_partial _ | Approval_authority_unavailable _ ->
+        | Approval_authority_partial _ | Approval_authority_unavailable ->
           Alcotest.fail "fresh pending store was not complete");
        Alcotest.(check (list string))
          "the exact pending id is current"
@@ -398,7 +398,7 @@ let test_world_observation_reconciles_resolved_approval_out_of_pending () =
        in
        (match after.state with
         | World_observation.Approval_authority_complete -> ()
-        | Approval_authority_partial _ | Approval_authority_unavailable _ ->
+        | Approval_authority_partial _ | Approval_authority_unavailable ->
           Alcotest.fail "resolved store was not complete");
        Alcotest.(check int)
          "the resolved approval is no longer pending"

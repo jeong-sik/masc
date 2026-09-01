@@ -188,8 +188,6 @@ let for_surface = function
       ; b Act "e" "modify"
           ~help:"edit the selected active schedule; running/finished rows refuse"
       ; b Act "x" "cancel" ~help:"arm / confirm cancellation"
-      ; b Act "a" "new wake"
-          ~help:"open the create form; enter advances, esc abandons"
       ; b Act "Y" "copy link" ~help:"copy the selected schedule reference"
       ]
       @ listing_meta

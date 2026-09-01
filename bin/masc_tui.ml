@@ -1484,7 +1484,6 @@ type async_msg =
   | Schedules_loaded of (schedule_snapshot, string) result
   | System_logs_loaded of (system_log_snapshot, string) result
   | Schedule_cancel_done of (string, string) result
-  | Schedule_create_done of (string, string) result
   (* (message, noop): [noop = true] says the verdict already stood. *)
   | Verification_verdict_done of (string * bool, string) result
   | Harness_label_done of (string, string) result
@@ -6742,57 +6741,6 @@ let handle_schedule_cancel_key state ~mailbox =
           add_event state "system"
             (Printf.sprintf "press x again to cancel %s" row.sch_schedule_id))
 
-(* The typed spec becomes the tool's own field names here, next to the send,
-   so the wire spelling has exactly one home in the TUI. *)
-let schedule_create_timing_fields (spec : Masc_tui_types.schedule_create_spec)
-    : (string * Yojson.Safe.t) list =
-  match spec with
-  | Masc_tui_types.Schedule_spec_one_shot { due_at_iso } ->
-      [ ("due_at_iso", `String due_at_iso) ]
-  | Masc_tui_types.Schedule_spec_interval { interval_sec } ->
-      [ ("recurrence_kind", `String "interval")
-      ; ("recurrence_interval_sec", `Int interval_sec)
-      ]
-  | Masc_tui_types.Schedule_spec_daily { hour; minute; timezone } ->
-      [ ("recurrence_kind", `String "daily")
-      ; ("recurrence_hour", `Int hour)
-      ; ("recurrence_minute", `Int minute)
-      ; ("recurrence_timezone", `String timezone)
-      ]
-  | Masc_tui_types.Schedule_spec_cron { cron; timezone } ->
-      [ ("recurrence_kind", `String "cron")
-      ; ("recurrence_cron", `String cron)
-      ; ("recurrence_timezone", `String timezone)
-      ]
-
-(* Send the submitted form through the create tool. Same fiber-and-mailbox
-   shape as the cancel; whether the wake is creatable (time syntax, timezone
-   spelling, unknown keeper) is the tool's contract to answer. *)
-let start_schedule_create state ~mailbox
-    ~(request : Masc_tui_types.schedule_create_request) =
-  state.schedule_create_error <- None;
-  add_event state "system"
-    (Printf.sprintf "creating a wake for %s" request.Masc_tui_types.scr_keeper);
-  let host = server_peer_host in
-  let port = state.port in
-  let run_create () =
-    let result =
-      match
-        Masc_tui_http.post_schedule_create ~host ~port
-          ~keeper_name:request.Masc_tui_types.scr_keeper
-          ~message:request.Masc_tui_types.scr_message
-          ~timing_fields:
-            (schedule_create_timing_fields request.Masc_tui_types.scr_spec)
-      with
-      | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
-    in
-    enqueue_async mailbox (Schedule_create_done result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork ~sw run_create
-  | None -> run_create ()
-
 (* Send the operator's verdict through the verification route. Same
    fiber-and-mailbox shape as the other writes; whether the task still awaits
    verification is the route's store rules to say, so the TUI does not
@@ -8031,15 +7979,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       | Error err ->
           state.schedule_cancel_armed <- None;
           state.schedule_cancel_error <- Some err)
-  | Schedule_create_done result -> (
-      match result with
-      | Ok message ->
-          state.schedule_create_error <- None;
-          add_event state "system" ("Schedule: " ^ message);
-          (* The new wake is the server's row now; reading it back is the one
-             way the list can show it. *)
-          launch_schedules_load state ~mailbox
-      | Error err -> state.schedule_create_error <- Some err)
   | Verification_verdict_done result -> (
       match result with
       | Ok (message, noop) ->
@@ -10555,7 +10494,6 @@ and is loaded on demand through keeper_skill.
         && (not state.context_inspector_open)
         && (not state.palette_open)
         && Option.is_none state.runtime_param_edit
-        && Option.is_none state.schedule_create_form
         && Option.is_none state.search
         && not (state.view = Board && state.board_mode = Board_compose)
         && state.view <> Keepers Keeper_message
@@ -11066,91 +11004,6 @@ and is loaded on demand through keeper_skill.
           the filter does. Three fields in order, enter to advance and to
           send on the last, esc to abandon -- and abandoning clears the
           secret rather than leaving it in the process. *)
-       (* The schedule-create form is taking keys. Same sequence as the
-          identity form below: enter advances, enter on the last field
-          submits, esc abandons. Left/right cycle the wake's kind, because
-          the kind decides which fields exist; Tab keeps its surface-cycling
-          meaning. *)
-       | Some k
-         when state.view = Schedules
-              && Option.is_some state.schedule_create_form
-              && not compact_viewport -> (
-           match state.schedule_create_form with
-           | None -> ()
-           | Some form -> (
-               let set text =
-                 state.schedule_create_form <-
-                   Some
-                     (match form.Masc_tui_types.scf_field with
-                      | Masc_tui_types.Schedule_field_keeper ->
-                        { form with Masc_tui_types.scf_keeper = text }
-                      | Masc_tui_types.Schedule_field_message ->
-                        { form with Masc_tui_types.scf_message = text }
-                      | Masc_tui_types.Schedule_field_when ->
-                        { form with Masc_tui_types.scf_when = text }
-                      | Masc_tui_types.Schedule_field_timezone ->
-                        { form with Masc_tui_types.scf_timezone = text })
-               in
-               let current =
-                 match form.Masc_tui_types.scf_field with
-                 | Masc_tui_types.Schedule_field_keeper ->
-                   form.Masc_tui_types.scf_keeper
-                 | Masc_tui_types.Schedule_field_message ->
-                   form.Masc_tui_types.scf_message
-                 | Masc_tui_types.Schedule_field_when ->
-                   form.Masc_tui_types.scf_when
-                 | Masc_tui_types.Schedule_field_timezone ->
-                   form.Masc_tui_types.scf_timezone
-               in
-               match k with
-               | "esc" ->
-                 state.schedule_create_form <- None;
-                 state.schedule_create_error <- None
-               | "left" | "right" ->
-                 (* A kind flip can retire the field the cursor is on: a
-                    timezone cursor with no timezone field would take keys
-                    into a row the renderer no longer draws. *)
-                 let kind =
-                   Masc_tui_types.schedule_create_kind_next
-                     form.Masc_tui_types.scf_kind
-                 in
-                 let field =
-                   match form.Masc_tui_types.scf_field with
-                   | Masc_tui_types.Schedule_field_timezone
-                     when not
-                            (Masc_tui_types.schedule_create_kind_needs_timezone
-                               kind) ->
-                     Masc_tui_types.Schedule_field_when
-                   | field -> field
-                 in
-                 state.schedule_create_form <-
-                   Some
-                     { form with
-                       Masc_tui_types.scf_kind = kind
-                     ; Masc_tui_types.scf_field = field
-                     }
-               | "\127" | "\b" ->
-                 set (Masc_tui_message_layout.drop_last_utf8_scalar current)
-               | "\r" | "\n" -> (
-                   match Masc_tui_types.schedule_create_next_field form with
-                   | Some field ->
-                     state.schedule_create_form <-
-                       Some { form with Masc_tui_types.scf_field = field }
-                   | None -> (
-                       match
-                         Masc_tui_types.schedule_create_request_of_form form
-                       with
-                       | Error err -> state.schedule_create_error <- Some err
-                       | Ok request ->
-                         state.schedule_create_form <- None;
-                         state.schedule_create_error <- None;
-                         start_schedule_create state
-                           ~mailbox:async_messages ~request))
-               | s
-                 when (String.length s = 1 && Char.code s.[0] >= 32)
-                      || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
-                 set (current ^ s)
-               | _ -> ()))
        | Some k
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_identity
@@ -14214,19 +14067,9 @@ and is loaded on demand through keeper_skill.
                 (* The approval queue owns this surface's arrows and its y/n,
                    so answering a Keeper's question opens as its own mode. *)
                 enter_ask_answering state
-            | Schedules ->
-                (* The create tool and its route already existed; only the
-                   TUI had no way to reach them, so Schedules could cancel a
-                   wake and never make one. The form draws on the list view,
-                   so an open detail closes rather than taking keys it does
-                   not show. *)
-                state.schedule_detail_id <- None;
-                state.schedule_create_form <-
-                  Some (Masc_tui_types.schedule_create_form_initial ());
-                state.schedule_create_error <- None
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Memory | Lanes
-            | Board | Planning | Harness
+            | Board | Planning | Schedules | Harness
             | Fusion | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
       | _ -> ());
 

@@ -3902,9 +3902,14 @@ let schedule_detail_lines ~width (row : schedule_row) =
   let summary =
     Option.value ~default:"(no payload summary)" row.sch_payload_summary
   in
+  let keeper_wake =
+    match row.sch_payload_kind with
+    | Some ("keeper_wake" | "masc.keeper_wake") -> true
+    | Some _ | None -> false
+  in
   let target_link =
-    match row.sch_payload_kind, row.sch_payload_target with
-    | Some "keeper_wake", Some keeper ->
+    match keeper_wake, row.sch_payload_target with
+    | true, Some keeper ->
         [ field "Keeper link"
             (Link.reference Keeper (Terminal_text.single_line keeper))
         ]
@@ -3971,14 +3976,13 @@ let schedule_detail_lines ~width (row : schedule_row) =
         "Reaction" reaction
     ]
   @ schedule_turn_rows ~field row
-  @ (match row.sch_payload_kind with
-     | Some ("keeper_wake" | "masc.keeper_wake") ->
+  @ (if keeper_wake then
        [ Ansi.dim, ""
        ; Ansi.bold, "  WORK RESULT"
        ; field "Attribution" "wake/turn only; no schedule-to-tool/result join"
        ; field "Inspect" "Keeper Calls or Acting after the recorded turn start"
        ]
-     | Some _ | None -> [])
+     else [])
 
 let schedule_detail_pane (state : state) ~rows ~cols (row : schedule_row) buf =
   box_top buf cols;

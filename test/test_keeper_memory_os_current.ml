@@ -290,6 +290,32 @@ let test_alternate_support_path_keeps_derived_fact_current () =
     (List.length second.change.invalidated)
 ;;
 
+let test_reverse_ordered_support_chain_reaches_fixed_point () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let root = fact ~claim:"chain root" () in
+  let chain_length = 256 in
+  let rec build index premise facts =
+    if index > chain_length
+    then facts
+    else
+      let conclusion =
+        derived_fact
+          ~claim:(Printf.sprintf "chain conclusion %d" index)
+          [ { rule_id = Printf.sprintf "chain_rule_%d" index
+            ; premise_ids = [ Types.memory_id premise ]
+            }
+          ]
+      in
+      build (index + 1) conclusion (conclusion :: facts)
+  in
+  let reverse_topological = build 1 root [ root ] in
+  let snapshot = replace ~keepers_dir ~facts:reverse_topological () |> require_ok in
+  check int "whole reverse-ordered chain is supported" (chain_length + 1)
+    (List.length snapshot.facts);
+  check int "supported chain has no invalidations" 0
+    (List.length snapshot.change.invalidated)
+;;
+
 let test_same_rule_replaces_its_premise_set () =
   with_temp_keepers @@ fun keepers_dir ->
   let first = fact ~claim:"first condition" () in
@@ -999,6 +1025,10 @@ let () =
             "support retraction cascades to fixed point"
             `Quick
             test_support_retraction_cascades_to_fixed_point
+        ; test_case
+            "reverse-ordered support chain reaches fixed point"
+            `Quick
+            test_reverse_ordered_support_chain_reaches_fixed_point
         ; test_case
             "alternate support keeps derived fact current"
             `Quick

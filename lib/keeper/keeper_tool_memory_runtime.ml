@@ -429,23 +429,12 @@ let keeper_context_status_json
 
 (* --- Explicit memory write surface ------------------------------- *)
 
-let keeper_memory_write_max_title_chars = 120
-
-(* Upper bound on the composed [**title** content] body. A durable fact is a
-   claim, not a document; the bound matches the cap the retired bank enforced
-   so existing producers see the same boundary. *)
-let keeper_memory_write_max_body_chars = 4096
-let keeper_memory_write_max_source_path_chars = 4096
-
 (** Pure validation result for a [keeper_memory_write] call. Splitting
     this from the persistence step lets tests pin the error_kind
     taxonomy without constructing a [Workspace.config]. *)
 type memory_write_error_kind =
-  | Title_too_long
   | Content_empty
-  | Content_too_long
   | Source_path_invalid
-  | Source_path_too_long
   | Source_read_failed
   | Derivation_incomplete
   | Derivation_invalid
@@ -455,11 +444,8 @@ type memory_write_error_kind =
   | No_memory_write_error
 
 let memory_write_error_kind_to_string = function
-  | Title_too_long -> "title_too_long"
   | Content_empty -> "content_empty"
-  | Content_too_long -> "content_too_long"
   | Source_path_invalid -> "source_path_invalid"
-  | Source_path_too_long -> "source_path_too_long"
   | Source_read_failed -> "source_read_failed"
   | Derivation_incomplete -> "derivation_incomplete"
   | Derivation_invalid -> "derivation_invalid"
@@ -493,8 +479,6 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
         || String.contains path '\n'
         || String.contains path '\r'
       then Error Source_path_invalid
-      else if String.length path > keeper_memory_write_max_source_path_chars
-      then Error Source_path_too_long
       else Ok (Some path)
     | _ -> Error Source_path_invalid
   in
@@ -528,48 +512,34 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
     | (`Null, _) | (_, `Null) -> Error Derivation_incomplete
     | _ -> Error Derivation_invalid
   in
-  if String.length title > keeper_memory_write_max_title_chars
-  then
-    Memory_write_invalid
-      { error_kind = Title_too_long
-      ; extras =
-          [ "max_chars", `Int keeper_memory_write_max_title_chars
-          ]
-      }
-  else
-    match source_path, derivation with
-    | Error error_kind, _ | _, Error error_kind ->
+  match source_path, derivation with
+  | Error error_kind, _ | _, Error error_kind ->
+    Memory_write_invalid { error_kind; extras = [] }
+  | Ok source_path, Ok basis ->
+    if
+      Option.is_some source_path
+      && (match basis with
+          | Keeper_memory_os_types.Observed -> false
+          | Keeper_memory_os_types.Derived _ -> true)
+    then
       Memory_write_invalid
-        { error_kind
-        ; extras =
-            (match error_kind with
-             | Source_path_too_long ->
-               [ "max_chars", `Int keeper_memory_write_max_source_path_chars ]
-             | _ -> [])
-        }
-    | Ok source_path, Ok basis ->
-      if
-        Option.is_some source_path
-        && (match basis with
-            | Keeper_memory_os_types.Observed -> false
-            | Keeper_memory_os_types.Derived _ -> true)
-      then
-        Memory_write_invalid
-          { error_kind = Derived_source_path_unsupported; extras = [] }
-      else
-      if content = ""
-      then Memory_write_invalid { error_kind = Content_empty; extras = [] }
-      else
-        let body =
-          if title = "" then content else Printf.sprintf "**%s** %s" title content
-        in
-        if String.length body > keeper_memory_write_max_body_chars
-        then
-          Memory_write_invalid
-            { error_kind = Content_too_long
-            ; extras = [ "max_chars", `Int keeper_memory_write_max_body_chars ]
-            }
-        else Memory_write_ok { body; source_path; basis }
+        { error_kind = Derived_source_path_unsupported; extras = [] }
+    else if content = ""
+    then Memory_write_invalid { error_kind = Content_empty; extras = [] }
+    else
+      let body =
+        if title = "" then content else Printf.sprintf "**%s** %s" title content
+      in
+      Memory_write_ok { body; source_path; basis }
+;;
+
+let memory_write_basis_receipt = function
+  | Keeper_memory_os_types.Observed -> `Assoc [ "kind", `String "observed" ]
+  | Keeper_memory_os_types.Derived derivations ->
+    `Assoc
+      [ "kind", `String "derived"
+      ; "proof_count", `Int (List.length derivations)
+      ]
 ;;
 
 (* An explicit write is a claim a later turn reads back; the current Memory OS
@@ -763,7 +733,7 @@ let keeper_memory_write_with_outcome
             ; "store", `String "current_memory_snapshot"
             ; ( "memory_id"
               , `String (Keeper_memory_os_types.memory_id written_fact) )
-            ; "basis", Keeper_memory_os_types.basis_to_json written_fact.basis
+            ; "basis", memory_write_basis_receipt written_fact.basis
             ]
         | None ->
           respond

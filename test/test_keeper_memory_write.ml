@@ -161,12 +161,6 @@ let test_validation_taxonomy () =
   Runtime.validate_memory_write_args (make_args ~title:"" ~content:"")
   |> assert_invalid ~expected:"content_empty";
   Runtime.validate_memory_write_args
-    (make_args ~title:(String.make 121 'x') ~content:"body")
-  |> assert_invalid ~expected:"title_too_long";
-  Runtime.validate_memory_write_args
-    (make_args ~title:"" ~content:(String.make 4097 'x'))
-  |> assert_invalid ~expected:"content_too_long";
-  Runtime.validate_memory_write_args
     (make_source_args ~title:"" ~content:"body" ~source_path:"   ")
   |> assert_invalid ~expected:"source_path_invalid";
   Runtime.validate_memory_write_args
@@ -214,6 +208,11 @@ let test_valid_body_composition () =
   Runtime.validate_memory_write_args
     (make_args ~title:"hook" ~content:"body text")
   |> assert_ok ~body:"**hook** body text";
+  let large_title = String.make 256 't' in
+  let large_content = String.make 8192 'c' in
+  Runtime.validate_memory_write_args
+    (make_args ~title:large_title ~content:large_content)
+  |> assert_ok ~body:(Printf.sprintf "**%s** %s" large_title large_content);
   (match
      Runtime.validate_memory_write_args
        (make_derived_args
@@ -325,7 +324,7 @@ let test_derived_write_uses_exact_premise_receipt () =
     write
       (make_derived_args
          ~content:"rollout is blocked"
-         ~rule_id:"blocked_when_dependency_fails"
+         ~rule_id:"RULE_ID_MUST_STAY_OUT_OF_WRITE_RECEIPT"
          ~premise_ids:[ premise_id ])
   in
   let response =
@@ -336,12 +335,11 @@ let test_derived_write_uses_exact_premise_receipt () =
   let basis = json_field "basis" response in
   Alcotest.(check string) "receipt declares derived basis" "derived"
     (string_field "kind" basis);
-  let derivations =
-    match json_field "derivations" basis with
-    | `List values -> values
-    | _ -> Alcotest.fail "expected derivations array"
-  in
-  Alcotest.(check int) "one proof path" 1 (List.length derivations);
+  Alcotest.(check int) "one proof path" 1 (int_field "proof_count" basis);
+  Alcotest.(check bool) "raw rule identity omitted from write receipt" false
+    (String_util.contains_substring
+       conclusion.Masc.Keeper_tool_execution.raw_output
+       "RULE_ID_MUST_STAY_OUT_OF_WRITE_RECEIPT");
   let stored =
     current_facts
       ~keepers_dir:

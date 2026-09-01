@@ -267,7 +267,7 @@ let for_surface = function
   | Connectors ->
       [ b Navigate "j/k" "scroll"
       ; b Act "b / u" "bind / unbind" ~help:"bind / unbind a channel (editor form)"
-      ; b Act "Esc" "overview"
+      ; b Act "Esc" "runtime" ~help:"back to the Runtime surface it hangs off"
       ]
       @ listing_meta
   | Runtime ->
@@ -275,6 +275,7 @@ let for_surface = function
       ; b Navigate "PgUp/PgDn" "detail page"
       ; b Act "Right / Enter" "detail"
           ~help:"show the full runtime, lane, dispatch, and probe fields"
+      ; b Act "c" "connectors" ~help:"channel bindings and reachability"
       ; b Act "Left / Esc" "back"
       ]
       @ listing_meta
@@ -490,7 +491,7 @@ let help_surfaces : (string * surface) list =
   ; "Memory", Memory
   ; "Repos", Repositories
   ; "Changes", Changes
-  ; "Connectors", Connectors
+  ; "Runtime / Connectors", Connectors
   ; "Runtime", Runtime
   ; "Config", Config
   ; "Resources", Resources

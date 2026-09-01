@@ -8,10 +8,10 @@ Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
 `bin/masc_tui_types.ml`: Overview, Acting, Keepers, Memory, Lanes, Approvals,
-Board, Planning, Schedules, Fusion, Repos, Code, Connectors, Runtime, Config,
-Resources, Tools, Logs. Verification, Harness, and Changes are not on the
-ring: Planning reaches the first two with `v`, and the Keepers roster reaches
-Changes with `f`.
+Board, Planning, Schedules, Fusion, Repos, Code, Runtime, Config, Resources,
+Tools, Logs. Verification, Harness, Changes, and Connectors are not on the
+ring: Planning reaches the first two with `v`, the Keepers roster reaches
+Changes with `f`, and Runtime reaches Connectors with `c`.
 
 ## Quick Start
 
@@ -136,8 +136,9 @@ renderer as chat and Board; binary parts report their encoded size instead of
 pretending to render content. With detail focused, `[`/`]` read the previous
 or next resource without returning to the list. Responses are URI-stamped, so
 a slow older read cannot replace a newer selection. `Ctrl-W` switches between
-list and detail, and `j`/`k` move whichever pane has focus. On Connectors,
-`b`/`u` open an editor form that binds or unbinds a channel.
+list and detail, and `j`/`k` move whichever pane has focus. Connectors hangs
+off Runtime: `c` opens it there, `Esc` returns to Runtime, and `b`/`u` open
+an editor form that binds or unbinds a channel.
 
 Tools has five deliberately different questions under `p`: `available` is
 the effective surface delivered to the selected Keeper now; `async runs` is
@@ -1201,7 +1202,7 @@ Per surface:
 Tab cycles the surfaces:
 
   Overview -> Acting -> Keepers -> Memory -> Lanes -> Approvals -> Board
-           -> Planning -> Schedules -> Fusion -> Repos -> Code -> Connectors
+           -> Planning -> Schedules -> Fusion -> Repos -> Code
            -> Runtime -> Config -> Resources -> Tools -> Logs -> Overview
 
 Within a surface:

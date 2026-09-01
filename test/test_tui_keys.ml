@@ -55,7 +55,7 @@ let test_one_spelling_per_key () =
 
 let test_plain_listing_footer_shape () =
   let canonical =
-    "j/k:scroll  b / u:bind / unbind  Esc:overview  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  b / u:bind / unbind  Esc:runtime  r:refresh  Tab:next  q:quit"
   in
   check str "the plain listing keeps its footer" canonical
     (Masc_tui_keys.footer_hints Connectors)
@@ -357,6 +357,26 @@ let test_changes_is_a_keeper_child () =
   Alcotest.(check int) "Changes highlights Keepers"
     (surface_ring_index (Keepers Keeper_list))
     (surface_ring_index Changes)
+
+(* Connectors is four channel rows about substrate reachability, so it hangs
+   off Runtime with [c] instead of holding a Tab stop of its own. *)
+let test_connectors_is_a_runtime_child () =
+  Alcotest.(check bool) "Connectors is not a top-level ring entry" false
+    (List.exists (fun (surface, _) -> surface = Connectors) surface_ring);
+  Alcotest.(check int) "Connectors highlights Runtime"
+    (surface_ring_index Runtime)
+    (surface_ring_index Connectors);
+  Alcotest.(check bool) "and the help sheet files it under Runtime" true
+    (List.exists
+       (fun (label, _) -> String.equal label "Runtime / Connectors")
+       (Masc_tui_keys.help_sections ()));
+  let runtime_keys =
+    List.map
+      (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
+      (Masc_tui_keys.for_surface Runtime)
+  in
+  Alcotest.(check bool) "Runtime documents the [c] hop" true
+    (List.mem "c" runtime_keys)
 
 let test_system_logs_owns_only_its_real_filter_keys () =
   (* g/G/f still belong to Acting. Logs owns the server level floor, direct
@@ -738,6 +758,8 @@ let () =
             test_verdicts_is_a_planning_child
         ; Alcotest.test_case "Changes is a Keepers child" `Quick
             test_changes_is_a_keeper_child
+        ; Alcotest.test_case "Connectors is a Runtime child" `Quick
+            test_connectors_is_a_runtime_child
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick

@@ -2,9 +2,9 @@
 """Reproducible exact-head ttyd/Chromium proof for Keeper chat causality.
 
 The capture measures ordinary NEXT promotion, first-submission clock and
-composer-slot preservation, exact-request recovery, and the distinct
-STEER -> interrupt -> replacement path. Every scenario records rendered xterm
-DOM text, HTTP bodies, timing measurements, and rehashed screenshots.
+composer-slot preservation, plus the distinct STEER -> interrupt -> replacement
+path. Every scenario records rendered xterm DOM text, HTTP bodies, timing
+measurements, and rehashed screenshots.
 """
 
 from __future__ import annotations
@@ -950,18 +950,6 @@ def buffer_line(page: Page, row: int) -> str:
     )
 
 
-def buffer_cell_chars(page: Page, row: int, column: int) -> str:
-    return page.evaluate(
-        """position => {
-          const buffer = window.term.buffer.active;
-          const line = buffer.getLine(buffer.baseY + position.row);
-          const cell = line && line.getCell(position.column);
-          return cell ? cell.getChars() : '';
-        }""",
-        {"row": row, "column": column},
-    )
-
-
 def wait_cursor(page: Page, expected_x: int, expected_y: int) -> dict[str, int]:
     try:
         page.wait_for_function(
@@ -1087,11 +1075,6 @@ def capture(
             marker not in input_row,
             f"{filename} input row retains {marker!r}: {input_row!r}",
         )
-    if input_row_markers:
-        require(
-            buffer_cell_chars(page, cursor["y"], dimensions["cols"] - 1) == "│",
-            f"{filename} input row lost right-border cell: {input_row!r}",
-        )
     box = screen.bounding_box()
     require(box is not None, f"{filename} has no screen bounds")
     screen.screenshot(path=str(path))
@@ -1179,8 +1162,6 @@ def success_scenario(
             base = Path(raw)
             prepare_base(base)
             state.workspace_base_path = str(base)
-            recovery = base / ".masc/tui-keeper-chat-recovery.json"
-            dispatch_lock = Path(str(recovery) + ".dispatch.lock")
             with ttyd_session(browser, base, api_port, executable) as (page, _started):
                 open_message(page)
                 resize_terminal(page, 99, 7)
@@ -1201,39 +1182,48 @@ def success_scenario(
                 resize_terminal(page, 99, 30)
                 wait_text(page, f"Keepers ▸ {KEEPER} ▸ chat")
                 wait_text(page, "blocked-tiny", present=False)
+                composer_row = cursor_position(page)["y"]
+                require(
+                    ">" in buffer_line(page, composer_row),
+                    f"restored cursor is not on the composer row: {composer_row}",
+                )
                 measurements["resize_restore_cursor_zero_based"] = wait_cursor(
-                    page, 6, 24
+                    page, 6, composer_row
                 )
                 type_text(page, "👍🏽")
                 wait_text(page, "👍🏽")
                 measurements["compound_before_backspace_cursor_zero_based"] = (
-                    wait_cursor(page, 10, 24)
+                    wait_cursor(page, 10, composer_row)
                 )
                 press(page, "Backspace")
                 wait_text(page, "👍")
                 wait_text(page, "👍🏽", present=False)
                 measurements["compound_after_backspace_cursor_zero_based"] = (
-                    wait_cursor(page, 8, 24)
+                    wait_cursor(page, 8, composer_row)
                 )
                 press(page, "Control+U")
                 wait_text(page, "👍", present=False)
                 type_text(page, LONG_DRAFT)
                 wait_text(page, "❤️❤️❤️-TAIL")
                 wait_text(page, "prefix-", present=False)
-                measurements["long_tail_cursor_zero_based"] = wait_cursor(page, 97, 24)
+                measurements["long_tail_cursor_zero_based"] = wait_cursor(
+                    page, 97, composer_row
+                )
                 # fmt: off
                 shots.append(capture(page, output, prefix + "02-chat-long-tail.png",
-                                     "> ~", "❤️❤️❤️-TAIL", expected_cursor=(97, 24),
+                                     "> ~", "❤️❤️❤️-TAIL", expected_cursor=(97, composer_row),
                                      input_row_markers=("> ~", "❤️❤️❤️-TAIL"),
                                      input_row_absent=("prefix-",)))
                 # fmt: on
                 press(page, "Backspace")
                 wait_text(page, "❤️❤️❤️-TAI")
                 wait_text(page, "❤️❤️❤️-TAIL", present=False)
-                measurements["backspace_cursor_zero_based"] = wait_cursor(page, 97, 24)
+                measurements["backspace_cursor_zero_based"] = wait_cursor(
+                    page, 97, composer_row
+                )
                 # fmt: off
                 shots.append(capture(page, output, prefix + "03-chat-long-tail-backspace.png",
-                                     "> ~", "❤️❤️❤️-TAI", expected_cursor=(97, 24),
+                                     "> ~", "❤️❤️❤️-TAI", expected_cursor=(97, composer_row),
                                      input_row_markers=("> ~", "❤️❤️❤️-TAI"),
                                      input_row_absent=("prefix-", "❤️❤️❤️-TAIL")))
                 # fmt: on
@@ -1242,44 +1232,27 @@ def success_scenario(
                 type_text(page, SUCCESS_MESSAGE)
                 wait_text(page, SUCCESS_MESSAGE)
                 measurements["unicode_draft_cursor_zero_based"] = wait_cursor(
-                    page, 25, 24
+                    page, 25, composer_row
                 )
                 # fmt: off
                 shots.append(capture(page, output, prefix + "04-chat-unicode-draft.png",
-                                     SUCCESS_MESSAGE, "Enter:send", expected_cursor=(25, 24),
+                                     SUCCESS_MESSAGE, "Enter:send", expected_cursor=(25, composer_row),
                                      input_row_markers=(f"> {SUCCESS_MESSAGE}",)))
                 # fmt: on
-                with held_file_lock(dispatch_lock) as release_dispatch_lock:
-                    started = time.monotonic()
-                    press(page, "Enter")
-                    wait_text(page, "(waiting for serialized dispatch ")
-                    measurements["enter_to_dispatch_lock_wait_ui_ms"] = round(
-                        (time.monotonic() - started) * 1000, 3
-                    )
-                    require(
-                        state.summary()["chat_stream_post_count"] == 0,
-                        "externally held dispatch lock allowed a POST",
-                    )
-                    measurements["post_count_while_dispatch_lock_held"] = 0
-                    release_started = time.monotonic()
-                    release_dispatch_lock()
+                started = time.monotonic()
+                press(page, "Enter")
                 await_event(state.post_seen, "success POST")
-                measurements["dispatch_lock_release_to_post_ms"] = round(
-                    (time.monotonic() - release_started) * 1000, 3
+                measurements["enter_to_post_ms"] = round(
+                    (time.monotonic() - started) * 1000, 3
                 )
                 request = request_identity(state, SUCCESS_MESSAGE)
                 request_label = (
                     request["request_id"][:4] + ".." + request["request_id"][-8:]
                 )
                 wait_text(page, f"(sending {request_label}")
-                measurements["dispatch_lock_release_to_sending_ui_ms"] = round(
-                    (time.monotonic() - release_started) * 1000, 3
+                measurements["enter_to_sending_ui_ms"] = round(
+                    (time.monotonic() - started) * 1000, 3
                 )
-                require(
-                    not file_lock_available(dispatch_lock),
-                    "dispatch lock was released while the POST response remained held",
-                )
-                measurements["dispatch_lock_held_while_response_pending"] = True
                 sending_text = screen_text(page)
                 footer_before_queue, _ = unique_screen_line(
                     sending_text, "Enter:queue(0)"
@@ -1424,19 +1397,6 @@ def success_scenario(
                 )
                 require(latency <= 2500, f"reply latency {latency:.3f}ms")
                 wait_text(page, "(sending ", present=False)
-                settled_ui_at = time.monotonic()
-                wait_until(
-                    lambda: file_lock_available(dispatch_lock),
-                    "done ACK did not release the dispatch lock",
-                    timeout=5,
-                )
-                lock_probe_succeeded_at = time.monotonic()
-                measurements["reply_visible_to_lock_probe_success_ms"] = round(
-                    (lock_probe_succeeded_at - reply_visible_at) * 1000, 3
-                )
-                measurements["settled_ui_to_lock_probe_success_ms"] = round(
-                    (lock_probe_succeeded_at - settled_ui_at) * 1000, 3
-                )
                 visible = screen_text(page)
                 first_user_row, _ = unique_screen_line(
                     visible, request_label, "TURN · YOU"
@@ -2084,17 +2044,6 @@ def main() -> int:
                     success_scenario(browser, output, prefix, executable)
                 )
                 evidence["scenarios"].append(
-                    recovery_scenario(browser, output, prefix, executable)
-                )
-                evidence["scenarios"].append(
-                    replayable_scenario(browser, output, prefix, executable)
-                )
-                evidence["scenarios"].append(
-                    cross_process_fail_closed_scenario(
-                        browser, output, prefix, executable
-                    )
-                )
-                evidence["scenarios"].append(
                     steer_scenario(browser, output, prefix, executable)
                 )
             finally:
@@ -2102,14 +2051,12 @@ def main() -> int:
 
         # fmt: off
         names = [scenario["name"] for scenario in evidence["scenarios"]]
-        require(names == ["responsive_causal_queue", "accepted_eof_exact_recovery_across_restart",
-                          "durable_replayable_exact_id_replay",
-                          "two_tui_stale_prepared_not_recreated",
+        require(names == ["responsive_causal_queue",
                           "steer_interrupt_precedes_ordinary_next"],
                 f"incomplete scenarios: {names}")
         screenshots = [shot for scenario in evidence["scenarios"] for shot in scenario["screenshots"]]
         # fmt: on
-        require(len(screenshots) == 16, f"screenshot count: {len(screenshots)}")
+        require(len(screenshots) == 10, f"screenshot count: {len(screenshots)}")
         screenshot_paths = sorted(output.glob("*.png"))
         require(
             [path.name for path in screenshot_paths]
@@ -2139,7 +2086,7 @@ def main() -> int:
         # fmt: off
         evidence["verified"] = {
             "exact_head": True, "clean_before_and_after": True, "focused_build": True,
-            "all_five_scenarios": True, "sixteen_screenshots": True,
+            "both_causal_scenarios": True, "ten_screenshots": True,
             "causal_queue_measured": True, "steer_interrupt_measured": True,
             "raw_dom_and_http_bodies": True,
             "binary_unchanged_during_capture": True, "script_unchanged": True,

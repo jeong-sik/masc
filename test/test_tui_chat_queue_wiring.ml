@@ -378,7 +378,8 @@ let test_find_anchor_survives_a_chronological_backfill () =
     | Some ceiling ->
         List.filteri
           (fun index row ->
-             index < ceiling && String.starts_with ~prefix:"match " row.me_text)
+             index < ceiling
+             && String.starts_with ~prefix:"match " row.Tui_types.me_text)
           rows
   in
   check (list string) "repeated find still sees the older match"

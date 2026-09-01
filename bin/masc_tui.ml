@@ -11749,7 +11749,7 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages Tools
        (* System logs hang off Activity the same way: one key from the
           parent, off the Tab ring. *)
-       | Some "l" when state.view = Acting ->
+       | Some ("l" | "L") when state.view = Acting ->
            goto_surface state ~mailbox:async_messages System_logs
        | Some (("n" | "N") as direction)
          when state.search_last <> ""

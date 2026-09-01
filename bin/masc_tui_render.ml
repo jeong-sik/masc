@@ -13005,15 +13005,23 @@ let render_themes (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
+  let entries = Theme_choice.entries () in
+  let native_count =
+    List.fold_left
+      (fun count (entry : Theme_choice.entry) ->
+        if entry.lifted = 0 then count + 1 else count)
+      0 entries
+  in
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s  %s"
-       (screen_title " MASC Themes")
+       (screen_title
+          (Printf.sprintf " MASC Themes · %d bundled · %d native-pass"
+             (List.length entries) native_count))
        (config_pane_strip state)
        (connection_badge state));
   box_divider buf cols;
   let chosen = state.theme_choice in
-  let entries = Theme_choice.entries () in
   let content_height = max 1 (rows - 7) in
   let cursor = max 0 (min state.theme_cursor (List.length entries - 1)) in
   let scroll = max 0 (cursor - content_height + 1) in
@@ -13032,9 +13040,9 @@ let render_themes (state : state) =
   ;
   box_line_styled buf cols ~style:Ansi.dim
     (if lift_on then
-       "  contrast: native=all 7 pass 4.5:1  lift N=N colours raised to pass"
+       "  order: least assistance, then name · native 7/7=no lift · lift N/7=N raised"
      else
-       "  contrast: native=all 7 pass 4.5:1  N low=N below floor (lift off)");
+       "  order: fewest low colours, then name · native 7/7=all pass · N/7 low=below 4.5:1");
   List.iteri
     (fun index (entry : Theme_choice.entry) ->
       if index >= scroll && index < scroll + content_height then begin

@@ -328,6 +328,7 @@ export type {
   DashboardRuntimeProbeResponse,
   PromptSource,
   DashboardPromptItem,
+  DashboardRuntimePromptAsset,
 } from './dashboard-tools-prompts'
 export {
   fetchToolMetrics,

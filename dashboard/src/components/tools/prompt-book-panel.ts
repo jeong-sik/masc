@@ -19,7 +19,7 @@
 // the parent already fetched — no new request.
 
 import { html } from 'htm/preact'
-import type { DashboardPromptItem } from '../../api'
+import type { DashboardPromptItem, DashboardRuntimePromptAsset } from '../../api'
 
 function basename(path: string): string {
   const slash = path.lastIndexOf('/')
@@ -41,6 +41,22 @@ interface FamilyDef {
 }
 
 const FAMILY_DEFS: readonly FamilyDef[] = [
+  {
+    id: 'canary',
+    family: 'Canary · 연속성',
+    feedsTurn: false,
+    order: 6,
+    note: '메모리 연속성 검증 전용 — keeper 턴 아님',
+    category: 'canary',
+  },
+  {
+    id: 'evaluation',
+    family: 'Evaluation · 캘리브레이션',
+    feedsTurn: false,
+    order: 8,
+    note: '평가 판정 보정 전용 — keeper 턴 아님',
+    category: 'evaluation',
+  },
   {
     id: 'librarian',
     family: 'Librarian · 메모리',
@@ -72,6 +88,22 @@ const FAMILY_DEFS: readonly FamilyDef[] = [
     order: 1,
     note: 'keeper 시스템 프롬프트를 이루는 md 계열 (큐레이션 · 런타임 조립과 1:1 아님)',
     category: 'keeper',
+  },
+  {
+    id: 'mcp',
+    family: 'MCP · 도구 프로필',
+    feedsTurn: false,
+    order: 3,
+    note: 'MCP 서버 도구 프로필 전용 — keeper 턴 아님',
+    category: 'mcp',
+  },
+  {
+    id: 'probe',
+    family: 'Probe · 기능 확인',
+    feedsTurn: false,
+    order: 2,
+    note: '런타임·도구 capability probe 전용 — keeper 턴 아님',
+    category: 'probe',
   },
 ]
 
@@ -110,7 +142,39 @@ function groupByFamily(prompts: readonly DashboardPromptItem[]): FamilyGroup[] {
   return Array.from(buckets.values()).sort((a, b) => a.def.order - b.def.order)
 }
 
-function PromptBookCatalog({ prompts }: { prompts: readonly DashboardPromptItem[] }) {
+function RuntimePromptAssets({ assets }: { assets: readonly DashboardRuntimePromptAsset[] }) {
+  if (assets.length === 0) return null
+  return html`
+    <section class="pb-cat-fam" data-testid="prompt-book-runtime-assets">
+      <div class="pb-cat-fam-head">
+        <span class="pb-cat-dot"></span>
+        <span class="pb-cat-fam-name">Runtime assets · 읽기 전용</span>
+        <span class="pb-cat-fam-count">${assets.length}</span>
+        <span class="pb-cat-tag">별도 계열</span>
+      </div>
+      <div class="pb-cat-fam-note">
+        배포된 .txt 지시문입니다. Prompt registry override 대상이 아닙니다.
+      </div>
+      ${assets.map(asset => html`
+        <details class="mt-2" key=${asset.path}>
+          <summary class="cursor-pointer text-xs text-[var(--color-fg-secondary)]">
+            ${asset.path} · ${asset.file_exists ? `${asset.char_count} chars` : 'missing after sync'}
+          </summary>
+          <div class="pb-cat-fam-note">${asset.file_path}</div>
+          <pre class="mt-2 max-h-72 overflow-auto whitespace-pre-wrap text-xs text-[var(--color-fg-primary)]">${asset.value}</pre>
+        </details>
+      `)}
+    </section>
+  `
+}
+
+function PromptBookCatalog({
+  prompts,
+  runtimeAssets,
+}: {
+  prompts: readonly DashboardPromptItem[]
+  runtimeAssets: readonly DashboardRuntimePromptAsset[]
+}) {
   const groups = groupByFamily(prompts)
   return html`
     <div class="pb-book pb-catalog" data-testid="prompt-book-catalog">
@@ -136,18 +200,21 @@ function PromptBookCatalog({ prompts }: { prompts: readonly DashboardPromptItem[
           </div>
         </section>
       `)}
+      <${RuntimePromptAssets} assets=${runtimeAssets} />
     </div>
   `
 }
 
 export function PromptBookPanel({
   prompts,
+  runtimeAssets = [],
   loading = false,
 }: {
   prompts: readonly DashboardPromptItem[]
+  runtimeAssets?: readonly DashboardRuntimePromptAsset[]
   loading?: boolean
 }) {
-  if (prompts.length === 0) {
+  if (prompts.length === 0 && runtimeAssets.length === 0) {
     return html`
       <div class="pb-wrap" data-theme="paper" data-testid="prompt-book-panel">
         <div class="pb-book">
@@ -164,7 +231,7 @@ export function PromptBookPanel({
 
   return html`
     <div class="pb-wrap" data-theme="paper" data-testid="prompt-book-panel">
-      <${PromptBookCatalog} prompts=${prompts} />
+      <${PromptBookCatalog} prompts=${prompts} runtimeAssets=${runtimeAssets} />
     </div>
   `
 }

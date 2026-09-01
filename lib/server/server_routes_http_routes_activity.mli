@@ -10,6 +10,16 @@ val add_routes :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Http_server_eio.Router.t -> Http_server_eio.Router.t
 
+val runtime_prompt_assets_json :
+  prompts_dir:string -> embedded_files:string list -> Yojson.Safe.t list
+(** Read-only managed [*.txt] prompt assets. [embedded_files] is the binary
+    inventory; content is read from the synchronized runtime prompt directory
+    so an absent projection remains observable to operator clients. *)
+
+val prompt_catalog_json : unit -> Yojson.Safe.t
+(** The [/api/v1/prompts] envelope: overrideable Markdown registry rows plus
+    a separate [runtime_assets] read-only collection. *)
+
 type board_context_inference_target_source =
   | Explicit_target
   | Post_author

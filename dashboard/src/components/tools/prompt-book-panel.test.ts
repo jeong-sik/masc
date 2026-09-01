@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { DashboardPromptItem } from '../../api'
+import type { DashboardPromptItem, DashboardRuntimePromptAsset } from '../../api'
 import { PromptBookPanel } from './prompt-book-panel'
 
 function makePrompt(overrides: Partial<DashboardPromptItem> & { key: string }): DashboardPromptItem {
@@ -58,6 +58,16 @@ const PROMPTS: DashboardPromptItem[] = [
   }),
 ]
 
+const RUNTIME_ASSETS: DashboardRuntimePromptAsset[] = [
+  {
+    path: 'keeper.autonomous.wake.txt',
+    file_path: 'config/prompts/keeper.autonomous.wake.txt',
+    value: 'Choose the next justified task.',
+    file_exists: true,
+    char_count: 31,
+  },
+]
+
 describe('PromptBookPanel', () => {
   let container: HTMLDivElement
 
@@ -106,6 +116,10 @@ describe('PromptBookPanel', () => {
       { key: 'judge.effect', category: 'judge' },
       { key: 'librarian', category: 'librarian' },
       { key: 'verification', category: 'verification' },
+      { key: 'keeper.canary.recall', category: 'canary' },
+      { key: 'keeper.capability_probe', category: 'probe' },
+      { key: 'mcp.full', category: 'mcp' },
+      { key: 'eval.calibration.few_shot', category: 'evaluation' },
     ]
     render(
       html`<${PromptBookPanel}
@@ -119,6 +133,25 @@ describe('PromptBookPanel', () => {
     const families = Array.from(catalog?.querySelectorAll('.pb-cat-fam') ?? [])
     expect(families.some(fam => fam.textContent?.includes('Other'))).toBe(false)
     expect(families.some(fam => fam.textContent?.includes('keeper 턴'))).toBe(true)
+  })
+
+  it('shows raw runtime assets separately and read-only', () => {
+    render(html`<${PromptBookPanel} prompts=${PROMPTS} runtimeAssets=${RUNTIME_ASSETS} />`, container)
+
+    const assets = container.querySelector('[data-testid="prompt-book-runtime-assets"]')
+    expect(assets).not.toBeNull()
+    expect(assets?.textContent).toContain('읽기 전용')
+    expect(assets?.textContent).toContain('keeper.autonomous.wake.txt')
+    expect(assets?.textContent).toContain('Choose the next justified task.')
+    expect(assets?.textContent).toContain('override 대상이 아닙니다')
+  })
+
+  it('keeps runtime assets visible when the Markdown registry is empty', () => {
+    render(html`<${PromptBookPanel} prompts=${[]} runtimeAssets=${RUNTIME_ASSETS} />`, container)
+
+    expect(container.querySelector('[data-testid="prompt-book-catalog"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="prompt-book-runtime-assets"]')).not.toBeNull()
+    expect(container.textContent).not.toContain('표시할 프롬프트 없음')
   })
 
   it('does not present Prompt_block_id assembly provenance', () => {

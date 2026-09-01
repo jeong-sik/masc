@@ -12,6 +12,60 @@ module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_api_types = Server_dashboard_http_keeper_api_types
 
+(* Runtime prompt assets intentionally stay outside [Prompt_registry]: they
+   have no frontmatter contract and are not overrideable.  The prompt sync
+   owns the runtime directory, so enumerate the binary's [*.txt] inventory
+   and then read the runtime projection.  A missing file stays visible rather
+   than being silently omitted; that is the useful signal after a failed sync.
+*)
+let runtime_prompt_assets_json ~prompts_dir ~embedded_files =
+  let prefix = "prompts/" in
+  let prefix_length = String.length prefix in
+  embedded_files
+  |> List.filter_map (fun embedded_path ->
+    if String.starts_with ~prefix embedded_path
+       && Filename.check_suffix embedded_path ".txt"
+    then
+      let relative =
+        String.sub embedded_path prefix_length
+          (String.length embedded_path - prefix_length)
+      in
+      let file_path = Filename.concat prompts_dir relative in
+      let value = Fs_compat.load_file_opt file_path in
+      let char_count =
+        match value with
+        | Some text -> String.length text
+        | None -> 0
+      in
+      Some
+        (`Assoc
+           [ ("path", `String relative)
+           ; ("file_path", `String file_path)
+           ; ("value", `String (Option.value ~default:"" value))
+           ; ("file_exists", `Bool (Option.is_some value))
+           ; ("char_count", `Int char_count)
+           ])
+    else None)
+  |> List.sort (fun left right ->
+    let path = function
+      | `Assoc fields ->
+        (match List.assoc_opt "path" fields with Some (`String value) -> value | _ -> "")
+      | _ -> ""
+    in
+    String.compare (path left) (path right))
+;;
+
+let prompt_catalog_json () =
+  let runtime_assets =
+    runtime_prompt_assets_json
+      ~prompts_dir:(Config_dir_resolver.prompts_dir ())
+      ~embedded_files:Embedded_config.file_list
+  in
+  match Prompt_registry.prompts_json () with
+  | `Assoc fields -> `Assoc (("runtime_assets", `List runtime_assets) :: fields)
+  | json -> json
+;;
+
 let activity_result_json ~ok ~message =
   `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
 ;;
@@ -1484,7 +1538,7 @@ let add_routes ~sw ~clock router =
   (* Prompt Registry API *)
   |> Http.Router.get "/api/v1/prompts" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
-         let json = Prompt_registry.prompts_json () in
+         let json = prompt_catalog_json () in
          Http.Response.json_value json reqd
        ) request reqd)
 

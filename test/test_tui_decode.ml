@@ -4403,6 +4403,15 @@ let prompts_payload =
                ("file_exists", `Bool false);
              ];
          ]);
+      ( "runtime_assets"
+      , `List
+          [ `Assoc
+              [ ("path", `String "keeper.autonomous.wake.txt")
+              ; ("file_path", `String "config/prompts/keeper.autonomous.wake.txt")
+              ; ("value", `String "Continue autonomously.")
+              ; ("file_exists", `Bool true)
+              ]
+          ] );
     ]
 
 let test_decode_prompts_reads_the_live_shape () =
@@ -4420,6 +4429,17 @@ let test_decode_prompts_reads_the_live_shape () =
       (first.Tui_decode.pr_operator_surface = Tui_decode.Prompt_primary);
     Alcotest.(check (list string)) "template input names"
       [ "keeper_instructions" ] first.Tui_decode.pr_template_variables
+
+let test_decode_prompts_reads_runtime_assets () =
+  match Tui_decode.decode_prompts prompts_payload with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    let asset = List.hd snapshot.Tui_decode.ps_runtime_assets in
+    Alcotest.(check string) "runtime asset path" "keeper.autonomous.wake.txt"
+      asset.Tui_decode.pra_path;
+    Alcotest.(check string) "runtime asset body" "Continue autonomously."
+      asset.Tui_decode.pra_value;
+    Alcotest.(check bool) "runtime asset exists" true asset.Tui_decode.pra_file_exists
 
 let test_prompt_rows_hide_fragments_by_default () =
   match Tui_decode.decode_prompts prompts_payload with
@@ -6483,6 +6503,8 @@ let () =
       [
         Alcotest.test_case "reads the live shape" `Quick
           test_decode_prompts_reads_the_live_shape;
+        Alcotest.test_case "reads separate read-only runtime assets" `Quick
+          test_decode_prompts_reads_runtime_assets;
         Alcotest.test_case "hides assembly fragments by default" `Quick
           test_prompt_rows_hide_fragments_by_default;
         Alcotest.test_case "legacy rows default to primary" `Quick

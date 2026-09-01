@@ -5502,7 +5502,17 @@ type prompt_row = {
   pr_template_variables : string list;
 }
 
-type prompts_snapshot = { ps_rows : prompt_row list }
+type runtime_prompt_asset = {
+  pra_path : string;
+  pra_file_path : string;
+  pra_value : string;
+  pra_file_exists : bool;
+}
+
+type prompts_snapshot = {
+  ps_rows : prompt_row list;
+  ps_runtime_assets : runtime_prompt_asset list;
+}
 
 let prompt_rows_for_operator ~show_fragments snapshot =
   if show_fragments
@@ -5562,6 +5572,14 @@ let decode_prompt_row json =
     }
 ;;
 
+let decode_runtime_prompt_asset json =
+  let* pra_path = required_string_field json "path" in
+  let* pra_file_path = required_string_field json "file_path" in
+  let* pra_value = required_string_field json "value" in
+  let* pra_file_exists = required_bool_field json "file_exists" in
+  Ok { pra_path; pra_file_path; pra_value; pra_file_exists }
+;;
+
 let decode_prompts json =
   let* rows_json = required_list_field json "prompts" in
   let* reversed =
@@ -5572,7 +5590,24 @@ let decode_prompts json =
          Ok (row :: acc))
       (Ok []) rows_json
   in
-  Ok { ps_rows = List.rev reversed }
+  let* runtime_assets_json =
+    match member "runtime_assets" json with
+    | `Null -> Ok []
+    | `List assets -> Ok assets
+    | value -> field_type_error "runtime_assets" "a list" value
+  in
+  let* reversed_runtime_assets =
+    List.fold_left
+      (fun result asset_json ->
+         let* acc = result in
+         let* asset = decode_runtime_prompt_asset asset_json in
+         Ok (asset :: acc))
+      (Ok []) runtime_assets_json
+  in
+  Ok
+    { ps_rows = List.rev reversed
+    ; ps_runtime_assets = List.rev reversed_runtime_assets
+    }
 ;;
 
 type librarian_run_page =

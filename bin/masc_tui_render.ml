@@ -12903,7 +12903,7 @@ let render_runtime_params (state : state) =
   finish_surface state ~surface_key:"config-params" ~rows:terminal_rows ~cols buf
 ;;
 
-let render_prompts (state : state) =
+let render_prompt_registry (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 8192 in
@@ -13059,8 +13059,109 @@ let render_prompts (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         "j/k:선택  PgUp/PgDn:읽기  a:내부 조각  i:최근 입력  e:편집  x:재정의 삭제  c:runtime.toml");
+         "j/k:선택  PgUp/PgDn:읽기  a:내부 조각  i:최근 입력  e:편집  x:재정의 삭제  o:런타임 자산");
   finish_surface state ~surface_key:"prompts" ~rows:terminal_rows ~cols buf
+
+(* The raw text assets are distributed with the binary and deliberately have
+   no override contract.  They use the same Config page as the editable
+   Markdown registry, but a distinct mode makes the missing edit controls an
+   explicit capability boundary rather than an accidental omission. *)
+let render_runtime_prompt_assets (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 8192 in
+  let assets =
+    match state.prompts_snapshot with
+    | None -> []
+    | Some snapshot -> snapshot.Tui_decode.ps_runtime_assets
+  in
+  let total = List.length assets in
+  let cursor = max 0 (min state.prompts_cursor (total - 1)) in
+  let selected = List.nth_opt assets cursor in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %s%d개 · 읽기 전용%s  %s  %s"
+       (screen_title " MASC 런타임 프롬프트 자산")
+       Ansi.dim total Ansi.reset
+       (config_pane_strip state)
+       (connection_badge state));
+  box_line_styled buf cols ~style:(Theme.recede ())
+    "  배포된 .txt 지시문 · registry override 대상이 아님";
+  box_divider buf cols;
+  let error_rows = if Option.is_some state.prompts_error then 1 else 0 in
+  let combined_height = max 2 (rows - 10 - error_rows) in
+  let list_height = min 8 (max 1 (combined_height / 3)) in
+  let detail_height = max 1 (combined_height - list_height) in
+  let first = if cursor < list_height then 0 else cursor - list_height + 1 in
+  (match state.prompts_error with
+   | Some detail ->
+     box_line buf cols
+       ((Theme.bad ()) ^ "  " ^ fit_width (Terminal_text.single_line detail) (cols - 6)
+        ^ Ansi.reset)
+   | None -> ());
+  let drawn = ref 0 in
+  List.iteri
+    (fun index (asset : Tui_decode.runtime_prompt_asset) ->
+       if index >= first && index < first + list_height then begin
+         incr drawn;
+         let mark = if asset.pra_file_exists then " " else (Theme.bad ()) ^ "!" ^ Ansi.reset in
+         let line =
+           Printf.sprintf "%s %-32s %s"
+             mark
+             (fit_width (Terminal_text.single_line asset.pra_path) 32)
+             (Ansi.dim
+             ^ (if asset.pra_file_exists then "런타임 파일" else "동기화 후 누락")
+              ^ Ansi.reset)
+         in
+         if index = cursor then box_line buf cols (Theme.selection ^ " " ^ line ^ Ansi.reset)
+         else box_line buf cols (" " ^ line)
+       end)
+    assets;
+  for _ = 1 to list_height - !drawn do
+    box_empty buf cols
+  done;
+  box_divider buf cols;
+  (match selected with
+   | None ->
+     box_line_styled buf cols ~style:(Theme.recede ()) "  런타임 프롬프트 자산이 없습니다";
+     box_line_styled buf cols ~style:(Theme.recede ())
+       "  서버가 오래되었거나 배포 자산을 아직 동기화하지 않았을 수 있습니다";
+     box_divider buf cols;
+     for _ = 1 to detail_height do box_empty buf cols done
+   | Some asset ->
+     let source = if asset.pra_file_exists then "런타임 파일" else "누락" in
+     box_line buf cols
+       (Printf.sprintf "  읽기 전용 자산  %s · %s · %s"
+          (Terminal_text.single_line asset.pra_path)
+          source
+          (Terminal_text.single_line asset.pra_file_path));
+     box_line_styled buf cols ~style:(Theme.recede ())
+       "  이 자산은 registry override·편집 대상이 아닙니다";
+     box_divider buf cols;
+     let body_width = max 1 (cols - 6) in
+     let rendered =
+       Message_layout.wrap_body ~markdown:document_markdown
+         ~max_cells:body_width ~sanitize:Terminal_text.single_line asset.pra_value
+     in
+     let max_scroll = max 0 (List.length rendered - detail_height) in
+     let scroll = max 0 (min state.config_scroll max_scroll) in
+     for index = 0 to detail_height - 1 do
+       match List.nth_opt rendered (scroll + index) with
+       | Some line -> box_line buf cols ("  " ^ line)
+       | None -> box_empty buf cols
+     done);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:"j/k:선택  PgUp/PgDn:읽기  o:레지스트리  r:새로고침");
+  finish_surface state ~surface_key:"prompt-runtime-assets" ~rows:terminal_rows ~cols buf
+;;
+
+let render_prompts (state : state) =
+  if state.prompts_show_runtime_assets
+  then render_runtime_prompt_assets state
+  else render_prompt_registry state
+;;
 
 (* The row the reader is on. A check rather than a colour, because the point
    of this screen is that colours are about to change. *)

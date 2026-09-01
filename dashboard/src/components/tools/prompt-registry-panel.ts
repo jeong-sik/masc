@@ -7,6 +7,7 @@ import {
   fetchDashboardPrompts,
   savePromptOverride,
   type DashboardPromptItem,
+  type DashboardRuntimePromptAsset,
   type PromptSource,
 } from '../../api'
 import { SectionCard } from '../common/card'
@@ -260,6 +261,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
   const sourceFilter = useSignal<PromptSourceFilter>('all')
   const searchQuery = useSignal('')
   const [prompts, setPrompts] = useState<DashboardPromptItem[]>([])
+  const [runtimeAssets, setRuntimeAssets] = useState<DashboardRuntimePromptAsset[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -321,6 +323,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
     try {
       const response = await fetchDashboardPrompts()
       const nextPrompts = response.prompts ?? []
+      setRuntimeAssets(response.runtime_assets ?? [])
       setPrompts(nextPrompts)
       const nextSelectedKey =
         preferredKey && nextPrompts.some(prompt => prompt.key === preferredKey)
@@ -648,7 +651,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
   const content = html`
     ${viewTabs}
     ${surfaceView === 'book'
-      ? html`<div class="set-promptbook-host"><${PromptBookPanel} prompts=${prompts} loading=${loading} /></div>`
+      ? html`<div class="set-promptbook-host"><${PromptBookPanel} prompts=${prompts} runtimeAssets=${runtimeAssets} loading=${loading} /></div>`
       : body}
   `
 

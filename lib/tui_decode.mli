@@ -1363,7 +1363,17 @@ type prompt_row = {
   pr_template_variables : string list;
 }
 
-type prompts_snapshot = { ps_rows : prompt_row list }
+type runtime_prompt_asset = {
+  pra_path : string;
+  pra_file_path : string;
+  pra_value : string;
+  pra_file_exists : bool;
+}
+
+type prompts_snapshot = {
+  ps_rows : prompt_row list;
+  ps_runtime_assets : runtime_prompt_asset list;
+}
 (** GET /api/v1/prompts. *)
 
 val prompt_rows_for_operator : show_fragments:bool -> prompts_snapshot -> prompt_row list

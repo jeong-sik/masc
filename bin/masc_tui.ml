@@ -11739,13 +11739,13 @@ and is loaded on demand through keeper_skill.
            state.memory_facts_cursor <- 0;
            state.memory_facts_scroll <- 0
        (* Resources and Tools hang off Config the way Connectors hangs off
-          Runtime: not on the Tab ring, one key from their parent. Guarded
-          off while a param edit field is open, which owns the letters. *)
-       | Some "s"
-         when state.view = Config && state.runtime_param_edit = None ->
+          Runtime: not on the Tab ring, one key from their parent. Both
+          cases, like every other hang-off hop (c|C, f|F, p|P), and no
+          param-edit guard: while a field is open, the capture arm earlier
+          in this match owns every key before these can see one. *)
+       | Some ("s" | "S") when state.view = Config ->
            goto_surface state ~mailbox:async_messages Resources
-       | Some "t"
-         when state.view = Config && state.runtime_param_edit = None ->
+       | Some ("t" | "T") when state.view = Config ->
            goto_surface state ~mailbox:async_messages Tools
        | Some (("n" | "N") as direction)
          when state.search_last <> ""

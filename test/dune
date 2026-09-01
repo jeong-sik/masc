@@ -3348,6 +3348,172 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input)))
 
+; The named lanes below are the same suite sliced by scenario family. They
+; existed only as local commands, so every assertion in them was dead in CI:
+; a PR could "fix" a lane scenario that nothing ever ran (found by the
+; #32245 review). One rule per lane keeps a red lane's name in the failure
+; output instead of one undifferentiated suite.
+
+(rule
+ (alias runtest-test_tui_keyboard_input-cli-base-path)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   cli-base-path)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-cli-base-path)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-planning-review)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   planning-review)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-planning-review)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-repositories)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   repositories)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-repositories)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-project-changes)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   project-changes)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-project-changes)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-config)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   config)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-config)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-chat-clarity)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   chat-clarity)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-chat-clarity)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-runtime)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   runtime)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-runtime)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-resources)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   resources)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-resources)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-keepers-lanes)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   keepers-lanes)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-keepers-lanes)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-board-json)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   board-json)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-board-json)))
+
 (test
  (name test_tui_metrics_tail)
  (modules test_tui_metrics_tail)

@@ -840,11 +840,13 @@ def selected_surface_from_screen(value: str) -> str | None:
 
 
 def goto_tools(page: Any, timeout: float) -> None:
+    # Tools left the Tab ring and hangs off Config under [t], so the walk
+    # goes to the Config stop and hops from there.
     deadline = time.monotonic() + timeout
     current = selected_surface_from_screen(screen_text(page))
     require(current is not None, "TUI did not expose its selected surface")
     visited = [current]
-    while time.monotonic() < deadline:
+    while current != "Config" and time.monotonic() < deadline:
         press(page, "Tab")
         observed = current
         while observed == current and time.monotonic() < deadline:
@@ -853,13 +855,12 @@ def goto_tools(page: Any, timeout: float) -> None:
             if selected is not None:
                 observed = selected
         require(observed != current, "TUI surface selection did not advance")
-        if observed == "Tools":
-            wait_screen(page, "MASC Tools", max(0.001, deadline - time.monotonic()))
-            return
-        require(observed not in visited, "TUI completed a surface cycle without Tools")
+        require(observed not in visited, "TUI completed a surface cycle without Config")
         visited.append(observed)
         current = observed
-    raise CaptureError("TUI did not reach the Tools surface")
+    require(current == "Config", "TUI did not reach the Config surface")
+    press(page, "t")
+    wait_screen(page, "MASC Tools", max(0.001, deadline - time.monotonic()))
 
 
 def selected_keeper_from_screen(value: str) -> str | None:

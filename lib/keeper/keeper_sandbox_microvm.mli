@@ -110,6 +110,43 @@ val delete_force_argv : container_name:string -> string list
 (** For a guest that survived as stopped (e.g. the host rebooted out from
     under [--rm]); running guests are taken down with {!stop_argv}. *)
 
+(** Guest mount point of the per-keeper build volume.
+
+    Build output must not sit on the virtiofs share: virtiofs pins one host
+    file descriptor -- and therefore one host vnode -- per inode the guest
+    touches, and [kern.maxvnodes] is 263,168. Measured writing 20,000 files
+    on container 1.3.1: ext4 volume 26 -> 26 host descriptors, virtiofs
+    26 -> 20,027, [_build] symlinked onto the volume 59 -> 61. See the
+    implementation for the panic this prevents. *)
+val build_volume_guest_root : string
+
+(** [masc-keeper-build-<keeper_name>], or an error when the name carries
+    anything outside [A-Za-z0-9._-]. *)
+val build_volume_name : keeper_name:string -> (string, string) result
+
+val build_volume_create_argv : volume_name:string -> size:string -> string list
+val build_volume_mount_args : volume_name:string -> string list
+
+(** Build directory for one checkout, addressed by its playground-relative
+    path. Errors when a segment is empty or contains the separator, which
+    would make two checkouts share one build directory. *)
+val build_link_target : playground_relative:string -> (string, string) result
+
+type build_link_state =
+  | Build_absent
+  | Build_symlink of string
+  | Build_real_directory
+
+type build_link_plan =
+  | Link_create of string
+  | Link_retarget of string
+  | Link_already_correct
+  | Link_refused_real_directory
+
+(** A real [_build] directory is refused, not deleted: it holds output this
+    module did not create. A stale symlink is retargeted, which loses no data. *)
+val plan_build_link : target:string -> build_link_state -> build_link_plan
+
 val keeper_vm_container_kind : string
 
 val inspect_argv : container_name:string -> string list

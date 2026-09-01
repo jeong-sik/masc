@@ -314,6 +314,123 @@ let delete_force_argv ~container_name =
   command_argv () @ [ "delete"; "--force"; container_name ]
 ;;
 
+(** Build output lives on a block device, not on the virtiofs share.
+
+    {b Why.} Apple's virtiofs opens an [O_PATH] descriptor on the host for
+    every inode the guest touches and closes it only on [FUSE_FORGET], which
+    arrives when the guest kernel evicts the dentry. A host descriptor pins a
+    host vnode, so a build that writes 200,000 files pins 200,000 vnodes --
+    and [kern.maxvnodes] is 263,168 by default. When the table fills with
+    nothing reclaimable, [vnode_create] fails, file-backed page faults become
+    SIGBUS, and a SIGBUS in launchd is a kernel panic. That happened three
+    times between 2026-08-30 and 2026-09-01.
+
+    {b Measured} on macOS 26.6.1 / M3 Max with container CLI 1.3.1, writing
+    20,000 files and counting host descriptors on the VM process:
+
+    - ext4 volume ([/dev/vdX]): 26 -> 26. The host holds one [volume.img].
+    - virtiofs bind mount: 26 -> 20,027. One descriptor per inode, exactly.
+    - [_build] symlinked onto the ext4 volume: 59 -> 61.
+
+    Reclaiming without a restart was tried and does not work: writing
+    [/proc/sys/vm/drop_caches] to force [FUSE_FORGET] is denied under
+    [--cap-drop ALL]. Deleting the tree does release the descriptors
+    (20,027 -> 59), but that is the build cache the directory exists to hold.
+
+    {b Why a symlink and not [DUNE_BUILD_DIR].} An absolute value is shared by
+    every checkout in the playground, so two builds would write the same
+    directory. A relative value that escapes the workspace is refused by dune
+    ("path outside the workspace", measured on dune 3.24.1). The symlink binds
+    per checkout, needs no dune-specific knowledge, and covers every tool that
+    writes [_build].
+
+    The link is created on the host and points at a guest path, so it dangles
+    when read from macOS. That is intended: the host never builds, and the
+    host-side readers under [Playground_paths] read sources, not build
+    output. *)
+let build_volume_guest_root = "/masc-build"
+
+(** Volume names reach [container] as an argument and become a directory name
+    under its state directory, so a name outside this set is refused rather
+    than escaped. Keeper names already satisfy it -- they are the same names
+    that appear in [masc-keeper-vm-<name>-<hash>]. *)
+let valid_volume_segment segment =
+  (not (String.equal segment ""))
+  && String.for_all
+       (function
+         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | '-' -> true
+         | _ -> false)
+       segment
+
+let build_volume_name ~keeper_name =
+  if valid_volume_segment keeper_name
+  then Ok ("masc-keeper-build-" ^ keeper_name)
+  else Error ("unsupported keeper name for a build volume: " ^ keeper_name)
+;;
+
+let build_volume_create_argv ~volume_name ~size =
+  command_argv () @ [ "volume"; "create"; "-s"; size; volume_name ]
+;;
+
+let build_volume_mount_args ~volume_name =
+  [ "--volume"; volume_name ^ ":" ^ build_volume_guest_root ]
+;;
+
+(** A checkout's build directory on the volume.
+
+    The playground-relative path is flattened with [:] so the target needs no
+    parent directories -- the guest cannot [mkdir -p] through a symlink whose
+    parent is missing, and the host cannot write into the disk image at all.
+    A path segment already containing [:] would make two checkouts share one
+    build directory, so it is refused instead. *)
+let build_link_separator = ':'
+
+let build_link_target ~playground_relative =
+  let segments = String.split_on_char '/' playground_relative in
+  let empty = List.exists (fun s -> String.equal s "") segments in
+  let collides = String.contains playground_relative build_link_separator in
+  if List.is_empty segments || empty
+  then Error ("empty path segment in playground path: " ^ playground_relative)
+  else if collides
+  then
+    Error
+      (Printf.sprintf
+         "playground path contains %c, which the build link uses as a separator: %s"
+         build_link_separator
+         playground_relative)
+  else
+    Ok
+      (Filename.concat
+         build_volume_guest_root
+         (String.concat (String.make 1 build_link_separator) segments))
+;;
+
+(** What [_build] is right now, as far as the plan cares. *)
+type build_link_state =
+  | Build_absent
+  | Build_symlink of string
+  | Build_real_directory
+
+type build_link_plan =
+  | Link_create of string
+  | Link_retarget of string
+  | Link_already_correct
+  | Link_refused_real_directory
+
+(** Deciding is separate from acting so the refusal is testable.
+
+    A real [_build] is not deleted. It holds build output this module did not
+    create, and silently discarding it to install a link would trade a vnode
+    problem for lost work; the caller reports it and leaves the checkout on
+    virtiofs. Retargeting a stale link is different -- removing a symlink
+    removes no data. *)
+let plan_build_link ~target = function
+  | Build_absent -> Link_create target
+  | Build_symlink existing when String.equal existing target -> Link_already_correct
+  | Build_symlink _ -> Link_retarget target
+  | Build_real_directory -> Link_refused_real_directory
+;;
+
 (** Label value distinguishing a keeper-lifetime guest from turn
     containers. The guest outlives turns, so it carries no turn id. *)
 let keeper_vm_container_kind = "keeper-vm"

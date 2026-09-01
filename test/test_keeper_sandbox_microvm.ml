@@ -756,6 +756,115 @@ let test_live_container_listing_is_scoped_to_the_keeper () =
   | Ok containers ->
     Alcotest.failf "expected exactly one scoped Apple Container VM, got %d" (List.length containers)
 
+
+(* Build output on a block device instead of the virtiofs share.
+
+   Measured on macOS 26.6.1 / M3 Max, container CLI 1.3.1, writing 20,000
+   files and counting host descriptors on the VM process: ext4 volume
+   26 -> 26, virtiofs bind mount 26 -> 20,027, [_build] symlinked onto the
+   volume 59 -> 61. Three kernel panics between 2026-08-30 and 2026-09-01
+   came from that middle row filling [kern.maxvnodes]. *)
+
+let ok_exn = function
+  | Ok v -> v
+  | Error e -> Alcotest.failf "expected Ok, got Error %S" e
+;;
+
+let error_exn = function
+  | Ok v -> Alcotest.failf "expected Error, got Ok %S" v
+  | Error e -> e
+;;
+
+let test_build_volume_name_is_keeper_scoped () =
+  Alcotest.(check string)
+    "one volume per keeper"
+    "masc-keeper-build-lane-smith"
+    (ok_exn (M.build_volume_name ~keeper_name:"lane-smith"));
+  Alcotest.(check string)
+    "dots are container-safe"
+    "masc-keeper-build-edgar.a.poe"
+    (ok_exn (M.build_volume_name ~keeper_name:"edgar.a.poe"))
+;;
+
+let test_build_volume_name_refuses_unsafe_names () =
+  (* A name reaching [container] as an argument and a state directory is
+     refused rather than escaped. *)
+  List.iter
+    (fun name ->
+      ignore (error_exn (M.build_volume_name ~keeper_name:name) : string))
+    [ ""; "../escape"; "has space"; "semi;colon"; "slash/inside" ]
+;;
+
+let test_build_volume_mount_targets_the_guest_root () =
+  Alcotest.(check bool)
+    "volume is mounted at the documented guest root"
+    true
+    (adjacent
+       ~flag:"--volume"
+       ~value:("masc-keeper-build-polisher:" ^ M.build_volume_guest_root)
+       (M.build_volume_mount_args ~volume_name:"masc-keeper-build-polisher"))
+;;
+
+let test_build_volume_create_argv_carries_a_size () =
+  let argv = M.build_volume_create_argv ~volume_name:"masc-keeper-build-x" ~size:"64g" in
+  Alcotest.(check bool) "goes through container" true (contains "container" argv);
+  Alcotest.(check bool) "creates a volume" true (adjacent ~flag:"volume" ~value:"create" argv);
+  (* The image is sparse -- 4 GiB nominal measured at 84 MB on disk -- so the
+     size is a ceiling, not an allocation. *)
+  Alcotest.(check bool) "size is passed" true (adjacent ~flag:"-s" ~value:"64g" argv)
+;;
+
+let test_build_link_target_is_flat_and_unique_per_checkout () =
+  Alcotest.(check string)
+    "top-level checkout"
+    "/masc-build/masc-t362"
+    (ok_exn (M.build_link_target ~playground_relative:"masc-t362"));
+  (* Flattened: the guest cannot mkdir through a symlink whose parent is
+     missing, and the host cannot write into the disk image at all. *)
+  Alcotest.(check string)
+    "nested checkout flattens"
+    "/masc-build/repos:wt-370"
+    (ok_exn (M.build_link_target ~playground_relative:"repos/wt-370"));
+  Alcotest.(check bool)
+    "siblings do not collide"
+    false
+    (String.equal
+       (ok_exn (M.build_link_target ~playground_relative:"repos/wt-370"))
+       (ok_exn (M.build_link_target ~playground_relative:"repos/wt-370-landing")))
+;;
+
+let test_build_link_target_refuses_ambiguous_paths () =
+  (* A segment carrying the separator would make two checkouts share one
+     build directory, which is worse than refusing. *)
+  ignore (error_exn (M.build_link_target ~playground_relative:"repos:wt/a") : string);
+  ignore (error_exn (M.build_link_target ~playground_relative:"repos//wt") : string);
+  ignore (error_exn (M.build_link_target ~playground_relative:"") : string)
+;;
+
+let test_plan_build_link_never_deletes_real_build_output () =
+  let target = "/masc-build/masc-t362" in
+  Alcotest.(check bool)
+    "absent -> create"
+    true
+    (M.plan_build_link ~target M.Build_absent = M.Link_create target);
+  Alcotest.(check bool)
+    "correct link -> no work"
+    true
+    (M.plan_build_link ~target (M.Build_symlink target) = M.Link_already_correct);
+  Alcotest.(check bool)
+    "stale link -> retarget (removing a symlink loses no data)"
+    true
+    (M.plan_build_link ~target (M.Build_symlink "/masc-build/old")
+     = M.Link_retarget target);
+  (* The one that matters: a real directory holds output this module did not
+     create, so it is reported and left alone. *)
+  Alcotest.(check bool)
+    "real directory -> refused, never deleted"
+    true
+    (M.plan_build_link ~target M.Build_real_directory = M.Link_refused_real_directory)
+;;
+
+
 let () =
   Alcotest.run
     "keeper_sandbox_microvm"
@@ -802,6 +911,22 @@ let () =
             test_inspect_state_parser
         ; Alcotest.test_case "live guest cat (MASC_MICROVM_LIVE=1)" `Slow
             test_live_turn_runtime_cat
+        ] )
+    ; ( "build volume"
+      , [ Alcotest.test_case "volume name is keeper scoped" `Quick
+            test_build_volume_name_is_keeper_scoped
+        ; Alcotest.test_case "volume name refuses unsafe names" `Quick
+            test_build_volume_name_refuses_unsafe_names
+        ; Alcotest.test_case "mount targets the guest root" `Quick
+            test_build_volume_mount_targets_the_guest_root
+        ; Alcotest.test_case "create argv carries a size" `Quick
+            test_build_volume_create_argv_carries_a_size
+        ; Alcotest.test_case "link target is flat and unique" `Quick
+            test_build_link_target_is_flat_and_unique_per_checkout
+        ; Alcotest.test_case "link target refuses ambiguous paths" `Quick
+            test_build_link_target_refuses_ambiguous_paths
+        ; Alcotest.test_case "plan never deletes real build output" `Quick
+            test_plan_build_link_never_deletes_real_build_output
         ] )
     ; ( "guest env"
       , [ Alcotest.test_case "env follows the config mount" `Quick

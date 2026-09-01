@@ -32,7 +32,7 @@ different behaviour (memory, not batching) and are deliberately out of scope.
 
 Usage:
     scripts/measure-tool-roundtrips.py --date 2026-09-01
-    scripts/measure-tool-roundtrips.py --tool-calls-dir ~/me/.masc/tool_calls --date 2026-09-01 --top 10
+    MASC_BASE_PATH=/srv/masc scripts/measure-tool-roundtrips.py --date 2026-09-01 --top 10
 """
 
 from __future__ import annotations
@@ -40,8 +40,11 @@ from __future__ import annotations
 import argparse
 import collections
 import json
+import os
 import pathlib
 import sys
+
+DEFAULT_BASE = pathlib.Path(os.environ.get("MASC_BASE_PATH", pathlib.Path.home() / "me"))
 
 
 def normalized_args(value: object) -> str:
@@ -222,9 +225,12 @@ def render(rows: list[dict], top: int) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument(
-        "--tool-calls-dir",
-        default=str(pathlib.Path.home() / "me" / ".masc" / "tool_calls"),
-        help="Root of the dated tool-call log tree (default: ~/me/.masc/tool_calls)",
+        "--base-path",
+        default=str(DEFAULT_BASE),
+        help=(
+            "MASC base path; logs are read from <base-path>/.masc/tool_calls "
+            "(default: MASC_BASE_PATH or the home workspace)"
+        ),
     )
     parser.add_argument(
         "--date",
@@ -240,7 +246,13 @@ def main() -> int:
     options = parser.parse_args()
 
     year_month, _, day = options.date.rpartition("-")
-    log_path = pathlib.Path(options.tool_calls_dir).expanduser() / year_month / f"{day}.jsonl"
+    log_path = (
+        pathlib.Path(options.base_path).expanduser()
+        / ".masc"
+        / "tool_calls"
+        / year_month
+        / f"{day}.jsonl"
+    )
     if not log_path.is_file():
         print(f"no such log file: {log_path}", file=sys.stderr)
         return 1

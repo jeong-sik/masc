@@ -258,7 +258,10 @@ let test_other_unknown_goal_field_still_fails () =
     "unrelated unknown field keeps store undecodable"
     0
     (List.length (Goal_store.read_state config).goals);
-  match Goal_store.update_goal config ~goal_id:goal.id Fun.id with
+  match
+    Goal_store.update_goal_if_phase config ~goal_id:goal.id
+      ~expected_phase:goal.phase Fun.id
+  with
   | Ok _ -> fail "unknown field licensed a write"
   | Error detail ->
     check bool
@@ -342,12 +345,52 @@ let test_update_missing_goal_does_not_bump () =
   Goal_store.write_state config
     { version = 9; updated_at = iso_now (); goals = [ goal ] };
   let before = Goal_store.read_state config in
-  (match Goal_store.update_goal config ~goal_id:"ghost" Fun.id with
+  (match
+     Goal_store.update_goal_if_phase config ~goal_id:"ghost"
+       ~expected_phase:goal.phase Fun.id
+   with
    | Error _ -> ()
    | Ok _ -> fail "expected missing goal error");
   let after = Goal_store.read_state config in
   check int "version unchanged on missing update" before.version after.version;
   check string "updated_at unchanged on missing update" before.updated_at after.updated_at
+
+let test_update_goal_if_phase_refuses_stale_phase () =
+  with_workspace @@ fun config ->
+  let goal = make_goal "cas" "concurrent transition refusal" in
+  Goal_store.write_state config
+    { version = 1; updated_at = iso_now (); goals = [ goal ] };
+  let before = Goal_store.read_state config in
+  (* A concurrent transition lands first: the goal leaves Executing. *)
+  (match
+     Goal_store.update_goal_if_phase config ~goal_id:goal.id
+       ~expected_phase:Goal_phase.Executing
+       (fun current -> { current with phase = Goal_phase.Dropped })
+   with
+   | Error detail -> fail ("first transition failed: " ^ detail)
+   | Ok (Goal_store.Goal_phase_mismatch _) ->
+     fail "first transition unexpectedly mismatched"
+   | Ok (Goal_store.Goal_updated _) -> (
+     (* The stale writer still believes the goal is Executing; its write must
+        refuse without touching the stored phase or bumping the version. *)
+     match
+       Goal_store.update_goal_if_phase config ~goal_id:goal.id
+         ~expected_phase:Goal_phase.Executing
+         (fun current -> { current with phase = Goal_phase.Completed })
+     with
+     | Ok (Goal_store.Goal_phase_mismatch actual) ->
+       check bool "stale write reports the actual phase" true
+         (actual = Goal_phase.Dropped);
+       let after = Goal_store.read_state config in
+       check int "version not bumped by refused write"
+         (before.version + 1) after.version;
+       (match Goal_store.get_goal config ~goal_id:goal.id with
+        | Some stored ->
+          check bool "stored phase untouched by refused write" true
+            (stored.phase = Goal_phase.Dropped)
+        | None -> fail "goal vanished after refused write")
+     | Ok (Goal_store.Goal_updated _) -> fail "stale-phase write licensed a transition"
+     | Error detail -> fail ("stale write errored instead of refusing: " ^ detail)))
 
 let test_write_state_sanitizes_invalid_utf8_before_persisting () =
   with_workspace @@ fun config ->
@@ -420,6 +463,8 @@ let () =
             test_list_goals_filters_by_phase;
           test_case "missing update: no bump" `Quick
             test_update_missing_goal_does_not_bump;
+          test_case "stale expected_phase refuses to write" `Quick
+            test_update_goal_if_phase_refuses_stale_phase;
           test_case "write_state sanitizes invalid utf8" `Quick
             test_write_state_sanitizes_invalid_utf8_before_persisting;
           test_case "recovery mirror write failure preserves primary" `Quick

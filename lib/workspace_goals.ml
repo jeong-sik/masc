@@ -161,18 +161,50 @@ let parse_optional_transition_action args field =
          ~received:(Yojson.Safe.to_string json))
 ;;
 
-let update_goal_phase (ctx : context) (goal : Goal_store.goal) ~phase ?note () =
+(* A phase write is decided against the phase the caller read with
+   [Goal_store.get_goal] — outside the store lock. Writing that decision with
+   a plain overwrite lets a second concurrent transition (also decided on the
+   same earlier phase) land a state the FSM never validated, e.g. Dropped on
+   top of Verifying. The compare-and-update closes that window: when the
+   phase moved in between, the write refuses and the caller reports a
+   Conflict instead of inventing a transition. *)
+type phase_write_error =
+  | Store_error of string
+  | Concurrent_transition of { expected : Goal_phase.t; actual : Goal_phase.t }
+
+let update_goal_phase (ctx : context) (goal : Goal_store.goal) ~phase ?note () :
+    (Goal_store.goal, phase_write_error) result =
   let last_review_note, last_review_at =
     match note with
     | Some note -> Some note, Some (Masc_domain.now_iso ())
     | None -> goal.last_review_note, goal.last_review_at
   in
-  Goal_store.update_goal ctx.config ~goal_id:goal.id (fun current ->
-    { current with
-      phase
-    ; last_review_note
-    ; last_review_at
-    })
+  match
+    Goal_store.update_goal_if_phase ctx.config ~goal_id:goal.id
+      ~expected_phase:goal.phase
+      (fun current ->
+        { current with
+          phase
+        ; last_review_note
+        ; last_review_at
+        })
+  with
+  | Ok (Goal_store.Goal_updated updated) -> Ok updated
+  | Ok (Goal_store.Goal_phase_mismatch actual) ->
+    Error (Concurrent_transition { expected = goal.phase; actual })
+  | Error msg -> Error (Store_error msg)
+;;
+
+let phase_write_error_result ~tool_name ~start_time (error : phase_write_error) =
+  match error with
+  | Store_error msg ->
+    error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+  | Concurrent_transition { expected; actual } ->
+    error_result_typed ~tool_name ~start_time ~code:Conflict
+      (Printf.sprintf
+         "goal phase moved from %s to %s while this transition was being \
+          decided; re-read the goal and retry"
+         (Goal_phase.to_string expected) (Goal_phase.to_string actual))
 ;;
 
 let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
@@ -531,12 +563,8 @@ let commit_verifier_decision
                 error_result_typed ~tool_name ~start_time ~code:Conflict msg
               | Ok record ->
                 (match update_goal_phase ctx goal ~phase ?note () with
-                 | Error msg ->
-                   error_result_typed
-                     ~tool_name
-                     ~start_time
-                     ~code:Internal_error
-                     msg
+                 | Error error ->
+                   phase_write_error_result ~tool_name ~start_time error
                  | Ok updated_goal ->
                    emit_goal_event
                      ctx
@@ -765,9 +793,8 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
                         ~tool_name ~start_time ~code:Internal_error msg
                     | Ok record ->
                       (match update_goal_phase ctx goal ~phase ?note () with
-                       | Error msg ->
-                         error_result_typed
-                           ~tool_name ~start_time ~code:Internal_error msg
+                       | Error error ->
+                         phase_write_error_result ~tool_name ~start_time error
                        | Ok updated_goal ->
                          emit_goal_event
                            ctx
@@ -795,8 +822,8 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
            | Goal_phase.Public_action.Drop
            | Goal_phase.Public_action.Reopen ->
                 (match update_goal_phase ctx goal ~phase ?note () with
-                 | Error msg ->
-                   error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+                 | Error error ->
+                   phase_write_error_result ~tool_name ~start_time error
                  | Ok updated_goal ->
                    emit_goal_event
                      ctx

@@ -61,8 +61,14 @@ literal_word:
    Concat [Lit "prefix="; Var "DIR"] — the shape bash itself uses for
    [FOO=bar$BAZ]. *)
 word_piece:
-  | value = literal_word { Masc_exec.Shell_ir.Lit value }
-  | name = PARAM { Masc_exec.Shell_ir.Var name }
+  | value = literal_word {
+      let text, meta = value in
+      Masc_exec.Shell_ir.Lit (text, meta)
+    }
+  | param = PARAM {
+      let name, meta = param in
+      Masc_exec.Shell_ir.Var (name, meta)
+    }
 
 word_seq:
   | piece = word_piece { [ piece ] }

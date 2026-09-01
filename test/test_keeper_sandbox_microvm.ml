@@ -257,7 +257,7 @@ let test_guest_target_runs_docker_preflight_only_for_docker () =
     incr preflight_calls;
     Ok ()
   in
-  let resolve meta =
+  let resolve (meta : Masc.Keeper_meta_contract.keeper_meta) =
     let factory = Masc.Keeper_sandbox_factory.create ~config ~meta () in
     let result =
       Masc.Keeper_sandbox_shell_ir_target.For_testing
@@ -273,7 +273,7 @@ let test_guest_target_runs_docker_preflight_only_for_docker () =
     | Ok { target = Masc_exec.Sandbox_target.Micro_vm _; _ }, Profile.Micro_vm
     | Ok { target = Masc_exec.Sandbox_target.Docker _; _ }, Profile.Docker -> ()
     | Ok _, _ -> Alcotest.fail "guest target kind differs from the keeper profile"
-    | Error error -> Alcotest.fail error.message
+    | Error error, _ -> Alcotest.fail error.message
   in
   resolve (microvm_meta ~name:"microvm-preflight-probe");
   Alcotest.(check int)

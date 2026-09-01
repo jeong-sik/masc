@@ -14322,79 +14322,75 @@ let context_composition_lines (selection : Masc_tui_context_inspector.selection)
       ^ Ansi.reset
     ]
 
-let context_prompt_lines state (capture : Masc.Keeper_prompt_capture.capture) =
+let context_exact_input_lines state
+    (input : Masc_tui_context_inspector.provider_input) =
   let module Inspector = Masc_tui_context_inspector in
+  let items = Inspector.exact_input_items input in
   match state.context_inspector_exact with
   | Some index ->
-      (match List.nth_opt capture.blocks index with
-       | None -> [ (Theme.bad ()) ^ "  Selected prompt block is no longer present" ^ Ansi.reset ]
-       | Some block ->
+      (match List.nth_opt items index with
+       | None ->
+         [ (Theme.bad ()) ^ "  Selected input item is no longer present"
+           ^ Ansi.reset ]
+       | Some item ->
            let width = max 8 (snd (get_terminal_size ()) - 6) in
            let heading =
-             Printf.sprintf "  %s%s%s  ·  %s"
+             Printf.sprintf "  %s%s%s  ·  %s  ·  sha256 %s"
                Ansi.bold
-               (Inspector.prompt_block_label block.id)
+               (Inspector.exact_input_label item.kind)
                Ansi.reset
-               (Inspector.format_bytes (String.length block.text))
+               (Inspector.format_bytes item.bytes)
+               (String.sub item.sha256 0 12)
            in
            let body =
              Message_layout.wrap_body ~max_cells:width
-               ~sanitize:Keeper_chat.terminal_safe_text block.text
+               ~sanitize:Keeper_chat.terminal_safe_text item.text
              |> List.map (fun line -> "  " ^ line)
            in
            heading :: "" :: body)
   | None ->
       let identity =
-        Printf.sprintf "  Last captured prompt blocks  %s#%d  %s"
-          (Keeper_chat.terminal_safe_text capture.trace_id)
-          capture.absolute_turn
-          (Masc_domain.iso8601_of_unix_seconds capture.captured_at)
-      in
-      let relation =
-        match state.context_inspector_reading with
-        | Some
-            ( _
-            , { Masc_tui_context_inspector.turn =
-                  Ok { Masc_tui_context_inspector.latest = record; _ }
-              ; _ } )
-          when String.equal record.trace_id capture.trace_id
-               && record.absolute_turn = capture.absolute_turn ->
-            []
-        | Some (_, { Masc_tui_context_inspector.turn = Ok _; _ }) ->
-            [ (Theme.warn ())
-              ^ "  Prompt capture and the latest turn describe different turns."
-              ^ Ansi.reset ]
-        | Some _ | None -> []
+        Printf.sprintf "  Exact provider input  %s  %s"
+          (Keeper_chat.terminal_safe_text
+             (Ids.Turn_ref.to_string input.turn_ref))
+          (Masc_domain.iso8601_of_unix_seconds input.captured_at)
       in
       let rows =
         List.mapi
-          (fun index (block : Masc.Keeper_prompt_capture.block) ->
+          (fun index (item : Inspector.exact_input_item) ->
              let selected = index = state.context_inspector_cursor in
              let marker, style =
                if selected then (">", Theme.selection) else (" ", Ansi.reset)
              in
-             Printf.sprintf "%s %s %d  %-24s %9s%s"
+             Printf.sprintf "%s %s %3d  %-34s %9s  %s%s"
                style marker (index + 1)
-               (Inspector.prompt_block_label block.id)
-               (Inspector.format_bytes (String.length block.text))
+               (Inspector.exact_input_label item.kind)
+               (Inspector.format_bytes item.bytes)
+               (String.sub item.sha256 0 12)
                Ansi.reset)
-          capture.blocks
+          items
       in
-      identity :: relation
-      @ [ ""
-        ; Ansi.bold ^ "  Exact turn-added prompt text" ^ Ansi.reset
-        ]
-      @ (if rows = [] then [ "  (this turn assembled no prompt blocks)" ] else rows)
+      [ identity
+      ; Printf.sprintf
+          "  Wire  %s · %s · %s · %s"
+          input.wire.provider
+          input.wire.model
+          (Inspector.format_bytes input.wire.body_bytes)
+          (String.sub input.wire.body_sha256 0 12)
+      ; ""
+      ; Ansi.bold ^ "  Canonical model input items" ^ Ansi.reset
+      ]
+      @ (if rows = [] then [ "  (this request carried no retained items)" ] else rows)
       @ [ ""
         ; Ansi.dim
-          ^ "  Enter reads one block. Base prompt, tool schemas, and conversation text are not captured here."
+          ^ "  Enter opens one exact item. The wire digest binds this canonical input to the serialized provider request."
           ^ Ansi.reset
         ]
 
 let context_input_map_lines state (record : Turn_record.t)
-    (capture : Masc.Keeper_prompt_capture.capture option) ~tool_surface =
+    (provider_input : Masc_tui_context_inspector.provider_input option) =
   let module Inspector = Masc_tui_context_inspector in
-  let rows = Inspector.input_map_rows record capture ~tool_surface in
+  let rows = Inspector.input_map_rows record provider_input in
   match state.context_inspector_exact with
   | Some index ->
       (match List.nth_opt rows index with
@@ -14466,11 +14462,11 @@ let context_inspector_content_lines state =
             | Error detail ->
                 [ (Theme.bad ()) ^ "  Composition unavailable: "
                   ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ])
-       | Masc_tui_context_inspector.Prompt_blocks ->
-           (match reading.prompt with
-            | Ok capture -> context_prompt_lines state capture
+       | Masc_tui_context_inspector.Exact_input ->
+           (match reading.provider_input with
+            | Ok input -> context_exact_input_lines state input
             | Error detail ->
-                [ (Theme.bad ()) ^ "  Prompt text unavailable: "
+                [ (Theme.bad ()) ^ "  Exact input unavailable: "
                   ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ])
        | Masc_tui_context_inspector.Input_map ->
            (match reading.turn with
@@ -14486,13 +14482,12 @@ let context_inspector_content_lines state =
                   ^ Ansi.reset ]
             | Ok { Masc_tui_context_inspector.attributed = Some { record; _ }; _ }
               ->
-                let capture =
-                  match reading.prompt with
-                  | Ok capture -> Some capture
+                let provider_input =
+                  match reading.provider_input with
+                  | Ok input -> Some input
                   | Error _ -> None
                 in
-                context_input_map_lines state record capture
-                  ~tool_surface:reading.tool_surface))
+                context_input_map_lines state record provider_input))
 
 let context_inspector_viewport state =
   let terminal_rows, _ = get_terminal_size () in
@@ -14521,7 +14516,7 @@ let render_context_inspector state =
     (Printf.sprintf "%s Context  %s%s  %s  %s"
        (screen_title "") keeper refreshing
        (tab_label Masc_tui_context_inspector.Composition "1" "composition")
-       (tab_label Masc_tui_context_inspector.Prompt_blocks "2" "prompt")
+       (tab_label Masc_tui_context_inspector.Exact_input "2" "input")
        ^ "  "
        ^ (tab_label Masc_tui_context_inspector.Input_map "3" "map"));
   framed_divider buf cols;

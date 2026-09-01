@@ -127,6 +127,15 @@ export { fetchAgentRelations } from './dashboard-agent'
 // that could drift independently. SSOT now lives in `./dashboard-hot`.
 export { fetchDashboardNamespaceTruth } from './dashboard-hot'
 
+export {
+  fetchKeeperProviderInput,
+  type ProviderInputMessage,
+  type ProviderInputSnapshot,
+  type ProviderInputSystemPrompt,
+  type ProviderInputToolSchema,
+  type ProviderInputWire,
+} from './dashboard-provider-input'
+
 export type {
   DashboardExecutionTrustKeeper,
   DashboardExecutionTrustResponse,

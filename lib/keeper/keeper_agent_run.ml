@@ -68,8 +68,11 @@ type raw_trace_sink_outcome =
 
 type request_evidence =
   { wire_observation : Turn_record.request_wire_observation
+  ; serialized_observation :
+      Llm_provider.Request_wire_observer.observation option
   ; prompt_blocks : Turn_record.prompt_block list
   ; input_messages : Agent_core.Types.message list option
+  ; projected_messages : Agent_core.Types.message list option
   ; tools : Agent_core.Tool.t list
     (** The surface this request carried, from
         {!Keeper_agent_tool_surface.on_the_wire}. Not the list the turn was
@@ -873,6 +876,7 @@ let run_turn
        cell would let the missing half erase the half that was measured. *)
     let model_input_window_ref = ref None in
     let current_request_input_messages_ref = ref None in
+    let current_request_projected_messages_ref = ref None in
     let source_model_input_projection =
       s.Keeper_run_tools.model_input_projection
     in
@@ -889,8 +893,10 @@ let run_turn
       match source_model_input_projection messages with
       | Error _ as error ->
         current_request_input_messages_ref := None;
+        current_request_projected_messages_ref := None;
         error
       | Ok projected_messages as result ->
+        current_request_projected_messages_ref := Some projected_messages;
         let prompt_context_present =
           Option.is_some acc.Keeper_run_tools.extra_system_context_size
         in
@@ -1154,6 +1160,7 @@ let run_turn
                           ~runtime_id
                           ~max_request_body_bytes
                           ~body_bytes
+                          ~serialized
                         ->
                            Option.iter
                              (s.Keeper_run_tools.stage_skill_delivery_on_wire
@@ -1171,9 +1178,12 @@ let run_turn
                                    { Turn_record.runtime_profile = runtime_id
                                    ; body_bytes
                                    }
+                               ; serialized_observation = serialized
                                ; prompt_blocks = acc.prompt_blocks
                                ; input_messages =
                                    !current_request_input_messages_ref
+                               ; projected_messages =
+                                   !current_request_projected_messages_ref
                                ; tools =
                                    Keeper_agent_tool_surface.on_the_wire
                                      ~agent_cell:agent_ref
@@ -1638,6 +1648,27 @@ let run_turn
                  run_ref.worker_run_id detail;
                None)
         in
+        (match !request_evidence_ref with
+         | Some
+             { serialized_observation = Some wire
+             ; projected_messages = Some messages
+             ; tools
+             ; _
+             } ->
+           Keeper_provider_input_snapshot.write_best_effort
+             ~config
+             ~keeper:meta.name
+             ~trace_id
+             ~absolute_turn:manifest_keeper_turn_id
+             ~runtime_profile:settled_runtime_id
+             ~wire
+             ~system_prompt:
+               (Inference_utils.sanitize_text_utf8 turn_system_prompt)
+             ~messages
+             ~tools
+         | Some { serialized_observation = None; _ }
+         | Some { projected_messages = None; _ }
+         | None -> ());
         Keeper_turn_record_writer.write
           ~config
           ~keeper_name:meta.name

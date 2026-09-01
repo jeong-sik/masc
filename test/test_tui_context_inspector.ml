@@ -3,10 +3,7 @@ open Alcotest
 module Inspector = Masc_tui_context_inspector
 open Turn_record
 
-let turn_ref trace turn =
-  match Ids.Turn_ref.of_yojson (`String (Printf.sprintf "%s#%d" trace turn)) with
-  | Ok value -> value
-  | Error detail -> fail detail
+let turn_ref trace turn = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:turn
 
 let record ?(blocks = []) ?input_components ~trace ~turn () : Turn_record.t =
   { execution_ids = []
@@ -55,10 +52,10 @@ let envelope records =
       , `List
           (List.map
              (fun record ->
-               `Assoc
-                 [ "record", Turn_record.to_json record
-                 ; "diff_vs_prev", `Null
-                 ])
+                `Assoc
+                  [ "record", Turn_record.to_json record
+                  ; "diff_vs_prev", `Null
+                  ])
              records) )
     ]
 
@@ -114,259 +111,183 @@ let test_malformed_row_is_not_dropped () =
   let good = record ~trace:"trace-a" ~turn:1 ~input_components:[] () in
   let json =
     match envelope [ good ] with
-    | `Assoc [ ("entries", `List rows) ] ->
-        `Assoc
-          [ ( "entries"
-            , `List
-                (`Assoc [ "diff_vs_prev", `Null ] :: rows) ) ]
+    | `Assoc [ "entries", `List rows ] ->
+      `Assoc [ "entries", `List (`Assoc [ "diff_vs_prev", `Null ] :: rows) ]
     | _ -> fail "fixture shape changed"
   in
   check bool "malformed row fails the whole reading" true
     (Result.is_error (Inspector.decode_turn_records json))
 
-let prompt_response keeper =
-  let capture : Masc.Keeper_prompt_capture.capture =
-    { captured_at = 1_787_600_000.
-    ; trace_id = "trace-a"
-    ; absolute_turn = 7
-    ; blocks =
-        [ { id = Prompt_block_id.Memory_os_recall
-          ; text = "Remember the exact fact."
-          }
-        ]
-    ; assembled = Some "Remember the exact fact."
-    }
-  in
-  match Masc.Keeper_prompt_capture.to_json capture with
-  | `Assoc fields -> `Assoc (("keeper", `String keeper) :: fields)
-  | _ -> fail "capture encoder did not return an object"
-
-let test_prompt_capture_binds_keeper () =
-  check bool "wrong Keeper is rejected" true
-    (Result.is_error
-       (Inspector.decode_prompt_capture ~expected_keeper:"omega"
-          (prompt_response "other")));
-  match
-    Inspector.decode_prompt_capture ~expected_keeper:"omega"
-      (prompt_response "omega")
-  with
-  | Error detail -> fail detail
-  | Ok capture ->
-      check int "one exact prompt block" 1 (List.length capture.blocks);
-      check string "memory label" "Memory recall"
-        (Inspector.prompt_block_label (List.hd capture.blocks).id)
-
 let digest text = Digestif.SHA256.(digest_string text |> to_hex)
 
-let test_input_map_joins_only_verified_prompt_text () =
-  let text = "remember the operator preference" in
-  let prompt_block : Turn_record.prompt_block =
-    { block = Prompt_block_id.Memory_os_recall
-    ; bytes = String.length text
-    ; digest = digest text
+let wire =
+  Llm_provider.Request_wire_observer.observation
+    ~capture_id:(Some "capture-1")
+    ~provider:"glm"
+    ~model:"glm-5.3"
+    ~http_codec:"openai_chat"
+    ~stream:true
+    ~body:"serialized provider body"
+
+let provider_input_response ?(keeper = "omega") ?(trace = "trace-map")
+    ?(turn = 9) system_prompt =
+  let message_content =
+    `Assoc
+      [ "role", `String "tool"
+      ; ( "content_blocks"
+        , `List
+            [ `Assoc
+                [ "type", `String "tool_result"
+                ; "tool_use_id", `String "call-1"
+                ; "content", `String "large result"
+                ; "is_error", `Bool false
+                ]
+            ] )
+      ]
+  in
+  let tool_content =
+    `Assoc
+      [ "name", `String "masc_execute"
+      ; "description", `String "Execute one command"
+      ; "input_schema", `Assoc [ "type", `String "object" ]
+      ]
+  in
+  `Assoc
+    [ "dashboard_surface", `String "/api/v1/keepers/:name/provider-input"
+    ; "schema", `String "masc.resolved-provider-input.v1"
+    ; "keeper", `String keeper
+    ; "trace_id", `String trace
+    ; "absolute_turn", `Int turn
+    ; "turn_ref", Ids.Turn_ref.to_yojson (turn_ref trace turn)
+    ; "runtime_profile", `String "glm-coding"
+    ; "captured_at", `Float 1_787_600_000.
+    ; "wire", Llm_provider.Request_wire_observer.observation_to_yojson wire
+    ; ( "system_prompt"
+      , `Assoc
+          [ "bytes", `Int (String.length system_prompt)
+          ; "sha256", `String (digest system_prompt)
+          ; "text", `String system_prompt
+          ] )
+    ; ( "messages"
+      , `List
+          [ `Assoc
+              [ "index", `Int 0
+              ; "role", `String "tool"
+              ; "bytes", `Int 160
+              ; "sha256", `String (String.make 64 'a')
+              ; "content", message_content
+              ]
+          ] )
+    ; ( "tool_schemas"
+      , `List
+          [ `Assoc
+              [ "index", `Int 0
+              ; "name", `String "masc_execute"
+              ; "bytes", `Int 120
+              ; "sha256", `String (String.make 64 'b')
+              ; "content", tool_content
+              ]
+          ] )
+    ]
+
+let decode_provider_input system_prompt =
+  Inspector.decode_provider_input
+    ~expected_keeper:"omega"
+    ~expected_turn_ref:(turn_ref "trace-map" 9)
+    (provider_input_response system_prompt)
+
+let test_provider_input_is_bound_to_exact_turn () =
+  let system_prompt = "immutable keeper instructions" in
+  match decode_provider_input system_prompt with
+  | Error detail -> fail detail
+  | Ok input ->
+    check string "exact turn ref" "trace-map#9"
+      (Ids.Turn_ref.to_string input.turn_ref);
+    check int "system + message + tool" 3
+      (List.length (Inspector.exact_input_items input));
+    check string "wire digest survives" wire.body_sha256 input.wire.body_sha256;
+    check string "tool result is openable" "Message · tool"
+      (Inspector.exact_input_label
+         (List.nth (Inspector.exact_input_items input) 1).kind)
+
+let test_provider_input_rejects_another_keeper_or_turn () =
+  let system_prompt = "immutable keeper instructions" in
+  check bool "wrong keeper rejected" true
+    (Result.is_error
+       (Inspector.decode_provider_input
+          ~expected_keeper:"omega"
+          ~expected_turn_ref:(turn_ref "trace-map" 9)
+          (provider_input_response ~keeper:"other" system_prompt)));
+  check bool "wrong turn rejected" true
+    (Result.is_error
+       (Inspector.decode_provider_input
+          ~expected_keeper:"omega"
+          ~expected_turn_ref:(turn_ref "trace-map" 9)
+          (provider_input_response ~turn:10 system_prompt)))
+
+let test_input_map_opens_only_digest_verified_system_prompt () =
+  let system_prompt = "immutable keeper instructions" in
+  let block =
+    { block = Prompt_block_id.Keeper_instructions
+    ; bytes = String.length system_prompt
+    ; digest = digest system_prompt
     }
   in
   let observed =
-    record ~trace:"trace-map" ~turn:9 ~blocks:[ prompt_block ]
+    record ~trace:"trace-map" ~turn:9 ~blocks:[ block ]
       ~input_components:
-        [ { component = Prompt_block Prompt_block_id.Memory_os_recall
-          ; bytes = String.length text
+        [ { component = Prompt_block Prompt_block_id.Keeper_instructions
+          ; bytes = String.length system_prompt
           }
-        ; { component = Tool_schemas; bytes = 2048 }
+        ; { component = Message_tool_result; bytes = 12 }
         ]
       ()
   in
-  let capture : Masc.Keeper_prompt_capture.capture =
-    { captured_at = 1_787_600_000.
-    ; trace_id = "trace-map"
-    ; absolute_turn = 9
-    ; blocks = [ { id = Prompt_block_id.Memory_os_recall; text } ]
-    ; assembled = Some text
-    }
+  let input =
+    match decode_provider_input system_prompt with
+    | Ok input -> input
+    | Error detail -> fail detail
   in
-  let rows =
-    Inspector.input_map_rows observed (Some capture)
-      ~tool_surface:Inspector.Surface_not_recorded
-  in
-  let memory = List.nth rows 0 in
-  let tools = List.nth rows 1 in
-  check (option string) "matching capture exposes exact text" (Some text)
-    memory.exact_text;
-  check string "matching capture is verified" "verified exact text"
-    memory.retention;
-  check (option string) "an unrecorded surface stays byte-only" None
-    tools.exact_text;
-  check string "an unrecorded surface keeps its default retention"
-    "schema bytes only" tools.retention;
-  check string "tool source is explicit" "effective tool surface"
-    tools.included_by;
-  let stale = { capture with absolute_turn = 8 } in
-  let stale_memory =
-    List.hd
-      (Inspector.input_map_rows observed (Some stale)
-         ~tool_surface:Inspector.Surface_not_recorded)
-  in
-  check (option string) "another turn is not joined" None stale_memory.exact_text;
+  let rows = Inspector.input_map_rows observed (Some input) in
+  check (option string) "system prompt verified" (Some system_prompt)
+    (List.nth rows 0).exact_text;
+  check string "message points to exact input tab" "exact items in input tab"
+    (List.nth rows 1).retention;
   let changed =
-    { capture with
-      blocks =
-        [ { id = Prompt_block_id.Memory_os_recall
-          ; text = "different text with same authority"
-          }
-        ]
-    }
+    { observed with blocks = [ { block with digest = digest "other" } ] }
   in
-  let changed_memory =
-    List.hd
-      (Inspector.input_map_rows observed (Some changed)
-         ~tool_surface:Inspector.Surface_not_recorded)
-  in
-  check (option string) "digest mismatch is not joined" None
-    changed_memory.exact_text
+  check (option string) "digest mismatch is not opened" None
+    (List.hd (Inspector.input_map_rows changed (Some input))).exact_text
 
-(* Three surfaces spell a byte count through this: the Context inspector, the
-   attachment note beside a chat message, and the skill-delivery row. The
-   delivery row used to divide by 1024 itself and so had no rung above KB.
-
-   A column has to hold the widest reading, and the widest is not the largest
-   number: [1023.9 KB] is nine cells while [999.9 MB] is eight. The delivery
-   column is sized nine, so that is what this pins. *)
 let test_a_size_never_outgrows_the_column_it_is_drawn_in () =
   List.iter
     (fun bytes ->
-      let text = Masc_tui_context_inspector.format_bytes bytes in
-      check bool
-        (Printf.sprintf "%d bytes reads as %s, within nine cells" bytes text)
-        true
-        (String.length text <= 9))
-    [ 0; 1; 999; 1023; 1024; 1_048_575; 1_048_576; 999_999_999;
-      1_073_741_824 ]
+       let text = Inspector.format_bytes bytes in
+       check bool
+         (Printf.sprintf "%d bytes reads as %s, within nine cells" bytes text)
+         true
+         (String.length text <= 9))
+    [ 0
+    ; 1
+    ; 999
+    ; 1023
+    ; 1024
+    ; 1_048_575
+    ; 1_048_576
+    ; 999_999_999
+    ; 1_073_741_824
+    ]
 
 let test_a_size_climbs_past_kilobytes () =
   List.iter
     (fun (bytes, expected) ->
-      check string (Printf.sprintf "%d bytes" bytes) expected
-        (Masc_tui_context_inspector.format_bytes bytes))
-    [ (512, "512 B")
-    ; (1024, "1.0 KB")
-    ; (1_048_576, "1.0 MB")
-    ; (3_145_728, "3.0 MB")
+       check string (Printf.sprintf "%d bytes" bytes) expected
+         (Inspector.format_bytes bytes))
+    [ 512, "512 B"
+    ; 1024, "1.0 KB"
+    ; 1_048_576, "1.0 MB"
+    ; 3_145_728, "3.0 MB"
     ]
-
-(* The listing answers one question -- which tools cost the request its
-   schema bytes -- so it is ordered by what it costs, not by config order. *)
-let test_the_listing_is_ordered_by_what_it_costs () =
-  let surface =
-    Inspector.Surface_resolved
-      [ { name = "masc_run_list"; schema_bytes = 379 }
-      ; { name = "masc_schedule_create"; schema_bytes = 4093 }
-      ; { name = "masc_board_hearths"; schema_bytes = 158 }
-      ]
-  in
-  let observed =
-    record ~trace:"trace-surface" ~turn:11
-      ~input_components:[ { component = Tool_schemas; bytes = 4630 } ]
-      ()
-  in
-  let row = List.hd (Inspector.input_map_rows observed None ~tool_surface:surface) in
-  match row.exact_text with
-  | None -> fail "a resolved surface must open"
-  | Some text ->
-      let lines = String.split_on_char '\n' text in
-      let named =
-        List.filter
-          (fun line -> String.length line > 0 && String.contains line ' ')
-          (List.filteri (fun index _ -> index >= 3) lines)
-      in
-      check (list string) "largest schema first"
-        [ "4.0 KB  masc_schedule_create"
-        ; "379 B  masc_run_list"
-        ; "158 B  masc_board_hearths"
-        ]
-        named;
-      check string "a resolved surface reads as verified" "verified exact text"
-        row.retention
-
-(* A reference that would not read and a turn that recorded none are different
-   facts. Collapsing them would report a failed fetch as "this request carried
-   no tools", which is the one reading an operator must not be handed. *)
-let test_an_unreadable_listing_says_so_on_its_row () =
-  let observed =
-    record ~trace:"trace-surface" ~turn:12
-      ~input_components:[ { component = Tool_schemas; bytes = 4630 } ]
-      ()
-  in
-  let row =
-    List.hd
-      (Inspector.input_map_rows observed None
-         ~tool_surface:(Inspector.Surface_unresolved { detail = "returned 404" }))
-  in
-  check (option string) "an unreadable listing does not open" None row.exact_text;
-  check string "the row carries the reason"
-    "listing unreadable: returned 404" row.retention
-
-let artifact_envelope content =
-  `Assoc
-    [ "sha256", `String (String.make 64 'a')
-    ; "bytes", `Int (String.length content)
-    ; "mime", `String "text/plain"
-    ; "content", `String content
-    ]
-
-let test_one_malformed_entry_fails_the_whole_listing () =
-  check bool "a good listing decodes" true
-    (Result.is_ok
-       (Inspector.decode_tool_surface
-          (artifact_envelope
-             {|[{"name":"masc_gc","schema_bytes":12}]|})));
-  (* Dropping the bad entry would understate the surface that was sent, which
-     is exactly the number this row exists to report. *)
-  check bool "a nameless entry fails the listing" true
-    (Result.is_error
-       (Inspector.decode_tool_surface
-          (artifact_envelope
-             {|[{"name":"masc_gc","schema_bytes":12},{"schema_bytes":9}]|})));
-  check bool "a non-array payload fails" true
-    (Result.is_error (Inspector.decode_tool_surface (artifact_envelope "{}")));
-  (* The endpoint's own refusal names the sha256 it would not serve; a generic
-     message here would throw that away. *)
-  match
-    Inspector.decode_tool_surface
-      (`Assoc [ "error", `String "not found"; "sha256", `String "abc" ])
-  with
-  | Ok _ -> fail "an error envelope is not a listing"
-  | Error detail -> check string "the endpoint keeps its words" "not found" detail
-
-let test_a_reference_is_read_not_restated () =
-  let stored =
-    Tool_output.Stored
-      (match
-         Tool_output.make_artifact_ref ~sha256:(String.make 64 'b') ~bytes:120
-           ~preview:"[{\"name\"" ~mime:"application/json"
-       with
-       | Ok reference -> reference
-       | Error error -> fail (Tool_output.make_error_to_string error))
-  in
-  let marked =
-    record ~trace:"trace-surface" ~turn:13 ()
-    |> fun row ->
-    { row with tool_surface_ref = Some (Tool_output.encode_for_agent_core stored) }
-  in
-  check (option (result string string)) "a marker yields its content address"
-    (Some (Ok (String.make 64 'b')))
-    (Inspector.tool_surface_sha256 marked);
-  check bool "a record without a reference asks for nothing" true
-    (Option.is_none
-       (Inspector.tool_surface_sha256 (record ~trace:"trace-surface" ~turn:14 ())));
-  check bool "a reference that is not a marker is reported, not fetched" true
-    (match
-       Inspector.tool_surface_sha256
-         { (record ~trace:"trace-surface" ~turn:15 ()) with
-           tool_surface_ref = Some "not a marker"
-         }
-     with
-     | Some (Error _) -> true
-     | Some (Ok _) | None -> false)
 
 let () =
   run "tui_context_inspector"
@@ -379,23 +300,15 @@ let () =
             test_empty_page_is_an_error
         ; test_case "rejects malformed rows" `Quick
             test_malformed_row_is_not_dropped
-        ; test_case "binds exact prompt to Keeper" `Quick
-            test_prompt_capture_binds_keeper
-        ; test_case "joins only verified prompt text" `Quick
-            test_input_map_joins_only_verified_prompt_text
+        ; test_case "binds provider input to exact turn" `Quick
+            test_provider_input_is_bound_to_exact_turn
+        ; test_case "rejects another keeper or turn" `Quick
+            test_provider_input_rejects_another_keeper_or_turn
+        ; test_case "opens only digest-verified system prompt" `Quick
+            test_input_map_opens_only_digest_verified_system_prompt
         ; test_case "a size never outgrows its column" `Quick
             test_a_size_never_outgrows_the_column_it_is_drawn_in
         ; test_case "a size climbs past kilobytes" `Quick
             test_a_size_climbs_past_kilobytes
-        ] )
-    ; ( "tool surface"
-      , [ test_case "the listing is ordered by what it costs" `Quick
-            test_the_listing_is_ordered_by_what_it_costs
-        ; test_case "an unreadable listing says so on its row" `Quick
-            test_an_unreadable_listing_says_so_on_its_row
-        ; test_case "one malformed entry fails the whole listing" `Quick
-            test_one_malformed_entry_fails_the_whole_listing
-        ; test_case "a reference is read, not restated" `Quick
-            test_a_reference_is_read_not_restated
         ] )
     ]

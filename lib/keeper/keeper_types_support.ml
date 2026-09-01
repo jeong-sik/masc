@@ -72,6 +72,26 @@ let keeper_turn_record_store config name : Dated_jsonl.t =
   in
   Eio_guard.with_mutex turn_record_store_mu lookup
 
+let provider_input_store_cache : (string, Dated_jsonl.t) Hashtbl.t =
+  Hashtbl.create 8
+
+let provider_input_store_mu = Eio.Mutex.create ()
+
+let keeper_provider_input_store config name : Dated_jsonl.t =
+  let dirname =
+    Common.keeper_runtime_store_dirname Common.Keeper_provider_inputs
+  in
+  let dir = Filename.concat (keeper_dir_ config) (name ^ "/" ^ dirname) in
+  let lookup () =
+    match Hashtbl.find_opt provider_input_store_cache dir with
+    | Some store -> store
+    | None ->
+      let store = Dated_jsonl.create ~base_dir:dir () in
+      Hashtbl.replace provider_input_store_cache dir store;
+      store
+  in
+  Eio_guard.with_mutex provider_input_store_mu lookup
+
 let keeper_runtime_dir config name =
   let dir = Filename.concat (keeper_dir_ config) name in
   ensure_dir_ dir

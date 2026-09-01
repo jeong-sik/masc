@@ -4229,8 +4229,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
       | exn ->
           let error = Error (Printexc.to_string exn) in
           { Masc_tui_context_inspector.turn = error
-          ; prompt = error
-          ; tool_surface = Masc_tui_context_inspector.Surface_not_recorded
+          ; provider_input = error
           }
     in
     enqueue_async mailbox
@@ -4248,8 +4247,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
            ( generation
            , keeper_name
            , { Masc_tui_context_inspector.turn = error
-             ; prompt = error
-             ; tool_surface = Masc_tui_context_inspector.Surface_not_recorded
+             ; provider_input = error
              } ))
 
 let open_context_inspector state ~mailbox ~keeper_name =
@@ -11100,14 +11098,17 @@ and is loaded on demand through keeper_skill.
                 | Some _ | None -> ())
             | _ -> ());
            Render_schedule.request render_schedule Render_schedule.Force
-       (* [/context] is modal: the summary and exact prompt text must not leak
+       (* [/context] is modal: the summary and exact input text must not leak
           keys into the composer underneath. The quit confirmation and chrome
           toggles remain global above it, matching Help and Palette. *)
        | Some k when state.context_inspector_open ->
-           let prompt_blocks () =
+           let exact_input_items () =
              match state.context_inspector_reading with
-             | Some (_, { Masc_tui_context_inspector.prompt = Ok capture; _ }) ->
-                 capture.Masc.Keeper_prompt_capture.blocks
+             | Some
+                 ( _
+                 , { Masc_tui_context_inspector.provider_input = Ok input; _ }
+                 ) ->
+                 Masc_tui_context_inspector.exact_input_items input
              | Some _ | None -> []
            in
            let input_map_rows () =
@@ -11115,8 +11116,7 @@ and is loaded on demand through keeper_skill.
              | Some
                  ( _
                  , { Masc_tui_context_inspector.turn = Ok selection
-                   ; prompt
-                   ; tool_surface
+                   ; provider_input
                    } ) -> (
                  (* The map is a per-component table, so it needs the
                     attributed record; the render side shows its own "no
@@ -11124,12 +11124,14 @@ and is loaded on demand through keeper_skill.
                  match selection.Masc_tui_context_inspector.attributed with
                  | None -> []
                  | Some attributed ->
-                     let capture =
-                       match prompt with Ok value -> Some value | Error _ -> None
+                     let provider_input =
+                       match provider_input with
+                       | Ok value -> Some value
+                       | Error _ -> None
                      in
                      Masc_tui_context_inspector.input_map_rows
-                       attributed.Masc_tui_context_inspector.record capture
-                       ~tool_surface)
+                       attributed.Masc_tui_context_inspector.record
+                       provider_input)
              | Some _ | None -> []
            in
            let close () =
@@ -11158,7 +11160,7 @@ and is loaded on demand through keeper_skill.
                 state.context_inspector_scroll <- 0
             | "2" ->
                 state.context_inspector_tab <-
-                  Masc_tui_context_inspector.Prompt_blocks;
+                  Masc_tui_context_inspector.Exact_input;
                 state.context_inspector_exact <- None;
                 state.context_inspector_cursor <- 0;
                 state.context_inspector_scroll <- 0
@@ -11172,8 +11174,8 @@ and is loaded on demand through keeper_skill.
                 state.context_inspector_tab <-
                   (match state.context_inspector_tab with
                    | Masc_tui_context_inspector.Composition ->
-                       Masc_tui_context_inspector.Prompt_blocks
-                   | Masc_tui_context_inspector.Prompt_blocks ->
+                       Masc_tui_context_inspector.Exact_input
+                   | Masc_tui_context_inspector.Exact_input ->
                        Masc_tui_context_inspector.Input_map
                    | Masc_tui_context_inspector.Input_map ->
                        Masc_tui_context_inspector.Composition);
@@ -11196,8 +11198,8 @@ and is loaded on demand through keeper_skill.
             | "j" | "down" ->
                 let count =
                   match state.context_inspector_tab with
-                  | Masc_tui_context_inspector.Prompt_blocks ->
-                      List.length (prompt_blocks ())
+                  | Masc_tui_context_inspector.Exact_input ->
+                      List.length (exact_input_items ())
                   | Masc_tui_context_inspector.Input_map ->
                       List.length (input_map_rows ())
                   | Masc_tui_context_inspector.Composition -> 0
@@ -11211,9 +11213,12 @@ and is loaded on demand through keeper_skill.
             | "\r" ->
                 if
                   state.context_inspector_tab
-                  = Masc_tui_context_inspector.Prompt_blocks
+                  = Masc_tui_context_inspector.Exact_input
                 then begin
-                  match List.nth_opt (prompt_blocks ()) state.context_inspector_cursor with
+                  match
+                    List.nth_opt (exact_input_items ())
+                      state.context_inspector_cursor
+                  with
                   | Some _ ->
                       state.context_inspector_exact <-
                         Some state.context_inspector_cursor;

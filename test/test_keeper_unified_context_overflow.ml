@@ -190,7 +190,9 @@ let test_byte_axis_forwards_exact_request_wire_observation () =
     ~max_request_body_bytes:1_048_576
     ~on_request_wire_observation:
       (Some
-         (fun ~runtime_id ~max_request_body_bytes ~body_bytes ->
+         (fun ~runtime_id ~max_request_body_bytes ~body_bytes ~serialized ->
+           check bool "serialized request absent on refusal" true
+             (Option.is_none serialized);
            observed := Some (runtime_id, max_request_body_bytes, body_bytes)))
     (request_body_too_large
        ~actual_bytes:1_671_330
@@ -206,7 +208,9 @@ let test_byte_axis_forwards_exact_request_wire_observation () =
     ~max_request_body_bytes:1_048_576
     ~on_request_wire_observation:
       (Some
-         (fun ~runtime_id ~max_request_body_bytes ~body_bytes ->
+         (fun ~runtime_id ~max_request_body_bytes ~body_bytes ~serialized ->
+           check bool "serialized request absent on refusal" true
+             (Option.is_none serialized);
            observed := Some (runtime_id, max_request_body_bytes, body_bytes)))
     (Agent_core.Error.Api
        (ContextOverflow { message = "exceeded"; limit = Some 32768 }));

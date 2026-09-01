@@ -32,6 +32,12 @@ val keeper_execution_receipt_store : Workspace.config -> string -> Dated_jsonl.t
     [.masc/keepers/<name>/turn-records/YYYY-MM/DD.jsonl]. *)
 val keeper_turn_record_store : Workspace.config -> string -> Dated_jsonl.t
 
+(** Date-split exact provider-input snapshot store:
+    [.masc/keepers/<name>/provider-inputs/YYYY-MM/DD.jsonl]. Each row joins to
+    one TurnRecord through [turn_ref] and owns content-addressed references to
+    the system prompt, transmitted messages, and tool schemas. *)
+val keeper_provider_input_store : Workspace.config -> string -> Dated_jsonl.t
+
 (** Per-keeper AGENT_CORE raw-trace store directory:
     [.masc/keepers/<name>/raw-traces/]. One JSONL file per keeper turn —
     a fresh file per turn keeps [Agent_core.Raw_trace.create] from scanning

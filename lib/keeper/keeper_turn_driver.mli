@@ -131,6 +131,7 @@ val run_named :
     (runtime_id:string ->
      max_request_body_bytes:int ->
      body_bytes:int ->
+     serialized:Llm_provider.Request_wire_observer.observation option ->
      unit) ->
   ?on_official_client_result_handoff:
     (runtime_id:string ->

@@ -5,21 +5,21 @@
 // between turns" without reading source.
 //
 // v2 refresh: each turn row opens a detail drawer with summary stats,
-// token-economics bar, tabbed waterfall, structured transcript, and
-// copyable context blocks styled after keeper-v2 turn-inspector.
+// token-economics bar, tabbed waterfall, and copyable exact provider input
+// styled after keeper-v2 turn-inspector.
 
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
+  fetchKeeperProviderInput,
   fetchKeeperToolCalls,
   fetchKeeperTurnRecords,
-  fetchKeeperTurnTranscript,
 } from '../api/dashboard'
 import type {
   MemoryOsFact,
   MemoryOsTurnRecordSnapshot,
+  ProviderInputSnapshot,
   ToolCallEntry,
-  ToolCallOutputBlob,
   ToolCallsResponse,
   TurnBlock,
   TurnBlockDiff,
@@ -27,8 +27,6 @@ import type {
   TurnRecordEntry,
   TurnRecordRow,
   TurnRecordsResponse,
-  TurnTranscript,
-  TurnTranscriptLine,
   TelemetryFreshnessMetadata,
 } from '../api/dashboard'
 import { formatTimeHms } from '../lib/format-time'
@@ -395,24 +393,13 @@ type TurnDetail = {
   visualTotalMs: number
   phases: TurnPhase[]
   tools: TurnToolDetail[]
-  systemPrompt: string
-  injectedCtx: string
 }
 
 type TurnToolDetail = {
   id: string
   toolName: string | null
-  status: 'ok' | 'bad' | 'unknown'
   durationMs: number | null
   agentSubturn: number | null
-  keeperTurn: number | null
-  // RFC-0233 §1.1: the real tool call I/O, joined from the tool-call log on
-  // execution_id (already boundary-redacted at write in keeper_tool_call_log).
-  // [matched] is false when no tool-call entry carried this execution id —
-  // the inspector renders explicit absence, never a fabricated result.
-  matched: boolean
-  input: unknown
-  output: string | ToolCallOutputBlob | null
 }
 
 type TurnInspectorData = {
@@ -427,19 +414,6 @@ function errorMessage(error: unknown): string {
 
 function approxTokens(str: string): number {
   return Math.max(1, Math.round(String(str).length / 3.6))
-}
-
-function buildSystemPrompt(keeperName: string, record: TurnRecordEntry): string {
-  return `당신은 MASC 코디네이션 서버의 keeper "${keeperName}" 입니다.
-runtime · profile : ${record.runtime_profile}
-absolute turn     : T${record.absolute_turn}
-trace id          : ${record.trace_id}
-
-원칙
-- 모든 작업은 trace 로 기록한다.
-- 컨텍스트 사용량이 85% 를 넘으면 compact() 를 호출한다.
-- 소유하지 않은 태스크는 현재 owner를 존중한다.
-- 답변은 근거(도구 결과·trace)를 함께 제시한다.`
 }
 
 function thinkingStateLabel(record: TurnRecordEntry): string {
@@ -466,81 +440,6 @@ function rawTraceRunRefLabel(record: TurnRecordEntry): string {
 // "미상" when the record has no context_window (render absence, not 200K).
 function formatCtxWindowK(cw: number | null | undefined): string {
   return cw != null ? `${Math.round(cw / 1000)}K` : '미상'
-}
-
-function buildInjectedCtx(record: TurnRecordEntry, ctxPct: number | null, tokIn: number): string {
-  const ctxLine = ctxPct != null
-    ? `${ctxPct.toFixed(1)}%   (${tokIn.toLocaleString()} / ${record.context_window?.toLocaleString() ?? '미상'} tok)`
-    : `미상   (${tokIn.toLocaleString()} / 미상 tok, runtime 미구성)`
-  return `# world snapshot
-fsm.state      = n/a
-selected model = ${record.selected_model ?? 'n/a'}
-finish_reason  = ${record.finish_reason ?? 'n/a'}
-ctx.window     = ${ctxLine}
-keeper.turn    = T${record.absolute_turn}
-thinking       = ${thinkingStateLabel(record)}
-thinking.budget= ${record.thinking_budget ?? '—'}
-
-# context blocks (조립 순서)
-${record.blocks.length
-    ? record.blocks.map(b => `  - ${b.block}  ${b.bytes}B  ${b.digest.slice(0, 12)}`).join('\n')
-    : '  (none)'}
-
-# input components (요청 조립 뷰, 큰 순)
-${record.input_components && record.input_components.length
-    ? sortedInputComponents(record).map(c => `  - ${c.component}  ${c.bytes}B`).join('\n')
-      + (record.request_body_bytes != null ? `\n  wire body = ${record.request_body_bytes}B` : '')
-    : '  (none)'}
-
-# tool executions
-${record.execution_ids.length
-    ? record.execution_ids.map(id => `  - ${id}`).join('\n')
-    : '  (none)'}`
-}
-
-function toolCallStatus(entry: ToolCallEntry | null): 'ok' | 'bad' | 'unknown' {
-  if (!entry) return 'unknown'
-  return entry.success ? 'ok' : 'bad'
-}
-
-function toolStatusClass(status: TurnToolDetail['status']): string {
-  if (status === 'ok') return 'ok'
-  if (status === 'bad') return 'bad'
-  return ''
-}
-
-function toolStatusLabel(status: TurnToolDetail['status']): string {
-  if (status === 'ok') return 'success'
-  if (status === 'bad') return 'error'
-  return 'unmatched'
-}
-
-// Tool input args as copyable text. Strings pass through; structured input is
-// pretty-printed JSON.
-function toolInputText(input: unknown): string {
-  if (input == null) return ''
-  if (typeof input === 'string') return input
-  try {
-    return JSON.stringify(input, null, 2)
-  } catch {
-    return String(input)
-  }
-}
-
-// Tool output as copyable text. A string is the result verbatim; a blob ref
-// (output spilled out-of-line by the server) yields its stored preview.
-function toolOutputText(output: string | ToolCallOutputBlob | null): string {
-  if (output == null) return ''
-  if (typeof output === 'string') return output
-  return output._blob.preview
-}
-
-// Provenance line for a blob-backed output so the operator knows the preview is
-// truncated, with the sha to fetch the full payload elsewhere.
-function toolOutputMeta(output: string | ToolCallOutputBlob | null): string | null {
-  if (output == null || typeof output === 'string') return null
-  const { bytes, mime, sha256 } = output._blob
-  return `blob · ${bytes}B · ${mime} · ${sha256.slice(0, 12)}`
 }
 
 function toolCallIndexByExecutionId(entries: readonly ToolCallEntry[]): Map<string, ToolCallEntry> {
@@ -610,7 +509,6 @@ function finalizePhaseOffsets(phases: TurnPhase[]): { visualTotalMs: number; mea
 }
 
 function buildTurnDetail(
-  keeperName: string,
   record: TurnRecordEntry,
   toolEntries: readonly ToolCallEntry[],
 ): TurnDetail {
@@ -657,13 +555,8 @@ function buildTurnDetail(
     return {
       id,
       toolName: entry?.tool ?? null,
-      status: toolCallStatus(entry),
       durationMs: entry?.duration_ms ?? null,
       agentSubturn: entry?.turn ?? null,
-      keeperTurn: entry?.keeper_turn_id ?? null,
-      matched: entry !== null,
-      input: entry?.input ?? null,
-      output: entry?.output ?? null,
     }
   })
   tools.forEach(tool => {
@@ -707,9 +600,6 @@ function buildTurnDetail(
   })
   const { visualTotalMs, measuredDurationMs } = finalizePhaseOffsets(phases)
 
-  const systemPrompt = buildSystemPrompt(keeperName, record)
-  const injectedCtx = buildInjectedCtx(record, ctxPct, tokIn)
-
   return {
     traceId,
     tokIn,
@@ -721,8 +611,6 @@ function buildTurnDetail(
     visualTotalMs,
     phases,
     tools,
-    systemPrompt,
-    injectedCtx,
   }
 }
 
@@ -804,191 +692,124 @@ function TimelineTab({ t }: { t: TurnDetail }) {
   `
 }
 
-// Lazy-loaded transcript state for the open turn (RFC-0233 §7). Distinct from
-// `null` (not yet requested) so the renderer can show loading vs absence.
-type TranscriptView =
+type ProviderInputView =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'loaded'; data: TurnTranscript }
+  | { kind: 'loaded'; data: ProviderInputSnapshot }
 
-// Map the async-resource state to a transcript view. Error wins over a stale
-// data value; absence of both reads as still-loading (the lazy fetch fires on
-// drawer open).
-function toTranscriptView(state: {
+function toProviderInputView(state: {
   loading: boolean
   error: string | null
-  data: TurnTranscript | null
-}): TranscriptView {
+  data: ProviderInputSnapshot | null
+}): ProviderInputView {
   if (state.error) return { kind: 'error', message: state.error }
   if (state.data) return { kind: 'loaded', data: state.data }
   return { kind: 'loading' }
 }
 
-// One operator request line. Renders the real persisted content; explicit
-// absence when the turn carried no joinable user row.
-function OperatorLine({ line, seq }: { line: TurnTranscriptLine | null; seq: number }) {
-  return html`
-    <div class="ti-msg">
-      <div class="ti-msg-h">
-        <span class="ti-msg-role user">user</span>
-        <span class="who">operator</span>
-        <span class="seq">#${seq}</span>
-      </div>
-      ${line
-        ? html`<div class="ti-msg-b" data-testid="turn-transcript-user">${line.content}</div>`
-        : html`<div class="ti-msg-b ti-msg-absent" data-testid="turn-transcript-user-absent">
-            operator 요청이 이 턴에 기록되지 않았습니다 (turn_ref 미연결 또는 보존 윈도 밖)
-          </div>`}
-    </div>
-  `
+function providerInputContentText(content: unknown): string {
+  try {
+    return JSON.stringify(content, null, 2) ?? String(content)
+  } catch {
+    return String(content)
+  }
 }
 
-// One keeper response line. A transport-failure row is labelled distinctly and
-// never presented as the keeper's own utterance.
-function KeeperLine({
-  keeperName,
-  line,
-  seq,
-}: {
-  keeperName: string
-  line: TurnTranscriptLine | null
-  seq: number
-}) {
-  const isFailure = line?.kind === 'transport_failure'
-  return html`
-    <div class="ti-msg">
-      <div class="ti-msg-h">
-        <span class="ti-msg-role assistant">assistant</span>
-        <span class="who">${keeperName}</span>
-        ${isFailure
-          ? html`<span class="pill bad" data-testid="turn-transcript-assistant-failure">transport failure</span>`
-          : null}
-        <span class="seq">#${seq}</span>
+function ProviderInputStatus({ input }: { input: ProviderInputView }) {
+  if (input.kind === 'loading') {
+    return html`
+      <div class="text-2xs text-[var(--color-fg-muted)] px-1 pb-1" data-testid="turn-provider-input-loading">
+        이 턴의 실제 입력을 불러오는 중…
       </div>
-      ${line
-        ? html`<div class="ti-msg-b" data-testid="turn-transcript-assistant">${line.content}</div>`
-        : html`<div class="ti-msg-b ti-msg-absent" data-testid="turn-transcript-assistant-absent">
-            keeper 응답이 이 턴에 기록되지 않았습니다
-          </div>`}
-    </div>
-  `
+    `
+  }
+  if (input.kind === 'error') {
+    return html`
+      <div class="text-2xs text-[var(--color-status-warn)] px-1 pb-1" data-testid="turn-provider-input-error">
+        실제 입력을 불러오지 못했습니다 · ${input.message}
+      </div>
+    `
+  }
+  return null
 }
 
-function MessagesTab({
-  keeperName,
-  t,
-  transcript,
-}: {
-  keeperName: string
-  t: TurnDetail
-  transcript: TranscriptView
-}) {
-  let seq = 0
-  const userLines = transcript.kind === 'loaded' ? transcript.data.user : []
-  const assistantLines = transcript.kind === 'loaded' ? transcript.data.assistant : []
-  // 2 synthetic (system + context) + real user lines + tools + real assistant
-  // lines. Falls back to one placeholder slot each while loading/absent.
-  const userSlots = userLines.length || 1
-  const assistantSlots = assistantLines.length || 1
-  const messageCount = 2 + userSlots + t.tools.length + assistantSlots
+function MessagesTab({ input }: { input: ProviderInputView }) {
+  if (input.kind !== 'loaded') {
+    return html`<div class="ti-sec"><${ProviderInputStatus} input=${input} /></div>`
+  }
+  const snapshot = input.data
   return html`
     <div class="ti-sec">
       <div class="ti-sec-h">
-        <h4>모델에 전달된 시퀀스</h4>
-        <span class="n">${messageCount} 메시지</span>
+        <h4>실제 전송 메시지</h4>
+        <span class="n">${snapshot.messages.length}개 · ${snapshot.turnRef}</span>
       </div>
-      ${transcript.kind === 'loading'
-        ? html`<div class="text-2xs text-[var(--color-fg-muted)] px-1 pb-1" data-testid="turn-transcript-loading">전사 불러오는 중…</div>`
-        : null}
-      ${transcript.kind === 'error'
-        ? html`<div class="text-2xs text-[var(--color-status-warn)] px-1 pb-1" data-testid="turn-transcript-error">전사 불러오기 실패 · ${transcript.message}</div>`
-        : null}
-      <div class="ti-seq-rail">
-        <div class="ti-msg">
-          <div class="ti-msg-h">
-            <span class="ti-msg-role system">system</span>
-            <span class="who">시스템 프롬프트</span>
-            <span class="seq">#${++seq}</span>
-          </div>
-          <div class="ti-msg-b mono">${t.systemPrompt}</div>
-        </div>
-        <div class="ti-msg">
-          <div class="ti-msg-h">
-            <span class="ti-msg-role context">context</span>
-            <span class="who">주입 컨텍스트</span>
-            <span class="seq">#${++seq}</span>
-          </div>
-          <div class="ti-msg-b mono">${t.injectedCtx}</div>
-        </div>
-        ${userLines.length
-          ? userLines.map(line => html`<${OperatorLine} line=${line} seq=${++seq} />`)
-          : html`<${OperatorLine} line=${null} seq=${++seq} />`}
-        ${t.tools.map((tool, i) => html`
-          <div key=${i} class="ti-tool">
-            <div class="ti-tool-h">
-              <span class="seq">#${++seq}</span>
-              <span class="tnm mono">${tool.toolName ?? tool.id}</span>
-              <span class="pill ${toolStatusClass(tool.status)}">
-                ${toolStatusLabel(tool.status)}
-              </span>
-              ${tool.agentSubturn != null
-                ? html`<span class="seq">agent subturn T${tool.agentSubturn}</span>`
-                : null}
-              ${tool.durationMs != null
-                ? html`<span class="seq">${formatMsCompact(tool.durationMs)}</span>`
-                : html`<span class="seq">duration 없음</span>`}
+      <div class="text-3xs text-[var(--color-fg-disabled)] px-1 pb-2" data-testid="turn-provider-wire">
+        ${snapshot.wire.provider} / ${snapshot.wire.model} · ${snapshot.wire.httpCodec} ·
+        ${snapshot.wire.bodyBytes.toLocaleString()}B · ${snapshot.wire.bodySha256}
+      </div>
+      <div class="ti-seq-rail" data-testid="turn-provider-messages">
+        ${snapshot.messages.map(message => {
+          const text = providerInputContentText(message.content)
+          return html`
+            <div key=${message.index} class="ti-msg">
+              <div class="ti-msg-h">
+                <span class="ti-msg-role ${message.role}">${message.role}</span>
+                <span class="who">전송 메시지</span>
+                <span class="seq">#${message.index} · ${message.bytes}B · ${message.sha256.slice(0, 12)}</span>
+              </div>
+              <${CodeCard} cap="정규화된 메시지 JSON" text=${text} tokens=${approxTokens(text)} />
             </div>
-            <div class="ti-tool-b">
-              ${tool.matched
-                ? html`
-                  <${CodeCard}
-                    cap="요청 · input"
-                    text=${toolInputText(tool.input)}
-                    tokens=${approxTokens(toolInputText(tool.input))}
-                  />
-                  <${CodeCard}
-                    cap=${toolOutputMeta(tool.output) ? `응답 · result (${toolOutputMeta(tool.output)})` : '응답 · result'}
-                    text=${toolOutputText(tool.output)}
-                    tokens=${approxTokens(toolOutputText(tool.output))}
-                  />
-                `
-                : html`
-                  <div class="ti-msg-b ti-msg-absent" data-testid="turn-tool-io-absent">
-                    이 execution(${tool.id.slice(0, 24)})의 tool-call I/O를 tool-call 로그에서 찾지 못했습니다 (보존 윈도 밖이거나 미기록)
-                  </div>
-                `}
-            </div>
-          </div>
-        `)}
-        ${assistantLines.length
-          ? assistantLines.map(line => html`<${KeeperLine} keeperName=${keeperName} line=${line} seq=${++seq} />`)
-          : html`<${KeeperLine} keeperName=${keeperName} line=${null} seq=${++seq} />`}
+          `
+        })}
       </div>
     </div>
   `
 }
 
-function ContextTab({ t }: { t: TurnDetail }) {
+function ContextTab({ input }: { input: ProviderInputView }) {
+  if (input.kind !== 'loaded') {
+    return html`<div class="ti-sec"><${ProviderInputStatus} input=${input} /></div>`
+  }
+  const snapshot = input.data
+  const systemPrompt = snapshot.systemPrompt
   return html`
     <div class="ti-sec">
       <div class="ti-ctx-card">
         <div class="ti-ctx-h">
-          <span class="t">시스템 프롬프트</span>
-          <span class="tok">~${approxTokens(t.systemPrompt)} tok</span>
-          <${CopyBtn} text=${t.systemPrompt} />
+          <span class="t">실제 시스템 프롬프트</span>
+          ${systemPrompt
+            ? html`<span class="tok">${systemPrompt.bytes}B · ${systemPrompt.sha256.slice(0, 12)}</span>`
+            : html`<span class="tok">없음</span>`}
+          ${systemPrompt ? html`<${CopyBtn} text=${systemPrompt.text} />` : null}
         </div>
-        <pre>${t.systemPrompt}</pre>
+        ${systemPrompt
+          ? html`<pre data-testid="turn-provider-system-prompt">${systemPrompt.text}</pre>`
+          : html`<div class="ti-msg-b ti-msg-absent" data-testid="turn-provider-system-prompt-absent">
+              이 요청에는 별도의 시스템 프롬프트가 없습니다
+            </div>`}
       </div>
     </div>
     <div class="ti-sec">
-      <div class="ti-ctx-card">
-        <div class="ti-ctx-h">
-          <span class="t">주입 컨텍스트 · blocks · executions</span>
-          <span class="tok">~${approxTokens(t.injectedCtx)} tok</span>
-          <${CopyBtn} text=${t.injectedCtx} />
-        </div>
-        <pre>${t.injectedCtx}</pre>
+      <div class="ti-sec-h">
+        <h4>실제 도구 스키마</h4>
+        <span class="n">${snapshot.toolSchemas.length}개</span>
       </div>
+      ${snapshot.toolSchemas.length
+        ? snapshot.toolSchemas.map(tool => {
+          const text = providerInputContentText(tool.content)
+          return html`
+            <${CodeCard}
+              key=${tool.index}
+              cap=${`#${tool.index} ${tool.name} · ${tool.bytes}B · ${tool.sha256.slice(0, 12)}`}
+              text=${text}
+              tokens=${approxTokens(text)}
+            />
+          `
+        })
+        : html`<div class="ti-msg-b ti-msg-absent" data-testid="turn-provider-tool-schemas-absent">
+            이 요청에 전송된 도구 스키마가 없습니다
+          </div>`}
     </div>
   `
 }
@@ -1051,23 +872,28 @@ function TurnDetailDrawer({
   onClose: () => void
 }) {
   const [tab, setTab] = useState('timeline')
-  const t = buildTurnDetail(keeperName, row.record, toolEntries)
+  const t = buildTurnDetail(row.record, toolEntries)
 
-  // RFC-0233 §7: lazily fetch this turn's transcript by its join key
-  // "<trace_id>#<absolute_turn>". Loaded per-open so the (potentially large)
-  // transcript never bloats the turn-records list.
-  const turnRef = `${row.record.trace_id}#${row.record.absolute_turn}`
-  const transcriptResource = useManagedAsyncResource<TurnTranscript | null>(null)
+  // Fetch only the selected turn's canonical provider input. The endpoint is
+  // keyed by the exact turn_ref carried by the TurnRecord; a mismatched
+  // response is rejected instead of being shown under the selected turn.
+  const turnRef = row.record.turn_ref
+  const providerInputResource = useManagedAsyncResource<ProviderInputSnapshot>(null)
   useEffect(() => {
-    void transcriptResource.load((signal) =>
-      fetchKeeperTurnTranscript(keeperName, turnRef, { signal }),
-    )
+    providerInputResource.reset()
+    void providerInputResource.load(async (signal) => {
+      const snapshot = await fetchKeeperProviderInput(keeperName, turnRef, { signal })
+      if (snapshot.keeper !== keeperName || snapshot.turnRef !== turnRef) {
+        throw new Error('provider-input이 선택한 keeper 턴과 일치하지 않습니다')
+      }
+      return snapshot
+    })
     return () => {
-      transcriptResource.cancel()
+      providerInputResource.cancel()
     }
-  }, [keeperName, turnRef, transcriptResource])
+  }, [keeperName, turnRef, providerInputResource])
 
-  const transcript = toTranscriptView(transcriptResource.state.value)
+  const providerInput = toProviderInputView(providerInputResource.state.value)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1192,8 +1018,8 @@ function TurnDetailDrawer({
 
         <div class="ti-body">
           ${tab === 'timeline' && html`<${TimelineTab} t=${t} />`}
-          ${tab === 'messages' && html`<${MessagesTab} keeperName=${keeperName} t=${t} transcript=${transcript} />`}
-          ${tab === 'context' && html`<${ContextTab} t=${t} />`}
+          ${tab === 'messages' && html`<${MessagesTab} input=${providerInput} />`}
+          ${tab === 'context' && html`<${ContextTab} input=${providerInput} />`}
           ${tab === 'meta' && html`<${MetaTab} record=${row.record} t=${t} source=${source} />`}
         </div>
       </div>

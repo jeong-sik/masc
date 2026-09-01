@@ -341,16 +341,16 @@ let reusable_artifacts snapshot =
     | Tool_output.Invalid_marker _ -> ()
   in
   Option.iter add snapshot.system_prompt;
-  List.iter (fun message -> add message.artifact) snapshot.messages;
-  List.iter (fun tool -> add tool.artifact) snapshot.tool_schemas;
+  List.iter (fun (message : message) -> add message.artifact) snapshot.messages;
+  List.iter (fun (tool : tool_schema) -> add tool.artifact) snapshot.tool_schemas;
   reusable
 ;;
 
-let store_artifact store ~reusable ~mime bytes =
+let store_artifact store ~reusable ~mime bytes : artifact =
   let bytes_length = String.length bytes in
   let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
   match Hashtbl.find_opt reusable (sha256, mime) with
-  | Some artifact when artifact.bytes = bytes_length -> artifact
+  | Some (artifact : artifact) when artifact.bytes = bytes_length -> artifact
   | Some _ | None ->
     let reference = Tool_blob_store.put_durable store ~bytes ~mime in
     let reference = Tool_output.with_preview reference "" in

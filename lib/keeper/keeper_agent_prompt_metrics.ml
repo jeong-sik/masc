@@ -70,19 +70,34 @@ let provenance_failure_reason = function
   | Prompt_context_presence_mismatch _ -> "prompt_context_presence_mismatch"
 ;;
 
+(* [None] rather than [""]: a failure that carries no measured value and one
+   whose value is legitimately empty are different facts, and a sentinel makes
+   the second silently read as the first. *)
 let provenance_failure_detail = function
   | Input_prefix_dropped { projection_input_messages; projected_messages } ->
-    Printf.sprintf "handed=%d returned=%d" projection_input_messages
-      projected_messages
+    Some
+      (Printf.sprintf "handed=%d returned=%d" projection_input_messages
+         projected_messages)
   | Input_prefix_rewritten { first_divergent_index } ->
-    Printf.sprintf "first_divergent_index=%d" first_divergent_index
+    Some (Printf.sprintf "first_divergent_index=%d" first_divergent_index)
   | Prompt_context_carrier_metadata_invalid
   | Prompt_context_carrier_metadata_duplicate
-  | Prompt_context_carrier_repeated -> ""
+  | Prompt_context_carrier_repeated -> None
   | Prompt_context_presence_mismatch { carrier_observed; prompt_context_present }
     ->
-    Printf.sprintf "carrier_observed=%b prompt_context_present=%b"
-      carrier_observed prompt_context_present
+    Some
+      (Printf.sprintf "carrier_observed=%b prompt_context_present=%b"
+         carrier_observed prompt_context_present)
+;;
+
+(* The one place the two halves are joined. It used to live at the call site,
+   which left the no-detail branch untested: a test that rebuilds the line
+   itself agrees with whatever it rebuilt, not with what the keeper logs. *)
+let provenance_failure_summary failure =
+  let reason = provenance_failure_reason failure in
+  match provenance_failure_detail failure with
+  | None -> reason
+  | Some detail -> reason ^ " " ^ detail
 ;;
 
 (* The index is reported rather than a bare "not equal" because the two

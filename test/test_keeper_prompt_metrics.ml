@@ -390,10 +390,14 @@ let test_provider_content_messages_rejects_prompt_carrier_mismatch () =
         @ Agent_core.Types.Extra_system_context_provenance.metadata
     }
   in
-  (* The reason, not just the rejection: an operator reading a turn with no
-     composition needs to know which of these five happened, because the fix
-     differs for each. *)
-  let failure_reason ~prompt_context_present messages =
+  (* The whole summary the log line carries, not the reason alone -- the
+     keeper prefixes keeper= and trace= around this value. Two of these five reach
+     [Prompt_context_presence_mismatch] from opposite conditions -- announced
+     and absent, arrived and unannounced -- and share a reason string, so
+     [carrier_observed] is the only thing that tells an operator which one
+     happened. Checking the reason alone let a copied [carrier_observed = seen]
+     invert that diagnosis with every test still green. *)
+  let failure_line ~prompt_context_present messages =
     match
       KAPM.provider_content_messages
         ~prompt_context_present
@@ -401,23 +405,32 @@ let test_provider_content_messages_rejects_prompt_carrier_mismatch () =
         ~projected_messages:messages
     with
     | Ok retained -> Printf.sprintf "attributed(%d)" (List.length retained)
-    | Error failure -> KAPM.provenance_failure_reason failure
+    | Error failure -> KAPM.provenance_failure_summary failure
   in
-  check string "missing typed carrier is a presence mismatch"
-    "prompt_context_presence_mismatch"
-    (failure_reason ~prompt_context_present:true [ plain ]);
-  check string "unexpected typed carrier is a presence mismatch"
-    "prompt_context_presence_mismatch"
-    (failure_reason ~prompt_context_present:false [ marked ]);
+  (* Each fragment carries its own leading space so the separator is visible
+     at the start of the line rather than hidden before a line continuation,
+     and so a tool that strips trailing whitespace cannot touch it. *)
+  check string "an announced carrier that never arrived says which side is missing"
+    ("prompt_context_presence_mismatch"
+     ^ " carrier_observed=false"
+     ^ " prompt_context_present=true")
+    (failure_line ~prompt_context_present:true [ plain ]);
+  check string "a carrier nobody announced says the opposite"
+    ("prompt_context_presence_mismatch"
+     ^ " carrier_observed=true"
+     ^ " prompt_context_present=false")
+    (failure_line ~prompt_context_present:false [ marked ]);
+  (* These three carry no detail. The expected strings have no trailing space,
+     so the branch that omits the separator is what keeps them passing. *)
   check string "a second typed carrier is repeated, not missing"
     "prompt_context_carrier_repeated"
-    (failure_reason ~prompt_context_present:true [ marked; marked ]);
+    (failure_line ~prompt_context_present:true [ marked; marked ]);
   check string "invalid carrier metadata is named as such"
     "prompt_context_carrier_metadata_invalid"
-    (failure_reason ~prompt_context_present:true [ invalid ]);
+    (failure_line ~prompt_context_present:true [ invalid ]);
   check string "duplicate carrier metadata is named as such"
     "prompt_context_carrier_metadata_duplicate"
-    (failure_reason ~prompt_context_present:true [ duplicate ])
+    (failure_line ~prompt_context_present:true [ duplicate ])
 ;;
 
 let test_provider_content_messages_rejects_projection_rewrite () =
@@ -431,9 +444,7 @@ let test_provider_content_messages_rejects_projection_rewrite () =
         ~projected_messages
     with
     | Ok retained -> Printf.sprintf "attributed(%d)" (List.length retained)
-    | Error failure ->
-      KAPM.provenance_failure_reason failure
-      ^ " " ^ KAPM.provenance_failure_detail failure
+    | Error failure -> KAPM.provenance_failure_summary failure
   in
   (* A reorder and a cut both used to read as one "provenance unavailable".
      They are separated here because only the second is what a history window

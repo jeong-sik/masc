@@ -60,10 +60,16 @@ type provenance_failure =
 val provenance_failure_reason : provenance_failure -> string
 (** Stable snake_case identifier for logs and durable records. *)
 
-val provenance_failure_detail : provenance_failure -> string
-(** Measured values carried by the failure, or [""] when it carries none.
-    Kept apart from {!provenance_failure_reason} so a reader can group by
-    reason without the counts splitting every group. *)
+val provenance_failure_summary : provenance_failure -> string
+(** The line the keeper logs: the reason, plus the failure's measured values
+    after a single space when it carries any.
+
+    The measured values are not exported on their own. Joining them to the
+    reason is one rule, and a caller able to reach both halves could implement
+    that rule a second time -- which is what left the no-detail branch
+    untested until this function existed. {!provenance_failure_reason} stays
+    exported because a reason may become a metric label; there is no such use
+    for the values alone. *)
 
 (** Return concrete provider content messages only when their provenance is
     unambiguous. The AGENT_CORE-generated [extra_system_context] carrier is removed by

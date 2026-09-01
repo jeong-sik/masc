@@ -1941,7 +1941,7 @@ let launch_gate_snapshot_load state ~mailbox =
       enqueue_async mailbox
         (Gate_snapshot_loaded (Error "Eio switch is unavailable"))
 
-let launch_gate_resolve state ~mailbox ~approval_id ~approve =
+let launch_gate_resolve state ~mailbox ~approval_id ~approve ?reason =
   (* A Gate decision mutates durable server state over one round trip. Take the
      same single-action slot the operator-confirm path takes, so the header
      draws [submitting] the instant the key lands and a second press during the
@@ -1958,7 +1958,7 @@ let launch_gate_resolve state ~mailbox ~approval_id ~approve =
         let result =
           try
             Masc_tui_http.post_dashboard_gate_resolve ~host ~port ~approval_id
-              ~approve
+              ~approve ?reason
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
@@ -9471,6 +9471,33 @@ let main () =
     | Runtime | Config | Resources | Code | Tools | System_logs ->
         selected_surface_reference state
   in
+  let reject_gate_approval (pending : Tui_decode.gate_pending) =
+    match Masc_tui_editor.editor_command () with
+    | None ->
+      add_event state "error"
+        "no $EDITOR set; export EDITOR to reject this Gate approval"
+    | Some _ -> (
+      let stem = "{\n  \"reason\": \"\"\n}\n" in
+      match
+        Masc_tui_editor.roundtrip ~restore:restore_terminal
+          ~reenter:reenter_terminal stem
+      with
+      | Error abort -> report_editor_abort state ~action:"Gate rejection" abort
+      | Ok body -> (
+        match Yojson.Safe.from_string body with
+        | exception Yojson.Json_error error ->
+          add_event state "error"
+            ("Gate rejection: body is not JSON: " ^ error)
+        | `Assoc fields -> (
+          match List.assoc_opt "reason" fields with
+          | Some (`String reason) when String.trim reason <> "" ->
+            launch_gate_resolve state ~mailbox:async_messages
+              ~approval_id:pending.gp_id ~approve:false ~reason:(String.trim reason)
+          | Some (`String _) | Some _ | None ->
+            add_event state "system" "Gate rejection cancelled (empty reason)" )
+        | _ ->
+          add_event state "error" "Gate rejection: body must be a JSON object"))
+  in
   let answer_presented_approval decision =
     match
       Approval_authority.resolve ~presented:!presented_approval
@@ -9484,10 +9511,11 @@ let main () =
           ~keeper_name:held.kta_keeper
           ~tool_call_id:held.kta_tool_call_id
           ~allow:(match decision with Confirm -> true | Deny -> false)
-    | Some { Approval_authority.row = Gate_row pending; decision } ->
+    | Some { Approval_authority.row = Gate_row pending; decision = Confirm } ->
         launch_gate_resolve state ~mailbox:async_messages
-          ~approval_id:pending.Tui_decode.gp_id
-          ~approve:(match decision with Confirm -> true | Deny -> false)
+          ~approval_id:pending.Tui_decode.gp_id ~approve:true
+    | Some { Approval_authority.row = Gate_row pending; decision = Deny } ->
+        reject_gate_approval pending
     | None ->
         add_event state "system"
           "Approval list changed; review the updated row before deciding"

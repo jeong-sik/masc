@@ -1165,13 +1165,16 @@ let expect_ok_true ~(what : string) json =
 
 (** POST /api/v1/dashboard/gate/resolve — decide one durable Gate approval. *)
 let post_dashboard_gate_resolve ~(host : string) ~(port : int)
-    ~(approval_id : string) ~(approve : bool) : (unit, string) result =
+    ~(approval_id : string) ~(approve : bool) ?reason : (unit, string) result =
   let body =
     Yojson.Safe.to_string
       (`Assoc
-         [ ("id", `String approval_id)
-         ; ("decision", `String (if approve then "approve" else "reject"))
-         ])
+         ([ ("id", `String approval_id)
+          ; ("decision", `String (if approve then "approve" else "reject"))
+          ]
+         @ match reason with
+           | None -> []
+           | Some reason -> [ "reason", `String reason ]))
   in
   match post_json ~host ~port ~path:"/api/v1/dashboard/gate/resolve" ~body with
   | Error detail -> Error detail

@@ -424,6 +424,19 @@ def send_and_wait(
     return bytes(output[start:frame_end])
 
 
+def palette_go(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    query: bytes,
+    needle: Needle,
+) -> bytes:
+    """Jump through the command palette. Surfaces that hang off a parent
+    instead of holding a Tab stop (Lanes, Connectors, Task Review) keep a
+    'go <label>' palette entry, so this is how a scenario reaches them."""
+    return send_and_wait(process, master_fd, output, b":" + query + b"\r", needle)
+
+
 def copy_reference(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -6764,7 +6777,7 @@ def keeper_lanes_interaction(
             b"j",
             keeper_row_selected(b"beta"),
         )
-        unread = tab_until(process, master_fd, output, b"MASC Lanes")
+        unread = palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
         # The body note is "(not loaded yet — press r)": #30945 added the
         # key hint without updating this needle.
         if b"(not loaded)" not in unread or b"(not loaded yet" not in unread:
@@ -7137,7 +7150,7 @@ def keeper_lanes_interaction(
                 f"{right_detail!r}"
             )
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
-        tab_until(process, master_fd, output, b"MASC Lanes")
+        palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
         enter_detail = send_and_wait(
             process,
             master_fd,
@@ -7151,7 +7164,7 @@ def keeper_lanes_interaction(
                 f"{enter_detail!r}"
             )
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
-        tab_until(process, master_fd, output, b"MASC Lanes")
+        palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
         orphan_count = 24
         fixtures[KEEPER_LANES_PATH] = keeper_lanes_response(
             [
@@ -7327,7 +7340,7 @@ def keeper_lanes_ia_interaction(gate: GatedHttpResponse) -> Interaction:
                     f"{keepers_plain!r}"
                 )
 
-        tab_until(process, master_fd, output, b"MASC Lanes")
+        palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
         lanes = resize_and_wait(
             process,
             master_fd,

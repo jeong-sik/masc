@@ -12486,7 +12486,9 @@ and is loaded on demand through keeper_skill.
                      state.lane_runs_error <- None;
                      state.lane_runs_cursor <- 0;
                      state.lane_runs_scroll <- 0
-                 | Lanes_overview -> state.view <- Overview)
+                 | Lanes_overview ->
+                     (* Back to the Runtime parent it hangs off, loaded. *)
+                     goto_surface state ~mailbox:async_messages Runtime)
             | Acting | Keepers Keeper_list -> state.view <- Overview
             | Approvals ->
                 (* Esc leaves the ask and returns to the list with the cursor
@@ -14024,13 +14026,21 @@ and is loaded on demand through keeper_skill.
               It cannot answer what this workspace could call: a runtime no
               lane names is absent from it, which is exactly the runtime an
               operator is looking for when they go to assign one. Same [p]
-              that moves panes on Tools and Config. *)
-           state.runtime_mode <-
-             (match state.runtime_mode with
-              | Masc_tui_types.Runtime_lanes -> Masc_tui_types.Runtime_all
-              | Masc_tui_types.Runtime_all -> Masc_tui_types.Runtime_lanes);
-           (* The scroll belonged to the other list's length. *)
-           state.runtime_surface_scroll <- 0
+              that moves panes on Tools and Config. The third stop is the
+              standalone service lanes, off the ring the way Task Review
+              hangs off Planning; [p] there returns here. *)
+           (match state.runtime_mode with
+            | Masc_tui_types.Runtime_lanes ->
+                state.runtime_mode <- Masc_tui_types.Runtime_all;
+                (* The scroll belonged to the other list's length. *)
+                state.runtime_surface_scroll <- 0
+            | Masc_tui_types.Runtime_all ->
+                state.runtime_mode <- Masc_tui_types.Runtime_lanes;
+                state.runtime_surface_scroll <- 0;
+                goto_surface state ~mailbox:async_messages Lanes)
+       | Some "p" | Some "P"
+         when state.view = Lanes && state.lanes_mode = Lanes_overview ->
+           goto_surface state ~mailbox:async_messages Runtime
        | Some "p" | Some "P" when state.view = Tools ->
            (* Five sections, one at a time. Concatenated they ran to 326 rows
               on this workspace and the terminal draws twenty, so four of

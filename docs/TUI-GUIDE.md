@@ -7,11 +7,12 @@ status: runbook
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
-`bin/masc_tui_types.ml`: Overview, Acting, Keepers, Memory, Lanes, Approvals,
+`bin/masc_tui_types.ml`: Overview, Acting, Keepers, Memory, Approvals,
 Board, Planning, Schedules, Fusion, Repos, Code, Runtime, Config, Resources,
-Tools, Logs. Verification, Harness, Changes, and Connectors are not on the
-ring: Planning reaches the first two with `v`, the Keepers roster reaches
-Changes with `f`, and Runtime reaches Connectors with `c`.
+Tools, Logs. Verification, Harness, Changes, Connectors, and Lanes are not on
+the ring: Planning reaches the first two with `v`, the Keepers roster reaches
+Changes with `f`, and Runtime reaches Connectors with `c` and the standalone
+Lanes with `p` (its third stop).
 
 ## Quick Start
 
@@ -316,7 +317,10 @@ restart puts every Keeper back on `auto`.
 ### Lanes
 
 Standalone execution lanes only. Keeper lifecycle and turn-cycle facts live on
-Keepers, so this surface no longer repeats a second Keeper table.
+Keepers, so this surface no longer repeats a second Keeper table. It hangs
+off Runtime rather than holding a Tab stop: `p` on Runtime walks keeper
+lanes, all runtimes, and then this surface; `p` or `Esc` here returns to
+Runtime, and the palette keeps `go Lanes`.
 
 ```
  MASC Lanes · Standalone (4 lanes)  17:02:53  [connected]
@@ -1201,7 +1205,7 @@ Per surface:
 ```
 Tab cycles the surfaces:
 
-  Overview -> Acting -> Keepers -> Memory -> Lanes -> Approvals -> Board
+  Overview -> Acting -> Keepers -> Memory -> Approvals -> Board
            -> Planning -> Schedules -> Fusion -> Repos -> Code
            -> Runtime -> Config -> Resources -> Tools -> Logs -> Overview
 

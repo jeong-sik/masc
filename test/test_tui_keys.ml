@@ -378,6 +378,27 @@ let test_connectors_is_a_runtime_child () =
   Alcotest.(check bool) "Runtime documents the [c] hop" true
     (List.mem "c" runtime_keys)
 
+(* Standalone Lanes is service-lane observation -- one more reading of "is
+   the substrate alive" -- so it hangs off Runtime as [p]'s third stop
+   instead of holding a Tab stop of its own. *)
+let test_lanes_is_a_runtime_child () =
+  Alcotest.(check bool) "Lanes is not a top-level ring entry" false
+    (List.exists (fun (surface, _) -> surface = Lanes) surface_ring);
+  Alcotest.(check int) "Lanes highlights Runtime"
+    (surface_ring_index Runtime)
+    (surface_ring_index Lanes);
+  Alcotest.(check bool) "and the help sheet files it under Runtime" true
+    (List.exists
+       (fun (label, _) -> String.equal label "Runtime / Lanes")
+       (Masc_tui_keys.help_sections ()));
+  let lanes_keys =
+    List.map
+      (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
+      (Masc_tui_keys.for_surface Lanes)
+  in
+  Alcotest.(check bool) "Lanes documents the [p] way back" true
+    (List.mem "p" lanes_keys)
+
 let test_system_logs_owns_only_its_real_filter_keys () =
   (* g/G/f still belong to Acting. Logs owns the server level floor, direct
      verbose toggle, and category cycle under l/v/c. *)
@@ -760,6 +781,8 @@ let () =
             test_changes_is_a_keeper_child
         ; Alcotest.test_case "Connectors is a Runtime child" `Quick
             test_connectors_is_a_runtime_child
+        ; Alcotest.test_case "Lanes is a Runtime child" `Quick
+            test_lanes_is_a_runtime_child
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick

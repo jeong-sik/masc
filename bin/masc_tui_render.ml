@@ -10287,7 +10287,7 @@ let render_runtime (state : state) =
             scroll_hint
             (match state.runtime_mode with
              | Masc_tui_types.Runtime_lanes -> "all runtimes"
-             | Masc_tui_types.Runtime_all -> "lanes")
+             | Masc_tui_types.Runtime_all -> "service lanes")
           ^ (match state.runtime_mode with
              | Masc_tui_types.Runtime_lanes -> "  e:add failover"
              | Masc_tui_types.Runtime_all -> "")));

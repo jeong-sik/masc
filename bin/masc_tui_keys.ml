@@ -128,7 +128,9 @@ let for_surface = function
           ~help:"open the standalone lane's exact runs"
       ; b Navigate "e" "lane config"
           ~help:"open this lane's runtime.exact_output_lanes section"
-      ; b Act "Esc" "overview"
+      ; b Navigate "p" "runtime"
+          ~help:"back to the Runtime surface this hangs off"
+      ; b Act "Esc" "runtime" ~help:"back to the Runtime surface it hangs off"
       ]
       @ listing_meta
   | Board ->
@@ -275,6 +277,9 @@ let for_surface = function
       ; b Navigate "PgUp/PgDn" "detail page"
       ; b Act "Right / Enter" "detail"
           ~help:"show the full runtime, lane, dispatch, and probe fields"
+      ; b Navigate "p" "keeper lanes / all runtimes / service lanes"
+          ~help:"walk the three substrate readings; the third is the \
+                 standalone Lanes surface"
       ; b Act "c" "connectors" ~help:"channel bindings and reachability"
       ; b Act "Left / Esc" "back"
       ]
@@ -480,7 +485,7 @@ let help_surfaces : (string * surface) list =
   ; "Keepers", Keepers Keeper_list
   ; "Keeper detail", Keepers Keeper_detail
   ; "Chat", Keepers Keeper_message
-  ; "Lanes", Lanes
+  ; "Runtime / Lanes", Lanes
   ; "Board", Board
   ; "Approvals", Approvals
   ; "Planning / Goals", Planning

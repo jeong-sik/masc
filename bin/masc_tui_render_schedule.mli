@@ -144,3 +144,27 @@ module Terminal_size_cache : sig
   val get : t -> probe:(unit -> (int * int) option) -> int * int
   val refresh : t -> probe:(unit -> (int * int) option) -> refresh
 end
+
+(** {1 Planning strip and Keeper schedule page} *)
+
+type planning_tab =
+  | Planning_goals
+  | Planning_task_review
+  | Planning_verdicts
+
+val planning_strip_plain :
+  tab:planning_tab -> review_count:int option -> window:string -> string list
+(** The Planning strip's stop labels, in order, without styling. Exactly three:
+    Schedules and Fusion are tabs of the selected Keeper, not stops here.
+    [window] is the page-versus-ledger reading, already formatted (e.g.
+    [" (8 of 4223)"]); it is appended to [tab]'s label and to no other, because
+    a count placed after the whole strip reads as belonging to its last name. *)
+
+type keeper_schedule_absence =
+  | Store_has_none
+  | Page_capped of { shown : int; total : int option }
+
+val classify_keeper_schedule_absence :
+  truncated:bool -> shown:int -> total:int option -> keeper_schedule_absence
+(** Why a Keeper's schedule filter matched nothing. A capped page cannot say
+    the store is empty; it can only say it did not look at all of it. *)

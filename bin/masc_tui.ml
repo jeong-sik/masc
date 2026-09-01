@@ -13929,21 +13929,19 @@ and is loaded on demand through keeper_skill.
                           ~keeper:(Some change.Masc.Tui_decode.fc_keeper) ~path)))
        | Some "v" | Some "V"
          when state.view = Planning || state.view = Verification
-              || state.view = Harness || state.view = Schedules
-              || state.view = Fusion ->
+              || state.view = Harness ->
            (* Planning is the parent workspace; [v] walks its child modes
               without putting any of them back on the top-level ring. The
               order is the life of one piece of work: the goals it hangs
-              off, the queue waiting for a ruling, the rulings the judge
-              recorded, the wakes that will start more of it, and the
-              fusion runs that judged it across models. *)
+              off, the queue waiting for a ruling, and the rulings the judge
+              recorded. Wakes and fusion runs left this walk when they became
+              tabs of the selected Keeper (RFC-tui-operator-ia section 3.1): they
+              belong to one Keeper, not to the fleet's planning workspace. *)
            goto_surface state ~mailbox:async_messages
              (match state.view with
               | Planning -> Verification
               | Verification -> Harness
-              | Harness -> Schedules
-              | Schedules -> Fusion
-              | Fusion | _ -> Planning)
+              | Harness | _ -> Planning)
        | Some "v" when state.view = Changes ->
            (* View the selected change on the Code surface. The clone-relative
               address resolves through the same ?keeper= axis the git-diff

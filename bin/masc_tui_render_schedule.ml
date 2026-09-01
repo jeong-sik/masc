@@ -441,3 +441,41 @@ module Terminal_size_cache = struct
     | Some size when size = current -> Unchanged current
     | Some _ | None -> Changed current
 end
+
+(* The Planning strip and the per-Keeper schedule page, as plain text. Both
+   were inline in the renderer, where nothing could reach them: the strip
+   spent a release naming two stops that had moved to the Keeper detail tabs,
+   and the page count it carried attached itself to the last of those names.
+   Kept here they are ordinary values a test can read. *)
+
+type planning_tab =
+  | Planning_goals
+  | Planning_task_review
+  | Planning_verdicts
+
+let planning_strip_plain ~tab ~review_count ~window =
+  let review_label =
+    match review_count with
+    | Some total when total > 0 -> Printf.sprintf "2 Task Review\xc2\xb7%d" total
+    | Some _ | None -> "2 Task Review"
+  in
+  let stops =
+    [ Planning_goals, "1 Goals"
+    ; Planning_task_review, review_label
+    ; Planning_verdicts, "3 Evaluator Verdicts"
+    ]
+  in
+  List.map
+    (fun (stop, label) -> if stop = tab then label ^ window else label)
+    stops
+
+(* Why a Keeper's Automation tab is empty. The projection caps its page and
+   sorts active rows first, so a filter that matches nothing has two readings
+   that a single "(none)" would merge: the store holds none for this Keeper,
+   or the page the server sent does not reach them. *)
+type keeper_schedule_absence =
+  | Store_has_none
+  | Page_capped of { shown : int; total : int option }
+
+let classify_keeper_schedule_absence ~truncated ~shown ~total =
+  if truncated then Page_capped { shown; total } else Store_has_none

@@ -233,6 +233,10 @@ run_gate() {
     done < <(find "$signals_root" -name '*.jsonl' -print0)
   fi
 
+  if ! "$PREFLIGHT_HELPER" validate-stores --base-path "$BASE_PATH"; then
+    fail "durable store validation rejected current runtime state"
+  fi
+
   # Board attention candidate ledgers are schema_version 4 (typed post_created
   # identity). parse_rows is fail-total per file, so one pre-v4 row silently
   # stalls that keeper's board attention after restart. There is deliberately
@@ -481,6 +485,18 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   printf '{"schema_version": 4}\n{"schema_ver' \
     >"$torn_candidate_root/.masc/board_attention_candidates/fixture.jsonl"
   expect_failure torn_board_attention_candidate_ledger "$torn_candidate_root"
+
+  malformed_provider_input_root="$fixture_root/malformed-provider-input"
+  write_schedules "$malformed_provider_input_root" running
+  mkdir -p "$malformed_provider_input_root/.masc/keepers/fixture/provider-inputs/2026-09"
+  printf '%s\n' \
+    '{"schema":"masc.provider-input-snapshot.v1","retired":true}' \
+    >"$malformed_provider_input_root/.masc/keepers/fixture/provider-inputs/2026-09/01.jsonl"
+  expect_failure_contains \
+    malformed_provider_input_snapshot \
+    "$malformed_provider_input_root" \
+    "keeper provider-input snapshots rows=1 refused=1" \
+    "durable store validation rejected current runtime state"
 
   malformed_current_root="$fixture_root/malformed-current"
   write_schedules "$malformed_current_root" running

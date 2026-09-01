@@ -296,8 +296,8 @@ let test_input_cursor_uses_visible_terminal_cells () =
      NO_COLOR leaves a reader. *)
   let marks =
     List.map Layout.speaker_mark
-      [ Layout.User; Layout.Keeper; Layout.Status; Layout.Error; Layout.Tool;
-        Layout.Thinking ]
+      [ Layout.User; Layout.Keeper; Layout.Status; Layout.Journal; Layout.Error;
+        Layout.Tool; Layout.Thinking ]
   in
   check int "every speaker has its own mark" (List.length marks)
     (List.length (List.sort_uniq String.compare marks));
@@ -1324,7 +1324,7 @@ let test_every_speaker_mark_is_distinct () =
   let marks =
     List.map Layout.speaker_mark
       [ Layout.User; Layout.Inbound; Layout.Keeper; Layout.Status
-      ; Layout.Error; Layout.Tool; Layout.Thinking
+      ; Layout.Journal; Layout.Error; Layout.Tool; Layout.Thinking
       ]
   in
   check int "no two speakers share a mark" (List.length marks)

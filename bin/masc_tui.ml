@@ -5538,8 +5538,8 @@ let seek_in_chat state ~target ~restart =
           ~needle:(String.lowercase_ascii (String.trim state.msg_find))
           ~older_than
       with
-      | Some (scroll, at) ->
-          state.msg_find_at <- Some at;
+      | Some (scroll, anchor) ->
+          state.msg_find_at <- Some anchor;
           set_msg_scroll state scroll;
           notice ~role:Message_status
             (Printf.sprintf "/find %s \xe2\x80\x94 %d row(s) back (/find repeats)"

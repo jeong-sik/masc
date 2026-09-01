@@ -9,6 +9,7 @@ type style =
   | Inbound
   | Keeper
   | Status
+  | Journal
   | Error
   | Tool
   | Skill of skill_tone
@@ -596,6 +597,7 @@ let speaker_mark : style -> string = function
   | Inbound -> "\xe2\x97\x80"   (* someone else sent this here *)
   | Keeper -> "\xe2\x97\x8f"    (* a keeper speaks *)
   | Status -> "?"
+  | Journal -> "\xe2\x97\x88"   (* the parallel Memory journal lane *)
   | Error -> "\xe2\x9c\x97"
   | Tool -> "\xe2\x96\xa0"
   | Skill Skill_live -> "\xe2\x97\x87"
@@ -879,7 +881,7 @@ let continued_mark style = speaker_mark style
 
    Reasoning is the Keeper's own, not a quotation, however folded it is. *)
 let shade_of_style : style -> shade = function
-  | Tool | Skill _ | Status -> Shade_quoted
+  | Tool | Skill _ | Status | Journal -> Shade_quoted
   | User | Inbound | Keeper | Error | Thinking -> Shade_none
 
 let origin_gutter ~origin ~previous ~inner_width entry =

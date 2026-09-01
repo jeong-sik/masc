@@ -15,6 +15,9 @@ type style =
           from six senders wearing the reader's own colours. *)
   | Keeper
   | Status
+  | Journal
+      (** Auxiliary Memory/Librarian lane. It has its own mark and rail so a
+          recorded memory pass never reads as part of ordinary conversation. *)
   | Error
   | Tool
   | Skill of skill_tone

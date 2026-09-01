@@ -5270,6 +5270,48 @@ def memory_journal_fixture() -> HttpResponse:
     )
 
 
+def memory_journal_backfill_fixture() -> HttpResponse:
+    status, payload = memory_journal_fixture()
+    entries = payload["entries"]
+    if not isinstance(entries, list):
+        raise AssertionError("memory journal fixture entries are not a list")
+    entries.insert(
+        0,
+        {
+            "ok": True,
+            "outcome": "failed",
+            "recorded_at": 1787348480.0,
+            "kind": "backfilled_probe",
+            "detail": "older Journal observation",
+            "snapshot_present": True,
+            "cadence_deferred": False,
+        },
+    )
+    payload["returned"] = 2
+    return status, payload
+
+
+def memory_journal_chat_fixture() -> HttpResponse:
+    return (
+        200,
+        [
+            {
+                "id": "assistant:before-journal",
+                "role": "assistant",
+                "content": "broadcast before Librarian",
+                "ts": 1787348489.0,
+            },
+            {
+                "id": "assistant:after-journal",
+                "role": "assistant",
+                "content": "direct turn after Librarian",
+                "ts": 1787348491.0,
+                "turn_ref": "trace-after#55",
+            },
+        ],
+    )
+
+
 def autonomous_turn_history_interaction() -> Interaction:
     """The chat pane draws what an autonomous turn did, not a blank line."""
 
@@ -5314,7 +5356,9 @@ def autonomous_turn_history_interaction() -> Interaction:
     return interact
 
 
-def memory_journal_timeline_interaction() -> Interaction:
+def memory_journal_timeline_interaction(
+    memory: SequencedHttpResponse,
+) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
         master_fd: int,
@@ -5353,7 +5397,27 @@ def memory_journal_timeline_interaction() -> Interaction:
             timeout=3.0,
         )
         frame_end = output.find(FRAME_END, last_row_end) + len(FRAME_END)
-        visible = bytes(output[start:frame_end])
+        visible = frame_containing(
+            bytes(output[start:frame_end]),
+            b"Librarian committed current memory revision 9",
+        )
+        plain_visible = CSI_RE.sub(b"", visible)
+        before = plain_visible.find(b"broadcast before Librarian")
+        journal = plain_visible.find(b"Librarian committed current memory revision 9")
+        after = plain_visible.find(b"direct turn after Librarian")
+        if not (0 <= before < journal < after):
+            raise AssertionError(
+                "Parallel chat/journal lanes were not ordered by recorded time "
+                f"without splitting conversation turns: {visible!r}"
+            )
+        if re.search("\u25c8\\s+JOURNAL".encode(), plain_visible) is None:
+            raise AssertionError(
+                f"Memory timeline did not draw its distinct Journal marker: {visible!r}"
+            )
+        if "\u250a".encode() not in plain_visible:
+            raise AssertionError(
+                f"Memory timeline did not draw its parallel dotted rail: {visible!r}"
+            )
         # The kind tag carries its own colour, so SGR lands between the
         # bracket, the word inside it, and the text after it. A flat byte
         # needle spanning that boundary cannot match a coloured tag -- the two
@@ -5384,6 +5448,49 @@ def memory_journal_timeline_interaction() -> Interaction:
                 raise AssertionError(
                     f"Memory timeline drew an unconsumed escape {escaped!r}: {visible!r}"
                 )
+
+        scrolled = send_and_wait(
+            process, master_fd, output, b"k", b"reading back 1 row(s)"
+        )
+        scrolled_frame = frame_containing(scrolled, b"reading back 1 row(s)")
+        anchor = b"Librarian committed current memory revision 9"
+        if anchor not in CSI_RE.sub(b"", scrolled_frame):
+            raise AssertionError(
+                f"Scroll setup did not keep the intended Journal anchor: {scrolled_frame!r}"
+            )
+        memory.responses.append(memory_journal_backfill_fixture())
+        served_before_backfill = memory.served
+        wait_for_fixture_served(
+            process,
+            master_fd,
+            output,
+            memory,
+            after=served_before_backfill,
+            description="chronological Journal backfill",
+            timeout=5.0,
+        )
+        drain_until_quiet(process, master_fd, output)
+        refreshed_frame = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=31,
+            columns=100,
+            needle=b"reading back 1 row(s)",
+            controls=(FULL_REDRAW,),
+        )
+        if anchor not in CSI_RE.sub(b"", refreshed_frame):
+            raise AssertionError(
+                "An older chronological Journal backfill moved the scroll pin: "
+                f"{refreshed_frame!r}"
+            )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x05",
+            b"direct turn after Librarian",
+        )
 
         send_and_wait(process, master_fd, output, b"/memory", composer_showing(b"/memory"))
         hidden = send_and_wait(process, master_fd, output, b"\r", b"memory:off")
@@ -10244,14 +10351,16 @@ def run_keyboard_regression(executable: str) -> None:
         },
         extra_args=("--reasoning", "full", "--tool-view", "full"),
     )
+    memory_journal_sequence = SequencedHttpResponse([memory_journal_fixture()])
     run_terminal_scenario(
         executable,
         description="Keeper Memory journal timeline",
-        interact=memory_journal_timeline_interaction(),
+        interact=memory_journal_timeline_interaction(memory_journal_sequence),
         http_fixtures={
-            "/api/v1/keepers/alpha/chat/history": (200, []),
-            "/api/v1/keepers/alpha/memory-journal?limit=20": memory_journal_fixture(),
+            "/api/v1/keepers/alpha/chat/history": memory_journal_chat_fixture(),
+            "/api/v1/keepers/alpha/memory-journal?limit=20": memory_journal_sequence,
         },
+        refresh=0.5,
     )
     run_terminal_scenario(
         executable,

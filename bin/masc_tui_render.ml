@@ -435,9 +435,11 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
            the operator's own message, which is prose and never quoted, so the
            rail cannot land inside a span this branch would have to restore. *)
         let rail =
-          match row.shade with
-          | Message_layout.Shade_none -> "  "
-          | Message_layout.Shade_quoted ->
+          match row.style, row.shade with
+          | Message_layout.Journal, _ ->
+              Printf.sprintf "%s┊%s " (Chat_theme.origin row.style) Ansi.reset
+          | _, Message_layout.Shade_none -> "  "
+          | _, Message_layout.Shade_quoted ->
               Printf.sprintf "%s\xe2\x94\x82%s " Ansi.gray Ansi.reset
         in
         if context.ambient_background then
@@ -460,7 +462,8 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
              (Printf.sprintf "[%s]  %s  %s" timestamp
                 (String.trim role_label) request_label)
        | Message_layout.User | Message_layout.Inbound | Message_layout.Keeper
-       | Message_layout.Status | Message_layout.Error | Message_layout.Skill _ ->
+       | Message_layout.Status | Message_layout.Journal | Message_layout.Error
+       | Message_layout.Skill _ ->
            (* [role_label] arrives right-aligned in a sixteen-to-twenty-four
               cell column so the request column stays put down the pane. The
               reverse span used to swallow that alignment, so "AUTO" -- four
@@ -6549,12 +6552,23 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
    Committed rows only. The turn still streaming is built where it is drawn:
    its row count changes on every frame, which is exactly what a stable
    position must not be measured against. *)
-let keeper_message_layout_entries ?messages (state : state) ~keeper_name
-    ~chat_cols =
+let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
   let messages =
     Option.value ~default:(chat_rows_for state keeper_name) messages
     |> List.filter (fun message ->
       state.msg_memory_visible || message.me_role <> Message_memory)
+  in
+  List.filter
+    (fun message ->
+       message.me_role <> Message_thinking
+       || state.msg_reasoning_visibility <> Reasoning_hidden)
+    messages
+;;
+
+let keeper_message_layout_entries ?messages (state : state) ~keeper_name
+    ~chat_cols =
+  let messages =
+    keeper_message_visible_messages ?messages state ~keeper_name
   in
   (* Derived once for the width and again per row, so the badge the pane
      measures is the badge it draws. *)
@@ -6574,16 +6588,13 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     | Message_tool -> "TOOLS"
     | Message_skill _ -> "SKILL"
     | Message_thinking -> "THINKING"
-    | Message_memory -> "MEMORY"
+    | Message_memory -> "JOURNAL"
   in
   (* A persisted delivery key or turn_ref is the grouping authority. Rows
      without one keep their old labels; grouping them by adjacency or clock
      would silently put unrelated activity inside the same turn. *)
   let visible_messages =
     List.mapi (fun entry_index message -> (entry_index, message)) messages
-    |> List.filter (fun (_, message) ->
-         message.me_role <> Message_thinking
-         || state.msg_reasoning_visibility <> Reasoning_hidden)
   in
   let grouped_messages =
     let rec loop previous_turn reversed = function
@@ -6654,7 +6665,8 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
           | Message_user (Sent_by_operator _) -> Message_layout.User
           | Message_user (Sent_by_other _) -> Message_layout.Inbound
           | Message_keeper | Message_autonomous -> Message_layout.Keeper
-          | Message_status | Message_memory -> Message_layout.Status
+          | Message_status -> Message_layout.Status
+          | Message_memory -> Message_layout.Journal
           | Message_error -> Message_layout.Error
           | Message_tool -> (
               match tool_projection with
@@ -6760,8 +6772,8 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
 (* Where the pane has to scroll to put a message holding [query] on screen, and
    which message that is.
 
-   Two numbers, because a caller needs both: the scroll to move to, and the
-   position to start the next search strictly older than. The scroll is
+   Two values, because a caller needs both: the scroll to move to, and the
+   structural anchor to start the next search strictly older than. The scroll is
    measured the only way it can be -- the physical rows the entries newer than
    the match render to, at this pane's width, through the same layout the
    frame draws. Counting messages instead would land somewhere else on every
@@ -6770,16 +6782,17 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
    Newest first. A search over a conversation starts at what was just said and
    walks back, which is also the direction [msg_scroll] counts.
 
-   [older_than] is a position in the same list, not an identity: the list is
-   rebuilt per call and a message cannot move within it while the pane is
-   parked, since rows only arrive at the newer end. A match at or newer than
-   it is skipped, so repeating a search walks rather than returning to the
-   newest match every time.
+   [older_than] is a causal row identity, resolved again in the current
+   timeline. A broadcast or Journal backfill may be inserted before it, so a
+   stored numeric position would skip an older match after refresh. A match at
+   or newer than the resolved anchor is skipped, which makes repeating a
+   search walk instead of returning to the newest match every time.
 
-   Measured over committed rows only, so a turn arriving while the operator
-   searches cannot move the answer. With one on screen the match lands that
-   turn's height above the bottom edge rather than on it -- context below a
-   result, and it settles to the exact position when the turn ends.
+   Measured over committed rows only. A later chronological insert can move
+   the physical row, so the repeat cursor and the scroll pin both retain its
+   causal identity rather than its old index. With a live turn on screen the
+   match lands that turn's height above the bottom edge rather than on it --
+   context below a result, and it settles when the turn ends.
 
    [needle] is trimmed and lower-cased by its caller, which is where the
    operator's text enters -- the same contract {!Masc_tui_types.palette_contains}
@@ -6795,11 +6808,18 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
     let chat_cols =
       Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden ~cols
     in
+    let messages = keeper_message_visible_messages state ~keeper_name in
     let entries =
-      keeper_message_layout_entries state ~keeper_name ~chat_cols
+      keeper_message_layout_entries ~messages state ~keeper_name ~chat_cols
     in
     let count = List.length entries in
-    let ceiling = match older_than with None -> count | Some at -> at in
+    let ceiling =
+      match older_than with
+      | None -> count
+      | Some anchor ->
+          Option.value ~default:count
+            (msg_index_of_anchor messages anchor)
+    in
     let matched =
       List.filteri (fun index _ -> index < ceiling) entries
       |> List.mapi (fun index (entry : Message_layout.entry) -> (index, entry))
@@ -6820,7 +6840,7 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
             ~inner_width:(max 1 (framed_inner_width chat_cols))
             newer
         in
-        Some (scroll, at)
+        Some (scroll, msg_anchor (List.nth messages at))
 
 let render_keeper_message (state : state) =
   (* The chat surface draws its own composer, so it keeps the whole terminal
@@ -7144,9 +7164,11 @@ let render_keeper_message (state : state) =
        pane counts are the rows it paints. *)
     let markdown = cached_chat_markdown ~theme:chat_theme in
     (* [msg_scroll] counts back from the row the operator was last looking at,
-       not from whatever is newest now. Anything that arrived since sits
-       between the two, so its rows are added back here rather than being
-       allowed to push the window down. *)
+       not from whatever is newest now. Count the current structural suffix
+       after that anchor: newly appended rows belong there, and a causal turn
+       that moves earlier when its input arrives can put pre-existing rows
+       there too. In both cases those rows sit between the anchor and bottom,
+       so adding their height is what keeps the same anchored content still. *)
     let rows_since_pin =
       match state.msg_scroll_pin with
       | None -> 0

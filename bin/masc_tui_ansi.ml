@@ -218,6 +218,7 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Inbound -> Theme.inbound_origin ()
     | Masc_tui_message_layout.Keeper -> Theme.keeper_origin ()
     | Masc_tui_message_layout.Status -> Theme.warn ()
+    | Masc_tui_message_layout.Journal -> Theme.info ()
     | Masc_tui_message_layout.Error -> Theme.bad ()
     | Masc_tui_message_layout.Tool -> Theme.tool_origin ()
     | Masc_tui_message_layout.Skill Masc_tui_message_layout.Skill_live ->
@@ -234,6 +235,7 @@ module Chat_theme = struct
     | Masc_tui_message_layout.User | Masc_tui_message_layout.Inbound
     | Masc_tui_message_layout.Keeper -> Ansi.reset
     | Masc_tui_message_layout.Status -> Theme.warn ()
+    | Masc_tui_message_layout.Journal -> Ansi.reset
     | Masc_tui_message_layout.Error -> Theme.bad ()
     | Masc_tui_message_layout.Tool -> Ansi.reset
     | Masc_tui_message_layout.Skill skill ->
@@ -245,7 +247,8 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Error -> Theme.bad ()
     | Masc_tui_message_layout.User | Masc_tui_message_layout.Inbound
     | Masc_tui_message_layout.Keeper | Masc_tui_message_layout.Tool
-    | Masc_tui_message_layout.Skill _ | Masc_tui_message_layout.Thinking ->
+    | Masc_tui_message_layout.Journal | Masc_tui_message_layout.Skill _
+    | Masc_tui_message_layout.Thinking ->
       Ansi.default_fg
 
   let link_style_restore style =
@@ -302,6 +305,7 @@ module Chat_theme = struct
     | ( Masc_tui_message_layout.Inbound
       | Masc_tui_message_layout.Keeper
       | Masc_tui_message_layout.Status
+      | Masc_tui_message_layout.Journal
       | Masc_tui_message_layout.Error
       | Masc_tui_message_layout.Tool
       | Masc_tui_message_layout.Skill _

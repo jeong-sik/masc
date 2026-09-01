@@ -474,33 +474,48 @@ let approval_observation_fields
      | Some goal_id -> [ "goal_id", goal_id ])
 ;;
 
+(* Every line the keeper reads comes from a fragment under config/prompts, so
+   an operator rewords it without an OCaml change (RFC
+   prompts-and-tool-definitions-outside-ocaml). A render can only fail when a
+   template and its call disagree about variables, which is a build-time
+   mistake; the failure is placed in the line rather than dropped, because a
+   silently missing line reads as an absent condition rather than a broken
+   one. *)
+let render_fragment key vars =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok text -> text
+  | Error detail -> key ^ ": " ^ detail
+;;
+
 let format_approval_authority_observation
       (observation : Keeper_world_observation.approval_authority_observation)
   =
   let buffer = Buffer.create 512 in
-  Buffer.add_string buffer "### Current Approval Authority\n";
+  let revision = string_of_int observation.revision in
+  let pending_count = string_of_int (List.length observation.pending) in
   Buffer.add_string buffer
-    (Printf.sprintf "- revision=%d" observation.revision);
+    (render_fragment Prompt_names.keeper_context_approval_authority_heading []);
+  Buffer.add_char buffer '\n';
   (match observation.state with
    | Keeper_world_observation.Approval_authority_complete ->
      Buffer.add_string buffer
-       (Printf.sprintf
-          " state=complete pending_count=%d\n"
-          (List.length observation.pending));
-     Buffer.add_string buffer
-       "- Only listed IDs are pending; absent historical IDs are stale.\n"
+       (render_fragment
+          Prompt_names.keeper_context_approval_authority_state_complete
+          [ "revision", revision; "pending_count", pending_count ])
    | Keeper_world_observation.Approval_authority_partial { read_error_count } ->
      Buffer.add_string buffer
-       (Printf.sprintf
-          " state=partial known_pending_count=%d read_error_count=%d\n"
-          (List.length observation.pending)
-          read_error_count);
-     Buffer.add_string buffer
-       "- Missing IDs are unknown, not resolved; re-read Gate before changing conditional constraints.\n"
+       (render_fragment
+          Prompt_names.keeper_context_approval_authority_state_partial
+          [ "revision", revision
+          ; "pending_count", pending_count
+          ; "read_error_count", string_of_int read_error_count
+          ])
    | Keeper_world_observation.Approval_authority_unavailable ->
-     Buffer.add_string buffer " state=unavailable\n";
      Buffer.add_string buffer
-       "- No pending/resolved inference is valid.\n");
+       (render_fragment
+          Prompt_names.keeper_context_approval_authority_state_unavailable
+          [ "revision", revision ]));
+  Buffer.add_char buffer '\n';
   List.iter
     (fun approval ->
        Buffer.add_string buffer
@@ -508,7 +523,8 @@ let format_approval_authority_observation
        Buffer.add_char buffer '\n')
     observation.pending;
   Buffer.add_string buffer
-    "- Gate state does not prove effect application.\n\n";
+    (render_fragment Prompt_names.keeper_context_approval_authority_footer []);
+  Buffer.add_string buffer "\n\n";
   Buffer.contents buffer
 ;;
 
@@ -1483,41 +1499,50 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
            let standing =
              match row.Keeper_sandbox_control.row_freshness with
              | Keeper_sandbox_control.Current { target_ref; _ } ->
-               "current with " ^ target_ref
+               render_fragment
+                 Prompt_names.keeper_context_checkouts_standing_current
+                 [ "target", target_ref ]
              | Keeper_sandbox_control.Ahead { target_ref; ahead; _ } ->
-               Printf.sprintf "ahead of %s by %d" target_ref ahead
+               render_fragment
+                 Prompt_names.keeper_context_checkouts_standing_ahead
+                 [ "target", target_ref; "ahead", string_of_int ahead ]
              | Keeper_sandbox_control.Behind { target_ref; behind; _ } ->
-               Printf.sprintf "behind %s by %d" target_ref behind
+               render_fragment
+                 Prompt_names.keeper_context_checkouts_standing_behind
+                 [ "target", target_ref; "behind", string_of_int behind ]
              | Keeper_sandbox_control.Diverged { target_ref; ahead; behind; _ } ->
-               Printf.sprintf
-                 "diverged from %s: behind %d, ahead %d"
-                 target_ref
-                 behind
-                 ahead
+               render_fragment
+                 Prompt_names.keeper_context_checkouts_standing_diverged
+                 [ "target", target_ref
+                 ; "behind", string_of_int behind
+                 ; "ahead", string_of_int ahead
+                 ]
              | Keeper_sandbox_control.Freshness_unavailable reason ->
-               "freshness unavailable: " ^ reason
+               render_fragment
+                 Prompt_names.keeper_context_checkouts_standing_unavailable
+                 [ "reason", reason ]
            in
-           Printf.sprintf
-             "- %s%s%s — %s"
-             row.Keeper_sandbox_control.row_checkout_path
-             branch_part
-             dirty_part
-             standing
+           render_fragment Prompt_names.keeper_context_checkouts_row
+             [ "path", row.Keeper_sandbox_control.row_checkout_path
+             ; "branch", branch_part
+             ; "dirty", dirty_part
+             ; "standing", standing
+             ]
          in
          let unmeasured_line =
            match List.length unmeasured with
            | 0 -> []
            | count ->
-             [ Printf.sprintf
-                 "- %d checkout(s) not measurable this turn — the keeper_status \
-                  tool carries each reason"
-                 count
+             [ render_fragment Prompt_names.keeper_context_checkouts_unmeasured
+                 [ "count", string_of_int count ]
              ]
          in
          Some
-           (Printf.sprintf "### Repository Checkouts (%d)\n" (List.length rows)
-            ^ "Where each checkout stands against its upstream default branch.\n"
-            ^ String.concat "\n" (List.map line measured @ unmeasured_line)
+           (render_fragment Prompt_names.keeper_context_checkouts_section
+              [ "count", string_of_int (List.length rows)
+              ; ( "rows"
+                , String.concat "\n" (List.map line measured @ unmeasured_line) )
+              ]
             ^ "\n\n"))
     (* 4. Autonomous trigger — lower churn than reactive inboxes. *)
     | Keeper_context_layers.Autonomous_trigger ->

@@ -73,3 +73,22 @@ let keeper_antigravity_system_instructions_label = "keeper.antigravity.system_in
 let keeper_antigravity_current_goal_label = "keeper.antigravity.current_goal_label"
 let eval_calibration_few_shot = "eval.calibration.few_shot"
 let eval_calibration_few_shot_example = "eval.calibration.few_shot.example"
+
+(* Repository checkout freshness — one fragment per line part, so an
+   operator can reword any of them without an OCaml change. *)
+let keeper_context_checkouts_section = "keeper.context.checkouts.section"
+let keeper_context_checkouts_row = "keeper.context.checkouts.row"
+let keeper_context_checkouts_standing_current = "keeper.context.checkouts.standing.current"
+let keeper_context_checkouts_standing_ahead = "keeper.context.checkouts.standing.ahead"
+let keeper_context_checkouts_standing_behind = "keeper.context.checkouts.standing.behind"
+let keeper_context_checkouts_standing_diverged = "keeper.context.checkouts.standing.diverged"
+let keeper_context_checkouts_standing_unavailable = "keeper.context.checkouts.standing.unavailable"
+let keeper_context_checkouts_unmeasured = "keeper.context.checkouts.unmeasured"
+
+(* Approval authority — the same split, so the state wording is an
+   operator surface rather than an OCaml literal. *)
+let keeper_context_approval_authority_heading = "keeper.context.approval_authority.heading"
+let keeper_context_approval_authority_state_complete = "keeper.context.approval_authority.state.complete"
+let keeper_context_approval_authority_state_partial = "keeper.context.approval_authority.state.partial"
+let keeper_context_approval_authority_state_unavailable = "keeper.context.approval_authority.state.unavailable"
+let keeper_context_approval_authority_footer = "keeper.context.approval_authority.footer"

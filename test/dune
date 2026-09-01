@@ -3139,11 +3139,6 @@
   masc_tui_message_layout))
 
 (test
- (name test_tui_schedule_form)
- (modules test_tui_schedule_form)
- (libraries alcotest astring masc_tui_types))
-
-(test
  (name test_tui_markdown_render_cache)
  (modules test_tui_markdown_render_cache)
  (libraries alcotest masc_tui_markdown masc_tui_markdown_render_cache))

@@ -1436,61 +1436,6 @@ let add_routes ~sw ~clock router =
                (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
        ) request reqd)
-  (* Schedule create from the terminal. The workspace tool owns the argument
-     contract ([Tool_schedule.handle_create]: keeper_name, message, the
-     timing shapes) and the store write; the route pipes HTTP straight into
-     that handler, the way cancel above does, so validation and error text
-     stay identical to the MCP tool. Create, unlike cancel, needs the tool's
-     full context — the wake result-delivery stamp and the creation
-     admission the MCP dispatch injects — and the acting agent comes off the
-     same headers the Board tool routes read. *)
-  |> Http.Router.post "/api/v1/tools/masc_schedule_create" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_schedule_create"
-         (fun state _req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let ( let* ) r f =
-               match r with
-               | Ok v -> f v
-               | Error msg ->
-                   respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (activity_result_json ~ok:false ~message:msg)
-             in
-             let* args =
-               try Ok (Yojson.Safe.from_string body_str)
-               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
-             in
-             let config = (Mcp_server.workspace_scope state).Mcp_server.config in
-             (* NDT-OK: the dispatch-boundary clock the tool contract takes
-                as [start_time] — the same reading the cancel route above and
-                the MCP dispatch take at their boundaries. It times the call
-                and anchors an absent [requested_at_unix]; no deterministic
-                branch reads it. *)
-             let start_time = Unix.gettimeofday () in
-             let result =
-               Tool_schedule.handle_create
-                 ~tool_name:"masc_schedule_create" ~start_time
-                 { Tool_schedule.config
-                 ; agent_name = board_tool_agent_name_from_request request
-                 ; stamp_keeper_wake_result_delivery =
-                     (fun ~payload ->
-                       Schedule_payload_projection
-                       .set_keeper_wake_result_delivery ~payload ~channel:None)
-                 ; admit_keeper_wake_creation =
-                     Keeper_schedule_creation_admission.run
-                 }
-                 args
-             in
-             let ok = Tool_result.is_success result in
-             let msg = Tool_result.message result in
-             let status = if ok then `OK else `Bad_request in
-             respond_json_value_with_cors ~status request reqd
-               (activity_result_json ~ok ~message:msg)
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd
-               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
-         )
-       ) request reqd)
 
   |> Http.Router.get "/api/v1/karma" (fun request reqd ->
        with_public_read (fun _state _req reqd ->

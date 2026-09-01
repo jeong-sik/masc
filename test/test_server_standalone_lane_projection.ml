@@ -459,6 +459,47 @@ let test_verifier_detail_keeps_verdict_reason_and_tools () =
        |> Yojson.Safe.Util.to_string)
 ;;
 
+let check_no_keeper_skill_evidence ~label = function
+  | Projection.Detail_not_found | Projection.Detail_ambiguous ->
+    fail (label ^ " detail is unavailable")
+  | Projection.Detail_found json ->
+    check string
+      (label ^ " Skill evidence")
+      "no_keeper_skills"
+      (json
+       |> Yojson.Safe.Util.member "run"
+       |> Yojson.Safe.Util.member "skill_evidence"
+       |> Yojson.Safe.Util.member "state"
+       |> Yojson.Safe.Util.to_string)
+;;
+
+let test_every_retained_run_kind_projects_skill_evidence () =
+  Exact.all_lanes
+  |> List.iteri (fun index lane ->
+    let run_id = Printf.sprintf "exact-skill-%d" index in
+    let run = exact_run ~run_id ~lane ~started_at:100. ~status:Exact.Running in
+    Projection.For_testing.run_detail_json_with
+      ~run_id
+      ~exact_runs:[ run ]
+      ~verification_runs:[]
+      ~goal_verification_runs:[]
+    |> check_no_keeper_skill_evidence ~label:(Exact.lane_key lane));
+  let task = task_verification_run ~verification_id:"task-skill" ~started_at:90. in
+  Projection.For_testing.run_detail_json_with
+    ~run_id:"task-skill"
+    ~exact_runs:[]
+    ~verification_runs:[ task ]
+    ~goal_verification_runs:[]
+  |> check_no_keeper_skill_evidence ~label:"task verification";
+  let goal = goal_verification_run ~run_id:"goal-skill" ~started_at:80. in
+  Projection.For_testing.run_detail_json_with
+    ~run_id:"goal-skill"
+    ~exact_runs:[]
+    ~verification_runs:[]
+    ~goal_verification_runs:[ goal ]
+  |> check_no_keeper_skill_evidence ~label:"goal verification"
+;;
+
 let test_unknown_lane_and_duplicate_identity_fail_explicitly () =
   (match
      Projection.For_testing.recent_run_page_json_with
@@ -512,6 +553,10 @@ let () =
             "verifier detail keeps verdict reason and tools"
             `Quick
             test_verifier_detail_keeps_verdict_reason_and_tools
+        ; test_case
+            "every retained run kind projects Skill evidence"
+            `Quick
+            test_every_retained_run_kind_projects_skill_evidence
         ; test_case
             "unknown lane and duplicate identity fail explicitly"
             `Quick

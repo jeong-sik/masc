@@ -169,9 +169,24 @@ let verifier_input ~kind ~subject_key ~subject_id fields =
     ]
 ;;
 
-let retained_run_detail_json = function
+let retained_run_skill_evidence_json = function
   | Exact_run run ->
-    `Assoc
+    (match run.Exact_lane_run_registry.lane with
+     | Exact_lane_run_registry.Librarian
+     | Exact_lane_run_registry.Hitl_auto_judge
+     | Exact_lane_run_registry.Board_attention ->
+       `Assoc [ "state", `String "no_keeper_skills" ])
+  | Task_verification_run _ | Goal_verification_run _ ->
+    `Assoc [ "state", `String "no_keeper_skills" ]
+;;
+
+let retained_run_detail_json run =
+  let with_skill_evidence fields =
+    `Assoc (("skill_evidence", retained_run_skill_evidence_json run) :: fields)
+  in
+  match run with
+  | Exact_run run ->
+    with_skill_evidence
       (("run_kind", `String "exact_output")
        :: assoc_fields (Exact_lane_run_registry.run_to_yojson run))
   | Task_verification_run run ->
@@ -181,7 +196,7 @@ let retained_run_detail_json = function
       | Verification_run_registry.Completed _ ->
         [ "output", Verification_run_registry.run_to_yojson run ]
     in
-    `Assoc
+    with_skill_evidence
       (task_verification_summary_fields run
        @ [ ( "input"
            , verifier_input
@@ -200,7 +215,7 @@ let retained_run_detail_json = function
       | Goal_verification_run_registry.Completed _ ->
         [ "output", Goal_verification_run_registry.run_to_yojson run ]
     in
-    `Assoc
+    with_skill_evidence
       (goal_verification_summary_fields run
        @ [ ( "input"
            , verifier_input

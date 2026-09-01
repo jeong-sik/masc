@@ -6300,12 +6300,13 @@ let decode_lane_run_tool_evidence ~run_kind ~output =
   | Lane_run_kind_other _, _ -> Ok Lane_run_tools_contract_unknown
 ;;
 
-let lane_run_skill_evidence = function
-  | Lane_run_exact_output
-  | Lane_run_task_verification
-  | Lane_run_goal_verification ->
-    Lane_run_no_skills_by_contract
-  | Lane_run_kind_other _ -> Lane_run_skills_contract_unknown
+let decode_lane_run_skill_evidence run =
+  let* evidence = required_object_field run "skill_evidence" in
+  let* state = required_string_field evidence "state" in
+  match state with
+  | "no_keeper_skills" -> Ok Lane_run_no_skills_by_contract
+  | "unknown" -> Ok Lane_run_skills_contract_unknown
+  | other -> Error (Printf.sprintf "unknown lane run Skill evidence state %S" other)
 ;;
 
 let decode_lane_run_gate_judgment ~lane ~status ~output =
@@ -6315,26 +6316,32 @@ let decode_lane_run_gate_judgment ~lane ~status ~output =
   if not (String.equal lane hitl_lane)
   then Ok Lane_run_not_gate_judgment
   else
+    let decode_advisory output =
+      let* judgment = required_string_field output "judgment" in
+      match
+        Keeper_approval_queue_rules_types.advisory_judgment_of_string judgment
+      with
+      | Some judgment -> Ok (Lane_run_gate_advisory judgment)
+      | None ->
+        Error
+          (Printf.sprintf
+             "HITL lane run judgment %S is not %s"
+             judgment
+             (String.concat
+                "/"
+                Keeper_approval_queue_rules_types.advisory_judgment_values))
+    in
     match status, output with
     | Lane_run_running, _ -> Ok Lane_run_gate_judgment_pending
-    | Lane_run_succeeded, Some output ->
-      let* judgment = required_string_field output "judgment" in
-      (match
-         Keeper_approval_queue_rules_types.advisory_judgment_of_string judgment
-       with
-       | Some judgment -> Ok (Lane_run_gate_advisory judgment)
-       | None ->
-         Error
-           (Printf.sprintf
-              "HITL lane run judgment %S is not %s"
-              judgment
-              (String.concat
-                 "/"
-                 Keeper_approval_queue_rules_types.advisory_judgment_values)))
+    | Lane_run_succeeded, Some output -> decode_advisory output
+    | (Lane_run_completion_persistence_failed | Lane_run_completion_durability_unknown),
+      Some output ->
+      let* judgment = optional_string_field output "judgment" in
+      (match judgment with
+       | None -> Ok Lane_run_gate_judgment_not_reached
+       | Some _ -> decode_advisory output)
     | ( Lane_run_cancelled
       | Lane_run_failed
-      | Lane_run_completion_persistence_failed
-      | Lane_run_completion_durability_unknown
       | Lane_run_approved
       | Lane_run_reviewed
       | Lane_run_committed
@@ -6446,7 +6453,7 @@ let decode_lane_run_detail json =
     decode_lane_run_tool_evidence ~run_kind:summary.lrs_run_kind
       ~output:lrd_output
   in
-  let lrd_skill_evidence = lane_run_skill_evidence summary.lrs_run_kind in
+  let* lrd_skill_evidence = decode_lane_run_skill_evidence run in
   let* lrd_gate_judgment =
     decode_lane_run_gate_judgment ~lane:summary.lrs_lane
       ~status:summary.lrs_status ~output:lrd_output

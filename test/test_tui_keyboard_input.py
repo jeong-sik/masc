@@ -7366,6 +7366,7 @@ def verifier_lane_run_detail_response() -> HttpResponse:
                 "status": "rejected",
                 "elapsed_s": 3.0,
                 "selected_slot": "verifier-primary",
+                "skill_evidence": {"state": "no_keeper_skills"},
                 "input": {
                     "kind": "exact",
                     "payload": {
@@ -7438,6 +7439,7 @@ def hitl_lane_run_detail_response() -> HttpResponse:
                 "status": "succeeded",
                 "elapsed_s": 2.0,
                 "selected_slot": "judge-primary",
+                "skill_evidence": {"state": "no_keeper_skills"},
                 "input": {
                     "kind": "exact",
                     "payload": {"tool_name": "network_read"},
@@ -8327,6 +8329,29 @@ def keeper_lanes_ia_interaction(gate: GatedHttpResponse) -> Interaction:
                 raise AssertionError(
                     f"HITL detail omitted {evidence!r}: {hitl_detail!r}"
                 )
+        compact_hitl_detail = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=14,
+            columns=140,
+            needle=b"Left / Esc",
+            controls=(FULL_REDRAW,),
+        )
+        if b"Left / Esc" not in CSI_RE.sub(b"", compact_hitl_detail):
+            raise AssertionError(
+                "Minimum-height HITL detail clipped its footer: "
+                f"{compact_hitl_detail!r}"
+            )
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=140,
+            needle=b"GATE RESOLUTION  NOT PROVEN BY THIS RUN",
+            controls=(FULL_REDRAW,),
+        )
         send_and_wait(process, master_fd, output, b"\x1b", b"succeeded")
         send_and_wait(process, master_fd, output, b"\x1b", banded_hitl)
         send_and_wait(process, master_fd, output, b"k", banded_board)

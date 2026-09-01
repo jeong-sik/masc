@@ -5558,6 +5558,7 @@ let lane_run_stacked_lines ~width (detail : Tui_decode.lane_run_detail) =
 
 let lane_run_pane_progress ~scroll ~height total =
   if total = 0 then "0/0"
+  else if height <= 0 then Printf.sprintf "0/%d" total
   else
     Printf.sprintf "%d-%d/%d" (scroll + 1) (min total (scroll + height)) total
 
@@ -5629,13 +5630,17 @@ let render_lane_run_detail (state : state) ~run_id =
         in
         let output_lines = lane_run_output_lines ~width:right_width detail in
         let content_height =
-          max 1 (rows - List.length summary - 7 - error_rows)
+          max 0 (rows - List.length summary - 7 - error_rows)
         in
         let input_max_scroll =
-          max 0 (List.length input_lines - content_height)
+          if content_height = 0
+          then 0
+          else max 0 (List.length input_lines - content_height)
         in
         let output_max_scroll =
-          max 0 (List.length output_lines - content_height)
+          if content_height = 0
+          then 0
+          else max 0 (List.length output_lines - content_height)
         in
         let max_scroll = max input_max_scroll output_max_scroll in
         let scroll = max 0 (min state.lane_run_detail_scroll max_scroll) in
@@ -5673,9 +5678,13 @@ let render_lane_run_detail (state : state) ~run_id =
           lane_run_stacked_lines ~width:(max 1 (cols - 8)) detail
         in
         let content_height =
-          max 1 (rows - List.length summary - 6 - error_rows)
+          max 0 (rows - List.length summary - 6 - error_rows)
         in
-        let max_scroll = max 0 (List.length lines - content_height) in
+        let max_scroll =
+          if content_height = 0
+          then 0
+          else max 0 (List.length lines - content_height)
+        in
         let scroll = max 0 (min state.lane_run_detail_scroll max_scroll) in
         for index = 0 to content_height - 1 do
           match List.nth_opt lines (index + scroll) with

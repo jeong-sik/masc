@@ -390,9 +390,6 @@ let test_provider_content_messages_rejects_prompt_carrier_mismatch () =
         @ Agent_core.Types.Extra_system_context_provenance.metadata
     }
   in
-  (* The reason, not just the rejection: an operator reading a turn with no
-     composition needs to know which of these five happened, because the fix
-     differs for each. *)
   (* The whole logged line, not the reason alone. Two of these five reach
      [Prompt_context_presence_mismatch] from opposite conditions -- announced
      and absent, arrived and unannounced -- and share a reason string, so

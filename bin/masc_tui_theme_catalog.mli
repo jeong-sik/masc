@@ -6,10 +6,10 @@
     terminal's has nowhere to say so, and pointing them at a directory they
     have to fill first means the picker is empty the first time it opens.
 
-    So the bundled catalog rides along. They are real base16 schemes from
-    tinted-theming/schemes (MIT), the same ones the contrast harness measures,
-    which is the point: what ships is what was measured. They are not palettes
-    masc invented. *)
+    So masc bundles this measured catalog. Its entries are real base16 schemes
+    from tinted-theming/schemes (MIT), the same ones the contrast harness
+    measures. What ships is therefore what was measured, not palettes masc
+    invented. *)
 
 type t
 

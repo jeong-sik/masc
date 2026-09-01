@@ -12937,9 +12937,9 @@ let render_themes (state : state) =
   ;
   box_line_styled buf cols ~style:Ansi.dim
     (if lift_on then
-       "  order: native-pass first, then lift count + name · native=all 7 pass 4.5:1"
+       "  order: least assistance, then name · native 7/7=no lift · lift N/7=N raised"
      else
-       "  order: native-pass first, then low count + name · N low=N below 4.5:1");
+       "  order: fewest low colours, then name · native 7/7=all pass · N/7 low=below 4.5:1");
   List.iteri
     (fun index (entry : Theme_choice.entry) ->
       if index >= scroll && index < scroll + content_height then begin

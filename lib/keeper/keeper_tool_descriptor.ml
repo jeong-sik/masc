@@ -1973,7 +1973,7 @@ let internal_descriptors : t list =
       ~input_schema_source:memory_retract_schema_source
       ~id:"keeper.memory.retract"
       ~name:"keeper_memory_retract"
-      ~description:Tool_shard_types_schemas_base_toml.memory_retract.description
+      ~description:memory_retract_schema.description
       ~input_schema:memory_retract_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_memory_retract

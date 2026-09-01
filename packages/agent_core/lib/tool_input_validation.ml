@@ -247,20 +247,39 @@ let property_matches property value =
   | `Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> true
 ;;
 
-(* Enum wins over const wins over type: when a property declares an enum and
-   the value failed [property_matches], the enum check necessarily failed too
-   (a coherent schema's enum values satisfy its own type), so naming the
-   allowed values is the report the caller can act on. A malformed enum
-   declaration (non-list) falls back to the type report rather than
-   advertising an empty allowed set. *)
-let expected_of_property property =
+(* Reports the constraint the value actually failed, not the loudest declared
+   one. A value can be a member of the declared enum and still violate a
+   sibling const, so declaration priority alone would reject a value while
+   naming an allowed list that contains it. With no value at hand (a missing
+   field), declaration order — enum, const, type — is the honest report. A
+   malformed enum declaration (non-list) falls back to the type report rather
+   than advertising an allowed set that was never declared. *)
+let expected_of_property ?against property =
   let types = Option.value ~default:[] (property_type_names property) in
   match property with
   | `Assoc fields ->
-    (match List.assoc_opt "enum" fields with
-     | Some (`List allowed) -> Expected_enum { types; allowed }
-     | Some _ | None ->
-       (match List.assoc_opt "const" fields with
+    let violated declared holds =
+      match declared with
+      | None -> None
+      | Some payload ->
+        (match against with
+         | None -> Some payload
+         | Some value -> if holds payload value then None else Some payload)
+    in
+    let enum_members =
+      match List.assoc_opt "enum" fields with
+      | Some (`List allowed) -> Some allowed
+      | Some
+          (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _)
+      | None -> None
+    in
+    (match
+       violated enum_members (fun allowed value ->
+         List.exists (json_semantic_equal value) allowed)
+     with
+     | Some allowed -> Expected_enum { types; allowed }
+     | None ->
+       (match violated (List.assoc_opt "const" fields) json_semantic_equal with
         | Some value -> Expected_const value
         | None -> Expected_types types))
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
@@ -270,6 +289,11 @@ let expected_of_property property =
 let describe_expected = function
   | Expected_types [] -> "declared schema"
   | Expected_types type_names -> String.concat " or " type_names
+  | Expected_enum { allowed = []; _ } ->
+    (* [enum: []] admits no value at all; reporting the type instead would
+       reject a well-typed value while telling the caller its type was
+       wrong. Say what the schema actually does. *)
+    "an empty enum (the schema accepts no value)"
   | Expected_enum { allowed; _ } ->
     "one of: " ^ String.concat ", " (List.map Yojson.Safe.to_string allowed)
   | Expected_const value -> "exactly " ^ Yojson.Safe.to_string value
@@ -315,14 +339,17 @@ let validate_authoritative input_schema input =
              Some
                { path
                ; expected =
-                   Option.fold ~none:Expected_required ~some:expected_of_property property
+                   Option.fold
+                   ~none:Expected_required
+                   ~some:(fun property -> expected_of_property property)
+                   property
                ; actual = Missing
                }
            | None, _ -> None
            | Some value, Some property when not (property_matches property value) ->
              Some
                { path
-               ; expected = expected_of_property property
+               ; expected = expected_of_property ~against:value property
                ; actual = Received (describe_json_value value)
                }
            | Some _, _ -> None)

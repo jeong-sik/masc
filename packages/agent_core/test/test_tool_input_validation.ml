@@ -489,6 +489,81 @@ let test_const_violation_renders_exactly () =
   | Tool_input_validation.Valid _ -> fail "expected Invalid for a const mismatch"
 ;;
 
+let test_const_beside_enum_reports_const () =
+  (* The value is a member of the declared enum and fails only the sibling
+     const. Declaration priority alone would answer "one of: a, b" — a list
+     that contains the rejected value — so the report must name the conjunct
+     that actually failed. *)
+  let schema =
+    match
+      Types.tool_schema_of_input_schema
+        ~name:"test_tool"
+        ~description:"test"
+        ~input_schema:
+          (`Assoc
+            [ "type", `String "object"
+            ; ( "properties"
+              , `Assoc
+                  [ ( "mode"
+                    , `Assoc
+                        [ "type", `String "string"
+                        ; "enum", `List [ `String "a"; `String "b" ]
+                        ; "const", `String "a"
+                        ] )
+                  ] )
+            ; "required", `List [ `String "mode" ]
+            ])
+        ()
+    with
+    | Ok schema -> schema
+    | Error message -> fail message
+  in
+  match Tool_input_validation.validate schema (`Assoc [ "mode", `String "b" ]) with
+  | Tool_input_validation.Invalid [ error ] ->
+    check
+      string
+      "the failed conjunct is the const"
+      {|exactly "a"|}
+      (Tool_input_validation.describe_expected error.expected)
+  | Tool_input_validation.Invalid _ -> fail "expected exactly one error"
+  | Tool_input_validation.Valid _ -> fail "expected Invalid for a const mismatch"
+;;
+
+let test_missing_field_with_enum_reports_enum () =
+  let input = `Assoc [] in
+  match Tool_input_validation.validate (projection_enum_schema ()) input with
+  | Tool_input_validation.Invalid ([ error ] as errors) ->
+    check
+      string
+      "missing field reports the declared enum"
+      {|one of: "compact", "full"|}
+      (Tool_input_validation.describe_expected error.expected);
+    let msg =
+      Tool_input_validation.format_errors_inline ~tool_name:"test_tool" ~args:input errors
+    in
+    check
+      bool
+      "MISSING line carries the enum members"
+      true
+      (Re.execp Re.(compile (str {|MISSING (required: one of: "compact", "full")|})) msg)
+  | Tool_input_validation.Invalid _ -> fail "expected exactly one error"
+  | Tool_input_validation.Valid _ -> fail "expected Invalid for the missing field"
+;;
+
+let test_empty_enum_renders_its_emptiness () =
+  let error : Tool_input_validation.field_error =
+    { path = "/mode"
+    ; expected = Expected_enum { types = [ "string" ]; allowed = [] }
+    ; actual = Received "string(\"anything\")"
+    }
+  in
+  check
+    string
+    "empty enum names the schema's refusal, not a type"
+    "an empty enum (the schema accepts no value)"
+    (Tool_input_validation.describe_expected error.expected)
+;;
+
 let test_non_string_enum_renders_literals () =
   let error : Tool_input_validation.field_error =
     { path = "/level"
@@ -553,6 +628,18 @@ let () =
             "const violation renders exactly"
             `Quick
             test_const_violation_renders_exactly
+        ; test_case
+            "const beside enum reports const"
+            `Quick
+            test_const_beside_enum_reports_const
+        ; test_case
+            "missing field with enum reports enum"
+            `Quick
+            test_missing_field_with_enum_reports_enum
+        ; test_case
+            "empty enum renders its emptiness"
+            `Quick
+            test_empty_enum_renders_its_emptiness
         ; test_case
             "non-string enum renders literals"
             `Quick

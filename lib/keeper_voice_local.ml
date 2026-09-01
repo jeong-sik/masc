@@ -16,18 +16,25 @@ let masc_base_dir () =
   | Some base_path -> Workspace_utils.masc_dir_from_base_path ~base_path
   | None -> Common.masc_dirname
 
-(** Singleton session manager, lazily initialized.
-    Thread-safety: safe under single Eio domain — all fibers share one
-    OS thread, so [ref] read/write cannot race. No Eio.Mutex needed.
-    Voice_session_manager.restore is called once on first access;
-    subsequent calls to [get_session_manager] return the cached value. *)
-let session_manager_ref : Voice_session_manager.t option ref = ref None
+(** Singleton session manager, lazily initialized. Creation and restore may
+    perform filesystem effects, so one cooperative cross-context lock owns the
+    slow path. Readers use the immutable atomic lifecycle snapshot. *)
+type lifecycle =
+  | Uninitialized
+  | Ready of Voice_session_manager.t
+
+let lifecycle = Atomic.make Uninitialized
+let initialization_lock = Cross_context_mutex.create ()
 
 let get_session_manager () =
-  match !session_manager_ref with
-  | Some mgr -> mgr
-  | None ->
-    let mgr = Voice_session_manager.create ~config_path:(masc_base_dir ()) in
-    Voice_session_manager.restore mgr;
-    session_manager_ref := Some mgr;
-    mgr
+  match Atomic.get lifecycle with
+  | Ready mgr -> mgr
+  | Uninitialized ->
+    Cross_context_mutex.with_lock initialization_lock (fun () ->
+      match Atomic.get lifecycle with
+      | Ready mgr -> mgr
+      | Uninitialized ->
+        let mgr = Voice_session_manager.create ~config_path:(masc_base_dir ()) in
+        Voice_session_manager.restore mgr;
+        Atomic.set lifecycle (Ready mgr);
+        mgr)

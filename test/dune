@@ -768,7 +768,12 @@
   masc.skill_config masc.skill_reference masc.skill_snapshot
   ;; The fake ssh shim renders its result trailer with the same function
   ;; the real shim uses, so the wire version cannot be typed in by hand.
-  exec_ssh_protocol))
+ exec_ssh_protocol))
+
+(test
+ (name test_voice_session_manager)
+ (modules test_voice_session_manager)
+ (libraries masc_test_deps eio_main unix))
 
 ; Extracted from the big (tests ...) group above: the fixtures run the typed
 ; dispatch on a keeper meta whose sandbox_profile resolves to Local (the

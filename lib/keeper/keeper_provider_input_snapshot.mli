@@ -5,7 +5,11 @@
     final projected message list, system prompt, and effective tool surface.
     This store persists those values as content-addressed artifacts and joins
     them to the TurnRecord with the same [turn_ref]. Repeated history messages
-    therefore occupy one blob even when many turns transmit them. *)
+    therefore occupy one blob even when many turns transmit them, and a
+    successful prior snapshot lets the next turn reuse those durable
+    references without rewriting and fsyncing the same bytes. Snapshot rows
+    keep empty artifact previews, so message text lives only in the blob and
+    is exposed through the administrator-only resolving endpoint. *)
 
 type artifact =
   { bytes : int

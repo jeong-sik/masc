@@ -36,10 +36,11 @@ Eio 의 `Switch` 는 `Fiber.fork` 로 얹은 fiber 가 전부 끝나야 닫힌�
 ## fork 를 유지하는 이유 (한 줄)
 
 모든 자리의 switch 는 서버 수명 switch 로 수렴하고, 서버 종료는
-`main_eio.ml:817` 의 `Graceful_shutdown` 이 switch 를 취소로 끝내므로 아무도
-닫기를 기다리지 않는다. `fork_daemon` 으로 바꾸면 오히려 서버 종료 시 이 fiber 가
-switch 밖으로 새어 정리되지 않는다. 따라서 fork 를 유지하고, 계약을 `.mli` 에
-적는다.
+`main_eio.ml:817` 의 `Graceful_shutdown` 이 switch 를 취소로 끝내므로 정상 drain 을
+기다리는 경로가 없다. `fork_daemon` 도 switch 종료 시 취소되고 취소 완료까지
+join 되므로 fiber 가 switch 밖으로 새지는 않는다. 다만 daemon 전환은 정상 drain
+때 기다리지 않는다는 별도 소유권 변경이며, 이 조사에서 필요한 수리가 아니다.
+따라서 fork 를 유지하고 현재 계약을 `.mli` 에 적는다.
 
 ## .mli 계약 추가 (4개)
 

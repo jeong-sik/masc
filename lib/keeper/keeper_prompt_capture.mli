@@ -73,4 +73,3 @@ val to_json : capture -> Yojson.Safe.t
 (** Decode the capture object emitted by {!to_json}. Extra envelope fields are
     ignored so the same decoder can read the dashboard route, which adds the
     keeper name and surface identity around this object. *)
-val capture_of_json : Yojson.Safe.t -> (capture, string) result

@@ -89,7 +89,6 @@ val decode_provider_input :
   (provider_input, string) result
 
 val input_component_label : Turn_record.input_component_id -> string
-val prompt_block_label : Prompt_block_id.t -> string
 val exact_input_label : exact_input_kind -> string
 
 val input_map_rows :

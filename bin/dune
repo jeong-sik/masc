@@ -996,37 +996,6 @@
 ;; response alone. Makes live HTTP calls against a running server (NOT a
 ;; test — CI determinism rules forbid network calls in test/).
 
-(executable
- (name keeper_canary_run)
- (modules keeper_canary_run keeper_canary_http)
- (public_name masc-keeper-canary-run)
- (package masc)
- (libraries
-  masc
-  masc.keeper_canary
-  masc.time_codec
-  masc.server
-  masc.runtime
-  masc.agent_core
-  masc.agent_core.llm_provider
-  masc.crypto_rng
-  masc.config
-  masc.config_dir_resolver
-  masc.masc_random_id
-  masc.http_client
-  masc.keeper_chat_delivery_identity
-  masc_types
-  masc_core
-  unix
-  yojson
-  digestif
-  eio
-  eio_main
-  time_compat
-  masc_eio_context
-  masc_process
-  fs_compat))
-
 (library
  (name masc_tui_image_ref)
  (wrapped false)

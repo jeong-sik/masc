@@ -91,7 +91,7 @@
   ; keeper_canary_run.ml's pure logic (nonce fact gen + turn plan +
   ; recall scoring + evidence JSON schema), split out for unit-testability
   ; (masc, task-11).
-  (re_export masc.keeper_canary)
+  (re_export keeper_canary_test_support)
   (re_export masc.keeper_chat_delivery_identity)
   (re_export masc.keeper_chat_operations)
   (re_export masc.keeper_contract)

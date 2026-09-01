@@ -203,6 +203,8 @@ let test_interval_for_wall_clock () =
     (Keeper_canary_facts.interval_for_wall_clock ~gaps:(-1) ~target_s:3600.0)
 
 let () =
+  Prompt_registry.set_markdown_dir
+    (Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts");
   Alcotest.run
     "keeper_canary_facts"
     [ ( "generate"

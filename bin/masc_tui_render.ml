@@ -6635,7 +6635,14 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
    position must not be measured against. *)
 let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
   let messages =
-    Option.value ~default:(chat_rows_for state keeper_name) messages
+    (* [Option.value ~default:] evaluates its default strictly, so writing it
+       here ran [chat_rows_for] — the pane's most expensive derivation — and
+       threw the result away on exactly the call site that passes [~messages]
+       to avoid recomputing it (#32429). The match keeps the caller's copy
+       authoritative and computes only when nothing was passed. *)
+    (match messages with
+     | Some messages -> messages
+     | None -> chat_rows_for state keeper_name)
     |> List.filter (fun message ->
       state.msg_memory_visibility <> Memory_hidden
       || message.me_role <> Message_memory)

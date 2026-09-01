@@ -604,6 +604,47 @@ let assert_policy_validation_payload ?(reason = "invalid_args") ~label result =
     true
     (Tool_result.failure_class result = Some Tool_result.Policy_rejection)
 
+let assert_schema_shape_has_execute_alternatives ~label result =
+  match Yojson.Safe.Util.member "schema_shape" (Tool_result.data result) with
+  | `Assoc fields ->
+    (match List.assoc_opt "properties" fields with
+     | Some (`Assoc _) -> ()
+     | Some shape ->
+       Alcotest.failf
+         "%s: expected schema_shape.properties object, got %s"
+         label
+         (Yojson.Safe.to_string shape)
+     | None -> Alcotest.failf "%s: missing schema_shape.properties" label);
+    (match List.assoc_opt "one_of_required" fields with
+     | Some (`List branches) ->
+       let has_execute_alternative =
+         List.exists
+           (function
+             | `List names ->
+               List.exists
+                 (function
+                   | `String name -> name = "argv" || name = "pipeline"
+                   | _ -> false)
+                 names
+             | _ -> false)
+           branches
+       in
+       Alcotest.(check bool)
+         (label ^ " has typed execute alternatives")
+         true
+         has_execute_alternative
+     | Some shape ->
+       Alcotest.failf
+         "%s: expected schema_shape.one_of_required list, got %s"
+         label
+         (Yojson.Safe.to_string shape)
+     | None -> Alcotest.failf "%s: missing schema_shape.one_of_required" label)
+  | shape ->
+    Alcotest.failf
+      "%s: expected schema_shape object, got %s"
+      label
+      (Yojson.Safe.to_string shape)
+
 let test_registered_hook_tool_edit_file_patch_args () =
   let args =
     `Assoc
@@ -1619,7 +1660,8 @@ let test_validate_args_tool_execute_rejects_bad_argv_type () =
   with
   | Error result ->
     let msg = Yojson.Safe.to_string (Tool_result.data result) in
-    Alcotest.(check bool) "mentions argv" true (string_contains msg "argv")
+    Alcotest.(check bool) "mentions argv" true (string_contains msg "argv");
+    assert_schema_shape_has_execute_alternatives ~label:"bad argv type" result
   | Ok forwarded ->
     Alcotest.failf
       "expected typed tool_execute argv string to fail, got %s"
@@ -2139,7 +2181,10 @@ let test_validate_args_tool_execute_pipeline_rejects_null_argv () =
   | Error result ->
     let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool) "mentions exact-one-of" true
-      (string_contains msg "exactly one of")
+      (string_contains msg "exactly one of");
+    assert_schema_shape_has_execute_alternatives
+      ~label:"pipeline with null argv"
+      result
   | Ok forwarded ->
     Alcotest.failf
       "expected tool_execute pipeline with null argv to fail, got %s"

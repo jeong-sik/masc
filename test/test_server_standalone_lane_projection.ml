@@ -106,6 +106,12 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
     |> Yojson.Safe.Util.to_string
   in
   check string "board running" "running" (status "board_attention_exact");
+  check string
+    "board consumer purpose"
+    "Judges one durable Board candidate for Keeper attention."
+    (lane_by_id json "board_attention_exact"
+     |> Yojson.Safe.Util.member "purpose"
+     |> Yojson.Safe.Util.to_string);
   check string "hitl idle" "idle" (status "hitl_auto_judge");
   check string "librarian degraded" "degraded" (status "librarian_exact");
   check string "verifier idle" "idle" (status Runtime.verifier_exact_lane_id);

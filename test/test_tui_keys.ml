@@ -66,8 +66,8 @@ let test_system_logs_footer_names_browser_controls () =
     (Masc_tui_keys.footer_hints System_logs)
 
 let test_lanes_footer_opens_standalone_runs () =
-  check str "Lanes names its standalone run drill-down"
-    "j/k:move  Right / Enter:runs  Esc:overview  r:refresh  Tab:next  q:quit"
+  check str "Lanes names its run drill-down and exact config source"
+    "j/k:move  Right / Enter:runs  e:lane config  Esc:overview  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =
@@ -471,6 +471,7 @@ let test_without_a_surface_the_order_is_the_strips () =
 let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
   { Tui_decode.sl_lane_id = lane_id
   ; sl_label = label
+  ; sl_purpose = None
   ; sl_required = false
   ; sl_status = Tui_decode.Standalone_idle
   ; sl_configuration_state = "ready"

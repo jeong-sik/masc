@@ -839,6 +839,9 @@ type standalone_lane_slot_count = {
 type standalone_lane = {
   sl_lane_id : string;
   sl_label : string;
+  sl_purpose : string option;
+      (** Human-readable consumer purpose. Optional so a newer TUI can still
+          read a retained v1 snapshot written before the field was added. *)
   sl_required : bool;
   sl_status : standalone_lane_status;
   sl_configuration_state : string;

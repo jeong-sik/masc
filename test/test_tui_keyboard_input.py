@@ -6540,9 +6540,22 @@ def standalone_lane_fixture(
 ) -> dict[str, object]:
     """One row of the observation matrix, in the wire shape the strict
     decoder accepts: every known lane exactly once, observation_only set."""
+    purposes = {
+        "board_attention_exact": (
+            "Judges one durable Board candidate for Keeper attention."
+        ),
+        "hitl_auto_judge": (
+            "Produces the structured judgment for one held approval."
+        ),
+        "librarian_exact": (
+            "Selects the next Memory OS snapshot from immutable Keeper history."
+        ),
+        "verifier_exact": "Reviews Task completion and Goal proof evidence.",
+    }
     return {
         "lane_id": lane_id,
         "label": label,
+        "purpose": purposes[lane_id],
         "required": True,
         "observation_only": True,
         "configured": True,
@@ -7328,6 +7341,18 @@ def keeper_lanes_ia_interaction(gate: GatedHttpResponse) -> Interaction:
                     f"Lanes still repeated Keeper column {duplicate!r}: "
                     f"{lanes_plain!r}"
                 )
+        for detail in (
+            "Judges one durable Board candidate for Keeper attention.",
+            "Config: [runtime.exact_output_lanes.board_attention_exact]",
+            "Catalog attempts (admitted order): 1 glm-coding.glm-5-turbo",
+            "Then CLI (after catalog exhaustion): (none)",
+            "Lane configuration is TOML. Run Input/Output is retained JSON evidence.",
+        ):
+            if detail not in lanes_plain:
+                raise AssertionError(
+                    f"Lanes omitted selected-lane detail {detail!r}: "
+                    f"{lanes_plain!r}"
+                )
         send_and_wait(
             process,
             master_fd,
@@ -7335,6 +7360,18 @@ def keeper_lanes_ia_interaction(gate: GatedHttpResponse) -> Interaction:
             b"c",
             b"Standalone lanes have no Keeper; use Keepers",
         )
+        config = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"e",
+            b"runtime.exact_output_lanes.board_attention_exact",
+        )
+        config_plain = CSI_RE.sub(b"", config).decode("utf-8")
+        if 'slots = ["glm-coding.glm-5-turbo"]' not in config_plain:
+            raise AssertionError(
+                f"Lanes e did not land on the selected TOML table: {config_plain!r}"
+            )
         os.write(master_fd, b"q")
 
     return interact
@@ -10167,6 +10204,27 @@ def run_keeper_lanes_regression(executable: str) -> None:
     )
     fixtures[KEEPER_LANES_PATH] = gate
     fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
+    fixtures[RUNTIME_CONFIG_RAW_PATH] = (
+        200,
+        {
+            "path": "/workspace/config/runtime.toml",
+            "source_text": "\n".join(
+                [
+                    "[runtime.exact_output_lanes.board_attention_exact]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                    "",
+                    "[runtime.exact_output_lanes.hitl_auto_judge]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                    "",
+                    "[runtime.exact_output_lanes.librarian_exact]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                    "",
+                    "[runtime.exact_output_lanes.verifier_exact]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                ]
+            ),
+        },
+    )
     run_terminal_scenario(
         executable,
         description="Keepers operations and Standalone-only Lanes",

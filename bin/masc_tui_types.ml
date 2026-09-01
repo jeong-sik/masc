@@ -1656,6 +1656,10 @@ type state = {
      is needed rather than stored beside them: two copies of the same rows
      drift the moment one is rebuilt and the other is not. *)
   mutable runtime_config_view: (string * (string * string) list list) option;
+  (* A source section requested by another surface while runtime.toml is
+     loading. The jump is consumed only after the same server-owned source
+     lands, so Lanes never needs a second config writer or a guessed path. *)
+  mutable runtime_config_jump_section: string option;
   (* The models pane's rows, parsed once when the source lands. The pane and
      the scroll bound have to agree on how many rows exist; deriving the
      count from the source instead made the keys move over 2,317 file lines
@@ -2438,6 +2442,7 @@ let create_state
   prompts_librarian_input_error = None;
   prompts_librarian_input_loading = false;
   runtime_config_view = None;
+  runtime_config_jump_section = None;
   config_models_rows = [];
   config_models_cursor = 0;
   runtime_config_view_error = None;

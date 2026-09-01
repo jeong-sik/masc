@@ -4809,6 +4809,57 @@ let standalone_lane_row ~now ~frame width (lane : Tui_decode.standalone_lane) =
   in
   fit_width line width
 
+(* The row is deliberately dense for comparison, but it cannot also carry
+   full slot ids, the consumer contract, and the fallback rule without
+   clipping. Keep those facts in a wrapped selected-row block underneath the
+   four-row matrix. The order is the execution contract: admitted catalog
+   slots first, official-client runtimes only after catalog exhaustion. *)
+let standalone_lane_detail_lines ~width (lane : Tui_decode.standalone_lane) =
+  let ordered values =
+    match values with
+    | [] -> "(none)"
+    | values ->
+      values
+      |> List.mapi (fun index value ->
+        Printf.sprintf "%d %s" (index + 1) (Terminal_text.single_line value))
+      |> String.concat "  →  "
+  in
+  let wrap style text =
+    Message_layout.wrap_words ~max_cells:(max 1 (width - 4)) text
+    |> List.map (fun line -> style, "  " ^ line)
+  in
+  let purpose =
+    Option.value ~default:"No consumer purpose reported by this server."
+      lane.sl_purpose
+  in
+  wrap Ansi.bold
+    (Printf.sprintf "%s · %s" (Terminal_text.single_line lane.sl_label)
+       (Terminal_text.single_line purpose))
+  @ wrap Ansi.dim
+      (Printf.sprintf "Config: [runtime.exact_output_lanes.%s]"
+         (Terminal_text.single_line lane.sl_lane_id))
+  @ wrap Ansi.reset
+      ("Catalog attempts (admitted order): " ^ ordered lane.sl_admitted_slots)
+  @ wrap Ansi.reset
+      ("Then CLI (after catalog exhaustion): " ^ ordered lane.sl_cli_slots)
+  @ wrap
+      (if lane.sl_dropped_slots = [] then Ansi.dim else Theme.warn ())
+      ("Dropped before execution: " ^ ordered lane.sl_dropped_slots)
+  @ (match lane.sl_admission_error with
+     | None -> []
+     | Some error ->
+       wrap (Theme.bad ())
+         ("Admission error: " ^ Terminal_text.single_line error))
+  @ wrap Ansi.dim
+      "TOML spec: slots = required non-empty catalog-ref array; cli_slots = optional official-client runtime-id array."
+  @ wrap Ansi.dim
+      "Lane configuration is TOML. Run Input/Output is retained JSON evidence. Press e to open this section in the preview-checked runtime.toml editor."
+
+let rec take_rows remaining acc = function
+  | _ when remaining <= 0 -> List.rev acc
+  | [] -> List.rev acc
+  | row :: rest -> take_rows (remaining - 1) (row :: acc) rest
+
 let render_lanes_overview (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -4882,6 +4933,35 @@ let render_lanes_overview (state : state) =
           | Some detail ->
               (Theme.bad ()) ^ "  standalone lane observation unavailable: "
               ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset));
+  (* Use only the body's remaining rows. At small terminal heights the matrix
+     stays complete and the detail truncates explicitly; at ordinary heights
+     the wrapped block shows every slot id without the row's [fit_width]. *)
+  (match selected_standalone_lane state with
+   | None -> ()
+   | Some lane ->
+       let action_error_rows =
+         match state.lanes_action_error with None -> 0 | Some _ -> 1
+       in
+       let available =
+         max 0
+           (rows - List.length (frame_lines buf) - action_error_rows - 3)
+       in
+       if available > 0 then begin
+         box_divider buf cols;
+         let detail = standalone_lane_detail_lines ~width:inner lane in
+         let shown = take_rows available [] detail in
+         let shown =
+           if List.length detail <= available then shown
+           else
+             match List.rev shown with
+             | [] -> []
+             | _ :: rest ->
+               List.rev ((Theme.warn (), "  … more; enlarge the terminal") :: rest)
+         in
+         List.iter
+           (fun (style, line) -> box_line_styled buf cols ~style line)
+           shown
+       end);
   (match state.lanes_action_error with
    | None -> ()
    | Some detail ->

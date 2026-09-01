@@ -126,6 +126,8 @@ let for_surface = function
       [ b Navigate "j/k" "move" ~help:"move the lane cursor"
       ; b Act "Right / Enter" "runs"
           ~help:"open the standalone lane's exact runs"
+      ; b Navigate "e" "lane config"
+          ~help:"open this lane's runtime.exact_output_lanes section"
       ; b Act "Esc" "overview"
       ]
       @ listing_meta

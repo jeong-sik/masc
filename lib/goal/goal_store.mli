@@ -120,15 +120,6 @@ val update_state :
 
 val get_goal : Workspace_utils.config -> goal_id:string -> goal option
 
-val update_goal :
-  Workspace_utils.config ->
-  goal_id:string ->
-  (goal -> goal) ->
-  (goal, string) result
-(** Locks the state file, applies [f] to the matched goal
-    (with [updated_at] pre-stamped), normalises the result,
-    and writes back.  Errors when the [goal_id] is unknown. *)
-
 type conditional_update =
   | Goal_updated of goal
   | Goal_phase_mismatch of Goal_phase.t

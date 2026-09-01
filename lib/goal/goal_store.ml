@@ -319,27 +319,6 @@ let update_state config f =
 let get_goal config ~goal_id =
   read_state config |> fun state -> find_goal state.goals goal_id
 
-let update_goal config ~goal_id f =
-  let lock_path = goals_path config in
-  Workspace_utils.with_file_lock config lock_path (fun () ->
-      match load_state config with
-      | Undecodable detail -> Error (undecodable_store_error config detail)
-      | Loaded state ->
-      match find_goal state.goals goal_id with
-      | None -> Error "goal not found"
-      | Some goal ->
-          let now = Masc_domain.now_iso () in
-          let updated_goal = f { goal with updated_at = now } in
-          let next_state =
-            {
-              version = state.version + 1;
-              updated_at = now;
-              goals = replace_goal state.goals updated_goal;
-            }
-          in
-          let* () = write_state_result config next_state in
-          Ok updated_goal)
-
 type conditional_update =
   | Goal_updated of goal
   | Goal_phase_mismatch of Goal_phase.t

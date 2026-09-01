@@ -107,7 +107,6 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
       update_source: {
         kind: 'librarian',
         trace_id: 'trace-active',
-        generation: 7,
       },
       read_errors: [],
       facts: {
@@ -119,6 +118,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
         added: [],
         removed: [],
         retained: 1,
+        invalidated: [],
       },
     },
     entries: [
@@ -233,7 +233,7 @@ describe('KeeperMemoryOsRecallPanel', () => {
     expect(text).toContain('retained 1')
     expect(text).toContain('latest revision memory change 없음')
     expect(text).toContain('store: .masc/config/keepers/albini.memory-current.json')
-    expect(text).toContain('source: librarian · trace-active · g7')
+    expect(text).toContain('source: librarian · trace-active')
   })
 
   it('shows the current fresh-state snapshot without a retired fallback', async () => {
@@ -242,7 +242,7 @@ describe('KeeperMemoryOsRecallPanel', () => {
     response.memory_os.updated_at = null
     response.memory_os.update_source = null
     response.memory_os.facts = { shown: 0, current: 0, items: [] }
-    response.memory_os.change = { added: [], removed: [], retained: 0 }
+    response.memory_os.change = { added: [], removed: [], retained: 0, invalidated: [] }
     fetchKeeperTurnRecordsMock.mockResolvedValue(response)
 
     const { container } = render(html`<${KeeperMemoryOsRecallPanel} keeperName="albini" />`)
@@ -251,6 +251,60 @@ describe('KeeperMemoryOsRecallPanel', () => {
       expect(container.textContent).toContain('revision 0')
     })
     expect(container.textContent).toContain('facts 0/0')
+  })
+
+  it('shows derived basis and exact support invalidation premises', async () => {
+    const response = turnRecordsWithMemoryOs()
+    const memoryId = (digit: string) => `sha256:${digit.repeat(64)}`
+    const premise = {
+      memory_id: memoryId('a'),
+      claim: 'observed premise',
+      category: { tag: 'fact' as const },
+      first_seen: 1_781_587_500,
+      current: true,
+      basis: { kind: 'observed' as const },
+    }
+    const conclusion = {
+      memory_id: memoryId('b'),
+      claim: 'derived conclusion',
+      category: { tag: 'fact' as const },
+      first_seen: 1_781_587_510,
+      current: true,
+      basis: {
+        kind: 'derived' as const,
+        derivations: [{ rule_id: 'supported_rule', premise_ids: [premise.memory_id] }],
+      },
+    }
+    const missing = memoryId('d')
+    const invalidated = {
+      memory_id: memoryId('c'),
+      claim: 'unsupported conclusion',
+      category: { tag: 'fact' as const },
+      first_seen: 1_781_587_400,
+      current: false,
+      basis: {
+        kind: 'derived' as const,
+        derivations: [{ rule_id: 'missing_rule', premise_ids: [missing] }],
+      },
+    }
+    Object.assign(response.memory_os, {
+      facts: { shown: 2, current: 2, items: [premise, conclusion] },
+      change: {
+        added: [conclusion],
+        removed: [invalidated],
+        retained: 1,
+        invalidated: [{ fact: invalidated, missing_premise_ids: [missing] }],
+      },
+    })
+    fetchKeeperTurnRecordsMock.mockResolvedValue(response)
+
+    const { container } = render(html`<${KeeperMemoryOsRecallPanel} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('derived · 1 proof(s)')
+    })
+    expect(container.textContent).toContain('support invalidated 1')
+    expect(container.textContent).toContain(missing)
   })
 })
 

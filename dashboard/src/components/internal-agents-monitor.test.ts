@@ -34,6 +34,16 @@ import {
 import { keepers, shellRuntimeResolution } from '../store'
 import { ApiRequestError } from '../api/core'
 
+const journalFact = (claim: string, category: 'fact' | 'blocker', firstSeen: number) => ({
+  claim,
+  category,
+  firstSeen,
+  lastSeen: firstSeen,
+  reinforcement: 0,
+  origin: { kind: 'injected' as const, traceId: 'trace-1' },
+  basis: { kind: 'observed' as const },
+})
+
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
@@ -337,6 +347,7 @@ describe('InternalAgentsMonitor', () => {
     })
     memoryApi.fetchKeeperMemoryJournal.mockResolvedValue({
       keeper: 'kidsnote',
+      dashboardSurface: '/api/v1/keepers/:name/memory-journal',
       returned: 1,
       undecodableLines: 0,
       entries: [{
@@ -346,10 +357,23 @@ describe('InternalAgentsMonitor', () => {
         revision: 42,
         traceId: 'trace-1',
         sourceKind: 'librarian',
-        added: [{ claim: '새 기억', category: 'fact', firstSeen: 1786000001 }],
-        removed: [{ claim: '낡은 기억', category: 'blocker', firstSeen: 1785000000 }],
+        added: [journalFact('새 기억', 'fact', 1786000001)],
+        removed: [journalFact('낡은 기억', 'blocker', 1785000000)],
         retained: 0,
-        drops: [{ memoryId: 'sha256:old', reason: '새 근거로 대체됨' }],
+        invalidated: [{
+          fact: {
+            ...journalFact('지지가 사라진 기억', 'fact', 1785000001),
+            basis: {
+              kind: 'derived' as const,
+              derivations: [{
+                rule_id: 'support_rule',
+                premise_ids: [`sha256:${'b'.repeat(64)}`],
+              }],
+            },
+          },
+          missingPremiseIds: [`sha256:${'b'.repeat(64)}`],
+        }],
+        drops: [{ memoryId: `sha256:${'a'.repeat(64)}`, reason: '새 근거로 대체됨' }],
       }],
     })
 
@@ -361,6 +385,7 @@ describe('InternalAgentsMonitor', () => {
     fireEvent.click(run)
 
     expect(await screen.findByText('추가된 기억 1건')).toBeTruthy()
+    expect(await screen.findByText('지지 무효화 1건')).toBeTruthy()
     expect(container.textContent).toContain('revision 42')
     expect(container.textContent).toContain('새 기억')
     expect(container.textContent).toContain('낡은 기억')
@@ -409,6 +434,7 @@ describe('InternalAgentsMonitor', () => {
     })
     memoryApi.fetchKeeperMemoryJournal.mockResolvedValue({
       keeper: 'full-cycle-probe',
+      dashboardSurface: '/api/v1/keepers/:name/memory-journal',
       returned: 1,
       undecodableLines: 0,
       entries: [{
@@ -418,9 +444,10 @@ describe('InternalAgentsMonitor', () => {
         revision: 617,
         traceId: 'trace-shared',
         sourceKind: 'explicit_write',
-        added: [{ claim: '실제 도구 체인 성공', category: 'fact', firstSeen: 1786202863 }],
+        added: [journalFact('실제 도구 체인 성공', 'fact', 1786202863)],
         removed: [],
         retained: 2,
+        invalidated: [],
         drops: [],
       }],
     })

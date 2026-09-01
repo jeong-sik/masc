@@ -180,6 +180,15 @@ export type MemoryOsFactCategoryTag =
   | 'lesson'
 export type MemoryOsFactCategory = { readonly tag: MemoryOsFactCategoryTag }
 
+export type MemoryOsDerivation = {
+  readonly rule_id: string
+  readonly premise_ids: string[]
+}
+
+export type MemoryOsFactBasis =
+  | { readonly kind: 'observed' }
+  | { readonly kind: 'derived'; readonly derivations: MemoryOsDerivation[] }
+
 // SSOT token list — must stay byte-identical to the known arms of
 // category_of_string/category_to_string. A drift-guard test pins this set.
 const MEMORY_OS_FACT_CATEGORY_TAGS: readonly MemoryOsFactCategoryTag[] = [
@@ -206,6 +215,7 @@ export type MemoryOsFact = {
   readonly claim: string
   readonly category: MemoryOsFactCategory
   readonly first_seen: number
+  readonly basis: MemoryOsFactBasis
   // Derived from membership in the current snapshot; never persisted as a
   // second Memory authority.
   readonly current: boolean
@@ -214,7 +224,11 @@ export type MemoryOsFact = {
 export type MemoryOsUpdateSource = {
   readonly kind: 'librarian' | 'explicit_write'
   readonly trace_id: string
-  readonly generation: number
+}
+
+export type MemoryOsSupportInvalidation = {
+  readonly fact: MemoryOsFact
+  readonly missing_premise_ids: string[]
 }
 
 export type MemoryOsTurnRecordSnapshot = {
@@ -235,6 +249,7 @@ export type MemoryOsTurnRecordSnapshot = {
     added: MemoryOsFact[]
     removed: MemoryOsFact[]
     retained: number
+    invalidated: MemoryOsSupportInvalidation[]
   }
 }
 
@@ -281,6 +296,13 @@ function hasNoUnknownKeys(raw: Record<string, unknown>, allowed: readonly string
 
 function decodeExactNonEmptyString(raw: unknown): string | null {
   return typeof raw === 'string' && raw.trim().length > 0 ? raw : null
+}
+
+export function isMemoryOsMemoryId(raw: unknown): raw is string {
+  if (typeof raw !== 'string' || raw.length !== 71 || !raw.startsWith('sha256:')) return false
+  return [...raw.slice(7)].every(char => (
+    (char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')
+  ))
 }
 
 function decodeNullableString(raw: unknown): string | null | undefined {
@@ -646,6 +668,40 @@ function decodeTurnRecordRow(raw: unknown): TurnRecordRow | null {
   }
 }
 
+function decodeMemoryOsDerivation(raw: unknown): MemoryOsDerivation | null {
+  if (!isRecord(raw) || !hasExactKeys(raw, ['rule_id', 'premise_ids'])) return null
+  const rule_id = decodeExactNonEmptyString(raw.rule_id)
+  const premise_ids = decodeArray(raw.premise_ids, decodeExactNonEmptyString)
+  if (
+    rule_id === null
+    || premise_ids === null
+    || premise_ids.length === 0
+    || new Set(premise_ids).size !== premise_ids.length
+    || premise_ids.some((value, index) => {
+      const previous = premise_ids[index - 1]
+      return previous !== undefined && previous >= value
+    })
+    || premise_ids.some(premiseId => !isMemoryOsMemoryId(premiseId))
+  ) return null
+  return { rule_id, premise_ids }
+}
+
+export function decodeMemoryOsBasis(raw: unknown): MemoryOsFactBasis | null {
+  if (!isRecord(raw)) return null
+  if (hasExactKeys(raw, ['kind']) && raw.kind === 'observed') {
+    return { kind: 'observed' }
+  }
+  if (!hasExactKeys(raw, ['kind', 'derivations']) || raw.kind !== 'derived') return null
+  const derivations = decodeArray(raw.derivations, decodeMemoryOsDerivation)
+  if (
+    derivations === null
+    || derivations.length === 0
+    || new Set(derivations.map(derivation => derivation.rule_id)).size
+      !== derivations.length
+  ) return null
+  return { kind: 'derived', derivations }
+}
+
 function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   if (!isRecord(raw) || !hasExactKeys(raw, [
     'memory_id',
@@ -653,20 +709,23 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
     'category',
     'first_seen',
     'current',
+    'basis',
   ])) return null
-  const memory_id = decodeExactNonEmptyString(raw.memory_id)
+  const memory_id = isMemoryOsMemoryId(raw.memory_id) ? raw.memory_id : null
   const claim = decodeExactNonEmptyString(raw.claim)
   const category = typeof raw.category === 'string'
     ? parseMemoryOsFactCategory(raw.category)
     : null
   const first_seen = asNumber(raw.first_seen)
   const current = asBoolean(raw.current)
+  const basis = decodeMemoryOsBasis(raw.basis)
   if (
     memory_id === null
     || claim === null
     || category === null
     || first_seen == null
     || current == null
+    || basis === null
   ) {
     return null
   }
@@ -676,24 +735,92 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
     category,
     first_seen,
     current,
+    basis,
   }
 }
 
+function decodeMemoryOsSupportInvalidation(
+  raw: unknown,
+): MemoryOsSupportInvalidation | null {
+  if (!isRecord(raw) || !hasExactKeys(raw, ['fact', 'missing_premise_ids'])) return null
+  const fact = decodeMemoryOsFact(raw.fact)
+  const missing_premise_ids = decodeArray(
+    raw.missing_premise_ids,
+    decodeExactNonEmptyString,
+  )
+  if (
+    fact === null
+    || fact.current
+    || fact.basis.kind !== 'derived'
+    || missing_premise_ids === null
+    || missing_premise_ids.length === 0
+    || new Set(missing_premise_ids).size !== missing_premise_ids.length
+    || missing_premise_ids.some((value, index) => {
+      const previous = missing_premise_ids[index - 1]
+      return previous !== undefined && previous >= value
+    })
+    || missing_premise_ids.some(premiseId => !isMemoryOsMemoryId(premiseId))
+  ) return null
+  return { fact, missing_premise_ids }
+}
+
 function decodeMemoryOsUpdateSource(raw: unknown): MemoryOsUpdateSource | null {
-  if (!isRecord(raw) || !hasExactKeys(raw, ['kind', 'trace_id', 'generation'])) {
+  if (!isRecord(raw) || !hasExactKeys(raw, ['kind', 'trace_id'])) {
     return null
   }
   const kind = decodeExactNonEmptyString(raw.kind)
   const trace_id = decodeExactNonEmptyString(raw.trace_id)
-  const generation = asNumber(raw.generation)
   if (
     (kind !== 'librarian' && kind !== 'explicit_write')
     || trace_id === null
-    || generation == null
-    || !Number.isSafeInteger(generation)
-    || generation < 0
   ) return null
-  return { kind, trace_id, generation }
+  return { kind, trace_id }
+}
+
+function memoryOsFactPayloadEqual(left: MemoryOsFact, right: MemoryOsFact): boolean {
+  return left.memory_id === right.memory_id
+    && left.claim === right.claim
+    && left.category.tag === right.category.tag
+    && left.first_seen === right.first_seen
+    && JSON.stringify(left.basis) === JSON.stringify(right.basis)
+}
+
+function memoryOsSupportClosure(facts: readonly MemoryOsFact[]): Set<string> {
+  type PendingRule = { readonly target: string; remaining: number }
+  const dependents = new Map<string, PendingRule[]>()
+  for (const fact of facts) {
+    if (fact.basis.kind !== 'derived') continue
+    for (const derivation of fact.basis.derivations) {
+      const rule: PendingRule = {
+        target: fact.memory_id,
+        remaining: derivation.premise_ids.length,
+      }
+      for (const premiseId of derivation.premise_ids) {
+        const rules = dependents.get(premiseId) ?? []
+        rules.push(rule)
+        dependents.set(premiseId, rules)
+      }
+    }
+  }
+  const supported = new Set<string>()
+  const pending: string[] = []
+  const activate = (memoryId: string): void => {
+    if (supported.has(memoryId)) return
+    supported.add(memoryId)
+    pending.push(memoryId)
+  }
+  for (const fact of facts) {
+    if (fact.basis.kind === 'observed') activate(fact.memory_id)
+  }
+  for (let cursor = 0; cursor < pending.length; cursor += 1) {
+    const memoryId = pending[cursor]
+    if (memoryId === undefined) continue
+    for (const rule of dependents.get(memoryId) ?? []) {
+      rule.remaining -= 1
+      if (rule.remaining === 0) activate(rule.target)
+    }
+  }
+  return supported
 }
 
 function decodeMemoryOsCounts(raw: unknown): {
@@ -752,7 +879,7 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
     || !factsRaw
     || !changeRaw
     || !facts
-    || !hasExactKeys(changeRaw, ['added', 'removed', 'retained'])
+    || !hasExactKeys(changeRaw, ['added', 'removed', 'retained', 'invalidated'])
   ) {
     return null
   }
@@ -762,23 +889,64 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
   const added = decodeFacts(changeRaw.added)
   const removed = decodeFacts(changeRaw.removed)
   const retained = decodeNonNegativeSafeInteger(changeRaw.retained)
+  const invalidated = decodeArray(
+    changeRaw.invalidated,
+    decodeMemoryOsSupportInvalidation,
+  )
+  const currentIds = new Set(factItems?.map(fact => fact.memory_id) ?? [])
+  const currentById = new Map(
+    (factItems ?? []).map(fact => [fact.memory_id, fact] as const),
+  )
+  const addedAreExactCurrent = (added ?? []).every(fact => {
+    const current = currentById.get(fact.memory_id)
+    return current !== undefined && memoryOsFactPayloadEqual(fact, current)
+  })
+  const removedAreNotExactCurrent = (removed ?? []).every(fact => {
+    const current = currentById.get(fact.memory_id)
+    return current === undefined || !memoryOsFactPayloadEqual(fact, current)
+  })
+  const supportClosure = memoryOsSupportClosure(factItems ?? [])
+  const invalidationsAreExact = (invalidated ?? []).every(invalidation => {
+    const derivations = invalidation.fact.basis.kind === 'derived'
+      ? invalidation.fact.basis.derivations
+      : []
+    const anySupported = derivations.some(derivation =>
+      derivation.premise_ids.every(premiseId => currentIds.has(premiseId)))
+    const missing = [...new Set(derivations.flatMap(derivation =>
+      derivation.premise_ids.filter(premiseId => !currentIds.has(premiseId))))]
+      .sort()
+    return !currentIds.has(invalidation.fact.memory_id)
+      && !anySupported
+      && missing.length === invalidation.missing_premise_ids.length
+      && missing.every((premiseId, index) =>
+        premiseId === invalidation.missing_premise_ids[index])
+  })
   if (
     factItems === null
     || added === null
     || removed === null
+    || invalidated === null
     || factItems.length !== facts.shown
     || facts.current !== facts.shown
     || factItems.some(fact => !fact.current)
+    || supportClosure.size !== factItems.length
     || added.some(fact => !fact.current)
     || removed.some(fact => fact.current)
     || retained === null
     || retained + added.length !== facts.shown
+    || !addedAreExactCurrent
+    || !removedAreNotExactCurrent
+    || new Set(added.map(fact => fact.memory_id)).size !== added.length
+    || new Set(removed.map(fact => fact.memory_id)).size !== removed.length
+    || new Set(invalidated.map(item => item.fact.memory_id)).size !== invalidated.length
+    || !invalidationsAreExact
     || (revision === 0
       && (updated_at !== null
         || update_source !== null
         || facts.shown !== 0
         || added.length !== 0
         || removed.length !== 0
+        || invalidated.length !== 0
         || retained !== 0))
     || (revision > 0
       && (updated_at === null || update_source === null))
@@ -799,6 +967,7 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
       added,
       removed,
       retained,
+      invalidated,
     },
   }
 }

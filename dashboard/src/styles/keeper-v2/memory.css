@@ -79,10 +79,10 @@
 .mem-store-text { font-size: 12.5px; line-height: 1.5; color: var(--text-primary); text-wrap: pretty; }
 .mem-store-meta { display: flex; align-items: center; gap: 12px; margin-top: 6px; font-size: 10.5px; color: var(--text-dim); }
 .mem-src { color: var(--text-dim); }
-/* TTL / current badge — replaces the deleted salience bar (RFC-0247) */
-.mem-ttl { flex: none; font-size: var(--fs-9-5); letter-spacing: 0.04em; padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
-.mem-ttl.current { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 36%, transparent); }
-.mem-ttl.expired { color: var(--text-dim); border-style: dashed; }
+/* Current/non-current state badge. */
+.mem-state { flex: none; font-size: var(--fs-9-5); letter-spacing: 0.04em; padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
+.mem-state.current { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 36%, transparent); }
+.mem-state.removed { color: var(--text-dim); border-style: dashed; }
 .mem-leg-tag { margin-left: 6px; font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--status-ok); border: 1px solid color-mix(in oklab, var(--status-ok) 32%, transparent); border-radius: var(--radius-xs); padding: 0 4px; }
 .mem-tl-range { display: block; margin-top: 3px; font-size: 9.5px; color: var(--text-dim); }
 

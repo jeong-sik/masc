@@ -164,12 +164,12 @@
 .mem-store-text { font-size: 12.5px; line-height: 1.5; color: var(--text-primary); text-wrap: pretty; }
 .mem-store-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 6px; font-size: 10.5px; color: var(--text-dim); }
 .mem-src { color: var(--text-dim); }
-/* TTL / current badge — replaces the deleted salience bar (RFC-0247) */
-.mem-ttl { flex: none; font-size: var(--fs-9-5); letter-spacing: 0.04em; padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
-.mem-ttl.current { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 36%, transparent); }
-.mem-ttl.expired { color: var(--text-dim); border-style: dashed; }
+/* Current/non-current state badge. */
+.mem-state { flex: none; font-size: var(--fs-9-5); letter-spacing: 0.04em; padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
+.mem-state.current { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 36%, transparent); }
+.mem-state.removed { color: var(--text-dim); border-style: dashed; }
 /* revision delta marker — the row's membership in memory_os.change.added /
-   .removed; same chip geometry as the prototype's .mem-ttl (keeper-v2/styles/memory.css:73-75) */
+   .removed; same chip geometry as the state badge. */
 .mem-delta { flex: none; font-size: var(--fs-9-5); letter-spacing: 0.04em; padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
 .mem-delta.added { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 36%, transparent); }
 .mem-delta.removed { color: var(--text-dim); border-style: dashed; }

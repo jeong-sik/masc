@@ -365,7 +365,7 @@ function MemoryTrustStrip({
     ? `${latestPromptRow.record.trace_id}#${latestPromptRow.record.absolute_turn}`
     : 'none'
   const sourceLabel = snapshot.update_source
-    ? `${snapshot.update_source.kind} · ${snapshot.update_source.trace_id} · g${snapshot.update_source.generation}`
+    ? `${snapshot.update_source.kind} · ${snapshot.update_source.trace_id}`
     : 'fresh state'
   return html`
     <div class="mem-trust">
@@ -479,8 +479,8 @@ function RecentRecallTimeline({ rows }: { rows: readonly TurnRecordRow[] }) {
 // one meta line. The wire carries `first_seen` only (no provenance, no
 // verification time), so the meta line is the insertion age with the absolute
 // instant in the title, plus the row's place in the latest revision delta.
-// The TTL chip (`.mem-ttl`) renders the live `current` flag: store rows are
-// current by construction, change.removed rows carry current=false (만료).
+// The state chip renders the live `current` flag: store rows are current by
+// construction, while change.removed rows are exact non-current delta evidence.
 // `srcOverride` adds the owning keeper label in the aggregate current-facts list.
 function FactRow({
   fact,
@@ -492,6 +492,14 @@ function FactRow({
   srcOverride?: string
 }) {
   const meta = factCategoryMeta(fact.category)
+  const basisLabel = fact.basis.kind === 'observed'
+    ? '관측'
+    : `파생 · 증명 ${fact.basis.derivations.length}`
+  const basisTitle = fact.basis.kind === 'observed'
+    ? '직접 관측된 현재 사실'
+    : fact.basis.derivations
+        .map(derivation => `${derivation.rule_id}: ${derivation.premise_ids.join(', ')}`)
+        .join('\n')
   return html`
     <div class=${delta === 'removed' ? 'mem-store-row removed' : 'mem-store-row'}>
       <span class="mem-kind" style=${{ color: meta.color, borderColor: meta.color }}>${meta.glyph} ${meta.lbl}</span>
@@ -499,15 +507,44 @@ function FactRow({
         <div class="mem-store-text">${fact.claim}</div>
         <div class="mem-store-meta">
           ${fact.current
-            ? html`<span class="mem-ttl current">유효</span>`
-            : html`<span class="mem-ttl expired">만료</span>`}
+            ? html`<span class="mem-state current">유효</span>`
+            : html`<span class="mem-state removed">제거됨</span>`}
           ${delta === 'added' ? html`<span class="mem-delta added" title="이번 revision부터 current memory에 존재">+ 추가됨 · 현재 기억에 들어옴</span>` : null}
           ${delta === 'removed' ? html`<span class="mem-delta removed" title="직전 revision에는 있었지만 현재 memory에서는 삭제됨">− 제거됨 · 현재 기억에서 빠짐</span>` : null}
+          <span class="mem-src mono" title=${basisTitle}>${basisLabel}</span>
           <span class="mono" title=${formatInstant(fact.first_seen)}>저장 ${factAgeLabel(fact)}</span>
           ${srcOverride ? html`<span class="mem-src mono">${srcOverride}</span>` : null}
         </div>
       </div>
     </div>`
+}
+
+function SupportInvalidations({ snapshot }: { snapshot: MemoryOsTurnRecordSnapshot }) {
+  if (snapshot.change.invalidated.length === 0) return null
+  return html`
+    <div class="turn-sec">
+      <div class="mem-sec-head">
+        <h4>지지 무효화 · support retraction</h4>
+        <span class="mem-n mono">${snapshot.change.invalidated.length}</span>
+      </div>
+      <div class="mem-store">
+        ${snapshot.change.invalidated.map(invalidation => html`
+          <div key=${invalidation.fact.memory_id} class="mem-store-row removed">
+            <span class="mem-kind">× 지지 없음</span>
+            <div class="mem-store-main">
+              <div class="mem-store-text">${invalidation.fact.claim}</div>
+              <div class="mem-store-meta">
+                <span class="mem-delta removed">missing premises</span>
+                ${invalidation.missing_premise_ids.map(premiseId => html`
+                  <code key=${premiseId} class="mono">${premiseId}</code>
+                `)}
+              </div>
+            </div>
+          </div>
+        `)}
+      </div>
+    </div>
+  `
 }
 
 // Honest disclosure for a section whose backend source lands in a later RFC
@@ -641,7 +678,7 @@ function OneKeeperMemoryReal({
         <div class="mem-sec-head">
           <h4>장기 메모리 스토어 · memory-os</h4>
           <span class="mem-n mono">${snapshot.facts.shown}</span>
-          <span class="mem-n mono" title=${`revision ${snapshot.revision}: +는 새 current fact, −는 직전 snapshot에서 삭제된 fact`}>추가 ${snapshot.change.added.length} · 제거 ${snapshot.change.removed.length} · 유지 ${snapshot.change.retained}</span>
+          <span class="mem-n mono" title=${`revision ${snapshot.revision}: +는 새 current fact, −는 직전 snapshot에서 삭제된 fact`}>추가 ${snapshot.change.added.length} · 제거 ${snapshot.change.removed.length} · 지지 무효화 ${snapshot.change.invalidated.length} · 유지 ${snapshot.change.retained}</span>
         </div>
         ${storeRows.length
           ? html`
@@ -653,11 +690,13 @@ function OneKeeperMemoryReal({
                 onPick=${(next: StoreFilter) => { storeFilter.value = next }}
               />
               <div class="mem-store">
-                ${visibleRows.map(row => html`<${FactRow} key=${row.fact.memory_id} fact=${row.fact} delta=${row.delta} />`)}
+                ${visibleRows.map(row => html`<${FactRow} key=${`${row.delta ?? 'retained'}:${row.fact.memory_id}`} fact=${row.fact} delta=${row.delta} />`)}
               </div>
             </>`
           : html`<div class="mem-empty">장기 메모리 항목 없음.</div>`}
       </div>
+
+      <${SupportInvalidations} snapshot=${snapshot} />
 
       <div class="turn-sec">
         <h4>최근 회상 · 주입</h4>
@@ -665,9 +704,6 @@ function OneKeeperMemoryReal({
       </div>
     </>`
 }
-
-// Bound on the recent-facts list each keeper contributes to (and the fleet-wide
-// slice) so the aggregate never carries an unbounded fact tail into the client.
 
 interface AggregateCategoryCount {
   readonly category: MemoryOsFactCategory

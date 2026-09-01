@@ -40,6 +40,8 @@ const keeper: MemoryKeeper = {
   status: 'run',
 }
 
+const memoryId = (digit: string) => `sha256:${digit.repeat(64)}`
+
 function fact(
   memoryId: string,
   claim: string,
@@ -52,13 +54,14 @@ function fact(
     category,
     first_seen: 1_700_000_000,
     current,
+    basis: { kind: 'observed' },
   }
 }
 
 function turnRecordsPayload() {
-  const retained = fact('id:retained', '계속 유지할 핵심 기억', true, 'constraint')
-  const added = fact('id:added', '이번 revision에 새로 들어온 기억', true)
-  const removed = fact('id:removed', '이번 revision에서 사라진 기억', false, 'lesson')
+  const retained = fact(memoryId('a'), '계속 유지할 핵심 기억', true, 'constraint')
+  const added = fact(memoryId('b'), '이번 revision에 새로 들어온 기억', true)
+  const removed = fact(memoryId('c'), '이번 revision에서 사라진 기억', false, 'lesson')
   return {
     keeper: keeper.id,
     count: 1,
@@ -85,7 +88,6 @@ function turnRecordsPayload() {
       update_source: {
         kind: 'librarian',
         trace_id: 'trace-a',
-        generation: 12,
       },
       read_errors: [],
       facts: {
@@ -97,6 +99,7 @@ function turnRecordsPayload() {
         added: [added],
         removed: [removed],
         retained: 1,
+        invalidated: [],
       },
     },
     entries: [{
@@ -204,7 +207,7 @@ describe('MemoryInspector current snapshot', () => {
 
     // head: store size (current facts only) + latest delta
     const head = [...section.querySelectorAll('.mem-sec-head .mem-n')].map(n => n.textContent)
-    expect(head).toEqual(['2', '추가 1 · 제거 1 · 유지 1'])
+    expect(head).toEqual(['2', '추가 1 · 제거 1 · 지지 무효화 0 · 유지 1'])
 
     // rows: current snapshot order, then the removed rows of the latest revision
     const rows = [...section.querySelectorAll('.mem-store-row')]
@@ -220,18 +223,17 @@ describe('MemoryInspector current snapshot', () => {
     ])
     expect(rows.map(row => row.classList.contains('removed'))).toEqual([false, false, true])
 
-    // one meta line: TTL chip from the live `current` flag + insertion age
+    // one meta line: current-state chip from the live flag + insertion age
     // (absolute instant in the title); no per-row reason line
     const retained = rows[0] as HTMLElement
-    expect(retained.querySelectorAll('*').length).toBe(6)
-    expect(retained.querySelector('.mem-ttl.current')?.textContent).toBe('유효')
-    const age = retained.querySelector('.mem-store-meta span[title]') as HTMLElement
+    expect(retained.querySelector('.mem-state.current')?.textContent).toBe('유효')
+    expect(retained.textContent).toContain('관측')
+    const age = [...retained.querySelectorAll('.mem-store-meta span')]
+      .find(span => span.textContent?.startsWith('저장 ')) as HTMLElement
     expect(age.textContent).toMatch(/^저장 /)
     expect(age.getAttribute('title')).toMatch(/^20\d\d/)
-    expect(retained.querySelector('.mem-store-meta')?.textContent).toBe(`유효${age.textContent}`)
-    expect((rows[1] as HTMLElement).querySelectorAll('*').length).toBe(7)
-    expect((rows[1] as HTMLElement).querySelector('.mem-ttl.current')?.textContent).toBe('유효')
-    expect((rows[2] as HTMLElement).querySelector('.mem-ttl.expired')?.textContent).toBe('만료')
+    expect((rows[1] as HTMLElement).querySelector('.mem-state.current')?.textContent).toBe('유효')
+    expect((rows[2] as HTMLElement).querySelector('.mem-state.removed')?.textContent).toBe('제거됨')
 
     // the delta lives in the store list; each claim is rendered once
     const headers = [...container.querySelectorAll('.turn-sec h4')].map(h => h.textContent ?? '')
@@ -244,10 +246,7 @@ describe('MemoryInspector current snapshot', () => {
     ])
     expect(container.textContent?.split('이번 revision에 새로 들어온 기억').length).toBe(2)
 
-    // whole-section element count for this fixture (measured): head 4 +
-    // filters 6 + list 1 + rows 7/8/8 (each row counts itself; +1 per row
-    // for the TTL chip)
-    expect(section.querySelectorAll('*').length).toBe(34)
+    expect(section.querySelectorAll('.mem-store-row')).toHaveLength(3)
   })
 
   it('filters the store by category chip and by the latest delta', async () => {
@@ -301,7 +300,7 @@ describe('MemoryInspector current snapshot', () => {
 
   it('omits the delta chip when the latest revision changed nothing', async () => {
     const payload = turnRecordsPayload()
-    payload.memory_os.change = { added: [], removed: [], retained: 2 }
+    payload.memory_os.change = { added: [], removed: [], retained: 2, invalidated: [] }
     stubFetch(payload)
     const { container } = render(
       html`<${MemoryInspector} keeper=${keeper} keepers=${[keeper]} onClose=${vi.fn()} />`,
@@ -315,7 +314,58 @@ describe('MemoryInspector current snapshot', () => {
       '◈ 사실',
     ])
     expect(container.querySelector('.mem-delta')).toBeNull()
-    expect([...container.querySelectorAll('.mem-sec-head .mem-n')].map(n => n.textContent)).toEqual(['2', '추가 0 · 제거 0 · 유지 2'])
+    expect([...container.querySelectorAll('.mem-sec-head .mem-n')].map(n => n.textContent)).toEqual(['2', '추가 0 · 제거 0 · 지지 무효화 0 · 유지 2'])
+  })
+
+  it('renders derived proof basis and exact missing premises for support retraction', async () => {
+    const payload = turnRecordsPayload()
+    const removed = payload.memory_os.change.removed[0]!
+    const missing = memoryId('f')
+    Object.assign(removed, {
+      basis: {
+        kind: 'derived',
+        derivations: [{ rule_id: 'removed_support', premise_ids: [missing] }],
+      },
+    })
+    Object.assign(payload.memory_os.change, {
+      invalidated: [{
+        fact: removed,
+        missing_premise_ids: [missing],
+      }],
+    })
+    stubFetch(payload)
+
+    const { container } = render(
+      html`<${MemoryInspector} keeper=${keeper} keepers=${[keeper]} onClose=${vi.fn()} />`,
+    )
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('지지 무효화 · support retraction')
+    })
+    expect(container.textContent).toContain('파생 · 증명 1')
+    expect(container.textContent).toContain(missing)
+  })
+
+  it('renders current and removed payloads separately when one identity changes metadata', async () => {
+    const payload = turnRecordsPayload()
+    const added = payload.memory_os.change.added[0]!
+    const removed = payload.memory_os.change.removed[0]!
+    Object.assign(removed, {
+      memory_id: added.memory_id,
+      claim: added.claim,
+    })
+    stubFetch(payload)
+
+    const { container } = render(
+      html`<${MemoryInspector} keeper=${keeper} keepers=${[keeper]} onClose=${vi.fn()} />`,
+    )
+
+    await waitFor(() => {
+      const matching = [...container.querySelectorAll('.mem-store-row')]
+        .filter(row => row.querySelector('.mem-store-text')?.textContent === added.claim)
+      expect(matching).toHaveLength(2)
+      expect(matching.map(row => row.classList.contains('removed'))).toEqual([false, true])
+    })
   })
 
   it('mounts the last captured prompt for the bound keeper from the recall chain', async () => {
@@ -486,9 +536,10 @@ describe('MemoryInspector pure projections', () => {
       category: { tag: 'fact' },
       first_seen: 1,
       current: true,
+      basis: { kind: 'observed' },
     })
-    const first = mkFact('id:first', 'first')
-    const second = mkFact('id:second', 'second')
+    const first = mkFact(memoryId('d'), 'first')
+    const second = mkFact(memoryId('e'), 'second')
     expect(sortMemoryFactsForReview([first, second])).toEqual([first, second])
   })
 
@@ -497,32 +548,39 @@ describe('MemoryInspector pure projections', () => {
       memory_id: string,
       tag: MemoryOsFact['category']['tag'],
       current: boolean,
-    ): MemoryOsFact => ({ memory_id, claim: memory_id, category: { tag }, first_seen: 1, current })
-    const retained = typed('id:retained', 'constraint', true)
-    const added = typed('id:added', 'fact', true)
-    const removed = typed('id:removed', 'lesson', false)
+    ): MemoryOsFact => ({
+      memory_id,
+      claim: memory_id,
+      category: { tag },
+      first_seen: 1,
+      current,
+      basis: { kind: 'observed' },
+    })
+    const retained = typed(memoryId('a'), 'constraint', true)
+    const added = typed(memoryId('b'), 'fact', true)
+    const removed = typed(memoryId('c'), 'lesson', false)
     const snapshot: MemoryOsTurnRecordSnapshot = {
       keeper: keeper.id,
       snapshot_store: '.masc/keepers/masc-improver.memory-current.json',
       recall_enabled: true,
       revision: 12,
       updated_at: 1_700_000_000,
-      update_source: { kind: 'librarian', trace_id: 'trace-a', generation: 12 },
+      update_source: { kind: 'librarian', trace_id: 'trace-a' },
       read_errors: [],
       facts: { shown: 2, current: 2, items: [retained, added] },
-      change: { added: [added], removed: [removed], retained: 1 },
+      change: { added: [added], removed: [removed], retained: 1, invalidated: [] },
     }
     const rows = storeRowsFromSnapshot(snapshot)
     expect(rows.map(row => [row.fact.memory_id, row.delta])).toEqual([
-      ['id:retained', null],
-      ['id:added', 'added'],
-      ['id:removed', 'removed'],
+      [memoryId('a'), null],
+      [memoryId('b'), 'added'],
+      [memoryId('c'), 'removed'],
     ])
     const byFilter = (filter: Parameters<typeof storeRowMatches>[1]): string[] =>
       rows.filter((row: StoreRow) => storeRowMatches(row, filter)).map(row => row.fact.memory_id)
-    expect(byFilter({ kind: 'all' })).toEqual(['id:retained', 'id:added', 'id:removed'])
-    expect(byFilter({ kind: 'delta' })).toEqual(['id:added', 'id:removed'])
-    expect(byFilter({ kind: 'category', tag: 'lesson' })).toEqual(['id:removed'])
+    expect(byFilter({ kind: 'all' })).toEqual([memoryId('a'), memoryId('b'), memoryId('c')])
+    expect(byFilter({ kind: 'delta' })).toEqual([memoryId('b'), memoryId('c')])
+    expect(byFilter({ kind: 'category', tag: 'lesson' })).toEqual([memoryId('c')])
     expect(byFilter({ kind: 'category', tag: 'goal' })).toEqual([])
   })
 })

@@ -2025,14 +2025,20 @@ type repository_change_snapshot = {
 type memory_alert = {
   ma_code : string;
   ma_severity : string;
+  ma_target : string;
   ma_label : string;
   ma_message : string;
+  ma_value : float;
+  ma_threshold : float;
 }
 
 type memory_keeper_health = {
   mkh_keeper_id : string;
   mkh_revision : int;
   mkh_facts : int;
+  mkh_observed_facts : int;
+  mkh_derived_facts : int;
+  mkh_support_invalidations : int;
   mkh_snapshot_bytes : int;
   mkh_added : int;
   mkh_removed : int;
@@ -2055,6 +2061,9 @@ type memory_health_snapshot = {
   mhs_generated_at : float;
   mhs_keepers : memory_keeper_health list;
   mhs_total_facts : int;
+  mhs_total_observed_facts : int;
+  mhs_total_derived_facts : int;
+  mhs_total_support_invalidations : int;
   mhs_total_snapshot_bytes : int;
   mhs_total_source_facts : int;
   mhs_total_source_invalidations : int;
@@ -3650,17 +3659,105 @@ let decode_repository_change_snapshot json =
   let* rcs_total = required_int_field json "total" in
   Ok { rcs_scope; rcs_changes; rcs_total }
 
+let require_exact_object_fields context expected = function
+  | `Assoc fields ->
+    let actual = List.map fst fields in
+    let unique_actual = List.sort_uniq String.compare actual in
+    if
+      List.length actual = List.length unique_actual
+      && List.equal String.equal
+           (List.sort String.compare expected)
+           unique_actual
+    then Ok ()
+    else Error (context ^ " has unknown, duplicate, or missing fields")
+  | _ -> Error (context ^ " must be an object")
+;;
+
 let decode_memory_alert json =
+  let* () =
+    require_exact_object_fields
+      "memory alert"
+      [ "code"; "severity"; "target"; "label"; "message"; "value"; "threshold" ]
+      json
+  in
   let* ma_code = required_string_field json "code" in
   let* ma_severity = required_string_field json "severity" in
+  let* ma_target = required_string_field json "target" in
   let* ma_label = required_string_field json "label" in
   let* ma_message = required_string_field json "message" in
-  Ok { ma_code; ma_severity; ma_label; ma_message }
+  let* ma_value = require_float_field json "value" in
+  let* ma_threshold = require_float_field json "threshold" in
+  let expected_severity =
+    match ma_code with
+    | "snapshot_read_error"
+    | "source_snapshot_read_error"
+    | "librarian_lane_busy"
+    | "librarian_failures"
+    | "vision_ingest_errors" -> Some "warn"
+    | "librarian_starvation" -> Some "error"
+    | _ -> None
+  in
+  (match expected_severity with
+   | Some expected
+     when String.equal ma_code ma_target
+          && String.equal ma_severity expected
+          && not (String.equal ma_label "")
+          && not (String.equal ma_message "")
+          && Float.is_finite ma_value
+          && Float.is_finite ma_threshold ->
+     Ok
+       { ma_code
+       ; ma_severity
+       ; ma_target
+       ; ma_label
+       ; ma_message
+       ; ma_value
+       ; ma_threshold
+       }
+   | Some _ | None -> Error "memory alert has an invalid typed code contract")
 
 let decode_memory_keeper_health json =
+  let* () =
+    require_exact_object_fields
+      "memory keeper health"
+      [ "keeper_id"
+      ; "revision"
+      ; "facts"
+      ; "observed_facts"
+      ; "derived_facts"
+      ; "support_invalidations"
+      ; "snapshot_bytes"
+      ; "added"
+      ; "removed"
+      ; "snapshot_present"
+      ; "librarian_lane_busy"
+      ; "librarian_failures"
+      ; "vision_ingest_errors"
+      ; "vision_ingest_error_reasons"
+      ; "read_error"
+      ; "source_revision"
+      ; "source_facts"
+      ; "source_invalidations"
+      ; "source_snapshot_bytes"
+      ; "source_snapshot_present"
+      ; "source_read_error"
+      ; "alerts"
+      ]
+      json
+  in
   let* mkh_keeper_id = required_string_field json "keeper_id" in
   let* mkh_revision = required_int_field json "revision" in
   let* mkh_facts = required_int_field json "facts" in
+  let* mkh_observed_facts = required_int_field json "observed_facts" in
+  let* mkh_derived_facts = required_int_field json "derived_facts" in
+  let* mkh_support_invalidations =
+    required_int_field json "support_invalidations"
+  in
+  let* () =
+    if mkh_observed_facts + mkh_derived_facts = mkh_facts
+    then Ok ()
+    else Error "ordinary fact total disagrees with observed and derived facts"
+  in
   let* mkh_snapshot_bytes = required_int_field json "snapshot_bytes" in
   let* mkh_added = required_int_field json "added" in
   let* mkh_removed = required_int_field json "removed" in
@@ -3671,13 +3768,27 @@ let decode_memory_keeper_health json =
     required_list_field json "vision_ingest_error_reasons"
   in
   let decode_vision_reason json =
+    let* () =
+      require_exact_object_fields
+        "vision ingest error reason"
+        [ "reason"; "count" ]
+        json
+    in
     let* reason = required_string_field json "reason" in
     let* count = required_int_field json "count" in
-    if count > 0 then Ok (reason, count) else Error "vision reason count must be positive"
+    if not (String.equal reason "") && count > 0
+    then Ok (reason, count)
+    else Error "vision reason and count must be present and positive"
   in
   let* mkh_vision_ingest_error_reasons =
     decode_list "vision_ingest_error_reasons" decode_vision_reason
       vision_reasons_json
+  in
+  let* () =
+    let reasons = List.map fst mkh_vision_ingest_error_reasons in
+    if List.length reasons = List.length (List.sort_uniq String.compare reasons)
+    then Ok ()
+    else Error "vision ingest error reasons must be unique"
   in
   let* mkh_vision_ingest_errors = required_int_field json "vision_ingest_errors" in
   let vision_reason_total =
@@ -3705,10 +3816,42 @@ let decode_memory_keeper_health json =
   let* mkh_source_read_error = optional_string json "source_read_error" in
   let* alerts_json = required_list_field json "alerts" in
   let* mkh_alerts = decode_list "alerts" decode_memory_alert alerts_json in
+  let* () =
+    if
+      not (String.equal mkh_keeper_id "")
+      && Option.fold ~none:true ~some:(fun value -> not (String.equal value "")) mkh_read_error
+      && Option.fold
+           ~none:true
+           ~some:(fun value -> not (String.equal value ""))
+           mkh_source_read_error
+      && List.for_all
+        (fun count -> count >= 0)
+        [ mkh_revision
+        ; mkh_facts
+        ; mkh_observed_facts
+        ; mkh_derived_facts
+        ; mkh_support_invalidations
+        ; mkh_snapshot_bytes
+        ; mkh_added
+        ; mkh_removed
+        ; mkh_librarian_lane_busy
+        ; mkh_librarian_failures
+        ; mkh_vision_ingest_errors
+        ; mkh_source_revision
+        ; mkh_source_facts
+        ; mkh_source_invalidations
+        ; mkh_source_snapshot_bytes
+        ]
+    then Ok ()
+    else Error "memory keeper health counts must be non-negative"
+  in
   Ok
     { mkh_keeper_id
     ; mkh_revision
     ; mkh_facts
+    ; mkh_observed_facts
+    ; mkh_derived_facts
+    ; mkh_support_invalidations
     ; mkh_snapshot_bytes
     ; mkh_added
     ; mkh_removed
@@ -3728,19 +3871,76 @@ let decode_memory_keeper_health json =
     }
 
 let decode_memory_health_snapshot json =
+  let* () =
+    require_exact_object_fields
+      "memory health snapshot"
+      [ "schema"
+      ; "generated_at"
+      ; "cadence_counter_entries"
+      ; "keepers"
+      ; "totals"
+      ; "alert_summary"
+      ]
+      json
+  in
   let* schema = required_string_field json "schema" in
   let* () =
-    if String.equal schema "keeper.memory_os.current_health.v2"
+    if String.equal schema "keeper.memory_os.current_health.v3"
     then Ok ()
     else Error ("unsupported memory health schema: " ^ schema)
   in
   let* mhs_generated_at = require_float_field json "generated_at" in
+  let* cadence_counter_entries =
+    required_int_field json "cadence_counter_entries"
+  in
+  let* () =
+    if Float.is_finite mhs_generated_at && mhs_generated_at >= 0.0
+       && cadence_counter_entries >= 0
+    then Ok ()
+    else Error "memory health observation metadata must be non-negative"
+  in
   let* keepers_json = required_list_field json "keepers" in
   let* mhs_keepers =
     decode_list "keepers" decode_memory_keeper_health keepers_json
   in
+  let* () =
+    let keeper_ids = List.map (fun keeper -> keeper.mkh_keeper_id) mhs_keepers in
+    if List.length keeper_ids = List.length (List.sort_uniq String.compare keeper_ids)
+    then Ok ()
+    else Error "memory health keeper identities must be unique"
+  in
   let* totals_json = required_member json "totals" in
+  let* () =
+    require_exact_object_fields
+      "memory health totals"
+      [ "facts"
+      ; "observed_facts"
+      ; "derived_facts"
+      ; "support_invalidations"
+      ; "snapshot_bytes"
+      ; "added"
+      ; "removed"
+      ; "source_facts"
+      ; "source_invalidations"
+      ; "source_snapshot_bytes"
+      ; "librarian_lane_busy"
+      ; "librarian_failures"
+      ; "vision_ingest_errors"
+      ; "read_errors"
+      ; "source_read_errors"
+      ]
+      totals_json
+  in
   let* mhs_total_facts = required_int_field totals_json "facts" in
+  let* mhs_total_observed_facts =
+    required_int_field totals_json "observed_facts"
+  in
+  let* mhs_total_derived_facts =
+    required_int_field totals_json "derived_facts"
+  in
+  let* mhs_total_support_invalidations =
+    required_int_field totals_json "support_invalidations"
+  in
   let* mhs_total_snapshot_bytes =
     required_int_field totals_json "snapshot_bytes"
   in
@@ -3763,16 +3963,135 @@ let decode_memory_health_snapshot json =
   let* mhs_total_source_read_errors =
     required_int_field totals_json "source_read_errors"
   in
+  let* total_added = required_int_field totals_json "added" in
+  let* total_removed = required_int_field totals_json "removed" in
+  let* total_librarian_lane_busy =
+    required_int_field totals_json "librarian_lane_busy"
+  in
   let* summary_json = required_member json "alert_summary" in
+  let* () =
+    require_exact_object_fields
+      "memory health alert summary"
+      [ "total_alerts"
+      ; "warn_alerts"
+      ; "error_alerts"
+      ; "keepers_with_alerts"
+      ; "snapshot_read_error_keepers"
+      ; "source_snapshot_read_error_keepers"
+      ; "librarian_lane_busy_keepers"
+      ; "librarian_starving_keepers"
+      ]
+      summary_json
+  in
+  let* total_alerts = required_int_field summary_json "total_alerts" in
   let* mhs_warn_alerts = required_int_field summary_json "warn_alerts" in
   let* mhs_error_alerts = required_int_field summary_json "error_alerts" in
   let* mhs_starving_keepers =
     required_int_field summary_json "librarian_starving_keepers"
   in
+  let* keepers_with_alerts =
+    required_int_field summary_json "keepers_with_alerts"
+  in
+  let* snapshot_read_error_keepers =
+    required_int_field summary_json "snapshot_read_error_keepers"
+  in
+  let* source_snapshot_read_error_keepers =
+    required_int_field summary_json "source_snapshot_read_error_keepers"
+  in
+  let* librarian_lane_busy_keepers =
+    required_int_field summary_json "librarian_lane_busy_keepers"
+  in
+  let all_totals =
+    [ mhs_total_facts
+    ; mhs_total_observed_facts
+    ; mhs_total_derived_facts
+    ; mhs_total_support_invalidations
+    ; mhs_total_snapshot_bytes
+    ; total_added
+    ; total_removed
+    ; mhs_total_source_facts
+    ; mhs_total_source_invalidations
+    ; mhs_total_source_snapshot_bytes
+    ; total_librarian_lane_busy
+    ; mhs_total_librarian_failures
+    ; mhs_total_vision_ingest_errors
+    ; mhs_total_read_errors
+    ; mhs_total_source_read_errors
+    ; total_alerts
+    ; mhs_warn_alerts
+    ; mhs_error_alerts
+    ; keepers_with_alerts
+    ; snapshot_read_error_keepers
+    ; source_snapshot_read_error_keepers
+    ; librarian_lane_busy_keepers
+    ; mhs_starving_keepers
+    ]
+  in
+  let* () =
+    if List.for_all (fun count -> count >= 0) all_totals
+    then Ok ()
+    else Error "memory health fleet totals must be non-negative"
+  in
+  let sum field =
+    List.fold_left (fun total keeper -> total + field keeper) 0 mhs_keepers
+  in
+  let expected_totals =
+    [ mhs_total_facts, sum (fun keeper -> keeper.mkh_facts)
+    ; mhs_total_observed_facts, sum (fun keeper -> keeper.mkh_observed_facts)
+    ; mhs_total_derived_facts, sum (fun keeper -> keeper.mkh_derived_facts)
+    ; mhs_total_support_invalidations, sum (fun keeper -> keeper.mkh_support_invalidations)
+    ; mhs_total_snapshot_bytes, sum (fun keeper -> keeper.mkh_snapshot_bytes)
+    ; total_added, sum (fun keeper -> keeper.mkh_added)
+    ; total_removed, sum (fun keeper -> keeper.mkh_removed)
+    ; mhs_total_source_facts, sum (fun keeper -> keeper.mkh_source_facts)
+    ; mhs_total_source_invalidations, sum (fun keeper -> keeper.mkh_source_invalidations)
+    ; mhs_total_source_snapshot_bytes, sum (fun keeper -> keeper.mkh_source_snapshot_bytes)
+    ; total_librarian_lane_busy, sum (fun keeper -> keeper.mkh_librarian_lane_busy)
+    ; mhs_total_librarian_failures, sum (fun keeper -> keeper.mkh_librarian_failures)
+    ; mhs_total_vision_ingest_errors, sum (fun keeper -> keeper.mkh_vision_ingest_errors)
+    ; mhs_total_read_errors, sum (fun keeper -> if Option.is_some keeper.mkh_read_error then 1 else 0)
+    ; mhs_total_source_read_errors,
+      sum (fun keeper -> if Option.is_some keeper.mkh_source_read_error then 1 else 0)
+    ]
+  in
+  let* () =
+    if List.for_all (fun (reported, actual) -> reported = actual) expected_totals
+    then Ok ()
+    else Error "memory health fleet totals disagree with keeper rows"
+  in
+  let observed_warn_alerts =
+    sum (fun keeper ->
+      List.length (List.filter (fun alert -> String.equal alert.ma_severity "warn") keeper.mkh_alerts))
+  in
+  let observed_error_alerts =
+    sum (fun keeper ->
+      List.length (List.filter (fun alert -> String.equal alert.ma_severity "error") keeper.mkh_alerts))
+  in
+  let* () =
+    if
+      total_alerts = sum (fun keeper -> List.length keeper.mkh_alerts)
+      && mhs_warn_alerts = observed_warn_alerts
+      && mhs_error_alerts = observed_error_alerts
+      && keepers_with_alerts = sum (fun keeper -> if keeper.mkh_alerts = [] then 0 else 1)
+      && snapshot_read_error_keepers = mhs_total_read_errors
+      && source_snapshot_read_error_keepers = mhs_total_source_read_errors
+      && librarian_lane_busy_keepers
+         = sum (fun keeper -> if keeper.mkh_librarian_lane_busy > 0 then 1 else 0)
+      && mhs_starving_keepers
+         = sum (fun keeper ->
+           if keeper.mkh_librarian_failures > 0 && not keeper.mkh_snapshot_present
+           then 1
+           else 0)
+    then Ok ()
+    else Error "memory health alert summary disagrees with keeper rows"
+  in
   Ok
     { mhs_generated_at
     ; mhs_keepers
     ; mhs_total_facts
+    ; mhs_total_observed_facts
+    ; mhs_total_derived_facts
+    ; mhs_total_support_invalidations
     ; mhs_total_snapshot_bytes
     ; mhs_total_source_facts
     ; mhs_total_source_invalidations

@@ -581,14 +581,20 @@ type repository_change_snapshot = {
 type memory_alert = {
   ma_code : string;
   ma_severity : string;
+  ma_target : string;
   ma_label : string;
   ma_message : string;
+  ma_value : float;
+  ma_threshold : float;
 }
 
 type memory_keeper_health = {
   mkh_keeper_id : string;
   mkh_revision : int;
   mkh_facts : int;
+  mkh_observed_facts : int;
+  mkh_derived_facts : int;
+  mkh_support_invalidations : int;
   mkh_snapshot_bytes : int;
   mkh_added : int;
   mkh_removed : int;
@@ -611,6 +617,9 @@ type memory_health_snapshot = {
   mhs_generated_at : float;
   mhs_keepers : memory_keeper_health list;
   mhs_total_facts : int;
+  mhs_total_observed_facts : int;
+  mhs_total_derived_facts : int;
+  mhs_total_support_invalidations : int;
   mhs_total_snapshot_bytes : int;
   mhs_total_source_facts : int;
   mhs_total_source_invalidations : int;

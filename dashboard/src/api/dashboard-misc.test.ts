@@ -13,13 +13,16 @@ import {
 
 function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v2',
+    schema: 'keeper.memory_os.current_health.v3',
     generated_at: 1_700_000_000,
     cadence_counter_entries: 2,
     keepers: [{
       keeper_id: 'healthy',
       revision: 7,
       facts: 4,
+      observed_facts: 3,
+      derived_facts: 1,
+      support_invalidations: 0,
       snapshot_bytes: 512,
       added: 1,
       removed: 2,
@@ -40,6 +43,9 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       keeper_id: 'broken',
       revision: 0,
       facts: 0,
+      observed_facts: 0,
+      derived_facts: 0,
+      support_invalidations: 0,
       snapshot_bytes: 32,
       added: 0,
       removed: 0,
@@ -67,6 +73,9 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
     }],
     totals: {
       facts: 4,
+      observed_facts: 3,
+      derived_facts: 1,
+      support_invalidations: 0,
       snapshot_bytes: 544,
       added: 1,
       removed: 2,
@@ -94,13 +103,16 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
 
 function starvingKeeperPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v2',
+    schema: 'keeper.memory_os.current_health.v3',
     generated_at: 1_700_000_000,
     cadence_counter_entries: 1,
     keepers: [{
       keeper_id: 'starving',
       revision: 0,
       facts: 0,
+      observed_facts: 0,
+      derived_facts: 0,
+      support_invalidations: 0,
       snapshot_bytes: 0,
       added: 0,
       removed: 0,
@@ -128,6 +140,9 @@ function starvingKeeperPayload(): KeeperMemoryHealthResponse {
     }],
     totals: {
       facts: 0,
+      observed_facts: 0,
+      derived_facts: 0,
+      support_invalidations: 0,
       snapshot_bytes: 0,
       added: 0,
       removed: 0,
@@ -163,7 +178,7 @@ describe('fetchKeeperMemoryHealth', () => {
 
     const response = await fetchKeeperMemoryHealth()
 
-    expect(response.schema).toBe('keeper.memory_os.current_health.v2')
+    expect(response.schema).toBe('keeper.memory_os.current_health.v3')
     expect(response.keepers[0]).toMatchObject({
       keeper_id: 'healthy',
       revision: 7,
@@ -187,6 +202,18 @@ describe('fetchKeeperMemoryHealth', () => {
   it('rejects totals that disagree with the keeper rows', async () => {
     const payload = keeperMemoryHealthPayload()
     payload.totals.facts = 5
+    getMock.mockResolvedValue(payload)
+
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow(
+      '유효하지 않은 keeper memory health payload',
+    )
+  })
+
+  it('rejects a fact total that disagrees with observed and derived facts', async () => {
+    const payload = keeperMemoryHealthPayload()
+    const keeper = payload.keepers[0]
+    if (keeper === undefined) throw new Error('fixture keeper missing')
+    keeper.derived_facts = 2
     getMock.mockResolvedValue(payload)
 
     await expect(fetchKeeperMemoryHealth()).rejects.toThrow(

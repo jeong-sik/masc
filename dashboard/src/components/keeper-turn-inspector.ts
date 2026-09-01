@@ -161,6 +161,9 @@ function MemoryOsChangeRow({
   const stateClass = kind === 'added'
     ? 'text-[var(--color-status-ok)]'
     : 'text-[var(--color-status-err)]'
+  const basis = fact.basis.kind === 'observed'
+    ? 'observed'
+    : `derived · ${fact.basis.derivations.length} proof(s)`
   return html`
     <div class="min-w-0 border-t border-[var(--color-border-muted)] py-2 first:border-t-0 v2-monitoring-row">
       <div class="mb-1 flex min-w-0 flex-wrap items-center gap-2">
@@ -170,9 +173,33 @@ function MemoryOsChangeRow({
         <span class="text-3xs font-mono text-[var(--color-fg-muted)]">
           ${fact.memory_id}
         </span>
+        <span class="text-3xs font-mono text-[var(--color-fg-muted)]">${basis}</span>
       </div>
       <div class="line-clamp-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
         ${fact.claim}
+      </div>
+    </div>
+  `
+}
+
+function MemoryOsInvalidationRow({
+  invalidation,
+}: {
+  invalidation: MemoryOsTurnRecordSnapshot['change']['invalidated'][number]
+}) {
+  return html`
+    <div class="min-w-0 border-t border-[var(--color-border-muted)] py-2 first:border-t-0 v2-monitoring-row">
+      <div class="mb-1 flex min-w-0 flex-wrap items-center gap-2">
+        <span class="font-mono text-2xs text-[var(--color-status-err)]">× support invalidated</span>
+        <span class="text-3xs font-mono text-[var(--color-fg-muted)]">
+          ${invalidation.fact.memory_id}
+        </span>
+      </div>
+      <div class="line-clamp-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+        ${invalidation.fact.claim}
+      </div>
+      <div class="mt-1 text-3xs font-mono text-[var(--color-status-err)]">
+        missing ${invalidation.missing_premise_ids.join(' · ')}
       </div>
     </div>
   `
@@ -195,7 +222,7 @@ function MemoryOsRecallSourcePanel({
     ? 'fresh state'
     : new Date(snapshot.updated_at * 1000).toISOString()
   const updateSource = snapshot.update_source
-    ? `${snapshot.update_source.kind} · ${snapshot.update_source.trace_id} · g${snapshot.update_source.generation}`
+    ? `${snapshot.update_source.kind} · ${snapshot.update_source.trace_id}`
     : 'none'
 
   return html`
@@ -227,6 +254,9 @@ function MemoryOsRecallSourcePanel({
           <span class="font-mono text-[var(--color-fg-muted)]">
             retained ${snapshot.change.retained}
           </span>
+          <span class="font-mono text-[var(--color-fg-muted)]">
+            support invalidated ${snapshot.change.invalidated.length}
+          </span>
         </div>
       </div>
 
@@ -235,13 +265,19 @@ function MemoryOsRecallSourcePanel({
         : null}
 
       <div class="mt-2 divide-y divide-[var(--color-border-muted)] v2-monitoring-row">
-        ${changes.length === 0
+        ${changes.length === 0 && snapshot.change.invalidated.length === 0
           ? html`<div class="py-2 text-2xs text-[var(--color-fg-disabled)] v2-monitoring-row">latest revision memory change 없음</div>`
-          : changes.map(change => html`<${MemoryOsChangeRow}
-              key=${`${change.kind}-${change.fact.memory_id}`}
-              fact=${change.fact}
-              kind=${change.kind}
-            />`)}
+          : html`
+              ${changes.map(change => html`<${MemoryOsChangeRow}
+                key=${`${change.kind}-${change.fact.memory_id}`}
+                fact=${change.fact}
+                kind=${change.kind}
+              />`)}
+              ${snapshot.change.invalidated.map(invalidation => html`<${MemoryOsInvalidationRow}
+                key=${`invalidated-${invalidation.fact.memory_id}`}
+                invalidation=${invalidation}
+              />`)}
+            `}
       </div>
 
       <details class="mt-2 text-3xs text-[var(--color-fg-disabled)] v2-monitoring-detail">

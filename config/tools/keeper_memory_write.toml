@@ -13,7 +13,7 @@ additional_properties = false
 [[params]]
 name = "title"
 type = "string"
-description = "Short hook (≤120 chars). Optional; may be empty."
+description = "Optional hook; may be empty."
 
 [[params]]
 name = "content"
@@ -50,5 +50,5 @@ key_constraints = [
   "A source-bound claim is discarded when its source bytes change or become unreadable.",
   "A derived claim cannot use source_path and is automatically retracted when no complete support set remains current.",
 ]
-details_markdown = "Writes an observed or derived claim into the Memory OS fact store. An ordinary-current receipt returns memory_id and basis. A source-bound receipt instead returns source_path and source_sha256 and is not eligible as a derived premise in this slice. For a derived claim, pass the rule identity and exact ordinary-current premise memory ids; Memory OS maintains the least supported fixed point."
+details_markdown = "Writes an observed or derived claim into the Memory OS fact store. An ordinary-current receipt returns memory_id and a bounded basis summary (kind and proof_count for derived facts). Exact proof identities remain available through memory search. A source-bound receipt instead returns source_path and source_sha256 and is not eligible as a derived premise in this slice. For a derived claim, pass the rule identity and exact ordinary-current premise memory ids; Memory OS maintains the least supported fixed point."
 examples = ["title='region' content='The deployment region is eu-west-1.' source_path='config/deploy.env'", "content='The rollout is blocked.' rule_id='blocked_when_dependency_fails' premise_ids=['sha256:...']"]

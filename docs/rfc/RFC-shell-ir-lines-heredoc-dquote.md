@@ -5,7 +5,8 @@
 ## 1. 측정
 
 지난 8일의 `keeper_spawn` 레코드에서 `["bash","-c",script]` 모양 511건을
-추출해 파서로 재실행했다 (`~/me/.masc/tool_calls/2026-{08,09}/*.jsonl`).
+추출해 파서로 재실행했다. 입력은 `MASC_BASE_PATH` 또는 `--base-path`로
+명시한 `<base-path>/.masc/tool_calls/2026-{08,09}/*.jsonl`이다.
 
 | 결과 | 이전 | 이후 |
 |---|---|---|

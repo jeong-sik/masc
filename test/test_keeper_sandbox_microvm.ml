@@ -1232,6 +1232,28 @@ let test_build_target_mkdir_is_one_exec_for_every_target () =
 ;;
 
 
+
+let test_build_volume_open_root_runs_as_root_and_only_chmods () =
+  (* A fresh ext4 volume's root is root:root 0755 and the keeper is not root,
+     so its mkdir is refused. chown is not the way out: under --cap-drop ALL
+     even root gets "Operation not permitted" (measured). chmod on a directory
+     root already owns needs no capability. *)
+  let argv = M.build_volume_open_root_argv ~container_name:"masc-keeper-vm-polisher-abc" in
+  Alcotest.(check bool) "goes through container exec" true (contains "exec" argv);
+  Alcotest.(check bool) "names the guest" true (contains "masc-keeper-vm-polisher-abc" argv);
+  Alcotest.(check bool) "runs as root, not the keeper" true (adjacent ~flag:"--user" ~value:"0:0" argv);
+  Alcotest.(check bool) "chmods" true (adjacent ~flag:"chmod" ~value:"0777" argv);
+  Alcotest.(check bool) "the mount point, nothing below it" true (contains M.build_volume_guest_root argv);
+  (* chown would be the tidier fix and is not available, so it must not appear
+     and quietly fail. *)
+  Alcotest.(check bool) "does not attempt chown" false (contains "chown" argv);
+  Alcotest.(check int)
+    "one command, not a shell script"
+    1
+    (List.length (List.filter (String.equal "chmod") argv))
+;;
+
+
 let () =
   Alcotest.run
     "keeper_sandbox_microvm"
@@ -1328,6 +1350,10 @@ let () =
     ; ( "build link creation"
       , [ Alcotest.test_case "mkdir is one exec for every target" `Quick
             test_build_target_mkdir_is_one_exec_for_every_target
+        ] )
+    ; ( "build volume permissions"
+      , [ Alcotest.test_case "open root runs as root and only chmods" `Quick
+            test_build_volume_open_root_runs_as_root_and_only_chmods
         ] )
     ; ( "guest env"
       , [ Alcotest.test_case "env follows the config mount" `Quick

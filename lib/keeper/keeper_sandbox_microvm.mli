@@ -215,6 +215,16 @@ type build_link_row =
     stayed on the virtiofs share. *)
 val ensure_build_links : playground_root:string -> build_link_row list
 
+(** Open the volume root so the keeper can create its own build directories.
+
+    A fresh ext4 volume's root is [root:root 0755] and the guest runs as the
+    keeper's uid, so its [mkdir] is refused. [chown] cannot fix it: under
+    [--cap-drop ALL] even root gets "Operation not permitted" (measured).
+    [chmod] on a directory root already owns needs no capability. The keeper's
+    own subdirectories come out [0755] under its uid, so the widened mode stops
+    at the mount point, inside a VM that runs nothing but this keeper. *)
+val build_volume_open_root_argv : container_name:string -> string list
+
 (** Targets a build will write through. A refused checkout contributes
     nothing -- it keeps its real [_build] on the share. *)
 val build_link_targets_to_create : build_link_row list -> string list

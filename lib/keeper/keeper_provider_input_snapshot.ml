@@ -341,16 +341,23 @@ let reusable_artifacts snapshot =
     | Tool_output.Invalid_marker _ -> ()
   in
   Option.iter add snapshot.system_prompt;
-  List.iter (fun message -> add message.artifact) snapshot.messages;
-  List.iter (fun tool -> add tool.artifact) snapshot.tool_schemas;
+  (* Annotated for the same reason as [artifact_to_json] above: [tool_schema]
+     is defined after [message] and also carries [artifact], so an unannotated
+     parameter re-infers to the later record and [snapshot.messages] stops
+     type-checking. *)
+  List.iter (fun (message : message) -> add message.artifact) snapshot.messages;
+  List.iter (fun (tool : tool_schema) -> add tool.artifact) snapshot.tool_schemas;
   reusable
 ;;
 
-let store_artifact store ~reusable ~mime bytes =
+(* Return type annotated for the same reason as the two sites above:
+   [resolved_system_prompt] is defined later and also carries [bytes], so the
+   record below re-infers to it and [content_ref] stops resolving. *)
+let store_artifact store ~reusable ~mime bytes : artifact =
   let bytes_length = String.length bytes in
   let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
   match Hashtbl.find_opt reusable (sha256, mime) with
-  | Some artifact when artifact.bytes = bytes_length -> artifact
+  | Some (artifact : artifact) when artifact.bytes = bytes_length -> artifact
   | Some _ | None ->
     let reference = Tool_blob_store.put_durable store ~bytes ~mime in
     let reference = Tool_output.with_preview reference "" in

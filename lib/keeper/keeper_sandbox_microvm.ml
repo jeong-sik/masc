@@ -717,6 +717,34 @@ let build_target_mkdir_argv ~container_name ~uid ~gid ~targets =
     ~command_argv:("mkdir" :: "-p" :: targets)
 ;;
 
+(** Open the volume root so the keeper can create its own build directories.
+
+    A fresh ext4 volume's root is [root:root 0755], and the guest runs as the
+    keeper's uid, so its [mkdir] is refused:
+
+    {v mkdir: cannot create directory '/masc-build/masc-t362': Permission denied v}
+
+    [chown] is not the way out. The guest runs [--cap-drop ALL], so even root
+    cannot change ownership -- measured, [chown 502:20] returns "Operation not
+    permitted". [chmod] on a directory root already owns needs no capability
+    and does work, so the root is opened once and the keeper then creates
+    subdirectories it owns itself. Those come out [0755] under the keeper's
+    uid, so the widened mode stops at the mount point.
+
+    The guest is one VM per keeper with its own kernel, and nothing else runs
+    in it, so a world-writable mount point there is not shared with anyone.
+    Raising [--cap-add CAP_CHOWN] to avoid one mode bit would widen the
+    sandbox further than this does. *)
+let build_volume_open_root_argv ~container_name =
+  exec_argv
+    ~container_name
+    ~uid:0
+    ~gid:0
+    ~container_cwd:"/"
+    ~stdin:false
+    ~command_argv:[ "chmod"; "0777"; build_volume_guest_root ]
+;;
+
 (** Targets that a build will write through, from the rows above.
 
     A refused checkout contributes nothing: it keeps its real [_build] on the

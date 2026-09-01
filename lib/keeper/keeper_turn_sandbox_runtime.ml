@@ -650,6 +650,21 @@ let refresh_microvm_build_links ?timeout_sec (t : t) ~container_name =
   match Keeper_sandbox_microvm.build_link_targets_to_create rows with
   | [] -> ()
   | targets ->
+    (* Before the keeper's mkdir, not after: a fresh ext4 volume's root is
+       root-owned 0755 and the keeper is not root, so its mkdir is refused
+       until the mount point is opened. Idempotent, and cheap next to the turn
+       it runs in. *)
+    (match
+       run_argv_with_status
+         ?timeout_sec
+         (Keeper_sandbox_microvm.build_volume_open_root_argv ~container_name)
+     with
+     | Unix.WEXITED 0, _ -> ()
+     | _, out ->
+       Log.Keeper.warn
+         ~keeper_name
+         "microvm build volume root not writable: %s"
+         out);
     let argv =
       Keeper_sandbox_microvm.build_target_mkdir_argv
         ~container_name

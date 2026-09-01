@@ -1,6 +1,22 @@
 type decision_preview = string
 
-let decision_preview_of_string value = value
+let decision_preview_max_bytes = 160
+
+(* The constructor owns the preview invariant so every entry point — the sink
+   producer and JSON replay alike — yields the same shape: control whitespace
+   flattened, trimmed, UTF-8-safely capped. Re-applying it to an already
+   bounded value is the identity, so replaying rows written by the sink keeps
+   them byte-exact. *)
+let decision_preview_of_string value =
+  value
+  |> String.map (function
+    | '\n' | '\r' | '\t' -> ' '
+    | char -> char)
+  |> String.trim
+  |> String_util.utf8_safe ~max_bytes:decision_preview_max_bytes ~suffix:"..."
+  |> String_util.to_string
+;;
+
 let decision_preview_to_string value = value
 
 type outcome =

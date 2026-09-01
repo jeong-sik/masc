@@ -150,6 +150,23 @@ let test_progress_is_typed_and_terminal_safe () =
   | None -> fail "completed run disappeared"
 ;;
 
+let test_decision_preview_bound () =
+  let flattened =
+    R.decision_preview_to_string
+      (R.decision_preview_of_string "  line one\nline\ttwo\r  ")
+  in
+  check string "whitespace flattens and trims" "line one line two" flattened;
+  let long = String.concat " " (List.init 60 (fun _ -> "판정")) in
+  let preview = R.decision_preview_to_string (R.decision_preview_of_string long) in
+  check bool "long input is capped" true
+    (String.length preview <= R.decision_preview_max_bytes);
+  check bool "truncation is marked" true
+    (String.length preview >= 3
+     && String.sub preview (String.length preview - 3) 3 = "...");
+  check string "re-applying the constructor is the identity" preview
+    (R.decision_preview_to_string (R.decision_preview_of_string preview))
+;;
+
 let test_list_newest_first () =
   let t = R.create () in
   R.register_running t ~run_id:"old" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1.0;
@@ -277,6 +294,8 @@ let () =
         ; test_case "mark unknown run_id is a no-op" `Quick test_mark_unknown_is_noop
         ; test_case "progress is typed and terminal-safe" `Quick
             test_progress_is_typed_and_terminal_safe
+        ; test_case "decision preview constructor enforces the bound" `Quick
+            test_decision_preview_bound
         ; test_case "list_runs is newest-first" `Quick test_list_newest_first
         ; test_case "prune keeps Running + recent completed" `Quick test_prune_keeps_running_and_recent
         ] )

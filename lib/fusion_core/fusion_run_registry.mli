@@ -5,7 +5,16 @@ type decision_preview = private string
     distinct from both the authoritative [Fusion_types.judge_decision] and an
     arbitrary wire string inside the registry domain. *)
 
+val decision_preview_max_bytes : int
+(** Byte cap enforced by [decision_preview_of_string], suffix included. *)
+
 val decision_preview_of_string : string -> decision_preview
+(** Enforces the preview invariant: flattens ['\n'], ['\r'], ['\t'] to spaces,
+    trims, and UTF-8-safely truncates to at most [decision_preview_max_bytes]
+    bytes (appending ["..."] when truncation occurs). Applying it to a value
+    it already produced is the identity, so JSON replay of persisted rows is
+    byte-exact. *)
+
 val decision_preview_to_string : decision_preview -> string
 
 type outcome =

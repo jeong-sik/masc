@@ -112,6 +112,50 @@ let test_empty_input () =
     "no model bindings in runtime.toml"
     (List.hd (T.render ~width:80 []))
 
+let test_detail_names_owners_and_api_override () =
+  let alpha = row_named (T.parse sample) "alpha" in
+  check
+    (Alcotest.list string)
+    "selected binding detail"
+    [ "Binding: provider=ollama_cloud  model=alpha"
+    ; "API model: alpha-v2 (api-name override)"
+    ; "[models.alpha]  reasoning-effort=low  temperature=0.7"
+    ; "[ollama_cloud.alpha]  max-tokens=16384"
+    ; "- means that key is absent; add or edit it in the section shown above."
+    ]
+    (T.detail_lines alpha)
+
+let test_detail_explains_absent_values () =
+  let beta = row_named (T.parse sample) "beta" in
+  check
+    (Alcotest.list string)
+    "absent values and default API name"
+    [ "Binding: provider=ollama_cloud  model=beta"
+    ; "API model: beta (default; api-name key absent)"
+    ; "[models.beta]  reasoning-effort=-  temperature=-"
+    ; "[ollama_cloud.beta]  max-tokens=-"
+    ; "- means that key is absent; add or edit it in the section shown above."
+    ]
+    (T.detail_lines beta)
+
+let test_detail_quotes_dotted_model_section () =
+  let row : T.row =
+    { model = "glm-5.2"
+    ; provider = "glm-coding"
+    ; api_name = None
+    ; reasoning_effort = None
+    ; temperature = None
+    ; max_tokens = None
+    }
+  in
+  let detail = T.detail_lines row in
+  check string "models section quotes the dotted key"
+    "[models.\"glm-5.2\"]  reasoning-effort=-  temperature=-"
+    (List.nth detail 2);
+  check string "binding section quotes the dotted key"
+    "[glm-coding.\"glm-5.2\"]  max-tokens=-"
+    (List.nth detail 3)
+
 let () =
   Alcotest.run
     "masc_tui_model_runtime_table"
@@ -128,5 +172,17 @@ let () =
     ; ( "render"
       , [ Alcotest.test_case "columns line up" `Quick test_render_columns_line_up
         ; Alcotest.test_case "empty input" `Quick test_empty_input
+        ; Alcotest.test_case
+            "detail names owners and API override"
+            `Quick
+            test_detail_names_owners_and_api_override
+        ; Alcotest.test_case
+            "detail explains absent values"
+            `Quick
+            test_detail_explains_absent_values
+        ; Alcotest.test_case
+            "detail quotes dotted model section"
+            `Quick
+            test_detail_quotes_dotted_model_section
         ] )
     ]

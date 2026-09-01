@@ -35,3 +35,8 @@ val render : width:int -> row list -> string list
 (** Fixed-column table. [width] clips the model column when the terminal is
     narrow; the two knob columns keep their width because a truncated number
     reads as a different number. *)
+
+val detail_lines : row -> string list
+(** Selected-binding explanation for the Models pane. It names the effective
+    API model and the exact TOML sections that own each knob. A model name that
+    is not a bare TOML key is quoted in the section path. *)

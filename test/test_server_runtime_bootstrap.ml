@@ -3798,6 +3798,52 @@ let test_prompt_markdown_dir_prefers_resolved_config_dir_over_cwd () =
             "resolved config prompts win over cwd fallback"
             resolved_prompts resolved))
 
+(* A config root with no prompts in it is what a first run looks like, and
+   what every run looked like after an asset was added to the manifest: the
+   sync that fills the directory runs inside main, so nothing has filled it
+   yet when the binary's modules load.
+
+   [default_wake_prompt] read that directory at module load and raised on
+   absence, which killed the boot that would have created the file. The value
+   comes from the embedded asset now, so the directory's contents cannot
+   decide whether the binary starts.
+
+   Run as a process rather than in-band because that is the only place the
+   property lives: a module-load read has already happened by the time a test
+   body can set an environment variable. *)
+let test_main_eio_starts_with_an_unsynced_config_root () =
+  with_temp_dir "unsynced-config" (fun dir ->
+      let exe = Masc_test_runtime.find_main_eio_exe () in
+      let config_root = Filename.concat dir "config" in
+      Unix.mkdir config_root 0o700;
+      let env =
+        main_eio_env_overrides
+          [ ("MASC_BASE_PATH", dir); ("MASC_CONFIG_DIR", config_root) ]
+      in
+      let out = Filename.concat dir "help.log" in
+      let fd =
+        Unix.openfile out [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+      in
+      let pid =
+        Unix.create_process_env exe [| exe; "--help" |] env Unix.stdin fd fd
+      in
+      Unix.close fd;
+      (* [waitpid] takes EINTR here: the suite runs with signals in flight. *)
+      let rec wait () =
+        match Unix.waitpid [] pid with
+        | _, status -> status
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+      in
+      let status = wait () in
+      let body = In_channel.with_open_text out In_channel.input_all in
+      Alcotest.(check bool)
+        (Printf.sprintf "the binary starts against an unsynced config root: %s" body)
+        true
+        (match status with
+         | Unix.WEXITED 0 -> true
+         | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false))
+;;
+
 let test_main_eio_serves_health_before_lazy_startup () =
   with_temp_dir "startup-health" (fun dir ->
       let exe = Masc_test_runtime.find_main_eio_exe () in
@@ -4953,6 +4999,10 @@ let () =
             "main_eio invalid default partial catalog stays degraded"
             `Slow
             test_main_eio_invalid_default_partial_catalog_stays_degraded;
+          Alcotest.test_case
+            "main_eio starts with an unsynced config root"
+            `Slow
+            test_main_eio_starts_with_an_unsynced_config_root;
           Alcotest.test_case
             "main_eio invalid runtime stays degraded but serves dashboard"
             `Slow

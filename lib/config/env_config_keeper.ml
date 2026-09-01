@@ -191,28 +191,34 @@ module KeeperAutonomous = struct
 
   (** The wording used when neither the fleet nor a keeper configures one.
 
-      Unlike model-facing markdown assets this sits below [Prompt_registry],
-      so it reads the synced config asset directly.  A missing asset is a boot
-      error: returning an empty user turn would silently change autonomy. *)
+      Read from the binary, not from [<config-root>/prompts]. That runtime
+      copy is derived distribution state: [Managed_asset_sync] overwrites it
+      from this same embedded tree on every boot, and prompt customization
+      lives in [prompt_overrides.json] instead — so the two are the same bytes
+      and reading the copy only adds a way to fail.
+
+      It added a real one. This binding is a value, so it runs at module load;
+      the sync that produces the copy runs later, inside [main]. An asset
+      newly added to the manifest therefore had no copy yet on any boot, and
+      the boot that would have created it died first. *)
   let default_wake_prompt =
-    let config_dir =
-      match Sys.getenv_opt "MASC_CONFIG_DIR" with
-      | Some dir when String.trim dir <> "" -> String.trim dir
-      | Some _ | None ->
-          (match Sys.getenv_opt "DUNE_SOURCEROOT" with
-           | Some root when String.trim root <> "" -> Filename.concat root "config"
-           | Some _ | None -> Filename.concat (Sys.getcwd ()) "config")
-    in
-    let path = Filename.concat config_dir "prompts/keeper.autonomous.wake.txt" in
-    if not (Sys.file_exists path) || Sys.is_directory path then
-      raise (Env_config_core.Config_error ("missing autonomous wake prompt asset: " ^ path));
-    let prompt = In_channel.with_open_text path In_channel.input_all |> String.trim in
-    match validate_wake_prompt prompt with
-    | Ok prompt -> prompt
-    | Error detail ->
-        raise
-          (Env_config_core.Config_error
-             (Printf.sprintf "invalid autonomous wake prompt asset %s: %s" path detail))
+    let asset = "prompts/keeper.autonomous.wake.txt" in
+    match Embedded_config.read asset with
+    | None ->
+      (* The crunch tree is the repository's own [config/], so a missing key
+         means the binary was built without the asset. Nothing at runtime can
+         supply it. *)
+      raise
+        (Env_config_core.Config_error
+           ("autonomous wake prompt is not embedded in this binary: " ^ asset))
+    | Some contents ->
+      (match validate_wake_prompt (String.trim contents) with
+       | Ok prompt -> prompt
+       | Error detail ->
+         raise
+           (Env_config_core.Config_error
+              (Printf.sprintf "invalid embedded autonomous wake prompt %s: %s" asset detail)))
+  ;;
 
   (** Fleet-wide wake prompt, or [None] when unset. Read as a function: the
       value is steerable through the boot override store, and a keeper process

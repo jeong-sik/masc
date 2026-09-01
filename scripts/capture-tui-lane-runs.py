@@ -14,20 +14,19 @@ Frames:
         Board Attention standalone row (k clamps at the first standalone row).
     02-lane-run-list.png — Enter on Board Attention: "MASC Lanes · Board
         Attention (N runs)", STARTED/ACTOR/STATUS/ELAPSED/SLOT/RUN ID columns.
-    03-lane-run-detail.png — Enter on a run: "MASC Lane Run", RUN meta block,
-        INPUT (prompt payload) / OUTPUT pretty JSON. If OUTPUT is below the
-        fold the view pages down until the OUTPUT header is visible.
-    04-verifier-no-llm.png — Enter on the Verifier lane: the notice that
-        verifier runs record no LLM prompt/output. Matched on the substring
-        "no LLM prompt/output" so the capture holds whether the notice is a
-        one-line action error or a full pane.
+    03-lane-run-detail.png — Enter on an exact-output run: sticky decision,
+        execution, and Tool summaries above side-by-side prompt/model JSON.
+    04-verifier-run-list.png — Verifier's retained Task/Goal decisions with
+        SUBJECT and STATUS columns.
+    05-verifier-run-detail.png — A completed Verifier decision with its
+        request beside the verdict and typed Tool evidence.
 
 Usage:
     python3 scripts/capture-tui-lane-runs.py \
         --base-path ~/me --out /tmp/tui-lane-runs
 
-Requires the live server on --api-port (default 8935) and a built
-_build/default/bin/masc_tui.exe (scripts/dune-local.sh build bin/masc_tui.exe).
+Requires the live server on --api-port (default 8935) and a built TUI passed
+with --executable (defaults to _build/default/bin/masc_tui.exe).
 """
 
 from __future__ import annotations
@@ -35,6 +34,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -49,14 +49,24 @@ from playwright.sync_api import Browser, Page, sync_playwright
 
 WORKTREE = Path(__file__).resolve().parents[1]
 TTYD = Path("/opt/homebrew/bin/ttyd")
-EXECUTABLE = WORKTREE / "_build/default/bin/masc_tui.exe"
+DEFAULT_EXECUTABLE = WORKTREE / "_build/default/bin/masc_tui.exe"
 
 # The whole capture is one connected trip through the drill-down; the frame
 # list documents what each shot must prove, and main() walks it in order.
-VERIFIER_NOTICE = "no LLM prompt/output"
-# A whole line that is only the box border and the OUTPUT header; payload
-# lines always carry JSON text after the indent, so this cannot match one.
-OUTPUT_HEADER_RE = re.compile(r"│\s*OUTPUT\s*│")
+LANE_ROW_RE = re.compile(r"\bactive\s+\d+\s+runs\s+\d+\s+ok/fail/cancel\b")
+TERMINAL_VERIFIER_STATUSES = (
+    "approved",
+    "rejected",
+    "reviewed",
+    "committed",
+    "deferred",
+    "review_cancelled",
+    "infrastructure_unavailable",
+    "not_reviewed",
+    "commit_failed",
+    "raised",
+)
+RUN_STATUS_COLUMN_CELLS = 11
 
 # Length-preserving placeholder: a terminal row is a grid, so a replacement
 # that is shorter than the name it covers moves every cell after it.
@@ -92,7 +102,11 @@ def discover_keeper_names(base_path: Path) -> list[str]:
     if not keepers.is_dir():
         return []
     return sorted(
-        (d.name for d in keepers.iterdir() if d.is_dir() and not d.name.startswith(".")),
+        (
+            d.name
+            for d in keepers.iterdir()
+            if d.is_dir() and not d.name.startswith(".")
+        ),
         key=len,
         reverse=True,
     )
@@ -141,7 +155,13 @@ def wait_port(port: int, process: subprocess.Popen, timeout: float = 20.0) -> No
 
 @contextmanager
 def ttyd_session(
-    browser: Browser, base: Path, api_port: int, cols: int, rows: int, workspace: str
+    browser: Browser,
+    base: Path,
+    api_port: int,
+    cols: int,
+    rows: int,
+    workspace: str,
+    executable: Path,
 ) -> Iterator[Page]:
     web_port = free_port()
     env = dict(os.environ)
@@ -160,14 +180,37 @@ def ttyd_session(
         }
     )
     command = [
-        str(TTYD), "-p", str(web_port), "-i", "127.0.0.1", "-W",
-        "-t", "rendererType=dom", "-t", "fontSize=14", "-t", "fontFamily=Menlo",
-        "-T", "xterm-256color", str(EXECUTABLE), "--base-path", str(base),
-        "--workspace", workspace, "--port", str(api_port), "--refresh", "60",
+        str(TTYD),
+        "-p",
+        str(web_port),
+        "-i",
+        "127.0.0.1",
+        "-W",
+        "-t",
+        "rendererType=dom",
+        "-t",
+        "fontSize=14",
+        "-t",
+        "fontFamily=Menlo",
+        "-T",
+        "xterm-256color",
+        str(executable),
+        "--base-path",
+        str(base),
+        "--workspace",
+        workspace,
+        "--port",
+        str(api_port),
+        "--refresh",
+        "60",
     ]
     process = subprocess.Popen(
-        command, cwd=WORKTREE, env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True,
+        command,
+        cwd=WORKTREE,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
     )
     context = None
     try:
@@ -251,6 +294,31 @@ def select_board_attention(page: Page) -> None:
     page.wait_for_timeout(400)
 
 
+def standalone_lane_index(text: str, label: str) -> int:
+    """Return the row index of an exact standalone label.
+
+    The matrix rows own the `active/runs/ok/fail/cancel` tuple. Matching that
+    typed projection keeps the selected-row detail prose from becoming a
+    second, accidental lane list.
+    """
+    rows = [line for line in text.splitlines() if LANE_ROW_RE.search(line)]
+    matches = [index for index, line in enumerate(rows) if label in line]
+    if len(matches) != 1:
+        raise WaitFailed(
+            f"expected one standalone lane row for {label!r}, found {len(matches)}"
+        )
+    return matches[0]
+
+
+def select_standalone_lane(page: Page, label: str) -> None:
+    """Select a lane by the matrix the operator can see, not by a fixed count."""
+    select_board_attention(page)
+    index = standalone_lane_index(screen_text(page), label)
+    if index:
+        press(page, "j", times=index)
+    wait_text(page, f"{label} ·")
+
+
 def first_succeeded_row_index(text: str) -> int:
     """Index of the first run-list row whose STATUS reads succeeded, or 0.
 
@@ -264,12 +332,52 @@ def first_succeeded_row_index(text: str) -> int:
         return 0
     index = 0
     for line in lines[header + 1 :]:
-        if "succeeded" in line:
-            return index
-        # Run rows are box lines with a timestamp in the STARTED column.
-        if re.search(r"│\s*\d{2}-\d{2} \d{2}:\d{2}:\d{2}", line):
+        # Run rows own a timestamp in the STARTED column. The surface is
+        # borderless, so a box glyph is not part of row identity.
+        if re.search(r"\b\d{2}-\d{2} \d{2}:\d{2}:\d{2}\b", line):
+            if "succeeded" in line:
+                return index
             index += 1
     return 0
+
+
+def first_terminal_verifier_row(text: str) -> tuple[int, str]:
+    """Return the first completed Verifier row and its typed status label."""
+    lines = text.splitlines()
+    try:
+        header = next(i for i, line in enumerate(lines) if "RUN ID" in line)
+    except StopIteration as error:
+        raise WaitFailed("Verifier run list has no RUN ID header") from error
+    index = 0
+    for line in lines[header + 1 :]:
+        if re.search(r"\b\d{2}-\d{2} \d{2}:\d{2}:\d{2}\b", line):
+            for status in TERMINAL_VERIFIER_STATUSES:
+                displayed = (
+                    status
+                    if len(status) <= RUN_STATUS_COLUMN_CELLS
+                    else status[: RUN_STATUS_COLUMN_CELLS - 1] + "~"
+                )
+                if displayed in line:
+                    return index, status
+            index += 1
+    raise WaitFailed("Verifier has no retained terminal decision to capture")
+
+
+def require_split_heading(text: str, left: str, right: str) -> None:
+    if not any(
+        left in line and "│" in line and right in line for line in text.splitlines()
+    ):
+        raise WaitFailed(
+            f"Input/Output split heading is absent: left={left!r}, right={right!r}"
+        )
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def capture(page: Page, pairs: list[list[str]], out: Path, stem: str) -> dict:
@@ -289,13 +397,15 @@ def main() -> int:
     ap.add_argument("--cols", type=int, default=170)
     ap.add_argument("--rows", type=int, default=48)
     ap.add_argument("--workspace", default="demo-workspace")
+    ap.add_argument("--executable", type=Path, default=DEFAULT_EXECUTABLE)
     args = ap.parse_args()
 
     if not TTYD.is_file():
         print(f"missing ttyd: {TTYD}", file=sys.stderr)
         return 1
-    if not EXECUTABLE.is_file():
-        print(f"missing {EXECUTABLE}; run scripts/dune-local.sh build bin/masc_tui.exe", file=sys.stderr)
+    executable = args.executable.expanduser().resolve()
+    if not executable.is_file():
+        print(f"missing TUI executable: {executable}", file=sys.stderr)
         return 1
 
     base = Path(args.base_path).expanduser()
@@ -308,21 +418,33 @@ def main() -> int:
         browser = pw.chromium.launch()
         try:
             with ttyd_session(
-                browser, base, args.api_port, args.cols, args.rows, args.workspace
+                browser,
+                base,
+                args.api_port,
+                args.cols,
+                args.rows,
+                args.workspace,
+                executable,
             ) as page:
-                dims = page.evaluate("() => ({cols: window.term.cols, rows: window.term.rows})")
+                dims = page.evaluate(
+                    "() => ({cols: window.term.cols, rows: window.term.rows})"
+                )
 
                 goto_lanes(page)
 
                 # 1. Overview, selection band on the first standalone row.
-                select_board_attention(page)
-                saved.append(capture(page, pairs, args.out, "01-lanes-overview-standalone"))
+                select_standalone_lane(page, "Board Attention")
+                saved.append(
+                    capture(page, pairs, args.out, "01-lanes-overview-standalone")
+                )
                 saved[-1]["selected_row"] = "Board Attention"
 
                 # 2. Enter opens the lane's run list over HTTP. Landing on
                 # "Board Attention" here also proves frame 1's selection.
                 press(page, "Enter")
-                text = wait_text(page, "Board Attention", "RUN ID", "Right / Enter:prompt")
+                text = wait_text(
+                    page, "Board Attention", "RUN ID", "Right / Enter:prompt"
+                )
                 page.wait_for_timeout(500)
                 saved.append(capture(page, pairs, args.out, "02-lane-run-list"))
                 saved[-1]["lane"] = "Board Attention"
@@ -333,33 +455,61 @@ def main() -> int:
                 if run_index:
                     press(page, "j", times=run_index)
                 press(page, "Enter")
-                wait_text(page, "MASC Lane Run", "INPUT (prompt payload)", "j/k:scroll")
+                exact_detail = wait_text(
+                    page,
+                    "MASC Lane Run",
+                    "DECISION  NOT A VERDICT",
+                    "TOOLS  none",
+                    "INPUT · PROMPT PAYLOAD",
+                    "OUTPUT · MODEL RESPONSE",
+                    "j/k:compare",
+                )
+                require_split_heading(
+                    exact_detail, "INPUT · PROMPT PAYLOAD", "OUTPUT · MODEL RESPONSE"
+                )
                 page.wait_for_timeout(500)
-                # INPUT sits at the top; page down until the OUTPUT header is
-                # visible too, so one frame shows both payloads' brackets.
-                for _ in range(8):
-                    if any(OUTPUT_HEADER_RE.search(line) for line in screen_text(page).splitlines()):
-                        break
-                    press(page, "PageDown")
-                    page.wait_for_timeout(300)
                 saved.append(capture(page, pairs, args.out, "03-lane-run-detail"))
                 saved[-1]["run_cursor_index"] = run_index
+                saved[-1]["decision"] = "not_a_verdict"
+                saved[-1]["layout"] = "side_by_side"
 
                 # 4. Back to the overview (Esc detail -> list, Esc list ->
-                # overview), then onto the Verifier row for its notice.
+                # overview), then open the Verifier decision ledger.
                 press(page, "Escape")
                 wait_text(page, "RUN ID")
                 press(page, "Escape")
                 wait_text(page, "Standalone LLM lanes", "Board Attention")
-                select_board_attention(page)
-                press(page, "j", times=4)  # Board Attention -> Verifier
+                select_standalone_lane(page, "Verifier")
                 press(page, "Enter")
-                # Substring, not a mode title: the notice may be a one-line
-                # action error in the overview or a full pane.
-                wait_text(page, VERIFIER_NOTICE)
+                verifier_list = wait_text(
+                    page, "MASC Lanes", "Verifier", "SUBJECT", "RUN ID"
+                )
                 page.wait_for_timeout(500)
-                saved.append(capture(page, pairs, args.out, "04-verifier-no-llm"))
-                saved[-1]["notice"] = VERIFIER_NOTICE
+                saved.append(capture(page, pairs, args.out, "04-verifier-run-list"))
+                verifier_index, verifier_status = first_terminal_verifier_row(
+                    verifier_list
+                )
+                if verifier_index:
+                    press(page, "j", times=verifier_index)
+                press(page, "Enter")
+                verifier_detail = wait_text(
+                    page,
+                    "MASC Lane Run",
+                    "DECISION",
+                    "TOOLS",
+                    "INPUT · VERIFICATION REQUEST",
+                    "OUTPUT · VERDICT + TOOL EVIDENCE",
+                )
+                require_split_heading(
+                    verifier_detail,
+                    "INPUT · VERIFICATION REQUEST",
+                    "OUTPUT · VERDICT + TOOL EVIDENCE",
+                )
+                page.wait_for_timeout(500)
+                saved.append(capture(page, pairs, args.out, "05-verifier-run-detail"))
+                saved[-1]["run_cursor_index"] = verifier_index
+                saved[-1]["verdict_status"] = verifier_status
+                saved[-1]["layout"] = "side_by_side"
         except WaitFailed as error:
             dump = args.out / "debug-screen-dump.txt"
             dump.write_text(str(error), encoding="utf-8")
@@ -373,12 +523,19 @@ def main() -> int:
         "commit": subprocess.run(
             ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
         ).stdout.strip(),
+        "executable": {
+            "path": str(executable),
+            "bytes": executable.stat().st_size,
+            "sha256": sha256_file(executable),
+        },
         "terminal": dims,
         "api_port": args.api_port,
         "keeper_names_redacted": len(names),
         "frames": saved,
     }
-    (args.out / "evidence.json").write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+    (args.out / "evidence.json").write_text(
+        json.dumps(evidence, indent=2) + "\n", encoding="utf-8"
+    )
     print(f"wrote {args.out / 'evidence.json'}")
     return 0
 

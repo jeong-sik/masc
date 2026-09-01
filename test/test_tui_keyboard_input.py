@@ -5354,6 +5354,7 @@ def memory_journal_backfill_fixture() -> HttpResponse:
             "ok": True,
             "outcome": "failed",
             "recorded_at": 1787348480.0,
+            "trace_id": "trace-backfilled-probe",
             "kind": "backfilled_probe",
             "detail": "older Journal observation",
             "snapshot_present": True,
@@ -5371,8 +5372,9 @@ def memory_journal_chat_fixture() -> HttpResponse:
             {
                 "id": "assistant:before-journal",
                 "role": "assistant",
-                "content": "broadcast before Librarian",
+                "content": "direct turn before Librarian",
                 "ts": 1787344889.0,
+                "turn_ref": "trace-before#54",
             },
             {
                 "id": "assistant:after-journal",
@@ -5494,16 +5496,14 @@ def memory_journal_timeline_interaction(
                     "Civil-hour rail was not drawn in its semantic colour "
                     f"and bold weight for {label!r}: {visible!r}"
                 )
-        before = plain_visible.find(b"broadcast before Librarian")
+        before = plain_visible.find(b"direct turn before Librarian")
         journal = plain_visible.find(b"Librarian committed current memory revision 9")
         after = plain_visible.find(b"direct turn after Librarian")
-        if not (
-            0 <= earlier_rail < before < later_rail < journal < after
-        ):
+        if not (0 <= earlier_rail < before < later_rail < after < journal):
             raise AssertionError(
-                "Civil-hour rails and parallel chat/journal lanes were not "
-                "ordered by recorded time without splitting conversation "
-                f"turns: {visible!r}"
+                "Civil-hour rails did not display clock transitions while chat "
+                "turns and the Journal lane retained typed turn then producer "
+                f"order: {visible!r}"
             )
         if re.search("\u25c8\\s+JOURNAL".encode(), plain_visible) is None:
             raise AssertionError(
@@ -5553,6 +5553,9 @@ def memory_journal_timeline_interaction(
             raise AssertionError(
                 f"Scroll setup did not keep the intended Journal anchor: {scrolled_frame!r}"
             )
+        anchor_row_before = frame_row_of(scrolled_frame, anchor)
+        status_row_before = frame_row_of(scrolled_frame, b"reading back 1 row(s)")
+        anchor_offset_before = anchor_row_before - status_row_before
         memory.responses.append(memory_journal_backfill_fixture())
         served_before_backfill = memory.served
         wait_for_fixture_served(
@@ -5561,7 +5564,7 @@ def memory_journal_timeline_interaction(
             output,
             memory,
             after=served_before_backfill,
-            description="chronological Journal backfill",
+            description="Journal producer backfill",
             timeout=5.0,
         )
         drain_until_quiet(process, master_fd, output)
@@ -5576,8 +5579,17 @@ def memory_journal_timeline_interaction(
         )
         if anchor not in CSI_RE.sub(b"", refreshed_frame):
             raise AssertionError(
-                "An older chronological Journal backfill moved the scroll pin: "
+                "A producer-side Journal backfill moved the structural scroll pin: "
                 f"{refreshed_frame!r}"
+            )
+        anchor_row_after = frame_row_of(refreshed_frame, anchor)
+        status_row_after = frame_row_of(refreshed_frame, b"reading back 1 row(s)")
+        anchor_offset_after = anchor_row_after - status_row_after
+        if anchor_offset_after != anchor_offset_before:
+            raise AssertionError(
+                "Journal prepend changed the pinned row's footer-relative slot: "
+                f"before={anchor_offset_before} after={anchor_offset_after} "
+                f"frame={refreshed_frame!r}"
             )
         send_and_wait(
             process,

@@ -139,7 +139,7 @@ type msg_role =
           live pane's thinking style, so a turn the keeper ran on its own and
           one watched live read alike. *)
   | Message_memory
-      (** One Memory OS journal pass interleaved by its recorded timestamp. *)
+      (** One Memory OS journal pass in its explicit auxiliary producer lane. *)
 
 type reasoning_visibility =
   | Reasoning_hidden
@@ -280,9 +280,8 @@ type msg_entry = {
   me_identity: msg_identity;
   me_turn_phase: chat_turn_phase;
   me_turn_sequence: int option;
-      (** Absolute Keeper turn sequence from a persisted turn_ref. It keeps
-          exact-time ties deterministic; the pane's top-level groups use
-          their displayed observation time. *)
+      (** Absolute Keeper turn sequence from a persisted turn_ref. This is the
+          cross-store ordering authority for complete turn groups. *)
   me_operation_seq: int;
       (** Structural producer position within one request. Timestamps never
           break ties or move rows; phase then this sequence is the order. *)
@@ -297,9 +296,7 @@ type msg_entry = {
   me_keeper_name: string;
   me_request_id: string;
   (* Producer observation time. Used for display, pagination cursors, and
-     render-cache identity, and chronological ordering between whole turns or
-     parallel-lane observations. Causal turn ownership decides order inside a
-     turn. *)
+     render-cache identity only. Causal turn ownership decides row order. *)
   me_at: float;
 }
 
@@ -314,13 +311,22 @@ type chat_timeline_item =
   | Chat_unowned of msg_entry
   | Chat_memory of msg_entry
       (** Explicit auxiliary journal lane. Memory rows have no conversational
-          request owner; their recorded time places them between whole chat
-          turns without making them part of either turn. *)
+          request owner and never borrow wall-clock order from chat turns. *)
 
 type chat_timeline = {
   ctl_settled: chat_timeline_item list;
   ctl_active: chat_turn option;
 }
+
+(* The clock a row displays and contributes to civil-hour rails. This helper
+   deliberately sits outside [compare_chat_timeline_items]: submitted/observed
+   time is presentation and pagination data, never conversation order. *)
+let message_display_at row =
+  let valid at = Float.is_finite at && at > 0. in
+  match row.me_submitted_at with
+  | Some at when valid at -> Some at
+  | Some _ | None -> if valid row.me_at then Some row.me_at else None
+;;
 
 type msg_anchor =
   { ma_identity : msg_identity
@@ -407,20 +413,11 @@ let append_chat_timeline_row items row =
     append [] items
 ;;
 
-let message_timeline_at row =
-  let valid at = Float.is_finite at && at > 0. in
-  match row.me_submitted_at with
-  | Some at when valid at -> Some at
-  | Some _ | None -> if valid row.me_at then Some row.me_at else None
-;;
-
-let timeline_observed_at = function
-  | Chat_turn { ct_rows; _ } ->
-      List.find_map message_timeline_at ct_rows
-  | Chat_unowned row | Chat_memory row -> message_timeline_at row
-;;
-
-let compare_chat_timeline_tie left right =
+(* Complete turns cross direct/autonomous stores through the persisted typed
+   turn sequence. Items without that authority keep producer order: inventing
+   one from a display clock would let clock skew or a late write rewrite the
+   conversation. [List.stable_sort] below is part of this contract. *)
+let compare_chat_timeline_items left right =
   match left, right with
   | Chat_turn left, Chat_turn right ->
       (match left.ct_turn_sequence, right.ct_turn_sequence with
@@ -428,29 +425,12 @@ let compare_chat_timeline_tie left right =
        | Some _, None -> -1
        | None, Some _ -> 1
        | None, None -> 0)
-  | Chat_turn _, (Chat_unowned _ | Chat_memory _) -> -1
-  | (Chat_unowned _ | Chat_memory _), Chat_turn _ -> 1
-  | Chat_unowned _, Chat_memory _ -> -1
-  | Chat_memory _, Chat_unowned _ -> 1
-  | Chat_unowned _, Chat_unowned _ | Chat_memory _, Chat_memory _ -> 0
-;;
-
-(* The top-level pane is a timeline, while each direct turn is a causal block.
-   Sort the blocks, unowned broadcasts, and Journal observations by their real
-   displayed observation time; never sort the rows inside a turn. This is what
-   prevents a 20:40 direct reply from being drawn above an 18:52 broadcast
-   merely because only the former has a [turn_ref]. Unknown clocks stay last
-   instead of masquerading as Unix epoch events. An exact clock tie uses one
-   total typed order: sequenced turns, unowned conversation, then Journal. *)
-let compare_chat_timeline_items left right =
-  match timeline_observed_at left, timeline_observed_at right with
-  | Some left_at, Some right_at ->
-      let by_time = Float.compare left_at right_at in
-      if by_time <> 0 then by_time
-      else compare_chat_timeline_tie left right
-  | Some _, None -> -1
-  | None, Some _ -> 1
-  | None, None -> compare_chat_timeline_tie left right
+  | Chat_turn { ct_turn_sequence = Some _; _ },
+    (Chat_unowned _ | Chat_memory _) -> -1
+  | (Chat_unowned _ | Chat_memory _),
+    Chat_turn { ct_turn_sequence = Some _; _ } -> 1
+  | (Chat_turn _ | Chat_unowned _ | Chat_memory _),
+    (Chat_turn _ | Chat_unowned _ | Chat_memory _) -> 0
 ;;
 
 let chat_timeline ~loaded ~session ~queued_request_ids ~active_request_id =
@@ -2195,7 +2175,7 @@ type state = {
           asking for the text again. *)
   mutable msg_find_at: msg_anchor option;
       (** Structural identity of the message [/find] last landed on. The next
-          search resolves it in the current chronological timeline and starts
+          search resolves it in the current causal timeline and starts
           strictly older. An index cannot survive a broadcast or Journal
           backfill inserted ahead of the match. *)
   mutable board_sort: board_sort;
@@ -3133,9 +3113,10 @@ let visible_system_log_entries (state : state) =
    "registered" answers true while the send path is closed; counting on that
    answer hid the unavailable row and left the send hint reading Enter:send. *)
 (* The rows the chat pane draws for one Keeper. Durable and session rows join
-   only through request ownership. Top-level turn groups and parallel-lane
-   observations are chronological; each turn remains Input -> Progress -> Tool
-   -> Output. Pending requests are withheld for the separate NEXT lane. *)
+   only through request ownership. Turn order follows typed turn sequence or
+   stable producer order; each turn is Input -> Progress -> Tool -> Output.
+   Pending requests are withheld for the separate NEXT lane. Wall clocks never
+   decide conversation order. *)
 (* What a polled surface can say when it has no rows to draw. Three facts,
    not one: nothing has been read yet, the read failed, or the read came back
    with nothing. The first was drawn as the third -- "nothing waiting on a

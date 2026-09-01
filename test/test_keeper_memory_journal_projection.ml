@@ -50,8 +50,7 @@ let append_raw ~keepers_dir line =
 ;;
 
 let read_json ~keepers_dir =
-  Current.read_journal_tail ~keepers_dir ~keeper_id:keeper ~limit:50
-  |> List.map Current.journal_line_to_json
+  Current.read_journal_tail_projection ~keepers_dir ~keeper_id:keeper ~limit:50
 ;;
 
 let field json name = U.member name json
@@ -153,6 +152,17 @@ let test_undecodable_line_keeps_its_position_and_reason () =
       Alcotest.(check bool) "torn line is marked" false (U.to_bool (field torn "ok"));
       Alcotest.(check bool) "and carries a reason" true
         (String.length (U.to_string (field torn "error")) > 0);
+      let torn_identity = U.to_string (field torn "structural_id") in
+      (match
+         Current.read_journal_tail_projection ~keepers_dir ~keeper_id:keeper
+           ~limit:2
+       with
+       | [ torn_again; _ ] ->
+         Alcotest.(check string) "tail window keeps absolute line identity"
+           torn_identity (U.to_string (field torn_again "structural_id"))
+       | lines ->
+         Alcotest.failf "expected two projected tail lines, got %d"
+           (List.length lines));
       Alcotest.(check string) "third is intact" "after"
         (U.to_string (field after "trace_id"))
     | lines -> Alcotest.failf "expected three lines, got %d" (List.length lines))

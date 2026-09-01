@@ -6832,7 +6832,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
              timestamp = message.me_timestamp;
              timeline_bucket =
                Option.map keeper_message_timeline_bucket
-                 (message_timeline_at message);
+                 (message_display_at message);
              role_label;
              role_label_mark_cells =
                Message_layout.role_label_mark_cells
@@ -6872,11 +6872,11 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
    or newer than the resolved anchor is skipped, which makes repeating a
    search walk instead of returning to the newest match every time.
 
-   Measured over committed rows only. A later chronological insert can move
-   the physical row, so the repeat cursor and the scroll pin both retain its
-   causal identity rather than its old index. With a live turn on screen the
-   match lands that turn's height above the bottom edge rather than on it --
-   context below a result, and it settles when the turn ends.
+   Measured over committed rows only. A producer backfill can move the physical
+   row, so the repeat cursor and the scroll pin both retain its causal identity
+   rather than its old index. With a live turn on screen the match lands that
+   turn's height above the bottom edge rather than on it -- context below a
+   result, and it settles when the turn ends.
 
    [needle] is trimmed and lower-cased by its caller, which is where the
    operator's text enters -- the same contract {!Masc_tui_types.palette_contains}
@@ -7260,10 +7260,10 @@ let render_keeper_message (state : state) =
     let markdown = cached_chat_markdown ~theme:chat_theme in
     (* [msg_scroll] counts back from the row the operator was last looking at,
        not from whatever is newest now. Count the current structural suffix
-       after that anchor: newly appended rows belong there, and a causal turn
-       that moves earlier when its input arrives can put pre-existing rows
-       there too. In both cases those rows sit between the anchor and bottom,
-       so adding their height is what keeps the same anchored content still. *)
+       after that anchor: newly appended rows belong there, and a late input
+       can move pre-existing output below an earlier phase inside its own turn.
+       In both cases those rows sit between the anchor and bottom, so adding
+       their height is what keeps the same anchored content still. *)
     let rows_since_pin =
       match state.msg_scroll_pin with
       | None -> 0

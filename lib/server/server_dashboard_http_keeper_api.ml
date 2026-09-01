@@ -1403,25 +1403,30 @@ let handle_keeper_get_subroutes state req request reqd =
       in
       let config = Mcp_server.workspace_config state in
       let keepers_dir = memory_os_keepers_dir config in
-      let lines =
-        Keeper_memory_os_current.read_journal_tail
+      let entries =
+        Keeper_memory_os_current.read_journal_tail_projection
           ~keepers_dir
           ~keeper_id:name
           ~limit
       in
       let undecodable =
-        List.length (List.filter (function Error _ -> true | Ok _ -> false) lines)
+        List.length
+          (List.filter
+             (function
+               | `Assoc fields -> List.assoc_opt "ok" fields = Some (`Bool false)
+               | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null
+               | `String _ -> false)
+             entries)
       in
       Http.Response.json_value ~compress:true ~request:req
         (`Assoc
            [ "keeper", `String name
            ; "dashboard_surface", `String "/api/v1/keepers/:name/memory-journal"
-           ; "returned", `Int (List.length lines)
+           ; "returned", `Int (List.length entries)
            ; (* Reported rather than hidden: a journal this build cannot fully
                 read is a different observation from a shorter one. *)
              "undecodable_lines", `Int undecodable
-           ; ( "entries"
-             , `List (List.map Keeper_memory_os_current.journal_line_to_json lines) )
+           ; "entries", `List entries
            ])
         reqd)
   else if ends_with "/operator-note" then

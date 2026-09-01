@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Reproducible exact-head ttyd/Chromium proof for Keeper chat recovery."""
+"""Reproducible exact-head ttyd/Chromium proof for Keeper chat causality.
+
+The capture measures ordinary NEXT promotion, first-submission clock and
+composer-slot preservation, exact-request recovery, and the distinct
+STEER -> interrupt -> replacement path. Every scenario records rendered xterm
+DOM text, HTTP bodies, timing measurements, and rehashed screenshots.
+"""
 
 from __future__ import annotations
 
@@ -46,6 +52,9 @@ SUCCESS_MESSAGE = "Aé한🙂👍🏽🇰🇷❤️-proof"
 LONG_TAIL = ("❤️" * 10) + "-TAIL"
 LONG_DRAFT = "prefix-" + ("x" * 100) + LONG_TAIL
 CHAT_POST = "/api/v1/keepers/chat/stream"
+INTERRUPT_POST = "/api/v1/keepers/turn/interrupt"
+CHAT_HISTORY_GET = f"/api/v1/keepers/{KEEPER}/chat/history"
+MEMORY_JOURNAL_GET = f"/api/v1/keepers/{KEEPER}/memory-journal?limit=20"
 OPERATOR_GET = "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
 OPERATION_RE = re.compile(r"^/api/v1/keepers/([^/]+)/chat/operations/([^/?]+)$")
 UUID7_RE = re.compile(
@@ -87,37 +96,43 @@ def require(condition: bool, detail: str) -> None:
 
 
 def current_keeper_meta() -> dict[str, object]:
-    # fmt: off
     meta: dict[str, object] = {
-        "schema": "masc.keeper_meta.v1", "name": KEEPER,
-        "agent_name": f"keeper-{KEEPER}-agent",
+        "schema": "masc.keeper_meta.v1",
+        "name": KEEPER,
         "instructions": "Runtime evidence fixture for Keeper chat recovery.",
-        "autonomous_instructions": None, "trace_id": "trace-capture-v3",
-        "trace_history": [], "generation": 1,
-        "created_at": "2026-08-22T00:00:00Z", "updated_at": "2026-08-22T00:00:00Z",
-        "last_proactive_outcome": "never_started", "last_proactive_reason": "",
+        "trace_id": "trace-capture-v3",
+        "trace_history": [],
+        "created_at": "2026-08-22T00:00:00Z",
+        "updated_at": "2026-08-22T00:00:00Z",
+        "last_proactive_outcome": "never_started",
+        "last_proactive_reason": "",
         "last_proactive_preview": "",
-        "last_autonomous_action_at": "", "message_scope_ack_id": None,
-        "last_blocker": None, "last_runtime_attempt": None, "paused": False,
-        "latched_reason": None, "current_task_id": None, "keeper_id": None,
+        "message_scope_ack_id": None,
+        "last_runtime_attempt": None,
+        "paused": False,
+        "latched_reason": None,
+        "current_task_id": None,
+        "keeper_id": None,
         "agent_core_env": {},
     }
     for key in (
-        "total_turns", "total_input_tokens", "total_output_tokens", "total_tokens",
-        "last_input_tokens", "last_output_tokens", "last_total_tokens",
-        "last_latency_ms", "proactive_count_total",
+        "last_handoff_ts",
+        "total_turns",
+        "total_input_tokens",
+        "total_output_tokens",
+        "total_tokens",
+        "total_cost_usd",
+        "last_turn_ts",
+        "last_input_tokens",
+        "last_output_tokens",
+        "last_total_tokens",
+        "last_latency_ms",
+        "proactive_count_total",
+        "last_proactive_ts",
         "proactive_visible_count_total",
-        "autonomous_action_count", "autonomous_turn_count",
-        "autonomous_text_turn_count", "autonomous_tool_turn_count",
-        "board_reactive_turn_count", "mention_reactive_turn_count", "noop_turn_count",
+        "last_visible_proactive_ts",
     ):
         meta[key] = 0
-    for key in (
-        "last_handoff_ts", "total_cost_usd", "last_turn_ts",
-        "last_proactive_ts", "last_visible_proactive_ts",
-    ):
-        meta[key] = 0.0
-    # fmt: on
     return meta
 
 
@@ -174,7 +189,13 @@ def sse(values: list[object]) -> bytes:
     ).encode()
 
 
-def stream_payload(request: dict[str, str], complete: bool) -> bytes:
+def stream_payload(
+    request: dict[str, str],
+    complete: bool,
+    *,
+    reply: str = "reply-v3",
+    turn_sequence: int = 1,
+) -> bytes:
     request_id = request["request_id"]
     run_id = f"keeper-operation-run-{request_id}"
     message_id = f"keeper-operation-message-{request_id}"
@@ -182,14 +203,33 @@ def stream_payload(request: dict[str, str], complete: bool) -> bytes:
     values = [
         acceptance(request),
         event(request, "RUN_STARTED", runId=run_id),
+    ]
+    if turn_sequence == 1:
+        tool_call_id = f"tool-call-{request_id}"
+        occurrence = {
+            "toolStreamScope": 0,
+            "toolCallBlockIndex": 0,
+            "toolCallId": tool_call_id,
+        }
+        values.extend([
+            event(request, "TOOL_CALL_START", runId=run_id, **occurrence,
+                  toolCallName="evidence_probe"),
+            event(request, "TOOL_CALL_ARGS", runId=run_id, **occurrence,
+                  delta='{"probe":"causal-order"}'),
+            event(request, "TOOL_CALL_END", runId=run_id, **occurrence),
+            event(request, "CUSTOM", runId=run_id, name="KEEPER_TOOL_RESULT_READY",
+                  value={**occurrence, "executionId": f"execution-{request_id}"}),
+        ])
+    values.extend([
         event(request, "TEXT_MESSAGE_START", runId=run_id, messageId=message_id, role="assistant"),
         event(request, "TEXT_MESSAGE_CONTENT", runId=run_id, messageId=message_id,
-              delta="reply-v3" if complete else "partial-must-not-be-promoted"),
-    ]
+              delta=reply if complete else "partial-must-not-be-promoted"),
+    ])
     if complete:
         values.extend([
             event(request, "CUSTOM", runId=run_id, name="KEEPER_REPLY_DETAILS",
-                  value={"reply": "reply-v3", "turn_outcome": "visible_reply", "turn_ref": "trace-chat#1"}),
+                  value={"reply": reply, "turn_outcome": "visible_reply",
+                         "turn_ref": f"trace-chat#{turn_sequence}"}),
             event(request, "TEXT_MESSAGE_END", runId=run_id, messageId=message_id),
             event(request, "RUN_FINISHED", runId=run_id),
         ])
@@ -244,15 +284,19 @@ OPERATOR = {"pending_confirm_envelope": {"items": [], "summary": {
 
 @dataclass
 class Fixture:
-    mode: Literal["success", "recovery", "rejection"]
+    mode: Literal["success", "recovery", "rejection", "causal", "steer"]
     lock: threading.Lock = field(default_factory=threading.Lock)
     request: dict[str, str] | None = None
+    requests: list[dict[str, str]] = field(default_factory=list)
     records: list[dict[str, Any]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     operation_sequence: int = 0
     get2_received_monotonic: float | None = None
+    workspace_base_path: str | None = None
     post_seen: threading.Event = field(default_factory=threading.Event)
     post_release: threading.Event = field(default_factory=threading.Event)
+    post2_release: threading.Event = field(default_factory=threading.Event)
+    interrupt_seen: threading.Event = field(default_factory=threading.Event)
     get1_seen: threading.Event = field(default_factory=threading.Event)
     get1_release: threading.Event = field(default_factory=threading.Event)
     get1_done: threading.Event = field(default_factory=threading.Event)
@@ -305,10 +349,20 @@ class Fixture:
             return None
         request = {key: value[key] for key in ("request_id", "name", "message")}
         with self.lock:
-            if self.request is None:
+            if any(
+                previous["request_id"] == request["request_id"] and previous != request
+                for previous in self.requests
+            ):
+                self.errors.append("a request ID changed payload")
+            elif self.mode in ("causal", "steer"):
+                self.requests.append(request)
+            elif self.request is None:
+                self.requests.append(request)
                 self.request = request
             elif self.request != request:
                 self.errors.append("a second POST changed request identity")
+            if self.request is None:
+                self.request = request
         return request
 
     def summary(self) -> dict[str, Any]:
@@ -324,19 +378,33 @@ class Fixture:
                     "message_bytes": len(message),
                     "message_sha256": digest_bytes(message),
                 }
+            requests = [
+                {
+                    "request_id": request["request_id"],
+                    "name": request["name"],
+                    "message": request["message"],
+                }
+                for request in self.requests
+            ]
             # fmt: off
             posts = sum(r["method"] == "POST" and r["path"] == CHAT_POST for r in records)
+            interrupts = sum(r["method"] == "POST" and r["path"] == INTERRUPT_POST for r in records)
             gets = sum(r["operation_ordinal"] is not None for r in records)
-            other_posts = sum(r["method"] == "POST" and r["path"] != CHAT_POST for r in records)
+            other_posts = sum(r["method"] == "POST"
+                              and r["path"] not in (CHAT_POST, INTERRUPT_POST)
+                              for r in records)
             unexpected_chat = sum("/chat/" in urlsplit(r["path"]).path
                                   and not (r["method"] == "POST" and r["path"] == CHAT_POST)
+                                  and not (r["method"] == "GET" and r["path"] == CHAT_HISTORY_GET)
                                   and r["operation_ordinal"] is None for r in records)
         return {
             "chat_stream_post_count": posts,
+            "interrupt_post_count": interrupts,
             "chat_operation_get_count": gets,
             "other_post_count": other_posts,
             "unexpected_chat_route_count": unexpected_chat,
             "request": request,
+            "requests": requests,
             "errors": errors,
             "records": records,
         }
@@ -345,6 +413,71 @@ class Fixture:
 
 class FixtureServer(ThreadingHTTPServer):
     daemon_threads = False
+
+
+def fixture_static_response(state: Fixture, path: str) -> object | None:
+    base_path = state.workspace_base_path or str(WORKTREE)
+    paths = {
+        "cwd": base_path,
+        "effective_base_path": base_path,
+        "effective_masc_root": str(Path(base_path) / ".masc"),
+        "effective_has_masc_dir": True,
+    }
+    roster = {
+        "count": 1,
+        "total": 1,
+        "truncated": False,
+        "keepers": [
+            {
+                "runtime_class": "keeper",
+                "name": KEEPER,
+                "meta": {
+                    "name": KEEPER,
+                    "trace_id": "trace-capture-v3",
+                    "created_at": "2026-08-22T00:00:00Z",
+                    "updated_at": "2026-08-22T00:00:00Z",
+                    "sandbox_profile": "docker",
+                },
+                "status": "active",
+                "health": "healthy",
+                "paused": False,
+                "phase": "running",
+                "keepalive_running": True,
+                "autoboot_enabled": True,
+                "proactive_enabled": True,
+                "runtime_id": "capture.fixture",
+            }
+        ],
+    }
+    return {
+        "/health": {"paths": paths},
+        "/health?full=1": {
+            "paths": paths,
+            "keeper_fleet_safety": {"status": "ok"},
+        },
+        "/api/v1/dashboard/transport-health": {
+            "summary": {
+                "primary_path": "sse",
+                "queue_pressure": "steady",
+            },
+            "sse": {"sessions_total": 1},
+            "websocket": {"listening": False},
+            "grpc": {"listening": False, "events_dropped": 0},
+        },
+        "/api/v1/dashboard/briefing": OVERVIEW,
+        OPERATOR_GET: OPERATOR,
+        "/api/v1/board": {"posts": []},
+        "/api/v1/board?sort_by=hot": {"posts": []},
+        "/api/v1/dashboard/planning": PLANNING,
+        "/api/v1/gate/keepers?detailed=true": roster,
+        CHAT_HISTORY_GET: [],
+        MEMORY_JOURNAL_GET: {
+            "keeper": KEEPER,
+            "returned": 0,
+            "undecodable_lines": 0,
+            "entries": [],
+        },
+    }.get(path)
 
 
 @contextmanager
@@ -393,12 +526,7 @@ def fixture_server(state: Fixture) -> Iterator[int]:
 
         def do_GET(self) -> None:  # noqa: N802
             record = state.record("GET", self.path)
-            static = {
-                "/api/v1/dashboard/briefing": OVERVIEW,
-                OPERATOR_GET: OPERATOR,
-                "/api/v1/board": {"posts": []},
-                "/api/v1/dashboard/planning": PLANNING,
-            }.get(self.path)
+            static = fixture_static_response(state, self.path)
             if static is not None:
                 self.reply_json(record, 200, static)
                 return
@@ -448,6 +576,38 @@ def fixture_server(state: Fixture) -> Iterator[int]:
                         "request_body_utf8": body.decode("utf-8"),
                     }
                 )
+            if self.path == INTERRUPT_POST and state.mode == "steer":
+                try:
+                    target = json.loads(body)
+                except (json.JSONDecodeError, UnicodeDecodeError) as error:
+                    state.errors.append(
+                        f"invalid interrupt JSON: {type(error).__name__}"
+                    )
+                    self.reply_json(record, 400, {"error": "bad interrupt request"})
+                    return
+                request = state.request
+                expected = (
+                    None
+                    if request is None
+                    else {
+                        "name": request["name"],
+                        "request_id": request["request_id"],
+                    }
+                )
+                if target != expected:
+                    state.errors.append("interrupt target identity mismatch")
+                    self.reply_json(record, 409, {"error": "identity mismatch"})
+                    return
+                state.interrupt_seen.set()
+                self.reply_json(
+                    record,
+                    200,
+                    {
+                        "signalled": True,
+                        "request_id": request["request_id"],
+                    },
+                )
+                return
             if self.path != CHAT_POST:
                 state.errors.append("unexpected POST endpoint")
                 self.reply_json(record, 500, {"error": "unexpected POST"})
@@ -457,7 +617,35 @@ def fixture_server(state: Fixture) -> Iterator[int]:
             if request is None:
                 self.reply_json(record, 400, {"error": "bad request"})
                 return
-            if state.mode in ("success", "rejection"):
+            with state.lock:
+                ordinal = next(
+                    (
+                        index
+                        for index, observed in enumerate(state.requests, 1)
+                        if observed["request_id"] == request["request_id"]
+                    ),
+                    1,
+                )
+            if state.mode in ("causal", "steer"):
+                gate = (
+                    state.post_release
+                    if ordinal == 1
+                    else state.post2_release
+                    if ordinal == 2
+                    else None
+                )
+                if gate is not None and not gate.wait(30):
+                    state.errors.append(f"POST{ordinal} gate timeout")
+                    self.reply_json(record, 504, {"error": "gate timeout"})
+                    return
+                reply = f"reply-{request['message']}"
+                payload = stream_payload(
+                    request,
+                    True,
+                    reply=reply,
+                    turn_sequence=ordinal,
+                )
+            elif state.mode in ("success", "rejection"):
                 if not state.post_release.wait(30):
                     state.errors.append("POST gate timeout")
                     self.reply_json(record, 504, {"error": "gate timeout"})
@@ -484,7 +672,12 @@ def fixture_server(state: Fixture) -> Iterator[int]:
     try:
         yield int(server.server_address[1])
     finally:
-        for gate in (state.post_release, state.get1_release, state.get2_release):
+        for gate in (
+            state.post_release,
+            state.post2_release,
+            state.get1_release,
+            state.get2_release,
+        ):
             gate.set()
         server.shutdown()
         thread.join(timeout=3)
@@ -668,6 +861,19 @@ def screen_text(page: Page) -> str:
     return page.locator(".xterm-screen").inner_text()
 
 
+def unique_screen_line(text: str, *markers: str) -> tuple[int, str]:
+    matches = [
+        (index, line)
+        for index, line in enumerate(text.splitlines())
+        if all(marker in line for marker in markers)
+    ]
+    require(
+        len(matches) == 1,
+        f"expected one screen line containing {markers!r}, found {len(matches)}",
+    )
+    return matches[0]
+
+
 def wait_text(
     page: Page, needle: str, timeout: int = 10_000, *, present: bool = True
 ) -> None:
@@ -700,7 +906,15 @@ def type_text(page: Page, value: str) -> None:
 
 
 def open_message(page: Page) -> None:
-    press(page, "Tab", "MASC Keepers")
+    for _ in range(12):
+        if "MASC Keepers" in screen_text(page):
+            break
+        press(page, "Tab")
+        page.wait_for_timeout(100)
+    else:
+        raise TimeoutError(
+            f"Keepers tab was not reached by visible navigation: {screen_text(page)!r}"
+        )
     press(page, "Enter")
     wait_text(page, "Identity")
     wait_text(page, "m:message")
@@ -835,6 +1049,7 @@ def capture(
     expected_dimensions: tuple[int, int] = (99, 30),
     input_row_markers: tuple[str, ...] = (),
     input_row_absent: tuple[str, ...] = (),
+    absent_markers: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     path = output / filename
     require(not path.exists(), f"capture path already exists: {path}")
@@ -852,6 +1067,8 @@ def capture(
     visible = screen_text(page)
     for marker in markers:
         require(marker in visible, f"{filename} does not show {marker!r}")
+    for marker in absent_markers:
+        require(marker not in visible, f"{filename} unexpectedly shows {marker!r}")
     screen = page.locator(".xterm-screen")
     cursor = cursor_position(page)
     input_row = buffer_line(page, cursor["y"])
@@ -897,9 +1114,17 @@ def capture(
 
 
 def request_identity(state: Fixture, expected_message: str) -> dict[str, str]:
-    request = state.request
-    if request is None:
-        raise AssertionError(f"{expected_message} request was not recorded")
+    with state.lock:
+        matches = [
+            request
+            for request in state.requests
+            if request["message"] == expected_message
+        ]
+    require(
+        len(matches) == 1,
+        f"expected one request for {expected_message!r}, found {len(matches)}",
+    )
+    request = matches[0]
     require(request["name"] == KEEPER, "Keeper identity mismatch")
     require(request["message"] == expected_message, "message identity mismatch")
     require(UUID7_RE.fullmatch(request["request_id"]) is not None, "invalid UUIDv7")
@@ -910,12 +1135,15 @@ def final_http(
     state: Fixture,
     posts: int,
     gets: int,
+    *,
+    interrupts: int = 0,
 ) -> dict[str, Any]:
     summary = state.summary()
     counts = {
         key: summary[key]
         for key in (
             "chat_stream_post_count",
+            "interrupt_post_count",
             "chat_operation_get_count",
             "other_post_count",
             "unexpected_chat_route_count",
@@ -923,6 +1151,7 @@ def final_http(
     }
     expected = {
         "chat_stream_post_count": posts,
+        "interrupt_post_count": interrupts,
         "chat_operation_get_count": gets,
         "other_post_count": 0,
         "unexpected_chat_route_count": 0,
@@ -943,13 +1172,14 @@ def success_scenario(
     prefix: str,
     executable: Path,
 ) -> dict[str, Any]:
-    state = Fixture("success")
+    state = Fixture("causal")
     shots: list[dict[str, Any]] = []
     measurements: dict[str, Any] = {}
     with fixture_server(state) as api_port:
         with tempfile.TemporaryDirectory(prefix="masc-tui-keeper-chat-success-") as raw:
             base = Path(raw)
             prepare_base(base)
+            state.workspace_base_path = str(base)
             recovery = base / ".masc/tui-keeper-chat-recovery.json"
             dispatch_lock = Path(str(recovery) + ".dispatch.lock")
             with ttyd_session(browser, base, api_port, executable) as (page, _started):
@@ -1051,6 +1281,11 @@ def success_scenario(
                     "dispatch lock was released while the POST response remained held",
                 )
                 measurements["dispatch_lock_held_while_response_pending"] = True
+                sending_text = screen_text(page)
+                footer_before_queue, _ = unique_screen_line(
+                    sending_text, "Enter:queue(0)"
+                )
+                composer_row_before_queue = cursor_position(page)["y"]
                 started = time.monotonic()
                 type_text(page, "draft-during-send")
                 wait_text(page, "> draft-during-send")
@@ -1063,23 +1298,131 @@ def success_scenario(
                     latency <= 500 and not state.post_release.is_set(),
                     f"draft latency/release violated: {latency:.3f}ms",
                 )
+                queue_enter_started = time.monotonic()
                 press(page, "Enter")
-                page.wait_for_timeout(350)
+                wait_text(page, "NEXT 1")
+                wait_text(page, "Enter:queue(1)")
                 require(
                     state.summary()["chat_stream_post_count"] == 1,
                     "inflight Enter sent a second POST",
                 )
+                queued_visible_at = time.monotonic()
+                queued_text = screen_text(page)
+                composer_row_with_queue = cursor_position(page)["y"]
+                next_row, next_line = unique_screen_line(
+                    queued_text, "NEXT 1", "draft-during-send"
+                )
+                footer_with_queue, _ = unique_screen_line(queued_text, "Enter:queue(1)")
+                require(
+                    footer_with_queue == footer_before_queue,
+                    "NEXT changed the composer's visual slot",
+                )
+                require(
+                    composer_row_with_queue == composer_row_before_queue,
+                    "NEXT moved the composer cursor row",
+                )
+                queued_clock_match = re.search(
+                    r"NEXT\s+1\s+·\s+(\d{2}:\d{2}:\d{2})\s+·\s+draft-during-send",
+                    next_line,
+                )
+                require(queued_clock_match is not None, "NEXT omitted submitted_at")
+                assert queued_clock_match is not None
+                queued_clock = queued_clock_match.group(1)
+                active_row, _ = unique_screen_line(queued_text, "ACTIVE TURN")
+                require(
+                    active_row < next_row,
+                    "NEXT was drawn inside or ahead of the active causal turn",
+                )
+                measurements.update(
+                    {
+                        "queue_enter_to_next_visible_ms": round(
+                            (queued_visible_at - queue_enter_started) * 1000,
+                            3,
+                        ),
+                        "queued_submitted_clock": queued_clock,
+                        "composer_row_before_queue_zero_based": composer_row_before_queue,
+                        "composer_row_with_queue_zero_based": composer_row_with_queue,
+                        "footer_row_before_queue_zero_based": footer_before_queue,
+                        "footer_row_with_queue_zero_based": footer_with_queue,
+                    }
+                )
                 # fmt: off
-                shots.append(capture(page, output, prefix + "05-chat-inflight-responsive.png",
+                shots.append(capture(page, output, prefix + "05-chat-next-separated.png",
                                   SUCCESS_MESSAGE, f"(sending {request_label}",
-                                  "> draft-during-send", "Enter:wait for current request"))
+                                  "NEXT 1", "draft-during-send", "Enter:queue(1)",
+                                  absent_markers=("TURN · QUEUED",)))
                 # fmt: on
+                hold_started = time.monotonic()
+                page.wait_for_timeout(1_250)
+                queued_hold_ms = (time.monotonic() - hold_started) * 1000
+                require(
+                    queued_hold_ms >= 1_000,
+                    f"queued hold was too short to distinguish clocks: {queued_hold_ms}",
+                )
+                measurements["queued_hold_before_promotion_ms"] = round(
+                    queued_hold_ms, 3
+                )
                 started = time.monotonic()
                 state.post_release.set()
-                wait_text(page, "reply-v3")
+                wait_until(
+                    lambda: len(state.summary()["requests"]) == 2,
+                    "NEXT did not dispatch after the active turn settled",
+                )
+                queued_request = request_identity(state, "draft-during-send")
+                queued_request_label = (
+                    queued_request["request_id"][:4]
+                    + ".."
+                    + queued_request["request_id"][-8:]
+                )
+                wait_text(page, f"(sending {queued_request_label}")
+                wait_text(page, "NEXT 1", present=False)
+                queue_active_at = time.monotonic()
+                active_text = screen_text(page)
+                queued_user_row, queued_user_line = unique_screen_line(
+                    active_text, queued_request_label, "TURN · YOU"
+                )
+                composer_row_queued_active = cursor_position(page)["y"]
+                active_footer_row, _ = unique_screen_line(active_text, "Enter:queue(0)")
+                require(
+                    queued_clock in queued_user_line,
+                    "queued USER lost its first submitted_at when it became active",
+                )
+                require(
+                    active_footer_row == footer_before_queue,
+                    "queue-to-active promotion moved the composer's visual slot",
+                )
+                require(
+                    queued_user_row == next_row,
+                    "NEXT did not hand its physical row to the promoted USER",
+                )
+                require(
+                    composer_row_queued_active == composer_row_before_queue,
+                    "queue-to-active promotion moved the composer cursor row",
+                )
+                measurements.update(
+                    {
+                        "first_release_to_queued_active_ms": round(
+                            (queue_active_at - started) * 1000,
+                            3,
+                        ),
+                        "queued_user_active_row_zero_based": queued_user_row,
+                        "composer_row_queued_active_zero_based": composer_row_queued_active,
+                        "footer_row_queued_active_zero_based": active_footer_row,
+                    }
+                )
+                # fmt: off
+                shots.append(capture(page, output, prefix + "06-chat-next-active-same-slot.png",
+                                  f"(sending {queued_request_label}", queued_request_label,
+                                  "draft-during-send", queued_clock, "Enter:queue(0)",
+                                  absent_markers=("NEXT 1",)))
+                # fmt: on
+                state.post2_release.set()
+                wait_text(page, "reply-draft-during-send")
                 reply_visible_at = time.monotonic()
                 latency = (reply_visible_at - started) * 1000
-                measurements["reply_visible_after_release_ms"] = round(latency, 3)
+                measurements["queued_reply_visible_after_release_ms"] = round(
+                    latency, 3
+                )
                 require(latency <= 2500, f"reply latency {latency:.3f}ms")
                 wait_text(page, "(sending ", present=False)
                 settled_ui_at = time.monotonic()
@@ -1095,27 +1438,50 @@ def success_scenario(
                 measurements["settled_ui_to_lock_probe_success_ms"] = round(
                     (lock_probe_succeeded_at - settled_ui_at) * 1000, 3
                 )
-                wait_text(page, "> draft-during-send")
                 visible = screen_text(page)
-                lines = visible.splitlines()
-                user_row = any(
-                    " you " in line and request_label in line for line in lines
+                first_user_row, _ = unique_screen_line(
+                    visible, request_label, "TURN · YOU"
                 )
-                keeper_row = any(
-                    f" {KEEPER} " in line and request_label in line for line in lines
+                first_tool_row, _ = unique_screen_line(
+                    visible, "✓", "evidence_probe"
                 )
-                require(user_row and keeper_row, "request ID is not on both rows")
+                first_keeper_row, _ = unique_screen_line(visible, request_label, KEEPER)
+                second_user_row, second_user_line = unique_screen_line(
+                    visible, queued_request_label, "TURN · YOU"
+                )
+                second_keeper_row, _ = unique_screen_line(
+                    visible, queued_request_label, KEEPER
+                )
+                require(
+                    first_user_row
+                    < first_tool_row
+                    < first_keeper_row
+                    < second_user_row
+                    < second_keeper_row,
+                    "final rows are not grouped USER then TOOL then ASSISTANT by request",
+                )
+                require(
+                    queued_clock in second_user_line,
+                    "settled queued USER lost its original submitted_at",
+                )
                 require("Enter:send" in visible, "settled footer does not allow send")
+                measurements["final_causal_row_order_zero_based"] = [
+                    first_user_row,
+                    first_tool_row,
+                    first_keeper_row,
+                    second_user_row,
+                    second_keeper_row,
+                ]
                 # fmt: off
-                shots.append(capture(page, output, prefix + "06-chat-success-correlated.png",
-                                  SUCCESS_MESSAGE, "reply-v3", request_label,
-                                  "> draft-during-send", "Enter:send",
-                                  expected_cursor=(23, 24),
-                                  input_row_markers=("> draft-during-send",)))
+                shots.append(capture(page, output, prefix + "07-chat-causal-turns-settled.png",
+                                  SUCCESS_MESSAGE, f"reply-{SUCCESS_MESSAGE}", request_label,
+                                  "✓", "evidence_probe",
+                                  "draft-during-send", "reply-draft-during-send",
+                                  queued_request_label, "Enter:send"))
                 # fmt: on
     # fmt: off
-    return {"name": "responsive_success", "measurements": measurements,
-            "screenshots": shots, "http": final_http(state, 1, 0)}
+    return {"name": "responsive_causal_queue", "measurements": measurements,
+            "screenshots": shots, "http": final_http(state, 2, 0)}
     # fmt: on
 
 
@@ -1134,6 +1500,7 @@ def recovery_scenario(
         ) as raw:
             base = Path(raw)
             prepare_base(base)
+            state.workspace_base_path = str(base)
             recovery = base / ".masc/tui-keeper-chat-recovery.json"
             with ttyd_session(browser, base, api_port, executable) as (page, _started):
                 open_message(page)
@@ -1176,7 +1543,7 @@ def recovery_scenario(
                     "unverified Enter sent a second POST",
                 )
                 # fmt: off
-                shots.append(capture(page, output, prefix + "07-chat-outcome-unverified.png",
+                shots.append(capture(page, output, prefix + "08-chat-outcome-unverified.png",
                                   "outcome unverified:", request_label, "> blocked-resend",
                                   "Ctrl-R:resume exact request  Enter:blocked"))
                 # fmt: on
@@ -1238,7 +1605,7 @@ def recovery_scenario(
                 )
                 wait_text(page, f"(reconciling exact operation {request_label}")
                 # fmt: off
-                shots.append(capture(page, output, prefix + "08-chat-restarted-reconciling.png",
+                shots.append(capture(page, output, prefix + "09-chat-restarted-reconciling.png",
                                   "Recovered an accepted request; reconciling the exact durable operation",
                                   f"(reconciling exact operation {request_label}",
                                   "reconciling exact operation  Enter:blocked"))
@@ -1257,7 +1624,7 @@ def recovery_scenario(
                 require(not recovery.exists(), "terminal recovery retained fence")
                 require("Enter:send" in screen_text(page), "settled footer blocks send")
                 # fmt: off
-                shots.append(capture(page, output, prefix + "09-chat-reconciled.png",
+                shots.append(capture(page, output, prefix + "10-chat-reconciled.png",
                                   "Operation settled successfully (turn:v3)",
                                   "canonical reply is unavailable", "transport", "Enter:send"))
                 # fmt: on
@@ -1294,6 +1661,7 @@ def replayable_scenario(
         with tempfile.TemporaryDirectory(prefix="masc-tui-keeper-chat-replay-") as raw:
             base = Path(raw)
             prepare_base(base)
+            state.workspace_base_path = str(base)
             recovery = write_recovery(base, phase="replayable", request=request)
             with ttyd_session(browser, base, api_port, executable) as (page, started):
                 await_event(state.post_seen, "authorized replay POST")
@@ -1315,7 +1683,7 @@ def replayable_scenario(
                 phase = json.loads(recovery.read_text(encoding="utf-8"))["phase"]
                 require(phase == "dispatching", f"replay claim phase: {phase}")
                 # fmt: off
-                shots.append(capture(page, output, prefix + "10-chat-replayable-exact-replay.png",
+                shots.append(capture(page, output, prefix + "11-chat-replayable-exact-replay.png",
                                      "Recovered a replayable request",
                                      f"(replaying exact request {request_label}",
                                      "prior outcome unverified:",
@@ -1351,6 +1719,7 @@ def cross_process_fail_closed_scenario(
         with tempfile.TemporaryDirectory(prefix="masc-tui-keeper-chat-race-") as raw:
             base = Path(raw)
             prepare_base(base)
+            state.workspace_base_path = str(base)
             recovery = write_recovery(base, phase="prepared", request=request)
             dispatch_lock = Path(str(recovery) + ".dispatch.lock")
             with held_file_lock(dispatch_lock) as release_lock:
@@ -1378,7 +1747,7 @@ def cross_process_fail_closed_scenario(
                         }
                     )
                     # fmt: off
-                    shots.append(capture(observer, output, prefix + "11-chat-stale-prepared-blocked.png",
+                    shots.append(capture(observer, output, prefix + "12-chat-stale-prepared-blocked.png",
                                          "Recovered a prepared request; claiming its first serialized dispatch",
                                          "prepared recovery blocked",
                                          "Ctrl-R:retry prepared fence  Enter:blocked"))
@@ -1443,7 +1812,7 @@ def cross_process_fail_closed_scenario(
                     )
                     measurements["post_count_after_350ms_stability_observation"] = 1
                     # fmt: off
-                    shots.append(capture(observer, output, prefix + "12-chat-stale-fence-not-recreated.png",
+                    shots.append(capture(observer, output, prefix + "13-chat-stale-fence-not-recreated.png",
                                          "Recovered a prepared request",
                                          "Enter:send"))
                     # fmt: on
@@ -1465,6 +1834,139 @@ def cross_process_fail_closed_scenario(
     # fmt: on
 
 
+def steer_scenario(
+    browser: Browser,
+    output: Path,
+    prefix: str,
+    executable: Path,
+) -> dict[str, Any]:
+    state = Fixture("steer")
+    shots: list[dict[str, Any]] = []
+    measurements: dict[str, Any] = {}
+    with fixture_server(state) as api_port:
+        with tempfile.TemporaryDirectory(prefix="masc-tui-keeper-chat-steer-") as raw:
+            base = Path(raw)
+            prepare_base(base)
+            state.workspace_base_path = str(base)
+            with ttyd_session(browser, base, api_port, executable) as (page, _started):
+                open_message(page)
+                type_text(page, "original-course")
+                press(page, "Enter")
+                await_event(state.post_seen, "steer original POST")
+                original = request_identity(state, "original-course")
+                original_label = (
+                    original["request_id"][:4] + ".." + original["request_id"][-8:]
+                )
+                wait_text(page, f"(sending {original_label}")
+
+                type_text(page, "ordinary-next")
+                press(page, "Enter")
+                wait_text(page, "NEXT 1")
+                type_text(page, "/steer corrected-course")
+                steer_started = time.monotonic()
+                press(page, "Enter")
+                wait_text(page, "STEER 1")
+                wait_text(page, "NEXT 2")
+                await_event(state.interrupt_seen, "steer exact interrupt POST")
+                steer_visible_at = time.monotonic()
+                page.wait_for_timeout(350)
+                stable_summary = state.summary()
+                require(
+                    stable_summary["chat_stream_post_count"] == 1
+                    and len(stable_summary["requests"]) == 1,
+                    "STEER dispatched a replacement before the parent terminal",
+                )
+                queued_text = screen_text(page)
+                steer_row, _ = unique_screen_line(
+                    queued_text, "STEER 1", "corrected-course"
+                )
+                next_row, _ = unique_screen_line(queued_text, "NEXT 2", "ordinary-next")
+                require(
+                    steer_row < next_row,
+                    "STEER does not precede ordinary NEXT in the pending lane",
+                )
+                measurements.update(
+                    {
+                        "steer_enter_to_visible_and_interrupt_ms": round(
+                            (steer_visible_at - steer_started) * 1000,
+                            3,
+                        ),
+                        "steer_pending_row_zero_based": steer_row,
+                        "ordinary_next_pending_row_zero_based": next_row,
+                        "post_count_after_interrupt_stability_observation": 1,
+                    }
+                )
+                # fmt: off
+                shots.append(capture(page, output, prefix + "14-chat-steer-distinct.png",
+                                     f"(sending {original_label}",
+                                     "STEER 1", "corrected-course",
+                                     "NEXT 2", "ordinary-next", "Enter:queue(2)"))
+                # fmt: on
+
+                release_started = time.monotonic()
+                state.post_release.set()
+                wait_until(
+                    lambda: len(state.summary()["requests"]) == 2,
+                    "STEER did not dispatch after the interrupted turn settled",
+                )
+                corrected = request_identity(state, "corrected-course")
+                corrected_label = (
+                    corrected["request_id"][:4] + ".." + corrected["request_id"][-8:]
+                )
+                wait_text(page, f"(sending {corrected_label}")
+                wait_text(page, "STEER 1", present=False)
+                active_text = screen_text(page)
+                _, _ = unique_screen_line(active_text, corrected_label, "TURN · YOU")
+                _, _ = unique_screen_line(active_text, "NEXT 1", "ordinary-next")
+                measurements["interrupt_release_to_steer_active_ms"] = round(
+                    (time.monotonic() - release_started) * 1000,
+                    3,
+                )
+                # fmt: off
+                shots.append(capture(page, output, prefix + "15-chat-steer-active-before-next.png",
+                                     f"(sending {corrected_label}", corrected_label,
+                                     "corrected-course", "NEXT 1", "ordinary-next",
+                                     absent_markers=("STEER 1",)))
+                # fmt: on
+
+                state.post2_release.set()
+                wait_until(
+                    lambda: len(state.summary()["requests"]) == 3,
+                    "ordinary NEXT did not dispatch after STEER",
+                )
+                ordinary = request_identity(state, "ordinary-next")
+                ordinary_label = (
+                    ordinary["request_id"][:4] + ".." + ordinary["request_id"][-8:]
+                )
+                wait_text(page, "reply-ordinary-next")
+                wait_text(page, "(sending ", present=False)
+                wait_text(page, "Enter:send")
+                messages = [
+                    request["message"] for request in state.summary()["requests"]
+                ]
+                require(
+                    messages
+                    == ["original-course", "corrected-course", "ordinary-next"],
+                    f"steer dispatch order is not causal: {messages!r}",
+                )
+                # fmt: off
+                shots.append(capture(page, output, prefix + "16-chat-steer-order-settled.png",
+                                     original_label, "reply-original-course",
+                                     corrected_label, "reply-corrected-course",
+                                     ordinary_label, "reply-ordinary-next", "Enter:send",
+                                     absent_markers=("STEER 1", "NEXT 1")))
+                # fmt: on
+    # fmt: off
+    return {
+        "name": "steer_interrupt_precedes_ordinary_next",
+        "measurements": measurements,
+        "dispatch_messages": ["original-course", "corrected-course", "ordinary-next"],
+        "screenshots": shots,
+        "http": final_http(state, 3, 0, interrupts=1),
+    }
+    # fmt: on
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expected-head", required=True)
@@ -1480,7 +1982,7 @@ def main() -> int:
     executable = build_dir / "default/bin/masc_tui.exe"
     # fmt: off
     evidence: dict[str, Any] = {
-        "schema": "masc.tui_keeper_chat_capture.v2", "target_pr": args.target_pr,
+        "schema": "masc.tui_keeper_chat_capture.v3", "target_pr": args.target_pr,
         "output_dir": str(output), "started_at": utc_now(), "scenarios": [],
     }
     # fmt: on
@@ -1593,18 +2095,22 @@ def main() -> int:
                         browser, output, prefix, executable
                     )
                 )
+                evidence["scenarios"].append(
+                    steer_scenario(browser, output, prefix, executable)
+                )
             finally:
                 browser.close()
 
         # fmt: off
         names = [scenario["name"] for scenario in evidence["scenarios"]]
-        require(names == ["responsive_success", "accepted_eof_exact_recovery_across_restart",
+        require(names == ["responsive_causal_queue", "accepted_eof_exact_recovery_across_restart",
                           "durable_replayable_exact_id_replay",
-                          "two_tui_stale_prepared_not_recreated"],
+                          "two_tui_stale_prepared_not_recreated",
+                          "steer_interrupt_precedes_ordinary_next"],
                 f"incomplete scenarios: {names}")
         screenshots = [shot for scenario in evidence["scenarios"] for shot in scenario["screenshots"]]
         # fmt: on
-        require(len(screenshots) == 12, f"screenshot count: {len(screenshots)}")
+        require(len(screenshots) == 16, f"screenshot count: {len(screenshots)}")
         screenshot_paths = sorted(output.glob("*.png"))
         require(
             [path.name for path in screenshot_paths]
@@ -1634,7 +2140,8 @@ def main() -> int:
         # fmt: off
         evidence["verified"] = {
             "exact_head": True, "clean_before_and_after": True, "focused_build": True,
-            "all_four_scenarios": True, "twelve_screenshots": True,
+            "all_five_scenarios": True, "sixteen_screenshots": True,
+            "causal_queue_measured": True, "steer_interrupt_measured": True,
             "raw_dom_and_http_bodies": True,
             "binary_unchanged_during_capture": True, "script_unchanged": True,
             "immutable_git_archive_source": True, "screenshots_rehashed": True,

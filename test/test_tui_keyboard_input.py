@@ -4406,21 +4406,77 @@ def paste_to_file_interaction(requests: HttpRequests) -> Interaction:
 
 
 def keeper_chat_succeeded_response(request_body: bytes) -> RawHttpResponse:
-    request_id = json.loads(request_body).get("request_id")
-    accepted = {
-        "type": "CUSTOM",
-        "threadId": "keeper:alpha",
-        "timestamp": 1.0,
-        "name": "KEEPER_CHAT_OPERATION_ACCEPTED",
-        "value": {
-            "operation_id": request_id,
-            "state": "Succeeded",
-            "queued_count": 0,
+    request = json.loads(request_body)
+    request_id = request.get("request_id")
+    keeper_name = request.get("name")
+    message = request.get("message")
+    run_id = f"keeper-operation-run-{request_id}"
+    message_id = f"keeper-operation-message-{request_id}"
+    reply = f"reply-{message}"
+    thread_id = f"keeper:{keeper_name}"
+    events = [
+        {
+            "type": "CUSTOM",
+            "threadId": "default",
+            "timestamp": 1.0,
+            "name": "KEEPER_CHAT_OPERATION_ACCEPTED",
+            "value": {
+                "operation_id": request_id,
+                "state": "Queued",
+                "queued_count": 0,
+            },
         },
-    }
+        {
+            "type": "RUN_STARTED",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+        },
+        {
+            "type": "TEXT_MESSAGE_START",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+            "messageId": message_id,
+            "role": "assistant",
+        },
+        {
+            "type": "TEXT_MESSAGE_CONTENT",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+            "messageId": message_id,
+            "delta": reply,
+        },
+        {
+            "type": "CUSTOM",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+            "name": "KEEPER_REPLY_DETAILS",
+            "value": {
+                "reply": reply,
+                "turn_outcome": "visible_reply",
+                "turn_ref": "trace-pty#1",
+            },
+        },
+        {
+            "type": "TEXT_MESSAGE_END",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+            "messageId": message_id,
+        },
+        {
+            "type": "RUN_FINISHED",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+        },
+    ]
     return RawHttpResponse(
         200,
-        ("data: " + json.dumps(accepted) + "\n\n").encode(),
+        "".join(f"data: {json.dumps(event)}\n\n" for event in events).encode(),
         content_type="text/event-stream",
     )
 
@@ -4608,7 +4664,6 @@ def chat_steer_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
         request_id = json.loads(request_body).get("request_id")
         return 200, {
             "signalled": True,
-            "turn_id": 71,
             "request_id": request_id,
         }
 
@@ -4862,6 +4917,24 @@ def chat_reconcile_interaction(
                     f"terminal reconciliation did not release NEXT: {messages!r}"
                 )
             time.sleep(0.02)
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"Enter:send",
+            start=0,
+            timeout=10.0,
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b",
+            b"Keepers \xe2\x96\xb8 \x1b[1malpha",
+        )
+        send_and_wait(
+            process, master_fd, output, b"\x1b", b"MASC Keepers"
+        )
         os.write(master_fd, b"q")
 
     return interact

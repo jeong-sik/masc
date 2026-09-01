@@ -12,6 +12,7 @@ open Alcotest
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Tui_types = Masc_tui_types
+module Tui_http = Masc_tui_interrupt_signal
 
 let calls ~module_path ~callee = Ast_grep.count_calls ~module_path ~callee
 

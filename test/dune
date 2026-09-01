@@ -2959,11 +2959,14 @@
  (libraries
   alcotest
   ast_grep
+  astring
+  masc_tui_interrupt_signal
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
   masc_tui_keeper_chat_transcript
   masc_tui_message_layout
-  masc_tui_types)
+  masc_tui_types
+  yojson)
  (deps
   (source_tree ../bin)))
 

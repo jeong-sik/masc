@@ -1160,6 +1160,40 @@ let test_projection_adoption_follows_the_toml_when_it_declares_docker () =
     (profile_label adopted.sandbox_profile)
 ;;
 
+let test_projection_adoption_preserves_durable_projection_fields () =
+  let admitted =
+    make_meta ~sandbox_profile:Keeper_types_profile_sandbox.Micro_vm "drift"
+  in
+  (* paused and the usage counters are durable projection fields: the
+     overlay must carry them through. Without this pin, "re-apply the TOML"
+     could silently widen into "always keep the admitted meta" and every
+     case above would still pass while the observer stopped reflecting
+     the projection at all. *)
+  let projection =
+    let base =
+      make_meta ~sandbox_profile:Keeper_types_profile_sandbox.Docker "drift"
+    in
+    { base with
+      Masc.Keeper_meta_contract.paused = true
+    ; Masc.Keeper_meta_contract.runtime =
+        { base.runtime with
+          usage =
+            { base.runtime.usage with last_total_tokens = 12345 }
+        }
+    }
+  in
+  let adopted =
+    Masc.Keeper_run_tools_hooks.adopt_projection_meta
+      ~profile_defaults:
+        (drift_defaults (Some Keeper_types_profile_sandbox.Micro_vm))
+      ~admitted ~projection
+  in
+  check bool "adopted keeps the projection's paused flag" true
+    adopted.paused;
+  check int "adopted keeps the projection's usage counters" 12345
+    adopted.runtime.usage.last_total_tokens
+;;
+
 let () =
   run
     "keeper_run_tools_hooks"
@@ -1317,6 +1351,10 @@ let () =
             "follows the TOML profile when it declares docker"
             `Quick
             test_projection_adoption_follows_the_toml_when_it_declares_docker
+        ; test_case
+            "keeps the projection's durable fields while re-applying the TOML"
+            `Quick
+            test_projection_adoption_preserves_durable_projection_fields
         ] )
     ]
 ;;

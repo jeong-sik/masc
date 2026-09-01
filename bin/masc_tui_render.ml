@@ -5803,6 +5803,64 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
               List.map (fun line -> "  " ^ line) lines
           | Some _ | None -> [ Ansi.dim ^ "  (loading\xe2\x80\xa6)" ^ Ansi.reset ])
     in
+    let channel_lines =
+      match state.connectors with
+      | None -> [ Ansi.dim ^ "  (loading channel transports…)" ^ Ansi.reset ]
+      | Some snapshot ->
+          [ Ansi.dim
+            ^ "  Transport reachability. Bind and unbind actions target "
+            ^ Terminal_text.single_line k.k_name ^ "." ^ Ansi.reset
+          ]
+          @ List.map
+              (fun (connector : Tui_decode.connector) ->
+                 Printf.sprintf "  %-16s %-11s %-11s %s"
+                   (Terminal_text.single_line connector.cn_display_name)
+                   (if connector.cn_available then "configured" else "unavailable")
+                   (if connector.cn_connected then "connected" else "offline")
+                   (Terminal_text.single_line connector.cn_status))
+              snapshot.cs_connectors
+    in
+    let automation_lines =
+      let target = "keeper:" ^ k.k_name in
+      match state.schedules with
+      | None -> [ Ansi.dim ^ "  (loading this Keeper's schedules…)" ^ Ansi.reset ]
+      | Some snapshot ->
+          let rows =
+            List.filter
+              (fun (row : schedule_row) ->
+                 Option.equal String.equal row.sch_payload_target (Some target))
+              snapshot.scs_rows
+          in
+          if rows = [] then [ Ansi.dim ^ "  (no schedules for this Keeper)" ^ Ansi.reset ]
+          else
+            List.map
+              (fun (row : schedule_row) ->
+                 Printf.sprintf "  %-12s %-18s %s"
+                   (Terminal_text.single_line row.sch_status)
+                   (Terminal_text.single_line row.sch_recurrence_summary)
+                   (Terminal_text.single_line
+                      (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)))
+              rows
+    in
+    let run_lines =
+      match state.fusion_runs with
+      | None -> [ Ansi.dim ^ "  (loading this Keeper's Fusion runs…)" ^ Ansi.reset ]
+      | Some snapshot ->
+          let runs =
+            List.filter
+              (fun (run : Tui_decode.fusion_run) -> String.equal run.fur_keeper k.k_name)
+              snapshot.fus_runs
+          in
+          if runs = [] then [ Ansi.dim ^ "  (no retained Fusion runs for this Keeper)" ^ Ansi.reset ]
+          else
+            List.map
+              (fun (run : Tui_decode.fusion_run) ->
+                 Printf.sprintf "  %-12s %-16s %s"
+                   (Tui_decode.fusion_run_status_to_string run.fur_status)
+                   (Terminal_text.single_line run.fur_preset)
+                   (Terminal_text.single_line run.fur_run_id))
+              runs
+    in
     let all_lines =
       match state.detail_tab with
       | Detail_info -> info_lines
@@ -5829,6 +5887,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                  (stamp, identity_lines state k ~cols providers))
                state.identity_view)
             state.identity_view_error
+      | Detail_channels -> channel_lines
+      | Detail_automation -> automation_lines
+      | Detail_runs -> run_lines
     in
     let total_lines = List.length all_lines in
 

@@ -893,10 +893,13 @@ type keeper_detail_tab =
   | Detail_secrets
   | Detail_github
   | Detail_identity
+  | Detail_channels
+  | Detail_automation
+  | Detail_runs
 
 let keeper_detail_tabs =
   [ Detail_info; Detail_sandbox; Detail_instructions; Detail_secrets; Detail_github
-  ; Detail_identity ]
+  ; Detail_identity; Detail_channels; Detail_automation; Detail_runs ]
 
 let keeper_detail_tab_label = function
   | Detail_info -> "Info"
@@ -905,6 +908,9 @@ let keeper_detail_tab_label = function
   | Detail_secrets -> "Secrets"
   | Detail_github -> "GitHub"
   | Detail_identity -> "Identity"
+  | Detail_channels -> "Channels"
+  | Detail_automation -> "Automation"
+  | Detail_runs -> "Runs"
 
 (** One line of the Identity tab. A declaration nobody can read is carried
     rather than dropped: an operator who came looking for a provider needs to
@@ -1196,10 +1202,12 @@ let surface_ring : (surface * string) list =
     (Acting, "Acting");
     (Keepers Keeper_list, "Keepers");
     (Memory, "Memory");
+    (Lanes, "Lanes");
     (Approvals, "Approvals");
     (Board, "Board");
     (Planning, "Planning");
-    (Repositories, "Workspace");
+    (Repositories, "Repos");
+    (Code, "Code");
     (Runtime, "Runtime");
     (Config, "Config");
     (Resources, "Resources");
@@ -1210,21 +1218,14 @@ let surface_ring : (surface * string) list =
 (* Ring position of the family a view belongs to. Keeper sub-modes collapse
    onto Keepers, Task Review and Verdicts collapse onto Planning, Changes
    collapses onto Keepers -- its rows are one keeper's file writes, chosen by
-   the roster cursor, so it was never a destination of its own -- and
-   Connectors and standalone Lanes collapse onto Runtime: channel rows and
-   service-lane observation are both parts of "is the substrate alive", not
-   peers of Board or Planning. Code collapses onto Workspace (the
-   Repositories surface): its tree is always somebody's checkout -- a
-   registered repository, a keeper workspace, or the project -- and Enter on
-   a Workspace row is already how a reader walks into it. *)
+   the roster cursor, so it was never a destination of its own. Connectors,
+   Schedules, and Fusion likewise belong to the selected Keeper's detail. *)
 let surface_ring_index (view : surface) =
   let family =
     match view with
     | Keepers _ -> Keepers Keeper_list
-    | Verification | Harness | Schedules | Fusion -> Planning
-    | Changes -> Keepers Keeper_list
-    | Connectors | Lanes -> Runtime
-    | Code -> Repositories
+    | Verification | Harness -> Planning
+    | Changes | Connectors | Schedules | Fusion -> Keepers Keeper_list
     | v -> v
   in
   let rec find i = function
@@ -3502,10 +3503,6 @@ let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
   @ [ "go Task Review", Palette_goto Verification ]
   @ [ "go Connectors", Palette_goto Connectors ]
-  @ [ "go Lanes", Palette_goto Lanes ]
-  @ [ "go Schedules", Palette_goto Schedules ]
-  @ [ "go Fusion", Palette_goto Fusion ]
-  @ [ "go Code", Palette_goto Code ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring

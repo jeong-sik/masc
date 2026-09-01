@@ -7,14 +7,11 @@ status: runbook
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
-`bin/masc_tui_types.ml`: Overview, Acting, Keepers, Memory, Approvals,
-Board, Planning, Workspace, Runtime, Config, Resources, Tools, Logs.
-Eight more surfaces hang off parents instead of holding Tab stops:
-Planning's `v` walks Task Review, Evaluator Verdicts, Schedules, and Fusion;
-the Keepers roster reaches Changes with `f`; Runtime reaches Connectors with
-`c` and the standalone Lanes with `p` (its third stop); Workspace reaches
-Code with `Enter` on a repository row. Every off-ring surface keeps a
-`go <name>` palette entry.
+`bin/masc_tui_types.ml`: Overview, Acting, Keepers, Memory, Lanes, Approvals,
+Board, Planning, Repos, Code, Runtime, Config, Resources, Tools, Logs.
+Verification and Harness belong to Planning; Changes, Channels, Automation,
+and Runs belong to the selected Keeper. The Keeper detail tab row is the
+larger surface for the latter three.
 
 ## Quick Start
 
@@ -56,8 +53,8 @@ decides whether launching one is worth it.
 | Approvals | unavailable | `GET /api/v1/operator`, `POST /api/v1/operator/confirm` |
 | Board | unavailable | `GET /api/v1/board` |
 | Planning | unavailable | `GET /api/v1/dashboard/planning` |
-| Schedules | unavailable | `GET /api/v1/dashboard/scheduled-automation`; authenticated create/update/cancel routes |
-| Fusion | unavailable | `GET /api/v1/dashboard/fusion-runs`, then exact `/:run_id` detail |
+| Keeper Automation | unavailable | `GET /api/v1/dashboard/scheduled-automation`, filtered to the selected Keeper |
+| Keeper Runs | unavailable | `GET /api/v1/dashboard/fusion-runs`, filtered to the selected Keeper |
 | Runtime | unavailable | `GET /api/v1/runtime/resolved` + `GET /api/v1/dashboard/runtime-probe` |
 | Keeper message | unavailable | `POST /api/v1/keepers/chat/stream` |
 | System Logs | unavailable | `GET /api/v1/dashboard/logs` |
@@ -139,9 +136,9 @@ renderer as chat and Board; binary parts report their encoded size instead of
 pretending to render content. With detail focused, `[`/`]` read the previous
 or next resource without returning to the list. Responses are URI-stamped, so
 a slow older read cannot replace a newer selection. `Ctrl-W` switches between
-list and detail, and `j`/`k` move whichever pane has focus. Connectors hangs
-off Runtime: `c` opens it there, `Esc` returns to Runtime, and `b`/`u` open
-an editor form that binds or unbinds a channel.
+list and detail, and `j`/`k` move whichever pane has focus. The selected
+Keeper's Channels tab shows transport status; `b`/`u` open a binding form with
+that Keeper already named.
 
 Tools has five deliberately different questions under `p`: `available` is
 the effective surface delivered to the selected Keeper now; `async runs` is
@@ -319,11 +316,7 @@ restart puts every Keeper back on `auto`.
 ### Lanes
 
 Standalone execution lanes only. Keeper lifecycle and turn-cycle facts live on
-Keepers, so this surface no longer repeats a second Keeper table. It hangs
-off Runtime rather than holding a Tab stop: `p` on Runtime walks keeper
-lanes, all runtimes, and then this surface. From the lane overview, `p` or
-`Esc` returns to Runtime; inside the run list and run detail, `Esc` first
-backs out one drill-down level as before. The palette keeps `go Lanes`.
+Keepers, so this surface no longer repeats a second Keeper table.
 
 ```
  MASC Lanes · Standalone (4 lanes)  17:02:53  [connected]
@@ -730,9 +723,8 @@ authored Markdown.
 Planning is one workspace with three ordered child views: `1 Goals` groups the
 outcome and its linked Tasks; `2 Task Review` holds Task completion requests
 waiting for an operator decision; `3 Evaluator Verdicts` shows automatic Gate
-rulings recorded afterward; `4 Schedules` and `5 Fusion` keep their own
-headers but continue the same walk. Press `v` to move through that order.
-Evaluator Verdicts is the old Harness ledger, not a Goal completion proof.
+rulings recorded afterward. Press `v` to move through that order. Evaluator
+Verdicts is the old Harness ledger, not a Goal completion proof.
 
 ```
  MASC Planning  ▸1 Goals  2 Task Review·2  3 Evaluator Verdicts  10:44:57  [connected]
@@ -783,9 +775,7 @@ boundary.
 
 The scheduled-automation list: every wake the runtime has queued, active rows
 first by due time. This is the surface that answers "why is this keeper about
-to wake up". It is the fourth stop of Planning's `v` walk rather than a Tab
-stop; `v` moves on to Fusion, `Esc` returns to Planning, and the palette
-keeps `go Schedules`.
+to wake up".
 
 ```
  MASC Schedules  [me]  10:44:57  [connected]
@@ -836,9 +826,7 @@ to the list; `j`/`k` scroll by a row and `PgUp`/`PgDn` by a page.
 
 ### Fusion
 
-The retained Fusion run registry is the list. It is the fifth stop of
-Planning's `v` walk rather than a Tab stop; `v` wraps back to Goals, `Esc`
-returns to Planning, and the palette keeps `go Fusion`. While a run is active, `STATE`
+The retained Fusion run registry is the list. While a run is active, `STATE`
 shows the exact process-local stage: `accepted`, `panel(N)`, `judge(A/F)`,
 `computed(A/F)`, or `recording(A/F)`. A successful terminal row also carries a
 bounded decision and resolved-answer preview when the current producer wrote
@@ -909,10 +897,9 @@ ingest로 보이지 않게 하기 위함이다.
 커서가 가리키는 행의 전체 상태와 서버가 매긴 경고(alert) 목록이 표
 아래에 함께 나온다. `r`로 다시 불러온다.
 
-### Workspace
+### Repositories
 
-등록된 저장소와 서버가 실제로 해석한 체크아웃 경로를 보여준다. Tab 링의
-아홉 번째 정거장이며, Code 화면은 이 화면에 매달린 자식이다. 목록의
+등록된 저장소와 서버가 실제로 해석한 체크아웃 경로를 보여준다. 목록의
 `Path` 열은 폭이 부족하면 가운데를 줄여 표시하지만, 선택한 행 아래의
 `Path:`에는 전체 경로가 줄바꿈되어 나온다. 설정에 저장된 값이 상대 경로라면
 `Stored as:`가 함께 표시되고, 담당 Keeper는 `Keepers:`에서 확인할 수 있다.
@@ -958,13 +945,12 @@ moves the line cursor to the first match, Enter keeps the query for
 
 Which workspace is a scope the header always names: the project tree by
 default, a keeper's playground after a Changes `v` jump (`alpha ▸ repos/…`),
-or a registered repository after `Enter` on a Workspace row
-(`masc ▸ /`). `Esc` at a scoped root returns to the project tree, and at the project
-root it lands on Workspace, the ring parent. The three
+or a registered repository after `Enter` on a Repositories row
+(`masc ▸ /`). `Esc` at a scoped root returns to the project tree. The three
 scopes are one field, so the surface cannot read two workspaces at once.
 
 프로젝트 tree에 초점이 있을 때 `d`를 누르면 현재 프로젝트의 Git 변경
-파일을 모두 보여준다. 이 프로젝트는 Workspace에 등록되어 있지 않아도
+파일을 모두 보여준다. 이 프로젝트는 Repositories에 등록되어 있지 않아도
 된다. 목록은 staged, worktree, untracked, conflict를 구분하고, `Enter`로
 선택한 파일을 연다. Left 또는 `Esc`를 누르면 같은 프로젝트 tree로
 돌아간다. 파일 pane에 초점이 있을 때의 `d`는 아래처럼 그 파일 하나의
@@ -999,7 +985,7 @@ in place:
 
 - `m` swaps it for the notes anchored to the file — who left each one, its
   kind, the line span, and the task it rides with. Notes are keyed by the
-  server-minted codebase slug, which only a Workspace row carries, so
+  server-minted codebase slug, which only a Repositories row carries, so
   `m` answers in repository scope and says why not in the others. Inside
   the notes view `w` adds one through the `$EDITOR` form (kind: Comment /
   Decision / Question / Bookmark); the acting identity is the bearer's.
@@ -1182,11 +1168,11 @@ Per surface:
 | `v` | Changes | View the row's file on the Code surface, in the keeper's workspace |
 | `a` twice | Verification | Approve the row under the cursor |
 | `x` | Verification | Reject it, with a reason through `$EDITOR` |
-| Right / `Enter` | Workspace | Browse the repository's tree on the Code surface |
-| `d` | Workspace | Show the repository's current Git working-tree changes |
+| Right / `Enter` | Repositories | Browse the repository's tree on the Code surface |
+| `d` | Repositories | Show the repository's current Git working-tree changes |
 | `d` | Code, project tree focused | Show every Git change in the current project, even when it is not registered |
 | Right / `Enter` | Code | Drill into a directory / open the file |
-| Left / `Esc` | Code | Close the overlay, then the file, then climb a directory; the project root lands on Workspace |
+| Left / `Esc` | Code | Close the overlay, then the file, then climb a directory |
 | `/`, `n` / `N` | Code | Jump the tree cursor to a match |
 | `h` / `l` | Code, file open | Pan the file sideways by one cell |
 | `H` | Code, file open | The commits that touched the file, newest first |
@@ -1215,9 +1201,9 @@ Per surface:
 ```
 Tab cycles the surfaces:
 
-  Overview -> Acting -> Keepers -> Memory -> Approvals -> Board
-           -> Planning -> Workspace
-           -> Runtime -> Config -> Resources -> Tools -> Logs -> Overview
+  Overview -> Acting -> Keepers -> Memory -> Lanes -> Approvals -> Board
+           -> Planning -> Repos -> Code -> Runtime -> Config -> Resources
+           -> Tools -> Logs -> Overview
 
 Within a surface:
 
@@ -1228,18 +1214,11 @@ Within a surface:
 
   Board     --Right/Enter-->  Board read
   Planning  --Right/Enter-->  Goal detail
-  Fusion    --Right/Enter-->  Run evidence detail
-
-Off-ring children:
-
-  Planning  --v-->  Task Review --v--> Verdicts --v--> Schedules --v--> Fusion
-  Keepers   --f-->  Changes
-  Runtime   --c-->  Connectors        Runtime --p--> ... --p--> Lanes
-  Workspace --Enter-->  Code (the selected repository's tree)
+  Keeper detail --[ / ]--> Channels / Automation / Runs
 ```
 
 `2` reaches Keepers after the active field or panel has declined it.
-`Esc` returns one level within Keepers, Board, Planning, and Fusion.
+`Esc` returns one level within Keepers, Board, and Planning.
 
 ## Requirements
 

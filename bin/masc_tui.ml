@@ -5844,6 +5844,9 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
            state.identity_attempt_error <- None;
            state.identity_filter <- None;
            launch_identity_view state ~mailbox keeper.k_name)
+       | Detail_channels -> launch_connectors_load state ~mailbox
+       | Detail_automation -> launch_schedules_load state ~mailbox
+       | Detail_runs -> launch_fusion_runs_load state ~mailbox)
 ;;
 
 let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
@@ -5877,6 +5880,9 @@ let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
       state.identity_view <- None;
       state.identity_view_error <- None;
       launch_identity_view state ~mailbox keeper.k_name
+  | Detail_channels -> launch_connectors_load state ~mailbox
+  | Detail_automation -> launch_schedules_load state ~mailbox
+  | Detail_runs -> launch_fusion_runs_load state ~mailbox
 ;;
 
 (* Enter on a Lanes overview row, shared with the mouse: a press on the row
@@ -9503,9 +9509,16 @@ let main () =
   let handle_connector_bind () =
     let host = server_peer_host in
     let port = state.port in
+    let keeper_name =
+      match selected_keeper state with
+      | Some keeper -> keeper.k_name
+      | None -> ""
+    in
     handle_connector_form ~action:"bind"
       ~stem:
-        "{\n  \"name\": \"discord\",\n  \"channel_id\": \"\",\n  \"keeper_name\": \"\"\n}\n"
+        (Printf.sprintf
+           "{\n  \"name\": \"discord\",\n  \"channel_id\": \"\",\n  \"keeper_name\": \"%s\"\n}\n"
+           (String.escaped keeper_name))
       ~post:(fun ~connector ~json ->
         Masc_tui_http.post_connector_bind ~host ~port ~connector
           ~body_json:(Yojson.Safe.to_string json))
@@ -11438,6 +11451,12 @@ and is loaded on demand through keeper_skill.
                 state.identity_view <- None;
                 state.identity_view_error <- None;
                 launch_identity_view state ~mailbox:async_messages keeper.k_name
+            | Some _, Detail_channels ->
+                launch_connectors_load state ~mailbox:async_messages
+            | Some _, Detail_automation ->
+                launch_schedules_load state ~mailbox:async_messages
+            | Some _, Detail_runs ->
+                launch_fusion_runs_load state ~mailbox:async_messages
             | _, Detail_info | _, Detail_secrets | None, _ -> ())
        (* One step through the list a detail was opened from, on every surface
           that has one. Each reuses the same open the Enter arm uses, so a
@@ -14305,9 +14324,15 @@ and is loaded on demand through keeper_skill.
              (if state.prompts_show_fragments then
                 "Prompt 목록에 내부 조각을 표시합니다"
               else "Prompt 목록에 주 프롬프트만 표시합니다")
-       | Some "b" when state.view = Connectors ->
+       | Some "b"
+         when state.view = Connectors
+              || (state.view = Keepers Keeper_detail
+                  && state.detail_tab = Detail_channels) ->
            handle_connector_bind ()
-       | Some "u" when state.view = Connectors ->
+       | Some "u"
+         when state.view = Connectors
+              || (state.view = Keepers Keeper_detail
+                  && state.detail_tab = Detail_channels) ->
            handle_connector_unbind ()
        | Some "a" | Some "A" ->
            (match state.view with

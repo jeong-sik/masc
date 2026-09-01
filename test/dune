@@ -3624,7 +3624,6 @@
  (deps
   test_keeper_skill_use_proof.py
   ../scripts/harness/workload/keeper_skill_use_proof.py
-  ../scripts/harness/workload/build_keeper_skill_tui.py
   ../scripts/harness/workload/proof_http.py)
  (action
   (run python3 %{dep:test_keeper_skill_use_proof.py})))
@@ -3703,7 +3702,8 @@
   ../scripts/harness/workload/join_natural_keeper_skill_ledger.py
   ../scripts/harness/workload/keeper_skill_use_proof.py
   ../scripts/harness/workload/capture_keeper_skill_tui_proof.py
-  ../scripts/harness/workload/proof_http.py)
+  ../scripts/harness/workload/proof_http.py
+  ../scripts/harness/workload/produce_natural_keeper_skill_proof.py)
  (action
   (run python3 %{dep:test_verify_keeper_skill_proof_bundle.py})))
 

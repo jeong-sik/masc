@@ -6633,32 +6633,32 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
    Committed rows only. The turn still streaming is built where it is drawn:
    its row count changes on every frame, which is exactly what a stable
    position must not be measured against. *)
-let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
+let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
   let messages =
-    (* [Option.value ~default:] evaluates its default strictly, so writing it
-       here ran [chat_rows_for] — the pane's most expensive derivation — and
-       threw the result away on exactly the call site that passes [~messages]
-       to avoid recomputing it (#32429). The match keeps the caller's copy
-       authoritative and computes only when nothing was passed. *)
-    (match messages with
-     | Some messages -> messages
-     | None -> chat_rows_for state keeper_name)
-    |> List.filter (fun message ->
-      state.msg_memory_visibility <> Memory_hidden
-      || message.me_role <> Message_memory)
+    match messages with
+    | Some messages -> messages
+    | None -> chat_rows_for state keeper_name
   in
-  List.filter
-    (fun message ->
-       message.me_role <> Message_thinking
-       || state.msg_reasoning_visibility <> Reasoning_hidden)
-    messages
+  List.combine messages (chat_projected_timeline_ats messages)
+  |> List.filter (fun (message, _) ->
+    state.msg_memory_visibility <> Memory_hidden
+    || message.me_role <> Message_memory)
+  |> List.filter (fun (message, _) ->
+    message.me_role <> Message_thinking
+    || state.msg_reasoning_visibility <> Reasoning_hidden)
+;;
+
+let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
+  keeper_message_visible_timeline ?messages state ~keeper_name
+  |> List.map fst
 ;;
 
 let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     ~chat_cols =
-  let messages =
-    keeper_message_visible_messages ?messages state ~keeper_name
+  let visible_timeline =
+    keeper_message_visible_timeline ?messages state ~keeper_name
   in
+  let messages = List.map fst visible_timeline in
   (* Derived once for the width and again per row, so the badge the pane
      measures is the badge it draws. *)
   let base_role_label_of (message : Masc_tui_types.msg_entry) =
@@ -6685,20 +6685,27 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
   let visible_messages =
     List.mapi (fun entry_index message -> (entry_index, message)) messages
   in
+  let timeline_ats = List.map snd visible_timeline in
   let grouped_messages =
-    let rec loop previous_turn previous_turn_at reversed = function
+    let rec loop seen_turns previous_turn reversed = function
       | [] -> List.rev reversed
-      | (entry_index, message) :: rest ->
+      | ((entry_index, message), timeline_at) :: rest ->
           let turn_id = message.me_request_id in
           let grouped = not (String.equal turn_id "") in
           let starts_turn =
             grouped
+            && not (List.exists (String.equal turn_id) seen_turns)
+          in
+          let resumes_turn =
+            grouped
+            && not starts_turn
             && not (Option.exists (String.equal turn_id) previous_turn)
           in
           let base = base_role_label_of message in
           let role_label =
             if not grouped then base
             else if starts_turn then "TURN · " ^ base
+            else if resumes_turn then "↳ " ^ base
             else
               (* A continuation carries the same name as the row above it,
                  and a name repeated says nothing. Marking it inside the
@@ -6712,25 +6719,14 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
                  consecutive rows have to match for it to fire. *)
               base
           in
-          let next_previous =
-            if grouped then Some turn_id else previous_turn
+          let next_seen_turns =
+            if starts_turn then turn_id :: seen_turns else seen_turns
           in
-          (* A turn is one causal block on the outer time axis. Its first row
-             chooses the hour rail for the entire block, so a skewed tool or
-             result clock cannot insert an older rail halfway through the
-             input -> progress -> tool -> output sequence. The row keeps its
-             own clock in the origin column; only the group rail is shared. *)
-          let timeline_at =
-            if starts_turn || not grouped then message_display_at message
-            else previous_turn_at
-          in
-          let next_previous_at =
-            if grouped then timeline_at else previous_turn_at
-          in
-          loop next_previous next_previous_at
+          let next_previous_turn = if grouped then Some turn_id else None in
+          loop next_seen_turns next_previous_turn
             ((entry_index, message, role_label, timeline_at) :: reversed) rest
     in
-    loop None None [] visible_messages
+    loop [] None [] (List.combine visible_messages timeline_ats)
   in
   let projected_tool_rows =
     keeper_message_tool_rows state ~keeper_name ~chat_cols
@@ -6858,7 +6854,9 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
                       (List.map (fun label -> "\xe2\x95\xb0 " ^ label) labels))
         in
         ({ style;
-             timestamp = message.me_timestamp;
+             timestamp =
+               Option.fold ~none:message.me_timestamp
+                 ~some:keeper_message_clock timeline_at;
              timeline_bucket =
                Option.map keeper_message_timeline_bucket
                  timeline_at;
@@ -6923,7 +6921,7 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
     in
     let messages = keeper_message_visible_messages state ~keeper_name in
     let entries =
-      keeper_message_layout_entries ~messages state ~keeper_name ~chat_cols
+      keeper_message_layout_entries state ~keeper_name ~chat_cols
     in
     let count = List.length entries in
     let ceiling =
@@ -7148,16 +7146,18 @@ let render_keeper_message (state : state) =
       keeper_message_tool_rows state ~keeper_name ~chat_cols
     in
     let promoted = promoted_inflight_for_keeper state keeper_name in
-    let committed_messages =
-      keeper_message_visible_messages state ~keeper_name
+    let committed_timeline_messages = chat_rows_for state keeper_name in
+    let committed_visible_timeline =
+      keeper_message_visible_timeline state ~keeper_name
     in
+    let committed_messages = List.map fst committed_visible_timeline in
     let committed_layout_entries =
-      keeper_message_layout_entries ~messages:committed_messages state
-        ~keeper_name ~chat_cols
+      keeper_message_layout_entries state ~keeper_name ~chat_cols
     in
-    (* Rows for the turn still streaming. They join the committed/session row
-       for the same request rather than escaping to a second bottom-only lane:
-       one request has one position and one hour rail on the outer timeline. *)
+    (* Rows for the turn still streaming. They follow the latest committed
+       causal frontier for the same request rather than escaping to a second
+       bottom-only lane. Parallel rows may remain between earlier request
+       phases; the live bucket uses that latest frontier, not the first input. *)
     let live_projection =
       match state.msg_live with
       | Some live
@@ -7167,19 +7167,10 @@ let render_keeper_message (state : state) =
           let request_id = Keeper_chat_transcript.request_id live in
           let request_label = Keeper_chat.compact_request_id request_id in
           let timeline_at =
-            List.find_map
-              (fun (message : msg_entry) ->
-                 if String.equal message.me_request_id request_id
-                 then message_display_at message
-                 else None)
-              committed_messages
-            |> function
-            | Some _ as observed -> observed
-            | None ->
-                let started_at = Keeper_chat_transcript.started_at live in
-                if Float.is_finite started_at && started_at > 0.
-                then Some started_at
-                else None
+            chat_live_timeline_at ~request_id
+              ~started_at:(Keeper_chat_transcript.started_at live)
+              ~request_messages:committed_timeline_messages
+              committed_visible_timeline
           in
           let timeline_bucket =
             Option.map keeper_message_timeline_bucket timeline_at
@@ -7312,22 +7303,9 @@ let render_keeper_message (state : state) =
       match live_projection with
       | None -> committed_tagged
       | Some (request_id, timeline_at, live_entries) ->
-          let _, after_request =
-            List.fold_left
-              (fun (index, found) (message, _) ->
-                 ( index + 1
-                 , match message with
-                   | Some message
-                     when String.equal message.me_request_id request_id ->
-                       Some (index + 1)
-                   | Some _ | None -> found ))
-              (0, None) committed_tagged
-          in
           let insertion =
-            match after_request with
-            | Some index -> index
-            | None ->
-                chat_live_insertion_index ~timeline_at committed_messages
+            chat_live_insertion_index ~request_id ~timeline_at
+              committed_visible_timeline
           in
           insert_at insertion
             (List.map (fun entry -> None, entry) live_entries)

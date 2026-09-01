@@ -320,9 +320,13 @@ Keepers, so this surface no longer repeats a second Keeper table.
 Rows come from `GET /api/v1/dashboard/standalone-lanes`. They show admission slots,
 current activity, retained run counts, execution outcomes, latency, and the
 slots actually selected. `j` / `k` moves the lane cursor; Right or `Enter`
-opens that lane's recent exact runs. A standalone lane has no Keeper identity,
-so `c` / `m` explains that chat belongs on Keepers instead of silently opening
-an unrelated Keeper.
+opens that lane's recent exact runs, and another Right or `Enter` opens the
+exact run record. Input and output are pretty-printed as syntax-highlighted
+JSON and long JSON lines wrap by terminal cells, so a value does not disappear
+behind the right edge. Each payload is bounded at 64 KiB; a larger retained
+value says its original byte count instead of ending in an unexplained `~`.
+A standalone lane has no Keeper identity, so `c` / `m` explains that chat
+belongs on Keepers instead of silently opening an unrelated Keeper.
 
 ### Keeper detail
 

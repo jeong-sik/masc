@@ -5040,23 +5040,30 @@ let render_lane_run_list (state : state) ~lane_id =
    sequence is split. *)
 let lane_run_render_max_bytes = 65536
 
-let lane_run_payload_lines json =
+let lane_run_payload_lines ~width json =
   let full = Yojson.Safe.pretty_to_string json in
-  let text =
-    if String.length full <= lane_run_render_max_bytes then full
+  let text, truncated =
+    if String.length full <= lane_run_render_max_bytes then full, false
     else
       let cut =
         match String.rindex_from_opt full lane_run_render_max_bytes '\n' with
         | Some newline -> newline
         | None -> lane_run_render_max_bytes
       in
-      Printf.sprintf "%s\n…(truncated, total %d bytes)" (String.sub full 0 cut)
-        (String.length full)
+      String.sub full 0 cut, true
   in
-  String.split_on_char '\n' text
-  |> List.map (fun line -> Ansi.reset, "  " ^ Terminal_text.single_line line)
+  let rendered =
+    fenced_document_text ~language:"json" text
+    |> document_markdown ~width
+    |> List.map (fun line -> Ansi.reset, "  " ^ line)
+  in
+  if truncated then
+    rendered
+    @ [ ( Theme.warn ()
+        , Printf.sprintf "  … truncated, total %d bytes" (String.length full) ) ]
+  else rendered
 
-let lane_run_detail_lines (detail : Tui_decode.lane_run_detail) =
+let lane_run_detail_lines ~width (detail : Tui_decode.lane_run_detail) =
   let elapsed_slot =
     match detail.lrd_elapsed_s, detail.lrd_selected_slot with
     | None, None -> ""
@@ -5077,12 +5084,12 @@ let lane_run_detail_lines (detail : Tui_decode.lane_run_detail) =
   ; Ansi.dim, ""
   ; Ansi.bold, "  INPUT (prompt payload)"
   ]
-  @ lane_run_payload_lines detail.lrd_input_payload
+  @ lane_run_payload_lines ~width detail.lrd_input_payload
   @ [ Ansi.dim, ""; Ansi.bold, "  OUTPUT" ]
   @ (match detail.lrd_output with
      | None ->
          [ (Theme.muted ()), "  (run has not completed; no output recorded)" ]
-     | Some output -> lane_run_payload_lines output)
+     | Some output -> lane_run_payload_lines ~width output)
 
 let render_lane_run_detail (state : state) ~run_id =
   let terminal_rows, cols = get_terminal_size () in
@@ -5118,7 +5125,8 @@ let render_lane_run_detail (state : state) ~run_id =
     | None, None -> [ Ansi.dim, "  (loading exact run record)" ]
     | None, Some _ ->
         [ Ansi.dim, "  (load failed; nothing here is a reading)" ]
-    | Some detail, (Some _ | None) -> lane_run_detail_lines detail
+    | Some detail, (Some _ | None) ->
+        lane_run_detail_lines ~width:(max 1 (cols - 8)) detail
   in
   let total = List.length lines in
   let max_scroll = max 0 (total - content_height) in

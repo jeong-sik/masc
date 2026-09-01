@@ -2172,6 +2172,20 @@ let test_the_board_header_and_rows_share_one_layout () =
     (Ast_grep.count_calls ~module_path ~callee:"board_row_layout" > 0)
 ;;
 
+(* Exact lane payloads used to pretty-print JSON and hand its plain lines
+   straight to the frame. A long scalar then ended at the right edge and no
+   token carried syntax colour. Pin the shared document renderer at the
+   payload boundary: it owns both fenced JSON lexing and cell-safe wrapping. *)
+let test_lane_run_payload_uses_the_json_document_renderer () =
+  let module_path = "bin/masc_tui_render.ml" in
+  check int "payload is fenced as JSON" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"lane_run_payload_lines" ~callee:"fenced_document_text");
+  check int "payload uses the shared highlighted document renderer" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"lane_run_payload_lines" ~callee:"document_markdown")
+;;
+
 
 let () =
   run "masc-tui-http-regression" [
@@ -2275,6 +2289,10 @@ let () =
           "the board header and rows share one layout"
           `Quick
           test_the_board_header_and_rows_share_one_layout;
+        test_case
+          "lane run payload uses the JSON document renderer"
+          `Quick
+          test_lane_run_payload_uses_the_json_document_renderer;
       ]
     )
   ]

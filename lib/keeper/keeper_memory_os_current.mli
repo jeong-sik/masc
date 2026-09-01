@@ -95,11 +95,22 @@ type journal_entry =
       ; snapshot_present : bool
       ; cadence_deferred : bool
       }
+  | Journal_quarantined of
+      { recorded_at : float
+      ; rejection : string
+      ; rejected_path : string
+      }
+      (** The snapshot on disk could not be decoded, so a writer moved it to
+          [rejected_path] and continued from fresh state. [rejection] is the
+          decoder's own account of what it refused. Neither a pass that
+          committed nor a pass that failed: the write that follows this line
+          succeeds, and the revision restarts at one. *)
 
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
-(** Append-only sidecar recording one line per librarian pass, committed or
-    failed, each tagged with an [outcome]. A committed line carries
+(** Append-only sidecar recording one line per librarian pass and one per
+    quarantined snapshot, each tagged with an [outcome]. A committed line
+    carries
     [recorded_at]/[revision]/[source]/[change] plus [dropped] when the writer
     supplied drop-reason statements; the resulting fact count is derivable as
     [change.retained + length change.added] and is deliberately not duplicated.
@@ -155,9 +166,17 @@ val replace
   -> unit
   -> (t, string) result
 (** Atomically replace the complete current snapshot only when its revision
-    still equals [expected_revision]. Existing state must parse as the exact
-    current schema; malformed, non-current, or
-    concurrently changed state fails closed and is not overwritten.
+    still equals [expected_revision]. Concurrently changed state fails closed
+    and is not overwritten.
+
+    Existing state this build cannot decode is moved aside and the write
+    continues from fresh state, with the decoder's own account recorded as a
+    [Journal_quarantined] line. Every writer reads before it writes, so
+    refusing to write over an undecodable file left the keeper's memory both
+    unreadable and unwritable for good. The moved-aside bytes are kept, never
+    deleted. An [expected_revision] of [Some _] still fails after a
+    quarantine, because a caller cannot have read a revision from a file that
+    does not decode.
 
     [dropped_statements], when present, is the writer's own account of every
     drop in this commit (the librarian's totality output) and is recorded on

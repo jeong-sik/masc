@@ -115,6 +115,7 @@ let test_every_kind_round_trips () =
       |> List.map (function
         | Ok (Current.Journal_failed entry) -> kind_label entry.kind
         | Ok (Current.Journal_committed _) -> "committed"
+        | Ok (Current.Journal_quarantined _) -> "quarantined"
         | Error reason -> "error: " ^ reason)
     in
     check
@@ -199,6 +200,7 @@ let test_one_bad_line_does_not_hide_its_neighbours () =
       |> List.map (function
         | Ok (Current.Journal_failed entry) -> entry.trace_id
         | Ok (Current.Journal_committed _) -> "committed"
+        | Ok (Current.Journal_quarantined _) -> "quarantined"
         | Error _ -> "error")
     in
     check
@@ -227,6 +229,7 @@ let test_limit_keeps_the_newest_lines_oldest_first () =
       |> List.map (function
         | Ok (Current.Journal_failed entry) -> entry.trace_id
         | Ok (Current.Journal_committed _) -> "committed"
+        | Ok (Current.Journal_quarantined _) -> "quarantined"
         | Error reason -> "error: " ^ reason)
     in
     check (list string) "last two, oldest first" [ "trace-4"; "trace-5" ] traces)

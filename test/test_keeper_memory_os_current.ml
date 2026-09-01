@@ -57,6 +57,14 @@ let require_ok = function
   | Error message -> fail message
 ;;
 
+let rejected_files ~keepers_dir =
+  Sys.readdir keepers_dir
+  |> Array.to_list
+  |> List.filter (fun name ->
+    String.starts_with ~prefix:"keeper.memory-current.json.rejected-" name)
+  |> List.sort String.compare
+;;
+
 let require_upsert_ok = function
   | Ok value -> value
   | Error error -> fail (Current.upsert_error_to_string error)
@@ -485,18 +493,37 @@ let test_duplicate_identity_rejects_without_overwrite () =
   check (list string) "unchanged facts" (fact_ids [ first ]) (fact_ids snapshot.facts)
 ;;
 
-let test_invalid_current_snapshot_fails_closed () =
+(* A file this build cannot decode is not this build's to destroy, and it is
+   also not this build's reason to stop writing forever. It moves aside with
+   its bytes intact and the write continues from fresh state.
+
+   The earlier contract refused the write and left the file where it was, which
+   is what turned one undecodable snapshot into a permanent wedge: every writer
+   reads before it writes. Byte preservation is what that test was protecting
+   and it still holds — at the moved-aside path. *)
+let test_non_current_snapshot_is_moved_aside_not_overwritten () =
   with_temp_keepers @@ fun keepers_dir ->
   let snapshot_path =
     Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
   in
-  Fs_compat.save_file snapshot_path {|{"schema":"unexpected.memory"}|};
-  (match replace ~keepers_dir ~facts:[ fact () ] () with
-   | Error _ -> ()
-   | Ok _ -> fail "non-current snapshot was overwritten");
-  check string "invalid bytes preserved"
-    {|{"schema":"unexpected.memory"}|}
-    (Fs_compat.load_file snapshot_path)
+  let alien = {|{"schema":"unexpected.memory"}|} in
+  Fs_compat.save_file snapshot_path alien;
+  let written = replace ~keepers_dir ~facts:[ fact () ] () |> require_ok in
+  check int "the write proceeds from fresh state" 1 written.revision;
+  match rejected_files ~keepers_dir with
+  | [ name ] ->
+    let kept = Filename.concat keepers_dir name in
+    check string "alien bytes preserved" alien (Fs_compat.load_file kept);
+    check
+      bool
+      "and the current snapshot is a different file"
+      true
+      (not (String.equal kept snapshot_path))
+  | files ->
+    fail
+      (Printf.sprintf
+         "expected the alien file to be kept, got [%s]"
+         (String.concat "; " files))
 ;;
 
 let test_snapshot_read_rejects_unsupported_current_truth () =
@@ -1197,6 +1224,161 @@ let test_rejection_names_an_unexpected_top_level_field () =
     [ "<root>: field set mismatch"; "unexpected: legacy_facts" ]
 ;;
 
+(* ---------- An undecodable snapshot must not be a permanent wedge ----------
+
+   Every writer reads before it writes, so refusing to write over a snapshot
+   this build cannot decode left the keeper's memory both unreadable and
+   unwritable: eight live keepers stayed that way through every restart on
+   2026-09-01 until the files were repaired by hand. *)
+
+let break_change_contract ~keepers_dir =
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let broken =
+    match Yojson.Safe.from_string (Fs_compat.load_file path) with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (field, value) ->
+              match field, value with
+              | "change", `Assoc nested ->
+                ( field
+                , `Assoc
+                    (List.filter
+                       (fun (name, _) -> not (String.equal name "invalidated"))
+                       nested) )
+              | _ -> field, value)
+           fields)
+    | json -> json
+  in
+  let content = Yojson.Safe.to_string broken in
+  Fs_compat.save_file path content;
+  content
+;;
+
+(* An inline record cannot leave its constructor, so the two fields under test
+   are projected here rather than returned whole. *)
+let quarantined_lines ~keepers_dir =
+  Current.read_journal_tail ~keepers_dir ~keeper_id:"keeper" ~limit:100
+  |> List.filter_map (function
+    | Ok (Current.Journal_quarantined { recorded_at = _; rejection; rejected_path }) ->
+      Some (rejection, rejected_path)
+    | Ok (Current.Journal_committed _ | Current.Journal_failed _) | Error _ -> None)
+;;
+
+let test_undecodable_snapshot_is_quarantined_and_the_write_proceeds () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (replace ~keepers_dir ~facts:[ fact ~claim:"original" () ] () |> require_ok);
+  let rejected_content = break_change_contract ~keepers_dir in
+  check
+    bool
+    "a broken snapshot is unreadable before the write"
+    true
+    (Result.is_error (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"));
+  let recovered =
+    Current.upsert_fact
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~now:600.0
+      ~source:(source Current.Explicit_write)
+      (fact ~claim:"written after the wedge" ())
+    |> require_upsert_ok
+  in
+  check int "the write restarts the revision" 1 recovered.revision;
+  check
+    (list string)
+    "only the new row is current"
+    [ "written after the wedge" ]
+    (List.map (fun (f : Types.fact) -> f.claim) recovered.facts);
+  (match rejected_files ~keepers_dir with
+   | [ name ] ->
+     check
+       string
+       "the rejected bytes are kept exactly as they were"
+       rejected_content
+       (Fs_compat.load_file (Filename.concat keepers_dir name))
+   | files ->
+     fail
+       (Printf.sprintf
+          "expected exactly one moved-aside snapshot, got [%s]"
+          (String.concat "; " files)));
+  match quarantined_lines ~keepers_dir with
+  | [ (rejection, rejected_path) ] ->
+    check
+      bool
+      (Printf.sprintf "the journal says what was refused: %s" rejection)
+      true
+      (String_util.contains_substring rejection "change: field set mismatch"
+       && String_util.contains_substring rejection "missing: invalidated");
+    check
+      bool
+      "the journal names where the bytes went"
+      true
+      (String_util.contains_substring rejected_path ".rejected-")
+  | lines ->
+    fail
+      (Printf.sprintf "expected exactly one quarantine line, got %d" (List.length lines))
+;;
+
+(* Reading is an observation. A read that moved files would make every
+   dashboard poll a write. *)
+let test_reading_an_undecodable_snapshot_moves_nothing () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (replace ~keepers_dir ~facts:[ fact () ] () |> require_ok);
+  let rejected_content = break_change_contract ~keepers_dir in
+  (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" with
+   | Error _ -> ()
+   | Ok _ -> fail "a broken snapshot crossed the authoritative read boundary");
+  check (list string) "nothing was moved aside" [] (rejected_files ~keepers_dir);
+  check
+    string
+    "the snapshot is still where it was"
+    rejected_content
+    (Fs_compat.load_file (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"));
+  check int "and nothing was journaled" 0 (List.length (quarantined_lines ~keepers_dir))
+;;
+
+(* A caller holding a revision cannot have read it from a file that does not
+   decode, so the concurrency contract still refuses. The quarantine happens
+   first and stands: the next write succeeds. *)
+let test_expected_revision_still_refuses_after_a_quarantine () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (replace ~keepers_dir ~facts:[ fact () ] () |> require_ok);
+  ignore (break_change_contract ~keepers_dir);
+  (match
+     replace ~keepers_dir ~expected_revision:(Some 1) ~facts:[ fact ~claim:"next" () ] ()
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "a stale expected revision was accepted after a quarantine");
+  check
+    int
+    "the quarantine stands even though the write refused"
+    1
+    (List.length (rejected_files ~keepers_dir));
+  let fresh =
+    replace ~keepers_dir ~facts:[ fact ~claim:"fresh" () ] () |> require_ok
+  in
+  check int "the following write proceeds from fresh state" 1 fresh.revision
+;;
+
+let test_torn_json_is_quarantined_too () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (replace ~keepers_dir ~facts:[ fact () ] () |> require_ok);
+  Fs_compat.save_file
+    (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper")
+    "{\"revision\": 1, \"facts\": [";
+  let recovered =
+    Current.upsert_fact
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~now:700.0
+      ~source:(source Current.Explicit_write)
+      (fact ~claim:"after a torn file" ())
+    |> require_upsert_ok
+  in
+  check int "a half-written file does not wedge the keeper either" 1 recovered.revision;
+  check int "and it is kept" 1 (List.length (rejected_files ~keepers_dir))
+;;
+
 let () =
   run
     "keeper_memory_os_current"
@@ -1239,9 +1421,9 @@ let () =
             `Quick
             test_duplicate_identity_rejects_without_overwrite
         ; test_case
-            "invalid current snapshot fails closed"
+            "non-current snapshot moved aside, not overwritten"
             `Quick
-            test_invalid_current_snapshot_fails_closed
+            test_non_current_snapshot_is_moved_aside_not_overwritten
         ; test_case
             "unsupported current truth fails closed"
             `Quick
@@ -1318,6 +1500,21 @@ let () =
             "re-observation reinforces instead of duplicating"
             `Quick
             test_reobservation_reinforces_instead_of_duplicating
+        ] )
+    ; ( "undecodable state is not a wedge"
+      , [ test_case
+            "quarantine and proceed"
+            `Quick
+            test_undecodable_snapshot_is_quarantined_and_the_write_proceeds
+        ; test_case
+            "reading moves nothing"
+            `Quick
+            test_reading_an_undecodable_snapshot_moves_nothing
+        ; test_case
+            "expected revision still refuses"
+            `Quick
+            test_expected_revision_still_refuses_after_a_quarantine
+        ; test_case "torn json too" `Quick test_torn_json_is_quarantined_too
         ] )
     ; ( "rejection names its cause"
       , [ test_case

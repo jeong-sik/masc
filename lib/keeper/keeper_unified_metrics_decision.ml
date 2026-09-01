@@ -270,6 +270,8 @@ let append_decision_record
               let usage_fields =
                 if r.usage_reported then
                   [
+                    ( "usage_scope"
+                    , `String (Runtime_usage_scope.to_string r.usage_scope) );
                     ("input_tokens", `Int r.usage.input_tokens);
                     ("output_tokens", `Int r.usage.output_tokens);
                     ("cache_creation_tokens", `Int r.usage.cache_creation_input_tokens);
@@ -288,6 +290,8 @@ let append_decision_record
                   @ usage_trust_json_fields usage_trust
                 else
                   [
+                    ( "usage_scope"
+                    , `String (Runtime_usage_scope.to_string r.usage_scope) );
                     ("input_tokens", `Null);
                     ("output_tokens", `Null);
                     ("cache_creation_tokens", `Null);

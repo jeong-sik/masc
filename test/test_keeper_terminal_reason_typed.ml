@@ -911,7 +911,11 @@ let () =
         ; "trace_id", `String "trace-success-clears-stale-provider-failure"
         ])
   in
-  let run_result ?(stop_reason = Runtime_agent.Completed) ()
+  let run_result
+        ?(stop_reason = Runtime_agent.Completed)
+        ?(usage = Masc.Inference_utils.zero_usage)
+        ?(usage_scope = Runtime_usage_scope.Per_request)
+        ()
     : Masc.Keeper_agent_run.run_result
     =
     let prompt_metrics =
@@ -943,9 +947,9 @@ let () =
     ; runtime_observation = None
     ; turn_count = 1
     ; final_agent_core_turn_ordinal = 0
-    ; usage = Masc.Inference_utils.zero_usage
+    ; usage
     ; usage_reported = true
-    ; usage_scope = Runtime_usage_scope.Per_request
+    ; usage_scope
     ; tool_calls = []
     ; completion_contract_result = R.Completion_tool_execution_observed
     ; operator_disposition = None
@@ -982,11 +986,18 @@ let () =
     "direct projects through reactive metrics channel"
     (Masc.Keeper_execution_outcome.metrics_channel direct_outcome
      = Masc.Keeper_world_observation.Reactive);
-  let reactive_success ~last_outcome ~last_reason =
+  let reactive_success
+        ?(prior = meta)
+        ?(usage = Masc.Inference_utils.zero_usage)
+        ?(usage_scope = Runtime_usage_scope.Per_request)
+        ~last_outcome
+        ~last_reason
+        ()
+    =
     let proactive_rt =
-      { meta.runtime.proactive_rt with last_outcome; last_reason }
+      { prior.runtime.proactive_rt with last_outcome; last_reason }
     in
-    let prior = { meta with runtime = { meta.runtime with proactive_rt } } in
+    let prior = { prior with runtime = { prior.runtime with proactive_rt } } in
     let reactive_event : Masc.Keeper_world_observation.pending_board_event =
       { event_kind = Masc.Keeper_world_observation.Board_post_created
       ; post_id = "reactive-success"
@@ -1034,12 +1045,13 @@ let () =
       ~latency_ms:1
       ~observation
       ~is_autonomous_turn:false
-      (run_result ())
+      (run_result ~usage ~usage_scope ())
   in
   let updated =
     reactive_success
       ~last_outcome:KMC.Proactive_error
       ~last_reason:"provider failure detail without a classifier prefix"
+      ()
   in
   check
     "reactive success clears typed proactive error"
@@ -1051,10 +1063,74 @@ let () =
     reactive_success
       ~last_outcome:KMC.Proactive_text_response
       ~last_reason:error_like_reason
+      ()
   in
   check
     "reactive success ignores error-like reason text"
     (String.equal updated.runtime.proactive_rt.last_reason error_like_reason);
+  let prior_usage =
+    { meta.runtime.usage with
+      total_input_tokens = 100
+    ; total_output_tokens = 20
+    ; total_tokens = 120
+    ; total_cost_usd = 1.5
+    }
+  in
+  let prior = { meta with runtime = { meta.runtime with usage = prior_usage } } in
+  let cumulative_usage =
+    { Masc.Inference_utils.zero_usage with
+      input_tokens = 9_000
+    ; output_tokens = 900
+    ; cost_usd = Some 12.0
+    }
+  in
+  let cumulative =
+    reactive_success
+      ~prior
+      ~usage:cumulative_usage
+      ~usage_scope:Runtime_usage_scope.Conversation_cumulative
+      ~last_outcome:KMC.Proactive_unknown
+      ~last_reason:"cumulative usage"
+      ()
+  in
+  check
+    "conversation cumulative input is not added as a turn delta"
+    (cumulative.runtime.usage.total_input_tokens = 100);
+  check
+    "conversation cumulative output is not added as a turn delta"
+    (cumulative.runtime.usage.total_output_tokens = 20);
+  check
+    "conversation cumulative cost is not added as a turn cost"
+    (Float.equal cumulative.runtime.usage.total_cost_usd 1.5);
+  check
+    "conversation cumulative raw observation remains visible"
+    (cumulative.runtime.usage.last_input_tokens = 9_000
+     && cumulative.runtime.usage.last_output_tokens = 900);
+  let per_request_usage =
+    { Masc.Inference_utils.zero_usage with
+      input_tokens = 40
+    ; output_tokens = 2
+    ; cost_usd = Some 0.25
+    }
+  in
+  let per_request =
+    reactive_success
+      ~prior
+      ~usage:per_request_usage
+      ~usage_scope:Runtime_usage_scope.Per_request
+      ~last_outcome:KMC.Proactive_unknown
+      ~last_reason:"per-request usage"
+      ()
+  in
+  check
+    "per-request input remains additive"
+    (per_request.runtime.usage.total_input_tokens = 140);
+  check
+    "per-request output remains additive"
+    (per_request.runtime.usage.total_output_tokens = 22);
+  check
+    "per-request cost remains additive"
+    (Float.equal per_request.runtime.usage.total_cost_usd 1.75);
   let stale_provider_failure =
     Masc.Keeper_registry.Provider_runtime_error
       { code = "api_error_invalid_request"

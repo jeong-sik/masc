@@ -1041,7 +1041,9 @@ let post_runtime_assignment ~(host : string) ~(port : int)
     an id the catalog does not know, and only then persists. This sends the
     whole list because the endpoint's contract is the lane's order, not a
     delta — a caller that sent one id would be declaring the lane has one
-    candidate. *)
+    candidate. A success is a commit receipt ([{ok = true; state =
+    "committed"; ...}]) — decoded here so a 2xx body of any other shape is an
+    error rather than a guessed success, matching [tool_envelope_outcome]. *)
 let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
       ~(runtime_ids : string list) : (unit, string) result =
   let body =
@@ -1056,12 +1058,8 @@ let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
   with
   | Error detail -> Error detail
   | Ok json ->
-    (match json with
-     | `Assoc fields ->
-       (match List.assoc_opt "error" fields with
-        | Some (`String detail) -> Error detail
-        | Some _ | None -> Ok ())
-     | _ -> Ok ())
+    decode_runtime_config_commit_receipt json
+    |> Result.map (fun (_receipt : runtime_config_commit_receipt) -> ())
 ;;
 
 (** GET /api/v1/keepers/tool-approvals — the tool calls keepers are holding. *)

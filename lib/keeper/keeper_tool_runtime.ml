@@ -110,7 +110,8 @@ let handle_filesystem ctx descriptor args =
 
 (* Shell IR mechanics live under the Execute owner; Grep workspace operations
    live under their own owner. Descriptor routing selects those owners here. *)
-let handle_shell_ir ctx descriptor args =
+let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descriptor
+    args =
   match descriptor.Keeper_tool_descriptor.runtime_handler with
   | Tool_execute ->
       Some
@@ -121,6 +122,10 @@ let handle_shell_ir ctx descriptor args =
          ?continuation_channel:ctx.continuation_channel
          ?gate_context:ctx.gate_context
          ?gate_grant:ctx.gate_grant
+         ~shell_ir_rewrite:
+           (Keeper_shell_tool_command.rewrite
+              ~lookup:descriptor_for_internal
+              ~dispatch)
          ~args
          ())
   | Tool_search_files ->
@@ -470,9 +475,12 @@ let handle_in_process ctx descriptor args =
   | Tool_write_file -> None
 ;;
 
-let handle ctx ~descriptor ~args =
+(* [handle] hands itself to the shell-ir owner as a value: a masc stage
+   found inside a shell line dispatches through the same routing as a
+   direct call, without a forward reference or a module cycle. *)
+let rec handle ctx ~descriptor ~args =
   match descriptor.Keeper_tool_descriptor.executor with
   | Filesystem -> handle_filesystem ctx descriptor args
-  | Shell_ir -> handle_shell_ir ctx descriptor args
+  | Shell_ir -> handle_shell_ir ctx ~dispatch:(handle ctx) descriptor args
   | In_process -> handle_in_process ctx descriptor args
 ;;

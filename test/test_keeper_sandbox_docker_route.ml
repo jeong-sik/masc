@@ -326,7 +326,7 @@ let test_turn_sandbox_factory_ignores_mid_turn_registry_profile_drift () =
   @@ fun () ->
   let docker_playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   match Keeper_sandbox_factory.resolve factory ~cwd:docker_playground with
-  | Runtime runtime ->
+  | Runtime { runtime; _ } ->
     Alcotest.(check string)
       "runtime host root stays on the turn's Docker profile"
       (Keeper_alerting_path.normalize_path_for_check_stripped docker_playground)
@@ -807,6 +807,38 @@ let test_execute_typed_pipeline_requires_docker_factory () =
     (response_mentions raw "error" "requires a turn sandbox factory");
   Alcotest.(check (option string)) "no local fallback" None
     (parse_string_field raw "sandbox_fallback")
+
+let test_execute_rejects_factory_profile_drift_in_every_direction () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta:docker ~playground ->
+  let microvm =
+    { docker with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm }
+  in
+  let remote =
+    { docker with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh }
+  in
+  let assert_mismatch ~factory_meta ~caller_meta =
+    let factory = Keeper_sandbox_factory.create ~config ~meta:factory_meta () in
+    Fun.protect
+      ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+    @@ fun () ->
+    let raw =
+      Keeper_tool_execute_runtime.handle_tool_execute
+        ~turn_sandbox_factory:(Some factory)
+        ~config
+        ~meta:caller_meta
+        ~args:(tool_execute_typed_exec_args ~cwd:playground "pwd" ~argv:[])
+        ()
+    in
+    Alcotest.(check (option string))
+      "typed contract mismatch"
+      (Some "sandbox_profile_contract_mismatch")
+      (parse_string_field raw "code")
+  in
+  assert_mismatch ~factory_meta:docker ~caller_meta:microvm;
+  assert_mismatch ~factory_meta:microvm ~caller_meta:docker;
+  assert_mismatch ~factory_meta:docker ~caller_meta:remote;
+  assert_mismatch ~factory_meta:remote ~caller_meta:docker
 
 let test_execute_typed_pipeline_uses_local_shell_ir_dispatch () =
   setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
@@ -1521,7 +1553,7 @@ let test_exec_argv_is_the_container_argv () =
   match Keeper_sandbox_factory.resolve_opt (Some factory) ~cwd:playground with
   | Keeper_sandbox_factory.No_factory | Keeper_sandbox_factory.Remote_ssh_profile ->
     Alcotest.fail "a docker keeper must resolve to a runtime"
-  | Keeper_sandbox_factory.Runtime runtime ->
+  | Keeper_sandbox_factory.Runtime { runtime; _ } ->
     (match
        Keeper_turn_sandbox_runtime.exec_argv
          ~validate_cached_container:false
@@ -2384,6 +2416,9 @@ let () =
           Alcotest.test_case
             "tool_execute typed pipeline requires docker factory"
             `Quick test_execute_typed_pipeline_requires_docker_factory;
+          Alcotest.test_case
+            "tool_execute rejects factory profile drift in every direction"
+            `Quick test_execute_rejects_factory_profile_drift_in_every_direction;
           Alcotest.test_case
             "tool_execute typed pipeline uses turn sandbox docker runner"
             `Quick test_execute_typed_pipeline_uses_turn_sandbox_docker_runner;

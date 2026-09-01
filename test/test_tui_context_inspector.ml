@@ -205,7 +205,8 @@ let test_provider_input_is_bound_to_exact_turn () =
       (Ids.Turn_ref.to_string input.turn_ref);
     check int "system + message + tool" 3
       (List.length (Inspector.exact_input_items input));
-    check string "wire digest survives" wire.body_sha256 input.wire.body_sha256;
+    check string "serialized request digest survives" wire.body_sha256
+      input.wire.body_sha256;
     check string "tool result is openable" "Message · tool"
       (Inspector.exact_input_label
          (List.nth (Inspector.exact_input_items input) 1).kind)
@@ -251,13 +252,27 @@ let test_input_map_opens_only_digest_verified_system_prompt () =
   let rows = Inspector.input_map_rows observed (Some input) in
   check (option string) "system prompt verified" (Some system_prompt)
     (List.nth rows 0).exact_text;
-  check string "message points to exact input tab" "exact items in input tab"
-    (List.nth rows 1).retention;
+  check bool "system prompt has verified evidence" true
+    ((List.nth rows 0).evidence = Inspector.Verified_exact_text);
+  check bool "message points to the same-turn serialized snapshot" true
+    ((List.nth rows 1).evidence = Inspector.Serialized_turn_snapshot);
+  check bool "message names its typed source" true
+    ((List.nth rows 1).source = Inspector.Provider_message_list);
+  check (option string) "prompt block retains its producer digest"
+    (Some block.digest) (List.nth rows 0).digest;
   let changed =
     { observed with blocks = [ { block with digest = digest "other" } ] }
   in
+  let changed_row = List.hd (Inspector.input_map_rows changed (Some input)) in
   check (option string) "digest mismatch is not opened" None
-    (List.hd (Inspector.input_map_rows changed (Some input))).exact_text
+    changed_row.exact_text;
+  check bool "digest mismatch is not mislabeled verified" true
+    (changed_row.evidence = Inspector.Serialized_turn_snapshot);
+  let without_snapshot = Inspector.input_map_rows observed None in
+  check bool "prompt digest remains explicit without a snapshot" true
+    ((List.nth without_snapshot 0).evidence = Inspector.Producer_digest_only);
+  check bool "a component with no digest or snapshot stays byte-only" true
+    ((List.nth without_snapshot 1).evidence = Inspector.Byte_count_only)
 
 let test_a_size_never_outgrows_the_column_it_is_drawn_in () =
   List.iter
@@ -288,6 +303,24 @@ let test_a_size_climbs_past_kilobytes () =
     ; 1_048_576, "1.0 MB"
     ; 3_145_728, "3.0 MB"
     ]
+
+let test_evidence_badges_own_their_exact_cell_budget () =
+  let cases =
+    [ Inspector.Verified_exact_text, 12
+    ; Inspector.Serialized_turn_snapshot, 14
+    ; Inspector.Producer_digest_only, 15
+    ; Inspector.Byte_count_only, 14
+    ]
+  in
+  List.iter
+    (fun (evidence, expected) ->
+       let badge = Inspector.input_evidence_badge_cells evidence in
+       check int (Inspector.input_evidence_label evidence) expected badge;
+       let row_width = 44 in
+       let label_width = max 4 (row_width - 17 - badge) in
+       check bool "badge budget does not overrun the row" true
+         (17 + label_width + badge <= row_width))
+    cases
 
 let test_a_tool_schema_is_grouped_with_the_other_schemas () =
   (* [exact_input_label] names a schema after its tool, which would put every
@@ -332,6 +365,8 @@ let () =
             test_a_size_never_outgrows_the_column_it_is_drawn_in
         ; test_case "a size climbs past kilobytes" `Quick
             test_a_size_climbs_past_kilobytes
+        ; test_case "evidence badges own their cell budget" `Quick
+            test_evidence_badges_own_their_exact_cell_budget
         ; test_case "a tool schema is grouped with the other schemas" `Quick
             test_a_tool_schema_is_grouped_with_the_other_schemas
         ] )

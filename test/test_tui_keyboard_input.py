@@ -5700,20 +5700,22 @@ def memory_journal_timeline_interaction(
                 f"Summary mode drew the change fence after restore: {restored!r}"
             )
 
-        # A viewport too small for the composer still owes the display
-        # toggles a working gate. The gate reads the live terminal size at
-        # dispatch, so keys pressed on the too-small screen decide there
-        # and prove themselves on the way back up. Ctrl-R/Ctrl-D always
-        # passed it while Ctrl-F and then Ctrl-N (#32367) were swallowed,
-        # because the gate admitted keys one by one instead of the
-        # display-toggle set.
+        # A chat pane too narrow for the composer still owes the display
+        # toggles a working gate. Twelve columns keeps the frame painted
+        # (the global compact fallback is row-driven and owns every key on
+        # its screen), draws only the "needs a larger terminal" notice, and
+        # makes keeper_message_input_supported false — the regime where the
+        # gate decides. Ctrl-R/Ctrl-D always passed it while Ctrl-F and then
+        # Ctrl-N (#32367) were swallowed, because the gate admitted keys one
+        # by one instead of the display-toggle set. The toggles land on the
+        # notice screen and prove themselves on the way back up.
         resize_and_wait(
             process,
             master_fd,
             output,
-            rows=8,
-            columns=100,
-            needle=b"terminal too small",
+            rows=31,
+            columns=12,
+            needle=b"Keeper ch~",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
@@ -5730,8 +5732,8 @@ def memory_journal_timeline_interaction(
         )
         if b"memory:full clock:inline" not in CSI_RE.sub(b"", widened):
             raise AssertionError(
-                "A display toggle pressed on the too-small screen was "
-                f"swallowed by the compact-viewport gate: {widened!r}"
+                "A display toggle pressed on the narrow-pane notice screen "
+                f"was swallowed by the composer gate: {widened!r}"
             )
         send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         os.write(master_fd, b"q")
@@ -5910,7 +5912,7 @@ def context_inspector_interaction() -> Interaction:
             process, master_fd, output, b"/context", composer_showing(b"/context")
         )
         composition = send_and_wait(
-            process, master_fd, output, b"\r", b"Input composition"
+            process, master_fd, output, b"\r", b"HISTORY REACH"
         )
         composition_plain = CSI_RE.sub(b"", composition)
         for needle in (
@@ -5927,60 +5929,115 @@ def context_inspector_interaction() -> Interaction:
                 )
 
         exact_input = send_and_wait(
-            process, master_fd, output, b"2", b"Canonical model input items"
+            process, master_fd, output, b"2", b"SELECTED INPUT"
         )
         exact_input_plain = CSI_RE.sub(b"", exact_input)
         for needle in (
             b"trace-context#42",
+            b"REQUEST ITEMS",
             b"System prompt",
             b"Message \xc2\xb7 system",
             b"Message \xc2\xb7 tool",
             b"Tool schema \xc2\xb7 masc_execute",
-            b"Wire  anthropic",
+            b"Prepared request  anthropic",
+            b"RETAINED ITEM",
         ):
             if needle not in exact_input_plain:
                 raise AssertionError(
                     f"Exact provider input omitted {needle!r}: {exact_input!r}"
                 )
 
-        send_and_wait(process, master_fd, output, b"j", b"Dynamic context")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"j",
+            b"exact dynamic context from the turn",
+        )
         exact = send_and_wait(
             process, master_fd, output, b"\r", b"exact dynamic context from the turn"
         )
-        if b"Canonical model input items" in CSI_RE.sub(b"", exact):
+        if b"SELECTED INPUT" in CSI_RE.sub(b"", exact):
             raise AssertionError(
                 f"Exact item view retained the list disclosure: {exact!r}"
             )
 
         send_and_wait(
-            process, master_fd, output, b"\x1b", b"Canonical model input items"
+            process, master_fd, output, b"\x1b", b"SELECTED INPUT"
         )
         input_map = send_and_wait(
             process, master_fd, output, b"3", b"Provider request map"
         )
         input_map_plain = CSI_RE.sub(b"", input_map)
         for needle in (
-            b"What reached the provider, and why",
-            b"included by turn prompt assembly",
-            b"verified exact text",
-            b"included by effective tool surface",
-            b"exact items in input tab",
+            b"CONTEXT STACK",
+            b"SELECTED BLOCK",
+            b"EXACT TURN JOIN",
+            b"VERIFIED",
+            b"SERIALIZED",
         ):
             if needle not in input_map_plain:
                 raise AssertionError(
                     f"Provider request map omitted {needle!r}: {input_map!r}"
                 )
 
-        send_and_wait(process, master_fd, output, b"j", b"included by")
-        send_and_wait(process, master_fd, output, b"j", b"Memory recall")
+        narrow_map = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=35,
+            columns=109,
+            needle=b"SELECTED BLOCK",
+        )
+        narrow_map_plain = CSI_RE.sub(b"", narrow_map)
+        for forbidden in (b"reached the provider", b"provider accepted", b"ON WIRE"):
+            if forbidden in narrow_map_plain:
+                raise AssertionError(
+                    f"Narrow provider map overstated pre-dispatch evidence as "
+                    f"{forbidden!r}: {narrow_map!r}"
+                )
+        for needle in (
+            b"turn prompt assembly",
+            b"digest",
+            b"retained text",
+            b"Keeper instruction text",
+        ):
+            if needle not in narrow_map_plain:
+                raise AssertionError(
+                    f"Narrow provider map omitted selected evidence {needle!r}: "
+                    f"{narrow_map!r}"
+                )
+
+        serialized_detail = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"j",
+            b"pre-dispatch serialization snapshot exists",
+        )
+        serialized_detail_plain = CSI_RE.sub(b"", serialized_detail)
+        for needle in (b"SERIALIZED", b"turn prompt assembly", b"digest"):
+            if needle not in serialized_detail_plain:
+                raise AssertionError(
+                    f"Narrow serialized detail omitted {needle!r}: "
+                    f"{serialized_detail!r}"
+                )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"k",
+            b"Keeper instruction text",
+        )
+
         map_exact = send_and_wait(
             process,
             master_fd,
             output,
             b"\r",
-            b"remember the operator preference",
+            b"Keeper instruction text",
         )
-        if b"included by turn prompt assembly" not in CSI_RE.sub(b"", map_exact):
+        if b"turn prompt assembly" not in CSI_RE.sub(b"", map_exact):
             raise AssertionError(f"Input map exact view lost provenance: {map_exact!r}")
 
         send_and_wait(process, master_fd, output, b"\x1b", b"Provider request map")

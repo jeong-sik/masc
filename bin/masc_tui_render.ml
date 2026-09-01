@@ -6635,7 +6635,14 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
    position must not be measured against. *)
 let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
   let messages =
-    Option.value ~default:(chat_rows_for state keeper_name) messages
+    (* [Option.value ~default:] evaluates its default strictly, so writing it
+       here ran [chat_rows_for] — the pane's most expensive derivation — and
+       threw the result away on exactly the call site that passes [~messages]
+       to avoid recomputing it (#32429). The match keeps the caller's copy
+       authoritative and computes only when nothing was passed. *)
+    (match messages with
+     | Some messages -> messages
+     | None -> chat_rows_for state keeper_name)
     |> List.filter (fun message ->
       state.msg_memory_visibility <> Memory_hidden
       || message.me_role <> Message_memory)
@@ -14487,6 +14494,36 @@ let context_component_style = function
   | Turn_record.Message_image | Turn_record.Message_document
   | Turn_record.Message_audio -> Ansi.reset
 
+let context_evidence_style = function
+  | Masc_tui_context_inspector.Verified_exact_text ->
+      Ansi.bold ^ Theme.ok ()
+  | Masc_tui_context_inspector.Serialized_turn_snapshot ->
+      Ansi.bold ^ Theme.info ()
+  | Masc_tui_context_inspector.Producer_digest_only ->
+      Ansi.bold ^ Ansi.magenta
+  | Masc_tui_context_inspector.Byte_count_only ->
+      Ansi.bold ^ Ansi.gray
+
+let context_evidence_badge evidence =
+  Printf.sprintf "%s[ %s ]%s"
+    (context_evidence_style evidence)
+    (Masc_tui_context_inspector.input_evidence_label evidence)
+    Ansi.reset
+
+let context_split_lines ~cols ~left_width ~left ~right =
+  let inner = framed_inner_width cols in
+  let divider = Theme.recede () ^ " │ " ^ Ansi.reset in
+  let right_width = max 1 (inner - left_width - 3) in
+  let count = max (List.length left) (List.length right) in
+  List.init count (fun index ->
+      let left = Option.value ~default:"" (List.nth_opt left index) in
+      let right = Option.value ~default:"" (List.nth_opt right index) in
+      fit_width left left_width ^ divider ^ fit_width right right_width)
+
+let context_split_width cols =
+  let available = max 1 (framed_inner_width cols - 3) in
+  min 62 (max 44 (available * 45 / 100))
+
 let context_composition_lines ~cols
     (selection : Masc_tui_context_inspector.selection) =
   let module Inspector = Masc_tui_context_inspector in
@@ -14537,7 +14574,7 @@ let context_composition_lines ~cols
   let wire_headline =
     match record.request_wire_observation with
     | Some observation ->
-        Printf.sprintf "  %s%s%s  %son the wire  ·  %s%s" Ansi.bold
+        Printf.sprintf "  %s%s%s  %sprepared request  ·  %s%s" Ansi.bold
           (Inspector.format_bytes observation.body_bytes)
           Ansi.reset Ansi.dim
           (Keeper_chat.terminal_safe_text observation.runtime_profile)
@@ -14719,9 +14756,9 @@ let context_composition_lines ~cols
                 Ansi.reset)
             ranked
         in
-        (* Attributed bytes and wire bytes are compared on the same turn, never
+        (* Attributed bytes and serialized bytes are compared on the same turn, never
            across two. They still disagree: on 2026-09-01 the attributed total
-           ran about a fifth above the wire figure across 1,556 turns, and the
+           ran about a fifth above the serialized-body figure across 1,556 turns, and the
            cause is not identified. Printing the gap is what keeps an operator
            from reading these bytes as the volume shipped. *)
         let against_wire =
@@ -14729,9 +14766,9 @@ let context_composition_lines ~cols
           | Some observation when total > 0 && observation.body_bytes > 0 ->
               prose
                 (Printf.sprintf
-                   "%s attributed here against %s on the wire, and the gap is \
-                    unexplained. Read the shares as proportions and the wire \
-                    line as this turn's size."
+                   "%s attributed here against %s in the serialized request, \
+                    and the gap is unexplained. Read the shares as proportions \
+                    and the prepared-request line as this turn's size."
                    (Inspector.format_bytes total)
                    (Inspector.format_bytes observation.body_bytes))
           | Some _ | None -> []
@@ -14740,8 +14777,8 @@ let context_composition_lines ~cols
   in
   [ identity; turn; trace; "" ]
   @ [ "  "
-      ^ Context_bars.band ~width ~title:"ON THE WIRE"
-          ~caption:"what the provider accepted"
+      ^ Context_bars.band ~width ~title:"SERIALIZED REQUEST"
+          ~caption:"bytes prepared before dispatch"
     ]
   @ (wire_headline :: token_lines)
   @ cache_lines
@@ -14762,23 +14799,41 @@ let context_composition_lines ~cols
        them is a breakdown of another, and they do not add up."
 
 
+let context_exact_item_detail_lines ~width
+    (item : Masc_tui_context_inspector.exact_input_item) =
+  let module Inspector = Masc_tui_context_inspector in
+  let body =
+    Message_layout.wrap_body ~max_cells:width
+      ~sanitize:Keeper_chat.terminal_safe_text item.text
+  in
+  [ Ansi.bold ^ Theme.info () ^ "[ RETAINED ITEM ]" ^ Ansi.reset
+  ; Ansi.bold ^ Inspector.exact_input_label item.kind ^ Ansi.reset
+  ; Printf.sprintf "%s  ·  sha256 %s"
+      (Inspector.format_bytes item.bytes)
+      (String.sub item.sha256 0 12)
+  ; ""
+  ; Ansi.dim ^ "RETAINED PRE-DISPATCH CONTENT" ^ Ansi.reset
+  ]
+  @ body
+
 (* Items grouped by kind, biggest group first, so the tab answers "what is
    this request made of" before it answers "what is item 34". Counted from the
    same items the list below draws, never from the composition tab's separate
    meter. *)
-let context_exact_input_summary ~width (items : Masc_tui_context_inspector.exact_input_item list) =
+let context_exact_input_summary ~width
+    (items : Masc_tui_context_inspector.exact_input_item list) =
   let module Inspector = Masc_tui_context_inspector in
   let tally = Hashtbl.create 8 in
   let order = ref [] in
   List.iter
     (fun (item : Inspector.exact_input_item) ->
       let key = Inspector.exact_input_category item.kind in
-      (match Hashtbl.find_opt tally key with
-       | None ->
-           order := key :: !order;
-           Hashtbl.replace tally key (1, item.bytes)
-       | Some (count, bytes) ->
-           Hashtbl.replace tally key (count + 1, bytes + item.bytes)))
+      match Hashtbl.find_opt tally key with
+      | None ->
+          order := key :: !order;
+          Hashtbl.replace tally key (1, item.bytes)
+      | Some (count, bytes) ->
+          Hashtbl.replace tally key (count + 1, bytes + item.bytes))
     items;
   let groups =
     List.filter_map
@@ -14800,7 +14855,7 @@ let context_exact_input_summary ~width (items : Masc_tui_context_inspector.exact
     else
       [ "  "
         ^ Context_bars.stacked_bar ~width:bar_width
-            ~segments:(List.map (fun (_, _, bytes) -> ("", bytes)) ranked)
+            ~segments:(List.map (fun (_, _, bytes) -> "", bytes) ranked)
       ]
   in
   let rows =
@@ -14813,9 +14868,6 @@ let context_exact_input_summary ~width (items : Masc_tui_context_inspector.exact
           if bytes > 0 && share < 0.05 then "<0.1%"
           else Printf.sprintf "%.1f%%" share
         in
-        (* Padded by cells, not by bytes: a category name carries a middle
-           dot, and %-22s would spend two of its twenty-two on one cell and
-           leave that row a column short of the rest. *)
         let label =
           key
           ^ String.make
@@ -14846,29 +14898,19 @@ let context_exact_input_lines ~cols state
   let items = Inspector.exact_input_items input in
   let width = max 1 (framed_inner_width cols - 2) in
   match state.context_inspector_exact with
-  | Some index -> (
-      match List.nth_opt items index with
-      | None ->
-          ( [ (Theme.bad ()) ^ "  Selected input item is no longer present"
-              ^ Ansi.reset
-            ]
-          , None )
-      | Some item ->
-          let heading =
-            Printf.sprintf "  %s%s%s  ·  %s  ·  sha256 %s" Ansi.bold
-              (Inspector.exact_input_label item.kind)
-              Ansi.reset
-              (Inspector.format_bytes item.bytes)
-              (String.sub item.sha256 0 12)
-          in
-          let body =
-            Message_layout.wrap_body ~max_cells:width
-              ~sanitize:Keeper_chat.terminal_safe_text item.text
-            |> List.map (fun line -> "  " ^ line)
-          in
-          (* Reading one item scrolls by hand; there is no row to keep in
-             view. *)
-          (heading :: "" :: body, None))
+  | Some index ->
+      (match List.nth_opt items index with
+       | None ->
+           ( [ (Theme.bad ()) ^ "  Selected input item is no longer present"
+               ^ Ansi.reset
+             ]
+           , None )
+       | Some item ->
+           let detail =
+             context_exact_item_detail_lines ~width item
+             |> List.map (fun line -> "  " ^ line)
+           in
+           (detail, None))
   | None ->
       let identity =
         Printf.sprintf "  Exact provider input  %s  %s"
@@ -14877,18 +14919,15 @@ let context_exact_input_lines ~cols state
           (Masc_domain.iso8601_of_unix_seconds input.captured_at)
       in
       let wire =
-        Printf.sprintf "  Wire  %s · %s · %s · %s" input.wire.provider
+        Printf.sprintf "  Prepared request  %s · %s · %s · %s" input.wire.provider
           input.wire.model
           (Inspector.format_bytes input.wire.body_bytes)
           (String.sub input.wire.body_sha256 0 12)
       in
       let summary, retained = context_exact_input_summary ~width items in
-      (* Both figures describe this one request, so the difference between
-         them is the envelope and whatever the serializer added -- worth
-         naming rather than leaving as two numbers that do not match. *)
       let against_wire =
         if retained > 0 && input.wire.body_bytes > 0 then
-          [ Printf.sprintf "  %s%s retained here, %s serialized on the wire%s"
+          [ Printf.sprintf "  %s%s retained here, %s in the serialized request%s"
               Ansi.dim
               (Inspector.format_bytes retained)
               (Inspector.format_bytes input.wire.body_bytes)
@@ -14896,51 +14935,125 @@ let context_exact_input_lines ~cols state
           ]
         else []
       in
-      let header =
-        [ identity; wire; "" ] @ summary @ against_wire @ [ "" ]
-        @ [ "  "
-            ^ Context_bars.band ~width ~title:"ITEMS"
-                ~caption:"in the order the request carries them"
-          ]
-      in
-      let rows =
+      let common = [ identity; wire; "" ] @ summary @ against_wire @ [ "" ] in
+      let rows width =
         List.mapi
           (fun index (item : Inspector.exact_input_item) ->
-            let selected = index = state.context_inspector_cursor in
-            let marker, style =
-              if selected then (">", Theme.selection) else (" ", Ansi.reset)
-            in
-            Printf.sprintf "%s %s %3d  %-34s %9s  %s%s" style marker
-              (index + 1)
-              (Inspector.exact_input_label item.kind)
-              (Inspector.format_bytes item.bytes)
-              (String.sub item.sha256 0 12)
-              Ansi.reset)
+             let selected = index = state.context_inspector_cursor in
+             let marker, style =
+               if selected then ">", Theme.selection else " ", Ansi.reset
+             in
+             let label_width = max 8 (width - 18) in
+             Printf.sprintf "%s %s %2d  %s  %9s%s" style marker (index + 1)
+               (fit_width (Inspector.exact_input_label item.kind) label_width)
+               (Inspector.format_bytes item.bytes) Ansi.reset)
           items
       in
-      let body =
-        if rows = [] then [ "  (this request carried no retained items)" ]
-        else rows
-      in
-      (* Where the highlight sits, so the pane can keep it in the window. *)
-      let selected =
-        if rows = [] then None
-        else
-          Some
-            (List.length header
-            + min (List.length rows - 1)
-                (max 0 state.context_inspector_cursor))
-      in
-      ( header @ body
-        @ [ ""
-          ; Ansi.dim
-            ^ "  Enter opens one exact item. The wire digest binds this \
-               canonical input to the serialized provider request."
-            ^ Ansi.reset
-          ]
-      , selected )
+      if cols >= keeper_split_threshold_cols then
+        let left_width = context_split_width cols in
+        let cursor =
+          min (max 0 (List.length items - 1))
+            (max 0 state.context_inspector_cursor)
+        in
+        let selected = List.nth_opt items cursor in
+        let left =
+          (Ansi.bold ^ "╭─ REQUEST ITEMS" ^ Ansi.reset)
+          :: (match rows left_width with
+              | [] -> [ Ansi.dim ^ "  (no retained items)" ^ Ansi.reset ]
+              | rows -> rows)
+        in
+        let right_width = max 8 (framed_inner_width cols - left_width - 3) in
+        let selected_detail =
+          match selected with
+          | None -> [ Ansi.dim ^ "  Select an item with j/k" ^ Ansi.reset ]
+          | Some item ->
+              context_exact_item_detail_lines ~width:right_width item
+        in
+        let right =
+          List.init cursor (fun _ -> "")
+          @ ((Ansi.bold ^ "╭─ SELECTED INPUT" ^ Ansi.reset)
+             :: selected_detail)
+        in
+        let selected_line =
+          if items = [] then None else Some (List.length common + 1 + cursor)
+        in
+        ( common
+          @ context_split_lines ~cols ~left_width ~left ~right
+          @ [ ""
+            ; Ansi.dim
+              ^ "  j/k moves the stack. Enter opens the selected exact item at full width."
+              ^ Ansi.reset
+            ]
+        , selected_line )
+      else
+        let header =
+          common
+          @ [ "  "
+              ^ Context_bars.band ~width ~title:"ITEMS"
+                  ~caption:"in the order the request carries them"
+            ]
+        in
+        let body =
+          match rows (framed_inner_width cols) with
+          | [] -> [ "  (this request carried no retained items)" ]
+          | rows -> rows
+        in
+        let selected =
+          if items = [] then None
+          else
+            Some
+              (List.length header
+              + min (List.length items - 1)
+                  (max 0 state.context_inspector_cursor))
+        in
+        ( header @ body
+          @ [ ""
+            ; Ansi.dim
+              ^ "  Enter opens one retained item. The request digest identifies the pre-dispatch serialized body; each row carries its own retained digest."
+              ^ Ansi.reset
+            ]
+        , selected )
 
-let context_input_map_lines state (record : Turn_record.t)
+let context_input_map_detail_lines ~width
+    (row : Masc_tui_context_inspector.input_map_row) =
+  let module Inspector = Masc_tui_context_inspector in
+  let digest =
+    match row.digest with
+    | None -> "digest  —"
+    | Some digest ->
+        "digest  " ^ String.sub digest 0 (min 12 (String.length digest))
+  in
+  let explanation =
+    match row.evidence with
+    | Inspector.Verified_exact_text ->
+        "The retained text, component byte count, and producer digest agree."
+    | Inspector.Serialized_turn_snapshot ->
+        "A same-turn pre-dispatch serialization snapshot exists, but no item-level join key binds this component row to one retained item. Inspect 2:request for the exact retained items."
+    | Inspector.Producer_digest_only ->
+        "The producer retained this prompt block's digest and byte count, but no same-turn exact snapshot is joined. The text cannot be verified or opened."
+    | Inspector.Byte_count_only ->
+        "Only the producer's component byte count is available. No exact provider snapshot is joined to this turn."
+  in
+  let wrap text =
+    Message_layout.wrap_body ~max_cells:width
+      ~sanitize:Keeper_chat.terminal_safe_text text
+  in
+  [ context_evidence_badge row.evidence
+  ; Ansi.bold ^ Inspector.input_component_label row.component ^ Ansi.reset
+  ; Printf.sprintf "%s  ·  %s"
+      (Inspector.format_bytes row.bytes)
+      (Inspector.input_source_label row.source)
+  ; Ansi.dim ^ digest ^ Ansi.reset
+  ; ""
+  ]
+  @ wrap explanation
+  @
+  match row.exact_text with
+  | None -> []
+  | Some text ->
+      [ ""; Ansi.dim ^ "VERIFIED TEXT" ^ Ansi.reset ] @ wrap text
+
+let context_input_map_lines ~cols state (record : Turn_record.t)
     (provider_input : Masc_tui_context_inspector.provider_input option) =
   let module Inspector = Masc_tui_context_inspector in
   let rows = Inspector.input_map_rows record provider_input in
@@ -14948,21 +15061,30 @@ let context_input_map_lines state (record : Turn_record.t)
   | Some index ->
       (match List.nth_opt rows index with
        | Some ({ exact_text = Some text; _ } as row) ->
-           let width = max 8 (snd (get_terminal_size ()) - 6) in
+           let width = max 8 (framed_inner_width cols - 4) in
            let heading =
-             Printf.sprintf "  %s%s%s  ·  %s  ·  included by %s"
+             Printf.sprintf "  %s%s%s  ·  %s  ·  %s  ·  %s"
                Ansi.bold
                (Inspector.input_component_label row.component)
                Ansi.reset
                (Inspector.format_bytes row.bytes)
-               row.included_by
+               (Inspector.input_source_label row.source)
+               (context_evidence_badge row.evidence)
+           in
+           let digest =
+             match row.digest with
+             | None -> ""
+             | Some digest ->
+                 Printf.sprintf "  %sdigest %s%s" Ansi.dim
+                   (String.sub digest 0 (min 12 (String.length digest)))
+                   Ansi.reset
            in
            let body =
              Message_layout.wrap_body ~max_cells:width
                ~sanitize:Keeper_chat.terminal_safe_text text
              |> List.map (fun line -> "  " ^ line)
            in
-           (heading :: "" :: body, None)
+           (heading :: digest :: "" :: body, None)
        | Some _ | None ->
            ( [ (Theme.bad ())
                ^ "  Exact text is not retained for this component" ^ Ansi.reset
@@ -14974,7 +15096,14 @@ let context_input_map_lines state (record : Turn_record.t)
           (Keeper_chat.terminal_safe_text record.trace_id)
           record.absolute_turn
       in
-      let mapped =
+      let joined =
+        match provider_input with
+        | Some input when Ids.Turn_ref.equal input.turn_ref record.turn_ref ->
+            Ansi.bold ^ Theme.ok () ^ "[ EXACT TURN JOIN ]" ^ Ansi.reset
+        | Some _ | None ->
+            Ansi.bold ^ Theme.warn () ^ "[ NO EXACT INPUT JOIN ]" ^ Ansi.reset
+      in
+      let mapped width =
         List.mapi
           (fun index (row : Inspector.input_map_row) ->
              let selected = index = state.context_inspector_cursor in
@@ -14982,43 +15111,103 @@ let context_input_map_lines state (record : Turn_record.t)
                if selected then ">", Theme.selection else " ", Ansi.reset
              in
              let branch = if index = List.length rows - 1 then "└─" else "├─" in
-             Printf.sprintf "%s %s %s %s%-22s%s %9s  included by %s · %s%s"
+             let badge_cells = Inspector.input_evidence_badge_cells row.evidence in
+             let label_width = max 4 (width - 17 - badge_cells) in
+             Printf.sprintf "%s %s %s %s%s%s %9s %s%s"
                selection marker branch
                (context_component_style row.component)
-               (Inspector.input_component_label row.component)
+               (fit_width (Inspector.input_component_label row.component) label_width)
                Ansi.reset
                (Inspector.format_bytes row.bytes)
-               row.included_by row.retention
+               (context_evidence_badge row.evidence)
                Ansi.reset)
           rows
       in
-      let header =
-        [ identity
-        ; ""
-        ; Ansi.bold ^ "  What reached the provider, and why" ^ Ansi.reset
-        ]
-      in
-      let body =
-        if mapped = [] then [ "  (exact component attribution unavailable)" ]
-        else mapped
-      in
-      (* Where the highlight sits, so the pane can keep it in the window. *)
-      let selected =
-        if mapped = [] then None
-        else
-          Some
-            (List.length header
-            + min (List.length mapped - 1)
-                (max 0 state.context_inspector_cursor))
-      in
-      ( header @ body
-        @ [ ""
-          ; Ansi.dim
-            ^ "  Enter opens only text verified against this turn's digest. \
-               Other rows remain byte-only evidence."
-            ^ Ansi.reset
+      if cols >= keeper_split_threshold_cols then
+        let left_width = context_split_width cols in
+        let cursor =
+          min (max 0 (List.length rows - 1))
+            (max 0 state.context_inspector_cursor)
+        in
+        let left =
+          (Ansi.bold ^ "╭─ CONTEXT STACK" ^ Ansi.reset)
+          :: (match mapped left_width with
+              | [] -> [ Ansi.dim ^ "  (no component attribution)" ^ Ansi.reset ]
+              | mapped -> mapped)
+        in
+        let right_width = max 8 (framed_inner_width cols - left_width - 3) in
+        let selected_detail =
+          match List.nth_opt rows cursor with
+          | None -> [ Ansi.dim ^ "  Select a block with j/k" ^ Ansi.reset ]
+          | Some row -> context_input_map_detail_lines ~width:right_width row
+        in
+        let right =
+          List.init cursor (fun _ -> "")
+          @ ((Ansi.bold ^ "╭─ SELECTED BLOCK" ^ Ansi.reset)
+             :: selected_detail)
+        in
+        let common = [ identity; "  " ^ joined; "" ] in
+        let selected =
+          if rows = [] then None else Some (List.length common + 1 + cursor)
+        in
+        ( common
+          @ context_split_lines ~cols ~left_width ~left ~right
+          @ [ ""
+            ; Ansi.dim
+              ^ "  VERIFIED opens with Enter. SERIALIZED names a same-turn pre-dispatch snapshot without inventing an item join."
+              ^ Ansi.reset
+            ]
+        , selected )
+      else
+        let header =
+          [ identity
+          ; "  " ^ joined
+          ; ""
+          ; Ansi.bold ^ "  What the runtime prepared, and why" ^ Ansi.reset
           ]
-      , selected )
+        in
+        let cursor =
+          min (max 0 (List.length rows - 1))
+            (max 0 state.context_inspector_cursor)
+        in
+        let body =
+          match mapped (framed_inner_width cols) with
+          | [] -> [ "  (exact component attribution unavailable)" ]
+          | mapped ->
+              List.mapi
+                (fun index line ->
+                   if index <> cursor
+                   then [ line ]
+                   else
+                     let detail =
+                       match List.nth_opt rows cursor with
+                       | None -> []
+                       | Some row ->
+                           context_input_map_detail_lines
+                             ~width:(max 8 (framed_inner_width cols - 4)) row
+                           |> List.map (fun detail -> "    " ^ detail)
+                     in
+                     line
+                     :: (Ansi.bold ^ "   ╰─ SELECTED BLOCK" ^ Ansi.reset)
+                     :: detail)
+                mapped
+              |> List.concat
+        in
+        let selected =
+          if rows = [] then None
+          else
+            Some
+              (List.length header
+              + min (List.length rows - 1)
+                  (max 0 state.context_inspector_cursor))
+        in
+        ( header @ body
+          @ [ ""
+            ; Ansi.dim
+              ^ "  Enter opens VERIFIED text. Use 2:request for exact retained items."
+              ^ Ansi.reset
+            ]
+        , selected )
 
 (* The pane's rows and, when a tab carries a highlight, the row it sits on.
    The highlight is reported rather than recomputed by the caller: only this
@@ -15073,7 +15262,7 @@ let context_inspector_content_lines ~cols state =
                   | Ok input -> Some input
                   | Error _ -> None
                 in
-                context_input_map_lines state record provider_input))
+                context_input_map_lines ~cols state record provider_input))
 
 let context_inspector_viewport state =
   let terminal_rows, cols = get_terminal_size () in
@@ -15102,10 +15291,10 @@ let render_context_inspector state =
   framed_line buf cols
     (Printf.sprintf "%s Context  %s%s  %s  %s"
        (screen_title "") keeper refreshing
-       (tab_label Masc_tui_context_inspector.Composition "1" "composition")
-       (tab_label Masc_tui_context_inspector.Exact_input "2" "input")
+       (tab_label Masc_tui_context_inspector.Composition "1" "stack")
+       (tab_label Masc_tui_context_inspector.Exact_input "2" "request")
        ^ "  "
-       ^ (tab_label Masc_tui_context_inspector.Input_map "3" "map"));
+       ^ (tab_label Masc_tui_context_inspector.Input_map "3" "proof"));
   framed_divider buf cols;
   let lines, selected = context_inspector_content_lines ~cols state in
   let content_height = framed_content_height ~rows in
@@ -15137,7 +15326,7 @@ let render_context_inspector state =
   let hints =
     match state.context_inspector_exact with
     | Some _ -> "j/k:scroll  Esc:list"
-    | None -> "1/2/3 or Tab:switch  j/k:move  Enter:verified text  r:refresh  Esc:close"
+    | None -> "1/2/3 or Tab:switch  j/k:select  Enter:open exact  r:refresh  Esc:close"
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
   finish_surface state ~surface_key:"context-inspector" ~rows:terminal_rows

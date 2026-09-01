@@ -559,6 +559,12 @@ type loaded =
   ; keeper_projection : Masc_domain.tool_schema option
   ; help : help option
   ; loading : loading
+  ; shell_command : string list option
+        (** RFC tools-as-shell-commands: the sub-command path this tool is
+            reachable under inside a keeper's shell line ([board post get]
+            makes [masc board post get p-1] callable without a provider
+            round trip).  Stored word-split once here rather than split at
+            every use.  Absent means the tool has no shell form. *)
   }
 
 let help_of_pairs pairs =
@@ -802,6 +808,18 @@ let tool_of_pairs ~name pairs =
       let* flag = as_bool ~context:"defer_loading" value in
       Ok (if flag then Deferrable else Always_loaded)
   in
+  let* shell_command =
+    match List.assoc_opt "shell_command" pairs with
+    | None -> Ok None
+    | Some value ->
+      let* text = as_non_empty_string ~context:"shell_command" value in
+      (* The shell path is matched word-for-word against argv pieces, so it
+         is stored word-split here once rather than split at every use. *)
+      let path = String.split_on_char ' ' text in
+      if List.exists (fun word -> word = "") path
+      then Error (sprintf "shell_command %S has an empty word" text)
+      else Ok (Some path)
+  in
   let* alternatives = alternatives_of_pairs ~context:"tool" pairs in
   let* keeper_projection =
     match List.assoc_opt "keeper_projection" pairs with
@@ -833,6 +851,7 @@ let tool_of_pairs ~name pairs =
         ; "keeper_projection"
         ; "help"
         ; "defer_loading"
+        ; "shell_command"
         ]
     in
     let rec walk = function
@@ -852,6 +871,7 @@ let tool_of_pairs ~name pairs =
     ; keeper_projection
     ; help
     ; loading
+    ; shell_command
     }
 ;;
 

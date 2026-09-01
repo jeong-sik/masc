@@ -138,6 +138,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_execute_exit_report.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime.mli` - shell-surface
+- `lib/keeper/keeper_shell_tool_command.ml` - shell-surface
+- `lib/keeper/keeper_shell_tool_command.mli` - shell-surface
 - `lib/keeper_tool_execute_shell_ir/keeper_tool_execute_shell_ir.ml` - shell-surface
 - `lib/keeper_tool_execute_shell_ir/keeper_tool_execute_shell_ir.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_path.ml` - shell-surface

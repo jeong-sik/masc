@@ -32,7 +32,8 @@ let file_redirect fd target mode =
    See RFC v5 (docs/rfc/RFC-0005). */
 
 %token <string * Masc_exec.Shell_ir.arg_meta> WORD
-%token <string * Masc_exec.Shell_ir.arg_meta> PARAM
+%token <Masc_exec.Shell_ir.arg> MIXED_WORD
+%token <string> HEREDOC_LITERAL
 %token DEV_NULL
 %token <int * int> FD_REDIRECT
 %token <int * Masc_exec.Redirect_scope.mode> FILE_REDIRECT_OP
@@ -40,6 +41,7 @@ let file_redirect fd target mode =
 %token AND_IF
 %token OR_IF
 %token SEMICOLON
+%token NEWLINE
 %token EOF
 
 (* A stage is a word sequence plus redirects.  Words are already
@@ -55,31 +57,16 @@ literal_word:
   | value = WORD { value }
   | DEV_NULL { "/dev/null", Masc_exec.Shell_ir.default_meta }
 
-(* One piece of a shell word: a literal token or a simple parameter
-   expansion.  Adjacent pieces become one word — [prefix=$DIR] lexes as
-   WORD ["prefix="] then PARAM ["DIR"] and assembles to
-   Concat [Lit "prefix="; Var "DIR"] — the shape bash itself uses for
-   [FOO=bar$BAZ]. *)
-word_piece:
-  | value = literal_word {
-      let text, meta = value in
-      Masc_exec.Shell_ir.Lit (text, meta)
-    }
-  | param = PARAM {
-      let name, meta = param in
-      Masc_exec.Shell_ir.Var (name, meta)
-    }
-
-word_seq:
-  | piece = word_piece { [ piece ] }
-  | seq = word_seq piece = word_piece { seq @ [ piece ] }
-
+(* One shell word is one token: the lexer assembles adjacent pieces
+   ([prefix=$DIR] → Concat [Lit "prefix="; Var "DIR"]) because only it
+   sees adjacency — whitespace reaches the grammar as nothing at all,
+   so a grammar-side piece sequence could not tell [ls -la] from
+   [FOO=$BAR] and menhir's shift preference glued them alike.  A word
+   holding any expansion arrives as MIXED_WORD, which the redirect
+   target below does not accept. *)
 word:
-  | pieces = word_seq {
-      match pieces with
-      | [ single ] -> single
-      | many -> Masc_exec.Shell_ir.Concat many
-    }
+  | value = literal_word { let text, meta = value in Masc_exec.Shell_ir.Lit (text, meta) }
+  | arg = MIXED_WORD { arg }
 
 part:
   | arg = word { Arg arg }
@@ -93,6 +80,12 @@ part:
   | item = FILE_REDIRECT_OP target = literal_word {
       let fd, mode = item in
       Redirect (file_redirect fd (fst target) mode)
+    }
+  (* A quoted heredoc arrives as its collected body: bash spells [<<] as
+     a redirection whose source is content, and Redirect_scope.Literal
+     is exactly that — dispatch feeds the bytes to the child's stdin. *)
+  | body = HEREDOC_LITERAL {
+      Redirect (Redirect_scope.Literal { bytes = body })
     }
 
 stage:
@@ -108,22 +101,37 @@ stage:
       (List.rev args, List.rev redirects)
     }
 
+(* Newlines read the way bash reads them: after [|], [&&], [||] (and
+   after [;]) a line break is continuation; between pipelines it is the
+   same separator [;] is.  POSIX calls these [linebreak] and
+   [newline_list]; [opt_newlines] is the former. *)
+opt_newlines:
+  | /* empty */ { () }
+  | opt_newlines NEWLINE { () }
+
 pipeline:
-  | stages = separated_nonempty_list(PIPE, stage) { stages }
+  | s = stage { [ s ] }
+  | p = pipeline PIPE opt_newlines s = stage { p @ [ s ] }
+
+(* One [;] may be followed by line breaks; bare line breaks separate on
+   their own.  Doubled [;;] stays a parse error, as in bash. *)
+seq_sep:
+  | SEMICOLON opt_newlines { () }
+  | NEWLINE opt_newlines { () }
 
 command:
-  | head = pipeline rest = command_rest EOF
+  | opt_newlines head = pipeline rest = command_rest EOF
     { (head, rest) }
 
 command_rest:
   | /* empty */ { [] }
-  | SEMICOLON { [] }
-  | SEMICOLON head = pipeline rest = command_rest {
+  | seq_sep { [] }
+  | seq_sep head = pipeline rest = command_rest {
       (Masc_exec.Shell_ir.Seq, head) :: rest
     }
-  | AND_IF head = pipeline rest = command_rest {
+  | AND_IF opt_newlines head = pipeline rest = command_rest {
       (Masc_exec.Shell_ir.And_if, head) :: rest
     }
-  | OR_IF head = pipeline rest = command_rest {
+  | OR_IF opt_newlines head = pipeline rest = command_rest {
       (Masc_exec.Shell_ir.Or_if, head) :: rest
     }

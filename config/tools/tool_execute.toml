@@ -14,7 +14,11 @@ which resolve against cwd. The Keeper-visible absolute root is \
 informational; Docker host absolute paths are unavailable. MASC does not \
 interpret program or subcommand meaning: after typed lowering, path \
 containment, sandbox resolution, and the external-effect Gate, the invoked \
-program owns its syntax and exit result."""
+program owns its syntax and exit result. MASC's own tools are reachable \
+inside a script line as the reserved command 'masc': 'masc board post get \
+p-123; masc board list' calls those tools without leaving the line, and \
+';', '&&' and '||' sequence them like any command. Each tool declares its \
+own path; the paths on this turn's surface are the ones that answer."""
 additional_properties = false
 
 [[params]]

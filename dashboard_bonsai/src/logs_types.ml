@@ -113,44 +113,10 @@ let level_order = function
   | _ -> 1
 ;;
 
-(** Fixture for Phase 1a static render. Remove when fetch lands. *)
+(** Initial placeholder — empty logs list, same shape as the other tabs'
+    fixtures. Before the first fetch (and whenever a fetch fails with no
+    prior good response) the view renders its empty state instead of
+    fabricated log rows. *)
 let fixture : response =
-  { total = 3
-  ; fetch_status = Fetch_pending
-  ; entries =
-      [ { seq = 3
-        ; ts = "2026-04-19T17:12:03Z"
-        ; level = "ERROR"
-        ; raw_level = "ERROR"
-        ; normalized_level = "ERROR"
-        ; source = "structured"
-        ; legacy_classified = false
-        ; module_ = "Keeper"
-        ; message = "heartbeat check failed: timeout after 30s"
-        ; details = Some {|{"request_id":"req-9aa1","session_id":"sess-0012"}|}
-        }
-      ; { seq = 2
-        ; ts = "2026-04-19T17:12:02Z"
-        ; level = "WARN"
-        ; raw_level = "WARN"
-        ; normalized_level = "WARN"
-        ; source = "structured"
-        ; legacy_classified = false
-        ; module_ = "Keeper"
-        ; message = "retry scheduled in 5s"
-        ; details = None
-        }
-      ; { seq = 1
-        ; ts = "2026-04-19T17:12:00Z"
-        ; level = "INFO"
-        ; raw_level = "INFO"
-        ; normalized_level = "INFO"
-        ; source = "structured"
-        ; legacy_classified = false
-        ; module_ = "Server"
-        ; message = "masc server started on :8935"
-        ; details = None
-        }
-      ]
-  }
+  { total = 0; fetch_status = Fetch_pending; entries = [] }
 ;;

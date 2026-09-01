@@ -43,11 +43,23 @@ type tab =
   | Exact_input
   | Input_map
 
+type input_source =
+  | Turn_prompt_assembly
+  | Effective_tool_surface
+  | Provider_message_list
+
+type input_evidence =
+  | Verified_exact_text
+  | Serialized_turn_snapshot
+  | Producer_digest_only
+  | Byte_count_only
+
 type input_map_row =
   { component : Turn_record.input_component_id
   ; bytes : int
-  ; included_by : string
-  ; retention : string
+  ; source : input_source
+  ; evidence : input_evidence
+  ; digest : string option
   ; exact_text : string option
   }
 
@@ -309,23 +321,37 @@ let format_bytes bytes =
   else if bytes >= 1024 then Printf.sprintf "%.1f KB" (float bytes /. 1024.)
   else Printf.sprintf "%d B" bytes
 
-let input_map_metadata = function
-  | Turn_record.Prompt_block _ -> "turn prompt assembly"
-  | Turn_record.Tool_schemas -> "effective tool surface"
+let input_source = function
+  | Turn_record.Prompt_block _ -> Turn_prompt_assembly
+  | Turn_record.Tool_schemas -> Effective_tool_surface
   | Turn_record.Message_thinking ->
-      "provider message list"
+      Provider_message_list
   | Turn_record.Message_redacted_thinking ->
-      "provider message list"
+      Provider_message_list
   | Turn_record.Message_user
   | Turn_record.Message_system
   | Turn_record.Message_assistant_text
   | Turn_record.Message_tool_use
   | Turn_record.Message_tool_result ->
-      "provider message list"
+      Provider_message_list
   | Turn_record.Message_image
   | Turn_record.Message_document
   | Turn_record.Message_audio ->
-      "provider message list"
+      Provider_message_list
+
+let input_source_label = function
+  | Turn_prompt_assembly -> "turn prompt assembly"
+  | Effective_tool_surface -> "effective tool surface"
+  | Provider_message_list -> "provider message list"
+
+let input_evidence_label = function
+  | Verified_exact_text -> "VERIFIED"
+  | Serialized_turn_snapshot -> "SERIALIZED"
+  | Producer_digest_only -> "DIGEST ONLY"
+  | Byte_count_only -> "BYTES ONLY"
+
+let input_evidence_badge_cells evidence =
+  String.length (input_evidence_label evidence) + 4
 
 let verified_system_prompt (record : Turn_record.t) provider_input component_bytes =
   match provider_input with
@@ -354,7 +380,7 @@ let input_map_rows (record : Turn_record.t) provider_input =
   | Some components ->
       List.map
         (fun (item : Turn_record.input_component) ->
-           let included_by = input_map_metadata item.component in
+           let source = input_source item.component in
            let exact_text =
              match item.component with
              | Turn_record.Prompt_block Prompt_block_id.Keeper_instructions ->
@@ -372,18 +398,41 @@ let input_map_rows (record : Turn_record.t) provider_input =
              | Turn_record.Message_document
              | Turn_record.Message_audio -> None
            in
+           let digest =
+             match item.component with
+             | Turn_record.Prompt_block block_id ->
+                 record.blocks
+                 |> List.find_opt
+                      (fun (block : Turn_record.prompt_block) ->
+                         block.block = block_id && block.bytes = item.bytes)
+                 |> Option.map (fun (block : Turn_record.prompt_block) ->
+                        block.digest)
+             | Turn_record.Tool_schemas
+             | Turn_record.Message_user
+             | Turn_record.Message_system
+             | Turn_record.Message_assistant_text
+             | Turn_record.Message_thinking
+             | Turn_record.Message_redacted_thinking
+             | Turn_record.Message_tool_use
+             | Turn_record.Message_tool_result
+             | Turn_record.Message_image
+             | Turn_record.Message_document
+             | Turn_record.Message_audio -> None
+           in
+           let evidence =
+             match exact_text, provider_input, digest with
+             | Some _, _, _ -> Verified_exact_text
+             | None, Some input, _
+               when Ids.Turn_ref.equal input.turn_ref record.turn_ref ->
+                 Serialized_turn_snapshot
+             | None, (Some _ | None), Some _ -> Producer_digest_only
+             | None, (Some _ | None), None -> Byte_count_only
+           in
            { component = item.component
            ; bytes = item.bytes
-           ; included_by
-           ; retention =
-               (match exact_text with
-                | Some _ -> "verified exact text"
-                | None ->
-                  (match provider_input with
-                   | Some input
-                     when Ids.Turn_ref.equal input.turn_ref record.turn_ref ->
-                     "exact items in input tab"
-                   | Some _ | None -> "snapshot unavailable"))
+           ; source
+           ; evidence
+           ; digest
            ; exact_text
            })
         components

@@ -758,7 +758,6 @@ let topbar ~(active : Route.t) =
             [ Node.text "Bonsai "
             ; Node.b [ Node.text "preview" ]
             ]
-        ; pill ~tone:`Ok "sse live"
         ; pill "operator"
         ]
     ]

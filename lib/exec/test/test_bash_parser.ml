@@ -523,16 +523,64 @@ let test_word_with_double_quoted_suffix () =
      | _ -> assert false)
   | _ -> assert false
 
-let test_double_quote_with_dollar_rejected () =
-  (* Variable expansion is subset-excluded at the A1 layer — any '$'
-     inside "..." breaks the lex, so the literal is never treated as
-     expanded.  It is named rather than left opaque: the double-quote
-     rule cannot close over a '$', and the rule that matches the opening
-     quote through to it reports the expansion, not the quote.  The
-     backtick case below has said this since it was written; the '$' said
-     Parse_error only because the scan it went through had no case for
-     '$' at all. *)
+let quoted_meta = { Shell_ir.quoted = true; glob = false; escaped = false }
+
+let test_double_quote_with_dollar_expands () =
+  (* A simple expansion inside "..." is the same Var the bare form
+     mints, marked quoted so the value stays one argv element.  The
+     surrounding text arrives as the pieces bash itself would keep. *)
   match Bash.parse_string "echo \"value $FOO here\"" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert
+      (s.args
+       = [ Shell_ir.Concat
+             [ Shell_ir.Lit ("value ", quoted_meta)
+             ; Shell_ir.Var ("FOO", quoted_meta)
+             ; Shell_ir.Lit (" here", quoted_meta)
+             ]
+         ])
+  | _ -> assert false
+
+let test_double_quote_two_vars_and_brace () =
+  match Bash.parse_string "echo \"$A:${B}\"" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert
+      (s.args
+       = [ Shell_ir.Concat
+             [ Shell_ir.Var ("A", quoted_meta)
+             ; Shell_ir.Lit (":", quoted_meta)
+             ; Shell_ir.Var ("B", quoted_meta)
+             ]
+         ])
+  | _ -> assert false
+
+let test_double_quote_var_word_continues () =
+  (* The word does not end at the closing quote. *)
+  match Bash.parse_string "ls \"$DIR\"/sub" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert
+      (s.args
+       = [ Shell_ir.Concat
+             [ Shell_ir.Var ("DIR", quoted_meta)
+             ; Shell_ir.Lit ("/sub", Shell_ir.default_meta)
+             ]
+         ])
+  | _ -> assert false
+
+let test_double_quote_cmd_subst_named () =
+  (* Inside quotes the refusal now names the construct bash would run,
+     instead of blaming the dollar. *)
+  match Bash.parse_string "echo \"$(date)\"" with
+  | Parsed.Too_complex `Cmd_subst -> ()
+  | _ -> assert false
+
+let test_double_quote_default_form_still_excluded () =
+  match Bash.parse_string "echo \"${X:-y}\"" with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_double_quote_array_subscript_still_excluded () =
+  match Bash.parse_string "echo \"EXIT=${PIPESTATUS[0]}\"" with
   | Parsed.Too_complex `Param_expansion -> ()
   | _ -> assert false
 
@@ -557,9 +605,84 @@ let test_unterminated_double_quote_rejected () =
   | Parsed.Parse_error _ -> ()
   | _ -> assert false
 
+let test_newline_separates_commands () =
+  (* Swallowed as whitespace, the second line's words joined the first
+     command's argv — silent wrong argv, the shape this test pins shut. *)
+  match Bash.parse_string "echo a\necho b" with
+  | Parsed.Parsed (Shell_ir.Sequence { head = Shell_ir.Simple a; tail = [ (Shell_ir.Seq, Shell_ir.Simple b) ] }) ->
+    assert (a.args = [ Shell_ir.Lit ("a", Shell_ir.default_meta) ]);
+    assert (b.args = [ Shell_ir.Lit ("b", Shell_ir.default_meta) ])
+  | _ -> assert false
+
+let test_newline_runs_and_trailing_collapse () =
+  (match Bash.parse_string "echo a\n\n\necho b" with
+   | Parsed.Parsed (Shell_ir.Sequence { tail = [ (Shell_ir.Seq, _) ]; _ }) -> ()
+   | _ -> assert false);
+  match Bash.parse_string "echo a\n" with
+  | Parsed.Parsed (Shell_ir.Simple _) -> ()
+  | _ -> assert false
+
+let test_newline_continues_after_operators () =
+  (* After && / || / | a line break is continuation, as in bash. *)
+  (match Bash.parse_string "true &&\necho ok" with
+   | Parsed.Parsed (Shell_ir.Sequence { tail = [ (Shell_ir.And_if, _) ]; _ }) -> ()
+   | _ -> assert false);
+  match Bash.parse_string "echo x |\nwc -l" with
+  | Parsed.Parsed (Shell_ir.Pipeline [ _; _ ]) -> ()
+  | _ -> assert false
+
+let test_semicolon_then_newline_is_one_separator () =
+  match Bash.parse_string "echo a; \necho b" with
+  | Parsed.Parsed (Shell_ir.Sequence { tail = [ (Shell_ir.Seq, _) ]; _ }) -> ()
+  | _ -> assert false
+
+let test_quoted_heredoc_becomes_stdin_literal () =
+  match Bash.parse_string "python3 - <<'EOF'\nprint(1)\nEOF\n" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "python3");
+    assert (s.args = [ Shell_ir.Lit ("-", Shell_ir.default_meta) ]);
+    assert (s.redirects = [ Redirect_scope.Literal { bytes = "print(1)\n" } ])
+  | _ -> assert false
+
+let test_heredoc_terminator_ends_the_command () =
+  (* The line after the terminator is a fresh command, not more argv. *)
+  match Bash.parse_string "cat <<'X'\nbody line\nX\necho done" with
+  | Parsed.Parsed (Shell_ir.Sequence { head = Shell_ir.Simple c; tail = [ (Shell_ir.Seq, Shell_ir.Simple e) ] }) ->
+    assert (c.redirects = [ Redirect_scope.Literal { bytes = "body line\n" } ]);
+    assert (e.args = [ Shell_ir.Lit ("done", Shell_ir.default_meta) ])
+  | _ -> assert false
+
+let test_heredoc_empty_body_and_double_quoted_tag () =
+  (match Bash.parse_string "cat <<'T'\nT\n" with
+   | Parsed.Parsed (Shell_ir.Simple s) ->
+     assert (s.redirects = [ Redirect_scope.Literal { bytes = "" } ])
+   | _ -> assert false);
+  match Bash.parse_string "cat <<\"T\"\nhi\nT\n" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (s.redirects = [ Redirect_scope.Literal { bytes = "hi\n" } ])
+  | _ -> assert false
+
+let test_heredoc_unterminated_is_parse_error () =
+  match Bash.parse_string "cat <<'T'\nnever" with
+  | Parsed.Parse_error _ -> ()
+  | _ -> assert false
+
+let test_heredoc_operator_must_end_its_line () =
+  (* Anything after the quoted tag keeps the plain refusal: the deferred
+     body would have to interleave with the rest of the line. *)
+  match Bash.parse_string "cat <<'T' | wc -l\nx\nT\n" with
+  | Parsed.Too_complex `Heredoc -> ()
+  | _ -> assert false
+
 let test_token_limit_aborts () =
   let many_words = List.init 50_001 (fun _ -> "x") in
   match Bash.parse_string (String.concat " " many_words) with
+  | Parsed.Parse_aborted `Token_limit_50k -> ()
+  | _ -> assert false
+
+let test_expanded_word_piece_limit_aborts () =
+  let many_expansions = List.init 50_001 (fun _ -> "$A") in
+  match Bash.parse_string ("echo " ^ String.concat "" many_expansions) with
   | Parsed.Parse_aborted `Token_limit_50k -> ()
   | _ -> assert false
 
@@ -620,9 +743,24 @@ let () =
   test_double_quote_rg_pattern ();
   test_double_quote_with_escaped_regex_pipe ();
   test_word_with_double_quoted_suffix ();
-  test_double_quote_with_dollar_rejected ();
+  test_double_quote_with_dollar_expands ();
+  test_double_quote_two_vars_and_brace ();
+  test_double_quote_var_word_continues ();
+  test_double_quote_cmd_subst_named ();
+  test_double_quote_default_form_still_excluded ();
+  test_double_quote_array_subscript_still_excluded ();
   test_double_quote_with_backslash_rejected ();
   test_double_quote_with_backtick_rejected ();
   test_unterminated_double_quote_rejected ();
+  test_newline_separates_commands ();
+  test_newline_runs_and_trailing_collapse ();
+  test_newline_continues_after_operators ();
+  test_semicolon_then_newline_is_one_separator ();
+  test_quoted_heredoc_becomes_stdin_literal ();
+  test_heredoc_terminator_ends_the_command ();
+  test_heredoc_empty_body_and_double_quoted_tag ();
+  test_heredoc_unterminated_is_parse_error ();
+  test_heredoc_operator_must_end_its_line ();
   test_token_limit_aborts ();
+  test_expanded_word_piece_limit_aborts ();
   print_endline "[test_bash_parser] all tests passed"

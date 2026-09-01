@@ -195,6 +195,7 @@ let guest_sandbox_target = Keeper_sandbox_shell_ir_target.guest_target
 
 type dispatch_bundle =
   { sandbox : Masc_exec.Sandbox_target.t
+  ; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile
   ; fields : (string * Yojson.Safe.t) list
   ; base_host_env : string array option
   ; github_secret_files : unit -> (string list, string) result
@@ -211,6 +212,7 @@ let handle_tool_execute_typed
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?shell_ir_rewrite
       ~(args : Yojson.Safe.t)
       ()
   =
@@ -265,9 +267,42 @@ let handle_tool_execute_typed
         let sandbox_profile, _ =
           Keeper_sandbox_runner.effective_sandbox_profile ~meta
         in
+        let resolved_dispatch =
+          match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
+          | No_factory ->
+            (match sandbox_profile with
+             | Remote_ssh -> Ok `Remote_ssh
+             | Docker | Micro_vm ->
+               Error
+                 (Keeper_sandbox_shell_ir_target.target_error
+                    "typed Shell IR guest dispatch requires a turn sandbox factory (no factory provided)"))
+          | Remote_ssh_profile ->
+            if sandbox_profile = Remote_ssh
+            then Ok `Remote_ssh
+            else
+              Error
+                (Keeper_sandbox_shell_ir_target.profile_contract_mismatch
+                   ~expected:sandbox_profile
+                   ~actual:Remote_ssh)
+          | Runtime binding ->
+            if typed_input_has_env input
+            then
+              Error
+                (Keeper_sandbox_shell_ir_target.target_error
+                   "typed Shell IR guest dispatch does not support env yet")
+            else
+              guest_sandbox_target
+                ~binding
+                ~meta
+                ~cwd
+                ~timeout_sec
+                ()
+              |> Result.map (fun dispatch -> `Guest dispatch)
+        in
         let dispatch_sandbox =
-          match sandbox_profile with
-          | Remote_ssh ->
+          match resolved_dispatch with
+          | Error _ as error -> error
+          | Ok `Remote_ssh ->
             (* Host identity projection is deliberately absent: the remote
                shim synthesizes its own minimal environment and receives only
                endpoint-allowlisted typed entries. The existing typed-env
@@ -304,6 +339,7 @@ let handle_tool_execute_typed
                   in
                   Ok
                     { sandbox = dispatch.target
+                    ; sandbox_profile = Remote_ssh
                     ; fields =
                         [ "requested_sandbox", `String "remote_ssh"
                         ; "via", `String "remote_ssh"
@@ -314,47 +350,30 @@ let handle_tool_execute_typed
                     ; github_secret_files = (fun () -> Ok [])
                     ; cleanup = Fun.id
                     }))
-          (* Both guest profiles enter the same target constructor, and the
-             factory hands both the same turn runtime, which builds Apple
-             [container] argv for a VM keeper (#31225, #31178). The labels
-             below are still read off the profile rather than written as
-             "docker" — a keeper that asked for a VM must not be told docker
-             ran its command. *)
-          | Docker | Micro_vm ->
-            if typed_input_has_env input
-            then
-              Error
-                (Keeper_sandbox_shell_ir_target.target_error
-                   "typed Shell IR guest dispatch does not support env yet")
-            else
-              guest_sandbox_target
-                ~turn_sandbox_factory
-                ~meta
-                ~cwd
-                ~timeout_sec
-                ()
-              |> Result.map
-                   (fun
-                     (dispatch : Keeper_sandbox_shell_ir_target.guest_dispatch)
-                   ->
-                  { sandbox = dispatch.target
-                  ; fields =
-                      (let label =
-                         Keeper_types_profile_sandbox.sandbox_profile_to_string
-                           sandbox_profile
-                       in
-                       [ "requested_sandbox", `String label
-                       ; "via", `String label
-                       ; "sandbox_profile", `String label
-                       ])
-                  ; base_host_env = None
-                  ; github_secret_files =
-                      (fun () ->
-                         Keeper_turn_sandbox_runtime.prepare_github_identity_secret_files
-                           ~timeout_sec
-                           dispatch.runtime)
-                  ; cleanup = Fun.id
-                  })
+          (* The factory result is the sole route authority. Its frozen guest
+             profile selects both the concrete target and the Gate label, so
+             a later meta snapshot cannot split execution from observability. *)
+          | Ok (`Guest (dispatch : Keeper_sandbox_shell_ir_target.guest_dispatch)) ->
+            let label =
+              Keeper_types_profile_sandbox.sandbox_profile_to_string
+                dispatch.sandbox_profile
+            in
+            Ok
+              { sandbox = dispatch.target
+              ; sandbox_profile = dispatch.sandbox_profile
+              ; fields =
+                  [ "requested_sandbox", `String label
+                  ; "via", `String label
+                  ; "sandbox_profile", `String label
+                  ]
+              ; base_host_env = None
+              ; github_secret_files =
+                  (fun () ->
+                     Keeper_turn_sandbox_runtime.prepare_github_identity_secret_files
+                       ~timeout_sec
+                       dispatch.runtime)
+              ; cleanup = Fun.id
+              }
         in
         (match dispatch_sandbox with
          | Error ({ message; fields; class_ } : Keeper_sandbox_shell_ir_target.target_error) ->
@@ -417,21 +436,40 @@ let handle_tool_execute_typed
                refuses), so it needs no mount binding. *)
             Keeper_tool_execute_typed_input.Command_filesystem
         in
-        match
-          Keeper_tool_execute_typed_input.to_shell_ir
-            ~sandbox:dispatch_sandbox
-            ~namespace:redirect_namespace
-            input
-        with
-        | Error e ->
+        (* RFC tools-as-shell-commands: the one conversion point.  Stages
+           whose program is the bare reserved word [masc] become delegated
+           tool calls before dispatch.  Callers without a turn context
+           (replay) skip the rewrite, so a shell line stays process-only
+           there.  A rewrite refusal reads as a typed refusal with its own
+           code; both refusals travel the same failure shape below. *)
+        let shell_ir_error =
+          match
+            Keeper_tool_execute_typed_input.to_shell_ir
+              ~sandbox:dispatch_sandbox
+              ~namespace:redirect_namespace
+              input
+          with
+          | Error e ->
+            Error (typed_validation_error_text e, "typed_validation_failed")
+          | Ok ir -> (
+            match shell_ir_rewrite with
+            | None -> Ok ir
+            | Some rewrite_ir -> (
+              match rewrite_ir ir with
+              | Ok rewritten -> Ok rewritten
+              | Error message ->
+                Error (message, "shell_tool_command_rejected")))
+        in
+        match shell_ir_error with
+        | Error (text, code) ->
           let fields =
-            [ "typed", `Bool true; "cmd", `String cmd ]
+            [ "typed", `Bool true; "cmd", `String cmd; "code", `String code ]
             @ dispatched_model_location_fields
           in
           Keeper_tool_execution.failure
             ~class_:Tool_result.Policy_rejection
             ~effect_disposition:Tool_result.Proven_pre_effect
-            (error_json ~fields (typed_validation_error_text e))
+            (error_json ~fields text)
         | Ok ir ->
         let cmd_for_log =
           Exec_policy.sanitize_command_for_log_of_ir ~fallback_cmd:cmd ir
@@ -462,7 +500,8 @@ let handle_tool_execute_typed
                msg)
         in
         let sandbox_profile_label =
-          Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile
+          Keeper_types_profile_sandbox.sandbox_profile_to_string
+            dispatch_bundle.sandbox_profile
         in
         let typed_args = assoc_upsert "cwd" (`String cwd) typed_args in
         let gate_input =
@@ -944,6 +983,7 @@ let handle_tool_execute_with_outcome
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?shell_ir_rewrite
       ~(args : Yojson.Safe.t)
       ()
   =
@@ -959,6 +999,7 @@ let handle_tool_execute_with_outcome
     ?continuation_channel
     ?gate_context
     ?gate_grant
+    ?shell_ir_rewrite
     ~args
     ()
 ;;
@@ -970,6 +1011,7 @@ let handle_tool_execute
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?shell_ir_rewrite
       ~args
       ()
   =
@@ -980,6 +1022,7 @@ let handle_tool_execute
      ?continuation_channel
      ?gate_context
      ?gate_grant
+     ?shell_ir_rewrite
      ~args
      ()).raw_output
 ;;

@@ -181,6 +181,54 @@ let run_remote_command_with_status
          endpoint.name signal)
 ;;
 
+type read_dispatch =
+  | Turn_runtime of Keeper_sandbox_factory.runtime_binding
+  | Remote_dispatch
+  | Docker_fallback
+
+let binding_profile (binding : Keeper_sandbox_factory.runtime_binding) =
+  match binding.guest_profile with
+  | Docker_guest -> Docker
+  | Micro_vm_guest -> Micro_vm
+;;
+
+let profile_contract_mismatch ~expected ~actual =
+  Printf.sprintf
+    "sandbox profile contract mismatch: caller expected %s but the turn factory froze %s"
+    (sandbox_profile_to_string expected)
+    (sandbox_profile_to_string actual)
+;;
+
+(* TEL-OK: pure fail-closed route selection. The selected backend performs and
+   reports the read effect in [run_command_with_status] below. *)
+let resolve_read_dispatch ~turn_sandbox_factory ~(meta : keeper_meta) ~cwd =
+  match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
+  | Runtime binding ->
+    let actual = binding_profile binding in
+    if actual = meta.sandbox_profile
+    then Ok (Turn_runtime binding)
+    else
+      Error
+        (profile_contract_mismatch
+           ~expected:meta.sandbox_profile
+           ~actual)
+  | Remote_ssh_profile ->
+    if meta.sandbox_profile = Remote_ssh
+    then Ok Remote_dispatch
+    else
+      Error
+        (profile_contract_mismatch
+           ~expected:meta.sandbox_profile
+           ~actual:Remote_ssh)
+  | No_factory ->
+    (match meta.sandbox_profile with
+     | Remote_ssh -> Ok Remote_dispatch
+     | Docker -> Ok Docker_fallback
+     | Micro_vm ->
+       Error
+         "microvm_read_requires_turn_sandbox_factory: refusing to substitute Docker for an Apple Container keeper")
+;;
+
 let run_command_with_status ?turn_sandbox_factory
     ?(ok_exit_codes = [ 0 ])
     ~config ~(meta : keeper_meta)
@@ -188,118 +236,99 @@ let run_command_with_status ?turn_sandbox_factory
     ~(timeout_sec : float) () : (Unix.process_status * string, string) result =
   if command_argv = [] then
     Error "run_command_with_status: command_argv is empty"
-  else if meta.sandbox_profile = Remote_ssh then
-    run_remote_command_with_status ~ok_exit_codes ~config ~meta
-      ~command_argv ~max_bytes ~timeout_sec ()
   else
-  let cwd = host_playground_root ~config ~meta in
-  let resolve_result =
-    Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd
-  in
-  let image =
-    match meta.sandbox_image with
-    | Some img when String.trim img <> "" -> img
-    | _ -> Env_config_sandbox.Runtime.docker_image ()
-  in
-  let no_runtime =
-    match resolve_result with
-    | Runtime _ -> false
-    (* [Remote_ssh_profile] has no Docker runtime to resolve — its reads go
-       through the SSH path above, not through here. The match below fails
-       closed on it before the image guard or any Docker fallback can claim
-       the call. *)
-    | No_factory | Remote_ssh_profile -> true
-  in
-  match resolve_result with
-  | Remote_ssh_profile ->
-    Error
-      "remote_ssh_read_internal_error: SSH profile reached Docker backend resolution"
-  | Runtime _ | No_factory ->
-  if no_runtime && String.trim image = "" then
-    Error "keeper sandbox docker image is not configured"
-  else
-    let head_program =
-      match command_argv with prog :: _ -> prog | [] -> "?"
-    in
-    match resolve_result with
-    | Runtime runtime ->
+    let cwd = host_playground_root ~config ~meta in
+    match resolve_read_dispatch ~turn_sandbox_factory ~meta ~cwd with
+    | Error _ as error -> error
+    | Ok Remote_dispatch ->
+      run_remote_command_with_status ~ok_exit_codes ~config ~meta
+        ~command_argv ~max_bytes ~timeout_sec ()
+    | Ok (Turn_runtime { runtime; _ }) ->
       Keeper_turn_sandbox_runtime.run_command_with_status
         ~ok_exit_codes runtime ~timeout_sec ~cwd ~command_argv ~max_bytes ()
-    | Remote_ssh_profile ->
-      Error
-        "remote_ssh_read_internal_error: SSH profile reached Docker backend dispatch"
-    | No_factory ->
-      match Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present ~image ~timeout_sec with
-      | Error err ->
-        let typed = Keeper_sandbox_error.Image_not_found { image } in
-        Error
-          (Printf.sprintf
-             "docker_%s_failed: %s: %s"
-             head_program
-             (Keeper_sandbox_error.to_string typed)
-             err)
-      | Ok () ->
-      match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec with
-      | Error err -> Error err
-      | Ok seccomp_args ->
-        let host_root = host_playground_root ~config ~meta in
-        let croot = container_root ~meta in
-        let container_name = container_name_of meta in
-        let uid = Unix.getuid () in
-        let gid = Unix.getgid () in
-        match
-          Keeper_secret_projection.docker_args_for_keeper
-            ~base_path:config.base_path
-            ~keeper_name:meta.name
-            ~container_name
-            ()
-        with
-        | Error err -> Error ("docker_read_failed: secret_projection: " ^ err)
-        | Ok secret_projection ->
-        let argv =
-          build_docker_argv
-            ~image
-            ~container_name
-            ~base_path:config.base_path
-            ~host_root
-            ~croot
-            ~uid
-            ~gid
-            ~seccomp_args
-            ~secret_args:secret_projection.docker_args
-            ~command_argv
+    | Ok Docker_fallback ->
+      let image =
+        match meta.sandbox_image with
+        | Some img when String.trim img <> "" -> img
+        | _ -> Env_config_sandbox.Runtime.docker_image ()
+      in
+      if String.trim image = "" then
+        Error "keeper sandbox docker image is not configured"
+      else
+        let head_program =
+          match command_argv with prog :: _ -> prog | [] -> "?"
         in
-        let st, out =
-          Eio_guard.protect
-            ~finally:secret_projection.cleanup
-            (fun () ->
-               Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
-                 Process_eio.run_argv_with_status
-                   ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-                   ~cwd:(Config_dir_resolver.current_working_dir ())
-                   ~timeout_sec
-                   argv))
-        in
-        (match st with
-         | Unix.WEXITED code
-           when List.exists (fun ok_code -> ok_code = code) ok_exit_codes ->
-           let body =
-             if String.length out > max_bytes then String.sub out 0 max_bytes
-             else out
-           in
-           Ok (st, body)
-         | Unix.WEXITED code ->
-           Error
-             (Printf.sprintf
-                "docker_%s_failed: exit=%d output=%s"
-                head_program code
-                (Exec_policy.truncate_for_log out))
-         | Unix.WSIGNALED n ->
-           Error
-             (Printf.sprintf "docker_%s_signaled: signal=%d" head_program n)
-         | Unix.WSTOPPED n ->
-           Error
-             (Printf.sprintf "docker_%s_stopped: signal=%d" head_program n))
+        match Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present ~image ~timeout_sec with
+        | Error err ->
+          let typed = Keeper_sandbox_error.Image_not_found { image } in
+          Error
+            (Printf.sprintf
+               "docker_%s_failed: %s: %s"
+               head_program
+               (Keeper_sandbox_error.to_string typed)
+               err)
+        | Ok () ->
+        match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec with
+        | Error err -> Error err
+        | Ok seccomp_args ->
+          let host_root = host_playground_root ~config ~meta in
+          let croot = container_root ~meta in
+          let container_name = container_name_of meta in
+          let uid = Unix.getuid () in
+          let gid = Unix.getgid () in
+          match
+            Keeper_secret_projection.docker_args_for_keeper
+              ~base_path:config.base_path
+              ~keeper_name:meta.name
+              ~container_name
+              ()
+          with
+          | Error err -> Error ("docker_read_failed: secret_projection: " ^ err)
+          | Ok secret_projection ->
+          let argv =
+            build_docker_argv
+              ~image
+              ~container_name
+              ~base_path:config.base_path
+              ~host_root
+              ~croot
+              ~uid
+              ~gid
+              ~seccomp_args
+              ~secret_args:secret_projection.docker_args
+              ~command_argv
+          in
+          let st, out =
+            Eio_guard.protect
+              ~finally:secret_projection.cleanup
+              (fun () ->
+                 Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
+                   Process_eio.run_argv_with_status
+                     ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+                     ~cwd:(Config_dir_resolver.current_working_dir ())
+                     ~timeout_sec
+                     argv))
+          in
+          (match st with
+           | Unix.WEXITED code
+             when List.exists (fun ok_code -> ok_code = code) ok_exit_codes ->
+             let body =
+               if String.length out > max_bytes then String.sub out 0 max_bytes
+               else out
+             in
+             Ok (st, body)
+           | Unix.WEXITED code ->
+             Error
+               (Printf.sprintf
+                  "docker_%s_failed: exit=%d output=%s"
+                  head_program code
+                  (Exec_policy.truncate_for_log out))
+           | Unix.WSIGNALED n ->
+             Error
+               (Printf.sprintf "docker_%s_signaled: signal=%d" head_program n)
+           | Unix.WSTOPPED n ->
+             Error
+               (Printf.sprintf "docker_%s_stopped: signal=%d" head_program n))
 
 let run_command ?turn_sandbox_factory ?(ok_exit_codes = [ 0 ]) ~config ~meta
     ~command_argv ~max_bytes ~timeout_sec () =

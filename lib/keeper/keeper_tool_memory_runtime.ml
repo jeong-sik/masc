@@ -774,3 +774,186 @@ let keeper_memory_write_with_outcome
          detail;
        respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ]))
 ;;
+
+(* --- Explicit memory retraction surface -------------------------- *)
+
+type memory_retract_error_kind =
+  | Memory_id_invalid
+  | Reason_empty
+  | Fact_not_found
+  | Retract_persistence_failed
+  | No_memory_retract_error
+
+let memory_retract_error_kind_to_string = function
+  | Memory_id_invalid -> "memory_id_invalid"
+  | Reason_empty -> "reason_empty"
+  | Fact_not_found -> "fact_not_found"
+  | Retract_persistence_failed -> "persistence_failed"
+  | No_memory_retract_error -> ""
+;;
+
+type memory_retract_validation =
+  | Memory_retract_ok of
+      { memory_id : string
+      ; reason : string
+      }
+  | Memory_retract_invalid of memory_retract_error_kind
+
+let validate_memory_retract_args (args : Yojson.Safe.t) =
+  let memory_id = Safe_ops.json_string ~default:"" "memory_id" args in
+  let reason = Safe_ops.json_string ~default:"" "reason" args |> String.trim in
+  if not (Keeper_memory_os_types.is_memory_id memory_id)
+  then Memory_retract_invalid Memory_id_invalid
+  else if String.equal reason ""
+  then Memory_retract_invalid Reason_empty
+  else Memory_retract_ok { memory_id; reason }
+;;
+
+let support_invalidation_receipt
+      (invalidation : Keeper_memory_os_current.support_invalidation)
+  =
+  `Assoc
+    [ ( "memory_id"
+      , `String (Keeper_memory_os_types.memory_id invalidation.fact) )
+    ; ( "missing_premise_ids"
+      , `List
+          (List.map
+             (fun premise_id -> `String premise_id)
+             invalidation.missing_premise_ids) )
+    ]
+;;
+
+let keeper_memory_retract_with_outcome
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t)
+  : Keeper_tool_execution.t
+  =
+  let respond
+        ?revision
+        ?(effect_disposition = Tool_result.Effect_outcome_unknown)
+        ~ok
+        ~error_kind
+        extras
+    =
+    let payload =
+      Yojson.Safe.to_string
+        (`Assoc
+            ([ "ok", `Bool ok
+             ; ( "error_kind"
+               , `String (memory_retract_error_kind_to_string error_kind) )
+             ]
+             @ extras))
+    in
+    if ok
+    then
+      let completed = Keeper_tool_execution.success payload in
+      Option.fold
+        ~none:completed
+        ~some:(fun revision ->
+          Keeper_tool_execution.with_memory_retract_receipt ~revision completed)
+        revision
+    else
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Workflow_rejection
+        ~effect_disposition
+        payload
+  in
+  match validate_memory_retract_args args with
+  | Memory_retract_invalid error_kind ->
+    respond
+      ~effect_disposition:Tool_result.Proven_pre_effect
+      ~ok:false
+      ~error_kind
+      []
+  | Memory_retract_ok { memory_id; reason } ->
+    let keepers_dir =
+      Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path
+    in
+    let now = Time_compat.now () in
+    let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+    (match
+       Keeper_memory_os_current.retract_fact
+         ~keepers_dir
+         ~keeper_id:meta.name
+         ~now
+         ~source:
+           { kind = Keeper_memory_os_current.Explicit_retract
+           ; trace_id
+           }
+         ~memory_id
+         ~reason
+         ()
+     with
+     | Ok snapshot ->
+       Log.Keeper.info
+         "explicit current Memory retracted keeper=%s revision=%d memory_id=%s support_invalidations=%d"
+         meta.name
+         snapshot.revision
+         memory_id
+         (List.length snapshot.change.invalidated);
+       respond
+         ~revision:snapshot.revision
+         ~ok:true
+         ~error_kind:No_memory_retract_error
+         [ "revision", `Int snapshot.revision
+         ; ( "recorded_at"
+           , `String (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at) )
+         ; "outcome", `String "retracted_current_fact"
+         ; "store", `String "current_memory_snapshot"
+         ; "memory_id", `String memory_id
+         ; "reason", `String reason
+         ; ( "removed_memory_ids"
+           , `List
+               (List.map
+                  (fun fact ->
+                     `String (Keeper_memory_os_types.memory_id fact))
+                  snapshot.change.removed) )
+         ; ( "support_invalidations"
+           , `List
+               (List.map
+                  support_invalidation_receipt
+                  snapshot.change.invalidated) )
+         ]
+     | Error Keeper_memory_os_current.Retract_memory_id_invalid ->
+       respond
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         ~ok:false
+         ~error_kind:Memory_id_invalid
+         []
+     | Error Keeper_memory_os_current.Retract_reason_empty ->
+       respond
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         ~ok:false
+         ~error_kind:Reason_empty
+         []
+     | Error (Keeper_memory_os_current.Retract_fact_not_found _) ->
+       respond
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         ~ok:false
+         ~error_kind:Fact_not_found
+         [ "memory_id", `String memory_id ]
+     | Error (Keeper_memory_os_current.Retract_persistence_failed detail) ->
+       Log.Keeper.warn
+         "explicit current Memory retraction failed keeper=%s memory_id=%s: %s"
+         meta.name
+         memory_id
+         detail;
+       respond
+         ~ok:false
+         ~error_kind:Retract_persistence_failed
+         [ "detail", `String detail ]
+     | exception (Eio.Cancel.Cancelled _ as error) -> raise error
+     | exception exn ->
+       let detail = Printexc.to_string exn in
+       Log.Keeper.warn
+         "explicit current Memory retraction failed keeper=%s memory_id=%s: %s"
+         meta.name
+         memory_id
+         detail;
+       respond
+         ~ok:false
+         ~error_kind:Retract_persistence_failed
+         [ "detail", `String detail ])
+;;

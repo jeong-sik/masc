@@ -1,0 +1,30 @@
+name = "keeper_memory_retract"
+description = """
+Retract one exact ordinary-current Memory OS fact. Use the memory_id returned \
+by memory write or search and state the concrete reason. The same atomic commit \
+removes every derived fact that no longer has a complete support path and \
+records both the direct reason and the support invalidations for inspection."""
+additional_properties = false
+
+[[params]]
+name = "memory_id"
+type = "string"
+required = true
+description = "Exact sha256 Memory OS identity to retract."
+
+[[params]]
+name = "reason"
+type = "string"
+required = true
+description = "Concrete non-empty reason this fact is no longer current."
+
+[help]
+short_description = "Retract a current keeper memory fact."
+when_to_use = "Use when an ordinary-current fact is false, obsolete, or no longer supported."
+key_constraints = [
+  "Use an exact memory_id from memory write or search.",
+  "A source-bound fact is not an ordinary-current fact and cannot be retracted here.",
+  "The reason is durable journal evidence, not transient commentary.",
+]
+details_markdown = "Retracts one exact fact from the current Memory OS snapshot. The response lists every removed memory id and each derived support invalidation with its exact missing premise ids. Invalid input and missing facts do not commit a snapshot or journal entry."
+examples = ["memory_id='sha256:...' reason='The deployment manifest now names a different region.'"]

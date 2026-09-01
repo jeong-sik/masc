@@ -446,6 +446,19 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
   (match
      Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
        (Some
+          (completed_outcome
+             ~route:Keeper_unified_turn.Continuation_memory_retract_completed
+             meta))
+   with
+   | Keeper_heartbeat_loop.Batch_ack_completed
+       { connector_attention_outcome = Keeper_heartbeat_loop.Attention_ignored }
+     -> ()
+   | _ ->
+     fail
+       "Completed + memory-retract receipt must drive Batch_ack_completed/Attention_ignored");
+  (match
+     Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
+       (Some
           (Keeper_heartbeat_loop_cycle.Checkpointed
              { meta
              ; checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived

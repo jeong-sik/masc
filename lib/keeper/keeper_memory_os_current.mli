@@ -14,6 +14,7 @@
 type source_kind =
   | Librarian
   | Explicit_write
+  | Explicit_retract
 
 type source =
   { kind : source_kind
@@ -40,6 +41,12 @@ type upsert_error =
   | Upsert_persistence_failed of string
 
 val upsert_error_to_string : upsert_error -> string
+
+type retract_error =
+  | Retract_memory_id_invalid
+  | Retract_reason_empty
+  | Retract_fact_not_found of string
+  | Retract_persistence_failed of string
 
 type t =
   { revision : int
@@ -181,5 +188,21 @@ val upsert_fact
     A derived incoming fact commits only when it survives support maintenance
     in the same locked update. Missing support is a typed
     [Unsupported_derivation] and writes no snapshot or journal revision. *)
+
+val retract_fact
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> keepers_dir:string
+  -> keeper_id:string
+  -> now:float
+  -> source:source
+  -> memory_id:string
+  -> reason:string
+  -> unit
+  -> (t, retract_error) result
+(** Atomically retract one exact ordinary-current fact and remove every derived
+    fact that no longer has a complete support path. The direct target and its
+    reason are written to the same journal commit as the resulting snapshot;
+    cascaded removals are represented by [change.invalidated]. Invalid input
+    and a missing target fail before any snapshot or journal write. *)
 
 val to_json : t -> Yojson.Safe.t

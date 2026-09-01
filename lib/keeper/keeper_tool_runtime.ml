@@ -75,6 +75,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_context_status
   | Tool_artifact_read
   | Tool_memory_search
+  | Tool_memory_retract
   | Tool_memory_write
   | Tool_library_search
   | Tool_library_read
@@ -138,6 +139,7 @@ let handle_shell_ir ctx descriptor args =
   | Tool_context_status
   | Tool_artifact_read
   | Tool_memory_search
+  | Tool_memory_retract
   | Tool_memory_write
   | Tool_library_search
   | Tool_library_read
@@ -221,6 +223,12 @@ let handle_in_process ctx descriptor args =
          ~config:ctx.config
          ~meta:ctx.meta
          ~ctx_work:ctx.ctx_work
+         ~args)
+  | Tool_memory_retract ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_memory_retract_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
          ~args)
   | Tool_memory_write ->
     Some

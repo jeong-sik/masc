@@ -126,8 +126,16 @@ val handle_memory_write_with_outcome
   -> meta:keeper_meta
   -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
-(** Validate [args] and atomically upsert this Keeper's bounded Memory OS
+(** Validate [args] and atomically upsert this Keeper's current Memory OS
     snapshot. This is an internal self-write, not an external Gate effect. *)
+
+val handle_memory_retract_with_outcome
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> args:Yojson.Safe.t
+  -> Keeper_tool_execution.t
+(** Atomically retract one exact ordinary-current Memory OS fact. This is an
+    internal self-write, not an external Gate effect. *)
 
 val handle_library_search_with_outcome
   : meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t

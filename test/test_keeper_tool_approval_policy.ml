@@ -186,12 +186,18 @@ let test_the_control_names_are_the_catalogue_s () =
    an operator prompt. These pin the split on its own axis so the next sweep
    has to see it. *)
 let test_an_in_process_write_runs () =
-  match Policy.verdict_for ~composition_plan_index:None
-          ~tool_name:"keeper_memory_write" ~input:no_input
-  with
-  | Policy.Run _ -> ()
-  | Policy.Ask { because } ->
-    failf "keeper_memory_write must run without asking, got Ask: %s" because
+  List.iter
+    (fun tool_name ->
+       match
+         Policy.verdict_for
+           ~composition_plan_index:None
+           ~tool_name
+           ~input:no_input
+       with
+       | Policy.Run _ -> ()
+       | Policy.Ask { because } ->
+         failf "%s must run without asking, got Ask: %s" tool_name because)
+    [ "keeper_memory_retract"; "keeper_memory_write" ]
 ;;
 
 let test_a_write_that_leaves_masc_is_asked_about () =

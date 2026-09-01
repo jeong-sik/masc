@@ -102,6 +102,7 @@ type continuation_route_disposition =
   | Continuation_route_addressed
   | Continuation_route_mismatch
   | Continuation_memory_write_completed
+  | Continuation_memory_retract_completed
   | Continuation_no_terminal_effect_receipt
   | Continuation_route_not_applicable
 
@@ -1332,6 +1333,12 @@ let run_keeper_cycle
                             completed, while no direct surface post did.  Do
                             not invent a mental "observed and chose" state. *)
                          Continuation_memory_write_completed
+                       | ( Some _
+                         , Some
+                             (Keeper_tool_execution.Memory_retract_completed _) ) ->
+                         (* Exact receipt evidence only: a memory retraction
+                            committed, while no direct surface post did. *)
+                         Continuation_memory_retract_completed
                        | ( Some _, None ) ->
                          (* Absence of a receipt proves neither observation nor
                             intent. Keep only the absence we actually saw. *)

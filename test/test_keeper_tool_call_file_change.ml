@@ -377,6 +377,21 @@ let test_memory_write_is_not_a_file_change () =
   | Change.Unreadable _ -> fail "expected Not_a_file_change, got Unreadable"
 ;;
 
+let test_memory_retract_is_not_a_file_change () =
+  match
+    classify
+      (row
+         ~descriptor_id:"keeper.memory.retract"
+         (`Assoc
+             [ "memory_id", `String ("sha256:" ^ String.make 64 '0')
+             ; "reason", `String "incorrect"
+             ]))
+  with
+  | Change.Not_a_file_change -> ()
+  | Change.File_change _ -> fail "a memory retraction does not touch a file in the tree"
+  | Change.Unreadable _ -> fail "expected Not_a_file_change, got Unreadable"
+;;
+
 (* A file-writing call whose arguments did not survive is reported, not
    silently dropped. A caller that saw [Not_a_file_change] here would count a
    producer defect as a read. *)
@@ -551,6 +566,7 @@ let () =
         ] )
     ; ( "not a change"
       , [ test_case "read" `Quick test_read_is_not_a_change
+        ; test_case "memory retract" `Quick test_memory_retract_is_not_a_file_change
         ; test_case "memory write" `Quick test_memory_write_is_not_a_file_change
         ; test_case "no route evidence" `Quick test_row_without_route_evidence_is_not_a_change
         ] )

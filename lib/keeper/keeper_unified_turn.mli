@@ -134,13 +134,15 @@ type continuation_route_disposition =
   | Continuation_route_addressed
   | Continuation_route_mismatch
   | Continuation_memory_write_completed
+  | Continuation_memory_retract_completed
   | Continuation_no_terminal_effect_receipt
   | Continuation_route_not_applicable
 (** Producer-owned evidence available when a completed turn is compared with
     its continuation route. [Continuation_route_addressed] and
     [Continuation_route_mismatch] come from a concrete surface-post receipt;
-    [Continuation_memory_write_completed] records the other concrete terminal
-    receipt; [Continuation_no_terminal_effect_receipt] records absence without
+    [Continuation_memory_write_completed] and
+    [Continuation_memory_retract_completed] record the other concrete terminal
+    receipts; [Continuation_no_terminal_effect_receipt] records absence without
     claiming the stimulus was unobserved; [Continuation_route_not_applicable]
     means this was not a continuation wake. Policy may map these facts to queue
     actions, but must not rename them into model intent. *)

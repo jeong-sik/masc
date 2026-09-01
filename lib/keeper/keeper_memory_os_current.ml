@@ -8,6 +8,7 @@ let suffix = ".memory-current.json"
 type source_kind =
   | Librarian
   | Explicit_write
+  | Explicit_retract
 
 type source =
   { kind : source_kind
@@ -29,6 +30,12 @@ type change =
 type upsert_error =
   | Unsupported_derivation of support_invalidation
   | Upsert_persistence_failed of string
+
+type retract_error =
+  | Retract_memory_id_invalid
+  | Retract_reason_empty
+  | Retract_fact_not_found of string
+  | Retract_persistence_failed of string
 
 let upsert_error_to_string = function
   | Unsupported_derivation invalidation ->
@@ -98,11 +105,13 @@ let list_keeper_ids_for_keepers_dir ~keepers_dir =
 let source_kind_to_string = function
   | Librarian -> "librarian"
   | Explicit_write -> "explicit_write"
+  | Explicit_retract -> "explicit_retract"
 ;;
 
 let source_kind_of_string = function
   | "librarian" -> Some Librarian
   | "explicit_write" -> Some Explicit_write
+  | "explicit_retract" -> Some Explicit_retract
   | _ -> None
 ;;
 
@@ -1060,6 +1069,64 @@ let upsert_fact
         ~invalidated
         ()
       |> Result.map_error (fun detail -> Upsert_persistence_failed detail))
+;;
+
+let retract_fact
+      ?clock
+      ~keepers_dir
+      ~keeper_id
+      ~now
+      ~source
+      ~memory_id:target_memory_id
+      ~reason
+      ()
+  =
+  if not (Keeper_memory_os_types.is_memory_id target_memory_id)
+  then Error Retract_memory_id_invalid
+  else if String.equal (String.trim reason) ""
+  then Error Retract_reason_empty
+  else
+    update_locked_with_error
+      ?clock
+      ~dropped_statements:
+        [ { Keeper_memory_os_types.memory_id = target_memory_id; reason } ]
+      ~store_error:(fun detail -> Retract_persistence_failed detail)
+      ~keepers_dir
+      ~keeper_id
+      (fun previous ->
+      let current_facts =
+        match previous with
+        | None -> []
+        | Some snapshot -> snapshot.facts
+      in
+      if
+        not
+          (List.exists
+             (fun fact ->
+                String.equal
+                  (Keeper_memory_os_types.memory_id fact)
+                  target_memory_id)
+             current_facts)
+      then Error (Retract_fact_not_found target_memory_id)
+      else
+        let candidates =
+          List.filter
+            (fun fact ->
+               not
+                 (String.equal
+                    (Keeper_memory_os_types.memory_id fact)
+                    target_memory_id))
+            current_facts
+        in
+        let facts, invalidated = maintain_supported_facts candidates in
+        make_snapshot_from_maintained
+          ~previous
+          ~now
+          ~source
+          ~facts
+          ~invalidated
+          ()
+        |> Result.map_error (fun detail -> Retract_persistence_failed detail))
 ;;
 
 (* Read-side projection. The write-side [journal_entry_to_json] above encodes a

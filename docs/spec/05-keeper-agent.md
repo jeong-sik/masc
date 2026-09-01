@@ -280,7 +280,7 @@ typed history/tail 읽기 기반만 남아 있다.
 
 ### 6.4 MASC-Owned Memory
 
-`run_turn`은 더 이상 agent core memory object를 만들거나 memory hook을 설치하지 않는다. 기억 기록은 명시적 `keeper_memory_write` 도구와 librarian 추출 경로에서만 수행한다 (Institution memory는 제거됨).
+`run_turn`은 agent core memory object를 만들거나 memory hook을 설치하지 않는다. 기억 기록은 명시적 `keeper_memory_write` 도구와 librarian 추출 경로에서만 수행하고, ordinary-current 사실 철회는 정확한 `memory_id`와 이유를 받는 `keeper_memory_retract` 도구가 담당한다.
 
 ---
 

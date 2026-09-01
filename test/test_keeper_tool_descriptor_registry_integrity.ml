@@ -326,6 +326,7 @@ let descriptions_owned_elsewhere =
   ; "keeper_context_status"
   ; "keeper_ide_annotate"
   ; "keeper_memory_search"
+  ; "keeper_memory_retract"
   ; "keeper_memory_write"
   ; "keeper_person_note_set"
   ; "keeper_time_now"
@@ -893,12 +894,28 @@ let test_memory_write_descriptor_schema_is_closed () =
     (schema_forbids_additional_properties descriptor.input_schema)
 ;;
 
+let test_memory_retract_descriptor_schema_is_closed () =
+  let descriptor = required_internal_descriptor "keeper_memory_retract" in
+  Alcotest.(check bool)
+    "keeper_memory_retract schema forbids additional properties"
+    true
+    (schema_forbids_additional_properties descriptor.input_schema)
+;;
+
 let test_memory_write_descriptor_is_terminal () =
   let descriptor = required_internal_descriptor "keeper_memory_write" in
   match descriptor.execution with
   | Descriptor.Direct_terminal -> ()
   | Descriptor.Ordinary _ | Descriptor.Terminal ->
     Alcotest.fail "keeper_memory_write lost its direct-only terminal boundary"
+;;
+
+let test_memory_retract_descriptor_is_terminal () =
+  let descriptor = required_internal_descriptor "keeper_memory_retract" in
+  match descriptor.execution with
+  | Descriptor.Direct_terminal -> ()
+  | Descriptor.Ordinary _ | Descriptor.Terminal ->
+    Alcotest.fail "keeper_memory_retract lost its direct-only terminal boundary"
 ;;
 
 let test_memory_write_rejects_retired_lifetime_argument () =
@@ -1974,6 +1991,14 @@ let () =
         ] )
     ; ( "agent-contract"
       , [ test_case
+            "keeper_memory_retract ends a successful turn"
+            `Quick
+            test_memory_retract_descriptor_is_terminal
+        ; test_case
+            "keeper_memory_retract descriptor schema is closed"
+            `Quick
+            test_memory_retract_descriptor_schema_is_closed
+        ; test_case
             "keeper_memory_write ends a successful turn"
             `Quick
             test_memory_write_descriptor_is_terminal

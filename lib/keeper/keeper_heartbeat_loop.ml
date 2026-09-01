@@ -361,6 +361,9 @@ let batch_disposition_of_cycle_outcome
           completed without direct reply"; it does not claim model intent. *)
        Batch_ack_completed
          { connector_attention_outcome = Attention_ignored }
+     | Keeper_unified_turn.Continuation_memory_retract_completed ->
+       Batch_ack_completed
+         { connector_attention_outcome = Attention_ignored }
      | Keeper_unified_turn.Continuation_route_mismatch
      | Keeper_unified_turn.Continuation_no_terminal_effect_receipt
      | Keeper_unified_turn.Continuation_route_not_applicable ->

@@ -108,6 +108,7 @@ type runtime_handler =
   | Tool_context_status
   | Tool_artifact_read
   | Tool_memory_search
+  | Tool_memory_retract
   | Tool_memory_write
   | Tool_library_search
   | Tool_library_read
@@ -227,6 +228,7 @@ let runtime_handler_to_string = function
   | Tool_context_status -> "tool_context_status"
   | Tool_artifact_read -> "tool_artifact_read"
   | Tool_memory_search -> "tool_memory_search"
+  | Tool_memory_retract -> "tool_memory_retract"
   | Tool_memory_write -> "tool_memory_write"
   | Tool_library_search -> "tool_library_search"
   | Tool_library_read -> "tool_library_read"
@@ -423,7 +425,7 @@ let descriptor
   let execution =
     match runtime_handler with
     | Tool_surface_post -> Terminal
-    | Tool_memory_write -> Direct_terminal
+    | Tool_memory_write | Tool_memory_retract -> Direct_terminal
     | ( Tool_execute
       | Tool_keeper_code_query_dispatch
       | Tool_keeper_webmcp_dispatch
@@ -937,6 +939,10 @@ let person_note_set_schema = shard_surface_schema "keeper_person_note_set"
 
 let memory_search_schema_source, memory_search_schema =
   base_schema_input "keeper_memory_search"
+;;
+
+let memory_retract_schema_source, memory_retract_schema =
+  base_schema_input "keeper_memory_retract"
 ;;
 
 let memory_write_schema_source, memory_write_schema =
@@ -1960,6 +1966,17 @@ let internal_descriptors : t list =
       ~input_schema:memory_search_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_memory_search
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:memory_retract_schema_source
+      ~id:"keeper.memory.retract"
+      ~name:"keeper_memory_retract"
+      ~description:"Retract one exact current memory fact with durable reason evidence."
+      ~input_schema:memory_retract_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_memory_retract
       ()
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity

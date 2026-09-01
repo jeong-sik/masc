@@ -78,11 +78,14 @@ keyword in model prose, or the mere presence of a process.
 - Each committed support retraction emits a structured Keeper log line with the
   revision, conclusion identity, and missing premise identities.
 
-This slice is the truth-maintenance store primitive. It intentionally does not
-claim Keeper-facing retraction usability: the public `keeper_memory_retract`
-tool is the next stacked change. Until that tool exists, fixed-point removal is
-proved only at the authoritative snapshot replacement boundary. Browser and
-live Keeper proof of a self-initiated retraction belongs to that next stack.
+The core slice introduced the truth-maintenance store primitive. The stacked
+public surface adds `keeper_memory_retract(memory_id, reason)`: successful
+calls commit an `explicit_retract` source, return the exact removed identities
+and support invalidations, and end with a typed Memory OS revision receipt.
+Invalid identities, empty reasons, and absent facts do not commit a snapshot or
+journal line. This source contract still requires an exact-head binary before
+Keeper-facing usability can be claimed; an older live service is baseline
+evidence only.
 
 Deployment is a hard cut, not a data conversion. After the exact branch binary
 is available and before it becomes the live writer, stop Keeper turns and remove
@@ -116,10 +119,9 @@ prove the new files through the API before resuming autonomous work.
 1. Exact source and schema checks in CI; no local build is used for this slice.
 2. CI proves two observations, a derived conclusion, and a conclusion depending
    on that conclusion at the authoritative store boundary.
-3. The next stacked change adds the typed Keeper-facing retract tool. Its
-   exact-head runtime removes one observation and proves both conclusions
-   disappear from recall while the journal, log, API, and dashboard show the
-   exact chain.
+3. The stacked typed Keeper-facing retract tool is checked in CI. Its exact-head
+   runtime then removes one observation and proves both conclusions disappear
+   from recall while the journal, log, API, and dashboard show the exact chain.
 4. With that public tool in place, the same scenario runs for 10+ turns, then
    at 1h, 2h, 4h, and 24h without
    changing the feature oracle.

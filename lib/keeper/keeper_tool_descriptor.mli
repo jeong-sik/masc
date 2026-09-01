@@ -112,6 +112,7 @@ type runtime_handler =
   | Tool_context_status
   | Tool_artifact_read
   | Tool_memory_search
+  | Tool_memory_retract
   | Tool_memory_write
   | Tool_library_search
   | Tool_library_read

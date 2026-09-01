@@ -7,7 +7,8 @@
     read, write, edit and execute.
 
     The last three arms were aimed at tools that exist under other names.
-    keeper_memory_search, keeper_memory_write, keeper_library_search,
+    keeper_memory_search, keeper_memory_retract, keeper_memory_write,
+    keeper_library_search,
     keeper_library_read, keeper_surface_read and keeper_surface_post carry a
     keeper_ prefix, so they land in "other". These cases pin that as the
     current answer rather than leaving it to be rediscovered — changing it
@@ -65,6 +66,7 @@ let test_keeper_prefixed_tools_fall_to_other () =
   List.iter
     (fun name -> check string name "other" (T.tool_type_of_name name))
     [ "keeper_memory_search"
+    ; "keeper_memory_retract"
     ; "keeper_memory_write"
     ; "keeper_library_search"
     ; "keeper_library_read"

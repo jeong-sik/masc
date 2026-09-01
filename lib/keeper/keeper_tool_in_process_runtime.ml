@@ -414,6 +414,17 @@ let handle_memory_write_with_outcome
     ~args
 ;;
 
+let handle_memory_retract_with_outcome
+      ~config
+      ~(meta : keeper_meta)
+      ~args
+  =
+  Keeper_tool_memory_runtime.keeper_memory_retract_with_outcome
+    ~config
+    ~meta
+    ~args
+;;
+
 let handle_library_search_with_outcome ~(meta : keeper_meta) ~args =
   Keeper_tool_execution.of_tool_result
     (Tool_library.handle_search

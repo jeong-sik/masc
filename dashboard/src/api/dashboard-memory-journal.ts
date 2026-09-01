@@ -49,7 +49,7 @@ export type MemoryJournalSupportInvalidation = {
   readonly missingPremiseIds: readonly string[]
 }
 
-export type MemoryJournalSourceKind = 'librarian' | 'explicit_write'
+export type MemoryJournalSourceKind = 'librarian' | 'explicit_write' | 'explicit_retract'
 
 // A committed pass wrote a revision. A failed pass did not, so the two are
 // separate members rather than one shape with nulls — a reader that has to
@@ -203,7 +203,9 @@ function decodeCommitted(raw: Record<string, unknown>): MemoryJournalEntry | nul
   const retained = asNumber(raw.change.retained)
   if (
     traceId == null
-    || (sourceKind !== 'librarian' && sourceKind !== 'explicit_write')
+    || (sourceKind !== 'librarian'
+      && sourceKind !== 'explicit_write'
+      && sourceKind !== 'explicit_retract')
     || retained == null
     || !Number.isSafeInteger(retained)
     || retained < 0

@@ -243,7 +243,9 @@ let memory_os_dashboard_json ~(config : Workspace.config) ~keeper_id =
             , `String
                 (match source.kind with
                  | Keeper_memory_os_current.Librarian -> "librarian"
-                 | Explicit_write -> "explicit_write") )
+                 | Keeper_memory_os_current.Explicit_write -> "explicit_write"
+                 | Keeper_memory_os_current.Explicit_retract ->
+                   "explicit_retract") )
           ; "trace_id", `String source.trace_id
           ] )
   in

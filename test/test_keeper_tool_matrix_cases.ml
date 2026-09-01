@@ -309,6 +309,11 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       `Assoc [ "query", `String "keeper_time_now" ]
   | "keeper_memory_search" ->
       `Assoc [ ("query", `String "memory needle"); ("limit", `Int 2) ]
+  | "keeper_memory_retract" ->
+      `Assoc
+        [ "memory_id", `String ("sha256:" ^ String.make 64 '0')
+        ; "reason", `String "tool matrix missing-fact refusal"
+        ]
   | "keeper_memory_write" ->
       `Assoc [ ("content", `String "tool matrix memory write content") ]
   | "keeper_analyze_image" ->

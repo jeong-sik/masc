@@ -13,13 +13,15 @@ val deferred_kind_to_string : deferred_kind -> string
 type terminal_effect_receipt =
   | Surface_post_completed of Keeper_surface_post.post_target
   | Memory_write_completed of { revision : int }
+  | Memory_retract_completed of { revision : int }
 (** Producer-owned proof of the concrete terminal effect that completed. *)
 
 val memory_revision_wire_key : string
-(** JSON field name carrying a [Memory_write_completed] receipt's revision in
-    the keeper reply payload: ["memory_revision"]. Shared by the producer
+(** JSON field name carrying a [Memory_write_completed] or
+    [Memory_retract_completed] receipt's revision in the keeper reply payload:
+    ["memory_revision"]. Shared by the producer
     ({!Keeper_turn} reply_json) and the stream decoder so the wire name cannot
-    drift; it is the memory-write counterpart of
+    drift; it is the Memory OS counterpart of
     {!Keeper_surface_post.delivery_target_wire_key}. *)
 
 (** [disposition] uses the canonical {!Tool_result.disposition}; this module
@@ -81,6 +83,9 @@ val with_surface_post_receipt : Keeper_surface_post.post_target -> t -> t
 
 val with_memory_write_receipt : revision:int -> t -> t
 (** Attach the committed Memory OS revision only to a completed execution. *)
+
+val with_memory_retract_receipt : revision:int -> t -> t
+(** Attach the committed Memory OS retraction revision only to a completed execution. *)
 
 val with_file_change_evidence : Keeper_file_change_evidence.t -> t -> t
 (** Attach producer-recorded line evidence only to a completed execution. *)

@@ -39,8 +39,7 @@ val keeper_context_status_json
     Body is stored as [**title** content] when [title] is non-empty.
 
     Args (JSON object):
-    - [title] — short hook (≤120 chars). May be empty; then [content]
-      stands alone.
+    - [title] — optional hook. May be empty; then [content] stands alone.
     - [content] — body. Required; must be non-empty.
     - [source_path] — optional keeper-visible regular file. When present, the
       claim enters the source-bound current store and is revalidated before
@@ -89,3 +88,30 @@ type memory_write_validation =
       }
 
 val validate_memory_write_args : Yojson.Safe.t -> memory_write_validation
+
+(** Explicitly retract one exact ordinary-current fact. The durable reason is
+    journaled with the same commit, and unsupported derived facts are removed
+    by the Memory OS support fixed point. *)
+val keeper_memory_retract_with_outcome
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> args:Yojson.Safe.t
+  -> Keeper_tool_execution.t
+
+type memory_retract_error_kind =
+  | Memory_id_invalid
+  | Reason_empty
+  | Fact_not_found
+  | Retract_persistence_failed
+  | No_memory_retract_error
+
+val memory_retract_error_kind_to_string : memory_retract_error_kind -> string
+
+type memory_retract_validation =
+  | Memory_retract_ok of
+      { memory_id : string
+      ; reason : string
+      }
+  | Memory_retract_invalid of memory_retract_error_kind
+
+val validate_memory_retract_args : Yojson.Safe.t -> memory_retract_validation

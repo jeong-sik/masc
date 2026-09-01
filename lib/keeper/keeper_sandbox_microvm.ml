@@ -368,6 +368,13 @@ let json_string_opt = function
   | _ -> None
 ;;
 
+let container_id_of_entry entry =
+  let open Yojson.Safe.Util in
+  match entry |> member "id" |> json_string_opt with
+  | Some id -> Some id
+  | None -> entry |> member "configuration" |> member "id" |> json_string_opt
+;;
+
 let live_containers_of_json ~base_path ~keeper_name = function
   | `List entries ->
     let open Yojson.Safe.Util in
@@ -394,8 +401,13 @@ let live_containers_of_json ~base_path ~keeper_name = function
     let decode entry =
       if not (belongs_to_keeper entry) then Ok None
       else
-        try
-          let id = entry |> member "id" |> to_string in
+        match container_id_of_entry entry with
+        | None ->
+          Error
+            (Printf.sprintf "microvm live container for %s is malformed: missing id"
+               keeper_name)
+        | Some id ->
+          try
           let configuration = entry |> member "configuration" in
           let image = configuration |> member "image" |> member "reference" |> to_string in
           let state = entry |> member "status" |> member "state" |> to_string in
@@ -422,10 +434,10 @@ let live_containers_of_json ~base_path ~keeper_name = function
                 ; started_at = float_label Keeper_sandbox_runtime.sandbox_started_at_label_key
                 ; ttl_sec = float_label Keeper_sandbox_runtime.sandbox_ttl_sec_label_key
                 } : Keeper_sandbox_runtime.live_container))
-        with Yojson.Safe.Util.Type_error (detail, _) ->
-          Error
-            (Printf.sprintf "microvm live container for %s is malformed: %s"
-               keeper_name detail)
+          with Yojson.Safe.Util.Type_error (detail, _) ->
+            Error
+              (Printf.sprintf "microvm live container for %s is malformed: %s"
+                 keeper_name detail)
     in
     List.fold_right
       (fun entry result ->

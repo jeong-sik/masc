@@ -712,10 +712,10 @@ let live_entry ~base_path ~keeper_name ~id =
     ]
   in
   `Assoc
-    [ "id", `String id
-    ; ( "configuration"
+    [ ( "configuration"
       , `Assoc
-          [ "creationDate", `String "2026-09-01T08:13:09Z"
+          [ "id", `String id
+          ; "creationDate", `String "2026-09-01T08:13:09Z"
           ; "image", `Assoc [ "reference", `String "masc-keeper-sandbox:local" ]
           ; "labels", `Assoc labels
           ] )

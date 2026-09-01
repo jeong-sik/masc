@@ -498,7 +498,8 @@ let test_batch_disposition_keeps_unsettled_evidence_pending () =
            (Some (completed_outcome ~route meta))
        with
        | Keeper_heartbeat_loop.Batch_no_action -> ()
-       | Keeper_heartbeat_loop.Batch_ack_completed _ ->
+       | Keeper_heartbeat_loop.Batch_ack_completed _
+       | Keeper_heartbeat_loop.Batch_ack_durable_stimulus_yield ->
          fail
            "unsettled route evidence must not ACK (no judgement was made)")
     [ Keeper_unified_turn.Continuation_route_mismatch

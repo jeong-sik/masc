@@ -105,7 +105,7 @@ let test_harness_footer_links_to_overview_task () =
 
 let test_schedules_footer_names_write_and_read_controls () =
   check str "Schedules names create and modify"
-    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  Right / Enter:details  Left / Esc:back  n:new  e:modify  x:cancel  a:new wake  Y:copy link  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  Right / Enter:details  Left / Esc:back  n:new  e:modify  x:cancel  Y:copy link  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Schedules)
 
 let schedule_form_row : schedule_row =

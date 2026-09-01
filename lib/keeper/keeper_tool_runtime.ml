@@ -121,7 +121,10 @@ let handle_shell_ir ctx descriptor args =
          ?continuation_channel:ctx.continuation_channel
          ?gate_context:ctx.gate_context
          ?gate_grant:ctx.gate_grant
-         ~tool_context:ctx
+         ~shell_ir_rewrite:
+           (Keeper_shell_tool_command.rewrite
+              ~lookup:descriptor_for_internal
+              ~dispatch:(handle ctx))
          ~args
          ())
   | Tool_search_files ->

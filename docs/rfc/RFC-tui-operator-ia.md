@@ -55,12 +55,12 @@ masc_tui.ml:13641-13645), 웹 대시보드는 상단 탭 스트립을 이미 없
 | 5 | Lanes | 진입 | standalone 서비스 레인 | Runtime 서브탭으로 흡수 |
 | 6 | Approvals | 폴링(전 화면) | 승인 + 질문 대기 | Inbox 로 확장 |
 | 7 | Board | 폴링 | Keeper 게시판 | 유지 |
-| 8 | Planning | 폴링 | Goals/Task Review/Verdicts (이미 3탭 허브) | 유지 — Fusion·Schedules 수용 |
-| 9 | Schedules | 진입 | wake 스케줄 | Planning 서브탭 |
-| 10 | Fusion | 진입 | fusion 런 | Planning 서브탭 |
+| 8 | Planning | 폴링 | Goals/Task Review/Verdicts (이미 3탭 허브) | 유지 |
+| 9 | Schedules | 진입 | wake 스케줄 | Keeper 상세 Automation 탭 |
+| 10 | Fusion | 진입 | fusion 런 | Keeper 상세 Runs 탭 |
 | 11 | Repos | 진입 | 등록 저장소 2행 | Workspace 로 병합 |
 | 12 | Code | 진입 | 파일 브라우저 + git diff/log | Workspace 로 병합 |
-| 13 | Connectors | 진입 | 채널 4행 + bind/unbind | Runtime 서브탭 |
+| 13 | Connectors | 진입 | 채널 4행 + bind/unbind | Keeper 상세 Channels 탭 |
 | 14 | Runtime | 진입 | keeper 레인/슬롯/프로브 | 유지 — 흡수 수용처 |
 | 15 | Config | 진입(pane별) | toml/models/params/prompts/themes | 유지 — Registry pane 수용 |
 | 16 | Resources | 진입(MCP JSON-RPC) | MCP 리소스 카탈로그 | Config Registry 로 |
@@ -103,12 +103,12 @@ Harness → Planning (`v` 순환), Changes → Keepers (`f`). **Harness 와 Chan
 |---|---|---|---|
 | 1 | Overview | fleet 계기판, Memory 건강 롤업 | 함대가 지금 어떤 상태인가 |
 | 2 | Inbox | Approvals + Questions + Attention + completed-unread | 내 결정을 뭐가 기다리나 |
-| 3 | Keepers | Changes, Keeper logs/calls, `/context` 모달, Tools 의 per-Keeper pane | 이 Keeper 가 뭘 했고 왜, 다음 턴에 뭘 아나 |
+| 3 | Keepers | Changes, Keeper logs/calls, `/context` 모달, Tools 의 per-Keeper pane, 그리고 상세 탭으로 Channels(Connectors)·Automation(Schedules)·Runs(Fusion) | 이 Keeper 가 뭘 했고 왜, 다음 턴에 뭘 아나 |
 | 4 | Activity | Acting + Logs | 함대 시간축에서 무슨 일이 있었나 |
 | 5 | Board | (유지) | Keeper 들이 서로 뭐라 하나 |
-| 6 | Planning | Verification·Harness(기존) + Fusion + Schedules | 작업·판정·자동화가 굴러가나 |
+| 6 | Planning | Verification·Harness(기존) | 작업과 판정이 굴러가나 |
 | 7 | Memory | (재정의 — §3.4) | 무엇이 기억됐고 어떤 분류인가 |
-| 8 | Runtime | Lanes + Connectors | 기반(레인·런타임·채널)이 살아있나 |
+| 8 | Runtime | Lanes | 기반(레인·런타임)이 살아있나 |
 | 9 | Workspace | Repos + Code | 파일과 저장소는 어떤 상태인가 |
 | 0 | Config | Resources + Tools 의 catalog/usage/receipts (Registry pane) | 무엇이 설정·등록돼 있나 |
 
@@ -210,6 +210,13 @@ Lesson` — keeper_memory_os_types.mli:41-49)와 사실별 origin
 
 C~H 는 각각 작고 기계적이다(`surface_ring` 제거 + `surface_ring_index` 부모
 등재 + 서브탭 키 + 문서/PTY). I 부터가 설계 작업이다.
+
+집행 결과 (2026-09-01): D~H·N 은 표대로 머지됐다 (#32213 스택, #32236,
+#32245). 이후 운영자 결정으로 #32242 가 D·F 의 수용처를 옮겼다 — Connectors·
+Schedules·Fusion 은 Runtime/Planning 서브탭이 아니라 **선택된 Keeper 상세의
+Channels·Automation·Runs 탭**이다. 채널 바인딩과 wake 스케줄과 fusion 런은
+함대 공용 관측이 아니라 그 Keeper 의 것이라는 판단이며, §3.1 표와 §1 의
+처분 열은 이 결정을 반영해 갱신됐다.
 
 ## 5. 경쟁 TUI 조사 (2026-09-01 웹 확인)
 

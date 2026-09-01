@@ -27,6 +27,11 @@ type t =
   | Interrupt_turn
       (** [/interrupt] — the composer form of the interrupt keybinding, for
           an operator mid-sentence whose hands are already on letters. *)
+  | Steer_turn of string
+      (** [/steer <message>] — interrupt the streaming turn, then dispatch
+          this exact message before ordinary next-turn input. *)
+  | Steer_missing_message
+      (** [/steer] without replacement text. *)
   | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
       (** [/thinking [hidden|folded|full]] — set or cycle reasoning visibility.
           Replaces the earlier [Toggle_thinking]: two states could not say

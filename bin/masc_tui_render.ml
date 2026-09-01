@@ -6454,6 +6454,12 @@ let render_keeper_logs (state : state) =
   end
 
 (** Render message input/conversation view *)
+let keeper_message_clock at =
+  let time = Unix.localtime at in
+  Printf.sprintf "%02d:%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
+    time.Unix.tm_sec
+;;
+
 (* How one finished turn's tool block becomes rows: the operator's
    compact/full choice, the width the aligned badge leaves, and this keeper's
    own file changes. The committed history and the turn still streaming both
@@ -6494,9 +6500,10 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
    Committed rows only. The turn still streaming is built where it is drawn:
    its row count changes on every frame, which is exactly what a stable
    position must not be measured against. *)
-let keeper_message_layout_entries (state : state) ~keeper_name ~chat_cols =
+let keeper_message_layout_entries ?messages (state : state) ~keeper_name
+    ~chat_cols =
   let messages =
-    chat_rows_for state keeper_name
+    Option.value ~default:(chat_rows_for state keeper_name) messages
     |> List.filter (fun message ->
       state.msg_memory_visible || message.me_role <> Message_memory)
   in
@@ -6506,21 +6513,10 @@ let keeper_message_layout_entries (state : state) ~keeper_name ~chat_cols =
     match message.me_role with
     | Message_user (Sent_by_other name) -> name
     | Message_user (Sent_by_operator label) ->
-        if
-          (* A line the operator typed during a turn sits in the
-             conversation from the moment it is typed, in its place in the
-             order. Marked, because a waiting line drawn like a sent one is
-             the same silence that made a refused send look like a sent one
-             -- the operator has to be able to tell which of their messages
-             has actually gone. The queue is the only place that fact lives,
-             so the row asks it rather than carrying a copy. *)
-          Masc_tui_keeper_chat_queue.holds state.msg_queued
-            ~request_id:message.me_request_id
-        then "QUEUED"
-          (* A bare ["you"] is drawn as the shout it always was; a label that
-             names the surface it came in on keeps that, because "you, from
-             Slack" is a different fact from "you, here". *)
-        else if String.equal label "you" then "YOU"
+        (* Pending input is not a transcript row. Once it enters a turn this
+           label can say YOU without a second queue lookup or a transient
+           QUEUED identity that later changes underneath it. *)
+        if String.equal label "you" then "YOU"
         else label
     | Message_keeper -> Keeper_chat.terminal_safe_text message.me_keeper_name
     | Message_autonomous -> "AUTO"
@@ -7078,24 +7074,16 @@ let render_keeper_message (state : state) =
     let rows_since_pin =
       match state.msg_scroll_pin with
       | None -> 0
-      | Some pin ->
-        let arrived =
-          List.filter
-            (fun (entry : Message_layout.entry) ->
-              match entry.markdown_source with
-              | Message_layout.Markdown_stable { observed_at; _ } ->
-                observed_at > pin
-              (* The turn still streaming is not something that arrived while
-                 the operator read back -- it was already on the pane when they
-                 left the bottom, and its row count changes on every frame. *)
-              | Message_layout.Markdown_growing _
-              | Message_layout.Markdown_streaming -> false)
-            layout_entries
-        in
-        if arrived = [] then 0
-        else
-          Message_layout.total_rows ~markdown ~origin:state.msg_origin_display
-            ~inner_width arrived
+      | Some pin -> (
+          match msg_entries_after_anchor (chat_rows_for state keeper_name) pin with
+          | None | Some [] -> 0
+          | Some arrived ->
+              let arrived =
+                keeper_message_layout_entries ~messages:arrived state
+                  ~keeper_name ~chat_cols
+              in
+              Message_layout.total_rows ~markdown
+                ~origin:state.msg_origin_display ~inner_width arrived)
     in
     let scroll, visible_rows =
       Message_layout.clamped_scrolled_rows ~markdown
@@ -7160,6 +7148,24 @@ let render_keeper_message (state : state) =
                   (Keeper_chat.compact_request_id entry.sent_request.request_id)
                   (sending_age entry)))
            others);
+    let pending =
+      Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
+        ~keeper_name
+    in
+    List.iteri
+      (fun index item ->
+        let intent, style =
+          match item.Masc_tui_keeper_chat_queue.intent with
+          | Masc_tui_keeper_chat_queue.Next -> "NEXT", Theme.recede ()
+          | Masc_tui_keeper_chat_queue.Steer_after_interrupt ->
+              "STEER", Theme.warn ()
+        in
+        let request = item.Masc_tui_keeper_chat_queue.request in
+        box_line_styled chat_buf chat_cols ~style
+          (Printf.sprintf "  %s %d · %s · %s" intent (index + 1)
+             (keeper_message_clock item.submitted_at)
+             (Terminal_text.single_line request.Keeper_chat.message)))
+      pending;
     (match state.msg_loaded_error with
      | Some detail ->
          (* Cause first. The consequence -- this session only -- is the same
@@ -7303,6 +7309,10 @@ let render_keeper_message (state : state) =
 
     (* Footer *)
     let disposition = send_disposition state ~keeper_name in
+    let pending_count =
+      Masc_tui_keeper_chat_queue.length_for_keeper state.msg_queued
+        ~keeper_name
+    in
     let enter_hint =
       (* What the key does is read once, by [send_disposition]; the in-flight
          kind only names what is happening while it does it. Answering both
@@ -7315,7 +7325,7 @@ let render_keeper_message (state : state) =
         match state.msg_recall_replaces with
         | Some _ -> "Enter:replace the queued line  Ctrl-U:leave it queued"
         | None -> (
-            match Masc_tui_keeper_chat_queue.length state.msg_queued with
+            match pending_count with
             | 0 -> "Enter:queue for next turn"
             | waiting ->
                 Printf.sprintf
@@ -7390,7 +7400,7 @@ let render_keeper_message (state : state) =
               | Some _ -> "Enter:replace queued  Ctrl-U:leave it"
               | None ->
                   Printf.sprintf "Enter:queue(%d)  Ctrl-K:cancel  Ctrl-P:edit"
-                    (Masc_tui_keeper_chat_queue.length state.msg_queued))
+                    pending_count)
           | Sends -> enter_hint
         in
         let compact_scroll_hint =

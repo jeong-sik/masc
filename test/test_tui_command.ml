@@ -12,6 +12,8 @@ let describe = function
   | Command.Switch_keeper name -> "keeper:" ^ name
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
   | Command.Interrupt_turn -> "interrupt"
+  | Command.Steer_turn message -> "steer:" ^ message
+  | Command.Steer_missing_message -> "steer-missing-message"
   | Command.Set_thinking mode ->
       "thinking:"
       ^ (match mode with
@@ -59,12 +61,14 @@ let test_task_takes_the_line_as_title_and_the_rest_as_body () =
     (describe (Command.parse "/task   "))
 
 let test_pane_commands_parse_by_word () =
-  check (list string) "help, settings, keeper, interrupt, visibility, memory, context and image"
+  check (list string) "pane commands"
     [ "help"
     ; "open-settings"
     ; "keeper:orbiter"
     ; "keeper-missing-name"
     ; "interrupt"
+    ; "steer:answer the correction\nwith this context"
+    ; "steer-missing-message"
     ; "thinking:cycle"
     ; "thinking:hidden"
     ; "thinking:folded"
@@ -88,6 +92,8 @@ let test_pane_commands_parse_by_word () =
        ; "/keeper orbiter"
        ; "/keeper   "
        ; "/interrupt"
+       ; "/steer answer the correction\nwith this context"
+       ; "/steer"
        ; "/thinking"
        ; "/thinking hidden"
        ; "/thinking folded"
@@ -118,7 +124,7 @@ let test_every_command_has_a_help_line () =
         (List.exists
            (fun line -> String.starts_with ~prefix:("/" ^ word) line)
            Command.help_lines))
-    [ "task"; "keeper"; "settings"; "interrupt"; "thinking"; "tools"; "memory"
+    [ "task"; "keeper"; "settings"; "interrupt"; "steer"; "thinking"; "tools"; "memory"
     ; "find"; "context"; "help" ]
 
 let test_keeper_names_resolve_by_unique_prefix () =

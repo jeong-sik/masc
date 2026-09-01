@@ -4416,13 +4416,8 @@ def chat_queue_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
 
 
 def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
-    """A line typed during a turn is shown, not just counted, and the arrows
-    walk back to it.
-
-    #29818 rewrote the in-flight rows and took the queue rows with them,
-    leaving the row budget that reserves them behind. The count in the footer
-    kept saying "2 waiting" over a pane that had lost two rows of conversation
-    and showed neither line."""
+    """Pending input stays in NEXT, outside the active causal turn, and the
+    arrows can still edit it."""
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -4465,8 +4460,6 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
         send_and_wait(
             process, master_fd, output, b"queued-one", composer_showing(b"queued-one")
         )
-        # Each line is checked where it was drawn. They no longer share a
-        # block of rows at the bottom, so one frame need not carry both.
         first_queued = send_and_wait(
             process, master_fd, output, b"\r", b"queued-one"
         )
@@ -4479,23 +4472,23 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
 
         frame = frame_containing(second_queued, b"queued-two")
         plain = CSI_RE.sub(b"", frame)
-        # A waiting line is drawn in the conversation now, in its place in the
-        # order, rather than in rows of its own beneath it -- and marked, so it
-        # is not mistaken for a line that has already gone.
-        for expected in (b"queued-two", b"QUEUED"):
+        # Pending messages are visible but not represented as turns the model
+        # has already received.
+        for expected in (b"NEXT 1", b"queued-one", b"NEXT 2", b"queued-two"):
             if expected not in plain:
                 raise AssertionError(
-                    f"a waiting line is not shown in the conversation; "
+                    f"a waiting line is not shown in NEXT; "
                     f"missing {expected!r}: {plain!r}"
                 )
+        if b"TURN \xc2\xb7 QUEUED" in plain:
+            raise AssertionError(f"pending input leaked into the transcript: {plain!r}")
+        if plain.find(b"ACTIVE TURN") > plain.find(b"NEXT 1"):
+            raise AssertionError(f"NEXT was drawn inside the active turn: {plain!r}")
         if b"Enter:queue(2)" not in plain:
             raise AssertionError(f"the footer lost its count: {plain!r}")
 
-        # Every variable row -- sending, queued, errors -- comes out of the
-        # history above it, so the pane ends on the same terminal row whatever
-        # it is saying. When rows are reserved and not drawn, the pane comes
-        # out short and everything below walks up the screen: one row per
-        # waiting line, which is exactly what an operator sees.
+        # NEXT owns fixed rows below history, and the budget hands those rows
+        # to active USER entries as they dispatch. The footer remains fixed.
         footer_with_queue = frame_row_of(second_queued, b"  Enter:")
         if footer_with_queue != footer_while_sending:
             raise AssertionError(
@@ -4504,9 +4497,9 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
                 f"{footer_with_queue} with two lines waiting"
             )
         first_plain = CSI_RE.sub(b"", frame_containing(first_queued, b"queued-one"))
-        if b"QUEUED" not in first_plain:
+        if b"NEXT 1" not in first_plain:
             raise AssertionError(
-                f"the first waiting line is not marked as waiting: {first_plain!r}"
+                f"the first waiting line is not in NEXT: {first_plain!r}"
             )
 
         # The newest thing the operator typed is the first thing the arrows
@@ -4566,6 +4559,154 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
             process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
         )
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def chat_steer_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
+    gate = GatedHttpResponse(
+        (503, {"error": "released after steer ordering was observed"}),
+        hold_seconds=30.0,
+    )
+    return {
+        "/api/v1/keepers/chat/stream": gate,
+        "/api/v1/keepers/turn/interrupt": (
+            200,
+            {"signalled": True, "turn_id": 71},
+        ),
+    }, gate
+
+
+def chat_steer_interaction(
+    gate: GatedHttpResponse, requests: HttpRequests
+) -> Interaction:
+    """/steer is visibly distinct and dispatches before ordinary NEXT."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\r",
+            b"Keepers \xe2\x96\xb8 \x1b[1malpha",
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"m",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"original",
+            composer_showing(b"original"),
+        )
+        send_and_wait(process, master_fd, output, b"\r", b"ACTIVE TURN")
+
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"ordinary-next",
+            composer_showing(b"ordinary-next"),
+        )
+        send_and_wait(process, master_fd, output, b"\r", b"NEXT 1")
+        steer = b"/steer corrected-course"
+        send_and_wait(
+            process, master_fd, output, steer, composer_showing(steer)
+        )
+        steered = send_and_wait(
+            process, master_fd, output, b"\r", b"STEER 1"
+        )
+        plain = CSI_RE.sub(b"", frame_containing(steered, b"STEER 1"))
+        expected_rows = (
+            b"STEER 1",
+            b"corrected-course",
+            b"NEXT 2",
+            b"ordinary-next",
+        )
+        for expected in expected_rows:
+            if expected not in plain:
+                raise AssertionError(
+                    f"steer/next lanes are incomplete: {plain!r}"
+                )
+        if plain.find(b"STEER 1") > plain.find(b"NEXT 2"):
+            raise AssertionError(
+                f"steer does not precede ordinary NEXT: {plain!r}"
+            )
+
+        deadline = time.monotonic() + 5.0
+        while not any(
+            path == "/api/v1/keepers/turn/interrupt"
+            for path, _body in requests
+        ):
+            read_available(master_fd, output)
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    "/steer did not signal the current turn"
+                )
+            time.sleep(0.02)
+
+        gate.release.set()
+        deadline = time.monotonic() + 10.0
+        while True:
+            read_available(master_fd, output)
+            chat_bodies = [
+                body
+                for path, body in requests
+                if path == "/api/v1/keepers/chat/stream"
+            ]
+            if len(chat_bodies) >= 3:
+                break
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    "steer queue did not drain three chat requests: "
+                    f"{requests!r}"
+                )
+            time.sleep(0.02)
+        messages = [
+            json.loads(body).get("message") for body in chat_bodies[:3]
+        ]
+        expected_messages = [
+            "original",
+            "corrected-course",
+            "ordinary-next",
+        ]
+        if messages != expected_messages:
+            raise AssertionError(
+                f"steer dispatch order is not causal: {messages!r}"
+            )
+
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"Enter:send",
+            start=0,
+            timeout=10.0,
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b",
+            b"Keepers \xe2\x96\xb8 \x1b[1malpha",
+        )
+        send_and_wait(
+            process, master_fd, output, b"\x1b", b"MASC Keepers"
+        )
         os.write(master_fd, b"q")
 
     return interact
@@ -9711,6 +9852,15 @@ def run_keyboard_regression(executable: str) -> None:
         description="Keeper chat queue is drawn and walked",
         interact=chat_queue_interaction(chat_queue_gate),
         http_fixtures=chat_queue_fixtures,
+    )
+    steer_requests: HttpRequests = []
+    steer_fixtures, steer_gate = chat_steer_http_fixtures()
+    run_terminal_scenario(
+        executable,
+        description="Keeper chat steer interrupts and precedes NEXT",
+        interact=chat_steer_interaction(steer_gate, steer_requests),
+        http_fixtures=steer_fixtures,
+        http_requests=steer_requests,
     )
     run_terminal_scenario(
         executable,

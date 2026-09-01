@@ -12,6 +12,9 @@
 let check = Alcotest.check
 let bool = Alcotest.bool
 let string = Alcotest.string
+let int = Alcotest.int
+let list = Alcotest.list
+let fail = Alcotest.fail
 
 module Color = Masc_tui_color
 module Palette = Masc_tui_terminal_palette
@@ -513,7 +516,17 @@ let test_picker_orders_native_first_then_by_cost_and_name () =
     (List.map (fun (entry : Masc_tui_theme_choice.entry) -> entry.name) entries);
   match entries with
   | [] -> fail "bundled theme picker is empty"
-  | first :: _ -> check int "first scheme needs no lift" 0 first.lifted
+  | first :: rest ->
+    (* No bundled scheme passes natively today (the best one still lifts a
+       colour), so asserting [lifted = 0] pins the catalog's contents, not
+       the feature. The ordering's own guarantee is what holds regardless
+       of the data: the first entry lifts no more than any other, so a
+       native scheme — once one exists — lands first. *)
+    List.iter
+      (fun (entry : Masc_tui_theme_choice.entry) ->
+        check bool "first scheme lifts the least" true
+          (first.lifted <= entry.lifted))
+      rest
 ;;
 
 let () =

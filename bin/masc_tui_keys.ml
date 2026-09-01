@@ -124,9 +124,8 @@ let for_surface = function
       ]
   | Lanes ->
       [ b Navigate "j/k" "move" ~help:"move the lane cursor"
-      ; b Act "Right / Enter" "detail"
-          ~help:"open the selected Keeper, or a standalone lane's exact runs"
-      ; b Act "c / m" "chat" ~help:"chat with the selected Keeper"
+      ; b Act "Right / Enter" "runs"
+          ~help:"open the standalone lane's exact runs"
       ; b Act "Esc" "overview"
       ]
       @ listing_meta

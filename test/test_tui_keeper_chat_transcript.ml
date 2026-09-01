@@ -481,7 +481,13 @@ let test_an_answer_clears_the_prompt () =
     ];
   check bool "nothing is held any more" true
     (Option.is_none (Transcript.awaiting_approval t));
-  check (list string) "and no prompt is drawn" [] (approval_rows t)
+  check (list string) "and no prompt is drawn" [] (approval_rows t);
+  check bool "the decision is approved, not success" true
+    (List.exists
+       (fun (kind, text) ->
+         kind = Transcript.Approval Transcript.Approved
+         && contains ~needle:"approval approved" text)
+       (rows t))
 
 let test_a_timeout_clears_the_prompt_too () =
   let t = fresh () in
@@ -492,7 +498,26 @@ let test_a_timeout_clears_the_prompt_too () =
   (* The decision is over even though nobody made one. Leaving the prompt up
      would ask again for a call that has already been denied. *)
   check bool "the prompt is gone" true
-    (Option.is_none (Transcript.awaiting_approval t))
+    (Option.is_none (Transcript.awaiting_approval t));
+  check bool "the absent decision is timed out, not failed" true
+    (List.exists
+       (fun (kind, text) ->
+         kind = Transcript.Approval Transcript.Timed_out
+         && contains ~needle:"approval timed out" text)
+       (rows t))
+
+let test_a_denial_uses_decision_vocabulary () =
+  let t = fresh () in
+  feed t
+    [ requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
+    ; Live.Approval_settled { call_id = "c1"; outcome = "deny" }
+    ];
+  check bool "the decision is denied, not failed" true
+    (List.exists
+       (fun (kind, text) ->
+         kind = Transcript.Approval Transcript.Denied
+         && contains ~needle:"approval denied" text)
+       (rows t))
 
 let test_a_late_settle_for_another_call_leaves_the_prompt () =
   let t = fresh () in
@@ -544,6 +569,8 @@ let test_the_whole_reasoning_trail_is_kept () =
 let kind_to_string : Transcript.status_kind -> string = function
   | Transcript.Progress -> "progress"
   | Transcript.Attention -> "attention"
+  | Transcript.Approval outcome ->
+      "approval:" ^ Transcript.approval_outcome_to_string outcome
 
 let test_status_rows_grow_only_with_what_they_report () =
   let t = fresh () in
@@ -794,6 +821,29 @@ let test_compact_summary_counts_registered_public_names () =
         [ "Tools 4"; "Read 2"; "Edit 1"; "Execute 1" ]
   | rows -> failf "expected one compact row, got %d" (List.length rows)
 
+let test_compact_summary_keeps_operational_tool_kinds () =
+  let activity name =
+    Transcript.make_tool_activity ~call_id:None ~tool_name:name ~args:"{}"
+      ~outcome:Transcript.Returned ~duration:None ()
+  in
+  let projection =
+    Transcript.tool_block
+      [ activity "keeper_skill"
+      ; activity "masc_keeper_status"
+      ; activity "masc_fusion"
+      ; activity "Read"
+      ]
+    |> Transcript.project_tool_block Transcript.Compact
+  in
+  match projection.rows with
+  | [ summary ] ->
+      List.iter
+        (fun expected ->
+          check bool ("summary keeps " ^ expected) true
+            (contains ~needle:expected summary))
+        [ "Skill 1"; "Keeper 1"; "Fusion 1" ]
+  | rows -> failf "expected one compact row, got %d" (List.length rows)
+
 let full_tool_rows block =
   (Transcript.project_tool_block Transcript.Full block).Transcript.rows
 
@@ -995,6 +1045,8 @@ let () =
             test_compact_and_full_keep_the_same_typed_facts
         ; test_case "compact summary counts registered public names" `Quick
             test_compact_summary_counts_registered_public_names
+        ; test_case "compact summary keeps operational tool kinds" `Quick
+            test_compact_summary_keeps_operational_tool_kinds
         ; test_case "a fold reports the outcome its marker stands for" `Quick
             test_a_fold_reports_the_outcome_its_marker_stands_for
         ] )
@@ -1014,6 +1066,8 @@ let () =
             test_an_answer_clears_the_prompt
         ; test_case "a timeout clears the prompt too" `Quick
             test_a_timeout_clears_the_prompt_too
+        ; test_case "a denial uses decision vocabulary" `Quick
+            test_a_denial_uses_decision_vocabulary
         ; test_case "a settle for another call leaves the prompt" `Quick
             test_a_late_settle_for_another_call_leaves_the_prompt
         ; test_case "the arguments reach the call row" `Quick

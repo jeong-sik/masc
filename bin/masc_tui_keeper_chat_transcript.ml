@@ -86,6 +86,18 @@ type awaiting_approval =
     because : string
   }
 
+type approval_outcome =
+  | Approved
+  | Denied
+  | Timed_out
+  | Displaced
+  | Approval_other of string
+
+type approval_settlement =
+  { settled_tool_name : string
+  ; settled_outcome : approval_outcome
+  }
+
 type unreadable =
   { count : int
   ; last_detail : string
@@ -126,6 +138,7 @@ type t =
   ; mutable unreadable_count : int
   ; mutable last_unreadable : string
   ; mutable awaiting : awaiting_approval option
+  ; mutable last_approval_settlement : approval_settlement option
   ; (* What the server said when it took the request, and how long its chat
        queue was at that moment. [None] until the acceptance arrives, which is
        the window this exists for: a wait of minutes used to read as "waiting
@@ -149,6 +162,7 @@ let create ~keeper_name ~request_id ~started_at =
   ; unreadable_count = 0
   ; last_unreadable = ""
   ; awaiting = None
+  ; last_approval_settlement = None
   ; admission = None
   }
 
@@ -389,6 +403,43 @@ let compact_tool_parts (activities : tool_activity list) =
 let compact_tool_mix activities =
   String.concat " · " (compact_tool_parts activities)
 
+type activity_kind =
+  | Skill_activity
+  | Keeper_activity
+  | Fusion_activity
+  | Tool_activity
+
+let activity_kind (activity : tool_activity) =
+  let name = activity.tool_name in
+  if
+    String.equal name "keeper_skill"
+    || String.starts_with ~prefix:"keeper_compose_" name
+  then Skill_activity
+  else if String.starts_with ~prefix:"masc_fusion" name then Fusion_activity
+  else if
+    String.starts_with ~prefix:"masc_keeper" name
+    || String.starts_with ~prefix:"keeper_" name
+  then Keeper_activity
+  else Tool_activity
+
+(* Generic tools are already named by [compact_tool_mix]. These three tags
+   retain the operational kind a compact fold used to erase. *)
+let compact_activity_kinds activities =
+  let count kind =
+    List.fold_left
+      (fun total activity ->
+        if activity_kind activity = kind then total + 1 else total)
+      0 activities
+  in
+  [ Skill_activity, "Skill"
+  ; Keeper_activity, "Keeper"
+  ; Fusion_activity, "Fusion"
+  ]
+  |> List.filter_map (fun (kind, label) ->
+       match count kind with
+       | 0 -> None
+       | count -> Some (Printf.sprintf "%s %d" label count))
+
 (* Both projections retain the same typed activities. [Full] is the shipping
    view and therefore stays byte-compatible with the old formatter. [Compact]
    folds only the presentation rows; it reports exactly how many detail rows
@@ -404,11 +455,16 @@ let project_tool_block mode (block : tool_block) =
     | Compact, activities ->
         let outcomes = String.concat ", " (compact_outcome_parts activities) in
         let mix = compact_tool_mix activities in
+        let kinds =
+          match compact_activity_kinds activities with
+          | [] -> ""
+          | kinds -> " · " ^ String.concat " · " kinds
+        in
         let hidden_activity_rows = List.length full_activity_rows in
         ( [ safe_line
-              (Printf.sprintf "%s Tools %d · %s · %s · %s folded"
+              (Printf.sprintf "%s Tools %d%s · %s · %s · %s folded"
                  (compact_marker activities)
-                 activity_count mix outcomes
+                 activity_count kinds mix outcomes
                  (plural hidden_activity_rows "detail"))
           ]
         , hidden_activity_rows
@@ -486,6 +542,21 @@ let trail t =
 type status_kind =
   | Progress
   | Attention
+  | Approval of approval_outcome
+
+let approval_outcome_of_string = function
+  | "approve" | "approved" -> Approved
+  | "deny" | "denied" -> Denied
+  | "timed_out" -> Timed_out
+  | "displaced" -> Displaced
+  | other -> Approval_other other
+
+let approval_outcome_to_string = function
+  | Approved -> "approved"
+  | Denied -> "denied"
+  | Timed_out -> "timed out"
+  | Displaced -> "displaced"
+  | Approval_other other -> safe_line other
 
 let phase_text t =
   match t.phase with
@@ -581,6 +652,13 @@ let awaiting_text t =
 let status_rows ~now t =
   [ Some (Progress, progress_text ~now t)
   ; Option.map (fun text -> (Attention, text)) (awaiting_text t)
+  ; Option.map
+      (fun settlement ->
+        ( Approval settlement.settled_outcome
+        , Printf.sprintf "approval %s · %s"
+            (approval_outcome_to_string settlement.settled_outcome)
+            settlement.settled_tool_name ))
+      t.last_approval_settlement
   ; Option.map (fun text -> (Attention, text)) (interrupt_text t)
   ; Option.map (fun text -> (Attention, text)) (unreadable_text t)
   ]
@@ -864,15 +942,21 @@ let apply t (delta : Live.delta) =
               (fun call -> { call with args })
           with
           | Call_updated | Call_missing | Call_ambiguous | Call_conflicting -> ()));
+      t.last_approval_settlement <- None;
       t.awaiting <- Some { call_id; tool_name; question; because }
-  | Live.Approval_settled { call_id; outcome = _ } ->
+  | Live.Approval_settled { call_id; outcome } ->
       (* Cleared whatever the answer was, including none: the prompt is over
          either way, and leaving it up would ask again for a call that has
          already been decided. Guarded by id so a late settle for a superseded
          call cannot clear a prompt now waiting on a different one. *)
       (match t.awaiting with
        | Some awaiting when String.equal awaiting.call_id call_id ->
-           t.awaiting <- None
+           t.awaiting <- None;
+           t.last_approval_settlement <-
+             Some
+               { settled_tool_name = awaiting.tool_name
+               ; settled_outcome = approval_outcome_of_string outcome
+               }
        | Some _ | None -> ())
   | Live.Checkpoint -> t.checkpoints <- t.checkpoints + 1
   | Live.External_effect_completed ->

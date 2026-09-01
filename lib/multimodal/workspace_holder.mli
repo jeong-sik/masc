@@ -19,32 +19,29 @@
 
     Threading the workspace through every callsite is intrusive
     and breaks RFC-0002 (the keeper FSM cannot grow new fields).
-    A module-level ref guarded by a mutex is the smallest seam
+    A module-level atomic immutable snapshot is the smallest seam
     that satisfies all three.
 
     {1 Concurrency}
 
-    The ref is protected by an internal {!Stdlib.Mutex} (not
-    {!Eio.Mutex}) so that updates from any context — pre-Eio
-    init, an Eio fiber, a unit-test main thread — work uniformly.
-    Reads ({!get}) snapshot the workspace under the lock and
-    return the immutable value; updates ({!update}) compose a
-    function under the lock. There is no recursion or blocking
-    I/O inside the critical section, so the mutex never becomes
-    a contention hotspot. *)
+    The [Atomic.t] works from any context — pre-Eio init, an Eio
+    fiber, a unit-test main thread, or another domain. Reads
+    ({!get}) return one immutable snapshot; updates ({!update})
+    publish the result of a pure function through a compare-and-set
+    retry loop. *)
 
 val get : unit -> Workspace.t
 (** Snapshot the current workspace value. *)
 
-val update : (Workspace.t -> Workspace.t) -> unit
-(** [update f] atomically replaces the held workspace with
-    [f current]. The function should be pure — exceptions thrown
-    inside [f] propagate and the workspace is left unchanged. *)
+val update : (Workspace.t -> Workspace.t * 'a) -> 'a
+(** [update transition] atomically publishes the first component returned by
+    [transition current] and returns the second. [transition] must be pure:
+    concurrent publication may evaluate it again against a newer snapshot.
+    Exceptions propagate and leave the workspace unchanged. *)
 
-val replace : Workspace.t -> unit
-(** Replace the held workspace value entirely. Primarily for
-    test setup; production code should prefer {!update}. *)
-
-val reset : unit -> unit
-(** Reset to {!Workspace.empty}. Test helper; equivalent to
-    [replace Workspace.empty]. *)
+module For_testing : sig
+  val replace : Workspace.t -> unit
+  val reset : unit -> unit
+end
+(** Explicit test-only whole-snapshot controls. Production callers update the
+    workspace only through {!update}. *)

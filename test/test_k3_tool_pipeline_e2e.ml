@@ -125,13 +125,12 @@ let phase2_consumer wc =
 (* ── Phase 3: hydrate + workspace_holder ─────────────────────── *)
 let phase3_hydrate raws =
   print_endline "── Phase 3: hydrate + workspace_holder ──";
-  H.reset ();
-  H.update (fun ws ->
-      let ws', added =
-        B.hydrate_with_workspace ws raws ~now ~created_by:"k3-test"
-      in
-      assert_eq_int ~label:"hydrated" 4 (List.length added);
-      ws');
+  H.For_testing.reset ();
+  let added = B.hydrate_batch raws ~now ~created_by:"k3-test" in
+  H.update (fun workspace ->
+    List.fold_left W.add workspace added, ());
+  let added_count = List.length added in
+  assert_eq_int ~label:"hydrated" 4 added_count;
   let snap = H.get () in
   assert_eq_int ~label:"workspace_size" 4 (W.size snap);
   print_endline "  4 typed artifacts in workspace_holder"

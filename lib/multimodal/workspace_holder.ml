@@ -1,29 +1,18 @@
 (* Workspace_holder — see workspace_holder.mli for design. *)
 
-let mutex = Mutex.create ()
+let workspace = Atomic.make Workspace.empty
 
-let workspace_ref = ref Workspace.empty
+let get () = Atomic.get workspace
 
-let get () =
-  Mutex.lock mutex;
-  let snap = !workspace_ref in
-  Mutex.unlock mutex;
-  snap
+let rec update transition =
+  let current = Atomic.get workspace in
+  let next, output = transition current in
+  if Atomic.compare_and_set workspace current next
+  then output
+  else update transition
+;;
 
-let replace ws =
-  Mutex.lock mutex;
-  workspace_ref := ws;
-  Mutex.unlock mutex
-
-let update f =
-  Mutex.lock mutex;
-  let next =
-    try f !workspace_ref
-    with exn ->  (* cancel-guard-ok: re-raises below *)
-      Mutex.unlock mutex;
-      raise exn
-  in
-  workspace_ref := next;
-  Mutex.unlock mutex
-
-let reset () = replace Workspace.empty
+module For_testing = struct
+  let replace value = Atomic.set workspace value
+  let reset () = replace Workspace.empty
+end

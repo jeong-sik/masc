@@ -12,11 +12,11 @@
      Wirein_helpers.extract_raw_artifacts  (K1: consumer)
        │  drains and parses
        ▼
-     Multimodal_keeper_bridge.hydrate_with_workspace
-       │  typed Artifact construction + DAG insertion
+     Multimodal_keeper_bridge.hydrate_batch
+       │  typed Artifact construction
        ▼
      Workspace_holder.update  (K1)
-       │  process-wide live workspace
+       │  pure artifact insertion into process-wide live workspace
        ▼
      Server_routes_http_routes_multimodal.list_response  (D1)
        │  read-only HTTP envelope
@@ -122,17 +122,15 @@ let phase2_consumer_extraction wc =
 (* ── Phase 3: hydration → workspace insertion ─────────────────── *)
 let phase3_hydrate raws =
   print_endline "── Phase 3: hydrate + workspace ──";
-  H.reset ();
-  H.update (fun ws ->
-      let ws', added =
-        B.hydrate_with_workspace ws raws ~now
-          ~created_by:"test-keeper"
-      in
-      assert_eq_int ~label:"hydrated" 3 (List.length added);
-      ws');
+  H.For_testing.reset ();
+  let added = B.hydrate_batch raws ~now ~created_by:"test-keeper" in
+  H.update (fun workspace ->
+    List.fold_left W.add workspace added, ());
+  let added_count = List.length added in
+  assert_eq_int ~label:"hydrated" 3 added_count;
   let snap = H.get () in
   assert_eq_int ~label:"workspace_size" 3 (W.size snap);
-  print_endline "  hydrate_with_workspace ok (3 typed artifacts in holder)"
+  print_endline "  hydrate_batch + holder update ok (3 typed artifacts)"
 
 (* ── Phase 4: HTTP surface response — D1 list endpoint ────────── *)
 let phase4_d1_response_via_holder () =
@@ -168,12 +166,14 @@ let phase5_incremental_turn () =
       ~metadata:(`Assoc [ ("duration_ms", `Int 1500) ])
   in
   let raws, _ = Result.get_ok (Wirein.extract_raw_artifacts wc) in
-  H.update (fun ws ->
-      let ws', _ =
-        B.hydrate_with_workspace ws raws ~now:(now +. 1.0)
-          ~created_by:"test-keeper"
-      in
-      ws');
+  let added =
+    B.hydrate_batch
+      raws
+      ~now:(now +. 1.0)
+      ~created_by:"test-keeper"
+  in
+  H.update (fun workspace ->
+    List.fold_left W.add workspace added, ());
   let snap = H.get () in
   assert_eq_int ~label:"workspace_size_after_turn2" 4 (W.size snap);
   let json = Multimodal_routes.list_response () in

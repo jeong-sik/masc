@@ -697,28 +697,37 @@ type cache_entry = {
   expires_at : float;
 }
 
-let initial_cache_capacity = 32
-let cache_entries : (string, cache_entry) Hashtbl.t = Hashtbl.create initial_cache_capacity
-let cache_mutex = Eio.Mutex.create ()
+module Cache_by_key = Set_util.StringMap
+
+let cache_entries = Atomic.make Cache_by_key.empty
 
 let cache_lookup key now =
   let ttl = Env_config.Tools.web_search_cache_ttl_sec () in
-  if Stdlib.Float.compare ttl 0.0 <= 0 then
-    None
-  else
-    Eio.Mutex.use_rw ~protect:true cache_mutex (fun () ->
-        Hashtbl.filter_map_inplace
-          (fun _ entry -> if Stdlib.Float.compare entry.expires_at now <= 0 then None else Some entry)
-          cache_entries;
-        match Hashtbl.find_opt cache_entries key with
-        | Some entry when Stdlib.Float.compare entry.expires_at now > 0 -> Some entry.response
-        | _ -> None)
+  if Stdlib.Float.compare ttl 0.0 <= 0
+  then None
+  else (
+    let rec publish_pruned_snapshot () =
+      let current = Atomic.get cache_entries in
+      let next =
+        Cache_by_key.filter
+          (fun _ entry -> Stdlib.Float.compare entry.expires_at now > 0)
+          current
+      in
+      let response =
+        Option.map (fun entry -> entry.response) (Cache_by_key.find_opt key next)
+      in
+      if Atomic.compare_and_set cache_entries current next
+      then response
+      else publish_pruned_snapshot ()
+    in
+    publish_pruned_snapshot ())
 
 let cache_store key response now =
   let ttl = Env_config.Tools.web_search_cache_ttl_sec () in
-  if Stdlib.Float.compare ttl 0.0 > 0 then
-    Eio.Mutex.use_rw ~protect:true cache_mutex (fun () ->
-        Hashtbl.replace cache_entries key { response; expires_at = now +. ttl })
+  if Stdlib.Float.compare ttl 0.0 > 0
+  then
+    Atomic_util.update cache_entries (fun current ->
+      Cache_by_key.add key { response; expires_at = now +. ttl } current)
 
 (* Rendered when the provider chain is empty — the operator-facing
    remedy travels with the failure instead of a bare symptom. Shared
@@ -758,22 +767,14 @@ let search_impl ~query ~limit =
   in
   loop [] (provider_order ())
 
-let search_impl_mutex = Mutex.create ()
-let search_impl_ref = ref search_impl
+let search_impl_cell = Atomic.make search_impl
 
-let current_search_impl () =
-  Mutex.protect search_impl_mutex (fun () -> !search_impl_ref)
+let current_search_impl () = Atomic.get search_impl_cell
 
 let with_search_impl_for_test impl f =
-  let previous =
-    Mutex.protect search_impl_mutex (fun () ->
-        let previous = !search_impl_ref in
-        search_impl_ref := impl;
-        previous)
-  in
+  let previous = Atomic.exchange search_impl_cell impl in
   Stdlib.Fun.protect
-    ~finally:(fun () ->
-      Mutex.protect search_impl_mutex (fun () -> search_impl_ref := previous))
+    ~finally:(fun () -> Atomic.set search_impl_cell previous)
     f
 
 let simulated_search_impl ~outcomes ~query ~limit =

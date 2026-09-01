@@ -6637,7 +6637,8 @@ let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
   let messages =
     Option.value ~default:(chat_rows_for state keeper_name) messages
     |> List.filter (fun message ->
-      state.msg_memory_visible || message.me_role <> Message_memory)
+      state.msg_memory_visibility <> Memory_hidden
+      || message.me_role <> Message_memory)
   in
   List.filter
     (fun message ->
@@ -6787,9 +6788,18 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
               | None -> message.me_text
               | Some projection ->
                   String.concat "\n" (projected_tool_rows projection))
+          | Message_memory -> (
+              match state.msg_memory_visibility with
+              (* Summary uses the producer's typed compact projection. Hidden
+                 rows never reach this arm (the layout filter removed them),
+                 and a neutral system row with no projection remains whole. *)
+              | Memory_full | Memory_hidden -> message.me_text
+              | Memory_summary ->
+                  Option.value ~default:message.me_text
+                    message.me_memory_summary)
           | Message_thinking | Message_user _ | Message_keeper
           | Message_autonomous
-          | Message_status | Message_error | Message_memory ->
+          | Message_status | Message_error ->
               message.me_text
         in
         (* What the links in this message point at, on rows of their own
@@ -6960,7 +6970,7 @@ let render_keeper_message (state : state) =
          mode away from its default is spelled -- see
          [Tui_types.chat_visibility_summary] for why. *)
       let modes =
-        chat_visibility_summary ~memory_visible:state.msg_memory_visible
+        chat_visibility_summary ~memory:state.msg_memory_visibility
           ~origin:state.msg_origin_display
           ~reasoning:state.msg_reasoning_visibility
           ~tools:state.msg_tool_visibility
@@ -7392,13 +7402,14 @@ let render_keeper_message (state : state) =
          (Printf.sprintf
             "  %d saved row(s) could not be read and are not shown"
             state.msg_loaded_dropped));
-    (match state.msg_memory_visible, state.msg_memory_error with
-     | false, _ -> ()
-     | true, None -> ()
-     | true, Some detail ->
+    (match state.msg_memory_visibility, state.msg_memory_error with
+     | Memory_hidden, _ -> ()
+     | (Memory_summary | Memory_full), None -> ()
+     | (Memory_summary | Memory_full), Some detail ->
          box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
            ("  memory journal unavailable: " ^ detail));
-    (if state.msg_memory_visible && state.msg_memory_dropped > 0 then
+    (if state.msg_memory_visibility <> Memory_hidden
+        && state.msg_memory_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
          (Printf.sprintf
             "  %d memory journal row(s) could not be read and are not shown"
@@ -7624,8 +7635,8 @@ let render_keeper_message (state : state) =
           compact_enter_hint compact_scroll_hint escape_hint
       else
         Printf.sprintf
-          "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-F:layout  \
-           Ctrl-O:image  %s%s  %s  Ctrl-U:clear"
+          "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:memory  \
+           Ctrl-F:layout  Ctrl-O:image  %s%s  %s  Ctrl-U:clear"
           enter_hint scroll_hint switch_hint escape_hint
     in
     Buffer.add_string chat_buf

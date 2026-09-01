@@ -1277,6 +1277,13 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          far back is worse than a key that ends the trip. *)
       set_msg_scroll state 0;
       true
+    end else if c = Some 14 then begin
+      (* Ctrl-N walks the Librarian/Memory journal lane through summary,
+         full, and hidden, same as /memory. Ctrl-M would read better for
+         memory, but that byte is the carriage return. *)
+      state.msg_memory_visibility <-
+        next_memory_visibility state.msg_memory_visibility;
+      true
     end else if c = Some 11 then begin
       (* Ctrl-K: drop the newest waiting line without sending it. The queue
          shows what waits in the order it will go; the newest is the one a
@@ -1689,6 +1696,7 @@ let append_chat_history ?tool_block ?skill_activity ?at ?submitted_at ?turn_phas
           me_turn_sequence = None;
           me_operation_seq = operation_seq;
           me_text = text;
+          me_memory_summary = None;
           me_submitted_at = submitted_at;
           me_tool_block = tool_block;
           me_skill_activity = skill_activity;
@@ -4393,7 +4401,7 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         | Keeper_chat_history.Tool_calls _
         | Keeper_chat_history.Skill_activity _
         | Keeper_chat_history.Reasoning _
-        | Keeper_chat_history.Memory_activity ->
+        | Keeper_chat_history.Memory_activity _ ->
             None)
       rows
   in
@@ -4409,7 +4417,7 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         | Keeper_chat_history.Tool_calls _
         | Keeper_chat_history.Skill_activity _
         | Keeper_chat_history.Reasoning _
-        | Keeper_chat_history.Memory_activity -> None)
+        | Keeper_chat_history.Memory_activity _ -> None)
       rows
   in
   state.msg_history <-
@@ -4460,6 +4468,18 @@ let locally_submitted_at state keeper_name request_id =
 
 let msg_entry_of_history_row state keeper_name ~operation_seq
     (row : Keeper_chat_history.row) =
+  let memory_summary =
+    match row.Keeper_chat_history.kind with
+    | Keeper_chat_history.Memory_activity { summary } -> summary
+    | Keeper_chat_history.Addressed_to_keeper _
+    | Keeper_chat_history.Said_by_keeper
+    | Keeper_chat_history.Autonomous_reply
+    | Keeper_chat_history.Delivery_failed _
+    | Keeper_chat_history.Tool_calls _
+    | Keeper_chat_history.Skill_activity _
+    | Keeper_chat_history.Reasoning _ ->
+        None
+  in
   let role, turn_phase, text, tool_block, skill_activity =
     match row.Keeper_chat_history.kind with
     | Keeper_chat_history.Addressed_to_keeper { speaker; surface } ->
@@ -4509,7 +4529,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , Some activity )
     | Keeper_chat_history.Reasoning lines ->
         (Message_thinking, Turn_progress, String.concat "\n" lines, None, None)
-    | Keeper_chat_history.Memory_activity ->
+    | Keeper_chat_history.Memory_activity _ ->
         (Message_memory, Turn_progress, row.text, None, None)
   in
   let submitted_at =
@@ -4522,12 +4542,12 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
       | Keeper_chat_history.Tool_calls _
       | Keeper_chat_history.Skill_activity _
       | Keeper_chat_history.Reasoning _
-      | Keeper_chat_history.Memory_activity), _
+      | Keeper_chat_history.Memory_activity _), _
     | Keeper_chat_history.Addressed_to_keeper _, None -> None
   in
   let timestamp =
     match row.Keeper_chat_history.kind with
-    | Keeper_chat_history.Memory_activity
+    | Keeper_chat_history.Memory_activity _
       when Float.equal row.Keeper_chat_history.at 0.0 ->
         "--:--:--"
     | _ ->
@@ -4560,6 +4580,10 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
   ; me_turn_sequence = row.Keeper_chat_history.turn_sequence
   ; me_operation_seq = operation_seq
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
+  ; me_memory_summary =
+      Option.map
+        (Keeper_chat.terminal_safe_text ~preserve_newlines:false)
+        memory_summary
   ; me_submitted_at = submitted_at
   ; me_tool_block = tool_block
   ; me_skill_activity = skill_activity
@@ -5171,6 +5195,7 @@ let chat_notice state ~keeper_name ~role text =
               me_turn_sequence = None;
               me_operation_seq = next_chat_operation_seq state "";
               me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
+              me_memory_summary = None;
               me_submitted_at = None;
               me_tool_block = None;
               me_skill_activity = None;
@@ -5678,13 +5703,14 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
        | Tools_compact, _ | Tools_full, None -> ());
       notice ~role:Message_status
         ("tool calls " ^ tool_visibility_to_string state.msg_tool_visibility)
-  | Masc_tui_command.Toggle_memory ->
+  | Masc_tui_command.Cycle_memory ->
       Buffer.clear state.msg_input;
-      state.msg_memory_visible <- not state.msg_memory_visible;
+      state.msg_memory_visibility <-
+        next_memory_visibility state.msg_memory_visibility;
       notice ~role:Message_status
-        (if state.msg_memory_visible
-         then "Librarian/Memory timeline shown (/memory to hide)"
-         else "Librarian/Memory timeline hidden (/memory to show)")
+        ("Librarian/Memory timeline: "
+         ^ memory_visibility_to_string state.msg_memory_visibility
+         ^ " (Ctrl-N or /memory to cycle)")
   | Masc_tui_command.Find_in_chat query ->
       (* A new query starts at the newest message; [Find_next] below carries on
          from wherever this landed. *)
@@ -7693,7 +7719,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
        | Masc_tui_command.Steer_missing_message
        | Masc_tui_command.Set_thinking _
-       | Masc_tui_command.Set_tools _ | Masc_tui_command.Toggle_memory
+       | Masc_tui_command.Set_tools _ | Masc_tui_command.Cycle_memory
        (* [/find] moves the pane on purpose, so unlike every other command it
           must not be followed by the reset to the newest row above. *)
        | Masc_tui_command.Find_in_chat _ | Masc_tui_command.Find_next

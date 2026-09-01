@@ -70,7 +70,7 @@ let origin_request_id = function
   | History.Addressed_to_keeper _ | History.Said_by_keeper
   | History.Autonomous_reply
   | History.Tool_calls _ | History.Skill_activity _ | History.Reasoning _
-  | History.Memory_activity -> None
+  | History.Memory_activity _ -> None
 
 let full_tool_rows = History.tool_rows
 
@@ -87,7 +87,7 @@ let kind_to_string : History.kind -> string = function
         (String.concat " | " (Transcript.skill_rows ~full:true skill))
   | History.Reasoning lines ->
       Printf.sprintf "thinking[%s]" (String.concat " | " lines)
-  | History.Memory_activity -> "memory"
+  | History.Memory_activity _ -> "memory"
 
 (* An assistant row the way an autonomous turn persists it: the server's
    [autonomous_turn] marker, a blank [content], and a [t: "trace"] block of
@@ -186,7 +186,14 @@ let test_roles_map_to_what_the_pane_draws () =
     (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows);
   check (list string) "and the text comes through"
     [ "고쳐줘"; "고쳤어요"; "slack 5xx"; "승인됨 · Execute" ]
-    (List.map (fun r -> r.History.text) decoded.History.rows)
+    (List.map (fun r -> r.History.text) decoded.History.rows);
+  (match (List.nth decoded.History.rows 3).History.kind with
+   | History.Memory_activity { summary } ->
+       check (option string) "a neutral system row stays whole" None summary
+   | History.Addressed_to_keeper _ | History.Said_by_keeper
+   | History.Autonomous_reply | History.Delivery_failed _
+   | History.Tool_calls _ | History.Skill_activity _ | History.Reasoning _ ->
+       fail "expected the system row to use the neutral Memory lane")
 
 (* The pane writes its own row when a turn fails, because most error rows are
    notices the server has no row for. A failed turn is the one it does record,
@@ -369,7 +376,7 @@ let test_an_addressed_row_says_who_sent_it_not_only_what_to_draw () =
     | History.Said_by_keeper | History.Autonomous_reply
     | History.Delivery_failed _ | History.Tool_calls _
     | History.Skill_activity _ | History.Reasoning _
-    | History.Memory_activity ->
+    | History.Memory_activity _ ->
         failf "expected an addressed row"
   in
   let is_operator json =
@@ -399,7 +406,7 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
     | History.Said_by_keeper | History.Autonomous_reply
     | History.Delivery_failed _ | History.Tool_calls _
     | History.Skill_activity _ | History.Reasoning _
-    | History.Memory_activity ->
+    | History.Memory_activity _ ->
         failf "expected an addressed row"
   in
   let surface kind extra = `Assoc (("kind", `String kind) :: extra) in
@@ -562,7 +569,7 @@ let test_consecutive_tool_rows_become_one_block () =
        | History.Autonomous_reply
        | History.Delivery_failed _ | History.Skill_activity _
        | History.Reasoning _
-       | History.Memory_activity ->
+       | History.Memory_activity _ ->
            fail "expected the middle row to be a tool block");
       check (float 0.0) "the block is keyed to its first call" 2.0
         tools.History.at
@@ -696,7 +703,7 @@ let test_an_autonomous_turn_draws_what_it_did () =
        | History.Autonomous_reply
        | History.Delivery_failed _ | History.Skill_activity _
        | History.Reasoning _
-       | History.Memory_activity ->
+       | History.Memory_activity _ ->
            fail "expected the second row to be a tool block");
       check (float 0.0) "both rows are keyed to the turn" 5.0 tools.History.at
   | rows -> failf "expected two rows, got %d" (List.length rows)
@@ -1111,7 +1118,17 @@ let test_memory_commit_names_added_removed_and_drop_reason () =
       check (float 0.0) "journal timestamp retained" 1_700_000_010.0 row.at;
       check bool "journal has a stable producer identity" true
         (Option.is_some row.structural_id);
-      check bool "typed as memory activity" true (row.kind = History.Memory_activity);
+      (match row.kind with
+       | History.Memory_activity { summary } ->
+           check (option string) "typed summary is producer-built"
+             (Some
+                "Librarian committed current memory revision 7 \xc2\xb7 now 1 added, 1 removed, 3 retained")
+             summary
+       | History.Addressed_to_keeper _ | History.Said_by_keeper
+       | History.Autonomous_reply | History.Delivery_failed _
+       | History.Tool_calls _ | History.Skill_activity _
+       | History.Reasoning _ ->
+           fail "journal row lost its Memory activity type");
       List.iter
         (fun needle ->
            check bool needle true (contains row.text needle))
@@ -1157,6 +1174,15 @@ let test_memory_failure_keeps_kind_and_detail () =
   | Ok { History.rows = [ row ]; dropped = 0 } ->
       check bool "failed observation has a stable producer identity" true
         (Option.is_some row.structural_id);
+      (match row.kind with
+       | History.Memory_activity { summary } ->
+           check (option string) "failure summary omits the detail body"
+             (Some "Librarian failed \xc2\xb7 exact_execution_failure") summary
+       | History.Addressed_to_keeper _ | History.Said_by_keeper
+       | History.Autonomous_reply | History.Delivery_failed _
+       | History.Tool_calls _ | History.Skill_activity _
+       | History.Reasoning _ ->
+           fail "failed journal row lost its Memory activity type");
       check bool "failure kind survives" true
         (contains row.text "exact_execution_failure");
       check bool "failure detail survives" true

@@ -65,7 +65,7 @@ type kind =
   | Tool_calls of Transcript.tool_block
   | Skill_activity of Transcript.skill_activity
   | Reasoning of string list
-  | Memory_activity
+  | Memory_activity of { summary : string option }
 
 let tool_rows block =
   let projection = Transcript.project_tool_block Transcript.Full block in
@@ -505,7 +505,7 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
                       Some (memory_committed_structural_id ~at ~revision)
                   ; turn_sequence = None
                   ; turn_id = None
-                  ; kind = Memory_activity
+                  ; kind = Memory_activity { summary = Some summary }
                   ; attachments = []
                   ; text =
                       (let change_lines =
@@ -541,6 +541,7 @@ let memory_failed_row (fields : (string * Yojson.Safe.t) list) =
     , Some detail
     , Some snapshot_present
     , Some cadence_deferred ) ->
+      let summary = Printf.sprintf "Librarian failed \xc2\xb7 %s" kind in
       Some
         { at
         ; structural_id =
@@ -549,12 +550,11 @@ let memory_failed_row (fields : (string * Yojson.Safe.t) list) =
                  ~snapshot_present ~cadence_deferred)
         ; turn_sequence = None
         ; turn_id = None
-        ; kind = Memory_activity
+        ; kind = Memory_activity { summary = Some summary }
         ; attachments = []
         ; text =
-            Printf.sprintf
-              "Librarian failed \xc2\xb7 %s\n%s\nsnapshot present: %s \xc2\xb7 cadence deferred: %s"
-              kind
+            Printf.sprintf "%s\n%s\nsnapshot present: %s \xc2\xb7 cadence deferred: %s"
+              summary
               detail
               (if snapshot_present then "yes" else "no")
               (if cadence_deferred then "yes" else "no")
@@ -572,13 +572,14 @@ let memory_row_of_json = function
        | Some false ->
            (match string_field fields "error", string_field fields "structural_id" with
             | Some error, Some structural_id ->
-              Some
+                let summary = "Memory journal unreadable: " ^ error in
+                Some
                 { at = 0.0
                 ; structural_id = Some structural_id
                 ; turn_sequence = None
                 ; turn_id = None
-                ; kind = Memory_activity
-                ; text = "Memory journal unreadable: " ^ error
+                ; kind = Memory_activity { summary = Some summary }
+                ; text = summary
                 ; attachments = []
                 }
             | Some _, None | None, Some _ | None, None -> None)
@@ -1153,7 +1154,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
               ; structural_id = structural_id_of_fields fields "system"
               ; turn_sequence
               ; turn_id
-              ; kind = Memory_activity
+              ; kind = Memory_activity { summary = None }
               ; text = content
               ; attachments = []
               }
@@ -1276,7 +1277,7 @@ let annotate_recovered_interruptions rows =
                 { origin_request_id = failure.origin_request_id; recovered_at }
           }, later_reply_at
         | Addressed_to_keeper _ | Said_by_keeper | Autonomous_reply
-        | Tool_calls _ | Skill_activity _ | Reasoning _ | Memory_activity ->
+        | Tool_calls _ | Skill_activity _ | Reasoning _ | Memory_activity _ ->
           row, later_reply_at
       in
       loop later_reply_at (row :: acc) rest

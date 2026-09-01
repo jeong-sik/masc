@@ -112,6 +112,8 @@ let for_surface = function
           ~help:"when scrolled back, adjust by one line"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
       ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
+      ; b Act "Ctrl-N" "memory detail"
+          ~help:"cycle Memory journal summary / full / hidden"
       ; b Act "Ctrl-F" "clock"
           ~help:"cycle origin row / inline clock / no clock"
       ; b Act "y / n" "approval" ~help:"answer a tool approval"

@@ -150,6 +150,14 @@ type tool_visibility =
   | Tools_compact
   | Tools_full
 
+(* How much of the Librarian/Memory journal the chat pane draws. Summary is
+   the resting state: one header line per journal pass, so the conversation
+   keeps the pane and the change itself stays one keypress away. *)
+type memory_visibility =
+  | Memory_hidden
+  | Memory_summary
+  | Memory_full
+
 let reasoning_visibility_to_string = function
   | Reasoning_hidden -> "hidden"
   | Reasoning_folded -> "folded"
@@ -159,6 +167,21 @@ let reasoning_visibility_to_string = function
 let tool_visibility_to_string = function
   | Tools_compact -> "compact"
   | Tools_full -> "full"
+;;
+
+let memory_visibility_to_string = function
+  | Memory_hidden -> "hidden"
+  | Memory_summary -> "summary"
+  | Memory_full -> "full"
+;;
+
+(* From the resting summary toward more, then none, then back: the first
+   press answers "what changed exactly", the second clears the lane, the
+   third restores the default. *)
+let next_memory_visibility = function
+  | Memory_summary -> Memory_full
+  | Memory_full -> Memory_hidden
+  | Memory_hidden -> Memory_summary
 ;;
 
 let origin_display_to_string = function
@@ -176,9 +199,10 @@ let origin_display_of_string = function
 
 (* The chat modes worth a place in the header.
 
-   Reasoning starts hidden and tools compact, so the answer remains the
-   strongest level in the pane. At rest those defaults say nothing unusual and
-   therefore cost no header width.
+   Reasoning starts hidden, tools compact, and the memory journal at its
+   one-line summary, so the answer remains the strongest level in the pane.
+   At rest those defaults say nothing unusual and therefore cost no header
+   width.
 
    So only a mode away from its default appears. That is exactly when the
    operator needs reminding: reasoning is missing from the pane because they
@@ -187,10 +211,13 @@ let origin_display_of_string = function
 
    Discovery lives in the footer and the help overlay, which name Ctrl-R and
    Ctrl-D whether or not a mode is on. *)
-let chat_visibility_summary ~memory_visible ~reasoning ~tools ~origin =
+let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
   let parts =
     List.filter_map Fun.id
-      [ (if memory_visible then None else Some "memory:off")
+      [ (match memory with
+         | Memory_summary -> None
+         | Memory_hidden -> Some "memory:off"
+         | Memory_full -> Some "memory:full")
       ; (* The row layout is the readable default. Compact modes trade that
            separation for capacity, so the header names the trade while it is
            active. *)
@@ -286,6 +313,10 @@ type msg_entry = {
       (** Structural producer position within one request. Timestamps never
           break ties or move rows; phase then this sequence is the order. *)
   me_text: string;
+  me_memory_summary: string option;
+      (** Producer-built compact text for a Memory journal row. [None] for
+          ordinary conversation and neutral system rows; renderers never
+          recover this boundary by splitting display text. *)
   me_submitted_at: float option;
       (** First local Enter time for an operator input. Preserved when the
           durable transcript replaces the session copy; never set on tool or
@@ -2543,7 +2574,7 @@ type state = {
   mutable msg_file_changes_refresh_pending: bool;
   mutable msg_file_changes_error: string option;
   mutable msg_file_changes_generation: int;
-  mutable msg_memory_visible: bool;
+  mutable msg_memory_visibility: memory_visibility;
   mutable msg_memory_error: string option;
   mutable msg_memory_dropped: int;
   (* Every full-history GET captures this generation. Keeper identity alone is
@@ -3069,7 +3100,7 @@ let create_state
   msg_file_changes_refresh_pending = false;
   msg_file_changes_error = None;
   msg_file_changes_generation = 0;
-  msg_memory_visible = true;
+  msg_memory_visibility = Memory_summary;
   msg_memory_error = None;
   msg_memory_dropped = 0;
   msg_history_load_generation = 0;
@@ -3840,8 +3871,10 @@ let keeper_message_status_rows (state : state) =
      starts that row is handed to the active user row one-for-one, so the text
      does not jump through an older turn's tool/output block. *)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
-  + (if state.msg_memory_visible && Option.is_some state.msg_memory_error then 1 else 0)
-  + (if state.msg_memory_visible && state.msg_memory_dropped > 0 then 1 else 0)
+  + (if state.msg_memory_visibility <> Memory_hidden
+        && Option.is_some state.msg_memory_error then 1 else 0)
+  + (if state.msg_memory_visibility <> Memory_hidden
+        && state.msg_memory_dropped > 0 then 1 else 0)
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
   + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
      else 0)

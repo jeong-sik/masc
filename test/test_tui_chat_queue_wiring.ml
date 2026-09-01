@@ -40,6 +40,7 @@ let entry_at at : Tui_types.msg_entry =
   ; me_turn_sequence = None
   ; me_operation_seq = 0
   ; me_text = Printf.sprintf "row at %.0f" at
+  ; me_memory_summary = None
   ; me_submitted_at = None
   ; me_tool_block = None
   ; me_skill_activity = None
@@ -51,8 +52,8 @@ let entry_at at : Tui_types.msg_entry =
 (* The trailing unit is what lets the three optional parameters be erased:
    without a positional parameter after them, OCaml cannot tell an omitted
    [?turn_phase] from a partial application. *)
-let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ~request_id ~role
-    ~text ~at () : Tui_types.msg_entry =
+let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ?memory_summary
+    ~request_id ~role ~text ~at () : Tui_types.msg_entry =
   { Tui_types.me_keeper_name = "alpha"
   ; me_role = role
   ; me_identity =
@@ -62,6 +63,7 @@ let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ~request_id ~role
   ; me_turn_sequence = turn_sequence
   ; me_operation_seq = operation_seq
   ; me_text = text
+  ; me_memory_summary = memory_summary
   ; me_submitted_at = None
   ; me_tool_block = None
   ; me_skill_activity = None
@@ -547,10 +549,13 @@ let test_approval_detail_scroll_accepts_the_rendered_clamp () =
    Every combination is listed rather than described, because the rule is
    about which of eight cases produce which string. *)
 let test_the_header_names_only_unusual_modes () =
-  let summary ?(origin = Masc_tui_message_layout.Origin_row) memory_visible
+  let summary ?(origin = Masc_tui_message_layout.Origin_row) memory
       reasoning tools =
-    Tui_types.chat_visibility_summary ~memory_visible ~reasoning ~tools ~origin
+    Tui_types.chat_visibility_summary ~memory ~reasoning ~tools ~origin
   in
+  let memory_summary = Tui_types.Memory_summary in
+  let memory_hidden = Tui_types.Memory_hidden in
+  let memory_full = Tui_types.Memory_full in
   let full = Tui_types.Reasoning_full and folded = Tui_types.Reasoning_folded in
   let hidden = Tui_types.Reasoning_hidden in
   let tools_full = Tui_types.Tools_full and compact = Tui_types.Tools_compact in
@@ -566,28 +571,33 @@ let test_the_header_names_only_unusual_modes () =
     (started.Tui_types.msg_origin_display
      = Masc_tui_message_layout.Origin_row);
   check string "everything at its default says nothing" ""
-    (summary ~origin:started.Tui_types.msg_origin_display true hidden compact);
+    (summary ~origin:started.Tui_types.msg_origin_display memory_summary
+       hidden compact);
   check string "the compact inline layout is named" "clock:inline"
-    (summary ~origin:Masc_tui_message_layout.Origin_inline true hidden compact);
+    (summary ~origin:Masc_tui_message_layout.Origin_inline memory_summary hidden
+       compact);
   check string "dropping the clock is named" "clock:off"
-    (summary ~origin:Masc_tui_message_layout.Origin_bare true hidden compact);
+    (summary ~origin:Masc_tui_message_layout.Origin_bare memory_summary hidden
+       compact);
   check string "full reasoning alone" "reasoning:full"
-    (summary true full compact);
+    (summary memory_summary full compact);
   check string "folded reasoning alone" "reasoning:folded"
-    (summary true folded compact);
+    (summary memory_summary folded compact);
   check string "full tools alone" "tools:full"
-    (summary true hidden tools_full);
+    (summary memory_summary hidden tools_full);
   check string "memory off alone" "memory:off"
-    (summary false hidden compact);
+    (summary memory_hidden hidden compact);
+  check string "full memory alone" "memory:full"
+    (summary memory_full hidden compact);
   check string "two of them" "reasoning:full tools:full"
-    (summary true full tools_full);
+    (summary memory_summary full tools_full);
   check string "all three, in a fixed order"
     "memory:off reasoning:full tools:full"
-    (summary false full tools_full);
+    (summary memory_hidden full tools_full);
   check int "at rest it now costs nothing" 0
-    (String.length (summary true hidden compact));
+    (String.length (summary memory_summary hidden compact));
   check int "all three deviations still fit as one compact label" 36
-    (String.length (summary false full tools_full))
+    (String.length (summary memory_hidden full tools_full))
 ;;
 
 let test_chat_header_resolves_the_effective_modes () =
@@ -623,6 +633,8 @@ let test_chat_visibility_defaults_and_cycles () =
     (Tui_types.reasoning_visibility_to_string default.msg_reasoning_visibility);
   check string "tool calls start as one activity summary" "compact"
     (Tui_types.tool_visibility_to_string default.msg_tool_visibility);
+  check string "Memory journal starts as one line per pass" "summary"
+    (Tui_types.memory_visibility_to_string default.msg_memory_visibility);
   let configured =
     Tui_types.create_state
       ~reasoning_visibility:Tui_types.Reasoning_hidden
@@ -646,6 +658,16 @@ let test_chat_visibility_defaults_and_cycles () =
          :: collect (count - 1) (Tui_types.next_reasoning_visibility mode)
      in
      collect 3 Tui_types.Reasoning_hidden);
+  check (list string) "Memory detail cycles through all three states"
+    [ "summary"; "full"; "hidden"; "summary" ]
+    (let rec collect count mode =
+       if count = 0
+       then [ Tui_types.memory_visibility_to_string mode ]
+       else
+         Tui_types.memory_visibility_to_string mode
+         :: collect (count - 1) (Tui_types.next_memory_visibility mode)
+     in
+     collect 3 Tui_types.Memory_summary);
   check string "tool detail toggles open" "full"
     (Tui_types.tool_visibility_to_string
        (Tui_types.toggle_tool_visibility Tui_types.Tools_compact))
@@ -662,7 +684,10 @@ let test_chat_shortcuts_reach_visibility_state () =
       in
       if count < 1 then
         failf "handle_message_key must call %s; observed %d call(s)" callee count)
-    [ "next_reasoning_visibility"; "toggle_tool_visibility" ]
+    [ "next_reasoning_visibility"
+    ; "toggle_tool_visibility"
+    ; "next_memory_visibility"
+    ]
 ;;
 
 (* Cancel (Ctrl-K) and edit (Ctrl-P) both act on the newest waiting line, so

@@ -298,7 +298,8 @@ let row_of_entry ~duration_ms entry =
    planes (agent-core wire: ready / start / call / returned / end; keeper
    ledger: completed / settled). The fold is a display projection only:
    nothing is stored, and events that are not part of a turn's lifecycle
-   pass through as the rows they already were.
+   pass through as the rows they already were -- when [visible Turns]
+   shows them at all; what the scope hides stays hidden.
 
    Attribution: events that carry a turn number key the chunk directly.
    Ledger events carry none, and the two planes interleave (a settle can

@@ -33,6 +33,7 @@ let file_redirect fd target mode =
 
 %token <string * Masc_exec.Shell_ir.arg_meta> WORD
 %token <Masc_exec.Shell_ir.arg> MIXED_WORD
+%token <string> HEREDOC_LITERAL
 %token DEV_NULL
 %token <int * int> FD_REDIRECT
 %token <int * Masc_exec.Redirect_scope.mode> FILE_REDIRECT_OP
@@ -40,6 +41,7 @@ let file_redirect fd target mode =
 %token AND_IF
 %token OR_IF
 %token SEMICOLON
+%token NEWLINE
 %token EOF
 
 (* A stage is a word sequence plus redirects.  Words are already
@@ -79,6 +81,12 @@ part:
       let fd, mode = item in
       Redirect (file_redirect fd (fst target) mode)
     }
+  (* A quoted heredoc arrives as its collected body: bash spells [<<] as
+     a redirection whose source is content, and Redirect_scope.Literal
+     is exactly that — dispatch feeds the bytes to the child's stdin. *)
+  | body = HEREDOC_LITERAL {
+      Redirect (Redirect_scope.Literal { bytes = body })
+    }
 
 stage:
   | head = part parts = list(part) {
@@ -93,22 +101,37 @@ stage:
       (List.rev args, List.rev redirects)
     }
 
+(* Newlines read the way bash reads them: after [|], [&&], [||] (and
+   after [;]) a line break is continuation; between pipelines it is the
+   same separator [;] is.  POSIX calls these [linebreak] and
+   [newline_list]; [opt_newlines] is the former. *)
+opt_newlines:
+  | /* empty */ { () }
+  | opt_newlines NEWLINE { () }
+
 pipeline:
-  | stages = separated_nonempty_list(PIPE, stage) { stages }
+  | s = stage { [ s ] }
+  | p = pipeline PIPE opt_newlines s = stage { p @ [ s ] }
+
+(* One [;] may be followed by line breaks; bare line breaks separate on
+   their own.  Doubled [;;] stays a parse error, as in bash. *)
+seq_sep:
+  | SEMICOLON opt_newlines { () }
+  | NEWLINE opt_newlines { () }
 
 command:
-  | head = pipeline rest = command_rest EOF
+  | opt_newlines head = pipeline rest = command_rest EOF
     { (head, rest) }
 
 command_rest:
   | /* empty */ { [] }
-  | SEMICOLON { [] }
-  | SEMICOLON head = pipeline rest = command_rest {
+  | seq_sep { [] }
+  | seq_sep head = pipeline rest = command_rest {
       (Masc_exec.Shell_ir.Seq, head) :: rest
     }
-  | AND_IF head = pipeline rest = command_rest {
+  | AND_IF opt_newlines head = pipeline rest = command_rest {
       (Masc_exec.Shell_ir.And_if, head) :: rest
     }
-  | OR_IF head = pipeline rest = command_rest {
+  | OR_IF opt_newlines head = pipeline rest = command_rest {
       (Masc_exec.Shell_ir.Or_if, head) :: rest
     }

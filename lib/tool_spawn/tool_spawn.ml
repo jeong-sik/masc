@@ -112,12 +112,13 @@ let handle_of args =
    key is naming a directory, and silently substituting a different one is how
    the first version of this went wrong. *)
 let cwd_of args =
-  match Json_util.get_string args "cwd" with
+  match Json_util.assoc_member_opt "cwd" args with
   | None -> Ok None
-  | Some value ->
+  | Some (`String value) ->
     (match String_util.trim_nonempty value with
      | Some value -> Ok (Some value)
      | None -> Error "cwd must not be blank")
+  | Some _ -> Error "cwd must be a string"
 ;;
 
 let handle_start ~tool_name ~start_time ctx args =

@@ -330,7 +330,12 @@ let test_an_absolute_cwd_goes_through_the_capability () =
   Alcotest.(check bool)
     "the capability answered, not a bypass"
     true
-    (Tool_result.is_failed result)
+    (Tool_result.is_failed result);
+  let message = error_message result in
+  Alcotest.(check bool)
+    ("the capability refusal is named -- got: " ^ message)
+    true
+    (Astring.String.is_infix ~affix:"Capabilities insufficient" message)
 ;;
 
 (* A blank [cwd] is refused rather than read as "use the default": a caller
@@ -349,7 +354,24 @@ let test_a_blank_cwd_is_refused () =
   Alcotest.(check bool)
     "it did not start"
     true
-    (Tool_result.is_failed result)
+    (Tool_result.is_failed result);
+  Alcotest.(check string) "the blank field is named" "cwd must not be blank"
+    (error_message result)
+;;
+
+let test_a_non_string_cwd_is_refused () =
+  with_eio
+  @@ fun () ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let ctx = context ~sw in
+  let result =
+    call ctx ~name:"keeper_spawn"
+      (`Assoc [ "argv", `List [ `String "true" ]; "cwd", `Int 123 ])
+  in
+  Alcotest.(check bool) "it did not start" true (Tool_result.is_failed result);
+  Alcotest.(check string) "the malformed field is named" "cwd must be a string"
+    (error_message result)
 ;;
 
 let () =
@@ -399,6 +421,10 @@ let () =
             "a blank cwd is refused"
             `Quick
             test_a_blank_cwd_is_refused
+        ; Alcotest.test_case
+            "a non-string cwd is refused"
+            `Quick
+            test_a_non_string_cwd_is_refused
         ] )
     ; ( "surface"
       , [ Alcotest.test_case

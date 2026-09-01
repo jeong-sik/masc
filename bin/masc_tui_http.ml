@@ -458,7 +458,7 @@ let fetch_ide_annotations ~(host : string) ~(port : int) ~(codebase : string)
     region store, this reads the tool-call log projection and therefore keeps
     working after the producing turn exits. *)
 let fetch_ide_file_activity ~(host : string) ~(port : int)
-    ?repo_id ~(file_path : string) :
+    ?repo_id ~(file_path : string) () :
     (Masc.Tui_decode.file_activity_snapshot, string) result =
   let route =
     "/api/v1/ide/file-activity?file_path="
@@ -482,7 +482,7 @@ let fetch_ide_file_activity ~(host : string) ~(port : int)
               match List.assoc_opt "error" fields with
               | Some (`String detail) -> Error detail
               | Some _ | None -> Error "file activity rejected")
-          | Some _ | None, _ -> Error "unexpected file activity envelope")
+          | Some _, _ | None, _ -> Error "unexpected file activity envelope")
       | _ -> Error "unexpected file activity envelope"
       | exception Yojson.Json_error detail ->
         Error ("file activity was not JSON: " ^ detail))

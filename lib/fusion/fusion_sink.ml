@@ -704,7 +704,11 @@ let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~j
            Fusion_run_registry.mark_completed registry ~run_id
              ~outcome:
                (Fusion_run_registry.Succeeded_with_summary
-                  { decision = registry_preview ~max_bytes:160 (render_decision j.decision)
+                  { decision =
+                      (* The constructor flattens whitespace, trims, and caps at
+                         [Fusion_run_registry.decision_preview_max_bytes]. *)
+                      Fusion_run_registry.decision_preview_of_string
+                        (render_decision j.decision)
                   ; summary = registry_preview ~max_bytes:240 j.resolved_answer
                   });
            broadcast_run_status ~registry ~run_id;

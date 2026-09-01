@@ -16,10 +16,28 @@ let activity_result_json ~ok ~message =
   `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
 ;;
 
-let schedule_write_schema tool_name =
+type schedule_write_tool =
+  | Schedule_create
+  | Schedule_update
+
+type schedule_write_schema_error =
+  | Schedule_schema_not_registered of schedule_write_tool
+
+let schedule_write_tool_name = function
+  | Schedule_create -> "masc_schedule_create"
+  | Schedule_update -> "masc_schedule_update"
+;;
+
+let schedule_write_schema_error_message = function
+  | Schedule_schema_not_registered tool ->
+    "schedule_schema_not_registered:" ^ schedule_write_tool_name tool
+;;
+
+let schedule_write_schema tool =
+  let tool_name = schedule_write_tool_name tool in
   match Tool_schemas_schedule.find_definition tool_name with
   | Some definition -> Ok definition.Tool_schemas_schedule.schema.input_schema
-  | None -> Error (tool_name ^ " schema is not registered")
+  | None -> Error (Schedule_schema_not_registered tool)
 ;;
 
 let schedule_stamp_operator_actor ~agent_name = function
@@ -61,10 +79,12 @@ let handle_schedule_write_request
       | Yojson.Json_error message -> Error ("Invalid JSON: " ^ message)
     in
     let args = schedule_stamp_operator_actor ~agent_name args in
-    let tool_name =
-      if update then "masc_schedule_update" else "masc_schedule_create"
+    let schedule_tool = if update then Schedule_update else Schedule_create in
+    let tool_name = schedule_write_tool_name schedule_tool in
+    let* schema =
+      schedule_write_schema schedule_tool
+      |> Result.map_error schedule_write_schema_error_message
     in
-    let* schema = schedule_write_schema tool_name in
     let* args =
       Tool_input_validation.validate_args
         ~schema

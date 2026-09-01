@@ -1,7 +1,28 @@
+type decision_preview = string
+
+let decision_preview_max_bytes = 160
+
+(* The constructor owns the preview invariant so every entry point — the sink
+   producer and JSON replay alike — yields the same shape: control whitespace
+   flattened, trimmed, UTF-8-safely capped. Re-applying it to an already
+   bounded value is the identity, so replaying rows written by the sink keeps
+   them byte-exact. *)
+let decision_preview_of_string value =
+  value
+  |> String.map (function
+    | '\n' | '\r' | '\t' -> ' '
+    | char -> char)
+  |> String.trim
+  |> String_util.utf8_safe ~max_bytes:decision_preview_max_bytes ~suffix:"..."
+  |> String_util.to_string
+;;
+
+let decision_preview_to_string value = value
+
 type outcome =
   | Succeeded
   | Succeeded_with_summary of
-      { decision : string
+      { decision : decision_preview
       ; summary : string
       }
   | Failed of
@@ -95,7 +116,7 @@ module Payload = struct
     | Succeeded_with_summary { decision; summary } ->
       `Assoc
         [ "outcome", `String "succeeded"
-        ; "decision", `String decision
+        ; "decision", `String (decision_preview_to_string decision)
         ; "summary", `String summary
         ]
     | Failed { reason; code } ->
@@ -125,7 +146,9 @@ module Payload = struct
       (match decision, summary with
        | None, None -> Ok Succeeded
        | Some decision, Some summary ->
-         Ok (Succeeded_with_summary { decision; summary })
+         Ok
+           (Succeeded_with_summary
+              { decision = decision_preview_of_string decision; summary })
        | Some _, None | None, Some _ ->
          Error "succeeded fusion completion requires decision and summary together")
     | "failed" ->
@@ -288,7 +311,9 @@ let run_to_yojson run =
     match run.status with
     | Running | Completed Succeeded -> []
     | Completed (Succeeded_with_summary { decision; summary }) ->
-      [ "decision", `String decision; "summary", `String summary ]
+      [ "decision", `String (decision_preview_to_string decision)
+      ; "summary", `String summary
+      ]
     | Completed (Failed { reason; code }) ->
       [ "error", `String reason; "failure_code", `String code ]
   in

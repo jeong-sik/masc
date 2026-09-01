@@ -223,6 +223,15 @@ let all =
       ~category:"heartbeat"
       "Interruptible heartbeat sleep chunk in seconds"
   ; setting
+      ~range:(float_range ~min:60.0 ~max:3600.0 ())
+      ~env_name:"MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC"
+      ~exposure:Env_only
+      ~value_kind:Float
+      ~default:"900.0"
+      ~consumers:[ "Env_config_keeper.KeeperKeepalive"; "Keeper_heartbeat_loop" ]
+      ~category:"heartbeat"
+      "Upper bound for rate-limit failure-route backoff in seconds"
+  ; setting
       ~range:(int_range ~min:1 ())
       ~lifecycle:
         (retired

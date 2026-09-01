@@ -55,12 +55,13 @@ write boundary에 남은 typed data가 필요하다. 그러나 산문에서 ID �
 또 초안의 공개 재현 코드는 다음 이유로 그대로는 재현되지 않는다.
 
 ```python
-glob.glob('~/me/.masc/keeper_chat/*.jsonl')
+glob.glob('<base-path>/.masc/keeper_chat/*.jsonl')
 ```
 
-Python `glob`은 `~`를 home directory로 확장하지 않는다. 따라서 게시된 명령과
-보고값 사이의 identity chain이 끊겼다. 8,597는 설계 동기가 된 과거 보고값으로
-남기되, acceptance evidence로 사용하지 않는다.
+초안은 `<base-path>` 자리에 shell에서만 확장되는 `~` 표기를 넣었지만 Python
+`glob`은 이를 home directory로 확장하지 않는다. 따라서 게시된 명령과 보고값
+사이의 identity chain이 끊겼다. 8,597는 설계 동기가 된 과거 보고값으로 남기되,
+acceptance evidence로 사용하지 않는다.
 
 재측정은 실제 base path를 인자로 받고, 대상 파일 목록과 digest를 먼저 남긴 뒤
 `content`만 세어야 한다. 최소 형태는 다음과 같다.

@@ -130,20 +130,41 @@ let test_progress_is_typed_and_terminal_safe () =
   R.mark_completed t ~run_id:"r-progress"
     ~outcome:
       (R.Succeeded_with_summary
-         { decision = "recommend — ship"; summary = "Two panels support it." });
+         { decision = R.decision_preview_of_string "recommend — ship"
+         ; summary = "Two panels support it."
+         });
   R.mark_progress t ~run_id:"r-progress"
     ~progress:(R.Progress_panel_running { expected = 99 });
   match R.get t ~run_id:"r-progress" with
   | Some
       { R.status =
           R.Completed
-            (R.Succeeded_with_summary { decision = "recommend — ship"; summary })
+            (R.Succeeded_with_summary { decision; summary })
       ; progress = None
       ; _
       } ->
+    check string "decision remains terminal" "recommend — ship"
+      (R.decision_preview_to_string decision);
     check string "summary remains terminal" "Two panels support it." summary
   | Some _ -> fail "terminal progress update must be ignored"
   | None -> fail "completed run disappeared"
+;;
+
+let test_decision_preview_bound () =
+  let flattened =
+    R.decision_preview_to_string
+      (R.decision_preview_of_string "  line one\nline\ttwo\r  ")
+  in
+  check string "whitespace flattens and trims" "line one line two" flattened;
+  let long = String.concat " " (List.init 60 (fun _ -> "판정")) in
+  let preview = R.decision_preview_to_string (R.decision_preview_of_string long) in
+  check bool "long input is capped" true
+    (String.length preview <= R.decision_preview_max_bytes);
+  check bool "truncation is marked" true
+    (String.length preview >= 3
+     && String.sub preview (String.length preview - 3) 3 = "...");
+  check string "re-applying the constructor is the identity" preview
+    (R.decision_preview_to_string (R.decision_preview_of_string preview))
 ;;
 
 let test_list_newest_first () =
@@ -248,7 +269,9 @@ let test_run_to_yojson_progress_and_summary () =
   R.mark_completed t ~run_id:"r-rich"
     ~outcome:
       (R.Succeeded_with_summary
-         { decision = "answer"; summary = "Use the typed projection." });
+         { decision = R.decision_preview_of_string "answer"
+         ; summary = "Use the typed projection."
+         });
   let completed = Option.get (R.get t ~run_id:"r-rich") |> R.run_to_yojson in
   check string "completed stage" "completed" (yojson_str completed "stage");
   check string "decision" "answer" (yojson_str completed "decision");
@@ -271,6 +294,8 @@ let () =
         ; test_case "mark unknown run_id is a no-op" `Quick test_mark_unknown_is_noop
         ; test_case "progress is typed and terminal-safe" `Quick
             test_progress_is_typed_and_terminal_safe
+        ; test_case "decision preview constructor enforces the bound" `Quick
+            test_decision_preview_bound
         ; test_case "list_runs is newest-first" `Quick test_list_newest_first
         ; test_case "prune keeps Running + recent completed" `Quick test_prune_keeps_running_and_recent
         ] )

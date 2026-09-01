@@ -1083,7 +1083,14 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                   , [] )
               in
               let said =
-                if String.equal content "" && trace_rows <> [] then []
+                (* Skill rows count as the turn's visible content too: when
+                   the projection replaces the raw skill tool, trace_rows is
+                   empty and the old guard let an empty utterance row through
+                   under the Skill row. *)
+                if
+                  String.equal content ""
+                  && (skill_rows <> [] || trace_rows <> [])
+                then []
                 else
                   [ Utterance
                       { at

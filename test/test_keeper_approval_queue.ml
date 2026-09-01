@@ -4402,6 +4402,125 @@ let test_nonapproved_resolution_payload_is_delivered () =
        drop_resolution ~base_path ~keeper_name rejected)
 ;;
 
+let test_canonical_replay_repairs_stale_chat_receipt_once () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-replay-chat-correction" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let input = `Assoc [ "target", `String "replay-correction" ] in
+       let approval_id = submit ~base_path ~keeper_name ~input in
+       (match
+          aq_resolve
+            ~base_path
+            ~id:approval_id
+            ~decision:Rule_types.Decision.Approve
+        with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       (match
+          AQ.consume_approved_resolution
+            ~base_path
+            ~id:approval_id
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input
+        with
+        | Ok (AQ.Consumption_committed _) -> ()
+        | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
+          Alcotest.fail "fixture approval grant was not consumed"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       let stale_ref = store_replay_artifact ~base_path "stale failed replay" in
+       let canonical_ref = store_replay_artifact ~base_path "canonical applied replay" in
+       let stale_lifecycle : Chat_store.approval_lifecycle =
+         { approval_id
+         ; tool_name = Some "external-effect"
+         ; phase = Chat_store.Approval_replay_failed
+         ; artifact_ref = Some stale_ref
+         }
+       in
+       (match
+          Chat_store.append_approval_lifecycle_once
+            ~base_dir:base_path
+            ~keeper_name
+            ~lifecycle:stale_lifecycle
+        with
+        | Ok (Chat_store.Appended _) -> ()
+        | Ok (Chat_store.Already_present _) | Error _ ->
+          Alcotest.fail "stale replay chat fixture was not appended");
+       (match
+          AQ.record_consumed_resolution_replay
+            ~base_path
+            ~id:approval_id
+            ~outcome:(AQ.Replay_applied canonical_ref)
+        with
+        | Ok AQ.Replay_recorded -> ()
+        | Ok AQ.Replay_already_recorded | Error _ ->
+          Alcotest.fail "canonical replay outcome was not recorded");
+       let canonical_outcome =
+         match AQ.approved_resolution_delivery ~base_path ~id:approval_id with
+         | Ok { replay_outcome = Some outcome; _ } -> outcome
+         | Ok _ -> Alcotest.fail "canonical replay outcome is absent"
+         | Error error -> Alcotest.fail (AQ.grant_error_to_string error)
+       in
+       (match
+          AQ.ensure_replay_chat_projection
+            ~base_path
+            ~keeper_name
+            ~approval_id
+            ~tool_name:(Some "external-effect")
+            ~outcome:canonical_outcome
+        with
+        | Ok () -> ()
+        | Error detail -> Alcotest.fail detail);
+       (match
+          AQ.ensure_replay_chat_projection
+            ~base_path
+            ~keeper_name
+            ~approval_id
+            ~tool_name:(Some "external-effect")
+            ~outcome:canonical_outcome
+        with
+        | Ok () -> ()
+        | Error detail -> Alcotest.fail detail);
+       (match
+          AQ.ensure_replay_chat_projection
+            ~base_path
+            ~keeper_name
+            ~approval_id
+            ~tool_name:(Some "external-effect")
+            ~outcome:(AQ.Replay_failed stale_ref)
+        with
+        | Error _ -> ()
+        | Ok () -> Alcotest.fail "stale replay displaced the correction");
+       let lifecycle_rows =
+         Chat_store.load_all ~base_dir:base_path ~keeper_name
+         |> List.filter (fun (message : Chat_store.chat_message) ->
+           match message.approval_lifecycle with
+           | Some lifecycle -> String.equal lifecycle.approval_id approval_id
+           | None -> false)
+       in
+       Alcotest.(check int) "resolution, stale replay, correction" 3
+         (List.length lifecycle_rows);
+       let phases =
+         List.filter_map
+           (fun (message : Chat_store.chat_message) ->
+              Option.map
+                (fun lifecycle -> lifecycle.Chat_store.phase)
+                message.approval_lifecycle)
+           lifecycle_rows
+       in
+       match phases with
+       | [ Chat_store.Approval_resolved_approved
+         ; Chat_store.Approval_replay_failed
+         ; Chat_store.Approval_replay_applied
+         ] -> ()
+       | _ -> Alcotest.fail "canonical correction history is incomplete")
+;;
+
 let test_audit_store_failure_keeps_defer_committed_and_visible () =
   let base_path = temp_dir () in
   let keeper_name = "queue-audit-store-failure" in
@@ -4942,6 +5061,10 @@ let () =
             "pre-effect replay failure retires grant and continues"
             `Quick
             test_pre_effect_replay_failure_retires_grant_and_unblocks_continuation
+        ; Alcotest.test_case
+            "canonical replay repairs stale chat receipt once"
+            `Quick
+            test_canonical_replay_repairs_stale_chat_receipt_once
         ; Alcotest.test_case
             "exact binding codec validates identity and current causes"
             `Quick

@@ -258,6 +258,17 @@ val append_approval_lifecycle_once :
   lifecycle:approval_lifecycle ->
   (append_once_result, string) result
 
+(** Reconcile the canonical durable replay outcome with its append-only chat
+    receipt. An identical original row remains idempotent. If an older replay
+    row conflicts, the canonical outcome is appended once in a distinct typed
+    correction slot; neither historical evidence nor the original row is
+    overwritten. Resolution and continuation phases are rejected. *)
+val reconcile_approval_replay_lifecycle_once :
+  base_dir:string ->
+  keeper_name:string ->
+  lifecycle:approval_lifecycle ->
+  (append_once_result, string) result
+
 val approval_lifecycle_phase_present :
   base_dir:string ->
   keeper_name:string ->

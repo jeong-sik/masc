@@ -2911,6 +2911,117 @@ let test_approval_lifecycle_redacts_and_compares_artifact_preview () =
        | Ok _ -> Alcotest.fail "conflicting artifact preview reused the replay slot"))
 ;;
 
+let test_approval_replay_reconciliation_appends_one_typed_correction () =
+  let base_dir = temp_base_path "keeper-chat-approval-replay-correction" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-approval-replay-correction" in
+      let artifact_ref character bytes =
+        Tool_output.make_artifact_ref
+          ~sha256:(String.make 64 character)
+          ~bytes
+          ~preview:""
+          ~mime:"text/plain"
+        |> Result.get_ok
+      in
+      let stale : K.approval_lifecycle =
+        { approval_id = "appr_replay_correction"
+        ; tool_name = Some "tool_execute"
+        ; phase = K.Approval_replay_failed
+        ; artifact_ref = Some (artifact_ref 'd' 955)
+        }
+      in
+      let canonical : K.approval_lifecycle =
+        { stale with
+          phase = K.Approval_replay_applied
+        ; artifact_ref = Some (artifact_ref 'a' 497)
+        }
+      in
+      (match K.append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle:stale with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) | Error _ ->
+         Alcotest.fail "stale replay fixture was not appended");
+      (match
+         K.append_approval_lifecycle_once
+           ~base_dir
+           ~keeper_name
+           ~lifecycle:canonical
+       with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "strict append hid a conflicting replay receipt");
+      (match
+         K.reconcile_approval_replay_lifecycle_once
+           ~base_dir
+           ~keeper_name
+           ~lifecycle:canonical
+       with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) | Error _ ->
+         Alcotest.fail "canonical replay correction was not appended");
+      (match
+         K.reconcile_approval_replay_lifecycle_once
+           ~base_dir
+           ~keeper_name
+           ~lifecycle:canonical
+       with
+       | Ok (K.Already_present _) -> ()
+       | Ok (K.Appended _) | Error _ ->
+         Alcotest.fail "canonical replay correction was not idempotent");
+      (match
+         K.reconcile_approval_replay_lifecycle_once
+           ~base_dir
+           ~keeper_name
+           ~lifecycle:stale
+       with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "stale replay overrode the correction authority");
+      let resolution =
+        { canonical with
+          phase = K.Approval_resolved_approved
+        ; artifact_ref = None
+        }
+      in
+      (match
+         K.reconcile_approval_replay_lifecycle_once
+           ~base_dir
+           ~keeper_name
+           ~lifecycle:resolution
+       with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "replay reconciliation accepted a resolution phase");
+      let messages = K.load_all ~base_dir ~keeper_name in
+      Alcotest.(check int) "original plus correction" 2 (List.length messages);
+      let phases =
+        List.filter_map
+          (fun (message : K.chat_message) ->
+             Option.map
+               (fun lifecycle -> lifecycle.K.phase)
+               message.approval_lifecycle)
+          messages
+      in
+      Alcotest.(check int) "both replay phases remain visible" 2 (List.length phases);
+      (match phases with
+       | [ K.Approval_replay_failed; K.Approval_replay_applied ] -> ()
+       | _ -> Alcotest.fail "correction did not preserve ordered replay history");
+      let slots =
+        List.filter_map
+          (fun (message : K.chat_message) ->
+             Option.map
+               (fun provenance -> provenance.Keeper_chat_delivery_identity.transcript_slot)
+               message.delivery_provenance)
+          messages
+      in
+      (match slots with
+       | [ Keeper_chat_delivery_identity.Approval_replay
+         ; Keeper_chat_delivery_identity.Approval_replay_correction
+         ] -> ()
+       | _ -> Alcotest.fail "correction did not use its typed provenance slot");
+      let correction = List.nth messages 1 in
+      Alcotest.(check bool) "correction is explicit to the operator" true
+        (String_util.contains_substring correction.content "승인 작업 결과 정정"))
+;;
+
 let test_all_replay_terminal_phases_roundtrip () =
   let base_dir = temp_base_path "keeper-chat-approval-terminal-phases" in
   Fun.protect
@@ -3051,6 +3162,10 @@ let () =
             "artifact previews are redacted and compared"
             `Quick
             test_approval_lifecycle_redacts_and_compares_artifact_preview
+        ; Alcotest.test_case
+            "stale replay receipt gets one typed correction"
+            `Quick
+            test_approval_replay_reconciliation_appends_one_typed_correction
         ; Alcotest.test_case
             "all replay terminal phases roundtrip"
             `Quick

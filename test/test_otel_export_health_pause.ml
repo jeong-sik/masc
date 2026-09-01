@@ -26,20 +26,25 @@ let listen_probe_target ~sw (env : Eio_unix.Stdenv.base) port =
   (* Accept-and-close listener: TCP connect succeeds (the probe's success
      condition), no bytes are exchanged. Export POSTs that reach it get an
      immediate close; the emitter treats that as a failed export, which is
-     fine — activity here is driven by the health probe, not exports. *)
+     fine — activity here is driven by the health probe, not exports.
+
+     The accept loop is a daemon: it exists only to serve the test body, and
+     a daemon cannot keep [Eio.Switch.run] from returning once that body is
+     done. *)
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, port) in
   let socket = Eio.Net.listen env#net ~sw ~reuse_addr:true ~backlog:8 addr in
-  Eio.Fiber.fork ~sw (fun () ->
+  Eio.Fiber.fork_daemon ~sw (fun () ->
     try
       while true do
         let flow, _ = Eio.Net.accept ~sw socket in
         Eio.Switch.run (fun csw ->
           Eio.Switch.on_release csw (fun () -> Eio.Flow.close flow);
           ())
-      done
+      done;
+      `Stop_daemon
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> ());
+    | _ -> `Stop_daemon);
   socket
 ;;
 
@@ -49,9 +54,20 @@ let test_outage_marks_inactive_then_restarts () =
   Eio.Switch.run
   @@ fun sw ->
   let clock = env#clock in
-  let port = 19000 + Unix.getpid () mod 1000 in
+  (* Port 0 and read the bound address back, the way the other OTLP tests
+     do. A pid-derived port collided under the parallel suite: another
+     test's live server took it over after [first] closed, the probe kept
+     answering against that foreign server, and the run wedged instead of
+     observing an outage. The second listener reuses the exact port the
+     first was given, because "the collector returns on the same port" is
+     the behavior under test. *)
+  let first = listen_probe_target ~sw env 0 in
+  let port =
+    match Eio.Net.listening_addr first with
+    | `Tcp (_, port) -> port
+    | _ -> Alcotest.fail "expected a TCP probe listener"
+  in
   let endpoint = Printf.sprintf "http://127.0.0.1:%d" port in
-  let first = listen_probe_target ~sw env port in
   Otel_spans.setup_exporter ~endpoint ~probe_interval:0.05 ~sw env;
   check bool "exporter active with collector up"
     true

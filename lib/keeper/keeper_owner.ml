@@ -29,6 +29,12 @@ type operation_projection =
   ; store_unavailable : bool
   }
 
+type operation_interrupt_result =
+  | Operation_interrupt_signalled
+  | Operation_not_current of
+      { running_operation_id : Operation_id.t option }
+  | Operation_interrupt_failed of string
+
 type turn_lane =
   | Autonomous
   | Chat_operation
@@ -135,6 +141,8 @@ type _ command =
       -> (Keeper_meta_contract.keeper_meta option, error) result command
   | Exact_operation :
       Operation_id.t -> (Chat_operation.t option, error) result command
+  | Interrupt_running_operation :
+      Operation_id.t -> (operation_interrupt_result, error) result command
   | Submit_operation :
       { operation_id : Operation_id.t
       ; source : Yojson.Safe.t
@@ -199,6 +207,11 @@ type packed_command =
    without depending on this module; see #28012. *)
 exception Stop_active_child = Keeper_owner_signals.Stop_active_child
 
+type child_cancel =
+  { stop : unit -> unit
+  ; interrupt : unit -> unit
+  }
+
 type t =
   { keeper_name : string
   ; mailbox : packed_command Eio.Stream.t
@@ -212,7 +225,7 @@ type t =
   ; closed_p : unit Eio.Promise.t
   ; store_error : string option ref
   ; child_active : bool ref
-  ; child_cancel : (unit -> unit) option Atomic.t
+  ; child_cancel : child_cancel option Atomic.t
   ; stopping_waiters : ((unit, error) result Eio.Promise.u) list ref
   ; shutdown_idle_waiters : ((unit, error) result Eio.Promise.u) list ref
   ; on_turn_slot_released : (unit -> unit) option
@@ -701,9 +714,14 @@ let start
             let execution =
               try
                 Eio.Switch.run (fun child_sw ->
-                  Atomic.set
-                    t.child_cancel
-                    (Some (fun () -> Eio.Switch.fail child_sw Stop_active_child));
+                  Atomic.set t.child_cancel
+                    (Some
+                       { stop = (fun () -> Eio.Switch.fail child_sw Stop_active_child)
+                       ; interrupt =
+                           (fun () ->
+                              Eio.Switch.fail child_sw
+                                Keeper_registry_types.Operator_interrupt)
+                       });
                   if (Atomic.get t.projection).Keeper_owner_reducer.stopping
                   then
                     Operation_failed
@@ -811,6 +829,27 @@ let start
               Chat_operation_store.get t.operation_store operation_id)
           in
           Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Interrupt_running_operation expected, resolve) ->
+          let inventory = Atomic.get t.operation_projection in
+          let response =
+            match inventory.running_operation_id with
+            | Some running when Operation_id.equal running expected ->
+                (match Atomic.get t.child_cancel with
+                 | None ->
+                     Operation_interrupt_failed
+                       "the exact operation is running without a cancellable child"
+                 | Some cancel ->
+                     (try
+                        cancel.interrupt ();
+                        Operation_interrupt_signalled
+                      with
+                      | exn ->
+                          Operation_interrupt_failed (Printexc.to_string exn)))
+            | running_operation_id ->
+                Operation_not_current { running_operation_id }
+          in
+          Eio.Promise.resolve resolve (Ok response);
           loop state shutdown_operation_id
         | Command (Submit_operation { operation_id; source; input }, resolve) ->
           let response =
@@ -1037,10 +1076,16 @@ let start
                        try
                          Ok
                            (Eio.Switch.run (fun child_sw ->
-                              Atomic.set
-                                t.child_cancel
+                              Atomic.set t.child_cancel
                                 (Some
-                                   (fun () -> Eio.Switch.fail child_sw Stop_active_child));
+                                   { stop =
+                                       (fun () ->
+                                          Eio.Switch.fail child_sw Stop_active_child)
+                                   ; interrupt =
+                                       (fun () ->
+                                          Eio.Switch.fail child_sw
+                                            Keeper_registry_types.Operator_interrupt)
+                                   });
                               run ()))
                        with
                        | exn -> Error (exn, Printexc.get_raw_backtrace ())
@@ -1092,7 +1137,7 @@ let start
                t.stopping_waiters := resolve :: !(t.stopping_waiters);
                Option.iter
                  (fun cancel ->
-                    try cancel () with
+                    try cancel.stop () with
                     | Invalid_argument _ -> ())
                  (Atomic.get t.child_cancel))
              else Eio.Promise.resolve resolve (Ok ());
@@ -1106,6 +1151,9 @@ let start
 let exact_projection t = request t Exact_projection
 let apply_meta t command = request t (Apply_meta command)
 let exact_operation t operation_id = request t (Exact_operation operation_id)
+let interrupt_running_operation t operation_id =
+  request t (Interrupt_running_operation operation_id)
+;;
 let wake_operation_drain t = request t Wake_operation_drain
 
 let submit_operation t ~operation_id ~source ~input =

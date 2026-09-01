@@ -176,12 +176,12 @@ val handle_keeper_tool_approval_mode_set :
 val handle_keeper_turn_interrupt :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/turn/interrupt].
-    Reads [{"name": "<keeper>"}], validates the keeper is registered, and
-    asks {!Keeper_registry.interrupt_current_turn} to fail the in-flight
-    turn's switch. Returns [{signalled:true, turn_id}] when the switch was
-    failed, [{signalled:false, reason:"no_in_flight_turn"}] when there was
-    no turn, and [{signalled:false, reason:"cancel_failed", detail}] when
-    the attempt itself failed.
+    Reads [{"name": "<keeper>", "request_id": "<operation>"}]. With a
+    request id it asks {!Keeper_owner.interrupt_running_operation} for a
+    mailbox-linearized compare-and-interrupt and echoes that id; a stale
+    request can never cancel its replacement. The name-only form remains for
+    operator surfaces that do not own a chat operation and uses
+    {!Keeper_registry.interrupt_current_turn}.
 
     [signalled] is not a completed cancellation: the signal still has to
     reach the running fiber, and a fiber parked in an uncancellable section

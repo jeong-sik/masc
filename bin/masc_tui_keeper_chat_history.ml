@@ -88,6 +88,8 @@ type attachment_note =
 
 type row =
   { at : float
+  ; structural_id : string option
+  ; turn_sequence : int option
   ; turn_id : string option
   ; kind : kind
   ; text : string
@@ -296,6 +298,8 @@ type parsed =
   | Utterance of row
   | Tool_call of
       { at : float
+      ; structural_id : string option
+      ; turn_sequence : int option
       ; turn_id : string option
       ; call_id : string option
       ; execution_id : string option
@@ -334,6 +338,17 @@ let turn_id_of_fields fields =
       in
       Some (Delivery_identity.Request_id.to_string request_id)
   | Ok None | Error _ -> string_field fields "turn_ref"
+
+let turn_sequence_of_fields fields =
+  Option.bind (string_field fields "turn_ref") (fun raw ->
+    Option.map Ids.Turn_ref.absolute_turn (Ids.Turn_ref.of_string raw))
+;;
+
+let structural_id_of_fields fields projection =
+  Option.map
+    (fun id -> id ^ ":" ^ projection)
+    (string_field fields "id")
+;;
 
 (* The row's text with one line per file under it.
 
@@ -460,6 +475,8 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
                       retained
                   in
                   { at
+                  ; structural_id = None
+                  ; turn_sequence = None
                   ; turn_id = None
                   ; kind = Memory_activity
                   ; attachments = []
@@ -493,6 +510,8 @@ let memory_failed_row (fields : (string * Yojson.Safe.t) list) =
   | Some at, Some kind, Some detail, Some snapshot_present, Some cadence_deferred ->
       Some
         { at
+        ; structural_id = None
+        ; turn_sequence = None
         ; turn_id = None
         ; kind = Memory_activity
         ; attachments = []
@@ -517,6 +536,8 @@ let memory_row_of_json = function
            Option.map
              (fun error ->
                 { at = 0.0
+                ; structural_id = None
+                ; turn_sequence = None
                 ; turn_id = None
                 ; kind = Memory_activity
                 ; text = "Memory journal unreadable: " ^ error
@@ -832,11 +853,16 @@ let reconcile_skill_projection_with_trace summary projection =
       ; replaces_raw_skill_tools = false
       }
 
-let rows_of_skill_projection ~turn_id at projection =
-  List.map
-    (fun activity ->
+let rows_of_skill_projection ~source_id ~turn_sequence ~turn_id at projection =
+  List.mapi
+    (fun index activity ->
       Utterance
         { at
+        ; structural_id =
+            Option.map
+              (fun id -> Printf.sprintf "%s:skill-%d" id index)
+              source_id
+        ; turn_sequence
         ; turn_id
         ; kind = Skill_activity activity
         ; text = ""
@@ -854,7 +880,10 @@ let plural count noun =
    rides the reasoning block and an omitted count the tool block -- omitted
    steps are steps the turn took, so a block that has nothing but that count
    is still a block of steps. *)
-let rows_of_trace ~turn_id at summary =
+let rows_of_trace ~source_id ~turn_sequence ~turn_id at summary =
+  let identity projection =
+    Option.map (fun id -> id ^ ":" ^ projection) source_id
+  in
   let omitted_note =
     if summary.omitted = 0 then []
     else
@@ -879,16 +908,57 @@ let rows_of_trace ~turn_id at summary =
       (* No reasoning and no calls: the omitted count is the only thing the
          block said, and remains a typed transcript omission rather than a
          synthetic tool call. *)
-      [ Utterance { at; turn_id; kind = Tool_calls tool_block; text = "" ; attachments = [] } ]
+      [ Utterance
+          { at
+          ; structural_id = identity "trace-tools"
+          ; turn_sequence
+          ; turn_id
+          ; kind = Tool_calls tool_block
+          ; text = ""
+          ; attachments = []
+          }
+      ]
   | reasoning, [], _ ->
       [ Utterance
-          { at; turn_id; kind = Reasoning (reasoning @ omitted_note); text = "" ; attachments = [] }
+          { at
+          ; structural_id = identity "trace-reasoning"
+          ; turn_sequence
+          ; turn_id
+          ; kind = Reasoning (reasoning @ omitted_note)
+          ; text = ""
+          ; attachments = []
+          }
       ]
   | [], _ :: _, _ ->
-      [ Utterance { at; turn_id; kind = Tool_calls tool_block; text = "" ; attachments = [] } ]
+      [ Utterance
+          { at
+          ; structural_id = identity "trace-tools"
+          ; turn_sequence
+          ; turn_id
+          ; kind = Tool_calls tool_block
+          ; text = ""
+          ; attachments = []
+          }
+      ]
   | reasoning, _ :: _, _ ->
-      [ Utterance { at; turn_id; kind = Reasoning reasoning; text = "" ; attachments = [] }
-      ; Utterance { at; turn_id; kind = Tool_calls tool_block; text = "" ; attachments = [] }
+      [ Utterance
+          { at
+          ; structural_id = identity "trace-reasoning"
+          ; turn_sequence
+          ; turn_id
+          ; kind = Reasoning reasoning
+          ; text = ""
+          ; attachments = []
+          }
+      ; Utterance
+          { at
+          ; structural_id = identity "trace-tools"
+          ; turn_sequence
+          ; turn_id
+          ; kind = Tool_calls tool_block
+          ; text = ""
+          ; attachments = []
+          }
       ]
 
 (* Annotated rather than inferred: an inferred parameter widens to an open
@@ -900,6 +970,8 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
       let at = Option.value ~default:0.0 (float_field fields "ts") in
       let content = Option.value ~default:"" (string_field fields "content") in
       let turn_id = turn_id_of_fields fields in
+      let turn_sequence = turn_sequence_of_fields fields in
+      let source_id = string_field fields "id" in
       match string_field fields "role" with
       | Some "user" ->
           (* [speaker_name] and [surface] are what the server already sends;
@@ -936,6 +1008,8 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
           in
           [ Utterance
               { at
+              ; structural_id = structural_id_of_fields fields "utterance"
+              ; turn_sequence
               ; turn_id
               ; kind = Addressed_to_keeper { speaker; surface }
               ; text = content
@@ -959,6 +1033,8 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
               in
               [ Utterance
                   { at
+                  ; structural_id = structural_id_of_fields fields "failure"
+                  ; turn_sequence
                   ; turn_id
                   ; kind = Delivery_failed { origin_request_id; recovered_at = None }
                   ; text = content
@@ -997,15 +1073,23 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                       without_raw_skill_tools summary
                     else summary
                   in
-                  ( rows_of_skill_projection ~turn_id at skill_projection
-                  , rows_of_trace ~turn_id at summary )
-                else rows_of_skill_projection ~turn_id at skill_projection, []
+                  ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id
+                      at skill_projection
+                  , rows_of_trace ~source_id ~turn_sequence ~turn_id at summary
+                  )
+                else
+                  ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id
+                      at skill_projection
+                  , [] )
               in
               let said =
                 if String.equal content "" && trace_rows <> [] then []
                 else
                   [ Utterance
                       { at
+                      ; structural_id =
+                          structural_id_of_fields fields "utterance"
+                      ; turn_sequence
                       ; turn_id
                       ; kind = if autonomous then Autonomous_reply else Said_by_keeper
                       ; text = content
@@ -1021,6 +1105,8 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
              advancing reply/recovery semantics. *)
           [ Utterance
               { at
+              ; structural_id = structural_id_of_fields fields "system"
+              ; turn_sequence
               ; turn_id
               ; kind = Memory_activity
               ; text = content
@@ -1035,6 +1121,8 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
           | Some tool_name ->
               [ Tool_call
                   { at
+                  ; structural_id = structural_id_of_fields fields "tool"
+                  ; turn_sequence
                   ; turn_id
                   ; call_id = string_field fields "tool_call_id"
                   ; execution_id = string_field fields "execution_id"
@@ -1054,10 +1142,20 @@ let fold_tool_blocks parsed_rows =
   let flush pending acc =
     match List.rev pending with
     | [] -> acc
-    | (at, turn_id, _, _, _, _) :: _ as calls ->
+    | (at, _, turn_sequence, turn_id, _, _, _, _) :: _ as calls ->
+        let structural_id =
+          let ids =
+            List.filter_map
+              (fun (_, structural_id, _, _, _, _, _, _) -> structural_id)
+              calls
+          in
+          match ids with
+          | [] -> None
+          | ids -> Some ("tool-block:" ^ String.concat "+" ids)
+        in
         let activities =
           List.map
-            (fun (_, _, call_id, execution_id, tool_name, args) ->
+            (fun (_, _, _, _, call_id, execution_id, tool_name, args) ->
               let outcome =
                 match execution_id with
                 | Some _ -> Transcript.Returned
@@ -1068,6 +1166,8 @@ let fold_tool_blocks parsed_rows =
             calls
         in
         { at
+        ; structural_id
+        ; turn_sequence
         ; turn_id
         ; kind = Tool_calls (Transcript.tool_block activities)
         ; text = ""
@@ -1077,10 +1177,29 @@ let fold_tool_blocks parsed_rows =
   in
   let rec loop pending acc = function
     | [] -> List.rev (flush pending acc)
-    | Tool_call { at; turn_id; call_id; execution_id; tool_name; args } :: rest ->
-        let next = (at, turn_id, call_id, execution_id, tool_name, args) in
+    | Tool_call
+        { at
+        ; structural_id
+        ; turn_sequence
+        ; turn_id
+        ; call_id
+        ; execution_id
+        ; tool_name
+        ; args
+        }
+      :: rest ->
+        let next =
+          ( at
+          , structural_id
+          , turn_sequence
+          , turn_id
+          , call_id
+          , execution_id
+          , tool_name
+          , args )
+        in
         (match pending with
-         | (_, pending_turn, _, _, _, _) :: _ when pending_turn <> turn_id ->
+         | (_, _, _, pending_turn, _, _, _, _) :: _ when pending_turn <> turn_id ->
              loop [ next ] (flush pending acc) rest
          | _ -> loop (next :: pending) acc rest)
     | Utterance row :: rest -> loop [] (row :: flush pending acc) rest

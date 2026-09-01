@@ -31,11 +31,10 @@
 
     {2 Ordering}
 
-    Rows come back in the order the server appended them, and the server's own
-    note says a client sorts by [ts] and breaks ties by original position —
-    rows persisted without a [ts] must keep their relative order rather than be
-    moved by a sort. [rows_of_json] returns them already in that order, so
-    callers do not repeat the rule. *)
+    Rows are decoded in producer order. [turn_sequence] joins direct and
+    autonomous sources on the persisted absolute turn; [structural_id] keeps
+    row identity through refresh. [ts] is display/pagination metadata and has
+    no conversation-order authority. *)
 
 (** The surface a row arrived on, mirrored from [Surface_ref.t] in the server.
     This library carries no [masc] dependency, so it cannot name that type;
@@ -141,7 +140,15 @@ type attachment_note =
     reader ignored the field the composer has been writing all along. *)
 
 type row =
-  { at : float  (** The server's [ts], the sort key. *)
+  { at : float
+      (** Producer wall clock for display and pagination only; never a
+          conversation ordering key. *)
+  ; structural_id : string option
+      (** Stable server row identity plus a projection discriminator when one
+          source row expands to reasoning/tool/reply rows. *)
+  ; turn_sequence : int option
+      (** Absolute Keeper turn from persisted [turn_ref], when present. This
+          orders turn groups across direct and autonomous stores. *)
   ; turn_id : string option
       (** Exact producer identity for grouping rows from one turn: the typed
           delivery key for direct turns, otherwise the persisted [turn_ref].

@@ -1361,6 +1361,72 @@ let test_operator_interrupt_settles_as_typed_cancel () =
   | _ -> fail "operator interrupt did not settle the operation as failed"
 ;;
 
+let test_exact_operation_interrupt_cannot_cancel_its_replacement () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let started = Eio.Stream.create 2 in
+  let release_first, resolve_first = Eio.Promise.create () in
+  let first_id = operation_id "kmsg-exact-interrupt-first" in
+  let second_id = operation_id "kmsg-exact-interrupt-second" in
+  let operation_executor ~sw:_ ~keeper_name:_ ~claim =
+    match claim () with
+    | Error error -> fail (Owner.error_to_string error)
+    | Ok None -> fail "exact-interrupt runner did not claim an operation"
+    | Ok (Some operation) ->
+        Eio.Stream.add started operation.Chat_operation.operation_id;
+        if Chat_operation.Operation_id.equal operation.operation_id first_id
+        then Eio.Promise.await release_first
+        else Eio.Fiber.await_cancel ();
+        Owner.Operation_succeeded { outcome_ref = "done" }
+  in
+  let owner =
+    owner_ok
+      (start_owner_with_executor
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_executor:(Some operation_executor)
+         ~keeper_name:"exact-interrupt"
+         ~initial_meta:(Some (make_meta "exact-interrupt"))
+         ())
+  in
+  List.iter
+    (fun operation_id ->
+      ignore
+        (owner_ok
+           (Owner.submit_operation owner ~operation_id ~source:operation_source
+              ~input:(operation_input "wait"))))
+    [ first_id; second_id ];
+  check bool "first operation started" true
+    (Chat_operation.Operation_id.equal (Eio.Stream.take started) first_id);
+  Eio.Promise.resolve resolve_first ();
+  ignore (await_terminal owner first_id 1_000);
+  check bool "replacement operation started" true
+    (Chat_operation.Operation_id.equal (Eio.Stream.take started) second_id);
+  (match Owner.interrupt_running_operation owner first_id with
+   | Ok
+       (Owner.Operation_not_current
+          { running_operation_id = Some running }) ->
+       check bool "stale interrupt observes replacement identity" true
+         (Chat_operation.Operation_id.equal running second_id)
+   | Ok Owner.Operation_interrupt_signalled ->
+       fail "stale interrupt signalled the replacement operation"
+   | Ok (Owner.Operation_not_current { running_operation_id = None }) ->
+       fail "replacement lost its running identity"
+   | Ok (Owner.Operation_interrupt_failed detail) -> fail detail
+   | Error error -> fail (Owner.error_to_string error));
+  (match Owner.interrupt_running_operation owner second_id with
+   | Ok Owner.Operation_interrupt_signalled -> ()
+   | Ok (Owner.Operation_not_current _) -> fail "exact replacement was not current"
+   | Ok (Owner.Operation_interrupt_failed detail) -> fail detail
+   | Error error -> fail (Owner.error_to_string error));
+  let terminal = await_terminal owner second_id 1_000 in
+  match terminal.state with
+  | Chat_operation.Failed { failure = { kind; _ }; _ } ->
+      check string "exact interrupt is a typed cancellation" "Turn_cancelled"
+        (Chat_operation.failure_kind_to_string kind)
+  | _ -> fail "exact interrupt did not settle the replacement as cancelled"
+;;
+
 let test_is_operator_interrupt_unwraps_every_shape () =
   let interrupt = Keeper_registry_types.Operator_interrupt in
   let bt = Printexc.get_callstack 0 in
@@ -2982,6 +3048,10 @@ let () =
             "operator interrupt settles as typed cancel"
             `Quick
             test_operator_interrupt_settles_as_typed_cancel
+        ; test_case
+            "stale exact interrupt cannot cancel replacement"
+            `Quick
+            test_exact_operation_interrupt_cannot_cancel_its_replacement
         ; test_case
             "is_operator_interrupt unwraps every shape"
             `Quick

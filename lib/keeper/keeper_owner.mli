@@ -28,6 +28,15 @@ type operation_projection =
   ; store_unavailable : bool
   }
 
+type operation_interrupt_result =
+  | Operation_interrupt_signalled
+  | Operation_not_current of
+      { running_operation_id : Chat_operation.Operation_id.t option }
+  | Operation_interrupt_failed of string
+(** Result of a mailbox-linearized compare-and-interrupt. A stale caller can
+    never signal a newer operation: the expected id is compared by the Owner
+    before its exact child cancel capability is invoked. *)
+
 type turn_lane =
   | Autonomous
   | Chat_operation
@@ -267,6 +276,12 @@ val exact_operation
   :  t
   -> Chat_operation.Operation_id.t
   -> (Chat_operation.t option, error) result
+
+val interrupt_running_operation
+  :  t
+  -> Chat_operation.Operation_id.t
+  -> (operation_interrupt_result, error) result
+(** Signal only when this exact operation still owns the running child. *)
 
 val submit_operation
   :  t

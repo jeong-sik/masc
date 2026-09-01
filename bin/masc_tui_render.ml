@@ -7172,8 +7172,13 @@ let render_keeper_message (state : state) =
      | mine, others ->
          List.iter
            (fun entry ->
+             let activity =
+               match entry.phase with
+               | Turn_streaming -> "sending"
+               | Turn_reconciling -> "reconciling"
+             in
              box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-               (Printf.sprintf "  (sending %s%s…)"
+               (Printf.sprintf "  (%s %s%s…)" activity
                   (Keeper_chat.compact_request_id entry.sent_request.request_id)
                   (sending_age entry)))
            mine;
@@ -7190,19 +7195,26 @@ let render_keeper_message (state : state) =
       Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
         ~keeper_name
     in
-    List.iteri
-      (fun index item ->
-        let intent, style =
-          match item.Masc_tui_keeper_chat_queue.intent with
-          | Masc_tui_keeper_chat_queue.Next -> "NEXT", Theme.recede ()
-          | Masc_tui_keeper_chat_queue.Steer_after_interrupt ->
-              "STEER", Theme.warn ()
-        in
-        let request = item.Masc_tui_keeper_chat_queue.request in
-        box_line_styled chat_buf chat_cols ~style
-          (Printf.sprintf "  %s %d · %s · %s" intent (index + 1)
-             (keeper_message_clock item.submitted_at)
-             (Terminal_text.single_line request.Keeper_chat.message)))
+    let pending = keeper_message_pending_preview pending in
+    List.iter
+      (function
+        | Pending_preview_item (position, item) ->
+            let intent, style =
+              match item.Masc_tui_keeper_chat_queue.intent with
+              | Masc_tui_keeper_chat_queue.Next -> "NEXT", Theme.recede ()
+              | Masc_tui_keeper_chat_queue.Steer_after_interrupt ->
+                  "STEER", Theme.warn ()
+            in
+            let request = item.Masc_tui_keeper_chat_queue.request in
+            box_line_styled chat_buf chat_cols ~style
+              (Printf.sprintf "  %s %d · %s · %s" intent position
+                 (keeper_message_clock item.submitted_at)
+                 (Terminal_text.single_line request.Keeper_chat.message))
+        | Pending_preview_omitted omitted ->
+            box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
+              (Printf.sprintf
+                 "  … %d pending row(s) hidden · Ctrl-K:cancel last · Ctrl-P:edit last"
+                 omitted))
       pending;
     (match state.msg_loaded_error with
      | Some detail ->

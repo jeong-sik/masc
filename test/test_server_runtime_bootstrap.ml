@@ -4611,7 +4611,80 @@ let test_transition_projection_cursor_commits_before_isolated_owner_recovery () 
     (List.rev !processed)
 ;;
 
+(* A wedged case in this suite has burned 57 CI minutes in silence: a hang
+   never fails, so dune kept the Alcotest stream buffered and the log showed
+   nothing (#32181 — load-only, unreproduced in three 6-way local rounds).
+   The watchdog turns that silence into a named failure. It is a forked
+   child, not a thread, so it shares no runtime state with the suite it
+   watches — an in-process Thread.delay was measured never returning under
+   this suite's Eio main loop, which would make a thread watchdog wedge
+   with its patient. On expiry the child writes a marker to stderr and
+   SIGKILLs the suite; dune then prints the captured stream, and the first
+   registered case missing from it is the wedged one. The pipe's write end
+   is cloexec and never written: kernel close at suite exit is the
+   liveness signal that retires the watchdog early. 900s is ~40x the
+   suite's measured wall time under 6-way self-contention; only a wedge
+   reaches it. MASC_TEST_WATCHDOG_SEC overrides the deadline, 0 disables. *)
+let watchdog_default_deadline_sec = 900.0
+
+let install_suite_watchdog () =
+  let deadline_sec =
+    match Sys.getenv_opt "MASC_TEST_WATCHDOG_SEC" with
+    | Some raw ->
+      (match float_of_string_opt (String.trim raw) with
+       | Some seconds -> seconds
+       | None -> watchdog_default_deadline_sec)
+    | None -> watchdog_default_deadline_sec
+  in
+  if deadline_sec > 0.0
+  then begin
+    let suite_alive_read, suite_alive_write = Unix.pipe ~cloexec:true () in
+    match Unix.fork () with
+    | 0 ->
+      Unix.close suite_alive_write;
+      let suite_pid = Unix.getppid () in
+      let deadline = Unix.gettimeofday () +. deadline_sec in
+      let rec watch () =
+        let remaining = deadline -. Unix.gettimeofday () in
+        let timeout = if remaining < 0.0 then 0.0 else remaining in
+        match Unix.select [ suite_alive_read ] [] [] timeout with
+        | _ :: _, _, _ ->
+          (* EOF: the suite exited on its own; the watchdog retires. *)
+          Stdlib.exit 0
+        | [], _, _ ->
+          if remaining <= 0.0
+          then begin
+            (* A raw write, not an OCaml channel: the channel state this
+               forked child inherited belongs to the suite process. *)
+            let marker =
+              Printf.sprintf
+                "MASC_TEST_WATCHDOG: Server_runtime_bootstrap exceeded \
+                 %.0fs; killing the suite so the buffered Alcotest stream \
+                 reaches the log — the first registered case missing from \
+                 it is the wedged one\n"
+                deadline_sec
+            in
+            (try
+               ignore
+                 (Unix.write_substring
+                    Unix.stderr marker 0 (String.length marker)
+                  : int)
+             with
+             | Unix.Unix_error _ -> ());
+            (try Unix.kill suite_pid Sys.sigkill with
+             | Unix.Unix_error _ -> ());
+            Stdlib.exit 0
+          end
+          else watch ()
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> watch ()
+      in
+      watch ()
+    | _watchdog_pid -> Unix.close suite_alive_read
+  end
+;;
+
 let () =
+  install_suite_watchdog ();
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio_guard.enable ();

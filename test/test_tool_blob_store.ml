@@ -66,6 +66,39 @@ let test_inline_roundtrip () =
   | O.Invalid_marker { detail } ->
       Alcotest.failf "expected Not_marker, got Invalid_marker: %s" detail
 
+(* A spaced media type used to encode fine and fail at read time with
+   "scanf: bad input at char number 109: looking for 'p', found 'c'" -- the
+   decoder had stopped mime at the space and met "charset=" where it wanted
+   "preview=". The value is rejected where it is built now. *)
+let test_spaced_mime_is_refused_at_construction () =
+  let sha256 = String.make 64 'b' in
+  match
+    O.make_artifact_ref ~sha256 ~bytes:12 ~preview:"p"
+      ~mime:"text/plain; charset=utf-8"
+  with
+  | Ok _ ->
+      Alcotest.fail "a media type the marker cannot carry was accepted"
+  | Error (O.Unencodable_mime mime) ->
+      Alcotest.(check string)
+        "the offending value is named" "text/plain; charset=utf-8" mime
+  | Error other ->
+      Alcotest.failf "wrong rejection: %s" (O.make_error_to_string other)
+
+(* The unspaced form every caller now writes must still survive the trip. *)
+let test_parameterised_mime_roundtrips_without_a_space () =
+  let sha256 = String.make 64 'c' in
+  let artifact_ref =
+    ref_exn ~sha256 ~bytes:7 ~preview:"body" ~mime:"text/plain;charset=utf-8"
+  in
+  let encoded = O.encode_for_agent_core (O.Stored artifact_ref) in
+  match O.decode_from_agent_core encoded with
+  | O.Decoded decoded ->
+      Alcotest.(check string)
+        "mime survives" "text/plain;charset=utf-8" decoded.O.mime
+  | O.Not_marker -> Alcotest.fail "encoded value was not recognised as a marker"
+  | O.Invalid_marker { detail } ->
+      Alcotest.failf "round trip failed: %s" detail
+
 let test_stored_roundtrip () =
   let sha256 = String.make 64 'a' in
   let artifact_ref =
@@ -88,35 +121,6 @@ let test_stored_roundtrip () =
   | O.Not_marker -> Alcotest.fail "expected Decoded"
   | O.Invalid_marker { detail } ->
       Alcotest.failf "expected Decoded, got Invalid_marker: %s" detail
-
-(* The marker format reads mime with [%s@ ], which stops at a space, so a
-   mime carrying a parameter -- text/plain; charset=utf-8 -- encodes fine and
-   then fails to come back: the scan reads "text/plain;" and looks for the
-   literal " preview=" where "charset=..." stands.
-
-   No caller passes such a mime today (both put sites hand over a literal
-   without spaces), so this pins a boundary rather than reporting a live
-   defect. It is here because the same file already knows content types
-   carry parameters -- [content_type_base] in tool_misc_web_fetch strips
-   them -- so the day one reaches this codec, the failure should land in a
-   test rather than in a keeper's tool result. #25499. *)
-let test_mime_with_a_space_does_not_survive_the_round_trip () =
-  let artifact_ref =
-    ref_exn ~sha256:(String.make 64 'b') ~bytes:12 ~preview:"hi"
-      ~mime:"text/plain; charset=utf-8"
-  in
-  let encoded = O.encode_for_agent_core (O.Stored artifact_ref) in
-  Alcotest.(check bool) "encoding still produces a marker" true
-    (O.is_marker encoded);
-  match O.decode_from_agent_core encoded with
-  | O.Invalid_marker _ -> ()
-  | O.Decoded { mime; _ } ->
-      Alcotest.failf
-        "decode unexpectedly succeeded with mime %S -- if the codec now reads \
-         mime up to the next literal, this test should assert the round trip \
-         instead of the rejection"
-        mime
-  | O.Not_marker -> Alcotest.fail "expected Invalid_marker, got Not_marker"
 
 (* [Scanf.sscanf] stops when the format is satisfied; it does not require the
    input to be spent. Trailing bytes after the closing bracket are therefore
@@ -1275,8 +1279,6 @@ let () =
         [
           Alcotest.test_case "inline" `Quick test_inline_roundtrip;
           Alcotest.test_case "stored" `Quick test_stored_roundtrip;
-          Alcotest.test_case "mime with a space does not survive" `Quick
-            test_mime_with_a_space_does_not_survive_the_round_trip;
           Alcotest.test_case "trailing bytes after the marker are ignored"
             `Quick test_trailing_bytes_after_the_marker_are_ignored;
           Alcotest.test_case
@@ -1388,6 +1390,10 @@ let () =
         [
           Alcotest.test_case "repeated put no dup" `Quick
             test_repeated_put_no_dup;
+          Alcotest.test_case "spaced mime is refused at construction" `Quick
+            test_spaced_mime_is_refused_at_construction;
+          Alcotest.test_case "parameterised mime round-trips without a space"
+            `Quick test_parameterised_mime_roundtrips_without_a_space;
         ] );
       ( "storage failure",
         [

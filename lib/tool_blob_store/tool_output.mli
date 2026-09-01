@@ -37,6 +37,10 @@ type make_error =
   | Invalid_sha256 of invalid_sha256
   | Negative_bytes of int
   | Empty_mime
+  | Unencodable_mime of string
+      (** The marker writes mime unquoted between spaces, so a media type with
+          a parameter ("text/plain; charset=utf-8") cannot survive the round
+          trip. *)
 
 val make_artifact_ref :
   sha256:string ->

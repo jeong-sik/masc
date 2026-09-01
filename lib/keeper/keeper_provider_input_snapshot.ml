@@ -430,7 +430,9 @@ let write_best_effort
             blob_store
             ~reusable
             (* No space: the agent-core blob marker is space-delimited, so a
-               spaced mime parameter breaks decode_from_agent_core (#32332). *)
+               spaced mime parameter breaks decode_from_agent_core (#32332),
+               and make_artifact_ref now rejects such a media type outright
+               rather than writing a marker that cannot be read back. *)
             ~mime:"text/plain;charset=utf-8"
             system_prompt
         in

@@ -634,15 +634,18 @@ let microvm_build_volume ~keeper_name ~timeout_sec =
     the share. A failed [mkdir] leaves a build to fail with a message naming
     the path, which is more useful than refusing the turn. *)
 let refresh_microvm_build_links ?timeout_sec (t : t) ~container_name =
-  let ctx = t.meta.name in
+  let keeper_name = t.meta.name in
   let rows = Keeper_sandbox_microvm.ensure_build_links ~playground_root:t.host_root in
   List.iter
     (fun (row : Keeper_sandbox_microvm.build_link_row) ->
       match row.outcome with
       | Ok `Unchanged -> ()
-      | Ok `Linked -> Log.info ~ctx "microvm build link installed: %s" row.path
-      | Ok `Relinked -> Log.info ~ctx "microvm build link retargeted: %s" row.path
-      | Error message -> Log.warn ~ctx "microvm build link skipped: %s" message)
+      | Ok `Linked ->
+        Log.Keeper.info ~keeper_name "microvm build link installed: %s" row.path
+      | Ok `Relinked ->
+        Log.Keeper.info ~keeper_name "microvm build link retargeted: %s" row.path
+      | Error message ->
+        Log.Keeper.warn ~keeper_name "microvm build link skipped: %s" message)
     rows;
   match Keeper_sandbox_microvm.build_link_targets_to_create rows with
   | [] -> ()
@@ -657,8 +660,8 @@ let refresh_microvm_build_links ?timeout_sec (t : t) ~container_name =
     (match run_argv_with_status ?timeout_sec argv with
      | Unix.WEXITED 0, _ -> ()
      | _, out ->
-       Log.warn
-         ~ctx
+       Log.Keeper.warn
+         ~keeper_name
          "microvm build volume mkdir failed for %d target(s): %s"
          (List.length targets)
          out)

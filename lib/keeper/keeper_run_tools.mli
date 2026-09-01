@@ -97,6 +97,7 @@ type agent_setup =
 val prepare_agent_setup
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context
   -> turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell

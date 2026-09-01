@@ -1597,6 +1597,86 @@ let test_schedule_exact_lookup_carries_the_wake_history () =
   check int "and the store's ceiling travels with it"
     Schedule_store.terminal_wakes_retained_per_schedule
     (body |> member "wake_retention_per_schedule" |> to_int)
+(* The fleet page caps at 20 rows with active ones first, so a Keeper whose
+   schedules are terminal or simply further down is absent from it. The tab
+   that filtered that page reported them as non-existent. A target-scoped page
+   is what makes them readable, and it must narrow every part of the envelope:
+   a scoped page carrying fleet counts would be read as this Keeper's. *)
+let test_schedule_page_can_be_scoped_to_one_target () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let actor id =
+    { Schedule_domain.id
+    ; kind = Schedule_domain.Human_operator
+    ; display_name = None
+    }
+  in
+  let insert ~schedule_id ~keeper =
+    let payload =
+      `Assoc
+        [ "kind", `String "masc.keeper_wake"
+        ; ( "body"
+          , `Assoc
+              [ "keeper_name", `String keeper
+              ; "message", `String "wake for the scoped page test"
+              ] )
+        ]
+    in
+    match
+      Schedule_domain.create_request
+        ~schedule_id
+        ~requested_by:(actor "requester")
+        ~scheduled_by:(actor "scheduler")
+        ~requested_at:100.0
+        ~due_at:200.0
+        ~payload
+        ~source:Schedule_domain.Operator_request
+        ()
+    with
+    | Ok request ->
+      (match Schedule_store.insert_request config request with
+       | Ok _ -> ()
+       | Error _ -> fail ("could not insert " ^ schedule_id))
+    | Error msg -> fail msg
+  in
+  insert ~schedule_id:"sched-scoped-a" ~keeper:"alpha";
+  insert ~schedule_id:"sched-scoped-b" ~keeper:"alpha";
+  insert ~schedule_id:"sched-scoped-c" ~keeper:"beta";
+  let open Yojson.Safe.Util in
+  let scoped =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~payload_target:"keeper:alpha"
+      config
+  in
+  check int "the scoped page counts only its target" 2
+    (scoped |> member "request_count" |> to_int);
+  check (list string) "and lists only its target's rows"
+    [ "sched-scoped-a"; "sched-scoped-b" ]
+    (scoped |> member "requests" |> to_list
+     |> List.map (fun row -> row |> member "schedule_id" |> to_string)
+     |> List.sort String.compare);
+  check (option string) "the response says what it is scoped to"
+    (Some "keeper:alpha")
+    (scoped |> member "payload_target_selector" |> to_option to_string);
+  check int "the scoped limit is its own number"
+    Server_dashboard_schedule_projection.schedule_projection_target_request_limit
+    (scoped |> member "request_limit" |> to_int);
+  let fleet =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+  in
+  check int "the unscoped page still counts the store" 3
+    (fleet |> member "request_count" |> to_int);
+  check bool "and does not claim a selector" true
+    (fleet |> member "payload_target_selector" = `Null);
+  let missing =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~payload_target:"keeper:nobody"
+      config
+  in
+  (* An empty scoped page is an answer, not a store failure: status stays ok so
+     the reader can tell "none for this target" from "could not read". *)
+  check string "an empty scope is still a read that succeeded" "ok"
+    (missing |> member "status" |> to_string);
+  check int "with nothing in it" 0 (missing |> member "request_count" |> to_int)
 
 (* The window selects which rows the scan covers, so two windows must not share
    an entry. Seeding only the 24 h key and asking for 1 h has to miss. *)
@@ -4495,6 +4575,8 @@ let () =
             test_scheduled_automation_reads_its_cache_key;
           test_case "schedule exact lookup carries the wake history" `Quick
             test_schedule_exact_lookup_carries_the_wake_history;
+          test_case "schedule page can be scoped to one target" `Quick
+            test_schedule_page_can_be_scoped_to_one_target;
           test_case "schedule exact lookup names a blank id" `Quick
             test_schedule_exact_lookup_rejects_blank_id;
           test_case "agent-activity keys on its window" `Quick

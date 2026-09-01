@@ -300,7 +300,17 @@ let dashboard_scheduled_automation_query_http_json
   : Yojson.Safe.t
   =
   match Server_utils.query_param request "schedule_id" with
-  | None -> dashboard_scheduled_automation_http_json ~config
+  | None ->
+    (* A target selector is already narrowed by its target, so it bypasses the
+       aggregate's shared cache the same way the exact lookup does: a
+       client-controlled selector in a cache key is a key per caller. *)
+    (match Server_utils.query_param request "payload_target" with
+     | None -> dashboard_scheduled_automation_http_json ~config
+     | Some payload_target ->
+       Domain_pool_ref.submit_io_or_inline (fun () ->
+         Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+           ~payload_target
+           config))
   | Some schedule_id ->
     Domain_pool_ref.submit_io_or_inline (fun () ->
       Server_dashboard_schedule_projection.scheduled_automation_exact_lookup_json

@@ -1528,6 +1528,10 @@ type async_msg =
      not say whose it was would be filed under whoever is open when it lands. *)
   | Schedule_wake_history_loaded of
       string * (schedule_wake_history, string) result
+  (* Carries the keeper it was asked about: the roster cursor can move while a
+     load is in flight, and an answer that did not say whose it was would be
+     filed under whoever is selected when it lands. *)
+  | Keeper_schedules_loaded of string * (schedule_snapshot, string) result
   | System_logs_loaded of (system_log_snapshot, string) result
   | Schedule_cancel_done of (string, string) result
   (* (message, noop): [noop = true] says the verdict already stood. *)
@@ -2260,6 +2264,31 @@ let launch_schedule_wake_history_load state ~mailbox ~schedule_id =
            enqueue_async mailbox
              (Schedule_wake_history_loaded
                 (schedule_id, Error "Eio switch is unavailable")))
+let launch_keeper_schedules_load state ~mailbox ~keeper_name =
+  match state.keeper_schedules_inflight with
+  | Some inflight when String.equal inflight keeper_name -> ()
+  | Some _ | None ->
+      state.keeper_schedules_inflight <- Some keeper_name;
+      let host = server_peer_host in
+      let port = state.port in
+      let payload_target = "keeper:" ^ keeper_name in
+      let run () =
+        let result =
+          try Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Keeper_schedules_loaded (keeper_name, result))
+      in
+      (match Eio_context.get_switch_opt () with
+       | Some sw ->
+           Eio.Fiber.fork_daemon ~sw (fun () ->
+               run ();
+               `Stop_daemon)
+       | None ->
+           enqueue_async mailbox
+             (Keeper_schedules_loaded
+                (keeper_name, Error "Eio switch is unavailable")))
 
 let launch_schedules_load state ~mailbox =
   let host = server_peer_host in
@@ -5927,7 +5956,10 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
            state.identity_filter <- None;
            launch_identity_view state ~mailbox keeper.k_name
        | Detail_channels -> launch_connectors_load state ~mailbox
-       | Detail_automation -> launch_schedules_load state ~mailbox
+       | Detail_automation ->
+           state.keeper_schedules <- None;
+           state.keeper_schedules_error <- None;
+           launch_keeper_schedules_load state ~mailbox ~keeper_name:keeper.k_name
        | Detail_runs -> launch_fusion_runs_load state ~mailbox)
 ;;
 
@@ -5963,7 +5995,10 @@ let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
       state.identity_view_error <- None;
       launch_identity_view state ~mailbox keeper.k_name
   | Detail_channels -> launch_connectors_load state ~mailbox
-  | Detail_automation -> launch_schedules_load state ~mailbox
+  | Detail_automation ->
+      state.keeper_schedules <- None;
+      state.keeper_schedules_error <- None;
+      launch_keeper_schedules_load state ~mailbox ~keeper_name:keeper.k_name
   | Detail_runs -> launch_fusion_runs_load state ~mailbox
 ;;
 
@@ -8228,6 +8263,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         Option.equal String.equal state.schedule_wake_history_inflight
           (Some schedule_id)
       then state.schedule_wake_history_inflight <- None
+  | Keeper_schedules_loaded (keeper_name, result) ->
+      (match state.keeper_schedules_inflight with
+       | Some inflight when String.equal inflight keeper_name ->
+           state.keeper_schedules_inflight <- None
+       | Some _ | None -> ());
+      (* A page that arrived for a keeper the cursor has left is not this tab's
+         answer; filing it would show one Keeper's schedules under another's
+         name. *)
+      (match result with
+       | Ok snapshot ->
+           state.keeper_schedules <- Some (keeper_name, snapshot);
+           state.keeper_schedules_error <- None
+       | Error err ->
+           state.keeper_schedules <- None;
+           state.keeper_schedules_error <- Some (keeper_name, err))
   | Schedule_cancel_done result -> (
       match result with
       | Ok message ->

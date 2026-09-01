@@ -874,6 +874,13 @@ let load_schedule_wake_history ~(host : string) ~(port : int)
   match fetch_schedule_detail ~host ~port ~schedule_id with
   | Error err -> Error ("schedule detail load failed: " ^ err)
   | Ok json -> decode_schedule_wake_history json
+(** Load one target's schedules. Same envelope as the fleet page, so the same
+    decoder reads it and the pane keeps its truncation reading. *)
+let load_schedules_for_target ~(host : string) ~(port : int)
+    ~(payload_target : string) : (schedule_snapshot, string) result =
+  match fetch_schedules_for_target ~host ~port ~payload_target with
+  | Error err -> Error ("keeper schedule load failed: " ^ err)
+  | Ok json -> decode_schedule_snapshot json
 
 (** Load board post list from /api/v1/board *)
 let load_board_list ~(host : string) ~(port : int)

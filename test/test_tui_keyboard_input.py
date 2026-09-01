@@ -8279,7 +8279,9 @@ def keeper_lanes_interaction(
     return interact
 
 
-def keeper_lanes_ia_interaction(gate: GatedHttpResponse) -> Interaction:
+def keeper_lanes_ia_interaction(
+    gate: GatedHttpResponse, fixtures: HttpFixtures
+) -> Interaction:
     """Keeper composite facts live on Keepers; Lanes is Standalone-only."""
 
     def interact(
@@ -8449,6 +8451,62 @@ def keeper_lanes_ia_interaction(gate: GatedHttpResponse) -> Interaction:
                 "Minimum-height HITL detail clipped its footer: "
                 f"{compact_hitl_detail!r}"
             )
+        compact_narrow_hitl_detail = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=14,
+            columns=100,
+            needle=b"Left / Esc",
+            controls=(FULL_REDRAW,),
+        )
+        if b"Left / Esc" not in CSI_RE.sub(b"", compact_narrow_hitl_detail):
+            raise AssertionError(
+                "Minimum-height narrow HITL detail clipped its footer: "
+                f"{compact_narrow_hitl_detail!r}"
+            )
+        fixtures[
+            "/api/v1/dashboard/exact-lane-runs/hitl-fixture"
+        ] = (503, {"error": "stale hitl detail"})
+        compact_narrow_refresh_error = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"r",
+            b"lane run detail returned 503",
+        )
+        compact_narrow_refresh_error_plain = CSI_RE.sub(
+            b"", compact_narrow_refresh_error
+        )
+        stale_evidence = (
+            b"lane run detail returned 503",
+            b"JUDGMENT  ADVISORY APPROVE",
+            b"Left / Esc",
+        )
+        for evidence in stale_evidence:
+            if evidence not in compact_narrow_refresh_error_plain:
+                raise AssertionError(
+                    "Minimum-height narrow stale HITL detail clipped evidence "
+                    f"{evidence!r}: {compact_narrow_refresh_error!r}"
+                )
+        compact_wide_refresh_error = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=14,
+            columns=140,
+            needle=b"Left / Esc",
+            controls=(FULL_REDRAW,),
+        )
+        compact_wide_refresh_error_plain = CSI_RE.sub(
+            b"", compact_wide_refresh_error
+        )
+        for evidence in stale_evidence:
+            if evidence not in compact_wide_refresh_error_plain:
+                raise AssertionError(
+                    "Minimum-height wide stale HITL detail clipped evidence "
+                    f"{evidence!r}: {compact_wide_refresh_error!r}"
+                )
         resize_and_wait(
             process,
             master_fd,
@@ -10625,7 +10683,7 @@ def run_keyboard_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
         description="Keepers operations and Standalone-only Lanes",
-        interact=keeper_lanes_ia_interaction(lanes_gate),
+        interact=keeper_lanes_ia_interaction(lanes_gate, lanes_fixtures),
         http_fixtures=lanes_fixtures,
     )
     run_terminal_scenario(
@@ -11429,7 +11487,7 @@ def run_keeper_lanes_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
         description="Keepers operations and Standalone-only Lanes",
-        interact=keeper_lanes_ia_interaction(gate),
+        interact=keeper_lanes_ia_interaction(gate, fixtures),
         http_fixtures=fixtures,
     )
 

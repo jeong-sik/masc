@@ -5604,8 +5604,13 @@ let render_lane_run_detail (state : state) ~run_id =
    | Some error ->
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text error);
-       box_divider buf cols);
-  let error_rows = if Option.is_some state.lane_run_detail_error then 2 else 0 in
+       if Option.is_none detail then box_divider buf cols);
+  let error_rows =
+    match detail, state.lane_run_detail_error with
+    | Some _, Some _ -> 1
+    | None, Some _ -> 2
+    | (Some _ | None), None -> 0
+  in
   let scroll, max_scroll =
     match detail, state.lane_run_detail_error with
     | None, error ->
@@ -5635,49 +5640,54 @@ let render_lane_run_detail (state : state) ~run_id =
           lane_run_payload_lines ~width:left_width detail.lrd_input_payload
         in
         let output_lines = lane_run_output_lines ~width:right_width detail in
-        let content_height =
-          max 0 (rows - List.length summary - 7 - error_rows)
+        let payload_rows =
+          max 0 (rows - List.length summary - 6 - error_rows)
         in
-        let input_max_scroll =
-          if content_height = 0
-          then 0
-          else max 0 (List.length input_lines - content_height)
-        in
-        let output_max_scroll =
-          if content_height = 0
-          then 0
-          else max 0 (List.length output_lines - content_height)
-        in
-        let max_scroll = max input_max_scroll output_max_scroll in
-        let scroll = max 0 (min state.lane_run_detail_scroll max_scroll) in
-        let input_scroll = min scroll input_max_scroll in
-        let output_scroll = min scroll output_max_scroll in
-        let input_title, output_title = lane_run_panel_titles detail in
-        lane_run_split_line buf cols ~left_width
-          ~left:
-            ( Ansi.bold
-            , Printf.sprintf "%s  %s" input_title
-                (lane_run_pane_progress ~scroll:input_scroll
-                   ~height:content_height (List.length input_lines)) )
-          ~right:
-            ( Ansi.bold
-            , Printf.sprintf "%s  %s" output_title
-                (lane_run_pane_progress ~scroll:output_scroll
-                   ~height:content_height (List.length output_lines)) );
-        for index = 0 to content_height - 1 do
-          let left =
-            Option.value
-              (List.nth_opt input_lines (index + input_scroll))
-              ~default:(Ansi.reset, "")
+        if payload_rows = 0
+        then 0, 0
+        else begin
+          let content_height = payload_rows - 1 in
+          let input_max_scroll =
+            if content_height = 0
+            then 0
+            else max 0 (List.length input_lines - content_height)
           in
-          let right =
-            Option.value
-              (List.nth_opt output_lines (index + output_scroll))
-              ~default:(Ansi.reset, "")
+          let output_max_scroll =
+            if content_height = 0
+            then 0
+            else max 0 (List.length output_lines - content_height)
           in
-          lane_run_split_line buf cols ~left_width ~left ~right
-        done;
-        scroll, max_scroll
+          let max_scroll = max input_max_scroll output_max_scroll in
+          let scroll = max 0 (min state.lane_run_detail_scroll max_scroll) in
+          let input_scroll = min scroll input_max_scroll in
+          let output_scroll = min scroll output_max_scroll in
+          let input_title, output_title = lane_run_panel_titles detail in
+          lane_run_split_line buf cols ~left_width
+            ~left:
+              ( Ansi.bold
+              , Printf.sprintf "%s  %s" input_title
+                  (lane_run_pane_progress ~scroll:input_scroll
+                     ~height:content_height (List.length input_lines)) )
+            ~right:
+              ( Ansi.bold
+              , Printf.sprintf "%s  %s" output_title
+                  (lane_run_pane_progress ~scroll:output_scroll
+                     ~height:content_height (List.length output_lines)) );
+          for index = 0 to content_height - 1 do
+            let left =
+              Option.value
+                (List.nth_opt input_lines (index + input_scroll))
+                ~default:(Ansi.reset, "")
+            in
+            let right =
+              Option.value
+                (List.nth_opt output_lines (index + output_scroll))
+                ~default:(Ansi.reset, "")
+            in
+            lane_run_split_line buf cols ~left_width ~left ~right
+          done;
+          scroll, max_scroll
+        end
       end
       else begin
         let lines =

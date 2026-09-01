@@ -33,10 +33,13 @@ let ( let* ) = Result.bind
 (* [expected] is read by a model deciding what to send next, so it is written
    in the vocabulary [Agent_core.Tool_input_validation] already uses on the
    schema layer: MISSING names an absent field and its type, "wrong type"
-   names what arrived. A payload that clears the schema and fails here used to
-   answer in a second vocabulary ("must be required field"), which named the
-   rule rather than the correction -- live logs carry a Keeper trying
-   target.agent, target.keeper_name, then target.keeper, one call each. *)
+   names what arrived. (That layer also answers enum/const violations with
+   "invalid value"; every check in this module is a JSON type check, so
+   "wrong type" remains the whole vocabulary it needs.) A payload that clears
+   the schema and fails here used to answer in a second vocabulary ("must be
+   required field"), which named the rule rather than the correction -- live
+   logs carry a Keeper trying target.agent, target.keeper_name, then
+   target.keeper, one call each. *)
 let invalid_wire_value ~field ~expected =
   Error (Invalid_wire_value { field; expected })
 ;;

@@ -1177,6 +1177,17 @@ let post_dashboard_gate_resolve ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok json -> expect_ok_true ~what:"gate resolve" json
 
+(** POST /api/v1/dashboard/gate/retry — explicitly rearm a blocked Auto
+    Judge only with the complete row identity just observed. The server checks
+    every field again, so this never turns a refresh race into a retry of a
+    different external effect. *)
+let post_dashboard_gate_retry ~(host : string) ~(port : int)
+    ~(request : Yojson.Safe.t) : (unit, string) result =
+  let body = Yojson.Safe.to_string request in
+  match post_json ~host ~port ~path:"/api/v1/dashboard/gate/retry" ~body with
+  | Error detail -> Error detail
+  | Ok json -> expect_ok_true ~what:"gate retry" json
+
 (** POST /api/v1/dashboard/gate/external-mode — set the external-services
     lane. Its own switch: the workspace lane never opens this one. *)
 let post_dashboard_gate_external_mode ~(host : string) ~(port : int)

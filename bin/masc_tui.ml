@@ -1479,6 +1479,11 @@ type async_msg =
           generation this decision holds. Completion releases that slot, so
           the header stops drawing [submitting] and a second press is admitted
           again. *)
+  | Gate_auto_judge_retried of
+      string * (unit, string) result * Approval.Flow.generation
+      (** approval id, rearm outcome, and the action slot this explicit retry
+          owns. The server accepts it only if every observed identity field
+          still matches the blocked row. *)
   | Gate_external_mode_set of string * (unit, string) result
       (** The external-services lane the operator asked for, and whether the
           server took it. *)
@@ -1963,6 +1968,40 @@ let launch_gate_resolve state ~mailbox ~approval_id ~approve =
                  approve,
                  Error "Eio switch is unavailable",
                  generation )))
+
+let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pending) =
+  match pending.gp_retry_request with
+  | None ->
+      add_event state "system"
+        "This Auto Judge result cannot be replayed safely; decide it with y/n"
+  | Some request ->
+      match Approval.Flow.begin_action state.approval_flow with
+      | Error `Already_inflight ->
+          add_event state "system" "Approval action already in progress"
+      | Ok (flow, generation) -> (
+          state.approval_flow <- flow;
+          let host = server_peer_host in
+          let port = state.port in
+          let run () =
+            let result =
+              try Masc_tui_http.post_dashboard_gate_retry ~host ~port ~request with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn -> Error (Printexc.to_string exn)
+            in
+            enqueue_async mailbox
+              (Gate_auto_judge_retried (pending.gp_id, result, generation))
+          in
+          match Eio_context.get_switch_opt () with
+          | Some sw ->
+              Eio.Fiber.fork_daemon ~sw (fun () ->
+                  run ();
+                  `Stop_daemon)
+          | None ->
+              enqueue_async mailbox
+                (Gate_auto_judge_retried
+                   ( pending.gp_id,
+                     Error "Eio switch is unavailable",
+                     generation )))
 
 let launch_gate_external_mode_set state ~mailbox ~mode =
   let host = server_peer_host in
@@ -8263,6 +8302,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            add_event state "error"
              (Printf.sprintf "Gate decision for %s failed: %s" approval_id
                 detail))
+  | Gate_auto_judge_retried (approval_id, result, generation) ->
+      let flow, _owns_action =
+        Approval.Flow.finish_action state.approval_flow generation
+      in
+      state.approval_flow <- flow;
+      (match result with
+       | Ok () ->
+           add_event state "system"
+             (Printf.sprintf "Auto Judge retry started for %s" approval_id);
+           launch_gate_snapshot_load state ~mailbox
+       | Error detail ->
+           add_event state "error"
+             (Printf.sprintf "Auto Judge retry for %s failed: %s" approval_id
+                detail))
   | Gate_external_mode_set (mode, result) ->
       (match result with
        | Ok () ->
@@ -11542,6 +11595,17 @@ and is loaded on demand through keeper_skill.
                  launch_identity_refresh state ~mailbox:async_messages
                    ~keeper_name:keeper.k_name ~provider_ids:attached
            | Some _, (Some _ | None) | None, _ -> ())
+       | Some "R" when state.view = Approvals ->
+           (match
+              Approval_authority.resolve ~presented:!presented_approval
+                ~current:(approval_items state) Confirm
+            with
+            | Some { Approval_authority.row = Gate_row pending; _ } ->
+                launch_gate_auto_judge_retry state ~mailbox:async_messages pending
+            | Some { Approval_authority.row = (Operator_row _ | Keeper_tool_row _); _ }
+            | None ->
+                add_event state "system"
+                  "Approval list changed; review the updated row before retrying")
        | Some "\r" when state.view = Resources ->
            open_selected_resource state ~mailbox:async_messages
        | Some "J" when state.view = Resources ->

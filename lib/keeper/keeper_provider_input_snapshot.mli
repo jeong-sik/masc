@@ -12,20 +12,20 @@
     is exposed through the administrator-only resolving endpoint. *)
 
 type artifact =
-  { bytes : int
-  ; content_ref : string
+  { art_bytes : int
+  ; art_content_ref : string
   }
 
 type message =
-  { index : int
-  ; role : string
-  ; artifact : artifact
+  { msg_index : int
+  ; msg_role : string
+  ; msg_artifact : artifact
   }
 
 type tool_schema =
-  { index : int
-  ; name : string
-  ; artifact : artifact
+  { ts_index : int
+  ; ts_name : string
+  ; ts_artifact : artifact
   }
 
 type t =
@@ -42,32 +42,35 @@ type t =
   }
 
 type resolved_message =
-  { index : int
-  ; role : string
-  ; bytes : int
-  ; sha256 : string
-  ; content : Yojson.Safe.t
+  { rmsg_index : int
+  ; rmsg_role : string
+  ; rmsg_bytes : int
+  ; rmsg_sha256 : string
+  ; rmsg_content : Yojson.Safe.t
   }
 
 type resolved_tool_schema =
-  { index : int
-  ; name : string
-  ; bytes : int
-  ; sha256 : string
-  ; content : Yojson.Safe.t
+  { rts_index : int
+  ; rts_name : string
+  ; rts_bytes : int
+  ; rts_sha256 : string
+  ; rts_content : Yojson.Safe.t
   }
 
 type resolved_system_prompt =
-  { bytes : int
-  ; sha256 : string
-  ; text : string
+  { rsp_bytes : int
+  ; rsp_sha256 : string
+  ; rsp_text : string
   }
 
+(* The record was [resolved] and its fields repeated [resolved_], so a reader
+   met the word twice for one fact. The prefix now names the record, not the
+   state. *)
 type resolved =
-  { snapshot : t
-  ; resolved_system_prompt : resolved_system_prompt option
-  ; resolved_messages : resolved_message list
-  ; resolved_tool_schemas : resolved_tool_schema list
+  { rv_snapshot : t
+  ; rv_system_prompt : resolved_system_prompt option
+  ; rv_messages : resolved_message list
+  ; rv_tool_schemas : resolved_tool_schema list
   }
 
 type read_error =

@@ -26,7 +26,7 @@ type guest_profile =
   | Docker_guest
   | Micro_vm_guest
 
-type runtime_binding =
+type runtime_binding = private
   { runtime : Keeper_turn_sandbox_runtime.t
   ; guest_profile : guest_profile
   ; image : string
@@ -34,7 +34,6 @@ type runtime_binding =
       (** The immutable execution contract frozen with the runtime. Consumers
           use these fields instead of pairing the runtime with another meta
           snapshot. *)
-
 type resolve_result =
   | Runtime of runtime_binding
   | No_factory

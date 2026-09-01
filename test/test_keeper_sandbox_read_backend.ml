@@ -8,6 +8,7 @@
 
 module Workspace = Masc.Workspace
 module Keeper_sandbox_read_backend = Masc.Keeper_sandbox_read_backend
+module Keeper_sandbox_shell_ir_target = Masc.Keeper_sandbox_shell_ir_target
 module Keeper_turn_sandbox_runtime = Masc.Keeper_turn_sandbox_runtime
 module Keeper_sandbox_factory = Masc.Keeper_sandbox_factory
 module Keeper_types = Keeper_types
@@ -364,6 +365,63 @@ let test_run_command_remote_ssh_endpoint_error_before_image_guard () =
            else loop (i + 1)
          in
          loop 0)
+
+let test_run_command_rejects_factory_profile_drift_in_both_directions () =
+  let base, config, docker = setup_config "read-profile-contract" in
+  let remote =
+    { docker with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh }
+  in
+  let assert_mismatch ~factory_meta ~caller_meta =
+    let factory = Keeper_sandbox_factory.create ~config ~meta:factory_meta () in
+    Fun.protect
+      ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+    @@ fun () ->
+    match
+      Keeper_sandbox_read_backend.run_command_with_status
+        ~turn_sandbox_factory:factory
+        ~config
+        ~meta:caller_meta
+        ~command_argv:[ "ls"; "/" ]
+        ~max_bytes:4096
+        ~timeout_sec:5.0
+        ()
+    with
+    | Ok _ -> Alcotest.fail "profile drift reached a read backend"
+    | Error message ->
+      Alcotest.(check bool)
+        "typed contract mismatch"
+        true
+        (String_util.contains_substring
+           message
+           "sandbox profile contract mismatch")
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  assert_mismatch ~factory_meta:docker ~caller_meta:remote;
+  assert_mismatch ~factory_meta:remote ~caller_meta:docker
+
+let test_run_command_refuses_microvm_without_a_turn_factory () =
+  let base, config, docker = setup_config "read-microvm-no-factory" in
+  let microvm =
+    { docker with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm }
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  match
+    Keeper_sandbox_read_backend.run_command_with_status
+      ~config
+      ~meta:microvm
+      ~command_argv:[ "ls"; "/" ]
+      ~max_bytes:4096
+      ~timeout_sec:5.0
+      ()
+  with
+  | Ok _ -> Alcotest.fail "microvm read silently fell back without a factory"
+  | Error message ->
+    Alcotest.(check bool)
+      "microvm needs its frozen runtime"
+      true
+      (String_util.contains_substring
+         message
+         "microvm_read_requires_turn_sandbox_factory")
 
 (* The trailer the fake shim writes, rendered by the same function the real
    shim renders it with. It was a hand-typed string carrying ["v":1] while
@@ -1557,6 +1615,66 @@ let test_turn_runtime_reuses_single_container () =
   Alcotest.(check bool) "turn exec pins MASC_CONFIG_DIR" true
     (String_util.contains_substring exec_line ("MASC_CONFIG_DIR=" ^ container_config_dir))
 
+let test_typed_guest_target_leaves_image_preflight_to_runtime_creation () =
+  with_fake_docker fake_docker_turn_runtime_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  let base, config, meta = setup_config "typed-target-preflight" in
+  let log_path = fake_docker_log_path () in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  ensure_dir host_root;
+  ensure_dir (Filename.concat (Filename.concat base Common.masc_dirname) "config");
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_sandbox_factory.cleanup factory;
+      cleanup_dir base)
+  @@ fun () ->
+  let run_once () =
+    let binding =
+      match Keeper_sandbox_factory.resolve factory ~cwd:host_root with
+      | Runtime binding -> binding
+      | No_factory -> Alcotest.fail "expected a guest runtime"
+      | Remote_ssh_profile -> Alcotest.fail "expected Docker, not remote SSH"
+    in
+    match
+      Keeper_sandbox_shell_ir_target.guest_target
+        ~binding
+        ~meta
+        ~cwd:host_root
+        ()
+    with
+    | Error error -> Alcotest.fail error.message
+    | Ok { target = Masc_exec.Sandbox_target.Docker { runner; _ }; _ } ->
+      let status, _stdout, stderr =
+        runner
+          ~on_stdout_chunk:None
+          ~on_stderr_chunk:None
+          ~stdin_content:None
+          ~argv:[ "true" ]
+          ~env:[||]
+          ~cwd:None
+      in
+      (match status with
+       | Unix.WEXITED 0 -> ()
+       | _ -> Alcotest.failf "typed target execution failed: %s" stderr)
+    | Ok _ -> Alcotest.fail "Docker factory produced a non-Docker target"
+  in
+  run_once ();
+  run_once ();
+  let image_inspects =
+    read_file log_path
+    |> String.split_on_char '\n'
+    |> List.filter (String.starts_with ~prefix:"image inspect alpine:test")
+    |> List.length
+  in
+  Alcotest.(check int)
+    "only runtime creation inspects the image"
+    1
+    image_inspects
+
 let test_streaming_exec_validates_cached_container_before_retry () =
   with_fake_docker fake_docker_stale_streaming_retry_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -2088,6 +2206,10 @@ let run_tests ~clock () =
             test_run_command_empty_image_errors;
           Alcotest.test_case "remote_ssh endpoint error precedes image guard" `Quick
             test_run_command_remote_ssh_endpoint_error_before_image_guard;
+          Alcotest.test_case "factory profile drift is rejected both ways" `Quick
+            test_run_command_rejects_factory_profile_drift_in_both_directions;
+          Alcotest.test_case "microvm without a turn factory fails closed" `Quick
+            test_run_command_refuses_microvm_without_a_turn_factory;
           Alcotest.test_case "nonzero exit errors by default" `Quick
             test_run_command_nonzero_exit_errors_by_default;
           Alcotest.test_case "configured nonzero exit is allowed" `Quick
@@ -2104,6 +2226,9 @@ let run_tests ~clock () =
             test_relaxed_fs_helpers;
           Alcotest.test_case "turn runtime reuses single container" `Quick
             test_turn_runtime_reuses_single_container;
+          Alcotest.test_case
+            "typed target leaves image preflight to runtime creation"
+            `Quick test_typed_guest_target_leaves_image_preflight_to_runtime_creation;
           Alcotest.test_case
             "streaming exec validates cached container before retry"
             `Quick test_streaming_exec_validates_cached_container_before_retry;

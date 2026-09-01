@@ -16,33 +16,34 @@ status: active
 
 ## 운영자 피드백 20항목 재감사 (2026-09-01)
 
-이 표는 2026-09-01의 `main`과 병합/열린 PR을 다시 읽은 결과다. `병합`은
-소스가 `main`에 있다는 뜻이고, `Draft`는 아직 빌드·PTY·병합 전이다. 운영자
-요청에 따라 이 캠페인의 후속 PR에서는 빌드를 실행하지 않았으므로, 아래 표를
-실행 바이너리 증거로 읽으면 안 된다.
+이 표는 2026-09-01의 `main`과 병합/열린 PR을 다시 읽은 결과다. 판정은 두
+가지뿐이다. `main`은 근거 소스가 현재 main에 있다는 뜻이고, `main + Draft`는
+기본 구현은 main에 있지만 표에 적힌 후속 개선은 아직 빌드·PTY·병합 전이라는
+뜻이다. 운영자 요청에 따라 이 캠페인의 후속 PR에서는 빌드를 실행하지
+않았으므로, 아래 표를 실행 바이너리 증거로 읽으면 안 된다.
 
 | # | 요구 | 현재 근거 | 판정 |
 |---|---|---|---|
-| 1 | Repositories와 Code에서 등록/미등록 Git Changes 보기 | #32110은 저장소 범위, #32124는 현재 프로젝트 범위 Changes를 연다. | 병합 |
-| 2 | Repositories의 불필요한 Keeper 비교 열 제거, 전체 경로 표시 | #32104 이후 목록은 Name/Branch/Status/Sync/Path이고, 선택 상세는 resolved absolute `Path`와 상대 `Stored as`를 줄바꿈한다. Keeper는 비교 열이 아니라 선택 상세에만 남는다. | 병합 |
-| 3 | Runtime lane/all rows의 잘린 상세 보기 | #32123의 identity-bound detail이 전체 runtime id/provider/model/lane/probe/error를 페이지로 표시한다. | 병합 |
-| 4 | Config runtime.toml PageUp/PageDown과 값 행 탐색 | #32113이 `j/k`를 assignment 행에만 착지시키고 PgUp/PgDn을 보이는 페이지 단위로 연결한다. | 병합 |
-| 5 | Models effort/temperature/max-token의 빈 값 의미와 개별 spec/추가 경로 | #32113과 #32191이 `-`를 실제 key 부재로 정의하고 `[models.NAME]`/`[PROVIDER.NAME]` 소유 섹션과 API model을 표시한다. `e`는 기존 preview-checked runtime.toml 편집 경로로 이동한다. | 병합 |
-| 6 | Config Params를 실제로 설정 | typed registry 행에서 `Enter`는 친화적 값, `E`는 JSON, `x`는 등록 기본값 복원으로 동작한다. | main 소스 |
-| 7 | Prompt 분류 축소, 한국어화, 낡은 내용 정리 | #32133이 본문/설명을 한국어로 맞추고, #32155가 낡은 Librarian 규범을 제거했으며, #32158이 6개 완성 prompt를 기본 목록으로 축소하고 14개 assembly fragment는 `a` 뒤로 옮겼다. | 병합 |
-| 8 | Theme 확장·대비·정렬·긴 이름 | #32184가 cell-width 열 정렬과 대비 의미를 표시한다. #32202는 37개 번들 중 native-pass를 먼저, lift cost와 이름순으로 정렬하고 개수를 표시한다. | 병합 + Draft #32202 |
-| 9 | Resources 설명, pretty/syntax-highlight detail, `[/]` 이동 | #32130과 #32136이 inventory 의미, metadata, pretty JSON/Markdown, syntax highlight, 인접 resource 이동을 추가했다. | 병합 |
-| 10 | Tools의 surface/async/activations/usage/catalog 차이와 사용 여부 | #32130 이후 5개 pane을 분리하고 각 pane의 질문·원천·빈 상태를 설명한다. effective Keeper surface와 activation/usage evidence가 사용 여부를 구분한다. | 병합 |
-| 11 | Logs 폭·category·verbose·상세 | #32138은 폭 적응 목록/정확한 상세를, #32148은 level floor/category를 추가했다. #32203은 `v`로 DEBUG verbose를 직접 켜고 끄며 헤더에 상태를 표시한다. | 병합 + Draft #32203 |
-| 12 | Overview Attention/Events/Tasks의 의미·색·Goal 계층 | #32134가 Tasks를 Goal 묶음과 상태색으로 표시하고 #32137이 Attention age와 `TUI Session Events` 이름을 추가했다. Attention은 producer의 현재 condition이며, timestamp가 없으면 condition 해소까지 남는다는 경계를 화면에 유지한다. | 병합 |
-| 13 | Acting 분류·event type·회색/composite/internal 의미 | #32177이 turns/actions/everything scope와 회색/Composite/Internal Agent Run 설명을 화면/가이드에 추가했다. | 병합 |
-| 14 | Keeper와 Lanes 중복, A/P/S·Turns·lifecycle/runtime 혼동 | #32140이 누적 Turns를 마지막 turn age로 바꾸고 #32174가 Keeper operations와 4개 standalone LLM lane을 중복 없이 분리했다. 합쳐 그리는 대신 소유 authority를 분리한 결정이다. | 병합 |
-| 15 | Standalone lane slot 설정·fallback·전체 Input/Output·Verifier/tool/approve 결과 | #32185가 JSON highlight/64KiB 경계를, #32189가 Verifier Task/Goal verdict와 tool evidence를 추가했다. #32194는 4개 lane 목적, TOML schema, catalog→CLI fallback, drop/error, `e` 설정 이동, tool-less exact flow와 Verifier evidence 차이를 펼쳐 표시한다. | 병합 + Draft #32194 |
-| 16 | Board/Planning 정렬 기준과 시각적 흐름 | #32180이 정렬 기준을 화면에 표시하고 #32186이 Planning을 Goals→Task Review→Evaluator Verdicts로 묶으며 Goal detail의 linked Task/actor/handoff flow를 추가했다. | 병합 |
-| 17 | ASCII/움직임/조명 효과 | 현재 source는 긴 Keeper 이름 왕복 marquee, 실행 중 activity pulse, 완료 후 60초 glow를 갖고 있으며 비활성 화면에서는 animation frame을 멈춘다. | main 소스 |
-| 18 | Schedule 마지막 동작·실행 기록·생성/수정 | #32139/#32141/#32171이 create/modify/cancel을 한 경로로 정리하고 last wake/queue/reaction/turn-start를 표시한다. #32204는 버려지던 Keeper/stimulus/occurrence/timestamp/reason을 표시하고 schedule receipt가 tool/result를 인과 귀속하지 못한다는 경계를 명시한다. | 병합 + Draft #32204 |
-| 19 | Fusion outcome 요약·rich text·live progress·tool trace | #32144가 stage/progress/summary, #32146이 durable tool trace, #32147이 Markdown detail과 tool execution evidence를 추가했다. | 병합 |
-| 20 | IDE file별 Keeper 작업 기록 | #32192가 Code file detail에 durable Keeper edit activity를 연결했고 #32196이 병합 직후 남은 컴파일 오류를 수리했다. | 병합 |
+| 1 | Repositories와 Code에서 등록/미등록 Git Changes 보기 | #32110은 저장소 범위, #32124는 현재 프로젝트 범위 Changes를 연다. | main |
+| 2 | Repositories의 불필요한 Keeper 비교 열 제거, 전체 경로 표시 | #32104 이후 목록은 Name/Branch/Status/Sync/Path이고, 선택 상세는 resolved absolute `Path`와 상대 `Stored as`를 줄바꿈한다. Keeper는 비교 열이 아니라 선택 상세에만 남는다. | main |
+| 3 | Runtime lane/all rows의 잘린 상세 보기 | #32123의 identity-bound detail이 전체 runtime id/provider/model/lane/probe/error를 페이지로 표시한다. | main |
+| 4 | Config runtime.toml PageUp/PageDown과 값 행 탐색 | #32113이 `j/k`를 assignment 행에만 착지시키고 PgUp/PgDn을 보이는 페이지 단위로 연결한다. | main |
+| 5 | Models effort/temperature/max-token의 빈 값 의미와 개별 spec/추가 경로 | #32113과 #32191이 `-`를 실제 key 부재로 정의하고 `[models.NAME]`/`[PROVIDER.NAME]` 소유 섹션과 API model을 표시한다. `e`는 기존 preview-checked runtime.toml 편집 경로로 이동한다. | main |
+| 6 | Config Params를 실제로 설정 | typed registry 행에서 `Enter`는 친화적 값, `E`는 JSON, `x`는 등록 기본값 복원으로 동작한다. | main |
+| 7 | Prompt 분류 축소, 한국어화, 낡은 내용 정리 | #32133이 본문/설명을 한국어로 맞추고, #32155가 낡은 Librarian 규범을 제거했으며, #32158이 6개 완성 prompt를 기본 목록으로 축소하고 14개 assembly fragment는 `a` 뒤로 옮겼다. | main |
+| 8 | Theme 확장·대비·정렬·긴 이름 | #32184가 cell-width 열 정렬과 대비 의미를 표시한다. #32202는 37개 번들 중 native-pass를 먼저, lift cost와 이름순으로 정렬하고 개수를 표시한다. | main + Draft #32202 |
+| 9 | Resources 설명, pretty/syntax-highlight detail, `[/]` 이동 | #32130과 #32136이 inventory 의미, metadata, pretty JSON/Markdown, syntax highlight, 인접 resource 이동을 추가했다. | main |
+| 10 | Tools의 surface/async/activations/usage/catalog 차이와 사용 여부 | #32130 이후 5개 pane을 분리하고 각 pane의 질문·원천·빈 상태를 설명한다. effective Keeper surface와 activation/usage evidence가 사용 여부를 구분한다. | main |
+| 11 | Logs 폭·category·verbose·상세 | #32138은 폭 적응 목록/정확한 상세를, #32148은 level floor/category를 추가했다. #32203은 `v`로 DEBUG verbose를 직접 켜고 끄며 헤더에 상태를 표시한다. | main + Draft #32203 |
+| 12 | Overview Attention/Events/Tasks의 의미·색·Goal 계층 | #32134가 Tasks를 Goal 묶음과 상태색으로 표시하고 #32137이 Attention age와 `TUI Session Events` 이름을 추가했다. Attention은 producer의 현재 condition이며, timestamp가 없으면 condition 해소까지 남는다는 경계를 화면에 유지한다. | main |
+| 13 | Acting 분류·event type·회색/composite/internal 의미 | #32177이 turns/actions/everything scope와 회색/Composite/Internal Agent Run 설명을 화면/가이드에 추가했다. | main |
+| 14 | Keeper와 Lanes 중복, A/P/S·Turns·lifecycle/runtime 혼동 | #32140이 누적 Turns를 마지막 turn age로 바꾸고 #32174가 Keeper operations와 4개 standalone LLM lane을 중복 없이 분리했다. 합쳐 그리는 대신 소유 authority를 분리한 결정이다. | main |
+| 15 | Standalone lane slot 설정·fallback·전체 Input/Output·Verifier/tool/approve 결과 | #32185가 JSON highlight/64KiB 경계를, #32189가 Verifier Task/Goal verdict와 tool evidence를 추가했다. #32194는 4개 lane 목적, TOML schema, catalog→CLI fallback, drop/error, `e` 설정 이동, tool-less exact flow와 Verifier evidence 차이를 펼쳐 표시한다. | main + Draft #32194 |
+| 16 | Board/Planning 정렬 기준과 시각적 흐름 | #32180이 정렬 기준을 화면에 표시하고 #32186이 Planning을 Goals→Task Review→Evaluator Verdicts로 묶으며 Goal detail의 linked Task/actor/handoff flow를 추가했다. | main |
+| 17 | ASCII/움직임/조명 효과 | 현재 source는 긴 Keeper 이름 왕복 marquee, 실행 중 activity pulse, 완료 후 60초 glow를 갖고 있으며 비활성 화면에서는 animation frame을 멈춘다. | main |
+| 18 | Schedule 마지막 동작·실행 기록·생성/수정 | #32139/#32141/#32171이 create/modify/cancel을 한 경로로 정리하고 last wake/queue/reaction/turn-start를 표시한다. #32204는 버려지던 Keeper/stimulus/occurrence/timestamp/reason을 표시하고 schedule receipt가 tool/result를 인과 귀속하지 못한다는 경계를 명시한다. | main + Draft #32204 |
+| 19 | Fusion outcome 요약·rich text·live progress·tool trace | #32144가 stage/progress/summary, #32146이 durable tool trace, #32147이 Markdown detail과 tool execution evidence를 추가했다. | main |
+| 20 | IDE file별 Keeper 작업 기록 | #32192가 Code file detail에 durable Keeper edit activity를 연결했고 #32196이 병합 직후 남은 컴파일 오류를 수리했다. | main |
 
 ### 남은 완료 게이트
 

@@ -57,6 +57,14 @@ let word_char = [^ ' ' '\t' '\n' '\r' '|' '<' '>' '&' ';' '(' ')'
                    '\'' '"' '$' '`' '{' '}' '!']
 let word = word_char+
 
+(* Parameter names for the simple expansion forms [$NAME] and [${NAME}].
+   A name must start with a letter or underscore — [\$1] is a positional
+   parameter, not an environment lookup, so it stays excluded by failing
+   to match rather than by being listed somewhere else. *)
+let param_start = ['a'-'z' 'A'-'Z' '_']
+let param_char = param_start | ['0'-'9']
+let param_name = param_start param_char*
+
 (* Prefix for a single shell word that continues with quoted literal
    content, e.g. [--include="*.ml"].  This keeps common argv-shaped
    options inside the typed parser without accepting glob metachars in
@@ -128,6 +136,20 @@ rule token = parse
      reaches the catch-all at the bottom and becomes a parse error. *)
   | "$(("           { excluded `Arith_expansion }
   | "$("            { excluded `Cmd_subst }
+  (* Simple parameter expansion — [$NAME] and [${NAME}] become a PARAM
+     token the grammar assembles into Shell_ir.Var.  Both forms come
+     before the bare ['\$'] exclusion so a name that does not follow
+     [param_name] (["\${NAME:-x}"], ["\$1"], ["\$" ...]) still falls
+     through to it and is refused as Param_expansion, keeping the
+     excluded vocabulary closed. *)
+  | '$' (name = param_name) {
+      incr_tokens ();
+      PARAM (name, meta_of_string name)
+    }
+  | "${" (name = param_name) "}" {
+      incr_tokens ();
+      PARAM (name, { Shell_ir.quoted = false; glob = false; escaped = false })
+    }
   | '`'             { excluded `Cmd_subst }
   | '$'             { excluded `Param_expansion }
   | "<<<"           { excluded `Here_string }

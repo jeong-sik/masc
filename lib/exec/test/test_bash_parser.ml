@@ -255,6 +255,85 @@ let test_env_prefix_dispatch_overlay () =
     assert (String.trim result.stdout = "ok")
   | _ -> assert false
 
+(* Simple parameter expansion — [$NAME] and [${NAME}] (RFC
+   shell-ir-simple-param-expansion).  These lock the assembled shapes
+   and the forms that stay excluded. *)
+let test_param_expansion_arg_is_var () =
+  match Bash.parse_string "echo $HOME" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "echo");
+    assert (s.args = [ Shell_ir.Var ("HOME", Shell_ir.default_meta) ])
+  | _ -> assert false
+
+let test_braced_param_expansion_is_var () =
+  match Bash.parse_string "echo ${HOME}" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "echo");
+    assert (s.args = [ Shell_ir.Var ("HOME", Shell_ir.default_meta) ])
+  | _ -> assert false
+
+let test_env_assignment_param_value () =
+  (* The measured pattern this opened for: an env prefix whose value is
+     an expansion.  The word [DUNE_CACHE_ROOT=$PWD] assembles to a
+     Concat and reads back as a binding with a [Var] value. *)
+  match Bash.parse_string "DUNE_CACHE_ROOT=$PWD dune build ." with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "dune");
+    assert
+      (s.env
+       = [ ( "DUNE_CACHE_ROOT"
+           , Shell_ir.Var ("PWD", Shell_ir.default_meta) ) ]);
+    assert (s.args = [ Shell_ir.Lit ("build", _); Shell_ir.Lit (".", _) ])
+  | _ -> assert false
+
+let test_env_assignment_mixed_literal_and_param () =
+  match Bash.parse_string "FOO=a$BAR printf x" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "printf");
+    (match s.env with
+     | [ ("FOO", Shell_ir.Concat parts) ] ->
+       assert
+         (parts
+          = [ Shell_ir.Lit ("a", _); Shell_ir.Var ("BAR", _) ])
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_param_as_word_suffix_concatenates () =
+  match Bash.parse_string "ls --root=$PWD" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "ls");
+    (match s.args with
+     | [ Shell_ir.Concat parts ] ->
+       assert
+         (parts = [ Shell_ir.Lit ("--root=", _); Shell_ir.Var ("PWD", _) ])
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_param_in_bin_position_outside_subset () =
+  (* A program name that is itself an expansion has nothing to execute;
+     the subset says so instead of guessing at run time. *)
+  match Bash.parse_string "$CMD arg" with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_param_default_form_still_excluded () =
+  match Bash.parse_string "echo ${X:-y}" with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_positional_param_still_excluded () =
+  match Bash.parse_string "echo $1" with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_redirect_target_param_is_parse_error () =
+  (* The redirect target stays a literal in the grammar — a substituted
+     path has nothing for [Path_scope.classify] to classify at parse
+     time, so [> $OUT] is refused rather than passed unchecked. *)
+  match Bash.parse_string "echo x > $OUT" with
+  | Parsed.Parse_error _ -> ()
+  | _ -> assert false
+
 let test_heredoc_rejected () =
   (* "<<" must out-rank single "<" — ocamllex longest match, no ordered list. *)
   match Bash.parse_string "cat <<EOF" with
@@ -507,6 +586,15 @@ let () =
   test_env_only_rejected ();
   test_pipeline_env_prefixes_preserved_per_stage ();
   test_env_prefix_dispatch_overlay ();
+  test_param_expansion_arg_is_var ();
+  test_braced_param_expansion_is_var ();
+  test_env_assignment_param_value ();
+  test_env_assignment_mixed_literal_and_param ();
+  test_param_as_word_suffix_concatenates ();
+  test_param_in_bin_position_outside_subset ();
+  test_param_default_form_still_excluded ();
+  test_positional_param_still_excluded ();
+  test_redirect_target_param_is_parse_error ();
   test_heredoc_rejected ();
   test_here_string_rejected ();
   test_cmd_subst_paren_rejected ();

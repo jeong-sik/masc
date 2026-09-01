@@ -370,27 +370,25 @@ type TurnPhase = {
   kind: 'ctx' | 'reason' | 'tool' | 'gen'
   mono?: boolean
   durationMs: number | null
-  durationSource: 'tool_call_log' | 'provider_telemetry' | 'estimated' | 'not_recorded'
+  durationSource: 'tool_call_log' | 'provider_telemetry' | 'not_recorded'
   // RFC-0233 §10 — time-to-first-token for the gen phase (null when not
   // recorded). Kept separate from durationMs (end-to-end request_latency_ms)
   // so the post-first-chunk decode split is never derived (§9.6 guard).
   ttfrcMs?: number | null
-  visualDurationMs: number
-  visualOffsetMs: number
   meta?: string
 }
 
 type TurnDetail = {
   traceId: string
-  tokIn: number
-  tokOut: number
+  tokIn: number | null
+  tokOut: number | null
   // RFC-0233 §8 — null when context_window/price are absent on the record
   // (runtime unknown or operator left runtime.toml unset); render "미상".
   ctxPct: number | null
   contextWindow: number | null
   cost: number | null
   measuredDurationMs: number | null
-  visualTotalMs: number
+  maxMeasuredDurationMs: number
   phases: TurnPhase[]
   tools: TurnToolDetail[]
 }
@@ -472,7 +470,6 @@ function phaseDurationLabel(phase: TurnPhase): string {
     }
     return base
   }
-  if (phase.durationSource === 'estimated') return '추정'
   return '측정 없음'
 }
 
@@ -482,29 +479,21 @@ function phaseDurationTitle(phase: TurnPhase): string {
       return 'duration_ms from /api/v1/keepers/:name/tool-calls'
     case 'provider_telemetry':
       return 'request_latency_ms — provider call wall-clock (Agent Core inference_telemetry)'
-    case 'estimated':
-      return 'estimated only; no durable duration for this phase'
     case 'not_recorded':
       return 'duration not recorded for this phase'
   }
 }
 
-function finalizePhaseOffsets(phases: TurnPhase[]): { visualTotalMs: number; measuredDurationMs: number | null } {
-  let visualOffsetMs = 0
-  let measuredDurationMs = 0
-  let measuredCount = 0
-  for (const phase of phases) {
-    phase.visualOffsetMs = visualOffsetMs
-    phase.visualDurationMs = phase.durationMs ?? 100
-    visualOffsetMs += phase.visualDurationMs
-    if (phase.durationMs != null) {
-      measuredDurationMs += phase.durationMs
-      measuredCount += 1
-    }
-  }
+function measuredPhaseSummary(phases: readonly TurnPhase[]): {
+  measuredDurationMs: number | null
+  maxMeasuredDurationMs: number
+} {
+  const durations = phases.flatMap(phase => phase.durationMs == null ? [] : [phase.durationMs])
   return {
-    visualTotalMs: Math.max(visualOffsetMs, 1),
-    measuredDurationMs: measuredCount > 0 ? measuredDurationMs : null,
+    measuredDurationMs: durations.length > 0
+      ? durations.reduce((sum, duration) => sum + duration, 0)
+      : null,
+    maxMeasuredDurationMs: durations.reduce((maximum, duration) => Math.max(maximum, duration), 0),
   }
 }
 
@@ -512,19 +501,22 @@ function buildTurnDetail(
   record: TurnRecordEntry,
   toolEntries: readonly ToolCallEntry[],
 ): TurnDetail {
-  const traceId = `${record.trace_id}_${String(record.absolute_turn).padStart(4, '0')}`
-  const tokIn = record.input_tokens ?? Math.max(1, Math.round(record.blocks.reduce((sum, b) => sum + b.bytes, 0) / 4))
-  const tokOut = record.output_tokens ?? 120
+  const traceId = record.turn_ref
+  const tokIn = record.input_tokens ?? null
+  const tokOut = record.output_tokens ?? null
   // RFC-0233 §8 — ctx-fill% and cost grounded in runtime.toml-declared facts.
   // context_window is the keeper-resolved effective budget (replaces the
   // hardcoded 200K); prices are USD/1M from the binding (replace Claude $3/$15).
   // Either is null when the record lacks the fact — the view renders "미상".
   const ctxPct =
-    record.context_window != null && record.context_window > 0
-      ? Math.min(100, (tokIn / record.context_window) * 100)
+    tokIn != null && record.context_window != null && record.context_window > 0
+      ? (tokIn / record.context_window) * 100
       : null
   const cost =
-    record.price_input_per_million != null && record.price_output_per_million != null
+    tokIn != null &&
+      tokOut != null &&
+      record.price_input_per_million != null &&
+      record.price_output_per_million != null
       ? (tokIn * record.price_input_per_million + tokOut * record.price_output_per_million) / 1e6
       : null
   const toolIndex = toolCallIndexByExecutionId(toolEntries)
@@ -534,8 +526,6 @@ function buildTurnDetail(
     kind: 'ctx',
     durationMs: null,
     durationSource: 'not_recorded',
-    visualDurationMs: 0,
-    visualOffsetMs: 0,
     meta: 'keeper turn pre-dispatch',
   }]
   if (record.enable_thinking === true || record.thinking_budget != null) {
@@ -544,8 +534,6 @@ function buildTurnDetail(
       kind: 'reason',
       durationMs: null,
       durationSource: 'not_recorded',
-      visualDurationMs: 0,
-      visualOffsetMs: 0,
       meta: record.thinking_budget != null ? `budget ${record.thinking_budget}` : 'enabled',
     })
   }
@@ -566,8 +554,6 @@ function buildTurnDetail(
       mono: true,
       durationMs: tool.durationMs,
       durationSource: tool.durationMs != null ? 'tool_call_log' : 'not_recorded',
-      visualDurationMs: 0,
-      visualOffsetMs: 0,
       meta: [
         tool.agentSubturn != null ? `agent subturn T${tool.agentSubturn}` : null,
         `execution ${tool.id.slice(0, 24)}`,
@@ -586,8 +572,6 @@ function buildTurnDetail(
     // RFC-0233 §10 — time-to-first-token. Populated on the streaming path for
     // every provider; null for non-streaming turns and on the error path.
     ttfrcMs: record.ttfrc_ms ?? null,
-    visualDurationMs: 0,
-    visualOffsetMs: 0,
     meta: (() => {
       if (record.request_latency_ms == null) {
         return 'provider/Agent Core duration is not recorded for this turn'
@@ -598,7 +582,7 @@ function buildTurnDetail(
       return 'provider call wall-clock (request_latency_ms)'
     })(),
   })
-  const { visualTotalMs, measuredDurationMs } = finalizePhaseOffsets(phases)
+  const { measuredDurationMs, maxMeasuredDurationMs } = measuredPhaseSummary(phases)
 
   return {
     traceId,
@@ -608,7 +592,7 @@ function buildTurnDetail(
     contextWindow: record.context_window ?? null,
     cost,
     measuredDurationMs,
-    visualTotalMs,
+    maxMeasuredDurationMs,
     phases,
     tools,
   }
@@ -654,7 +638,7 @@ function TimelineTab({ t }: { t: TurnDetail }) {
   return html`
     <div class="ti-sec">
       <div class="ti-sec-h">
-        <h4>턴 워터폴</h4>
+        <h4>단계별 실측 시간</h4>
         <span class="n">
           ${t.phases.length} 단계 · 실측 ${t.measuredDurationMs != null ? formatMsCompact(t.measuredDurationMs) : '없음'} · 미측정 ${unknownCount}
         </span>
@@ -667,14 +651,18 @@ function TimelineTab({ t }: { t: TurnDetail }) {
               <span class="nm ${p.mono ? 'mono' : ''}" title=${p.meta ?? p.label}>${p.label}</span>
             </div>
             <div class="ti-wf-track">
-              <div
-                class=${`ti-wf-bar ti-k-${p.kind}${p.durationSource === 'not_recorded' ? ' is-unmeasured' : ''}`}
-                title=${phaseDurationTitle(p)}
-                style=${{
-                  left: `${(p.visualOffsetMs / t.visualTotalMs) * 100}%`,
-                  width: `${Math.max(0.6, (p.visualDurationMs / t.visualTotalMs) * 100)}%`,
-                }}
-              />
+              ${p.durationMs != null && t.maxMeasuredDurationMs > 0
+                ? html`
+                  <div
+                    class=${`ti-wf-bar ti-k-${p.kind}`}
+                    title=${phaseDurationTitle(p)}
+                    style=${{
+                      left: '0',
+                      width: `${(p.durationMs / t.maxMeasuredDurationMs) * 100}%`,
+                    }}
+                  />
+                `
+                : null}
             </div>
             <span class="ti-wf-dur" title=${phaseDurationTitle(p)}>${phaseDurationLabel(p)}</span>
           </div>
@@ -830,8 +818,8 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
         <span class="k">selected model</span><span class="v">${record.selected_model ?? 'n/a'}</span>
         <span class="k">runtime</span><span class="v">${record.runtime_profile}</span>
         <span class="k">fsm.state</span><span class="v">n/a</span>
-        <span class="k">input tokens</span><span class="v">${t.tokIn.toLocaleString()}</span>
-        <span class="k">output tokens</span><span class="v">${t.tokOut.toLocaleString()}</span>
+        <span class="k">input tokens</span><span class="v">${t.tokIn?.toLocaleString() ?? '미상'}</span>
+        <span class="k">output tokens</span><span class="v">${t.tokOut?.toLocaleString() ?? '미상'}</span>
         <span class="k">cache read tokens</span><span class="v">${record.cache_read_input_tokens?.toLocaleString() ?? '미상'}</span>
         <span class="k">cache write tokens</span><span class="v">${record.cache_creation_input_tokens?.toLocaleString() ?? '미상'}</span>
         <span class="k">ctx window${record.context_window != null ? '' : ' · 미상'}</span><span class="v">${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}% / ${record.context_window?.toLocaleString() ?? '미상'}` : '미상'}</span>
@@ -873,6 +861,10 @@ function TurnDetailDrawer({
 }) {
   const [tab, setTab] = useState('timeline')
   const t = buildTurnDetail(row.record, toolEntries)
+  const tokenCounts =
+    t.tokIn != null && t.tokOut != null
+      ? { input: t.tokIn, output: t.tokOut, total: t.tokIn + t.tokOut }
+      : null
 
   // Fetch only the selected turn's canonical provider input. The endpoint is
   // keyed by the exact turn_ref carried by the TurnRecord; a mismatched
@@ -964,11 +956,11 @@ function TurnDetailDrawer({
           </div>
           <div class="ti-stat">
             <div class="k">입력</div>
-            <div class="v">${(t.tokIn / 1000).toFixed(1)}<small>k</small></div>
+            <div class="v">${t.tokIn != null ? html`${(t.tokIn / 1000).toFixed(1)}<small>k</small>` : '미상'}</div>
           </div>
           <div class="ti-stat">
             <div class="k">출력</div>
-            <div class="v volt">${t.tokOut.toLocaleString()}</div>
+            <div class="v volt">${t.tokOut?.toLocaleString() ?? '미상'}</div>
           </div>
           <div class="ti-stat">
             <div class="k">도구</div>
@@ -986,18 +978,22 @@ function TurnDetailDrawer({
             <span class="ctxpct">${t.ctxPct != null ? `컨텍스트 ${t.ctxPct.toFixed(1)}% / ${formatCtxWindowK(t.contextWindow)}` : '컨텍스트 미상'}</span>
           </div>
           <div class="ti-tok-bar">
-            <span
-              class="seg-in"
-              style=${{ width: `${(t.tokIn / (t.tokIn + t.tokOut)) * 100}%` }}
-            />
-            <span
-              class="seg-out"
-              style=${{ width: `${(t.tokOut / (t.tokIn + t.tokOut)) * 100}%` }}
-            />
+            ${tokenCounts != null && tokenCounts.total > 0
+              ? html`
+                <span
+                  class="seg-in"
+                  style=${{ width: `${(tokenCounts.input / tokenCounts.total) * 100}%` }}
+                />
+                <span
+                  class="seg-out"
+                  style=${{ width: `${(tokenCounts.output / tokenCounts.total) * 100}%` }}
+                />
+              `
+              : html`<span data-testid="turn-token-bar-unobserved">${tokenCounts == null ? '측정 없음' : '0 tokens'}</span>`}
           </div>
           <div class="ti-tok-legend">
-            <span class="in"><i></i>입력 <b>${t.tokIn.toLocaleString()}</b></span>
-            <span class="out"><i></i>출력 <b>${t.tokOut.toLocaleString()}</b></span>
+            <span class="in"><i></i>입력 <b>${t.tokIn?.toLocaleString() ?? '미상'}</b></span>
+            <span class="out"><i></i>출력 <b>${t.tokOut?.toLocaleString() ?? '미상'}</b></span>
           </div>
         </div>
 

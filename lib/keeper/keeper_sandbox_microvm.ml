@@ -466,20 +466,33 @@ let list_live_containers ~base_path ~keeper_name ~timeout_sec =
          (output_for_log ~stdout ~stderr))
 ;;
 
-let sweep_candidates_of_json ~is_pid_alive json =
+let sweep_candidates_of_json ~base_path ~is_pid_alive json =
   let open Yojson.Safe.Util in
+  let base_path_hash = Keeper_sandbox_runtime.base_path_hash base_path in
   match json with
   | `List entries ->
     List.filter_map
       (fun entry ->
          let kind = label_of entry Keeper_sandbox_runtime_setup.sandbox_kind_label_key in
+         let component =
+           label_of entry Keeper_sandbox_runtime_setup.sandbox_component_label_key
+         in
+         let entry_base_path_hash =
+           label_of entry Keeper_sandbox_runtime_setup.sandbox_base_path_hash_label_key
+         in
          let id =
            match entry |> member "configuration" |> member "id" with
            | `String id -> Some id
            | _ -> None
          in
-         match kind, id with
-         | Some kind, Some container_id when String.equal kind keeper_vm_container_kind ->
+         match component, entry_base_path_hash, kind, id with
+         | ( Some component
+           , Some entry_base_path_hash
+           , Some kind
+           , Some container_id )
+           when String.equal component Keeper_sandbox_runtime_setup.sandbox_component_label_value
+                && String.equal entry_base_path_hash base_path_hash
+                && String.equal kind keeper_vm_container_kind ->
            let owner_pid =
              Option.bind (label_of entry Keeper_sandbox_runtime_setup.sandbox_owner_pid_label_key) int_of_string_opt
            in
@@ -504,6 +517,7 @@ type sweep_outcome =
     worth reporting, and is not a reason to fail whatever asked for the
     sweep. A listing that cannot be read removes nothing. *)
 let sweep_abandoned_guests
+      ~base_path
       ~command_available
       ~timeout_sec
       ~is_pid_alive
@@ -519,7 +533,7 @@ let sweep_abandoned_guests
        | Unix.WEXITED 0, out ->
          let candidates =
            match Yojson.Safe.from_string out with
-           | json -> sweep_candidates_of_json ~is_pid_alive json
+           | json -> sweep_candidates_of_json ~base_path ~is_pid_alive json
            | exception Yojson.Json_error _ -> []
          in
          List.fold_left

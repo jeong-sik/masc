@@ -616,9 +616,16 @@ let test_docker_lane_disables_git_terminal_prompts () =
    owner liveness and nothing else, and that an entry the build cannot
    account for is left alone. *)
 
-let entry ?(kind = "keeper-vm") ?owner_pid ?(keeper = "probe") id =
+let sweep_base_path = "/workspace-a"
+
+let entry ?(base_path = sweep_base_path) ?(kind = "keeper-vm") ?owner_pid
+    ?(keeper = "probe") id =
   let labels =
-    [ "masc.mcp.kind", `String kind; "masc.mcp.keeper", `String keeper ]
+    [ "masc.mcp.component", `String Runtime.sandbox_component_label_value
+    ; "masc.mcp.base_path_hash", `String (Runtime.base_path_hash base_path)
+    ; "masc.mcp.kind", `String kind
+    ; "masc.mcp.keeper", `String keeper
+    ]
     @ (match owner_pid with Some p -> [ "masc.mcp.owner_pid", `String p ] | None -> [])
   in
   `Assoc [ "configuration", `Assoc [ "id", `String id; "labels", `Assoc labels ] ]
@@ -640,7 +647,7 @@ let test_only_guests_whose_owner_is_gone () =
   Alcotest.(check (list string))
     "only the guest whose server is gone"
     [ "dead-owner" ]
-    (ids (M.sweep_candidates_of_json ~is_pid_alive listing))
+    (ids (M.sweep_candidates_of_json ~base_path:sweep_base_path ~is_pid_alive listing))
 
 (* A turn container carries a different kind and is swept by the docker
    path; taking it here would remove a container mid-turn. *)
@@ -651,7 +658,7 @@ let test_leaves_containers_that_are_not_guests () =
   Alcotest.(check (list string))
     "a non-guest is not a sweep target"
     []
-    (ids (M.sweep_candidates_of_json ~is_pid_alive listing))
+    (ids (M.sweep_candidates_of_json ~base_path:sweep_base_path ~is_pid_alive listing))
 
 (* Without a usable owner label the build cannot say whose guest it is.
    Guessing -- by age, or by assuming abandonment -- would remove somebody's
@@ -666,7 +673,16 @@ let test_leaves_guests_it_cannot_account_for () =
   Alcotest.(check (list string))
     "an unaccountable guest stays"
     []
-    (ids (M.sweep_candidates_of_json ~is_pid_alive listing))
+    (ids (M.sweep_candidates_of_json ~base_path:sweep_base_path ~is_pid_alive listing))
+
+let test_leaves_foreign_base_guest_untouched () =
+  let listing =
+    `List [ entry ~base_path:"/workspace-b" ~owner_pid:(string_of_int dead_pid) "foreign-base" ]
+  in
+  Alcotest.(check (list string))
+    "a dead guest from another base path is not a sweep target"
+    []
+    (ids (M.sweep_candidates_of_json ~base_path:sweep_base_path ~is_pid_alive listing))
 
 let test_sweep_skips_listing_when_cli_is_unavailable () =
   let spawn_count = ref 0 in
@@ -676,6 +692,7 @@ let test_sweep_skips_listing_when_cli_is_unavailable () =
   in
   let unavailable =
     M.sweep_abandoned_guests
+      ~base_path:sweep_base_path
       ~command_available:(fun command ->
         Alcotest.(check string) "microvm executable" "container" command;
         false)
@@ -687,6 +704,7 @@ let test_sweep_skips_listing_when_cli_is_unavailable () =
   Alcotest.(check int) "unavailable spawn count" 0 !spawn_count;
   let available =
     M.sweep_abandoned_guests
+      ~base_path:sweep_base_path
       ~command_available:(fun _ -> true)
       ~timeout_sec:1.0
       ~is_pid_alive
@@ -762,6 +780,8 @@ let () =
             test_live_container_listing_is_scoped_to_the_keeper
         ; Alcotest.test_case "leaves containers that are not guests" `Quick
             test_leaves_containers_that_are_not_guests
+        ; Alcotest.test_case "leaves a foreign-base guest untouched" `Quick
+            test_leaves_foreign_base_guest_untouched
         ; Alcotest.test_case "leaves guests it cannot account for" `Quick
             test_leaves_guests_it_cannot_account_for
         ; Alcotest.test_case "skips listing when CLI is unavailable" `Quick

@@ -145,15 +145,14 @@ type sweep_outcome =
   }
 
 val sweep_candidates_of_json :
+  base_path:string ->
   is_pid_alive:(int -> bool) -> Yojson.Safe.t -> sweep_candidate list
-(** Guests in a [container list --format json] listing whose owning server is
-    gone. A guest is keeper-lifetime, so age proves nothing; what marks one
-    abandoned is its owner pid naming a process that no longer exists. A
-    guest whose label is missing or unparseable is not a candidate -- this
-    build cannot say whose it is, and removing a running guest to tidy up is
-    worse than leaking one. *)
+(** Guests in a [container list --format json] listing that belong to this
+    base path and whose owning server is gone. A guest whose scope or owner
+    label is missing or unparseable is not a candidate. *)
 
 val sweep_abandoned_guests :
+  base_path:string ->
   command_available:(string -> bool) ->
   timeout_sec:float ->
   is_pid_alive:(int -> bool) ->

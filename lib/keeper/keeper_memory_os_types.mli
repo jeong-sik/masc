@@ -8,11 +8,6 @@ val wire_field_claim : string
 val wire_field_category : string
 val wire_field_memory_id : string
 val wire_field_reason : string
-val wire_field_basis : string
-val wire_field_kind : string
-val wire_field_derivations : string
-val wire_field_rule_id : string
-val wire_field_premise_ids : string
 
 (** Claim-object fields accepted from the librarian and rendered in retry
     prompts. *)
@@ -91,7 +86,6 @@ type basis =
   | Derived of derivation list
 
 val basis_to_json : basis -> Yojson.Safe.t
-val basis_of_json : Yojson.Safe.t -> basis option
 
 (** Canonical lowercase token for an origin kind. Category tokens only —
     this never renders a unique identity into a prompt (masc#29558). *)

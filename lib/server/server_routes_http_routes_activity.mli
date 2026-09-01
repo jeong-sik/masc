@@ -16,10 +16,6 @@ val runtime_prompt_assets_json :
     inventory; content is read from the synchronized runtime prompt directory
     so an absent projection remains observable to operator clients. *)
 
-val prompt_catalog_json : unit -> Yojson.Safe.t
-(** The [/api/v1/prompts] envelope: overrideable Markdown registry rows plus
-    a separate [runtime_assets] read-only collection. *)
-
 type board_context_inference_target_source =
   | Explicit_target
   | Post_author

@@ -283,32 +283,36 @@ let test_guest_target_refuses_a_profile_mismatch () =
   let config = Masc.Workspace.default_config base in
   let docker = docker_meta ~name:"contract-mismatch" in
   let microvm = { docker with sandbox_profile = Profile.Micro_vm } in
-  let factory = Masc.Keeper_sandbox_factory.create ~config ~meta:docker () in
-  let result =
-    match
-      Masc.Keeper_sandbox_factory.resolve
-        factory
-        ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config microvm)
-    with
-    | Runtime binding ->
-      Masc.Keeper_sandbox_shell_ir_target.guest_target
-        ~binding
-        ~meta:microvm
-        ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config microvm)
-        ()
-    | No_factory -> Alcotest.fail "expected a guest runtime"
-    | Remote_ssh_profile -> Alcotest.fail "expected a guest, not remote SSH"
+  let assert_mismatch ~factory_meta ~caller_meta =
+    let factory = Masc.Keeper_sandbox_factory.create ~config ~meta:factory_meta () in
+    let result =
+      match
+        Masc.Keeper_sandbox_factory.resolve
+          factory
+          ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config caller_meta)
+      with
+      | Runtime binding ->
+        Masc.Keeper_sandbox_shell_ir_target.guest_target
+          ~binding
+          ~meta:caller_meta
+          ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config caller_meta)
+          ()
+      | No_factory -> Alcotest.fail "expected a guest runtime"
+      | Remote_ssh_profile -> Alcotest.fail "expected a guest, not remote SSH"
+    in
+    Masc.Keeper_sandbox_factory.cleanup factory;
+    match result with
+    | Ok _ -> Alcotest.fail "a mismatched factory and caller profile reached dispatch"
+    | Error error ->
+      Alcotest.(check (option string))
+        "typed mismatch code"
+        (Some "sandbox_profile_contract_mismatch")
+        (match List.assoc_opt "code" error.fields with
+         | Some (`String code) -> Some code
+         | Some _ | None -> None)
   in
-  Masc.Keeper_sandbox_factory.cleanup factory;
-  match result with
-  | Ok _ -> Alcotest.fail "a mismatched factory and caller profile reached dispatch"
-  | Error error ->
-    Alcotest.(check (option string))
-      "typed mismatch code"
-      (Some "sandbox_profile_contract_mismatch")
-      (match List.assoc_opt "code" error.fields with
-       | Some (`String code) -> Some code
-       | Some _ | None -> None)
+  assert_mismatch ~factory_meta:docker ~caller_meta:microvm;
+  assert_mismatch ~factory_meta:microvm ~caller_meta:docker
 
 let test_turn_start_argv_shape () =
   let a =

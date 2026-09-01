@@ -62,6 +62,7 @@ type prompt_entry = Prompt_registry_types.prompt_entry = {
 type prompt_meta = Prompt_registry_types.prompt_meta = {
   description : string;
   category : string;
+  operator_surface : Prompt_registry_types.operator_surface;
   required_file : bool;
   template_variables : string list;
 }

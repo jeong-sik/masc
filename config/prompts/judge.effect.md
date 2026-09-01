@@ -1,6 +1,7 @@
 ---
-description: Request-local judgment for an exact Keeper external effect
+description: Keeper의 정확한 외부 효과 요청을 안전성 기준으로 판정
 category: judge
+operator_surface: primary
 ---
 
 You are the configured contextual judge for one exact Keeper external-effect

@@ -4278,6 +4278,7 @@ let prompts_payload =
          [ `Assoc
              [ ("key", `String "keeper");
                ("category", `String "keeper");
+               ("operator_surface", `String "primary");
                ("description", `String "The keeper's standing instructions");
                ("effective", `String "You are a keeper.\nWork the task.");
                ("has_override", `Bool false);
@@ -4288,6 +4289,7 @@ let prompts_payload =
              ];
            `Assoc
              [ ("key", `String "judge.board");
+               ("operator_surface", `String "fragment");
                ("effective", `String "overridden text");
                ("has_override", `Bool true);
                ("file_exists", `Bool false);
@@ -4306,8 +4308,49 @@ let test_decode_prompts_reads_the_live_shape () =
       "You are a keeper.\nWork the task." first.Tui_decode.pr_effective;
     Alcotest.(check bool) "no override" false first.Tui_decode.pr_has_override;
     Alcotest.(check string) "source" "file" first.Tui_decode.pr_source;
+    Alcotest.(check bool) "primary surface" true
+      (first.Tui_decode.pr_operator_surface = Tui_decode.Prompt_primary);
     Alcotest.(check (list string)) "template input names"
       [ "keeper_instructions" ] first.Tui_decode.pr_template_variables
+
+let test_prompt_rows_hide_fragments_by_default () =
+  match Tui_decode.decode_prompts prompts_payload with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    let primary =
+      Tui_decode.prompt_rows_for_operator ~show_fragments:false snapshot
+    in
+    let all = Tui_decode.prompt_rows_for_operator ~show_fragments:true snapshot in
+    Alcotest.(check (list string)) "only complete prompts"
+      [ "keeper" ] (List.map (fun row -> row.Tui_decode.pr_key) primary);
+    Alcotest.(check int) "toggle restores every editable row" 2 (List.length all)
+
+let test_decode_prompts_defaults_legacy_surface_to_primary () =
+  let json =
+    `Assoc [ "prompts", `List [ `Assoc [ "key", `String "legacy" ] ] ]
+  in
+  match Tui_decode.decode_prompts json with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    let row = List.hd snapshot.Tui_decode.ps_rows in
+    Alcotest.(check bool) "legacy row stays visible" true
+      (row.Tui_decode.pr_operator_surface = Tui_decode.Prompt_primary)
+
+let test_decode_prompts_rejects_unknown_operator_surface () =
+  let json =
+    `Assoc
+      [ ( "prompts"
+        , `List
+            [ `Assoc
+                [ "key", `String "future"
+                ; "operator_surface", `String "mystery"
+                ]
+            ] )
+      ]
+  in
+  match Tui_decode.decode_prompts json with
+  | Ok _ -> Alcotest.fail "an unknown operator surface must not be guessed"
+  | Error _ -> ()
 
 let test_decode_prompts_survives_a_sparse_row () =
   match Tui_decode.decode_prompts prompts_payload with
@@ -6177,6 +6220,12 @@ let () =
       [
         Alcotest.test_case "reads the live shape" `Quick
           test_decode_prompts_reads_the_live_shape;
+        Alcotest.test_case "hides assembly fragments by default" `Quick
+          test_prompt_rows_hide_fragments_by_default;
+        Alcotest.test_case "legacy rows default to primary" `Quick
+          test_decode_prompts_defaults_legacy_surface_to_primary;
+        Alcotest.test_case "rejects an unknown operator surface" `Quick
+          test_decode_prompts_rejects_unknown_operator_surface;
         Alcotest.test_case "survives a sparse row" `Quick
           test_decode_prompts_survives_a_sparse_row;
         Alcotest.test_case "rejects a row with no key" `Quick

@@ -1,6 +1,7 @@
 ---
-description: Keeper turn observation — task missing from a recovery snapshot, so absence proves nothing
+description: 복구 스냅샷에 현재 Task가 없어 부재를 단정할 수 없음을 알리는 내부 조각
 category: keeper
+operator_surface: fragment
 template_variables: [task_id]
 ---
 

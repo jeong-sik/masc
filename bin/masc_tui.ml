@@ -2833,6 +2833,18 @@ let launch_prompts_load state ~mailbox =
   | None ->
       enqueue_async mailbox (Prompts_loaded (Error "Eio switch is unavailable"))
 
+let prompt_rows_for_state state =
+  match state.prompts_snapshot with
+  | None -> []
+  | Some snapshot ->
+      Tui_decode.prompt_rows_for_operator
+        ~show_fragments:state.prompts_show_fragments snapshot
+;;
+
+let selected_prompt_for_state state =
+  List.nth_opt (prompt_rows_for_state state) state.prompts_cursor
+;;
+
 let launch_librarian_input_load state ~mailbox ~prompt_key =
   let host = server_peer_host in
   let port = state.port in
@@ -7601,16 +7613,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match result with
        | Ok snapshot ->
            state.prompts_snapshot <- Some snapshot;
+           state.prompts_cursor <-
+             max 0
+               (min state.prompts_cursor
+                  (List.length (prompt_rows_for_state state) - 1));
            state.prompts_error <- None
        | Error detail -> state.prompts_error <- Some detail)
   | Librarian_input_loaded (prompt_key, result) ->
       let still_selected =
-        match state.prompts_snapshot with
+        match selected_prompt_for_state state with
+        | Some row -> String.equal row.Tui_decode.pr_key prompt_key
         | None -> false
-        | Some snapshot ->
-            (match List.nth_opt snapshot.Tui_decode.ps_rows state.prompts_cursor with
-             | Some row -> String.equal row.Tui_decode.pr_key prompt_key
-             | None -> false)
       in
       if still_selected then begin
         state.prompts_librarian_input_loading <- false;
@@ -10122,10 +10135,7 @@ and is loaded on demand through keeper_skill.
      what the keeper reads and editing the file underneath it would change
      nothing the operator can see. *)
   let selected_prompt () =
-    match state.prompts_snapshot with
-    | None -> None
-    | Some snapshot ->
-        List.nth_opt snapshot.Tui_decode.ps_rows state.prompts_cursor
+    selected_prompt_for_state state
   in
   let handle_librarian_input_read () =
     match selected_prompt () with
@@ -12758,11 +12768,7 @@ and is loaded on demand through keeper_skill.
                 state.theme_cursor <- min (max 0 last) (state.theme_cursor + 1);
                 preview_theme_under_cursor ()
             | Config when state.config_pane = Config_prompts ->
-                let count =
-                  match state.prompts_snapshot with
-                  | Some snapshot -> List.length snapshot.Tui_decode.ps_rows
-                  | None -> 0
-                in
+                let count = List.length (prompt_rows_for_state state) in
                 if state.prompts_cursor < count - 1 then begin
                   state.prompts_cursor <- state.prompts_cursor + 1;
                   state.config_scroll <- 0;
@@ -14310,6 +14316,18 @@ and is loaded on demand through keeper_skill.
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_prompts ->
            handle_prompt_clear ()
+       | Some "a" | Some "A"
+         when state.view = Config && state.config_pane = Config_prompts ->
+           state.prompts_show_fragments <- not state.prompts_show_fragments;
+           state.prompts_cursor <- 0;
+           state.config_scroll <- 0;
+           state.prompts_librarian_input <- None;
+           state.prompts_librarian_input_error <- None;
+           state.prompts_librarian_input_loading <- false;
+           add_event state "system"
+             (if state.prompts_show_fragments then
+                "Prompt 목록에 내부 조각을 표시합니다"
+              else "Prompt 목록에 주 프롬프트만 표시합니다")
        | Some "b" when state.view = Connectors ->
            handle_connector_bind ()
        | Some "u" when state.view = Connectors ->

@@ -1,6 +1,7 @@
 ---
-description: One line per other task the keeper holds that names skills, and the tool that serves their bodies
+description: 보유 중인 다른 Task별 Skill과 본문 조회 도구를 한 줄로 조립하는 내부 조각
 category: keeper
+operator_surface: fragment
 template_variables: [task_id, skill_surfaces]
 ---
 

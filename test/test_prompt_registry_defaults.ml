@@ -48,6 +48,9 @@ let markdown_fixture key body =
       "category: test";
     ]
     @
+    (if String.equal key "test.plain" then [ "operator_surface: fragment" ]
+     else [])
+    @
     (if template_variables = [] then []
      else
        [
@@ -615,6 +618,17 @@ let () =
               check (option string) "source"
                 (Some "override")
                 (get_string_field "source" keeper_system);
+              check (option string) "legacy metadata stays operator-visible"
+                (Some "primary")
+                (get_string_field "operator_surface" keeper_system);
+              let fragment =
+                prompts
+                |> List.find (fun item ->
+                       get_string_field "key" item = Some "test.plain")
+              in
+              check (option string) "frontmatter exposes assembly fragments"
+                (Some "fragment")
+                (get_string_field "operator_surface" fragment);
               check (option bool) "required_file"
                 (Some true)
                 (get_bool_field "required_file" keeper_system);

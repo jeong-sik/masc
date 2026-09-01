@@ -1,6 +1,7 @@
 ---
-description: Keeper turn observation — current task read from a recovery snapshot
+description: 현재 Task가 복구 스냅샷에서 읽혔음을 알리는 내부 관측 조각
 category: keeper
+operator_surface: fragment
 template_variables: []
 ---
 

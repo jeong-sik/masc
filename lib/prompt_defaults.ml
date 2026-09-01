@@ -1,7 +1,8 @@
 (** Prompt_defaults — Auto-discovers prompt metadata from markdown frontmatter.
     Call [bootstrap_runtime] during server startup to scan config/prompts/ and
     register all prompts that have YAML frontmatter (description, category,
-    template_variables).  No OCaml code changes needed to add new prompts. *)
+    operator_surface, template_variables).  No OCaml code changes needed to add
+    new prompts. *)
 
 let install_prompt_registry_observers () =
   Prompt_registry.set_restore_failure_observer (fun () ->

@@ -1,6 +1,7 @@
 ---
-description: Review section — the evidence items the task contract requires
+description: Task 계약이 요구한 증거 항목을 조립하는 내부 검증 섹션
 category: verification
+operator_surface: fragment
 template_variables: [evidence_items]
 ---
 

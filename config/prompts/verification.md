@@ -1,6 +1,7 @@
 ---
-description: Task completion anti-rationalization reviewer prompt
+description: Task 완료 증거를 계약과 스냅샷에 대조하는 독립 검증
 category: verification
+operator_surface: primary
 template_variables: [task_title, task_description, agent_name, completion_notes, evidence_refs, lookup_section, verification_contract_section, evidence_section, calibration_section]
 ---
 

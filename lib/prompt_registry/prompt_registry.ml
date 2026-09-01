@@ -48,6 +48,7 @@ type prompt_entry = Types.prompt_entry = {
 type prompt_meta = Types.prompt_meta = {
   description: string;
   category: string;
+  operator_surface: Types.operator_surface;
   required_file: bool;
   template_variables: string list;
 }
@@ -309,6 +310,8 @@ let prompt_item_json_of_resolved key (meta : prompt_meta) resolved =
     [
       ("key", `String key);
       ("category", `String meta.category);
+      ( "operator_surface",
+        `String (Types.operator_surface_to_string meta.operator_surface) );
       ("description", `String meta.description);
       ("current", `String resolved.effective);
       ("effective", `String resolved.effective);
@@ -335,12 +338,14 @@ let compare_prompt_items a b =
   String.compare (get_key a) (get_key b)
 
 let register_prompt_unlocked ~key ~description ?(category = "general")
-    ?(required_file = false) ?(template_variables = []) () =
+    ?(operator_surface = Types.Primary) ?(required_file = false)
+    ?(template_variables = []) () =
   with_mutex (fun () ->
       Hashtbl.replace meta_tbl key
         {
           description;
           category;
+          operator_surface;
           required_file;
           template_variables = List.sort_uniq String.compare template_variables;
         })
@@ -368,12 +373,25 @@ let load_prompts_from_directory dir =
                       | Some category -> category
                       | None -> "general"
                     in
+                    let operator_surface =
+                      match List.assoc_opt "operator_surface" meta_pairs with
+                      | None -> Types.Primary
+                      | Some value ->
+                          (match Types.operator_surface_of_string value with
+                           | Some surface -> surface
+                           | None ->
+                               Log.Misc.warn
+                                 "prompt %s has unknown operator_surface=%S; keeping it visible as primary"
+                                 key value;
+                               Types.Primary)
+                    in
                     let template_variables =
                       match List.assoc_opt "template_variables" meta_pairs with
                       | Some v -> parse_list_value v
                       | None -> []
                     in
                     register_prompt_unlocked ~key ~description ~category
+                      ~operator_surface
                       ~required_file:true ~template_variables ()
               with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                 Log.Misc.error

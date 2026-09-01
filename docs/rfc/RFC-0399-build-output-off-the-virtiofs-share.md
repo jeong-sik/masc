@@ -233,9 +233,47 @@ shape either way.
 
 `_build` is dune's name and dune's alone. Other ecosystems pin host descriptors
 the same way through `node_modules`, `target` or `dist`, and are not handled.
-The mechanism carries over unchanged; only the marker file and the directory
-name differ. This is named rather than left implicit, so the change is not read
-as covering every keeper.
+
+An earlier draft of this section said the mechanism carries over unchanged and
+only the marker file and directory name differ. **That is measured false for
+npm**, and the correction is worth more than the original claim.
+
+The two tools treat their output directory in opposite ways:
+
+| | what it does with an existing `_build` / `node_modules` |
+|---|---|
+| dune | `lstat`s it, and if something is there, uses it. A symlink is followed. |
+| npm | rebuilds it as its own. A symlink is **deleted and replaced with a real directory**. |
+
+Measured in a live guest (node 22.23.2, npm 10.9.8), installing one dependency
+into a `node_modules` symlinked onto the volume:
+
+```
+before   node_modules -> /masc-build/nm2   (symlink)
+after    drwxr-xr-x    node_modules        (real directory)
+
+files written to the volume   0
+files written to the share    1055
+```
+
+One dependency is 1,055 files. masc's own `dashboard/package.json` would be
+tens of thousands, on the share, exactly as before.
+
+So adding `("package.json", "node_modules")` to a list of pairs would compile,
+log "link installed" every turn, and leak the whole time: the link is
+reinstalled each turn and npm removes it on each install. A silent no-op is
+worse than an admitted gap, which is why this is written down rather than
+attempted.
+
+`cargo` is untested — the guest carries no Rust toolchain — so `target` is
+unknown rather than known-broken. Whatever covers npm has to be a different
+mechanism than a symlink, and it needs the same measurement before it lands.
+
+masc's own repository is where this bites: `<checkout>/dashboard/package.json`
+and `<checkout>/viewer/Cargo.toml` sit inside every keeper checkout, so a
+keeper working on the dashboard reopens the leak this RFC closed for dune.
+Currently zero such directories exist in any playground, so the exposure is
+latent rather than active.
 
 The volume size is a ceiling, not an allocation — the image is sparse, 4 GiB
 nominal measured at 84 MB on disk — but a build that exceeds it fails inside

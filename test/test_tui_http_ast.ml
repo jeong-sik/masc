@@ -717,6 +717,16 @@ let test_operator_approvals_use_current_contract () =
        ~module_path:"bin/masc_tui.ml"
        ~binding_name:"answer_presented_approval"
        ~callee:"launch_surface_tool_approval");
+  check int "Gate rejection collects its required reason in the editor" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"reject_gate_approval"
+       ~callee:"Masc_tui_editor.roundtrip");
+  check int "Gate rejection resolves the presented approval after collecting a reason" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"reject_gate_approval"
+       ~callee:"launch_gate_resolve");
   check int "normal approval rendering emits one typed receipt" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"

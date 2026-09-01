@@ -10,8 +10,21 @@ type tool_surface =
   | Surface_unresolved of { detail : string }
   | Surface_resolved of tool_surface_entry list
 
+(* The interface constrains these; the implementation must still declare
+   them — without this the record literals below have no fields in scope. *)
+type attributed_turn =
+  { record : Turn_record.t
+  ; components : Turn_record.input_component list
+  ; turns_behind_latest : int
+  }
+
+type selection =
+  { latest : Turn_record.t
+  ; attributed : attributed_turn option
+  }
+
 type reading =
-  { turn : (Turn_record.t, string) result
+  { turn : (selection, string) result
   ; prompt : (Prompt_capture.capture, string) result
   ; tool_surface : tool_surface
   }

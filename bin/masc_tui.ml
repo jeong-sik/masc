@@ -11008,13 +11008,22 @@ and is loaded on demand through keeper_skill.
              match state.context_inspector_reading with
              | Some
                  ( _
-                 , { Masc_tui_context_inspector.turn = Ok record
+                 , { Masc_tui_context_inspector.turn = Ok selection
                    ; prompt
                    ; tool_surface
-                   } ) ->
-                 let capture = match prompt with Ok value -> Some value | Error _ -> None in
-                 Masc_tui_context_inspector.input_map_rows record capture
-                   ~tool_surface
+                   } ) -> (
+                 (* The map is a per-component table, so it needs the
+                    attributed record; the render side shows its own "no
+                    exact composition" line when the page holds none. *)
+                 match selection.Masc_tui_context_inspector.attributed with
+                 | None -> []
+                 | Some attributed ->
+                     let capture =
+                       match prompt with Ok value -> Some value | Error _ -> None
+                     in
+                     Masc_tui_context_inspector.input_map_rows
+                       attributed.Masc_tui_context_inspector.record capture
+                       ~tool_surface)
              | Some _ | None -> []
            in
            let close () =

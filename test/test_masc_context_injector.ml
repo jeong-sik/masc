@@ -120,10 +120,15 @@ let test_context_updates_overwrite_bounded_keys () =
 
 (* ── Temporal summary rendering ─────────────────────── *)
 
+(* #32199: a turn before any tool execution still gets the clock — and
+   nothing else, since neither the session anchor nor tool metadata
+   exists yet. *)
 let test_render_temporal_summary_empty () =
   let ctx = Agent_core.Context.create_sync () in
-  check (option string) "no summary before any tool"
-    None (MCI.render_temporal_summary ctx)
+  let now = 1_800_000_000.0 in
+  check string "a fresh context renders the clock alone"
+    ("[Temporal] time=" ^ MCI.iso8601_of_float now)
+    (MCI.render_temporal_summary ~now ctx)
 
 let test_render_temporal_summary_populated () =
   let ctx = Agent_core.Context.create_sync () in
@@ -138,15 +143,13 @@ let test_render_temporal_summary_populated () =
     MCI.key_last_tool_name (`String "tool_execute");
   Agent_core.Context.set ctx
     MCI.key_last_tool_outcome (`String "ok");
-  match MCI.render_temporal_summary ~now ctx with
-  | Some summary ->
-    check bool "contains time" true
-      (Astring.String.is_prefix ~affix:"[Temporal]" summary);
-    check bool "contains tool name" true
-      (Astring.String.is_infix ~affix:"tool_execute" summary);
-    check bool "contains elapsed" true
-      (Astring.String.is_infix ~affix:"elapsed=42s" summary)
-  | None -> fail "expected Some summary"
+  let summary = MCI.render_temporal_summary ~now ctx in
+  check bool "contains time" true
+    (Astring.String.is_prefix ~affix:"[Temporal]" summary);
+  check bool "contains tool name" true
+    (Astring.String.is_infix ~affix:"tool_execute" summary);
+  check bool "contains elapsed" true
+    (Astring.String.is_infix ~affix:"elapsed=42s" summary)
 
 (* Regression: turn N+1 must render the *fresh* current time, not the
    last tool call's timestamp frozen in [key_wall_time] from turn N
@@ -169,18 +172,16 @@ let test_render_uses_fresh_now_not_stale () =
     MCI.key_last_tool_outcome (`String "ok");
   let fresh_now = 1_800_000_000.0 in
   (* 2027-01-15T08:00:00Z — 100_000_000s after the stale snapshot *)
-  match MCI.render_temporal_summary ~now:fresh_now ctx with
-  | Some summary ->
-    let fresh_iso = MCI.iso8601_of_float fresh_now in
-    let stale_iso = MCI.iso8601_of_float stale_now in
-    check bool "time= is the fresh render-time clock" true
-      (Astring.String.is_infix ~affix:("time=" ^ fresh_iso) summary);
-    check bool "time= is NOT the stale stored wall_time" false
-      (Astring.String.is_infix ~affix:stale_iso summary);
-    (* elapsed = fresh_now - session_start = 100_000_000 + 100 *)
-    check bool "elapsed recomputed against session_start at render time" true
-      (Astring.String.is_infix ~affix:"elapsed=100000100s" summary)
-  | None -> fail "expected Some summary"
+  let summary = MCI.render_temporal_summary ~now:fresh_now ctx in
+  let fresh_iso = MCI.iso8601_of_float fresh_now in
+  let stale_iso = MCI.iso8601_of_float stale_now in
+  check bool "time= is the fresh render-time clock" true
+    (Astring.String.is_infix ~affix:("time=" ^ fresh_iso) summary);
+  check bool "time= is NOT the stale stored wall_time" false
+    (Astring.String.is_infix ~affix:stale_iso summary);
+  (* elapsed = fresh_now - session_start = 100_000_000 + 100 *)
+  check bool "elapsed recomputed against session_start at render time" true
+    (Astring.String.is_infix ~affix:"elapsed=100000100s" summary)
 
 let test_render_rejects_retired_elapsed_without_session_start () =
   let ctx = Agent_core.Context.create_sync () in
@@ -194,18 +195,23 @@ let test_render_rejects_retired_elapsed_without_session_start () =
     MCI.key_last_tool_name (`String "legacy_tool");
   Agent_core.Context.set ctx
     MCI.key_last_tool_outcome (`String "ok");
-  check
-    (option string)
-    "retired elapsed value is not repaired"
-    None
-    (MCI.render_temporal_summary ~now:1_800_000_000.0 ctx)
+  let summary = MCI.render_temporal_summary ~now:1_800_000_000.0 ctx in
+  check bool "retired elapsed value is not repaired" false
+    (Astring.String.is_infix ~affix:"elapsed=" summary);
+  check bool "the retired seconds never surface" false
+    (Astring.String.is_infix ~affix:"55" summary);
+  check bool "the clock and tool trail still render" true
+    (Astring.String.is_prefix ~affix:"[Temporal] time=" summary
+     && Astring.String.is_infix ~affix:"last=legacy_tool(ok)" summary)
 
 let test_render_omits_malformed_elapsed_context () =
   let ctx = Agent_core.Context.create_sync () in
   Agent_core.Context.set ctx
     MCI.key_wall_time (`String "2023-11-14T22:13:20Z");
-  check (option string) "missing elapsed anchor omits summary"
-    None (MCI.render_temporal_summary ~now:1_800_000_000.0 ctx)
+  let now = 1_800_000_000.0 in
+  check string "a context with only the sentinel renders the clock alone"
+    ("[Temporal] time=" ^ MCI.iso8601_of_float now)
+    (MCI.render_temporal_summary ~now ctx)
 
 (* ── ISO 8601 formatting ────────────────────────────── *)
 

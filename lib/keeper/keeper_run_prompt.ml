@@ -120,7 +120,6 @@ let build_turn_context
   in
   let temporal_context =
     Masc_context_injector.render_temporal_summary shared_context
-    |> Option.value ~default:""
   in
   let prompt_metrics =
     Keeper_agent_prompt_metrics.build_prompt_metrics

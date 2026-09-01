@@ -90,34 +90,45 @@ let tool_summary_fields ctx =
   with
   | Some tool_count, Some last_tool, Some outcome ->
     Some (tool_count, last_tool, outcome)
-  | _ ->
-    Log.Keeper.warn
-      "Temporal summary skipped: missing tool summary keys (%s/%s/%s)"
-      key_tool_call_count key_last_tool_name key_last_tool_outcome;
-    None
+  | _ -> None
 
-let render_temporal_summary ?now (ctx : Agent_core.Context.t) : string option =
-  (* [key_wall_time] presence is the "at least one tool has executed"
-     sentinel (turn 0 renders no block). We do NOT display its stored
-     value: it is the last tool-call timestamp and goes stale across
-     idle turns, which is exactly the bug this renderer must avoid. *)
-  match Agent_core.Context.get ctx key_wall_time with
-  | None -> None
-  | Some _ ->
-    let now = match now with Some n -> n | None -> Time_compat.now () in
-    (* [time=] is recomputed at render (= turn start), so a keeper waking
-       after an idle gap sees the current wall clock, not a past tool time. *)
-    let wall_time = iso8601_of_float now in
-    let elapsed =
-      match get_float ctx key_session_start with
-      | Some session_start -> Some (now -. session_start)
-      | None ->
-        Log.Keeper.warn "Temporal summary skipped: missing %s" key_session_start;
-        None
-    in
-    match elapsed, tool_summary_fields ctx with
-    | Some elapsed, Some (tool_count, last_tool, outcome) ->
-      Some (Printf.sprintf
-        "[Temporal] time=%s elapsed=%.0fs tools=%d last=%s(%s)"
-        wall_time elapsed tool_count last_tool outcome)
-    | _ -> None
+let render_temporal_summary ?now (ctx : Agent_core.Context.t) : string =
+  (* The clock is unconditional: before this became total, a turn with no
+     tool execution yet rendered no block at all, so the model had no idea
+     what time it was and hand-typed prose timestamps drifted by whole
+     hours (#32199). [key_wall_time] presence still means "at least one
+     tool has executed" — it now gates only the corruption diagnostics
+     below, never the clock. Its stored value is never displayed: it is
+     the last tool-call timestamp and goes stale across idle turns. *)
+  let tool_context_exists = Agent_core.Context.get ctx key_wall_time <> None in
+  let now = match now with Some n -> n | None -> Time_compat.now () in
+  (* [time=] is recomputed at render (= turn start), so a keeper waking
+     after an idle gap sees the current wall clock, not a past tool time. *)
+  let wall_time = iso8601_of_float now in
+  let elapsed_part =
+    match get_float ctx key_session_start with
+    | Some session_start -> Printf.sprintf " elapsed=%.0fs" (now -. session_start)
+    | None ->
+      (* A retired-shape context (tools ran, no session anchor) is not
+         repaired: elapsed is omitted rather than recomputed from any
+         legacy key. A fresh context omits it silently. *)
+      if tool_context_exists
+      then Log.Keeper.warn "Temporal summary omits elapsed: missing %s" key_session_start;
+      ""
+  in
+  let tools_part =
+    match tool_summary_fields ctx with
+    | Some (tool_count, last_tool, outcome) ->
+      Printf.sprintf " tools=%d last=%s(%s)" tool_count last_tool outcome
+    | None ->
+      (* The injector writes every key together, so tool context with
+         partial tool keys is corruption worth a warning; a fresh context
+         simply has nothing to say yet. *)
+      if tool_context_exists
+      then
+        Log.Keeper.warn
+          "Temporal summary omits tools: missing tool summary keys (%s/%s/%s)"
+          key_tool_call_count key_last_tool_name key_last_tool_outcome;
+      ""
+  in
+  Printf.sprintf "[Temporal] time=%s%s%s" wall_time elapsed_part tools_part

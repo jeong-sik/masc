@@ -753,10 +753,9 @@ let assemble_hooks
                 (if String.trim dynamic_context <> ""
                  then
                    record_block Prompt_block_id.Dynamic_context dynamic_context);
-                (match Masc_context_injector.render_temporal_summary shared_context with
-                 | None -> ()
-                 | Some temporal ->
-                   record_block Prompt_block_id.Temporal_summary temporal);
+                record_block
+                  Prompt_block_id.Temporal_summary
+                  (Masc_context_injector.render_temporal_summary shared_context);
                 let schema_filter, computed_turn_lane =
                   compute_tool_surface
                     ~turn

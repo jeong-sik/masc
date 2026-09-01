@@ -725,6 +725,7 @@ let run_turn
     Keeper_run_tools.prepare_agent_setup
       ~config
       ~meta
+      ~profile_defaults
       ~publication_recovery
       ?continuation_channel
       ?on_tool_stream_observation

@@ -1086,6 +1086,80 @@ let test_runtime_attempt_clears_previous_runtime_delivery () =
   check bool "runtime B inherits no pending delivery" false !observed
 ;;
 
+(* ── adopt_projection_meta: projection adoption keeps the TOML profile ──
+
+   #31178 drift, observer site. The registry projection is durable keeper
+   JSON: it cannot carry the TOML-owned fields, so its decoder fills
+   [sandbox_profile] with a placeholder (docker as of #32078). Adopting the
+   projection whole is what dispatched a microvm keeper's Execute to the
+   host docker daemon (lane-smith, 2026-09-01). The post-tool observer
+   re-applies the TOML the turn was admitted with. Docker below stands in
+   for whatever the decoder placeholder is: the assertion is about which
+   side wins, not about the placeholder's value. *)
+
+let drift_defaults sandbox =
+  { Keeper_types_profile.empty_keeper_profile_defaults with
+    manifest_path = Some "keepers/drift.toml"
+  ; sandbox_profile = sandbox
+  }
+;;
+
+let profile_label =
+  Keeper_types_profile_sandbox.sandbox_profile_to_string
+;;
+
+let test_projection_adoption_keeps_admitted_toml_profile () =
+  let admitted =
+    make_meta ~sandbox_profile:Keeper_types_profile_sandbox.Micro_vm "drift"
+  in
+  let projection =
+    make_meta ~sandbox_profile:Keeper_types_profile_sandbox.Docker "drift"
+  in
+  let adopted =
+    Masc.Keeper_run_tools_hooks.adopt_projection_meta
+      ~profile_defaults:
+        (drift_defaults (Some Keeper_types_profile_sandbox.Micro_vm))
+      ~admitted ~projection
+  in
+  check string "adopted keeps the TOML microvm profile"
+    (profile_label Keeper_types_profile_sandbox.Micro_vm)
+    (profile_label adopted.sandbox_profile)
+;;
+
+let test_projection_adoption_without_a_toml_profile_keeps_admitted () =
+  let admitted =
+    make_meta ~sandbox_profile:Keeper_types_profile_sandbox.Micro_vm "drift"
+  in
+  let projection =
+    make_meta ~sandbox_profile:Keeper_types_profile_sandbox.Docker "drift"
+  in
+  let adopted =
+    Masc.Keeper_run_tools_hooks.adopt_projection_meta
+      ~profile_defaults:(drift_defaults None)
+      ~admitted ~projection
+  in
+  check string "keeps the admitted profile when the TOML declares none"
+    (profile_label Keeper_types_profile_sandbox.Micro_vm)
+    (profile_label adopted.sandbox_profile)
+;;
+
+let test_projection_adoption_follows_the_toml_when_it_declares_docker () =
+  let admitted =
+    make_meta ~sandbox_profile:Keeper_types_profile_sandbox.Micro_vm "drift"
+  in
+  let projection =
+    make_meta ~sandbox_profile:Keeper_types_profile_sandbox.Docker "drift"
+  in
+  let adopted =
+    Masc.Keeper_run_tools_hooks.adopt_projection_meta
+      ~profile_defaults:(drift_defaults (Some Keeper_types_profile_sandbox.Docker))
+      ~admitted ~projection
+  in
+  check string "follows the TOML profile when it declares docker"
+    (profile_label Keeper_types_profile_sandbox.Docker)
+    (profile_label adopted.sandbox_profile)
+;;
+
 let () =
   run
     "keeper_run_tools_hooks"
@@ -1229,6 +1303,20 @@ let () =
             "runtime failover clears previous delivery"
             `Quick
             test_runtime_attempt_clears_previous_runtime_delivery
+        ] )
+    ; ( "projection adoption"
+      , [ test_case
+            "keeps the admitted TOML profile over the decoder placeholder"
+            `Quick
+            test_projection_adoption_keeps_admitted_toml_profile
+        ; test_case
+            "keeps the admitted profile when the TOML declares none"
+            `Quick
+            test_projection_adoption_without_a_toml_profile_keeps_admitted
+        ; test_case
+            "follows the TOML profile when it declares docker"
+            `Quick
+            test_projection_adoption_follows_the_toml_when_it_declares_docker
         ] )
     ]
 ;;

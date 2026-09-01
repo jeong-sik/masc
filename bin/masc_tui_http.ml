@@ -1165,7 +1165,8 @@ let expect_ok_true ~(what : string) json =
 
 (** POST /api/v1/dashboard/gate/resolve — decide one durable Gate approval. *)
 let post_dashboard_gate_resolve ~(host : string) ~(port : int)
-    ~(approval_id : string) ~(approve : bool) ?reason : (unit, string) result =
+    ~(approval_id : string) ~(approve : bool) ~(reason : string option) :
+    (unit, string) result =
   let body =
     Yojson.Safe.to_string
       (`Assoc

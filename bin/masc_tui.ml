@@ -1941,7 +1941,7 @@ let launch_gate_snapshot_load state ~mailbox =
       enqueue_async mailbox
         (Gate_snapshot_loaded (Error "Eio switch is unavailable"))
 
-let launch_gate_resolve state ~mailbox ~approval_id ~approve ?reason =
+let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
   (* A Gate decision mutates durable server state over one round trip. Take the
      same single-action slot the operator-confirm path takes, so the header
      draws [submitting] the instant the key lands and a second press during the
@@ -1958,7 +1958,7 @@ let launch_gate_resolve state ~mailbox ~approval_id ~approve ?reason =
         let result =
           try
             Masc_tui_http.post_dashboard_gate_resolve ~host ~port ~approval_id
-              ~approve ?reason
+              ~approve ~reason
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
@@ -9333,6 +9333,13 @@ let main () =
   in
 
   let request_full_repaint _ = Atomic.set resize_requested true in
+  (* The other half of the terminal handshake [restore_terminal] opens, kept
+     beside it: every $EDITOR round-trip on this screen needs both, and the
+     first one added above this definition did not compile. *)
+  let reenter_terminal () =
+    apply_raw_mode new_term;
+    request_full_repaint 0
+  in
   let terminate _ = exit 0 in
   (* Ctrl-C used to reach [terminate] and the session ended mid-sentence, with
      whatever was in the composer gone. It is one key away from Ctrl-V and
@@ -9492,7 +9499,8 @@ let main () =
           match List.assoc_opt "reason" fields with
           | Some (`String reason) when String.trim reason <> "" ->
             launch_gate_resolve state ~mailbox:async_messages
-              ~approval_id:pending.gp_id ~approve:false ~reason:(String.trim reason)
+              ~approval_id:pending.gp_id ~approve:false
+              ~reason:(Some (String.trim reason))
           | Some (`String _) | Some _ | None ->
             add_event state "system" "Gate rejection cancelled (empty reason)" )
         | _ ->
@@ -9513,7 +9521,7 @@ let main () =
           ~allow:(match decision with Confirm -> true | Deny -> false)
     | Some { Approval_authority.row = Gate_row pending; decision = Confirm } ->
         launch_gate_resolve state ~mailbox:async_messages
-          ~approval_id:pending.Tui_decode.gp_id ~approve:true
+          ~approval_id:pending.Tui_decode.gp_id ~approve:true ~reason:None
     | Some { Approval_authority.row = Gate_row pending; decision = Deny } ->
         reject_gate_approval pending
     | None ->
@@ -9606,10 +9614,6 @@ let main () =
      leaves the settings untouched, so these flows skip Keeper_control's
      arming gate. The terminal handshake around the child is the pair
      [suspend] already runs around Ctrl-Z. *)
-  let reenter_terminal () =
-    apply_raw_mode new_term;
-    request_full_repaint 0
-  in
   (* An empty object is the honest starting point for a partial patch: the
      config route applies only the fields present in the body, and the TUI
      has no view of the current settings to prefill from -- showing a

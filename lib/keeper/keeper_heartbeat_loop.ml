@@ -211,6 +211,38 @@ let connector_attention_event_ids_of_stimuli stimuli =
     stimuli
 ;;
 
+(* Which stimuli own a turn-entry reaction. Both halves of the turn read this
+   one predicate: a finish row for a stimulus that never wrote a start row would
+   be evidence of a turn nobody recorded entering. *)
+let stimulus_owns_turn_reaction (stimulus : Keeper_event_queue.stimulus) =
+  match stimulus.payload with
+  (* Same shape as the HITL resolution beside it: an async thing this keeper was
+     waiting on came back, and the turn's cause should say so. *)
+  | Keeper_event_queue.Schedule_due _
+  | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Ask_answered _ -> true
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Bootstrap
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Completion_authority_rejected _
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Workspace_message _
+  | Keeper_event_queue.Delegate_completed _
+  | Keeper_event_queue.Composition_completed _ -> false
+;;
+
+let record_replay_owned_turn_finished_reactions ~ctx ~keeper_name ~disposition stimuli =
+  List.iter
+    (fun stimulus ->
+       if stimulus_owns_turn_reaction stimulus
+       then
+         Stimulus_intake.record_event_queue_stimulus_turn_finished ~ctx ~keeper_name
+           ~disposition stimulus)
+    stimuli
+;;
+
 let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
   List.iter
     (fun (stimulus : Keeper_event_queue.stimulus) ->
@@ -876,6 +908,15 @@ let run_keepalive_unified_turn
             record_deferred_runtime_lane
             (Cycle.deferred_runtime_lane cycle_outcome);
           cycle_outcome_ref := Some cycle_outcome;
+          (* The closing half of the turn-entry reactions written above. The
+             stimulus's evidence otherwise ends at "a turn started", and what
+             the turn did is recovered by comparing that clock against the
+             keeper's calls. *)
+          record_replay_owned_turn_finished_reactions
+            ~ctx
+            ~keeper_name:meta_after_triage.name
+            ~disposition:(Cycle.disposition_token cycle_outcome)
+            !consumed_stimuli;
           Cycle.meta cycle_outcome)
         else meta_after_triage
       in

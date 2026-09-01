@@ -3816,6 +3816,7 @@ let schedule_turn_rows
   let step_observed =
     [ row.sch_wake_seen
     ; row.sch_turn_started
+    ; row.sch_turn_finished
     ; row.sch_queue_ack_seen
     ; row.sch_wake_cancelled
     ]
@@ -3828,6 +3829,7 @@ let schedule_turn_rows
     ; row.sch_reaction_reason
     ; row.sch_stimulus_recorded_at_iso
     ; row.sch_turn_started_recorded_at_iso
+    ; row.sch_turn_finished_recorded_at_iso
     ; row.sch_queue_ack_recorded_at_iso
     ; row.sch_wake_cancelled_recorded_at_iso
     ]
@@ -3876,6 +3878,8 @@ let schedule_turn_rows
     @ [ step "Wake seen" row.sch_wake_seen row.sch_stimulus_recorded_at_iso
       ; step "Turn started" row.sch_turn_started
           row.sch_turn_started_recorded_at_iso
+      ; step "Turn finished" row.sch_turn_finished
+          row.sch_turn_finished_recorded_at_iso
       ; step "Queue ack" row.sch_queue_ack_seen row.sch_queue_ack_recorded_at_iso
       ; step ~bad_when_true:true "Cancelled" row.sch_wake_cancelled
           row.sch_wake_cancelled_recorded_at_iso
@@ -4061,8 +4065,10 @@ let schedule_detail_lines ~width (row : schedule_row)
   @ (if keeper_wake then
        [ Ansi.dim, ""
        ; Ansi.bold, "  WORK RESULT"
-       ; field "Attribution" "wake/turn only; no schedule-to-tool/result join"
-       ; field "Inspect" "Keeper Calls or Activity after the recorded turn start"
+       ; field "Attribution"
+           "the turn this wake opened, bounded by its start and finish rows"
+       ; field "Inspect"
+           "Keeper Calls or Activity between the two recorded times"
        ]
      else [])
 

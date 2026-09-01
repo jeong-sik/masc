@@ -15,6 +15,7 @@ type stimulus_kind =
 
 type reaction_kind =
   | Turn_started
+  | Turn_finished
   | Event_queue_ack
   | Event_queue_cancelled
 
@@ -76,6 +77,7 @@ let stimulus_kind_of_string = function
 
 let reaction_kind_to_string = function
   | Turn_started -> "turn_started"
+  | Turn_finished -> "turn_finished"
   | Event_queue_ack -> "event_queue_ack"
   | Event_queue_cancelled -> "event_queue_cancelled"
 ;;
@@ -84,6 +86,7 @@ let reaction_kind_to_string = function
    reaction value, so an unknown label can never clear a pending stimulus. *)
 let reaction_kind_of_string = function
   | "turn_started" -> Ok Turn_started
+  | "turn_finished" -> Ok Turn_finished
   | "event_queue_ack" -> Ok Event_queue_ack
   | "event_queue_cancelled" -> Ok Event_queue_cancelled
   | other -> Error (Unknown_reaction_kind other)
@@ -321,10 +324,43 @@ let event_queue_turn_started_json ~keeper_name stimulus =
        ])
 ;;
 
+let event_queue_turn_finished_json ~keeper_name ~disposition stimulus =
+  let stimulus_id = stimulus_id_of_event_queue stimulus in
+  let recorded_at = Time_compat.now () in
+  `Assoc
+    (base_fields
+       ~record_kind:"reaction"
+       ~event_id:(stimulus_id ^ ":reaction:turn_finished")
+       ~keeper_name
+       ~recorded_at
+     @ [ "stimulus_id", `String stimulus_id
+       ; ( "reaction"
+         , `Assoc
+             [ "kind", `String (reaction_kind_to_string Turn_finished)
+             ; "source", `String "keeper_event_queue"
+             ; "post_id", `String stimulus.post_id
+             ; "stimulus_kind", `String (stimulus_kind_to_string (stimulus_kind_of_event_queue stimulus))
+             ; "disposition", `String disposition
+             ] )
+       ])
+;;
+
 let record_event_queue_turn_started ~base_path ~keeper_name stimulus =
   Dated_jsonl.append
     (store_for_base_path ~base_path ~keeper_name)
     (event_queue_turn_started_json ~keeper_name stimulus);
+  notify_state_change_observer ~keeper_name
+;;
+
+(* The other end of the turn the stimulus opened. Without it a schedule's
+   evidence stops at "a turn started at T" and the operator joins the rest by
+   comparing that clock against Keeper Calls -- a reconstruction, not evidence.
+   [disposition] is the turn boundary's own typed outcome rendered as its
+   canonical token; this ledger never decides what a turn did. *)
+let record_event_queue_turn_finished ~base_path ~keeper_name ~disposition stimulus =
+  Dated_jsonl.append
+    (store_for_base_path ~base_path ~keeper_name)
+    (event_queue_turn_finished_json ~keeper_name ~disposition stimulus);
   notify_state_change_observer ~keeper_name
 ;;
 
@@ -659,7 +695,7 @@ let reaction_kind_matches_transition reaction_kind transition =
   | Event_queue_ack, Keeper_event_queue_state.Transfer_accepted _ -> true
   | Event_queue_ack, Keeper_event_queue_state.Ack_source_terminal _ -> true
   | Event_queue_cancelled, Keeper_event_queue_state.Cancel_accepted _ -> true
-  | Turn_started, _
+  | (Turn_started | Turn_finished), _
   | Event_queue_ack, Keeper_event_queue_state.Cancel_accepted _
   | Event_queue_cancelled,
     ( Keeper_event_queue_state.Transfer_accepted _
@@ -777,8 +813,10 @@ let decode_reaction_row ~event_id metadata reaction =
     decode_reaction_stimulus_reference reaction
   in
   match reaction_kind, source with
-  | Turn_started, "keeper_event_queue" ->
-    let expected_event_id = metadata.stimulus_id ^ ":reaction:turn_started" in
+  | (Turn_started | Turn_finished), "keeper_event_queue" ->
+    let expected_event_id =
+      metadata.stimulus_id ^ ":reaction:" ^ reaction_kind_to_string reaction_kind
+    in
     if String.equal event_id expected_event_id
     then Ok (Current_reaction { metadata; reaction_kind; transition_receipt = None })
     else Error Event_identity_mismatch
@@ -796,10 +834,10 @@ let decode_reaction_row ~event_id metadata reaction =
     Ok
       (Current_reaction
          { metadata; reaction_kind; transition_receipt = Some transition_receipt })
-  | Turn_started, "keeper_event_queue_transition"
+  | (Turn_started | Turn_finished), "keeper_event_queue_transition"
   | (Event_queue_ack | Event_queue_cancelled),
     "keeper_event_queue" -> Error Reaction_source_mismatch
-  | (Turn_started | Event_queue_ack | Event_queue_cancelled),
+  | (Turn_started | Turn_finished | Event_queue_ack | Event_queue_cancelled),
     _ -> Error Unknown_reaction_source
 ;;
 
@@ -909,10 +947,12 @@ type event_queue_reaction_evidence =
   ; stimulus_id : string
   ; stimulus_seen : bool
   ; turn_started_seen : bool
+  ; turn_finished_seen : bool
   ; event_queue_ack_seen : bool
   ; event_queue_cancelled_seen : bool
   ; stimulus_recorded_at : float option
   ; turn_started_recorded_at : float option
+  ; turn_finished_recorded_at : float option
   ; event_queue_ack_recorded_at : float option
   ; event_queue_cancelled_recorded_at : float option
   ; latest_recorded_at : float option
@@ -947,10 +987,12 @@ let max_recorded_at current candidate =
 type event_queue_reaction_evidence_accumulator =
   { mutable stimulus_seen : bool
   ; mutable turn_started_seen : bool
+  ; mutable turn_finished_seen : bool
   ; mutable event_queue_ack_seen : bool
   ; mutable event_queue_cancelled_seen : bool
   ; mutable stimulus_recorded_at : float option
   ; mutable turn_started_recorded_at : float option
+  ; mutable turn_finished_recorded_at : float option
   ; mutable event_queue_ack_recorded_at : float option
   ; mutable event_queue_cancelled_recorded_at : float option
   ; mutable latest_recorded_at : float option
@@ -963,10 +1005,12 @@ type event_queue_reaction_evidence_accumulator =
 let empty_event_queue_reaction_evidence_accumulator () =
   { stimulus_seen = false
   ; turn_started_seen = false
+  ; turn_finished_seen = false
   ; event_queue_ack_seen = false
   ; event_queue_cancelled_seen = false
   ; stimulus_recorded_at = None
   ; turn_started_recorded_at = None
+  ; turn_finished_recorded_at = None
   ; event_queue_ack_recorded_at = None
   ; event_queue_cancelled_recorded_at = None
   ; latest_recorded_at = None
@@ -1017,6 +1061,10 @@ let note_event_queue_reaction_evidence_row ~keeper_name accumulator row =
          accumulator.turn_started_seen <- true;
          accumulator.turn_started_recorded_at
            <- max_recorded_at accumulator.turn_started_recorded_at recorded_at
+       | Current_reaction { reaction_kind = Turn_finished; _ } ->
+         accumulator.turn_finished_seen <- true;
+         accumulator.turn_finished_recorded_at
+           <- max_recorded_at accumulator.turn_finished_recorded_at recorded_at
        | Current_reaction { reaction_kind = Event_queue_ack; _ } ->
          accumulator.event_queue_ack_seen <- true;
          accumulator.event_queue_ack_recorded_at
@@ -1039,10 +1087,12 @@ let event_queue_reaction_evidence_of_accumulator
     ; stimulus_id
     ; stimulus_seen = accumulator.stimulus_seen
     ; turn_started_seen = accumulator.turn_started_seen
+    ; turn_finished_seen = accumulator.turn_finished_seen
     ; event_queue_ack_seen = accumulator.event_queue_ack_seen
     ; event_queue_cancelled_seen = accumulator.event_queue_cancelled_seen
     ; stimulus_recorded_at = accumulator.stimulus_recorded_at
     ; turn_started_recorded_at = accumulator.turn_started_recorded_at
+    ; turn_finished_recorded_at = accumulator.turn_finished_recorded_at
     ; event_queue_ack_recorded_at = accumulator.event_queue_ack_recorded_at
     ; event_queue_cancelled_recorded_at =
         accumulator.event_queue_cancelled_recorded_at
@@ -1184,6 +1234,7 @@ let event_queue_turn_started_seen_for_source_result =
       match reaction_kind, transition_receipt with
       | Turn_started, None -> true
       | (Event_queue_ack | Event_queue_cancelled), _
+      | Turn_finished, _
       | Turn_started, Some _ -> false)
 ;;
 
@@ -1193,6 +1244,9 @@ let event_queue_delivery_seen_for_source_result =
       match reaction_kind, transition_receipt with
       | Turn_started, None
       | (Event_queue_ack | Event_queue_cancelled), Some _ -> true
+      (* A finished row is the turn's outcome, not its delivery: delivery is
+         proven by entry and by the queue transitions. *)
+      | Turn_finished, _
       | Turn_started, Some _
       | (Event_queue_ack | Event_queue_cancelled), None -> false)
 ;;
@@ -1413,6 +1467,7 @@ let summarize_rows ~keeper_name ~limit rows =
   let stimulus_count = ref 0 in
   let reaction_count = ref 0 in
   let turn_started_count = ref 0 in
+  let turn_finished_count = ref 0 in
   let event_queue_ack_count = ref 0 in
   let event_queue_cancelled_count = ref 0 in
   let quarantined_row_count = ref 0 in
@@ -1460,8 +1515,10 @@ let summarize_rows ~keeper_name ~limit rows =
   let note_reaction_kind reaction_kind transition_receipt =
     match reaction_kind, transition_receipt with
     | Turn_started, None -> incr turn_started_count
+    | Turn_finished, None -> incr turn_finished_count
     | Event_queue_ack, Some _ -> incr event_queue_ack_count
     | Event_queue_cancelled, Some _ -> incr event_queue_cancelled_count
+    | Turn_finished, Some _
     | Turn_started, Some _
     | (Event_queue_ack | Event_queue_cancelled), None -> ()
   in
@@ -1523,6 +1580,7 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "stimulus_count", `Int !stimulus_count
     ; "reaction_count", `Int !reaction_count
     ; "turn_started_count", `Int !turn_started_count
+    ; "turn_finished_count", `Int !turn_finished_count
     ; "event_queue_ack_count", `Int !event_queue_ack_count
     ; "event_queue_cancelled_count", `Int !event_queue_cancelled_count
     ; "quarantined_row_count", `Int !quarantined_row_count
@@ -1553,6 +1611,7 @@ let error_summary ~keeper_name ~limit error =
     ; "stimulus_count", `Int 0
     ; "reaction_count", `Int 0
     ; "turn_started_count", `Int 0
+    ; "turn_finished_count", `Int 0
     ; "event_queue_ack_count", `Int 0
     ; "event_queue_cancelled_count", `Int 0
     ; "quarantined_row_count", `Int 0
@@ -1617,6 +1676,7 @@ let unavailable_fleet_summary_json () =
     ; "stimulus_count", `Int 0
     ; "reaction_count", `Int 0
     ; "turn_started_count", `Int 0
+    ; "turn_finished_count", `Int 0
     ; "event_queue_ack_count", `Int 0
     ; "event_queue_cancelled_count", `Int 0
     ; "quarantined_row_count", `Int 0
@@ -1870,6 +1930,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "stimulus_count", `Int (total_int "stimulus_count")
     ; "reaction_count", `Int (total_int "reaction_count")
     ; "turn_started_count", `Int (total_int "turn_started_count")
+    ; "turn_finished_count", `Int (total_int "turn_finished_count")
     ; "event_queue_ack_count", `Int (total_int "event_queue_ack_count")
     ; ( "event_queue_cancelled_count"
       , `Int (total_int "event_queue_cancelled_count") )

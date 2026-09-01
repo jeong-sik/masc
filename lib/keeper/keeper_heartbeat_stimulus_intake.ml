@@ -145,6 +145,29 @@ let pending_board_events_of_stimulus_result ~meta_after_triage stim =
     classify_pending_board_event_result read_result
 ;;
 
+let record_event_queue_stimulus_turn_finished
+      ~(ctx : _ context)
+      ~keeper_name
+      ~disposition
+      (stimulus : Keeper_event_queue.stimulus)
+  =
+  try
+    Keeper_reaction_ledger.record_event_queue_turn_finished
+      ~base_path:ctx.config.base_path
+      ~keeper_name
+      ~disposition
+      stimulus
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.error
+      "turn exit: failed to persist event queue turn-finished reaction \
+       post_id=%s keeper=%s: %s"
+      stimulus.Keeper_event_queue.post_id
+      keeper_name
+      (Printexc.to_string exn)
+;;
+
 let record_event_queue_stimulus_turn_started
       ~(ctx : _ context)
       ~keeper_name

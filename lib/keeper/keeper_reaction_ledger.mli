@@ -27,6 +27,10 @@ type stimulus_kind =
 
 type reaction_kind =
   | Turn_started
+  | Turn_finished
+      (** The turn the stimulus opened reached its boundary. Carries the turn's
+          own typed disposition as a token; this ledger records what the turn
+          boundary decided and never decides it. *)
   | Event_queue_ack
   | Event_queue_cancelled
 
@@ -80,8 +84,20 @@ val record_event_queue_stimulus :
 
 val record_event_queue_turn_started :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus -> unit
-(** Append the sole non-transition event-queue reaction. The writer fixes the
-    reaction kind so callers cannot manufacture transition evidence. *)
+(** Append a turn-entry reaction. The writer fixes the reaction kind so callers
+    cannot manufacture transition evidence. *)
+
+val record_event_queue_turn_finished :
+  base_path:string ->
+  keeper_name:string ->
+  disposition:string ->
+  Keeper_event_queue.stimulus ->
+  unit
+(** Append the closing half of {!record_event_queue_turn_started}. Without it a
+    stimulus's evidence ends at "a turn started", and what the turn did is
+    recovered by comparing that timestamp against the keeper's calls -- a
+    reconstruction rather than a record. [disposition] is the turn boundary's
+    own outcome; this writer does not classify. *)
 
 val project_event_queue_transition_outbox_result :
   base_path:string ->
@@ -102,10 +118,12 @@ type event_queue_reaction_evidence =
   ; stimulus_id : string
   ; stimulus_seen : bool
   ; turn_started_seen : bool
+  ; turn_finished_seen : bool
   ; event_queue_ack_seen : bool
   ; event_queue_cancelled_seen : bool
   ; stimulus_recorded_at : float option
   ; turn_started_recorded_at : float option
+  ; turn_finished_recorded_at : float option
   ; event_queue_ack_recorded_at : float option
   ; event_queue_cancelled_recorded_at : float option
   ; latest_recorded_at : float option

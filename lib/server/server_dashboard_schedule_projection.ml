@@ -493,6 +493,7 @@ let schedule_keeper_reaction_evidence_dashboard_json
                [ "stimulus_id", `String stimulus_id
                   ; "stimulus_seen", `Bool evidence.stimulus_seen
                   ; "turn_started_seen", `Bool evidence.turn_started_seen
+                  ; "turn_finished_seen", `Bool evidence.turn_finished_seen
                   ; "event_queue_ack_seen", `Bool evidence.event_queue_ack_seen
                   ; ( "event_queue_cancelled_seen"
                     , `Bool evidence.event_queue_cancelled_seen )
@@ -505,6 +506,12 @@ let schedule_keeper_reaction_evidence_dashboard_json
                       | Some ts -> `Float ts )
                   ; ( "stimulus_recorded_at_iso"
                     , unix_iso_option_json evidence.stimulus_recorded_at )
+                  ; ( "turn_finished_recorded_at"
+                    , match evidence.turn_finished_recorded_at with
+                      | None -> `Null
+                      | Some ts -> `Float ts )
+                  ; ( "turn_finished_recorded_at_iso"
+                    , unix_iso_option_json evidence.turn_finished_recorded_at )
                   ; ( "turn_started_recorded_at"
                     , match evidence.turn_started_recorded_at with
                       | None -> `Null
@@ -595,6 +602,11 @@ let schedule_keeper_reaction_evidence_dashboard_json
                   then "matched_terminal_cancelled"
                   else if evidence.event_queue_ack_seen
                   then "matched_consumed_ack"
+                  (* Finished outranks started: both rows are written for the
+                     same stimulus, and the later one is the more complete
+                     reading of what happened. *)
+                  else if evidence.turn_finished_seen
+                  then "matched_turn_finished"
                   else if evidence.turn_started_seen
                   then "matched_turn_started"
                   else if evidence.stimulus_seen

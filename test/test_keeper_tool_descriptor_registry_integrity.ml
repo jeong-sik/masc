@@ -326,7 +326,6 @@ let descriptions_owned_elsewhere =
   ; "keeper_context_status"
   ; "keeper_ide_annotate"
   ; "keeper_memory_search"
-  ; "keeper_memory_retract"
   ; "keeper_memory_write"
   ; "keeper_person_note_set"
   ; "keeper_time_now"

@@ -900,6 +900,15 @@ let base_schema_input name =
     Canonical_registry, schema.input_schema
   | None -> invalid_arg ("missing base tool schema for " ^ name)
 
+(* [base_schema_input] keeps only the schema, so a descriptor whose
+   description is the TOML's own cannot be built from it -- there is nothing
+   left to read the description off. This keeps the whole record for that
+   case. *)
+let base_schema_declared name =
+  match find_base_schema_opt name with
+  | Some (schema : Masc_domain.tool_schema) -> Canonical_registry, schema
+  | None -> invalid_arg ("missing base tool schema for " ^ name)
+
 let keeper_tools_list_schema =
   match find_base_schema_opt "keeper_tools_list" with
   | Some schema -> schema
@@ -942,7 +951,7 @@ let memory_search_schema_source, memory_search_schema =
 ;;
 
 let memory_retract_schema_source, memory_retract_schema =
-  base_schema_input "keeper_memory_retract"
+  base_schema_declared "keeper_memory_retract"
 ;;
 
 let memory_write_schema_source, memory_write_schema =
@@ -1974,7 +1983,7 @@ let internal_descriptors : t list =
       ~id:"keeper.memory.retract"
       ~name:"keeper_memory_retract"
       ~description:memory_retract_schema.description
-      ~input_schema:memory_retract_schema
+      ~input_schema:memory_retract_schema.input_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_memory_retract
       ()

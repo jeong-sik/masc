@@ -61,6 +61,22 @@ let read_file path =
     (fun () -> really_input_string input (in_channel_length input))
 ;;
 
+let rec jsonl_rows_under path =
+  if Sys.is_directory path
+  then
+    Sys.readdir path
+    |> Array.to_list
+    |> List.concat_map (fun entry -> jsonl_rows_under (Filename.concat path entry))
+  else if Filename.check_suffix path ".jsonl"
+  then
+    read_file path
+    |> String.split_on_char '\n'
+    |> List.filter_map (fun line ->
+      let line = String.trim line in
+      if String.equal line "" then None else Some (Yojson.Safe.from_string line))
+  else []
+;;
+
 let reaction_ledger_dir ~base_path ~keeper_name =
   (* Ask the writer where it writes. Rebuilding the path here made a storage
      generation bump silently point the test at an empty old namespace. *)
@@ -1320,7 +1336,7 @@ let test_keeper_wake_durable_state_failure_retries_same_occurrence () =
       "schedule-keeper"
   in
   mkdir_p keeper_owner_path;
-  let queue_path = Filename.concat keeper_owner_path "event-queue-v17.json" in
+  let queue_path = Filename.concat keeper_owner_path "event-queue-v18.json" in
   mkdir_p queue_path;
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
@@ -1442,7 +1458,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
           (Filename.concat
              (Common.keepers_runtime_dir_of_base ~base_path)
              keeper_name)
-          "event-queue-transitions-v6.jsonl"
+          "event-queue-transitions-v7.jsonl"
       in
       check bool "cancellation WAL survives until projection" true
         (Sys.file_exists transition_wal_path
@@ -1563,9 +1579,10 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
   let stimulus_id = single_occurrence_id first in
   check string "first dispatch is retryable failure" "failed"
     (Schedule_runner.dispatch_status_to_string (List.hd first.dispatches).status);
-  Sys.remove ledger_dir;
+  rm_rf ledger_dir;
   mkdir_p ledger_dir;
   let selection = pending_selection_exn ~base_path ~keeper_name in
+  let original_stimulus = selection.source in
   (match
      Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
        ~base_path
@@ -1581,6 +1598,75 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
           { detail; _ }) ->
      fail detail
    | Error detail -> fail detail);
+  let later_stimulus =
+    match original_stimulus.payload with
+    | Keeper_event_queue.Schedule_due wake ->
+      { original_stimulus with
+        post_id = "later-projected-schedule-occurrence"
+      ; arrived_at = 201.75
+      ; payload =
+          Keeper_event_queue.Schedule_due
+            { wake with occurrence_id = "later-projected-schedule-occurrence" }
+      }
+    | _ -> fail "expected the original schedule stimulus"
+  in
+  Keeper_registry_event_queue.enqueue ~base_path keeper_name later_stimulus;
+  let later_selection = pending_selection_exn ~base_path ~keeper_name in
+  (match
+     Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
+       ~base_path
+       keeper_name
+       ~applied_at:201.8
+       ~selection:later_selection
+       ~detail:"later terminal displaces schedule retry into compact history"
+   with
+   | Ok (Keeper_registry_event_queue.Acked _)
+   | Ok (Keeper_registry_event_queue.Already_acked _) -> ()
+   | Ok
+       (Keeper_registry_event_queue.Ack_committed_followup_failed
+          { detail; _ }) ->
+     fail detail
+   | Error detail -> fail detail);
+  let compact_state =
+    match Keeper_registry_event_queue.durable_state_result ~base_path keeper_name with
+    | Ok state -> state
+    | Error detail -> fail detail
+  in
+  (match
+     Keeper_event_queue_state.projected_dispositions compact_state
+     |> List.find_opt (function
+       | Keeper_event_queue_state.Projected_witness witness ->
+         String.equal witness.post_id stimulus_id
+       | Keeper_event_queue_state.Current_receipt _ -> false)
+   with
+   | Some (Keeper_event_queue_state.Projected_witness _) -> ()
+   | Some (Keeper_event_queue_state.Current_receipt _) | None ->
+     fail "older schedule terminal did not become a compact witness");
+  let conflicting_stimulus =
+    match original_stimulus.payload with
+    | Keeper_event_queue.Schedule_due wake ->
+      { original_stimulus with
+        arrived_at = 201.9
+      ; payload =
+          Keeper_event_queue.Schedule_due
+            { wake with message = "changed message for the same occurrence" }
+      }
+    | _ -> fail "expected the original schedule stimulus"
+  in
+  (match
+     Server_schedule_consumers.accept_keeper_wake_occurrence
+       ~base_path
+       ~keeper_name
+       ~expected_owner:keeper_name
+       ~stimulus_id
+       conflicting_stimulus
+   with
+   | Error (Schedule_runner.Retryable_dispatch_failure detail) ->
+     check bool "changed compact source is rejected explicitly" true
+       (String_util.contains_substring detail "compact source conflicts")
+   | Error (Schedule_runner.Terminal_dispatch_rejection detail) ->
+     fail ("changed compact source became terminal: " ^ detail)
+   | Ok _ -> fail "changed compact source reused the durable occurrence");
   let retried = tick_ok config ~now:202.0 in
   (match List.hd retried.dispatches with
    | { status = Schedule_runner.Dispatch_succeeded
@@ -1602,6 +1688,20 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
   in
   check int "terminal retry retires the reaction outbox" 0
     (Keeper_event_queue_state.transition_outbox durable_state |> List.length);
+  let repaired_arrived_at =
+    jsonl_rows_under ledger_dir
+    |> List.find_map (fun row ->
+      let open Yojson.Safe.Util in
+      if String.equal (row |> member "record_kind" |> to_string_option |> Option.value ~default:"") "stimulus"
+         && String.equal
+              (row |> member "stimulus_id" |> to_string_option |> Option.value ~default:"")
+              stimulus_id
+      then row |> member "stimulus" |> member "arrived_at_unix" |> to_float_option
+      else None)
+  in
+  check (option (float 0.001)) "ledger repair preserves durable source arrival"
+    (Some original_stimulus.arrived_at)
+    repaired_arrived_at;
   match
     Keeper_reaction_ledger.event_queue_reaction_evidence_result
       ~base_path

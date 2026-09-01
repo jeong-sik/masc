@@ -616,21 +616,30 @@ and terminal_evidence_status =
   | Terminal_evidence_pending of string
   | Terminal_evidence_recorded
 
+type durable_occurrence_source =
+  | Full_source of Keeper_event_queue.stimulus
+  | Compact_schedule_source of
+      { post_id : string
+      ; urgency : Keeper_event_queue.urgency
+      ; arrived_at : float
+      ; source_ref : string
+      }
+
 type durable_occurrence_disposition =
-  { source : Keeper_event_queue.stimulus
+  { source : durable_occurrence_source
   ; source_incarnation : int64
   ; state : durable_occurrence_state
   }
 
 type resolved_occurrence_disposition =
-  | Pending_at of string * Keeper_event_queue.stimulus
+  | Pending_at of string * durable_occurrence_source
   | Transfer_projecting_at of string * string
   | Terminal_completed_at of
-      string * Keeper_event_queue.stimulus * terminal_evidence_status
+      string * durable_occurrence_source * terminal_evidence_status
   | Terminal_failed_at of
-      string * Keeper_event_queue.stimulus * string * terminal_evidence_status
+      string * durable_occurrence_source * string * terminal_evidence_status
   | Terminal_cancelled_at of
-      string * Keeper_event_queue.stimulus * string * terminal_evidence_status
+      string * durable_occurrence_source * string * terminal_evidence_status
   | Absent_at of string
 
 let terminal_evidence_status_equal left right =
@@ -675,14 +684,14 @@ let occurrence_source_and_disposition
   in
   match receipt.transition with
   | Keeper_event_queue_state.Cancel_accepted cancellation ->
-    ( cancellation.source
-    , { source = cancellation.source
+    ( cancellation.source.post_id
+    , { source = Full_source cancellation.source
       ; source_incarnation = cancellation.source_incarnation
       ; state = Cancelled (cancellation.reason, terminal_evidence)
       } )
   | Keeper_event_queue_state.Transfer_accepted transfer ->
-    ( transfer.source
-    , { source = transfer.source
+    ( transfer.source.post_id
+    , { source = Full_source transfer.source
       ; source_incarnation = transfer.source_incarnation
       ; state =
           (if projecting
@@ -699,8 +708,8 @@ let occurrence_source_and_disposition
       | Keeper_event_queue_state.Turn_completed ->
         Terminally_completed terminal_evidence
     in
-    ( terminal.source
-    , { source = terminal.source
+    ( terminal.source.post_id
+    , { source = Full_source terminal.source
       ; source_incarnation = terminal.source_incarnation
       ; state
       } )
@@ -739,7 +748,7 @@ let durable_occurrence_index state =
       let* () =
         add
           selection.source.post_id
-          { source = selection.source
+          { source = Full_source selection.source
           ; source_incarnation = selection.admitted_revision
           ; state = Pending
           }
@@ -749,11 +758,85 @@ let durable_occurrence_index state =
   let rec add_receipts ~projecting = function
     | [] -> Ok ()
     | receipt :: rest ->
-      let source, disposition =
+      let occurrence_id, disposition =
         occurrence_source_and_disposition ~projecting receipt
       in
-      let* () = add source.post_id disposition in
+      let* () = add occurrence_id disposition in
       add_receipts ~projecting rest
+  in
+  let rec add_projected = function
+    | [] -> Ok ()
+    | Keeper_event_queue_state.Current_receipt receipt :: rest ->
+      (match
+         (Keeper_event_queue_state.transition_source receipt.transition).payload
+       with
+       | Keeper_event_queue.Schedule_due _ ->
+         let occurrence_id, disposition =
+           occurrence_source_and_disposition ~projecting:false receipt
+         in
+         let* () = add occurrence_id disposition in
+         add_projected rest
+       | Keeper_event_queue.Board_signal _
+       | Keeper_event_queue.Board_attention _
+       | Keeper_event_queue.Bootstrap
+       | Keeper_event_queue.Fusion_completed _
+       | Keeper_event_queue.Connector_attention _
+       | Keeper_event_queue.Hitl_resolved _
+       | Keeper_event_queue.Ask_answered _
+       | Keeper_event_queue.Completion_authority_rejected _
+       | Keeper_event_queue.Task_cancelled _
+       | Keeper_event_queue.Workspace_message _
+       | Keeper_event_queue.Delegate_completed _
+       | Keeper_event_queue.Composition_completed _ ->
+         add_projected rest)
+    | Keeper_event_queue_state.Projected_witness witness :: rest ->
+      (match witness.source_kind with
+       | Keeper_event_queue_state.Source_schedule_due ->
+         let source =
+           Compact_schedule_source
+             { post_id = witness.post_id
+             ; urgency = witness.urgency
+             ; arrived_at = witness.source_arrived_at
+             ; source_ref = witness.source_ref
+             }
+         in
+         let state =
+           match witness.kind with
+           | Keeper_event_queue_state.Projected_cancel _ ->
+             Cancelled ("projected cancellation", Terminal_evidence_recorded)
+           | Keeper_event_queue_state.Projected_transfer { to_keeper; _ } ->
+             Transferred_to to_keeper
+           | Keeper_event_queue_state.Projected_turn_attempt_terminal ->
+             Terminally_failed
+               ("projected turn attempt terminal", Terminal_evidence_recorded)
+           | Keeper_event_queue_state.Projected_turn_completed ->
+             Terminally_completed Terminal_evidence_recorded
+           | Keeper_event_queue_state.Projected_fusion_terminal
+           | Keeper_event_queue_state.Projected_hitl_terminal ->
+             Terminally_completed Terminal_evidence_recorded
+         in
+         let* () =
+           add
+             witness.post_id
+             { source
+             ; source_incarnation = witness.source_incarnation
+             ; state
+             }
+         in
+         add_projected rest
+       | Keeper_event_queue_state.Source_board_signal
+       | Keeper_event_queue_state.Source_board_attention
+       | Keeper_event_queue_state.Source_bootstrap
+       | Keeper_event_queue_state.Source_fusion_completed
+       | Keeper_event_queue_state.Source_connector_attention
+       | Keeper_event_queue_state.Source_hitl_resolved
+       | Keeper_event_queue_state.Source_ask_answered
+       | Keeper_event_queue_state.Source_completion_authority_rejected
+       | Keeper_event_queue_state.Source_task_cancelled
+       | Keeper_event_queue_state.Source_workspace_message
+       | Keeper_event_queue_state.Source_delegate_completed
+       | Keeper_event_queue_state.Source_composition_completed ->
+         add_projected rest)
   in
   let* () =
     Keeper_event_queue_state.pending_selections state
@@ -765,8 +848,8 @@ let durable_occurrence_index state =
     |> add_receipts ~projecting:true
   in
   let* () =
-    Keeper_event_queue_state.projected_transition_receipts state
-    |> add_receipts ~projecting:false
+    Keeper_event_queue_state.projected_dispositions state
+    |> add_projected
   in
   Ok index
 ;;
@@ -866,12 +949,45 @@ let accept_keeper_wake_occurrence
       ~stimulus_id
       stimulus
   =
+  let exact_stimulus_for_source = function
+    | Full_source durable_stimulus -> Ok durable_stimulus
+    | Compact_schedule_source { post_id; urgency; arrived_at; source_ref } ->
+      let durable_stimulus = { stimulus with arrived_at } in
+      (match stimulus.Keeper_event_queue.payload with
+       | Keeper_event_queue.Schedule_due _
+         when String.equal stimulus.post_id post_id
+              && stimulus.urgency = urgency
+              && String.equal
+                   (Keeper_event_queue_state.source_snapshot_ref
+                      durable_stimulus)
+                   source_ref ->
+         Ok durable_stimulus
+       | Keeper_event_queue.Schedule_due _
+       | Keeper_event_queue.Board_signal _
+       | Keeper_event_queue.Board_attention _
+       | Keeper_event_queue.Bootstrap
+       | Keeper_event_queue.Fusion_completed _
+       | Keeper_event_queue.Connector_attention _
+       | Keeper_event_queue.Hitl_resolved _
+       | Keeper_event_queue.Ask_answered _
+       | Keeper_event_queue.Completion_authority_rejected _
+       | Keeper_event_queue.Task_cancelled _
+       | Keeper_event_queue.Workspace_message _
+       | Keeper_event_queue.Delegate_completed _
+       | Keeper_event_queue.Composition_completed _ ->
+         retryable_dispatch_failure
+           (Printf.sprintf
+              "scheduled keeper wake compact source conflicts occurrence=%s source_ref=%s"
+              stimulus_id
+              source_ref))
+  in
   let accept_terminal
         ~owner
         ~durable_stimulus
         ~evidence
         acceptance
     =
+    let* durable_stimulus = exact_stimulus_for_source durable_stimulus in
     let* () =
       match evidence with
       | Terminal_evidence_recorded -> Ok ()
@@ -914,6 +1030,7 @@ let accept_keeper_wake_occurrence
     (* A prior attempt may have committed the queue entry and then failed the
        independent reaction-ledger append. Verify the exact stimulus identity
        and repair only an absent row before reporting durable acceptance. *)
+    let* durable_stimulus = exact_stimulus_for_source durable_stimulus in
     accept_with_recorded_stimulus
       ~base_path
       ~keeper_name:owner

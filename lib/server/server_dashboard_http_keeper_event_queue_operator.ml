@@ -236,13 +236,11 @@ let handle_post state ~actor request reqd ~keeper_name body =
         try
           let source_details =
             match result with
-            | Ok (source, _) ->
-              [ "post_id", `String source.Keeper_event_queue.post_id
-              ; ( "payload_kind"
-                , `String
-                    (Keeper_event_queue.payload_kind_label source.payload) )
+            | Ok (Some source, _) ->
+              [ "post_id", `String source.Execute.post_id
+              ; "payload_kind", `String source.payload_kind
               ]
-            | Error _ -> []
+            | Ok (None, _) | Error _ -> []
           in
           Audit_log.log_action
             config

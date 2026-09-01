@@ -929,7 +929,8 @@ let test_timeline_breaks_follow_civil_hours () =
         | Layout.Metadata (Layout.Timeline_break bucket) ->
             Some (bucket.tb_hour, row.text)
         | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
-        | Layout.Body ->
+        | Layout.Body
+        | Layout.Viewport_gap _ ->
             None)
       rows
   in
@@ -1024,7 +1025,8 @@ let test_repeated_dst_hour_has_distinct_rails () =
          match row.kind with
          | Layout.Metadata (Layout.Timeline_break _) -> Some row.text
          | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
-         | Layout.Body ->
+         | Layout.Body
+         | Layout.Viewport_gap _ ->
              None)
   in
   check int "the repeated civil hour keeps both rails" 2 (List.length labels);

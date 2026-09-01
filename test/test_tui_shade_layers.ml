@@ -34,7 +34,9 @@ let entry style body : Layout.entry =
 let shades_of style =
   Layout.visible_rows ~inner_width:60 ~height:20 [ entry style "quoted body" ]
   |> List.filter_map (fun (row : Layout.row) ->
-       match row.kind with Layout.Body -> Some row.shade | Layout.Metadata _ -> None)
+       match row.kind with
+       | Layout.Body -> Some row.shade
+       | Layout.Metadata _ | Layout.Viewport_gap _ -> None)
 ;;
 
 let is_quoted = function Layout.Shade_quoted -> true | Layout.Shade_none -> false
@@ -80,7 +82,7 @@ let test_metadata_rows_are_never_quoted () =
       (fun (row : Layout.row) ->
          match row.kind with
          | Layout.Metadata _ -> Some row.shade
-         | Layout.Body -> None)
+         | Layout.Body | Layout.Viewport_gap _ -> None)
       rows
   in
   check bool "there is a metadata row to check" true (metadata_shades <> []);

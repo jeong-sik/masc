@@ -6121,6 +6121,20 @@ def message_origin_history_fixture() -> HttpResponse:
     )
 
 
+def viewport_gap_history_fixture() -> HttpResponse:
+    return (
+        200,
+        [
+            {
+                "id": "oversized-keeper-reply",
+                "role": "assistant",
+                "content": "\n".join(f"line-{index:02d}" for index in range(24)),
+                "ts": 1787348491.3,
+            }
+        ],
+    )
+
+
 LIVE_MARKDOWN_REPLY = """@keeper-haneul-agent — 고마워요! Execute가 작동하는 세션이 있다면 정말 큰 도움이 됩니다.
 
 ## 정확한 5개 git 명령 (task478 worktree에서 실행):
@@ -6256,16 +6270,22 @@ def message_origin_badge_interaction(
     plain_frame = CSI_RE.sub(b"", frame)
     for pattern, description in (
         (
-            b"\xe2\x96\xb6\\s+(?:TURN \xc2\xb7 )?vincent {2}operator-body-neutral",
-            "operator mark, origin, and separated body",
+            b"\xe2\x96\xb6\\s+vincent[^\\n]*\\n\\s+operator-body-neutral",
+            "operator origin row and separated body",
         ),
         (
-            b"\xe2\x97\x8f\\s+(?:TURN \xc2\xb7 )?alpha {2}keeper-body-neutral",
-            "Keeper mark, origin, and separated body",
+            b"\xe2\x97\x8f\\s+alpha[^\\n]*\\n\\s+keeper-body-neutral",
+            "Keeper origin row and separated body",
         ),
     ):
         if re.search(pattern, plain_frame) is None:
             raise AssertionError(f"chat frame omitted {description}: {frame!r}")
+    for name in (b"vincent", b"alpha"):
+        if b"\x1b[7m" + name not in frame:
+            raise AssertionError(
+                f"chat origin did not keep its reverse-video badge for {name!r}: "
+                f"{frame!r}"
+            )
     for forbidden, description in (
         (b"\x1b[36m  operator-body-neutral", "operator body cyan wash"),
         (b"\x1b[34m  keeper-body-neutral", "Keeper body blue wash"),
@@ -6274,12 +6294,76 @@ def message_origin_badge_interaction(
         if forbidden in frame:
             raise AssertionError(f"chat frame retained {description}: {frame!r}")
 
+    inline = send_and_wait(process, master_fd, output, b"\x06", b"clock:inline")
+    inline_plain = CSI_RE.sub(b"", inline)
+    for pattern in (
+        b"\xe2\x96\xb6\\s+(?:TURN \xc2\xb7 )?vincent {2}operator-body-neutral",
+        b"\xe2\x97\x8f\\s+(?:TURN \xc2\xb7 )?alpha {2}keeper-body-neutral",
+    ):
+        if re.search(pattern, inline_plain) is None:
+            raise AssertionError(
+                f"Ctrl-F header said inline but its physical rows did not: {inline!r}"
+            )
+
+    bare = send_and_wait(process, master_fd, output, b"\x06", b"clock:off")
+    bare_plain = CSI_RE.sub(b"", bare)
+    if b"operator-body-neutral" not in bare_plain or b"keeper-body-neutral" not in bare_plain:
+        raise AssertionError(f"clock-free inline layout lost a speaker body: {bare!r}")
+    if re.search(rb"\d\d:\d\d\s+\xe2\x96\xb6", bare_plain) is not None:
+        raise AssertionError(f"clock:off still rendered an inline clock: {bare!r}")
+
     draft_frame = send_and_wait(
         process, master_fd, output, b"draft-neutral", b"draft-neutral"
     )
     if b"\x1b[36m  > \x1b[0mdraft-neutral" not in draft_frame:
         raise AssertionError(
             f"chat composer did not limit accent to its prompt: {draft_frame!r}"
+        )
+    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+    os.write(master_fd, b"q")
+
+
+def viewport_gap_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=11,
+        columns=100,
+        needle=b"MASC Overview",
+    )
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+    opened = send_and_wait(process, master_fd, output, b"m", b"hidden")
+    plain = CSI_RE.sub(b"", opened)
+    marker = "⋯".encode()
+    positions = [plain.find(needle) for needle in (b"line-00", marker, b"line-23")]
+    if any(position < 0 for position in positions) or positions != sorted(positions):
+        raise AssertionError(
+            f"oversized live edge did not order opening, gap, and latest row: {opened!r}"
+        )
+
+    send_and_wait(process, master_fd, output, b"\x1b[5~", b"line-18")
+    complete = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=12,
+        columns=100,
+        needle=b"line-18",
+        controls=(FULL_REDRAW,),
+    )
+    complete_plain = CSI_RE.sub(b"", complete)
+    if marker in complete_plain or b"hidden" in complete_plain:
+        raise AssertionError(
+            f"PgUp retained a synthetic gap inside transcript rows: {complete!r}"
         )
     send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     os.write(master_fd, b"q")
@@ -10470,6 +10554,15 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
+        description="Keeper oversized viewport gap under NO_COLOR",
+        interact=viewport_gap_interaction,
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": viewport_gap_history_fixture(),
+        },
+        extra_env={"NO_COLOR": "1"},
+    )
+    run_terminal_scenario(
+        executable,
         description="Keeper live Markdown code frame",
         interact=live_markdown_interaction,
         http_fixtures={
@@ -11002,6 +11095,15 @@ def run_chat_clarity_regression(executable: str) -> None:
         description="Skill usage date clarity",
         interact=skills_usage_clarity_interaction(),
         http_fixtures=skills_usage_clarity_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper oversized viewport gap under NO_COLOR",
+        interact=viewport_gap_interaction,
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": viewport_gap_history_fixture(),
+        },
+        extra_env={"NO_COLOR": "1"},
     )
 
 

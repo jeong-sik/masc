@@ -820,6 +820,15 @@
  (modules masc_tui_runtime_config_receipt)
  (libraries yojson))
 
+;; Interrupt-signal decode contract, extracted from masc_tui_http so the
+;; chat queue test can link it (executable modules are not linkable) —
+;; the extraction #32330's removal note asked for.
+(library
+ (name masc_tui_interrupt_signal)
+ (wrapped false)
+ (modules masc_tui_interrupt_signal)
+ (libraries yojson))
+
 (executable
  (name masc_tui)
  (modules
@@ -862,6 +871,7 @@
   masc_tui_terminal_profile
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
+  masc_tui_interrupt_signal
   masc.runtime
   masc.keeper_registry
   masc.skill_reference

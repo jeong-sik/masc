@@ -2959,6 +2959,8 @@
  (libraries
   alcotest
   ast_grep
+  astring
+  masc_tui_interrupt_signal
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
   masc_tui_keeper_chat_transcript

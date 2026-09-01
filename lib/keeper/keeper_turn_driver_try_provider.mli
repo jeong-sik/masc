@@ -188,7 +188,6 @@ val context_overflow_shrink_sequence :
 
 val run_try_provider :
   try_provider_ctx ->
-  ?enable_thinking_override:bool ->
   Runtime_candidate.t ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
   * Agent_core.Checkpoint.t option
@@ -196,7 +195,6 @@ val run_try_provider :
 
 val run_try_provider_with_context_overflow_shrink :
   try_provider_ctx ->
-  ?enable_thinking_override:bool ->
   Runtime_candidate.t ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
   * Agent_core.Checkpoint.t option

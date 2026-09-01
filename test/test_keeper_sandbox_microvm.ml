@@ -192,6 +192,9 @@ let microvm_meta ~name : Masc.Keeper_meta_contract.keeper_meta =
   | Ok meta -> { meta with sandbox_profile = Profile.Micro_vm }
   | Error e -> Alcotest.fail e
 
+let docker_meta ~name =
+  { (microvm_meta ~name) with sandbox_profile = Profile.Docker }
+
 let refusal = Profile.backend_unimplemented_message Profile.Micro_vm
 
 let with_eio_fs f =
@@ -244,6 +247,44 @@ let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
    | Remote_ssh_profile ->
      Alcotest.fail "microvm meta must never resolve to Remote_ssh_profile");
   Masc.Keeper_sandbox_factory.cleanup factory
+
+let test_guest_target_runs_docker_preflight_only_for_docker () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir "guest_target_preflight_" in
+  let config = Masc.Workspace.default_config base in
+  let preflight_calls = ref 0 in
+  let docker_image_preflight ~image:_ ~timeout_sec:_ =
+    incr preflight_calls;
+    Ok ()
+  in
+  let resolve (meta : Masc.Keeper_meta_contract.keeper_meta) =
+    let factory = Masc.Keeper_sandbox_factory.create ~config ~meta () in
+    let result =
+      Masc.Keeper_sandbox_shell_ir_target.For_testing
+      .guest_target_with_docker_image_preflight
+        ~docker_image_preflight
+        ~turn_sandbox_factory:(Some factory)
+        ~meta
+        ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta)
+        ()
+    in
+    Masc.Keeper_sandbox_factory.cleanup factory;
+    match result, meta.sandbox_profile with
+    | Ok { target = Masc_exec.Sandbox_target.Micro_vm _; _ }, Profile.Micro_vm
+    | Ok { target = Masc_exec.Sandbox_target.Docker _; _ }, Profile.Docker -> ()
+    | Ok _, _ -> Alcotest.fail "guest target kind differs from the keeper profile"
+    | Error error, _ -> Alcotest.fail error.message
+  in
+  resolve (microvm_meta ~name:"microvm-preflight-probe");
+  Alcotest.(check int)
+    "microvm does not inspect Docker's image store"
+    0
+    !preflight_calls;
+  resolve (docker_meta ~name:"docker-preflight-probe");
+  Alcotest.(check int)
+    "docker still performs its image preflight"
+    1
+    !preflight_calls
 
 let test_turn_start_argv_shape () =
   let a =
@@ -1271,6 +1312,8 @@ let () =
     ; ( "turn"
       , [ Alcotest.test_case "factory resolves to a profile-carrying runtime" `Quick
             test_factory_resolves_microvm_to_a_profile_carrying_runtime
+        ; Alcotest.test_case "guest target and Docker preflight follow the profile" `Quick
+            test_guest_target_runs_docker_preflight_only_for_docker
         ; Alcotest.test_case "turn start argv shape" `Quick
             test_turn_start_argv_shape
         ; Alcotest.test_case "inspect state parser" `Quick

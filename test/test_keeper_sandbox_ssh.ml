@@ -395,7 +395,8 @@ remote_endpoint = "build-box"
     check string "resolved identity path"
       (Filename.concat base_path ".masc/ssh/build-box.key")
       endpoint.identity_file
-  | Ok { target = Host | Docker _ } -> fail "expected SSH target"
+  | Ok { target = Host | Docker _ | Micro_vm _ | Delegated _ } ->
+    fail "expected SSH target"
 ;;
 
 let () =

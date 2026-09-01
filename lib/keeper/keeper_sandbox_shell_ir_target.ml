@@ -10,18 +10,22 @@ type target_error =
   ; class_ : Tool_result.tool_failure_class
   }
 
-type docker_dispatch =
+type guest_dispatch =
   { target : Masc_exec.Sandbox_target.t
   ; runtime : Keeper_turn_sandbox_runtime.t
   }
 
 type ssh_dispatch = { target : Masc_exec.Sandbox_target.t }
 
+type guest_profile =
+  | Docker_guest
+  | Micro_vm_guest
+
 let target_error ?(fields = []) ?(class_ = Tool_result.Runtime_failure) message =
   { message; fields; class_ }
 ;;
 
-let docker_image (meta : keeper_meta) =
+let guest_image (meta : keeper_meta) =
   match meta.sandbox_image with
   | Some img when String.trim img <> "" -> img
   | _ -> Env_config_sandbox.Runtime.docker_image ()
@@ -58,39 +62,64 @@ let image_preflight_target_error (failure : Keeper_sandbox_runtime.classified_er
        failure)
 ;;
 
-let docker_target ~turn_sandbox_factory ~meta ~cwd ?timeout_sec () =
+let docker_image_preflight ~image ~timeout_sec =
+  Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class_optional
+    ~image
+    ?timeout_sec
+    ()
+;;
+
+let guest_target_with_docker_image_preflight
+      ~docker_image_preflight
+      ~turn_sandbox_factory
+      ~(meta : keeper_meta)
+      ~cwd
+      ?timeout_sec
+      ()
+  =
   let default_cwd = cwd in
   let stage_cwd_or_default = function
     | Some stage_cwd -> stage_cwd
     | None -> default_cwd
   in
+  let guest_profile =
+    match meta.sandbox_profile with
+    | Docker -> Ok Docker_guest
+    | Micro_vm -> Ok Micro_vm_guest
+    | Remote_ssh ->
+      Error
+        (target_error
+           "remote_ssh_dispatch_unavailable: typed Shell IR guest dispatch does not apply to sandbox_profile=remote_ssh; that profile dispatches through the SSH runner instead")
+  in
+  match guest_profile with
+  | Error _ as error -> error
+  | Ok guest_profile ->
   match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
   | No_factory ->
     Error
       (target_error
-         "typed Shell IR Docker dispatch requires a turn sandbox factory (no factory provided)")
+         "typed Shell IR guest dispatch requires a turn sandbox factory (no factory provided)")
   | Remote_ssh_profile ->
-    (* Unreachable from typed dispatch (the Remote_ssh arm there fails
-       closed first), but fail closed here too: never improvise a Docker
-       or host target for a remote_ssh keeper (RFC-0001). *)
+    (* The factory and the admitted profile must describe the same target. *)
     Error
       (target_error
-         "remote_ssh_dispatch_unavailable: typed Shell IR Docker dispatch does \
-          not apply to sandbox_profile=remote_ssh; that profile dispatches \
-          through the SSH runner instead")
+         "typed Shell IR guest dispatch received a remote_ssh sandbox factory")
   | Runtime runtime ->
-    let image = docker_image meta in
-    (match
-       Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class_optional
-         ~image
-         ?timeout_sec
-         ()
+    let image = guest_image meta in
+    let image_preflight =
+      match guest_profile with
+      | Docker_guest ->
+        docker_image_preflight ~image ~timeout_sec
+        |> Result.map_error image_preflight_target_error
+      | Micro_vm_guest -> Ok ()
+    in
+    (match image_preflight
      with
-     | Error failure -> Error (image_preflight_target_error failure)
+     | Error _ as error -> error
      | Ok () ->
       let runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd:stage_cwd =
         if Array.length env > 0 then
-          (Unix.WEXITED 1, "", "typed Shell IR Docker dispatch does not support env yet")
+          (Unix.WEXITED 1, "", "typed Shell IR guest dispatch does not support env yet")
         else
           let cwd = stage_cwd_or_default stage_cwd in
           match
@@ -113,7 +142,7 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd ?timeout_sec () =
              stages
          with
          | Some _ ->
-           (Unix.WEXITED 1, "", "typed Shell IR Docker dispatch does not support env yet")
+           (Unix.WEXITED 1, "", "typed Shell IR guest dispatch does not support env yet")
          | None ->
            let stages =
              List.map
@@ -136,11 +165,24 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd ?timeout_sec () =
            | Ok result -> result
            | Error err -> Unix.WEXITED 1, "", err
        in
-       Ok
-         { target = Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ()
-         ; runtime
-       })
+       let target =
+         match guest_profile with
+         | Docker_guest ->
+           Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ()
+         | Micro_vm_guest ->
+           Masc_exec.Sandbox_target.micro_vm ~image ~runner ~pipeline_runner ()
+       in
+       Ok { target; runtime })
 ;;
+
+let guest_target =
+  guest_target_with_docker_image_preflight ~docker_image_preflight
+;;
+
+module For_testing = struct
+  let guest_target_with_docker_image_preflight =
+    guest_target_with_docker_image_preflight
+end
 
 let ssh_target ~base_path ~meta ~timeout_sec ?ssh_bin () =
   match Keeper_sandbox_ssh.resolve_endpoint ~base_path ~keeper_name:meta.name with

@@ -621,7 +621,7 @@ let test_local_keeper_sees_its_host_root () =
 
 (* Execute dispatch can transparently run a Docker keeper's command on the
    host when the image preflight fails
-   (Keeper_sandbox_shell_ir_target.docker_local_fallback_target), and the
+   (Keeper_sandbox_shell_ir_target.guest_target), and the
    typed cwd resolver confines raw cwds against host roots in both cases.
    The mount spelling therefore must never be promised as an execution
    operand: the prompt has to carry the caveat, and the host spelling of

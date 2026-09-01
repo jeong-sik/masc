@@ -573,12 +573,14 @@ Only rows the server marks as autonomous turns are read this way. A turn
 in the conversation itself already has its calls in the transcript as tool
 rows, so its trace block is not drawn a second time.
 
-Conversation order is structural. Direct and autonomous groups join on the
-absolute turn sequence in their persisted `turn_ref`; rows inside one request
-use typed Input → Progress → Tool → Output phase and producer operation
-sequence. Stable server row IDs keep scroll anchors through refresh. The clock
-is display and pagination metadata only. Unowned Memory journal rows remain an
-explicit auxiliary lane instead of borrowing chat order from timestamps.
+Conversation turns remain structural: rows inside one request use typed
+Input → Progress → Tool → Output phase and producer operation sequence. Whole
+turns, broadcasts, and Memory journal observations then share the displayed
+clock as one chronological axis, so an hour rail never falls from `22:00` back
+to `17:00`. Stable server row IDs keep scroll anchors through refresh; sorting
+the groups does not split a turn or replace its identity. A turn that is still
+streaming stays beside its committed input on that axis instead of escaping to
+a separate bottom-only lane.
 
 Only a request-correlated terminal keeper result is rendered as a reply.
 Interrupted streams, protocol errors, rejected turns, and terminal outcomes

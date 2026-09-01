@@ -31,10 +31,11 @@
 
     {2 Ordering}
 
-    Rows are decoded in producer order. [turn_sequence] joins direct and
-    autonomous sources on the persisted absolute turn; [structural_id] keeps
-    row identity through refresh. [ts] is display/pagination metadata and has
-    no conversation-order authority. *)
+    Rows are decoded in producer order. [turn_id] joins rows that belong to one
+    causal turn; [turn_sequence] breaks an exact displayed-time tie between
+    whole turns. The TUI places those turns and auxiliary rows on one time
+    axis. [structural_id] keeps row identity through that projection and
+    refresh. *)
 
 (** The surface a row arrived on, mirrored from [Surface_ref.t] in the server.
     This library carries no [masc] dependency, so it cannot name that type;
@@ -143,15 +144,16 @@ type attachment_note =
 
 type row =
   { at : float
-      (** Producer wall clock for display and pagination only; never a
-          conversation ordering key. *)
+      (** Producer wall clock for display, pagination, and placement of the
+          row's whole causal group on the shared chat timeline. *)
   ; structural_id : string option
       (** Stable producer identity plus a projection discriminator when one
           source row expands to reasoning/tool/reply rows. Journal rows derive
           it from their typed revision or exact failed-observation fields. *)
   ; turn_sequence : int option
       (** Absolute Keeper turn from persisted [turn_ref], when present. This
-          orders turn groups across direct and autonomous stores. *)
+          breaks a tie between whole turn groups whose displayed clocks are
+          equal. *)
   ; turn_id : string option
       (** Exact producer identity for grouping rows from one turn: the typed
           delivery key for direct turns, otherwise the persisted [turn_ref].
@@ -222,6 +224,6 @@ val rows_of_json : Yojson.Safe.t -> (decoded, string) result
 
 val memory_rows_of_json : Yojson.Safe.t -> (decoded, string) result
 (** Decode [/api/v1/keepers/:name/memory-journal]. Entries retain their
-    [recorded_at] timestamp for display and pagination. The caller keeps them
-    in the explicit Journal producer lane; the clock grants no chat-order
-    authority. *)
+    [recorded_at] timestamp for display, pagination, and placement on the
+    shared displayed-time axis. The caller keeps them in the explicit Journal
+    producer lane. *)

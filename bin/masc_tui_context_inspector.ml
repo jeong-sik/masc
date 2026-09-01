@@ -288,6 +288,15 @@ let input_component_label = function
   | Turn_record.Message_document -> "Documents"
   | Turn_record.Message_audio -> "Audio"
 
+(* The kind an item is grouped under. Not [exact_input_label]: that names a
+   tool schema after its tool, which would put every schema in a group of one
+   and hide that the schemas together are the second-largest thing in the
+   request. *)
+let exact_input_category = function
+  | System_prompt -> "System prompt"
+  | Message { role } -> "Message · " ^ role
+  | Tool_schema _ -> "Tool schemas"
+
 let exact_input_label = function
   | System_prompt -> "System prompt"
   | Message { role } -> "Message · " ^ role

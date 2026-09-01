@@ -283,7 +283,11 @@ let test_env_assignment_param_value () =
       (s.env
        = [ ( "DUNE_CACHE_ROOT"
            , Shell_ir.Var ("PWD", Shell_ir.default_meta) ) ]);
-    assert (s.args = [ Shell_ir.Lit ("build", _); Shell_ir.Lit (".", _) ])
+    (* [arg_meta] is not part of what this case pins, so the shape is matched
+       rather than compared: a wildcard is a pattern, not an expression. *)
+    (match s.args with
+     | [ Shell_ir.Lit ("build", _); Shell_ir.Lit (".", _) ] -> ()
+     | _ -> assert false)
   | _ -> assert false
 
 let test_env_assignment_mixed_literal_and_param () =
@@ -292,9 +296,9 @@ let test_env_assignment_mixed_literal_and_param () =
     assert (Exec_program.to_string s.bin = "printf");
     (match s.env with
      | [ ("FOO", Shell_ir.Concat parts) ] ->
-       assert
-         (parts
-          = [ Shell_ir.Lit ("a", _); Shell_ir.Var ("BAR", _) ])
+       (match parts with
+        | [ Shell_ir.Lit ("a", _); Shell_ir.Var ("BAR", _) ] -> ()
+        | _ -> assert false)
      | _ -> assert false)
   | _ -> assert false
 
@@ -304,8 +308,9 @@ let test_param_as_word_suffix_concatenates () =
     assert (Exec_program.to_string s.bin = "ls");
     (match s.args with
      | [ Shell_ir.Concat parts ] ->
-       assert
-         (parts = [ Shell_ir.Lit ("--root=", _); Shell_ir.Var ("PWD", _) ])
+       (match parts with
+        | [ Shell_ir.Lit ("--root=", _); Shell_ir.Var ("PWD", _) ] -> ()
+        | _ -> assert false)
      | _ -> assert false)
   | _ -> assert false
 

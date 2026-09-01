@@ -235,5 +235,5 @@
     }
   ],
   "bundle_manifest": "task-362-bundle/SHA256SUMS",
-  "redaction_note": "turn-record-claude-codex-d205-000300.jsonl contained one Anthropic API key echoed into a tool_result environment capture; the key value was replaced with the literal sk-ant-REDACTED-BY-PUSH-PROTECTION before pushing (GitHub push protection). No other bytes changed."
+  "redaction_note": "turn-record-claude-codex-d205-000300.jsonl contained one Anthropic API key echoed into a tool_result environment capture; the key value was replaced with the literal sk-ant-REDACTED-BY-PUSH-PROTECTION before pushing (GitHub push protection). A follow-up redaction commit replaced live MASC_OPERATOR_TOKEN, MASC_MCP_TOKEN, and dashboard token= values in the same tool_result environment capture with the literal REDACTED. No other bytes changed."
 }

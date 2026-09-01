@@ -66,6 +66,7 @@ type t =
   | Host
   | Docker of { image : string; runner : runner; pipeline_runner : pipeline_runner option }
   | Ssh of { endpoint : ssh_endpoint; runner : runner; pipeline_runner : pipeline_runner option }
+  | Delegated of { caller : runner }
 
 let host () : t = Host
 
@@ -73,4 +74,6 @@ let docker ~image ~runner ?pipeline_runner () : t = Docker { image; runner; pipe
 
 let ssh ~endpoint ~runner ?pipeline_runner () : t =
   Ssh { endpoint; runner; pipeline_runner }
+
+let delegated ~caller () : t = Delegated { caller }
 

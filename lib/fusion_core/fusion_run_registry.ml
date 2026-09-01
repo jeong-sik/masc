@@ -1,7 +1,12 @@
+type decision_preview = string
+
+let decision_preview_of_string value = value
+let decision_preview_to_string value = value
+
 type outcome =
   | Succeeded
   | Succeeded_with_summary of
-      { decision : string
+      { decision : decision_preview
       ; summary : string
       }
   | Failed of
@@ -95,7 +100,7 @@ module Payload = struct
     | Succeeded_with_summary { decision; summary } ->
       `Assoc
         [ "outcome", `String "succeeded"
-        ; "decision", `String decision
+        ; "decision", `String (decision_preview_to_string decision)
         ; "summary", `String summary
         ]
     | Failed { reason; code } ->
@@ -125,7 +130,9 @@ module Payload = struct
       (match decision, summary with
        | None, None -> Ok Succeeded
        | Some decision, Some summary ->
-         Ok (Succeeded_with_summary { decision; summary })
+         Ok
+           (Succeeded_with_summary
+              { decision = decision_preview_of_string decision; summary })
        | Some _, None | None, Some _ ->
          Error "succeeded fusion completion requires decision and summary together")
     | "failed" ->
@@ -288,7 +295,9 @@ let run_to_yojson run =
     match run.status with
     | Running | Completed Succeeded -> []
     | Completed (Succeeded_with_summary { decision; summary }) ->
-      [ "decision", `String decision; "summary", `String summary ]
+      [ "decision", `String (decision_preview_to_string decision)
+      ; "summary", `String summary
+      ]
     | Completed (Failed { reason; code }) ->
       [ "error", `String reason; "failure_code", `String code ]
   in

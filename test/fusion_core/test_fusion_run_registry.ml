@@ -130,17 +130,21 @@ let test_progress_is_typed_and_terminal_safe () =
   R.mark_completed t ~run_id:"r-progress"
     ~outcome:
       (R.Succeeded_with_summary
-         { decision = "recommend — ship"; summary = "Two panels support it." });
+         { decision = R.decision_preview_of_string "recommend — ship"
+         ; summary = "Two panels support it."
+         });
   R.mark_progress t ~run_id:"r-progress"
     ~progress:(R.Progress_panel_running { expected = 99 });
   match R.get t ~run_id:"r-progress" with
   | Some
       { R.status =
           R.Completed
-            (R.Succeeded_with_summary { decision = "recommend — ship"; summary })
+            (R.Succeeded_with_summary { decision; summary })
       ; progress = None
       ; _
       } ->
+    check string "decision remains terminal" "recommend — ship"
+      (R.decision_preview_to_string decision);
     check string "summary remains terminal" "Two panels support it." summary
   | Some _ -> fail "terminal progress update must be ignored"
   | None -> fail "completed run disappeared"
@@ -248,7 +252,9 @@ let test_run_to_yojson_progress_and_summary () =
   R.mark_completed t ~run_id:"r-rich"
     ~outcome:
       (R.Succeeded_with_summary
-         { decision = "answer"; summary = "Use the typed projection." });
+         { decision = R.decision_preview_of_string "answer"
+         ; summary = "Use the typed projection."
+         });
   let completed = Option.get (R.get t ~run_id:"r-rich") |> R.run_to_yojson in
   check string "completed stage" "completed" (yojson_str completed "stage");
   check string "decision" "answer" (yojson_str completed "decision");

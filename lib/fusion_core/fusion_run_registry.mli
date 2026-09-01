@@ -1,9 +1,17 @@
 (** Bounded observation registry for active and recently completed Fusion runs. *)
 
+type decision_preview = private string
+(** A bounded display projection of a typed Fusion judge decision. It remains
+    distinct from both the authoritative [Fusion_types.judge_decision] and an
+    arbitrary wire string inside the registry domain. *)
+
+val decision_preview_of_string : string -> decision_preview
+val decision_preview_to_string : decision_preview -> string
+
 type outcome =
   | Succeeded
   | Succeeded_with_summary of
-      { decision : string
+      { decision : decision_preview
       ; summary : string
       }
   | Failed of

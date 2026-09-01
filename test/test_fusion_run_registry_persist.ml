@@ -98,7 +98,9 @@ let test_persist_success_summary () =
   R.mark_completed t ~run_id:"r-summary"
     ~outcome:
       (R.Succeeded_with_summary
-         { decision = "recommend — ship"; summary = "The panel reached consensus." });
+         { decision = R.decision_preview_of_string "recommend — ship"
+         ; summary = "The panel reached consensus."
+         });
   let content = Fs_compat.load_file path in
   let event2 = parse (List.nth (String.split_on_char '\n' content) 1) in
   let completion = object_ event2 "completion" in
@@ -112,7 +114,8 @@ let test_persist_success_summary () =
           R.Completed (R.Succeeded_with_summary { decision; summary })
       ; _
       } ->
-    check string "replayed decision" "recommend — ship" decision;
+    check string "replayed decision" "recommend — ship"
+      (R.decision_preview_to_string decision);
     check string "replayed summary" "The panel reached consensus." summary
   | Some _ -> fail "expected replayed success summary"
   | None -> fail "expected replayed run"

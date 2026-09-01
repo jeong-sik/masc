@@ -608,7 +608,7 @@ let test_emit_success_projects_board_chat_and_registry () =
         ; _
         } ->
       check string "registry decision preview" ("answer — " ^ resolved_answer)
-        decision;
+        (Fusion_run_registry.decision_preview_to_string decision);
       check string "registry resolved-answer preview" resolved_answer summary
     | Some
         { Fusion_run_registry.status =
@@ -1073,7 +1073,8 @@ let test_tool_handle_async_success_projects_running_then_completed () =
         ; _
         } ->
       check string "async registry decision preview"
-        ("answer — " ^ resolved_answer) decision;
+        ("answer — " ^ resolved_answer)
+        (Fusion_run_registry.decision_preview_to_string decision);
       check string "async registry resolved-answer preview" resolved_answer summary
     | Some
         { Fusion_run_registry.status =

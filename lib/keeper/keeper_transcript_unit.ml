@@ -336,6 +336,104 @@ type tail_closure =
 
    A [structural_error] is passed through unchanged: a history that does not
    parse is genuine corruption and must keep latching. *)
+(* The synthesized result a turn that never came back would have produced. *)
+let interrupted_closer tool_use_id : T.message =
+  { role = T.Tool
+  ; content =
+      [ T.ToolResult
+          { tool_use_id
+          ; content = interrupted_tool_result_content
+          ; outcome =
+              T.Tool_failed
+                { failure_kind = T.Unattributed_tool_error; error_class = Some T.Unknown }
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+;;
+
+(* Close every open cycle where it sits, not only the one at the tail.
+
+   [close_open_tail] repairs the shape an interruption leaves *if nothing has
+   been appended since*. That is not the shape a keeper actually reaches. A
+   turn dies mid-tool-call, the next turn appends its own request, and now the
+   unclosed cycle is in the middle of the history: [partition] reports
+   [Overlapping_tool_cycle] and rejects before any repair runs. The result is
+   a keeper that fails at the same fixed [message_index] on every turn
+   forever -- issue #31595, observed on lab-sangsu (5+ turns), and again on
+   2026-09-01 where one keeper went an hour without a single completed turn
+   and another logged 585 of these in a day.
+
+   The comment on [close_open_tail] said a structural break is corruption no
+   synthesized result can repair. That is right for most of the family --
+   [Orphan_tool_result] has no request to attach to, [Non_assistant_tool_use]
+   puts a request in a role that cannot issue one -- but it is wrong for this
+   member. [Overlapping_tool_cycle] means exactly one thing: a request whose
+   results never arrived, and a later request that exposed it. That is the
+   same missing result [close_open_tail] already synthesizes; only its
+   position differs.
+
+   So this walks the history and, wherever a request appears while a cycle is
+   still open, inserts that cycle's closers immediately before it. Nothing is
+   trimmed and nothing is reset: the history a keeper has already reasoned
+   over stays, and the record now says the interrupted call failed rather than
+   leaving a request the transcript never answers.
+
+   A history that is broken some other way still latches. This closes cycles;
+   it does not invent requests, and it cannot make an orphaned result belong
+   to anything. *)
+let close_open_cycles messages =
+  let rec loop index acc_rev pending closed_rev = function
+    | [] ->
+      let closers = List.rev_map interrupted_closer pending in
+      Ok
+        { messages = List.rev_append acc_rev closers
+        ; closed_tool_use_ids = List.rev closed_rev
+        }
+    | (message : T.message) :: rest ->
+      (match validated_top_level_anchors ~message_index:index message with
+       | Error _ as error -> error
+       | Ok (tool_ids, result_ids) ->
+         (* Results answer the open requests, whether or not the cycle is the
+            one this pass opened. *)
+         let pending =
+           List.filter
+             (fun id -> not (List.exists (String.equal id) result_ids))
+             pending
+         in
+         (match tool_ids, pending with
+          | _ :: _, _ :: _ ->
+            (* A request while others are still unanswered: close them here,
+               before this message, and carry on with this request open. *)
+            let closers = List.rev_map interrupted_closer pending in
+            loop
+              (index + 1)
+              (message :: List.rev_append (List.rev closers) acc_rev)
+              tool_ids
+              (List.rev_append pending closed_rev)
+              rest
+          | _ :: _, [] ->
+            loop (index + 1) (message :: acc_rev) tool_ids closed_rev rest
+          | [], _ -> loop (index + 1) (message :: acc_rev) pending closed_rev rest))
+  in
+  (* The walk above closes cycles; it does not judge the rest of the history.
+     An orphaned result passes through it untouched, so the repair is checked
+     rather than trusted: whatever [partition] still rejects is returned as
+     the error it is. This is what makes the postcondition -- on [Ok],
+     [validate_provider_transcript] returns [Ok ()] -- true by construction
+     instead of by argument. *)
+  match loop 0 [] [] [] messages with
+  | Error _ as error -> error
+  | Ok ({ messages = repaired; _ } as closure) ->
+    (match partition repaired with
+     | Ok _ -> Ok closure
+     | Error _ as error -> error)
+;;
+
 let close_open_tail messages =
   match partition messages with
   | Error _ as error -> error

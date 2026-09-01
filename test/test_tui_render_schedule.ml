@@ -610,6 +610,41 @@ let test_keeper_name_width_never_shrinks_as_the_terminal_grows () =
     previous := name
   done
 
+(* The strip named five stops while the Planning walk had three: Schedules and
+   Fusion had become tabs of the selected Keeper and nothing took their names
+   off this row. A reader pressing 4 or 5 arrived nowhere. *)
+let test_planning_strip_names_only_its_own_stops () =
+  check (list string) "three stops, and Schedules and Fusion are not among them"
+    [ "1 Goals"; "2 Task Review"; "3 Evaluator Verdicts" ]
+    (Schedule.planning_strip_plain ~tab:Schedule.Planning_goals
+       ~review_count:None ~window:"")
+
+(* The verdict page count read as a Fusion count: it was appended after the
+   whole strip, and the strip ended with "5 Fusion". A window belongs to the
+   tab the reader is on and to no other. *)
+let test_planning_window_rides_the_active_stop () =
+  check (list string) "the window sits on Verdicts"
+    [ "1 Goals"; "2 Task Review\xc2\xb7979"; "3 Evaluator Verdicts (8 of 4223)" ]
+    (Schedule.planning_strip_plain ~tab:Schedule.Planning_verdicts
+       ~review_count:(Some 979) ~window:" (8 of 4223)");
+  check (list string) "and moves with the reader"
+    [ "1 Goals"; "2 Task Review\xc2\xb7979 (20 of 979)"; "3 Evaluator Verdicts" ]
+    (Schedule.planning_strip_plain ~tab:Schedule.Planning_task_review
+       ~review_count:(Some 979) ~window:" (20 of 979)")
+
+(* A Keeper whose schedules sit past the projection's page has none the tab can
+   show, which is not the same as having none. The live store held 323 requests
+   behind a 20-row page when this was written. *)
+let test_capped_page_cannot_report_an_empty_store () =
+  check bool "a capped page is not an empty store" true
+    (Schedule.classify_keeper_schedule_absence ~truncated:true ~shown:20
+       ~total:(Some 323)
+     = Schedule.Page_capped { shown = 20; total = Some 323 });
+  check bool "a whole page that matched nothing is" true
+    (Schedule.classify_keeper_schedule_absence ~truncated:false ~shown:12
+       ~total:(Some 12)
+     = Schedule.Store_has_none)
+
 (* Slack reaches the name and the runtime before the task id, and both stop at
    a cap so one very wide terminal does not spend eighty cells on a model
    name. *)
@@ -682,5 +717,11 @@ let () =
             test_keeper_name_width_never_shrinks_as_the_terminal_grows
         ; test_case "keeper columns grow identifiers first" `Quick
             test_keeper_columns_grow_identifiers_first
+        ; test_case "planning strip names only its own stops" `Quick
+            test_planning_strip_names_only_its_own_stops
+        ; test_case "planning window rides the active stop" `Quick
+            test_planning_window_rides_the_active_stop
+        ; test_case "a capped page cannot report an empty store" `Quick
+            test_capped_page_cannot_report_an_empty_store
         ] )
     ]

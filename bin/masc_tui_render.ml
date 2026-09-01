@@ -3040,29 +3040,30 @@ let planning_phase_color = function
    Review: one lists what is waiting for a ruling and the other what was
    ruled, and they were a screen apart with nothing saying they were the same
    subject. *)
-type planning_tab = Planning_goals | Planning_task_review | Planning_verdicts
+type planning_tab = Render_schedule.planning_tab =
+  | Planning_goals
+  | Planning_task_review
+  | Planning_verdicts
 
-let planning_workspace_title (state : state) ~(tab : planning_tab) =
-  let review_count =
-    match state.verification with
-    | Some snapshot when snapshot.vs_total > 0 ->
-        Printf.sprintf "\xc2\xb7%d" snapshot.vs_total
-    | Some _ | None -> ""
+(* [window] is the page-versus-ledger reading for the tab the reader is on,
+   already formatted, e.g. " (8 of 4223)". It rides the active label because a
+   count set loose at the end of the strip attaches itself to whatever label
+   happens to be last: the verdict page count read as a Fusion count for as
+   long as Schedules and Fusion were named here. Surfaces with nothing to
+   count pass "". *)
+let planning_workspace_title (state : state) ~(tab : planning_tab) ~(window : string) =
+  let review_count = Option.map (fun s -> s.vs_total) state.verification in
+  let labels =
+    Render_schedule.planning_strip_plain ~tab ~review_count ~window
   in
-  let draw ~active label =
-    if active then
+  let stops = [ Planning_goals; Planning_task_review; Planning_verdicts ] in
+  let draw stop label =
+    if stop = tab then
       (Theme.info ()) ^ Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
     else Ansi.dim ^ label ^ Ansi.reset
   in
-  Printf.sprintf "%s  %s  %s  %s  %s  %s"
-    (screen_title " MASC Planning")
-    (draw ~active:(tab = Planning_goals) "1 Goals")
-    (draw ~active:(tab = Planning_task_review) ("2 Task Review" ^ review_count))
-    (draw ~active:(tab = Planning_verdicts) "3 Evaluator Verdicts")
-    (* The next two [v] stops keep their own headers; the strip still names
-       them so the walk is visible from its first three stops. *)
-    (draw ~active:false "4 Schedules")
-    (draw ~active:false "5 Fusion")
+  String.concat "  "
+    (screen_title " MASC Planning" :: List.map2 draw stops labels)
 
 (* Where the goal stands with the completion judge, in one column. The phase
    reads [executing] both for a goal nobody asked about and for one the judge
@@ -3151,7 +3152,7 @@ let render_planning_list (state : state) =
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let header = Printf.sprintf "%s  order:%s  show:%s  %s  %s"
-    (planning_workspace_title state ~tab:Planning_goals)
+    (planning_workspace_title state ~tab:Planning_goals ~window:"")
     (planning_sort_label state.planning_sort)
     (planning_filter_label state.planning_filter)
     timestamp
@@ -3359,7 +3360,7 @@ let planning_detail_pane (state : state)
   let status_color = planning_phase_color goal.pg_phase in
   let status_label = planning_phase_label goal.pg_phase in
   let header = Printf.sprintf "%s  %s[%s]%s  %s"
-    (planning_workspace_title state ~tab:Planning_goals)
+    (planning_workspace_title state ~tab:Planning_goals ~window:"")
     status_color (fit_width status_label planning_phase_column) Ansi.reset
     (fit_width (Terminal_text.single_line goal.pg_id) 20)
   in
@@ -5831,7 +5832,28 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                  Option.equal String.equal row.sch_payload_target (Some target))
               snapshot.scs_rows
           in
-          if rows = [] then [ Ansi.dim ^ "  (no schedules for this Keeper)" ^ Ansi.reset ]
+          if rows = [] then
+            match
+              Render_schedule.classify_keeper_schedule_absence
+                ~truncated:snapshot.scs_truncated
+                ~shown:(List.length snapshot.scs_rows)
+                ~total:snapshot.scs_request_count
+            with
+            | Render_schedule.Store_has_none ->
+                [ Ansi.dim ^ "  (no schedules for this Keeper)" ^ Ansi.reset ]
+            | Render_schedule.Page_capped { shown; total } ->
+                let of_total =
+                  match total with
+                  | Some total -> Printf.sprintf " -- %d of %d requests" shown total
+                  | None -> ""
+                in
+                [ Ansi.dim
+                  ^ Printf.sprintf
+                      "  (none on the page the server sent%s; open Schedules \
+                       for the full list)"
+                      of_total
+                  ^ Ansi.reset
+                ]
           else
             List.map
               (fun (row : schedule_row) ->
@@ -7422,15 +7444,17 @@ let render_verification_list (state : state) =
     match state.verification with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (planning_workspace_title state ~tab:Planning_task_review) timestamp
-          (connection_badge state)
+          (planning_workspace_title state ~tab:Planning_task_review ~window:"")
+          timestamp (connection_badge state)
     | Some snapshot ->
         (* Both numbers, for the same reason the log surface shows both: "12"
            beside a list of 12 would read as "that is all of them". *)
-        Printf.sprintf "%s (%d of %d)  %s  %s"
-          (planning_workspace_title state ~tab:Planning_task_review) shown
-          snapshot.Masc.Tui_decode.vs_total timestamp
-          (connection_badge state)
+        Printf.sprintf "%s  %s  %s"
+          (planning_workspace_title state ~tab:Planning_task_review
+             ~window:
+               (Printf.sprintf " (%d of %d)" shown
+                  snapshot.Masc.Tui_decode.vs_total))
+          timestamp (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -7667,7 +7691,8 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s"
-       (planning_workspace_title state ~tab:Planning_task_review ^ " \xe2\x96\xb8 details")
+       (planning_workspace_title state ~tab:Planning_task_review ~window:""
+        ^ " \xe2\x96\xb8 details")
        (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id));
   box_divider buf cols;
   let width = max 1 (framed_inner_width cols) in
@@ -7834,8 +7859,8 @@ let render_harness_list (state : state) =
     match state.harness with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (planning_workspace_title state ~tab:Planning_verdicts) timestamp
-          (connection_badge state)
+          (planning_workspace_title state ~tab:Planning_verdicts ~window:"")
+          timestamp (connection_badge state)
     | Some snapshot ->
         (* The page and the ledger, apart. This read "(8 verdicts)" while the
            server was reporting 4,197: the eight are the recent page, and
@@ -7853,9 +7878,11 @@ let render_harness_list (state : state) =
           if fallbacks > 0 then Printf.sprintf ", %d by fallback" fallbacks
           else ""
         in
-        Printf.sprintf "%s (%d%s%s)  %s  %s"
-          (planning_workspace_title state ~tab:Planning_verdicts)
-          shown of_total by_fallback timestamp (connection_badge state)
+        Printf.sprintf "%s  %s  %s"
+          (planning_workspace_title state ~tab:Planning_verdicts
+             ~window:
+               (Printf.sprintf " (%d%s%s)" shown of_total by_fallback))
+          timestamp (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -8111,7 +8138,7 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s  %s"
-       (planning_workspace_title state ~tab:Planning_verdicts
+       (planning_workspace_title state ~tab:Planning_verdicts ~window:""
         ^ " \xe2\x96\xb8 verdict")
        (Terminal_text.single_line verdict.Masc.Tui_decode.hv_task_id)
        (connection_badge state));

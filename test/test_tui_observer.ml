@@ -253,6 +253,37 @@ let test_a_delta_with_a_slice_is_not_a_snapshot () =
     (Masc.Dashboard_event_slices.carries_whole_projection
        "keeper_composite_changed")
 
+(* Server shape: keeper_chat_broadcast.ml writes the keeper in "name" and
+   the connector when the turn came through one. *)
+let chat_appended_frame =
+  "data: {\"type\":\"keeper_chat_appended\",\"name\":\"lane-smith\",\
+   \"connector\":\"api\",\"ts_unix\":1787507576.0}\n\n"
+
+(* The chat pane reloads its history on exactly one event.  Quantified
+   over every sample frame in this file: only the appended frame names
+   a keeper, so a new variant cannot start reloading the pane by
+   arriving, and the appended frame cannot silently stop. *)
+let test_only_a_chat_appended_event_names_a_reload_keeper () =
+  check (list string) "the appended frame decodes with keeper and connector"
+    [ "chat(lane-smith,api)" ]
+    (List.map summary (decode_all [ chat_appended_frame ]));
+  let reload_keepers frames =
+    decode_all frames
+    |> List.filter_map (function
+         | Observer.Event event -> Observer.chat_appended_keeper event
+         | Observer.Undecodable _ -> None)
+  in
+  check (list string) "every other sample event answers no keeper" []
+    (reload_keepers
+       [ tool_called_frame; agent_completed_frame; agent_failed_frame
+       ; heartbeat_frame; turn_complete_frame; keeper_tool_call_frame
+       ; composite_frame; chat_stream_delta_frame; chat_stream_custom_frame
+       ; waiting_inventory_frame; operator_digest_frame
+       ; transport_health_frame
+       ]);
+  check (list string) "the appended frame answers its keeper" [ "lane-smith" ]
+    (reload_keepers [ chat_appended_frame ])
+
 let test_a_line_cut_by_the_chunk_boundary_is_held () =
   let at = String.index tool_called_frame '{' + 40 in
   let head = String.sub tool_called_frame 0 at in
@@ -343,6 +374,8 @@ let () =
             test_every_whole_projection_push_decodes_as_a_snapshot
         ; test_case "a delta with a slice is not a snapshot" `Quick
             test_a_delta_with_a_slice_is_not_a_snapshot
+        ; test_case "only a chat-appended event names a reload keeper" `Quick
+            test_only_a_chat_appended_event_names_a_reload_keeper
         ; test_case "a line cut by the chunk boundary is held" `Quick
             test_a_line_cut_by_the_chunk_boundary_is_held
         ; test_case "what this build was not taught keeps its name" `Quick

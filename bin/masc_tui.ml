@@ -7877,6 +7877,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       add_event state "observer" "runtime event feed open"
   | Observer_received decoded ->
       let received = Unix.gettimeofday () in
+      (* One reload per batch, however many turns it carries: the pane
+         shows the whole history anyway, and the loader is generation-
+         guarded, so the flag only remembers that a reload is due. *)
+      let open_chat_gained_turn = ref false in
       List.iter
         (fun item ->
           match item with
@@ -7886,6 +7890,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                    state.observer <-
                      Observer_live { live with events = live.events + 1 }
                | Observer_off | Observer_opening | Observer_closed _ -> ());
+              (match Masc_tui_observer.chat_appended_keeper event with
+               | Some appended_keeper
+                 when state.view = Keepers Keeper_message
+                      && state.msg_target_keeper_name = Some appended_keeper ->
+                   open_chat_gained_turn := true
+               | Some _ | None -> ());
               state.acting <-
                 { Masc_tui_acting.ae_at = received; ae_event = event }
                 :: state.acting;
@@ -7914,7 +7924,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         in
         state.acting <- kept;
         state.acting_dropped <- state.acting_dropped + dropped
-      end
+      end;
+      (* The pane otherwise reloads only on open, on its own sends and on
+         the operator cadence — a turn appended from anywhere else (API
+         chat, another operator, a connector) stayed invisible until the
+         operator left and re-entered.  Same guard as the cadence reload:
+         an operator scrolled into the past keeps their place. *)
+      (if !open_chat_gained_turn && state.msg_scroll = 0 then
+         match state.msg_target_keeper_name with
+         | Some keeper_name ->
+             launch_keeper_history_load ~load_file_changes:false state ~mailbox
+               ~keeper_name
+         | None -> ())
   | Task_dispatched { keeper; task_id; title; body } ->
       add_event state "task" (Printf.sprintf "%s created for %s" task_id keeper);
       (* The jump lands on a clean screen: a modal or roster search opened

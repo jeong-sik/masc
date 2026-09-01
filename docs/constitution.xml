@@ -1,8 +1,10 @@
 <!--
-  MASC 프롬프트 3분할 구조.
-  [1] constitution : 영속. 매 세션 고정 로드. 제품이 도달해야 할 불변의 목표 지점.
-  [2] execution_protocol : 영속. 작업 방식 규약.
-  [3] mission : 매 턴 교체. 목표 지점으로 전진하기 위한 구체적 작업 단위.
+  MASC 제품·개발 계약.
+  constitution 은 제품이 도달해야 할 지속적인 목표와 원칙을 정의한다.
+  execution_protocol 은 이 저장소에서 일하는 코딩 에이전트의 작업 방식을 정의한다.
+  코딩 에이전트는 repo-root AGENTS.md 또는 이를 지정하는 상위 project instruction 을
+  통해 이 파일을 읽는다. MASC 런타임이 자동 로드하는 Keeper 시스템 프롬프트가 아니다.
+  Keeper 런타임 프롬프트의 정본은 config/prompts/keeper.md 와 배포별 keeper.instructions 다.
 
   이 파일은 2026-08-20 코드 감사(14개 영역) 결과와 2026-09-01 사용자 재확인을
   반영해 레포에 버전 관리되는 SSOT다.
@@ -285,8 +287,9 @@
   <engineering>
     <effects>Effect 를 모아서 바깥으로 밀어낸다. Option / FlatMap / Monadic Binding 으로
              올바르게 파싱된 데이터를 만들고, 그 위에서 사이드이펙트 없는 흐름을 짠다.</effects>
-    <types>곱타입보다 합타입. 패턴매칭 적극 사용. 튜플로 되는 건 튜플로.
-           가능한 불변 데이터 구조.</types>
+    <types>서로 배타적인 상태는 합타입으로, 동시에 존재해야 하는 값 묶음은 곱타입으로 표현한다.
+           이름이 의미를 더하지 않는 작은 곱타입은 튜플로 두고, 필드 의미나 확장성이 중요하면
+           레코드를 쓴다. 패턴매칭을 적극 사용하고 가능한 불변 데이터 구조를 유지한다.</types>
     <abstraction>너무 깊은 추상화보다 중복이 낫다.</abstraction>
     <facade>Facade 를 쓰려면 진짜 맞는 이유가 있어야 한다.
             빌드 도달용·땜빵용이면 절대 금지.
@@ -299,7 +302,8 @@
   <!-- ================= 실행 프로토콜 ================= -->
   <execution_protocol>
     <work_unit>
-      작업 분량은 항상 20k token 이하로 유지한다.
+      코딩 에이전트의 작업 분해 단위와 예상 output 은 20k token 이하로 유지한다.
+      이 수치는 작업 분해와 에이전트 출력 범위이며 Keeper 런타임의 제어 게이트가 아니다.
       연속 작업에 실제 의존성이 있으면 Stacked PR 로 나눈다.
       독립적인 수정은 main 기반의 별도 PR 로 나눈다.
     </work_unit>
@@ -345,8 +349,10 @@
     </item>
 
     <item id="budget_gate">
-      Budget 숫자로 제한·비교·게이트를 만들지 않는다. 기존에 있다면 지우고 제대로 만든다.
-      없어도 되는 타임아웃은 제거한다.
+      Keeper 런타임과 제품 control flow 에 누적 turn·time·token·cost 숫자로 행동을 제한하는
+      게이트를 만들지 않는다. 기존에 있다면 지우고 typed state 와 명시적 경계로 다시 만든다.
+      코딩 에이전트의 작업 분해용 output token 범위, provider 의 hard limit, 안전·자원 경계는
+      이 금지의 대상이 아니다. 없어도 되는 타임아웃은 제거한다.
       (현재 코드는 keeper_agent_run.ml: "Keeper does not impose a cumulative turn, time,
        token, or cost budget" 원칙을 명시하고 restart/failure 카운터는 observation only)
     </item>

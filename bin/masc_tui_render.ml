@@ -1982,15 +1982,33 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
           | Gate_human_required -> "HUMAN REQUIRED", (Theme.warn ())
           | Gate_blocked -> "AUTO JUDGE BLOCKED", (Theme.bad ())
         in
-        Printf.sprintf "  %s%s → %s · %s%s"
-          tone
-          keeper
-          (fit_width
-             (Terminal_text.single_line pending.Tui_decode.gp_display_tool)
-             (max 8 (cols - 32 - Message_layout.display_width keeper
-                     - Message_layout.display_width phase)))
-          phase
-          Ansi.reset
+        let headline =
+          Printf.sprintf "  %s%s → %s · %s%s"
+            tone
+            keeper
+            (fit_width
+               (Terminal_text.single_line pending.Tui_decode.gp_display_tool)
+               (max 8 (cols - 32 - Message_layout.display_width keeper
+                       - Message_layout.display_width phase)))
+            phase
+            Ansi.reset
+        in
+        (match pending.gp_phase with
+         | Gate_blocked ->
+             let detail =
+               Terminal_text.single_line_or ~default:"(the server recorded no detail)"
+                 pending.gp_auto_judge_detail
+             in
+             let next =
+               match pending.gp_retry_request with
+               | Some _ -> "R: retry Auto Judge; y/n: decide now"
+               | None -> "y/n: decide now (this exact attempt cannot be replayed)"
+             in
+             Printf.sprintf "%s\n  %sreason: %s%s\n  %s%s%s"
+               headline Ansi.dim
+               (fit_width detail (max 8 (cols - 12))) Ansi.reset
+               Ansi.dim (fit_width next (max 8 (cols - 4))) Ansi.reset
+         | Gate_queued | Gate_judging | Gate_human_required -> headline)
     | None -> ""
 ;;
 

@@ -1179,6 +1179,12 @@ type gate_pending = {
           changes what the command means. *)
   gp_waiting_s : float option;
   gp_phase : gate_pending_phase;
+  gp_auto_judge_detail : string option;
+      (** Durable Auto Judge failure or handoff reason, when the server
+          recorded one. *)
+  gp_retry_request : Yojson.Safe.t option;
+      (** Exact observed payload for a server-validated rearm. [None] means
+          the row must be decided by a human rather than replayed. *)
 }
 
 type gate_lane_modes = {

@@ -4794,6 +4794,15 @@ type gate_pending = {
   gp_execution_sandbox : string option;
   gp_waiting_s : float option;
   gp_phase : gate_pending_phase;
+  gp_auto_judge_detail : string option;
+      (** The durable reason why Auto Judge handed this row back or stopped.
+          It is intentionally separate from the phase: [blocked] without its
+          producer reason leaves an operator unable to decide whether to wait,
+          rearm, or answer the request themselves. *)
+  gp_retry_request : Yojson.Safe.t option;
+      (** A complete, observed compare-and-swap request for the explicit
+          Auto Judge rearm endpoint. [None] means that this row cannot be
+          safely rearmed; it can still be decided by a human. *)
 }
 
 type gate_lane_modes = {
@@ -5001,6 +5010,41 @@ let gate_pending_phase_of_json json =
   | "settled", _, "available", ("approve" | "deny") -> Gate_judging
   | _ -> Gate_queued
 
+let gate_auto_judge_detail_of_json json =
+  let summary = member "summary_status" json in
+  let disposition = member "summary_attempt_disposition" json in
+  match member "reason" summary, member "operator_detail" disposition with
+  | `String reason, _ when String.trim reason <> "" -> Some reason
+  | _, `String detail when String.trim detail <> "" -> Some detail
+  | _ -> None
+
+(* The server owns the full parser and repeats the compare-and-swap checks.
+   The TUI only carries the exact five fields it observed, and only advertises
+   rearm for the three dispositions the server explicitly permits. A failed
+   exact attempt (for example cancellation after dispatch) has no request
+   here: replaying it could duplicate an external effect. *)
+let gate_retry_request_of_json ~id json =
+  let disposition = member "summary_attempt_disposition" json in
+  let retryable =
+    match member "code" disposition with
+    | `String ("identity_unbound" | "persistence_uncertain"
+              | "pre_worker_unavailable") -> true
+    | _ -> false
+  in
+  match retryable, member "input_hash" json, member "sequence" json,
+        member "exact_attempt" json with
+  | true, (`String input_hash), (`Int sequence), (`Assoc _ as exact_attempt)
+    when String.trim input_hash <> "" && sequence > 0 ->
+      Some
+        (`Assoc
+           [ "id", `String id
+           ; "input_hash", `String input_hash
+           ; "sequence", `Int sequence
+           ; "exact_attempt", exact_attempt
+           ; "summary_attempt_disposition", disposition
+           ])
+  | _ -> None
+
 let decode_gate_pending json =
   let* gp_id = required_string_field json "id" in
   let* gp_keeper = required_string_field json "keeper_name" in
@@ -5031,6 +5075,8 @@ let decode_gate_pending json =
         snd (gate_execution_site ~operation:gp_operation input);
       gp_waiting_s;
       gp_phase = gate_pending_phase_of_json json;
+      gp_auto_judge_detail = gate_auto_judge_detail_of_json json;
+      gp_retry_request = gate_retry_request_of_json ~id:gp_id json;
     }
 
 let decode_gate_lane_modes json =

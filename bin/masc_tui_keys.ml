@@ -156,6 +156,8 @@ let for_surface = function
       ; b Act "Enter" "read the whole ask" ~help:"j/k scrolls it; Esc goes back"
       ; b Act "y" "confirm"
       ; b Act "n" "deny"
+      ; b Act "R" "retry Auto Judge"
+          ~help:"only when the blocked row is safely rearmable"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "e" "external Gate lane"

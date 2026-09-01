@@ -5137,6 +5137,65 @@ let test_decode_gate_rows_distinguish_operator_phases () =
      = Tui_decode.Gate_blocked)
 ;;
 
+let test_decode_gate_block_reason_and_retry_contract () =
+  let row ~summary_status ~disposition ~exact_attempt =
+    `Assoc
+      [ "id", `String "appr-retry"
+      ; "keeper_name", `String "retry-keeper"
+      ; "tool_name", `String "identity_call"
+      ; "input_preview", `String "{}"
+      ; "input_hash", `String (String.make 64 'a')
+      ; "sequence", `Int 41
+      ; "exact_attempt", exact_attempt
+      ; "summary_status", summary_status
+      ; "summary_attempt_disposition", disposition
+      ]
+  in
+  let decode row =
+    match Tui_decode.decode_gate_snapshot (gate_snapshot_json ~queue:(`List [ row ]) ()) with
+    | Ok { gs_pending = [ pending ]; _ } -> pending
+    | Ok _ -> Alcotest.fail "expected one gate row"
+    | Error detail -> Alcotest.fail detail
+  in
+  let retryable =
+    decode
+      (row
+         ~summary_status:(`String "pending")
+         ~disposition:
+           (`Assoc
+              [ "code", `String "pre_worker_unavailable"
+              ; "reason_code", `String "auto_judge_unavailable"
+              ; "operator_detail", `String "Judge topology is unavailable"
+              ])
+         ~exact_attempt:(`Assoc [ "state", `String "unbound" ]))
+  in
+  Alcotest.check Alcotest.(option string) "blocked detail is readable"
+    (Some "Judge topology is unavailable") retryable.gp_auto_judge_detail;
+  Alcotest.check Alcotest.bool "pre-worker row carries a CAS retry request" true
+    (Option.is_some retryable.gp_retry_request);
+  let terminal =
+    decode
+      (row
+         ~summary_status:
+           (`Assoc
+              [ "status", `String "failed"
+              ; "reason", `String "Auto Judge exact attempt quarantined: cancellation"
+              ])
+         ~disposition:(`Assoc [ "code", `String "settled" ])
+         ~exact_attempt:
+           (`Assoc
+              [ "state", `String "bound"
+              ; "status", `String "quarantined"
+              ; "quarantine_cause", `String "cancellation"
+              ]))
+  in
+  Alcotest.check Alcotest.(option string) "terminal reason is readable"
+    (Some "Auto Judge exact attempt quarantined: cancellation")
+    terminal.gp_auto_judge_detail;
+  Alcotest.check Alcotest.bool "terminal exact failure is never replayable" false
+    (Option.is_some terminal.gp_retry_request)
+;;
+
 let execute_gate_row ~preview ~input =
   `Assoc
     [ ("id", `String "appr-1");
@@ -6496,6 +6555,8 @@ let () =
           test_decode_gate_rules_and_their_store_state;
         Alcotest.test_case "rows distinguish Auto Judge phases" `Quick
           test_decode_gate_rows_distinguish_operator_phases;
+        Alcotest.test_case "blocked reason and retry contract" `Quick
+          test_decode_gate_block_reason_and_retry_contract;
         Alcotest.test_case "an execute row leads with the command" `Quick
           test_decode_execute_gate_row_leads_with_the_command;
         Alcotest.test_case "an execute row shows the script line" `Quick

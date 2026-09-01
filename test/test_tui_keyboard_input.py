@@ -7301,25 +7301,35 @@ def assert_verifier_tool_color_summary(frame: bytes) -> None:
     """The executed PTY path must preserve typed severity and per-call color."""
     plain = CSI_RE.sub(b"", frame)
     expected = (
-        b"TOOLS  \xe2\x9c\x97 1 failed  \xe2\x9c\x93 1 completed  \xc2\xb7  "
-        b"2 calls \xc2\xb7 \xe2\x9c\x93 masc_task_get "
-        b"[completed \xc2\xb7 12ms]  \xc2\xb7  \xe2\x9c\x97 "
-        b"tool_read_file [failed \xc2\xb7 7ms]"
+        b"TOOLS  \xe2\x9c\x97 FAILED 1   \xe2\x9c\x93 COMPLETED 1   "
+        b"\xe2\x94\x80\xe2\x94\x80  2 CALLS  \xe2\x94\x82  "
+        b"\xe2\x9c\x93 masc_task_get \xe2\x80\xb9completed \xc2\xb7 12ms\xe2\x80\xba  "
+        b"\xe2\x94\x82  \xe2\x9c\x97 tool_read_file "
+        b"\xe2\x80\xb9failed \xc2\xb7 7ms\xe2\x80\xba"
     )
     if expected not in plain:
         raise AssertionError(
             f"Verifier detail omitted its typed Tool rollup/calls: {frame!r}"
         )
-    if b"\x1b[1mTOOLS\x1b[0m  \x1b[91m" not in frame:
+    if b"\x1b[1mTOOLS\x1b[0m \x1b[91m\x1b[7m\x1b[1m" not in frame:
         raise AssertionError(
             "Verifier detail did not put the worst severity immediately after "
-            f"the emphasized Tool label: {frame!r}"
+            f"the emphasized Tool label as an ANSI badge: {frame!r}"
         )
     for style, mark, count, status, tool in (
         (b"\x1b[91m", b"\xe2\x9c\x97", b"1", b"failed", b"tool_read_file"),
         (b"\x1b[92m", b"\xe2\x9c\x93", b"1", b"completed", b"masc_task_get"),
     ):
-        rollup = style + b"\x1b[1m" + mark + b" " + count + b" " + status
+        rollup = (
+            style
+            + b"\x1b[7m\x1b[1m "
+            + mark
+            + b" "
+            + status.upper()
+            + b" "
+            + count
+            + b" "
+        )
         detail = style + b"\x1b[1m" + mark + b" " + tool
         if rollup not in frame or detail not in frame:
             raise AssertionError(
@@ -8117,7 +8127,10 @@ def keeper_lanes_ia_interaction(gate: GatedHttpResponse) -> Interaction:
             needle=b"TOOLS",
             controls=(FULL_REDRAW,),
         )
-        if b"\x1b[1mTOOLS\x1b[0m  \x1b[91m\x1b[1m\xe2\x9c\x97" not in narrow_detail:
+        if (
+            b"\x1b[1mTOOLS\x1b[0m \x1b[91m\x1b[7m\x1b[1m \xe2\x9c\x97"
+            not in narrow_detail
+        ):
             raise AssertionError(
                 "Ultra-narrow Verifier detail clipped the worst Tool severity "
                 f"before its badge: {narrow_detail!r}"

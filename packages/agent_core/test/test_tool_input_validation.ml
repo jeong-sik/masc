@@ -25,7 +25,8 @@ let test_required_missing () =
   | Tool_input_validation.Invalid errors ->
     check int "one error" 1 (List.length errors);
     check string "path" "/room" (List.hd errors).path;
-    check string "expected" "string" (List.hd errors).expected;
+    check string "expected" "string"
+      (Tool_input_validation.describe_expected (List.hd errors).expected);
     check string "actual" "missing" (actual_to_string (List.hd errors).actual)
   | Tool_input_validation.Valid _ -> fail "expected Invalid for missing required field"
 ;;
@@ -83,7 +84,8 @@ let test_type_mismatch () =
   | Tool_input_validation.Invalid errors ->
     check int "one error" 1 (List.length errors);
     check string "path" "/count" (List.hd errors).path;
-    check string "expected" "integer" (List.hd errors).expected
+    check string "expected" "integer"
+      (Tool_input_validation.describe_expected (List.hd errors).expected)
   | Tool_input_validation.Valid _ -> fail "non-numeric string should not match Integer"
 ;;
 
@@ -102,7 +104,8 @@ let test_string_to_int_is_rejected_unchanged () =
   let input = `Assoc [ "count", `String "42" ] in
   match Tool_input_validation.validate schema input with
   | Tool_input_validation.Invalid [ error ] ->
-    check string "expected" "integer" error.expected;
+    check string "expected" "integer"
+      (Tool_input_validation.describe_expected error.expected);
     check string "actual" {|string("42")|} (actual_to_string error.actual);
     check string "input unchanged" {|{"count":"42"}|} (Yojson.Safe.to_string input)
   | Tool_input_validation.Invalid _ -> fail "expected one type error"
@@ -150,7 +153,8 @@ let test_null_input () =
   let input = `Null in
   match Tool_input_validation.validate schema input with
   | Tool_input_validation.Invalid [ error ] ->
-    check string "expected" "object" error.expected;
+    check string "expected" "object"
+      (Tool_input_validation.describe_expected error.expected);
     check string "actual" "null" (actual_to_string error.actual)
   | Tool_input_validation.Invalid _ -> fail "expected one root type error"
   | Tool_input_validation.Valid _ -> fail "null is not an object input"
@@ -243,8 +247,11 @@ let test_actual_descriptions_cover_json_shapes () =
 
 let test_format_errors () =
   let errors : Tool_input_validation.field_error list =
-    [ { path = "/room"; expected = "required"; actual = Missing }
-    ; { path = "/count"; expected = "integer"; actual = Received "string(\"sixty\")" }
+    [ { path = "/room"; expected = Expected_required; actual = Missing }
+    ; { path = "/count"
+      ; expected = Expected_types [ "integer" ]
+      ; actual = Received "string(\"sixty\")"
+      }
     ]
   in
   let msg = Tool_input_validation.format_errors ~tool_name:"test_tool" errors in
@@ -271,7 +278,7 @@ let test_format_errors () =
 
 let test_format_errors_inline_missing () =
   let errors : Tool_input_validation.field_error list =
-    [ { path = "/name"; expected = "string"; actual = Missing } ]
+    [ { path = "/name"; expected = Expected_types [ "string" ]; actual = Missing } ]
   in
   let args = `Assoc [ "op", `String "find"; "pattern", `String "*.ml" ] in
   let msg =
@@ -311,7 +318,10 @@ let test_format_errors_inline_missing () =
 
 let test_format_errors_inline_type_error () =
   let errors : Tool_input_validation.field_error list =
-    [ { path = "/count"; expected = "integer"; actual = Received "string(\"sixty\")" } ]
+    [ { path = "/count"
+      ; expected = Expected_types [ "integer" ]
+      ; actual = Received "string(\"sixty\")"
+      } ]
   in
   let args = `Assoc [ "count", `String "sixty" ] in
   let msg =
@@ -339,8 +349,11 @@ let test_format_errors_inline_type_error () =
 
 let test_format_errors_inline_multiple () =
   let errors : Tool_input_validation.field_error list =
-    [ { path = "/name"; expected = "string"; actual = Missing }
-    ; { path = "/timeout"; expected = "number"; actual = Received "string(\"fast\")" }
+    [ { path = "/name"; expected = Expected_types [ "string" ]; actual = Missing }
+    ; { path = "/timeout"
+      ; expected = Expected_types [ "number" ]
+      ; actual = Received "string(\"fast\")"
+      }
     ]
   in
   let args = `Assoc [ "timeout", `String "fast" ] in
@@ -358,7 +371,7 @@ let test_format_errors_inline_multiple () =
 
 let test_format_errors_inline_path_without_slash () =
   let errors : Tool_input_validation.field_error list =
-    [ { path = "raw"; expected = "object"; actual = Received "array" } ]
+    [ { path = "raw"; expected = Expected_types [ "object" ]; actual = Received "array" } ]
   in
   let msg =
     Tool_input_validation.format_errors_inline
@@ -372,6 +385,122 @@ let test_format_errors_inline_path_without_slash () =
     true
     (let re = Re.(compile (str "\"raw\": wrong type")) in
      Re.execp re msg)
+;;
+
+(* ── Enum / const constraints (authoritative input_schema path) ── *)
+
+let projection_enum_schema () =
+  match
+    Types.tool_schema_of_input_schema
+      ~name:"test_tool"
+      ~description:"test"
+      ~input_schema:
+        (`Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "projection"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "enum", `List [ `String "compact"; `String "full" ]
+                      ] )
+                ] )
+          ; "required", `List [ `String "projection" ]
+          ])
+      ()
+  with
+  | Ok schema -> schema
+  | Error message -> fail message
+;;
+
+let test_enum_member_passes () =
+  let input = `Assoc [ "projection", `String "compact" ] in
+  match Tool_input_validation.validate (projection_enum_schema ()) input with
+  | Tool_input_validation.Valid _ -> ()
+  | Tool_input_validation.Invalid _ -> fail "expected enum member to validate"
+;;
+
+let test_enum_violation_names_allowed_values () =
+  let input = `Assoc [ "projection", `String "summary" ] in
+  match Tool_input_validation.validate (projection_enum_schema ()) input with
+  | Tool_input_validation.Invalid ([ error ] as errors) ->
+    (match error.expected with
+     | Tool_input_validation.Expected_enum { types; allowed } ->
+       check (list string) "enum types" [ "string" ] types;
+       check
+         (list string)
+         "allowed members"
+         [ {|"compact"|}; {|"full"|} ]
+         (List.map Yojson.Safe.to_string allowed)
+     | Tool_input_validation.Expected_types _
+     | Tool_input_validation.Expected_const _
+     | Tool_input_validation.Expected_required ->
+       fail "expected the enum constraint to be reported");
+    let msg =
+      Tool_input_validation.format_errors_inline ~tool_name:"test_tool" ~args:input errors
+    in
+    let contains needle = Re.execp Re.(compile (str needle)) msg in
+    check bool "labels the violation invalid value" true (contains "invalid value");
+    check
+      bool
+      "names the allowed values"
+      true
+      (contains {|one of: "compact", "full"|});
+    check bool "does not claim a type mismatch" false (contains "wrong type")
+  | Tool_input_validation.Invalid _ -> fail "expected exactly one error"
+  | Tool_input_validation.Valid _ -> fail "expected Invalid for a non-member value"
+;;
+
+let test_const_violation_renders_exactly () =
+  let schema =
+    match
+      Types.tool_schema_of_input_schema
+        ~name:"test_tool"
+        ~description:"test"
+        ~input_schema:
+          (`Assoc
+            [ "type", `String "object"
+            ; ( "properties"
+              , `Assoc [ "mode", `Assoc [ "const", `String "exact" ] ] )
+            ; "required", `List [ `String "mode" ]
+            ])
+        ()
+    with
+    | Ok schema -> schema
+    | Error message -> fail message
+  in
+  let input = `Assoc [ "mode", `String "loose" ] in
+  match Tool_input_validation.validate schema input with
+  | Tool_input_validation.Invalid ([ error ] as errors) ->
+    check
+      string
+      "expected renders the constant"
+      {|exactly "exact"|}
+      (Tool_input_validation.describe_expected error.expected);
+    let msg =
+      Tool_input_validation.format_errors_inline ~tool_name:"test_tool" ~args:input errors
+    in
+    check
+      bool
+      "labels the violation invalid value"
+      true
+      (Re.execp Re.(compile (str "invalid value")) msg)
+  | Tool_input_validation.Invalid _ -> fail "expected exactly one error"
+  | Tool_input_validation.Valid _ -> fail "expected Invalid for a const mismatch"
+;;
+
+let test_non_string_enum_renders_literals () =
+  let error : Tool_input_validation.field_error =
+    { path = "/level"
+    ; expected = Expected_enum { types = [ "integer" ]; allowed = [ `Int 1; `Int 2 ] }
+    ; actual = Received "integer(3)"
+    }
+  in
+  check
+    string
+    "non-string members render as JSON literals"
+    "one of: 1, 2"
+    (Tool_input_validation.describe_expected error.expected)
 ;;
 
 (* ── Test runner ──────────────────────────────────────── *)
@@ -413,6 +542,21 @@ let () =
             "actual descriptions"
             `Quick
             test_actual_descriptions_cover_json_shapes
+        ] )
+    ; ( "constraints"
+      , [ test_case "enum member passes" `Quick test_enum_member_passes
+        ; test_case
+            "enum violation names allowed values"
+            `Quick
+            test_enum_violation_names_allowed_values
+        ; test_case
+            "const violation renders exactly"
+            `Quick
+            test_const_violation_renders_exactly
+        ; test_case
+            "non-string enum renders literals"
+            `Quick
+            test_non_string_enum_renders_literals
         ] )
     ; ( "format"
       , [ test_case "format_errors output" `Quick test_format_errors

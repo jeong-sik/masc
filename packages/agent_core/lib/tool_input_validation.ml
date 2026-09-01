@@ -7,9 +7,22 @@ type actual =
   | Missing
   | Received of string
 
+(* The violated constraint, kept structured until rendering. Collapsing it to
+   a string at creation time is what produced the unfixable message
+   `wrong type — expected: string, got: string("summary")` for enum
+   violations: the allowed values were discarded before the renderer ran. *)
+type expected =
+  | Expected_types of string list
+  | Expected_enum of
+      { types : string list
+      ; allowed : Yojson.Safe.t list
+      }
+  | Expected_const of Yojson.Safe.t
+  | Expected_required
+
 type field_error =
   { path : string
-  ; expected : string
+  ; expected : expected
   ; actual : actual
   }
 
@@ -234,10 +247,33 @@ let property_matches property value =
   | `Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> true
 ;;
 
-let expected_property_type property =
-  match property_type_names property with
-  | Some (_ :: _ as type_names) -> String.concat " or " type_names
-  | Some [] | None -> "declared schema"
+(* Enum wins over const wins over type: when a property declares an enum and
+   the value failed [property_matches], the enum check necessarily failed too
+   (a coherent schema's enum values satisfy its own type), so naming the
+   allowed values is the report the caller can act on. A malformed enum
+   declaration (non-list) falls back to the type report rather than
+   advertising an empty allowed set. *)
+let expected_of_property property =
+  let types = Option.value ~default:[] (property_type_names property) in
+  match property with
+  | `Assoc fields ->
+    (match List.assoc_opt "enum" fields with
+     | Some (`List allowed) -> Expected_enum { types; allowed }
+     | Some _ | None ->
+       (match List.assoc_opt "const" fields with
+        | Some value -> Expected_const value
+        | None -> Expected_types types))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    Expected_types types
+;;
+
+let describe_expected = function
+  | Expected_types [] -> "declared schema"
+  | Expected_types type_names -> String.concat " or " type_names
+  | Expected_enum { allowed; _ } ->
+    "one of: " ^ String.concat ", " (List.map Yojson.Safe.to_string allowed)
+  | Expected_const value -> "exactly " ^ Yojson.Safe.to_string value
+  | Expected_required -> "required"
 ;;
 
 let authoritative_schema_parts = function
@@ -279,14 +315,14 @@ let validate_authoritative input_schema input =
              Some
                { path
                ; expected =
-                   Option.fold ~none:"required" ~some:expected_property_type property
+                   Option.fold ~none:Expected_required ~some:expected_of_property property
                ; actual = Missing
                }
            | None, _ -> None
            | Some value, Some property when not (property_matches property value) ->
              Some
                { path
-               ; expected = expected_property_type property
+               ; expected = expected_of_property property
                ; actual = Received (describe_json_value value)
                }
            | Some _, _ -> None)
@@ -295,7 +331,10 @@ let validate_authoritative input_schema input =
     if errors = [] then Valid input else Invalid errors
   | other ->
     Invalid
-      [ { path = "/"; expected = "object"; actual = Received (describe_json_value other) }
+      [ { path = "/"
+        ; expected = Expected_types [ "object" ]
+        ; actual = Received (describe_json_value other)
+        }
       ]
 ;;
 
@@ -315,13 +354,16 @@ let validate (schema : Types.tool_schema) (input : Yojson.Safe.t) : validation_r
               match List.assoc_opt p.name fields with
               | None when p.required ->
                 Some
-                  { path; expected = string_of_param_type p.param_type; actual = Missing }
+                  { path
+                  ; expected = Expected_types [ string_of_param_type p.param_type ]
+                  ; actual = Missing
+                  }
               | None -> None
               | Some value when matches_type p.param_type value -> None
               | Some value ->
                 Some
                   { path
-                  ; expected = string_of_param_type p.param_type
+                  ; expected = Expected_types [ string_of_param_type p.param_type ]
                   ; actual = Received (describe_json_value value)
                   })
            params
@@ -330,7 +372,7 @@ let validate (schema : Types.tool_schema) (input : Yojson.Safe.t) : validation_r
      | other ->
        Invalid
          [ { path = "/"
-           ; expected = "object"
+           ; expected = Expected_types [ "object" ]
            ; actual = Received (describe_json_value other)
            }
          ])
@@ -347,7 +389,11 @@ let format_errors ~tool_name errors =
            | Missing -> "missing"
            | Received description -> description
          in
-         Printf.sprintf "- %s: expected %s, got %s" e.path e.expected actual)
+         Printf.sprintf
+           "- %s: expected %s, got %s"
+           e.path
+           (describe_expected e.expected)
+           actual)
       errors
   in
   Printf.sprintf
@@ -381,12 +427,24 @@ let format_errors_inline ~tool_name ~(args : Yojson.Safe.t) errors =
          in
          match e.actual with
          | Missing ->
-           Printf.sprintf "  \"%s\": MISSING (required: %s)" field_name e.expected
-         | Received description ->
            Printf.sprintf
-             "  \"%s\": wrong type — expected: %s, got: %s"
+             "  \"%s\": MISSING (required: %s)"
              field_name
-             e.expected
+             (describe_expected e.expected)
+         | Received description ->
+           (* An enum/const violation is not a type mismatch: the value's
+              JSON type is usually right, so labelling it "wrong type" told
+              the model nothing it could correct. *)
+           let label =
+             match e.expected with
+             | Expected_enum _ | Expected_const _ -> "invalid value"
+             | Expected_types _ | Expected_required -> "wrong type"
+           in
+           Printf.sprintf
+             "  \"%s\": %s — expected: %s, got: %s"
+             field_name
+             label
+             (describe_expected e.expected)
              description)
       errors
   in

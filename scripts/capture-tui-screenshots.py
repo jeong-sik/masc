@@ -40,7 +40,7 @@ SURFACES: list[tuple[str, str, str]] = [
     ("02-keepers", "go keepers", "MASC Keepers"),
     ("03-lanes", "go lanes", "MASC Lanes"),
     ("05-approvals", "go approvals", "MASC Approvals"),
-    ("06-acting", "go acting", "MASC Acting"),
+    ("06-activity", "go activity", "MASC Activity"),
 ]
 # Board is deliberately absent. Its rows are free-text post titles written by
 # whoever posted them, and no name-and-path rule can promise a title carries

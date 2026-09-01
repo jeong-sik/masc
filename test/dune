@@ -1673,9 +1673,9 @@
   (action
    (setenv MASC_MAIN_EIO_EXE %{dep:../bin/main_eio.exe} (run %{test}))))
 
-; Stable dashboard behavior contracts only. The HTTP core executable also
-; contains source-shape assertions, so CI selects its behavior suite; the
-; briefing executable is behavior-only and runs in full.
+; Stable dashboard behavior contracts only, as a focused local runner. CI
+; does not select this alias: both executables already run in full through
+; their (test)/(tests) stanzas under @test/runtest.
 (rule
  (alias runtest-dashboard-http-behavior-contracts)
  (action
@@ -3513,6 +3513,144 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-board-json)))
+
+; Python unit suites over the scripts/ tree. Every one of these existed with
+; no rule, no workflow, and no caller -- eleven suites of dead verification
+; (the #32245 review found the pattern; this sweep found the rest). They are
+; stdlib-only unittest files whose subjects live under scripts/, so each rule
+; carries the test file and the scripts tree.
+
+(rule
+ (alias runtest-test_capture_keeper_skill_tui_proof)
+ (deps
+  test_capture_keeper_skill_tui_proof.py
+  (source_tree ../scripts))
+ (action
+  (run python3 %{dep:test_capture_keeper_skill_tui_proof.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_capture_keeper_skill_tui_proof)))
+
+(rule
+ (alias runtest-test_dune_build_input_fingerprint)
+ (deps
+  test_dune_build_input_fingerprint.py
+  (source_tree ../scripts))
+ (action
+  (run python3 %{dep:test_dune_build_input_fingerprint.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_dune_build_input_fingerprint)))
+
+(rule
+ (alias runtest-test_join_natural_keeper_skill_ledger)
+ (deps
+  test_join_natural_keeper_skill_ledger.py
+  (source_tree ../scripts))
+ (action
+  (run python3 %{dep:test_join_natural_keeper_skill_ledger.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_join_natural_keeper_skill_ledger)))
+
+(rule
+ (alias runtest-test_keeper_multi_collaboration_acceptance)
+ (deps
+  test_keeper_multi_collaboration_acceptance.py
+  (source_tree ../scripts))
+ (action
+  (run python3 %{dep:test_keeper_multi_collaboration_acceptance.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_keeper_multi_collaboration_acceptance)))
+
+(rule
+ (alias runtest-test_keeper_skill_use_proof)
+ (deps
+  test_keeper_skill_use_proof.py
+  (source_tree ../scripts))
+ (action
+  (run python3 %{dep:test_keeper_skill_use_proof.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_keeper_skill_use_proof)))
+
+(rule
+ (alias runtest-test_memory_os_judge_eval)
+ (deps
+  test_memory_os_judge_eval.py
+  (source_tree ../scripts))
+ (action
+  (run python3 %{dep:test_memory_os_judge_eval.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_memory_os_judge_eval)))
+
+(rule
+ (alias runtest-test_produce_natural_keeper_skill_proof)
+ (deps
+  test_produce_natural_keeper_skill_proof.py
+  (source_tree ../scripts))
+ (action
+  (run python3 %{dep:test_produce_natural_keeper_skill_proof.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_produce_natural_keeper_skill_proof)))
+
+(rule
+ (alias runtest-test_produce_tui_build_evidence)
+ (deps
+  test_produce_tui_build_evidence.py
+  (source_tree ../scripts))
+ (action
+  (run python3 %{dep:test_produce_tui_build_evidence.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_produce_tui_build_evidence)))
+
+(rule
+ (alias runtest-test_proof_http)
+ (deps
+  test_proof_http.py
+  (source_tree ../scripts))
+ (action
+  (run python3 %{dep:test_proof_http.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_proof_http)))
+
+(rule
+ (alias runtest-test_run_local_executable_binding)
+ (deps
+  test_run_local_executable_binding.py
+  (source_tree ../scripts))
+ (action
+  (run python3 %{dep:test_run_local_executable_binding.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_run_local_executable_binding)))
+
+(rule
+ (alias runtest-test_verify_keeper_skill_proof_bundle)
+ (deps
+  test_verify_keeper_skill_proof_bundle.py
+  (source_tree ../scripts))
+ (action
+  (run python3 %{dep:test_verify_keeper_skill_proof_bundle.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_verify_keeper_skill_proof_bundle)))
 
 (test
  (name test_tui_metrics_tail)

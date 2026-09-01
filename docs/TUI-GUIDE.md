@@ -909,6 +909,21 @@ ingest로 보이지 않게 하기 위함이다.
 커서가 가리키는 행의 전체 상태와 서버가 매긴 경고(alert) 목록이 표
 아래에 함께 나온다. `r`로 다시 불러온다.
 
+행에서 `Enter`를 누르면 그 Keeper의 **사실(fact) 브라우저**가 열린다.
+표가 개수만 말하던 것을 사실 단위로 보여준다: ordinary 저장소의 각 사실은
+`[category] 내용 ×강화횟수`로, source-bound 사실은 `[source] 경로 — 내용`
+으로, 무효화된 사실은 `[dropped] 경로 — 사유`로 그린다. category와
+origin, 무효화 사유는 서버가 보낸 문자열 그대로다 — TUI는 분류를 만들지
+않는다. 커서 행의 전체 내용(원문, origin, 강화 횟수, first/last seen,
+memory id, source sha)은 목록 아래에 펼쳐진다.
+
+`c`는 category 필터를 순환한다: All → 로드된 저장소가 실제로 가진
+category들(정렬순) → All. 필터는 ordinary 사실만 좁힌다 — source-bound
+행은 category가 없으므로 항상 보인다. `/`는 사실 내용으로 커서를 옮기고,
+`Esc`는 건강 표로 돌아간다. 두 저장소는 서버가 따로 답하므로, 한쪽이
+읽기 실패해도 다른 쪽 목록은 그대로 나오고 실패한 쪽은 사유가 화면에
+남는다.
+
 ### Workspace
 
 등록된 저장소와 서버가 실제로 해석한 체크아웃 경로를 보여준다. Tab 링의
@@ -1195,6 +1210,9 @@ Per surface:
 | `w` | Code, notes view | Add a note through the `$EDITOR` form |
 | `K` / `D` | Code, file open | Ask the language server: hover / definition of a name on the cursor line |
 | `l` | Keeper detail | Open logs |
+| `Enter` | Memory | Browse the selected keeper's facts, both stores |
+| `c` | Memory facts | Cycle the category filter through the loaded categories |
+| `Esc` | Memory facts | Close the browser, back to the health table |
 | `c` / `m` | Keeper list or detail | Open message input for the selected keeper |
 | `y` / `n` | Approvals | Confirm / deny the selected request |
 | `n` | Schedules | Create a schedule through the `$EDITOR` JSON form |

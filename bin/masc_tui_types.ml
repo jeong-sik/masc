@@ -2025,6 +2025,17 @@ type state = {
   mutable memory_health_error: string option;
   mutable memory_health_scroll: int;
   mutable memory_health_cursor: int;
+  (* The Memory fact browser. [memory_facts_keeper = None] draws the health
+     table; [Some name] draws that keeper's fact listing over it. The
+     category filter holds a category string exactly as the server spelled
+     it -- filtering is equality against the loaded rows, never a
+     classification this side invents. *)
+  mutable memory_facts_keeper: string option;
+  mutable memory_facts: Tui_decode.memory_fact_snapshot option;
+  mutable memory_facts_error: string option;
+  mutable memory_facts_cursor: int;
+  mutable memory_facts_scroll: int;
+  mutable memory_facts_category: string option;
   mutable repository_changes_open: bool;
   mutable repository_changes_scope: Tui_decode.repository_change_scope option;
   mutable repository_changes: Tui_decode.repository_change_snapshot option;
@@ -2638,6 +2649,12 @@ let create_state
   memory_health_error = None;
   memory_health_scroll = 0;
   memory_health_cursor = 0;
+  memory_facts_keeper = None;
+  memory_facts = None;
+  memory_facts_error = None;
+  memory_facts_cursor = 0;
+  memory_facts_scroll = 0;
+  memory_facts_category = None;
   repository_changes_open = false;
   repository_changes_scope = None;
   repository_changes = None;
@@ -3085,6 +3102,90 @@ let lanes_overview_hit (state : state) ~terminal_rows:_ ~row : lanes_overview_hi
     if offset < standalone_count then Lanes_hit_standalone offset
     else Lanes_hit_none
 
+(* One browsable row of the Memory fact browser. The three kinds keep their
+   sections apart -- an ordinary fact, a fact bound to a file, and a fact
+   the store dropped -- while the cursor walks them as one flat list. *)
+type memory_fact_row =
+  | Memory_row_fact of Tui_decode.memory_fact
+  | Memory_row_source_fact of Tui_decode.memory_source_fact
+  | Memory_row_invalidation of Tui_decode.memory_invalidation
+
+(* The flat row list the browser's cursor, scroll, and search all read. The
+   category filter narrows only ordinary facts: source-bound rows carry no
+   category, and hiding them under a category filter would read as the store
+   losing them. A store that failed to read or has no snapshot contributes
+   no rows here; the render names that state in its section header. *)
+let memory_fact_rows (state : state) : memory_fact_row list =
+  match state.memory_facts with
+  | None -> []
+  | Some snapshot ->
+      let ordinary =
+        match snapshot.Tui_decode.mfs_ordinary with
+        | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+          ->
+            []
+        | Tui_decode.Memory_store_present store ->
+            let facts =
+              match state.memory_facts_category with
+              | None -> store.Tui_decode.mos_facts
+              | Some category ->
+                  List.filter
+                    (fun (fact : Tui_decode.memory_fact) ->
+                      String.equal fact.Tui_decode.mf_category category)
+                    store.Tui_decode.mos_facts
+            in
+            List.map (fun fact -> Memory_row_fact fact) facts
+      in
+      let source_rows, invalidation_rows =
+        match snapshot.Tui_decode.mfs_source with
+        | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+          ->
+            ([], [])
+        | Tui_decode.Memory_store_present store ->
+            ( List.map
+                (fun fact -> Memory_row_source_fact fact)
+                store.Tui_decode.mss_facts
+            , List.map
+                (fun row -> Memory_row_invalidation row)
+                store.Tui_decode.mss_invalidations )
+      in
+      ordinary @ source_rows @ invalidation_rows
+
+(* The categories the loaded ordinary store actually holds, distinct and
+   sorted -- the [c] cycle walks these. Read from the rows, never from a
+   list this side hardcodes: the taxonomy is the server's, and a category it
+   adds appears here without a code change. *)
+let memory_fact_categories (state : state) : string list =
+  match state.memory_facts with
+  | None -> []
+  | Some snapshot -> (
+      match snapshot.Tui_decode.mfs_ordinary with
+      | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+        ->
+          []
+      | Tui_decode.Memory_store_present store ->
+          store.Tui_decode.mos_facts
+          |> List.map (fun (fact : Tui_decode.memory_fact) ->
+               fact.Tui_decode.mf_category)
+          |> List.sort_uniq String.compare)
+
+(* All -> first category -> ... -> last -> All. A [current] that is no
+   longer among [categories] (the snapshot refreshed under the filter)
+   restarts at All rather than guessing a neighbour. *)
+let next_memory_category (current : string option) (categories : string list)
+    : string option =
+  match current with
+  | None -> ( match categories with [] -> None | first :: _ -> Some first)
+  | Some current ->
+      let rec after = function
+        | [] -> None
+        | candidate :: rest ->
+            if String.equal candidate current then
+              (match rest with [] -> None | next :: _ -> Some next)
+            else after rest
+      in
+      after categories
+
 let scrolled_surface_rows (state : state) : surface -> scrolled option =
   let listing ~error count =
     Some
@@ -3136,13 +3237,17 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
            | None -> 0
            | Some s -> List.length s.Tui_decode.rs_repositories)
   | Memory ->
-      (* Fleet rows plus the detail panel of the row the cursor names. The
-         panel is one scroll unit: its own height follows the render, and
-         search only needs to land on rows that exist. *)
-      listing ~error:state.memory_health_error
-        (match state.memory_health with
-         | None -> 0
-         | Some s -> List.length s.Tui_decode.mhs_keepers + 1)
+      if Option.is_some state.memory_facts_keeper then
+        listing ~error:state.memory_facts_error
+          (List.length (memory_fact_rows state))
+      else
+        (* Fleet rows plus the detail panel of the row the cursor names. The
+           panel is one scroll unit: its own height follows the render, and
+           search only needs to land on rows that exist. *)
+        listing ~error:state.memory_health_error
+          (match state.memory_health with
+           | None -> 0
+           | Some s -> List.length s.Tui_decode.mhs_keepers + 1)
   | Changes ->
       Some
         { sc_count =
@@ -3267,11 +3372,30 @@ let surface_row_texts (state : state) : surface -> string list option = function
               s.Tui_decode.rs_repositories)
           state.repositories
   | Memory ->
-      Option.map
-        (fun s ->
-          List.map (fun k -> k.Tui_decode.mkh_keeper_id) s.Tui_decode.mhs_keepers
-          @ [ "memory detail" ])
-        state.memory_health
+      if Option.is_some state.memory_facts_keeper then
+        (match memory_fact_rows state with
+         | [] -> None
+         | rows ->
+             Some
+               (List.map
+                  (function
+                    | Memory_row_fact fact ->
+                        fact.Tui_decode.mf_category ^ " "
+                        ^ fact.Tui_decode.mf_claim
+                    | Memory_row_source_fact fact ->
+                        fact.Tui_decode.msf_path ^ " "
+                        ^ fact.Tui_decode.msf_claim
+                    | Memory_row_invalidation row ->
+                        row.Tui_decode.mi_source_path ^ " "
+                        ^ row.Tui_decode.mi_reason)
+                  rows))
+      else
+        Option.map
+          (fun s ->
+            List.map (fun k -> k.Tui_decode.mkh_keeper_id)
+              s.Tui_decode.mhs_keepers
+            @ [ "memory detail" ])
+          state.memory_health
   | Connectors ->
       Option.map
         (fun s ->

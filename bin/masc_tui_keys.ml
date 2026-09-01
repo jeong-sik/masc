@@ -241,6 +241,8 @@ let for_surface = function
   | Memory ->
       [ b Navigate "j/k" "scroll"
       ; b Navigate "[ / ]" "keeper" ~help:"previous / next keeper row"
+      ; b Act "Enter" "facts"
+          ~help:"browse what the selected keeper actually remembers"
       ]
       @ listing_meta
   | Repositories ->
@@ -479,6 +481,19 @@ let footer_hints_git_changes =
     ([ b Navigate "j/k" "move"
      ; b Act "Enter" "open file"
      ; b Act "Left / Esc" "back"
+     ]
+     @ listing_meta)
+
+(* The Memory fact browser drawn over the health table. Its own row because
+   the keys change with it: the cursor moves rows instead of scrolling the
+   table, [c] narrows by the categories the loaded store holds, and Esc
+   closes the browser rather than leaving the surface. *)
+let footer_hints_memory_facts =
+  hints_of_bindings
+    ([ b Navigate "j/k" "move"
+     ; b Act "c" "category" ~help:"cycle the category filter (All first)"
+     ; b Search "/" "find" ~help:"jump the cursor to a matching fact"
+     ; b Act "Esc" "health" ~help:"close the browser, back to the table"
      ]
      @ listing_meta)
 

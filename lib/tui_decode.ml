@@ -2068,6 +2068,53 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
+type memory_fact = {
+  mf_claim : string;
+  mf_category : string;
+  mf_origin : string;
+  mf_first_seen : float;
+  mf_last_seen : float;
+  mf_reinforcement : int;
+  mf_memory_id : string;
+}
+
+type memory_source_fact = {
+  msf_claim : string;
+  msf_first_seen : float;
+  msf_path : string;
+  msf_sha256 : string;
+}
+
+type memory_invalidation = {
+  mi_source_path : string;
+  mi_invalidated_at : float;
+  mi_reason : string;
+}
+
+type 'a memory_store_reading =
+  | Memory_store_read_error of string
+  | Memory_store_absent
+  | Memory_store_present of 'a
+
+type memory_ordinary_store = {
+  mos_revision : int;
+  mos_updated_at : float;
+  mos_facts : memory_fact list;
+}
+
+type memory_source_store = {
+  mss_revision : int;
+  mss_updated_at : float;
+  mss_facts : memory_source_fact list;
+  mss_invalidations : memory_invalidation list;
+}
+
+type memory_fact_snapshot = {
+  mfs_keeper : string;
+  mfs_ordinary : memory_ordinary_store memory_store_reading;
+  mfs_source : memory_source_store memory_store_reading;
+}
+
 type harness_verdict = {
   hv_at : float;
   hv_task_id : string;
@@ -3738,6 +3785,87 @@ let decode_memory_health_snapshot json =
     ; mhs_error_alerts
     ; mhs_starving_keepers
     }
+
+let decode_memory_fact json =
+  let* mf_claim = required_string_field json "claim" in
+  let* mf_category = required_string_field json "category" in
+  let* mf_origin = required_string_field json "origin" in
+  let* mf_first_seen = require_float_field json "first_seen" in
+  let* mf_last_seen = require_float_field json "last_seen" in
+  let* mf_reinforcement = required_int_field json "reinforcement" in
+  let* mf_memory_id = required_string_field json "memory_id" in
+  Ok
+    { mf_claim
+    ; mf_category
+    ; mf_origin
+    ; mf_first_seen
+    ; mf_last_seen
+    ; mf_reinforcement
+    ; mf_memory_id
+    }
+
+let decode_memory_source_fact json =
+  let* msf_claim = required_string_field json "claim" in
+  let* msf_first_seen = require_float_field json "first_seen" in
+  let* msf_path = required_string_field json "path" in
+  let* msf_sha256 = required_string_field json "sha256" in
+  Ok { msf_claim; msf_first_seen; msf_path; msf_sha256 }
+
+let decode_memory_invalidation json =
+  let* mi_source_path = required_string_field json "source_path" in
+  let* mi_invalidated_at = require_float_field json "invalidated_at" in
+  let* mi_reason = required_string_field json "reason" in
+  Ok { mi_source_path; mi_invalidated_at; mi_reason }
+
+(* The server answers each store with exactly one of three shapes:
+   {"read_error"}, {"present": false}, or {"present": true, ...rows}. Read
+   by which field is there; anything else is a decode error, never an empty
+   store, so a broken reading cannot pass as "remembers nothing". *)
+let decode_memory_store_reading ~label decode_present json =
+  match Json_util.assoc_member_opt "read_error" json with
+  | Some (`String detail) -> Ok (Memory_store_read_error detail)
+  | Some other ->
+      Error
+        (Printf.sprintf "%s.read_error must be a string (received %s)" label
+           (Json_util.kind_name other))
+  | None ->
+      let* present = required_bool_field json "present" in
+      if not present then Ok Memory_store_absent
+      else
+        let* value = decode_present json in
+        Ok (Memory_store_present value)
+
+let decode_memory_ordinary_store json =
+  let* mos_revision = required_int_field json "revision" in
+  let* mos_updated_at = require_float_field json "updated_at" in
+  let* facts_json = required_list_field json "facts" in
+  let* mos_facts = decode_list "facts" decode_memory_fact facts_json in
+  Ok { mos_revision; mos_updated_at; mos_facts }
+
+let decode_memory_source_store json =
+  let* mss_revision = required_int_field json "revision" in
+  let* mss_updated_at = require_float_field json "updated_at" in
+  let* facts_json = required_list_field json "facts" in
+  let* mss_facts = decode_list "facts" decode_memory_source_fact facts_json in
+  let* invalidations_json = required_list_field json "invalidations" in
+  let* mss_invalidations =
+    decode_list "invalidations" decode_memory_invalidation invalidations_json
+  in
+  Ok { mss_revision; mss_updated_at; mss_facts; mss_invalidations }
+
+let decode_memory_fact_snapshot json =
+  let* mfs_keeper = required_string_field json "keeper" in
+  let* ordinary_json = required_member json "ordinary" in
+  let* mfs_ordinary =
+    decode_memory_store_reading ~label:"ordinary" decode_memory_ordinary_store
+      ordinary_json
+  in
+  let* source_json = required_member json "source_bound" in
+  let* mfs_source =
+    decode_memory_store_reading ~label:"source_bound"
+      decode_memory_source_store source_json
+  in
+  Ok { mfs_keeper; mfs_ordinary; mfs_source }
 
 let decode_harness_verdict json =
   let* hv_task_id = required_string_field json "task_id" in

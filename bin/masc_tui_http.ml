@@ -1648,6 +1648,17 @@ let fetch_keeper_memory_health ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/keeper-memory-health"
 
+(** Fetch what one keeper remembers, fact by fact
+    ([GET /api/v1/keepers/:name/memory-facts]): the ordinary and
+    source-bound stores, each answered independently. *)
+let fetch_keeper_memory_facts ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:
+      ("/api/v1/keepers/"
+       ^ percent_encode_path_segment keeper_name
+       ^ "/memory-facts")
+
 (** Fetch Git working-tree changes for the current project workspace. *)
 let fetch_project_changes ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =

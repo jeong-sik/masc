@@ -4759,6 +4759,160 @@ def autonomous_turn_history_fixture() -> HttpResponse:
     )
 
 
+def memory_facts_http_fixtures() -> HttpFixtures:
+    """The Memory surface's health table plus one keeper's fact listing."""
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/dashboard/keeper-memory-health"] = (
+        200,
+        {
+            "schema": "keeper.memory_os.current_health.v2",
+            "generated_at": 1787348000.0,
+            "keepers": [
+                {
+                    "keeper_id": "alpha",
+                    "revision": 7,
+                    "facts": 2,
+                    "snapshot_bytes": 512,
+                    "added": 1,
+                    "removed": 0,
+                    "snapshot_present": True,
+                    "librarian_lane_busy": 0,
+                    "librarian_failures": 0,
+                    "vision_ingest_errors": 0,
+                    "vision_ingest_error_reasons": [],
+                    "source_revision": 2,
+                    "source_facts": 1,
+                    "source_invalidations": 1,
+                    "source_snapshot_bytes": 128,
+                    "source_snapshot_present": True,
+                    "alerts": [],
+                }
+            ],
+            "totals": {
+                "facts": 2,
+                "snapshot_bytes": 512,
+                "source_facts": 1,
+                "source_invalidations": 1,
+                "source_snapshot_bytes": 128,
+                "librarian_failures": 0,
+                "vision_ingest_errors": 0,
+                "read_errors": 0,
+                "source_read_errors": 0,
+            },
+            "alert_summary": {
+                "warn_alerts": 0,
+                "error_alerts": 0,
+                "librarian_starving_keepers": 0,
+            },
+        },
+    )
+    fixtures["/api/v1/keepers/alpha/memory-facts"] = (
+        200,
+        {
+            "keeper": "alpha",
+            "dashboard_surface": "/api/v1/keepers/:name/memory-facts",
+            "ordinary": {
+                "present": True,
+                "revision": 7,
+                "updated_at": 1787348000.0,
+                "facts": [
+                    {
+                        "claim": "the deploy needs assets",
+                        "category": "lesson",
+                        "origin": "authored",
+                        "first_seen": 1787340000.0,
+                        "last_seen": 1787347000.0,
+                        "reinforcement": 3,
+                        "memory_id": "mem-1",
+                    },
+                    {
+                        "claim": "port 8935 is already claimed",
+                        "category": "blocker",
+                        "origin": "injected",
+                        "first_seen": 1787341000.0,
+                        "last_seen": 1787346000.0,
+                        "reinforcement": 1,
+                        "memory_id": "mem-2",
+                    },
+                ],
+            },
+            "source_bound": {
+                "present": True,
+                "revision": 2,
+                "updated_at": 1787348000.0,
+                "facts": [
+                    {
+                        "claim": "the config floor is masc.core",
+                        "first_seen": 1787342000.0,
+                        "path": "docs/config.md",
+                        "sha256": "cafe0123beef4567cafe0123beef4567",
+                    }
+                ],
+                "invalidations": [
+                    {
+                        "source_path": "docs/old.md",
+                        "invalidated_at": 1787347500.0,
+                        "reason": "source_changed",
+                    }
+                ],
+            },
+        },
+    )
+    return fixtures
+
+
+def memory_facts_interaction() -> Interaction:
+    """Enter on a Memory health row opens the fact browser: the rows carry
+    the server's category and origin spellings, c cycles the filter through
+    the loaded categories, and Esc returns to the health table."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Memory")
+        # Enter is a no-op until the health snapshot lands, so wait for the
+        # loaded title tail before pressing it.
+        wait_for_output(
+            process, master_fd, output, b"failed/no ordinary",
+            start=0, timeout=5.0,
+        )
+        # The title is bold up to the reset, so needles start after it:
+        # "<bold> MASC Memory<reset> ▸ alpha (...)".
+        send_and_wait(
+            process, master_fd, output, b"\r",
+            b"\xe2\x96\xb8 alpha",
+        )
+        # The listing arrives async after the browser opens.
+        wait_for_output(
+            process, master_fd, output,
+            b"[lesson] the deploy needs assets \xc3\x973",
+            start=0, timeout=5.0,
+        )
+        for needle in (
+            b"[blocker] port 8935 is already claimed",
+            b"[source] docs/config.md",
+            b"[dropped] docs/old.md \xe2\x80\x94 source_changed",
+            b"origin authored",
+            b"ordinary r7 \xc2\xb7 2 facts",
+        ):
+            wait_for_output(
+                process, master_fd, output, needle, start=0, timeout=5.0
+            )
+        # The categories are the loaded ones, sorted: blocker first.
+        send_and_wait(process, master_fd, output, b"c", b"filter blocker")
+        send_and_wait(process, master_fd, output, b"c", b"filter lesson")
+        # Esc closes the browser back to the health table, whose title tail
+        # is the only place this phrase appears.
+        send_and_wait(process, master_fd, output, b"\x1b", b"failed/no ordinary")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def memory_journal_fixture() -> HttpResponse:
     return (
         200,
@@ -9378,6 +9532,12 @@ def run_keyboard_regression(executable: str) -> None:
         interact=image_view_interaction(),
         prepare_workspace=seed_image_workspace,
         preload_input=GRAPHICS_SUPPORTED_REPLY,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Memory fact browser lists both stores and filters",
+        interact=memory_facts_interaction(),
+        http_fixtures=memory_facts_http_fixtures(),
     )
     to_file_requests: HttpRequests = []
     run_terminal_scenario(

@@ -289,6 +289,28 @@ let test_a_size_climbs_past_kilobytes () =
     ; 3_145_728, "3.0 MB"
     ]
 
+let test_a_tool_schema_is_grouped_with_the_other_schemas () =
+  (* [exact_input_label] names a schema after its tool, which would put every
+     schema in a group of one. The summary needs them counted together: on a
+     real turn the schemas are the second-largest thing in the request. *)
+  Alcotest.(check string)
+    "schemas share one group" "Tool schemas"
+    (Inspector.exact_input_category (Inspector.Tool_schema { name = "masc_check" }));
+  Alcotest.(check string)
+    "and it does not depend on the tool" "Tool schemas"
+    (Inspector.exact_input_category (Inspector.Tool_schema { name = "masc_tasks" }));
+  (* Messages stay split by role, which is what separates a tool result from
+     the assistant text that called for it. *)
+  Alcotest.(check string)
+    "a tool result" "Message · tool"
+    (Inspector.exact_input_category (Inspector.Message { role = "tool" }));
+  Alcotest.(check string)
+    "an assistant message" "Message · assistant"
+    (Inspector.exact_input_category (Inspector.Message { role = "assistant" }));
+  Alcotest.(check string)
+    "the system prompt" "System prompt"
+    (Inspector.exact_input_category Inspector.System_prompt)
+
 let () =
   run "tui_context_inspector"
     [ ( "decode"
@@ -310,5 +332,7 @@ let () =
             test_a_size_never_outgrows_the_column_it_is_drawn_in
         ; test_case "a size climbs past kilobytes" `Quick
             test_a_size_climbs_past_kilobytes
+        ; test_case "a tool schema is grouped with the other schemas" `Quick
+            test_a_tool_schema_is_grouped_with_the_other_schemas
         ] )
     ]

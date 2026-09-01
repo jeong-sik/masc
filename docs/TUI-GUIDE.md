@@ -312,14 +312,44 @@ Standalone execution lanes only. Keeper lifecycle and turn-cycle facts live on
 Keepers, so this surface no longer repeats a second Keeper table.
 
 ```
- MASC Lanes · Standalone (6 lanes)  17:02:53  [connected]
+ MASC Lanes · Standalone (4 lanes)  17:02:53  [connected]
   Standalone LLM lanes · READ-ONLY OBSERVATION · observed 17:02:52
  >● Librarian       running 12s    slots librarian-exact  active 1  runs 50  ok/fail/cancel 47/2/1
 ```
 
 Rows come from `GET /api/v1/dashboard/standalone-lanes`. They show admission slots,
 current activity, retained run counts, execution outcomes, latency, and the
-slots actually selected. `j` / `k` moves the lane cursor; Right or `Enter`
+slots actually selected. This build projects four fixed consumers:
+`Board Attention` judges one durable Board attention candidate, `HITL Auto
+Judge` judges one held approval, `Librarian` selects the next Memory OS
+snapshot from immutable Keeper history, and `Verifier` reviews Task completion
+and Goal proof evidence.
+
+The selected row expands underneath the matrix instead of forcing its long
+identifiers through the clipped comparison row. It names the exact
+`[runtime.exact_output_lanes.<lane-id>]` table, every admitted catalog slot in
+attempt order, the official-client runtime suffix used only after catalog
+exhaustion, publication-dropped slots that will not execute, and any admission
+error. In `runtime.toml`, `slots` is a required non-empty array of opaque
+catalog references; `cli_slots` is an optional array of official-client runtime
+ids. Blank values and duplicates are rejected. The lane tries admitted catalog
+slots in declaration order, then CLI runtimes in declaration order. The
+configuration is TOML; an individual run's Input and Output are retained JSON
+evidence, not another lane configuration format.
+
+Board Attention, HITL Auto Judge, and Librarian are schema-constrained
+structured-output generation flows, not MASC tool loops. Their run evidence is
+the exact Input and Output, outcome, elapsed time, and selected slot; there is
+no omitted tool-call ledger for those runs. Their outputs mean, respectively,
+the accepted Board candidate judgment, the validated and durably settled HITL
+context judgment summary, and selected memory facts plus committed snapshot
+metadata. Verifier is different: its Task/Goal review records also retain the
+verdict reason, evaluator runtime, and MASC tool observations, which appear in
+the exact run detail.
+
+`j` / `k` moves the lane cursor. `e` opens that lane's exact table in the
+Config `runtime.toml` source pane; another `e` uses the existing editor,
+server-side preview, and save path. Right or `Enter`
 opens that lane's recent exact runs, and another Right or `Enter` opens the
 exact run record. Input and output are pretty-printed as syntax-highlighted
 JSON and long JSON lines wrap by terminal cells, so a value does not disappear

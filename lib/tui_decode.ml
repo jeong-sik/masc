@@ -147,6 +147,7 @@ type standalone_lane_slot_count = {
 type standalone_lane = {
   sl_lane_id : string;
   sl_label : string;
+  sl_purpose : string option;
   sl_required : bool;
   sl_status : standalone_lane_status;
   sl_configuration_state : string;
@@ -4141,6 +4142,7 @@ let decode_standalone_lane_slot_count json =
 let decode_standalone_lane json =
   let* sl_lane_id = required_string_field json "lane_id" in
   let* sl_label = required_string_field json "label" in
+  let* sl_purpose = optional_string_field json "purpose" in
   let* sl_required = required_bool_field json "required" in
   let* observation_only = required_bool_field json "observation_only" in
   let* () =
@@ -4195,6 +4197,7 @@ let decode_standalone_lane json =
   Ok
     { sl_lane_id
     ; sl_label
+    ; sl_purpose
     ; sl_required
     ; sl_status
     ; sl_configuration_state

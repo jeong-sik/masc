@@ -2862,12 +2862,14 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
       Alcotest.(check bool) "error names the missing field" true
         (String.starts_with ~prefix:"snapshots[0]: missing required field 'idle_seconds'" detail)
 
-let standalone_lane_json ?(status = "idle") ?(retained = 3)
+let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ?(running = 0) ?(selected_slots = []) lane_id label =
   `Assoc
-    [ "lane_id", `String lane_id
-    ; "label", `String label
-    ; "required", `Bool true
+    ([ "lane_id", `String lane_id
+     ; "label", `String label
+     ]
+     @ (match purpose with None -> [] | Some text -> [ "purpose", `String text ])
+     @ [ "required", `Bool true
     ; "observation_only", `Bool true
     ; "configured", `Bool true
     ; "configuration_state", `String "ready"
@@ -2886,7 +2888,7 @@ let standalone_lane_json ?(status = "idle") ?(retained = 3)
     ; "last_outcome", (if retained = 0 then `Null else `String "succeeded")
     ; "p50_elapsed_s", (if retained = 0 then `Null else `Float 1.)
     ; "selected_slots", `List selected_slots
-    ]
+    ])
 
 (* The start of the newest run. The fixture has carried it since this suite
    was written and the decoder read it into an underscore, so the field
@@ -2944,7 +2946,9 @@ let test_decode_standalone_lane_keeps_the_run_start () =
 
 let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
   let lanes =
-    [ standalone_lane_json ~status:"running" ~running:1
+    [ standalone_lane_json
+        ~purpose:"Judges one durable Board candidate for Keeper attention."
+        ~status:"running" ~running:1
         "board_attention_exact" "Board Attention"
     ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
     ; standalone_lane_json
@@ -2974,7 +2978,12 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
       let first = List.hd snapshot.sls_lanes in
       Alcotest.(check string) "running status" "running"
         (Tui_decode.standalone_lane_status_to_string first.sl_status);
+      Alcotest.(check (option string)) "consumer purpose"
+        (Some "Judges one durable Board candidate for Keeper attention.")
+        first.sl_purpose;
       let verifier = List.nth snapshot.sls_lanes 3 in
+      Alcotest.(check (option string)) "older v1 row remains readable" None
+        verifier.sl_purpose;
       Alcotest.(check string)
         "none retained"
         "none retained"

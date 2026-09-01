@@ -14178,21 +14178,45 @@ let context_composition_lines (selection : Masc_tui_context_inspector.selection)
       (Masc_domain.iso8601_of_unix_seconds record.ts)
   in
   let token_lines =
-    match record.usage.input_tokens, record.context_window with
-    | Some tokens, Some maximum when maximum > 0 ->
-        let ratio = float tokens /. float maximum in
-        [ Printf.sprintf "  Context  %s / %s tokens  (%.1f%%)"
-            (Inspector.format_tokens tokens)
-            (Inspector.format_tokens maximum)
-            (ratio *. 100.)
-        ; "  " ^ context_ratio_bar ~width:30 ~tokens ~maximum
-        ; Printf.sprintf "  Remaining to context ceiling  %s tokens"
-            (Inspector.format_tokens (max 0 (maximum - tokens)))
-        ]
-    | Some tokens, (None | Some _) ->
-        [ Printf.sprintf "  Context  %s input tokens; window not observed"
-            (Inspector.format_tokens tokens) ]
-    | None, _ -> [ "  Context usage was not reported for this turn" ]
+    match record.usage.scope with
+    (* A cumulative counter covers the conversation, not this request, so
+       dividing it by the window states an occupancy nobody measured. On
+       2026-09-01 every turn whose reported input exceeded its own window --
+       642 of them -- carried this scope, without a single exception. *)
+    | Runtime_usage_scope.Conversation_cumulative ->
+        (match record.usage.input_tokens, record.context_window with
+         | Some tokens, Some maximum when maximum > 0 ->
+             [ Printf.sprintf
+                 "  Conversation input  %s tokens  %s(cumulative; this turn's \
+                  share was not reported)%s"
+                 (Inspector.format_tokens tokens) Ansi.dim Ansi.reset
+             ; Printf.sprintf "  Context window  %s tokens"
+                 (Inspector.format_tokens maximum)
+             ]
+         | Some tokens, (None | Some _) ->
+             [ Printf.sprintf
+                 "  Conversation input  %s tokens  %s(cumulative; window not \
+                  observed)%s"
+                 (Inspector.format_tokens tokens) Ansi.dim Ansi.reset
+             ]
+         | None, _ -> [ "  Context usage was not reported for this turn" ])
+    | Runtime_usage_scope.Per_request | Runtime_usage_scope.Usage_scope_unavailable
+      ->
+        (match record.usage.input_tokens, record.context_window with
+         | Some tokens, Some maximum when maximum > 0 ->
+             let ratio = float tokens /. float maximum in
+             [ Printf.sprintf "  Context  %s / %s tokens  (%.1f%%)"
+                 (Inspector.format_tokens tokens)
+                 (Inspector.format_tokens maximum)
+                 (ratio *. 100.)
+             ; "  " ^ context_ratio_bar ~width:30 ~tokens ~maximum
+             ; Printf.sprintf "  Remaining to context ceiling  %s tokens"
+                 (Inspector.format_tokens (max 0 (maximum - tokens)))
+             ]
+         | Some tokens, (None | Some _) ->
+             [ Printf.sprintf "  Context  %s input tokens; window not observed"
+                 (Inspector.format_tokens tokens) ]
+         | None, _ -> [ "  Context usage was not reported for this turn" ])
   in
   let cache_lines =
     let parts =
@@ -14208,7 +14232,13 @@ let context_composition_lines (selection : Masc_tui_context_inspector.selection)
             record.usage.output_tokens
         ]
     in
-    match parts with [] -> [] | _ -> [ "  Usage  " ^ String.concat "  ·  " parts ]
+    let label =
+      match record.usage.scope with
+      | Runtime_usage_scope.Conversation_cumulative -> "  Usage (cumulative)  "
+      | Runtime_usage_scope.Per_request
+      | Runtime_usage_scope.Usage_scope_unavailable -> "  Usage  "
+    in
+    match parts with [] -> [] | _ -> [ label ^ String.concat "  ·  " parts ]
   in
   let wire_lines =
     match record.request_wire_observation with

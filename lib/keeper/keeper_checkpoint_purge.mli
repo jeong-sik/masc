@@ -66,6 +66,18 @@ type report =
   ; reasoning_blocks_stripped : int (** R2: blocks removed from survivors *)
   ; reasoning_messages_dropped : int (** R2: messages left empty and dropped *)
   ; tool_results_cleared : int (** R3: blocks whose content was replaced *)
+  ; messages_dropped_at_structural_break : int
+      (** Messages discarded because the input transcript was already broken:
+          the offending cycle and everything after it. Zero for a structurally
+          sound input, which is every input that is not being recovered.
+
+          Purge refused a broken transcript until 2026-09-01, which made it
+          useless for the one case an operator reaches for it -- a keeper whose
+          stored history carries a break cannot save a checkpoint, so it fails
+          every turn at the same message until someone edits the JSON by hand.
+          Preserving the break instead of dropping it would return a
+          still-unsaveable transcript and report success, so recovery discards
+          it and says how much. *)
   }
 
 type purge_error =

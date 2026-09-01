@@ -275,15 +275,30 @@ val handle_keeper_webmcp_with_outcome
     [Effect_outcome_unknown] because the bridge cannot prove the page's tool
     did not run. *)
 
-val handle_keeper_spawn_with_outcome
+val spawn_outside_boundary
   :  name:string
+  -> profile:Keeper_types_profile_sandbox.sandbox_profile
+  -> Keeper_tool_execution.t
+(** The refusal {!handle_keeper_spawn_with_outcome} answers a start with.
+
+    Exported so a test can pin it: reaching it through the handler needs a
+    turn registry and a live switch, and a decision only reachable that way is
+    a decision no test pins. *)
+
+val handle_keeper_spawn_with_outcome
+  :  meta:Keeper_meta_contract.keeper_meta
+  -> name:string
   -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 (** The four spawn tools, reached through the turn's registry.
 
     Answers with a refusal outside a turn: there is nowhere for a process to
     live that a later call could reach, and saying so beats creating a registry
-    nothing else can find. *)
+    nothing else can find.
+
+    [meta] is here for the sandbox profile. Starting a process runs it on the
+    host, which no profile permits, so the start action is refused and the
+    handle actions are left alone. *)
 
 (** RFC-0234 — [handle_masc_schedule_with_outcome] is the descriptor-projection
     cluster handler for [masc_schedule_*] tools. *)

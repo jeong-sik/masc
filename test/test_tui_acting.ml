@@ -165,6 +165,28 @@ let test_turns_do_not_readmit_what_the_scope_hides () =
     ]
     (List.map text rows)
 
+(* Telemetry is a quiet member: it may refresh a chunk that exists, but a
+   keeper the feed knows nothing else about must not gain a ghost
+   [turn ? | running] row from it (#32208, live capture 2026-09-01). *)
+let test_telemetry_alone_conjures_no_turn () =
+  let events_oldest_first =
+    [ agent_core ~kind:Observer.Telemetry "analyst" ]
+  in
+  check (list string) "no rows from telemetry alone" []
+    (List.map text
+       (Acting.chunk_rows ~traces:[] (entries_of events_oldest_first)))
+
+let test_telemetry_refreshes_but_never_duplicates_a_turn () =
+  let events_oldest_first =
+    [ agent_core ~kind:Observer.Turn_ready ~turn:7 "analyst"
+    ; agent_core ~kind:Observer.Telemetry "analyst"
+    ]
+  in
+  check (list string) "still exactly the one turn row"
+    [ "\xe2\x96\xb6 analyst turn 7 | running" ]
+    (List.map text
+       (Acting.chunk_rows ~traces:[] (entries_of events_oldest_first)))
+
 (* A running turn names what it is doing right now: the call alone puts the
    tool on screen, before any return or ledger row exists. *)
 let test_a_running_turn_names_its_in_flight_call () =
@@ -536,6 +558,10 @@ let () =
             test_turns_pass_non_lifecycle_rows_through
         ; test_case "turns do not readmit what the scope hides" `Quick
             test_turns_do_not_readmit_what_the_scope_hides
+        ; test_case "telemetry alone conjures no turn" `Quick
+            test_telemetry_alone_conjures_no_turn
+        ; test_case "telemetry refreshes but never duplicates a turn" `Quick
+            test_telemetry_refreshes_but_never_duplicates_a_turn
         ; test_case "turns fall back to the wire when the ledger is silent"
             `Quick test_turns_fall_back_to_the_wire_when_the_ledger_is_silent
         ] )

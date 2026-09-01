@@ -483,6 +483,51 @@ let test_readonly_execute_omitted_cwd_does_not_create_write_root () =
       (Sys.file_exists playground)
 
 
+(* Containment held for the read tools and did not hold for spawn: it ran
+   [Eio.Process.spawn] on the host whatever profile the keeper was declared
+   under. Measured 2026-09-01 -- a [remote_ssh] keeper built and ran OCaml on
+   the host while its endpoint container sat empty.
+
+   Every profile has to refuse, so every profile is named. If a new one is
+   added, the exhaustive match inside the gate stops compiling and this list
+   is where the answer gets recorded. *)
+let test_spawn_start_is_refused_under_every_profile () =
+  List.iter
+    (fun (profile, label) ->
+       let result =
+         Masc.Keeper_tool_in_process_runtime.spawn_outside_boundary
+           ~name:"keeper_spawn"
+           ~profile
+       in
+       let payload = result.Masc.Keeper_tool_execution.raw_output in
+       let refused =
+         match result.Masc.Keeper_tool_execution.disposition with
+         | Tool_result.Failed _ -> true
+         | Tool_result.Completed _ | Tool_result.Deferred _ -> false
+       in
+       Alcotest.(check bool)
+         (Printf.sprintf "%s refuses to start a process" label)
+         true
+         refused;
+       Alcotest.(check bool)
+         (Printf.sprintf "%s proves no process began" label)
+         true
+         (result.Masc.Keeper_tool_execution.failure_effect_disposition
+          = Tool_result.Proven_pre_effect);
+       Alcotest.(check bool)
+         (Printf.sprintf "%s names itself in the refusal" label)
+         true
+         (String_util.contains_substring payload label))
+    (List.map
+       (fun profile ->
+          ( profile
+          , Keeper_types_profile_sandbox.sandbox_profile_to_string profile ))
+       [ Keeper_types_profile_sandbox.Docker
+       ; Keeper_types_profile_sandbox.Micro_vm
+       ; Keeper_types_profile_sandbox.Remote_ssh
+       ])
+;;
+
 let () =
   Alcotest.run "Keeper_tool_search_files_containment"
     [
@@ -518,6 +563,9 @@ let () =
             `Quick test_container_file_path_is_not_rewritten;
           Alcotest.test_case "docker other container root stays blocked"
             `Quick test_docker_other_container_root_stays_blocked;
+          Alcotest.test_case
+            "spawn start is refused under every sandbox profile"
+            `Quick test_spawn_start_is_refused_under_every_profile;
           Alcotest.test_case
             "read-only Execute omitted cwd does not create write root"
             `Quick

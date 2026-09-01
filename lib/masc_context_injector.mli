@@ -36,8 +36,13 @@ val make : config:config -> unit -> Agent_core.Hooks.context_injector
     Thread-safe: uses {!Atomic} counters internally.
     Returns [Some injection] for every tool call (never [None]). *)
 
-val render_temporal_summary : ?now:float -> Agent_core.Context.t -> string option
-(** Render a one-line temporal summary from [Context.t].
+val render_temporal_summary : ?now:float -> Agent_core.Context.t -> string
+(** Render a one-line temporal summary from [Context.t]. Total: the
+    [time=] clock always renders (#32199 — a turn before any tool
+    execution used to carry no clock at all, and hand-typed prose
+    timestamps drifted by whole hours), while [elapsed=] appears only
+    when the [key_session_start] anchor exists and [tools=]/[last=]
+    only when the tool metadata keys exist.
 
     [time=] and [elapsed=] are recomputed from [now] (defaulting to
     {!Time_compat.now}) at render time — i.e. turn start — rather than
@@ -46,8 +51,9 @@ val render_temporal_summary : ?now:float -> Agent_core.Context.t -> string optio
     waking after an idle gap therefore sees the current wall clock, not a
     past tool-call timestamp. For current contexts, [elapsed] is
     [now - key_session_start] (seconds since the injector/session
-    started). A context without the current [key_session_start] anchor does
-    not render a temporal summary.
+    started). A retired-shape context (tools ran, no current anchor)
+    renders without [elapsed=] rather than repairing it from any legacy
+    key.
 
     [now] is a Unix timestamp in seconds; pass it to inject a fixed clock
     in tests.

@@ -2885,6 +2885,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_keeper_shell_tool_command)
+ (modules test_keeper_shell_tool_command)
+ (libraries alcotest masc))
+
+(test
  (name test_keeper_tool_read_window)
  (modules test_keeper_tool_read_window)
  (libraries masc_test_deps))

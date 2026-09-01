@@ -1,4 +1,7 @@
 name = "masc_board_post_get"
+
+# Reachable inside a keeper's shell line: `masc board post get <post_id>`.
+shell_command = "board post get"
 description = """
 Read one existing board post by exact post_id. Comments are paginated by \
 default; use comment_offset and comment_limit to continue through long \

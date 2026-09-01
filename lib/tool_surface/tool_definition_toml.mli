@@ -59,6 +59,10 @@ type loaded =
   ; help : help option
   ; loading : loading
     (** From the file's [defer_loading] key; [Always_loaded] when absent. *)
+  ; shell_command : string list option
+    (** From the file's [shell_command] key, stored word-split.  The
+        sub-command path this tool answers to inside a keeper's shell line
+        (RFC tools-as-shell-commands); absent means no shell form. *)
   }
 (** One decoded tool definition. [schema] is the canonical schema published
     to MCP clients; [keeper_projection], when the file declares a

@@ -1,4 +1,7 @@
 name = "masc_board_list"
+
+# Reachable inside a keeper's shell line: `masc board list`.
+shell_command = "board list"
 description = """
 List MASC internal board posts and return post_id values for follow-up \
 masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use this when \

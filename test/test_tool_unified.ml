@@ -1,6 +1,7 @@
 (** Tests for Tool_unified — unified tool query interface. *)
 
 module Tool_unified = Masc.Tool_unified
+module Keeper_tool_descriptor = Masc.Keeper_tool_descriptor
 module Tool_catalog = Tool_catalog
 module Tool_dispatch = Tool_dispatch
 module Tool_registry = Tool_registry
@@ -95,5 +96,76 @@ let () =
                     check int "top count" 2
                       (first |> member "call_count" |> to_int)
                   | [] -> fail "expected one top tool"));
+          test_case "every row carries the join key" `Quick (fun () ->
+              (* The counters are keyed by the internal name, which is the one
+                 name a request never contains. Without the public names beside
+                 it a count cannot be lined up against the tool schemas a turn
+                 carried, which is the join the schema budget is decided on. *)
+              let report = Tool_unified.summary_report () in
+              let open Yojson.Safe.Util in
+              List.iter
+                (fun key ->
+                  List.iter
+                    (fun row ->
+                      let _ = row |> member "name" |> to_string in
+                      let _ = row |> member "public_names" |> to_list in
+                      ())
+                    (report |> member key |> to_list))
+                [ "top_20"; "by_tool"; "never_called" ]);
+          test_case "the report carries the whole distribution" `Quick (fun () ->
+              (* Deciding which schemas earn their place in every request needs
+                 the whole distribution, not its head. [top_20] stays the head
+                 of [by_tool] for readers that only want the busiest tools. *)
+              let report = Tool_unified.summary_report () in
+              let open Yojson.Safe.Util in
+              let by_tool = report |> member "by_tool" |> to_list in
+              let top_20 = report |> member "top_20" |> to_list in
+              check int "by_tool covers every called tool"
+                (report |> member "distinct_tools_called" |> to_int)
+                (List.length by_tool);
+              check bool "top_20 is no longer than by_tool" true
+                (List.length top_20 <= List.length by_tool);
+              let name row = row |> member "name" |> to_string in
+              let rec prefix short long =
+                match short, long with
+                | [], _ -> true
+                | a :: rest_a, b :: rest_b ->
+                  String.equal (name a) (name b) && prefix rest_a rest_b
+                | _ :: _, [] -> false
+              in
+              check bool "top_20 is the head of by_tool" true
+                (prefix top_20 by_tool);
+              check int "never_called names match their count"
+                (report |> member "never_called_count" |> to_int)
+                (report |> member "never_called" |> to_list |> List.length));
+          test_case "a counted tool names what the model calls it" `Quick
+            (fun () ->
+              Tool_registry.reset ();
+              Tool_metrics.clear ();
+              Fun.protect
+                ~finally:(fun () ->
+                  Tool_registry.reset ();
+                  Tool_metrics.clear ())
+                (fun () ->
+                  Tool_metrics.record
+                    (make_completed ~name:"tool_execute" ~duration_ms:5.0);
+                  let report = Tool_unified.summary_report () in
+                  let open Yojson.Safe.Util in
+                  match report |> member "by_tool" |> to_list with
+                  | [ row ] ->
+                    check string "counted under the internal name" "tool_execute"
+                      (row |> member "name" |> to_string);
+                    (* The descriptors are a static list in the module, so this
+                       holds in any process and the assertion cannot pass by
+                       finding nothing. A tool the model can call must name
+                       itself; an empty list here would mean the join key is
+                       absent exactly where it is needed. *)
+                    let public =
+                      List.map to_string (row |> member "public_names" |> to_list)
+                    in
+                    check (list string) "the name the model calls it"
+                      [ "Execute" ] public
+                  | rows ->
+                    failf "expected one counted tool, got %d" (List.length rows)));
         ] );
     ]

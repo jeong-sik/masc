@@ -832,6 +832,49 @@ let load_schedules ~(host : string) ~(port : int) :
   | Error err -> Error ("schedule load failed: " ^ err)
   | Ok json -> decode_schedule_snapshot json
 
+let decode_schedule_wake json =
+  let* swk_status = required_string_field json "status" in
+  let* swk_started_at_iso = optional_string_field json "started_at_iso" in
+  let* swk_finished_at_iso = optional_string_field json "finished_at_iso" in
+  let* swk_error = optional_string_field json "error" in
+  Ok { swk_status; swk_started_at_iso; swk_finished_at_iso; swk_error }
+
+(* The lookup answers four ways and only one of them carries a schedule. The
+   other three are reported as their own error text rather than as an empty
+   history, because "this schedule has never woken" and "the store could not
+   be read" are the two readings this pane exists to keep apart. *)
+let decode_schedule_wake_history json =
+  let* status = required_string_field json "status" in
+  let* swh_schedule_id = required_string_field json "schedule_id" in
+  match status with
+  | "found" ->
+      let* wake_jsons = required_list_field json "wakes" in
+      let* swh_wakes = decode_list "wakes" decode_schedule_wake wake_jsons in
+      (* [wake_count] rides the wire for a JSON reader; the pane counts the
+         list it is about to draw, so the two cannot drift apart on screen. *)
+      let* swh_retention_per_schedule =
+        required_int_field json "wake_retention_per_schedule"
+      in
+      Ok { swh_schedule_id; swh_wakes; swh_retention_per_schedule }
+  | "not_found" ->
+      Error (Printf.sprintf "schedule %s is no longer in the store" swh_schedule_id)
+  | "invalid_id" -> Error "the schedule lookup was asked for an empty id"
+  | "unavailable" ->
+      let reason =
+        match optional_string_field json "reason" with
+        | Ok (Some reason) -> reason
+        | Ok None | Error _ -> "no reason given"
+      in
+      Error ("schedule lookup unavailable: " ^ reason)
+  | other -> Error ("unknown schedule lookup status: " ^ other)
+
+(** Load one schedule's wake history from the exact lookup. *)
+let load_schedule_wake_history ~(host : string) ~(port : int)
+    ~(schedule_id : string) : (schedule_wake_history, string) result =
+  match fetch_schedule_detail ~host ~port ~schedule_id with
+  | Error err -> Error ("schedule detail load failed: " ^ err)
+  | Ok json -> decode_schedule_wake_history json
+
 (** Load board post list from /api/v1/board *)
 let load_board_list ~(host : string) ~(port : int)
     ~(sort_by : string) ~(hearth : string option) :

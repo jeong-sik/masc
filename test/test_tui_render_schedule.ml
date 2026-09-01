@@ -645,6 +645,32 @@ let test_capped_page_cannot_report_an_empty_store () =
        ~total:(Some 12)
      = Schedule.Store_has_none)
 
+(* The pane had one shape when one wake was all it could get. Four readings
+   share the block now, and three of them are not "never woke": a load still in
+   flight, a load that failed, and a schedule with attempts to list. Merging any
+   of them into the empty case is how a pane reports what it has not seen. *)
+let test_wake_readings_stay_four_separate_answers () =
+  check bool "a load in flight is not an empty history" true
+    (Schedule.classify_wake_reading ~history_error:None ~history:None
+     = Schedule.Wake_last_only);
+  check bool "a failed load is not an empty history either" true
+    (Schedule.classify_wake_reading ~history_error:(Some "store unreadable")
+       ~history:None
+     = Schedule.Wake_history_failed "store unreadable");
+  check bool "an answered lookup with no wakes is" true
+    (Schedule.classify_wake_reading ~history_error:None ~history:(Some (0, 32))
+     = Schedule.Wake_never);
+  check bool "and attempts carry their ceiling" true
+    (Schedule.classify_wake_reading ~history_error:None ~history:(Some (3, 32))
+     = Schedule.Wake_history { count = 3; retention = 32 });
+  (* An error outranks a stale list: the pane must not draw the previous
+     schedule's attempts under a failure. *)
+  check bool "an error outranks a list already in hand" true
+    (Schedule.classify_wake_reading ~history_error:(Some "boom")
+       ~history:(Some (3, 32))
+     = Schedule.Wake_history_failed "boom")
+;;
+
 (* Slack reaches the name and the runtime before the task id, and both stop at
    a cap so one very wide terminal does not spend eighty cells on a model
    name. *)
@@ -723,5 +749,7 @@ let () =
             test_planning_window_rides_the_active_stop
         ; test_case "a capped page cannot report an empty store" `Quick
             test_capped_page_cannot_report_an_empty_store
+        ; test_case "wake readings stay four separate answers" `Quick
+            test_wake_readings_stay_four_separate_answers
         ] )
     ]

@@ -735,6 +735,78 @@ let test_terminal_wakes_are_bounded_per_schedule () =
   check int "quiet schedule keeps every wake" 3 (for_schedule "quiet-1")
 ;;
 
+(* The dashboard read one wake of the up-to-32 the store keeps, because the
+   only accessor returned one. A reader of a schedule's past needs the list and
+   needs it scoped: a replaced definition gets a fresh instance id, and its
+   wakes are not evidence for the replacement. *)
+let test_wake_list_is_scoped_to_its_instance_and_newest_first () =
+  with_workspace
+  @@ fun config ->
+  let req =
+    make_request ~schedule_id:"loop-2" ~recurrence:(Interval { interval_sec = 60 }) ()
+  in
+  ignore (insert_ok config req);
+  let rec turn n now =
+    if n <= 0
+    then ()
+    else (
+      (match refresh_due config ~now with
+       | Ok _ -> ()
+       | Error err -> fail (store_error_to_string err));
+      (match start_due_candidate config ~now:(now +. 1.0) ~schedule_id:"loop-2" with
+       | Ok _ -> ()
+       | Error err -> fail (store_error_to_string err));
+      (match accept_running config ~now:(now +. 2.0) ~schedule_id:"loop-2" () with
+       | Ok _ -> ()
+       | Error err -> fail (store_error_to_string err));
+      turn (n - 1) (now +. 60.0))
+  in
+  turn 3 201.0;
+  let state = read_state config in
+  let stored =
+    match
+      List.find_opt
+        (fun (r : Schedule_domain.schedule_request) ->
+           String.equal r.schedule_id "loop-2")
+        state.schedules
+    with
+    | Some r -> r
+    | None -> fail "the schedule under test disappeared"
+  in
+  let wakes =
+    Schedule_store.wakes_for_schedule_instance
+      state
+      ~schedule_instance_id:stored.schedule_instance_id
+      ~schedule_id:"loop-2"
+  in
+  check int "every occurrence of this instance is listed" 3 (List.length wakes);
+  let started = List.map (fun (w : wake_record) -> w.started_at) wakes in
+  check (list (float 0.001)) "newest first"
+    (List.sort (fun a b -> Float.compare b a) started)
+    started;
+  (match
+     ( Schedule_store.last_wake_for_schedule_instance
+         state
+         ~schedule_instance_id:stored.schedule_instance_id
+         ~schedule_id:"loop-2"
+     , wakes )
+   with
+   | Some head, first :: _ ->
+     check (float 0.001) "last_wake is the head of the list" first.started_at
+       head.started_at
+   | Some _, [] | None, _ -> fail "last_wake and the wake list disagree");
+  let other_instance =
+    Schedule_store.wakes_for_schedule_instance
+      state
+      ~schedule_instance_id:"an-instance-that-never-ran"
+      ~schedule_id:"loop-2"
+  in
+  check int "a different instance borrows none of them" 0
+    (List.length other_instance);
+  check bool "the retention ceiling is a number a reader can see" true
+    (Schedule_store.terminal_wakes_retained_per_schedule > 0)
+;;
+
 let test_recurring_occurrences_remain_dispatchable () =
   with_workspace
   @@ fun config ->
@@ -1250,6 +1322,8 @@ let () =
             test_recurring_occurrences_remain_dispatchable;
           test_case "terminal wakes are bounded per schedule" `Quick
             test_terminal_wakes_are_bounded_per_schedule;
+          test_case "wake list is scoped to its instance, newest first" `Quick
+            test_wake_list_is_scoped_to_its_instance_and_newest_first;
           test_case "prune deletes terminal request and wake receipt"
             `Quick test_prune_deletes_terminal_request_and_wake_receipt;
           test_case

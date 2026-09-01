@@ -1523,6 +1523,11 @@ type async_msg =
   | Board_vote_done of (string, string) result
   | Goal_transition_done of (string, string) result
   | Schedules_loaded of (schedule_snapshot, string) result
+  (* Carries the schedule it was asked about: the reader can step to the next
+     row or close the detail while a load is in flight, and an answer that did
+     not say whose it was would be filed under whoever is open when it lands. *)
+  | Schedule_wake_history_loaded of
+      string * (schedule_wake_history, string) result
   | System_logs_loaded of (system_log_snapshot, string) result
   | Schedule_cancel_done of (string, string) result
   (* (message, noop): [noop = true] says the verdict already stood. *)
@@ -2227,6 +2232,31 @@ let cycle_tools_keeper state ~mailbox ~delta =
     launch_tools_load state ~mailbox
   end
 ;;
+
+let launch_schedule_wake_history_load state ~mailbox ~schedule_id =
+  match state.schedule_wake_history_inflight with
+  | Some inflight when String.equal inflight schedule_id -> ()
+  | Some _ | None ->
+      state.schedule_wake_history_inflight <- Some schedule_id;
+      let host = server_peer_host in
+      let port = state.port in
+      let run () =
+        let result =
+          try Masc_tui_loader.load_schedule_wake_history ~host ~port ~schedule_id with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Schedule_wake_history_loaded (schedule_id, result))
+      in
+      (match Eio_context.get_switch_opt () with
+       | Some sw ->
+           Eio.Fiber.fork_daemon ~sw (fun () ->
+               run ();
+               `Stop_daemon)
+       | None ->
+           enqueue_async mailbox
+             (Schedule_wake_history_loaded
+                (schedule_id, Error "Eio switch is unavailable")))
 
 let launch_schedules_load state ~mailbox =
   let host = server_peer_host in
@@ -7000,14 +7030,22 @@ let open_planning_detail state ~mailbox =
       state.goal_timeline <- None;
       launch_goal_timeline_load state ~mailbox g.pg_id
 
-let open_schedule_detail state =
+(* The list row carries one wake; the whole history comes from the exact
+   lookup, so opening a detail asks for it. Clearing the previous schedule's
+   history first is what stops the pane showing one schedule's attempts under
+   another's name while the answer is in flight. *)
+let open_schedule_detail state ~mailbox =
   match state.schedules with
   | None -> ()
   | Some snapshot ->
       Option.iter
         (fun row ->
           state.schedule_detail_id <- Some row.sch_schedule_id;
-          state.schedule_scroll <- 0)
+          state.schedule_scroll <- 0;
+          state.schedule_wake_history <- None;
+          state.schedule_wake_history_error <- None;
+          launch_schedule_wake_history_load state ~mailbox
+            ~schedule_id:row.sch_schedule_id)
         (List.nth_opt snapshot.scs_rows state.schedule_cursor)
 
 let open_verification_detail state ~mailbox =
@@ -8164,6 +8202,29 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                state.schedule_scroll <- 0
            | Some _ | None -> ())
       | Error err -> state.schedules_error <- Some err)
+  | Schedule_wake_history_loaded (schedule_id, result) ->
+      (* A history that arrived for a row the reader has left is not this
+         pane's answer; dropping it is what keeps one schedule's attempts from
+         being read as another's. *)
+      if
+        Option.equal String.equal state.schedule_detail_id (Some schedule_id)
+      then begin
+        (match state.schedule_wake_history_inflight with
+         | Some inflight when String.equal inflight schedule_id ->
+             state.schedule_wake_history_inflight <- None
+         | Some _ | None -> ());
+        match result with
+        | Ok history ->
+            state.schedule_wake_history <- Some history;
+            state.schedule_wake_history_error <- None
+        | Error err ->
+            state.schedule_wake_history <- None;
+            state.schedule_wake_history_error <- Some (schedule_id, err)
+      end
+      else if
+        Option.equal String.equal state.schedule_wake_history_inflight
+          (Some schedule_id)
+      then state.schedule_wake_history_inflight <- None
   | Schedule_cancel_done result -> (
       match result with
       | Ok message ->
@@ -11522,7 +11583,8 @@ and is loaded on demand through keeper_skill.
              ~cursor:state.schedule_cursor
              ~delta:(if bracket = "]" then 1 else -1)
              ~set_cursor:(fun n -> state.schedule_cursor <- n)
-             ~reopen:(fun () -> open_schedule_detail state)
+             ~reopen:(fun () ->
+               open_schedule_detail state ~mailbox:async_messages)
        | Some (("[" | "]") as bracket)
          when state.view = Verification
               && Option.is_some state.verification_detail_request_id ->
@@ -12148,7 +12210,11 @@ and is loaded on demand through keeper_skill.
                        goal_id
                  | Board, Some post_id -> state.board_mode <- Board_read post_id
                  | Schedules, Some schedule_id ->
-                     state.schedule_detail_id <- Some schedule_id
+                     state.schedule_detail_id <- Some schedule_id;
+                     state.schedule_wake_history <- None;
+                     state.schedule_wake_history_error <- None;
+                     launch_schedule_wake_history_load state
+                       ~mailbox:async_messages ~schedule_id
                  | Fusion, Some run_id -> state.fusion_mode <- Fusion_detail run_id
                  | Keepers _, Some keeper_name ->
                      (* The roster is a cursor, not an id, so this puts the
@@ -13627,7 +13693,7 @@ and is loaded on demand through keeper_skill.
                  | Board_read _ | Board_compose -> ())
             | Schedules ->
                 (match state.schedule_detail_id with
-                 | None -> open_schedule_detail state
+                 | None -> open_schedule_detail state ~mailbox:async_messages
                  | Some _ -> ())
             | Verification ->
                 (match state.verification_detail_request_id with

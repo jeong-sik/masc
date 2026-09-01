@@ -496,6 +496,25 @@ type schedule_snapshot = {
   scs_rows: schedule_row list;
 }
 
+(** One recorded wake attempt of a schedule instance. The list surface carries
+    only the newest of these on its row; the whole list arrives from the exact
+    schedule lookup. *)
+type schedule_wake = {
+  swk_status: string;
+  swk_started_at_iso: string option;
+  swk_finished_at_iso: string option;
+  swk_error: string option;
+}
+
+(** The exact-lookup wake history for one schedule instance, newest first.
+    [swh_retention_per_schedule] is the store's own ceiling on terminal wakes,
+    which is what stops [swh_count] from reading as a complete history. *)
+type schedule_wake_history = {
+  swh_schedule_id: string;
+  swh_wakes: schedule_wake list;
+  swh_retention_per_schedule: int;
+}
+
 (** Board surface sub-mode *)
 type board_mode =
   | Board_list
@@ -1964,6 +1983,12 @@ type state = {
   mutable schedule_cursor: int;
   mutable schedule_scroll: int;
   mutable schedule_detail_id: string option;
+  (* The wake history of whichever schedule the detail is open on. Carries the
+     schedule id it was asked about so a late answer for a row the reader has
+     already left is dropped rather than filed under the new one. *)
+  mutable schedule_wake_history: schedule_wake_history option;
+  mutable schedule_wake_history_error: (string * string) option;
+  mutable schedule_wake_history_inflight: string option;
   (* A cancel armed for a second keypress: which schedule. The cursor can move
      between the two presses, so the schedule id is captured at arm time and a
      press on a different row re-arms for that row. *)
@@ -2603,6 +2628,9 @@ let create_state
   schedule_cursor = 0;
   schedule_scroll = 0;
   schedule_detail_id = None;
+  schedule_wake_history = None;
+  schedule_wake_history_error = None;
+  schedule_wake_history_inflight = None;
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
   lanes = None;

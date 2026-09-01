@@ -1383,6 +1383,16 @@ let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojso
 let fetch_schedules ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/scheduled-automation"
 
+(** Fetch one schedule's exact projection, which carries its wake history. The
+    aggregate above sends one wake per row; this route reads the same ledger
+    for a single [schedule_id] and is not on the aggregate's shared cache. *)
+let fetch_schedule_detail ~(host : string) ~(port : int) ~(schedule_id : string) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/dashboard/scheduled-automation?schedule_id=%s"
+         (percent_encode_query_value schedule_id))
+
 (** Create or atomically modify a schedule from the JSON form the TUI handed
     to [$EDITOR]. The server validates each against its canonical Tool schema;
     update requires [schedule_id] and refuses running or terminal rows. *)

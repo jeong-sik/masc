@@ -479,3 +479,19 @@ type keeper_schedule_absence =
 
 let classify_keeper_schedule_absence ~truncated ~shown ~total =
   if truncated then Page_capped { shown; total } else Store_has_none
+
+(* Which wake reading the schedule detail has. The pane had one shape because
+   only one wake was ever projected; with the history arriving separately it has
+   four, and three of them are not "this schedule never woke". *)
+type wake_reading =
+  | Wake_history of { count : int; retention : int }
+  | Wake_never
+  | Wake_last_only
+  | Wake_history_failed of string
+
+let classify_wake_reading ~history_error ~history =
+  match history_error, history with
+  | Some err, _ -> Wake_history_failed err
+  | None, None -> Wake_last_only
+  | None, Some (0, _) -> Wake_never
+  | None, Some (count, retention) -> Wake_history { count; retention }

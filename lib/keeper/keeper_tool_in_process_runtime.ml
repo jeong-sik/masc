@@ -1719,11 +1719,55 @@ let handle_keeper_webmcp_with_outcome ~name ~args =
   |> dispatch_option_to_execution ?failure_effect_disposition ~name
 ;;
 
-let handle_keeper_spawn_with_outcome ~name ~args =
+(* RFC spawn-a-process-that-outlives-the-call §3.1: a backgrounded command
+   "crosses the same gate as any other: path scope, redirect policy, and the
+   sandbox target all apply before a process exists". None of that happened.
+   The handler never received [meta], so it could not read the profile even to
+   refuse, and [Tool_spawn.dispatch] reached [Eio.Process.spawn] directly --
+   on the host, in the server's own cwd, whatever boundary the keeper was
+   declared under.
+
+   Measured 2026-09-01: a [remote_ssh] keeper ran
+   [bash -c "cd /tmp/masc860 && dune build ./tmp_probe/probe_load.exe"] on the
+   host while its endpoint container held no processes and an empty
+   playground. The tool's own description says "No shell" -- true of argv, and
+   irrelevant once the program named is bash.
+
+   Every profile is a boundary: [Local] went in #32078 because "execution
+   outside a boundary is not a profile the fleet offers"
+   ([Keeper_sandbox_config]), so there is no arm to allow this under. The
+   match is exhaustive rather than [_ ->] so a profile added later has to
+   answer this question instead of inheriting an answer. *)
+let spawn_outside_boundary ~name ~(profile : sandbox_profile) =
+  let profile_name =
+    Keeper_types_profile_sandbox.sandbox_profile_to_string profile
+  in
+  let detail =
+    match profile with
+    | Docker | Micro_vm | Remote_ssh ->
+      Printf.sprintf
+        "spawn runs on the host, so it cannot start a process for a keeper \
+         under the %s boundary. Run the command with Execute, which crosses \
+         it."
+        profile_name
+  in
+  Keeper_tool_execution.failure
+    ~class_:Tool_result.Policy_rejection
+    ~effect_disposition:Tool_result.Proven_pre_effect
+    (Yojson.Safe.to_string
+       (`Assoc
+           [ "error", `String detail
+           ; "tool", `String name
+           ; "sandbox_profile", `String profile_name
+           ]))
+;;
+
+let handle_keeper_spawn_with_outcome ~(meta : keeper_meta) ~name ~args =
   match Spawn_turn_registry.get_opt (), Eio_context.get_switch_opt () with
   | Some registry, Some sw ->
+    let definition = Tool_schemas_spawn.find_definition name in
     let failure_effect_disposition =
-      match Tool_schemas_spawn.find_definition name with
+      match definition with
       | Some { action = Tool_schemas_spawn.Start; _ } ->
         Tool_result.Effect_outcome_unknown
       | Some
@@ -1736,8 +1780,22 @@ let handle_keeper_spawn_with_outcome ~name ~args =
         Tool_result.Proven_pre_effect
       | None -> Tool_result.Effect_outcome_unknown
     in
-    Tool_spawn.dispatch { Tool_spawn.registry; sw } ~name ~args
-    |> dispatch_option_to_execution ~failure_effect_disposition ~name
+    (* Only [Start] creates a process, so only [Start] is gated. [Read],
+       [Wait] and [Stop] address handles that already exist and cross nothing;
+       refusing them too would hide handles a caller still has to reap. *)
+    (match definition with
+     | Some { action = Tool_schemas_spawn.Start; _ } ->
+       spawn_outside_boundary ~name ~profile:meta.sandbox_profile
+     | Some
+         { action =
+             ( Tool_schemas_spawn.Read
+             | Tool_schemas_spawn.Wait
+             | Tool_schemas_spawn.Stop )
+         ; _
+         }
+     | None ->
+       Tool_spawn.dispatch { Tool_spawn.registry; sw } ~name ~args
+       |> dispatch_option_to_execution ~failure_effect_disposition ~name)
   | (Some _ | None), (Some _ | None) ->
     Keeper_tool_execution.failure
       (Yojson.Safe.to_string

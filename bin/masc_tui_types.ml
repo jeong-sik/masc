@@ -1698,10 +1698,19 @@ type inflight_phase =
   | Turn_streaming
   | Turn_reconciling
 
+type inflight_origin =
+  | Direct_submission
+  | Promoted_queue of
+      { submission_seq : int
+      ; intent : Masc_tui_keeper_chat_queue.intent
+      ; causal_parent_request_id : string option
+      }
+
 type inflight =
   { sent_request : Masc_tui_keeper_chat_projection.request
   ; submitted_at : float
   ; sent_at : float
+  ; origin : inflight_origin
   ; mutable phase : inflight_phase
   ; live : Masc_tui_keeper_chat_transcript.t
   }
@@ -2643,6 +2652,12 @@ let live_for_keeper state keeper_name =
   Option.map (fun entry -> entry.live) (inflight_for_keeper state keeper_name)
 ;;
 
+let promoted_inflight_for_keeper state keeper_name =
+  match inflight_for_keeper state keeper_name with
+  | Some ({ origin = Promoted_queue _; _ } as entry) -> Some entry
+  | Some { origin = Direct_submission; _ } | None -> None
+;;
+
 let send_disposition state ~keeper_name : send_disposition =
   Masc_tui_send_disposition.of_state
     ~inflight:
@@ -3157,15 +3172,27 @@ let empty_page_of ~snapshot ~error =
   | Some _, None -> Page_empty
 
 let chat_rows_for (state : state) keeper_name =
+  let promoted_request_id =
+    Option.map
+      (fun entry -> entry.sent_request.request_id)
+      (promoted_inflight_for_keeper state keeper_name)
+  in
+  let not_promoted row =
+    not
+      (Option.exists
+         (String.equal row.me_request_id)
+         promoted_request_id)
+  in
   let loaded =
     match state.msg_loaded_keeper with
     | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
-        state.msg_loaded
+        List.filter not_promoted state.msg_loaded
     | Some _ | None -> []
   in
   let session =
     List.filter
-      (fun entry -> String.equal entry.me_keeper_name keeper_name)
+      (fun entry ->
+        String.equal entry.me_keeper_name keeper_name && not_promoted entry)
       state.msg_history
   in
   let queued_request_ids =
@@ -3851,6 +3878,11 @@ let keeper_message_status_rows (state : state) =
          List.length
            (Masc_tui_keeper_chat_transcript.status_rows
               ~now:(Unix.gettimeofday ()) live))
+  + (match state.msg_target_keeper_name with
+     | Some keeper_name
+       when Option.is_some (promoted_inflight_for_keeper state keeper_name) ->
+         2
+     | Some _ | None -> 0)
   + (match state.msg_target_keeper_name with
      | Some keeper_name ->
          Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued

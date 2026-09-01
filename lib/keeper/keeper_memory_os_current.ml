@@ -81,6 +81,11 @@ type journal_entry =
       ; snapshot_present : bool
       ; cadence_deferred : bool
       }
+  | Journal_quarantined of
+      { recorded_at : float
+      ; rejection : string
+      ; rejected_path : string
+      }
 
 let path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ suffix)
@@ -766,6 +771,7 @@ let librarian_failure_kind_of_string = function
 
 let committed_outcome = "committed"
 let failed_outcome = "failed"
+let quarantined_outcome = "quarantined"
 
 (* [dropped_statements = None] means the writer makes no drop-reason
    statements (explicit keeper writes, upserts); [Some list] is the
@@ -849,6 +855,28 @@ let append_librarian_failure
        ~detail
        ~snapshot_present
        ~cadence_deferred)
+;;
+
+(* A snapshot this build cannot decode is durable state no producer can leave:
+   every writer reads before it writes, so one undecodable file wedges the
+   keeper's memory permanently. The bytes move aside rather than being deleted
+   and this line says why, so a build that can read them again still has both.
+   Recorded on its own outcome because it is neither a pass that committed nor
+   a pass that failed. *)
+let journal_quarantine_to_json ~now ~rejection ~rejected_path =
+  `Assoc
+    [ "outcome", `String quarantined_outcome
+    ; "recorded_at", `Float now
+    ; "rejection", `String rejection
+    ; "rejected_path", `String rejected_path
+    ]
+;;
+
+let append_snapshot_quarantine ~keepers_dir ~keeper_id ~now ~rejection ~rejected_path =
+  append_journal_line
+    ~keepers_dir
+    ~keeper_id
+    (journal_quarantine_to_json ~now ~rejection ~rejected_path)
 ;;
 
 let committed_entry_of_fields fields =
@@ -963,6 +991,27 @@ let failed_entry_of_fields fields =
       "failed line is missing recorded_at/trace_id/kind/detail/snapshot_present/cadence_deferred"
 ;;
 
+let quarantined_entry_of_fields fields =
+  if
+    not
+      (exact_object_fields
+         [ "outcome"; "recorded_at"; "rejection"; "rejected_path" ]
+         fields)
+  then Error "quarantined line has unknown, duplicate, or missing fields"
+  else
+    match
+      ( List.assoc_opt "recorded_at" fields
+      , List.assoc_opt "rejection" fields
+      , List.assoc_opt "rejected_path" fields )
+    with
+    | ( Some (`Float recorded_at)
+      , Some (`String rejection)
+      , Some (`String rejected_path) ) ->
+      Ok (Journal_quarantined { recorded_at; rejection; rejected_path })
+    | _ ->
+      Error "quarantined line is missing recorded_at/rejection/rejected_path"
+;;
+
 let journal_entry_of_json = function
   | `Assoc fields ->
     (match List.assoc_opt "outcome" fields with
@@ -970,6 +1019,8 @@ let journal_entry_of_json = function
        committed_entry_of_fields fields
      | Some (`String outcome) when String.equal outcome failed_outcome ->
        failed_entry_of_fields fields
+     | Some (`String outcome) when String.equal outcome quarantined_outcome ->
+       quarantined_entry_of_fields fields
      | Some (`String outcome) ->
        Error (Printf.sprintf "journal line has an unknown outcome %S" outcome)
      | Some _ -> Error "journal line has a non-string outcome"
@@ -1012,6 +1063,7 @@ let update_locked_with_error
       ~store_error
       ~keepers_dir
       ~keeper_id
+      ~now
       build
   =
   let dropped_statements_are_valid =
@@ -1041,10 +1093,47 @@ let update_locked_with_error
            match Fs_compat.load_file_opt snapshot_path with
            | None -> Ok None
            | Some content ->
-             let+ snapshot =
-               parse snapshot_path content |> Result.map_error store_error
-             in
-             Some snapshot
+             (match parse snapshot_path content with
+              | Ok snapshot -> Ok (Some snapshot)
+              | Error rejection ->
+                (* Every writer reads before it writes, so a snapshot this
+                   build cannot decode is durable state no producer can leave:
+                   one undecodable file wedged eight live keepers for good on
+                   2026-09-01. #32239 declared a hard cut and left the old
+                   files in place, and that is the half that was missing — a
+                   hard cut is finished when the old state is gone.
+
+                   The bytes move aside instead of being overwritten by the
+                   commit below, because recovering by destroying the only copy
+                   of the rejected state is not recovery. *)
+                let rejected_path =
+                  Printf.sprintf "%s.rejected-%.0f" snapshot_path now
+                in
+                (match Fs_compat.rename snapshot_path rejected_path with
+                 | () ->
+                   append_snapshot_quarantine
+                     ~keepers_dir
+                     ~keeper_id
+                     ~now
+                     ~rejection
+                     ~rejected_path;
+                   Log.Keeper.warn
+                     ~keeper_name:keeper_id
+                     "memory os snapshot quarantined rejected_path=%s rejection=%s"
+                     rejected_path
+                     rejection;
+                   Ok None
+                 | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+                 | exception exn ->
+                   (* Failing here keeps the wedge, which is the lesser harm:
+                      the alternative overwrites the rejected bytes. *)
+                   Error
+                     (store_error
+                        (Printf.sprintf
+                           "current Memory OS snapshot could not be moved aside path=%s: %s (rejected: %s)"
+                           snapshot_path
+                           (Printexc.to_string exn)
+                           rejection))))
          in
          let* next = build previous in
          let content = Yojson.Safe.pretty_to_string (to_json next) ^ "\n" in
@@ -1070,13 +1159,14 @@ let update_locked_with_error
                    message)))))
 ;;
 
-let update_locked ?clock ?dropped_statements ~keepers_dir ~keeper_id build =
+let update_locked ?clock ?dropped_statements ~keepers_dir ~keeper_id ~now build =
   update_locked_with_error
     ?clock
     ?dropped_statements
     ~store_error:Fun.id
     ~keepers_dir
     ~keeper_id
+    ~now
     build
 ;;
 
@@ -1135,6 +1225,7 @@ let replace
     ?dropped_statements
     ~keepers_dir
     ~keeper_id
+    ~now
     (fun previous ->
     let observed_revision =
       Option.map (fun snapshot -> snapshot.revision) previous
@@ -1168,6 +1259,7 @@ let upsert_fact
     ~store_error:(fun detail -> Upsert_persistence_failed detail)
     ~keepers_dir
     ~keeper_id
+    ~now
     (fun previous ->
     let current_facts =
       match previous with
@@ -1261,6 +1353,7 @@ let retract_fact
       ~store_error:(fun detail -> Retract_persistence_failed detail)
       ~keepers_dir
       ~keeper_id
+      ~now
       (fun previous ->
       let current_facts =
         match previous with
@@ -1326,6 +1419,8 @@ let decoded_journal_entry_to_json = function
       ; "snapshot_present", `Bool snapshot_present
       ; "cadence_deferred", `Bool cadence_deferred
       ]
+  | Journal_quarantined { recorded_at; rejection; rejected_path } ->
+    journal_quarantine_to_json ~now:recorded_at ~rejection ~rejected_path
 ;;
 
 (* A line this build could not decode keeps its position and says why. Dropping

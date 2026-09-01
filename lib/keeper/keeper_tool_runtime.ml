@@ -110,7 +110,7 @@ let handle_filesystem ctx descriptor args =
 
 (* Shell IR mechanics live under the Execute owner; Grep workspace operations
    live under their own owner. Descriptor routing selects those owners here. *)
-let handle_shell_ir ctx descriptor args =
+let handle_shell_ir ~dispatch ctx descriptor args =
   match descriptor.Keeper_tool_descriptor.runtime_handler with
   | Tool_execute ->
       Some
@@ -124,7 +124,7 @@ let handle_shell_ir ctx descriptor args =
          ~shell_ir_rewrite:
            (Keeper_shell_tool_command.rewrite
               ~lookup:descriptor_for_internal
-              ~dispatch:(handle ctx))
+              ~dispatch)
          ~args
          ())
   | Tool_search_files ->
@@ -474,9 +474,14 @@ let handle_in_process ctx descriptor args =
   | Tool_write_file -> None
 ;;
 
-let handle ctx ~descriptor ~args =
+let rec handle ctx ~descriptor ~args =
   match descriptor.Keeper_tool_descriptor.executor with
   | Filesystem -> handle_filesystem ctx descriptor args
-  | Shell_ir -> handle_shell_ir ctx descriptor args
+  | Shell_ir ->
+    handle_shell_ir
+      ~dispatch:(fun ~descriptor ~args -> handle ctx ~descriptor ~args)
+      ctx
+      descriptor
+      args
   | In_process -> handle_in_process ctx descriptor args
 ;;

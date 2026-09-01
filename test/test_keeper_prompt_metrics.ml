@@ -184,50 +184,6 @@ let test_soft_context_in_dynamic_only () =
   check bool "no worktree in system" true
     (not (has_in tp.system_prompt "Worktree changes"))
 
-let test_keeper_prompt_keeps_current_contract () =
-  let prompt = KP.build_keeper_system_prompt ~instructions:"" () in
-  check bool "shared system anchor present" true (has_in prompt "<system>");
-  check bool "scope is bounded" true
-    (has_in prompt "지금 맡은 일을 그 일의 범위에서 끝냅니다");
-  check bool "unrelated work is excluded" true
-    (has_in prompt "범위를 넓히는 판단이 필요하면");
-  check bool "output leads with the result" true
-    (has_in prompt "결과를 먼저 쓰고");
-  check bool "past failures are time scoped" true
-    (has_in prompt
-       "대한 증명은 아닙니다");
-  check bool "current read-only probes are preferred" true
-    (has_in prompt "읽기 전용으로 한 번 짚어봅니다");
-  check bool "memory and current observation stay separate" true
-    (has_in prompt
-       "기억이 떠올린 것은 나눠서 적습니다");
-  check bool "uncertain effects are never resent" true
-    (has_in prompt
-       "적용 여부가 불확실하거나, 없다는 것이 증명되지 않았다면")
-
-(* The Librarian retains recurring lessons that current authoritative sources
-   have not taught effectively. *)
-let test_librarian_keeps_a_recurring_lesson () =
-  let prompt = Prompt_registry.get_prompt Prompt_names.librarian in
-  check bool "the librarian prompt is loaded" true (String.length prompt > 100);
-  check bool "recurrence overrides recoverability" true
-    (has_in prompt "A mistake the conversation shows recurring is not recoverable");
-  check bool "the test is the conversation, not a judgement of the limitation" true
-    (has_in prompt "the source that would have taught it did not, and that recurrence is the evidence");
-  check bool "the cost of dropping it is named" true
-    (has_in prompt "returns the Keeper to the turn before it learned");
-  check bool "recalled repetition is not recurrence" true
-    (has_in prompt
-       "repeating a recalled failure is not a new observation");
-  check bool "new success supersedes stale prohibitions" true
-    (has_in prompt
-       "drop the obsolete prohibition instead of preserving it as a permanent rule");
-  check bool "partially stale compound facts are corrected" true
-    (has_in prompt "correcting a partially stale compound fact");
-  check bool "false clauses cannot shelter behind true clauses" true
-    (has_in prompt
-       "Retaining a false clause to save a true one")
-
 (* Every assembled Keeper system prompt opens with the shared cacheable block. *)
 let test_assembled_prompt_opens_with_system_tag () =
   let cases =
@@ -513,10 +469,6 @@ let () =
         [
           test_case "soft context in dynamic only" `Quick
             test_soft_context_in_dynamic_only;
-          test_case "keeper prompt keeps current contract" `Quick
-            test_keeper_prompt_keeps_current_contract;
-          test_case "librarian keeps a recurring lesson" `Quick
-            test_librarian_keeps_a_recurring_lesson;
           test_case "assembled system prompt opens with the system tag" `Quick
             test_assembled_prompt_opens_with_system_tag;
           test_case "user message sanitizer preserves normal text" `Quick

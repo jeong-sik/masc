@@ -1201,7 +1201,10 @@ let tasks_list_task_item_schema =
 
 (* Producer: Tasks_list Ok branch (keeper_tool_task_runtime.ml) — the
    Snapshot_protocol envelope prefixed with backlog provenance and the row
-   shape that was served. [snapshot] is absent on the [unchanged] variant. *)
+   shape that was served. [snapshot] and the row statistics
+   ([matching_count]/[returned_count]/[truncated]) are absent on the
+   [unchanged] variant: it carries no rows, so row statistics would
+   contradict it. *)
 let tasks_list_output_schema =
   object_output_schema
     ~properties:
@@ -1218,15 +1221,7 @@ let tasks_list_output_schema =
       ; "truncated", `Assoc [ "type", `String "boolean" ]
       ]
     ~required:
-      [ "backlog_authority"
-      ; "degraded"
-      ; "projection"
-      ; "kind"
-      ; "revision"
-      ; "matching_count"
-      ; "returned_count"
-      ; "truncated"
-      ]
+      [ "backlog_authority"; "degraded"; "projection"; "kind"; "revision" ]
 ;;
 
 (* Producer: Keeper_artifact_read.page_to_json — the single success path. *)

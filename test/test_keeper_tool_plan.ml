@@ -843,15 +843,14 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
        ; "revision", `String "tasks:r1"
        ; "snapshot", `List [ compact_task_item ]
        ]);
+  (* The unchanged variant carries no rows, so the producer omits the row
+     statistics (matching_count/returned_count/truncated) entirely. *)
   accepts
     "keeper_tasks_list"
     (`Assoc
        [ "backlog_authority", `String "primary"
        ; "degraded", `Bool false
        ; "projection", `String "compact"
-       ; "matching_count", `Int 1
-       ; "returned_count", `Int 1
-       ; "truncated", `Bool false
        ; "kind", `String "unchanged"
        ; "revision", `String "tasks:r1"
        ]);

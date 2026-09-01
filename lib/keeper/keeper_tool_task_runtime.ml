@@ -451,18 +451,33 @@ let handle_keeper_task_tool_with_outcome
        let data =
          match Snapshot_protocol.to_yojson response with
          | `Assoc fields ->
-           `Assoc
-             (( "backlog_authority"
-              , `String
-                  (if Option.is_none recovered_from
-                   then "primary"
-                   else "recovery_non_authoritative") )
-              :: ("degraded", `Bool (Option.is_some recovered_from))
-              :: ("projection", `String (task_projection_to_string projection))
-              :: ("matching_count", `Int matching_count)
-              :: ("returned_count", `Int (List.length tasks))
-              :: ("truncated", `Bool (matching_count > limit))
-              :: fields)
+           let provenance =
+             [ ( "backlog_authority"
+               , `String
+                   (if Option.is_none recovered_from
+                    then "primary"
+                    else "recovery_non_authoritative") )
+             ; "degraded", `Bool (Option.is_some recovered_from)
+             ; "projection", `String (task_projection_to_string projection)
+             ]
+           in
+           (* Row statistics describe the rows travelling in this response.
+              An [unchanged] response carries no rows, so echoing the
+              snapshot-path statistics produced a self-contradiction —
+              `truncated:true, returned_count:N` beside zero rows — that
+              models resolved by re-issuing the identical call (211 identical
+              back-to-back pairs on 2026-09-01 alone). The caller's snapshot
+              is the one place those numbers already live. *)
+           let row_stats =
+             match response with
+             | Snapshot_protocol.Snapshot _ ->
+               [ "matching_count", `Int matching_count
+               ; "returned_count", `Int (List.length tasks)
+               ; "truncated", `Bool (matching_count > limit)
+               ]
+             | Snapshot_protocol.Unchanged _ -> []
+           in
+           `Assoc (provenance @ row_stats @ fields)
          | payload -> payload
        in
        Keeper_tool_execution.success_data data)

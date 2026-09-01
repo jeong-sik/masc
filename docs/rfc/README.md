@@ -239,6 +239,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0396 | Keeper coding capability: wire a coding-outcome eval from existing parts, the... | Draft | - |
 | 0397 | Librarian wire contract states changes, not the whole roster | Draft | - |
 | 0398 | Edit addresses lines and proves freshness; the substring search goes away | Draft | - |
+| 0399 | Build output leaves the virtiofs share | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |
@@ -264,8 +265,10 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-per-keeper-github-cli-identity | Keeper-specific GitHub CLI identity | Draft | - |
 | RFC-prompts-and-tool-definitions-outside-ocaml | 프롬프트와 도구 정의를 OCaml 밖으로 — 모델이 읽는 모든 글은 config 파일이 소유한다 | Draft | - |
 | RFC-runtime-note-field-and-dashboard-surfacing | Per-runtime note field & dashboard surfacing | Draft | - |
+| RFC-schedule-history-and-outcome | # RFC — A schedule's past and its result | Draft | - |
 | RFC-skills-as-tools | Skill 과 Tool 은 한 카탈로그의 두 표면 — SKILL.md 가 지시·합성·비동기를 선언한다 | Active | - |
 | RFC-spawn-a-process-that-outlives-the-call | Spawn: a process that outlives the call | Draft | - |
+| RFC-tools-as-shell-commands | 도구를 셸 first-class 커맨드로 — 순차 결합의 provider 왕복을 없앤다 | Draft | - |
 | RFC-tui-operator-ia | TUI 정보 구조 재설계 — 18탭을 숫자 키 10개로 접고, Keeper 워크벤치를 중심 화면으로 | Draft | - |
 | RFC-tui-server-lifecycle | TUI 안에서 서버를 켠다 — opt-in 온디맨드 서버 시작으로 TUI 를 기본 진입점으로 | Draft | - |
 | RFC-turn-failure-visible-stop | 턴 실패를 숨기지 않고 상태로 보여준다 — 실패 면제와 예산 계정을 걷어낸다 | Implemented | - |

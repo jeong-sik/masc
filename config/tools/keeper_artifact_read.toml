@@ -1,9 +1,12 @@
 name = "keeper_artifact_read"
 description = """
-Read an explicit byte range from a [masc:blob ...] ToolResult. Use the \
-marker's sha256, then continue with the returned next_offset. Text pages use \
-UTF-8; arbitrary bytes use base64. The full artifact is never restored into \
-model history."""
+Restore the content of a [masc:blob ...] ToolResult by its sha256. The \
+marker's bytes= field is the artifact's total size. max_bytes defaults to \
+the 65536 maximum, so one call returns most artifacts whole; read whole \
+artifacts, not small slices. If the response has eof=false, continue from \
+next_offset until eof=true. Text pages use UTF-8; arbitrary bytes use \
+base64. The runtime never re-inlines a stored artifact into model history; \
+this tool is the only way to read one."""
 additional_properties = false
 
 [[params]]
@@ -17,7 +20,7 @@ name = "offset"
 type = "integer"
 minimum = 0
 default = 0
-description = "Byte offset to read from."
+description = "Byte offset to read from. Continue a paged read at the returned next_offset."
 
 [[params]]
 name = "max_bytes"
@@ -25,4 +28,4 @@ type = "integer"
 minimum = 1
 maximum = 65536
 default = 65536
-description = "Maximum source bytes to expose in this model-visible page."
+description = "Maximum source bytes in this model-visible page. Defaults to the maximum; lower it only for a deliberate slice, not for paging."

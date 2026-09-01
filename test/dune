@@ -3200,6 +3200,7 @@
   digestif
   masc_tui_context_inspector
   masc
+  masc.agent_core.llm_provider
   masc.masc_tool_blob_store
   masc.masc_types))
 

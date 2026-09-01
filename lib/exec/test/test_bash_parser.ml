@@ -563,6 +563,12 @@ let test_token_limit_aborts () =
   | Parsed.Parse_aborted `Token_limit_50k -> ()
   | _ -> assert false
 
+let test_expanded_word_piece_limit_aborts () =
+  let many_expansions = List.init 50_001 (fun _ -> "$A") in
+  match Bash.parse_string ("echo " ^ String.concat "" many_expansions) with
+  | Parsed.Parse_aborted `Token_limit_50k -> ()
+  | _ -> assert false
+
 let () =
   test_ls_single_command ();
   test_ls_with_args ();
@@ -625,4 +631,5 @@ let () =
   test_double_quote_with_backtick_rejected ();
   test_unterminated_double_quote_rejected ();
   test_token_limit_aborts ();
+  test_expanded_word_piece_limit_aborts ();
   print_endline "[test_bash_parser] all tests passed"

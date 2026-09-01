@@ -9,9 +9,9 @@
   open Bash_subset
   open Masc_exec
 
-  (* Token budget — each lexeme increments a counter.  The 50k ceiling
-     is enforced in the lexer so large inputs abort before Menhir builds
-     an oversized stage list. *)
+  (* Token budget — each emitted simple lexeme and each adjacent word piece
+     materialized by [word_tail] increments the same counter. The 50k ceiling
+     is enforced before Menhir or the lexer can build an oversized list. *)
   let token_count = ref 0
   let token_limit = 50_000
   exception Token_limit_exceeded

@@ -1,7 +1,5 @@
-(** Keeper Memory OS current fact schema.
-
-    The persisted shape is current-only and closed; version or compatibility
-    fields reject. *)
+(** Keeper Memory OS current fact schema. The persisted shape is closed and
+    unknown fields reject. *)
 
 (** Canonical JSON wire field names for Memory OS persistence and librarian
     ingestion. The schema module owns these strings so parser, retry prompt,
@@ -10,6 +8,11 @@ val wire_field_claim : string
 val wire_field_category : string
 val wire_field_memory_id : string
 val wire_field_reason : string
+val wire_field_basis : string
+val wire_field_kind : string
+val wire_field_derivations : string
+val wire_field_rule_id : string
+val wire_field_premise_ids : string
 
 (** Claim-object fields accepted from the librarian and rendered in retry
     prompts. *)
@@ -59,18 +62,36 @@ val category_of_string : string -> category option
 
 (** Row-level provenance. [Authored]: explicit keeper memory_write.
     [Injected]: librarian extraction (a copy of what the keeper already
-    saw — the feed the self-referential reinjection loop runs on).
-    [Legacy]: rows written before this field existed; provenance unknown,
-    never back-filled with a guess. *)
+    saw — the feed the self-referential reinjection loop runs on). *)
 type origin_kind =
   | Authored
   | Injected
-  | Legacy
 
 type origin =
   { kind : origin_kind
   ; trace_id : string
   }
+
+(** One independently sufficient proof of a derived fact. Every [premise_id]
+    is the exact {!memory_id} of another current fact. [rule_id] is an opaque
+    producer-owned identity used for explanation and rule evolution; Memory OS
+    never branches on its spelling. *)
+type derivation =
+  { rule_id : string
+  ; premise_ids : string list
+  }
+
+(** Why a fact belongs to maintained current knowledge. [Observed] facts are
+    base facts selected from evidence. [Derived] facts stay current while at
+    least one derivation has all of its premises current. The non-empty
+    derivation and premise invariants are enforced at construction and decode
+    boundaries. *)
+type basis =
+  | Observed
+  | Derived of derivation list
+
+val basis_to_json : basis -> Yojson.Safe.t
+val basis_of_json : Yojson.Safe.t -> basis option
 
 (** Canonical lowercase token for an origin kind. Category tokens only —
     this never renders a unique identity into a prompt (masc#29558). *)
@@ -78,8 +99,8 @@ val origin_kind_to_string : origin_kind -> string
 
 (** A single semantic claim extracted from conversation history.
     [first_seen] insertion (authoritative, preserved across re-upsert);
-    [last_seen] most recent re-observation of the same claim bytes —
-    the eviction ordering key; [reinforcement] re-observation count of the
+    [last_seen] most recent re-observation of the same claim bytes;
+    [reinforcement] re-observation count of the
     exact claim bytes, the measurable damper on byte-identical reinjection. *)
 type fact =
   { claim : string
@@ -88,6 +109,7 @@ type fact =
   ; last_seen : float
   ; reinforcement : int
   ; origin : origin
+  ; basis : basis
   }
 
 (** A claim observed for the first time. [first_seen] and [last_seen] are both
@@ -96,9 +118,7 @@ type fact =
 
     The three identity fields move together, and this is the one place that
     says how. Spelled at each construction site instead, the invariant would
-    live in as many copies as there are fixtures -- and a later row that
-    forgot [last_seen = first_seen] would sort wrong in eviction without
-    failing anything. *)
+    live in as many copies as there are fixtures. *)
 val observed
   :  claim:string
   -> category:category
@@ -106,14 +126,27 @@ val observed
   -> origin:origin
   -> fact
 
+(** A derived claim with one or more independently sufficient proof paths.
+    Empty derivation lists, empty premise lists, duplicate premise ids, and
+    blank or duplicate rule ids are rejected. Premise ids are canonicalized as
+    a set in lexical order. *)
+val derived
+  :  claim:string
+  -> category:category
+  -> now:float
+  -> origin:origin
+  -> derivations:derivation list
+  -> (fact, string) result
+
+(** True only for the canonical [sha256:] prefix followed by exactly 64
+    lowercase hexadecimal characters. *)
+val is_memory_id : string -> bool
+
 (** SHA-256 of the exact claim bytes. This derived identifier is used only for
     retention, duplicate rejection, and observability. *)
 val memory_id : fact -> string
 
 val fact_to_json : fact -> Yojson.Safe.t
 
-(** Inverse of {!fact_to_json}. Accepts both the current six-field row and
-    the legacy three-field row; a legacy row decodes with [Legacy] origin,
-    [last_seen = first_seen], [reinforcement = 0]. A row mixing the two
-    vocabularies rejects rather than being read past. *)
+(** Inverse of {!fact_to_json}. The current shape is closed and field-exact. *)
 val fact_of_json : Yojson.Safe.t -> fact option

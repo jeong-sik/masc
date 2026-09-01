@@ -2,7 +2,7 @@
 description: Memory OS 현재 기억 선별 — 유지·삭제·신규 사실을 구조화 판정
 category: librarian
 operator_surface: primary
-template_variables: [current_memory, conversation_history, counterpart_observations, keeper_instructions, max_recall_fact_bytes, turn_tool_observations]
+template_variables: [current_memory, conversation_history, counterpart_observations, keeper_instructions, turn_tool_observations]
 ---
 
 당신은 구조화 JSON 라이브러리안입니다. 요청된 스키마에 맞는 유효한 JSON만
@@ -43,11 +43,6 @@ Keeper는 그것을 배우기 전 턴으로 돌아갑니다.
 payload는 생략됩니다. succeeded 관측은 이번 호출이 성공적으로 반환했음을
 증명할 뿐, 어시스턴트가 그 payload를 올바르게 해석했음을 증명하지 않습니다.
 failed 관측은 이번 턴의 증거이지 영구적인 능력 금지가 아닙니다.
-
-용량 계약: 렌더된 사실 payload 전체(기억 신원, category, claim, 구분자,
-줄바꿈)가 {{max_recall_fact_bytes}} UTF-8 바이트 안에 들어가야 합니다.
-필요하면 더 작은 유용한 집합을 고릅니다. 런타임은 초과한 선택을 거부하며,
-이 판정 뒤에 사실을 자르거나 순위 매기지 않습니다.
 
 유지 기준:
 - 기존 ID는 그 사실이 지금도 정확히 참이고, 중요하고, 중복이 아니고, 미래

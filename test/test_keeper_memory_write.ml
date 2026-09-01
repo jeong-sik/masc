@@ -17,6 +17,16 @@ let make_source_args ~title ~content ~source_path =
     ]
 ;;
 
+let make_derived_args ~content ~rule_id ~premise_ids =
+  `Assoc
+    [ "content", `String content
+    ; "rule_id", `String rule_id
+    ; "premise_ids", `List (List.map (fun premise_id -> `String premise_id) premise_ids)
+    ]
+;;
+
+let memory_id digit = "sha256:" ^ String.make 64 digit
+
 let error_label = Runtime.memory_write_error_kind_to_string
 
 let assert_invalid ~expected = function
@@ -123,7 +133,7 @@ let fact claim : Masc.Keeper_memory_os_types.fact =
   let now = Time_compat.now () in
   Masc.Keeper_memory_os_types.observed ~claim
     ~category:Masc.Keeper_memory_os_types.Fact ~now
-    ~origin:{ kind = Masc.Keeper_memory_os_types.Legacy; trace_id = "" }
+    ~origin:{ kind = Masc.Keeper_memory_os_types.Authored; trace_id = "" }
 ;;
 
 let current_facts ~keepers_dir ~keeper_id =
@@ -151,12 +161,6 @@ let test_validation_taxonomy () =
   Runtime.validate_memory_write_args (make_args ~title:"" ~content:"")
   |> assert_invalid ~expected:"content_empty";
   Runtime.validate_memory_write_args
-    (make_args ~title:(String.make 121 'x') ~content:"body")
-  |> assert_invalid ~expected:"title_too_long";
-  Runtime.validate_memory_write_args
-    (make_args ~title:"" ~content:(String.make 4097 'x'))
-  |> assert_invalid ~expected:"content_too_long";
-  Runtime.validate_memory_write_args
     (make_source_args ~title:"" ~content:"body" ~source_path:"   ")
   |> assert_invalid ~expected:"source_path_invalid";
   Runtime.validate_memory_write_args
@@ -165,7 +169,37 @@ let test_validation_taxonomy () =
        ; "content", `String "body"
        ; "source_path", `List []
        ])
-  |> assert_invalid ~expected:"source_path_invalid"
+  |> assert_invalid ~expected:"source_path_invalid";
+  Runtime.validate_memory_write_args
+    (`Assoc [ "content", `String "derived"; "rule_id", `String "rule" ])
+  |> assert_invalid ~expected:"derivation_incomplete";
+  Runtime.validate_memory_write_args
+    (make_derived_args
+       ~content:"derived"
+       ~rule_id:"rule"
+       ~premise_ids:[ memory_id 'a'; memory_id 'a' ])
+  |> assert_invalid ~expected:"derivation_invalid";
+  List.iter
+    (fun premise_id ->
+       Runtime.validate_memory_write_args
+         (make_derived_args
+            ~content:"derived"
+            ~rule_id:"rule"
+            ~premise_ids:[ premise_id ])
+       |> assert_invalid ~expected:"derivation_invalid")
+    [ "sha256:" ^ String.make 63 'a'
+    ; "sha256:" ^ String.make 65 'a'
+    ; "sha256:" ^ String.make 64 'A'
+    ; memory_id 'a' ^ "\n"
+    ];
+  Runtime.validate_memory_write_args
+    (`Assoc
+       [ "content", `String "derived"
+       ; "rule_id", `String "rule"
+       ; "premise_ids", `List [ `String (memory_id 'a') ]
+       ; "source_path", `String "evidence.txt"
+       ])
+  |> assert_invalid ~expected:"derived_source_path_unsupported"
 ;;
 
 let test_valid_body_composition () =
@@ -173,7 +207,29 @@ let test_valid_body_composition () =
   |> assert_ok ~body:"body";
   Runtime.validate_memory_write_args
     (make_args ~title:"hook" ~content:"body text")
-  |> assert_ok ~body:"**hook** body text"
+  |> assert_ok ~body:"**hook** body text";
+  let large_title = String.make 256 't' in
+  let large_content = String.make 8192 'c' in
+  Runtime.validate_memory_write_args
+    (make_args ~title:large_title ~content:large_content)
+  |> assert_ok ~body:(Printf.sprintf "**%s** %s" large_title large_content);
+  (match
+     Runtime.validate_memory_write_args
+       (make_derived_args
+          ~content:"derived"
+          ~rule_id:"rule"
+          ~premise_ids:[ memory_id 'a'; memory_id 'b' ])
+   with
+   | Runtime.Memory_write_ok
+       { basis = Masc.Keeper_memory_os_types.Derived [ derivation ]; _ } ->
+     Alcotest.(check string) "rule identity" "rule" derivation.rule_id;
+     Alcotest.(check (list string))
+       "exact premise identities"
+       [ memory_id 'a'; memory_id 'b' ]
+       derivation.premise_ids
+   | Runtime.Memory_write_ok _ -> Alcotest.fail "derived input decoded as observed"
+   | Runtime.Memory_write_invalid { error_kind; _ } ->
+     Alcotest.failf "unexpected validation error: %s" (error_label error_kind))
 ;;
 
 (* The loop the model actually depends on: a write must reach the store
@@ -210,6 +266,11 @@ let test_write_comes_back_through_recall () =
     "routed to the current snapshot"
     "current_memory_snapshot"
     (string_field "store" response);
+  let memory_id = string_field "memory_id" response in
+  Alcotest.(check string)
+    "write receipt declares observed basis"
+    "observed"
+    (string_field "kind" (json_field "basis" response));
   (* rfc3339_of_unix renders exactly "YYYY-MM-DDTHH:MM:SSZ" (20 bytes). The
      receipt echoes the persisted snapshot stamp so the authoring model sees
      an authoritative UTC time next to the prose it just wrote. *)
@@ -233,6 +294,10 @@ let test_write_comes_back_through_recall () =
   Alcotest.(check int) "one durable claim" 1 (List.length facts);
   let fact = List.hd facts in
   Alcotest.(check string)
+    "receipt identity resolves the stored fact"
+    memory_id
+    (Masc.Keeper_memory_os_types.memory_id fact);
+  Alcotest.(check string)
     "the claim reaches a later turn"
     "reasoning_content must be replayed unmodified"
     fact.Masc.Keeper_memory_os_types.claim;
@@ -240,6 +305,81 @@ let test_write_comes_back_through_recall () =
     "producer timestamp recorded"
     true
     (fact.Masc.Keeper_memory_os_types.first_seen > 0.0)
+;;
+
+let test_derived_write_uses_exact_premise_receipt () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "derived-write" in
+  let write args =
+    Runtime.keeper_memory_write_with_outcome ~config ~meta ~args
+  in
+  let premise = write (make_args ~title:"" ~content:"dependency failed") in
+  let premise_json =
+    premise.Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
+  in
+  let premise_id = string_field "memory_id" premise_json in
+  let conclusion =
+    write
+      (make_derived_args
+         ~content:"rollout is blocked"
+         ~rule_id:"RULE_ID_MUST_STAY_OUT_OF_WRITE_RECEIPT"
+         ~premise_ids:[ premise_id ])
+  in
+  let response =
+    conclusion.Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
+  in
+  Alcotest.(check bool) "derived write succeeds" true
+    (json_field "ok" response = `Bool true);
+  let basis = json_field "basis" response in
+  Alcotest.(check string) "receipt declares derived basis" "derived"
+    (string_field "kind" basis);
+  Alcotest.(check int) "one proof path" 1 (int_field "proof_count" basis);
+  Alcotest.(check bool) "raw rule identity omitted from write receipt" false
+    (String_util.contains_substring
+       conclusion.Masc.Keeper_tool_execution.raw_output
+       "RULE_ID_MUST_STAY_OUT_OF_WRITE_RECEIPT");
+  let stored =
+    current_facts
+      ~keepers_dir:
+        (Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path)
+      ~keeper_id:meta.name
+  in
+  Alcotest.(check int) "premise and conclusion persist" 2 (List.length stored);
+  Alcotest.(check string) "conclusion receipt resolves exact fact"
+    (string_field "memory_id" response)
+    (Masc.Keeper_memory_os_types.memory_id (List.nth stored 1))
+;;
+
+let test_unsupported_derived_write_is_proven_pre_effect () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "unsupported-derived-write" in
+  let execution =
+    Runtime.keeper_memory_write_with_outcome
+      ~config
+      ~meta
+      ~args:
+        (make_derived_args
+           ~content:"unsupported conclusion"
+           ~rule_id:"requires_missing"
+           ~premise_ids:[ memory_id 'c' ])
+  in
+  let response =
+    execution.Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
+  in
+  Alcotest.(check string) "typed rejection" "unsupported_derivation"
+    (string_field "error_kind" response);
+  Alcotest.(check bool) "no snapshot effect is possible" true
+    (execution.Masc.Keeper_tool_execution.failure_effect_disposition
+     = Tool_result.Proven_pre_effect);
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  Alcotest.(check int) "no ordinary fact was persisted" 0
+    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name))
 ;;
 
 let test_source_bound_write_discards_stale_claim_and_recreates () =
@@ -287,6 +427,30 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     "ordinary current memory remains untouched"
     0
     (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
+  let source_search =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      ~args:
+        (`Assoc
+           [ "query", `String "us-west-1"
+           ; "source", `String "memory"
+           ; "limit", `Int 10
+           ])
+    |> Yojson.Safe.from_string
+  in
+  (match json_field "matches" source_search with
+   | `List [ (`Assoc fields as matched) ] ->
+     Alcotest.(check string) "source search names its store"
+       "source_bound_current_memory"
+       (string_field "store" matched);
+     Alcotest.(check bool) "source identity is not mislabeled as memory_id" true
+       (Option.is_none (List.assoc_opt "memory_id" fields));
+     Alcotest.(check string) "source receipt and search share exact identity"
+       (string_field "source_sha256" first_write)
+       (string_field "source_sha256" matched)
+   | _ -> Alcotest.fail "expected one source-bound memory match");
   let first_prompt = render () in
   Alcotest.(check bool)
     "unchanged source claim reaches recall"
@@ -385,7 +549,7 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     (match_texts replacement_search)
 ;;
 
-let test_source_bound_write_refuses_unrecallable_payload () =
+let test_source_bound_write_is_not_gated_by_recall_size () =
   with_temp_dir
   @@ fun base_path ->
   let config = Masc.Workspace.default_config base_path in
@@ -403,205 +567,28 @@ let test_source_bound_write_refuses_unrecallable_payload () =
    with
    | Ok () -> ()
    | Error detail -> Alcotest.fail detail);
-  with_env "MASC_KEEPER_MEMORY_OS_RECALL_FACTS_MAX_BYTES" "32" (fun () ->
-    let response =
-      Runtime.keeper_memory_write_with_outcome
-        ~config
-        ~meta
-        ~args:
-          (make_source_args
-             ~title:""
-             ~content:"This claim cannot fit the configured recall payload."
-             ~source_path)
-      |> fun execution -> execution.Masc.Keeper_tool_execution.raw_output
-      |> Yojson.Safe.from_string
-    in
-    Alcotest.(check string)
-      "unrecallable source claim is not reported persisted"
-      "persistence_failed"
-      (string_field "error_kind" response));
+  let response =
+    Runtime.keeper_memory_write_with_outcome
+      ~config
+      ~meta
+      ~args:
+        (make_source_args
+           ~title:""
+           ~content:(String.make 512 'x')
+           ~source_path)
+    |> fun execution -> execution.Masc.Keeper_tool_execution.raw_output
+    |> Yojson.Safe.from_string
+  in
+  Alcotest.(check bool) "large source truth persists" true
+    (Yojson.Safe.Util.member "ok" response |> Yojson.Safe.Util.to_bool);
   match
     Masc.Keeper_memory_source_current.read_for_keepers_dir
       ~keepers_dir
       ~keeper_id:meta.name
   with
-  | Ok None -> ()
-  | Ok (Some _) -> Alcotest.fail "over-budget source claim reached persistence"
+  | Ok (Some snapshot) -> Alcotest.(check int) "source fact persisted" 1 (List.length snapshot.facts)
+  | Ok None -> Alcotest.fail "source fact was hidden by a size threshold"
   | Error detail -> Alcotest.fail detail
-;;
-
-let test_ordinary_write_reserves_source_payload () =
-  with_temp_dir
-  @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "aggregate-budget" in
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-  in
-  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
-  let source_path = "source.txt" in
-  Fs_compat.mkdir_p sandbox_root;
-  (match
-     Fs_compat.save_file_atomic (Filename.concat sandbox_root source_path) "value\n"
-   with
-   | Ok () -> ()
-   | Error detail -> Alcotest.fail detail);
-  with_env "MASC_KEEPER_MEMORY_OS_RECALL_FACTS_MAX_BYTES" "512" (fun () ->
-    let source_write =
-      Runtime.keeper_memory_write_with_outcome
-        ~config
-        ~meta
-        ~args:(make_source_args ~title:"" ~content:"source claim" ~source_path)
-    in
-    Alcotest.(check bool)
-      "source write succeeds inside aggregate budget"
-      true
-      (source_write.Masc.Keeper_tool_execution.disposition = Tool_result.Completed ());
-    let response =
-      Runtime.keeper_memory_write_with_outcome
-        ~config
-        ~meta
-        ~args:(make_args ~title:"" ~content:(String.make 400 'x'))
-      |> fun execution -> execution.Masc.Keeper_tool_execution.raw_output
-      |> Yojson.Safe.from_string
-    in
-    Alcotest.(check string)
-      "ordinary writer observes source reservation"
-      "persistence_failed"
-      (string_field "error_kind" response));
-  Alcotest.(check int)
-    "rejected ordinary write leaves its store absent"
-    0
-    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name))
-;;
-
-let test_source_write_reserves_ordinary_payload () =
-  with_temp_dir
-  @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "aggregate-source-budget" in
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-  in
-  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
-  let source_path = "source.txt" in
-  Fs_compat.mkdir_p sandbox_root;
-  (match
-     Fs_compat.save_file_atomic (Filename.concat sandbox_root source_path) "value\n"
-   with
-   | Ok () -> ()
-   | Error detail -> Alcotest.fail detail);
-  with_env "MASC_KEEPER_MEMORY_OS_RECALL_FACTS_MAX_BYTES" "512" (fun () ->
-    let ordinary = fact (String.make 400 'x') in
-    Current.replace
-      ~max_fact_bytes:512
-      ~keepers_dir
-      ~keeper_id:meta.name
-      ~expected_revision:None
-      ~now:100.0
-      ~source:{ Current.kind = Current.Librarian; trace_id = "ordinary-first" }
-      ~facts:[ ordinary ]
-      ()
-    |> function
-    | Error detail -> Alcotest.fail detail
-    | Ok _ ->
-      let response =
-        Runtime.keeper_memory_write_with_outcome
-          ~config
-          ~meta
-          ~args:(make_source_args ~title:"" ~content:"source claim" ~source_path)
-        |> fun execution -> execution.Masc.Keeper_tool_execution.raw_output
-        |> Yojson.Safe.from_string
-      in
-      Alcotest.(check string)
-        "source writer observes ordinary reservation"
-        "persistence_failed"
-        (string_field "error_kind" response));
-  match
-    Masc.Keeper_memory_source_current.read_for_keepers_dir
-      ~keepers_dir
-      ~keeper_id:meta.name
-  with
-  | Ok None -> ()
-  | Ok (Some _) -> Alcotest.fail "rejected source write reached persistence"
-  | Error detail -> Alcotest.fail detail
-;;
-
-let test_concurrent_writers_serialize_aggregate_budget () =
-  with_temp_dir
-  @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "aggregate-concurrent" in
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-  in
-  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
-  let source_path = "source.txt" in
-  Fs_compat.mkdir_p sandbox_root;
-  (match
-     Fs_compat.save_file_atomic (Filename.concat sandbox_root source_path) "value\n"
-   with
-   | Ok () -> ()
-   | Error detail -> Alcotest.fail detail);
-  with_env "MASC_KEEPER_MEMORY_OS_RECALL_FACTS_MAX_BYTES" "512" (fun () ->
-    Eio_main.run
-    @@ fun env ->
-    let clock = Eio.Stdenv.clock env in
-    let source_observing, set_source_observing = Eio.Promise.create () in
-    let release_source, set_release_source = Eio.Promise.create () in
-    let source_result = ref None in
-    let ordinary_result = ref None in
-    Eio.Fiber.both
-      (fun () ->
-         source_result :=
-           Some
-             (Masc.Keeper_memory_source_current.upsert_file_fact
-                ~clock
-                ~config
-                ~meta
-                ~keepers_dir
-                ~ordinary_payload:(fun () ->
-                  Eio.Promise.resolve set_source_observing ();
-                  Eio.Promise.await release_source;
-                  Ok "")
-                ~now:100.0
-                ~claim:"source claim"
-                ~source_path
-                ()))
-      (fun () ->
-         Eio.Promise.await source_observing;
-         Eio.Promise.resolve set_release_source ();
-         ordinary_result :=
-           Some
-             (Current.replace
-                ~clock
-                ~max_fact_bytes:512
-                ~keepers_dir
-                ~keeper_id:meta.name
-                ~expected_revision:None
-                ~now:200.0
-                ~source:{ Current.kind = Current.Librarian; trace_id = "concurrent" }
-                ~facts:[ fact (String.make 400 'x') ]
-                ()))
-    ;
-    (match !source_result with
-     | Some (Ok _) -> ()
-     | Some
-         (Error
-           ( Masc.Keeper_memory_source_current.Source_read_failed detail
-           | Masc.Keeper_memory_source_current.Store_write_failed detail )) ->
-       Alcotest.fail detail
-     | None -> Alcotest.fail "concurrent source writer did not finish");
-    (match !ordinary_result with
-     | Some (Error detail) ->
-       Alcotest.(check bool)
-         "later writer observes the committed source payload"
-         true
-         (String.starts_with
-            ~prefix:"combined Memory OS rendered payload exceeds byte budget"
-            detail)
-     | Some (Ok _) -> Alcotest.fail "concurrent ordinary writer overcommitted budget"
-     | None -> Alcotest.fail "concurrent ordinary writer did not finish"))
 ;;
 
 let test_source_bound_rewrite_renews_first_seen () =
@@ -626,7 +613,6 @@ let test_source_bound_rewrite_renews_first_seen () =
         ~config
         ~meta
         ~keepers_dir
-        ~ordinary_payload:(fun () -> Ok "")
         ~now
         ~claim
         ~source_path
@@ -743,7 +729,16 @@ let test_search_filters_exact_substring_without_ranking () =
          (function
            | `Assoc fields -> Option.is_none (List.assoc_opt "score" fields)
            | _ -> false)
-         matches)
+         matches);
+    let first = List.hd matches in
+    Alcotest.(check string) "ordinary match names premise-eligible store"
+      "current_memory_snapshot"
+      (string_field "store" first);
+    Alcotest.(check string) "match exposes exact memory identity"
+      (Masc.Keeper_memory_os_types.memory_id first_match)
+      (string_field "memory_id" first);
+    Alcotest.(check string) "match exposes observed basis" "observed"
+      (string_field "kind" (json_field "basis" first))
   | _ -> Alcotest.fail "expected matches array"
 ;;
 
@@ -874,6 +869,10 @@ let () =
             "valid input composes the stored body"
             `Quick
             test_valid_body_composition
+        ; Alcotest.test_case
+            "unsupported derived write is proven pre-effect"
+            `Quick
+            test_unsupported_derived_write_is_proven_pre_effect
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case
@@ -881,25 +880,17 @@ let () =
             `Quick
             test_write_comes_back_through_recall
         ; Alcotest.test_case
+            "derived write uses exact premise receipt"
+            `Quick
+            test_derived_write_uses_exact_premise_receipt
+        ; Alcotest.test_case
             "source change discards stale claim until recreation"
             `Quick
             test_source_bound_write_discards_stale_claim_and_recreates
         ; Alcotest.test_case
-            "source write refuses an unrecallable payload"
+            "source write has no recall size gate"
             `Quick
-            test_source_bound_write_refuses_unrecallable_payload
-        ; Alcotest.test_case
-            "ordinary write reserves source payload"
-            `Quick
-            test_ordinary_write_reserves_source_payload
-        ; Alcotest.test_case
-            "source write reserves ordinary payload"
-            `Quick
-            test_source_write_reserves_ordinary_payload
-        ; Alcotest.test_case
-            "concurrent writers serialize aggregate budget"
-            `Quick
-            test_concurrent_writers_serialize_aggregate_budget
+            test_source_bound_write_is_not_gated_by_recall_size
         ; Alcotest.test_case
             "source rewrite renews the claim timestamp"
             `Quick

@@ -47,7 +47,6 @@ let input () : Librarian.input =
   { turn_ref = Ids.Turn_ref.make ~trace_id:"trace-librarian-preference" ~absolute_turn:1
   ; keeper_instructions = "Curate current memory."
   ; current = None
-  ; max_recall_fact_bytes = 64 * 1024
   ; messages =
       [ Agent_core.Types.make_message
           ~role:Agent_core.Types.User

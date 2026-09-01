@@ -102,13 +102,11 @@ module KeeperMemoryOs : sig
   val librarian_env_key : string
   val librarian_cadence_turns_env_key : string
   val librarian_max_messages_env_key : string
-  val recall_facts_max_bytes_env_key : string
 
   val recall_enabled_default : bool
   val librarian_enabled_default : bool
   val librarian_cadence_turns_default : int
   val librarian_max_messages_default : int
-  val recall_facts_max_bytes_default : int
 
   val librarian_config_state : unit -> librarian_config_state
   (** Typed projection of the effective librarian toggle. Blank or absent
@@ -118,9 +116,6 @@ module KeeperMemoryOs : sig
   val recall_enabled : unit -> bool
   val librarian_cadence_turns : unit -> int
   val librarian_max_messages : unit -> int
-  val recall_facts_max_bytes : unit -> int
-  (** Maximum UTF-8 bytes for the rendered dynamic fact payload injected by
-      Memory OS recall. Floored to 1. *)
 end
 
 (** {1 Keeper vision tool} *)

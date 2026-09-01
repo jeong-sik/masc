@@ -38,9 +38,6 @@ type input =
         importance through this identity; [""] renders as an explicit
         [no keeper instructions] marker. *)
   ; current : current_selection option
-  ; max_recall_fact_bytes : int
-    (** Maximum UTF-8 bytes for the exact rendered fact lines. The prompt states
-        this capacity and the parser rejects an oversized selection. *)
   ; messages : Agent_core.Types.message list
   ; tool_observations : tool_observation list
   ; counterpart_observations : Keeper_counterpart_observation.t list
@@ -86,10 +83,6 @@ type parse_error =
   | Duplicate_dropped_memory_id of string
   | Dropped_memory_id_also_retained of string
   | Missing_disposition of string
-  | Recall_fact_budget_exceeded of
-      { actual_bytes : int
-      ; max_bytes : int
-      }
 
 val parse_error_to_string : parse_error -> string
 

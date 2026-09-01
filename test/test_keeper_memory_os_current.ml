@@ -26,6 +26,7 @@ let fact ?(claim = "claim") () :
   ; last_seen = 100.0
   ; reinforcement = 0
   ; origin = { kind = Types.Authored; trace_id = "trace" }
+  ; basis = Types.Observed
   }
 ;;
 
@@ -56,6 +57,11 @@ let require_ok = function
   | Error message -> fail message
 ;;
 
+let require_upsert_ok = function
+  | Ok value -> value
+  | Error error -> fail (Current.upsert_error_to_string error)
+;;
+
 let require_some = function
   | Some value -> value
   | None -> fail "expected current snapshot"
@@ -63,6 +69,31 @@ let require_some = function
 
 let fact_ids facts =
   List.map Types.memory_id facts
+;;
+
+let missing_memory_id digit = "sha256:" ^ String.make 64 digit
+
+let derived_fact ~claim derivations =
+  Types.derived
+    ~claim
+    ~category:Types.Fact
+    ~now:100.0
+    ~origin:{ kind = Types.Authored; trace_id = "trace" }
+    ~derivations
+  |> require_ok
+;;
+
+let read_journal_lines ~keepers_dir =
+  let path =
+    Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+  in
+  if not (Sys.file_exists path)
+  then []
+  else
+    Fs_compat.load_file path
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> not (String.equal line ""))
+    |> List.map Yojson.Safe.from_string
 ;;
 
 let test_memory_id_is_exact_claim_derived_state () =
@@ -76,6 +107,38 @@ let test_memory_id_is_exact_claim_derived_state () =
     true
     (not (String.equal (Types.memory_id first) (Types.memory_id different_bytes)));
   check int "sha256 id length" 71 (String.length (Types.memory_id first))
+;;
+
+let test_derivation_contract_canonicalizes_sets_and_rejects_duplicate_rules () =
+  let first = fact ~claim:"first premise" () in
+  let second = fact ~claim:"second premise" () in
+  let derived =
+    derived_fact
+      ~claim:"canonical conclusion"
+      [ { rule_id = "canonical_rule"
+        ; premise_ids = [ Types.memory_id second; Types.memory_id first ]
+        }
+      ]
+  in
+  (match derived.basis with
+   | Types.Derived [ derivation ] ->
+     check (list string) "premise set has canonical order"
+       (List.sort String.compare [ Types.memory_id first; Types.memory_id second ])
+       derivation.premise_ids
+   | Types.Derived _ | Types.Observed -> fail "unexpected canonical basis");
+  match
+    Types.derived
+      ~claim:"duplicate rules"
+      ~category:Types.Fact
+      ~now:100.0
+      ~origin:{ kind = Types.Authored; trace_id = "trace" }
+      ~derivations:
+        [ { rule_id = "same_rule"; premise_ids = [ Types.memory_id first ] }
+        ; { rule_id = "same_rule"; premise_ids = [ Types.memory_id second ] }
+        ]
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "duplicate rule identity was accepted"
 ;;
 
 let test_fresh_replace_and_delta () =
@@ -94,7 +157,281 @@ let test_fresh_replace_and_delta () =
   check (list string) "facts" (fact_ids [ first; second ]) (fact_ids snapshot.facts);
   check (list string) "added" (fact_ids [ first; second ]) (fact_ids snapshot.change.added);
   check (list string) "removed" [] (fact_ids snapshot.change.removed);
-  check int "retained" 0 snapshot.change.retained
+  check int "retained" 0 snapshot.change.retained;
+  check int "no support invalidations" 0 (List.length snapshot.change.invalidated)
+;;
+
+let test_support_retraction_cascades_to_fixed_point () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let dependency = fact ~claim:"dependency is healthy" () in
+  let approval = fact ~claim:"approval exists" () in
+  let rollout =
+    derived_fact
+      ~claim:"rollout can proceed"
+      [ { rule_id = "rollout_ready"
+        ; premise_ids = [ Types.memory_id dependency; Types.memory_id approval ]
+        }
+      ]
+  in
+  let notification =
+    derived_fact
+      ~claim:"notify the release channel"
+      [ { rule_id = "notify_ready_rollout"
+        ; premise_ids = [ Types.memory_id rollout ]
+        }
+      ]
+  in
+  let initial = [ dependency; approval; rollout; notification ] in
+  let first = replace ~keepers_dir ~facts:initial () |> require_ok in
+  check (list string) "complete support closes transitively"
+    (fact_ids initial)
+    (fact_ids first.facts);
+  check int "initial invalidations" 0 (List.length first.change.invalidated);
+  let recall =
+    Masc.Keeper_memory_os_recall.render_context
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~now:240.0
+      ()
+  in
+  check bool "automatic recall distinguishes a derived conclusion" true
+    (String_util.contains_substring recall "basis=derived");
+  check bool "rule identity stays on typed search surface" false
+    (String_util.contains_substring recall "rollout_ready");
+  let second =
+    replace
+      ~keepers_dir
+      ~expected_revision:(Some first.revision)
+      ~facts:[ approval; rollout; notification ]
+      ()
+    |> require_ok
+  in
+  check (list string) "only supported fixed point remains"
+    (fact_ids [ approval ])
+    (fact_ids second.facts);
+  check (list string) "cascade is observable as removals"
+    (fact_ids [ dependency; rollout; notification ])
+    (fact_ids second.change.removed);
+  (match second.change.invalidated with
+   | [ rollout_invalidation; notification_invalidation ] ->
+     check string "directly invalidated conclusion"
+       (Types.memory_id rollout)
+       (Types.memory_id rollout_invalidation.fact);
+     check (list string) "direct missing premise"
+       [ Types.memory_id dependency ]
+       rollout_invalidation.missing_premise_ids;
+     check string "transitively invalidated conclusion"
+       (Types.memory_id notification)
+       (Types.memory_id notification_invalidation.fact);
+     check (list string) "transitive missing premise"
+       [ Types.memory_id rollout ]
+       notification_invalidation.missing_premise_ids
+   | invalidated ->
+     failf "expected two support invalidations, got %d" (List.length invalidated));
+  let journal = read_journal_lines ~keepers_dir in
+  let open Yojson.Safe.Util in
+  check int "journal exposes both invalidations" 2
+    (List.nth journal 1
+     |> member "change"
+     |> member "invalidated"
+     |> to_list
+     |> List.length)
+;;
+
+let test_alternate_support_path_keeps_derived_fact_current () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let primary = fact ~claim:"primary approval" () in
+  let emergency = fact ~claim:"emergency approval" () in
+  let primary_rollout =
+    derived_fact
+      ~claim:"rollout can proceed"
+      [ { rule_id = "primary_path"; premise_ids = [ Types.memory_id primary ] } ]
+  in
+  let emergency_rollout =
+    derived_fact
+      ~claim:"rollout can proceed"
+      [ { rule_id = "emergency_path"; premise_ids = [ Types.memory_id emergency ] } ]
+  in
+  ignore (replace ~keepers_dir ~facts:[ primary; emergency ] () |> require_ok);
+  ignore
+    (Current.upsert_fact
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~now:300.0
+       ~source:(source Current.Explicit_write)
+       primary_rollout
+     |> require_upsert_ok);
+  let joined =
+    Current.upsert_fact
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~now:400.0
+      ~source:(source Current.Explicit_write)
+      emergency_rollout
+    |> require_upsert_ok
+  in
+  let rollout = List.nth joined.facts 2 in
+  (match rollout.basis with
+   | Types.Derived derivations ->
+     check int "re-observation joins alternate proofs" 2 (List.length derivations)
+   | Types.Observed -> fail "derived conclusion was promoted without observation");
+  let second =
+    replace
+      ~keepers_dir
+      ~expected_revision:(Some joined.revision)
+      ~facts:[ emergency; rollout ]
+      ()
+    |> require_ok
+  in
+  check (list string) "one complete proof is sufficient"
+    (fact_ids [ emergency; rollout ])
+    (fact_ids second.facts);
+  check int "no invalidation while alternate proof survives" 0
+    (List.length second.change.invalidated)
+;;
+
+let test_reverse_ordered_support_chain_reaches_fixed_point () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let root = fact ~claim:"chain root" () in
+  let chain_length = 256 in
+  let rec build index premise facts =
+    if index > chain_length
+    then facts
+    else
+      let conclusion =
+        derived_fact
+          ~claim:(Printf.sprintf "chain conclusion %d" index)
+          [ { rule_id = Printf.sprintf "chain_rule_%d" index
+            ; premise_ids = [ Types.memory_id premise ]
+            }
+          ]
+      in
+      build (index + 1) conclusion (conclusion :: facts)
+  in
+  let reverse_topological = build 1 root [ root ] in
+  let snapshot = replace ~keepers_dir ~facts:reverse_topological () |> require_ok in
+  check int "whole reverse-ordered chain is supported" (chain_length + 1)
+    (List.length snapshot.facts);
+  check int "supported chain has no invalidations" 0
+    (List.length snapshot.change.invalidated)
+;;
+
+let test_same_rule_replaces_its_premise_set () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let first = fact ~claim:"first condition" () in
+  let second = fact ~claim:"second condition" () in
+  let initial_rule =
+    derived_fact
+      ~claim:"rule-governed conclusion"
+      [ { rule_id = "governing_rule"; premise_ids = [ Types.memory_id first ] } ]
+  in
+  let strengthened_rule =
+    derived_fact
+      ~claim:"rule-governed conclusion"
+      [ { rule_id = "governing_rule"
+        ; premise_ids = [ Types.memory_id second; Types.memory_id first ]
+        }
+      ]
+  in
+  ignore (replace ~keepers_dir ~facts:[ first; second ] () |> require_ok);
+  ignore
+    (Current.upsert_fact
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~now:300.0
+       ~source:(source Current.Explicit_write)
+       initial_rule
+     |> require_upsert_ok);
+  let strengthened =
+    Current.upsert_fact
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~now:400.0
+      ~source:(source Current.Explicit_write)
+      strengthened_rule
+    |> require_upsert_ok
+  in
+  let conclusion = List.nth strengthened.facts 2 in
+  (match conclusion.basis with
+   | Types.Derived [ derivation ] ->
+     check (list string) "same rule carries only its current premise set"
+       (List.sort String.compare [ Types.memory_id first; Types.memory_id second ])
+       derivation.premise_ids
+   | Types.Derived _ | Types.Observed -> fail "rule replacement changed basis shape");
+  let retracted =
+    replace
+      ~keepers_dir
+      ~expected_revision:(Some strengthened.revision)
+      ~facts:[ first; conclusion ]
+      ()
+    |> require_ok
+  in
+  check (list string) "removed strengthened premise retracts conclusion"
+    (fact_ids [ first ])
+    (fact_ids retracted.facts)
+;;
+
+let test_unsupported_derived_upsert_has_no_effect () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let conclusion =
+    derived_fact
+      ~claim:"unsupported conclusion"
+      [ { rule_id = "requires_missing_fact"; premise_ids = [ missing_memory_id 'a' ] } ]
+  in
+  (match
+     Current.upsert_fact
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~now:200.0
+       ~source:(source Current.Explicit_write)
+       conclusion
+   with
+   | Error (Current.Unsupported_derivation invalidation) ->
+     check (list string) "typed missing support"
+       [ missing_memory_id 'a' ]
+       invalidation.missing_premise_ids
+   | Error error -> fail (Current.upsert_error_to_string error)
+   | Ok _ -> fail "unsupported derived fact was committed");
+  check bool "no snapshot revision was created" false
+    (Sys.file_exists
+       (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"));
+  check int "no journal line was created" 0
+    (List.length (read_journal_lines ~keepers_dir));
+  let premise = fact ~claim:"present premise" () in
+  let supported =
+    derived_fact
+      ~claim:"existing conclusion"
+      [ { rule_id = "supported_path"; premise_ids = [ Types.memory_id premise ] } ]
+  in
+  let unsupported_alternative =
+    derived_fact
+      ~claim:"existing conclusion"
+      [ { rule_id = "unsupported_path"; premise_ids = [ missing_memory_id 'b' ] } ]
+  in
+  let seeded = replace ~keepers_dir ~facts:[ premise; supported ] () |> require_ok in
+  (match
+     Current.upsert_fact
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~now:300.0
+       ~source:(source Current.Explicit_write)
+       unsupported_alternative
+   with
+   | Error (Current.Unsupported_derivation _) -> ()
+   | Error error -> fail (Current.upsert_error_to_string error)
+   | Ok _ -> fail "unsupported alternative piggybacked on existing support");
+  let unchanged =
+    Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    |> require_ok
+    |> require_some
+  in
+  check int "unsupported alternative creates no revision" seeded.revision unchanged.revision;
+  (match (List.nth unchanged.facts 1).basis with
+   | Types.Derived derivations ->
+     check int "unsupported alternative is not stored" 1 (List.length derivations)
+   | Types.Observed -> fail "derived conclusion changed basis");
+  check int "only the seed commit is journaled" 1
+    (List.length (read_journal_lines ~keepers_dir))
 ;;
 
 let test_replace_records_exact_added_removed_and_retained () =
@@ -153,31 +490,94 @@ let test_invalid_current_snapshot_fails_closed () =
   let snapshot_path =
     Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
   in
-  Fs_compat.save_file snapshot_path {|{"schema":"old.memory.v0"}|};
+  Fs_compat.save_file snapshot_path {|{"schema":"unexpected.memory"}|};
   (match replace ~keepers_dir ~facts:[ fact () ] () with
    | Error _ -> ()
    | Ok _ -> fail "non-current snapshot was overwritten");
   check string "invalid bytes preserved"
-    {|{"schema":"old.memory.v0"}|}
+    {|{"schema":"unexpected.memory"}|}
     (Fs_compat.load_file snapshot_path)
 ;;
 
-let test_previous_path_is_not_read_or_migrated () =
+let test_snapshot_read_rejects_unsupported_current_truth () =
   with_temp_keepers @@ fun keepers_dir ->
-  let previous_path = Filename.concat keepers_dir "keeper.memory.json" in
-  Fs_compat.save_file previous_path {|{"retired":"snapshot"}|};
-  (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" with
-   | Ok None -> ()
-   | Ok (Some _) -> fail "previous path was read as current state"
-   | Error message -> fail message);
-  ignore (replace ~keepers_dir ~facts:[ fact () ] () |> require_ok);
-  check string "previous bytes remain untouched"
-    {|{"retired":"snapshot"}|}
-    (Fs_compat.load_file previous_path);
-  check bool "current path created"
-    true
-    (Sys.file_exists
-       (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"))
+  let unsupported =
+    derived_fact
+      ~claim:"unsupported file claim"
+      [ { rule_id = "missing_support"; premise_ids = [ missing_memory_id 'c' ] } ]
+  in
+  let forged : Current.t =
+    { revision = 1
+    ; updated_at = 200.0
+    ; source = source Current.Explicit_write
+    ; facts = [ unsupported ]
+    ; change = { added = [ unsupported ]; removed = []; retained = 0; invalidated = [] }
+    }
+  in
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  Fs_compat.save_file path (Yojson.Safe.to_string (Current.to_json forged));
+  match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" with
+  | Error _ -> ()
+  | Ok _ -> fail "unsupported derived fact crossed the authoritative read boundary"
+;;
+
+let test_snapshot_read_rejects_forged_invalidation_evidence () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let premise = fact ~claim:"present premise" () in
+  let conclusion =
+    derived_fact
+      ~claim:"supported conclusion"
+      [ { rule_id = "supported"; premise_ids = [ Types.memory_id premise ] } ]
+  in
+  let forged : Current.t =
+    { revision = 1
+    ; updated_at = 200.0
+    ; source = source Current.Explicit_write
+    ; facts = [ premise; conclusion ]
+    ; change =
+        { added = [ premise; conclusion ]
+        ; removed = []
+        ; retained = 0
+        ; invalidated =
+            [ { fact = conclusion; missing_premise_ids = [ missing_memory_id 'd' ] } ]
+        }
+    }
+  in
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  Fs_compat.save_file path (Yojson.Safe.to_string (Current.to_json forged));
+  match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" with
+  | Error _ -> ()
+  | Ok _ -> fail "forged support invalidation crossed the authoritative read boundary"
+;;
+
+let test_snapshot_read_requires_fact_basis () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let written = replace ~keepers_dir ~facts:[ fact () ] () |> require_ok in
+  let without_basis = function
+    | `Assoc fields ->
+      `Assoc (List.filter (fun (field, _) -> not (String.equal field "basis")) fields)
+    | json -> json
+  in
+  let broken =
+    match Current.to_json written with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (field, value) ->
+              if String.equal field "facts"
+              then
+                match value with
+                | `List facts -> field, `List (List.map without_basis facts)
+                | _ -> field, value
+              else field, value)
+           fields)
+    | json -> json
+  in
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  Fs_compat.save_file path (Yojson.Safe.to_string broken);
+  match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" with
+  | Error _ -> ()
+  | Ok _ -> fail "a fact without basis crossed the authoritative read boundary"
 ;;
 
 let test_current_snapshot_object_order_is_irrelevant_but_fields_are_exact () =
@@ -208,7 +608,7 @@ let test_current_snapshot_object_order_is_irrelevant_but_fields_are_exact () =
   check int "reordered current revision" written.revision decoded.revision;
   let with_unknown =
     match reordered with
-    | `Assoc fields -> `Assoc (("summary", `String "retired") :: fields)
+    | `Assoc fields -> `Assoc (("summary", `String "unexpected") :: fields)
     | _ -> reordered
   in
   Fs_compat.save_file snapshot_path (Yojson.Safe.to_string with_unknown);
@@ -318,12 +718,7 @@ let test_recall_read_failure_injects_no_block () =
   check string "unreadable snapshot injects no recall block" "" rendered
 ;;
 
-(* The recall byte budget is read at render time, so a snapshot that was
-   within budget when written can exceed it later — the budget is an env
-   knob, and facts accumulate. That arm injects nothing rather than a
-   truncated block, and it is the only recall path that discards facts it
-   successfully read. *)
-let test_recall_over_budget_injects_no_block () =
+let test_recall_does_not_hide_current_truth_behind_a_size_threshold () =
   with_temp_keepers
   @@ fun keepers_dir ->
   let prompt_dir = Filename.concat keepers_dir "prompts" in
@@ -331,78 +726,15 @@ let test_recall_over_budget_injects_no_block () =
   Prompt_registry.set_markdown_dir prompt_dir;
   Prompt_registry.load_prompts_from_directory prompt_dir;
   ignore (replace ~keepers_dir ~facts:[ fact ~claim:(String.make 256 'y') () ] () |> require_ok);
-  let key = Env_config.KeeperMemoryOs.recall_facts_max_bytes_env_key in
-  let previous = Sys.getenv_opt key in
-  let restore () =
-    match previous with
-    | Some value -> Unix.putenv key value
-    | None -> Unix.putenv key ""
-  in
-  Fun.protect ~finally:restore (fun () ->
-    Unix.putenv key "16";
-    let rendered =
-      Masc.Keeper_memory_os_recall.render_context
-        ~keepers_dir
-        ~keeper_id:"keeper"
-        ~now:240.0
-        ()
-    in
-    check string "over-budget recall injects no block" "" rendered);
-  Unix.putenv key "1048576";
-  let rendered_within_budget =
+  let rendered =
     Masc.Keeper_memory_os_recall.render_context
       ~keepers_dir
       ~keeper_id:"keeper"
       ~now:240.0
       ()
   in
-  check bool "same snapshot renders when the budget allows it" true
-    (String.length rendered_within_budget > 0)
-;;
-
-let test_snapshot_write_rejects_rendered_fact_payload_over_budget () =
-  with_temp_keepers @@ fun keepers_dir ->
-  match
-    Current.replace
-      ~max_fact_bytes:128
-      ~keepers_dir
-      ~keeper_id:"keeper"
-      ~expected_revision:None
-      ~now:200.0
-      ~source:(source Current.Explicit_write)
-      ~facts:[ fact ~claim:(String.make 256 'x') () ]
-      ()
-  with
-  | Error message ->
-    check bool "typed boundary detail" true
-      (String_util.contains_substring message "actual_bytes=");
-    check bool "declared budget detail" true
-      (String_util.contains_substring message "max_bytes=128");
-    check bool "no snapshot written" false
-      (Sys.file_exists
-         (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"))
-  | Ok _ -> fail "oversized snapshot was committed"
-;;
-
-let test_snapshot_write_floors_nonpositive_budget () =
-  with_temp_keepers @@ fun keepers_dir ->
-  match
-    Current.replace
-      ~max_fact_bytes:0
-      ~keepers_dir
-      ~keeper_id:"keeper"
-      ~expected_revision:None
-      ~now:200.0
-      ~source:(source Current.Explicit_write)
-      ~facts:[ fact ~claim:"x" () ]
-      ()
-  with
-  | Error message ->
-    check bool "budget floored to one byte" true
-      (String_util.contains_substring message "max_bytes=1");
-    check bool "invalid zero budget not exposed" false
-      (String_util.contains_substring message "max_bytes=0")
-  | Ok _ -> fail "non-empty snapshot fit within the one-byte floor"
+  check bool "large current truth reaches recall" true
+    (String.length rendered > 0)
 ;;
 
 let test_explicit_upsert_preserves_snapshot_and_records_delta () =
@@ -422,7 +754,7 @@ let test_explicit_upsert_preserves_snapshot_and_records_delta () =
       ~now:300.0
       ~source:(source Current.Explicit_write)
       second
-    |> require_ok
+    |> require_upsert_ok
   in
   check int "revision" 2 snapshot.revision;
   check (list string) "facts" (fact_ids [ first; second ]) (fact_ids snapshot.facts);
@@ -445,7 +777,7 @@ let test_explicit_upsert_preserves_first_seen_for_same_claim () =
       ~now:600.0
       ~source:(source Current.Explicit_write)
       repeated
-    |> require_ok
+    |> require_upsert_ok
   in
   let stored = List.hd snapshot.facts in
   check (float 0.0) "first insertion time remains authoritative" 100.0 stored.first_seen;
@@ -476,19 +808,6 @@ let test_explicit_keepers_dirs_do_not_cross_contaminate () =
     (fact_ids (read second_dir).facts)
 ;;
 
-let read_journal_lines ~keepers_dir =
-  let path =
-    Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
-  in
-  if not (Sys.file_exists path)
-  then []
-  else
-    Fs_compat.load_file path
-    |> String.split_on_char '\n'
-    |> List.filter (fun line -> not (String.equal line ""))
-    |> List.map Yojson.Safe.from_string
-;;
-
 let test_every_commit_appends_one_journal_entry () =
   with_temp_keepers @@ fun keepers_dir ->
   let first = fact ~claim:"first" () in
@@ -514,7 +833,7 @@ let test_every_commit_appends_one_journal_entry () =
        ~now:300.0
        ~source:(source Current.Explicit_write)
        second
-     |> require_ok);
+     |> require_upsert_ok);
   let lines = read_journal_lines ~keepers_dir in
   check int "one journal line per commit" 3 (List.length lines);
   let open Yojson.Safe.Util in
@@ -553,6 +872,28 @@ let test_rejected_commit_appends_no_journal_entry () =
     (List.length (read_journal_lines ~keepers_dir))
 ;;
 
+let test_invalid_drop_identity_has_no_effect () =
+  with_temp_keepers @@ fun keepers_dir ->
+  (match
+     replace
+       ~keepers_dir
+       ~facts:[ fact () ]
+       ~dropped_statements:
+         [ { Masc.Keeper_memory_os_types.memory_id = "not-a-memory-id"
+           ; reason = "invalid producer identity"
+           }
+         ]
+       ()
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "invalid drop identity committed a snapshot");
+  check bool "invalid drop writes no snapshot" false
+    (Sys.file_exists
+       (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"));
+  check int "invalid drop writes no journal" 0
+    (List.length (read_journal_lines ~keepers_dir))
+;;
+
 (* The purge hook drops the memoized journal appender before unlinking
    (Fs_compat.invalidate_cached_writer): without that, a same-process
    successor keeper would keep appending to the deleted inode and no new
@@ -573,7 +914,7 @@ let test_journal_recreated_after_purge_sequence () =
        ~now:300.0
        ~source:(source Current.Explicit_write)
        (fact ~claim:"after purge" ())
-     |> require_ok);
+     |> require_upsert_ok);
   check bool "journal recreated after purge" true (Sys.file_exists journal_path);
   check int "only the post-purge commit is journaled" 1
     (List.length (read_journal_lines ~keepers_dir))
@@ -607,7 +948,7 @@ let test_stale_replace_rejects_concurrent_explicit_write () =
        ~now:250.0
        ~source:(source Current.Explicit_write)
        explicit
-     |> require_ok);
+     |> require_upsert_ok);
   (match
      replace
        ~keepers_dir
@@ -637,49 +978,6 @@ let test_stale_replace_rejects_concurrent_explicit_write () =
     (fact_ids snapshot.facts)
 ;;
 
-(* A pre-provenance three-field row — the shape of every snapshot already on
-   disk — must decode as a Legacy row instead of being rejected: last_seen
-   collapses to first_seen, reinforcement to 0, and no origin is invented. A
-   row mixing the two vocabularies is a shape this build does not know and
-   must reject rather than read past. *)
-let test_legacy_three_field_fact_row_decodes_as_legacy () =
-  let strip_newer_fields fields =
-    List.filter
-      (fun (key, _) ->
-         not (List.mem key [ "last_seen"; "reinforcement"; "origin" ]))
-      fields
-  in
-  let legacy_row =
-    match Types.fact_to_json (fact ~claim:"written before provenance" ()) with
-    | `Assoc fields -> `Assoc (strip_newer_fields fields)
-    | _ -> fail "fact_to_json did not produce an object"
-  in
-  (match Types.fact_of_json legacy_row with
-   | Some decoded ->
-     check bool "legacy origin declared" true (decoded.origin.kind = Types.Legacy);
-     check
-       bool
-       "no invented trace"
-       true
-       (String.equal decoded.origin.trace_id "");
-     check (float 0.0) "last_seen collapses to first_seen" 100.0 decoded.last_seen;
-     check int "no phantom reinforcement" 0 decoded.reinforcement;
-     check
-       string
-       "claim bytes survive the widening"
-       "written before provenance"
-       decoded.claim
-   | None -> fail "legacy three-field row was rejected");
-  let mixed_row =
-    match legacy_row with
-    | `Assoc fields ->
-      `Assoc
-        (("origin", `Assoc [ "kind", `String "authored"; "trace_id", `String "" ]) :: fields)
-    | _ -> fail "unreachable"
-  in
-  check bool "mixed vocabulary rejects" true (Types.fact_of_json mixed_row = None)
-;;
-
 (* Byte-identical re-observation is reinforcement, not duplication: the row
    count stays flat, insertion time stays authoritative, the observation time
    refreshes, the re-observation is counted, and an injected copy re-observing
@@ -703,7 +1001,7 @@ let test_reobservation_reinforces_instead_of_duplicating () =
       ~now:600.0
       ~source:(source Current.Librarian)
       reinjected
-    |> require_ok
+    |> require_upsert_ok
   in
   check int "one row, not a duplicate" 1 (List.length snapshot.facts);
   let stored = List.hd snapshot.facts in
@@ -719,6 +1017,30 @@ let () =
     "keeper_memory_os_current"
     [ ( "current snapshot"
       , [ test_case "fresh replace and delta" `Quick test_fresh_replace_and_delta
+        ; test_case
+            "derivation contract canonicalizes premise sets"
+            `Quick
+            test_derivation_contract_canonicalizes_sets_and_rejects_duplicate_rules
+        ; test_case
+            "support retraction cascades to fixed point"
+            `Quick
+            test_support_retraction_cascades_to_fixed_point
+        ; test_case
+            "reverse-ordered support chain reaches fixed point"
+            `Quick
+            test_reverse_ordered_support_chain_reaches_fixed_point
+        ; test_case
+            "alternate support keeps derived fact current"
+            `Quick
+            test_alternate_support_path_keeps_derived_fact_current
+        ; test_case
+            "same rule replaces premise set"
+            `Quick
+            test_same_rule_replaces_its_premise_set
+        ; test_case
+            "unsupported derived upsert has no effect"
+            `Quick
+            test_unsupported_derived_upsert_has_no_effect
         ; test_case
             "memory id is exact claim derived state"
             `Quick
@@ -736,9 +1058,17 @@ let () =
             `Quick
             test_invalid_current_snapshot_fails_closed
         ; test_case
-            "previous path is not read or migrated"
+            "unsupported current truth fails closed"
             `Quick
-            test_previous_path_is_not_read_or_migrated
+            test_snapshot_read_rejects_unsupported_current_truth
+        ; test_case
+            "forged invalidation evidence fails closed"
+            `Quick
+            test_snapshot_read_rejects_forged_invalidation_evidence
+        ; test_case
+            "fact basis is required"
+            `Quick
+            test_snapshot_read_requires_fact_basis
         ; test_case
             "object order irrelevant and fields exact"
             `Quick
@@ -760,17 +1090,9 @@ let () =
             `Quick
             test_recall_read_failure_injects_no_block
         ; test_case
-            "recall over budget injects no block"
+            "recall has no size threshold"
             `Quick
-            test_recall_over_budget_injects_no_block
-        ; test_case
-            "snapshot rejects rendered facts over budget"
-            `Quick
-            test_snapshot_write_rejects_rendered_fact_payload_over_budget
-        ; test_case
-            "snapshot floors nonpositive budget"
-            `Quick
-            test_snapshot_write_floors_nonpositive_budget
+            test_recall_does_not_hide_current_truth_behind_a_size_threshold
         ; test_case
             "explicit upsert preserves snapshot"
             `Quick
@@ -796,6 +1118,10 @@ let () =
             `Quick
             test_rejected_commit_appends_no_journal_entry
         ; test_case
+            "invalid drop identity has no effect"
+            `Quick
+            test_invalid_drop_identity_has_no_effect
+        ; test_case
             "purge plan removes memory sidecars"
             `Quick
             test_purge_plan_removes_memory_sidecars
@@ -803,10 +1129,6 @@ let () =
             "journal recreated after purge sequence"
             `Quick
             test_journal_recreated_after_purge_sequence
-        ; test_case
-            "legacy three-field row decodes as legacy"
-            `Quick
-            test_legacy_three_field_fact_row_decodes_as_legacy
         ; test_case
             "re-observation reinforces instead of duplicating"
             `Quick

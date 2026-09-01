@@ -461,15 +461,6 @@ let all =
       ~category:"memory"
       "Recent-message window for memory librarian extraction"
   ; setting
-      ~range:(int_range ~min:1 ())
-      ~env_name:"MASC_KEEPER_MEMORY_OS_RECALL_FACTS_MAX_BYTES"
-      ~exposure:Env_only
-      ~value_kind:Integer
-      ~default:"65536"
-      ~consumers:[ "Env_config_keeper.KeeperMemoryOs"; "Keeper memory recall" ]
-      ~category:"memory"
-      "Maximum bytes of recalled memory facts injected into a turn"
-  ; setting
       ~reload_class:Next_turn
       ~env_name:"MASC_KEEPER_MEMORY_OS_RECALL"
       ~exposure:Env_only

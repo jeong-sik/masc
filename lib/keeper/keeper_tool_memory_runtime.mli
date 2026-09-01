@@ -45,6 +45,8 @@ val keeper_context_status_json
     - [source_path] — optional keeper-visible regular file. When present, the
       claim enters the source-bound current store and is revalidated before
       every recall instead of entering the ordinary Memory OS snapshot.
+    - [rule_id] and [premise_ids] — optional pair for an ordinary-current
+      derived conclusion. Premises are exact ordinary Memory OS identities.
 
     Returns a JSON string with [{ok, error_kind, ...}]:
     - On success: [ok=true], [rows_written], [outcome], [store].
@@ -55,22 +57,21 @@ val keeper_memory_write_with_outcome
   -> meta:Keeper_meta_contract.keeper_meta
   -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
-(** Validate and atomically upsert an explicit fact in the Keeper's bounded
+(** Validate and atomically upsert an explicit fact in the Keeper's
     Memory OS snapshot. The write stays inside MASC and never enters the
     external-effect Gate or approval replay path. *)
 
-(** Title length cap exposed for sync regression tests. *)
-(** Upper bound on the composed [**title** content] body. *)
 (** Result of validating a [keeper_memory_write] call's args. Exposed
     so tests can pin the error_kind taxonomy without constructing a
     [Workspace.config]. *)
 type memory_write_error_kind =
-  | Title_too_long
   | Content_empty
-  | Content_too_long
   | Source_path_invalid
-  | Source_path_too_long
   | Source_read_failed
+  | Derivation_incomplete
+  | Derivation_invalid
+  | Derived_source_path_unsupported
+  | Unsupported_derivation
   | Persistence_failed
   | No_memory_write_error
 
@@ -80,6 +81,7 @@ type memory_write_validation =
   | Memory_write_ok of
       { body : string
       ; source_path : string option
+      ; basis : Keeper_memory_os_types.basis
       }
   | Memory_write_invalid of
       { error_kind : memory_write_error_kind

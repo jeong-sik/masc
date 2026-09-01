@@ -42,9 +42,25 @@ let valid_memory_search_source_strings =
 
 (* --- Durable fact search (Memory OS store) --- *)
 
+type fact_store =
+  | Ordinary_current
+  | Source_bound_current
+
+let fact_store_to_string = function
+  | Ordinary_current -> "current_memory_snapshot"
+  | Source_bound_current -> "source_bound_current_memory"
+;;
+
+type fact_identity =
+  | Ordinary_memory_id of string
+  | Source_sha256 of string
+
 type fact_match =
-  { claim : string
+  { identity : fact_identity
+  ; claim : string
   ; category : string
+  ; basis : Keeper_memory_os_types.basis
+  ; store : fact_store
   }
 
 let read_current_facts ~keepers_dir ~keeper_id =
@@ -104,13 +120,21 @@ let search_durable_facts
     matched
     |> List.map (fun (fact : Keeper_memory_os_types.fact) ->
       { claim = fact.claim
+      ; identity = Ordinary_memory_id (Keeper_memory_os_types.memory_id fact)
       ; category = Keeper_memory_os_types.category_to_string fact.category
+      ; basis = fact.basis
+      ; store = Ordinary_current
       })
   in
   let source_matches =
     List.map
       (fun (fact : Keeper_memory_source_current.fact) ->
-         { claim = fact.claim; category = "fact" })
+      { identity = Source_sha256 fact.source.sha256
+      ; claim = fact.claim
+      ; category = "fact"
+      ; basis = Keeper_memory_os_types.Observed
+      ; store = Source_bound_current
+      })
       source_matched
   in
   take limit (ordinary_matches @ source_matches), total_candidates
@@ -118,9 +142,15 @@ let search_durable_facts
 
 let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
   `Assoc
-    [ "text", `String m.claim
-    ; "category", `String m.category
-    ]
+    ([ "text", `String m.claim
+     ; "category", `String m.category
+     ; "basis", Keeper_memory_os_types.basis_to_json m.basis
+     ; "store", `String (fact_store_to_string m.store)
+     ]
+     @
+     match m.identity with
+     | Ordinary_memory_id memory_id -> [ "memory_id", `String memory_id ]
+     | Source_sha256 sha256 -> [ "source_sha256", `String sha256 ])
 ;;
 
 (* --- History search (checkpoint + trace history) --- *)
@@ -399,34 +429,28 @@ let keeper_context_status_json
 
 (* --- Explicit memory write surface ------------------------------- *)
 
-let keeper_memory_write_max_title_chars = 120
-
-(* Upper bound on the composed [**title** content] body. A durable fact is a
-   claim, not a document; the bound matches the cap the retired bank enforced
-   so existing producers see the same boundary. *)
-let keeper_memory_write_max_body_chars = 4096
-let keeper_memory_write_max_source_path_chars = 4096
-
 (** Pure validation result for a [keeper_memory_write] call. Splitting
     this from the persistence step lets tests pin the error_kind
     taxonomy without constructing a [Workspace.config]. *)
 type memory_write_error_kind =
-  | Title_too_long
   | Content_empty
-  | Content_too_long
   | Source_path_invalid
-  | Source_path_too_long
   | Source_read_failed
+  | Derivation_incomplete
+  | Derivation_invalid
+  | Derived_source_path_unsupported
+  | Unsupported_derivation
   | Persistence_failed
   | No_memory_write_error
 
 let memory_write_error_kind_to_string = function
-  | Title_too_long -> "title_too_long"
   | Content_empty -> "content_empty"
-  | Content_too_long -> "content_too_long"
   | Source_path_invalid -> "source_path_invalid"
-  | Source_path_too_long -> "source_path_too_long"
   | Source_read_failed -> "source_read_failed"
+  | Derivation_incomplete -> "derivation_incomplete"
+  | Derivation_invalid -> "derivation_invalid"
+  | Derived_source_path_unsupported -> "derived_source_path_unsupported"
+  | Unsupported_derivation -> "unsupported_derivation"
   | Persistence_failed -> "persistence_failed"
   | No_memory_write_error -> ""
 ;;
@@ -435,6 +459,7 @@ type memory_write_validation =
   | Memory_write_ok of
       { body : string
       ; source_path : string option
+      ; basis : Keeper_memory_os_types.basis
       }
   | Memory_write_invalid of
       { error_kind : memory_write_error_kind
@@ -454,44 +479,67 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
         || String.contains path '\n'
         || String.contains path '\r'
       then Error Source_path_invalid
-      else if String.length path > keeper_memory_write_max_source_path_chars
-      then Error Source_path_too_long
       else Ok (Some path)
     | _ -> Error Source_path_invalid
   in
-  if String.length title > keeper_memory_write_max_title_chars
-  then
-    Memory_write_invalid
-      { error_kind = Title_too_long
-      ; extras =
-          [ "max_chars", `Int keeper_memory_write_max_title_chars
-          ]
-      }
-  else
-    match source_path with
-    | Error error_kind ->
+  let derivation =
+    match Safe_ops.safe_member "rule_id" args, Safe_ops.safe_member "premise_ids" args with
+    | `Null, `Null -> Ok Keeper_memory_os_types.Observed
+    | `String raw_rule_id, `List premise_values ->
+      let rule_id = String.trim raw_rule_id in
+      let rec premise_ids seen acc = function
+        | [] ->
+          if String.equal rule_id "" || acc = []
+          then Error Derivation_invalid
+          else
+            Ok
+              (Keeper_memory_os_types.Derived
+                 [ { rule_id; premise_ids = List.rev acc } ])
+        | `String raw :: rest ->
+          let premise_id = raw in
+          if
+            not (Keeper_memory_os_types.is_memory_id premise_id)
+            || StringSet.mem premise_id seen
+          then Error Derivation_invalid
+          else
+            premise_ids
+              (StringSet.add premise_id seen)
+              (premise_id :: acc)
+              rest
+        | _ -> Error Derivation_invalid
+      in
+      premise_ids StringSet.empty [] premise_values
+    | (`Null, _) | (_, `Null) -> Error Derivation_incomplete
+    | _ -> Error Derivation_invalid
+  in
+  match source_path, derivation with
+  | Error error_kind, _ | _, Error error_kind ->
+    Memory_write_invalid { error_kind; extras = [] }
+  | Ok source_path, Ok basis ->
+    if
+      Option.is_some source_path
+      && (match basis with
+          | Keeper_memory_os_types.Observed -> false
+          | Keeper_memory_os_types.Derived _ -> true)
+    then
       Memory_write_invalid
-        { error_kind
-        ; extras =
-            (match error_kind with
-             | Source_path_too_long ->
-               [ "max_chars", `Int keeper_memory_write_max_source_path_chars ]
-             | _ -> [])
-        }
-    | Ok source_path ->
-      if content = ""
-      then Memory_write_invalid { error_kind = Content_empty; extras = [] }
-      else
-        let body =
-          if title = "" then content else Printf.sprintf "**%s** %s" title content
-        in
-        if String.length body > keeper_memory_write_max_body_chars
-        then
-          Memory_write_invalid
-            { error_kind = Content_too_long
-            ; extras = [ "max_chars", `Int keeper_memory_write_max_body_chars ]
-            }
-        else Memory_write_ok { body; source_path }
+        { error_kind = Derived_source_path_unsupported; extras = [] }
+    else if content = ""
+    then Memory_write_invalid { error_kind = Content_empty; extras = [] }
+    else
+      let body =
+        if title = "" then content else Printf.sprintf "**%s** %s" title content
+      in
+      Memory_write_ok { body; source_path; basis }
+;;
+
+let memory_write_basis_receipt = function
+  | Keeper_memory_os_types.Observed -> `Assoc [ "kind", `String "observed" ]
+  | Keeper_memory_os_types.Derived derivations ->
+    `Assoc
+      [ "kind", `String "derived"
+      ; "proof_count", `Int (List.length derivations)
+      ]
 ;;
 
 (* An explicit write is a claim a later turn reads back; the current Memory OS
@@ -504,7 +552,8 @@ let upsert_explicit_fact
       ~(keepers_dir : string)
       ~(meta : keeper_meta)
       ~(body : string)
-  : (Keeper_memory_os_current.t, string) result
+      ~(basis : Keeper_memory_os_types.basis)
+  : (Keeper_memory_os_current.t, Keeper_memory_os_current.upsert_error) result
   =
   let keeper_id = meta.name in
   let now = Time_compat.now () in
@@ -516,6 +565,7 @@ let upsert_explicit_fact
     ; last_seen = now
     ; reinforcement = 0
     ; origin = { kind = Keeper_memory_os_types.Authored; trace_id }
+    ; basis
     }
   in
   let result =
@@ -578,7 +628,7 @@ let keeper_memory_write_with_outcome
       ~ok:false
       ~error_kind
       extras
-  | Memory_write_ok { body; source_path } ->
+  | Memory_write_ok { body; source_path; basis } ->
     let keepers_dir =
       Config_dir_resolver.keepers_dir_for_base_path
         ~base_path:config.Workspace.base_path
@@ -590,16 +640,6 @@ let keeper_memory_write_with_outcome
             ~config
             ~meta
             ~keepers_dir
-            ~ordinary_payload:(fun () ->
-              match
-                Keeper_memory_os_current.read_for_keepers_dir
-                  ~keepers_dir
-                  ~keeper_id:meta.name
-              with
-              | Ok None -> Ok ""
-              | Ok (Some snapshot) ->
-                Ok (Keeper_memory_os_budget.render_facts snapshot.facts)
-              | Error detail -> Error detail)
             ~now:(Time_compat.now ())
             ~claim:body
             ~source_path
@@ -665,26 +705,58 @@ let keeper_memory_write_with_outcome
             detail;
           respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ])
      | None ->
-    (match upsert_explicit_fact ~keepers_dir ~meta ~body with
+    (match upsert_explicit_fact ~keepers_dir ~meta ~body ~basis with
      | Ok snapshot ->
+       let written_fact =
+         List.find_opt
+           (fun fact -> String.equal fact.Keeper_memory_os_types.claim body)
+           snapshot.facts
+       in
+       (match written_fact with
+        | Some written_fact ->
+          respond
+            ~memory_revision:snapshot.revision
+            ~ok:true
+            ~error_kind:No_memory_write_error
+            [ "rows_written", `Int 1
+            ; "revision", `Int snapshot.revision
+              (* [recorded_at] echoes the persisted snapshot stamp rather than
+                 reading a second clock: the receipt and the stored fact cannot
+                 disagree, and the authoring model gets an authoritative UTC
+                 time at the exact moment it writes prose claims — hand-typed
+                 timestamps in claims have drifted by whole hours (lane-smith,
+                 2026-09-01: a 02:42Z event recorded as "03:42Z"). *)
+            ; ( "recorded_at"
+              , `String
+                  (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at) )
+            ; "outcome", `String "persisted_current_snapshot"
+            ; "store", `String "current_memory_snapshot"
+            ; ( "memory_id"
+              , `String (Keeper_memory_os_types.memory_id written_fact) )
+            ; "basis", memory_write_basis_receipt written_fact.basis
+            ]
+        | None ->
+          respond
+            ~effect_disposition:Tool_result.Proven_post_effect
+            ~ok:false
+            ~error_kind:Persistence_failed
+            [ "revision", `Int snapshot.revision
+            ; ( "detail"
+              , `String
+                  "committed current Memory snapshot omitted the written fact" )
+            ])
+     | Error (Keeper_memory_os_current.Unsupported_derivation invalidation) ->
        respond
-         ~memory_revision:snapshot.revision
-         ~ok:true
-         ~error_kind:No_memory_write_error
-         [ "rows_written", `Int 1
-         ; "revision", `Int snapshot.revision
-           (* [recorded_at] echoes the persisted snapshot stamp rather than
-              reading a second clock: the receipt and the stored fact cannot
-              disagree, and the authoring model gets an authoritative UTC
-              time at the exact moment it writes prose claims — hand-typed
-              timestamps in claims have drifted by whole hours (lane-smith,
-              2026-09-01: a 02:42Z event recorded as "03:42Z"). *)
-         ; ( "recorded_at"
-           , `String (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at) )
-         ; "outcome", `String "persisted_current_snapshot"
-         ; "store", `String "current_memory_snapshot"
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         ~ok:false
+         ~error_kind:Unsupported_derivation
+         [ ( "missing_premise_ids"
+           , `List
+               (List.map
+                  (fun premise_id -> `String premise_id)
+                  invalidation.missing_premise_ids) )
          ]
-     | Error detail ->
+     | Error (Keeper_memory_os_current.Upsert_persistence_failed detail) ->
        Log.Keeper.warn
          "explicit current Memory write failed keeper=%s: %s"
          meta.name

@@ -11,6 +11,12 @@ let wire_field_reinforcement = "reinforcement"
 let wire_field_origin = "origin"
 let wire_field_memory_id = "memory_id"
 let wire_field_reason = "reason"
+let wire_field_basis = "basis"
+let wire_field_kind = "kind"
+let wire_field_derivations = "derivations"
+let wire_field_rule_id = "rule_id"
+let wire_field_premise_ids = "premise_ids"
+let wire_field_trace_id = "trace_id"
 
 module Wire_field_set = Set.Make (String)
 
@@ -31,11 +37,28 @@ let closed_fields allowed fields =
   loop Wire_field_set.empty fields
 ;;
 
-(* The canonical persisted fact shape. [legacy_fact_wire_fields] is the
-   pre-provenance three-field shape: rows written before
-   origin/last_seen/reinforcement existed decode as [Legacy] origin rather
-   than being rejected, so this widening never orphans the snapshot already
-   on disk. A row mixing the two vocabularies rejects below. *)
+let exact_fields allowed fields =
+  closed_fields allowed fields
+  && List.length fields = Wire_field_set.cardinal allowed
+;;
+
+let memory_id_prefix = "sha256:"
+
+let is_lowercase_hex = function
+  | '0' .. '9' | 'a' .. 'f' -> true
+  | _ -> false
+;;
+
+let is_memory_id value =
+  let prefix_length = String.length memory_id_prefix in
+  String.length value = prefix_length + 64
+  && String.starts_with ~prefix:memory_id_prefix value
+  && String.for_all is_lowercase_hex (String.sub value prefix_length 64)
+;;
+
+let non_empty_string value = not (String.equal (String.trim value) "")
+
+(* The canonical persisted fact shape is closed and field-exact. *)
 let fact_wire_fields =
   wire_field_set
     [ wire_field_claim
@@ -44,11 +67,8 @@ let fact_wire_fields =
     ; wire_field_last_seen
     ; wire_field_reinforcement
     ; wire_field_origin
+    ; wire_field_basis
     ]
-;;
-
-let legacy_fact_wire_fields =
-  wire_field_set [ wire_field_claim; wire_field_category; wire_field_first_seen ]
 ;;
 
 let wire_librarian_claim_fields =
@@ -65,6 +85,8 @@ type dropped_statement =
   }
 
 let dropped_statement_to_json (d : dropped_statement) =
+  if not (is_memory_id d.memory_id) || not (non_empty_string d.reason)
+  then invalid_arg "dropped statement must name a memory identity and non-empty reason";
   `Assoc
     [ wire_field_memory_id, `String d.memory_id
     ; wire_field_reason, `String d.reason
@@ -83,7 +105,8 @@ let dropped_statement_of_json = function
        List.assoc_opt wire_field_memory_id fields
        , List.assoc_opt wire_field_reason fields
      with
-     | Some (`String memory_id), Some (`String reason) ->
+     | Some (`String memory_id), Some (`String reason)
+       when is_memory_id memory_id && non_empty_string reason ->
        Some { memory_id; reason }
      | _ -> None)
   | _ -> None
@@ -142,15 +165,12 @@ let category_of_string s =
    keeper memory_write. [Injected]: librarian extraction — the row is a copy
    of something the keeper already saw, which is exactly the feed the
    self-referential reinjection loop runs on (task-1032 / rondo probes).
-   [Legacy]: rows written before this field existed; provenance is unknown
-   and must not be back-filled with a guess. [trace_id] is the committing
-   write's trace when the writer knows one; empty means consult the snapshot
-   journal. Category tokens only ever reach prompt renders — never a unique
-   identity (masc#29558). *)
+   [trace_id] is the committing write's trace when the writer knows one; empty
+   means consult the snapshot journal. Category tokens only ever reach prompt
+   renders — never a unique identity (masc#29558). *)
 type origin_kind =
   | Authored
   | Injected
-  | Legacy
 
 type origin =
   { kind : origin_kind
@@ -160,17 +180,21 @@ type origin =
 let origin_kind_to_string = function
   | Authored -> "authored"
   | Injected -> "injected"
-  | Legacy -> "legacy"
 ;;
 
 let origin_of_json = function
-  | `Assoc fields ->
-    (match List.assoc_opt "kind" fields, List.assoc_opt "trace_id" fields with
+  | `Assoc fields
+    when exact_fields
+           (wire_field_set [ wire_field_kind; wire_field_trace_id ])
+           fields ->
+    (match
+       List.assoc_opt wire_field_kind fields
+       , List.assoc_opt wire_field_trace_id fields
+     with
      | Some (`String kind), Some (`String trace_id) ->
        (match kind with
         | "authored" -> Some { kind = Authored; trace_id }
         | "injected" -> Some { kind = Injected; trace_id }
-        | "legacy" -> Some { kind = Legacy; trace_id }
         | _ -> None)
      | _ -> None)
   | _ -> None
@@ -178,18 +202,26 @@ let origin_of_json = function
 
 let origin_to_json (o : origin) =
   `Assoc
-    [ "kind", `String (origin_kind_to_string o.kind)
-    ; "trace_id", `String o.trace_id
+    [ wire_field_kind, `String (origin_kind_to_string o.kind)
+    ; wire_field_trace_id, `String o.trace_id
     ]
 ;;
+
+type derivation =
+  { rule_id : string
+  ; premise_ids : string list
+  }
+
+type basis =
+  | Observed
+  | Derived of derivation list
 
 (* The fact carries the exact claim, its recalled category, and observable
    insertion/refresh timestamps. [first_seen]: insertion, authoritative,
    preserved across re-upsert. [last_seen]: most recent observation of the
-   same claim bytes — the eviction ordering key, so a row that keeps proving
-   relevant outlives budget pressure instead of dying of age. [reinforcement]:
-   how many times the exact claim bytes were re-observed — the measurable
-   damper on the byte-identical reinjection loop: a re-injected row
+   same claim bytes. [reinforcement]: how many times the exact claim bytes were
+   re-observed — the measurable damper on the byte-identical reinjection loop:
+   a re-injected row
    increments instead of accumulating a duplicate. A fact's value is the
    librarian's judgment, not a score or a model-invented semantic identity. *)
 type fact =
@@ -199,6 +231,7 @@ type fact =
   ; last_seen : float
   ; reinforcement : int
   ; origin : origin
+  ; basis : basis
   }
 
 (* ---------- JSON codecs ---------- *)
@@ -217,17 +250,149 @@ let json_float_field key (fields : (string * Yojson.Safe.t) list) =
   | Some (`Assoc _ | `Bool _ | `Intlit _ | `List _ | `Null | `String _) | None -> None
 ;;
 
-let non_empty_string value = not (String.equal (String.trim value) "")
+let unique_non_empty_strings values =
+  let rec loop seen = function
+    | [] -> true
+    | value :: rest ->
+      if
+        not (non_empty_string value)
+        || Wire_field_set.mem value seen
+      then false
+      else loop (Wire_field_set.add value seen) rest
+  in
+  values <> [] && loop Wire_field_set.empty values
+;;
+
+let valid_derivation ({ rule_id; premise_ids } : derivation) =
+  non_empty_string rule_id
+  && unique_non_empty_strings premise_ids
+  && List.for_all is_memory_id premise_ids
+;;
+
+let normalize_derivation ({ rule_id; premise_ids } : derivation) =
+  { rule_id; premise_ids = List.sort String.compare premise_ids }
+;;
+
+let valid_derivations derivations =
+  let rec loop rule_ids = function
+    | [] -> true
+    | derivation :: rest ->
+      if
+        not (valid_derivation derivation)
+        || Wire_field_set.mem derivation.rule_id rule_ids
+      then false
+      else loop (Wire_field_set.add derivation.rule_id rule_ids) rest
+  in
+  derivations <> [] && loop Wire_field_set.empty derivations
+;;
+
+let derivation_to_json ({ rule_id; premise_ids } : derivation) =
+  if not (valid_derivation { rule_id; premise_ids })
+  then invalid_arg "memory derivation must name a rule and unique non-empty premises";
+  let { rule_id; premise_ids } =
+    normalize_derivation { rule_id; premise_ids }
+  in
+  `Assoc
+    [ wire_field_rule_id, `String rule_id
+    ; wire_field_premise_ids, `List (List.map (fun id -> `String id) premise_ids)
+    ]
+;;
+
+let derivation_of_json = function
+  | `Assoc fields
+    when exact_fields
+           (wire_field_set [ wire_field_rule_id; wire_field_premise_ids ])
+           fields ->
+    (match
+       List.assoc_opt wire_field_rule_id fields
+       , List.assoc_opt wire_field_premise_ids fields
+     with
+     | Some (`String rule_id), Some (`List values) ->
+       let rec strings acc = function
+         | [] -> Some (List.rev acc)
+         | `String value :: rest -> strings (value :: acc) rest
+         | _ -> None
+       in
+       (match strings [] values with
+        | Some premise_ids when valid_derivation { rule_id; premise_ids } ->
+          Some (normalize_derivation { rule_id; premise_ids })
+        | Some _ | None -> None)
+     | _ -> None)
+  | _ -> None
+;;
+
+let basis_to_json = function
+  | Observed -> `Assoc [ wire_field_kind, `String "observed" ]
+  | Derived derivations ->
+    if not (valid_derivations derivations)
+    then invalid_arg "derived memory basis must carry valid derivations";
+    `Assoc
+      [ wire_field_kind, `String "derived"
+      ; wire_field_derivations, `List (List.map derivation_to_json derivations)
+      ]
+;;
+
+let basis_of_json = function
+  | `Assoc fields
+    when exact_fields (wire_field_set [ wire_field_kind ]) fields ->
+    (match List.assoc_opt wire_field_kind fields with
+     | Some (`String "observed") -> Some Observed
+     | Some _ | None -> None)
+  | `Assoc fields
+    when exact_fields
+           (wire_field_set [ wire_field_kind; wire_field_derivations ])
+           fields ->
+    (match
+       List.assoc_opt wire_field_kind fields
+       , List.assoc_opt wire_field_derivations fields
+     with
+     | Some (`String "derived"), Some (`List values) ->
+       let rec derivations acc = function
+         | [] -> Some (List.rev acc)
+         | value :: rest ->
+           (match derivation_of_json value with
+            | Some derivation -> derivations (derivation :: acc) rest
+            | None -> None)
+       in
+       (match derivations [] values with
+        | Some derivations when valid_derivations derivations ->
+          Some (Derived derivations)
+        | Some _ | None -> None)
+     | _ -> None)
+  | _ -> None
+;;
 
 (* The exact claim bytes are the only memory-content authority. The digest is a
    bounded derived identifier for retention and observability; it does not
    normalize or classify prose. *)
 let observed ~claim ~category ~now ~origin =
-  { claim; category; first_seen = now; last_seen = now; reinforcement = 0; origin }
+  { claim
+  ; category
+  ; first_seen = now
+  ; last_seen = now
+  ; reinforcement = 0
+  ; origin
+  ; basis = Observed
+  }
+;;
+
+let derived ~claim ~category ~now ~origin ~derivations =
+  if not (valid_derivations derivations)
+  then Error "derived memory fact must carry unique valid rule derivations"
+  else
+    Ok
+      { claim
+      ; category
+      ; first_seen = now
+      ; last_seen = now
+      ; reinforcement = 0
+      ; origin
+      ; basis = Derived (List.map normalize_derivation derivations)
+      }
 ;;
 
 let memory_id (f : fact) =
-  "sha256:" ^ Digestif.SHA256.(digest_string f.claim |> to_hex)
+  memory_id_prefix ^ Digestif.SHA256.(digest_string f.claim |> to_hex)
 ;;
 
 let fact_to_json (f : fact) =
@@ -246,35 +411,11 @@ let fact_to_json (f : fact) =
     ; wire_field_last_seen, `Float f.last_seen
     ; wire_field_reinforcement, `Int f.reinforcement
     ; wire_field_origin, origin_to_json f.origin
+    ; wire_field_basis, basis_to_json f.basis
     ]
 ;;
 
-(* Strict decoders for the closed canonical fact shapes. The current
-   six-field row and the legacy three-field row are both closed sets; a row
-   mixing the vocabularies (origin without last_seen, or vice versa) is a
-   shape this build does not know and rejects rather than reading past. *)
-let legacy_fact fields =
-  match
-    ( json_string_field wire_field_claim fields
-    , json_string_field wire_field_category fields
-    , json_float_field wire_field_first_seen fields )
-  with
-  | Some claim, Some category_str, Some first_seen ->
-    (match category_of_string category_str with
-     | None -> None
-     | Some category when non_empty_string claim && Float.is_finite first_seen ->
-       Some
-         { claim
-         ; category
-         ; first_seen
-         ; last_seen = first_seen
-         ; reinforcement = 0
-         ; origin = { kind = Legacy; trace_id = "" }
-         }
-     | Some _ -> None)
-  | _ -> None
-;;
-
+(* Strict decoder for the closed canonical fact shape. *)
 let current_fact fields =
   match
     ( json_string_field wire_field_claim fields
@@ -282,40 +423,35 @@ let current_fact fields =
     , json_float_field wire_field_first_seen fields
     , json_float_field wire_field_last_seen fields
     , List.assoc_opt wire_field_reinforcement fields
-    , List.assoc_opt wire_field_origin fields )
+    , List.assoc_opt wire_field_origin fields
+    , List.assoc_opt wire_field_basis fields )
   with
   | ( Some claim
     , Some category_str
     , Some first_seen
     , Some last_seen
     , Some (`Int reinforcement)
-    , Some origin_json ) ->
-    (match category_of_string category_str, origin_of_json origin_json with
-     | Some category, Some origin
+    , Some origin_json
+    , Some basis_json ) ->
+    (match
+       category_of_string category_str
+       , origin_of_json origin_json
+       , basis_of_json basis_json
+     with
+     | Some category, Some origin, Some basis
        when non_empty_string claim
             && Float.is_finite first_seen
             && Float.is_finite last_seen
             && reinforcement >= 0 ->
-       Some { claim; category; first_seen; last_seen; reinforcement; origin }
+       Some { claim; category; first_seen; last_seen; reinforcement; origin; basis }
      | _ -> None)
   | _ -> None
-;;
-
-(* A dispatch between two closed shapes needs set equality, not a subset
-   check: a legacy three-field row is also a subset of the current
-   vocabulary, so [closed_fields] alone steered it into [current_fact],
-   where it died without the legacy arm ever being consulted. *)
-let exact_fields allowed fields =
-  closed_fields allowed fields
-  && List.length fields = Wire_field_set.cardinal allowed
 ;;
 
 let fact_of_json (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields when exact_fields fact_wire_fields fields ->
     current_fact fields
-  | `Assoc fields when exact_fields legacy_fact_wire_fields fields ->
-    legacy_fact fields
   | `Assoc _
   | `Bool _
   | `Float _

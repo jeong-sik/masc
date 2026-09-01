@@ -179,6 +179,89 @@ let test_helper_does_not_strip_when_first_segment_mismatches () =
     Alcotest.(check string) "mismatched first segment leaves path alone"
       "other/hello.txt" target_path)
 
+(* Issue #28950, two-level well: the playground holds a single top-level
+   sub-dir [repos] and inside that a single sub-dir [masc]. A bare
+   repo-relative path (form A, "lib/...") must descend to
+   [<root>/repos/masc/] so the subsequent [cwd_abs ++ target_path]
+   lands on the actual file. The pre-fix code (no helper) returned
+   [(<root>, "lib/...")] and the absolute join landed at
+   [<root>/lib/...], where the file does not exist, producing the
+   "owned file is missing" rejection. *)
+let test_omitted_cwd_descends_two_level_well () =
+  with_ownership_root (fun root ->
+    let repos = Filename.concat root "repos" in
+    Unix.mkdir repos 0o755;
+    let masc = Filename.concat repos "masc" in
+    Unix.mkdir masc 0o755;
+    write_file (Filename.concat masc "hello.txt") "hello from the well";
+    let masc_lib = Filename.concat masc "lib" in
+    Unix.mkdir masc_lib 0o755;
+    write_file (Filename.concat masc_lib "hello.txt") "hello from the well";
+    let cwd_abs, target_path =
+      Masc.Keeper_tool_filesystem_runtime.default_owned_target
+        ~ownership_root:root
+        ~path:"lib/hello.txt"
+    in
+    Alcotest.(check string) "two-level well descends to a/b" masc cwd_abs;
+    Alcotest.(check string) "two-level well leaves bare path alone"
+      "lib/hello.txt" target_path;
+    read_via_tool ~ownership_root:root
+      (`Assoc [ "path", `String "lib/hello.txt" ])
+    |> expect_read_success ~what:"omitted cwd + two-level well"
+         ~expected_content:"hello from the well")
+
+(* Issue #28950, two-level well with explicit "a/b/..." prefix: the helper
+   strips both leading segments so the absolute join does not overshoot.
+   Pre-fix (no helper) and post-fix both land on the same final file. *)
+let test_omitted_cwd_strips_two_segment_prefix () =
+  with_ownership_root (fun root ->
+    let repos = Filename.concat root "repos" in
+    Unix.mkdir repos 0o755;
+    let masc = Filename.concat repos "masc" in
+    Unix.mkdir masc 0o755;
+    write_file (Filename.concat masc "hello.txt") "hello from the well";
+    let cwd_abs, target_path =
+      Masc.Keeper_tool_filesystem_runtime.default_owned_target
+        ~ownership_root:root
+        ~path:"repos/masc/hello.txt"
+    in
+    Alcotest.(check string) "two-level well descends to a/b" masc cwd_abs;
+    Alcotest.(check string) "two-level well strips a/b prefix" "hello.txt"
+      target_path;
+    read_via_tool ~ownership_root:root
+      (`Assoc [ "path", `String "repos/masc/hello.txt" ])
+    |> expect_read_success ~what:"omitted cwd + two-level well + a/b prefix"
+         ~expected_content:"hello from the well")
+
+(* Two-level safety: when the depth-1 sub-dir is unique but the depth-2
+   set is multi, the helper must NOT guess which sub-sub-dir to descend
+   into. A bare path falls back to the ownership root (no guess); a
+   path that names the depth-1 sub-dir as its first segment still
+   descends one level only. *)
+let test_omitted_cwd_does_not_guess_when_depth2_is_multi () =
+  with_ownership_root (fun root ->
+    let repos = Filename.concat root "repos" in
+    Unix.mkdir repos 0o755;
+    let a_dir = Filename.concat repos "a" in
+    let b_dir = Filename.concat repos "b" in
+    Unix.mkdir a_dir 0o755;
+    Unix.mkdir b_dir 0o755;
+    write_file (Filename.concat root "lib.txt") "lib at root";
+    let cwd_abs, target_path =
+      Masc.Keeper_tool_filesystem_runtime.default_owned_target
+        ~ownership_root:root
+        ~path:"lib.txt"
+    in
+    Alcotest.(check string) "depth-2 multi + bare path -> ownership_root"
+      root cwd_abs;
+    Alcotest.(check string) "depth-2 multi + bare path leaves path alone"
+      "lib.txt" target_path;
+    read_via_tool ~ownership_root:root
+      (`Assoc [ "path", `String "lib.txt" ])
+    |> expect_read_success
+         ~what:"omitted cwd + depth-2 multi + bare path"
+         ~expected_content:"lib at root")
+
 let () =
   Alcotest.run "owned_read_cwd"
     [ ( "cwd resolution"
@@ -204,5 +287,14 @@ let () =
         ; Alcotest.test_case
             "helper falls back to root when first segment does not match"
             `Quick test_helper_does_not_strip_when_first_segment_mismatches
+        ; Alcotest.test_case
+            "omitted cwd + two-level well descends to a/b (issue #28950 form A)"
+            `Quick test_omitted_cwd_descends_two_level_well
+        ; Alcotest.test_case
+            "omitted cwd + two-level well strips a/b prefix" `Quick
+            test_omitted_cwd_strips_two_segment_prefix
+        ; Alcotest.test_case
+            "omitted cwd + depth-2 multi does not guess" `Quick
+            test_omitted_cwd_does_not_guess_when_depth2_is_multi
         ] )
     ]

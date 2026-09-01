@@ -99,8 +99,15 @@ let dq_char = [^ '"' '\n' '\\' '$' '`'] | "\\|"
 let dq_body = dq_char*
 
 rule token = parse
-  | [' ' '\t']+    { token lexbuf }
-  | '\n'           { incr_tokens (); Lexing.new_line lexbuf; token lexbuf }
+  (* Whitespace is not skipped: a run becomes one SEP token, so the
+     grammar can tell [--root=$PWD] (one word — the pieces are adjacent)
+     from [echo $HOME] (two words — a separator sits between).  '\r' joins
+     the run instead of reaching the catch-all below. *)
+  | [' ' '\t' '\r' '\n']+ as ws {
+      incr_tokens ();
+      String.iter (fun c -> if c = '\n' then Lexing.new_line lexbuf) ws;
+      SEP
+    }
   (* Before [PIPE] and the fd-redirect rules so the two-character
      operators win their own lexemes. A lone [&] stays out of the subset
      and is named `Background by its own rule below. *)
@@ -142,11 +149,11 @@ rule token = parse
      [param_name] (["\${NAME:-x}"], ["\$1"], ["\$" ...]) still falls
      through to it and is refused as Param_expansion, keeping the
      excluded vocabulary closed. *)
-  | '$' (name = param_name) {
+  | '$' (param_name as name) {
       incr_tokens ();
       PARAM (name, meta_of_string name)
     }
-  | "${" (name = param_name) "}" {
+  | "${" (param_name as name) "}" {
       incr_tokens ();
       PARAM (name, { Shell_ir.quoted = false; glob = false; escaped = false })
     }

@@ -283,7 +283,11 @@ let test_env_assignment_param_value () =
       (s.env
        = [ ( "DUNE_CACHE_ROOT"
            , Shell_ir.Var ("PWD", Shell_ir.default_meta) ) ]);
-    assert (s.args = [ Shell_ir.Lit ("build", _); Shell_ir.Lit (".", _) ])
+    assert
+      (s.args
+       = [ Shell_ir.Lit ("build", Shell_ir.default_meta)
+         ; Shell_ir.Lit (".", Shell_ir.default_meta)
+         ])
   | _ -> assert false
 
 let test_env_assignment_mixed_literal_and_param () =
@@ -294,7 +298,9 @@ let test_env_assignment_mixed_literal_and_param () =
      | [ ("FOO", Shell_ir.Concat parts) ] ->
        assert
          (parts
-          = [ Shell_ir.Lit ("a", _); Shell_ir.Var ("BAR", _) ])
+          = [ Shell_ir.Lit ("a", Shell_ir.default_meta)
+            ; Shell_ir.Var ("BAR", Shell_ir.default_meta)
+            ])
      | _ -> assert false)
   | _ -> assert false
 
@@ -305,7 +311,10 @@ let test_param_as_word_suffix_concatenates () =
     (match s.args with
      | [ Shell_ir.Concat parts ] ->
        assert
-         (parts = [ Shell_ir.Lit ("--root=", _); Shell_ir.Var ("PWD", _) ])
+         (parts
+          = [ Shell_ir.Lit ("--root=", Shell_ir.default_meta)
+            ; Shell_ir.Var ("PWD", Shell_ir.default_meta)
+            ])
      | _ -> assert false)
   | _ -> assert false
 

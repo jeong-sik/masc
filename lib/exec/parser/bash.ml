@@ -1,5 +1,9 @@
 (* A1 parser facade — wraps Menhir grammar + lexer with error
-   translation to Parsed.t arms.  Never raises. *)
+   translation to Parsed.t arms.  Never raises.
+
+   [Shell_ir.Var] reaches here unresolved; dispatch reads the value
+   from the executing process environment (resolve_arg), not from this
+   command's cwd — reflecting cwd (e.g. [$PWD]) is future work. *)
 
 open Masc_exec
 
@@ -34,7 +38,7 @@ let value_of_pieces (pieces : Shell_ir.arg list) : Shell_ir.arg =
   | [ single ] -> single
   | many -> Shell_ir.Concat many
 
-let rec arg_as_assignment (arg : Shell_ir.arg) :
+let arg_as_assignment (arg : Shell_ir.arg) :
     (string * Shell_ir.arg) option =
   match arg with
   | Shell_ir.Var _ -> None
@@ -60,7 +64,9 @@ let rec arg_as_assignment (arg : Shell_ir.arg) :
         else Shell_ir.Lit (value_literal, meta) :: rest
       in
       binding_of_literal_name_value name (value_of_pieces pieces))
-  | Shell_ir.Concat [] -> None
+  (* A concat whose leading piece is not a literal has no [=] boundary
+     to read a name from — the same answer as [Var]: not a binding. *)
+  | Shell_ir.Concat _ -> None
 
 let split_env_prefix (args : Shell_ir.arg list) =
   let rec loop env = function
@@ -81,7 +87,8 @@ type stage_error =
   | Stage_parse_error of Parsed.parse_error
   | Stage_outside_subset of Parsed.reason_too_complex
 
-let raw_to_simple (args : Shell_ir.arg list, redirects)
+let raw_to_simple
+      ((args, redirects) : Shell_ir.arg list * Redirect_scope.t list)
     : (Shell_ir.simple, stage_error) result =
   match split_env_prefix args with
   | Error e -> Error (Stage_parse_error e)

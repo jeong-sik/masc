@@ -42,7 +42,16 @@ let () =
       | Error message ->
         (* "shell command takes 1 argument, got 0" *)
         assert (String.length message > 0)
-      | Ok _ -> assert false))
+      | Ok _ -> assert false);
+     (* A schema with no required key states zero required parameters, so
+        an optional-only tool answers the path alone.  This is the review
+        finding that made [masc board list] and [masc time now] work. *)
+     (match Keeper_tool_runtime.descriptor_for_internal "masc_board_list" with
+      | None -> assert false
+      | Some list_descriptor -> (
+        match Keeper_shell_tool_command.args_json_of_words ~list_descriptor [] with
+        | Ok (`Assoc []) -> ()
+        | Ok _ | Error _ -> assert false)))
 
 let () =
   print_endline "[test_keeper_shell_tool_command] all tests passed"

@@ -8,11 +8,12 @@ val handle_tool_execute :
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
   ?gate_grant:Keeper_gate.cycle_grant ->
-  ?tool_context:Keeper_tool_runtime.context ->
-    (** The calling turn's tool context. Present on a real turn, absent on
-        replay — present is what lets a shell-line [masc] stage reach the
-        tool runtime (RFC tools-as-shell-commands), absent keeps replay
-        process-only. *)
+  ?shell_ir_rewrite:(Masc_exec.Shell_ir.t -> (Masc_exec.Shell_ir.t, string) result) ->
+    (** The calling turn's shell rewrite hook (RFC tools-as-shell-commands):
+        it turns [masc] stages into delegated tool calls.  Present on a real
+        turn, absent on replay — replay stays process-only.  A closure
+        rather than a module reference, so this runtime never names the
+        module that supplies it. *)
   args:Yojson.Safe.t ->
   unit ->
   string
@@ -44,11 +45,12 @@ val handle_tool_execute_with_outcome :
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
   ?gate_grant:Keeper_gate.cycle_grant ->
-  ?tool_context:Keeper_tool_runtime.context ->
-    (** The calling turn's tool context. Present on a real turn, absent on
-        replay — present is what lets a shell-line [masc] stage reach the
-        tool runtime (RFC tools-as-shell-commands), absent keeps replay
-        process-only. *)
+  ?shell_ir_rewrite:(Masc_exec.Shell_ir.t -> (Masc_exec.Shell_ir.t, string) result) ->
+    (** The calling turn's shell rewrite hook (RFC tools-as-shell-commands):
+        it turns [masc] stages into delegated tool calls.  Present on a real
+        turn, absent on replay — replay stays process-only.  A closure
+        rather than a module reference, so this runtime never names the
+        module that supplies it. *)
   args:Yojson.Safe.t ->
   unit ->
   Keeper_tool_execution.t

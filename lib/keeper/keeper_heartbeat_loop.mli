@@ -161,7 +161,7 @@ type connector_attention_outcome =
 type batch_disposition =
   | Batch_ack_completed of
       { connector_attention_outcome : connector_attention_outcome }
-  | Batch_ack_durable_stimulus_yield
+  | Batch_ack_attention_only
   | Batch_no_action
 
 val batch_disposition_of_cycle_outcome :
@@ -170,12 +170,14 @@ val batch_disposition_of_cycle_outcome :
     only when a surface-post receipt addresses the route, or a memory-write
     receipt proves completion without a direct surface reply. A mismatched
     surface route, absent terminal receipt, or inapplicable continuation route
-    leaves the batch pending; none is evidence of model intent. A
-    durable-stimulus yield ACKs attention-only sources so the newer source can
-    advance, but preserves Connector_attention until an exact reply/ignore
-    settlement exists. Every other incomplete, failed, cancelled, or
-    checkpointed outcome leaves the whole batch pending. Provider/runtime
-    failure is not authority to discard input. *)
+    ACKs already-projected attention-only sources but preserves Connector
+    attention; none is evidence of model intent. A
+    durable-stimulus or repeated-assistant-text checkpoint ACKs attention-only
+    sources after preserving the continuation, but preserves
+    Connector_attention until an exact reply/ignore settlement exists. Every
+    other incomplete, failed, cancelled, or checkpointed outcome leaves the
+    whole batch pending. Provider/runtime failure is not authority to discard
+    input. *)
 
 type connector_attention_settlement =
   | Settle_resolved
@@ -267,6 +269,10 @@ val run_heartbeat_loop :
   wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
 module For_testing : sig
+  (** Whether post-turn HITL settlement may project a continuation before its
+      queue source is acknowledged. *)
+  val batch_disposition_records_continuation : batch_disposition -> bool
+
   (** During autoboot warmup, the next cycle runs at the warmup boundary rather
       than one full heartbeat cadence later. [rate_limited_backoff_sec] is the
       already-capped backoff to sleep instead of the plain cadence after a

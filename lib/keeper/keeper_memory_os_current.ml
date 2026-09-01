@@ -872,6 +872,24 @@ let journal_quarantine_to_json ~now ~rejection ~rejected_path =
     ]
 ;;
 
+(* [now] is the caller's own observation time and repeats: two writes in the
+   same second share it, and a caller may pass a fixed value. [rename] replaces
+   its destination, so a repeated name would delete the snapshot an earlier
+   quarantine kept — the one thing this path promises not to do. The search
+   runs under the snapshot lock the writer already holds, so the name it
+   settles on is still free when the rename happens. *)
+let unused_rejected_path ~snapshot_path ~now =
+  let base = Printf.sprintf "%s.rejected-%.0f" snapshot_path now in
+  if not (Fs_compat.file_exists base)
+  then base
+  else (
+    let rec next attempt =
+      let candidate = Printf.sprintf "%s-%d" base attempt in
+      if Fs_compat.file_exists candidate then next (attempt + 1) else candidate
+    in
+    next 2)
+;;
+
 let append_snapshot_quarantine ~keepers_dir ~keeper_id ~now ~rejection ~rejected_path =
   append_journal_line
     ~keepers_dir
@@ -1106,9 +1124,7 @@ let update_locked_with_error
                    The bytes move aside instead of being overwritten by the
                    commit below, because recovering by destroying the only copy
                    of the rejected state is not recovery. *)
-                let rejected_path =
-                  Printf.sprintf "%s.rejected-%.0f" snapshot_path now
-                in
+                let rejected_path = unused_rejected_path ~snapshot_path ~now in
                 (match Fs_compat.rename snapshot_path rejected_path with
                  | () ->
                    append_snapshot_quarantine

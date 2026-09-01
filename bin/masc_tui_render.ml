@@ -7630,14 +7630,11 @@ let render_keeper_message (state : state) =
         let compact_scroll_hint =
           if scroll = 0 then "PgUp:history" else "PgDn:newest"
         in
-        Printf.sprintf
-          "%s  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-F:layout  %s  %s"
-          compact_enter_hint compact_scroll_hint escape_hint
+        Masc_tui_footer.compact_chat_hints ~enter_hint:compact_enter_hint
+          ~scroll_hint:compact_scroll_hint ~escape_hint
       else
-        Printf.sprintf
-          "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:memory  \
-           Ctrl-F:layout  Ctrl-O:image  %s%s  %s  Ctrl-U:clear"
-          enter_hint scroll_hint switch_hint escape_hint
+        Masc_tui_footer.chat_hints ~enter_hint ~scroll_hint ~switch_hint
+          ~escape_hint
     in
     Buffer.add_string chat_buf
       (footer_line state ~max_cells:chat_cols ~hints:footer_hints);

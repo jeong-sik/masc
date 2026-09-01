@@ -1379,6 +1379,52 @@ let test_torn_json_is_quarantined_too () =
   check int "and it is kept" 1 (List.length (rejected_files ~keepers_dir))
 ;;
 
+(* rename replaces its destination, and [now] repeats: it is the caller's own
+   observation time, so two writes in the same second carry the same value. A
+   fixed name would therefore delete the snapshot an earlier quarantine kept. *)
+let test_two_quarantines_at_the_same_time_keep_both_files () =
+  with_temp_keepers @@ fun keepers_dir ->
+  (* Both rounds write through upsert, which carries no revision expectation,
+     so the fixture is about the rejected paths and nothing else. Both
+     quarantines are handed the same [now], which is the collision. *)
+  let write ~now ~claim =
+    ignore
+      (Current.upsert_fact
+         ~keepers_dir
+         ~keeper_id:"keeper"
+         ~now
+         ~source:(source Current.Explicit_write)
+         (fact ~claim ())
+       |> require_upsert_ok)
+  in
+  let quarantine_once ~claim =
+    write ~now:500.0 ~claim;
+    let broken = break_change_contract ~keepers_dir in
+    write ~now:600.0 ~claim:(claim ^ " recovered");
+    broken
+  in
+  let first = quarantine_once ~claim:"first" in
+  let second = quarantine_once ~claim:"second" in
+  check
+    bool
+    "the two rejected snapshots differ, so overwriting one would lose bytes"
+    true
+    (not (String.equal first second));
+  match rejected_files ~keepers_dir with
+  | [ older; newer ] ->
+    let kept name = Fs_compat.load_file (Filename.concat keepers_dir name) in
+    check
+      (list string)
+      "both rejected snapshots are still on disk"
+      (List.sort String.compare [ first; second ])
+      (List.sort String.compare [ kept older; kept newer ])
+  | files ->
+    fail
+      (Printf.sprintf
+         "expected both quarantines to be kept, got [%s]"
+         (String.concat "; " files))
+;;
+
 let () =
   run
     "keeper_memory_os_current"
@@ -1515,6 +1561,10 @@ let () =
             `Quick
             test_expected_revision_still_refuses_after_a_quarantine
         ; test_case "torn json too" `Quick test_torn_json_is_quarantined_too
+        ; test_case
+            "two quarantines at the same time keep both"
+            `Quick
+            test_two_quarantines_at_the_same_time_keep_both_files
         ] )
     ; ( "rejection names its cause"
       , [ test_case

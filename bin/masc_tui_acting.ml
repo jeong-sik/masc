@@ -553,8 +553,15 @@ let chunk_rows ~traces entries =
       let at = entry.ae_at in
       match member_of_event event with
       | None ->
-          plains :=
-            (entry.ae_at, row_of_entry ~duration_ms:None entry) :: !plains
+          (* A non-member passes through as its own row only if the Turns
+             scope shows it at all. Without this test the fold readmitted
+             everything [visible Turns] hides -- composite pushes, heartbeats,
+             stream frames, waiting-queue changes -- and a live screen showed
+             them outnumbering the turn rows it promised (2026-09-01, 128
+             rows). *)
+          if visible Turns event then
+            plains :=
+              (entry.ae_at, row_of_entry ~duration_ms:None entry) :: !plains
       | Some member ->
           let keeper = keeper_of_event ~traces event in
           let turn_of_member =

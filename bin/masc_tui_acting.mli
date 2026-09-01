@@ -105,7 +105,10 @@ val row_of_event :
 val chunk_rows : traces:(string * string) list -> entry list -> row list
 (** The [Turns] projection: entries (newest first) folded into one row per
     keeper turn, plus the rows that are not turn lifecycle (chat, approvals,
-    server events, internal agent runs) unchanged. Rows come back newest
+    server events, internal agent runs) unchanged. What [visible Turns] hides
+    (composite pushes, heartbeats, stream frames, waiting-queue changes,
+    snapshots) stays hidden here too; the fold never readmits it as a
+    pass-through row. Rows come back newest
     first by latest activity. Events that carry a turn number key their
     chunk; the keeper-ledger events carry none and attach to the keeper's
     most recent chunk, which can misfile a ledger row that arrives after the

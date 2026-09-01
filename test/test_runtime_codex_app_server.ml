@@ -62,8 +62,55 @@ let rec drop count values =
    [--masc-warmup] first argument that exits before touching stdin, and is
    executed once with it right after creation, so the measured run pays only
    the re-run cost. *)
+
+(* Two orders of magnitude above the measured first-exec cost. Only a wedged
+   system check should ever reach it. *)
+let warmup_deadline_s = 10.0
+
+(* The warmup must be bounded: under full-suite load the first-exec check
+   itself can wedge — a stack sample of this binary stuck for 5+ minutes
+   showed 100% of samples inside [Sys.command]'s wait4 on the warmup child
+   (#32181), so the unbounded wait turned a latency workaround into a
+   suite-wide hang. The warmup is best-effort by design: on deadline the
+   child is killed and the measured run pays the first-exec cost itself,
+   which costs accuracy on one admission timing, not the whole suite. The
+   child is spawned directly rather than through [Sys.command]'s shell so
+   the deadline kill reaches the script, not an intermediate [sh]. *)
 let warm_fresh_executable path =
-  ignore (Sys.command (Filename.quote path ^ " --masc-warmup") : int)
+  match
+    Unix.create_process
+      path
+      [| path; "--masc-warmup" |]
+      Unix.stdin
+      Unix.stdout
+      Unix.stderr
+  with
+  | exception Unix.Unix_error _ -> ()
+  | pid ->
+    let deadline = Unix.gettimeofday () +. warmup_deadline_s in
+    let rec reap_blocking () =
+      match Unix.waitpid [] pid with
+      | _ -> ()
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap_blocking ()
+      | exception Unix.Unix_error _ -> ()
+    in
+    let rec wait () =
+      match Unix.waitpid [ Unix.WNOHANG ] pid with
+      | 0, _ ->
+        if Unix.gettimeofday () >= deadline
+        then begin
+          (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
+          reap_blocking ()
+        end
+        else begin
+          Unix.sleepf 0.01;
+          wait ()
+        end
+      | _, _ -> ()
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+      | exception Unix.Unix_error _ -> ()
+    in
+    wait ()
 ;;
 
 let fixture_script ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
@@ -2337,10 +2384,22 @@ let test_keeper_codex_raw_trace_separates_native_tool_observation () =
                 0
                 (List.length (records_of_type Tool_execution_finished));
               let native_start = List.hd (records_of_type Native_tool_started) in
+              (* Native identity lives in its own typed field: the raw-trace
+                 writer refuses a native record that also carries
+                 [tool_use_id] ("native tool record cannot also carry
+                 tool_use_id"), so the id must be read from
+                 [native_tool_identity]. *)
               check
                 (option string)
                 "native call id"
                 (Some "native-command-1")
+                (match native_start.native_tool_identity with
+                 | Some (Agent_core.Raw_trace.Call_id call_id) -> Some call_id
+                 | Some (Agent_core.Raw_trace.Provider_step _) | None -> None);
+              check
+                (option string)
+                "native record carries no MASC tool_use_id"
+                None
                 native_start.tool_use_id;
               check
                 (option string)

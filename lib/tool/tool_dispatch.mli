@@ -2,8 +2,8 @@
 (** Central Tool Dispatch Registry.
 
     Production MCP tool names route through {!Tool_name} and the module-tag
-    registry. Mutable handler registrations remain only for dispatch
-    execution; they are not used for token validation or discovery. *)
+    registry. Handlers, hook composition, and tag/schema routing are published
+    as separate immutable atomic snapshots. *)
 
 (** Registered handlers are total for their exact registry key. Missing
     handlers are represented by the registry lookup performed by
@@ -21,12 +21,11 @@ val register : tool_name:string -> handler:handler -> unit
     transformation, and dispatch observer fan-out. *)
 
 val mint_token : name:string -> (Tool_token.t, string) Result.t
-(** Mint a [Tool_token.t] whose name is present in the tag registry.
-    Thread-safe (protected by dispatch_mu).
+(** Mint a [Tool_token.t] whose name is present in the immutable tag snapshot.
 
-    Note the asymmetry: this checks [tag_registry] while [guarded_dispatch]
-    looks the handler up in [registry]. A name registered in one and not the
-    other mints a token that then dispatches to nothing. *)
+    Note the asymmetry: this checks the tag snapshot while [guarded_dispatch]
+    looks the handler up in the handler snapshot. A name registered in one and
+    not the other mints a token that then dispatches to nothing. *)
 
 (** {2 Dispatch Hooks And Observers}
 
@@ -53,8 +52,7 @@ type dispatch_observer =
     Receives the typed {!Dispatch_outcome.t} together with the
     handler-produced {!Tool_result.result} (when the [Handled] arm ran)
     once dispatch completes — regardless of which arm fired
-    ([Handled] / [Rejected_by_capability] / [Rejected_by_pre_hook] /
-    [No_handler] / [Handler_error]).
+    ([Handled] / [No_handler]).
 
     The optional [Tool_result.result] is [Some _] only on the [Handled]
     arm; other arms receive [None].  Observer-only ([unit] return) —
@@ -89,8 +87,8 @@ val set_span_wrapper : span_wrapper -> unit
     [Server_bootstrap_maintenance.start_background_maintenance]. *)
 
 val clear_hooks : unit -> unit
-(** Reset pre-hooks, dispatch observers, the result transformer, and the
-    span wrapper (back to identity). *)
+(** Atomically reset pre-hooks, dispatch observers, and the span wrapper
+    (back to identity). *)
 
 val run_pre_hooks :
   name:string -> args:Yojson.Safe.t -> Tool_result.result option * Yojson.Safe.t

@@ -670,7 +670,7 @@ function OneKeeperMemoryReal({
       </div>
 
       <div class="turn-sec">
-        <h4>현재 기억 계약 · librarian</h4>
+        <h4>현재 기억 계약 · ${snapshot.update_source?.kind ?? 'fresh state'}</h4>
         <${MemoryCurrentContract} snapshot=${snapshot} />
       </div>
 

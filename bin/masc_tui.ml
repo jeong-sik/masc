@@ -10242,10 +10242,24 @@ and is loaded on demand through keeper_skill.
     | None ->
       report_action state "error" "no $EDITOR set; export EDITOR to create a keeper here"
     | Some _ -> (
-      (* The stem names the only two fields a keeper cannot come up without;
-         the name is edited in place and the route name comes from it. *)
+      (* The stem names the fields a keeper cannot come up without; the name
+         is edited in place and the route name comes from it.
+
+         Both carried values are required and neither was in the stem, so the
+         form produced a declaration the server refuses. [sandbox_profile]
+         became required in #32078, which removed the [Local] default because
+         "execution outside a boundary is not a profile the fleet offers";
+         [instructions] is rejected when it trims to empty
+         ([Keeper_turn_up_config_persistence]). The stem carries a value for
+         each rather than an empty string: the editor is where they get
+         changed, and a form whose defaults are refused teaches the
+         requirement through a 400. *)
       let stem =
-        "{\n  \"name\": \"new-keeper\",\n  \"instructions\": \"\"\n}\n"
+        "{\n\
+        \  \"name\": \"new-keeper\",\n\
+        \  \"sandbox_profile\": \"docker\",\n\
+        \  \"instructions\": \"Replace this with what this keeper is for.\"\n\
+         }\n"
       in
       match
         Masc_tui_editor.roundtrip ~restore:restore_terminal

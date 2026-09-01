@@ -498,6 +498,16 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     "keeper provider-input snapshots rows=1 refused=1" \
     "durable store validation rejected current runtime state"
 
+  malformed_board_posts_root="$fixture_root/malformed-board-posts"
+  write_schedules "$malformed_board_posts_root" running
+  printf '%s\n' '{not-json' \
+    >"$malformed_board_posts_root/.masc/board_posts.jsonl"
+  expect_failure_contains \
+    malformed_board_posts \
+    "$malformed_board_posts_root" \
+    "board posts rows=1 refused=1" \
+    "durable store validation rejected current runtime state"
+
   malformed_current_root="$fixture_root/malformed-current"
   write_schedules "$malformed_current_root" running
   # This case writes a corrupt snapshot with no valid one, so it cannot borrow

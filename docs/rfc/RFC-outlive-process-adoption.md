@@ -3,7 +3,7 @@ rfc: "outlive-process-adoption"
 title: "턴보다 오래 사는 프로세스가 머지됐는데도 죽는다 — 채택 갭을 먼저 진단한다"
 status: Draft
 created: 2026-09-01
-updated: 2026-09-01
+updated: 2026-09-02
 author: claude
 supersedes: []
 superseded_by: null
@@ -65,3 +65,33 @@ implementation_prs: []
 - 내부: `.tmp/toolstudy/masc-gap.md` §4 (실패 92건 중 84건)
 - 코드: `lib/keeper/keeper_subprocess_registry.ml`(#30244), #30265 네 도구
 - 백로그: issue #32369 작전 6
+
+---
+
+## 7. 측정 결과 (2026-09-02) — 세 후보 전부 기각, 실체는 기능 부재
+
+§2의 진단을 수행했다(원본: `.tmp/toolstudy/pr0-measurements.md` §2).
+
+- **(a) 기각**: `keeper_spawn` 스키마에 유지 옵션이 **존재하지 않는다**
+  (argv/cwd 뿐, `additional_properties=false`, description이 "The process ends
+  when the turn does"라고 명시). 실측 2,545건 호출에서 outlive/hold류 키 **0건**.
+  "옵션을 안 쓴다"가 아니라 쓸 옵션이 없었다.
+- **(b) 기각**: registry는 런 스코프이고 같은 런 안의 read는 2,708건 전부 성공
+  (`spawn_registry`에 remove 경로가 없음 — 코드로 확인). 실패 86건 전부가
+  **다른 런에서의 read**였다(spawn→read p50 643초, 그 사이 런이 종료).
+- **(c) 기각**: registry 구현은 전 keeper·전 프로필 동일. 편중은 행동 편중
+  (polisher 43, lane-smith 18, code-reviewer 18 — 후자는 remote_ssh에서 spawn
+  자체가 경계 거부되는 프로필).
+
+**실체**: keeper는 런을 넘어 프로세스를 읽으려 시도하고 있다 — 49건은 이전
+handle을 기억에서 재구성한 오염 문자열(`allama`, `deeplist`…)까지 보인다. 이것은
+채택 갭이 아니라 **기능 부재**다. 배경 서술의 "8/24에 머지됐는데도"도 정정한다:
+#30244는 "outlive the **call**"(호출 반환 후, 런 내 생존)이고, 런 넘어 생존은
+`keeper_agent_run`의 설계와 `keeper_spawn.toml` 문서 모두에서 처음부터 없다.
+
+**PR-1 재정의**: 프롬프트/설명 개선이 아니라 **outlive-the-run 기능을 만들 것인가
+말 것인가의 결정**이어야 한다. 필요 측정도 이미 답했다 — 런 넘어 read 시도가
+86건(성공 2,708건의 약 3%)이고 필요 경과는 p50 11분. 이 수요를 닫을 축은
+(1) registry의 런 간 이양(keeper 재개 시 재부착), (2) read의 "이미 종료된
+프로세스" 명시적 안내(오염 handle 49건의 루프 끊기) 중 하나다. §2의 후보 표는
+폐기한다.

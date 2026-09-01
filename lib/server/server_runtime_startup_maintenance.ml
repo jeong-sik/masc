@@ -267,11 +267,13 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
     Removing a guest is a VM shutdown and takes about a minute each
     (measured 63-67s on container 1.3.0), so this is not something keeper
     boot should wait behind -- see the group it is registered in. *)
-let startup_sweep_microvm_guests (_state : Mcp_server.server_state) =
+let startup_sweep_microvm_guests (state : Mcp_server.server_state) =
   try
     let timeout_sec = Env_config_sandbox.Runtime.microvm_remove_timeout_sec () in
+    let config = Mcp_server.workspace_config state in
     let outcome =
       Keeper_sandbox_microvm.sweep_abandoned_guests
+        ~base_path:config.base_path
         ~command_available:Executable_path.command_available
         ~timeout_sec
         ~is_pid_alive:Keeper_sandbox_runtime.pid_alive

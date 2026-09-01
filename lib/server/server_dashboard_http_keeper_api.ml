@@ -577,10 +577,10 @@ let keeper_chat_history_json config name =
   let messages = Keeper_chat_store.load ~base_dir ~keeper_name:name in
   let trace_block_by_turn_ref = keeper_chat_trace_blocks config name in
   let chat_rows = Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref messages in
-  (* Appended, not merged by timestamp: the client already sorts the whole
-     transcript by [ts] and breaks ties by original index, and rows the chat
-     store persisted without a [ts] must keep their relative order rather
-     than be repositioned by a sort here. *)
+  (* Appended without pretending the two stores share a wall clock. Each
+     autonomous row and every completed direct turn carry a persisted
+     [turn_ref] whose absolute turn is the client's structural cross-store
+     order. Rows without that authority remain in their producer order. *)
   let autonomous_rows =
     Keeper_autonomous_turn_source.load_recent ~config ~keeper_name:name ()
     |> List.map autonomous_turn_json

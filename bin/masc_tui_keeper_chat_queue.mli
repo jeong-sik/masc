@@ -36,9 +36,14 @@ type intent =
 type item =
   { request : Chat.request
   ; submitted_at : float
+  ; submission_seq : int
+      (** Monotone local submission order. Dispatch priority can move a steer
+          ahead of NEXT, so list position is not "newest input" authority. *)
   ; intent : intent
+  ; causal_parent_request_id : string option
+      (** Exact operation the steer was created to replace. [None] for an
+          ordinary next-turn item. *)
   }
-
 val empty : t
 val is_empty : t -> bool
 val length : t -> int
@@ -62,7 +67,11 @@ val push : t -> submitted_at:float -> Chat.request -> (t * int, string) result
     operator to notice a line went missing. *)
 
 val push_steer :
-  t -> submitted_at:float -> Chat.request -> (t * int, string) result
+  t ->
+  submitted_at:float ->
+  causal_parent_request_id:string ->
+  Chat.request ->
+  (t * int, string) result
 (** Queue an explicit replacement turn after the current turn is interrupted.
     At most one steer may wait for a Keeper. It dispatches before that
     Keeper's ordinary {!Next} items without reordering other Keepers' work. *)
@@ -105,3 +114,12 @@ val holds : t -> request_id:string -> bool
 (** Whether this request is still waiting. Recall/edit and transcript
     projection read this exact request identity; neither infers pending state
     from a timestamp or rendered label. *)
+
+val find : t -> request_id:string -> item option
+(** Exact pending item, for intent-aware recall/edit behavior. *)
+
+val replace_request :
+  t -> request_id:string -> Chat.request -> (t, string) result
+(** Edit a pending request in place while preserving intent, causal parent,
+    submission sequence, submitted_at, and dispatch position. The replacement
+    must retain the same request_id. *)

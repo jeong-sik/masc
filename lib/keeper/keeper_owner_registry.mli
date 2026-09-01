@@ -148,6 +148,14 @@ val exact_operation
   -> Keeper_chat_operation.Operation_id.t
   -> (Keeper_chat_operation.t option, command_error) result
 
+val interrupt_running_operation
+  :  base_path:string
+  -> keeper_name:string
+  -> Keeper_chat_operation.Operation_id.t
+  -> (Keeper_owner.operation_interrupt_result, command_error) result
+(** Mailbox-linearized exact-operation interrupt. A request naming an older
+    operation cannot cancel a newer child for the same Keeper. *)
+
 val submit_operation
   :  base_path:string
   -> keeper_name:string

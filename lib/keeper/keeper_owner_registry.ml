@@ -338,6 +338,14 @@ let operation_projection ~base_path ~keeper_name =
   | Ok owner -> Ok (Keeper_owner.operation_projection owner)
 ;;
 
+let interrupt_running_operation ~base_path ~keeper_name operation_id =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+      Keeper_owner.interrupt_running_operation owner operation_id
+      |> Result.map_error (fun error -> Command_rejected error)
+;;
+
 let wake_operation_drain ~base_path ~keeper_name =
   match get ~base_path ~keeper_name with
   | Error error -> Error (Command_lookup_failed error)

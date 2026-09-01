@@ -911,6 +911,23 @@ let test_a_blank_autonomous_turn_has_an_explicit_origin () =
   check (list string) "one autonomous row" [ "autonomous" ]
     (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
 
+let test_persisted_identity_and_absolute_turn_survive_projection () =
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~turn_ref:"trace-1#54" ~content:(`String "done")
+             [ reason "consider"; tool "Execute" ] ])
+  in
+  check (list (option int)) "one structural turn sequence on every projection"
+    [ Some 54; Some 54; Some 54 ]
+    (List.map (fun row -> row.History.turn_sequence) decoded.History.rows);
+  let identities =
+    List.filter_map (fun row -> row.History.structural_id) decoded.History.rows
+  in
+  check int "one stable identity per projected row" 3
+    (List.length (List.sort_uniq String.compare identities))
+;;
+
 let test_server_order_is_kept () =
   (* The server appends in order and asks a client not to reposition rows that
      carry no ts. A decoder that sorted would move these three. *)
@@ -1336,6 +1353,9 @@ let () =
             test_skill_evidence_count_mismatch_retains_every_raw_call
         ; test_case "blank autonomous turn keeps its origin" `Quick
             test_a_blank_autonomous_turn_has_an_explicit_origin
+        ; test_case "projection keeps stable row and absolute turn identity"
+            `Quick
+            test_persisted_identity_and_absolute_turn_survive_projection
         ; test_case "a turn that also spoke keeps the order it ran in" `Quick
             test_a_turn_that_also_spoke_keeps_the_order_it_ran_in
         ; test_case "steps the server dropped are counted" `Quick

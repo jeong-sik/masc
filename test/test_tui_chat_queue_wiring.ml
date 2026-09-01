@@ -12,6 +12,7 @@ open Alcotest
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Tui_types = Masc_tui_types
+module Tui_http = Masc_tui_http
 
 let calls ~module_path ~callee = Ast_grep.count_calls ~module_path ~callee
 
@@ -32,7 +33,14 @@ let test_every_way_back_asks_for_what_is_behind_it () =
 let entry_at at : Tui_types.msg_entry =
   { Tui_types.me_keeper_name = "alpha"
   ; me_role = Tui_types.Message_keeper
+  ; me_identity =
+      Tui_types.Persisted_legacy_row
+        { request_id = ""; operation_seq = 0 }
+  ; me_turn_phase = Tui_types.Turn_output
+  ; me_turn_sequence = None
+  ; me_operation_seq = 0
   ; me_text = Printf.sprintf "row at %.0f" at
+  ; me_submitted_at = None
   ; me_tool_block = None
   ; me_skill_activity = None
   ; me_timestamp = ""
@@ -40,10 +48,18 @@ let entry_at at : Tui_types.msg_entry =
   ; me_at = at
   }
 
-let chat_entry ~request_id ~role ~text ~at : Tui_types.msg_entry =
+let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ~request_id ~role
+    ~text ~at : Tui_types.msg_entry =
   { Tui_types.me_keeper_name = "alpha"
   ; me_role = role
+  ; me_identity =
+      Tui_types.Persisted_legacy_row { request_id; operation_seq }
+  ; me_turn_phase =
+      Option.value ~default:(Tui_types.chat_turn_phase_of_role role) turn_phase
+  ; me_turn_sequence = turn_sequence
+  ; me_operation_seq = operation_seq
   ; me_text = text
+  ; me_submitted_at = None
   ; me_tool_block = None
   ; me_skill_activity = None
   ; me_timestamp = Printf.sprintf "%.0f" at
@@ -105,16 +121,18 @@ let test_oldest_at_reports_the_cursor () =
 let test_causal_timeline_keeps_turns_whole_without_timestamp_sorting () =
   let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
   let loaded =
-    [ chat_entry ~request_id:"turn-d" ~role:user ~text:"D" ~at:100.
-    ; chat_entry ~request_id:"turn-d" ~role:Tui_types.Message_tool
-        ~text:"Execute" ~at:300.
-    ; chat_entry ~request_id:"turn-d" ~role:Tui_types.Message_keeper
-        ~text:"D answer" ~at:300.
+    [ chat_entry ~operation_seq:0 ~request_id:"turn-d" ~role:user ~text:"D"
+        ~at:100.
+    ; chat_entry ~operation_seq:2 ~request_id:"turn-d"
+        ~role:Tui_types.Message_tool ~text:"Execute" ~at:300.
+    ; chat_entry ~turn_phase:Tui_types.Turn_output ~operation_seq:3
+        ~request_id:"turn-d" ~role:Tui_types.Message_status ~text:"D answer"
+        ~at:50.
     ]
   in
   let session =
-    [ chat_entry ~request_id:"turn-d" ~role:Tui_types.Message_status
-        ~text:"approved" ~at:200.
+    [ chat_entry ~operation_seq:1 ~request_id:"turn-d"
+        ~role:Tui_types.Message_status ~text:"approved" ~at:200.
     ; chat_entry ~request_id:"turn-next" ~role:user ~text:"queued correction"
         ~at:150.
     ; chat_entry ~request_id:"turn-active" ~role:user ~text:"active input"
@@ -154,6 +172,102 @@ let test_scroll_anchor_follows_structure_not_clock () =
         (List.map (fun row -> row.Tui_types.me_text) after)
 ;;
 
+let test_scroll_anchor_distinguishes_duplicate_text_in_one_turn () =
+  let first =
+    chat_entry ~operation_seq:1 ~request_id:"same-turn"
+      ~role:Tui_types.Message_status ~text:"working" ~at:10.
+  in
+  let second =
+    chat_entry ~operation_seq:2 ~request_id:"same-turn"
+      ~role:Tui_types.Message_status ~text:"working" ~at:10.
+  in
+  match Tui_types.msg_entries_after_anchor [ first; second ]
+          (Tui_types.msg_anchor first) with
+  | Some [ found ] ->
+      check int "second duplicate has its own structural identity" 2
+        found.Tui_types.me_operation_seq
+  | Some _ | None -> fail "duplicate text collapsed the structural scroll anchor"
+;;
+
+let test_scroll_anchor_survives_session_user_persistence () =
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let session =
+    chat_entry ~operation_seq:0 ~request_id:"same-turn" ~role:user
+      ~text:"submitted locally" ~at:10.
+  in
+  let session =
+    { session with
+      Tui_types.me_identity =
+        Tui_types.Session_row
+          { request_id = "same-turn"
+          ; turn_phase = Tui_types.Turn_input
+          ; operation_seq = 0
+          }
+    }
+  in
+  let persisted =
+    { session with
+      Tui_types.me_identity = Tui_types.Persisted_row "server-user-row"
+    ; me_text = "submitted locally\n"
+    }
+  in
+  let answer =
+    chat_entry ~operation_seq:1 ~request_id:"same-turn"
+      ~role:Tui_types.Message_keeper ~text:"answer" ~at:11.
+  in
+  match
+    Tui_types.msg_entries_after_anchor [ persisted; answer ]
+      (Tui_types.msg_anchor session)
+  with
+  | Some [ found ] -> check string "answer remains below pin" "answer" found.me_text
+  | Some _ | None -> fail "session USER pin was lost when history persisted it"
+;;
+
+let test_absolute_turn_sequence_joins_direct_and_autonomous_sources () =
+  let loaded =
+    [ chat_entry ~turn_sequence:12 ~request_id:"direct-12"
+        ~role:Tui_types.Message_keeper ~text:"direct later" ~at:1. ]
+  in
+  let session =
+    [ chat_entry ~turn_sequence:10 ~request_id:"trace#10"
+        ~role:Tui_types.Message_autonomous ~text:"autonomous earlier" ~at:999.
+    ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
+        ~text:"memory lane" ~at:2.
+    ]
+  in
+  let timeline =
+    Tui_types.chat_timeline ~loaded ~session ~queued_request_ids:[]
+      ~active_request_id:None
+  in
+  check (list string) "absolute turn sequence, then auxiliary memory lane"
+    [ "autonomous earlier"; "direct later"; "memory lane" ]
+    (Tui_types.chat_timeline_rows timeline
+     |> List.map (fun row -> row.Tui_types.me_text))
+;;
+
+let test_interrupt_receipt_is_bound_to_the_exact_request () =
+  let response request_id =
+    `Assoc
+      [ "signalled", `Bool true
+      ; "request_id", `String request_id
+      ]
+  in
+  (match
+     Tui_http.decode_interrupt_signal ~expected_request_id:"parent-a"
+       (response "parent-a")
+   with
+   | Ok (Tui_http.Signalled _) -> ()
+   | Ok (Tui_http.Not_signalled _) | Error _ ->
+       fail "matching exact interrupt receipt was rejected");
+  match
+    Tui_http.decode_interrupt_signal ~expected_request_id:"parent-a"
+      (response "replacement-b")
+  with
+  | Error detail ->
+      check bool "mismatch is explicit" true
+        (Astring.String.is_infix ~affix:"request_id mismatch" detail)
+  | Ok _ -> fail "a replacement operation's receipt satisfied the parent"
+;;
 let test_enter_during_a_turn_queues () =
   let n = calls ~module_path:"bin/masc_tui.ml" ~callee:"queue_keeper_message" in
   if n < 1 then
@@ -470,6 +584,40 @@ let test_take_newest_returns_last_and_keeps_order () =
        | None -> failf "oldest no longer drains first after take_newest")
 ;;
 
+let test_pending_preview_is_bounded_and_keeps_the_newest_submission () =
+  let queue =
+    List.fold_left
+      (fun queue index ->
+        let request =
+          Keeper_chat.create_request ~keeper_name:"alpha"
+            ~message:(string_of_int index) ()
+        in
+        match
+          Masc_tui_keeper_chat_queue.push queue
+            ~submitted_at:(float_of_int index) request
+        with
+        | Ok (queue, _) -> queue
+        | Error detail -> fail detail)
+      Masc_tui_keeper_chat_queue.empty
+      [ 1; 2; 3; 4; 5; 6 ]
+  in
+  let preview =
+    Masc_tui_keeper_chat_queue.waiting queue
+    |> Tui_types.keeper_message_pending_preview
+  in
+  check int "bounded rows including omission" 4 (List.length preview);
+  match preview with
+  | [ Tui_types.Pending_preview_item (1, first)
+    ; Tui_types.Pending_preview_item (2, second)
+    ; Tui_types.Pending_preview_omitted 3
+    ; Tui_types.Pending_preview_item (6, newest)
+    ] ->
+      check (list string) "first dispatch positions and newest input"
+        [ "1"; "2"; "6" ]
+        [ first.request.message; second.request.message; newest.request.message ]
+  | _ -> fail "pending preview shape changed"
+;;
+
 (* NEXT is a separate causal lane below the transcript. Its row budget counts
    the selected Keeper only, and the renderer walks that same selected queue;
    a workspace-global count is what made one Keeper's footer report another
@@ -479,7 +627,7 @@ let test_the_budget_and_the_pane_agree_about_queue_rows () =
     Ast_grep.count_calls_in_value_binding
       ~module_path:"bin/masc_tui_types.ml"
       ~binding_name:"keeper_message_status_rows"
-      ~callee:"Masc_tui_keeper_chat_queue.length_for_keeper"
+      ~callee:"Masc_tui_keeper_chat_queue.waiting_for_keeper"
   in
   let drawn =
     Ast_grep.count_calls_in_value_binding
@@ -487,11 +635,25 @@ let test_the_budget_and_the_pane_agree_about_queue_rows () =
       ~binding_name:"render_keeper_message"
       ~callee:"Masc_tui_keeper_chat_queue.waiting_for_keeper"
   in
-  if counted <> 1 || drawn <> 1 then
+  let counted_preview =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui_types.ml"
+      ~binding_name:"keeper_message_status_rows"
+      ~callee:"keeper_message_pending_status_rows"
+  in
+  let drawn_preview =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_keeper_message"
+      ~callee:"keeper_message_pending_preview"
+  in
+  if
+    counted <> 1 || drawn <> 1 || counted_preview <> 1 || drawn_preview <> 1
+  then
     failf
       "NEXT must be counted and drawn once for the selected Keeper: \
-       count=%d draw=%d"
-      counted drawn
+       count=%d draw=%d count-preview=%d draw-preview=%d"
+      counted drawn counted_preview drawn_preview
 ;;
 
 (* The same contract as the queue rows above, for the row that says the pane is
@@ -609,21 +771,25 @@ let test_queueing_puts_the_line_in_the_conversation () =
       n
 ;;
 
-(* And taking it back takes the row with it. A cancelled line left in the
-   conversation reads as sent -- the exact confusion the row was added to
-   end. *)
+(* Cancel removes the pending row. Edit keeps it and rewrites the exact queued
+   request in place, which is what preserves STEER intent and submitted_at. *)
 let test_cancel_and_edit_take_the_row_with_them () =
-  let n =
+  let cancelled =
     Ast_grep.count_calls_in_value_binding
       ~module_path:"bin/masc_tui.ml"
       ~binding_name:"handle_message_key"
       ~callee:"forget_queued_history"
   in
-  if n < 2 then
+  let edited =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"start_keeper_message"
+      ~callee:"Chat_queue.replace_request"
+  in
+  if cancelled <> 1 || edited <> 1 then
     failf
-      "cancel (Ctrl-K) and edit (Ctrl-P) must each drop the queued line's row; \
-       forget_queued_history is called %d time(s) in handle_message_key"
-      n
+      "cancel must remove once and edit must replace once: cancel=%d edit=%d"
+      cancelled edited
 ;;
 
 (* Every box row the chat pane draws belongs to the pane, not to the frame
@@ -827,11 +993,22 @@ let () =
             test_oldest_at_reports_the_cursor
         ; test_case "causal timeline keeps turns whole" `Quick
             test_causal_timeline_keeps_turns_whole_without_timestamp_sorting
+        ; test_case "absolute turn sequence joins transcript sources" `Quick
+            test_absolute_turn_sequence_joins_direct_and_autonomous_sources
+        ; test_case "interrupt receipt binds exact request" `Quick
+            test_interrupt_receipt_is_bound_to_the_exact_request
         ; test_case "scroll anchor follows structure" `Quick
             test_scroll_anchor_follows_structure_not_clock
+        ; test_case "scroll anchor distinguishes duplicate text" `Quick
+            test_scroll_anchor_distinguishes_duplicate_text_in_one_turn
+        ; test_case "scroll anchor survives USER persistence" `Quick
+            test_scroll_anchor_survives_session_user_persistence
         ] )
     ; ( "queue"
       , [ test_case "take_newest returns the last and keeps order" `Quick
-            test_take_newest_returns_last_and_keeps_order ] )
+            test_take_newest_returns_last_and_keeps_order
+        ; test_case "pending preview is bounded" `Quick
+            test_pending_preview_is_bounded_and_keeps_the_newest_submission
+        ] )
     ]
 ;;

@@ -496,27 +496,95 @@ let handle_keeper_tool_approval_mode_set ~actor state request reqd =
 let handle_keeper_turn_interrupt state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in
-    let name_result =
+    let target_result =
       try
         match Yojson.Safe.from_string body_str with
         | `Assoc fields ->
           (match List.assoc_opt "name" fields with
-           | Some (`String s) -> Ok (String.trim s)
+           | Some (`String s) ->
+             let request_id_result =
+               match List.assoc_opt "request_id" fields with
+               | None -> Ok None
+               | Some (`String value) when String.trim value <> "" ->
+                 Ok (Some (String.trim value))
+               | Some (`String _) -> Error "request_id must be non-blank"
+               | Some _ -> Error "request_id must be a string when present"
+             in
+             Result.map
+               (fun request_id -> String.trim s, request_id)
+               request_id_result
            | _ -> Error "name (string) is required")
         | _ -> Error "JSON object body required"
       with
       | Yojson.Json_error msg -> Error ("invalid json: " ^ msg)
     in
-    match name_result with
+    match target_result with
     | Error msg ->
       respond_json_value_with_cors ~status:`Bad_request request reqd
         (keeper_chat_stream_error_json msg)
-    | Ok keeper_name ->
+    | Ok (keeper_name, request_id) ->
       if not (Keeper_registry.is_registered ~base_path keeper_name)
       then
         respond_json_value_with_cors ~status:`Not_found request reqd
           (keeper_chat_stream_error_json "keeper not registered")
-      else (
+      else
+        match request_id with
+        | Some request_id ->
+          (match Keeper_chat_operation.Operation_id.of_string request_id with
+           | Error detail ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (keeper_chat_stream_error_json detail)
+           | Ok operation_id ->
+             (match
+                Keeper_owner_registry.interrupt_running_operation ~base_path
+                  ~keeper_name operation_id
+              with
+              | Ok Keeper_owner.Operation_interrupt_signalled ->
+                Log.Keeper.info
+                  "keeper_turn_interrupt: keeper=%s request_id=%s exact=true"
+                  keeper_name request_id;
+                respond_json_value_with_cors ~status:`OK request reqd
+                  (`Assoc
+                     [ "signalled", `Bool true
+                     ; "request_id", `String request_id
+                     ])
+              | Ok
+                  (Keeper_owner.Operation_not_current
+                     { running_operation_id }) ->
+                respond_json_value_with_cors ~status:`OK request reqd
+                  (`Assoc
+                     ([ "signalled", `Bool false
+                      ; "reason", `String "operation_not_current"
+                      ; "request_id", `String request_id
+                      ]
+                      @
+                      match running_operation_id with
+                      | None -> []
+                      | Some current ->
+                        [ ( "current_request_id"
+                          , `String
+                              (Keeper_chat_operation.Operation_id.to_string
+                                 current) ) ]))
+              | Ok (Keeper_owner.Operation_interrupt_failed detail) ->
+                respond_json_value_with_cors ~status:`OK request reqd
+                  (`Assoc
+                     [ "signalled", `Bool false
+                     ; "reason", `String "cancel_failed"
+                     ; "request_id", `String request_id
+                     ; "detail", `String detail
+                     ])
+              | Error error ->
+                respond_json_value_with_cors ~status:`OK request reqd
+                  (`Assoc
+                     [ "signalled", `Bool false
+                     ; "reason", `String "owner_unavailable"
+                     ; "request_id", `String request_id
+                     ; ( "detail"
+                       , `String
+                           (Keeper_owner_registry.command_error_to_string error)
+                       )
+                     ])))
+        | None ->
         (* The server fails the turn switch and learns nothing more within this
            request: whether the signal reaches the running fiber, and whether
            that fiber then terminates, are later events. [signalled] reports
@@ -524,7 +592,7 @@ let handle_keeper_turn_interrupt state request reqd =
            running after a [signalled: true] response, so an operator has to
            read the turn state to know the outcome. The former [cancelled:
            true] read as that outcome and hid a 63-minute hang (#29229). *)
-        match Keeper_registry.interrupt_current_turn ~base_path keeper_name with
+        (match Keeper_registry.interrupt_current_turn ~base_path keeper_name with
         | Keeper_registry.Exact_turn_cancelled turn_id ->
           Log.Keeper.info "keeper_turn_interrupt: keeper=%s turn_id=%d" keeper_name turn_id;
           respond_json_value_with_cors ~status:`OK request reqd
@@ -545,7 +613,7 @@ let handle_keeper_turn_interrupt state request reqd =
                 @
                 match turn_id with
                 | Some turn_id -> [ ("turn_id", `Int turn_id) ]
-                | None -> []))))
+                | None -> [])))
 ;;
 
 (* No cumulative timeout or work budget for keeper_msg. Keeper calls AGENT_CORE with

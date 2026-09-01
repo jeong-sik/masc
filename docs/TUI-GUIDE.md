@@ -557,6 +557,13 @@ Only rows the server marks as autonomous turns are read this way. A turn
 in the conversation itself already has its calls in the transcript as tool
 rows, so its trace block is not drawn a second time.
 
+Conversation order is structural. Direct and autonomous groups join on the
+absolute turn sequence in their persisted `turn_ref`; rows inside one request
+use typed Input → Progress → Tool → Output phase and producer operation
+sequence. Stable server row IDs keep scroll anchors through refresh. The clock
+is display and pagination metadata only. Unowned Memory journal rows remain an
+explicit auxiliary lane instead of borrowing chat order from timestamps.
+
 Only a request-correlated terminal keeper result is rendered as a reply.
 Interrupted streams, protocol errors, rejected turns, and terminal outcomes
 without visible text become explicit status or error rows; partial text is never
@@ -649,23 +656,33 @@ rows. It has its own `NEXT` lane below the causal transcript, oldest first:
 ```
 
 A count on its own is not enough - an operator who typed three lines during a
-turn needs to see which three. Each row keeps the first submission clock while
-it waits and after it starts. Only the first line of a queued message is shown,
-with `…` where it was cut; the rest goes with it when it is sent.
+turn needs to see which three. Up to three pending items are shown (the first
+two dispatch positions and the newest submission); a fourth row names how many
+middle items are hidden so a full 32-item queue cannot consume the viewport or
+disable cancel/edit. Each item keeps its first submission clock while it waits
+and after it starts. Only the first line is shown; the rest goes with it.
 
-`/steer <message>` is a distinct action. It signals the current turn to stop
-and places the exact replacement in a typed `STEER` row ahead of ordinary
+`/steer <message>` is a distinct action. It signals the exact current request
+ID to stop and places the replacement in a typed `STEER` row ahead of ordinary
 `NEXT` rows for that Keeper. The replacement is dispatched only after the
 current operation reaches a terminal state; an interrupt acknowledgement is
 not misreported as completion. A second pending steer for the same Keeper is
 refused instead of silently replacing the first.
 
+If the stream disappears without terminal evidence, the row changes to
+`reconciling` and the TUI re-subscribes with the same idempotent operation ID.
+The Keeper remains occupied and every `NEXT`/`STEER` stays held until the
+server emits a verified terminal receipt. A transport error is never treated
+as a turn boundary.
+
 A queued line travels with the keeper it was written to, so switching keepers
 mid-turn cannot redirect it; a line addressed elsewhere names its keeper after
 the number. The visible `NEXT` count is scoped to the selected Keeper rather
 than the workspace-global queue. `Ctrl-K` drops the newest waiting line and
-`Ctrl-P` pulls it back into the composer. Nothing has been dispatched, so both
-are local.
+`Ctrl-P` edits it in place. Newest means submission sequence, not dispatch
+position: editing preserves request ID, original submission clock, queue slot,
+attachments, `NEXT`/`STEER` intent, and a steer's causal parent. Nothing has
+been dispatched, so both are local.
 
 When the oldest `NEXT` row becomes active, its reserved row is handed to the
 active USER row one-for-one. The row therefore does not jump upward through an

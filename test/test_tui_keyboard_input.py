@@ -4405,14 +4405,51 @@ def paste_to_file_interaction(requests: HttpRequests) -> Interaction:
     return interact
 
 
+def keeper_chat_succeeded_response(request_body: bytes) -> RawHttpResponse:
+    request_id = json.loads(request_body).get("request_id")
+    accepted = {
+        "type": "CUSTOM",
+        "threadId": "keeper:alpha",
+        "timestamp": 1.0,
+        "name": "KEEPER_CHAT_OPERATION_ACCEPTED",
+        "value": {
+            "operation_id": request_id,
+            "state": "Succeeded",
+            "queued_count": 0,
+        },
+    }
+    return RawHttpResponse(
+        200,
+        ("data: " + json.dumps(accepted) + "\n\n").encode(),
+        content_type="text/event-stream",
+    )
+
+
 def chat_queue_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     # The turn has to still be running while the scenario types the lines that
     # queue behind it, so the fixture holds the answer rather than sending one.
-    gate = GatedHttpResponse(
-        (503, {"error": "released after the queue was read"}),
-        hold_seconds=30.0,
-    )
-    return {"/api/v1/keepers/chat/stream": gate}, gate
+    gate = GatedHttpResponse((200, {}), hold_seconds=30.0)
+
+    def terminal_response(request_body: bytes) -> RawHttpResponse:
+        with gate.lock:
+            call_index = gate.calls
+            gate.calls += 1
+        if call_index == 0:
+            gate.requested.set()
+            try:
+                if not gate.release.wait(timeout=gate.hold_seconds):
+                    return RawHttpResponse(
+                        504,
+                        json.dumps({"error": "fixture response gate timed out"}).encode(),
+                        content_type="application/json",
+                    )
+            finally:
+                gate.completed.set()
+        return keeper_chat_succeeded_response(request_body)
+
+    return {
+        "/api/v1/keepers/chat/stream": RequestHttpResponse(terminal_response)
+    }, gate
 
 
 def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
@@ -4565,17 +4602,20 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
 
 
 def chat_steer_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
-    gate = GatedHttpResponse(
-        (503, {"error": "released after steer ordering was observed"}),
-        hold_seconds=30.0,
+    fixtures, gate = chat_queue_http_fixtures()
+
+    def interrupt_response(request_body: bytes) -> HttpResponse:
+        request_id = json.loads(request_body).get("request_id")
+        return 200, {
+            "signalled": True,
+            "turn_id": 71,
+            "request_id": request_id,
+        }
+
+    fixtures["/api/v1/keepers/turn/interrupt"] = RequestHttpResponse(
+        interrupt_response
     )
-    return {
-        "/api/v1/keepers/chat/stream": gate,
-        "/api/v1/keepers/turn/interrupt": (
-            200,
-            {"signalled": True, "turn_id": 71},
-        ),
-    }, gate
+    return fixtures, gate
 
 
 def chat_steer_interaction(
@@ -4688,6 +4728,17 @@ def chat_steer_interaction(
             raise AssertionError(
                 f"steer dispatch order is not causal: {messages!r}"
             )
+        interrupt_bodies = [
+            json.loads(body)
+            for path, body in requests
+            if path == "/api/v1/keepers/turn/interrupt"
+        ]
+        original_request_id = json.loads(chat_bodies[0]).get("request_id")
+        if not interrupt_bodies or interrupt_bodies[0].get("request_id") != original_request_id:
+            raise AssertionError(
+                "steer interrupt was not bound to the exact original request: "
+                f"original={original_request_id!r} interrupts={interrupt_bodies!r}"
+            )
 
         wait_for_output(
             process,
@@ -4711,6 +4762,109 @@ def chat_steer_interaction(
 
     return interact
 
+
+def chat_reconcile_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
+    gate = GatedHttpResponse((200, {}), hold_seconds=30.0)
+    calls = 0
+    lock = threading.Lock()
+
+    def response(request_body: bytes) -> HttpResponse | RawHttpResponse:
+        nonlocal calls
+        with lock:
+            call_index = calls
+            calls += 1
+        if call_index == 0:
+            return 503, {"error": "first stream outcome is unknown"}
+        if call_index == 1:
+            gate.requested.set()
+            try:
+                if not gate.release.wait(timeout=gate.hold_seconds):
+                    return 504, {"error": "reconciliation gate timed out"}
+            finally:
+                gate.completed.set()
+        return keeper_chat_succeeded_response(request_body)
+
+    return {
+        "/api/v1/keepers/chat/stream": RequestHttpResponse(response)
+    }, gate
+
+
+def chat_reconcile_interaction(
+    gate: GatedHttpResponse, requests: HttpRequests
+) -> Interaction:
+    """An unknown stream outcome keeps NEXT held until exact re-subscribe ends."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\r",
+            b"Keepers \xe2\x96\xb8 \x1b[1malpha",
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"m",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
+        send_and_wait(
+            process, master_fd, output, b"uncertain", composer_showing(b"uncertain")
+        )
+        send_and_wait(process, master_fd, output, b"\r", b"ACTIVE TURN")
+        if not wait_for_fixture_event(
+            process,
+            master_fd,
+            output,
+            gate.requested,
+            timeout=5.0,
+        ):
+            raise AssertionError("exact Keeper chat re-subscribe did not start")
+        send_and_wait(
+            process, master_fd, output, b"held-next", composer_showing(b"held-next")
+        )
+        held = send_and_wait(process, master_fd, output, b"\r", b"NEXT 1")
+        held_plain = CSI_RE.sub(b"", frame_containing(held, b"NEXT 1"))
+        if b"reconciling" not in held_plain:
+            raise AssertionError(
+                f"unknown outcome did not expose reconciliation state: {held_plain!r}"
+            )
+        if any(
+            json.loads(body).get("message") == "held-next"
+            for path, body in requests
+            if path == "/api/v1/keepers/chat/stream"
+        ):
+            raise AssertionError("NEXT dispatched before terminal reconciliation")
+
+        gate.release.set()
+        deadline = time.monotonic() + 10.0
+        while True:
+            read_available(master_fd, output)
+            bodies = [
+                body
+                for path, body in requests
+                if path == "/api/v1/keepers/chat/stream"
+            ]
+            messages = [json.loads(body).get("message") for body in bodies]
+            if messages.count("uncertain") >= 2 and "held-next" in messages:
+                break
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f"terminal reconciliation did not release NEXT: {messages!r}"
+                )
+            time.sleep(0.02)
+        os.write(master_fd, b"q")
+
+    return interact
 
 def utf8_message_interaction(requests: HttpRequests) -> Interaction:
     expected_text = "Aé한🙂"
@@ -9948,6 +10102,15 @@ def run_keyboard_regression(executable: str) -> None:
         interact=chat_steer_interaction(steer_gate, steer_requests),
         http_fixtures=steer_fixtures,
         http_requests=steer_requests,
+    )
+    reconcile_requests: HttpRequests = []
+    reconcile_fixtures, reconcile_gate = chat_reconcile_http_fixtures()
+    run_terminal_scenario(
+        executable,
+        description="Unknown Keeper chat outcome holds NEXT until terminal",
+        interact=chat_reconcile_interaction(reconcile_gate, reconcile_requests),
+        http_fixtures=reconcile_fixtures,
+        http_requests=reconcile_requests,
     )
     run_terminal_scenario(
         executable,

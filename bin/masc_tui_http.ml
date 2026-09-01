@@ -862,7 +862,7 @@ type interrupt_signal =
       ; detail : string option
       }
 
-let decode_interrupt_signal json =
+let decode_interrupt_signal ~expected_request_id json =
   let field name =
     match json with
     | `Assoc fields -> List.assoc_opt name fields
@@ -878,6 +878,15 @@ let decode_interrupt_signal json =
     | Some (`Int value) -> Some value
     | Some _ | None -> None
   in
+  let echoed_request_id = string_of "request_id" in
+  if echoed_request_id <> Some expected_request_id
+  then
+    Error
+      (Printf.sprintf
+         "interrupt response request_id mismatch: expected %s, received %s"
+         expected_request_id
+         (Option.value ~default:"<missing>" echoed_request_id))
+  else
   match field "signalled" with
   | Some (`Bool true) -> Ok (Signalled { turn_id })
   | Some (`Bool false) ->
@@ -915,15 +924,20 @@ let post_keeper_tool_approval ~(host : string) ~(port : int)
       | _ -> Error "approval response was not a JSON object")
 
 let post_keeper_turn_interrupt ~(host : string) ~(port : int)
-    ~(keeper_name : string) : (interrupt_signal, string) result =
+    ~(keeper_name : string) ~(request_id : string) :
+    (interrupt_signal, string) result =
   let body =
-    Yojson.Safe.to_string (`Assoc [ ("name", `String keeper_name) ])
+    Yojson.Safe.to_string
+      (`Assoc
+         [ ("name", `String keeper_name)
+         ; ("request_id", `String request_id)
+         ])
   in
   match
     post_json ~host ~port ~path:keeper_turn_interrupt_path ~body
   with
   | Error detail -> Error detail
-  | Ok json -> decode_interrupt_signal json
+  | Ok json -> decode_interrupt_signal ~expected_request_id:request_id json
 
 let fetch_keeper_chat_operation ~(host : string) ~(port : int)
     (request : Masc_tui_keeper_chat_projection.request) :

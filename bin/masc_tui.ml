@@ -1037,7 +1037,17 @@ let own_typed_messages (state : state) =
             | Message_error | Message_tool | Message_skill _
             | Message_thinking | Message_memory ->
                 false)
-           && String.equal entry.me_keeper_name target)
+           && String.equal entry.me_keeper_name target
+           &&
+           match
+             Chat_queue.find state.msg_queued ~request_id:entry.me_request_id
+           with
+           | Some item when item.Chat_queue.intent = Chat_queue.Steer_after_interrupt ->
+               (* A steer is command intent, not ordinary chat text. Ctrl-P
+                  restores it with [/steer]; arrow recall must not turn it into
+                  NEXT merely because both have a user-shaped session row. *)
+               false
+           | Some _ | None -> true)
   in
   (* The queue is not walked here any more. A queued line enters the history
      when it is typed, not when it is dispatched, so it is already in [sent] --
@@ -1064,9 +1074,7 @@ let recall_land (state : state) entries at =
   let entry = List.nth entries (count - 1 - at) in
   set_composer_text state entry.me_text;
   state.msg_recall_replaces <-
-    (if Chat_queue.holds state.msg_queued ~request_id:entry.me_request_id
-     then Some entry.me_request_id
-     else None)
+    Chat_queue.find state.msg_queued ~request_id:entry.me_request_id
 
 let recall_older (state : state) =
   let sent = own_typed_messages state in
@@ -1121,7 +1129,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
     ~(load_older : before:float -> unit) ~(paste_image : unit -> unit)
     ~(open_named_image : unit -> unit) ~(inspect_context : unit -> unit)
-    ~(load_tool_changes : unit -> unit)
+    ~(load_tool_changes : unit -> unit) ~(drain_queue : unit -> unit)
     (key : string) : bool =
   (* y and n answer a held call, and only while one is held -- otherwise they
      are letters someone is typing. The prompt on screen is what makes them
@@ -1156,6 +1164,12 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       | None -> true)
   | _ ->
   match key with
+  | "esc" when Option.is_some state.msg_recall_replaces ->
+    state.msg_recall_replaces <- None;
+    state.msg_attachments <- [];
+    Buffer.clear state.msg_input;
+    drain_queue ();
+    true
   | "esc" ->
     leave_keeper_message state;
     true
@@ -1186,7 +1200,10 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     recall_older state;
     true
   | "down" ->
+    let was_editing = Option.is_some state.msg_recall_replaces in
     recall_newer state;
+    if was_editing && Option.is_none state.msg_recall_replaces
+    then drain_queue ();
     true
   | "wheel-up" ->
     (* A notch is worth more than a row. The wheel used to arrive as the arrow
@@ -1247,7 +1264,12 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          waiting line is abandoned the same way: the line stays queued and the
          next Enter is a new line, not a replacement. *)
       state.msg_spill <- None;
-      state.msg_recall_replaces <- None;
+      if Option.is_some state.msg_recall_replaces
+      then begin
+        state.msg_attachments <- [];
+        state.msg_recall_replaces <- None;
+        drain_queue ()
+      end;
       Buffer.clear state.msg_input;
       true
     end else if c = Some 5 then begin
@@ -1268,6 +1290,13 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
        | Some (item, rest) ->
          let request = item.Chat_queue.request in
          state.msg_queued <- rest;
+         (match state.msg_recall_replaces with
+          | Some editing
+            when String.equal editing.Chat_queue.request.request_id
+                   request.request_id ->
+              state.msg_recall_replaces <- None;
+              state.msg_attachments <- []
+          | Some _ | None -> ());
          forget_queued_history state request;
          add_event state "info"
            (Printf.sprintf "Cancelled queued message to %s"
@@ -1281,15 +1310,14 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
            Chat_queue.take_newest_for_keeper state.msg_queued ~keeper_name)
        with
        | None -> ()
-       | Some (item, rest) ->
+       | Some (item, _rest) ->
          let request = item.Chat_queue.request in
-         state.msg_queued <- rest;
-         forget_queued_history state request;
+         state.msg_recall_replaces <- Some item;
          (* The attachments come back with the text. They were staged for this
-            line and taken when it was queued, so leaving them behind would
-            hand the operator a draft whose images had quietly gone. *)
-         state.msg_attachments <-
-           request.Keeper_chat.attachments @ state.msg_attachments;
+            line and remain on the queued request while it is edited in place.
+            The composer mirrors them so replacing the body retains the exact
+            payload; Ctrl-U abandons only the edit and leaves the queue item. *)
+         state.msg_attachments <- request.Keeper_chat.attachments;
          Buffer.clear state.msg_input;
          Buffer.add_string state.msg_input request.Keeper_chat.message);
       true
@@ -1623,14 +1651,43 @@ let clock_text_of_unix at =
   Printf.sprintf "%02d:%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
     time.Unix.tm_sec
 
-let append_chat_history ?tool_block ?skill_activity ?at state request role text =
+let next_chat_operation_seq state request_id =
+  List.fold_left
+    (fun next entry ->
+      if String.equal entry.me_request_id request_id
+      then max next (entry.me_operation_seq + 1)
+      else next)
+    0
+    (state.msg_loaded @ state.msg_history)
+;;
+
+let append_chat_history ?tool_block ?skill_activity ?at ?submitted_at ?turn_phase
+    ?operation_seq state request role text =
   let text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text in
   let at = Option.value ~default:(Unix.gettimeofday ()) at in
+  let turn_phase =
+    Option.value ~default:(chat_turn_phase_of_role role) turn_phase
+  in
+  let operation_seq =
+    Option.value
+      ~default:(next_chat_operation_seq state request.Keeper_chat.request_id)
+      operation_seq
+  in
   state.msg_history <-
     state.msg_history
     @ [ {
           me_role = role;
+          me_identity =
+            Session_row
+              { request_id = request.Keeper_chat.request_id
+              ; turn_phase
+              ; operation_seq
+              };
+          me_turn_phase = turn_phase;
+          me_turn_sequence = None;
+          me_operation_seq = operation_seq;
           me_text = text;
+          me_submitted_at = submitted_at;
           me_tool_block = tool_block;
           me_skill_activity = skill_activity;
           me_timestamp = clock_text_of_unix at;
@@ -1639,21 +1696,8 @@ let append_chat_history ?tool_block ?skill_activity ?at state request role text 
           me_at = at;
         } ]
 
-let remember_submission_time state request_id submitted_at =
-  if not (List.mem_assoc request_id state.msg_submission_times)
-  then
-    state.msg_submission_times <-
-      (request_id, submitted_at) :: state.msg_submission_times
-;;
-
-let append_user_history_once ?submitted_at state (request : Keeper_chat.request) =
-  let submitted_at =
-    match submitted_at, List.assoc_opt request.request_id state.msg_submission_times with
-    | Some at, _ -> at
-    | None, Some at -> at
-    | None, None -> Unix.gettimeofday ()
-  in
-  remember_submission_time state request.request_id submitted_at;
+let append_user_history_once ~submitted_at state
+    (request : Keeper_chat.request) =
   let expected_text =
     Keeper_chat.terminal_safe_text ~preserve_newlines:true request.message
   in
@@ -1667,7 +1711,7 @@ let append_user_history_once ?submitted_at state (request : Keeper_chat.request)
       state.msg_history
   in
   if not already_present then
-    append_chat_history ~at:submitted_at state request
+    append_chat_history ~at:submitted_at ~submitted_at state request
       (Message_user (Sent_by_operator "you"))
       request.message
 
@@ -1796,17 +1840,43 @@ let post_keeper_chat_watching ~mailbox ~port request =
            , "sending without a live view: no Eio clock to bound the stream" ));
       Masc_tui_http.post_keeper_chat ~host ~port request
   | Some clock ->
-      let decoder = Keeper_chat_live.create () in
-      (* Runs on this fiber between reads, so it only decodes and hands the
-         result to the render loop; drawing happens there. *)
-      let on_chunk chunk =
-        match Keeper_chat_live.feed decoder chunk with
-        | [] -> ()
-        | deltas ->
-            enqueue_async mailbox (Keeper_chat_stream_deltas (request, deltas))
+      let rec watch was_unverified =
+        let decoder = Keeper_chat_live.create () in
+        (* Each idempotent re-subscribe has its own SSE grammar state. The
+           visible transcript remains request-owned, but an acceptance event
+           at the head of the new stream is not a duplicate in that stream. *)
+        let on_chunk chunk =
+          match Keeper_chat_live.feed decoder chunk with
+          | [] -> ()
+          | deltas ->
+              enqueue_async mailbox
+                (Keeper_chat_stream_deltas (request, deltas))
+        in
+        let result =
+          Masc_tui_http.post_keeper_chat_streaming ~clock ~host ~port ~on_chunk
+            request
+        in
+        match result with
+        | Error error
+          when Keeper_chat.error_certainty ~was_unverified error
+               = Keeper_chat.Outcome_unverified ->
+            if not was_unverified
+            then
+              enqueue_async mailbox
+                (Keeper_chat_stream_unavailable
+                   ( request
+                   , Printf.sprintf
+                       "connection lost; reconciling exact request %s before NEXT"
+                       request.Keeper_chat.request_id ));
+            (* Re-POSTing the same operation id is the server's idempotent
+               subscribe/reconcile path. The in-flight owner stays held until
+               one watcher observes terminal truth, so NEXT cannot overlap a
+               turn whose first stream merely disappeared. *)
+            Eio.Time.sleep clock 0.5;
+            watch true
+        | (Ok _ | Error _) as terminal -> terminal
       in
-      Masc_tui_http.post_keeper_chat_streaming ~clock ~host ~port ~on_chunk
-        request
+      watch false
 
 let inflight_entry_by_request_id state request_id =
   List.find_opt
@@ -4367,8 +4437,24 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
             false)
       state.msg_history
 
-let msg_entry_of_history_row state keeper_name (row : Keeper_chat_history.row) =
-  let role, text, tool_block, skill_activity =
+let locally_submitted_at state keeper_name request_id =
+  List.find_map
+    (fun entry ->
+      match entry.me_role with
+      | Message_user (Sent_by_operator _)
+        when String.equal entry.me_keeper_name keeper_name
+             && String.equal entry.me_request_id request_id ->
+          entry.me_submitted_at
+      | Message_user (Sent_by_other _) | Message_keeper | Message_autonomous
+      | Message_status | Message_error | Message_tool | Message_skill _
+      | Message_thinking
+      | Message_memory -> None)
+    (state.msg_history @ state.msg_loaded)
+;;
+
+let msg_entry_of_history_row state keeper_name ~operation_seq
+    (row : Keeper_chat_history.row) =
+  let role, turn_phase, text, tool_block, skill_activity =
     match row.Keeper_chat_history.kind with
     | Keeper_chat_history.Addressed_to_keeper { speaker; surface } ->
         (* The label is what the row draws; the speaker is what it is. Both
@@ -4380,11 +4466,12 @@ let msg_entry_of_history_row state keeper_name (row : Keeper_chat_history.row) =
           | Keeper_chat_history.Named _
           | Keeper_chat_history.Unresolved _ -> Sent_by_other label
         in
-        (Message_user author, row.text, None, None)
+        (Message_user author, Turn_input, row.text, None, None)
     | Keeper_chat_history.Said_by_keeper ->
-        (Message_keeper, row.text, None, None)
+        (Message_keeper, Turn_output, row.text, None, None)
     | Keeper_chat_history.Autonomous_reply ->
         ( Message_autonomous
+        , Turn_output
         , (if String.trim row.text = "" then "\xc2\xb7" else row.text)
         , None
         , None )
@@ -4396,26 +4483,41 @@ let msg_entry_of_history_row state keeper_name (row : Keeper_chat_history.row) =
           | Some presented -> presented
           | None -> row.text, false
         in
-        ((if recovered then Message_status else Message_error), text, None, None)
+        ( (if recovered then Message_status else Message_error)
+        , Turn_output
+        , text
+        , None
+        , None )
     | Keeper_chat_history.Tool_calls block ->
         ( Message_tool
+        , Turn_tool
         , String.concat "\n" (Keeper_chat_history.tool_rows block)
         , Some block
         , None )
     | Keeper_chat_history.Skill_activity activity ->
         ( Message_skill activity.Keeper_chat_transcript.state
+        , Turn_progress
         , String.concat "\n"
             (Keeper_chat_transcript.skill_rows ~full:false activity)
         , None
         , Some activity )
     | Keeper_chat_history.Reasoning lines ->
-        (Message_thinking, String.concat "\n" lines, None, None)
+        (Message_thinking, Turn_progress, String.concat "\n" lines, None, None)
     | Keeper_chat_history.Memory_activity ->
-        (Message_memory, row.text, None, None)
+        (Message_memory, Turn_progress, row.text, None, None)
   in
   let submitted_at =
-    Option.bind row.Keeper_chat_history.turn_id (fun request_id ->
-      List.assoc_opt request_id state.msg_submission_times)
+    match row.Keeper_chat_history.kind, row.Keeper_chat_history.turn_id with
+    | Keeper_chat_history.Addressed_to_keeper _, Some request_id ->
+        locally_submitted_at state keeper_name request_id
+    | (Keeper_chat_history.Said_by_keeper
+      | Keeper_chat_history.Autonomous_reply
+      | Keeper_chat_history.Delivery_failed _
+      | Keeper_chat_history.Tool_calls _
+      | Keeper_chat_history.Skill_activity _
+      | Keeper_chat_history.Reasoning _
+      | Keeper_chat_history.Memory_activity), _
+    | Keeper_chat_history.Addressed_to_keeper _, None -> None
   in
   let timestamp =
     match row.Keeper_chat_history.kind with
@@ -4440,7 +4542,19 @@ let msg_entry_of_history_row state keeper_name (row : Keeper_chat_history.row) =
       ~notes:row.Keeper_chat_history.attachments
   in
   { me_role = role
+  ; me_identity =
+      (match row.Keeper_chat_history.structural_id with
+       | Some id -> Persisted_row id
+       | None ->
+           Persisted_legacy_row
+             { request_id = Option.value ~default:"" row.turn_id
+             ; operation_seq
+             })
+  ; me_turn_phase = turn_phase
+  ; me_turn_sequence = row.Keeper_chat_history.turn_sequence
+  ; me_operation_seq = operation_seq
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
+  ; me_submitted_at = submitted_at
   ; me_tool_block = tool_block
   ; me_skill_activity = skill_activity
   ; me_timestamp = timestamp
@@ -4452,13 +4566,29 @@ let msg_entry_of_history_row state keeper_name (row : Keeper_chat_history.row) =
   ; me_at = row.Keeper_chat_history.at
   }
 
+let msg_entries_of_history_rows state keeper_name rows =
+  let next_by_request = Hashtbl.create 16 in
+  List.map
+    (fun (row : Keeper_chat_history.row) ->
+      let request_id = Option.value ~default:"" row.turn_id in
+      let operation_seq =
+        Option.value ~default:0 (Hashtbl.find_opt next_by_request request_id)
+      in
+      Hashtbl.replace next_by_request request_id (operation_seq + 1);
+      msg_entry_of_history_row state keeper_name ~operation_seq row)
+    rows
+;;
+
 let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
   let host = server_peer_host in
   let port = state.port in
   let keeper_name = request.Keeper_chat.keeper_name in
+  let request_id = request.Keeper_chat.request_id in
   let run () =
     let result =
-      try Masc_tui_http.post_keeper_turn_interrupt ~host ~port ~keeper_name
+      try
+        Masc_tui_http.post_keeper_turn_interrupt ~host ~port ~keeper_name
+          ~request_id
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -4625,7 +4755,6 @@ let take_pending_attachments state =
 
 let launch_keeper_request ?submitted_at state ~mailbox request =
   let submitted_at = Option.value ~default:(Unix.gettimeofday ()) submitted_at in
-  remember_submission_time state request.Keeper_chat.request_id submitted_at;
   let live =
     Keeper_chat_transcript.create
       ~keeper_name:request.Keeper_chat.keeper_name
@@ -4636,6 +4765,7 @@ let launch_keeper_request ?submitted_at state ~mailbox request =
     { sent_request = request
     ; submitted_at
     ; sent_at = Unix.gettimeofday ()
+    ; phase = Turn_streaming
     ; live
     }
     :: state.msg_inflight;
@@ -4679,9 +4809,12 @@ let queue_keeper_message state request =
       Ok waiting
 ;;
 
-let queue_keeper_steer state request =
+let queue_keeper_steer state ~causal_parent_request_id request =
   let submitted_at = Unix.gettimeofday () in
-  match Chat_queue.push_steer state.msg_queued ~submitted_at request with
+  match
+    Chat_queue.push_steer state.msg_queued ~submitted_at
+      ~causal_parent_request_id request
+  with
   | Error _ as error -> error
   | Ok (queue, waiting) ->
       state.msg_queued <- queue;
@@ -4714,7 +4847,11 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
             Keeper_chat.create_request ~attachments:state.msg_attachments
               ~keeper_name ~message:text ()
           in
-          (match queue_keeper_steer state request with
+          (match
+             queue_keeper_steer state
+               ~causal_parent_request_id:active_request.Keeper_chat.request_id
+               request
+           with
            | Error detail -> add_event state "error" detail
            | Ok waiting ->
                state.msg_attachments <- [];
@@ -4729,7 +4866,6 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
                  = Keeper_chat_transcript.Not_requested
                then launch_keeper_interrupt state ~mailbox active_request))
 ;;
-
 (* Send one line to one keeper.
 
    The refusals here are about whether the message can be delivered at all: no
@@ -4752,34 +4888,76 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
         (Printf.sprintf "Cannot send: Keeper %s is no longer registered"
            (Keeper_chat.terminal_safe_text target))
   | Some target -> (
-      (* An edit of a waiting line replaces it. The original leaves the queue
-         here, before the new request is built, so the two cannot both go out
-         -- which is what recalling a queued line and pressing Enter did:
-         the queue still held the original and the composer queued a copy.
-
-         [None] from [take] is the line having gone out while it was being
-         edited. Nothing to replace then, and this becomes an ordinary new
-         line rather than a send that silently does nothing. *)
-      (match state.msg_recall_replaces with
-       | None -> ()
-       | Some request_id ->
-           state.msg_recall_replaces <- None;
-           (match Chat_queue.take state.msg_queued ~request_id with
-            | None -> ()
-            | Some (item, rest) ->
-                let original = item.Chat_queue.request in
-                state.msg_queued <- rest;
-                forget_queued_history state original));
       (* Now that the keeper is known, a spilled paste can be written where
          that keeper can read it. Above this point there is no answer to
          "whose workspace", and a file in the wrong one is a message pointing
          at nothing. *)
       let text = place_spilled_paste state ~base_path ~keeper_name:target text in
-      (* Read through [send_disposition] rather than the state directly: the
-         footer answers the same question the same way, and the two drifting
-         apart is what put "Enter:blocked" on a screen that also said
-         "queued 1". *)
-      match send_disposition state ~keeper_name:target with
+      match state.msg_recall_replaces with
+      | Some editing
+        when String.equal editing.Chat_queue.request.Keeper_chat.keeper_name
+               target ->
+          let original = editing.Chat_queue.request in
+          let request =
+            { original with
+              message = text
+            ; attachments = take_pending_attachments state
+            }
+          in
+          (match
+             Chat_queue.replace_request state.msg_queued
+               ~request_id:original.Keeper_chat.request_id request
+           with
+           | Error detail -> add_event state "error" detail
+           | Ok queue ->
+               state.msg_queued <- queue;
+               state.msg_recall_replaces <- None;
+               let safe_text =
+                 Keeper_chat.terminal_safe_text ~preserve_newlines:true text
+               in
+               state.msg_history <-
+                 List.map
+                   (fun entry ->
+                     if
+                       String.equal entry.me_request_id request.request_id
+                       && String.equal entry.me_keeper_name request.keeper_name
+                       &&
+                       match entry.me_role with
+                       | Message_user (Sent_by_operator _) -> true
+                       | Message_user (Sent_by_other _) | Message_keeper
+                       | Message_autonomous | Message_status | Message_error
+                       | Message_tool | Message_skill _ | Message_thinking
+                       | Message_memory -> false
+                     then { entry with me_text = safe_text }
+                     else entry)
+                   state.msg_history;
+               clear_current_message_draft state;
+               add_event state "message"
+                 (Printf.sprintf "Updated queued %s for %s"
+                    (match editing.Chat_queue.intent with
+                     | Chat_queue.Next -> "NEXT"
+                     | Chat_queue.Steer_after_interrupt -> "STEER")
+                    (Keeper_chat.terminal_safe_text target));
+               if Option.is_none (inflight_for state target)
+               then
+                 match
+                   Chat_queue.take state.msg_queued
+                     ~request_id:request.Keeper_chat.request_id
+                 with
+                 | None -> ()
+                 | Some (item, rest) ->
+                     state.msg_queued <- rest;
+                     launch_keeper_request ~submitted_at:item.submitted_at state
+                       ~mailbox item.request)
+      | Some _ ->
+          add_event state "error"
+            "Queued edit belongs to another Keeper; switch back or press Ctrl-U"
+      | None ->
+        (* Read through [send_disposition] rather than the state directly: the
+           footer answers the same question the same way, and the two drifting
+           apart is what put "Enter:blocked" on a screen that also said
+           "queued 1". *)
+        (match send_disposition state ~keeper_name:target with
       | Sends ->
           let request =
             Keeper_chat.create_request
@@ -4812,7 +4990,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
               add_event state "message"
                 (Printf.sprintf "Queued for %s behind %s (%d waiting)"
                    (Keeper_chat.terminal_safe_text target)
-                   blocking.Keeper_chat.request_id waiting)))
+                   blocking.Keeper_chat.request_id waiting))))
 ;;
 
 let drain_queued_message state ~base_path ~mailbox =
@@ -4830,7 +5008,14 @@ let drain_queued_message state ~base_path ~mailbox =
   let rec next () =
     match
       Chat_queue.take_first_sendable state.msg_queued ~sendable:(fun keeper_name ->
-        Option.is_none (inflight_for state keeper_name))
+        Option.is_none (inflight_for state keeper_name)
+        &&
+        match state.msg_recall_replaces with
+        | Some editing ->
+            not
+              (String.equal editing.Chat_queue.request.Keeper_chat.keeper_name
+                 keeper_name)
+        | None -> true)
     with
     | None -> ()
     | Some (item, rest) ->
@@ -4970,7 +5155,17 @@ let chat_notice state ~keeper_name ~role text =
         state.msg_history
         @ [ {
               me_role = role;
+              me_identity =
+                Session_row
+                  { request_id = ""
+                  ; turn_phase = chat_turn_phase_of_role role
+                  ; operation_seq = next_chat_operation_seq state ""
+                  };
+              me_turn_phase = chat_turn_phase_of_role role;
+              me_turn_sequence = None;
+              me_operation_seq = next_chat_operation_seq state "";
               me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
+              me_submitted_at = None;
               me_tool_block = None;
               me_skill_activity = None;
               me_timestamp = current_clock_text ();
@@ -5366,7 +5561,15 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
     | None -> state.msg_target_keeper_name
   in
   let notice = chat_notice state ~keeper_name:target in
-  match Masc_tui_command.parse text with
+  let command = Masc_tui_command.parse text in
+  if
+    Option.is_some state.msg_recall_replaces
+    && match command with Masc_tui_command.Say _ -> false | _ -> true
+  then
+    notice ~role:Message_error
+      "A queued edit is active; press Enter for its text or Ctrl-U to abandon it"
+  else
+  match command with
   | Masc_tui_command.Say _ ->
       start_keeper_message ?keeper_name state ~base_path ~mailbox text
   | Masc_tui_command.Task_missing_title ->
@@ -5520,8 +5723,27 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
 let apply_keeper_chat_result state request result =
   match inflight_by_request_id state request.Keeper_chat.request_id with
   | Some current when Keeper_chat.same_request_identity current request ->
-      drop_inflight state request;
       (match result with
+       | Error error
+         when Keeper_chat.error_certainty ~was_unverified:false error
+              = Keeper_chat.Outcome_unverified ->
+           let detail =
+             Keeper_chat.reconciliation_failure_detail
+               ~credential_sent:(Masc_tui_http.operator_token_present ())
+               error
+             |> Keeper_chat.terminal_safe_text
+           in
+           append_chat_history state request Message_status
+             (Printf.sprintf
+                "Outcome still unverified for %s; holding NEXT while the exact operation is reconciled. %s"
+                request.request_id detail);
+           add_event state "error"
+             (Printf.sprintf "Keeper request still unverified: %s"
+                request.request_id);
+           false
+       | (Ok _ | Error _) as result ->
+         drop_inflight state request;
+         (match result with
        | Ok (Keeper_chat.Turn_completed completed) ->
            let role =
              match completed.turn_outcome with
@@ -5534,13 +5756,15 @@ let apply_keeper_chat_result state request result =
              | Keeper_chat.External_effect_pending
              | Keeper_chat.No_visible_reply -> Message_status
            in
-           append_chat_history state request role (chat_status_text completed);
+           append_chat_history ~turn_phase:Turn_output state request role
+             (chat_status_text completed);
            add_event state "message"
              (Printf.sprintf "Keeper turn finished: %s" request.request_id)
        | Ok (Keeper_chat.Replayed_succeeded _) ->
            (* The server answered [Existing] for this id: the turn already ran
               and this POST produced no second one. *)
-           append_chat_history state request Message_status
+           append_chat_history ~turn_phase:Turn_output state request
+             Message_status
              "Request was already completed; canonical reply is not present in this replay stream";
            add_event state "message"
              (Printf.sprintf "Keeper request already completed: %s"
@@ -5556,31 +5780,21 @@ let apply_keeper_chat_result state request result =
              |> Keeper_chat.terminal_safe_text
            in
            let detail =
-             match
-               Keeper_chat.error_certainty ~was_unverified:false error
-             with
+             match Keeper_chat.error_certainty ~was_unverified:false error with
              | Keeper_chat.Verified_rejected | Keeper_chat.Verified_failed ->
                  detail
-             | Keeper_chat.Outcome_unverified ->
-                 (* The POST did not come back with an answer, so the turn may
-                    have run anyway. Nothing here has to reconcile it: the
-                    transcript reloads from the server after every settle, and
-                    a turn that ran appears there. Sending the line again is
-                    safe too — that request carries a new id, so the server
-                    treats it as the new message it is. *)
-                 Printf.sprintf
-                   "Outcome unverified for %s; the turn may still be running. The transcript reload will show it. %s"
-                   request.request_id detail
+             | Keeper_chat.Outcome_unverified -> assert false
            in
            let detail =
              match Keeper_chat_history.present_delivery_failure detail with
              | Some (presented, _) -> presented
              | None -> detail
            in
-           append_chat_history state request Message_error detail;
+           append_chat_history ~turn_phase:Turn_output state request
+             Message_error detail;
            add_event state "error"
              (Printf.sprintf "Keeper message %s: %s" request.request_id detail));
-      true
+         true)
   | Some _ | None -> false
 
 let remember_surface_error state ~surface ~current_error ~set_error err =
@@ -7509,6 +7723,7 @@ let handle_composer_key state ~base_path ~mailbox key =
                 launch_keeper_chat_file_changes_load ~force:true state ~mailbox
                   ~keeper_name
             | None -> ())
+          ~drain_queue:(fun () -> ())
           key
       in
       true
@@ -8448,7 +8663,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           with
           | Some entry
             when Keeper_chat.same_request_identity entry.sent_request request ->
-              append_user_history_once state request;
+              append_user_history_once ~submitted_at:entry.submitted_at state
+                request;
               consume_dispatched_message_draft state request;
               add_event state "message"
                 (Printf.sprintf "%s Keeper request: %s"
@@ -8461,37 +8677,39 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               then state.msg_live <- Some entry.live;
               proceed := true
           | Some _ | None -> ())
-  | Keeper_chat_done (request, was_replay, result, acknowledge) ->
-      settle_live_turn state request;
-      (* The server persists the user row, the reply and the tool calls before
-         it ends the stream, so by now the transcript holds this turn. While
-         the pane still points here, reloading makes that record the thing on
-         screen; the rows settle_live_turn just committed are what stands if
-         the load fails. A background Keeper does not supersede the visible
-         Keeper's history generation. *)
-      if
-        Option.exists
-          (String.equal request.Keeper_chat.keeper_name)
-          state.msg_target_keeper_name
-      then begin
-        launch_keeper_history_load ~load_file_changes:false state ~mailbox
-          ~keeper_name:request.Keeper_chat.keeper_name;
-        (* Persistence is complete at this boundary. A load already serving a
-           live result coalesces this request through [refresh_pending], so the
-           final snapshot cannot miss a later tool in the same turn. *)
-        if state.view = Keepers Keeper_message then
-          launch_keeper_chat_file_changes_load ~force:true state ~mailbox
-            ~keeper_name:request.Keeper_chat.keeper_name
-      end;
+  | Keeper_chat_done (request, _was_replay, result, acknowledge) ->
+      let terminal =
+        match result with
+        | Ok _ -> true
+        | Error error ->
+            Keeper_chat.error_certainty ~was_unverified:false error
+            <> Keeper_chat.Outcome_unverified
+      in
+      if terminal then settle_live_turn state request;
       let applied =
         Fun.protect
           ~finally:(fun () -> Eio.Promise.resolve acknowledge ())
           (fun () ->
             apply_keeper_chat_result state request result)
       in
-      if applied then load_local_workspace_if_safe state base_path;
-      (* The turn settled, so "next" has arrived for whatever was waiting. *)
-      drain_queued_message state ~base_path ~mailbox
+      if applied then begin
+        (* A terminal operation has persisted the user row, reply and tool
+           calls. Only this boundary may replace the live projection or hand
+           the Keeper slot to NEXT. *)
+        if
+          Option.exists
+            (String.equal request.Keeper_chat.keeper_name)
+            state.msg_target_keeper_name
+        then begin
+          launch_keeper_history_load ~load_file_changes:false state ~mailbox
+            ~keeper_name:request.Keeper_chat.keeper_name;
+          if state.view = Keepers Keeper_message then
+            launch_keeper_chat_file_changes_load ~force:true state ~mailbox
+              ~keeper_name:request.Keeper_chat.keeper_name
+        end;
+        load_local_workspace_if_safe state base_path;
+        drain_queued_message state ~base_path ~mailbox
+      end
   | Keeper_chat_stream_deltas (request, deltas) ->
       (* Each Keeper can stream independently. Looking up the request keeps a
          background turn from replacing the selected Keeper's transcript and
@@ -8501,9 +8719,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        with
        | Some entry
          when Keeper_chat.same_request_identity entry.sent_request request ->
+           entry.phase <- Turn_streaming;
            List.iter (Keeper_chat_transcript.apply entry.live) deltas
        | Some _ | None -> ())
   | Keeper_chat_stream_unavailable (request, detail) ->
+      (match
+         inflight_entry_by_request_id state request.Keeper_chat.request_id
+       with
+       | Some entry
+         when Keeper_chat.same_request_identity entry.sent_request request ->
+           entry.phase <- Turn_reconciling
+       | Some _ | None -> ());
       append_chat_history state request Message_status detail
   | Keeper_chat_approval_answered (request, tool_call_id, allow, result) ->
       let text =
@@ -8775,9 +9001,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           | Ok { Keeper_chat_history.rows; dropped } ->
              state.msg_loaded_error <- None;
              state.msg_loaded_dropped <- dropped;
-             let fresh =
-               List.map (msg_entry_of_history_row state keeper_name) rows
-             in
+             let fresh = msg_entries_of_history_rows state keeper_name rows in
              let kept = merge_paged_history ~paged:prior_history ~fresh in
              let cursor = oldest_at kept in
              (* Where reading further back starts: the oldest row now held. A
@@ -8802,7 +9026,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           | Ok { Keeper_chat_history.rows; dropped } ->
               state.msg_memory_error <- None;
               state.msg_memory_dropped <- dropped;
-              List.map (msg_entry_of_history_row state keeper_name) rows
+              msg_entries_of_history_rows state keeper_name rows
           | Error detail ->
               state.msg_memory_error <- Some detail;
               prior_memory
@@ -9143,12 +9367,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         match result with
         | Ok page ->
             let rows =
-              List.map
-                (msg_entry_of_history_row state keeper_name)
+              msg_entries_of_history_rows state keeper_name
                 page.Keeper_chat_history.decoded.Keeper_chat_history.rows
             in
-            (* Prepended, not merged: these are strictly older than everything
-               loaded, and the pane orders the whole list by time anyway. *)
+            (* Prepended, not timestamp-merged: the paging cursor establishes
+               that these producer rows precede the window already held;
+               turn_sequence orders cross-store turn groups inside it. *)
             state.msg_loaded <- rows @ state.msg_loaded;
             state.msg_loaded_dropped <-
               state.msg_loaded_dropped
@@ -12105,16 +12329,27 @@ and is loaded on demand through keeper_skill.
              String.length k = 1 && Char.code k.[0] = 4
            in
            let switch_key = String.length k = 1 && Char.code k.[0] = 7 in
+           let queue_management_key =
+             String.length k = 1
+             && (Char.code k.[0] = 11 || Char.code k.[0] = 16)
+           in
            if
              keeper_message_input_supported state
              || String.equal k "esc"
              || reasoning_key
              || tool_view_key
              || switch_key
+             || queue_management_key
            then
-             if switch_key then
+             if switch_key then begin
+               if Option.is_some state.msg_recall_replaces then begin
+                 state.msg_recall_replaces <- None;
+                 state.msg_attachments <- [];
+                 drain_queued_message state ~base_path
+                   ~mailbox:async_messages
+               end;
                switch_to_next_keeper_message state ~mailbox:async_messages
-             else
+             end else
                let (_handled : bool) =
                  handle_message_key state
                    ~submit_message:
@@ -12154,6 +12389,9 @@ and is loaded on demand through keeper_skill.
                          launch_keeper_chat_file_changes_load ~force:true state
                            ~mailbox:async_messages ~keeper_name
                      | None -> ())
+                   ~drain_queue:(fun () ->
+                     drain_queued_message state ~base_path
+                       ~mailbox:async_messages)
                    k
                in
                ()

@@ -208,7 +208,10 @@ let test_steer_precedes_next_for_its_keeper () =
   let queue, _ = push_exn queue ~keeper_name:"alpha" "next two" in
   let steer = request ~keeper_name:"alpha" "replacement" in
   let queue =
-    match Queue.push_steer queue ~submitted_at:99. steer with
+    match
+      Queue.push_steer queue ~submitted_at:99.
+        ~causal_parent_request_id:"active-a" steer
+    with
     | Error detail -> fail detail
     | Ok (queue, waiting) ->
         check int "three alpha items" 3 waiting;
@@ -223,9 +226,32 @@ let test_steer_precedes_next_for_its_keeper () =
        check string "steer dispatches first" "replacement"
          item.Queue.request.Chat.message;
        check bool "typed intent" true
-         (item.Queue.intent = Queue.Steer_after_interrupt)
+         (item.Queue.intent = Queue.Steer_after_interrupt);
+       check (option string) "exact causal parent" (Some "active-a")
+         item.Queue.causal_parent_request_id
    | None -> fail "steer should be sendable");
-  match Queue.push_steer queue ~submitted_at:100. steer with
+  (match Queue.take_newest_for_keeper queue ~keeper_name:"alpha" with
+   | Some (item, _) ->
+       check string "newest means submission, not dispatch tail" "replacement"
+         item.Queue.request.Chat.message
+   | None -> fail "newest alpha submission should exist");
+  let edited = { steer with Chat.message = "edited replacement" } in
+  (match Queue.replace_request queue ~request_id:steer.request_id edited with
+   | Error detail -> fail detail
+   | Ok edited_queue ->
+       (match Queue.find edited_queue ~request_id:steer.request_id with
+        | None -> fail "edited steer disappeared"
+        | Some edited_item ->
+            check string "edited body" "edited replacement"
+              edited_item.request.message;
+            check (float 0.001) "edit keeps submission clock" 99.
+              edited_item.submitted_at;
+            check (option string) "edit keeps causal parent" (Some "active-a")
+              edited_item.causal_parent_request_id));
+  match
+    Queue.push_steer queue ~submitted_at:100.
+      ~causal_parent_request_id:"active-a" steer
+  with
   | Ok _ -> fail "a second steer for one Keeper must be refused"
   | Error detail ->
       check bool "refusal names existing steer" true
@@ -245,7 +271,6 @@ let test_take_newest_for_keeper_does_not_touch_another_keeper () =
         [ "alpha one"; "beta one"; "beta two" ]
         (messages rest)
 ;;
-
 let () =
   run
     "tui_keeper_chat_queue"

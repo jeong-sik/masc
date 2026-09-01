@@ -3898,7 +3898,7 @@ def board_detail_authority_interaction(
 
             late_list.release.set()
             tab_until(process, master_fd, output, b"MASC Planning")
-            tab_until(process, master_fd, output, b"MASC System Logs")
+            tab_until(process, master_fd, output, b"MASC Activity")
             tab_until(process, master_fd, output, b"late-list-applied")
             tab_until(process, master_fd, output, b"MASC Keepers")
             tab_until(process, master_fd, output, b"MASC Approvals")
@@ -7848,9 +7848,12 @@ def enter_outside_changes_interaction(
         raise AssertionError(
             f"Changes did not draw the fixture row as a list: {populated_plain!r}"
         )
-    acting = tab_until(process, master_fd, output, b"MASC Acting")
-    if b"MASC Acting" not in acting:
-        raise AssertionError(f"did not reach Acting: {acting!r}")
+    acting = tab_until(process, master_fd, output, b"MASC Activity")
+    if b"MASC Activity" not in acting:
+        raise AssertionError(f"did not reach Activity: {acting!r}")
+    # System logs hang off Activity under [l]; Esc walks back to the parent.
+    send_and_wait(process, master_fd, output, b"l", b"MASC System Logs")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Activity")
     os.write(master_fd, b"\r")
     back = open_changes(process, master_fd, output)
     back_plain = CSI_RE.sub(b"", back).decode("utf-8")
@@ -9240,7 +9243,7 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         # The one frame the fixture streamed is a row on the Acting surface.
         # The default view folds it into a turn chunk: the running turn names
         # its in-flight call.
-        acting = send_and_wait(process, master_fd, output, b"\t", b"MASC Acting")
+        acting = send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
         for needle, what in (
             (b"(1 of 1 held, turns)", "the held and shown counts"),
             (b"alpha", "the keeper that acted"),

@@ -65,6 +65,8 @@ let for_surface = function
   | Acting ->
       [ b Navigate "j/k" "scroll"
       ; b Navigate "g / G" "newest / oldest"
+      ; b Navigate "l" "logs"
+          ~help:"the server's own log lines, off the ring under Activity"
       ; b Act "f" "filter" ~help:"cycle the filter"
       ; b Act "Esc" "overview"
       ; b Meta "Tab" "next"
@@ -507,7 +509,7 @@ let footer_hints_memory_facts =
    sub-modes collapse into the two sections an operator thinks in. *)
 let help_surfaces : (string * surface) list =
   [ "Overview", Overview
-  ; "Acting", Acting
+  ; "Activity", Acting
   ; "Keepers", Keepers Keeper_list
   ; "Keeper detail", Keepers Keeper_detail
   ; "Chat", Keepers Keeper_message
@@ -527,7 +529,7 @@ let help_surfaces : (string * surface) list =
   ; "Config", Config
   ; "Config / Resources", Resources
   ; "Config / Tools", Tools
-  ; "Logs", System_logs
+  ; "Activity / Logs", System_logs
   ]
 
 let entries bindings =

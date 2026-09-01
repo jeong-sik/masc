@@ -1012,6 +1012,191 @@ let test_reobservation_reinforces_instead_of_duplicating () =
   check bool "category still updates" true (stored.category = Types.Lesson)
 ;;
 
+(* ---------- A rejection has to name the row and the field ----------
+
+   These assert the rendered text, because the text is the whole deliverable.
+   The 2026-09-01 recovery (#32239) had a snapshot the runtime refused and one
+   message for all of it, so finding out which of three contract changes had
+   fired meant re-implementing this decoder by hand and bisecting. Each case
+   below is one of the rejections that actually happened, plus the three
+   nearest neighbours. *)
+
+let object_fields = function
+  | `Assoc fields -> fields
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    fail "expected a JSON object"
+;;
+
+let field_value name fields =
+  match List.assoc_opt name fields with
+  | Some value -> value
+  | None -> fail (Printf.sprintf "expected field %S" name)
+;;
+
+let with_field name value fields =
+  List.map
+    (fun (field, existing) ->
+       if String.equal field name then field, value else field, existing)
+    fields
+;;
+
+let without_field name fields =
+  List.filter (fun (field, _) -> not (String.equal field name)) fields
+;;
+
+let overwrite_snapshot ~keepers_dir json =
+  Fs_compat.save_file
+    (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper")
+    (Yojson.Safe.to_string json)
+;;
+
+let reject_names ~keepers_dir ~what needles =
+  match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" with
+  | Ok _ -> fail (Printf.sprintf "%s crossed the authoritative read boundary" what)
+  | Error message ->
+    List.iter
+      (fun needle ->
+         check
+           bool
+           (Printf.sprintf "%s names %S; message was: %s" what needle message)
+           true
+           (String_util.contains_substring message needle))
+      needles
+;;
+
+(* One field written by a later contract turns every earlier snapshot into a
+   single unexplained refusal. This is the change that took the live fleet
+   down. *)
+let test_rejection_names_a_missing_change_field () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let written = replace ~keepers_dir ~facts:[ fact () ] () |> require_ok in
+  let fields = object_fields (Current.to_json written) in
+  let change = object_fields (field_value "change" fields) in
+  overwrite_snapshot
+    ~keepers_dir
+    (`Assoc (with_field "change" (`Assoc (without_field "invalidated" change)) fields));
+  reject_names
+    ~keepers_dir
+    ~what:"a change object without invalidated"
+    [ "change: field set mismatch"; "missing: invalidated" ]
+;;
+
+(* A provenance token this build does not know, on one row out of many. *)
+let test_rejection_names_the_row_and_field_of_an_unknown_token () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let written = replace ~keepers_dir ~facts:[ fact () ] () |> require_ok in
+  let fields = object_fields (Current.to_json written) in
+  let rows =
+    match field_value "facts" fields with
+    | `List rows -> rows
+    | _ -> fail "facts is not an array"
+  in
+  let repainted =
+    List.map
+      (fun row ->
+         let row_fields = object_fields row in
+         let origin = object_fields (field_value "origin" row_fields) in
+         `Assoc
+           (with_field
+              "origin"
+              (`Assoc (with_field "kind" (`String "legacy") origin))
+              row_fields))
+      rows
+  in
+  overwrite_snapshot ~keepers_dir (`Assoc (with_field "facts" (`List repainted) fields));
+  reject_names
+    ~keepers_dir
+    ~what:"a row whose origin kind is legacy"
+    [ "facts[0].origin.kind"; "does not know the token \"legacy\"" ]
+;;
+
+(* The delta lost its added rows, so the row count no longer adds up. *)
+let test_rejection_names_the_retained_arithmetic () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let written = replace ~keepers_dir ~facts:[ fact () ] () |> require_ok in
+  let fields = object_fields (Current.to_json written) in
+  let change = object_fields (field_value "change" fields) in
+  overwrite_snapshot
+    ~keepers_dir
+    (`Assoc (with_field "change" (`Assoc (with_field "added" (`List []) change)) fields));
+  reject_names
+    ~keepers_dir
+    ~what:"a delta that lost its added rows"
+    [ "change.retained: 0 retained plus 0 added does not equal 1 facts" ]
+;;
+
+(* Same identity, different payload: the delta describes a row the snapshot no
+   longer holds. *)
+let test_rejection_names_an_added_row_that_is_not_current () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let written = replace ~keepers_dir ~facts:[ fact () ] () |> require_ok in
+  let fields = object_fields (Current.to_json written) in
+  let change = object_fields (field_value "change" fields) in
+  let staled =
+    match field_value "added" change with
+    | `List rows ->
+      `List
+        (List.map
+           (fun row -> `Assoc (with_field "last_seen" (`Float 999.0) (object_fields row)))
+           rows)
+    | _ -> fail "change.added is not an array"
+  in
+  overwrite_snapshot
+    ~keepers_dir
+    (`Assoc (with_field "change" (`Assoc (with_field "added" staled change)) fields));
+  reject_names
+    ~keepers_dir
+    ~what:"an added row that is not the current payload"
+    [ "change.added:"; "is not the row facts currently holds" ]
+;;
+
+let test_rejection_names_the_index_of_a_duplicate_row () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let written = replace ~keepers_dir ~facts:[ fact ~claim:"twice" () ] () |> require_ok in
+  let fields = object_fields (Current.to_json written) in
+  let row =
+    match field_value "facts" fields with
+    | `List [ row ] -> row
+    | _ -> fail "expected exactly one stored row"
+  in
+  overwrite_snapshot
+    ~keepers_dir
+    (`Assoc (with_field "facts" (`List [ row; row ]) fields));
+  reject_names
+    ~keepers_dir
+    ~what:"the same row stored twice"
+    [ "facts[1]"; "appears more than once" ]
+;;
+
+let test_rejection_names_a_blank_source_trace_id () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let written = replace ~keepers_dir ~facts:[ fact () ] () |> require_ok in
+  let fields = object_fields (Current.to_json written) in
+  let source_fields = object_fields (field_value "source" fields) in
+  overwrite_snapshot
+    ~keepers_dir
+    (`Assoc
+       (with_field
+          "source"
+          (`Assoc (with_field "trace_id" (`String "   ") source_fields))
+          fields));
+  reject_names
+    ~keepers_dir
+    ~what:"a source with a blank trace id"
+    [ "source.trace_id: expected a non-blank string" ]
+;;
+
+let test_rejection_names_an_unexpected_top_level_field () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let written = replace ~keepers_dir ~facts:[ fact () ] () |> require_ok in
+  let fields = object_fields (Current.to_json written) in
+  overwrite_snapshot ~keepers_dir (`Assoc (("legacy_facts", `List []) :: fields));
+  reject_names
+    ~keepers_dir
+    ~what:"a snapshot carrying an unknown top-level field"
+    [ "<root>: field set mismatch"; "unexpected: legacy_facts" ]
+;;
+
 let () =
   run
     "keeper_memory_os_current"
@@ -1133,6 +1318,36 @@ let () =
             "re-observation reinforces instead of duplicating"
             `Quick
             test_reobservation_reinforces_instead_of_duplicating
+        ] )
+    ; ( "rejection names its cause"
+      , [ test_case
+            "missing change field"
+            `Quick
+            test_rejection_names_a_missing_change_field
+        ; test_case
+            "unknown token names row and field"
+            `Quick
+            test_rejection_names_the_row_and_field_of_an_unknown_token
+        ; test_case
+            "retained arithmetic"
+            `Quick
+            test_rejection_names_the_retained_arithmetic
+        ; test_case
+            "added row is not current"
+            `Quick
+            test_rejection_names_an_added_row_that_is_not_current
+        ; test_case
+            "duplicate row index"
+            `Quick
+            test_rejection_names_the_index_of_a_duplicate_row
+        ; test_case
+            "blank source trace id"
+            `Quick
+            test_rejection_names_a_blank_source_trace_id
+        ; test_case
+            "unexpected top-level field"
+            `Quick
+            test_rejection_names_an_unexpected_top_level_field
         ] )
     ]
 ;;

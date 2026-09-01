@@ -1,5 +1,7 @@
 (** Keeper_memory_os_types — current Memory OS fact schema. *)
 
+open Result.Syntax
+
 (* Canonical JSON wire keys for Memory OS persistence and librarian ingestion.
    The schema module owns these strings so the parser, retry prompt, persistence
    codec, and tests cannot drift by maintaining parallel literal sets. *)
@@ -24,22 +26,184 @@ let wire_field_set fields =
   List.fold_left (fun set field -> Wire_field_set.add field set) Wire_field_set.empty fields
 ;;
 
-let closed_fields allowed fields =
-  let rec loop seen = function
-    | [] -> true
-    | (field, _) :: rest ->
-      if
-        Wire_field_set.mem field seen
-        || not (Wire_field_set.mem field allowed)
-      then false
-      else loop (Wire_field_set.add field seen) rest
-  in
-  loop Wire_field_set.empty fields
+(* ---------- Decode rejections ---------- *)
+
+(** One step of the path to a rejected node, outermost first. A rejection that
+    names only the document sends its reader back to re-deriving this decoder
+    by hand, which is what the #32239 snapshot recovery had to do. *)
+type wire_step =
+  | Wire_field of string
+  | Wire_index of int
+
+(** Why one node did not decode. Closed, so a new rejection has to name itself
+    here before a decoder can make it. Every constructor is produced by at
+    least one site in this module or in {!Keeper_memory_os_current}. *)
+type wire_reason =
+  | Expected_object
+  | Expected_array
+  | Expected_string
+  | Expected_int
+  | Expected_number
+  | Duplicate_field of string
+  | Field_set_mismatch of
+      { missing : string list
+      ; unexpected : string list
+      }
+  | Unknown_token of string
+      (** A closed vocabulary (category, origin kind, basis kind, source kind)
+          does not contain this token. *)
+  | Blank_string
+  | Not_a_memory_id of string
+  | Not_finite
+  | Negative
+  | Not_positive
+  | Empty_list
+  | Not_ascending
+  | Duplicate_entry of string
+
+type wire_error =
+  { path : wire_step list
+  ; reason : wire_reason
+  }
+
+let wire_step_to_string = function
+  | Wire_field name -> "." ^ name
+  | Wire_index index -> Printf.sprintf "[%d]" index
 ;;
 
-let exact_fields allowed fields =
-  closed_fields allowed fields
-  && List.length fields = Wire_field_set.cardinal allowed
+let wire_path_to_string path =
+  match path with
+  | [] -> "<root>"
+  | _ :: _ ->
+    let rendered = String.concat "" (List.map wire_step_to_string path) in
+    (* The outermost step renders as ".facts"; the document root is implicit. *)
+    if String.length rendered > 0 && rendered.[0] = '.'
+    then String.sub rendered 1 (String.length rendered - 1)
+    else rendered
+;;
+
+let wire_reason_to_string = function
+  | Expected_object -> "expected a JSON object"
+  | Expected_array -> "expected a JSON array"
+  | Expected_string -> "expected a JSON string"
+  | Expected_int -> "expected a JSON integer"
+  | Expected_number -> "expected a JSON number"
+  | Duplicate_field name -> Printf.sprintf "field %S appears more than once" name
+  | Field_set_mismatch { missing; unexpected } ->
+    Printf.sprintf
+      "field set mismatch (missing: %s) (unexpected: %s)"
+      (match missing with
+       | [] -> "none"
+       | _ :: _ -> String.concat "," missing)
+      (match unexpected with
+       | [] -> "none"
+       | _ :: _ -> String.concat "," unexpected)
+  | Unknown_token token -> Printf.sprintf "this build does not know the token %S" token
+  | Blank_string -> "expected a non-blank string"
+  | Not_a_memory_id value -> Printf.sprintf "expected a memory identity, got %S" value
+  | Not_finite -> "expected a finite number"
+  | Negative -> "expected a non-negative value"
+  | Not_positive -> "expected a value of at least one"
+  | Empty_list -> "expected a non-empty array"
+  | Not_ascending -> "expected entries in strictly ascending order"
+  | Duplicate_entry identity -> Printf.sprintf "identity %s appears more than once" identity
+;;
+
+let wire_error_to_string { path; reason } =
+  Printf.sprintf "%s: %s" (wire_path_to_string path) (wire_reason_to_string reason)
+;;
+
+let wire_fail path reason = Error { path; reason }
+let wire_here reason = Error { path = []; reason }
+
+(** Prefix [step] onto the path of a rejection produced by a nested decoder, so
+    each decoder reports a path relative to itself and the caller places it. *)
+let wire_at step = function
+  | Ok _ as ok -> ok
+  | Error error -> Error { error with path = step :: error.path }
+;;
+
+(** Why [fields] is not exactly the closed set [allowed], or [None] when it is.
+    A repeated key is reported on its own because it leaves both difference
+    sets empty while still being a rejection. *)
+let field_set_rejection allowed fields =
+  let rec duplicate seen = function
+    | [] -> None
+    | (name, _) :: rest ->
+      if Wire_field_set.mem name seen
+      then Some (Duplicate_field name)
+      else duplicate (Wire_field_set.add name seen) rest
+  in
+  match duplicate Wire_field_set.empty fields with
+  | Some _ as rejection -> rejection
+  | None ->
+    let observed =
+      List.fold_left
+        (fun set (name, _) -> Wire_field_set.add name set)
+        Wire_field_set.empty
+        fields
+    in
+    let missing = Wire_field_set.(elements (diff allowed observed)) in
+    let unexpected = Wire_field_set.(elements (diff observed allowed)) in
+    (match missing, unexpected with
+     | [], [] -> None
+     | _, _ -> Some (Field_set_mismatch { missing; unexpected }))
+;;
+
+(** [field_set_rejection] as a result, for decoders that reject and stop. *)
+let exact_fields_result allowed fields =
+  match field_set_rejection allowed fields with
+  | None -> Ok ()
+  | Some reason -> wire_here reason
+;;
+
+(** {!exact_fields_result} for callers that name the closed set as a list. *)
+let exact_field_names_result names fields =
+  exact_fields_result (wire_field_set names) fields
+;;
+
+(* Field readers used after [exact_fields_result] has proven the field set.
+   Absence is still reported rather than asserted away: the two checks
+   disagreeing is a rejection like any other, not a reason to raise. *)
+
+let wire_string_field key fields =
+  match List.assoc_opt key fields with
+  | Some (`String value) -> Ok value
+  | Some _ -> wire_fail [ Wire_field key ] Expected_string
+  | None -> wire_fail [] (Field_set_mismatch { missing = [ key ]; unexpected = [] })
+;;
+
+let wire_int_field key fields =
+  match List.assoc_opt key fields with
+  | Some (`Int value) -> Ok value
+  | Some _ -> wire_fail [ Wire_field key ] Expected_int
+  | None -> wire_fail [] (Field_set_mismatch { missing = [ key ]; unexpected = [] })
+;;
+
+let wire_number_field key fields =
+  match List.assoc_opt key fields with
+  | Some (`Float value) -> Ok value
+  | Some (`Int value) -> Ok (float_of_int value)
+  | Some _ -> wire_fail [ Wire_field key ] Expected_number
+  | None -> wire_fail [] (Field_set_mismatch { missing = [ key ]; unexpected = [] })
+;;
+
+let wire_list_field key fields =
+  match List.assoc_opt key fields with
+  | Some (`List values) -> Ok values
+  | Some _ -> wire_fail [ Wire_field key ] Expected_array
+  | None -> wire_fail [] (Field_set_mismatch { missing = [ key ]; unexpected = [] })
+;;
+
+let wire_json_field key fields =
+  match List.assoc_opt key fields with
+  | Some json -> Ok json
+  | None -> wire_fail [] (Field_set_mismatch { missing = [ key ]; unexpected = [] })
+;;
+
+(** Place a nested rejection at [field]'s [index] element. *)
+let wire_at_element field index result =
+  wire_at (Wire_field field) (wire_at (Wire_index index) result)
 ;;
 
 let memory_id_prefix = "sha256:"
@@ -98,18 +262,25 @@ let dropped_statement_to_json (d : dropped_statement) =
    memory_id/reason is a shape this build does not know and is rejected
    rather than read past. *)
 let dropped_statement_of_json = function
-  | `Assoc fields
-    when closed_fields (wire_field_set wire_librarian_dropped_fields) fields
-         && List.length fields = List.length wire_librarian_dropped_fields ->
-    (match
-       List.assoc_opt wire_field_memory_id fields
-       , List.assoc_opt wire_field_reason fields
-     with
-     | Some (`String memory_id), Some (`String reason)
-       when is_memory_id memory_id && non_empty_string reason ->
-       Some { memory_id; reason }
-     | _ -> None)
-  | _ -> None
+  | `Assoc fields ->
+    let* () =
+      exact_fields_result (wire_field_set wire_librarian_dropped_fields) fields
+    in
+    let* memory_id = wire_string_field wire_field_memory_id fields in
+    let* reason = wire_string_field wire_field_reason fields in
+    let* () =
+      if is_memory_id memory_id
+      then Ok ()
+      else wire_fail [ Wire_field wire_field_memory_id ] (Not_a_memory_id memory_id)
+    in
+    let+ () =
+      if non_empty_string reason
+      then Ok ()
+      else wire_fail [ Wire_field wire_field_reason ] Blank_string
+    in
+    { memory_id; reason }
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    wire_here Expected_object
 ;;
 
 (* The librarian taxonomy as a closed sum. The LLM emits one exact category
@@ -183,21 +354,20 @@ let origin_kind_to_string = function
 ;;
 
 let origin_of_json = function
-  | `Assoc fields
-    when exact_fields
-           (wire_field_set [ wire_field_kind; wire_field_trace_id ])
-           fields ->
-    (match
-       List.assoc_opt wire_field_kind fields
-       , List.assoc_opt wire_field_trace_id fields
-     with
-     | Some (`String kind), Some (`String trace_id) ->
-       (match kind with
-        | "authored" -> Some { kind = Authored; trace_id }
-        | "injected" -> Some { kind = Injected; trace_id }
-        | _ -> None)
-     | _ -> None)
-  | _ -> None
+  | `Assoc fields ->
+    let* () =
+      exact_fields_result
+        (wire_field_set [ wire_field_kind; wire_field_trace_id ])
+        fields
+    in
+    let* kind = wire_string_field wire_field_kind fields in
+    let* trace_id = wire_string_field wire_field_trace_id fields in
+    (match kind with
+     | "authored" -> Ok { kind = Authored; trace_id }
+     | "injected" -> Ok { kind = Injected; trace_id }
+     | _ -> wire_fail [ Wire_field wire_field_kind ] (Unknown_token kind))
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    wire_here Expected_object
 ;;
 
 let origin_to_json (o : origin) =
@@ -235,20 +405,6 @@ type fact =
   }
 
 (* ---------- JSON codecs ---------- *)
-
-let json_string_field key (fields : (string * Yojson.Safe.t) list) =
-  match List.assoc_opt key fields with
-  | Some (`String s) -> Some s
-  | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null)
-  | None -> None
-;;
-
-let json_float_field key (fields : (string * Yojson.Safe.t) list) =
-  match List.assoc_opt key fields with
-  | Some (`Float f) -> Some f
-  | Some (`Int i) -> Some (float_of_int i)
-  | Some (`Assoc _ | `Bool _ | `Intlit _ | `List _ | `Null | `String _) | None -> None
-;;
 
 let unique_non_empty_strings values =
   let rec loop seen = function
@@ -298,27 +454,54 @@ let derivation_to_json ({ rule_id; premise_ids } : derivation) =
     ]
 ;;
 
+(* [valid_derivation] answers a bool. A stored derivation this build refuses
+   has to say which of the three constraints it broke, so the same predicate is
+   spelled again as a rejection. Accept/reject sets are identical; only the
+   order in which reasons are reported differs. *)
+let derivation_rejection ~rule_id ~premise_ids =
+  if not (non_empty_string rule_id)
+  then wire_fail [ Wire_field wire_field_rule_id ] Blank_string
+  else (
+    match premise_ids with
+    | [] -> wire_fail [ Wire_field wire_field_premise_ids ] Empty_list
+    | _ :: _ ->
+      let rec check index seen = function
+        | [] -> Ok ()
+        | premise_id :: rest ->
+          let at reason =
+            wire_fail [ Wire_field wire_field_premise_ids; Wire_index index ] reason
+          in
+          if Wire_field_set.mem premise_id seen
+          then at (Duplicate_entry premise_id)
+          else if not (is_memory_id premise_id)
+          then at (Not_a_memory_id premise_id)
+          else check (index + 1) (Wire_field_set.add premise_id seen) rest
+      in
+      check 0 Wire_field_set.empty premise_ids)
+;;
+
 let derivation_of_json = function
-  | `Assoc fields
-    when exact_fields
-           (wire_field_set [ wire_field_rule_id; wire_field_premise_ids ])
-           fields ->
-    (match
-       List.assoc_opt wire_field_rule_id fields
-       , List.assoc_opt wire_field_premise_ids fields
-     with
-     | Some (`String rule_id), Some (`List values) ->
-       let rec strings acc = function
-         | [] -> Some (List.rev acc)
-         | `String value :: rest -> strings (value :: acc) rest
-         | _ -> None
-       in
-       (match strings [] values with
-        | Some premise_ids when valid_derivation { rule_id; premise_ids } ->
-          Some (normalize_derivation { rule_id; premise_ids })
-        | Some _ | None -> None)
-     | _ -> None)
-  | _ -> None
+  | `Assoc fields ->
+    let* () =
+      exact_fields_result
+        (wire_field_set [ wire_field_rule_id; wire_field_premise_ids ])
+        fields
+    in
+    let* rule_id = wire_string_field wire_field_rule_id fields in
+    let* values = wire_list_field wire_field_premise_ids fields in
+    let rec strings index acc = function
+      | [] -> Ok (List.rev acc)
+      | `String value :: rest -> strings (index + 1) (value :: acc) rest
+      | _ :: _ ->
+        wire_fail
+          [ Wire_field wire_field_premise_ids; Wire_index index ]
+          Expected_string
+    in
+    let* premise_ids = strings 0 [] values in
+    let+ () = derivation_rejection ~rule_id ~premise_ids in
+    normalize_derivation { rule_id; premise_ids }
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    wire_here Expected_object
 ;;
 
 let basis_to_json = function
@@ -332,34 +515,59 @@ let basis_to_json = function
       ]
 ;;
 
+(* What [valid_derivations] still checks once every element has decoded: the
+   list is non-empty and no rule identity repeats. *)
+let derivations_rejection derivations =
+  match derivations with
+  | [] -> wire_fail [ Wire_field wire_field_derivations ] Empty_list
+  | _ :: _ ->
+    let rec check index seen = function
+      | [] -> Ok ()
+      | derivation :: rest ->
+        if Wire_field_set.mem derivation.rule_id seen
+        then
+          wire_fail
+            [ Wire_field wire_field_derivations
+            ; Wire_index index
+            ; Wire_field wire_field_rule_id
+            ]
+            (Duplicate_entry derivation.rule_id)
+        else check (index + 1) (Wire_field_set.add derivation.rule_id seen) rest
+    in
+    check 0 Wire_field_set.empty derivations
+;;
+
+(* The kind token, not the field set, chooses the shape. Dispatching on the
+   field set instead reported a missing [derivations] list as an unknown
+   basis. *)
 let basis_of_json = function
-  | `Assoc fields
-    when exact_fields (wire_field_set [ wire_field_kind ]) fields ->
-    (match List.assoc_opt wire_field_kind fields with
-     | Some (`String "observed") -> Some Observed
-     | Some _ | None -> None)
-  | `Assoc fields
-    when exact_fields
+  | `Assoc fields ->
+    let* kind = wire_string_field wire_field_kind fields in
+    (match kind with
+     | "observed" ->
+       let+ () = exact_fields_result (wire_field_set [ wire_field_kind ]) fields in
+       Observed
+     | "derived" ->
+       let* () =
+         exact_fields_result
            (wire_field_set [ wire_field_kind; wire_field_derivations ])
-           fields ->
-    (match
-       List.assoc_opt wire_field_kind fields
-       , List.assoc_opt wire_field_derivations fields
-     with
-     | Some (`String "derived"), Some (`List values) ->
-       let rec derivations acc = function
-         | [] -> Some (List.rev acc)
-         | value :: rest ->
-           (match derivation_of_json value with
-            | Some derivation -> derivations (derivation :: acc) rest
-            | None -> None)
+           fields
        in
-       (match derivations [] values with
-        | Some derivations when valid_derivations derivations ->
-          Some (Derived derivations)
-        | Some _ | None -> None)
-     | _ -> None)
-  | _ -> None
+       let* values = wire_list_field wire_field_derivations fields in
+       let rec decode index acc = function
+         | [] -> Ok (List.rev acc)
+         | value :: rest ->
+           let* derivation =
+             wire_at_element wire_field_derivations index (derivation_of_json value)
+           in
+           decode (index + 1) (derivation :: acc) rest
+       in
+       let* derivations = decode 0 [] values in
+       let+ () = derivations_rejection derivations in
+       Derived derivations
+     | _ -> wire_fail [ Wire_field wire_field_kind ] (Unknown_token kind))
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    wire_here Expected_object
 ;;
 
 (* The exact claim bytes are the only memory-content authority. The digest is a
@@ -417,47 +625,48 @@ let fact_to_json (f : fact) =
 
 (* Strict decoder for the closed canonical fact shape. *)
 let current_fact fields =
-  match
-    ( json_string_field wire_field_claim fields
-    , json_string_field wire_field_category fields
-    , json_float_field wire_field_first_seen fields
-    , json_float_field wire_field_last_seen fields
-    , List.assoc_opt wire_field_reinforcement fields
-    , List.assoc_opt wire_field_origin fields
-    , List.assoc_opt wire_field_basis fields )
-  with
-  | ( Some claim
-    , Some category_str
-    , Some first_seen
-    , Some last_seen
-    , Some (`Int reinforcement)
-    , Some origin_json
-    , Some basis_json ) ->
-    (match
-       category_of_string category_str
-       , origin_of_json origin_json
-       , basis_of_json basis_json
-     with
-     | Some category, Some origin, Some basis
-       when non_empty_string claim
-            && Float.is_finite first_seen
-            && Float.is_finite last_seen
-            && reinforcement >= 0 ->
-       Some { claim; category; first_seen; last_seen; reinforcement; origin; basis }
-     | _ -> None)
-  | _ -> None
+  let* claim = wire_string_field wire_field_claim fields in
+  let* category_token = wire_string_field wire_field_category fields in
+  let* first_seen = wire_number_field wire_field_first_seen fields in
+  let* last_seen = wire_number_field wire_field_last_seen fields in
+  let* reinforcement = wire_int_field wire_field_reinforcement fields in
+  let* origin_json = wire_json_field wire_field_origin fields in
+  let* basis_json = wire_json_field wire_field_basis fields in
+  let* category =
+    match category_of_string category_token with
+    | Some category -> Ok category
+    | None -> wire_fail [ Wire_field wire_field_category ] (Unknown_token category_token)
+  in
+  let* origin = wire_at (Wire_field wire_field_origin) (origin_of_json origin_json) in
+  let* basis = wire_at (Wire_field wire_field_basis) (basis_of_json basis_json) in
+  let* () =
+    if non_empty_string claim
+    then Ok ()
+    else wire_fail [ Wire_field wire_field_claim ] Blank_string
+  in
+  let* () =
+    if Float.is_finite first_seen
+    then Ok ()
+    else wire_fail [ Wire_field wire_field_first_seen ] Not_finite
+  in
+  let* () =
+    if Float.is_finite last_seen
+    then Ok ()
+    else wire_fail [ Wire_field wire_field_last_seen ] Not_finite
+  in
+  let+ () =
+    if reinforcement >= 0
+    then Ok ()
+    else wire_fail [ Wire_field wire_field_reinforcement ] Negative
+  in
+  { claim; category; first_seen; last_seen; reinforcement; origin; basis }
 ;;
 
 let fact_of_json (json : Yojson.Safe.t) =
   match json with
-  | `Assoc fields when exact_fields fact_wire_fields fields ->
+  | `Assoc fields ->
+    let* () = exact_fields_result fact_wire_fields fields in
     current_fact fields
-  | `Assoc _
-  | `Bool _
-  | `Float _
-  | `Int _
-  | `Intlit _
-  | `List _
-  | `Null
-  | `String _ -> None
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    wire_here Expected_object
 ;;

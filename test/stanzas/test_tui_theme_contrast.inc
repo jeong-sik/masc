@@ -6,4 +6,5 @@
   masc_tui_color
   masc_tui_terminal_palette
   masc_tui_theme
-  masc_tui_theme_catalog))
+  masc_tui_theme_catalog
+  masc_tui_theme_choice))

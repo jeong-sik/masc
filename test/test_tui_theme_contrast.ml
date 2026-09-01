@@ -482,6 +482,21 @@ let test_the_setting_reads_back () =
       check bool "on reads back as on" true (Masc_tui_theme.lift_is_enabled ()))
 ;;
 
+let contrast_entry ~measured ~lifted : Masc_tui_theme_choice.entry =
+  { name = "test"; light = false; measured; lifted; swatch = [] }
+;;
+
+let test_contrast_status_names_native_assisted_and_unassisted () =
+  let native = contrast_entry ~measured:7 ~lifted:0 in
+  let assisted = contrast_entry ~measured:7 ~lifted:3 in
+  check string "native is a positive result" "native 7/7"
+    (Masc_tui_theme_choice.contrast_status ~lift_on:true native);
+  check string "lift on names the assisted colours" "lift 3/7"
+    (Masc_tui_theme_choice.contrast_status ~lift_on:true assisted);
+  check string "lift off names the colours still below the floor" "3/7 low"
+    (Masc_tui_theme_choice.contrast_status ~lift_on:false assisted)
+;;
+
 let () =
   Alcotest.run "masc-tui-theme-contrast"
     [ ( "lift_colours"
@@ -491,6 +506,8 @@ let () =
             test_lift_on_still_replaces_a_failing_entry
         ; Alcotest.test_case "the setting reads back" `Quick
             test_the_setting_reads_back
+        ; Alcotest.test_case "status names native, assisted, and low" `Quick
+            test_contrast_status_names_native_assisted_and_unassisted
         ] )
     ; ( "readability across themes"
       , [ Alcotest.test_case "lifting makes every token readable" `Quick

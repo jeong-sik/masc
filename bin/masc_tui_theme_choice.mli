@@ -26,6 +26,12 @@ val entries : unit -> entry list
 (** Every bundled scheme with what picking it would cost, measured against
     the same floor the renderer lifts to. *)
 
+val contrast_status : lift_on:bool -> entry -> string
+(** A compact, explicit reading of the measurement. [native 7/7] means every
+    measured colour clears the floor without help; [lift 3/7] means the lift
+    raises three; [3/7 low] means those three remain below it because the lift
+    is disabled. *)
+
 val apply : string -> bool
 (** Draw with this scheme's colours from now on. [false] for a name no
     bundled scheme answers to, so a stale choice in a config file cannot

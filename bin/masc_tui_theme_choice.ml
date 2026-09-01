@@ -59,6 +59,17 @@ let entries () =
     Catalog.bundled
 ;;
 
+(* A zero is a result, not the absence of one: every measured colour already
+   clears the floor without masc touching it. For a non-zero count the same
+   scheme has two honest readings, depending on whether the reader enabled
+   the lift. Keep that distinction beside the measurement so the chooser
+   cannot drift back to the ambiguous "none" / "3 of 7" pair. *)
+let contrast_status ~lift_on (entry : entry) =
+  if entry.lifted = 0 then Printf.sprintf "native %d/%d" entry.measured entry.measured
+  else if lift_on then Printf.sprintf "lift %d/%d" entry.lifted entry.measured
+  else Printf.sprintf "%d/%d low" entry.lifted entry.measured
+;;
+
 (* The reader's own choice, held beside the terminal's answer rather than
    inside it: the terminal keeps reporting whatever it reports, and this says
    whether masc listens. Publishing goes through the same generation the OSC

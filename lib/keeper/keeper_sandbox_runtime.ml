@@ -395,12 +395,7 @@ let cleanup_failure_or_absent
 ;;
 
 let remove_cleanup_container ~container_id ~timeout_sec =
-  (* -v also removes the container's anonymous volumes. Without it the
-     per-turn sandbox volumes accumulate in the docker daemon's metadata
-     index (9563 volumes observed in production), starving even simple
-     commands like `docker ps` until they time out. Keeper sandbox volumes
-     are per-turn/ephemeral, so -v is safe here. *)
-  let argv = docker_command_argv () @ [ "rm"; "-f"; "-v"; container_id ] in
+  let argv = docker_remove_argv container_id in
   let st, out =
     run_docker_argv_with_status
       ~timeout_sec

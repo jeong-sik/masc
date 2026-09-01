@@ -1550,8 +1550,11 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
       (String_util.contains_substring line ("MASC_CONFIG_DIR=" ^ container_config_dir));
     Alcotest.(check bool) "oneshot container has ttl label" true
       (String_util.contains_substring line "masc.mcp.ttl_sec=");
-    Alcotest.(check bool) "oneshot cleanup attempts docker rm" true
-      (String_util.contains_substring log "\nrm -f masc-keeper-");
+    (* -v is part of the removal, not a caller's option: the sandbox image
+       declares VOLUME ["/tmp/keeper-creds"], so dropping the flag orphans one
+       anonymous volume per oneshot container. *)
+    Alcotest.(check bool) "oneshot cleanup removes the container with its volume" true
+      (String_util.contains_substring log "\nrm -f -v masc-keeper-");
     Alcotest.(check bool) "tasks mounted under runtime root" true
       (String_util.contains_substring
          line
@@ -2190,6 +2193,22 @@ let test_docker_mount_failure_requires_daemon_origin () =
   Alcotest.(check (option string)) "runtime-like app output lacks init origin" None
     (Keeper_sandbox_runtime.docker_mount_failure_path app_oci_output)
 
+(* The sandbox image declares VOLUME ["/tmp/keeper-creds"], so Docker mints a
+   fresh anonymous volume for every container it starts. A removal that omits
+   -v leaves that volume behind unnamed and unreferenced; 9,563 such orphans
+   were observed in the daemon metadata index, and 4,795 again on 2026-09-01
+   because only one of the five removal sites carried the flag. The flag now
+   lives in the argv, so this pins the argv rather than each call site. *)
+let test_container_removal_reclaims_anonymous_volumes () =
+  let argv = Keeper_sandbox_runtime.docker_remove_argv "keeper-sandbox-probe" in
+  let n = List.length argv in
+  let tail = List.filteri (fun i _ -> i >= n - 4) argv in
+  Alcotest.(check (list string))
+    "removal argv ends in rm -f -v <container>"
+    [ "rm"; "-f"; "-v"; "keeper-sandbox-probe" ]
+    tail
+;;
+
 let () =
   Alcotest.run "Keeper_sandbox_docker_route"
     [
@@ -2354,6 +2373,10 @@ let () =
             "docker run does not retry generic timeout"
             `Quick
             test_docker_run_does_not_retry_generic_timeout;
+          Alcotest.test_case
+            "container removal reclaims anonymous volumes"
+            `Quick
+            test_container_removal_reclaims_anonymous_volumes;
           Alcotest.test_case
             "docker run does not retry daemon unavailable"
             `Quick

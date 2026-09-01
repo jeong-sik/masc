@@ -1017,8 +1017,7 @@ let start_container ?timeout_sec (t : t) =
                       the sweep only takes stopped containers. Best-effort
                       remove it before returning Error. *)
                    let rm_argv =
-                     Keeper_sandbox_runtime.docker_command_argv ()
-                     @ [ "rm"; "-f"; container_name ]
+                     Keeper_sandbox_runtime.docker_remove_argv container_name
                    in
                    let _rm_st, _rm_out =
                      run_argv_with_status ?timeout_sec rm_argv
@@ -1099,8 +1098,7 @@ let start_container ?timeout_sec (t : t) =
              (Exec_policy.truncate_for_log inspect_out)))
     else (
       let rm_argv =
-        Keeper_sandbox_runtime.docker_command_argv ()
-        @ [ "rm"; "-f"; container_name ]
+        Keeper_sandbox_runtime.docker_remove_argv container_name
       in
       let _rm_st, _rm_out = run_argv_with_status ?timeout_sec rm_argv in
       create ())
@@ -1159,7 +1157,7 @@ let stop_container_for_github_identity_refresh ?timeout_sec t =
           (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
     in
     let argv =
-      Keeper_sandbox_runtime.docker_command_argv () @ [ "rm"; "-f"; container_name ]
+      Keeper_sandbox_runtime.docker_remove_argv container_name
     in
     let status, output = run_argv_with_status ~timeout_sec argv in
       (match status with

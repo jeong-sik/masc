@@ -440,6 +440,15 @@ let handle_keeper_task_tool_with_outcome
              ; "include_done", `Bool include_done
              ; "limit", `Int limit
              ; "projection", `String (task_projection_to_string projection)
+               (* The backlog size is part of the answer, not only the page:
+                  matching_count travels in every snapshot and truncated is
+                  derived from it. Without it in the hash, tasks appearing or
+                  leaving beyond the page kept the revision stable and an
+                  if_revision caller polled `unchanged` while the backlog
+                  moved — the #29101 blindness rebuilt on the conditional-read
+                  path. With it, `unchanged` states that the whole response —
+                  rows and statistics — is the one the caller already holds. *)
+             ; "matching_count", `Int matching_count
              ; "snapshot", tasks_json
              ])
        in
@@ -466,8 +475,10 @@ let handle_keeper_task_tool_with_outcome
               snapshot-path statistics produced a self-contradiction —
               `truncated:true, returned_count:N` beside zero rows — that
               models resolved by re-issuing the identical call (211 identical
-              back-to-back pairs on 2026-09-01 alone). The caller's snapshot
-              is the one place those numbers already live. *)
+              back-to-back pairs on 2026-09-01 alone). Because the revision
+              hash covers [matching_count] alongside the page rows, an
+              [unchanged] response guarantees the caller's cached statistics
+              are still exact — omitting them here loses nothing. *)
            let row_stats =
              match response with
              | Snapshot_protocol.Snapshot _ ->

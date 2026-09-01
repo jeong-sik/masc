@@ -406,13 +406,18 @@ let test_provider_content_messages_rejects_prompt_carrier_mismatch () =
     | Ok retained -> Printf.sprintf "attributed(%d)" (List.length retained)
     | Error failure -> KAPM.provenance_failure_summary failure
   in
+  (* Each fragment carries its own leading space so the separator is visible
+     at the start of the line rather than hidden before a line continuation,
+     and so a tool that strips trailing whitespace cannot touch it. *)
   check string "an announced carrier that never arrived says which side is missing"
-    "prompt_context_presence_mismatch carrier_observed=false \
-     prompt_context_present=true"
+    ("prompt_context_presence_mismatch"
+     ^ " carrier_observed=false"
+     ^ " prompt_context_present=true")
     (failure_line ~prompt_context_present:true [ plain ]);
   check string "a carrier nobody announced says the opposite"
-    "prompt_context_presence_mismatch carrier_observed=true \
-     prompt_context_present=false"
+    ("prompt_context_presence_mismatch"
+     ^ " carrier_observed=true"
+     ^ " prompt_context_present=false")
     (failure_line ~prompt_context_present:false [ marked ]);
   (* These three carry no detail. The expected strings have no trailing space,
      so the branch that omits the separator is what keeps them passing. *)

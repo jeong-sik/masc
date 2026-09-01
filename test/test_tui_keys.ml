@@ -67,7 +67,9 @@ let test_system_logs_footer_names_browser_controls () =
 
 let test_lanes_footer_opens_standalone_runs () =
   check str "Lanes names its run drill-down, config source, and way back"
-    "j/k:move  Right / Enter:runs  e:lane config  p:runtime  Esc:runtime  r:refresh  Tab:next  q:quit"
+    (* [hints_of_bindings] stable-sorts by group: Navigate (j/k, e, p)
+       precedes Act (Right/Enter, Esc) regardless of declaration order. *)
+    "j/k:move  e:lane config  p:runtime  Right / Enter:runs  Esc:runtime  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =

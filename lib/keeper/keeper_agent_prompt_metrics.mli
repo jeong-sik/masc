@@ -60,8 +60,8 @@ type provenance_failure =
 val provenance_failure_reason : provenance_failure -> string
 (** Stable snake_case identifier for logs and durable records. *)
 
-val provenance_failure_detail : provenance_failure -> string
-(** Measured values carried by the failure, or [""] when it carries none.
+val provenance_failure_detail : provenance_failure -> string option
+(** Measured values carried by the failure, or [None] when it carries none.
     Kept apart from {!provenance_failure_reason} so a reader can group by
     reason without the counts splitting every group. *)
 

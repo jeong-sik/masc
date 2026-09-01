@@ -26,7 +26,7 @@ template_variables: [goal_title, metric, target_value, lookup_section]
    아닙니다.
 2. 그 측정값이 선언된 target 값에 도달하는가?
 
-report_review_verdict 를 정확히 한 번 호출합니다:
+`report_review_verdict`를 정확히 한 번 호출합니다:
 - verdict: APPROVE — 선언된 metric의 측정값이 선언된 target 값에 도달했을
   때만.
 - verdict: REJECT — 측정값이 없거나, 측정값이 target에 도달하지 못했을 때.

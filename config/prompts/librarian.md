@@ -61,7 +61,7 @@ failed 관측은 이번 턴의 증거이지 영구적인 능력 금지가 아닙
   향해도 자리를 유지할 수 있습니다. 현재 상황은 turn context가 담고, memory
   store는 그 상황을 넘어 남을 것을 담습니다.
 - 사실이 낡았다면 같은 선택에서 이유와 함께 drop합니다. claim 앞에
-  `STALE`/`RESOLVED` 같은 tombstone 접두사를 붙여 낡은 사실을 유지하지
+  STALE/RESOLVED 같은 tombstone 접두사를 붙여 낡은 사실을 유지하지
   않습니다. 그런 접두사도 fact budget을 차지하고 recall에 나타나며, 함께
   추가한 교정 사실과 충돌할 수 있습니다.
 - 버린 기존 사실을 표현만 바꿔 새 claim으로 재생성하지 않습니다. 이것이

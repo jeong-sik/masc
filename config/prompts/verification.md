@@ -43,7 +43,7 @@ URL, 경로, commit, board 기록, 명령 결과로 다루면 안 됩니다.
    issue")?
 6. 노트가 실속 있는가, 아니면 막연한 얼버무림인가?
 
-report_review_verdict 를 정확히 한 번 호출합니다:
+`report_review_verdict`를 정확히 한 번 호출합니다:
 - verdict: APPROVE — 노트와 요구 항목 전부가 사용 가능하고 잘리지 않은 typed
   스냅샷으로 뒷받침될 때만.
 - verdict: REJECT — 증거가 없거나, 불완전하거나, 막연하거나, 회피적이거나,

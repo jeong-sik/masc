@@ -94,6 +94,9 @@ type shade =
 type row_kind =
   | Metadata of metadata
   | Body
+  | Viewport_gap of { hidden_rows : int }
+      (** A synthetic row marking content omitted from an oversized newest
+          entry at the live edge. It is not part of transcript row counts. *)
 
 type origin_display =
   | Origin_row  (** The origin keeps a row of its own, above the body. *)
@@ -300,7 +303,10 @@ val visible_rows :
   entry list ->
   row list
 (** Render chat entries into cell-bounded, UTF-8-safe physical rows and retain
-    the newest rows. The newest entry always keeps its metadata row.
+    the newest rows. In a supported viewport, an oversized newest entry keeps
+    its first row and latest rows with a typed viewport-gap row between them.
+    A smaller caller receives the best bounded fallback: first row, then latest
+    row when two rows of height are available.
 
     [markdown] renders one entry into rows already wrapped to the width it is
     given. The whole entry is supplied so a caller can distinguish stable

@@ -57,10 +57,110 @@ let test_keeps_newest_metadata_and_bytes () =
   in
   check string "full layout loses no body bytes" body reconstructed;
   match Layout.visible_rows ~inner_width:20 ~height:3 [ newest ] with
-  | metadata :: _ ->
+  | [ metadata; gap; latest ] ->
       check bool "oversized newest entry keeps metadata" true
-        (String.starts_with ~prefix:"[12:34:56]" metadata.text)
+        (String.starts_with ~prefix:"[12:34:56]" metadata.text);
+      (match gap.kind with
+       | Layout.Viewport_gap { hidden_rows } ->
+           check int "the viewport reports every omitted physical row"
+             (List.length all_rows - 2) hidden_rows;
+           check bool "the marker fits without the generic truncation mark" true
+             (Layout.display_width gap.text <= 20
+              && not (String.ends_with ~suffix:"~" gap.text))
+       | Layout.Metadata _ | Layout.Body ->
+           fail "oversized newest entry hid rows without a typed gap");
+      check string "the newest body tail remains visible"
+        (List.hd (List.rev all_rows)).text latest.text
   | [] -> fail "oversized newest entry rendered no rows"
+  | _ -> fail "oversized newest entry did not spend exactly the viewport"
+
+let test_inline_oversized_entry_marks_the_missing_middle () =
+  let body = String.init 160 (fun index -> Char.chr (97 + (index mod 26))) in
+  let newest = entry Layout.Keeper "keeper.one" "tui-..cccccccc" body in
+  let all_rows =
+    Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:20 ~height:100
+      [ newest ]
+  in
+  match
+    Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:20 ~height:4
+      [ newest ]
+  with
+  | [ first; gap; penultimate; latest ] ->
+      check bool "inline mode keeps the start that names the speaker" true
+        (String.starts_with ~prefix:"abc" (String.trim first.text));
+      check bool "a partial inline clock has no generic truncation mark" true
+        (not (String.contains first.gutter '~'));
+      (match gap.kind with
+       | Layout.Viewport_gap { hidden_rows } ->
+           check int "inline marker reports only rows not drawn"
+             (List.length all_rows - 3) hidden_rows
+       | Layout.Metadata _ | Layout.Body ->
+           fail "inline oversized entry hid its middle without a typed gap");
+      check bool "the two newest rows remain in chronological order" true
+        (not (String.equal penultimate.text latest.text));
+      check string "inline mode keeps the latest body bytes"
+        (List.hd (List.rev all_rows)).text latest.text
+  | _ -> fail "inline oversized entry did not expose its viewport gap"
+
+let test_row_mode_keeps_the_heading_opening_and_latest_output () =
+  let newest =
+    entry Layout.Keeper "keeper.one" "tui-..cccccccc" (String.make 160 'x')
+  in
+  match Layout.visible_rows ~inner_width:20 ~height:4 [ newest ] with
+  | [ metadata; opening; gap; latest ] ->
+      check bool "the first row remains the typed origin" true
+        (match metadata.kind with Layout.Metadata _ -> true | _ -> false);
+      check string "the opening body row remains visible" ("  " ^ String.make 18 'x')
+        opening.text;
+      check bool "the missing middle remains explicit" true
+        (match gap.kind with Layout.Viewport_gap _ -> true | _ -> false);
+      check bool "the latest output remains a body row" true
+        (match latest.kind with Layout.Body -> true | _ -> false)
+  | _ -> fail "row mode did not preserve heading, opening, gap, and latest row"
+
+let test_oversized_entry_small_height_policy () =
+  let newest =
+    entry Layout.Keeper "keeper.one" "tui-..cccccccc" (String.make 160 'x')
+  in
+  List.iter
+    (fun origin ->
+      let all =
+        Layout.visible_rows ~origin ~inner_width:20 ~height:100 [ newest ]
+      in
+      let first = List.hd all and latest = List.hd (List.rev all) in
+      let visible height =
+        Layout.visible_rows ~origin ~inner_width:20 ~height [ newest ]
+      in
+      check int "zero height draws nothing" 0 (List.length (visible 0));
+      check (list string) "one row preserves identity/opening" [ first.text ]
+        (List.map (fun (row : Layout.row) -> row.text) (visible 1));
+      check (list string) "two rows preserve first and latest without pretending"
+        [ first.text; latest.text ]
+        (List.map (fun (row : Layout.row) -> row.text) (visible 2));
+      match visible 3 with
+      | [ kept_first; gap; kept_latest ] ->
+          check string "three rows preserve the first" first.text kept_first.text;
+          check bool "three rows can state the omission" true
+            (match gap.kind with Layout.Viewport_gap _ -> true | _ -> false);
+          check string "three rows preserve the latest" latest.text kept_latest.text
+      | _ -> fail "three-row viewport omitted its first/gap/latest contract")
+    [ Layout.Origin_row; Layout.Origin_inline ]
+
+let test_scrolling_into_an_oversized_entry_shows_transcript_rows_only () =
+  let newest =
+    entry Layout.Keeper "keeper.one" "tui-..cccccccc" (String.make 160 'x')
+  in
+  let rows =
+    Layout.scrolled_rows ~origin:Layout.Origin_inline ~inner_width:20 ~height:4
+      ~from_bottom:1 [ newest ]
+  in
+  check bool "the gap is only a live-edge projection" true
+    (List.for_all
+       (fun (row : Layout.row) ->
+         match row.kind with
+         | Layout.Metadata _ | Layout.Body -> true
+         | Layout.Viewport_gap _ -> false)
+       rows)
 
 let test_terminal_cell_width_and_fit () =
   List.iter
@@ -344,14 +444,13 @@ let test_input_cursor_uses_visible_terminal_cells () =
     Layout.message_viewport_supported ~terminal_rows:rows ~terminal_cols:cols
       ~status_rows
   in
-  check bool "seven rows would scroll the final newline" false
-    (supported 7 80 0);
-  check bool "eight rows fit the zero-status frame" true
-    (supported 8 80 0);
+  check bool "nine rows cannot show first, gap, and latest" false
+    (supported 9 80 0);
+  check bool "ten rows fit three history rows" true (supported 10 80 0);
   check bool "status rows raise the minimum height" false
-    (supported 10 80 3);
-  check bool "status frame fits above its final newline" true
-    (supported 11 80 3);
+    (supported 12 80 3);
+  check bool "status frame keeps three history rows" true
+    (supported 13 80 3);
   check bool "twelve columns cannot preserve a source suffix" false
     (supported 30 12 0);
   check bool "thirteen columns preserve a source suffix" true
@@ -1085,7 +1184,9 @@ let test_row_mode_draws_what_it_always_did () =
   check bool "headings still have their own rows" true
     (List.exists
        (fun (row : Layout.row) ->
-         match row.kind with Layout.Metadata _ -> true | Layout.Body -> false)
+         match row.kind with
+         | Layout.Metadata _ -> true
+         | Layout.Body | Layout.Viewport_gap _ -> false)
        rows)
 
 let test_folding_returns_one_row_per_message () =
@@ -1102,7 +1203,9 @@ let test_folding_returns_one_row_per_message () =
   check bool "no metadata rows survive" true
     (List.for_all
        (fun (row : Layout.row) ->
-         match row.kind with Layout.Metadata _ -> false | Layout.Body -> true)
+         match row.kind with
+         | Layout.Metadata _ | Layout.Viewport_gap _ -> false
+         | Layout.Body -> true)
        (Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:40
           ~height:20 entries))
 
@@ -1528,6 +1631,14 @@ let () =
             test_keeps_latest_reply
         ; test_case "keeps newest metadata and body bytes" `Quick
             test_keeps_newest_metadata_and_bytes
+        ; test_case "inline oversized entry marks the missing middle" `Quick
+            test_inline_oversized_entry_marks_the_missing_middle
+        ; test_case "row mode keeps heading, opening, and latest output" `Quick
+            test_row_mode_keeps_the_heading_opening_and_latest_output
+        ; test_case "oversized entry has an explicit small-height policy" `Quick
+            test_oversized_entry_small_height_policy
+        ; test_case "scrolling shows transcript rows without synthetic gaps" `Quick
+            test_scrolling_into_an_oversized_entry_shows_transcript_rows_only
         ; test_case "terminal cell width and UTF-8 fit" `Quick
             test_terminal_cell_width_and_fit
         ; test_case "the scroll hint says how far back" `Quick

@@ -1350,8 +1350,10 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
 
 let keeper_message_input_supported state =
   let rows, cols = get_terminal_size () in
+  let status_rows = keeper_message_status_rows state in
   Masc_tui_message_layout.message_viewport_supported ~terminal_rows:rows
-    ~terminal_cols:cols ~status_rows:(keeper_message_status_rows state)
+    ~terminal_cols:cols
+    ~status_rows:(keeper_message_support_status_rows state ~status_rows)
 
 let approval_decision_key = function
   | Confirm -> "y"
@@ -12337,6 +12339,10 @@ and is loaded on demand through keeper_skill.
              String.length k = 1
              && (Char.code k.[0] = 11 || Char.code k.[0] = 16)
            in
+           let scroll_recovery_key =
+             String.equal k "down" || String.equal k "pagedown"
+             || String.equal k "end"
+           in
            if
              keeper_message_input_supported state
              || String.equal k "esc"
@@ -12344,6 +12350,7 @@ and is loaded on demand through keeper_skill.
              || tool_view_key
              || switch_key
              || queue_management_key
+             || scroll_recovery_key
            then
              if switch_key then begin
                if Option.is_some state.msg_recall_replaces then begin

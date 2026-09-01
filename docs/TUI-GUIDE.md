@@ -509,6 +509,16 @@ and emphasis keep their own hierarchy. Connector and agent origins remain in
 the badge label (`vincent · slack`, `taskmaster · agent`) instead of being
 inferred from row position.
 
+Chat opens in the roomier origin-row layout: the timestamp and reverse-video
+speaker badge form a heading, and prose starts on the following row. `Ctrl-F`
+cycles to the denser inline-clock layout and then the clock-free inline layout;
+the header names either compact choice as `clock:inline` or `clock:off`. When
+one newest message is taller than the history pane, the live edge keeps its
+heading (or inline opening) and latest rows with an explicit
+`⋯ N hidden · PgUp` separator.
+That separator is a viewport projection, not a transcript row, and remains
+readable under `NO_COLOR`.
+
 The pane opens on the keeper's durable transcript. A turn the keeper ran on
 its own is drawn as what it did, not as a blank line. Reasoning starts hidden
 and tool calls start as one compact activity row, so the answer remains the

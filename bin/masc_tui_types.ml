@@ -191,13 +191,12 @@ let chat_visibility_summary ~memory_visible ~reasoning ~tools ~origin =
   let parts =
     List.filter_map Fun.id
       [ (if memory_visible then None else Some "memory:off")
-      ; (* The default is the inline margin, so it is the one that says
-           nothing. [Origin_row] is now the deviation: it is the older, roomier
-           layout an operator can go back to, and the header should say when
-           they have. *)
+      ; (* The row layout is the readable default. Compact modes trade that
+           separation for capacity, so the header names the trade while it is
+           active. *)
         (match origin with
-         | Masc_tui_message_layout.Origin_inline -> None
-         | Masc_tui_message_layout.Origin_row -> Some "clock:row"
+         | Masc_tui_message_layout.Origin_row -> None
+         | Masc_tui_message_layout.Origin_inline -> Some "clock:inline"
          | Masc_tui_message_layout.Origin_bare -> Some "clock:off")
       ; (match reasoning with
          | Reasoning_hidden -> None
@@ -3101,11 +3100,10 @@ let create_state
   msg_older_loading = false;
   msg_older_error = None;
   msg_reasoning_visibility = reasoning_visibility;
-  (* The origin folds into the body's left margin by default. On a row of its
-     own it cost one row per message: eight speakers taking turns spent eight
-     of a forty-row pane saying who was talking. Ctrl-F cycles back to the
-     roomier layout for anyone who wants it. *)
-  msg_origin_display = Masc_tui_message_layout.Origin_inline;
+  (* Keep each origin on a row of its own by default: the speaker badge and
+     prose then form separate visual levels instead of one dense column.
+     Ctrl-F retains the compact inline and clock-free alternatives. *)
+  msg_origin_display = Masc_tui_message_layout.Origin_row;
   msg_tool_visibility = tool_visibility;
   msg_spill = None;
   msg_queued = Masc_tui_keeper_chat_queue.empty;
@@ -3868,6 +3866,13 @@ let keeper_message_status_rows (state : state) =
      else 0)
   + (if keeper_message_reading_back state then 1 else 0)
   + composer_extra_rows state
+
+(* Support cannot disappear merely because PgUp adds the reading-back notice.
+   At the live edge, reserve that possible row only for the support threshold;
+   once reading back, it is already part of [keeper_message_status_rows]. The
+   rendered history still uses the exact rows it currently draws. *)
+let keeper_message_support_status_rows state ~status_rows =
+  status_rows + if keeper_message_reading_back state then 0 else 1
 
 (* One list under one cursor: the calls keepers are holding first (they run
    out in [kta_timeout_sec]; the operator actions keep), then the operator

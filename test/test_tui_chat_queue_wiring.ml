@@ -564,7 +564,7 @@ let test_approval_detail_scroll_accepts_the_rendered_clamp () =
    Every combination is listed rather than described, because the rule is
    about which of eight cases produce which string. *)
 let test_the_header_names_only_unusual_modes () =
-  let summary ?(origin = Masc_tui_message_layout.Origin_inline) memory_visible
+  let summary ?(origin = Masc_tui_message_layout.Origin_row) memory_visible
       reasoning tools =
     Tui_types.chat_visibility_summary ~memory_visible ~reasoning ~tools ~origin
   in
@@ -578,16 +578,14 @@ let test_the_header_names_only_unusual_modes () =
   in
   check
     bool
-    "the pane starts with the origin in the margin"
+    "the pane starts with a separate origin row"
     true
     (started.Tui_types.msg_origin_display
-     = Masc_tui_message_layout.Origin_inline);
+     = Masc_tui_message_layout.Origin_row);
   check string "everything at its default says nothing" ""
     (summary ~origin:started.Tui_types.msg_origin_display true hidden compact);
-  (* The inline margin is the default, so going back to the roomier row layout
-     is what the header has to name. *)
-  check string "the roomier row layout is named" "clock:row"
-    (summary ~origin:Masc_tui_message_layout.Origin_row true hidden compact);
+  check string "the compact inline layout is named" "clock:inline"
+    (summary ~origin:Masc_tui_message_layout.Origin_inline true hidden compact);
   check string "dropping the clock is named" "clock:off"
     (summary ~origin:Masc_tui_message_layout.Origin_bare true hidden compact);
   check string "full reasoning alone" "reasoning:full"
@@ -838,6 +836,24 @@ let test_the_budget_and_the_pane_agree_about_the_scrollback_row () =
       "the scrollback notice should be asked about exactly once on each side, \
        not %d time(s)"
       counted
+;;
+
+let test_the_support_threshold_reserves_the_scrollback_row () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let newest_status_rows = Tui_types.keeper_message_status_rows state in
+  let newest =
+    Tui_types.keeper_message_support_status_rows state
+      ~status_rows:newest_status_rows
+  in
+  state.msg_scroll <- 1;
+  let reading_back_status_rows = Tui_types.keeper_message_status_rows state in
+  let reading_back =
+    Tui_types.keeper_message_support_status_rows state
+      ~status_rows:reading_back_status_rows
+  in
+  check int "PgUp does not move the viewport support threshold" newest reading_back
 ;;
 
 let layout_binding = "keeper_message_layout_entries"
@@ -1116,6 +1132,8 @@ let () =
         ; test_case "the budget and the pane agree about the scrollback row"
             `Quick
             test_the_budget_and_the_pane_agree_about_the_scrollback_row
+        ; test_case "the support threshold reserves the scrollback row" `Quick
+            test_the_support_threshold_reserves_the_scrollback_row
         ; test_case "pending input is not mixed into the transcript" `Quick
             test_pending_input_is_not_mixed_into_the_transcript
         ; test_case "queueing puts the line in the conversation" `Quick

@@ -366,6 +366,10 @@ let tool_projection_mode (state : state) =
 
 let render_chat_row ~theme buf cols (row : Message_layout.row) =
   match row.kind with
+  | Message_layout.Viewport_gap { hidden_rows = _ } ->
+      (* The glyph survives NO_COLOR; the adaptive recede keeps the separator
+         visible without competing with the message above and below it. *)
+      box_line_styled buf cols ~style:(Theme.recede ()) row.text
   | Message_layout.Body ->
       (* The two cells reserved by the layout separate the activity column from
          its body. The semantic lead lives with the origin label, so wrapped
@@ -6905,6 +6909,9 @@ let render_keeper_message (state : state) =
       keeper_available_for_new_message state keeper_name
     in
     let status_rows = keeper_message_status_rows state in
+    let support_status_rows =
+      keeper_message_support_status_rows state ~status_rows
+    in
     (* Wide terminals keep the roster beside the chat, exactly as the detail
        view does; the chat lays out against its own pane width. *)
     let split = keeper_roster_pane_shown state ~cols in
@@ -7041,7 +7048,7 @@ let render_keeper_message (state : state) =
     if
       not
         (Message_layout.message_viewport_supported ~terminal_rows:rows
-           ~terminal_cols:chat_cols ~status_rows)
+           ~terminal_cols:chat_cols ~status_rows:support_status_rows)
     then begin
       let notice =
         " Keeper chat needs a larger terminal; resize to type (Esc:back)"
@@ -7062,8 +7069,9 @@ let render_keeper_message (state : state) =
        the footer — and every variable row (status, sending, queue, errors,
        composer growth) is in [status_rows]. The old constant 10 reserved
        three rows nothing drew, so the pane stopped three short of the
-       terminal's bottom edge. [message_viewport_supported] already states
-       the same chrome as [8 + status_rows]: 7 plus one history row. *)
+       terminal's bottom edge. [message_viewport_supported] requires the same
+       seven-row chrome plus three history rows, so a live-edge omission can
+       still show its first row, typed gap, and latest row. *)
     let history_height = max 0 (rows - 7 - status_rows) in
     (* The same pure derivation the committed rows used, asked again for the
        live ones: one call to one function with one argument, so the badge the
@@ -7562,11 +7570,11 @@ let render_keeper_message (state : state) =
           if scroll = 0 then "PgUp:history" else "PgDn:newest"
         in
         Printf.sprintf
-          "%s  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-F:clock  %s  %s"
+          "%s  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-F:layout  %s  %s"
           compact_enter_hint compact_scroll_hint escape_hint
       else
         Printf.sprintf
-          "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-F:clock  \
+          "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-F:layout  \
            Ctrl-O:image  %s%s  %s  Ctrl-U:clear"
           enter_hint scroll_hint switch_hint escape_hint
     in

@@ -50,6 +50,7 @@ type metadata =
 type row_kind =
   | Metadata of metadata
   | Body
+  | Viewport_gap of { hidden_rows : int }
 
 type origin_display =
   | Origin_row
@@ -671,7 +672,10 @@ let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
      body indent, four for the body itself, and three for a shortened source
      such as […aa]. Eleven columns left one source cell, which could draw only
      the omission marker and therefore admitted a chat pane with no identity. *)
-  terminal_cols >= 13 && terminal_rows >= 8 + max 0 status_rows
+  (* The fixed chrome costs seven rows. Three history rows are the minimum that
+     can show an oversized entry's identity/opening, an omission marker, and
+     its latest output instead of silently dropping one of those facts. *)
+  terminal_cols >= 13 && terminal_rows >= 10 + max 0 status_rows
 
 let take_last count values =
   let drop = max 0 (List.length values - max 0 count) in
@@ -928,7 +932,15 @@ let origin_gutter ~origin ~previous ~inner_width entry =
             (max 0 (ceiling - display_width label))
         else 0
       in
-      let filled = fit_width clock clock_cells ^ label in
+      (* A partial clock is context, not an identifier. [fit_width] would put
+         its generic "~" over the final clock cell, producing gutters such as
+         [12:~keeper] that look like damaged chat. Keep the cell-safe prefix
+         and its alignment without inventing a truncation glyph. *)
+      let clock = take_cells clock clock_cells in
+      let clock =
+        clock ^ String.make (max 0 (clock_cells - display_width clock)) ' '
+      in
+      let filled = clock ^ label in
       (* Where the kind label starts: past the clock and past the speaker mark.
          Computed here because this is where the clock is prepended; a renderer
          deriving it would be measuring the same two things a second time.
@@ -1000,6 +1012,50 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
       | None -> body_rows
       | Some metadata -> metadata :: body_rows)
 
+let viewport_gap_text ~inner_width hidden_rows =
+  let candidates =
+    [ Printf.sprintf
+        "  \xe2\x8b\xaf %d chat rows hidden \xc2\xb7 PgUp to reveal"
+        hidden_rows
+    ; Printf.sprintf "  \xe2\x8b\xaf %d hidden \xc2\xb7 PgUp" hidden_rows
+    ; Printf.sprintf "  \xe2\x8b\xaf %d hidden" hidden_rows
+    ; Printf.sprintf "\xe2\x8b\xaf%d" hidden_rows
+    ; "\xe2\x8b\xaf"
+    ]
+  in
+  Option.value
+    (List.find_opt (fun text -> display_width text <= inner_width) candidates)
+    ~default:""
+
+(* At the live edge, keep enough of an oversized newest entry to identify it,
+   see its opening when space permits, and see its latest output. The typed gap
+   makes the missing middle explicit; without it, inline mode looked like one
+   continuous message even though rows had disappeared. *)
+let newest_entry_window ~inner_width ~height rows =
+  match height, rows with
+  | 0, _ | _, [] -> []
+  | 1, first :: _ -> [ first ]
+  | 2, first :: rest -> (
+      match List.rev rest with [] -> [ first ] | latest :: _ -> [ first; latest ])
+  | _, first :: rest ->
+      let start, rest =
+        match first.kind, rest with
+        | Metadata _, body :: rest when height >= 4 -> [ first; body ], rest
+        | (Metadata _ | Body | Viewport_gap _), _ -> [ first ], rest
+      in
+      let tail = take_last (height - 1 - List.length start) rest in
+      let hidden_rows = List.length rows - List.length start - List.length tail in
+      let gap =
+        { style = Status
+        ; kind = Viewport_gap { hidden_rows }
+        ; shade = Shade_none
+        ; text = viewport_gap_text ~inner_width hidden_rows
+        ; gutter_label_at = 0
+        ; gutter = ""
+        }
+      in
+      start @ (gap :: tail)
+
 let visible_rows ?markdown ?origin ~inner_width ~height entries =
   let inner_width = max 1 inner_width in
   let height = max 0 height in
@@ -1014,10 +1070,7 @@ let visible_rows ?markdown ?origin ~inner_width ~height entries =
         let chosen =
           if List.length rows <= remaining then rows
           else if selected = [] then
-            match rows with
-            | [] -> []
-            | metadata :: body ->
-                metadata :: take_last (remaining - 1) body
+            newest_entry_window ~inner_width ~height:remaining rows
           else take_last remaining rows
         in
         collect (remaining - List.length chosen) (chosen @ selected) older

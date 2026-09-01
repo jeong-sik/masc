@@ -53,6 +53,7 @@ let model_execute_cwd_resolution_error ~config ~meta ~args ~cwd error =
 let sandbox_target_label = function
   | Masc_exec.Sandbox_target.Host -> "host"
   | Masc_exec.Sandbox_target.Docker { image; _ } -> "docker:" ^ image
+  | Masc_exec.Sandbox_target.Micro_vm { image; _ } -> "microvm:" ^ image
   | Masc_exec.Sandbox_target.Ssh { endpoint; _ } -> "ssh:" ^ endpoint.host
   | Masc_exec.Sandbox_target.Delegated _ -> "delegated"
 ;;
@@ -190,7 +191,7 @@ let typed_input_env
 ;;
 
 (* Backend target helpers for typed Shell IR dispatch. *)
-let docker_sandbox_target = Keeper_sandbox_shell_ir_target.docker_target
+let guest_sandbox_target = Keeper_sandbox_shell_ir_target.guest_target
 
 type dispatch_bundle =
   { sandbox : Masc_exec.Sandbox_target.t
@@ -299,7 +300,7 @@ let handle_tool_execute_typed
                       [ "remote_endpoint", `String endpoint.name
                       ; "remote_host", `String endpoint.host
                       ]
-                    | Host | Docker _ -> []
+                    | Host | Docker _ | Micro_vm _ | Delegated _ -> []
                   in
                   Ok
                     { sandbox = dispatch.target
@@ -326,7 +327,7 @@ let handle_tool_execute_typed
                 (Keeper_sandbox_shell_ir_target.target_error
                    "typed Shell IR guest dispatch does not support env yet")
             else
-              docker_sandbox_target
+              guest_sandbox_target
                 ~turn_sandbox_factory
                 ~meta
                 ~cwd
@@ -334,7 +335,7 @@ let handle_tool_execute_typed
                 ()
               |> Result.map
                    (fun
-                     (dispatch : Keeper_sandbox_shell_ir_target.docker_dispatch)
+                     (dispatch : Keeper_sandbox_shell_ir_target.guest_dispatch)
                    ->
                   { sandbox = dispatch.target
                   ; fields =
@@ -373,7 +374,7 @@ let handle_tool_execute_typed
         let base_host_env = dispatch_bundle.base_host_env in
         let dispatched_model_location_fields =
           (* [Host] is unreachable on this lane: every profile a keeper may
-             declare builds a Docker or Ssh target, and the builder that made
+             declare builds a guest or SSH target, and the builder that made
              a host one went with the [Local] profile. The arm stays because
              [Sandbox_target.t] is the general execution type and other
              callers do run on this host; it answers with the same fields the
@@ -381,7 +382,7 @@ let handle_tool_execute_typed
              exist. *)
           match dispatch_sandbox with
           | Masc_exec.Sandbox_target.Host
-          | Docker _ | Ssh _ -> model_location_fields
+          | Docker _ | Micro_vm _ | Ssh _ -> model_location_fields
           | Masc_exec.Sandbox_target.Delegated _ ->
             (* Unreachable from a profile-built target today (no profile
                builds one); a delegated stage is labelled where the
@@ -405,7 +406,8 @@ let handle_tool_execute_typed
                refuses to open it here rather than touching a same-named
                local file. *)
             Keeper_tool_execute_typed_input.Command_filesystem
-          | Masc_exec.Sandbox_target.Docker _ ->
+          | Masc_exec.Sandbox_target.Docker _
+          | Masc_exec.Sandbox_target.Micro_vm _ ->
             Keeper_tool_execute_typed_input.Bound_mount
               { visible_root = Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
               ; host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta
@@ -680,7 +682,7 @@ let handle_tool_execute_typed
               Keeper_external_resource_lease.with_lease
                 (Keeper_external_resource_lease.Host_cwd cwd)
                 dispatch
-            | Docker _ | Ssh _ -> dispatch ()
+            | Docker _ | Micro_vm _ | Ssh _ | Delegated _ -> dispatch ()
           in
           match dispatch_result with
           | Error (Keeper_tooling.Execute_shell_ir.Gate_reject diagnostic) ->

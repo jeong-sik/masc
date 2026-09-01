@@ -21,7 +21,7 @@
 
    [t] is a variant rather than a record so that the [Host] case needs
    no runner closure.  [Exec_dispatch] routes [Host] directly to
-   [Process_eio], and [Docker] / [Ssh] via the carried [runner]. *)
+   [Process_eio], and guest / SSH targets via the carried [runner]. *)
 
 type runner =
   on_stdout_chunk:(string -> unit) option ->
@@ -65,6 +65,7 @@ type ssh_endpoint = {
 type t =
   | Host
   | Docker of { image : string; runner : runner; pipeline_runner : pipeline_runner option }
+  | Micro_vm of { image : string; runner : runner; pipeline_runner : pipeline_runner option }
   | Ssh of { endpoint : ssh_endpoint; runner : runner; pipeline_runner : pipeline_runner option }
   | Delegated of { caller : runner }
 
@@ -72,8 +73,10 @@ let host () : t = Host
 
 let docker ~image ~runner ?pipeline_runner () : t = Docker { image; runner; pipeline_runner }
 
+let micro_vm ~image ~runner ?pipeline_runner () : t =
+  Micro_vm { image; runner; pipeline_runner }
+
 let ssh ~endpoint ~runner ?pipeline_runner () : t =
   Ssh { endpoint; runner; pipeline_runner }
 
 let delegated ~caller () : t = Delegated { caller }
-

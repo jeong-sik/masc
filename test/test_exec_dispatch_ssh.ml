@@ -92,7 +92,10 @@ let () =
        assert (endpoint.name = "builder-a");
        assert (endpoint.host = "builder-a.internal");
        assert (endpoint.port = 22)
-   | Masc_exec.Sandbox_target.Host | Masc_exec.Sandbox_target.Docker _ ->
+   | Masc_exec.Sandbox_target.Host
+   | Masc_exec.Sandbox_target.Docker _
+   | Masc_exec.Sandbox_target.Micro_vm _
+   | Masc_exec.Sandbox_target.Delegated _ ->
        assert false)
 
 (* --- dispatch_simple refuses an untranslated redirect before spawning --- *)

@@ -2,7 +2,7 @@
 
    RFC tools-as-shell-commands PR-1a: [Sandbox_target.Delegated] routes
    a stage's execution to an injected [caller] closure with the same
-   shape the Docker/Ssh runners already use. These tests lock the
+   shape the guest/SSH runners already use. These tests lock the
    round trip — argv travels in, a process-shaped answer travels back —
    and that a file redirect on a delegated stage is refused rather than
    opened on this host. *)

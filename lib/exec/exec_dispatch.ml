@@ -2,7 +2,7 @@
    Execute Shell_ir.t directly via Process_eio without going through
    /bin/bash. Simple commands use argv-based spawn. Redirect-free host
    pipelines use streaming process pipes; redirect-free sandboxed
-   (Docker/Ssh) pipelines stream through the injected pipeline runner.
+   Guest/SSH pipelines stream through the injected pipeline runner.
    Unsupported shapes fall back to deterministic stdout->stdin chaining. *)
 
 type dispatch_result = {
@@ -136,6 +136,7 @@ let target_is_openable_here ~(sandbox : Sandbox_target.t) target =
   | _, Redirect_scope.On_this_host _ -> true
   | Sandbox_target.Host, Redirect_scope.In_command_namespace _ -> true
   | ( Sandbox_target.Docker _
+    | Sandbox_target.Micro_vm _
     | Sandbox_target.Ssh _
     | Sandbox_target.Delegated _ ),
     Redirect_scope.In_command_namespace _ ->
@@ -168,7 +169,7 @@ let unresolved_target_message ~sandbox target =
       "remote_ssh_redirect_unavailable: remote file redirect %s has no remote \
        file-operation transport; refusing host fallback"
       path
-  | Sandbox_target.Host | Docker _ ->
+  | Sandbox_target.Host | Docker _ | Micro_vm _ ->
     Printf.sprintf
       "a file redirect to %s is not carried out for a sandboxed stage: the path \
        names a file inside the sandbox and would be opened on this host"
@@ -329,9 +330,9 @@ let resolve_host_env ?base_host_env = function
 
 (* Dispatch a simple command via the IR-carried Sandbox_target.
 
-   The [Host] case forks/execs through [Process_eio]; the [Docker] and [Ssh]
-   cases are wired up by [lib/keeper] using a closure over its own runtime
-   ([Keeper_turn_sandbox_runtime] for Docker, the SSH lane runner for [Ssh]).
+   The [Host] case forks/execs through [Process_eio]; guest and [Ssh] cases
+   are wired up by [lib/keeper] using a closure over its own runtime
+   ([Keeper_turn_sandbox_runtime] for guests, the SSH lane runner for [Ssh]).
    Which one runs is decided by the keeper's [sandbox_profile] carried on the
    IR, not by this function. *)
 let process_spec_of_simple (s : Shell_ir.simple) =
@@ -366,7 +367,10 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
           (unresolved_target_message ~sandbox:s.sandbox target)
       | Some (Redirect_scope.Fd_to_fd _ | Redirect_scope.Literal _) | None ->
         (match s.sandbox with
-         | Docker { runner; _ } | Ssh { runner; _ } | Delegated { caller = runner } ->
+         | Docker { runner; _ }
+         | Micro_vm { runner; _ }
+         | Ssh { runner; _ }
+         | Delegated { caller = runner } ->
            (* stdin from a file is read here and handed to the runner as
               bytes, for the same reason: the runner takes a string. *)
            let stdin_for_runner =
@@ -486,7 +490,10 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
              }
          | status, stdout, stderr ->
              apply_redirect_plan redirect_plan { status; stdout; stderr })
-      | Docker { runner; _ } | Ssh { runner; _ } | Delegated { caller = runner } ->
+      | Docker { runner; _ }
+      | Micro_vm { runner; _ }
+      | Ssh { runner; _ }
+      | Delegated { caller = runner } ->
         let on_stdout_chunk, on_stderr_chunk =
           match child_on_output_chunk with
           | None -> None, None
@@ -544,7 +551,7 @@ let host_pipeline_specs ?base_host_env stages =
          (* A delegated stage is not a host process, so it cannot join a
             host process pipeline; it falls back to per-stage dispatch,
             where the caller answers for it. *)
-         | Docker _ | Ssh _ | Delegated _ -> None)
+         | Docker _ | Micro_vm _ | Ssh _ | Delegated _ -> None)
     (* A stage that is itself a pipeline or a sequence needs a subshell,
        which this dispatcher does not spawn. *)
     | (Shell_ir.Pipeline _ | Shell_ir.Sequence _) :: _ -> None
@@ -553,7 +560,7 @@ let host_pipeline_specs ?base_host_env stages =
 
 (* The streaming pipeline runner is per sandbox target: every stage must
    carry the same target value and that target must inject a
-   [pipeline_runner].  Docker and Ssh stages collect identically. *)
+   [pipeline_runner]. Guest and SSH stages collect identically. *)
 let sandbox_pipeline_specs stages =
   let rec loop pipeline_runner sandbox_target acc = function
     | [] -> Option.map (fun runner -> runner, List.rev acc) pipeline_runner
@@ -564,7 +571,9 @@ let sandbox_pipeline_specs stages =
           | Some first_target -> simple.sandbox == first_target
         in
         (match simple.sandbox with
-         | Docker { pipeline_runner = Some runner; _ } | Ssh { pipeline_runner = Some runner; _ }
+         | Docker { pipeline_runner = Some runner; _ }
+         | Micro_vm { pipeline_runner = Some runner; _ }
+         | Ssh { pipeline_runner = Some runner; _ }
            when simple.redirects = [] && same_sandbox_target ->
              let argv, env, cwd = process_spec_of_simple simple in
              let stage : Sandbox_target.pipeline_stage = { argv; env; cwd } in

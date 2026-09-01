@@ -1297,6 +1297,37 @@ def board_selection_http_fixtures() -> HttpFixtures:
     return fixtures
 
 
+def board_json_http_fixtures() -> HttpFixtures:
+    json_body = json.dumps(
+        {
+            "verification_request": {
+                "id": "vrf-board-json",
+                "task_id": "task-1200",
+                "worker": "lane-smith",
+                "approved": True,
+                "attempt": 3,
+            }
+        },
+        separators=(",", ":"),
+    )
+    markdown_body = "# Normal heading\n\n**Markdown stays authored.**"
+    posts = [
+        board_selection_post("json", "JSON evidence", json_body),
+        board_selection_post("markdown", "Markdown note", markdown_body),
+    ]
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
+    fixtures["/api/v1/board/post-json?format=flat"] = (
+        200,
+        {"post": posts[0], "comments": []},
+    )
+    fixtures["/api/v1/board/post-markdown?format=flat"] = (
+        200,
+        {"post": posts[1], "comments": []},
+    )
+    return fixtures
+
+
 def board_detail_comment(comment_id: str, content: str) -> dict[str, object]:
     return {
         "id": comment_id,
@@ -3512,6 +3543,71 @@ def board_reference_interaction(fixtures: HttpFixtures) -> Interaction:
 
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board")
         # Arm the exit; the harness supplies the confirming press.
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def board_json_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+        tab_until(process, master_fd, output, b"MASC Keepers")
+        tab_until(process, master_fd, output, b"MASC Approvals")
+        tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (2)"))
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=40,
+            columns=160,
+            needle=screen_header(b"MASC Board", b" (2)"),
+            final_cursor=b"\x1b[?25l",
+        )
+
+        opened = send_and_wait(
+            process, master_fd, output, b"\r", b'"verification_request"'
+        )
+        frame = frame_containing(opened, b'"verification_request"')
+        plain = CSI_RE.sub(b"", frame)
+        for needle in (
+            b'"verification_request": {',
+            b'"task_id": "task-1200"',
+            b'"approved": true',
+            b'"attempt": 3',
+        ):
+            if needle not in plain:
+                raise AssertionError(
+                    f"Board JSON was not pretty-printed ({needle!r}): {plain!r}"
+                )
+        if b'{"verification_request":{"id"' in plain:
+            raise AssertionError(f"Board kept compact JSON on one line: {plain!r}")
+        highlighted_key = re.compile(
+            rb'(?:\x1b\[[0-9;]*m)+'
+            + re.escape(b'"verification_request"')
+            + rb'(?:\x1b\[[0-9;]*m)+'
+        )
+        if highlighted_key.search(frame) is None:
+            raise AssertionError(f"Board JSON key has no syntax colour: {frame!r}")
+
+        markdown = send_and_wait(
+            process, master_fd, output, b"]", b"Normal heading"
+        )
+        markdown_plain = CSI_RE.sub(b"", frame_containing(markdown, b"Normal heading"))
+        for needle in (b"Normal heading", b"Markdown stays authored."):
+            if needle not in markdown_plain:
+                raise AssertionError(
+                    f"ordinary Board Markdown lost {needle!r}: {markdown_plain!r}"
+                )
+        if b"# Normal heading" in markdown_plain or b"**Markdown" in markdown_plain:
+            raise AssertionError(
+                f"ordinary Board Markdown rendered as source: {markdown_plain!r}"
+            )
         os.write(master_fd, b"q")
 
     return interact
@@ -9459,6 +9555,7 @@ def run_keyboard_regression(executable: str) -> None:
         interact=board_reference_interaction(board_reference_fixtures),
         http_fixtures=board_reference_fixtures,
     )
+    run_board_json_regression(executable)
     run_terminal_scenario(
         executable,
         description="Board selection identity",
@@ -9904,6 +10001,15 @@ def run_keeper_lanes_regression(executable: str) -> None:
     )
 
 
+def run_board_json_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="Board JSON pretty-print and syntax highlighting",
+        interact=board_json_interaction(),
+        http_fixtures=board_json_http_fixtures(),
+    )
+
+
 def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
         run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
@@ -9941,11 +10047,15 @@ def main() -> None:
         run_keeper_lanes_regression(os.path.abspath(sys.argv[1]))
         print("tui Keepers/Lanes regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "board-json":
+        run_board_json_regression(os.path.abspath(sys.argv[1]))
+        print("tui Board JSON regression: PASS")
+        return
     if len(sys.argv) != 2:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
             "[cli-base-path|planning-review|repositories|project-changes|config|"
-            "chat-clarity|runtime|resources|keepers-lanes]"
+            "chat-clarity|runtime|resources|keepers-lanes|board-json]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

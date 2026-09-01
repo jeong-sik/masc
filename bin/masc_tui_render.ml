@@ -228,6 +228,38 @@ let chat_markdown ~context ~width body =
 let document_markdown ~width body =
   markdown_with_closing ~closing:Ansi.reset ~width body
 
+let fenced_document_text ~language text =
+  match
+    Masc_tui_markdown.non_colliding_fence_marker
+      (String.split_on_char '\n' text)
+  with
+  | Some marker -> String.concat "\n" [ marker ^ language; text; marker ]
+  | None -> text
+
+let fenced_pretty_json text =
+  let pretty =
+    match Yojson.Safe.from_string text with
+    | json -> Yojson.Safe.pretty_to_string json
+    | exception Yojson.Json_error _ -> text
+  in
+  fenced_document_text ~language:"json" pretty
+
+(* Board accepts ordinary Markdown, so JSON detection is deliberately the
+   narrow whole-document case. Objects and arrays are operational payloads;
+   a post containing a scalar or a JSON-shaped fragment remains exactly the
+   Markdown its author wrote. *)
+let board_document_source body =
+  let trimmed = String.trim body in
+  match Yojson.Safe.from_string trimmed with
+  | (`Assoc _ | `List _) as json ->
+      Yojson.Safe.pretty_to_string json
+      |> fenced_document_text ~language:"json"
+  | _ -> body
+  | exception Yojson.Json_error _ -> body
+
+let board_document_markdown ~width body =
+  document_markdown ~width (board_document_source body)
+
 (* The semantic Markdown palette itself is compiled into this binary. The
    generation travels separately because only a user row's ambient terminal
    background changes its closing strings. *)
@@ -2739,7 +2771,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
      for a while; this surface reads the same kind of document. *)
   let body_lines =
     Message_layout.wrap_body
-      ~markdown:document_markdown
+      ~markdown:board_document_markdown
       ~max_cells:text_width
       ~sanitize:Terminal_text.single_line
       post.bp_body
@@ -2829,7 +2861,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                  Ansi.reset Ansi.dim created_at Ansi.reset
              in
              let body =
-               Message_layout.wrap_body ~markdown:document_markdown
+               Message_layout.wrap_body ~markdown:board_document_markdown
                  ~max_cells:
                    (max 1
                       (cols - 10 - Message_layout.display_width rail))
@@ -12203,25 +12235,10 @@ let resource_mime_is_markdown mime =
   List.mem (resource_mime_essence mime)
     [ "text/markdown"; "text/x-markdown"; "application/markdown" ]
 
-let fenced_resource_text ~language text =
-  match
-    Masc_tui_markdown.non_colliding_fence_marker
-      (String.split_on_char '\n' text)
-  with
-  | Some marker ->
-      String.concat "\n" [ marker ^ language; text; marker ]
-  | None -> text
-
 let pretty_resource_text ~mime text =
   match resource_language_of_mime mime with
-  | Some "json" ->
-      let pretty =
-        match Yojson.Safe.from_string text with
-        | json -> Yojson.Safe.pretty_to_string json
-        | exception Yojson.Json_error _ -> text
-      in
-      fenced_resource_text ~language:"json" pretty
-  | Some language -> fenced_resource_text ~language text
+  | Some "json" -> fenced_pretty_json text
+  | Some language -> fenced_document_text ~language text
   | None when resource_mime_is_markdown mime -> text
   | None -> text
 

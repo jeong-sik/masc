@@ -655,7 +655,10 @@ sending returns to the post with the reply visible.
 
 Board comments keep their author and timestamp on a separate line. Markdown
 headings, lists, tables, code blocks, and wrapped paragraphs are rendered below
-that line instead of being flattened into one truncated row.
+that line instead of being flattened into one truncated row. When a post or
+comment body is a complete JSON object or array, Board pretty-prints it and
+uses the same JSON syntax colours as fenced code. Ordinary Markdown remains
+authored Markdown.
 
 ### Planning
 

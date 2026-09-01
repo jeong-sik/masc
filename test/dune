@@ -3522,13 +3522,13 @@
 ; no rule, no workflow, and no caller -- eleven suites of dead verification
 ; (the #32245 review found the pattern; this sweep found the rest). They are
 ; stdlib-only unittest files whose subjects live under scripts/, so each rule
-; carries the test file and the scripts tree.
+; carries the test file plus the exact script files it loads.
 
 (rule
  (alias runtest-test_capture_keeper_skill_tui_proof)
  (deps
   test_capture_keeper_skill_tui_proof.py
-  (source_tree ../scripts))
+  ../scripts/harness/workload/capture_keeper_skill_tui_proof.py)
  (action
   (run python3 %{dep:test_capture_keeper_skill_tui_proof.py})))
 
@@ -3540,7 +3540,7 @@
  (alias runtest-test_capture_tui_lane_runs)
  (deps
   test_capture_tui_lane_runs.py
-  (source_tree ../scripts))
+  ../scripts/capture-tui-lane-runs.py)
  (action
   (run python3 %{dep:test_capture_tui_lane_runs.py})))
 
@@ -3552,7 +3552,7 @@
  (alias runtest-test_dune_build_input_fingerprint)
  (deps
   test_dune_build_input_fingerprint.py
-  (source_tree ../scripts))
+  ../scripts/dune-build-input-fingerprint.py)
  (action
   (run python3 %{dep:test_dune_build_input_fingerprint.py})))
 
@@ -3564,7 +3564,7 @@
  (alias runtest-test_join_natural_keeper_skill_ledger)
  (deps
   test_join_natural_keeper_skill_ledger.py
-  (source_tree ../scripts))
+  ../scripts/harness/workload/join_natural_keeper_skill_ledger.py)
  (action
   (run python3 %{dep:test_join_natural_keeper_skill_ledger.py})))
 
@@ -3576,7 +3576,8 @@
  (alias runtest-test_keeper_multi_collaboration_acceptance)
  (deps
   test_keeper_multi_collaboration_acceptance.py
-  (source_tree ../scripts))
+  ../scripts/harness/workload/keeper_multi_collaboration_acceptance.py
+  ../scripts/fixtures/keeper-multi-collaboration/missions.json)
  (action
   (run python3 %{dep:test_keeper_multi_collaboration_acceptance.py})))
 
@@ -3588,7 +3589,8 @@
  (alias runtest-test_keeper_skill_use_proof)
  (deps
   test_keeper_skill_use_proof.py
-  (source_tree ../scripts))
+  ../scripts/harness/workload/keeper_skill_use_proof.py
+  ../scripts/harness/workload/build_keeper_skill_tui.py)
  (action
   (run python3 %{dep:test_keeper_skill_use_proof.py})))
 
@@ -3600,7 +3602,7 @@
  (alias runtest-test_memory_os_judge_eval)
  (deps
   test_memory_os_judge_eval.py
-  (source_tree ../scripts))
+  ../scripts/memory_os_judge_eval.py)
  (action
   (run python3 %{dep:test_memory_os_judge_eval.py})))
 
@@ -3612,7 +3614,7 @@
  (alias runtest-test_produce_natural_keeper_skill_proof)
  (deps
   test_produce_natural_keeper_skill_proof.py
-  (source_tree ../scripts))
+  ../scripts/harness/workload/produce_natural_keeper_skill_proof.py)
  (action
   (run python3 %{dep:test_produce_natural_keeper_skill_proof.py})))
 
@@ -3624,7 +3626,7 @@
  (alias runtest-test_produce_tui_build_evidence)
  (deps
   test_produce_tui_build_evidence.py
-  (source_tree ../scripts))
+  ../scripts/harness/workload/produce_tui_build_evidence.py)
  (action
   (run python3 %{dep:test_produce_tui_build_evidence.py})))
 
@@ -3636,7 +3638,7 @@
  (alias runtest-test_proof_http)
  (deps
   test_proof_http.py
-  (source_tree ../scripts))
+  ../scripts/harness/workload/proof_http.py)
  (action
   (run python3 %{dep:test_proof_http.py})))
 
@@ -3648,7 +3650,8 @@
  (alias runtest-test_run_local_executable_binding)
  (deps
   test_run_local_executable_binding.py
-  (source_tree ../scripts))
+  ../scripts/run-local-executable-binding.py
+  ../scripts/build-dashboard-if-needed.sh)
  (action
   (run python3 %{dep:test_run_local_executable_binding.py})))
 
@@ -3660,7 +3663,7 @@
  (alias runtest-test_verify_keeper_skill_proof_bundle)
  (deps
   test_verify_keeper_skill_proof_bundle.py
-  (source_tree ../scripts))
+  ../scripts/harness/workload/verify_keeper_skill_proof_bundle.py)
  (action
   (run python3 %{dep:test_verify_keeper_skill_proof_bundle.py})))
 

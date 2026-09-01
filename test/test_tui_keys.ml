@@ -53,6 +53,19 @@ let test_one_spelling_per_key () =
         (Masc_tui_keys.for_surface surface))
     every_surface
 
+let test_chat_help_names_memory_cycle () =
+  let bindings = Masc_tui_keys.for_surface (Keepers Keeper_message) in
+  match
+    List.find_opt
+      (fun (binding : Masc_tui_keys.binding) -> String.equal binding.key "Ctrl-N")
+      bindings
+  with
+  | None -> Alcotest.fail "chat help omitted the Ctrl-N Memory shortcut"
+  | Some binding ->
+      check (Alcotest.option str) "Memory cycle help"
+        (Some "cycle Memory journal summary / full / hidden")
+        binding.help
+
 let test_plain_listing_footer_shape () =
   let canonical =
     "j/k:scroll  b / u:bind / unbind  Esc:keeper  r:refresh  Tab:next  q:quit"
@@ -912,6 +925,8 @@ let () =
             test_no_surface_repeats_a_key
         ; Alcotest.test_case "one spelling per key" `Quick
             test_one_spelling_per_key
+        ; Alcotest.test_case "chat help names the Memory cycle" `Quick
+            test_chat_help_names_memory_cycle
         ] )
     ; ( "projections"
       , [ Alcotest.test_case "plain listing footer shape" `Quick

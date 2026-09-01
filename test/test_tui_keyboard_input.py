@@ -5452,17 +5452,95 @@ def memory_journal_timeline_interaction(
             b"m",
             b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
         )
+        # At rest the journal draws only its one-line summary: the header
+        # with source, revision, and counts. The change fence under it is a
+        # keypress away.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"Librarian committed current memory revision 9",
+            start=start,
+            timeout=5.0,
+        )
+        last_row_end = output.find(
+            b"Librarian committed current memory revision 9", start
+        ) + len(b"Librarian committed current memory revision 9")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            FRAME_END,
+            start=last_row_end,
+            timeout=3.0,
+        )
+        frame_end = output.find(FRAME_END, last_row_end) + len(FRAME_END)
+        resting = frame_containing(
+            bytes(output[start:frame_end]),
+            b"Librarian committed current memory revision 9",
+        )
+        plain_resting = CSI_RE.sub(b"", resting)
+        earlier_hour = time.strftime(
+            "%Y-%m-%d · %H:00", time.localtime(1787344889.0)
+        ).encode()
+        later_hour = time.strftime(
+            "%Y-%m-%d · %H:00", time.localtime(1787348490.35)
+        ).encode()
+        earlier_rail = plain_resting.find(earlier_hour)
+        later_rail = plain_resting.find(later_hour)
+        for label in (earlier_hour, later_hour):
+            styled_rail = re.compile(
+                rb"\x1b\[[0-9;]*m\x1b\[1m"
+                + "── ".encode()
+                + re.escape(label)
+            )
+            if styled_rail.search(resting) is None:
+                raise AssertionError(
+                    "Civil-hour rail was not drawn in its semantic colour "
+                    f"and bold weight for {label!r}: {resting!r}"
+                )
+        before = plain_resting.find(b"direct turn before Librarian")
+        journal = plain_resting.find(b"Librarian committed current memory revision 9")
+        after = plain_resting.find(b"direct turn after Librarian")
+        if not (0 <= earlier_rail < before < later_rail < after < journal):
+            raise AssertionError(
+                "Civil-hour rails did not display clock transitions while chat "
+                "turns and the Journal lane retained typed turn then producer "
+                f"order: {resting!r}"
+            )
+        if re.search("\u25c8\\s+JOURNAL".encode(), plain_resting) is None:
+            raise AssertionError(
+                f"Memory timeline did not draw its distinct Journal marker: {resting!r}"
+            )
+        if "\u250a".encode() not in plain_resting:
+            raise AssertionError(
+                f"Memory timeline did not draw its parallel dotted rail: {resting!r}"
+            )
+        for fence_only in (
+            b"one provider endpoint",
+            b"superseded by provider grouping",
+        ):
+            if fence_only in resting:
+                raise AssertionError(
+                    f"Summary mode drew the change fence {fence_only!r}: {resting!r}"
+                )
+
+        # /memory steps the lane from summary to full, where the change
+        # fence draws in whole.
+        send_and_wait(process, master_fd, output, b"/memory", composer_showing(b"/memory"))
+        full_start = len(output)
+        send_and_wait(process, master_fd, output, b"\r", b"memory:full")
         wait_for_output(
             process,
             master_fd,
             output,
             b"superseded by provider grouping",
-            start=start,
+            start=full_start,
             timeout=5.0,
         )
-        last_row_end = output.find(b"superseded by provider grouping", start) + len(
-            b"superseded by provider grouping"
-        )
+        last_row_end = output.find(
+            b"superseded by provider grouping", full_start
+        ) + len(b"superseded by provider grouping")
         wait_for_output(
             process,
             master_fd,
@@ -5473,8 +5551,8 @@ def memory_journal_timeline_interaction(
         )
         frame_end = output.find(FRAME_END, last_row_end) + len(FRAME_END)
         visible = frame_containing(
-            bytes(output[start:frame_end]),
-            b"Librarian committed current memory revision 9",
+            bytes(output[full_start:frame_end]),
+            b"superseded by provider grouping",
         )
         plain_visible = CSI_RE.sub(b"", visible)
         earlier_hour = time.strftime(
@@ -5599,23 +5677,25 @@ def memory_journal_timeline_interaction(
             b"direct turn after Librarian",
         )
 
-        send_and_wait(process, master_fd, output, b"/memory", composer_showing(b"/memory"))
-        hidden = send_and_wait(process, master_fd, output, b"\r", b"memory:off")
+        # Ctrl-N walks the same cycle without the composer: full -> hidden.
+        hidden = send_and_wait(process, master_fd, output, b"\x0e", b"memory:off")
         if b"Librarian committed current memory revision 9" in hidden:
             raise AssertionError(f"Hidden Memory timeline still drew its row: {hidden!r}")
 
-        send_and_wait(process, master_fd, output, b"/memory", composer_showing(b"/memory"))
+        # ... and hidden -> summary, the resting default.
         restored = send_and_wait(
             process,
             master_fd,
             output,
-            b"\r",
+            b"\x0e",
             b"Librarian committed current memory revision 9",
         )
-        if b"Librarian/Memory timeline shown" not in restored:
-            raise AssertionError(f"Memory timeline did not report restoration: {restored!r}")
         if b"memory:off" in restored:
             raise AssertionError(f"Restored Memory timeline stayed off: {restored!r}")
+        if b"superseded by provider grouping" in restored:
+            raise AssertionError(
+                f"Summary mode drew the change fence after restore: {restored!r}"
+            )
         send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         os.write(master_fd, b"q")
 

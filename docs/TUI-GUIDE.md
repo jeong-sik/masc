@@ -527,6 +527,12 @@ and full; `Ctrl-D` toggles compact and full tool details. `/thinking` and
 `/tools` expose the same choices by name. `--reasoning` and `--tool-view` can
 override the initial modes.
 
+Memory journal rows open in summary mode, using producer-owned compact text
+instead of reconstructing a summary from rendered prose. `Ctrl-N` or `/memory`
+cycles those rows through summary, full, and hidden; the header names the two
+non-default states as `memory:full` and `memory:off`. Neutral system rows that
+share the journal lane have no summary projection and therefore remain whole.
+
 The folded tool row retains exact outcome counts and ends with
 `Ctrl-D: details / diffs`, so the hidden change view is discoverable from the
 row that owns it. The typed calls themselves stay attached to the message, so

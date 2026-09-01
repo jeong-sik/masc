@@ -14,7 +14,7 @@ type t =
   | Steer_missing_message
   | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
   | Set_tools of [ `Toggle | `Compact | `Full ]
-  | Toggle_memory
+  | Cycle_memory
   | Find_in_chat of string
   | Find_next
   | Inspect_context
@@ -67,7 +67,7 @@ let catalog =
     }
   ; { word = "memory"
     ; args = ""
-    ; summary = "show or hide Librarian/Memory journal rows"
+    ; summary = "cycle Librarian/Memory journal rows: summary, full, hidden"
     }
   ; { word = "find"
     ; args = "[text]"
@@ -148,7 +148,7 @@ let parse text =
     | "tools", "" -> Set_tools `Toggle
     | "tools", "compact" -> Set_tools `Compact
     | "tools", "full" -> Set_tools `Full
-    | "memory", _ -> Toggle_memory
+    | "memory", _ -> Cycle_memory
     | "find", "" -> Find_next
     | "find", text -> Find_in_chat text
     | "context", _ -> Inspect_context

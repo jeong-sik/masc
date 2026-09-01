@@ -116,9 +116,11 @@ type kind =
           block carried it: the lines the server kept, and a count of the
           steps it withheld. A blank [content] with a trace behind it used
           to draw as an empty line; this is what was behind it. *)
-  | Memory_activity
+  | Memory_activity of { summary : string option }
       (** A committed or failed Memory OS journal pass. [row.text] carries
-          exact added/removed claims or typed failure detail. *)
+          exact added/removed claims or typed failure detail; [summary] is the
+          producer-built one-line projection. Neutral system rows reuse this
+          lane with [None] and therefore remain whole in summary mode. *)
 
 val tool_rows : Masc_tui_keeper_chat_transcript.tool_block -> string list
 (** The current full-detail rows for a typed history block. This delegates to

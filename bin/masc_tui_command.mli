@@ -38,8 +38,9 @@ type t =
           "keep the count but not the text". *)
   | Set_tools of [ `Toggle | `Compact | `Full ]
       (** [/tools [compact|full]] — set or toggle tool-call detail. *)
-  | Toggle_memory
-      (** [/memory] — show or hide Librarian/Memory journal rows. *)
+  | Cycle_memory
+      (** [/memory] — cycle Librarian/Memory journal rows: summary, full,
+          hidden. Ctrl-N walks the same cycle. *)
   | Find_in_chat of string
       (** [/find <text>] — put the pane on the newest message holding [text].
 

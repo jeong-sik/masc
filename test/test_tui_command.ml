@@ -27,7 +27,7 @@ let describe = function
          | `Toggle -> "toggle"
          | `Compact -> "compact"
          | `Full -> "full")
-  | Command.Toggle_memory -> "toggle-memory"
+  | Command.Cycle_memory -> "cycle-memory"
   | Command.Find_in_chat text -> "find:" ^ text
   | Command.Find_next -> "find-next"
   | Command.Inspect_context -> "inspect-context"
@@ -76,7 +76,7 @@ let test_pane_commands_parse_by_word () =
     ; "tools:toggle"
     ; "tools:compact"
     ; "tools:full"
-    ; "toggle-memory"
+    ; "cycle-memory"
     ; "find:caret"
     ; "find:two words"
     ; "find-next"
@@ -452,7 +452,8 @@ let test_colour_boundaries_keep_every_glyph () =
 
 let test_a_complete_word_needs_no_untyped_run () =
   check string "nothing left to type"
-    "T[/memory]D[ \xe2\x80\x94 show or hide Librarian/Memory journal rows]"
+    "T[/memory]D[ \xe2\x80\x94 cycle Librarian/Memory journal rows: summary, \
+     full, hidden]"
     (spans "/memory");
   check bool "an argument stays a detail" true
     (match Command.hint_spans (Command.hint "/thinking") with

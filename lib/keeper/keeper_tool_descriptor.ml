@@ -1940,6 +1940,11 @@ let internal_descriptors : t list =
          state for this keeper turn. Context-window occupancy is not \
          currently observed."
       ~input_schema:empty_object_schema
+      (* Serial, deliberately: the memory section runs
+         Keeper_memory_source_current.revalidate, which persists pending
+         invalidations under the source-store lock — a write during read.
+         The read-only policy hint below covers approval, not batch
+         admission; do not promote this to Concurrent on its strength. *)
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_context_status
       ()
@@ -1968,6 +1973,11 @@ let internal_descriptors : t list =
       ~description:
         "Search keeper memory or history; current facts use explicit substring filtering and snapshot order."
       ~input_schema:memory_search_schema
+      (* Serial, deliberately: the memory/all sources run
+         Keeper_memory_source_current.revalidate, which persists pending
+         invalidations under the source-store lock — a write during read.
+         The read-only policy hint below covers approval, not batch
+         admission; do not promote this to Concurrent on its strength. *)
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_memory_search
       ()
@@ -2028,6 +2038,12 @@ let internal_descriptors : t list =
           'members', or 'member', the Discord lane can also query its live \
           channel and server read surface within the keeper's bound channels."
        ~input_schema:surface_read_schema
+       (* Concurrent: the local lane pages the chat store and person notes
+          through plain file reads (the person-notes Hashtbl is
+          function-local); the Discord lane issues one HTTP request per
+          call through Discord_rest_client, whose only shared state is an
+          Atomic request-sequence counter. *)
+       ~ordinary_execution_mode:Concurrent
        ~policy:(read_only_in_process_policy ())
        ~handler:Tool_surface_read
        ()

@@ -1395,6 +1395,7 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "keeper_capability_search"
     ; "keeper_library_read"
     ; "keeper_library_search"
+    ; "keeper_surface_read"
     ; "keeper_tasks_audit"
     ; "keeper_tasks_list"
     ; "keeper_time_now"

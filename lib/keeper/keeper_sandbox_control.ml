@@ -369,7 +369,19 @@ let freshness_json = function
   | Freshness_unavailable error ->
     `Assoc [ "state", `String "unavailable"; "error", `String error ]
 
-let checkout_json ~budget ~catalog (checkout : Keeper_playground_checkouts.checkout) =
+(* One checkout's measured facts. [checkout_json] renders this to the tool
+   surface and [freshness_row_of_inspection] projects it into the turn
+   context, so the two surfaces read the same probe and can never disagree. *)
+type checkout_inspection = {
+  inspected : Keeper_playground_checkouts.checkout;
+  catalog_resolution : catalog_resolution;
+  branch : (string, string) result;
+  head : (string, string) result;
+  dirty : (bool * int, string) result;
+  freshness : checkout_freshness;
+}
+
+let inspect_checkout ~budget ~catalog (checkout : Keeper_playground_checkouts.checkout) =
   (* The checkout's own path, as discovered. Previously this reassembled
      [sandbox_abs/repos/<name>], which meant any checkout found outside that
      one shape was inspected at a path that does not exist — every git call
@@ -400,6 +412,18 @@ let checkout_json ~budget ~catalog (checkout : Keeper_playground_checkouts.check
   in
   let head = first_git_line ~budget ~cwd:checkout_abs [ "rev-parse"; "HEAD" ] in
   let dirty = dirty_state ~budget ~repository in
+  (* Freshness stays the last probe so the budget drains in the same order as
+     the pre-split [checkout_json] did. *)
+  let freshness = freshness_of_catalog ~budget ~repository catalog_resolution in
+  { inspected = checkout; catalog_resolution; branch; head; dirty; freshness }
+
+let checkout_json (inspection : checkout_inspection) =
+  let checkout = inspection.inspected in
+  let name = checkout.Keeper_playground_checkouts.name in
+  let catalog_resolution = inspection.catalog_resolution in
+  let branch = inspection.branch in
+  let head = inspection.head in
+  let dirty = inspection.dirty in
   let inspection_errors =
     [ (match branch with Error error -> Some ("branch: " ^ error) | Ok _ -> None)
     ; (match head with Error error -> Some ("head: " ^ error) | Ok _ -> None)
@@ -427,10 +451,29 @@ let checkout_json ~budget ~catalog (checkout : Keeper_playground_checkouts.check
     ; "changed_files", (match dirty with Ok (_, value) -> `Int value | Error _ -> `Null)
     ; "inspection_state", `String (if inspection_errors = [] then "available" else "unavailable")
     ; "inspection_errors", `List (List.map (fun error -> `String error) inspection_errors)
-    ; ( "freshness"
-      , freshness_json
-          (freshness_of_catalog ~budget ~repository catalog_resolution) )
+    ; "freshness", freshness_json inspection.freshness
     ]
+
+type freshness_row = {
+  row_checkout_path : string;
+  row_branch : string option;
+  row_changed_files : int option;
+  row_freshness : checkout_freshness;
+}
+
+let freshness_row_of_inspection (inspection : checkout_inspection) =
+  (* [relative_path], not [name]: it is the cwd the keeper passes to its
+     tools, and basenames collide (a live playground held two [poc-repo]
+     checkouts at different paths, 2026-09-01 field probe). *)
+  { row_checkout_path =
+      inspection.inspected.Keeper_playground_checkouts.relative_path
+  ; row_branch = Result.to_option inspection.branch
+  ; row_changed_files =
+      (match inspection.dirty with
+       | Ok (_, changed_files) -> Some changed_files
+       | Error _ -> None)
+  ; row_freshness = inspection.freshness
+  }
 
 let repository_checkouts_json_with_budget_impl
     ~before_git_inspection
@@ -457,7 +500,8 @@ let repository_checkouts_json_with_budget_impl
     match scan with
     | Ok discovery ->
       Keeper_playground_checkouts.found discovery
-      |> List.map (checkout_json ~budget:inspection_budget ~catalog)
+      |> List.map (fun checkout ->
+        checkout_json (inspect_checkout ~budget:inspection_budget ~catalog checkout))
     | Error _ -> []
   in
   `Assoc
@@ -491,6 +535,28 @@ let repository_checkouts_json ~config ~meta =
     ~inspection_budget_sec:Repo_git.inspection_timeout_sec
     ~config
     ~meta
+;;
+
+let checkout_freshness_rows
+    ?(inspection_budget_sec = Repo_git.inspection_timeout_sec)
+    ~(config : Workspace.config)
+    ~(meta : keeper_meta)
+    ()
+  =
+  let sandbox_abs =
+    Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path
+  in
+  let catalog = Repo_store.load_all ~base_path:config.base_path in
+  match Keeper_playground_checkouts.discover ~root:sandbox_abs with
+  | Error scan_error -> Error scan_error
+  | Ok discovery ->
+    let budget =
+      Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
+    in
+    Ok
+      (Keeper_playground_checkouts.found discovery
+       |> List.map (fun checkout ->
+         freshness_row_of_inspection (inspect_checkout ~budget ~catalog checkout)))
 ;;
 
 module For_testing = struct

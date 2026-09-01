@@ -164,9 +164,19 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
                 ~selection ~current_task
                 ~held_task_skills:observation.held_task_skills
           in
+          (* Same parity rule as the Skill surfaces above: the preview shows
+             the freshness rows a real turn would project, and a failed scan
+             previews as an absent layer — which is also what the turn does. *)
+          let repository_freshness =
+            match
+              Keeper_sandbox_control.checkout_freshness_rows ~config ~meta:m ()
+            with
+            | Ok rows -> rows
+            | Error _ -> []
+          in
           Keeper_unified_prompt.build_prompt_preview ~meta:m ~config
             ~profile_defaults:defaults ~current_task ~active_goal_summaries
-            ~task_skill_surfaces ~observation ()
+            ~task_skill_surfaces ~repository_freshness ~observation ()
         in
         (* Match what a turn actually sends: the observation frame rides the
            per-turn dynamic context (system side), and the persisted user

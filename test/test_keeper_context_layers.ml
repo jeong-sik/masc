@@ -16,6 +16,7 @@ let all_layers =
     L.Approval_authority;
     L.Connected_surfaces;
     L.Namespace_state;
+    L.Repository_freshness;
     L.Autonomous_trigger;
     L.Scheduled_automation;
     L.Completion_authority;

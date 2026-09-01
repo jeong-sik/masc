@@ -6,6 +6,7 @@ type layer_id =
   | Approval_authority
   | Connected_surfaces
   | Namespace_state
+  | Repository_freshness
   | Autonomous_trigger
   | Scheduled_automation
   | Completion_authority
@@ -33,6 +34,7 @@ let ordered =
   ; Approval_authority
   ; Connected_surfaces
   ; Namespace_state
+  ; Repository_freshness
   ; Autonomous_trigger
   ; Scheduled_automation
   ; Completion_authority
@@ -55,16 +57,17 @@ let order_index = function
   | Approval_authority -> 2
   | Connected_surfaces -> 3
   | Namespace_state -> 4
-  | Autonomous_trigger -> 5
-  | Scheduled_automation -> 6
-  | Completion_authority -> 7
-  | Task_cancellations -> 8
-  | Pending_mentions -> 9
-  | Scope_messages -> 10
-  | Own_board_posts -> 11
-  | Board_activity -> 12
-  | Own_recent_actions -> 13
-  | Fleet_messages -> 14
+  | Repository_freshness -> 5
+  | Autonomous_trigger -> 6
+  | Scheduled_automation -> 7
+  | Completion_authority -> 8
+  | Task_cancellations -> 9
+  | Pending_mentions -> 10
+  | Scope_messages -> 11
+  | Own_board_posts -> 12
+  | Board_activity -> 13
+  | Own_recent_actions -> 14
+  | Fleet_messages -> 15
 ;;
 
 type retention =
@@ -87,6 +90,9 @@ let retention = function
   | Approval_authority -> Required
   | Connected_surfaces -> Required
   | Namespace_state -> Required
+  (* Bounded rows: checkout name, branch, and small ints — the discovery
+     itself caps the checkout count (Keeper_playground_checkouts). *)
+  | Repository_freshness -> Required
   | Autonomous_trigger -> Required
   | Scheduled_automation -> Required
   | Completion_authority -> Required

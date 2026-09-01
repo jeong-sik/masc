@@ -6240,7 +6240,8 @@ def project_changes_interaction(
     _base_path: str,
 ) -> None:
     """List an unregistered project's Git changes from Code, return to the
-    tree, then reopen the list and enter the selected file."""
+    tree, leave for Workspace with Esc at the root and walk back in, then
+    reopen the list and enter the selected file."""
     palette_go(process, master_fd, output, b"go code", b"README.md")
     changes_wide = send_and_wait(process, master_fd, output, b"d", b"lib/a.ml")
     changes_narrow = resize_and_wait(
@@ -6271,6 +6272,10 @@ def project_changes_interaction(
     tree = send_and_wait(process, master_fd, output, b"\x1b", b"README.md")
     if "MASC Git Changes" in CSI_RE.sub(b"", tree).decode("utf-8"):
         raise AssertionError("Esc did not return from project changes to Code")
+    # With nothing open and the project root under foot, Esc leaves for
+    # Workspace, the ring parent; the palette walks back in for the rest.
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Workspace")
+    palette_go(process, master_fd, output, b"go code", b"README.md")
     send_and_wait(process, master_fd, output, b"d", b"lib/a.ml")
     opened = send_and_wait(
         process, master_fd, output, b"\r", b"lib/a.ml  [j/k]"

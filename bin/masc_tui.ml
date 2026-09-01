@@ -2552,7 +2552,7 @@ let code_scope_codebase state =
                     "this repository's remote has no canonical slug, so \
                      it has no notes")))
   | Code_scope_keeper _ ->
-      Error "notes are scoped by repository; open the file from Repos"
+      Error "notes are scoped by repository; open the file from Workspace"
   | Code_scope_project ->
       Error "the project tree is not a registered repository; no notes here"
 
@@ -14334,7 +14334,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_create ()
             (* The route and its permission already existed; only the TUI had
-               no way to reach them, so Repos could list what was registered
+               no way to reach them, so Workspace could list what was registered
                and never register anything. *)
             | Repositories -> handle_repository_add ()
             | Verification ->

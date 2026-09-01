@@ -465,7 +465,7 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
              ; continuation_route = Keeper_unified_turn.Continuation_route_addressed
              }))
    with
-   | Keeper_heartbeat_loop.Batch_ack_durable_stimulus_yield -> ()
+   | Keeper_heartbeat_loop.Batch_ack_attention_only -> ()
    | _ ->
      fail
        "durable-stimulus checkpoint must advance attention-only sources before the newer source");
@@ -502,7 +502,7 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
 
 (* #32096: mismatch and missing/inapplicable receipt evidence say nothing
    about model intent, so the connector-attention row must not be recorded
-   as Ignored — [Batch_ack_durable_stimulus_yield] settles it as
+   as Ignored — [Batch_ack_attention_only] settles it as
    [Settle_pending_in_queue]. #32277: refusing the queue ACK as well
    replayed the same admitted batch into every later turn (one board post
    re-promoted 297 times, a 10-15s wake churn), so the completed turn still
@@ -515,7 +515,7 @@ let test_batch_disposition_keeps_unsettled_evidence_pending () =
          Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
            (Some (completed_outcome ~route meta))
        with
-       | Keeper_heartbeat_loop.Batch_ack_durable_stimulus_yield -> ()
+       | Keeper_heartbeat_loop.Batch_ack_attention_only -> ()
        | Keeper_heartbeat_loop.Batch_ack_completed _ ->
          fail
            "unsettled route evidence must not label the attention row \
@@ -697,7 +697,7 @@ let test_batch_turn_failure_leaves_every_member_queued () =
      with
      | Keeper_heartbeat_loop.Batch_no_action -> ()
      | Keeper_heartbeat_loop.Batch_ack_completed _
-     | Keeper_heartbeat_loop.Batch_ack_durable_stimulus_yield ->
+     | Keeper_heartbeat_loop.Batch_ack_attention_only ->
        fail "a failed turn must leave every admitted source pending");
     let queued =
       match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
@@ -766,7 +766,7 @@ let test_batch_completion_acks_every_member () =
            intake.consumed_selections
        in
        check bool "every batch member acks cleanly" true acked
-     | Keeper_heartbeat_loop.Batch_ack_durable_stimulus_yield ->
+     | Keeper_heartbeat_loop.Batch_ack_attention_only ->
        fail "a completed turn was classified as a checkpoint yield"
      | Keeper_heartbeat_loop.Batch_no_action ->
        fail "a completed, addressed outcome must drive Batch_ack_completed");
@@ -805,7 +805,7 @@ let test_every_terminalizing_disposition_settles_its_attention_rows () =
    | _ -> fail "an unfinished turn must not settle a still-pending row");
   (match
      Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
-       Keeper_heartbeat_loop.Batch_ack_durable_stimulus_yield
+       Keeper_heartbeat_loop.Batch_ack_attention_only
    with
    | Keeper_heartbeat_loop.Settle_pending_in_queue -> ()
    | _ -> fail "a checkpoint yield must not settle connector attention")

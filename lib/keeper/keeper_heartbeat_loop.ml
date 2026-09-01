@@ -365,16 +365,16 @@ let handle_cycle_exception ~base_path ~(meta : keeper_meta) exn =
 
 (* The queue records attention that a Keeper must observe, not provider health.
    A source normally leaves only after a completed turn has observed the
-   admitted batch. The narrow exception is a checkpoint caused by a newer
-   durable source: attention-only rows advance while the checkpoint preserves
-   the model continuation. Provider/config/context failures therefore leave
-   every source untouched; otherwise one runtime failure can terminally discard
-   an arbitrary batch of unrelated Board, Schedule, Task, or
-   completion-authority facts. *)
+   admitted batch. A durable-stimulus yield and the repeated-assistant-text
+   loop guard are narrow checkpoint exceptions: attention-only rows advance
+   after the continuation is durably preserved. Provider/config/context
+   failures therefore leave every source untouched; otherwise one runtime
+   failure can terminally discard an arbitrary batch of unrelated Board,
+   Schedule, Task, or completion-authority facts. *)
 type batch_disposition =
   | Batch_ack_completed of
       { connector_attention_outcome : connector_attention_outcome }
-  | Batch_ack_durable_stimulus_yield
+  | Batch_ack_attention_only
   | Batch_no_action
 
 let batch_disposition_of_cycle_outcome
@@ -403,24 +403,28 @@ let batch_disposition_of_cycle_outcome
           attention stays pending instead of gaining an evidence-free
           Ignored label (#32114 kept this narrow claim honest). The rest of
           the admitted batch is still consumed: the completed turn projected
-          those rows and chose its actions with them in view, and the
-          Durable_stimulus_arrived checkpoint below already acks them on a
-          weaker outcome. Refusing both here replayed the same board rows
-          into every later turn — one post re-promoted 297 times and a
-          10-15s wake churn (#32277). *)
-       Batch_ack_durable_stimulus_yield)
+          those rows and chose its actions with them in view. The
+          attention-only disposition preserves Connector attention while
+          advancing the rest. Refusing both replayed the same board rows into
+          every later turn — one post re-promoted 297 times and a 10-15s wake
+          churn (#32277). *)
+       Batch_ack_attention_only)
   | Some
       (Cycle.Checkpointed
-         { checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived
+         { checkpoint_reason =
+             ( Keeper_unified_turn.Durable_stimulus_arrived
+             | Keeper_unified_turn.Repeated_assistant_text )
          ; continuation_route = _
          ; _
          }) ->
     (* The admitted batch is an attention layer, not the continuation store.
        This checkpoint exists specifically because a newer durable source
-       arrived; retaining the older batch would replay it ahead of the new
-       source forever under continuous arrivals. Connector attention remains
-       pending until it has an exact reply/ignore settlement. *)
-    Batch_ack_durable_stimulus_yield
+       arrived or the typed loop guard durably preserved the turn after the
+       admitted attention was projected. Retaining the admitted batch in
+       either case replays the same attention into that continuation.
+       Connector attention remains pending until it has an exact reply/ignore
+       settlement. *)
+    Batch_ack_attention_only
   | Some
       ( Cycle.Failed _
       | Cycle.Checkpointed _
@@ -443,7 +447,12 @@ let connector_attention_settlement_of_disposition = function
     Settle_ignored
   (* The entry stays pending, so the turn that finally drains it owns the
      terminal event. Settling here would retire a row that is still live. *)
-  | Batch_ack_durable_stimulus_yield | Batch_no_action -> Settle_pending_in_queue
+  | Batch_ack_attention_only | Batch_no_action -> Settle_pending_in_queue
+;;
+
+let batch_disposition_records_continuation = function
+  | Batch_ack_completed _ | Batch_ack_attention_only -> true
+  | Batch_no_action -> false
 ;;
 
 
@@ -956,24 +965,13 @@ let run_keepalive_unified_turn
           ~selection
         |> record_terminal_selection_result ~label:"turn completion"
       in
-      let cycle_recorded_continuation =
-        match !cycle_outcome_ref with
-        | Some (Cycle.Completed _) -> true
-        | Some
-            (Cycle.Checkpointed
-               { checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived
-               ; _
-               }) ->
-          true
-        | Some
-            ( Cycle.Failed _
-            | Cycle.Checkpointed _
-            | Cycle.Input_required _
-            | Cycle.Cancelled _
-            | Cycle.Skipped _ )
-        | None -> false
+      let disposition =
+        batch_disposition_of_cycle_outcome !cycle_outcome_ref
       in
-      (match cycle_recorded_continuation, !hitl_resolution_for_cycle with
+      let disposition_records_continuation =
+        batch_disposition_records_continuation disposition
+      in
+      (match disposition_records_continuation, !hitl_resolution_for_cycle with
        | true, Some resolution ->
          (match
             Keeper_approval_queue.ensure_settled_continuation_chat_projection
@@ -1051,14 +1049,13 @@ let run_keepalive_unified_turn
              if all_acked && List.is_empty retained_selections
              then settle_connector_attention settlement
            in
-           let disposition = batch_disposition_of_cycle_outcome !cycle_outcome_ref in
            let settlement =
              connector_attention_settlement_of_disposition disposition
            in
            match disposition with
            | Batch_ack_completed _ ->
              remove_completed_selections ~should_ack:(fun _ -> true) ~settlement
-           | Batch_ack_durable_stimulus_yield ->
+           | Batch_ack_attention_only ->
              remove_completed_selections
                ~should_ack:(fun selection ->
                  match selection.Keeper_event_queue_state.source.payload with
@@ -1565,6 +1562,10 @@ let run_heartbeat_loop
 
 module For_testing = struct
   let consume_deferred_runtime_lane_hint = consume_deferred_runtime_lane_hint
+  let batch_disposition_records_continuation =
+    batch_disposition_records_continuation
+  ;;
+
   let rate_limited_backoff_sec = rate_limited_backoff_sec
   let next_keepalive_sleep_duration_sec = next_keepalive_sleep_duration_sec
 end

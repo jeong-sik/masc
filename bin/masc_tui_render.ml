@@ -12804,6 +12804,16 @@ let render_prompts (state : state) =
    of this screen is that colours are about to change. *)
 let chosen_mark = "\xe2\x9c\x93"
 
+(* Everything right of the theme name has a fixed cell budget: the palette
+   blocks, page kind, and contrast result. Give the name what remains, up to
+   the longest bundled name. Unlike a printf width this counts terminal cells
+   and truncates, so gruvbox-material-light-medium cannot push the next three
+   columns sideways. *)
+let theme_name_width ~cols =
+  let fixed_cells = 45 in
+  max 8 (min 29 (framed_inner_width cols - fixed_cells))
+;;
+
 let render_themes (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -12817,7 +12827,7 @@ let render_themes (state : state) =
   box_divider buf cols;
   let chosen = state.theme_choice in
   let entries = Theme_choice.entries () in
-  let content_height = max 1 (rows - 6) in
+  let content_height = max 1 (rows - 7) in
   let cursor = max 0 (min state.theme_cursor (List.length entries - 1)) in
   let scroll = max 0 (cursor - content_height + 1) in
   (* The count in the last column is the number of measured colours that sit
@@ -12827,10 +12837,17 @@ let render_themes (state : state) =
      different things, so the heading has to say which one, or a reader with
      the lift off reads "3 lifted" about three colours nothing lifted. *)
   let lift_on = Masc_tui_theme.lift_is_enabled () in
+  let name_width = theme_name_width ~cols in
   box_line_styled buf cols ~style:Ansi.dim
-    (Printf.sprintf "  %-26s %-18s %-9s %-12s" "theme" "colours" "page"
-       (if lift_on then "lifted" else "below floor"))
+    ("  " ^ fit_width "theme" (name_width + 2) ^ " "
+     ^ fit_width "colours" 16 ^ "  " ^ fit_width "page" 9 ^ " "
+     ^ fit_width "contrast" 12)
   ;
+  box_line_styled buf cols ~style:Ansi.dim
+    (if lift_on then
+       "  contrast: native=all 7 pass 4.5:1  lift N=N colours raised to pass"
+     else
+       "  contrast: native=all 7 pass 4.5:1  N low=N below floor (lift off)");
   List.iteri
     (fun index (entry : Theme_choice.entry) ->
       if index >= scroll && index < scroll + content_height then begin
@@ -12854,21 +12871,19 @@ let render_themes (state : state) =
                ^ "  \027[49m")
           |> String.concat ""
         in
-        (* Built in two halves with the swatch spliced between them, never
-           through a width specifier. OCaml pads by bytes, and a swatch is
-           mostly escape bytes -- run it through [%-24s] and the padding is
-           computed against the escapes, which then get cut mid-sequence and
-           printed as "49m". *)
+        (* Built in two halves with the swatch spliced between them. The name
+           is fitted before the ANSI swatch is attached: printf pads bytes,
+           not terminal cells, while [fit_width] keeps the following columns
+           fixed even for a long or wide name. The swatch itself must never
+           pass through a printf width because it is mostly escape bytes. *)
         let row =
-          Printf.sprintf "  %s %-24s "
-            (if picked then chosen_mark else " ")
-            (Terminal_text.single_line entry.name)
+          Printf.sprintf "  %s %s " (if picked then chosen_mark else " ")
+            (fit_width (Terminal_text.single_line entry.name) name_width)
           ^ swatch
-          ^ Printf.sprintf "  %-9s %-12s"
-              (if entry.light then "light" else "dark")
-              (match entry.lifted with
-               | 0 -> "none"
-               | count -> Printf.sprintf "%d of %d" count entry.measured)
+          ^ "  "
+          ^ fit_width (if entry.light then "light" else "dark") 9
+          ^ " "
+          ^ fit_width (Theme_choice.contrast_status ~lift_on entry) 12
         in
         if index = cursor then box_line_selected buf cols (Masc_tui_theme.strip_sgr row)
         else box_line buf cols row

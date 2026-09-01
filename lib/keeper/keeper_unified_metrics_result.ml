@@ -36,7 +36,29 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let observed_input_tokens = result.usage.input_tokens in
   let observed_output_tokens = result.usage.output_tokens in
   let observed_total_tokens = Inference_utils.total_tokens result.usage in
-  let turn_cost = estimate_usage_cost_usd result.usage in
+  (* Runtime usage is not necessarily a turn delta.  Official clients may
+     report the total for the whole resumed conversation; adding that value on
+     every Keeper cycle makes the aggregate grow quadratically.  Until the
+     runtime boundary supplies an exact per-request delta, only the typed
+     [Per_request] observation is additive.  The raw observation still becomes
+     the last-usage value below and remains available in Decision/TurnRecord
+     evidence with its scope. *)
+  let aggregate_input_tokens,
+      aggregate_output_tokens,
+      aggregate_total_tokens,
+      aggregate_cost =
+    match result.usage_reported, result.usage_scope with
+    | true, Runtime_usage_scope.Per_request ->
+      ( observed_input_tokens
+      , observed_output_tokens
+      , observed_total_tokens
+      , estimate_usage_cost_usd result.usage )
+    | ( false, _
+      | true,
+        ( Runtime_usage_scope.Conversation_cumulative
+        | Runtime_usage_scope.Usage_scope_unavailable ) ) ->
+      0, 0, 0, 0.0
+  in
   let has_substantive_tools = has_substantive_tool_calls tool_names in
   let has_text = String.trim result.response_text <> "" in
   (* Visible-output preview follows the typed result surface. *)
@@ -87,11 +109,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
             rt.usage with
             total_turns = rt.usage.total_turns + 1;
             total_input_tokens =
-              rt.usage.total_input_tokens + observed_input_tokens;
+              rt.usage.total_input_tokens + aggregate_input_tokens;
             total_output_tokens =
-              rt.usage.total_output_tokens + observed_output_tokens;
-            total_tokens = rt.usage.total_tokens + observed_total_tokens;
-            total_cost_usd = rt.usage.total_cost_usd +. turn_cost;
+              rt.usage.total_output_tokens + aggregate_output_tokens;
+            total_tokens = rt.usage.total_tokens + aggregate_total_tokens;
+            total_cost_usd = rt.usage.total_cost_usd +. aggregate_cost;
             last_turn_ts = now_ts;
             last_latency_ms = latency_ms;
           }

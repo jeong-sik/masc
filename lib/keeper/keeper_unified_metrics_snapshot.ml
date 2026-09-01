@@ -37,6 +37,8 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     if result.usage_reported then
       `Assoc
         ([
+          ( "usage_scope"
+          , `String (Runtime_usage_scope.to_string result.usage_scope) );
           ("input_tokens", `Int result.usage.input_tokens);
           ("output_tokens", `Int result.usage.output_tokens);
           ("cache_creation_tokens", `Int result.usage.cache_creation_input_tokens);
@@ -48,6 +50,8 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     else
       `Assoc
         ([
+          ( "usage_scope"
+          , `String (Runtime_usage_scope.to_string result.usage_scope) );
           ("input_tokens", `Null);
           ("output_tokens", `Null);
           ("cache_creation_tokens", `Null);

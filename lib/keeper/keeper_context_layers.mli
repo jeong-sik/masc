@@ -15,6 +15,7 @@
 type layer_id =
   | Active_goals
   | Current_task
+  | Approval_authority
   | Connected_surfaces
   | Namespace_state
   | Autonomous_trigger

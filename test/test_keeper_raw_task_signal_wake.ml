@@ -13,6 +13,8 @@ let base_observation : WO.world_observation =
   ; held_task_skills = []
   ; failed_task_count = 0
   ; scheduled_automation = WO.empty_scheduled_automation_observation
+  ; approval_authority =
+      { revision = 1; state = WO.Approval_authority_complete; pending = [] }
   ; backlog_revision = Some 1
   ; running_keeper_fiber_count = 1
   ; connected_surfaces = []

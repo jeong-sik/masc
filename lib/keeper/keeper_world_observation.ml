@@ -154,6 +154,73 @@ let empty_scheduled_automation_observation =
   }
 ;;
 
+type pending_approval_observation =
+  { approval_id : string
+  ; tool_name : string
+  ; sequence : int
+  ; requested_at : float
+  ; task_id : string option
+  ; goal_id : string option
+  }
+
+type approval_authority_state =
+  | Approval_authority_complete
+  | Approval_authority_partial of { read_error_count : int }
+  | Approval_authority_unavailable of { reason : string }
+
+type approval_authority_observation =
+  { revision : int
+  ; state : approval_authority_state
+  ; pending : pending_approval_observation list
+  }
+
+let pending_approval_observation_of_entry
+      (entry : Keeper_approval_queue_rules_types.pending_approval)
+  =
+  { approval_id = entry.id
+  ; tool_name = entry.tool_name
+  ; sequence = entry.sequence
+  ; requested_at = entry.requested_at
+  ; task_id = entry.task_id
+  ; goal_id = entry.goal_id
+  }
+;;
+
+let read_approval_authority_observation
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+  =
+  match
+    Keeper_approval_queue.pending_entries_snapshot_for_workspace
+      ~base_path:config.base_path
+  with
+  | Error error ->
+    { revision =
+        Keeper_approval_queue.store_revision_for_workspace
+          ~base_path:config.base_path
+    ; state =
+        Approval_authority_unavailable
+          { reason = Keeper_approval_queue.storage_error_to_string error }
+    ; pending = []
+    }
+  | Ok snapshot ->
+    let pending =
+      snapshot.entries
+      |> List.filter (fun
+        (entry : Keeper_approval_queue_rules_types.pending_approval) ->
+        String.equal entry.keeper_name meta.name)
+      |> List.map pending_approval_observation_of_entry
+    in
+    let state =
+      match snapshot.read_errors with
+      | [] -> Approval_authority_complete
+      | _ ->
+        Approval_authority_partial
+          { read_error_count = List.length snapshot.read_errors }
+    in
+    { revision = snapshot.revision; state; pending }
+;;
+
 module Inputs = Keeper_world_observation_inputs
 
 type world_observation =
@@ -166,6 +233,7 @@ type world_observation =
   ; held_task_skills : Inputs.held_task_skills list
   ; failed_task_count : int
   ; scheduled_automation : scheduled_automation_observation
+  ; approval_authority : approval_authority_observation
   ; backlog_revision : int option
   ; running_keeper_fiber_count : int
   ; connected_surfaces : Gate_surface.surface_presence list
@@ -1358,6 +1426,7 @@ let observe
       ~config
       ~now:(Time_compat.now ())
   in
+  let approval_authority = read_approval_authority_observation ~config ~meta in
   let pending_board_events =
     match pending_board_events with
     | Some events -> events
@@ -1379,6 +1448,7 @@ let observe
   ; held_task_skills = backlog_snapshot.held_task_skills
   ; failed_task_count
   ; scheduled_automation
+  ; approval_authority
   ; backlog_revision
   ; running_keeper_fiber_count
   ; connected_surfaces = surface_presence.surfaces
@@ -1406,6 +1476,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
       ~config
       ~now:(Time_compat.now ())
   in
+  let approval_authority = read_approval_authority_observation ~config ~meta in
   let surface_presence =
     Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name
   in
@@ -1418,6 +1489,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; held_task_skills = backlog_snapshot.held_task_skills
   ; failed_task_count
   ; scheduled_automation
+  ; approval_authority
   ; backlog_revision
   ; running_keeper_fiber_count = count_running_keeper_fibers ~config
   ; connected_surfaces = surface_presence.surfaces
@@ -1641,4 +1713,3 @@ let keeper_cycle_decision
         ; verdict = Skip { reasons = Reactive_disabled, [] }
         })
 ;;
-

@@ -23,6 +23,7 @@ module Registry_queue = Masc.Keeper_registry_event_queue
 module Event_queue_persistence = Keeper_event_queue_persistence
 module Reaction_ledger = Masc.Keeper_reaction_ledger
 module Chat_store = Masc.Keeper_chat_store
+module World_observation = Masc.Keeper_world_observation
 
 (* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
    reproduces its unit projection over [resolve_with_policy] so these
@@ -342,6 +343,80 @@ let test_multiple_resolution_projections_keep_fifo_order () =
        in
        Alcotest.(check (list string)) "chat projection preserves resolution FIFO"
          [ first; second ] projected_ids)
+;;
+
+let test_world_observation_reconciles_resolved_approval_out_of_pending () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-world-reconcile" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let config = Masc.Workspace.default_config base_path in
+       let meta =
+         match
+           Masc_test_deps.meta_of_json_fixture
+             (`Assoc
+                [ "name", `String keeper_name
+                ; "trace_id", `String ("trace-" ^ keeper_name)
+                ])
+         with
+         | Ok meta -> meta
+         | Error detail -> Alcotest.fail detail
+       in
+       (match Masc.Keeper_meta_store.replace_snapshot config meta with
+        | Ok () -> ()
+        | Error detail -> Alcotest.fail detail);
+       let approval_id =
+         submit_with_context
+           ~task_id:"task-1037"
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "command", `String "git fetch origin main" ])
+           ()
+       in
+       let before =
+         World_observation.read_approval_authority_observation ~config ~meta
+       in
+       (match before.state with
+        | World_observation.Approval_authority_complete -> ()
+        | Approval_authority_partial _ | Approval_authority_unavailable _ ->
+          Alcotest.fail "fresh pending store was not complete");
+       Alcotest.(check (list string))
+         "the exact pending id is current"
+         [ approval_id ]
+         (List.map
+            (fun
+              (row : World_observation.pending_approval_observation) ->
+               row.approval_id)
+            before.pending);
+       reject_and_cleanup ~base_path approval_id;
+       let after =
+         World_observation.read_approval_authority_observation ~config ~meta
+       in
+       (match after.state with
+        | World_observation.Approval_authority_complete -> ()
+        | Approval_authority_partial _ | Approval_authority_unavailable _ ->
+          Alcotest.fail "resolved store was not complete");
+       Alcotest.(check int)
+         "the resolved approval is no longer pending"
+         0
+         (List.length after.pending);
+       Alcotest.(check bool)
+         "resolution advances the same snapshot revision"
+         true
+         (after.revision > before.revision);
+       let rendered =
+         Masc.Keeper_unified_prompt.format_approval_authority_observation after
+       in
+       Alcotest.(check bool)
+         "the next turn explicitly invalidates the historical pending claim"
+         true
+         (String_util.contains_substring
+            rendered
+            "Only listed IDs are pending; absent historical IDs are stale"))
 ;;
 
 (* The measured 2026-08-16 incident, end to end: the retry lands after the
@@ -5021,6 +5096,10 @@ let () =
             "multiple resolution projections keep FIFO order"
             `Quick
             test_multiple_resolution_projections_keep_fifo_order
+        ; Alcotest.test_case
+            "world observation reconciles resolved approval out of pending"
+            `Quick
+            test_world_observation_reconciles_resolved_approval_out_of_pending
         ; Alcotest.test_case
             "terminal head does not stall the owner queue"
             `Quick

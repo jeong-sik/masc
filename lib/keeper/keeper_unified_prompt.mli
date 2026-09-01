@@ -64,6 +64,12 @@ val format_current_task_observation
     provenance, and handoff as an autonomous wake without persisting that
     context. Storage error text is not model-facing content. *)
 
+val format_approval_authority_observation :
+  Keeper_world_observation.approval_authority_observation -> string
+(** Render the current durable Gate projection. A complete empty projection is
+    explicit so old chat claims about pending approvals cannot silently remain
+    current; partial/unavailable projections forbid that inference. *)
+
 val effective_instructions :
   meta:Keeper_meta_contract.keeper_meta ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->

@@ -133,6 +133,41 @@ type scheduled_automation_observation = {
 
 val empty_scheduled_automation_observation : scheduled_automation_observation
 
+(** One exact Gate request that is still pending for this Keeper. The
+    observation deliberately omits the effect input: current-state
+    reconciliation needs the approval identity and scope, not another copy of
+    potentially large or sensitive arguments. *)
+type pending_approval_observation = {
+  approval_id : string;
+  tool_name : string;
+  sequence : int;
+  requested_at : float;
+  task_id : string option;
+  goal_id : string option;
+}
+
+(** Whether the pending-approval projection is complete. [Partial] and
+    [Unavailable] are distinct from a readable empty result: neither permits a
+    Keeper to infer that an approval mentioned in history has resolved. *)
+type approval_authority_state =
+  | Approval_authority_complete
+  | Approval_authority_partial of { read_error_count : int }
+  | Approval_authority_unavailable of { reason : string }
+
+type approval_authority_observation = {
+  revision : int;
+  state : approval_authority_state;
+  pending : pending_approval_observation list;
+}
+
+val read_approval_authority_observation :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  approval_authority_observation
+(** Read the current durable Gate authority for one Keeper. A complete empty
+    [pending] list is affirmative current state, not an omitted observation.
+    Storage failures remain typed instead of collapsing to zero. *)
+
 (** Snapshot of the world as seen by a keeper at heartbeat time. *)
 type world_observation = {
   pending_messages : Keeper_world_observation_message_scope.pending_message list;
@@ -166,6 +201,11 @@ type world_observation = {
   scheduled_automation : scheduled_automation_observation;
   (** Durable schedule-store state that needs keeper attention, such as due
       requests ready to dispatch. *)
+
+  approval_authority : approval_authority_observation;
+  (** Current pending-approval authority, re-read for every direct or
+      autonomous turn. This is the typed current-state counterpart to
+      historical chat instructions that mention an approval. *)
 
   backlog_revision : int option;
   (** The backlog commit revision observed through the recovery-backed read.
@@ -405,4 +445,3 @@ val has_pending_board_activity : world_observation -> bool
 val keeper_cycle_decision :
   ?event_queue_triggers:event_queue_trigger list ->
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
-

@@ -1015,6 +1015,11 @@ let () =
       ; failed_task_count = 0
       ; scheduled_automation =
           Masc.Keeper_world_observation.empty_scheduled_automation_observation
+      ; approval_authority =
+          { revision = 1
+          ; state = Masc.Keeper_world_observation.Approval_authority_complete
+          ; pending = []
+          }
       ; backlog_revision = Some 1
       ; running_keeper_fiber_count = 0
       ; connected_surfaces = []

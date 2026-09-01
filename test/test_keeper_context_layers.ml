@@ -13,6 +13,7 @@ let all_layers =
   [
     L.Active_goals;
     L.Current_task;
+    L.Approval_authority;
     L.Connected_surfaces;
     L.Namespace_state;
     L.Autonomous_trigger;

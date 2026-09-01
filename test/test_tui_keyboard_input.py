@@ -4319,17 +4319,21 @@ def paste_spill_interaction(requests: HttpRequests) -> Interaction:
 
 
 def seed_playground_workspace(base_path: str) -> None:
-    """Give alpha the directory a local keeper reads its files from.
+    """Give alpha the directory a Docker keeper reads its files from.
 
-    A keeper reads paths relative to its own sandbox root. For a local
-    keeper that is .masc/playground/<name>/; a Docker one has a `docker`
-    directory in the middle. Declaring the profile here is what makes this
-    scenario about the first."""
+    A keeper reads paths relative to its own sandbox root, and the root the
+    profile names is the one that has to exist: a Docker keeper's is
+    .masc/playground/docker/<name>/. Seeding .masc/playground/<name>/
+    instead leaves the declared root absent, and the TUI then has nowhere to
+    write -- it falls back to sending the text, and no file is written at
+    all."""
     Path(base_path, ".masc", "config", "keepers").mkdir(parents=True, exist_ok=True)
     Path(base_path, ".masc", "config", "keepers", "alpha.toml").write_text(
         '[keeper]\nsandbox_profile = "docker"\n', encoding="utf-8"
     )
-    Path(base_path, ".masc", "playground", "alpha").mkdir(parents=True, exist_ok=True)
+    Path(base_path, ".masc", "playground", "docker", "alpha").mkdir(
+        parents=True, exist_ok=True
+    )
 
 
 def paste_to_file_interaction(requests: HttpRequests) -> Interaction:
@@ -4374,7 +4378,7 @@ def paste_to_file_interaction(requests: HttpRequests) -> Interaction:
         )
         message = json.loads(body).get("message") or ""
 
-        playground = Path(base_path, ".masc", "playground", "alpha")
+        playground = Path(base_path, ".masc", "playground", "docker", "alpha")
         written = sorted(playground.glob("pasted-*.txt"))
         if len(written) != 1:
             raise AssertionError(

@@ -250,8 +250,8 @@ let handle_initialize_eio ?(profile = Full) id params =
                , `String
                    (match profile with
                     | Full -> TP.default_instructions ()
-                    | Managed_agent -> TP.managed_agent_instructions
-                    | Operator_remote -> TP.operator_remote_instructions) )
+                    | Managed_agent -> TP.managed_agent_instructions ()
+                    | Operator_remote -> TP.operator_remote_instructions ()) )
              ; ( "_meta"
                , `Assoc
                    (Mcp_server.meta_field
@@ -270,8 +270,8 @@ let handle_initialize_eio ?(profile = Full) id params =
 
 let profile_instructions = function
   | Full -> TP.default_instructions ()
-  | Managed_agent -> TP.managed_agent_instructions
-  | Operator_remote -> TP.operator_remote_instructions
+  | Managed_agent -> TP.managed_agent_instructions ()
+  | Operator_remote -> TP.operator_remote_instructions ()
 ;;
 
 let handle_server_discover_eio ?(profile = Full) id =

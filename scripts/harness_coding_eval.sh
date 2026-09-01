@@ -295,8 +295,18 @@ start_live_server() {
   fi
 }
 
+harness_prompt_asset() {
+  local name="$1"
+  local path="${ROOT_DIR}/config/prompts/${name}.txt"
+  if [[ ! -r "${path}" ]]; then
+    echo "missing required harness prompt asset: ${path}" >&2
+    return 1
+  fi
+  cat "${path}"
+}
+
 coding_keeper_instructions() {
-  printf '%s\n' "너는 coding-outcome eval 전용 keeper다. 주어진 워크스페이스 디렉터리 안에서만 파일을 읽고 수정한다. 먼저 검사를 실행해 실패를 눈으로 확인하고, 원인을 고친 뒤, 같은 검사가 통과하는 것을 확인하고 나서 DONE이라고 답한다. 검사 스크립트 자체는 수정하지 않는다."
+  harness_prompt_asset "harness.coding_keeper"
 }
 
 keeper_tool_call_names() {

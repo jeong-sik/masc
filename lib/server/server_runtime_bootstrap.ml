@@ -1217,6 +1217,13 @@ let validate_embedded_tool_definitions () =
   | Ok () -> ()
   | Error message -> failwith (Printf.sprintf "embedded tool definition: %s" message)
 
+let bootstrap_prompt_assets () =
+  sync_managed_assets_from_binary
+    ~label:"prompt"
+    ~domain:Managed_asset_sync.Prompts
+    ~dest_dir:(Config_dir_resolver.prompts_dir ())
+    ()
+
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
@@ -1224,11 +1231,7 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
   (* Converge the runtime prompt markdown and tool definition dirs onto the
      binary-embedded assets before anything scans them (#20929: merged
      prompt edits never reached the runtime dir otherwise). *)
-  sync_managed_assets_from_binary
-    ~label:"prompt"
-    ~domain:Managed_asset_sync.Prompts
-    ~dest_dir:(Config_dir_resolver.prompts_dir ())
-    ();
+  bootstrap_prompt_assets ();
   sync_managed_assets_from_binary
     ~label:"tool"
     ~domain:Managed_asset_sync.Tools

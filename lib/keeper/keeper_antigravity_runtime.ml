@@ -88,8 +88,17 @@ let extra_system_context_messages messages =
     messages
 ;;
 
-let system_instructions_label = "SYSTEM INSTRUCTIONS:\n"
-let current_goal_label = "CURRENT GOAL:\n"
+let prompt_label key =
+  let prompt = Prompt_registry.get_prompt key in
+  if String.trim prompt = "" then invalid_arg ("missing required Antigravity prompt: " ^ key)
+  else String.trim prompt ^ "\n"
+
+let system_instructions_label () =
+  prompt_label Prompt_names.keeper_antigravity_system_instructions_label
+
+let current_goal_label () =
+  prompt_label Prompt_names.keeper_antigravity_current_goal_label
+
 let prompt_section_separator = "\n\n"
 
 let measure_model_input_message_bytes (message : Agent_core.Types.message) =
@@ -119,9 +128,9 @@ let measure_model_input_message_bytes (message : Agent_core.Types.message) =
    plus one separator; charging a separator for the last message too is a
    deliberate conservative byte that keeps the rendered prompt within the
    declared cap without depending on deployment margin. *)
-let prompt_section_framing_reserved_bytes =
-  String.length system_instructions_label
-  + String.length current_goal_label
+let prompt_section_framing_reserved_bytes () =
+  String.length (system_instructions_label ())
+  + String.length (current_goal_label ())
   + (2 * String.length prompt_section_separator)
 ;;
 
@@ -181,7 +190,7 @@ let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
     let reserved_bytes =
       String.length system_prompt
       + String.length goal
-      + prompt_section_framing_reserved_bytes
+      + prompt_section_framing_reserved_bytes ()
     in
     if reserved_bytes >= capacity_bytes
     then
@@ -220,9 +229,9 @@ let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
     let* history = render_messages prepared.messages in
     Ok
       ([ String_util.trim_nonempty prepared.system_prompt
-         |> Option.map (fun value -> system_instructions_label ^ value)
+         |> Option.map (fun value -> system_instructions_label () ^ value)
       ; String_util.trim_nonempty history
-      ; Some (current_goal_label ^ goal)
+      ; Some (current_goal_label () ^ goal)
       ]
       |> List.filter_map Fun.id
       |> String.concat prompt_section_separator)
@@ -1104,6 +1113,6 @@ module For_testing = struct
   let reserved_prompt_bytes ~system_prompt ~goal =
     String.length system_prompt
     + String.length goal
-    + prompt_section_framing_reserved_bytes
+    + prompt_section_framing_reserved_bytes ()
   ;;
 end

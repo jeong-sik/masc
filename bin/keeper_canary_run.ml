@@ -707,6 +707,13 @@ let resolve_base_path (args : args) : (string, string) result =
 let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
   (Keeper_canary_evidence.run_evidence, string) result
   =
+  Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
+  Server_runtime_bootstrap.bootstrap_prompt_assets ();
+  ignore
+    (Masc.Prompt_defaults.bootstrap_runtime
+       ~workspace_path:base_path
+       ~base_path
+     : string);
   let ( let* ) = Result.bind in
   (
     (* [--host] says where to reach the server. Without it the server is the one
@@ -980,7 +987,7 @@ let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
       ; recall =
           { turn_index = recall_draft.index
           ; request_id = recall_draft.request_id
-          ; prompt = Keeper_canary_facts.recall_prompt
+          ; prompt = Keeper_canary_facts.recall_prompt ()
           ; reply = recall_draft.reply_text
           }
       ; timing
@@ -1079,7 +1086,7 @@ let make_judge ~sw ~net ~clock ~judge_runtime : judge_fn =
             }
           in
           let messages =
-            [ message Agent_core.Types.System Keeper_canary_judge.system_prompt
+            [ message Agent_core.Types.System (Keeper_canary_judge.system_prompt ())
             ; message
                 Agent_core.Types.User
                 (Keeper_canary_judge.compose_prompt ~facts ~recall_reply)

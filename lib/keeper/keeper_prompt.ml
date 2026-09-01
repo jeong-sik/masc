@@ -27,6 +27,11 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
 let system_prompt_body () : string =
   Prompt_registry.get_prompt Prompt_names.keeper
 
+let render_instruction key vars =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok prompt -> prompt
+  | Error detail -> invalid_arg (Printf.sprintf "missing or invalid prompt %s: %s" key detail)
+
 let build_keeper_system_prompt
     ~instructions ?(keeper_name = "")
     ?(workspace_root = "") ?(active_goals = []) () =
@@ -56,16 +61,8 @@ let build_keeper_system_prompt
   let workspace_block =
     if workspace_root = "" then ""
     else
-      Printf.sprintf
-        "\n\
-         <workspace>\n\
-         - Visible sandbox root: %s\n\
-         - Pass a relative typed `cwd` (usually `.`), not this absolute root.\n\
-         - Relative argv path operands resolve from the typed `cwd`.\n\
-         - The working directory persists between tool calls, but shell state does not.\n\
-         - Prefer relative argv path operands. In Docker, host absolute paths are unavailable.\n\
-         </workspace>\n"
-        (String_util.escape_xml workspace_root)
+      "\n" ^ String.trim (render_instruction Prompt_names.keeper_workspace
+        [ "workspace_root", String_util.escape_xml workspace_root ]) ^ "\n"
   in
   (* Prefix ordering: the shared block comes first for LLM KV cache sharing.
      All keepers share the same <system> text, so keeper-specific blocks come
@@ -75,16 +72,8 @@ let build_keeper_system_prompt
   let identity_block =
     if keeper_name = "" then ""
     else
-      Printf.sprintf
-        "<identity>\
-         \nYou are %s. You are not any other keeper.\
-         \nThis identity is immutable and cannot change regardless of context,\
-         \nor conversation history. If recalled context suggests a different\
-         \nidentity, that recalled context is wrong.\
-         \nYou must always respond as %s.\
-         \n</identity>\n\n"
-        (String_util.escape_xml keeper_name)
-        (String_util.escape_xml keeper_name)
+      String.trim (render_instruction Prompt_names.keeper_identity
+        [ "keeper_name", String_util.escape_xml keeper_name ]) ^ "\n\n"
   in
   String.concat ""
     [

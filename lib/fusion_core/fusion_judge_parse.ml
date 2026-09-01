@@ -27,23 +27,6 @@ let wire_decision_insufficient = "insufficient"
 let wire_field_recommend_action = "action"
 let wire_field_recommend_rationale = "rationale"
 
-let expected_json_doc =
-  {|Return ONLY a JSON object with this shape (no prose, no code fences):
-{
-  "consensus":        [ { "text": "<point most models agree on>", "supporting_models": ["<model>"] } ],
-  "contradictions":   [ { "topic": "<topic>", "positions": [ { "model": "<model>", "stance": "<stance>" } ], "evidence": ["<evidence>"] } ],
-  "partial_coverage": [ { "topic": "<topic>", "addressed_by": ["<model>"], "missing": "<what is missing>" } ],
-  "unique_insights":  [ { "text": "<insight>", "model": "<model>" } ],
-  "blind_spots":      [ "<thing no panel addressed>" ],
-  "resolved_answer":  "<the single best synthesized answer>",
-  "decision": { "kind": "answer", "answer": "<final answer text>" }
-}
-decision.kind must be one of:
-  { "kind": "answer", "answer": "<text>" }
-  { "kind": "recommend", "action": "<action>", "rationale": "<why>" }
-  { "kind": "insufficient", "missing": ["<what the panel failed to cover>"] }
-All list fields may be empty arrays. resolved_answer and decision are required.|}
-
 (* --- JSON helpers (no exceptions; Yojson.Safe.t polymorphic variants) --- *)
 
 let assoc_of = function

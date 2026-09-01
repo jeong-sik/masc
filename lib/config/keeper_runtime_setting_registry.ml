@@ -158,7 +158,7 @@ let all =
       ~env_name:"MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT"
       ~exposure:(Toml_and_env "autonomous.wake_prompt")
       ~value_kind:String
-      ~default:"지금은 자율 턴입니다. 위 World State 와 직전 턴들이 남긴 것을 먼저 읽고, 이어서 할 일을 고릅니다."
+      ~default:Env_config_keeper.KeeperAutonomous.default_wake_prompt
       ~reload_class:Next_turn
       ~consumers:[ "Keeper_unified_prompt" ]
       ~category:"lifecycle"

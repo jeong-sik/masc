@@ -112,7 +112,7 @@ let test_plan_orders_facts_then_one_recall_turn () =
   (match recall_entries with
    | [ recall ] ->
      Alcotest.(check int) "recall is the last index" 5 recall.index;
-     Alcotest.(check string) "recall message is the fixed prompt" Keeper_canary_facts.recall_prompt recall.message
+     Alcotest.(check string) "recall message is the configured prompt" (Keeper_canary_facts.recall_prompt ()) recall.message
    | _ -> Alcotest.fail "expected exactly one recall entry")
 
 let test_plan_fact_entries_carry_their_own_statement () =
@@ -129,7 +129,7 @@ let test_plan_on_zero_facts_is_just_the_recall_turn () =
   let plan = Keeper_canary_facts.plan ~facts:[] in
   match plan with
   | [ { index = 1; category = None; message } ] ->
-    Alcotest.(check string) "recall message" Keeper_canary_facts.recall_prompt message
+    Alcotest.(check string) "recall message" (Keeper_canary_facts.recall_prompt ()) message
   | _ -> Alcotest.fail "expected a single recall-only entry at index 1"
 
 let test_score_all_recalled_in_order_is_pass_shaped () =

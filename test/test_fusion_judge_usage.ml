@@ -71,6 +71,23 @@ let test_prompt_escapes_all_xml_entities () =
     (String_util.contains_substring prompt
        ("<question>" ^ untrusted ^ "</question>"))
 
+let test_external_output_contract_covers_parser_wire_fields () =
+  let contract = Prompt_registry.get_prompt Prompt_names.fusion_judge_output in
+  check bool "output contract is a registered external asset" true
+    (String.length (String.trim contract) > 0);
+  List.iter
+    (fun field ->
+       check bool ("contract names parser field " ^ field) true
+         (String_util.contains_substring contract ("\"" ^ field ^ "\"")))
+    [ Fusion_judge_parse.wire_field_consensus
+    ; Fusion_judge_parse.wire_field_contradictions
+    ; Fusion_judge_parse.wire_field_partial_coverage
+    ; Fusion_judge_parse.wire_field_unique_insights
+    ; Fusion_judge_parse.wire_field_blind_spots
+    ; Fusion_judge_parse.wire_field_resolved_answer
+    ; Fusion_judge_parse.wire_field_decision
+    ]
+
 (* 패널 계약 = free text (2026-07-01 사고 회귀 가드). prose가 그대로 답변이 된다 —
    JSON envelope 파싱이 없으므로 "provider가 schema를 무시해 prose를 반환"하는
    실패 모드 자체가 존재하지 않는다. *)
@@ -362,6 +379,10 @@ let () =
             "clears wire response format"
             `Quick
             test_output_contract_clears_wire_response_format
+        ; test_case
+            "external output contract covers parser wire fields"
+            `Quick
+            test_external_output_contract_covers_parser_wire_fields
         ; test_case "escapes all XML entities at prompt boundaries" `Quick
             test_prompt_escapes_all_xml_entities
         ] )

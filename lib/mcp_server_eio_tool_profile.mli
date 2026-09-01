@@ -37,9 +37,9 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
 
 (** {1 Profile-specific instructions}
 
-    Pinned literals served as the [instructions] field on each
-    [initialize] response.  Operator-visible — drift in these
-    strings changes how clients describe / discover the server. *)
+    Operator-managed prompt assets served as the [instructions] field on each
+    [initialize] response. Operator-visible — drift in these strings changes
+    how clients describe / discover the server. *)
 
 val default_instructions : unit -> string
 (** [default_instructions ()] returns [Full] profile instructions. Describes
@@ -47,12 +47,12 @@ val default_instructions : unit -> string
     names no tool as a thing to call: the typed schema is the callable
     catalog. *)
 
-val managed_agent_instructions : string
+val managed_agent_instructions : unit -> string
 (** [Managed_agent] profile instructions.  States that the profile exposes
     the internal agent control surface, and warns that the public /mcp
     surface and the managed-agent surface diverge in inventory. *)
 
-val operator_remote_instructions : string
+val operator_remote_instructions : unit -> string
 (** [Operator_remote] profile instructions.  Names the 6 operator
     tools ([masc_operator_snapshot], [masc_operator_digest],
     [masc_operator_action],

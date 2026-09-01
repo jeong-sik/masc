@@ -10,17 +10,14 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Managed_agent
   | Operator_remote
 
-let operator_remote_instructions =
-  "MASC remote operator profile exposes six operator tools: \
-masc_operator_snapshot, masc_operator_digest, masc_operator_action, masc_operator_board_attention_quarantine_requeue, masc_operator_task_recovery_resolve, and masc_operator_confirm. \
-masc_operator_board_attention_quarantine_requeue accepts only with the exact Keeper, partition, candidate, and quarantine id observed from durable state; it never auto-retries. \
-masc_operator_task_recovery_resolve accepts only the exact task owner and backlog version observed from Task state; it performs no liveness inference. \
-When confirm_required=true, you must call masc_operator_confirm with the returned confirm_token before the action executes. \
-Do not assume access to any other MASC tool from this endpoint."
+let instruction key =
+  let value = Prompt_registry.get_prompt key in
+  if String.trim value = "" then invalid_arg ("missing required MCP prompt: " ^ key)
+  else value
 
-let managed_agent_instructions =
-  "MASC managed-agent profile exposes the internal agent control surface. \
-Do not assume that the public /mcp surface and the managed-agent surface have the same inventory."
+let operator_remote_instructions () = instruction Prompt_names.mcp_operator_remote
+
+let managed_agent_instructions () = instruction Prompt_names.mcp_managed_agent
 
 let managed_agent_passthrough_tool_names =
   Tool_catalog_surfaces.spawned_agent_surface_tools
@@ -41,12 +38,7 @@ let managed_agent_passthrough_tool_set : (string, unit) Hashtbl.t =
 module StringSet = Set_util.StringSet
 module StringMap = Set_util.StringMap
 
-let default_instructions () =
-  "MASC (Multi-Agent Streaming Workspace) enables AI agent collaboration. \
-PROJECT: Agents sharing the same base path (.masc/ folder) align together. \
-CLUSTER: Set MASC_CLUSTER_NAME for multi-machine workspace (otherwise tool surfaces use the configured cluster/default label). \
-READ: use resources/list + resources/read (status/tasks/agents/events/schema) for snapshots. \
-WRITE: task state changes are CAS-guarded; pass expected_version."
+let default_instructions () = instruction Prompt_names.mcp_full
 
 let tool_schemas_for_profile ?(include_hidden = false)
     _state profile =

@@ -1,0 +1,16 @@
+[2026-09-01 05:18:48] [INFO] [MCP] Tag registry initialized: 126 tools registered
+[2026-09-01 05:18:48] [INFO] [Misc] model_catalog: deployment overlay /Users/dancer/me/.masc/config/agent-core-models-overlay.toml installed onto embedded catalog
+probing 1 runtime(s) x 1 projected tool(s) x 1 attempt(s)
+  antigravity_subscription.gemini-3-5-flash-low  keeper_time_now        #1  provider rejected: Antigravity turn failed: invalid model selection (--model "gemini-3.5-flash-low" --effort ""): model gemini-3.5-flash-low is not recognized as a known model or custom model in settings
+Available models:
+  Gemini 3.7 Flash (High)
+  Gemini 3.7 Flash (Medium)
+  Gemini 3.7 Flash (Low)
+  Gemini 3.6 Flash (High)
+  Gemini 3.6 Flash (Medium)
+  Gemini 3.6 Flash (Low)
+  Gemini 3.1 Pro (High)
+  Gemini 3.1 Pro (Low)
+  Claude Sonnet 4.6 (Thinking)
+  Claude Opus 4.6 (Thinking)
+  GPT-OSS 120B (Medium)

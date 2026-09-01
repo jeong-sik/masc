@@ -1,0 +1,239 @@
+{
+  "task": "task-362",
+  "title": "[evidence] Prove official-client tool/context truth on an exact-revision live binary",
+  "generated_at": "2026-09-01T06:00:00Z",
+  "measured_by": "polisher",
+  "identity_note": "evidence produced by polisher (keeper); measurements are live runs, not simulations",
+  "source": {
+    "repo": "https://github.com/jeong-sik/masc",
+    "clone_command": "gh repo clone jeong-sik/masc -- --depth 50",
+    "code_revision_sha": "8ef224aa3fa47c8348a783219136017aa75e0e53",
+    "evidence_branch": "polish/task-362-official-client-live-truth",
+    "evidence_branch_head": "0b6a46b62ea8b7de639943912638c1936134c441",
+    "branch_delta_note": "evidence commits add docs/evidence only; no code change between code_revision_sha and evidence_branch_head",
+    "binary": "_build/default/bin/keeper_capability_probe_cli.exe",
+    "binary_sha256": "a14b4a4b77feb890d6f2acd7b3c033b00fa6a6fbc550c93890f404db6f04b31f",
+    "build_command": "dune build --root .",
+    "build_exit": 0
+  },
+  "environment": {
+    "base_path": "/Users/dancer/me",
+    "masc_base_path_env": "/Users/dancer/me",
+    "deployment_overlay": "/Users/dancer/me/.masc/config/agent-core-models-overlay.toml",
+    "deployment_overlay_sha256": "ad10e314b88fbce414e1fc25d681777608da54676ab685dbac31db17336e1249",
+    "repo_runtime_catalog": "config/runtime.toml",
+    "repo_runtime_catalog_sha256": "27d5d5f52271cc102446e7b7d082420f5a11bff95c38b3c8ea16ada16106582b",
+    "measurement_window": "2026-09-01T04:53:00Z/2026-09-01T05:49:00Z"
+  },
+  "surface_pass": {
+    "command": "_build/default/bin/keeper_capability_probe_cli.exe --base-path /Users/dancer/me --surface-only --tool <each of 83 tools>",
+    "tools_total": 83,
+    "projected": 83,
+    "operator_only": 0,
+    "aliased": 0,
+    "withheld_by_schema_error": 0,
+    "raw_output": "task-362-surface.jsonl",
+    "raw_output_sha256": "f2c621b02e9b5c583ccb924a2f7d97f8aa1ff2e14da00b658665b55f44fceb30",
+    "tool_name_list": "task-362-tools.txt",
+    "tool_name_list_sha256": "511b97fcbeaef004730f72a5ae86e14023dfc7a294c767dffa13421a1f3d3ab6",
+    "parity_recompute_recipe": "run --list-tools, diff against task-362-tools.txt (83 lines, digest above); run --surface-only with those names and count verdict kinds in task-362-surface.jsonl"
+  },
+  "official_client_observations": [
+    {
+      "lane": "claude_code",
+      "runtime": "claude_code.claude-haiku-4-5",
+      "tool": "keeper_time_now",
+      "outcome": "tool_invoked",
+      "elapsed_s": 13.467,
+      "client_session_id": "01a05967-3a17-7000-850e-6437ad2a537a",
+      "client_transcript": "task-362-bundle/claude-session-01a05967.jsonl",
+      "client_transcript_sha256": "6328f3b4906fe218fe63befeca1f0a0001879225f444517e97c21efbdef18449",
+      "masc_turn_record": "task-362-bundle/turn-record-claude-codex-d205-000300.jsonl",
+      "masc_turn_record_sha256": "af659771bbea178f60db64feb88528f544ec5b290c27596c77fd8a2bf3c79f87",
+      "probe_output": "task-362-live-claude-code.jsonl",
+      "probe_output_sha256": "0c89d96d679c4b69c28f919c7e8c4a6b57716ff51a6fcc3683938a9dd79bc13c"
+    },
+    {
+      "lane": "codex_app_server",
+      "runtime": "codex_subscription.gpt-5.4-mini",
+      "tool": "keeper_time_now",
+      "outcome": "tool_invoked",
+      "elapsed_s": 11.165,
+      "client_thread_id": "01a05969-98f0-7230-b653-ebef60c630c3",
+      "client_transcript": "task-362-bundle/codex-rollout-01a05969.jsonl",
+      "client_transcript_sha256": "9ea5a6aaa6fe5305c855ae6161035c17dde83c6892258d72b5e044e693d3b629",
+      "masc_turn_record": "task-362-bundle/turn-record-claude-codex-d205-000300.jsonl",
+      "masc_turn_record_sha256": "af659771bbea178f60db64feb88528f544ec5b290c27596c77fd8a2bf3c79f87",
+      "probe_output": "task-362-live-codex.jsonl",
+      "probe_output_sha256": "bebd14c7ef65b256d1ae21b72bf06d33ece017f6cf4f0654ca67ccbe9a0e20f6"
+    },
+    {
+      "lane": "antigravity_cli",
+      "runtime": "antigravity_subscription.gemini-3-6-flash-low",
+      "tool": "keeper_time_now",
+      "outcome": "tool_invoked",
+      "elapsed_s": 8.924,
+      "probe_output": "task-362-bundle/t362-live-agy2.jsonl",
+      "probe_output_sha256": "bc8f5f6da4e37aa377cdbebd36b85caa01b45cd6e433b5f753b1e174956fd642",
+      "masc_turn_record": "task-362-bundle/turn-record-agy-d205-000337.jsonl",
+      "masc_turn_record_sha256": "d3af14f7c92699c7e4514784a97bf8aefd20ba7b1e9ed7f22a721fa59deeafb1",
+      "client_store_note": "antigravity-cli writes no per-conversation file under ~/.gemini, ~/.cache/antigravity, or ~/Library/Caches/antigravity newer than the run marker; the MASC turn record above is the durable raw trace for this lane"
+    }
+  ],
+  "catalog_drift_finding": {
+    "finding": "live antigravity CLI rejects catalog entry antigravity_subscription.gemini-3-5-flash-low",
+    "evidence": "task-362-bundle/t362-live-agy.jsonl (outcome provider_rejected)",
+    "evidence_sha256": "25407b1891e3578247859edcba10f7b1f33124bea337b713cf78a5764dbcbe7f",
+    "rejected_model_arg": "gemini-3.5-flash-low",
+    "cli_known_models": [
+      "Gemini 3.7 Flash (High/Medium/Low)",
+      "Gemini 3.6 Flash (High/Medium/Low)",
+      "Gemini 3.1 Pro (High/Low)",
+      "Claude Sonnet 4.6 (Thinking)",
+      "Claude Opus 4.6 (Thinking)",
+      "GPT-OSS 120B (Medium)"
+    ],
+    "implication": "catalog rows antigravity_subscription.gemini-3-5-flash-{high,medium,low} cannot invoke; 3-1-pro and 3-6/3-7 rows align with CLI-known models"
+  },
+  "context_truth": {
+    "claim": "probe turns run with no host-disk context layers loaded",
+    "mechanism": [
+      "probe config sets setting_sources = [] (lib/keeper/keeper_capability_probe.ml)",
+      "Runtime_native_tools.claude_setting_sources_arg [] emits --setting-sources= (empty), so no user/project/local settings, CLAUDE.md, hooks, subagents, or skills load",
+      "system_prompt = None for probe turns; the probe prompt is the only instruction"
+    ],
+    "run_receipts": [
+      "task-362-bundle/t362-live.err (claude_code run stderr)",
+      "task-362-bundle/t362-live-codex.err (codex run stderr)",
+      "task-362-bundle/t362-live-agy2.err (antigravity run stderr)"
+    ],
+    "independent_check": "open the turn-record receipts and confirm argv/composition carries no setting-sources and no system prompt"
+  },
+  "focused_tests": {
+    "ran_at": "2026-09-01T05:46:00Z",
+    "design_doc_targets": [
+      "test_runtime_claude_code",
+      "test_runtime_codex_app_server",
+      "test_keeper_antigravity_runtime",
+      "test_keeper_context_observation_projection",
+      "test_tui_decode"
+    ],
+    "results": [
+      {
+        "suite": "test_runtime_claude_code.exe",
+        "tests": 50,
+        "failures": 0,
+        "status": "pass"
+      },
+      {
+        "suite": "test_runtime_codex_app_server.exe",
+        "tests": 64,
+        "failures": 1,
+        "status": "fail",
+        "failing_test": "subscription boundary #50 Keeper Codex RAW separates native-command call ids",
+        "location": "test/test_runtime_codex_app_server.ml:2340",
+        "expected": "Some \"native-command-1\"",
+        "received": "None",
+        "note": "observed on code_revision_sha with no local code change; recorded as-is, not fixed in this evidence task"
+      },
+      {
+        "suite": "test_keeper_antigravity_runtime.exe",
+        "tests": 10,
+        "failures": 0,
+        "status": "pass"
+      },
+      {
+        "suite": "test_keeper_context_observation_projection.exe",
+        "tests": 11,
+        "failures": 0,
+        "status": "pass"
+      },
+      {
+        "suite": "test_tui_decode.exe",
+        "tests": 181,
+        "failures": 0,
+        "status": "pass"
+      }
+    ],
+    "raw_output": [
+      "task-362-bundle/t362-focused.txt",
+      "task-362-bundle/t362-codex-test.log"
+    ]
+  },
+  "tui_capture": {
+    "command": "python3 scripts/capture-tui-screenshots.py --base-path /Users/dancer/me --out docs/evidence/task-362-bundle/tui",
+    "surfaces": [
+      "01-overview.png",
+      "02-keepers.png",
+      "03-lanes.png",
+      "05-approvals.png",
+      "06-acting.png"
+    ],
+    "manifest": "task-362-bundle/tui/evidence.json",
+    "digests": "task-362-bundle/SHA256SUMS",
+    "binary_used": "_build/default/bin/masc_tui.exe (same checkout)"
+  },
+  "ci": {
+    "workflow": "ci.yml",
+    "trigger": "workflow_dispatch (ci.yml defines no pull_request/push triggers; dispatch forces every surface)",
+    "branch": "polish/task-362-official-client-live-truth",
+    "runs": [
+      {
+        "run_id": 33438579513,
+        "url": "https://github.com/jeong-sik/masc/actions/runs/33438579513",
+        "dispatched_at_head": "0b6a46b62ea8b7de639943912638c1936134c441",
+        "state_at_submission": "in_progress (55+ min)",
+        "note": "dispatched before the bundle commit landed; superseded by the run below for head truth"
+      },
+      {
+        "run_id": 33440469892,
+        "url": "https://github.com/jeong-sik/masc/actions/runs/33440469892",
+        "dispatched_at_head": "13e2619ce5926bf826c81d4dbc258acb0a0119ee (final evidence head)",
+        "state_at_submission": "in_progress; jobs completed: Detect Changed Surfaces/OCaml Structure Ratchet/Health/Shell IR Consumption Ratchet/Meta Guards = success; Lint = failure; Dashboard/Full validation still running"
+      }
+    ],
+    "lint_failure_investigation": {
+      "ci_observation": "Lint job failed on run 33440469892 while the same job passed on run 33438579513 (older head, same tree minus docs/evidence bundle); logs are only downloadable after the run completes, so the failing step text was not yet retrievable at submission time",
+      "local_reproduction": "on the exact pushed tree 13e2619: scripts/ci/run-lint-suite.sh blocking -> all 32 lints passed; blocking with no base (workflow_dispatch shape) -> all 39 lints passed; all six standalone Lint-job steps (no-unknown-permissive-default, yojson-option-default, no-docstring-escape-quote, no-hardcoded-colors-dashboard, dashboard-ssot-keeper-state, dashboard-ssot-agent-status) -> exit 0. The CI Lint failure did not reproduce locally; recorded as an open discrepancy, not explained away."
+    }
+  },
+  "completion_triggers": [
+    {
+      "id": "exact-source-and-binary",
+      "status": "pass",
+      "detail": "source 8ef224aa, binary a14b4a4b…, one checkout for all measurements"
+    },
+    {
+      "id": "surface-parity-83-projected",
+      "status": "pass",
+      "detail": "83/83 projected, 0 aliased/withheld/operator_only; recomputable via parity_recompute_recipe"
+    },
+    {
+      "id": "official-client-3-lanes-live",
+      "status": "pass",
+      "detail": "tool_invoked on claude_code, codex_app_server, antigravity_cli with client transcripts and turn records"
+    },
+    {
+      "id": "context-uncontaminated",
+      "status": "pass",
+      "detail": "empty setting sources, no system prompt; receipts committed"
+    },
+    {
+      "id": "tui-captures",
+      "status": "pass",
+      "detail": "5 surfaces captured from the same-revision TUI binary"
+    },
+    {
+      "id": "focused-tests",
+      "status": "fail",
+      "detail": "codex suite 1/64 fails (native call id separation); recorded as-is with location"
+    },
+    {
+      "id": "ci-required-checks",
+      "status": "pending_terminal_state",
+      "detail": "two dispatch runs linked; final-head run 33440469892 still in_progress at submission with Lint=failure observed and not reproducible locally (see ci.lint_failure_investigation); terminal state to be recorded on the PR"
+    }
+  ],
+  "bundle_manifest": "task-362-bundle/SHA256SUMS",
+  "redaction_note": "turn-record-claude-codex-d205-000300.jsonl contained one Anthropic API key echoed into a tool_result environment capture; the key value was replaced with the literal sk-ant-REDACTED-BY-PUSH-PROTECTION before pushing (GitHub push protection). No other bytes changed."
+}

@@ -917,8 +917,7 @@ def open_message(page: Page) -> None:
         )
     press(page, "Enter")
     wait_text(page, "Identity")
-    wait_text(page, "m:message")
-    press(page, "m", f"Message to: {KEEPER}")
+    press(page, "m", f"Keepers ▸ {KEEPER} ▸ chat")
 
 
 def cursor_position(page: Page) -> dict[str, int]:
@@ -1185,7 +1184,7 @@ def success_scenario(
             with ttyd_session(browser, base, api_port, executable) as (page, _started):
                 open_message(page)
                 resize_terminal(page, 99, 7)
-                wait_text(page, "Keeper chat needs")
+                wait_text(page, "terminal too small")
                 wait_cursor_hidden(page)
                 type_text(page, "blocked-tiny")
                 page.wait_for_timeout(2_000)
@@ -1196,11 +1195,11 @@ def success_scenario(
                 )
                 # fmt: off
                 shots.append(capture(page, output, prefix + "01-chat-tiny-resize-gate.png",
-                                     "Keeper chat needs", "resize", "Esc:back",
+                                     "terminal too small", "resize to at least 14 rows", "q: quit",
                                      expected_dimensions=(99, 7)))
                 # fmt: on
                 resize_terminal(page, 99, 30)
-                wait_text(page, f"Message to: {KEEPER}")
+                wait_text(page, f"Keepers ▸ {KEEPER} ▸ chat")
                 wait_text(page, "blocked-tiny", present=False)
                 measurements["resize_restore_cursor_zero_based"] = wait_cursor(
                     page, 6, 24

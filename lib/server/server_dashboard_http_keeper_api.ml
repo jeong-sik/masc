@@ -513,7 +513,7 @@ let attach_keeper_chat_skill_activations ~config rows =
                  if reports_skill then
                    Some
                      (keeper_chat_skill_activations_json ~status:"unavailable"
-                        ~detail [])
+                        ~detail:detail [])
                  else None
                | Ok
                    (Keeper_skill_activation_projection.Trace_available

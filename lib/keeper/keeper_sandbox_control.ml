@@ -610,10 +610,10 @@ let container_mode (meta : keeper_meta) containers =
         containers
     then
       "managed_running"
-    else
+    else (
       match meta.network_mode with
       | Network_none -> "turn_scoped_or_managed_none"
-      | Network_inherit -> "oneshot_or_managed_inherit"
+      | Network_inherit -> "oneshot_or_managed_inherit")
   | Remote_ssh -> "remote_ssh"
 
 let why_no_container (meta : keeper_meta) ~preflight containers =

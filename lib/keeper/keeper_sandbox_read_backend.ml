@@ -199,6 +199,8 @@ let profile_contract_mismatch ~expected ~actual =
     (sandbox_profile_to_string actual)
 ;;
 
+(* TEL-OK: pure fail-closed route selection. The selected backend performs and
+   reports the read effect in [run_command_with_status] below. *)
 let resolve_read_dispatch ~turn_sandbox_factory ~(meta : keeper_meta) ~cwd =
   match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
   | Runtime binding ->

@@ -1422,6 +1422,12 @@ def success_scenario(
                 )
                 require(latency <= 2500, f"reply latency {latency:.3f}ms")
                 wait_text(page, "(sending ", present=False)
+                # The 30-row viewport is the physical-slot proof above. The
+                # settled transcript contains two full turns plus a tool block;
+                # widen only this final evidence frame so an older causal row
+                # cannot be mistaken for a missing projection after clipping.
+                resize_terminal(page, 99, 42)
+                wait_text(page, "evidence_probe")
                 visible = screen_text(page)
                 first_user_row, _ = unique_screen_line(
                     visible, request_label, "TURN · YOU"
@@ -1461,7 +1467,8 @@ def success_scenario(
                                   SUCCESS_MESSAGE, f"reply-{SUCCESS_MESSAGE}", request_label,
                                   "✓", "evidence_probe",
                                   "draft-during-send", "reply-draft-during-send",
-                                  queued_request_label, "Enter:send"))
+                                  queued_request_label, "Enter:send",
+                                  expected_dimensions=(99, 42)))
                 # fmt: on
     # fmt: off
     return {"name": "responsive_causal_queue", "measurements": measurements,

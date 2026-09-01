@@ -6,11 +6,10 @@
     terminal's has nowhere to say so, and pointing them at a directory they
     have to fill first means the picker is empty the first time it opens.
 
-    So these twelve ride along. They are real base16 schemes from
+    So the bundled catalog rides along. They are real base16 schemes from
     tinted-theming/schemes (MIT), the same ones the contrast harness measures,
-    which is the point: what ships is what was measured. They are not a
-    palette masc invented, and a reader who wants one of the other two hundred
-    puts the file in the themes directory instead. *)
+    which is the point: what ships is what was measured. They are not palettes
+    masc invented. *)
 
 type t
 

@@ -103,8 +103,12 @@ The table measures the seven colours MASC uses for semantic text against a
 4.5:1 contrast floor. `native 7/7` means the theme clears it without help;
 `lift N/7` means MASC raises those colours to the floor. With
 `[tui].lift_colours = false`, the same risk is shown as `N/7 low` instead of
-pretending the colours were lifted. Theme names are fitted by terminal cells,
-so long bundled names keep the swatch, page, and contrast columns aligned.
+pretending the colours were lifted. Native-pass schemes are listed first;
+assisted schemes follow by lift count, and equal counts are alphabetical. The
+header reports both the bundled total and the native-pass count, so the
+high-contrast candidates no longer have to be found by scanning an unordered
+catalog. Theme names are fitted by terminal cells, so long bundled names keep
+the swatch, page, and contrast columns aligned.
 
 Keeper sub-views spell their position as a breadcrumb in the header:
 `Keepers ▸ <name> ▸ chat` (also `logs`, `calls`, `runtime`).

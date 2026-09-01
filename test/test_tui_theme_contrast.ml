@@ -498,6 +498,24 @@ let test_contrast_status_names_native_assisted_and_unassisted () =
     (Masc_tui_theme_choice.contrast_status ~lift_on:false assisted)
 ;;
 
+let test_picker_orders_native_first_then_by_cost_and_name () =
+  let entries = Masc_tui_theme_choice.entries () in
+  let expected =
+    List.sort
+      (fun (left : Masc_tui_theme_choice.entry) right ->
+        match Int.compare left.lifted right.lifted with
+        | 0 -> String.compare left.name right.name
+        | order -> order)
+      entries
+  in
+  check (list string) "picker order"
+    (List.map (fun (entry : Masc_tui_theme_choice.entry) -> entry.name) expected)
+    (List.map (fun (entry : Masc_tui_theme_choice.entry) -> entry.name) entries);
+  match entries with
+  | [] -> fail "bundled theme picker is empty"
+  | first :: _ -> check int "first scheme needs no lift" 0 first.lifted
+;;
+
 let () =
   Alcotest.run "masc-tui-theme-contrast"
     [ ( "lift_colours"
@@ -509,6 +527,8 @@ let () =
             test_the_setting_reads_back
         ; Alcotest.test_case "status names native, assisted, and low" `Quick
             test_contrast_status_names_native_assisted_and_unassisted
+        ; Alcotest.test_case "picker orders native first, then cost and name"
+            `Quick test_picker_orders_native_first_then_by_cost_and_name
         ] )
     ; ( "readability across themes"
       , [ Alcotest.test_case "lifting makes every token readable" `Quick

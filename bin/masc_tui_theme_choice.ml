@@ -40,23 +40,36 @@ let lifted_count palette =
 ;;
 
 let entries () =
-  List.filter_map
-    (fun scheme ->
-      match Catalog.to_palette scheme with
-      | None -> None
-      | Some palette ->
-        Some
-          { name = Catalog.name scheme
-          ; light = Catalog.light scheme
-          ; measured = List.length measured_slots
-          ; lifted = lifted_count palette
-          ; swatch =
-              (* The page first, then the colours masc reads meaning from, so
-                 a row shows the scheme the way the screen will. *)
-              Palette.background palette
-              :: List.filter_map (Palette.ansi palette) measured_slots
-          })
-    Catalog.bundled
+  let entries =
+    List.filter_map
+      (fun scheme ->
+        match Catalog.to_palette scheme with
+        | None -> None
+        | Some palette ->
+          Some
+            { name = Catalog.name scheme
+            ; light = Catalog.light scheme
+            ; measured = List.length measured_slots
+            ; lifted = lifted_count palette
+            ; swatch =
+                (* The page first, then the colours masc reads meaning from, so
+                   a row shows the scheme the way the screen will. *)
+                Palette.background palette
+                :: List.filter_map (Palette.ansi palette) measured_slots
+            })
+      Catalog.bundled
+  in
+  (* Put the schemes that already clear the readable floor first. The old
+     catalog order was explicitly "no particular order", which hid native
+     high-contrast candidates among thirty-seven rows and made the picker
+     look like an unsorted filename dump. Within the same assistance cost,
+     names are alphabetical so the order stays predictable. *)
+  List.sort
+    (fun left right ->
+      match Int.compare left.lifted right.lifted with
+      | 0 -> String.compare left.name right.name
+      | order -> order)
+    entries
 ;;
 
 (* A zero is a result, not the absence of one: every measured colour already

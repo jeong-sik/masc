@@ -215,6 +215,14 @@ type build_link_row =
     stayed on the virtiofs share. *)
 val ensure_build_links : playground_root:string -> build_link_row list
 
+(** What each checkout's [_build] is, without changing any of it.
+
+    The status surface needs [ensure_build_links]'s walk without its effects:
+    opening a tab must not install links. A checkout still holding a real
+    [_build] is the row that matters -- still writing to the virtiofs share,
+    and only a person can clear it. *)
+val observe_build_links : playground_root:string -> (string * build_link_state) list
+
 (** Targets a build will write through. A refused checkout contributes
     nothing -- it keeps its real [_build] on the share. *)
 val build_link_targets_to_create : build_link_row list -> string list

@@ -639,6 +639,64 @@ let why_no_container (meta : keeper_meta) ~preflight containers =
               Some
                 "no active turn or visible managed sandbox container; Docker containers start on sandboxed tool calls or via masc_keeper_sandbox_start, with the keeper playground mounted"))
 
+(** Where a microvm keeper's build output actually sits.
+
+    The vnode exhaustion that panicked this host three times was invisible
+    from every operator surface: whether a checkout writes to the virtiofs
+    share or to the block volume decided whether the machine survived, and
+    nothing showed it. This answers that per checkout.
+
+    Read-only. Opening a tab must not install links, so it walks through
+    [observe_build_links] rather than the ensure path.
+
+    [unlinked] is the actionable list: a checkout still holding a real
+    [_build] keeps writing to the share, and only a person can clear it --
+    the ensure path refuses to delete build output it did not create. *)
+let microvm_build_volume_json ~(config : Workspace.config) ~(meta : keeper_meta) =
+  match meta.sandbox_profile with
+  | Docker | Remote_ssh -> `Null
+  | Micro_vm ->
+    let playground_root =
+      Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path
+    in
+    let observations = Keeper_sandbox_microvm.observe_build_links ~playground_root in
+    let is_linked (_, state) =
+      match state with
+      | Keeper_sandbox_microvm.Build_symlink _ -> true
+      | Keeper_sandbox_microvm.Build_absent | Keeper_sandbox_microvm.Build_real_directory
+        -> false
+    in
+    let linked, unlinked = List.partition is_linked observations in
+    let relative path =
+      match Keeper_sandbox_microvm.playground_relative ~playground_root path with
+      | Some rel -> rel
+      | None -> path
+    in
+    `Assoc
+      [ ( "name"
+        , match Keeper_sandbox_microvm.build_volume_name ~keeper_name:meta.name with
+          | Ok name -> `String name
+          | Error _ -> `Null )
+      ; ("guest_root", `String Keeper_sandbox_microvm.build_volume_guest_root)
+      ; ("linked", `Int (List.length linked))
+      ; ( "unlinked"
+        , `List
+            (List.map
+               (fun (path, state) ->
+                 `Assoc
+                   [ ("path", `String (relative path))
+                   ; ( "reason"
+                     , `String
+                         (match state with
+                          | Keeper_sandbox_microvm.Build_real_directory ->
+                            "holds build output on the share"
+                          | Keeper_sandbox_microvm.Build_absent -> "not built yet"
+                          | Keeper_sandbox_microvm.Build_symlink _ -> "linked") )
+                   ])
+               unlinked) )
+      ]
+;;
+
 let live_status_json ?(include_preflight = true)
     ?preflight_override
     ?containers_override
@@ -704,6 +762,7 @@ let live_status_json ?(include_preflight = true)
             Keeper_sandbox_runtime.docker_preflight_to_yojson
             preflight
         else `Null );
+      ("build_volume", microvm_build_volume_json ~config ~meta);
       ("container_error", Json_util.string_opt_to_json container_error);
       ("why_no_container", Json_util.string_opt_to_json why_no_container);
       ( "repository_checkouts",

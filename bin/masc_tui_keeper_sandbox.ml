@@ -9,6 +9,24 @@ type container =
   ; owner_pid : int option
   }
 
+(** A checkout whose [_build] is not on the volume, and why.
+
+    This is the row an operator acts on: it is still writing to the virtiofs
+    share, which is what exhausted the host's vnode table. Only a person can
+    clear one -- the server refuses to delete build output it did not
+    create. *)
+type unlinked_checkout =
+  { checkout_path : string
+  ; checkout_reason : string
+  }
+
+type build_volume =
+  { volume_name : string option
+  ; guest_root : string
+  ; linked : int
+  ; unlinked : unlinked_checkout list
+  }
+
 type t =
   { sandbox_profile : string option
   ; configured_network_mode : string option
@@ -17,6 +35,7 @@ type t =
   ; containers : container list option
   ; container_error : string option
   ; why_no_container : string option
+  ; build_volume : build_volume option
   ; keeper_last_error : string option
   }
 
@@ -96,6 +115,57 @@ let decode_containers ~sanitize fields =
     |> Result.map Option.some
   | Some _ -> Error "sandbox_live.containers must be a list or null"
 
+let decode_unlinked ~sanitize index json =
+  let open Result.Syntax in
+  let prefix = Printf.sprintf "sandbox_live.build_volume.unlinked[%d]." index in
+  let* fields = assoc (prefix ^ "row") json in
+  let required name =
+    match field name fields with
+    | Some (`String value) -> Ok (sanitize value)
+    | Some _ -> Error (prefix ^ name ^ " must be a string")
+    | None -> Error (prefix ^ name ^ " is required")
+  in
+  let* checkout_path = required "path" in
+  let* checkout_reason = required "reason" in
+  Ok { checkout_path; checkout_reason }
+;;
+
+(* [`Null] rather than a missing key is the docker and remote_ssh answer:
+   they have no build volume, which is not the same as one that could not be
+   read. Both decode to [None] and the view says nothing, but the server
+   states which it means. *)
+let decode_build_volume ~sanitize fields =
+  let open Result.Syntax in
+  match field "build_volume" fields with
+  | None | Some `Null -> Ok None
+  | Some (`Assoc inner) ->
+    let* volume_name = string_opt ~sanitize ~key:"name" ~path:"build_volume.name" inner in
+    let* guest_root =
+      match field "guest_root" inner with
+      | Some (`String value) -> Ok (sanitize value)
+      | _ -> Error "sandbox_live.build_volume.guest_root must be a string"
+    in
+    let* linked =
+      match field "linked" inner with
+      | Some (`Int value) -> Ok value
+      | _ -> Error "sandbox_live.build_volume.linked must be an integer"
+    in
+    let* unlinked =
+      match field "unlinked" inner with
+      | Some (`List rows) ->
+        List.fold_right
+          (fun row result ->
+            match row, result with
+            | Ok row, Ok rows -> Ok (row :: rows)
+            | Error detail, _ | _, Error detail -> Error detail)
+          (List.mapi (decode_unlinked ~sanitize) rows)
+          (Ok [])
+      | _ -> Error "sandbox_live.build_volume.unlinked must be a list"
+    in
+    Ok (Some { volume_name; guest_root; linked; unlinked })
+  | Some _ -> Error "sandbox_live.build_volume must be an object or null"
+;;
+
 let decode ~sanitize json =
   let open Result.Syntax in
   let* root = assoc "keeper status" json in
@@ -127,6 +197,7 @@ let decode ~sanitize json =
   let* why_no_container =
     string_opt ~sanitize ~path:"why_no_container" live
   in
+  let* build_volume = decode_build_volume ~sanitize live in
   Ok
     { sandbox_profile
     ; configured_network_mode
@@ -135,6 +206,7 @@ let decode ~sanitize json =
     ; containers
     ; container_error
     ; why_no_container
+    ; build_volume
     ; keeper_last_error
     }
 
@@ -211,6 +283,43 @@ let container_lines ~width containers =
       wrapped_rows ~width ~label:"Container" ~tone headline
       @ wrapped_rows ~width ~label:"" ~tone:`Muted details)
 
+(* Where this keeper's build output lands.
+
+   A checkout on the share pins one host descriptor per file it writes, and
+   a host descriptor is a host vnode; that is what emptied the table and
+   panicked the machine. The count alone is not enough -- an operator needs
+   the paths, because clearing a real [_build] is a person's job. The server
+   will not delete build output it did not create. *)
+let build_volume_lines ~width = function
+  | None -> []
+  | Some volume ->
+    let headline =
+      match volume.unlinked with
+      | [] ->
+        ( `Ok
+        , Printf.sprintf "%d checkout(s) on %s" volume.linked volume.guest_root )
+      | rows ->
+        ( `Warn
+        , Printf.sprintf
+            "%d on %s, %d still on the share"
+            volume.linked
+            volume.guest_root
+            (List.length rows) )
+    in
+    let tone, summary = headline in
+    [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "build output" ]
+    @ wrapped_rows ~width ~label:"Volume" ~tone:`Muted (value volume.volume_name)
+    @ wrapped_rows ~width ~label:"Placed" ~tone summary
+    @ List.concat_map
+        (fun row ->
+          wrapped_rows
+            ~width
+            ~label:"On share"
+            ~tone:`Warn
+            (row.checkout_path ^ " — " ^ row.checkout_reason))
+        volume.unlinked
+;;
+
 let view_lines ~width reading =
   let containers, observed_tone = container_summary reading.containers in
   let declared =
@@ -255,5 +364,6 @@ let view_lines ~width reading =
   @ wrapped_rows ~width ~label:"Managed kind" ~tone:`Muted
       (value reading.managed_container_kind)
   @ container_lines ~width reading.containers
+  @ build_volume_lines ~width reading.build_volume
   @ explanation_lines
   @ error_lines

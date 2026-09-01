@@ -695,6 +695,20 @@ let ensure_build_links ~playground_root =
          }))
 ;;
 
+(** What each checkout's [_build] is, without changing any of it.
+
+    The status surface needs the same walk [ensure_build_links] does but must
+    not act: an operator opening a tab should not install links as a side
+    effect of looking. A checkout still holding a real [_build] is the row
+    that matters -- it is the one still writing to the virtiofs share, and
+    the one a person has to clear by hand. *)
+let observe_build_links ~playground_root =
+  build_roots_under ~playground_root
+  |> List.map (fun root ->
+    let path = Filename.concat root build_output_dir_name in
+    path, build_link_state_of_path path)
+;;
+
 (** Create the link targets inside the guest.
 
     Measured, and the reason this step exists: dune does not create the

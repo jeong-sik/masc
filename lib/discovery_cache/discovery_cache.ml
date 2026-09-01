@@ -7,76 +7,67 @@
 
     @since 2.130.0 *)
 
-(* ── Eio capability refs (set once at server init) ───────── *)
+(* ── Eio capability snapshot (set at server init) ────────── *)
 
-let sw_ref : Eio.Switch.t option Atomic.t = Atomic.make None
-let net_ref : [`Generic | `Unix] Eio.Net.ty Eio.Resource.t option Atomic.t = Atomic.make None
+type environment = {
+  switch : Eio.Switch.t;
+  net : [`Generic | `Unix] Eio.Net.ty Eio.Resource.t;
+}
 
-let set_env ~sw ~(net : [`Generic | `Unix] Eio.Net.ty Eio.Resource.t) =
-  Atomic.set sw_ref (Some sw);
-  Atomic.set net_ref (Some net)
-
-(* ── Cache state (Eio.Mutex-protected) ───────────────────── *)
+(* ── Cache snapshot ──────────────────────────────────────── *)
 
 type endpoint_info = Llm_provider.Discovery.endpoint_status
 
-let cache_mu = Eio.Mutex.create ()
-let cached_endpoints : endpoint_info list ref = ref []
-let cache_updated_at : float Atomic.t = Atomic.make 0.0
+type cache_snapshot = {
+  endpoints : endpoint_info list;
+  updated_at : float;
+}
+
+type runtime_state = {
+  environment : environment option;
+  cache : cache_snapshot;
+}
+
+let empty_cache = { endpoints = []; updated_at = 0.0 }
+let state = Atomic.make { environment = None; cache = empty_cache }
 let cache_ttl = 30.0
 
-(* Probe every configured endpoint and install the result under the
-   mutex.  The probe itself ([Llm_provider.Discovery.discover])
-   makes HTTP requests — potentially several seconds of network
-   I/O — so it must NOT be executed while holding [cache_mu].
+let set_env ~sw ~(net : [`Generic | `Unix] Eio.Net.ty Eio.Resource.t) =
+  Atomic_util.update state (fun _ ->
+    { environment = Some { switch = sw; net }; cache = empty_cache })
 
-   The prior version was named [refresh_cache_unlocked] and was
-   called from inside [get_cached_or_refresh]'s [Eio.Mutex.use_rw]
-   block, which meant every dashboard / local-runtime consumer
-   waited on the mutex for the full probe duration.  That is the
-   same drift class as the prompt_registry [_unlocked] variants
-   fixed in PR #6663 — the in-tree API was refactored to keep I/O
-   out of the critical section, but a sibling helper with a
-   misleading "_unlocked" name was left with the old pattern.
-
-   This version splits the work: the HTTP probe runs with no lock
-   held, then the result is installed under the mutex.  Two
-   concurrent refreshers may both probe; that is wasteful but
-   correct.  In practice the 30 s TTL narrows the window. *)
+(* Probe every configured endpoint outside the atomic publication
+   step. The result is installed only if the exact state observed before
+   the probe is still current. Environment replacement or another completed
+   refresh makes the result obsolete. *)
 let refresh_cache () =
-  match Atomic.get sw_ref, Atomic.get net_ref with
-  | Some sw, Some net ->
+  let observed = Atomic.get state in
+  match observed.environment with
+  | Some { switch; net } ->
     let endpoints =
       Llm_provider.Provider_registry.active_llama_endpoints ()
     in
-    (* HTTP probes — executed OUTSIDE [cache_mu]. *)
-    let results = Llm_provider.Discovery.discover ~sw ~net ~endpoints in
-    (* Install the fresh result under the mutex — no yields inside
-       this critical section. *)
-    Eio.Mutex.use_rw ~protect:true cache_mu (fun () ->
-      cached_endpoints := results;
-      Atomic.set cache_updated_at (Time_compat.now ()))
-  | _ ->
-    ()
+    let results =
+      Llm_provider.Discovery.discover ~sw:switch ~net ~endpoints
+    in
+    let next =
+      {
+        observed with
+        cache = { endpoints = results; updated_at = Time_compat.now () };
+      }
+    in
+    ignore (Atomic.compare_and_set state observed next : bool)
+  | None -> ()
 
 let get_cached_or_refresh () =
-  (* Cheap staleness check: [cache_updated_at] is [Atomic] so the
-     TTL comparison needs no lock.  Only when the cached list is
-     still empty do we take the mutex to decide. *)
-  let stale_by_ttl =
-    Time_compat.now () -. Atomic.get cache_updated_at > cache_ttl
-  in
+  let snapshot = (Atomic.get state).cache in
+  let stale_by_ttl = Time_compat.now () -. snapshot.updated_at > cache_ttl in
   let need_refresh =
-    stale_by_ttl
-    || Eio.Mutex.use_rw ~protect:true cache_mu (fun () ->
-        !cached_endpoints = [])
+    stale_by_ttl || snapshot.endpoints = []
   in
   if need_refresh then refresh_cache ();
-  Eio.Mutex.use_rw ~protect:true cache_mu (fun () -> !cached_endpoints)
+  (Atomic.get state).cache.endpoints
 
 let cache_age_seconds () =
-  Time_compat.now () -. Atomic.get cache_updated_at
-
-(* ── Convenience queries ─────────────────────────────────── *)
-
-(* ── JSON (delegates to AGENT_CORE) ─────────────────────────────── *)
+  let snapshot = (Atomic.get state).cache in
+  Time_compat.now () -. snapshot.updated_at

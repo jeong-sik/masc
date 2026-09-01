@@ -5362,7 +5362,7 @@ let lane_run_tool_call_summary (tool : Tui_decode.lane_run_tool) =
     Tui_decode.lane_run_tool_disposition_label tool.lrt_disposition
     |> Terminal_text.single_line
   in
-  Printf.sprintf "%s%s%s %s%s%s [%s · %.0fms]%s"
+  Printf.sprintf "%s%s%s %s%s%s ‹%s · %.0fms›%s"
     style Ansi.bold mark
     (Terminal_text.single_line tool.lrt_name)
     Ansi.reset style disposition tool.lrt_duration_ms Ansi.reset
@@ -5399,9 +5399,9 @@ let lane_run_tool_count_summary tools =
     if count = 0 then None
     else
       Some
-        (Printf.sprintf "%s%s%s %d %s%s" style Ansi.bold mark count label
-           Ansi.reset))
-  |> String.concat "  "
+        (Printf.sprintf "%s%s%s %s %s %d %s" style Ansi.reverse Ansi.bold mark
+           (String.uppercase_ascii label) count Ansi.reset))
+  |> String.concat " "
 
 let lane_run_tool_summary = function
   | Tui_decode.Lane_run_no_tools_by_contract ->
@@ -5415,7 +5415,7 @@ let lane_run_tool_summary = function
     let counts = lane_run_tool_count_summary tools in
     let names =
       List.map lane_run_tool_call_summary tools
-      |> String.concat "  ·  "
+      |> String.concat "  │  "
     in
     let evidence =
       [ names ]
@@ -5423,17 +5423,17 @@ let lane_run_tool_summary = function
       |> String.concat "  ·  "
     in
     let call_count =
-      Printf.sprintf "%d %s" calls (if calls = 1 then "call" else "calls")
+      Printf.sprintf "%d %s" calls (if calls = 1 then "CALL" else "CALLS")
     in
     let overview =
-      if String.equal counts "" then call_count else counts ^ "  ·  " ^ call_count
+      if String.equal counts "" then call_count else counts ^ "  ──  " ^ call_count
     in
     (* fit_width clips the right edge, so put the worst typed disposition
        immediately after the label. Even an ultra-narrow terminal retains the
        operator-significant failure/deferred badge before call metadata. *)
     ( Ansi.reset
-    , Printf.sprintf "%sTOOLS%s  %s%s" Ansi.bold Ansi.reset overview
-        (if String.equal evidence "" then "" else " · " ^ evidence) )
+    , Printf.sprintf "%sTOOLS%s %s%s" Ansi.bold Ansi.reset overview
+        (if String.equal evidence "" then "" else "  │  " ^ evidence) )
 
 let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
   let subject =

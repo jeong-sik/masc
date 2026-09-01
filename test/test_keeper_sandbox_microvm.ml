@@ -4,6 +4,7 @@
    [unsupported_docker_flags] were rejected with "Unknown option". *)
 
 module M = Masc.Keeper_sandbox_microvm
+module Runtime = Masc.Keeper_sandbox_runtime
 module Profile = Keeper_types_profile_sandbox
 
 let argv ?(network = Profile.Network_none) () =
@@ -698,6 +699,45 @@ let test_sweep_skips_listing_when_cli_is_unavailable () =
     Alcotest.(check (list string)) "available removed" [] outcome.M.removed;
     Alcotest.(check int) "available failures" 0 (List.length outcome.M.failed)
 
+let live_entry ~base_path ~keeper_name ~id =
+  let label key value = key, `String value in
+  let labels =
+    [ label Runtime.sandbox_component_label_key Runtime.sandbox_component_label_value
+    ; label Runtime.sandbox_base_path_hash_label_key (Runtime.base_path_hash base_path)
+    ; label Runtime.sandbox_keeper_label_key (Runtime.sanitize_label_value keeper_name)
+    ; label Runtime.sandbox_kind_label_key M.keeper_vm_container_kind
+    ; label Runtime.sandbox_network_label_key "inherit"
+    ; label Runtime.sandbox_owner_pid_label_key "42"
+    ; label Runtime.sandbox_started_at_label_key "123.5"
+    ]
+  in
+  `Assoc
+    [ ( "configuration"
+      , `Assoc
+          [ "id", `String id
+          ; "creationDate", `String "2026-09-01T08:13:09Z"
+          ; "image", `Assoc [ "reference", `String "masc-keeper-sandbox:local" ]
+          ; "labels", `Assoc labels
+          ] )
+    ; "status", `Assoc [ "state", `String "running" ]
+    ]
+
+let test_live_container_listing_is_scoped_to_the_keeper () =
+  let base_path = "/workspace" in
+  let keeper_name = "lane-smith" in
+  let visible = live_entry ~base_path ~keeper_name ~id:"lane-vm" in
+  let other = live_entry ~base_path ~keeper_name:"edgar.a.poe" ~id:"edgar-vm" in
+  match M.live_containers_of_json ~base_path ~keeper_name (`List [ visible; other ]) with
+  | Error detail -> Alcotest.fail detail
+  | Ok [ container ] ->
+    Alcotest.(check string) "Apple Container id" "lane-vm" container.id;
+    Alcotest.(check string) "Apple Container image" "masc-keeper-sandbox:local" container.image;
+    Alcotest.(check (option bool)) "Apple Container running" (Some true) container.running;
+    Alcotest.(check (option string)) "keeper-lifetime kind"
+      (Some M.keeper_vm_container_kind) container.container_kind
+  | Ok containers ->
+    Alcotest.failf "expected exactly one scoped Apple Container VM, got %d" (List.length containers)
+
 let () =
   Alcotest.run
     "keeper_sandbox_microvm"
@@ -718,6 +758,8 @@ let () =
             test_live_structured_image_probe
         ; Alcotest.test_case "sweeps only guests whose owner is gone" `Quick
             test_only_guests_whose_owner_is_gone
+        ; Alcotest.test_case "lists only this Keeper's Apple Container VM" `Quick
+            test_live_container_listing_is_scoped_to_the_keeper
         ; Alcotest.test_case "leaves containers that are not guests" `Quick
             test_leaves_containers_that_are_not_guests
         ; Alcotest.test_case "leaves guests it cannot account for" `Quick

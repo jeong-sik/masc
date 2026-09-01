@@ -1061,6 +1061,79 @@ let test_full_skill_rows_show_actions_and_exact_proof () =
   check bool "the runtime coordinate is visible" true
     (contains ~needle:"runtime=codex-app-server" body)
 
+(* The folded line has to say which tool broke.
+
+   Observed on kidsnote-pr-jira-checker (2026-09-01 20:08):
+
+     x Tools 29 . Keeper 6 . keeper_artifact_read 1 .
+       atlassian_searchJiraIssuesUsingJql 21 . keeper_time_now 1 . Execute 1 .
+       keeper_memory_search 2 . keeper_capability_search 2 . WebFetch 1 .
+       28 returned, 1 failed . 29 details folded
+
+   Eight tool names and "1 failed", with nothing tying the two together. The
+   counts were already there; the name is what makes the line answerable
+   without unfolding it. *)
+let summary_row mode activities =
+  match
+    (Transcript.project_tool_block mode
+       (Transcript.tool_block ~omitted_steps:0 activities))
+      .Transcript.rows
+  with
+  | row :: _ -> row
+  | [] -> Alcotest.fail "a projected block has at least its summary row"
+;;
+
+let contains_substring haystack needle =
+  let n = String.length needle and h = String.length haystack in
+  let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
+  n = 0 || at 0
+;;
+
+let test_a_fold_names_the_tool_that_failed () =
+  let row =
+    summary_row Transcript.Compact
+      [ activity ~name:"read_file" ~outcome:Transcript.Returned
+      ; activity ~name:"glob" ~outcome:Transcript.Returned
+      ; activity ~name:"web_fetch" ~outcome:Transcript.Failed
+      ]
+  in
+  check bool "the failure count survives" true (contains_substring row "1 failed");
+  check bool "and now says which tool" true (contains_substring row "web_fetch");
+  (* The successes stay counted, not listed: a reader chasing a failure does
+     not need the other two named twice on one line. *)
+  check bool "successes stay a count" true (contains_substring row "2 returned")
+;;
+
+let test_a_fold_names_calls_still_out_and_never_returned () =
+  let awaiting =
+    summary_row Transcript.Compact
+      [ activity ~name:"read_file" ~outcome:Transcript.Returned
+      ; activity ~name:"execute" ~outcome:Transcript.Awaiting_result
+      ]
+  in
+  check bool "a call still out is named" true (contains_substring awaiting "execute");
+  let never =
+    summary_row Transcript.Compact
+      [ activity ~name:"read_file" ~outcome:Transcript.Returned
+      ; activity ~name:"web_fetch" ~outcome:Transcript.Never_returned
+      ]
+  in
+  check bool "so is one whose end was never recorded" true
+    (contains_substring never "web_fetch")
+;;
+
+let test_a_repeated_failing_tool_is_counted_once_with_its_count () =
+  (* 21 calls to one tool must not print its name 21 times. *)
+  let row =
+    summary_row Transcript.Compact
+      (activity ~name:"read_file" ~outcome:Transcript.Returned
+       :: List.init 3 (fun _ -> activity ~name:"search" ~outcome:Transcript.Failed))
+  in
+  check bool "the name appears with a count" true (contains_substring row "search 3");
+  check bool "and the outcome count agrees" true (contains_substring row "3 failed")
+;;
+
+
 let () =
   run "tui_keeper_chat_transcript"
     [ ( "content"
@@ -1113,6 +1186,12 @@ let () =
             test_compact_summary_keeps_operational_tool_kinds
         ; test_case "a fold reports the outcome its marker stands for" `Quick
             test_a_fold_reports_the_outcome_its_marker_stands_for
+        ; test_case "a fold names the tool that failed" `Quick
+            test_a_fold_names_the_tool_that_failed
+        ; test_case "a fold names calls still out" `Quick
+            test_a_fold_names_calls_still_out_and_never_returned
+        ; test_case "a repeated failing tool carries its count" `Quick
+            test_a_repeated_failing_tool_is_counted_once_with_its_count
         ] )
     ; ( "terminal safety"
       , [ test_case "control bytes never reach the pane" `Quick

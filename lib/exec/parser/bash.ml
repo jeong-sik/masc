@@ -16,54 +16,94 @@ let is_env_name_char = function
   | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
   | _other -> false
 
-let parse_env_assignment (word_str, meta) =
-  match String.index_opt word_str '=' with
-  | None -> None
-  | Some 0 -> None
-  | Some idx ->
-    let name = String.sub word_str 0 idx in
-    if is_env_name_start name.[0]
-       && String.for_all is_env_name_char name
-    then
+(* An env binding is a fact about a whole word, so it is read from the
+   assembled [Shell_ir.arg], not from a token.  A literal word keeps the
+   original [NAME=value] reading; a concatenated word ([FOO=$BAR],
+   [FOO=bar$BAZ]) splits at the first [=] of its leading literal piece,
+   which is where the lexer ended the word it had and started the
+   expansion. *)
+let binding_of_literal_name_value name (value : Shell_ir.arg) =
+  if String.length name > 0
+     && is_env_name_start name.[0]
+     && String.for_all is_env_name_char name
+  then Some (name, value)
+  else None
+
+let value_of_pieces (pieces : Shell_ir.arg list) : Shell_ir.arg =
+  match pieces with
+  | [ single ] -> single
+  | many -> Shell_ir.Concat many
+
+let rec arg_as_assignment (arg : Shell_ir.arg) :
+    (string * Shell_ir.arg) option =
+  match arg with
+  | Shell_ir.Var _ -> None
+  | Shell_ir.Lit (word, meta) -> (
+    match String.index_opt word '=' with
+    | None | Some 0 -> None
+    | Some idx ->
+      let name = String.sub word 0 idx in
       let value =
-        String.sub word_str (idx + 1) (String.length word_str - idx - 1)
+        String.sub word (idx + 1) (String.length word - idx - 1)
       in
-      Some (name, Shell_ir.Lit (value, meta))
-    else None
+      binding_of_literal_name_value name (Shell_ir.Lit (value, meta)))
+  | Shell_ir.Concat (Shell_ir.Lit (word, meta) :: rest) -> (
+    match String.index_opt word '=' with
+    | None | Some 0 -> None
+    | Some idx ->
+      let name = String.sub word 0 idx in
+      let value_literal =
+        String.sub word (idx + 1) (String.length word - idx - 1)
+      in
+      let pieces =
+        if String.length value_literal = 0 then rest
+        else Shell_ir.Lit (value_literal, meta) :: rest
+      in
+      binding_of_literal_name_value name (value_of_pieces pieces))
+  | Shell_ir.Concat [] -> None
 
-let split_env_prefix words =
+let split_env_prefix (args : Shell_ir.arg list) =
   let rec loop env = function
-    | [] -> Error { Parsed.pos = Lexing.dummy_pos; token = ""; expected = [ "command" ] }
-    | word :: rest ->
-      (match parse_env_assignment word with
+    | [] ->
+      Error { Parsed.pos = Lexing.dummy_pos; token = ""; expected = [ "command" ] }
+    | arg :: rest ->
+      (match arg_as_assignment arg with
        | Some binding -> loop (binding :: env) rest
-       | None -> Ok (List.rev env, word, rest))
+       | None -> Ok (List.rev env, arg, rest))
   in
-  loop [] words
+  loop [] args
 
-let raw_to_simple (bin_word, args_words, redirects)
-    : (Shell_ir.simple, Parsed.parse_error) result =
-  match split_env_prefix (bin_word :: args_words) with
-  | Error e -> Error e
-  | Ok (env, (bin_str, _), args_words) -> (
-  match Exec_program.of_string bin_str with
-  | Error (`Unknown _) ->
-    (* A0 guarantees Exec_program.of_string only errors on empty input.  That
-       cannot happen downstream of the current grammar (WORD+ accepts
-       at least one token), so this branch is defensive. *)
-    Error { Parsed.pos = Lexing.dummy_pos; token = bin_str; expected = [] }
-  | Ok bin ->
-    let args =
-      List.map (fun (s, meta) -> Shell_ir.Lit (s, meta)) args_words
+(* A stage refused before there was a [Shell_ir.simple] to talk about:
+   either the tokens never formed a command, or they formed one whose
+   program position is an expansion — the subset reads [$CMD args] as
+   outside itself rather than guessing a program at run time. *)
+type stage_error =
+  | Stage_parse_error of Parsed.parse_error
+  | Stage_outside_subset of Parsed.reason_too_complex
+
+let raw_to_simple (args : Shell_ir.arg list, redirects)
+    : (Shell_ir.simple, stage_error) result =
+  match split_env_prefix args with
+  | Error e -> Error (Stage_parse_error e)
+  | Ok (env, bin_arg, arg_words) -> (
+    let bin_word =
+      match bin_arg with
+      | Shell_ir.Lit (value, _) -> `Word value
+      | Shell_ir.Var _ | Shell_ir.Concat _ -> `Expansion
     in
-    Ok
-      { Shell_ir.bin
-      ; args
-      ; env
-      ; cwd = None
-      ; redirects
-      ; sandbox = Sandbox_target.host ()
-      })
+    match bin_word with
+    | `Expansion -> Error (Stage_outside_subset `Param_expansion)
+    | `Word bin_str -> (
+      match Exec_program.of_string bin_str with
+      | Error (`Unknown _) ->
+        (* A0 guarantees Exec_program.of_string only errors on empty input.  That
+           cannot happen downstream of the current grammar (the stage accepts
+           at least one piece), so this branch is defensive. *)
+        Error
+          (Stage_parse_error
+             { Parsed.pos = Lexing.dummy_pos; token = bin_str; expected = [] })
+      | Ok bin -> Ok { Shell_ir.bin; args = arg_words; env; cwd = None
+                     ; redirects; sandbox = Sandbox_target.host () }))
 
 let rec map_stages = function
   | [] -> Ok []
@@ -76,12 +116,8 @@ let rec map_stages = function
         | Ok tail -> Ok (simple :: tail)))
 
 let pipeline_to_ir
-      (stages :
-        ( (string * Shell_ir.arg_meta)
-        * (string * Shell_ir.arg_meta) list
-        * Redirect_scope.t list )
-        list)
-    : (Shell_ir.t, Parsed.parse_error) result =
+      (stages : (Shell_ir.arg list * Redirect_scope.t list) list)
+    : (Shell_ir.t, stage_error) result =
   match map_stages stages with
   | Error e -> Error e
   | Ok [ single ] -> Ok (Shell_ir.Simple single)
@@ -90,19 +126,14 @@ let pipeline_to_ir
   | Ok [] ->
     (* Unreachable: the grammar uses separated_nonempty_list so
        stages is always length >= 1.  Defensive. *)
-    Error { pos = Lexing.dummy_pos; token = ""; expected = [ "command" ] }
+    Error
+      (Stage_parse_error
+         { Parsed.pos = Lexing.dummy_pos; token = ""; expected = [ "command" ] })
 
 let to_shell_ir
       ((head, tail) :
-        ( (string * Shell_ir.arg_meta)
-        * (string * Shell_ir.arg_meta) list
-        * Redirect_scope.t list )
-        list
-        * (Shell_ir.connector
-          * ( (string * Shell_ir.arg_meta)
-            * (string * Shell_ir.arg_meta) list
-            * Redirect_scope.t list )
-            list)
+        (Shell_ir.arg list * Redirect_scope.t list) list
+        * (Shell_ir.connector * (Shell_ir.arg list * Redirect_scope.t list) list)
           list)
     : Shell_ir.t Parsed.t =
   let ( let* ) = Result.bind in
@@ -121,7 +152,8 @@ let to_shell_ir
   in
   match parsed with
   | Ok ir -> Parsed.Parsed ir
-  | Error e -> Parsed.Parse_error e
+  | Error (Stage_parse_error e) -> Parsed.Parse_error e
+  | Error (Stage_outside_subset reason) -> Parsed.Too_complex reason
 
 (* Two ways to be outside the subset, told apart by which stage refused.
 

@@ -2,7 +2,7 @@
 open Masc_exec
 
 type stage_part =
-  | Arg of (string * Masc_exec.Shell_ir.arg_meta)
+  | Arg of Masc_exec.Shell_ir.arg
   | Redirect of Redirect_scope.t
 
 let file_redirect fd target mode =
@@ -32,6 +32,7 @@ let file_redirect fd target mode =
    See RFC v5 (docs/rfc/RFC-0005). */
 
 %token <string * Masc_exec.Shell_ir.arg_meta> WORD
+%token <string * Masc_exec.Shell_ir.arg_meta> PARAM
 %token DEV_NULL
 %token <int * int> FD_REDIRECT
 %token <int * Masc_exec.Redirect_scope.mode> FILE_REDIRECT_OP
@@ -41,7 +42,12 @@ let file_redirect fd target mode =
 %token SEMICOLON
 %token EOF
 
-%start <(((string * Masc_exec.Shell_ir.arg_meta) * (string * Masc_exec.Shell_ir.arg_meta) list * Masc_exec.Redirect_scope.t list) list * (Masc_exec.Shell_ir.connector * ((string * Masc_exec.Shell_ir.arg_meta) * (string * Masc_exec.Shell_ir.arg_meta) list * Masc_exec.Redirect_scope.t list) list) list)> command
+(* A stage is a word sequence plus redirects.  Words are already
+   assembled args ([Lit] / [Var] / [Concat]) — the [bin] is decided in
+   bash.ml after env prefixes are split off, because whether a word is
+   the program or a binding ([FOO=$BAR cmd]) is a fact about the whole
+   word, not about a token. *)
+%start <(Masc_exec.Shell_ir.arg list * Masc_exec.Redirect_scope.t list) list * (Masc_exec.Shell_ir.connector * (Masc_exec.Shell_ir.arg list * Masc_exec.Redirect_scope.t list) list) list> command
 
 %%
 
@@ -49,28 +55,51 @@ literal_word:
   | value = WORD { value }
   | DEV_NULL { "/dev/null", Masc_exec.Shell_ir.default_meta }
 
+(* One piece of a shell word: a literal token or a simple parameter
+   expansion.  Adjacent pieces become one word — [prefix=$DIR] lexes as
+   WORD ["prefix="] then PARAM ["DIR"] and assembles to
+   Concat [Lit "prefix="; Var "DIR"] — the shape bash itself uses for
+   [FOO=bar$BAZ]. *)
+word_piece:
+  | value = literal_word { Masc_exec.Shell_ir.Lit value }
+  | name = PARAM { Masc_exec.Shell_ir.Var name }
+
+word_seq:
+  | piece = word_piece { [ piece ] }
+  | seq = word_seq piece = word_piece { seq @ [ piece ] }
+
+word:
+  | pieces = word_seq {
+      match pieces with
+      | [ single ] -> single
+      | many -> Masc_exec.Shell_ir.Concat many
+    }
+
 part:
-  | arg = literal_word { Arg arg }
+  | arg = word { Arg arg }
   | pair = FD_REDIRECT {
       let src, dst = pair in
       Redirect (Redirect_scope.Fd_to_fd { src; dst })
     }
+  (* The redirect target stays a literal: [Path_scope.classify] runs on
+     it at parse time and a substituted path has nothing to classify.
+     [> $OUT] therefore fails to parse rather than passing unchecked. *)
   | item = FILE_REDIRECT_OP target = literal_word {
       let fd, mode = item in
       Redirect (file_redirect fd (fst target) mode)
     }
 
 stage:
-  | bin = literal_word parts = list(part) {
+  | head = part parts = list(part) {
       let args, redirects =
         List.fold_left
           (fun (args, redirects) -> function
              | Arg arg -> arg :: args, redirects
              | Redirect redirect -> args, redirect :: redirects)
           ([], [])
-          parts
+          (head :: parts)
       in
-      (bin, List.rev args, List.rev redirects)
+      (List.rev args, List.rev redirects)
     }
 
 pipeline:

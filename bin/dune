@@ -269,6 +269,15 @@
  (modules masc_tui_server_lifecycle)
  (libraries masc.masc_process))
 
+;; Bars and band headers for the Context inspector. Own library so the
+;; largest-remainder split, the never-floor-a-real-share rule, and the cell
+;; widths of the drawn rows all run under a test without a TTY.
+(library
+ (name masc_tui_context_bars)
+ (wrapped false)
+ (modules masc_tui_context_bars)
+ (libraries masc_tui_theme))
+
 (library
  (name masc_tui_ask_projection)
  (wrapped false)
@@ -932,6 +941,7 @@
   masc_tui_planning_detail
   masc_tui_task_selection
   masc_tui_render_schedule
+  masc_tui_context_bars
   masc_tui_tool_tree
   masc_tui_terminal_write_repair
   masc_tui_editor

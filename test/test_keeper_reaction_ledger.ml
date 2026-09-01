@@ -203,6 +203,48 @@ let test_event_queue_stimulus_and_turn_reaction () =
     (reaction_row |> member "reaction")
 ;;
 
+(* A stimulus's evidence used to end at "a turn started at T", and what the turn
+   did was recovered by comparing that clock against the keeper's calls. The
+   closing row makes the interval and the outcome a record instead. *)
+let test_turn_finished_closes_the_interval_the_start_opened () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "ledger-keeper" in
+  let stimulus = board_stimulus ~post_id:"finish-post" () in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_started ~base_path ~keeper_name stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_finished
+    ~base_path
+    ~keeper_name
+    ~disposition:"completed"
+    stimulus;
+  let rows = read_recent_rows ~base_path ~keeper_name ~limit:10 in
+  check int "three rows persisted" 3 (List.length rows);
+  let finished_row = List.nth rows 2 in
+  check_member_string "reaction record kind" "reaction" "record_kind" finished_row;
+  check_member_string
+    "reaction kind"
+    "turn_finished"
+    "kind"
+    (finished_row |> member "reaction");
+  check_member_string
+    "the turn's own outcome, not this writer's guess"
+    "completed"
+    "disposition"
+    (finished_row |> member "reaction");
+  (* Both halves name the same stimulus, which is what makes them an interval
+     rather than two unrelated rows. *)
+  check_member_string
+    "same stimulus as the start"
+    "board:finish-post"
+    "stimulus_id"
+    finished_row;
+  check_member_string
+    "and its own event identity"
+    "board:finish-post:reaction:turn_finished"
+    "event_id"
+    finished_row
+;;
+
 let test_direct_append_state_change_observer_contract () =
   let notifications = ref 0 in
   with_state_change_observer
@@ -1283,6 +1325,10 @@ let () =
             "event queue stimulus and turn reaction are durable"
             `Quick
             test_event_queue_stimulus_and_turn_reaction
+        ; test_case
+            "turn finished closes the interval the start opened"
+            `Quick
+            test_turn_finished_closes_the_interval_the_start_opened
         ; test_case
             "unexpected schema rows cannot double-count current occurrences"
             `Quick

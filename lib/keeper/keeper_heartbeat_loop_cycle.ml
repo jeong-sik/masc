@@ -54,6 +54,15 @@ type cycle_outcome =
       ; failure : Keeper_unified_turn.turn_failure
       }
 
+let disposition_token = function
+  | Completed _ -> "completed"
+  | Checkpointed _ -> "checkpointed"
+  | Input_required _ -> "input_required"
+  | Cancelled _ -> "cancelled"
+  | Skipped _ -> "skipped"
+  | Failed _ -> "failed"
+;;
+
 let meta = function
   | Completed { meta; _ }
   | Checkpointed { meta; _ }

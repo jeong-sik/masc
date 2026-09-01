@@ -390,10 +390,15 @@ type schedule_row = {
           wake that was delivered from one that was acted on; the pane had
           only [sch_reaction_projection_status], a single word for all four
           of these at once. *)
+  sch_turn_finished: bool option;
+      (** Whether the turn the wake opened reached its boundary. A wake that
+          started a turn and one whose turn finished are different facts, and
+          the pane said only the first until the ledger recorded the second. *)
   sch_queue_ack_seen: bool option;
   sch_wake_cancelled: bool option;
   sch_stimulus_recorded_at_iso: string option;
   sch_turn_started_recorded_at_iso: string option;
+  sch_turn_finished_recorded_at_iso: string option;
   sch_queue_ack_recorded_at_iso: string option;
   sch_wake_cancelled_recorded_at_iso: string option;
   sch_reaction_quarantined: int option;

@@ -80,6 +80,17 @@ val record_event_queue_stimulus_turn_started
   -> Keeper_event_queue.stimulus
   -> unit
 
+val record_event_queue_stimulus_turn_finished
+  :  ctx:_ context
+  -> keeper_name:string
+  -> disposition:string
+  -> Keeper_event_queue.stimulus
+  -> unit
+(** The closing half of {!record_event_queue_stimulus_turn_started}. A
+    persistence failure is logged and does not abort the turn, for the same
+    reason its opening half does not: the ledger records what happened and does
+    not decide whether the keeper may continue. *)
+
 (** Result of one heartbeat intake — accumulated pending board events
     after dedup and the number of stimuli consumed from the queue. *)
 type heartbeat_event_intake = {

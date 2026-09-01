@@ -711,6 +711,14 @@ let decode_schedule_row json =
     optional_nested_string_field json "keeper_reaction_evidence"
       "stimulus_recorded_at_iso"
   in
+  let* sch_turn_finished =
+    optional_nested_bool_field json "keeper_reaction_evidence"
+      "turn_finished_seen"
+  in
+  let* sch_turn_finished_recorded_at_iso =
+    optional_nested_string_field json "keeper_reaction_evidence"
+      "turn_finished_recorded_at_iso"
+  in
   let* sch_turn_started_recorded_at_iso =
     optional_nested_string_field json "keeper_reaction_evidence"
       "turn_started_recorded_at_iso"
@@ -760,10 +768,12 @@ let decode_schedule_row json =
     ; sch_reaction_reason
     ; sch_wake_seen
     ; sch_turn_started
+    ; sch_turn_finished
     ; sch_queue_ack_seen
     ; sch_wake_cancelled
     ; sch_stimulus_recorded_at_iso
     ; sch_turn_started_recorded_at_iso
+    ; sch_turn_finished_recorded_at_iso
     ; sch_queue_ack_recorded_at_iso
     ; sch_wake_cancelled_recorded_at_iso
     ; sch_reaction_quarantined

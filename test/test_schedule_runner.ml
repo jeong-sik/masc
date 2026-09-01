@@ -633,6 +633,32 @@ let test_runner_status_snapshot_tracks_liveness () =
   check int "crash count" 1 (json_int "crash_count" stale)
 ;;
 
+let test_runner_status_cross_domain_updates_are_lossless () =
+  Schedule_runner_status.reset_for_test ();
+  let domain_count = 4 in
+  let updates_per_domain = 250 in
+  let workers =
+    List.init domain_count (fun domain_index ->
+      Domain.spawn (fun () ->
+        for update_index = 1 to updates_per_domain do
+          let started_at =
+            Float.of_int ((domain_index * updates_per_domain) + update_index)
+          in
+          Schedule_runner_status.record_tick_error
+            ~started_at
+            ~finished_at:(started_at +. 0.25)
+            "cross-domain fixture"
+        done))
+  in
+  List.iter Domain.join workers;
+  let snapshot = Schedule_runner_status.snapshot () in
+  let expected = domain_count * updates_per_domain in
+  check int "every domain update is counted" expected snapshot.tick_count;
+  check int "every failure is counted" expected snapshot.failure_count;
+  check int "no crash was recorded" 0 snapshot.crash_count;
+  Schedule_runner_status.reset_for_test ()
+;;
+
 
 let () =
   run "Schedule_runner"
@@ -661,6 +687,8 @@ let () =
     ; ( "status",
         [ test_case "tracks liveness snapshot" `Quick
             test_runner_status_snapshot_tracks_liveness
+        ; test_case "cross-domain updates are lossless" `Quick
+            test_runner_status_cross_domain_updates_are_lossless
         ] )
     ]
 ;;

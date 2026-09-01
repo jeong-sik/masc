@@ -64,18 +64,15 @@ let empty =
   }
 ;;
 
-let state = ref empty
-let state_mu = Stdlib.Mutex.create ()
-
-let with_lock f = Stdlib.Mutex.protect state_mu f
+let state = Atomic.make empty
 
 let reset_for_test () =
-  with_lock (fun () -> state := empty)
+  Atomic.set state empty
 ;;
 
 let record_tick_started ~now =
-  with_lock (fun () ->
-    state := { !state with tick_in_flight = true; last_tick_started_at = Some now })
+  Atomic_util.update state (fun current ->
+    { current with tick_in_flight = true; last_tick_started_at = Some now })
 ;;
 
 (* TEL-OK: this module is a pure process-local projection over
@@ -126,36 +123,32 @@ let record_tick_ok
       result
   =
   let counts = tick_counts_of_result ~wake_enqueue_counts result in
-  with_lock (fun () ->
-    let current = !state in
-    state :=
-      { current with
-        tick_in_flight = false
-      ; tick_count = current.tick_count + 1
-      ; success_count = current.success_count + 1
-      ; last_tick_started_at = Some started_at
-      ; last_tick_finished_at = Some finished_at
-      ; last_success_at = Some finished_at
-      ; last_duration_sec = Some (duration ~started_at ~finished_at)
-      ; last_counts = Some counts
-      })
+  Atomic_util.update state (fun current ->
+    { current with
+      tick_in_flight = false
+    ; tick_count = current.tick_count + 1
+    ; success_count = current.success_count + 1
+    ; last_tick_started_at = Some started_at
+    ; last_tick_finished_at = Some finished_at
+    ; last_success_at = Some finished_at
+    ; last_duration_sec = Some (duration ~started_at ~finished_at)
+    ; last_counts = Some counts
+    })
 ;;
 
 let record_failure ~crashed ~started_at ~finished_at error =
-  with_lock (fun () ->
-    let current = !state in
-    state :=
-      { current with
-        tick_in_flight = false
-      ; tick_count = current.tick_count + 1
-      ; failure_count = current.failure_count + 1
-      ; crash_count = current.crash_count + if crashed then 1 else 0
-      ; last_tick_started_at = Some started_at
-      ; last_tick_finished_at = Some finished_at
-      ; last_error_at = Some finished_at
-      ; last_error = Some error
-      ; last_duration_sec = Some (duration ~started_at ~finished_at)
-      })
+  Atomic_util.update state (fun current ->
+    { current with
+      tick_in_flight = false
+    ; tick_count = current.tick_count + 1
+    ; failure_count = current.failure_count + 1
+    ; crash_count = current.crash_count + if crashed then 1 else 0
+    ; last_tick_started_at = Some started_at
+    ; last_tick_finished_at = Some finished_at
+    ; last_error_at = Some finished_at
+    ; last_error = Some error
+    ; last_duration_sec = Some (duration ~started_at ~finished_at)
+    })
 ;;
 
 let record_tick_error ~started_at ~finished_at error =
@@ -166,7 +159,7 @@ let record_tick_crash ~started_at ~finished_at error =
   record_failure ~crashed:true ~started_at ~finished_at error
 ;;
 
-let snapshot () = with_lock (fun () -> !state)
+let snapshot () = Atomic.get state
 
 
 let option_int_counts_json = function

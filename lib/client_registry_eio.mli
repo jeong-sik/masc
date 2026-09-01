@@ -1,8 +1,8 @@
 (** Agent Registry Eio - Global agent identity tracking
 
-    Actor model: one immutable identity/session/cache snapshot is swapped
-    behind a single mutex. Identity materialization and logging stay outside
-    the critical section; pure transitions close creation races.
+    One immutable identity/session/cache snapshot is published through an
+    atomic compare-and-set transition. Identity materialization and logging
+    stay outside the retry loop; pure transitions close creation races.
 
     @since 0.5.0
 *)
@@ -42,8 +42,10 @@ val total_count : unit -> int
 (** {1 Cleanup} *)
 
 val clear_all : unit -> unit
-(** Atomically clears registered identities and all MCP-session mappings.
-    Intended for process shutdown; individual sessions must use
+(** Atomically closes the process registry and clears registered identities
+    and MCP-session mappings. Once closed, later calls may still materialize
+    an unregistered identity for their immediate request but cannot repopulate
+    process state. Intended for process shutdown; individual sessions must use
     {!unregister_mcp_session}. *)
 
 val unregister_mcp_session : string -> unit

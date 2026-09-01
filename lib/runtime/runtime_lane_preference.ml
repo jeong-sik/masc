@@ -2,15 +2,14 @@
 
     See the [.mli] for the contract.  Implementation notes:
 
-    - One immutable state value is swapped under [Stdlib.Mutex] (record/read
-      may be called outside Eio fibers, so [Eio.Mutex] is not required).
-    - The shell observes clock and TTL once before locking. The pure state
-      transition resolves absence versus expiry and prunes stale entries. *)
+    - One immutable state value is published through an atomic compare-and-set
+      transition, so record/read calls need no Eio runtime or lock.
+    - The shell observes clock and TTL once before the transition. The pure
+      state function resolves absence versus expiry and prunes stale entries. *)
 
 module State = Runtime_lane_preference_state
 
-let state = ref State.empty
-let mu = Stdlib.Mutex.create ()
+let state = Atomic.make State.empty
 
 let ttl_s = Env_config_runtime.Lane.preference_ttl_s
 
@@ -18,11 +17,12 @@ let ttl_s = Env_config_runtime.Lane.preference_ttl_s
    deterministic replay logic branches on these timestamps. *)
 let now () = Unix.gettimeofday ()
 
-let apply_transition transition =
-  Stdlib.Mutex.protect mu (fun () ->
-    let next, output = transition !state in
-    state := next;
-    output)
+let rec apply_transition transition =
+  let current = Atomic.get state in
+  let next, output = transition current in
+  if Atomic.compare_and_set state current next
+  then output
+  else apply_transition transition
 ;;
 
 let observe ~lane_id =
@@ -43,4 +43,4 @@ let preferred_of_lane ~lane_id =
   State.preferred (observe ~lane_id)
 
 let reset_for_testing () =
-  Stdlib.Mutex.protect mu (fun () -> state := State.empty)
+  Atomic.set state State.empty

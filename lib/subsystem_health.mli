@@ -1,14 +1,13 @@
 (** Subsystem_health — process-wide registry of forked subsystems
     and their alive/dead state.
 
-    One immutable state value is guarded by [Stdlib.Mutex] (cross-domain:
-    /health handler may run on a different domain than the fork callers,
-    ruling out [Eio.Mutex]). Available from process start with no init timing
-    dependency. Clock observation and JSON rendering happen outside the
-    critical section.
+    One immutable state value is published through an [Atomic.t], so the
+    cross-domain /health reader never takes the fork callers' lock. Available
+    from process start with no init timing dependency. Clock observation and
+    JSON rendering happen outside the compare-and-set retry loop.
 
-    Internal helpers (the state holder and [registry_mu] mutex) are hidden —
-    callers consume only the three lifecycle entry points below. *)
+    Internal state publication is hidden; callers consume only the three
+    lifecycle entry points below. *)
 
 val register : string -> unit
 (** Mark [name] as alive in the registry. Called from

@@ -9,8 +9,8 @@
     provider rate limits are account-scoped, so one keeper's failover
     discovery benefits every keeper routed through the same lane.  Entries
     expire lazily on read against {!ttl_s}; there is no background sweeper.
-    Clock and TTL are observed once outside the registry mutex, then supplied
-    to a pure transition. *)
+    Clock and TTL are observed once before the atomic registry transition,
+    then supplied to a pure state function. *)
 
 val prefer_order : lane_id:string -> string list -> string list
 (** Reorder [candidates] so the remembered last-good candidate for [lane_id]

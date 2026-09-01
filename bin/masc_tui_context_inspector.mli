@@ -1,11 +1,13 @@
-(** Read-only projection of the last provider input a Keeper actually sent.
+(** Read-only projection of the last provider input retained at the
+    pre-dispatch serialization boundary.
 
     The turn record owns exact component byte counts and provider usage. The
     provider-input snapshot owns content-addressed copies of the final system
     prompt, projected messages, and effective tool schemas for that same
-    [turn_ref], plus the serialized request byte count and digest. The two
-    readings remain separate so one failed observation cannot erase the
-    other. *)
+    [turn_ref], plus the prepared request byte count and digest. This proves
+    what was serialized, not that transport began or the provider accepted
+    it. The two readings remain separate so one failed observation cannot
+    erase the other. *)
 
 type exact_input_kind =
   | System_prompt
@@ -65,11 +67,23 @@ type tab =
   | Exact_input
   | Input_map
 
+type input_source =
+  | Turn_prompt_assembly
+  | Effective_tool_surface
+  | Provider_message_list
+
+type input_evidence =
+  | Verified_exact_text
+  | Serialized_turn_snapshot
+  | Producer_digest_only
+  | Byte_count_only
+
 type input_map_row =
   { component : Turn_record.input_component_id
   ; bytes : int
-  ; included_by : string
-  ; retention : string
+  ; source : input_source
+  ; evidence : input_evidence
+  ; digest : string option
   ; exact_text : string option
   }
 
@@ -95,6 +109,12 @@ val exact_input_category : exact_input_kind -> string
 
 val input_component_label : Turn_record.input_component_id -> string
 val exact_input_label : exact_input_kind -> string
+val input_source_label : input_source -> string
+val input_evidence_label : input_evidence -> string
+val input_evidence_badge_cells : input_evidence -> int
+(** Display cells occupied by ["[ LABEL ]"]. Evidence labels are ASCII, so
+    this is also the byte width; renderers use it before allocating the
+    component-name column. *)
 
 val input_map_rows :
   Turn_record.t ->
@@ -103,7 +123,10 @@ val input_map_rows :
 (** The composition categories and exact input are joined only when both name
     the same [turn_ref]. Exact item text remains available in the input tab;
     categories that cannot be isolated without reinterpreting message content
-    stay explicit byte-only rows. *)
+    remain explicitly non-verified, distinguishing a same-turn pre-dispatch
+    serialization from producer-digest-only and byte-count-only evidence.
+    [digest] is producer-owned prompt-block evidence when the component is a
+    prompt block; it does not authorize an item-level join by itself. *)
 val exact_input_items : provider_input -> exact_input_item list
 val format_bytes : int -> string
 val format_tokens : int -> string

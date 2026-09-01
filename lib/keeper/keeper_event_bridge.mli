@@ -13,7 +13,12 @@
     event to the cluster-aware [.masc/agent-core-events/] store for offline/debugging.
     The durable store prunes old date-split files on append using
     [MASC_AGENT_CORE_EVENTS_RETENTION_DAYS] (default 30; non-positive disables).
-    Runs as a background Eio fiber under [sw]. *)
+    Runs as a background Eio fiber under [sw].
+
+    Contract: the bridge fiber is a never-ending loop forked on [sw].
+    [sw] must be ended by cancellation (e.g. server shutdown), never by
+    drain — a caller that returns normally from [Switch.run] with this
+    fiber forked will hang. *)
 val start :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->

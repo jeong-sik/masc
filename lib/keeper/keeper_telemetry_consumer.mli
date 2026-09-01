@@ -14,4 +14,9 @@ val spawn_subscriber
 (** [spawn_subscriber ~sw ~clock ~bus] forks a fiber that drains
     [Custom("telemetry_event", json)] payloads from [bus] and increments
     an OTel counter for each. The fiber yields every 100 ms so
-    co-located fibers are not starved. *)
+    co-located fibers are not starved.
+
+    Contract: the drain fiber is a never-ending loop forked on [sw].
+    [sw] must be ended by cancellation (e.g. server shutdown), never by
+    drain — a caller that returns normally from [Switch.run] with this
+    fiber forked will hang. *)

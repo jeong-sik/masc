@@ -113,7 +113,12 @@ val run :
        state machine decides the event passes [trigger_policy]).
     4. On [Close_wss] effect: tear down, reschedule per backoff.
 
-    @raise Failure until Phase 1.2 ships the implementation. *)
+    @raise Failure until Phase 1.2 ships the implementation.
+
+    Contract: [run] forks a never-ending heartbeat fiber on [sw] in
+    addition to the read loop. [sw] must be ended by cancellation (e.g.
+    server shutdown), never by drain — a caller that returns normally
+    from [Switch.run] with [run] forked will hang. *)
 
 (** {1 Connection state (RFC-0223 P2)} *)
 

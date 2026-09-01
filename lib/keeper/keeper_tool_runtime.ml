@@ -121,6 +121,7 @@ let handle_shell_ir ctx descriptor args =
          ?continuation_channel:ctx.continuation_channel
          ?gate_context:ctx.gate_context
          ?gate_grant:ctx.gate_grant
+         ~tool_context:ctx
          ~args
          ())
   | Tool_search_files ->

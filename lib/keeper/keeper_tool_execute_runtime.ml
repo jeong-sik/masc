@@ -212,6 +212,7 @@ let handle_tool_execute_typed
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?(tool_context : Keeper_tool_runtime.context option)
       ~(args : Yojson.Safe.t)
       ()
   =
@@ -435,21 +436,40 @@ let handle_tool_execute_typed
                refuses), so it needs no mount binding. *)
             Keeper_tool_execute_typed_input.Command_filesystem
         in
-        match
-          Keeper_tool_execute_typed_input.to_shell_ir
-            ~sandbox:dispatch_sandbox
-            ~namespace:redirect_namespace
-            input
-        with
-        | Error e ->
+        (* RFC tools-as-shell-commands: the one conversion point.  Stages
+           whose program is the bare reserved word [masc] become delegated
+           tool calls before dispatch.  Callers without a turn context
+           (replay) skip the rewrite, so a shell line stays process-only
+           there.  A rewrite refusal reads as a typed refusal with its own
+           code; both refusals travel the same failure shape below. *)
+        let shell_ir_error =
+          match
+            Keeper_tool_execute_typed_input.to_shell_ir
+              ~sandbox:dispatch_sandbox
+              ~namespace:redirect_namespace
+              input
+          with
+          | Error e ->
+            Error (typed_validation_error_text e, "typed_validation_failed")
+          | Ok ir -> (
+            match tool_context with
+            | None -> Ok ir
+            | Some context -> (
+              match Keeper_shell_tool_command.rewrite ~context ir with
+              | Ok rewritten -> Ok rewritten
+              | Error message ->
+                Error (message, "shell_tool_command_rejected")))
+        in
+        match shell_ir_error with
+        | Error (text, code) ->
           let fields =
-            [ "typed", `Bool true; "cmd", `String cmd ]
+            [ "typed", `Bool true; "cmd", `String cmd; "code", `String code ]
             @ dispatched_model_location_fields
           in
           Keeper_tool_execution.failure
             ~class_:Tool_result.Policy_rejection
             ~effect_disposition:Tool_result.Proven_pre_effect
-            (error_json ~fields (typed_validation_error_text e))
+            (error_json ~fields text)
         | Ok ir ->
         let cmd_for_log =
           Exec_policy.sanitize_command_for_log_of_ir ~fallback_cmd:cmd ir
@@ -963,6 +983,7 @@ let handle_tool_execute_with_outcome
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?tool_context
       ~(args : Yojson.Safe.t)
       ()
   =
@@ -978,6 +999,7 @@ let handle_tool_execute_with_outcome
     ?continuation_channel
     ?gate_context
     ?gate_grant
+    ?tool_context
     ~args
     ()
 ;;
@@ -989,6 +1011,7 @@ let handle_tool_execute
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?tool_context
       ~args
       ()
   =
@@ -999,6 +1022,7 @@ let handle_tool_execute
      ?continuation_channel
      ?gate_context
      ?gate_grant
+     ?tool_context
      ~args
      ()).raw_output
 ;;

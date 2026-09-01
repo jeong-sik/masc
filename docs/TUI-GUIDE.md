@@ -319,8 +319,9 @@ restart puts every Keeper back on `auto`.
 Standalone execution lanes only. Keeper lifecycle and turn-cycle facts live on
 Keepers, so this surface no longer repeats a second Keeper table. It hangs
 off Runtime rather than holding a Tab stop: `p` on Runtime walks keeper
-lanes, all runtimes, and then this surface; `p` or `Esc` here returns to
-Runtime, and the palette keeps `go Lanes`.
+lanes, all runtimes, and then this surface. From the lane overview, `p` or
+`Esc` returns to Runtime; inside the run list and run detail, `Esc` first
+backs out one drill-down level as before. The palette keeps `go Lanes`.
 
 ```
  MASC Lanes · Standalone (4 lanes)  17:02:53  [connected]

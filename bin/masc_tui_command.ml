@@ -10,6 +10,8 @@ type t =
   | Switch_keeper of string
   | Switch_keeper_missing_name
   | Interrupt_turn
+  | Steer_turn of string
+  | Steer_missing_message
   | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
   | Set_tools of [ `Toggle | `Compact | `Full ]
   | Toggle_memory
@@ -50,6 +52,10 @@ let catalog =
   ; { word = "interrupt"
     ; args = ""
     ; summary = "signal the streaming turn to stop"
+    }
+  ; { word = "steer"
+    ; args = "<message>"
+    ; summary = "interrupt, then run this before queued next turns"
     }
   ; { word = "thinking"
     ; args = "[hidden|folded|full]"
@@ -131,6 +137,10 @@ let parse text =
     | "keeper", "" -> Switch_keeper_missing_name
     | "keeper", name -> Switch_keeper name
     | "interrupt", _ -> Interrupt_turn
+    | "steer", "" -> Steer_missing_message
+    | "steer", message ->
+        Steer_turn
+          (if String.equal body "" then message else message ^ "\n" ^ body)
     | "thinking", "" -> Set_thinking `Cycle
     | "thinking", "hidden" -> Set_thinking `Hidden
     | "thinking", "folded" -> Set_thinking `Folded

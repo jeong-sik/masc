@@ -16,11 +16,13 @@ let request ~keeper_name text =
 ;;
 
 let messages queue =
-  List.map (fun (r : Chat.request) -> r.Chat.message) (Queue.waiting queue)
+  List.map
+    (fun (item : Queue.item) -> item.request.Chat.message)
+    (Queue.waiting queue)
 ;;
 
 let push_exn queue ~keeper_name text =
-  match Queue.push queue (request ~keeper_name text) with
+  match Queue.push queue ~submitted_at:42. (request ~keeper_name text) with
   | Ok (queue, waiting) -> (queue, waiting)
   | Error detail -> failf "expected the line to queue, got: %s" detail
 ;;
@@ -43,12 +45,14 @@ let test_a_line_keeps_the_keeper_it_was_written_to () =
   let q, _ = push_exn q ~keeper_name:"bandleader" "for bandleader" in
   match Queue.take_first_sendable q ~sendable:(fun _ -> true) with
   | None -> fail "expected a waiting line"
-  | Some (first, rest) ->
+  | Some (first_item, rest) ->
+      let first = first_item.Queue.request in
       check string "the oldest goes first" "for bluebird" first.Chat.message;
       check string "to its own keeper" "bluebird" first.Chat.keeper_name;
       (match Queue.take_first_sendable rest ~sendable:(fun _ -> true) with
        | None -> fail "expected the second line to still be waiting"
-       | Some (second, rest) ->
+       | Some (second_item, rest) ->
+           let second = second_item.Queue.request in
            check string "and the next keeps its own" "bandleader"
              second.Chat.keeper_name;
            check string "with its own text" "for bandleader" second.Chat.message;
@@ -66,7 +70,9 @@ let test_the_cap_refuses_rather_than_forgetting () =
   in
   let full = fill Queue.empty Queue.cap in
   check int "the queue is at its cap" Queue.cap (Queue.length full);
-  match Queue.push full (request ~keeper_name:"k" "one too many") with
+  match
+    Queue.push full ~submitted_at:42. (request ~keeper_name:"k" "one too many")
+  with
   | Ok _ -> fail "the cap must refuse"
   | Error detail ->
       check bool "the refusal says the line was not taken" true
@@ -97,7 +103,8 @@ let test_a_busy_keeper_does_not_stall_the_lines_behind_it () =
   let q, _ = push_exn q ~keeper_name:"busy" "waits too" in
   match Queue.take_first_sendable q ~sendable:(fun k -> not (String.equal k "busy")) with
   | None -> fail "the free keeper's line should be sendable"
-  | Some (taken, rest) ->
+  | Some (taken_item, rest) ->
+      let taken = taken_item.Queue.request in
       check string "the free keeper's line comes out" "can go" taken.Chat.message;
       check string "with its own keeper" "free" taken.Chat.keeper_name;
       check (list string) "and the busy keeper's lines keep their order"
@@ -118,7 +125,8 @@ let test_all_sendable_is_oldest_first () =
   let q, _ = push_exn q ~keeper_name:"b" "two" in
   match Queue.take_first_sendable q ~sendable:(fun _ -> true) with
   | None -> fail "expected a line"
-  | Some (taken, rest) ->
+  | Some (taken_item, rest) ->
+      let taken = taken_item.Queue.request in
       check string "oldest first" "one" taken.Chat.message;
       check (list string) "the rest keeps its order" [ "two" ]
         (messages rest)
@@ -134,14 +142,15 @@ let test_take_removes_the_named_line_and_keeps_the_order () =
   let queue =
     List.fold_left
       (fun queue request ->
-        match Queue.push queue request with
+        match Queue.push queue ~submitted_at:42. request with
         | Ok (queue, _) -> queue
         | Error detail -> failf "push failed: %s" detail)
       Queue.empty [ one; two; three ]
   in
   (match Queue.take queue ~request_id:two.Chat.request_id with
    | None -> fail "the queue holds this request"
-   | Some (taken, rest) ->
+   | Some (taken_item, rest) ->
+       let taken = taken_item.Queue.request in
        check string "the named line comes out" "two" taken.Chat.message;
        check (list string) "and the rest keeps its order" [ "one"; "three" ]
          (messages rest));
@@ -155,7 +164,7 @@ let test_take_removes_the_named_line_and_keeps_the_order () =
 let test_holds_agrees_with_take () =
   let only = request ~keeper_name:"k" "only" in
   let queue =
-    match Queue.push Queue.empty only with
+    match Queue.push Queue.empty ~submitted_at:42. only with
     | Ok (queue, _) -> queue
     | Error detail -> failf "push failed: %s" detail
   in
@@ -172,6 +181,69 @@ let test_an_empty_queue_takes_nothing () =
   check int "and has no length" 0 (Queue.length Queue.empty);
   check bool "and takes nothing" true
     (Option.is_none (Queue.take_first_sendable Queue.empty ~sendable:(fun _ -> true)))
+;;
+
+let test_submission_clock_and_per_keeper_count_are_preserved () =
+  let alpha = request ~keeper_name:"alpha" "one" in
+  let beta = request ~keeper_name:"beta" "two" in
+  let queue =
+    match Queue.push Queue.empty ~submitted_at:12.5 alpha with
+    | Error detail -> fail detail
+    | Ok (queue, _) ->
+        (match Queue.push queue ~submitted_at:13.5 beta with
+         | Error detail -> fail detail
+         | Ok (queue, _) -> queue)
+  in
+  check int "alpha count" 1 (Queue.length_for_keeper queue ~keeper_name:"alpha");
+  check int "beta count" 1 (Queue.length_for_keeper queue ~keeper_name:"beta");
+  match Queue.waiting_for_keeper queue ~keeper_name:"alpha" with
+  | [ item ] ->
+      check (float 0.001) "first submission clock" 12.5 item.Queue.submitted_at
+  | items -> failf "expected one alpha item, got %d" (List.length items)
+;;
+
+let test_steer_precedes_next_for_its_keeper () =
+  let queue, _ = push_exn Queue.empty ~keeper_name:"alpha" "next one" in
+  let queue, _ = push_exn queue ~keeper_name:"beta" "beta next" in
+  let queue, _ = push_exn queue ~keeper_name:"alpha" "next two" in
+  let steer = request ~keeper_name:"alpha" "replacement" in
+  let queue =
+    match Queue.push_steer queue ~submitted_at:99. steer with
+    | Error detail -> fail detail
+    | Ok (queue, waiting) ->
+        check int "three alpha items" 3 waiting;
+        queue
+  in
+  check (list string) "alpha dispatch order"
+    [ "replacement"; "next one"; "next two" ]
+    (Queue.waiting_for_keeper queue ~keeper_name:"alpha"
+     |> List.map (fun item -> item.Queue.request.Chat.message));
+  (match Queue.take_first_sendable queue ~sendable:(fun _ -> true) with
+   | Some (item, _) ->
+       check string "steer dispatches first" "replacement"
+         item.Queue.request.Chat.message;
+       check bool "typed intent" true
+         (item.Queue.intent = Queue.Steer_after_interrupt)
+   | None -> fail "steer should be sendable");
+  match Queue.push_steer queue ~submitted_at:100. steer with
+  | Ok _ -> fail "a second steer for one Keeper must be refused"
+  | Error detail ->
+      check bool "refusal names existing steer" true
+        (Astring.String.is_infix ~affix:"already waiting" detail)
+;;
+
+let test_take_newest_for_keeper_does_not_touch_another_keeper () =
+  let queue, _ = push_exn Queue.empty ~keeper_name:"alpha" "alpha one" in
+  let queue, _ = push_exn queue ~keeper_name:"beta" "beta one" in
+  let queue, _ = push_exn queue ~keeper_name:"alpha" "alpha two" in
+  let queue, _ = push_exn queue ~keeper_name:"beta" "beta two" in
+  match Queue.take_newest_for_keeper queue ~keeper_name:"alpha" with
+  | None -> fail "alpha has waiting input"
+  | Some (taken, rest) ->
+      check string "newest alpha" "alpha two" taken.Queue.request.Chat.message;
+      check (list string) "other positions survive"
+        [ "alpha one"; "beta one"; "beta two" ]
+        (messages rest)
 ;;
 
 let () =
@@ -197,6 +269,12 @@ let () =
             test_all_sendable_is_oldest_first
         ; test_case "an empty queue takes nothing" `Quick
             test_an_empty_queue_takes_nothing
+        ; test_case "submission clock and per-keeper count are preserved" `Quick
+            test_submission_clock_and_per_keeper_count_are_preserved
+        ; test_case "steer precedes next for its keeper" `Quick
+            test_steer_precedes_next_for_its_keeper
+        ; test_case "take newest is scoped to one Keeper" `Quick
+            test_take_newest_for_keeper_does_not_touch_another_keeper
         ] )
     ]
 ;;

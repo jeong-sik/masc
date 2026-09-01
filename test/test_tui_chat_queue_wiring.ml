@@ -39,6 +39,16 @@ let entry_at at : Tui_types.msg_entry =
   ; me_at = at
   }
 
+let chat_entry ~request_id ~role ~text ~at : Tui_types.msg_entry =
+  { Tui_types.me_keeper_name = "alpha"
+  ; me_role = role
+  ; me_text = text
+  ; me_tool_block = None
+  ; me_timestamp = Printf.sprintf "%.0f" at
+  ; me_request_id = request_id
+  ; me_at = at
+  }
+
 let ats entries =
   List.map (fun (e : Tui_types.msg_entry) -> e.Tui_types.me_at) entries
 
@@ -90,6 +100,58 @@ let test_oldest_at_reports_the_cursor () =
     (Tui_types.oldest_at [])
 ;;
 
+let test_causal_timeline_keeps_turns_whole_without_timestamp_sorting () =
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let loaded =
+    [ chat_entry ~request_id:"turn-d" ~role:user ~text:"D" ~at:100.
+    ; chat_entry ~request_id:"turn-d" ~role:Tui_types.Message_tool
+        ~text:"Execute" ~at:300.
+    ; chat_entry ~request_id:"turn-d" ~role:Tui_types.Message_keeper
+        ~text:"D answer" ~at:300.
+    ]
+  in
+  let session =
+    [ chat_entry ~request_id:"turn-d" ~role:Tui_types.Message_status
+        ~text:"approved" ~at:200.
+    ; chat_entry ~request_id:"turn-next" ~role:user ~text:"queued correction"
+        ~at:150.
+    ; chat_entry ~request_id:"turn-active" ~role:user ~text:"active input"
+        ~at:120.
+    ]
+  in
+  let timeline =
+    Tui_types.chat_timeline ~loaded ~session
+      ~queued_request_ids:[ "turn-next" ]
+      ~active_request_id:(Some "turn-active")
+  in
+  check (list string) "causal rows, not wall-clock rows"
+    [ "D"; "approved"; "Execute"; "D answer"; "active input" ]
+    (Tui_types.chat_timeline_rows timeline
+     |> List.map (fun row -> row.Tui_types.me_text));
+  check bool "queued input is a separate NEXT lane" true
+    (not
+       (List.exists
+          (fun row -> String.equal row.Tui_types.me_request_id "turn-next")
+          (Tui_types.chat_timeline_rows timeline)))
+;;
+
+let test_scroll_anchor_follows_structure_not_clock () =
+  let rows =
+    [ chat_entry ~request_id:"one" ~role:Tui_types.Message_keeper ~text:"one"
+        ~at:300.
+    ; chat_entry ~request_id:"two" ~role:Tui_types.Message_keeper ~text:"two"
+        ~at:100.
+    ; chat_entry ~request_id:"three" ~role:Tui_types.Message_keeper
+        ~text:"three" ~at:200.
+    ]
+  in
+  match Tui_types.msg_entries_after_anchor rows (Tui_types.msg_anchor (List.hd rows)) with
+  | None -> fail "the anchor is present"
+  | Some after ->
+      check (list string) "list suffix wins over timestamps" [ "two"; "three" ]
+        (List.map (fun row -> row.Tui_types.me_text) after)
+;;
+
 let test_enter_during_a_turn_queues () =
   let n = calls ~module_path:"bin/masc_tui.ml" ~callee:"queue_keeper_message" in
   if n < 1 then
@@ -106,6 +168,29 @@ let test_a_settled_turn_drains_the_queue () =
       "bin/masc_tui.ml must drain the queue when a turn settles; \
        drain_queued_message is called %d time(s)"
       n
+;;
+
+let test_steer_queues_then_interrupts_through_distinct_paths () =
+  let queued =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml" ~binding_name:"start_keeper_steer"
+      ~callee:"queue_keeper_steer"
+  in
+  let interrupted =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml" ~binding_name:"start_keeper_steer"
+      ~callee:"launch_keeper_interrupt"
+  in
+  let prioritized =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml" ~binding_name:"queue_keeper_steer"
+      ~callee:"Chat_queue.push_steer"
+  in
+  if queued <> 1 || interrupted <> 1 || prioritized <> 1 then
+    failf
+      "steer must persist the replacement before signalling the current turn: \
+       queue=%d interrupt=%d priority=%d"
+      queued interrupted prioritized
 ;;
 
 (* Two Keepers can stream at once. A single [state.msg_live] slot lets the
@@ -144,7 +229,11 @@ let test_live_transcripts_are_kept_per_keeper () =
         ~request_id:sent_request.request_id
         ~started_at
     in
-    ({ Tui_types.sent_request = sent_request; sent_at = started_at; live }
+    ({ Tui_types.sent_request = sent_request
+     ; submitted_at = started_at
+     ; sent_at = started_at
+     ; live
+     }
       : Tui_types.inflight)
   in
   let alpha = entry "alpha" 1.0 in
@@ -341,7 +430,9 @@ let test_take_newest_returns_last_and_keeps_order () =
       Masc_tui_keeper_chat_projection.create_request ~attachments:[]
         ~keeper_name:keeper ~message:text ()
     in
-    match Masc_tui_keeper_chat_queue.push queue request with
+    match
+      Masc_tui_keeper_chat_queue.push queue ~submitted_at:42. request
+    with
     | Ok (next, _) -> next
     | Error detail -> failf "push failed: %s" detail
   in
@@ -354,7 +445,8 @@ let test_take_newest_returns_last_and_keeps_order () =
   in
   match Masc_tui_keeper_chat_queue.take_newest queue with
   | None -> failf "take_newest returned None with three waiting"
-  | Some (newest, rest) ->
+  | Some (newest_item, rest) ->
+      let newest = newest_item.Masc_tui_keeper_chat_queue.request in
       check string "newest request is the last pushed" "c"
         newest.Masc_tui_keeper_chat_projection.keeper_name;
       check string "newest text is the last pushed" "third"
@@ -365,49 +457,38 @@ let test_take_newest_returns_last_and_keeps_order () =
          Masc_tui_keeper_chat_queue.take_first_sendable rest
            ~sendable:(fun _ -> true)
        with
-       | Some (oldest, remaining) ->
+       | Some (oldest_item, remaining) ->
+           let oldest = oldest_item.Masc_tui_keeper_chat_queue.request in
            check string "oldest still drains first" "a"
              oldest.Masc_tui_keeper_chat_projection.keeper_name;
            check (list string) "and what is left keeps its order" [ "second" ]
              (Masc_tui_keeper_chat_queue.waiting remaining
-              |> List.map (fun (r : Masc_tui_keeper_chat_projection.request) ->
-                     r.Masc_tui_keeper_chat_projection.message))
+              |> List.map (fun item ->
+                     item.Masc_tui_keeper_chat_queue.request.message))
        | None -> failf "oldest no longer drains first after take_newest")
 ;;
 
-(* The queue no longer has rows of its own beneath the conversation: a waiting
-   line is drawn in the conversation, in its place in the order, from the
-   moment it is typed.
-
-   What still has to hold is that the budget and the pane agree about it.
-   Counting rows nothing draws is the same defect as drawing rows nothing
-   counts, and the second one shipped: #29818 rewrote the in-flight block and
-   took the queue rows out with it, leaving the count behind, so every line
-   typed during a turn cost a row of conversation and put nothing in its
-   place.
-
-   Asserted as an equality rather than as "both at least once". The contract is
-   that the two sides move together; "neither draws nor counts" satisfies it
-   exactly as "both do", and requiring a count would pin the old design rather
-   than the rule it existed for. *)
+(* NEXT is a separate causal lane below the transcript. Its row budget counts
+   the selected Keeper only, and the renderer walks that same selected queue;
+   a workspace-global count is what made one Keeper's footer report another
+   Keeper's waiting input. *)
 let test_the_budget_and_the_pane_agree_about_queue_rows () =
   let counted =
     Ast_grep.count_calls_in_value_binding
       ~module_path:"bin/masc_tui_types.ml"
       ~binding_name:"keeper_message_status_rows"
-      ~callee:"Masc_tui_keeper_chat_queue.waiting"
+      ~callee:"Masc_tui_keeper_chat_queue.length_for_keeper"
   in
   let drawn =
     Ast_grep.count_calls_in_value_binding
       ~module_path:"bin/masc_tui_render.ml"
       ~binding_name:"render_keeper_message"
-      ~callee:"Masc_tui_keeper_chat_queue.waiting"
+      ~callee:"Masc_tui_keeper_chat_queue.waiting_for_keeper"
   in
-  if counted <> drawn then
+  if counted <> 1 || drawn <> 1 then
     failf
-      "the row budget and the pane disagree about the queue: \
-       keeper_message_status_rows walks it %d time(s), render_keeper_message \
-       %d time(s)"
+      "NEXT must be counted and drawn once for the selected Keeper: \
+       count=%d draw=%d"
       counted drawn
 ;;
 
@@ -442,52 +523,50 @@ let test_the_budget_and_the_pane_agree_about_the_scrollback_row () =
       counted
 ;;
 
-(* A queued line is shown as queued. Drawn like a sent one it would be the same
-   silence that made a refused send look like a sent one -- the operator has to
-   be able to tell which of their own messages has actually gone. The queue is
-   the only place that fact lives, so the pane asks it rather than carrying a
-   second copy that can drift. *)
-(* Named for the binding that builds the row labels rather than the one that
-   draws the frame. The two were the same function until the layout build was
-   lifted out so a search over the conversation could measure the same
-   document the pane draws; a guard that keeps naming the outer one stops
-   watching anything the moment the inner one moves. *)
 let layout_binding = "keeper_message_layout_entries"
 
-let test_the_pane_marks_what_is_still_waiting () =
-  let n =
+let test_pending_input_is_not_mixed_into_the_transcript () =
+  let transcript_reads =
     Ast_grep.count_calls_in_value_binding
       ~module_path:"bin/masc_tui_render.ml"
       ~binding_name:layout_binding
       ~callee:"Masc_tui_keeper_chat_queue.holds"
   in
-  if n < 1 then
+  let next_reads =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_keeper_message"
+      ~callee:"Masc_tui_keeper_chat_queue.waiting_for_keeper"
+  in
+  if transcript_reads <> 0 || next_reads <> 1 then
     failf
-      "%s must ask the queue which rows are still waiting; \
-       Masc_tui_keeper_chat_queue.holds is called %d time(s)"
-      layout_binding n
+      "pending input must live only in NEXT: transcript queue reads=%d, \
+       NEXT reads=%d"
+      transcript_reads next_reads
 ;;
 
-(* When a turn settles, the pane reloads the keeper's transcript from the
-   server and drops the rows it is replacing -- every user row for that keeper.
-   A queued line is not in what the server sent, because it has not been sent;
-   dropping it there takes it off the screen at the exact moment the turn ahead
-   of it settles, which is when the operator is watching for it to go. It would
-   come back only if and when it was dispatched, and the lines behind it not at
-   all. So the reload asks the queue before dropping. *)
-let test_a_transcript_reload_keeps_what_is_still_queued () =
-  let n =
+(* A refresh started for the previous turn can land after NEXT became active
+   but before its user row reached the server. Queue membership has already
+   ended there, so only exact request identity in the returned transcript may
+   replace the session row. *)
+let test_a_transcript_reload_replaces_only_an_exact_user_row () =
+  let queue_guesses =
     Ast_grep.count_calls_in_value_binding
       ~module_path:"bin/masc_tui.ml"
       ~binding_name:"forget_session_rows_the_transcript_holds"
       ~callee:"Chat_queue.holds"
   in
-  if n < 1 then
+  let identity_reads =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"forget_session_rows_the_transcript_holds"
+      ~callee:"List.exists"
+  in
+  if queue_guesses <> 0 || identity_reads < 2 then
     failf
-      "the transcript reload must keep the rows the queue still holds; \
-       Chat_queue.holds is called %d time(s) in \
-       forget_session_rows_the_transcript_holds"
-      n
+      "transcript replacement must use returned request identity, not current \
+       queue state: queue reads=%d identity reads=%d"
+      queue_guesses identity_reads
 ;;
 
 (* Staged attachments belong to the line they were staged for. They used to be
@@ -687,6 +766,8 @@ let () =
             test_enter_during_a_turn_queues
         ; test_case "a settled turn drains the queue" `Quick
             test_a_settled_turn_drains_the_queue
+        ; test_case "steer queues then interrupts through distinct paths" `Quick
+            test_steer_queues_then_interrupts_through_distinct_paths
         ; test_case "concurrent turns keep request-owned transcripts" `Quick
             test_concurrent_turns_keep_request_owned_transcripts
         ; test_case "live transcripts are kept per Keeper" `Quick
@@ -712,14 +793,14 @@ let () =
         ; test_case "the budget and the pane agree about the scrollback row"
             `Quick
             test_the_budget_and_the_pane_agree_about_the_scrollback_row
-        ; test_case "the pane marks what is still waiting" `Quick
-            test_the_pane_marks_what_is_still_waiting
+        ; test_case "pending input is not mixed into the transcript" `Quick
+            test_pending_input_is_not_mixed_into_the_transcript
         ; test_case "queueing puts the line in the conversation" `Quick
             test_queueing_puts_the_line_in_the_conversation
         ; test_case "a queued line takes its attachments when it is typed" `Quick
             test_a_queued_line_takes_its_attachments_when_it_is_typed
-        ; test_case "a transcript reload keeps what is still queued" `Quick
-            test_a_transcript_reload_keeps_what_is_still_queued
+        ; test_case "a transcript reload replaces only an exact user row" `Quick
+            test_a_transcript_reload_replaces_only_an_exact_user_row
         ; test_case "cancel and edit take the row with them" `Quick
             test_cancel_and_edit_take_the_row_with_them
         ; test_case "the pane draws every row into its own buffer" `Quick
@@ -742,6 +823,10 @@ let () =
             test_an_empty_refresh_keeps_the_transcript
         ; test_case "oldest_at reports the cursor" `Quick
             test_oldest_at_reports_the_cursor
+        ; test_case "causal timeline keeps turns whole" `Quick
+            test_causal_timeline_keeps_turns_whole_without_timestamp_sorting
+        ; test_case "scroll anchor follows structure" `Quick
+            test_scroll_anchor_follows_structure_not_clock
         ] )
     ; ( "queue"
       , [ test_case "take_newest returns the last and keeps order" `Quick

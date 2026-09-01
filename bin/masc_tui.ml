@@ -1260,9 +1260,13 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          shows what waits in the order it will go; the newest is the one a
          mis-send just hit, and dropping it is local — nothing was
          dispatched. *)
-      (match Chat_queue.take_newest state.msg_queued with
+      (match
+         Option.bind state.msg_target_keeper_name (fun keeper_name ->
+           Chat_queue.take_newest_for_keeper state.msg_queued ~keeper_name)
+       with
        | None -> () (* nothing waits; consume quietly like Ctrl-U on empty *)
-       | Some (request, rest) ->
+       | Some (item, rest) ->
+         let request = item.Chat_queue.request in
          state.msg_queued <- rest;
          forget_queued_history state request;
          add_event state "info"
@@ -1272,9 +1276,13 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     end else if c = Some 16 then begin
       (* Ctrl-P: pull the newest waiting line back into the composer. That is
          the edit: fix it and Enter queues it again. *)
-      (match Chat_queue.take_newest state.msg_queued with
+      (match
+         Option.bind state.msg_target_keeper_name (fun keeper_name ->
+           Chat_queue.take_newest_for_keeper state.msg_queued ~keeper_name)
+       with
        | None -> ()
-       | Some (request, rest) ->
+       | Some (item, rest) ->
+         let request = item.Chat_queue.request in
          state.msg_queued <- rest;
          forget_queued_history state request;
          (* The attachments come back with the text. They were staged for this
@@ -1615,22 +1623,36 @@ let clock_text_of_unix at =
   Printf.sprintf "%02d:%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
     time.Unix.tm_sec
 
-let append_chat_history ?tool_block state request role text =
+let append_chat_history ?tool_block ?at state request role text =
   let text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text in
+  let at = Option.value ~default:(Unix.gettimeofday ()) at in
   state.msg_history <-
     state.msg_history
     @ [ {
           me_role = role;
           me_text = text;
           me_tool_block = tool_block;
-          me_timestamp = current_clock_text ();
+          me_timestamp = clock_text_of_unix at;
           me_keeper_name = request.Keeper_chat.keeper_name;
           me_request_id = request.request_id;
-          me_at = Unix.gettimeofday ();
+          me_at = at;
         } ]
 
+let remember_submission_time state request_id submitted_at =
+  if not (List.mem_assoc request_id state.msg_submission_times)
+  then
+    state.msg_submission_times <-
+      (request_id, submitted_at) :: state.msg_submission_times
+;;
 
-let append_user_history_once state (request : Keeper_chat.request) =
+let append_user_history_once ?submitted_at state (request : Keeper_chat.request) =
+  let submitted_at =
+    match submitted_at, List.assoc_opt request.request_id state.msg_submission_times with
+    | Some at, _ -> at
+    | None, Some at -> at
+    | None, None -> Unix.gettimeofday ()
+  in
+  remember_submission_time state request.request_id submitted_at;
   let expected_text =
     Keeper_chat.terminal_safe_text ~preserve_newlines:true request.message
   in
@@ -1644,7 +1666,7 @@ let append_user_history_once state (request : Keeper_chat.request) =
       state.msg_history
   in
   if not already_present then
-    append_chat_history state request
+    append_chat_history ~at:submitted_at state request
       (Message_user (Sent_by_operator "you"))
       request.message
 
@@ -4282,6 +4304,20 @@ let switch_to_next_keeper_message state ~mailbox =
    could not finish never produces that row, and the session keeps the only
    record, which is what keeping every error row was protecting. *)
 let forget_session_rows_the_transcript_holds state keeper_name rows =
+  let user_turns_the_transcript_holds =
+    List.filter_map
+      (fun (row : Keeper_chat_history.row) ->
+        match row.Keeper_chat_history.kind with
+        | Keeper_chat_history.Addressed_to_keeper _ -> row.turn_id
+        | Keeper_chat_history.Said_by_keeper
+        | Keeper_chat_history.Autonomous_reply
+        | Keeper_chat_history.Delivery_failed _
+        | Keeper_chat_history.Tool_calls _
+        | Keeper_chat_history.Reasoning _
+        | Keeper_chat_history.Memory_activity ->
+            None)
+      rows
+  in
   let failures_the_transcript_holds =
     List.filter_map
       (fun (row : Keeper_chat_history.row) ->
@@ -4310,20 +4346,20 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
                     (String.equal entry.me_request_id)
                     failures_the_transcript_holds)
         | Message_user _ ->
-            (* A line still waiting in the queue is not in the transcript the
-               server just sent, because it has not been sent yet. Dropping it
-               with the rest would take it off the screen at the exact moment
-               the turn ahead of it settled -- which is when the operator is
-               watching for it to go -- and it would come back only if and when
-               it was dispatched. It is kept until the queue stops holding
-               it. *)
-            Chat_queue.holds state.msg_queued ~request_id:entry.me_request_id
+            (* Queue membership is not proof that a row reached the server,
+               and leaving the queue is not proof either: the next request can
+               enter [msg_inflight] before a transcript refresh started for the
+               previous turn comes back. Replace this session row only when
+               the exact request id is in the snapshot being applied. *)
+            not
+              (List.exists (String.equal entry.me_request_id)
+                 user_turns_the_transcript_holds)
         | Message_keeper | Message_autonomous | Message_tool
         | Message_thinking | Message_memory ->
             false)
       state.msg_history
 
-let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
+let msg_entry_of_history_row state keeper_name (row : Keeper_chat_history.row) =
   let role, text, tool_block =
     match row.Keeper_chat_history.kind with
     | Keeper_chat_history.Addressed_to_keeper { speaker; surface } ->
@@ -4359,12 +4395,18 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
         (Message_thinking, String.concat "\n" lines, None)
     | Keeper_chat_history.Memory_activity -> (Message_memory, row.text, None)
   in
+  let submitted_at =
+    Option.bind row.Keeper_chat_history.turn_id (fun request_id ->
+      List.assoc_opt request_id state.msg_submission_times)
+  in
   let timestamp =
     match row.Keeper_chat_history.kind with
     | Keeper_chat_history.Memory_activity
       when Float.equal row.Keeper_chat_history.at 0.0 ->
         "--:--:--"
-    | _ -> clock_text_of_unix row.Keeper_chat_history.at
+    | _ ->
+        clock_text_of_unix
+          (Option.value ~default:row.Keeper_chat_history.at submitted_at)
   in
   (* A file the row carries, said on a line of its own under the words. The
      store has held these since the composer learned to stage one; the pane
@@ -4562,7 +4604,9 @@ let take_pending_attachments state =
   staged
 ;;
 
-let launch_keeper_request state ~mailbox request =
+let launch_keeper_request ?submitted_at state ~mailbox request =
+  let submitted_at = Option.value ~default:(Unix.gettimeofday ()) submitted_at in
+  remember_submission_time state request.Keeper_chat.request_id submitted_at;
   let live =
     Keeper_chat_transcript.create
       ~keeper_name:request.Keeper_chat.keeper_name
@@ -4570,7 +4614,11 @@ let launch_keeper_request state ~mailbox request =
       ~started_at:(Unix.gettimeofday ())
   in
   state.msg_inflight <-
-    { sent_request = request; sent_at = Unix.gettimeofday (); live }
+    { sent_request = request
+    ; submitted_at
+    ; sent_at = Unix.gettimeofday ()
+    ; live
+    }
     :: state.msg_inflight;
   if
     Option.exists
@@ -4600,22 +4648,67 @@ let launch_keeper_request state ~mailbox request =
            (request, "Eio switch is unavailable"))
 
 let queue_keeper_message state request =
-  match Chat_queue.push state.msg_queued request with
+  let submitted_at = Unix.gettimeofday () in
+  match Chat_queue.push state.msg_queued ~submitted_at request with
   | Error _ as error -> error
   | Ok (queue, waiting) ->
       state.msg_queued <- queue;
-      (* The line takes its place in the conversation now rather than when it
-         is dispatched. The operator pressed Enter and has to see that it
-         landed somewhere; until this, a queued line lived only in a row
-         beneath the conversation and the pane above it looked as though
-         nothing had been typed.
-
-         [append_user_history_once] is the same call dispatch makes and is
-         keyed on the request id, so when this request does go out the row it
-         already has is the row it keeps -- there is no second copy to
-         reconcile. *)
-      append_user_history_once state request;
+      (* Keep one request-owned session row for recall and the later active
+         turn, but causal projection withholds it from the transcript while
+         the queue owns it. NEXT renders the queue item itself. *)
+      append_user_history_once ~submitted_at state request;
       Ok waiting
+;;
+
+let queue_keeper_steer state request =
+  let submitted_at = Unix.gettimeofday () in
+  match Chat_queue.push_steer state.msg_queued ~submitted_at request with
+  | Error _ as error -> error
+  | Ok (queue, waiting) ->
+      state.msg_queued <- queue;
+      append_user_history_once ~submitted_at state request;
+      Ok waiting
+;;
+
+let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
+  let target =
+    match keeper_name with
+    | Some _ as named -> named
+    | None -> state.msg_target_keeper_name
+  in
+  match target with
+  | None -> add_event state "error" "/steer needs a Keeper selected"
+  | Some keeper_name when not (keeper_available_for_new_message state keeper_name) ->
+      add_event state "error"
+        (Printf.sprintf "Cannot steer: Keeper %s is unavailable"
+           (Keeper_chat.terminal_safe_text keeper_name))
+  | Some keeper_name -> (
+      match inflight_for state keeper_name, live_for_keeper state keeper_name with
+      | None, _ | _, None ->
+          add_event state "error"
+            "/steer needs a turn currently streaming for this Keeper"
+      | Some active_request, Some live ->
+          let text =
+            place_spilled_paste state ~base_path ~keeper_name text
+          in
+          let request =
+            Keeper_chat.create_request ~attachments:state.msg_attachments
+              ~keeper_name ~message:text ()
+          in
+          (match queue_keeper_steer state request with
+           | Error detail -> add_event state "error" detail
+           | Ok waiting ->
+               state.msg_attachments <- [];
+               clear_current_message_draft state;
+               add_event state "message"
+                 (Printf.sprintf
+                    "Steer queued for %s after interrupting %s (%d waiting)"
+                    (Keeper_chat.terminal_safe_text keeper_name)
+                    active_request.Keeper_chat.request_id waiting);
+               if
+                 Keeper_chat_transcript.interrupt live
+                 = Keeper_chat_transcript.Not_requested
+               then launch_keeper_interrupt state ~mailbox active_request))
 ;;
 
 (* Send one line to one keeper.
@@ -4654,7 +4747,8 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
            state.msg_recall_replaces <- None;
            (match Chat_queue.take state.msg_queued ~request_id with
             | None -> ()
-            | Some (original, rest) ->
+            | Some (item, rest) ->
+                let original = item.Chat_queue.request in
                 state.msg_queued <- rest;
                 forget_queued_history state original));
       (* Now that the keeper is known, a spilled paste can be written where
@@ -4720,7 +4814,8 @@ let drain_queued_message state ~base_path ~mailbox =
         Option.is_none (inflight_for state keeper_name))
     with
     | None -> ()
-    | Some (request, rest) ->
+    | Some (item, rest) ->
+        let request = item.Chat_queue.request in
         let keeper_name = request.Keeper_chat.keeper_name in
         if keeper_available_for_new_message state keeper_name
         then (
@@ -4729,7 +4824,7 @@ let drain_queued_message state ~base_path ~mailbox =
              when the operator pressed Enter, so dispatch neither re-reads the
              staged attachments nor mints a second identity for a line the
              conversation already shows. *)
-          launch_keeper_request state ~mailbox request;
+          launch_keeper_request ~submitted_at:item.submitted_at state ~mailbox request;
           next ())
         else (
           (* The keeper this was written to is no longer registered. Sending it
@@ -4737,15 +4832,18 @@ let drain_queued_message state ~base_path ~mailbox =
              never moves. Say what is being let go, and let it go. *)
           let dropped =
             Chat_queue.waiting state.msg_queued
-            |> List.filter (fun (queued : Keeper_chat.request) ->
-                   String.equal queued.Keeper_chat.keeper_name keeper_name)
+            |> List.filter (fun item ->
+                   String.equal item.Chat_queue.request.Keeper_chat.keeper_name
+                     keeper_name)
           in
           let before = Chat_queue.length state.msg_queued in
           state.msg_queued <-
             Chat_queue.drop_for_keeper state.msg_queued ~keeper_name;
           (* Their rows go with them: a line left in the conversation for a
              keeper that will never receive it reads as sent. *)
-          List.iter (forget_queued_history state) dropped;
+          List.iter
+            (fun item -> forget_queued_history state item.Chat_queue.request)
+            dropped;
           add_event state "error"
             (Printf.sprintf
                "Keeper %s is no longer registered; %d queued message(s) for it \
@@ -5322,6 +5420,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
           notice ~role:Message_status
             "an interrupt is already outstanding for this turn"
       | None -> notice ~role:Message_status "no turn is streaming in this pane")
+  | Masc_tui_command.Steer_missing_message ->
+      notice ~role:Message_error "/steer needs replacement text on the same line"
+  | Masc_tui_command.Steer_turn message ->
+      start_keeper_steer ?keeper_name state ~base_path ~mailbox message
   | Masc_tui_command.Set_thinking mode ->
       Buffer.clear state.msg_input;
       state.msg_reasoning_visibility <-
@@ -7348,7 +7450,9 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
        | Masc_tui_command.Open_settings
-       | Masc_tui_command.Interrupt_turn | Masc_tui_command.Set_thinking _
+       | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
+       | Masc_tui_command.Steer_missing_message
+       | Masc_tui_command.Set_thinking _
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Toggle_memory
        (* [/find] moves the pane on purpose, so unlike every other command it
           must not be followed by the reset to the newest row above. *)
@@ -8651,7 +8755,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           | Ok { Keeper_chat_history.rows; dropped } ->
              state.msg_loaded_error <- None;
              state.msg_loaded_dropped <- dropped;
-             let fresh = List.map (msg_entry_of_history_row keeper_name) rows in
+             let fresh =
+               List.map (msg_entry_of_history_row state keeper_name) rows
+             in
              let kept = merge_paged_history ~paged:prior_history ~fresh in
              let cursor = oldest_at kept in
              (* Where reading further back starts: the oldest row now held. A
@@ -8676,7 +8782,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           | Ok { Keeper_chat_history.rows; dropped } ->
               state.msg_memory_error <- None;
               state.msg_memory_dropped <- dropped;
-              List.map (msg_entry_of_history_row keeper_name) rows
+              List.map (msg_entry_of_history_row state keeper_name) rows
           | Error detail ->
               state.msg_memory_error <- Some detail;
               prior_memory
@@ -9018,7 +9124,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Ok page ->
             let rows =
               List.map
-                (msg_entry_of_history_row keeper_name)
+                (msg_entry_of_history_row state keeper_name)
                 page.Keeper_chat_history.decoded.Keeper_chat_history.rows
             in
             (* Prepended, not merged: these are strictly older than everything

@@ -260,13 +260,152 @@ type msg_entry = {
   me_timestamp: string;
   me_keeper_name: string;
   me_request_id: string;
-  (* Unix time, the key the pane orders by. The durable transcript and this
-     session's own notices are two sources of rows and neither knows the
-     other's positions, so they are merged on a shared clock rather than
-     concatenated. [me_timestamp] is a wall-clock string for display and
-     cannot serve: it has no date and does not sort across midnight. *)
+  (* Producer observation time. Used for display, pagination cursors, and
+     render-cache identity only. Causal turn ownership decides row order. *)
   me_at: float;
 }
+
+type chat_turn_phase =
+  | Turn_input
+  | Turn_progress
+  | Turn_tool
+  | Turn_output
+
+type chat_turn = {
+  ct_request_id: string;
+  ct_rows: msg_entry list;
+}
+
+type chat_timeline_item =
+  | Chat_turn of chat_turn
+  | Chat_unowned of msg_entry
+
+type chat_timeline = {
+  ctl_settled: chat_timeline_item list;
+  ctl_active: chat_turn option;
+}
+
+type msg_anchor = {
+  ma_request_id: string;
+  ma_role: msg_role;
+  ma_text: string;
+}
+
+let chat_turn_phase = function
+  | Message_user _ -> Turn_input
+  | Message_status | Message_thinking | Message_memory -> Turn_progress
+  | Message_tool -> Turn_tool
+  | Message_keeper | Message_autonomous | Message_error -> Turn_output
+;;
+
+let order_chat_turn_rows rows =
+  let rows_at phase =
+    List.filter (fun row -> chat_turn_phase row.me_role = phase) rows
+  in
+  List.concat
+    [ rows_at Turn_input
+    ; rows_at Turn_progress
+    ; rows_at Turn_tool
+    ; rows_at Turn_output
+    ]
+;;
+
+let same_turn_user left right =
+  match left.me_role, right.me_role with
+  | Message_user _, Message_user _ ->
+      String.equal left.me_request_id right.me_request_id
+      && String.equal left.me_text right.me_text
+  | (Message_keeper | Message_autonomous | Message_status | Message_error
+    | Message_tool | Message_thinking | Message_memory), _
+  | _, (Message_keeper | Message_autonomous | Message_status | Message_error
+       | Message_tool | Message_thinking | Message_memory) ->
+      false
+;;
+
+let append_chat_timeline_row items row =
+  if String.equal row.me_request_id ""
+  then items @ [ Chat_unowned row ]
+  else
+    let rec append reversed = function
+      | [] ->
+          List.rev
+            (Chat_turn
+               { ct_request_id = row.me_request_id; ct_rows = [ row ] }
+             :: reversed)
+      | Chat_turn turn :: rest
+        when String.equal turn.ct_request_id row.me_request_id ->
+          let rows =
+            if List.exists (same_turn_user row) turn.ct_rows
+            then turn.ct_rows
+            else order_chat_turn_rows (turn.ct_rows @ [ row ])
+          in
+          List.rev_append reversed (Chat_turn { turn with ct_rows = rows } :: rest)
+      | item :: rest -> append (item :: reversed) rest
+    in
+    append [] items
+;;
+
+let chat_timeline ~loaded ~session ~queued_request_ids ~active_request_id =
+  let queued request_id =
+    List.exists (String.equal request_id) queued_request_ids
+  in
+  let visible_session =
+    List.filter (fun row -> not (queued row.me_request_id)) session
+  in
+  let items =
+    List.fold_left append_chat_timeline_row [] (loaded @ visible_session)
+  in
+  let active, settled =
+    List.fold_left
+      (fun (active, settled) item ->
+        match item, active_request_id with
+        | Chat_turn turn, Some request_id
+          when String.equal turn.ct_request_id request_id ->
+            Some turn, settled
+        | (Chat_turn _ | Chat_unowned _), (Some _ | None) ->
+            active, item :: settled)
+      (None, []) items
+  in
+  { ctl_settled = List.rev settled; ctl_active = active }
+;;
+
+let chat_timeline_rows timeline =
+  let rows_of_item = function
+    | Chat_turn turn -> turn.ct_rows
+    | Chat_unowned row -> [ row ]
+  in
+  List.concat (List.map rows_of_item timeline.ctl_settled)
+  @
+  match timeline.ctl_active with
+  | None -> []
+  | Some turn -> turn.ct_rows
+;;
+
+let msg_anchor entry =
+  { ma_request_id = entry.me_request_id
+  ; ma_role = entry.me_role
+  ; ma_text = entry.me_text
+  }
+;;
+
+let same_msg_anchor anchor entry =
+  String.equal anchor.ma_request_id entry.me_request_id
+  && anchor.ma_role = entry.me_role
+  && String.equal anchor.ma_text entry.me_text
+;;
+
+let msg_entries_after_anchor entries anchor =
+  let rec walk found reversed_after = function
+    | [] -> if found then Some (List.rev reversed_after) else None
+    | entry :: rest ->
+        if same_msg_anchor anchor entry
+        then walk true [] rest
+        else if found
+        then walk true (entry :: reversed_after) rest
+        else walk false reversed_after rest
+  in
+  walk false [] entries
+;;
 
 
 
@@ -1424,6 +1563,7 @@ let system_log_listing_chrome ~error = listing_chrome ~error + 1
    rows. *)
 type inflight =
   { sent_request : Masc_tui_keeper_chat_projection.request
+  ; submitted_at : float
   ; sent_at : float
   ; live : Masc_tui_keeper_chat_transcript.t
   }
@@ -2247,6 +2387,10 @@ type state = {
   mutable msg_return: keeper_chat_return;
   mutable msg_drafts: (string * string) list;
   mutable msg_history: msg_entry list;
+  (* The first local submission clock for each request. A queued row keeps this
+     clock when it becomes active and when a transcript refresh replaces the
+     session copy. It is presentation metadata, never an ordering key. *)
+  mutable msg_submission_times: (string * float) list;
   (* How far back the arrows have walked through what this pane sent, and the
      draft they set aside to do it. [None] means the composer holds the
      operator's own text, so pressing down has nothing to give back. *)
@@ -2291,14 +2435,14 @@ type state = {
      not enough after alpha -> beta -> alpha: the first alpha response can
      arrive after the second alpha request and still name the visible Keeper. *)
   mutable msg_history_load_generation: int;
-  (* The newest row [msg_scroll] counts back from, as [me_at], while the
+  (* The newest row [msg_scroll] counts back from, by causal row identity, while the
      operator is reading back. Counting from whatever is newest right now made
      the count mean something different every time a reply landed: the new rows
      go on that end, so the same count lands further down and the window slides
      toward text nobody asked to see. Pinned when they scroll off the bottom
      and released when they return to it, which is also how they get back to
      following the turn. *)
-  mutable msg_scroll_pin: float option;
+  mutable msg_scroll_pin: msg_anchor option;
   (* How many rows above the newest the chat pane is showing. 0 is the bottom,
      where the pane follows a running turn. Held rather than derived: an
      operator reading back should stay where they are while the keeper keeps
@@ -2794,6 +2938,7 @@ let create_state
   msg_return = Keeper_chat_return_detail;
   msg_drafts = [];
   msg_history = [];
+  msg_submission_times = [];
   msg_recall_at = None;
   msg_recall_draft = "";
   msg_recall_replaces = None;
@@ -2853,12 +2998,11 @@ let visible_system_log_entries (state : state) =
    predicate. A roster that failed to load leaves stale entries behind, so
    "registered" answers true while the send path is closed; counting on that
    answer hid the unavailable row and left the send hint reading Enter:send. *)
-(* The rows the chat pane draws for one keeper: the durable transcript as last
-   loaded, plus this session's own rows, ordered on a shared clock. Two sources
-   with no identity between them, so they are merged by time rather than
-   concatenated -- a notice the TUI wrote belongs where it happened, not after
-   everything the server knows about. Ties keep the loaded row first, which is
-   what [stable_sort] over [loaded @ session] gives. *)
+(* The rows the chat pane draws for one Keeper. Durable and session rows join
+   only through request ownership. Turn order follows first structural
+   appearance; each turn is Input -> Progress -> Tool -> Output. Pending
+   requests are withheld for the separate NEXT lane. Wall clocks never decide
+   conversation order. *)
 (* What a polled surface can say when it has no rows to draw. Three facts,
    not one: nothing has been read yet, the read failed, or the read came back
    with nothing. The first was drawn as the third -- "nothing waiting on a
@@ -2887,9 +3031,17 @@ let chat_rows_for (state : state) keeper_name =
       (fun entry -> String.equal entry.me_keeper_name keeper_name)
       state.msg_history
   in
-  List.stable_sort
-    (fun left right -> Float.compare left.me_at right.me_at)
-    (loaded @ session)
+  let queued_request_ids =
+    Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name
+    |> List.map (fun item -> item.Masc_tui_keeper_chat_queue.request.request_id)
+  in
+  let active_request_id =
+    Option.map
+      (fun entry -> entry.sent_request.request_id)
+      (inflight_for_keeper state keeper_name)
+  in
+  chat_timeline ~loaded ~session ~queued_request_ids ~active_request_id
+  |> chat_timeline_rows
 
 (* The one place [msg_scroll] moves, so the pin it counts back from cannot be
    forgotten at one of the dozen keys that scroll. Leaving the bottom takes the
@@ -2929,7 +3081,7 @@ let set_msg_scroll (state : state) rows =
          | None -> None
          | Some keeper_name ->
            (match List.rev (chat_rows_for state keeper_name) with
-            | newest :: _ -> Some newest.me_at
+            | newest :: _ -> Some (msg_anchor newest)
             | [] -> None));
     state.msg_scroll <- rows
   end
@@ -3541,11 +3693,14 @@ let keeper_message_status_rows (state : state) =
          List.length
            (Masc_tui_keeper_chat_transcript.status_rows
               ~now:(Unix.gettimeofday ()) live))
-  (* The queue reserves nothing here any more. A waiting line is drawn in the
-     conversation, from the moment it is typed, where the operator's own
-     messages already are -- so it costs a history row rather than a row of
-     its own beneath them. Reserving here as well would take a row off the
-     conversation and put nothing in its place. *)
+  + (match state.msg_target_keeper_name with
+     | Some keeper_name ->
+         Masc_tui_keeper_chat_queue.length_for_keeper state.msg_queued
+           ~keeper_name
+     | None -> 0)
+  (* Pending input owns a NEXT row below the causal transcript. When its turn
+     starts that row is handed to the active user row one-for-one, so the text
+     does not jump through an older turn's tool/output block. *)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
   + (if state.msg_memory_visible && Option.is_some state.msg_memory_error then 1 else 0)
   + (if state.msg_memory_visible && state.msg_memory_dropped > 0 then 1 else 0)

@@ -635,29 +635,41 @@ the pane. Nothing takes the screen to report a failure.
 
 #### Lines typed during a turn
 
-Enter during a running turn holds the line for the next one rather than
-refusing it. The pane draws every waiting line in full, oldest first, under the
-sending rows:
+Enter during a running turn is the explicit **queue next** action. It holds the
+line for a later turn rather than pretending the running model saw it. Pending
+input is not inserted between the active turn's user, status/tool, and reply
+rows. It has its own `NEXT` lane below the causal transcript, oldest first:
 
 ```
    (sending tui-..d3530056 · 12s…)
-   queued 1: check the CI run too
-   queued 2 -> polisher: and the rebase
+   NEXT 1 · 10:42:13 · check the CI run too
+   NEXT 2 · 10:42:18 · and the rebase
    > _
   Enter:queue (2 waiting)  Ctrl-K:cancel last  Ctrl-P:edit last  …
 ```
 
 A count on its own is not enough - an operator who typed three lines during a
-turn needs to see which three. Only the first line of a queued message is
-shown, with `…` where it was cut; the rest goes with it when it is sent.
+turn needs to see which three. Each row keeps the first submission clock while
+it waits and after it starts. Only the first line of a queued message is shown,
+with `…` where it was cut; the rest goes with it when it is sent.
+
+`/steer <message>` is a distinct action. It signals the current turn to stop
+and places the exact replacement in a typed `STEER` row ahead of ordinary
+`NEXT` rows for that Keeper. The replacement is dispatched only after the
+current operation reaches a terminal state; an interrupt acknowledgement is
+not misreported as completion. A second pending steer for the same Keeper is
+refused instead of silently replacing the first.
 
 A queued line travels with the keeper it was written to, so switching keepers
 mid-turn cannot redirect it; a line addressed elsewhere names its keeper after
-the number. `Ctrl-K` drops the newest waiting line and `Ctrl-P` pulls it back
-into the composer. Nothing has been dispatched, so both are local.
+the number. The visible `NEXT` count is scoped to the selected Keeper rather
+than the workspace-global queue. `Ctrl-K` drops the newest waiting line and
+`Ctrl-P` pulls it back into the composer. Nothing has been dispatched, so both
+are local.
 
-Each waiting line takes its row from the conversation above it, never from the
-terminal: the pane ends on the same row whether the queue is empty or full.
+When the oldest `NEXT` row becomes active, its reserved row is handed to the
+active USER row one-for-one. The row therefore does not jump upward through an
+older turn's Tool or reply block.
 
 The arrows walk what the operator typed for this keeper, newest first, and the
 waiting lines come before the sent ones. `Up` on a fresh composer therefore

@@ -1061,7 +1061,7 @@ effective prompt through `$EDITOR`, and `x` clears only its persisted override.
 The server's log ring, the same source the dashboard `logs` tab reads.
 
 ```
- MASC System Logs (247 of 774273, seq 774272)  level≥INFO
+ MASC System Logs (247 of 774273, seq 774272)  level≥INFO  verbose:off
    Time     Level   Module           Keeper       Category  Message
    03:09:21 INFO    Discord          system       routine   presence update: idle
    03:09:18 WARN    Keeper           alpha        turn      turn budget exceeded

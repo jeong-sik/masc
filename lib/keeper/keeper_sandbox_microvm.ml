@@ -363,6 +363,97 @@ let label_of entry key =
   | _ -> None
 ;;
 
+let json_string_opt = function
+  | `String value -> Some value
+  | _ -> None
+;;
+
+let live_containers_of_json ~base_path ~keeper_name = function
+  | `List entries ->
+    let open Yojson.Safe.Util in
+    let expected_base_path_hash = Keeper_sandbox_runtime.base_path_hash base_path in
+    let expected_keeper_name = Keeper_sandbox_runtime.sanitize_label_value keeper_name in
+    let belongs_to_keeper entry =
+      String.equal
+        (Option.value ~default:""
+           (label_of entry Keeper_sandbox_runtime.sandbox_component_label_key))
+        Keeper_sandbox_runtime.sandbox_component_label_value
+      && String.equal
+           (Option.value ~default:""
+              (label_of entry Keeper_sandbox_runtime.sandbox_base_path_hash_label_key))
+           expected_base_path_hash
+      && String.equal
+           (Option.value ~default:""
+              (label_of entry Keeper_sandbox_runtime.sandbox_keeper_label_key))
+           expected_keeper_name
+      && String.equal
+           (Option.value ~default:""
+              (label_of entry Keeper_sandbox_runtime.sandbox_kind_label_key))
+           keeper_vm_container_kind
+    in
+    let decode entry =
+      if not (belongs_to_keeper entry) then Ok None
+      else
+        try
+          let id = entry |> member "id" |> to_string in
+          let configuration = entry |> member "configuration" in
+          let image = configuration |> member "image" |> member "reference" |> to_string in
+          let state = entry |> member "status" |> member "state" |> to_string in
+          let labels = configuration |> member "labels" in
+          let label name = labels |> member name |> json_string_opt in
+          let float_label name = Option.bind (label name) float_of_string_opt in
+          let owner_pid =
+            Option.bind
+              (label Keeper_sandbox_runtime.sandbox_owner_pid_label_key)
+              int_of_string_opt
+          in
+          Ok
+            (Some
+               ({ id
+                ; name = id
+                ; image
+                ; status = state
+                ; running = Some (String.equal state "running")
+                ; created_at = configuration |> member "creationDate" |> json_string_opt
+                ; keeper_name = label Keeper_sandbox_runtime.sandbox_keeper_label_key
+                ; container_kind = label Keeper_sandbox_runtime.sandbox_kind_label_key
+                ; network_label = label Keeper_sandbox_runtime.sandbox_network_label_key
+                ; owner_pid
+                ; started_at = float_label Keeper_sandbox_runtime.sandbox_started_at_label_key
+                ; ttl_sec = float_label Keeper_sandbox_runtime.sandbox_ttl_sec_label_key
+                } : Keeper_sandbox_runtime.live_container))
+        with Yojson.Safe.Util.Type_error (detail, _) ->
+          Error
+            (Printf.sprintf "microvm live container for %s is malformed: %s"
+               keeper_name detail)
+    in
+    List.fold_right
+      (fun entry result ->
+         match decode entry, result with
+         | Error detail, _ | _, Error detail -> Error detail
+         | Ok None, Ok containers -> Ok containers
+         | Ok (Some container), Ok containers -> Ok (container :: containers))
+      entries
+      (Ok [])
+  | _ -> Error "microvm container list must be a JSON array"
+;;
+
+let list_live_containers ~base_path ~keeper_name ~timeout_sec =
+  let argv = command_argv () @ [ "list"; "-a"; "--format"; "json" ] in
+  match Process_eio.run_argv_with_status_split ~timeout_sec argv with
+  | Unix.WEXITED 0, stdout, _ -> (
+    match Yojson.Safe.from_string stdout with
+    | json -> live_containers_of_json ~base_path ~keeper_name json
+    | exception Yojson.Json_error detail ->
+      Error ("microvm container list returned invalid JSON: " ^ detail))
+  | status, stdout, stderr ->
+    Error
+      (Printf.sprintf
+         "microvm container list failed (%s): %s"
+         (Keeper_sandbox_exec_failure.status_label status)
+         (output_for_log ~stdout ~stderr))
+;;
+
 let sweep_candidates_of_json ~is_pid_alive json =
   let open Yojson.Safe.Util in
   match json with

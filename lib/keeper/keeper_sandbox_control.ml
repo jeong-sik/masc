@@ -62,6 +62,12 @@ let live_containers ~config ~meta ~timeout_sec =
     ~timeout_sec
     ()
 
+let live_microvm_containers ~config ~meta ~timeout_sec =
+  Keeper_sandbox_microvm.list_live_containers
+    ~base_path:config.Workspace.base_path
+    ~keeper_name:meta.name
+    ~timeout_sec
+
 let live_containers_for_keeper ~(meta : keeper_meta) containers =
   let keeper_label = Keeper_sandbox_runtime.sanitize_label_value meta.name in
   List.filter
@@ -591,17 +597,24 @@ let preflight_ok (preflight : Keeper_sandbox_runtime.docker_preflight option) =
    under a backend now, so the answer is about containers from the first
    line. *)
 let container_mode (meta : keeper_meta) containers =
-  if
-    List.exists
-      (fun (c : Keeper_sandbox_runtime.live_container) ->
-        c.container_kind = Some managed_kind && c.running = Some true)
-      containers
-  then
-    "managed_running"
-  else
-    match meta.network_mode with
-    | Network_none -> "turn_scoped_or_managed_none"
-    | Network_inherit -> "oneshot_or_managed_inherit"
+  match meta.sandbox_profile with
+  | Micro_vm ->
+    if List.exists (fun (c : Keeper_sandbox_runtime.live_container) -> c.running = Some true) containers
+    then "microvm_vm_running"
+    else "microvm_vm_not_running"
+  | Docker ->
+    if
+      List.exists
+        (fun (c : Keeper_sandbox_runtime.live_container) ->
+          c.container_kind = Some managed_kind && c.running = Some true)
+        containers
+    then
+      "managed_running"
+    else
+      match meta.network_mode with
+      | Network_none -> "turn_scoped_or_managed_none"
+      | Network_inherit -> "oneshot_or_managed_inherit"
+  | Remote_ssh -> "remote_ssh"
 
 let why_no_container (meta : keeper_meta) ~preflight containers =
   (* "sandbox_profile=local" was the first answer here. No keeper can report
@@ -609,16 +622,22 @@ let why_no_container (meta : keeper_meta) ~preflight containers =
   if containers <> [] then
     None
   else
-    match preflight_ok preflight with
-    | Some false -> Some "docker_preflight_failed"
-    | _ -> (
-        match meta.network_mode with
-        | Network_inherit ->
-            Some
-              "no visible managed sandbox container; network_mode=inherit uses one-shot Docker containers on sandboxed tool calls, and those containers still mount the keeper playground"
-        | Network_none ->
-            Some
-              "no active turn or visible managed sandbox container; Docker containers start on sandboxed tool calls or via masc_keeper_sandbox_start, with the keeper playground mounted")
+    match meta.sandbox_profile with
+    | Micro_vm ->
+      Some "no visible Apple Container VM; a microvm guest is created on this Keeper's first sandboxed tool execution"
+    | Remote_ssh ->
+      Some "remote_ssh executes on its configured endpoint and does not own a local container"
+    | Docker -> (
+      match preflight_ok preflight with
+      | Some false -> Some "docker_preflight_failed"
+      | _ -> (
+          match meta.network_mode with
+          | Network_inherit ->
+              Some
+                "no visible managed sandbox container; network_mode=inherit uses one-shot Docker containers on sandboxed tool calls, and those containers still mount the keeper playground"
+          | Network_none ->
+              Some
+                "no active turn or visible managed sandbox container; Docker containers start on sandboxed tool calls or via masc_keeper_sandbox_start, with the keeper playground mounted"))
 
 let live_status_json ?(include_preflight = true)
     ?preflight_override
@@ -639,21 +658,30 @@ let live_status_json ?(include_preflight = true)
         None
   in
   let containers, container_error =
-    if meta.sandbox_profile = Docker then
-      match containers_override with
-      | Some (Ok containers) ->
-          (live_containers_for_keeper ~meta containers, None)
-      | Some (Error err) -> ([], Some err)
-      | None -> (
-        match live_containers ~config ~meta ~timeout_sec with
-        | Ok containers -> (containers, None)
-        | Error err -> ([], Some err))
-    else
-      ([], None)
+    match meta.sandbox_profile with
+    | Docker ->
+      (match containers_override with
+       | Some (Ok containers) ->
+           (live_containers_for_keeper ~meta containers, None)
+       | Some (Error err) -> ([], Some err)
+       | None -> (
+         match live_containers ~config ~meta ~timeout_sec with
+         | Ok containers -> (containers, None)
+         | Error err -> ([], Some err)))
+    | Micro_vm -> (
+      match live_microvm_containers ~config ~meta ~timeout_sec with
+      | Ok containers -> (containers, None)
+      | Error err -> ([], Some err))
+    | Remote_ssh -> ([], None)
   in
   let why_no_container =
     match container_error with
-    | Some _ -> Some "docker_container_listing_failed"
+    | Some _ ->
+      Some
+        (match meta.sandbox_profile with
+         | Docker -> "docker_container_listing_failed"
+         | Micro_vm -> "microvm_container_listing_failed"
+         | Remote_ssh -> "remote_ssh_container_listing_failed")
     | None -> why_no_container meta ~preflight containers
   in
   `Assoc
@@ -662,7 +690,11 @@ let live_status_json ?(include_preflight = true)
       ("sandbox_profile", `String (sandbox_profile_to_string meta.sandbox_profile));
       ("configured_network_mode", `String (network_mode_to_string meta.network_mode));
       ("effective_mode", `String (container_mode meta containers));
-      ("managed_container_kind", `String managed_kind);
+      ( "managed_container_kind"
+      , match meta.sandbox_profile with
+        | Docker -> `String managed_kind
+        | Micro_vm -> `String Keeper_sandbox_microvm.keeper_vm_container_kind
+        | Remote_ssh -> `Null );
       ("containers",
        `List (List.map Keeper_sandbox_runtime.live_container_to_yojson containers));
       ( "preflight",

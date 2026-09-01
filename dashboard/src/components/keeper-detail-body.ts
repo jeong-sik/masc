@@ -54,6 +54,7 @@ import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api
 import { KeeperRuntimeAlertStrip } from './keeper-detail-alert-strip'
 import { KeeperCommsPanel, RepositoryCheckoutsPanel } from './keeper-detail-comms'
 import { KeeperClearContextDialog } from './keeper-detail-lifecycle'
+import { KeeperSandboxLivePanel } from './keeper-sandbox-live'
 import type { KeeperDetailEvidenceState } from './keeper-detail-hooks'
 
 export interface KeeperDetailBodyProps {
@@ -184,6 +185,7 @@ export function KeeperDetailBody({
         >
           ${'' /* Runtime assignment is read-only here; edits deep-link to the config runtime tab, the single write path. */}
           <${KeeperRuntimeModelEditor} keeperName=${keeper.name} onOpenRuntimeConfig=${onOpenRuntimeConfig} />
+          <${KeeperSandboxLivePanel} keeperName=${keeper.name} />
           <${KeeperToolTelemetry} keeperName=${keeper.name} />
           <${KeeperSecretProjectionPanel} keeperName=${keeper.name} projection=${compositeSnapshot?.secret_projection} />
           <${KeeperEvalQualityPanel} keeperName=${keeper.name} />

@@ -50,6 +50,97 @@ export type {
 export type { KeeperChatHistoryMessage } from './schemas/keeper-chat-history'
 export type { KeeperTransition, KeeperTransitionsResponse }
 
+export interface KeeperSandboxContainer {
+  id: string
+  name: string
+  image: string
+  status: string
+  running: boolean | null
+  container_kind: string | null
+  network_label: string | null
+  owner_pid: number | null
+}
+
+export interface KeeperSandboxLiveStatus {
+  sandbox_profile: string | null
+  configured_network_mode: string | null
+  effective_mode: string | null
+  managed_container_kind: string | null
+  containers: KeeperSandboxContainer[] | null
+  container_error: string | null
+  why_no_container: string | null
+  keeper_last_error: string | null
+}
+
+function nullableStringField(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
+}
+
+function nullableBooleanField(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null
+}
+
+function nullableIntegerField(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) ? value : null
+}
+
+function parseKeeperSandboxContainer(value: unknown, index: number): KeeperSandboxContainer {
+  if (!isRecord(value)) throw new Error(`sandbox_live.containers[${index}] must be an object`)
+  const required = (key: 'id' | 'name' | 'image' | 'status'): string => {
+    const field = value[key]
+    if (typeof field !== 'string') throw new Error(`sandbox_live.containers[${index}].${key} is required`)
+    return field
+  }
+  return {
+    id: required('id'),
+    name: required('name'),
+    image: required('image'),
+    status: required('status'),
+    running: nullableBooleanField(value.running),
+    container_kind: nullableStringField(value.container_kind),
+    network_label: nullableStringField(value.network_label),
+    owner_pid: nullableIntegerField(value.owner_pid),
+  }
+}
+
+export function parseKeeperSandboxLiveStatus(value: unknown): KeeperSandboxLiveStatus {
+  if (!isRecord(value)) throw new Error('keeper status must be an object')
+  if (!isRecord(value.sandbox_live)) throw new Error('keeper status has no sandbox_live observation')
+  const live = value.sandbox_live
+  let containers: KeeperSandboxContainer[] | null
+  if (live.containers == null) {
+    containers = null
+  } else if (Array.isArray(live.containers)) {
+    containers = live.containers.map(parseKeeperSandboxContainer)
+  } else {
+    throw new Error('sandbox_live.containers must be an array or null')
+  }
+  return {
+    sandbox_profile: nullableStringField(live.sandbox_profile),
+    configured_network_mode: nullableStringField(live.configured_network_mode),
+    effective_mode: nullableStringField(live.effective_mode),
+    managed_container_kind: nullableStringField(live.managed_container_kind),
+    containers,
+    container_error: nullableStringField(live.container_error),
+    why_no_container: nullableStringField(live.why_no_container),
+    keeper_last_error: nullableStringField(value.keeper_last_error),
+  }
+}
+
+export async function fetchKeeperSandboxLiveStatus(
+  name: string,
+  opts?: { signal?: AbortSignal },
+): Promise<KeeperSandboxLiveStatus> {
+  const path = `/api/v1/gate/keeper-status?name=${encodeURIComponent(name)}`
+  const resp = await fetchWithTimeout(
+    path,
+    { headers: jsonHeaders(), signal: opts?.signal },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!resp.ok) throw await apiRequestErrorFromResponse('GET', path, resp)
+  return parseKeeperSandboxLiveStatus(await resp.json())
+}
+
 // --- Runtime trace evidence (split to keeper-runtime-trace.ts) ---
 export type {
   KeeperRuntimeTraceTurnIdentity,

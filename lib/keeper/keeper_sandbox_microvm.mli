@@ -118,6 +118,21 @@ val running_of_inspect_json : string -> (bool, string) result
 (** [Ok true] iff [.[0].status.state = "running"]. The caller maps a
     non-zero inspect exit to absent before calling this. *)
 
+val live_containers_of_json :
+  base_path:string ->
+  keeper_name:string ->
+  Yojson.Safe.t ->
+  (Keeper_sandbox_runtime.live_container list, string) result
+(** Decode only the Apple Container guests labelled for this base path and
+    keeper. Unrelated host containers are not projected into Keeper status. *)
+
+val list_live_containers :
+  base_path:string ->
+  keeper_name:string ->
+  timeout_sec:float ->
+  (Keeper_sandbox_runtime.live_container list, string) result
+(** Read the labelled Apple Container guest inventory for one microvm Keeper. *)
+
 type sweep_candidate =
   { container_id : string
   ; keeper_name : string option

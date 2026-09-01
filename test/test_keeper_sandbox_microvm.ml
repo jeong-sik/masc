@@ -1206,29 +1206,36 @@ let test_ensure_build_links_on_a_missing_playground_is_empty () =
 
 
 
-let test_build_target_mkdir_is_one_exec_for_every_target () =
+let test_build_target_setup_runs_as_root_for_every_target () =
   (* dune does not create the directory a _build symlink points at -- it
      lstats _build, sees the link, and opens _build/.lock straight away
      ("Error: open(_build/.lock): No such file or directory"). The host cannot
      create it either, since it lives inside the volume's ext4 image. So the
-     guest does, and in one exec rather than one per checkout. *)
+     guest creates as root and makes the directories writable by the Keeper. *)
   let argv =
     M.build_target_mkdir_argv
       ~container_name:"masc-keeper-vm-polisher-abc"
-      ~uid:501
-      ~gid:20
       ~targets:[ "/masc-build/masc-t362"; "/masc-build/repos:wt-370" ]
   in
   Alcotest.(check bool) "goes through container exec" true (contains "exec" argv);
   Alcotest.(check bool) "names the guest" true (contains "masc-keeper-vm-polisher-abc" argv);
-  Alcotest.(check bool) "runs as the keeper" true (adjacent ~flag:"--user" ~value:"501:20" argv);
+  Alcotest.(check bool) "creates as root" true (adjacent ~flag:"--user" ~value:"0:0" argv);
   Alcotest.(check bool) "mkdir -p, so repeating is safe" true (adjacent ~flag:"mkdir" ~value:"-p" argv);
   Alcotest.(check bool) "first target" true (contains "/masc-build/masc-t362" argv);
   Alcotest.(check bool) "second target" true (contains "/masc-build/repos:wt-370" argv);
   Alcotest.(check int)
     "one exec, not one per target"
     1
-    (List.length (List.filter (String.equal "exec") argv))
+    (List.length (List.filter (String.equal "exec") argv));
+  let argv =
+    M.build_target_chmod_argv
+      ~container_name:"masc-keeper-vm-polisher-abc"
+      ~targets:[ "/masc-build/masc-t362"; "/masc-build/repos:wt-370" ]
+  in
+  Alcotest.(check bool) "chmods as root" true (adjacent ~flag:"--user" ~value:"0:0" argv);
+  Alcotest.(check bool) "sets writable mode" true (adjacent ~flag:"chmod" ~value:"0777" argv);
+  Alcotest.(check bool) "chmods first target" true (contains "/masc-build/masc-t362" argv);
+  Alcotest.(check bool) "chmods second target" true (contains "/masc-build/repos:wt-370" argv)
 ;;
 
 
@@ -1326,8 +1333,8 @@ let () =
             test_ensure_build_links_on_a_missing_playground_is_empty
         ] )
     ; ( "build link creation"
-      , [ Alcotest.test_case "mkdir is one exec for every target" `Quick
-            test_build_target_mkdir_is_one_exec_for_every_target
+      , [ Alcotest.test_case "setup runs as root for every target" `Quick
+            test_build_target_setup_runs_as_root_for_every_target
         ] )
     ; ( "guest env"
       , [ Alcotest.test_case "env follows the config mount" `Quick

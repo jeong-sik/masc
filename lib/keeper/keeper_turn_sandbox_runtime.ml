@@ -623,11 +623,12 @@ let microvm_build_volume ~keeper_name ~timeout_sec =
     worktrees while its guest is already up; a boot-only pass would leave every
     checkout made after boot writing to the share.
 
-    Two steps, because they happen on opposite sides of the boundary. The
+    Two locations, because they sit on opposite sides of the boundary. The
     symlink is written on the host, where the checkout lives. The directory it
-    points at is created in the guest, because it lives inside the volume's
-    ext4 image and dune will not create it -- measured, dune lstats [_build],
-    sees the link, and opens [_build/.lock] straight away.
+    points at is created in the guest as root, then made writable by the
+    Keeper process identity, because the volume root starts root-owned. It lives
+    inside the volume's ext4 image and dune will not create it -- measured,
+    dune lstats [_build], sees the link, and opens [_build/.lock] straight away.
 
     Neither failure raises. A refused checkout is one that already holds real
     build output: it stays exactly where it is, which is correct, just still on
@@ -650,15 +651,26 @@ let refresh_microvm_build_links ?timeout_sec (t : t) ~container_name =
   match Keeper_sandbox_microvm.build_link_targets_to_create rows with
   | [] -> ()
   | targets ->
-    let argv =
+    let mkdir_argv =
       Keeper_sandbox_microvm.build_target_mkdir_argv
         ~container_name
-        ~uid:t.uid
-        ~gid:t.gid
         ~targets
     in
-    (match run_argv_with_status ?timeout_sec argv with
-     | Unix.WEXITED 0, _ -> ()
+    (match run_argv_with_status ?timeout_sec mkdir_argv with
+     | Unix.WEXITED 0, _ ->
+       let chmod_argv =
+         Keeper_sandbox_microvm.build_target_chmod_argv
+           ~container_name
+           ~targets
+       in
+       (match run_argv_with_status ?timeout_sec chmod_argv with
+        | Unix.WEXITED 0, _ -> ()
+        | _, out ->
+          Log.Keeper.warn
+            ~keeper_name
+            "microvm build volume chmod failed for %d target(s): %s"
+            (List.length targets)
+            out)
      | _, out ->
        Log.Keeper.warn
          ~keeper_name

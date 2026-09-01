@@ -704,17 +704,34 @@ let ensure_build_links ~playground_root =
     {v Error: open(_build/.lock): No such file or directory v}
 
     The host cannot create it either, because it lives inside the volume's
-    ext4 image. So the guest does, in one exec for every target rather than
-    one per checkout. [mkdir -p] is idempotent, so this is safe to repeat each
-    turn and says nothing when the directories are already there. *)
-let build_target_mkdir_argv ~container_name ~uid ~gid ~targets =
+    ext4 image. The volume root is initially owned by root, so creation runs
+    as root and its mode is then opened to the Keeper process identity.
+    Each command covers every target rather than spawning once per checkout.
+    Both operations are idempotent. *)
+let build_target_mkdir_argv ~container_name ~targets =
   exec_argv
     ~container_name
-    ~uid
-    ~gid
+    ~uid:0
+    ~gid:0
     ~container_cwd:build_volume_guest_root
     ~stdin:false
     ~command_argv:("mkdir" :: "-p" :: targets)
+;;
+
+(* This volume is mounted only in one Keeper's guest. Apple Container 1.3.1
+   rejects chown inside the named ext4 volume even for guest root, so mode is
+   the available ownership boundary; build outputs still inherit the Keeper's
+   normal umask. *)
+let build_target_dir_mode = "0777"
+
+let build_target_chmod_argv ~container_name ~targets =
+  exec_argv
+    ~container_name
+    ~uid:0
+    ~gid:0
+    ~container_cwd:build_volume_guest_root
+    ~stdin:false
+    ~command_argv:("chmod" :: build_target_dir_mode :: targets)
 ;;
 
 (** Targets that a build will write through, from the rows above.

@@ -266,6 +266,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-runtime-note-field-and-dashboard-surfacing | Per-runtime note field & dashboard surfacing | Draft | - |
 | RFC-skills-as-tools | Skill 과 Tool 은 한 카탈로그의 두 표면 — SKILL.md 가 지시·합성·비동기를 선언한다 | Active | - |
 | RFC-spawn-a-process-that-outlives-the-call | Spawn: a process that outlives the call | Draft | - |
+| RFC-tui-operator-ia | TUI 정보 구조 재설계 — 18탭을 숫자 키 10개로 접고, Keeper 워크벤치를 중심 화면으로 | Draft | - |
 | RFC-tui-server-lifecycle | TUI 안에서 서버를 켠다 — opt-in 온디맨드 서버 시작으로 TUI 를 기본 진입점으로 | Draft | - |
 | RFC-turn-failure-visible-stop | 턴 실패를 숨기지 않고 상태로 보여준다 — 실패 면제와 예산 계정을 걷어낸다 | Implemented | - |
 | RFC-virtual-project-missions | Virtual-project missions: RW24-RW30 from planned rows to judged runs | Draft | - |

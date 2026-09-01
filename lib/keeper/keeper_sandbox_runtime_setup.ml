@@ -71,6 +71,18 @@ let docker_command_argv () =
   | None -> [ docker_command () ]
 ;;
 
+(* Removing a sandbox container also removes the anonymous volumes it owns.
+   The sandbox image declares VOLUME ["/tmp/keeper-creds"], so Docker mints a
+   fresh anonymous volume per container; a [docker rm] without [-v] leaves it
+   behind unnamed and unreferenced. Orphans accumulate in the daemon metadata
+   index until plain commands like [docker ps] time out -- 9,563 observed in
+   production, then 4,795 again on 2026-09-01, because only one of the five
+   removal sites carried the flag. [-v] lives in the argv so a removal site
+   cannot omit it. *)
+let docker_remove_argv container =
+  docker_command_argv () @ [ "rm"; "-f"; "-v"; container ]
+;;
+
 let docker_run_pull_never_args () = [ "--pull"; "never" ]
 
 let docker_image_inspect_next_action =

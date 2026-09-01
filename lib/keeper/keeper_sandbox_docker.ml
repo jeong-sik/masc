@@ -173,7 +173,7 @@ let cleanup_target_state ~container_name =
 ;;
 
 let cleanup_oneshot_container ~container_name =
-  let argv = Keeper_sandbox_runtime.docker_command_argv () @ [ "rm"; "-f"; container_name ] in
+  let argv = Keeper_sandbox_runtime.docker_remove_argv container_name in
   let run_rm () =
     Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
       Process_eio.run_argv_with_status

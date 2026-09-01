@@ -68,6 +68,13 @@ val pid_alive : int -> bool
     copy of the rule. EPERM counts as alive: another user owns it. *)
 
 val docker_command_argv : unit -> string list
+(** Argv removing [container] together with the anonymous volumes it owns.
+
+    The sandbox image declares VOLUME ["/tmp/keeper-creds"], so every container
+    started from it carries a fresh anonymous volume. [-v] is inside this argv
+    so a removal site cannot orphan that volume by leaving the flag out. *)
+val docker_remove_argv : string -> string list
+
 
 (** Docker [run] flag fragment that prevents implicit registry pulls. Keeper
     sandbox images are a local runtime prerequisite and must be built before

@@ -15,6 +15,13 @@ val refuse_real_daemon_under_test : what:string -> unit
 
 val docker_command_argv : unit -> string list
 val docker_run_pull_never_args : unit -> string list
+(** Argv removing [container] together with the anonymous volumes it owns.
+
+    The sandbox image declares VOLUME ["/tmp/keeper-creds"], so every container
+    started from it carries a fresh anonymous volume. [-v] is inside this argv
+    so a removal site cannot orphan that volume by leaving the flag out. *)
+val docker_remove_argv : string -> string list
+
 val docker_image_inspect_next_action : string
 val run_docker_argv_with_status :
   ?timeout_sec:float -> string list -> Unix.process_status * string

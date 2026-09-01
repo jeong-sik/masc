@@ -460,7 +460,7 @@ let write_config_root_keeper_toml ?(autoboot_enabled = true) config_root name =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     (Printf.sprintf
-       "[keeper]\ninstructions = \"instructions-%s\"\nautoboot_enabled = %b\nsandbox_profile = \"local\"\n"
+       "[keeper]\ninstructions = \"instructions-%s\"\nautoboot_enabled = %b\nsandbox_profile = \"docker\"\n"
        name
        autoboot_enabled)
 
@@ -481,6 +481,7 @@ let write_basepath_keeper_toml base_path name =
 instructions = "example"
 proactive_enabled = false
 autoboot_enabled = true
+sandbox_profile = "docker"
 |}
 let find_free_port_from start =
   let rec loop attempts port =
@@ -2315,6 +2316,7 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
       ~autoboot_enabled:false
       config_root
       "canonical-meta-disabled";
+    write_config_root_keeper_toml config_root "canonical-meta-paused";
     with_explicit_test_config_root config_root @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
@@ -2577,6 +2579,10 @@ let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacit
     List.iter
       (write_config_root_keeper_toml config_root)
       [ "target-missing"; "target-running" ];
+    write_config_root_keeper_toml
+      ~autoboot_enabled:false
+      config_root
+      "non-target-running";
     with_explicit_test_config_root config_root @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();

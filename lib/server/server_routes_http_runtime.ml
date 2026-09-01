@@ -1197,7 +1197,7 @@ let finish_full_health_refresh_worker worker outcome =
     Log.Dashboard.debug
       "full_health_snapshot discarded worker %d result after generation change"
       worker.id;
-    Eio.Stream.add full_health_refresh_wakeup ()
+    signal_full_health_refresh_wakeup ()
   end
 
 let await_full_health_refresh_worker ~sw ~compute =

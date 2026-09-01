@@ -60,8 +60,8 @@ val footer_hints_lanes_run_list : string
 (** The Lanes run-list footer: the drill-down under a standalone lane row. *)
 
 val footer_hints_lanes_run_detail : scroll:int -> max_scroll:int -> string
-(** The Lanes run-detail footer, with the live scroll position appended the
-    same way the Fusion detail footer does. *)
+(** The Lanes run-detail footer, with the synchronized Input/Output scroll
+    position appended the same way the Fusion detail footer does. *)
 
 (** The Lanes lane-notice footer. The pane is static, so it keeps only the
     way back plus the shared tail. *)

@@ -475,8 +475,8 @@ let footer_hints_lanes_run_list =
 let footer_hints_lanes_run_detail ~scroll ~max_scroll =
   Printf.sprintf "%s  (%d/%d)"
     (hints_of_bindings
-       ([ b Navigate "j/k" "scroll"
-        ; b Navigate "PgUp/PgDn" "page"
+       ([ b Navigate "j/k" "compare" ~help:"scroll Input and Output together"
+        ; b Navigate "PgUp/PgDn" "page" ~help:"page both evidence panes"
         ; b Act "Left / Esc" "back" ~help:"back to the run list"
         ]
         @ listing_meta))

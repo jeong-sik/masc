@@ -5082,14 +5082,21 @@ let render_lanes_overview (state : state) =
    the producer adds later decodes to [Lane_run_other] and reads muted until
    it is named here. *)
 let lane_run_status_style = function
-  | Tui_decode.Lane_run_succeeded -> Theme.ok ()
-  | Tui_decode.Lane_run_verifier_positive _ -> Theme.ok ()
+  | Tui_decode.Lane_run_succeeded
+  | Tui_decode.Lane_run_approved
+  | Tui_decode.Lane_run_reviewed
+  | Tui_decode.Lane_run_committed -> Theme.ok ()
   | Tui_decode.Lane_run_cancelled
-  | Tui_decode.Lane_run_verifier_negative _ -> Theme.warn ()
+  | Tui_decode.Lane_run_rejected
+  | Tui_decode.Lane_run_deferred
+  | Tui_decode.Lane_run_review_cancelled -> Theme.warn ()
   | Tui_decode.Lane_run_failed
   | Tui_decode.Lane_run_completion_persistence_failed
   | Tui_decode.Lane_run_completion_durability_unknown
-  | Tui_decode.Lane_run_verifier_failed _ -> Theme.bad ()
+  | Tui_decode.Lane_run_infrastructure_unavailable
+  | Tui_decode.Lane_run_not_reviewed
+  | Tui_decode.Lane_run_commit_failed
+  | Tui_decode.Lane_run_raised -> Theme.bad ()
   | Tui_decode.Lane_run_running -> Theme.info ()
   | Tui_decode.Lane_run_other _ -> Theme.muted ()
 
@@ -5237,74 +5244,166 @@ let lane_run_payload_lines ~width json =
   let rendered =
     fenced_document_text ~language:"json" text
     |> document_markdown ~width
-    |> List.map (fun line -> Ansi.reset, "  " ^ line)
+    |> List.map (fun line -> Ansi.reset, line)
   in
   if truncated then
     rendered
     @ [ ( Theme.warn ()
-        , Printf.sprintf "  … truncated, total %d bytes" (String.length full) ) ]
+        , Printf.sprintf "… truncated, total %d bytes" (String.length full) ) ]
   else rendered
 
-let lane_run_detail_lines ~width (detail : Tui_decode.lane_run_detail) =
-  let elapsed_slot =
-    match detail.lrd_elapsed_s, detail.lrd_selected_slot with
-    | None, None -> ""
-    | Some seconds, None -> Printf.sprintf "  ·  %.1fs" seconds
-    | None, Some slot ->
-        Printf.sprintf "  ·  slot %s" (Terminal_text.single_line slot)
-    | Some seconds, Some slot ->
-        Printf.sprintf "  ·  %.1fs  ·  slot %s" seconds
-          (Terminal_text.single_line slot)
-  in
-  let subject_line =
+let lane_run_decision_badge (detail : Tui_decode.lane_run_detail) =
+  match
+    Tui_decode.lane_run_decision ~run_kind:detail.lrd_run_kind
+      ~status:detail.lrd_status
+  with
+  | Tui_decode.Lane_run_decision_approved -> Theme.ok (), "APPROVED"
+  | Tui_decode.Lane_run_decision_rejected -> Theme.warn (), "REJECTED"
+  | Tui_decode.Lane_run_decision_reviewed -> Theme.ok (), "REVIEWED"
+  | Tui_decode.Lane_run_decision_committed -> Theme.ok (), "COMMITTED"
+  | Tui_decode.Lane_run_decision_pending -> Theme.info (), "NO DECISION YET"
+  | Tui_decode.Lane_run_decision_not_reached -> Theme.warn (), "NO DECISION"
+  | Tui_decode.Lane_run_not_a_decision -> Theme.info (), "NOT A VERDICT"
+  | Tui_decode.Lane_run_decision_unknown -> Theme.muted (), "UNKNOWN"
+
+let lane_run_tool_summary = function
+  | Tui_decode.Lane_run_no_tools_by_contract ->
+    Theme.muted (), "TOOLS  none · exact-output runs do not use the MASC tool loop"
+  | Tui_decode.Lane_run_tools_pending ->
+    Theme.info (), "TOOLS  pending · the verifier run is still in progress"
+  | Tui_decode.Lane_run_tools_contract_unknown ->
+    Theme.muted (), "TOOLS  unknown · this run kind has no typed tool contract"
+  | Tui_decode.Lane_run_tools_observed tools ->
+    let style =
+      if
+        List.exists
+          (fun (tool : Tui_decode.lane_run_tool) ->
+            match tool.lrt_disposition with
+            | Tui_decode.Lane_run_tool_failed -> true
+            | Tui_decode.Lane_run_tool_completed
+            | Tui_decode.Lane_run_tool_deferred
+            | Tui_decode.Lane_run_tool_disposition_other _ -> false)
+          tools
+      then Theme.bad ()
+      else if
+        List.exists
+          (fun (tool : Tui_decode.lane_run_tool) ->
+            match tool.lrt_disposition with
+            | Tui_decode.Lane_run_tool_deferred
+            | Tui_decode.Lane_run_tool_disposition_other _ -> true
+            | Tui_decode.Lane_run_tool_completed
+            | Tui_decode.Lane_run_tool_failed -> false)
+          tools
+      then Theme.warn ()
+      else Theme.ok ()
+    in
+    let calls = List.length tools in
+    let names =
+      List.map
+        (fun (tool : Tui_decode.lane_run_tool) ->
+          Printf.sprintf "%s [%s · %.0fms]"
+            (Terminal_text.single_line tool.lrt_name)
+            (Terminal_text.single_line
+               (Tui_decode.lane_run_tool_disposition_label
+                  tool.lrt_disposition))
+            tool.lrt_duration_ms)
+        tools
+      |> String.concat "  ·  "
+    in
+    ( style
+    , Printf.sprintf "TOOLS  %d %s%s" calls
+        (if calls = 1 then "call" else "calls")
+        (if String.equal names "" then "" else " · " ^ names) )
+
+let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
+  let subject =
     match detail.lrd_run_kind, detail.lrd_subject_id with
     | Tui_decode.Lane_run_task_verification, Some subject ->
-      [ Ansi.reset, "  Task: " ^ Terminal_text.single_line subject ]
+      "  ·  TASK " ^ Terminal_text.single_line subject
     | Tui_decode.Lane_run_goal_verification, Some subject ->
-      [ Ansi.reset, "  Goal: " ^ Terminal_text.single_line subject ]
+      "  ·  GOAL " ^ Terminal_text.single_line subject
     | (Tui_decode.Lane_run_exact_output | Tui_decode.Lane_run_kind_other _), _
     | (Tui_decode.Lane_run_task_verification | Tui_decode.Lane_run_goal_verification),
       None ->
-      []
+      ""
   in
-  let input_heading, output_heading =
-    match detail.lrd_run_kind with
-    | Tui_decode.Lane_run_exact_output -> "INPUT (prompt payload)", "OUTPUT"
-    | Tui_decode.Lane_run_task_verification
-    | Tui_decode.Lane_run_goal_verification ->
-      let tool_count =
-        match detail.lrd_output with
-        | Some json ->
-          (match json_assoc_member_opt "tools" json with
-           | Some (`List tools) -> Some (List.length tools)
-           | Some _ | None -> None)
-        | None -> None
-      in
-      ( "REQUEST"
-      , match tool_count with
-        | None -> "RESULT / TOOL EVIDENCE"
-        | Some count -> Printf.sprintf "RESULT / TOOL EVIDENCE (%d calls)" count )
-    | Tui_decode.Lane_run_kind_other _ -> "INPUT", "OUTPUT"
+  let elapsed =
+    match detail.lrd_elapsed_s with
+    | None -> ""
+    | Some seconds -> Printf.sprintf "  ·  %.1fs" seconds
   in
-  [ Ansi.bold, "  RUN"
-  ; Ansi.reset, "  Run: " ^ Terminal_text.single_line detail.lrd_run_id
-  ; Ansi.reset, "  Kind: " ^ Tui_decode.lane_run_kind_label detail.lrd_run_kind
-  ; Ansi.reset, "  Lane: " ^ Terminal_text.single_line detail.lrd_lane
-  ; Ansi.reset, "  Actor: " ^ Terminal_text.single_line detail.lrd_actor
+  let slot =
+    match detail.lrd_selected_slot with
+    | None -> ""
+    | Some slot -> "  ·  SLOT " ^ Terminal_text.single_line slot
+  in
+  let decision_style, decision = lane_run_decision_badge detail in
+  let tool_style, tools = lane_run_tool_summary detail.lrd_tool_evidence in
+  [ ( Ansi.reset
+    , Printf.sprintf "  LANE  %s  ·  %s%s"
+        (Terminal_text.single_line detail.lrd_lane)
+        (Terminal_text.single_line
+           (Tui_decode.lane_run_kind_label detail.lrd_run_kind))
+        subject )
+  ; ( Ansi.dim
+    , Printf.sprintf "  ACTOR  %s  ·  STARTED %s%s%s"
+        (Terminal_text.single_line detail.lrd_actor)
+        (lane_run_clock detail.lrd_started_at) elapsed slot )
+  ; ( Ansi.reset
+    , Printf.sprintf "  DECISION  %s%s%s  ·  RUN  %s%s%s" decision_style
+        decision Ansi.reset (lane_run_status_style detail.lrd_status)
+        (Terminal_text.single_line
+           (Tui_decode.lane_run_status_label detail.lrd_status))
+        Ansi.reset )
+  ; tool_style, "  " ^ tools
   ]
-  @ subject_line
-  @ [ Ansi.dim, "  Started: " ^ lane_run_clock detail.lrd_started_at
-  ; ( lane_run_status_style detail.lrd_status
-    , "  Status: " ^ Tui_decode.lane_run_status_label detail.lrd_status ^ elapsed_slot )
-  ; Ansi.dim, ""
-  ; Ansi.bold, "  " ^ input_heading
-  ]
-  @ lane_run_payload_lines ~width detail.lrd_input_payload
-  @ [ Ansi.dim, ""; Ansi.bold, "  " ^ output_heading ]
-  @ (match detail.lrd_output with
-     | None ->
-         [ (Theme.muted ()), "  (run has not completed; no output recorded)" ]
-     | Some output -> lane_run_payload_lines ~width output)
+
+let lane_run_panel_titles (detail : Tui_decode.lane_run_detail) =
+  match detail.lrd_run_kind, detail.lrd_tool_evidence with
+  | Tui_decode.Lane_run_exact_output, _ ->
+    "INPUT · PROMPT PAYLOAD", "OUTPUT · MODEL RESPONSE"
+  | (Tui_decode.Lane_run_task_verification | Tui_decode.Lane_run_goal_verification),
+    Tui_decode.Lane_run_tools_observed tools ->
+    ( "INPUT · VERIFICATION REQUEST"
+    , Printf.sprintf "OUTPUT · VERDICT + TOOL EVIDENCE (%d %s)"
+        (List.length tools)
+        (if List.length tools = 1 then "CALL" else "CALLS") )
+  | (Tui_decode.Lane_run_task_verification | Tui_decode.Lane_run_goal_verification),
+    (Tui_decode.Lane_run_tools_pending | Tui_decode.Lane_run_no_tools_by_contract
+    | Tui_decode.Lane_run_tools_contract_unknown) ->
+    "INPUT · VERIFICATION REQUEST", "OUTPUT · VERDICT + TOOL EVIDENCE"
+  | Tui_decode.Lane_run_kind_other _, _ -> "INPUT", "OUTPUT"
+
+let lane_run_output_lines ~width (detail : Tui_decode.lane_run_detail) =
+  match detail.lrd_output with
+  | None ->
+    [ Theme.muted (), "(run has not completed; no output recorded)" ]
+  | Some output -> lane_run_payload_lines ~width output
+
+let lane_run_stacked_lines ~width (detail : Tui_decode.lane_run_detail) =
+  let input_title, output_title = lane_run_panel_titles detail in
+  let indent lines = List.map (fun (style, line) -> style, "  " ^ line) lines in
+  [ Ansi.bold, "  " ^ input_title ]
+  @ indent (lane_run_payload_lines ~width detail.lrd_input_payload)
+  @ [ Ansi.dim, ""; Ansi.bold, "  " ^ output_title ]
+  @ indent (lane_run_output_lines ~width detail)
+
+let lane_run_pane_progress ~scroll ~height total =
+  if total = 0 then "0/0"
+  else
+    Printf.sprintf "%d-%d/%d" (scroll + 1) (min total (scroll + height)) total
+
+let lane_run_split_line buf cols ~left_width ~left ~right =
+  let inner = framed_inner_width cols in
+  let divider = " │ " in
+  let divider_width = 3 in
+  let right_width = max 1 (inner - left_width - divider_width) in
+  let styled width (style, line) =
+    fit_width (style ^ line ^ Ansi.reset) width
+  in
+  box_line buf cols
+    (styled left_width left ^ Theme.recede () ^ divider ^ Ansi.reset
+     ^ styled right_width right)
 
 let render_lane_run_detail (state : state) ~run_id =
   let terminal_rows, cols = get_terminal_size () in
@@ -5331,26 +5430,93 @@ let render_lane_run_detail (state : state) ~run_id =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text error);
        box_divider buf cols);
-  let chrome_rows =
-    if Option.is_some state.lane_run_detail_error then 7 else 5
-  in
-  let content_height = max 1 (rows - chrome_rows) in
-  let lines =
+  let error_rows = if Option.is_some state.lane_run_detail_error then 2 else 0 in
+  let scroll, max_scroll =
     match detail, state.lane_run_detail_error with
-    | None, None -> [ Ansi.dim, "  (loading exact run record)" ]
-    | None, Some _ ->
-        [ Ansi.dim, "  (load failed; nothing here is a reading)" ]
+    | None, error ->
+      let content_height = max 1 (rows - 5 - error_rows) in
+      let line =
+        match error with
+        | None -> Ansi.dim, "  (loading exact run record)"
+        | Some _ -> Ansi.dim, "  (load failed; nothing here is a reading)"
+      in
+      box_line_styled buf cols ~style:(fst line) (snd line);
+      for _ = 2 to content_height do
+        box_empty buf cols
+      done;
+      0, 0
     | Some detail, (Some _ | None) ->
-        lane_run_detail_lines ~width:(max 1 (cols - 8)) detail
+      let summary = lane_run_summary_lines detail in
+      List.iter
+        (fun (style, line) -> box_line_styled buf cols ~style line)
+        summary;
+      box_divider buf cols;
+      if cols >= keeper_split_threshold_cols then begin
+        let inner = framed_inner_width cols in
+        let divider_width = 3 in
+        let left_width = max 1 ((inner - divider_width) / 2) in
+        let right_width = max 1 (inner - left_width - divider_width) in
+        let input_lines =
+          lane_run_payload_lines ~width:left_width detail.lrd_input_payload
+        in
+        let output_lines = lane_run_output_lines ~width:right_width detail in
+        let content_height =
+          max 1 (rows - List.length summary - 7 - error_rows)
+        in
+        let input_max_scroll =
+          max 0 (List.length input_lines - content_height)
+        in
+        let output_max_scroll =
+          max 0 (List.length output_lines - content_height)
+        in
+        let max_scroll = max input_max_scroll output_max_scroll in
+        let scroll = max 0 (min state.lane_run_detail_scroll max_scroll) in
+        let input_scroll = min scroll input_max_scroll in
+        let output_scroll = min scroll output_max_scroll in
+        let input_title, output_title = lane_run_panel_titles detail in
+        lane_run_split_line buf cols ~left_width
+          ~left:
+            ( Ansi.bold
+            , Printf.sprintf "%s  %s" input_title
+                (lane_run_pane_progress ~scroll:input_scroll
+                   ~height:content_height (List.length input_lines)) )
+          ~right:
+            ( Ansi.bold
+            , Printf.sprintf "%s  %s" output_title
+                (lane_run_pane_progress ~scroll:output_scroll
+                   ~height:content_height (List.length output_lines)) );
+        for index = 0 to content_height - 1 do
+          let left =
+            Option.value
+              (List.nth_opt input_lines (index + input_scroll))
+              ~default:(Ansi.reset, "")
+          in
+          let right =
+            Option.value
+              (List.nth_opt output_lines (index + output_scroll))
+              ~default:(Ansi.reset, "")
+          in
+          lane_run_split_line buf cols ~left_width ~left ~right
+        done;
+        scroll, max_scroll
+      end
+      else begin
+        let lines =
+          lane_run_stacked_lines ~width:(max 1 (cols - 8)) detail
+        in
+        let content_height =
+          max 1 (rows - List.length summary - 6 - error_rows)
+        in
+        let max_scroll = max 0 (List.length lines - content_height) in
+        let scroll = max 0 (min state.lane_run_detail_scroll max_scroll) in
+        for index = 0 to content_height - 1 do
+          match List.nth_opt lines (index + scroll) with
+          | None -> box_empty buf cols
+          | Some (style, line) -> box_line_styled buf cols ~style line
+        done;
+        scroll, max_scroll
+      end
   in
-  let total = List.length lines in
-  let max_scroll = max 0 (total - content_height) in
-  let scroll = max 0 (min state.lane_run_detail_scroll max_scroll) in
-  for index = 0 to content_height - 1 do
-    match List.nth_opt lines (index + scroll) with
-    | None -> box_empty buf cols
-    | Some (style, line) -> box_line_styled buf cols ~style line
-  done;
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols

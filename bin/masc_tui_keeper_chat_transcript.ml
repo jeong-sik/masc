@@ -347,24 +347,7 @@ let plural count noun =
 let omitted_steps_row count =
   Printf.sprintf "(%s not carried by the transcript)" (plural count "step")
 
-let compact_outcome_parts (activities : tool_activity list) =
-  let count outcome =
-    List.fold_left
-      (fun total activity ->
-        if activity.outcome = outcome then total + 1 else total)
-      0 activities
-  in
-  [ Started, "started"
-  ; Awaiting_result, "awaiting result"
-  ; Returned, "returned"
-  ; Failed, "failed"
-  ; Never_returned, "never returned"
-  ; Outcome_unrecorded, "outcome unrecorded"
-  ]
-  |> List.filter_map (fun (outcome, label) ->
-         match count outcome with
-         | 0 -> None
-         | count -> Some (Printf.sprintf "%d %s" count label))
+
 
 (* The one outcome a folded block reads as. The order is the order of what a
    reader needs to know first: a call that failed outranks one still out,
@@ -406,6 +389,65 @@ let canonical_tool_name (activity : tool_activity) =
       with
       | Some public_name -> public_name
       | None -> safe_line (display_tool_name activity.tool_name))
+
+(* The outcomes worth naming a tool for.
+
+   A fold that says "28 returned, 1 failed" beside eight tool names leaves the
+   reader to open the details to learn which one broke. The counts are the
+   same information either way; the name is what turns the line into an
+   answer. Only the outcomes someone acts on carry names -- a reader chasing
+   a failure needs the tool, a reader seeing 28 successes does not. *)
+let names_its_tools = function
+  | Failed | Never_returned | Awaiting_result -> true
+  | Started | Returned | Outcome_unrecorded -> false
+;;
+
+(* Distinct tool names for one outcome, each with its count when it repeats.
+   Order follows first appearance, so the line reads in the order the calls
+   were made. *)
+let tools_for_outcome outcome activities =
+  List.filter (fun activity -> activity.outcome = outcome) activities
+  |> List.fold_left
+       (fun counts activity ->
+         let name = canonical_tool_name activity in
+         let rec increment reversed = function
+           | [] -> List.rev ((name, 1) :: reversed)
+           | (existing, count) :: rest when String.equal existing name ->
+             List.rev_append reversed ((existing, count + 1) :: rest)
+           | entry :: rest -> increment (entry :: reversed) rest
+         in
+         increment [] counts)
+       []
+  |> List.map (fun (name, count) ->
+       if count = 1 then name else Printf.sprintf "%s %d" name count)
+;;
+
+let compact_outcome_parts (activities : tool_activity list) =
+  let count outcome =
+    List.fold_left
+      (fun total activity ->
+        if activity.outcome = outcome then total + 1 else total)
+      0 activities
+  in
+  [ Started, "started"
+  ; Awaiting_result, "awaiting result"
+  ; Returned, "returned"
+  ; Failed, "failed"
+  ; Never_returned, "never returned"
+  ; Outcome_unrecorded, "outcome unrecorded"
+  ]
+  |> List.filter_map (fun (outcome, label) ->
+         match count outcome with
+         | 0 -> None
+         | count ->
+           let counted = Printf.sprintf "%d %s" count label in
+           if not (names_its_tools outcome)
+           then Some counted
+           else (
+             match tools_for_outcome outcome activities with
+             | [] -> Some counted
+             | names -> Some (counted ^ ": " ^ String.concat ", " names)))
+;;
 
 let compact_tool_parts (activities : tool_activity list) =
   let add counts activity =

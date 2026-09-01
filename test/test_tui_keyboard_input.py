@@ -8349,8 +8349,8 @@ def runtime_surface_interaction(
     ) -> None:
         completed = False
         try:
-            # Connectors and Code both left the Tab ring, so the ring
-            # predecessor of Runtime is now Workspace. The hop is
+            # Channels now lives under the selected Keeper, so the ring
+            # predecessor of Runtime is Workspace. Each hop is
             # needle-verified so an async frame between presses cannot lap
             # the walk; the last Tab stays bare because the probe fixture
             # must observe its request after [start].
@@ -8569,10 +8569,6 @@ def runtime_surface_interaction(
                     raise AssertionError(
                         f"Runtime discarded its prior rows after failure: {preserved_plain!r}"
                     )
-            # The [c] hop opens Connectors off the ring, and Esc returns to
-            # the Runtime parent rather than Overview.
-            send_and_wait(process, master_fd, output, b"c", b"MASC Connectors")
-            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Runtime")
             send_and_wait(process, master_fd, output, b"\t", b"MASC Config")
             os.write(master_fd, b"q")
             completed = True

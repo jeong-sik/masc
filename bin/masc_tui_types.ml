@@ -3629,7 +3629,6 @@ let workspace_entries_count_label total =
 let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
   @ [ "go Task Review", Palette_goto Verification ]
-  @ [ "go Connectors", Palette_goto Connectors ]
   @ [ "go Lanes", Palette_goto Lanes ]
   @ [ "go Schedules", Palette_goto Schedules ]
   @ [ "go Fusion", Palette_goto Fusion ]

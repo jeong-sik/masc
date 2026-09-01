@@ -55,7 +55,7 @@ let test_one_spelling_per_key () =
 
 let test_plain_listing_footer_shape () =
   let canonical =
-    "j/k:scroll  b / u:bind / unbind  Esc:runtime  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  b / u:bind / unbind  Esc:keeper  r:refresh  Tab:next  q:quit"
   in
   check str "the plain listing keeps its footer" canonical
     (Masc_tui_keys.footer_hints Connectors)

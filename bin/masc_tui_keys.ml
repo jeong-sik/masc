@@ -273,8 +273,8 @@ let for_surface = function
       @ listing_meta
   | Connectors ->
       [ b Navigate "j/k" "scroll"
-      ; b Act "b / u" "bind / unbind" ~help:"bind / unbind a channel (editor form)"
-      ; b Act "Esc" "runtime" ~help:"back to the Runtime surface it hangs off"
+      ; b Act "b / u" "bind / unbind" ~help:"bind / unbind a channel"
+      ; b Act "Esc" "keeper" ~help:"back to the selected Keeper"
       ]
       @ listing_meta
   | Runtime ->
@@ -285,7 +285,6 @@ let for_surface = function
       ; b Navigate "p" "keeper lanes / all runtimes / service lanes"
           ~help:"walk the three substrate readings; the third is the \
                  standalone Lanes surface"
-      ; b Act "c" "connectors" ~help:"channel bindings and reachability"
       ; b Act "Left / Esc" "back"
       ]
       @ listing_meta
@@ -512,13 +511,12 @@ let help_surfaces : (string * surface) list =
   ; "Planning / Goals", Planning
   ; "Planning / Task Review", Verification
   ; "Planning / Verdicts", Harness
-  ; "Planning / Schedules", Schedules
-  ; "Planning / Fusion", Fusion
+  ; "Keeper detail / Automation", Schedules
+  ; "Keeper detail / Runs", Fusion
   ; "Memory", Memory
   ; "Workspace", Repositories
   ; "Workspace / Code", Code
   ; "Changes", Changes
-  ; "Runtime / Connectors", Connectors
   ; "Runtime", Runtime
   ; "Config", Config
   ; "Resources", Resources

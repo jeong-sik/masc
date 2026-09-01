@@ -325,6 +325,10 @@ type operation_wire_stream = Wire_started | Wire_terminal_sent
 
 module For_testing : sig
   val parse_request : string -> (keeper_chat_stream_request, string) result
+  val parse_keeper_turn_interrupt_target :
+    string -> (string * string option, string) result
+  (** Parses and trims the interrupt target. Blank Keeper names and blank or
+      non-string request IDs fail at the request boundary. *)
   val has_connector_context : keeper_chat_stream_request -> bool
   val has_external_speaker : keeper_chat_stream_request -> bool
   val message_for_request : keeper_chat_stream_request -> string

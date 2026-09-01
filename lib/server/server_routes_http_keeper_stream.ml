@@ -493,32 +493,34 @@ let handle_keeper_tool_approval_mode_set ~actor state request reqd =
              ])))
 ;;
 
+let parse_keeper_turn_interrupt_target body_str =
+  try
+    match Yojson.Safe.from_string body_str with
+    | `Assoc fields ->
+      (match List.assoc_opt "name" fields with
+       | Some (`String s) when String.trim s <> "" ->
+         let request_id_result =
+           match List.assoc_opt "request_id" fields with
+           | None -> Ok None
+           | Some (`String value) when String.trim value <> "" ->
+             Ok (Some (String.trim value))
+           | Some (`String _) -> Error "request_id must be non-blank"
+           | Some _ -> Error "request_id must be a string when present"
+         in
+         Result.map
+           (fun request_id -> String.trim s, request_id)
+           request_id_result
+       | Some (`String _) -> Error "name must be non-blank"
+       | _ -> Error "name (string) is required")
+    | _ -> Error "JSON object body required"
+  with
+  | Yojson.Json_error msg -> Error ("invalid json: " ^ msg)
+;;
+
 let handle_keeper_turn_interrupt state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in
-    let target_result =
-      try
-        match Yojson.Safe.from_string body_str with
-        | `Assoc fields ->
-          (match List.assoc_opt "name" fields with
-           | Some (`String s) when String.trim s <> "" ->
-             let request_id_result =
-               match List.assoc_opt "request_id" fields with
-               | None -> Ok None
-               | Some (`String value) when String.trim value <> "" ->
-                 Ok (Some (String.trim value))
-               | Some (`String _) -> Error "request_id must be non-blank"
-               | Some _ -> Error "request_id must be a string when present"
-             in
-             Result.map
-               (fun request_id -> String.trim s, request_id)
-               request_id_result
-           | Some (`String _) -> Error "name must be non-blank"
-           | _ -> Error "name (string) is required")
-        | _ -> Error "JSON object body required"
-      with
-      | Yojson.Json_error msg -> Error ("invalid json: " ^ msg)
-    in
+    let target_result = parse_keeper_turn_interrupt_target body_str in
     match target_result with
     | Error msg ->
       respond_json_value_with_cors ~status:`Bad_request request reqd
@@ -3022,6 +3024,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
 
 module For_testing = struct
   let parse_request = parse_keeper_chat_stream_request
+  let parse_keeper_turn_interrupt_target = parse_keeper_turn_interrupt_target
   let has_connector_context = has_connector_context
   let has_external_speaker = has_external_speaker
   let message_for_request = message_for_request

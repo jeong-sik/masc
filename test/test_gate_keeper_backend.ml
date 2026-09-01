@@ -336,6 +336,22 @@ let test_parse_keeper_chat_stream_request_rejects_unknown_user_block_type () =
         {|unsupported user_blocks type "tool_result": expected text, image, document, or audio|}
         err
 
+let test_parse_keeper_turn_interrupt_target_rejects_blank_name () =
+  let parse =
+    Server_routes_http_keeper_stream.For_testing
+    .parse_keeper_turn_interrupt_target
+  in
+  check
+    (result (pair string (option string)) string)
+    "blank Keeper name is a request error"
+    (Error "name must be non-blank")
+    (parse {|{"name":"  ","request_id":"tui-request"}|});
+  check
+    (result (pair string (option string)) string)
+    "valid target is trimmed"
+    (Ok ("alpha", Some "tui-request"))
+    (parse {|{"name":" alpha ","request_id":" tui-request "}|})
+
 let test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks () =
   let attachments =
     [
@@ -3426,6 +3442,8 @@ let () =
             test_parse_keeper_chat_stream_request_accepts_attachment_only_user_blocks;
           test_case "stream request rejects unknown user block type" `Quick
             test_parse_keeper_chat_stream_request_rejects_unknown_user_block_type;
+          test_case "interrupt target rejects blank Keeper name" `Quick
+            test_parse_keeper_turn_interrupt_target_rejects_blank_name;
           test_case "multimodal input converts user blocks to AGENT_CORE blocks" `Quick
             test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks;
           test_case "multimodal parse maps each kind to its constructor" `Quick

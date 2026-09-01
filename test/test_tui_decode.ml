@@ -5039,6 +5039,49 @@ let test_decode_lane_run_detail_running_has_no_output () =
       Alcotest.(check bool) "no output while running" true
         (Option.is_none detail.Tui_decode.lrd_output)
 
+let hitl_lane_run_detail_json judgment =
+  `Assoc
+    [ ( "run"
+      , `Assoc
+          [ "run_id", `String "hitl-9"
+          ; "run_kind", `String "exact_output"
+          ; "lane", `String "hitl_auto_judge"
+          ; "actor", `String "auto_judge"
+          ; "started_at", `Float 100.
+          ; "status", `String "succeeded"
+          ; "elapsed_s", `Float 2.
+          ; "selected_slot", `String "judge-primary"
+          ; ( "input"
+            , `Assoc
+                [ "kind", `String "exact"
+                ; "payload", `Assoc [ "tool_name", `String "network_read" ]
+                ] )
+          ; "output", `Assoc [ "judgment", `String judgment ]
+          ] )
+    ]
+
+let test_decode_hitl_detail_separates_advisory_from_gate_resolution () =
+  match Tui_decode.decode_lane_run_detail (hitl_lane_run_detail_json "approve") with
+  | Error detail -> Alcotest.fail detail
+  | Ok detail ->
+    (match detail.Tui_decode.lrd_gate_judgment with
+     | Tui_decode.Lane_run_gate_advisory
+         Keeper_approval_queue_rules_types.Approve ->
+       ()
+     | _ -> Alcotest.fail "HITL approve must remain a typed advisory judgment");
+    Alcotest.(check bool) "standalone run loads no Keeper Skills" true
+      (detail.Tui_decode.lrd_skill_evidence
+       = Tui_decode.Lane_run_no_skills_by_contract);
+    Alcotest.(check bool) "exact HITL output is not itself the Gate verdict" true
+      (Tui_decode.lane_run_decision ~run_kind:detail.lrd_run_kind
+         ~status:detail.lrd_status
+       = Tui_decode.Lane_run_not_a_decision)
+
+let test_decode_hitl_detail_rejects_unknown_advisory () =
+  match Tui_decode.decode_lane_run_detail (hitl_lane_run_detail_json "maybe") with
+  | Ok _ -> Alcotest.fail "an unknown HITL judgment must not become approval"
+  | Error _ -> ()
+
 let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
   let json =
     `Assoc
@@ -6559,6 +6602,10 @@ let () =
           test_decode_lane_run_detail_carries_prompt_and_output;
         Alcotest.test_case "running detail has no output" `Quick
           test_decode_lane_run_detail_running_has_no_output;
+        Alcotest.test_case "HITL advisory is not Gate resolution" `Quick
+          test_decode_hitl_detail_separates_advisory_from_gate_resolution;
+        Alcotest.test_case "HITL unknown advisory is rejected" `Quick
+          test_decode_hitl_detail_rejects_unknown_advisory;
         Alcotest.test_case "verifier detail keeps kind, subject, and tools" `Quick
           test_decode_verifier_detail_keeps_kind_subject_and_tool_result;
         Alcotest.test_case "detail requires the payload" `Quick

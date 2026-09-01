@@ -5435,6 +5435,44 @@ let lane_run_tool_summary = function
     , Printf.sprintf "%sTOOLS%s %s%s" Ansi.bold Ansi.reset overview
         (if String.equal evidence "" then "" else "  │  " ^ evidence) )
 
+let lane_run_skill_summary = function
+  | Tui_decode.Lane_run_no_skills_by_contract ->
+    Theme.muted (),
+    "SKILLS  none · standalone runs do not load Keeper Skill instructions"
+  | Tui_decode.Lane_run_skills_contract_unknown ->
+    Theme.muted (), "SKILLS  unknown · this run kind has no typed Skill contract"
+
+let lane_run_gate_judgment_summary = function
+  | Tui_decode.Lane_run_not_gate_judgment -> None
+  | Tui_decode.Lane_run_gate_judgment_pending ->
+    Some
+      ( Ansi.reset
+      , Printf.sprintf
+          "%sJUDGMENT%s  %spending%s  ·  GATE RESOLUTION  NOT PROVEN BY THIS RUN"
+          Ansi.bold Ansi.reset (Theme.info ()) Ansi.reset )
+  | Tui_decode.Lane_run_gate_judgment_not_reached ->
+    Some
+      ( Ansi.reset
+      , Printf.sprintf
+          "%sJUDGMENT%s  %snone%s  ·  GATE RESOLUTION  NOT PROVEN BY THIS RUN"
+          Ansi.bold Ansi.reset (Theme.warn ()) Ansi.reset )
+  | Tui_decode.Lane_run_gate_advisory judgment ->
+    let style =
+      match judgment with
+      | Keeper_approval_queue_rules_types.Approve -> Theme.ok ()
+      | Keeper_approval_queue_rules_types.Deny -> Theme.warn ()
+      | Keeper_approval_queue_rules_types.Require_human -> Theme.info ()
+    in
+    let label =
+      Keeper_approval_queue_rules_types.advisory_judgment_to_string judgment
+      |> String.uppercase_ascii
+    in
+    Some
+      ( Ansi.reset
+      , Printf.sprintf
+          "%sJUDGMENT%s  %sADVISORY %s%s  ·  GATE RESOLUTION  NOT PROVEN BY THIS RUN"
+          Ansi.bold Ansi.reset style label Ansi.reset )
+
 let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
   let subject =
     match detail.lrd_run_kind, detail.lrd_subject_id with
@@ -5459,6 +5497,12 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
   in
   let decision_style, decision = lane_run_decision_badge detail in
   let tool_style, tools = lane_run_tool_summary detail.lrd_tool_evidence in
+  let skill_style, skills = lane_run_skill_summary detail.lrd_skill_evidence in
+  let gate_judgment =
+    match lane_run_gate_judgment_summary detail.lrd_gate_judgment with
+    | None -> []
+    | Some (style, line) -> [ style, "  " ^ line ]
+  in
   [ ( Ansi.reset
     , Printf.sprintf "  LANE  %s  ·  %s%s"
         (Terminal_text.single_line detail.lrd_lane)
@@ -5475,8 +5519,9 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
         (Terminal_text.single_line
            (Tui_decode.lane_run_status_label detail.lrd_status))
         Ansi.reset )
-  ; tool_style, "  " ^ tools
   ]
+  @ gate_judgment
+  @ [ tool_style, "  " ^ tools; skill_style, "  " ^ skills ]
 
 let lane_run_panel_titles (detail : Tui_decode.lane_run_detail) =
   match detail.lrd_run_kind, detail.lrd_tool_evidence with

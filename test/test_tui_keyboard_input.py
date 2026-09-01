@@ -7297,6 +7297,54 @@ def verifier_lane_run_detail_response() -> HttpResponse:
     )
 
 
+def hitl_lane_runs_response() -> HttpResponse:
+    return (
+        200,
+        {
+            "runs": [
+                {
+                    "run_id": "hitl-fixture",
+                    "run_kind": "exact_output",
+                    "lane": "hitl_auto_judge",
+                    "actor": "auto_judge",
+                    "started_at": 1787557000.0,
+                    "status": "succeeded",
+                    "elapsed_s": 2.0,
+                    "selected_slot": "judge-primary",
+                }
+            ],
+            "has_more": False,
+        },
+    )
+
+
+def hitl_lane_run_detail_response() -> HttpResponse:
+    return (
+        200,
+        {
+            "run": {
+                "run_id": "hitl-fixture",
+                "run_kind": "exact_output",
+                "lane": "hitl_auto_judge",
+                "actor": "auto_judge",
+                "started_at": 1787557000.0,
+                "status": "succeeded",
+                "elapsed_s": 2.0,
+                "selected_slot": "judge-primary",
+                "input": {
+                    "kind": "exact",
+                    "payload": {"tool_name": "network_read"},
+                },
+                "output": {
+                    "summary_version": 2,
+                    "judgment": "approve",
+                    "rationale": "the requested read is bounded",
+                },
+            }
+        },
+    )
+
+
 def assert_verifier_tool_color_summary(frame: bytes) -> None:
     """The executed PTY path must preserve typed severity and per-call color."""
     plain = CSI_RE.sub(b"", frame)
@@ -8113,10 +8161,15 @@ def keeper_lanes_ia_interaction(gate: GatedHttpResponse) -> Interaction:
             b"\r",
             b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (2 CALLS)",
         )
-        if b"DECISION  REJECTED" not in CSI_RE.sub(b"", verifier_detail):
-            raise AssertionError(
-                f"Verifier detail omitted its decision: {verifier_detail!r}"
-            )
+        verifier_detail_plain = CSI_RE.sub(b"", verifier_detail)
+        for evidence in (
+            b"DECISION  REJECTED",
+            b"SKILLS  none",
+        ):
+            if evidence not in verifier_detail_plain:
+                raise AssertionError(
+                    f"Verifier detail omitted {evidence!r}: {verifier_detail!r}"
+                )
         assert_verifier_tool_color_summary(verifier_detail)
         narrow_detail = resize_and_wait(
             process,
@@ -8148,6 +8201,27 @@ def keeper_lanes_ia_interaction(gate: GatedHttpResponse) -> Interaction:
         send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)
         send_and_wait(process, master_fd, output, b"k", banded_librarian)
         send_and_wait(process, master_fd, output, b"k", banded_hitl)
+        send_and_wait(process, master_fd, output, b"\r", b"succeeded")
+        hitl_detail = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\r",
+            b"GATE RESOLUTION  NOT PROVEN BY THIS RUN",
+        )
+        hitl_detail_plain = CSI_RE.sub(b"", hitl_detail)
+        for evidence in (
+            b"DECISION  NOT A VERDICT",
+            b"JUDGMENT  ADVISORY APPROVE",
+            b"TOOLS  none",
+            b"SKILLS  none",
+        ):
+            if evidence not in hitl_detail_plain:
+                raise AssertionError(
+                    f"HITL detail omitted {evidence!r}: {hitl_detail!r}"
+                )
+        send_and_wait(process, master_fd, output, b"\x1b", b"succeeded")
+        send_and_wait(process, master_fd, output, b"\x1b", banded_hitl)
         send_and_wait(process, master_fd, output, b"k", banded_board)
         send_and_wait(
             process,
@@ -10140,6 +10214,10 @@ def run_keyboard_regression(executable: str) -> None:
     lanes_fixtures[
         "/api/v1/dashboard/exact-lane-runs/vrf-fixture"
     ] = verifier_lane_run_detail_response()
+    lanes_fixtures[lane_runs_path("hitl_auto_judge")] = hitl_lane_runs_response()
+    lanes_fixtures[
+        "/api/v1/dashboard/exact-lane-runs/hitl-fixture"
+    ] = hitl_lane_run_detail_response()
     runtime_fixtures, runtime_initial_probe, runtime_force_probe = (
         runtime_http_fixtures()
     )
@@ -11065,6 +11143,10 @@ def run_keeper_lanes_regression(executable: str) -> None:
     fixtures[
         "/api/v1/dashboard/exact-lane-runs/vrf-fixture"
     ] = verifier_lane_run_detail_response()
+    fixtures[lane_runs_path("hitl_auto_judge")] = hitl_lane_runs_response()
+    fixtures[
+        "/api/v1/dashboard/exact-lane-runs/hitl-fixture"
+    ] = hitl_lane_run_detail_response()
     fixtures[RUNTIME_CONFIG_RAW_PATH] = (
         200,
         {

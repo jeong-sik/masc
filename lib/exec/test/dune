@@ -8,6 +8,7 @@
   test_exec_dispatch_docker_streaming
   test_exec_dispatch_stdin_streaming
   test_exec_dispatch_pipeline_streaming
+  test_exec_dispatch_delegated
   test_shell_ir_chaining_benchmark)
  (libraries
   masc_exec

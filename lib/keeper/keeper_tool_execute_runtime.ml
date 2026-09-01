@@ -54,6 +54,7 @@ let sandbox_target_label = function
   | Masc_exec.Sandbox_target.Host -> "host"
   | Masc_exec.Sandbox_target.Docker { image; _ } -> "docker:" ^ image
   | Masc_exec.Sandbox_target.Ssh { endpoint; _ } -> "ssh:" ^ endpoint.host
+  | Masc_exec.Sandbox_target.Delegated _ -> "delegated"
 ;;
 
 (* The Gate operation name this runtime submits under. Shared with the replay
@@ -381,6 +382,11 @@ let handle_tool_execute_typed
           match dispatch_sandbox with
           | Masc_exec.Sandbox_target.Host
           | Docker _ | Ssh _ -> model_location_fields
+          | Masc_exec.Sandbox_target.Delegated _ ->
+            (* Unreachable from a profile-built target today (no profile
+               builds one); a delegated stage is labelled where the
+               delegation is minted, not here. *)
+            model_location_fields
         in
         (* Lower the validated typed input exactly once. The resulting Shell IR
            is the neutral dispatch representation; it carries no product or
@@ -404,6 +410,10 @@ let handle_tool_execute_typed
               { visible_root = Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
               ; host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta
               }
+          | Masc_exec.Sandbox_target.Delegated _ ->
+            (* A delegated stage never opens a redirect file (dispatch
+               refuses), so it needs no mount binding. *)
+            Keeper_tool_execute_typed_input.Command_filesystem
         in
         match
           Keeper_tool_execute_typed_input.to_shell_ir

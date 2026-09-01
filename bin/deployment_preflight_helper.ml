@@ -935,7 +935,7 @@ let provider_input_store =
                            line_number
                            detail)
                     | json ->
-                      Keeper_provider_input_snapshot.of_json json
+                      Masc.Keeper_provider_input_snapshot.of_json json
                       |> Result.map (fun _ -> ())
                       |> Result.map_error (fun detail ->
                         Printf.sprintf

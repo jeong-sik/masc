@@ -610,10 +610,9 @@ let handle_keeper_turn_interrupt state request reqd =
                 ; ("reason", `String "cancel_failed")
                 ; ("detail", `String detail)
                 ]
-                @
-                match turn_id with
-                | Some turn_id -> [ ("turn_id", `Int turn_id) ]
-                | None -> [])))
+                @ (match turn_id with
+                   | Some turn_id -> [ ("turn_id", `Int turn_id) ]
+                   | None -> [])))))
 ;;
 
 (* No cumulative timeout or work budget for keeper_msg. Keeper calls AGENT_CORE with

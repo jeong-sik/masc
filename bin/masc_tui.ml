@@ -4445,7 +4445,11 @@ let locally_submitted_at state keeper_name request_id =
         when String.equal entry.me_keeper_name keeper_name
              && String.equal entry.me_request_id request_id ->
           entry.me_submitted_at
-      | Message_user (Sent_by_other _) | Message_keeper | Message_autonomous
+      (* [Sent_by_operator] is listed again because the arm above it is
+         guarded: an operator row for another keeper or request falls through
+         to here rather than matching that one. *)
+      | Message_user (Sent_by_operator _ | Sent_by_other _)
+      | Message_keeper | Message_autonomous
       | Message_status | Message_error | Message_tool | Message_skill _
       | Message_thinking
       | Message_memory -> None)

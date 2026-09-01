@@ -789,7 +789,11 @@ let budgeted_model_input_projection
        | Some inner -> inner windowed)
 ;;
 
-let run_try_provider (ctx : try_provider_ctx) candidate =
+let run_try_provider
+      (ctx : try_provider_ctx)
+      ?enable_thinking_override:_
+      candidate
+  =
   let resolved_lane =
     match ctx.tools with
     | [] -> "none"
@@ -1179,6 +1183,7 @@ let context_overflow_shrink_sequence
     rediscover it every turn. A successful attempt updates that memory. *)
 let run_try_provider_with_context_overflow_shrink
       (ctx : try_provider_ctx)
+      ?enable_thinking_override:_
       candidate
   =
   let starting_capacity_bytes =

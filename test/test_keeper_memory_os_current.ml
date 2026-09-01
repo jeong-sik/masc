@@ -607,6 +607,68 @@ let test_snapshot_read_requires_fact_basis () =
   | Ok _ -> fail "a fact without basis crossed the authoritative read boundary"
 ;;
 
+let test_snapshot_read_accepts_pre_invalidated_change_field_set () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let written =
+    replace ~keepers_dir ~facts:[ fact ~claim:"legacy change" () ] () |> require_ok
+  in
+  let legacy =
+    match Current.to_json written with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (field, value) ->
+              if String.equal field "change"
+              then (
+                match value with
+                | `Assoc change_fields ->
+                  field
+                  , `Assoc
+                      (List.filter
+                         (fun (name, _) ->
+                            not (String.equal name "invalidated"))
+                         change_fields)
+                | _ -> field, value)
+              else field, value)
+           fields)
+    | json -> json
+  in
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  Fs_compat.save_file path (Yojson.Safe.to_string legacy);
+  match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" with
+  | Ok (Some decoded) ->
+    check int "legacy change revision" written.revision decoded.revision;
+    check
+      (list string)
+      "legacy change facts survive"
+      (fact_ids written.facts)
+      (fact_ids decoded.facts);
+    check int "legacy invalidated ledger starts empty" 0
+      (List.length decoded.change.invalidated);
+    check int "legacy retained preserved"
+      written.change.retained decoded.change.retained;
+    (* The 2026-09-01 incident: a schema-introducing deploy made every
+       pre-existing three-field snapshot unreadable, so every keeper write
+       failed at its read step. A write on top of a legacy change must heal
+       the file instead of rejecting it. *)
+    let healed =
+      Current.upsert_fact
+        ~keepers_dir
+        ~keeper_id:"keeper"
+        ~now:300.0
+        ~source:(source Current.Explicit_write)
+        (fact ~claim:"after legacy read" ())
+      |> require_upsert_ok
+    in
+    check int "write heals on top of legacy change"
+      (written.revision + 1)
+      healed.revision;
+    check int "healed snapshot carries an empty invalidation ledger" 0
+      (List.length healed.change.invalidated)
+  | Ok None -> fail "legacy snapshot vanished"
+  | Error message -> fail ("legacy three-field change was rejected: " ^ message)
+;;
+
 let test_current_snapshot_object_order_is_irrelevant_but_fields_are_exact () =
   with_temp_keepers @@ fun keepers_dir ->
   let written = replace ~keepers_dir ~facts:[ fact () ] () |> require_ok in
@@ -1482,6 +1544,10 @@ let () =
             "fact basis is required"
             `Quick
             test_snapshot_read_requires_fact_basis
+        ; test_case
+            "pre-invalidated change field set stays readable"
+            `Quick
+            test_snapshot_read_accepts_pre_invalidated_change_field_set
         ; test_case
             "object order irrelevant and fields exact"
             `Quick

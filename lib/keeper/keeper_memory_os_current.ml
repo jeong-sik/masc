@@ -348,44 +348,64 @@ let change_to_json change =
 ;;
 
 let change_of_json = function
-  | `Assoc fields ->
-    let* () =
-      exact_field_names_result
-        [ field_added; field_removed; field_retained; field_invalidated ]
-        fields
-    in
-    let* added_json = wire_json_field field_added fields in
-    let* removed_json = wire_json_field field_removed fields in
-    let* retained = wire_int_field field_retained fields in
-    let* invalidated_json = wire_list_field field_invalidated fields in
-    let* added = wire_at (Wire_field field_added) (facts_of_json added_json) in
-    let* removed = wire_at (Wire_field field_removed) (facts_of_json removed_json) in
-    let rec invalidations index seen acc = function
-      | [] -> Ok (List.rev acc)
-      | json :: rest ->
-        let* invalidation =
-          wire_at_element field_invalidated index (support_invalidation_of_json json)
+  | `Assoc fields -> (
+      let is_4 =
+        exact_object_fields
+          [ field_added; field_removed; field_retained; field_invalidated ]
+          fields
+      in
+      let is_3 =
+        exact_object_fields [ field_added; field_removed; field_retained ] fields
+      in
+      if not (is_4 || is_3)
+      then wire_here Expected_object
+      else (
+        let* added_json = wire_json_field field_added fields in
+        let* removed_json = wire_json_field field_removed fields in
+        let* retained = wire_int_field field_retained fields in
+        let* invalidated_json =
+          if is_4
+          then wire_list_field field_invalidated fields
+          else
+            (* Snapshots written before invalidated existed (before 3322eee8d9,
+               #32239) carry a three-field change. The support-invalidation
+               ledger starts empty for them, the same state the journal's
+               committed-entry reader accepts for a pre-dropped field set. *)
+            Ok []
         in
-        let identity = memory_id invalidation.fact in
-        if Set_util.StringSet.mem identity seen
-        then
-          wire_fail
-            [ Wire_field field_invalidated; Wire_index index ]
-            (Duplicate_entry identity)
-        else
-          invalidations
-            (index + 1)
-            (Set_util.StringSet.add identity seen)
-            (invalidation :: acc)
-            rest
-    in
-    let* invalidated = invalidations 0 Set_util.StringSet.empty [] invalidated_json in
-    let+ () =
-      if retained >= 0
-      then Ok ()
-      else wire_fail [ Wire_field field_retained ] Negative
-    in
-    { added; removed; retained; invalidated }
+        let* added = wire_at (Wire_field field_added) (facts_of_json added_json) in
+        let* removed = wire_at (Wire_field field_removed) (facts_of_json removed_json) in
+        let rec invalidations index seen acc = function
+          | [] -> Ok (List.rev acc)
+          | json :: rest ->
+            let* invalidation =
+              wire_at_element
+                field_invalidated
+                index
+                (support_invalidation_of_json json)
+            in
+            let identity = memory_id invalidation.fact in
+            if Set_util.StringSet.mem identity seen
+            then
+              wire_fail
+                [ Wire_field field_invalidated; Wire_index index ]
+                (Duplicate_entry identity)
+            else
+              invalidations
+                (index + 1)
+                (Set_util.StringSet.add identity seen)
+                (invalidation :: acc)
+                rest
+        in
+        let* invalidated =
+          invalidations 0 Set_util.StringSet.empty [] invalidated_json
+        in
+        let+ () =
+          if retained >= 0
+          then Ok ()
+          else wire_fail [ Wire_field field_retained ] Negative
+        in
+        { added; removed; retained; invalidated }))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     wire_here Expected_object
 ;;

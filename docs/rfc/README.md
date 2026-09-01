@@ -266,6 +266,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-skills-as-tools | Skill 과 Tool 은 한 카탈로그의 두 표면 — SKILL.md 가 지시·합성·비동기를 선언한다 | Active | - |
 | RFC-spawn-a-process-that-outlives-the-call | Spawn: a process that outlives the call | Draft | - |
 | RFC-tui-server-lifecycle | TUI 안에서 서버를 켠다 — opt-in 온디맨드 서버 시작으로 TUI 를 기본 진입점으로 | Draft | - |
+| RFC-turn-failure-visible-stop | 턴 실패를 숨기지 않고 상태로 보여준다 — 실패 면제와 예산 계정을 걷어낸다 | Implemented | - |
 | RFC-virtual-project-missions | Virtual-project missions: RW24-RW30 from planned rows to judged runs | Draft | - |
 | RFC-webmcp-capability-lanes | WebMCP 를 masc 능력으로 — credential 위임(C), 생태계 센서(D), 공유 화면·사람 승인(E) | Draft | - |
 | RFC-webmcp-dashboard-agent-surface | 대시보드를 WebMCP 도구 표면으로 — 읽기 전용 MCP allowlist relay 와 CDP 소비 브리지 | Draft | - |

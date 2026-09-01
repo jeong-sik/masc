@@ -1164,8 +1164,11 @@ let expect_ok_true ~(what : string) json =
   | _ -> Error (what ^ " response was not a JSON object")
 
 (** POST /api/v1/dashboard/gate/resolve — decide one durable Gate approval. *)
+(* [reason] is a required-labeled option rather than [?reason]: nothing
+   follows it, so an optional argument here is unerasable (warning 16). *)
 let post_dashboard_gate_resolve ~(host : string) ~(port : int)
-    ~(approval_id : string) ~(approve : bool) ?reason : (unit, string) result =
+    ~(approval_id : string) ~(approve : bool) ~(reason : string option) :
+    (unit, string) result =
   let body =
     Yojson.Safe.to_string
       (`Assoc

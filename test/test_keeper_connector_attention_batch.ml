@@ -501,7 +501,12 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
 ;;
 
 (* #32096: mismatch and missing/inapplicable receipt evidence say nothing
-   about model intent. They must NOT be recorded as Ignored. *)
+   about model intent, so the connector-attention row must not be recorded
+   as Ignored — [Batch_ack_durable_stimulus_yield] settles it as
+   [Settle_pending_in_queue]. #32277: refusing the queue ACK as well
+   replayed the same admitted batch into every later turn (one board post
+   re-promoted 297 times, a 10-15s wake churn), so the completed turn still
+   consumes its batch. *)
 let test_batch_disposition_keeps_unsettled_evidence_pending () =
   let meta = test_meta "batch-disposition-pending" in
   List.iter
@@ -510,11 +515,15 @@ let test_batch_disposition_keeps_unsettled_evidence_pending () =
          Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
            (Some (completed_outcome ~route meta))
        with
-       | Keeper_heartbeat_loop.Batch_no_action -> ()
-       | Keeper_heartbeat_loop.Batch_ack_completed _
-       | Keeper_heartbeat_loop.Batch_ack_durable_stimulus_yield ->
+       | Keeper_heartbeat_loop.Batch_ack_durable_stimulus_yield -> ()
+       | Keeper_heartbeat_loop.Batch_ack_completed _ ->
          fail
-           "unsettled route evidence must not ACK (no judgement was made)")
+           "unsettled route evidence must not label the attention row \
+            (no judgement was made)"
+       | Keeper_heartbeat_loop.Batch_no_action ->
+         fail
+           "a completed turn must consume its admitted batch — leaving it \
+            pending replays the same rows every turn (#32277)")
     [ Keeper_unified_turn.Continuation_route_mismatch
     ; Keeper_unified_turn.Continuation_no_terminal_effect_receipt
     ; Keeper_unified_turn.Continuation_route_not_applicable

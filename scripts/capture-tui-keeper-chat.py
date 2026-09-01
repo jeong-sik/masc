@@ -950,6 +950,19 @@ def buffer_line(page: Page, row: int) -> str:
     )
 
 
+def find_composer_row(page: Page) -> int:
+    return page.evaluate(
+        """() => {
+          const buffer = window.term.buffer.active;
+          for (let row = 0; row < buffer.length; row += 1) {
+            const line = buffer.getLine(buffer.baseY + row);
+            if (line && line.translateToString(false).includes("> ~")) return row;
+          }
+          return -1;
+        }"""
+    )
+
+
 def wait_cursor(page: Page, expected_x: int, expected_y: int) -> dict[str, int]:
     try:
         page.wait_for_function(
@@ -1182,10 +1195,15 @@ def success_scenario(
                 resize_terminal(page, 99, 30)
                 wait_text(page, f"Keepers ▸ {KEEPER} ▸ chat")
                 wait_text(page, "blocked-tiny", present=False)
-                composer_row = cursor_position(page)["y"]
+                composer_row = find_composer_row(page)
                 require(
-                    ">" in buffer_line(page, composer_row),
-                    f"restored cursor is not on the composer row: {composer_row}",
+                    composer_row >= 0,
+                    "composer prompt row was not found in the xterm buffer",
+                )
+                cursor = cursor_position(page)
+                require(
+                    cursor["y"] == composer_row,
+                    f"cursor y {cursor['y']} does not match composer row {composer_row}",
                 )
                 measurements["resize_restore_cursor_zero_based"] = wait_cursor(
                     page, 6, composer_row

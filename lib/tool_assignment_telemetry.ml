@@ -126,15 +126,34 @@ let event_of_json json : (tool_event, string) Result.t =
 
 (* ── In-memory state ──────────────────────────────────── *)
 
-let store_ref : Dated_jsonl.t option ref = ref None
-let store_mu = Eio.Mutex.create ()
+module Assignment_by_agent = Set_util.StringMap
 
-let agent_index : (string, assignment_id) Hashtbl.t = Hashtbl.create 64
-let index_mu = Eio.Mutex.create ()
+type runtime_state = {
+  epoch : int;
+  revision : int;
+  store : Dated_jsonl.t option;
+  assignments : assignment_id Assignment_by_agent.t;
+}
 
-let rng = Random.State.make_self_init ()
-let rng_mu = Eio.Mutex.create ()
-let with_rng f = Eio.Mutex.use_ro rng_mu (fun () -> f rng)
+let runtime_state =
+  Atomic.make
+    {
+      epoch = 0;
+      revision = 0;
+      store = None;
+      assignments = Assignment_by_agent.empty;
+    }
+
+let store_lifecycle_lock = Cross_context_mutex.create ()
+
+type active_runtime = {
+  epoch : int;
+  store : Dated_jsonl.t;
+  assignments : assignment_id Assignment_by_agent.t;
+}
+
+let activate (runtime : runtime_state) store : active_runtime =
+  { epoch = runtime.epoch; store; assignments = runtime.assignments }
 
 let record_failure_metric ?(delta = 1.0) ~site () =
   Otel_metric_store.inc_counter Otel_metric_store.metric_tool_assignment_telemetry_failures
@@ -145,18 +164,21 @@ let observe_failure ~site ~error =
   Log.Telemetry.warn "tool_assignment_telemetry failure: site=%s error=%s"
     site error
 
-type failure_acc =
-  { mutable count : int
-  ; mutable first_error : string option
-  }
+type failure_acc = {
+  count : int;
+  first_error : string option;
+}
 
 let create_failure_acc () = { count = 0; first_error = None }
 
 let add_decode_failure acc error =
-  acc.count <- acc.count + 1;
-  match acc.first_error with
-  | Some _ -> ()
-  | None -> acc.first_error <- Some error
+  {
+    count = acc.count + 1;
+    first_error =
+      (match acc.first_error with
+       | Some _ as first_error -> first_error
+       | None -> Some error);
+  }
 
 let observe_decode_failures ~site acc =
   if acc.count > 0 then (
@@ -168,25 +190,48 @@ let observe_decode_failures ~site acc =
 
 (* ── Store lifecycle ──────────────────────────────────── *)
 
-let get_or_create_store () : Dated_jsonl.t =
-  match !store_ref with
-  | Some s -> s
+let get_or_create_runtime () : active_runtime =
+  let observed = Atomic.get runtime_state in
+  match observed.store with
+  | Some store -> activate observed store
   | None ->
-      Eio_guard.with_mutex store_mu (fun () ->
-        match !store_ref with
-        | Some s -> s
-        | None ->
-            let base_path = Env_config.base_path () in
-            (* RFC-0121: layout SSOT via [Config_dir_resolver.data_dir]. *)
-            let dir =
-              Filename.concat
-                (Config_dir_resolver.data_dir ~base_path)
-                "tool-events"
-            in
-            Fs_compat.mkdir_p dir;
-            let s = Dated_jsonl.create ~base_dir:dir () in
-            store_ref := Some s;
-            s)
+    (* Store creation touches the filesystem and callers include tests that run
+       outside an Eio scheduler. This cooperative cross-context lock owns only
+       the rare initialise/reset effect; normal reads use the atomic snapshot. *)
+    Cross_context_mutex.with_lock store_lifecycle_lock (fun () ->
+      let current = Atomic.get runtime_state in
+      match current.store with
+      | Some store -> activate current store
+      | None ->
+        let base_path = Env_config.base_path () in
+        (* RFC-0121: layout SSOT via [Config_dir_resolver.data_dir]. *)
+        let dir =
+          Filename.concat
+            (Config_dir_resolver.data_dir ~base_path)
+            "tool-events"
+        in
+        Fs_compat.mkdir_p dir;
+        let store = Dated_jsonl.create ~base_dir:dir () in
+        let next =
+          { current with revision = current.revision + 1; store = Some store }
+        in
+        Atomic.set runtime_state next;
+        activate next store)
+
+let rec update_assignments_for_epoch epoch transition =
+  let current = Atomic.get runtime_state in
+  if current.epoch <> epoch
+  then ()
+  else (
+    let next =
+      {
+        current with
+        revision = current.revision + 1;
+        assignments = transition current.assignments;
+      }
+    in
+    if not (Atomic.compare_and_set runtime_state current next)
+    then update_assignments_for_epoch epoch transition)
 
 (* ── Default config hash ──────────────────────────────── *)
 
@@ -203,9 +248,7 @@ let emit_assigned
     ?config_hash
     ?(reason = "")
     () : assignment_id =
-  let assignment_id =
-    with_rng (fun rng -> Uuidm.(v4_gen rng () |> to_string))
-  in
+  let assignment_id = Random_id.uuid_v7 () in
   let config_hash =
     match config_hash with
     | Some h -> h
@@ -222,10 +265,10 @@ let emit_assigned
       ; timestamp = Time_compat.now ()
       }
   in
-  let store = get_or_create_store () in
-  Dated_jsonl.append store (event_to_json event);
-  Eio_guard.with_mutex index_mu (fun () ->
-    Hashtbl.replace agent_index agent_id assignment_id);
+  let runtime = get_or_create_runtime () in
+  Dated_jsonl.append runtime.store (event_to_json event);
+  update_assignments_for_epoch runtime.epoch (fun current ->
+    Assignment_by_agent.add agent_id assignment_id current);
   assignment_id
 
 let emit_called
@@ -234,9 +277,9 @@ let emit_called
     ?(arguments_hash = "")
     ~source
     () : assignment_id option =
+  let runtime = get_or_create_runtime () in
   let assignment_id_opt =
-    Eio_guard.with_mutex_ro index_mu (fun () ->
-      Hashtbl.find_opt agent_index agent_id)
+    Assignment_by_agent.find_opt agent_id runtime.assignments
   in
   match assignment_id_opt with
   | None -> None
@@ -250,8 +293,7 @@ let emit_called
           ; timestamp = Time_compat.now ()
           }
       in
-      let store = get_or_create_store () in
-      Dated_jsonl.append store (event_to_json event);
+      Dated_jsonl.append runtime.store (event_to_json event);
       Some assignment_id
 
 let emit_completed
@@ -271,31 +313,28 @@ let emit_completed
       ; timestamp = Time_compat.now ()
       }
   in
-  let store = get_or_create_store () in
-  Dated_jsonl.append store (event_to_json event)
+  let runtime = get_or_create_runtime () in
+  Dated_jsonl.append runtime.store (event_to_json event)
 
 let find_latest_assignment_id ~agent_id : assignment_id option =
-  Eio_guard.with_mutex_ro index_mu (fun () ->
-    Hashtbl.find_opt agent_index agent_id)
+  Assignment_by_agent.find_opt agent_id (Atomic.get runtime_state).assignments
 
 let read_recent ~n : (tool_event list, string) Result.t =
   try
-    let store = get_or_create_store () in
-    let jsons = Dated_jsonl.read_recent store n in
-    let decode_failures = create_failure_acc () in
-    let events =
-      List.filter_map
-        (fun json ->
+    let runtime = get_or_create_runtime () in
+    let jsons = Dated_jsonl.read_recent runtime.store n in
+    let events, decode_failures =
+      List.fold_left
+        (fun (events, failures) json ->
           match event_of_json json with
-          | Ok ev -> Some ev
-          | Error msg ->
-              add_decode_failure decode_failures msg;
-              None)
+          | Ok event -> event :: events, failures
+          | Error error -> events, add_decode_failure failures error)
+        ([], create_failure_acc ())
         jsons
     in
     observe_decode_failures ~site:"read_recent_decode" decode_failures;
-    (* Dated_jsonl returns oldest-first; API promises newest-first. *)
-    Ok (List.rev events)
+    (* Dated_jsonl returns oldest-first; consing above produces newest-first. *)
+    Ok events
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -303,18 +342,39 @@ let read_recent ~n : (tool_event list, string) Result.t =
       observe_failure ~site:"read_recent_exception" ~error;
       Error error
 
+let rebuild_assignment_index store =
+  let rebuilt = ref Assignment_by_agent.empty in
+  let decode_failures = ref (create_failure_acc ()) in
+  Dated_jsonl.iter_all store (fun json ->
+    match event_of_json json with
+    | Ok (Assigned { assignment_id; agent_id; _ }) ->
+      rebuilt := Assignment_by_agent.add agent_id assignment_id !rebuilt
+    | Error error ->
+      decode_failures := add_decode_failure !decode_failures error
+    | _ -> ());
+  !rebuilt, !decode_failures
+
+let rec publish_rebuilt_assignment_index () =
+  let runtime = get_or_create_runtime () in
+  let observed = Atomic.get runtime_state in
+  if observed.epoch <> runtime.epoch
+  then publish_rebuilt_assignment_index ()
+  else (
+    let rebuilt, decode_failures = rebuild_assignment_index runtime.store in
+    let next =
+      {
+        observed with
+        revision = observed.revision + 1;
+        assignments = rebuilt;
+      }
+    in
+    if Atomic.compare_and_set runtime_state observed next
+    then decode_failures
+    else publish_rebuilt_assignment_index ())
+
 let warm_up () : unit =
   try
-    let store = get_or_create_store () in
-    let decode_failures = create_failure_acc () in
-    Eio_guard.with_mutex index_mu (fun () ->
-      Hashtbl.clear agent_index;
-      Dated_jsonl.iter_all store (fun json ->
-        match event_of_json json with
-        | Ok (Assigned { assignment_id; agent_id; _ }) ->
-          Hashtbl.replace agent_index agent_id assignment_id
-        | Error msg -> add_decode_failure decode_failures msg
-        | _ -> ()));
+    let decode_failures = publish_rebuilt_assignment_index () in
     observe_decode_failures ~site:"warm_up_decode" decode_failures
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -323,5 +383,13 @@ let warm_up () : unit =
       observe_failure ~site:"warm_up_exception" ~error
 
 let reset_for_testing () : unit =
-  store_ref := None;
-  Eio_guard.with_mutex index_mu (fun () -> Hashtbl.clear agent_index)
+  Cross_context_mutex.with_lock store_lifecycle_lock (fun () ->
+    let current = Atomic.get runtime_state in
+    Atomic.set
+      runtime_state
+      {
+        epoch = current.epoch + 1;
+        revision = current.revision + 1;
+        store = None;
+        assignments = Assignment_by_agent.empty;
+      })

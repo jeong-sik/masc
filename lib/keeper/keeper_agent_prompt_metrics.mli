@@ -65,6 +65,11 @@ val provenance_failure_detail : provenance_failure -> string
     Kept apart from {!provenance_failure_reason} so a reader can group by
     reason without the counts splitting every group. *)
 
+val provenance_failure_summary : provenance_failure -> string
+(** [provenance_failure_reason], plus [provenance_failure_detail] after a
+    single space when the failure carries any. This is what the keeper logs,
+    exposed so a test constrains that line rather than rebuilding it. *)
+
 (** Return concrete provider content messages only when their provenance is
     unambiguous. The AGENT_CORE-generated [extra_system_context] carrier is removed by
     its typed metadata identity, never by position or content. Its presence must

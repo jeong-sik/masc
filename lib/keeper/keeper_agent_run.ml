@@ -910,14 +910,10 @@ let run_turn
            current_request_input_messages_ref := Some provider_content
          | Error failure ->
            current_request_input_messages_ref := None;
-           let detail =
-             Keeper_agent_prompt_metrics.provenance_failure_detail failure
-           in
            Log.Keeper.warn
-             "turn input composition unavailable: keeper=%s trace=%s reason=%s%s"
+             "turn input composition unavailable: keeper=%s trace=%s reason=%s"
              meta.name trace_id
-             (Keeper_agent_prompt_metrics.provenance_failure_reason failure)
-             (if String.equal detail "" then "" else " " ^ detail));
+             (Keeper_agent_prompt_metrics.provenance_failure_summary failure));
         result
     in
     (* 8. Run Agent *)

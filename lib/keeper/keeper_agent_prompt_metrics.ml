@@ -85,6 +85,16 @@ let provenance_failure_detail = function
       carrier_observed prompt_context_present
 ;;
 
+(* The one place the two halves are joined. It used to live at the call site,
+   which left the empty-detail branch untested: a test that rebuilds the line
+   itself agrees with whatever it rebuilt, not with what the keeper logs. *)
+let provenance_failure_summary failure =
+  let reason = provenance_failure_reason failure in
+  match provenance_failure_detail failure with
+  | "" -> reason
+  | detail -> reason ^ " " ^ detail
+;;
+
 (* The index is reported rather than a bare "not equal" because the two
    rewrites this separates need different fixes: a carrier the assembler
    inserted lands at a low index, a reordered tail lands near the end. *)

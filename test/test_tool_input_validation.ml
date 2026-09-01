@@ -607,11 +607,14 @@ let assert_policy_validation_payload ?(reason = "invalid_args") ~label result =
 let assert_schema_shape_has_execute_alternatives ~label result =
   match Yojson.Safe.Util.member "schema_shape" (Tool_result.data result) with
   | `Assoc fields ->
+    (* schema_shape.properties is the validated NAME list
+       (validated_property_names maps fst over the schema object), not the
+       schema's property objects themselves. *)
     (match List.assoc_opt "properties" fields with
-     | Some (`Assoc _) -> ()
+     | Some (`List (_ :: _)) -> ()
      | Some shape ->
        Alcotest.failf
-         "%s: expected schema_shape.properties object, got %s"
+         "%s: expected non-empty schema_shape.properties name list, got %s"
          label
          (Yojson.Safe.to_string shape)
      | None -> Alcotest.failf "%s: missing schema_shape.properties" label);

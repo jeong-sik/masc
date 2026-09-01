@@ -429,7 +429,9 @@ let write_best_effort
           store_artifact
             blob_store
             ~reusable
-            ~mime:"text/plain; charset=utf-8"
+            (* No space: the agent-core blob marker is space-delimited, so a
+               spaced mime parameter breaks decode_from_agent_core (#32332). *)
+            ~mime:"text/plain;charset=utf-8"
             system_prompt
         in
         Some artifact, reusable

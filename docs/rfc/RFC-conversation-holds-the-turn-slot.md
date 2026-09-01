@@ -352,7 +352,8 @@ consumed this overlay; retaining it fabricated operator control". 그것은 자�
 RFC: 0373, 0303, 0385, 0377, 0315, 0366, event-queue-admit-all-ready,
 observe-by-waking-not-polling.
 
-측정 재현: 스크립트는 라이브 base path(`~/me/.masc`)의
+측정 재현: 스크립트는 `MASC_BASE_PATH` 또는 `--base-path`로 명시한
+`<base-path>/.masc`의
 `keepers/*/chat-operations.sqlite3`(operations 표)와 `logs/system_log_YYYY-MM-DD.jsonl`
 ("keepalive turn scheduled" / "Keeper Owner deferred autonomous work" /
 "yielded autonomous Owner child" 라인)에서 위 수치를 재계산한다.

@@ -877,6 +877,10 @@
   ;; Tui_decode carries the type through fur_topology, but dune does not open a
   ;; transitive library's module names, so masc_tui lists masc.fusion_core.
   masc.fusion_core
+  ;; Same rule for the advisory judgment: Tui_decode carries the
+  ;; Lane_run_gate_advisory payload, but masc_tui_render names its
+  ;; Keeper_approval_queue_rules_types constructors directly.
+  masc.keeper_contract
   masc_tui_footer
   masc_tui_approval_detail
   masc_tui_roster_pane

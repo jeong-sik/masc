@@ -7140,6 +7140,7 @@ let render_keeper_message (state : state) =
     let projected_tool_rows =
       keeper_message_tool_rows state ~keeper_name ~chat_cols
     in
+    let promoted = promoted_inflight_for_keeper state keeper_name in
     let committed_messages =
       keeper_message_visible_messages state ~keeper_name
     in
@@ -7154,6 +7155,7 @@ let render_keeper_message (state : state) =
       match state.msg_live with
       | Some live
         when String.equal (Keeper_chat_transcript.keeper_name live) keeper_name
+             && Option.is_none promoted
         ->
           let request_id = Keeper_chat_transcript.request_id live in
           let request_label = Keeper_chat.compact_request_id request_id in
@@ -7412,12 +7414,25 @@ let render_keeper_message (state : state) =
       done
     end;
 
+    (* Queue provenance survives promotion in [inflight.origin]. While that
+       request runs, draw its USER in the exact slot NEXT owned and withhold its
+       session copy from the settled transcript. Settlement drops the inflight
+       provenance and the durable typed turn takes over. *)
+    (match promoted with
+     | Some entry ->
+         let request = entry.sent_request in
+         box_line_styled chat_buf chat_cols ~style:(Theme.info ())
+           (Printf.sprintf "  [%s]  ▶              TURN · YOU  %s"
+              (keeper_message_clock entry.submitted_at)
+              (Keeper_chat.compact_request_id request.request_id));
+         box_line_styled chat_buf chat_cols ~style:(Theme.info ())
+           ("    " ^ Terminal_text.single_line request.message)
+     | None -> ());
     (* Pending input owns the exact two-row shape of the USER entry it will
-       become: one lane header and one body row. [history_height] already
-       subtracts these rows through [keeper_message_status_rows], so promotion
-       gives the same two physical rows back to the active USER without moving
-       the divider, composer, or footer. The lane is outside the transcript and
-       immediately below it; the model has not seen this input yet. *)
+       become: one lane header and one body row. [history_height] subtracts
+       these rows through [keeper_message_status_rows], so promotion exchanges
+       NEXT for the promoted USER without moving the divider, composer, or
+       footer. The model has not seen pending input yet. *)
     let pending =
       Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
         ~keeper_name

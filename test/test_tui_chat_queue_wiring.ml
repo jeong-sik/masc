@@ -516,6 +516,7 @@ let test_live_transcripts_are_kept_per_keeper () =
     ({ Tui_types.sent_request = sent_request
      ; submitted_at = started_at
      ; sent_at = started_at
+     ; origin = Tui_types.Direct_submission
      (* A request that has just been POSTed is streaming; reconciling is what
         it becomes after the stream settles. *)
      ; phase = Tui_types.Turn_streaming
@@ -534,6 +535,46 @@ let test_live_transcripts_are_kept_per_keeper () =
     (match Tui_types.live_for_keeper state "beta" with
      | Some live -> live == beta.live
      | None -> false)
+;;
+
+let test_promoted_queue_request_owns_a_typed_slot_outside_transcript () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let request =
+    Keeper_chat.create_request ~keeper_name:"alpha" ~message:"queued input" ()
+  in
+  let live =
+    Keeper_chat_transcript.create ~keeper_name:"alpha"
+      ~request_id:request.request_id ~started_at:43.0
+  in
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_history <-
+    [ chat_entry ~request_id:request.request_id
+        ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
+        ~text:"queued input" ~at:42.0 () ];
+  state.msg_inflight <-
+    [ { Tui_types.sent_request = request
+      ; submitted_at = 42.0
+      ; sent_at = 43.0
+      ; origin =
+          Tui_types.Promoted_queue
+            { submission_seq = 7
+            ; intent = Masc_tui_keeper_chat_queue.Next
+            ; causal_parent_request_id = None
+            }
+      ; phase = Tui_types.Turn_streaming
+      ; live
+      } ];
+  check (list string) "promoted USER is withheld from settled transcript" []
+    (Tui_types.chat_rows_for state "alpha"
+     |> List.map (fun row -> row.Tui_types.me_text));
+  match Tui_types.promoted_inflight_for_keeper state "alpha" with
+  | None -> fail "typed promoted slot disappeared"
+  | Some entry ->
+      check string "slot keeps exact request identity" request.request_id
+        entry.sent_request.request_id;
+      check (float 0.001) "slot keeps first submitted_at" 42.0 entry.submitted_at
 ;;
 
 (* The renderer knows the wrapped transcript's real maximum only after it has
@@ -1169,6 +1210,8 @@ let () =
             test_concurrent_turns_keep_request_owned_transcripts
         ; test_case "live transcripts are kept per Keeper" `Quick
             test_live_transcripts_are_kept_per_keeper
+        ; test_case "promoted queue request owns a typed slot" `Quick
+            test_promoted_queue_request_owns_a_typed_slot_outside_transcript
         ; test_case "message scroll accepts the rendered clamp" `Quick
             test_message_scroll_accepts_the_rendered_clamp
         ; test_case "resource scroll accepts the rendered clamp" `Quick

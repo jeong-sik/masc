@@ -16,6 +16,110 @@ val wire_librarian_claim_fields : string list
 (** Dropped-statement object fields accepted from the librarian. *)
 val wire_librarian_dropped_fields : string list
 
+(** {1 Decode rejections}
+
+    A decoder that answers [None] tells its caller only that something is
+    wrong. Reading a snapshot the runtime had refused meant re-deriving this
+    decoder by hand to find out which row and field it was (#32239 recovery),
+    so every rejection now carries a path and a named reason. *)
+
+(** One step of the path to a rejected node, outermost first. *)
+type wire_step =
+  | Wire_field of string
+  | Wire_index of int
+
+(** Why one node did not decode. Closed, so a new rejection has to name itself
+    here before a decoder can make it. [Not_ascending] and [Not_positive] are
+    produced only by the snapshot codec in {!Keeper_memory_os_current}, which
+    shares this vocabulary rather than keeping a parallel one. *)
+type wire_reason =
+  | Expected_object
+  | Expected_array
+  | Expected_string
+  | Expected_int
+  | Expected_number
+  | Duplicate_field of string
+  | Field_set_mismatch of
+      { missing : string list
+      ; unexpected : string list
+      }
+  | Unknown_token of string
+  | Blank_string
+  | Not_a_memory_id of string
+  | Not_finite
+  | Negative
+  | Not_positive
+  | Empty_list
+  | Not_ascending
+  | Duplicate_entry of string
+
+type wire_error =
+  { path : wire_step list
+  ; reason : wire_reason
+  }
+
+(** One line naming the path and the reason, for a log or an operator surface.
+    [<root>] is the document itself. *)
+val wire_error_to_string : wire_error -> string
+
+val wire_path_to_string : wire_step list -> string
+val wire_reason_to_string : wire_reason -> string
+
+(** Reject at [path] relative to the decoder that calls it. *)
+val wire_fail : wire_step list -> wire_reason -> ('a, wire_error) result
+
+(** {!wire_fail} at the node itself. *)
+val wire_here : wire_reason -> ('a, wire_error) result
+
+(** Prefix [step] onto a nested decoder's path, so each decoder reports
+    relative to itself and its caller places the result. *)
+val wire_at : wire_step -> ('a, wire_error) result -> ('a, wire_error) result
+
+(** {!wire_at} for the [index]th element of the array field [field]. *)
+val wire_at_element
+  :  string
+  -> int
+  -> ('a, wire_error) result
+  -> ('a, wire_error) result
+
+(** [Ok ()] only when the object's fields are exactly [names]: no duplicate,
+    nothing missing, nothing extra. The rejection names which side is wrong. *)
+val exact_field_names_result
+  :  string list
+  -> (string * Yojson.Safe.t) list
+  -> (unit, wire_error) result
+
+(** Typed readers for a field the caller has already proven present. An absent
+    field is reported as missing rather than raised: the two checks disagreeing
+    is a rejection like any other. *)
+val wire_string_field
+  :  string
+  -> (string * Yojson.Safe.t) list
+  -> (string, wire_error) result
+
+val wire_int_field
+  :  string
+  -> (string * Yojson.Safe.t) list
+  -> (int, wire_error) result
+
+(** Accepts a JSON integer as well as a float, because a whole-numbered
+    timestamp serializes without a decimal point. *)
+val wire_number_field
+  :  string
+  -> (string * Yojson.Safe.t) list
+  -> (float, wire_error) result
+
+val wire_list_field
+  :  string
+  -> (string * Yojson.Safe.t) list
+  -> (Yojson.Safe.t list, wire_error) result
+
+(** The raw value, for a field whose own decoder reports its shape. *)
+val wire_json_field
+  :  string
+  -> (string * Yojson.Safe.t) list
+  -> (Yojson.Safe.t, wire_error) result
+
 (** The librarian's explicit reason for dropping one existing memory.
     [memory_id] names a fact in the current snapshot; [reason] is one
     non-empty sentence. Statements ride the journal line of the commit
@@ -28,10 +132,12 @@ type dropped_statement =
 val dropped_statement_to_json : dropped_statement -> Yojson.Safe.t
 
 (** Inverse of {!dropped_statement_to_json}. Field-exact: an object carrying
-    anything besides [memory_id] and [reason] is [None] rather than being
+    anything besides [memory_id] and [reason] is rejected rather than being
     read past, so a journal line written by a build with a wider statement
     shape does not decode as this one. *)
-val dropped_statement_of_json : Yojson.Safe.t -> dropped_statement option
+val dropped_statement_of_json
+  :  Yojson.Safe.t
+  -> (dropped_statement, wire_error) result
 
 (** Librarian taxonomy as a closed sum. Labels outside the current vocabulary
     reject at the producer and persistence boundaries. Categories are model
@@ -142,5 +248,7 @@ val memory_id : fact -> string
 
 val fact_to_json : fact -> Yojson.Safe.t
 
-(** Inverse of {!fact_to_json}. The current shape is closed and field-exact. *)
-val fact_of_json : Yojson.Safe.t -> fact option
+(** Inverse of {!fact_to_json}. The current shape is closed and field-exact.
+    A rejection names the field it failed on, which is how a refused snapshot
+    row is read without re-deriving this decoder. *)
+val fact_of_json : Yojson.Safe.t -> (fact, wire_error) result

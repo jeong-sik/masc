@@ -56,11 +56,23 @@ let run () : unit =
   let open Fut.Result_syntax in
   let work =
     let* response = Fetch.url (Jstr.v endpoint) in
+    (* The envelope check below would catch an error body anyway, but only
+       as "unexpected goals response envelope" — reporting the actual HTTP
+       status here keeps the stale reason diagnostic. *)
+    let* () =
+      if Fetch.Response.ok response
+      then Fut.return ()
+      else
+        Fut.error
+          (Printf.sprintf "HTTP %d %s"
+             (Fetch.Response.status response)
+             (Jstr.to_string (Fetch.Response.status_text response)))
+    in
     Fetch.Body.text (Fetch.Response.as_body response)
   in
   Fut.await work (function
     | Ok text -> parse_and_store text
-    | Error _ -> store_failure "fetch failed")
+    | Error reason -> store_failure reason)
 ;;
 
 let start_polling () : unit =

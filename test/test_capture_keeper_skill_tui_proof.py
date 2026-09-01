@@ -387,18 +387,20 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             )
         )
 
-    def test_tools_navigation_follows_the_observed_surface_ring(self):
+    def test_tools_navigation_walks_to_config_and_hops(self):
+        # Tools is off the Tab ring: the walk stops at Config and presses
+        # [t], and arrival is the Tools screen text, not a strip token.
         class Page:
             def wait_for_timeout(self, _milliseconds):
                 pass
 
         screens = iter(
             [
-                "▸Overview Acting Tools\n  MASC Overview",
-                "▸Overview Acting Tools\n  MASC Overview",
-                "Overview ▸Acting Tools\n  MASC Acting",
-                "Overview ▸Acting Tools\n  MASC Acting",
-                "Overview Acting ▸Tools\n  MASC Tools",
+                "▸Overview Activity Config\n  MASC Overview",
+                "▸Overview Activity Config\n  MASC Overview",
+                "Overview ▸Activity Config\n  MASC Activity",
+                "Overview ▸Activity Config\n  MASC Activity",
+                "Overview Activity ▸Config\n  MASC Config",
             ]
         )
         with (
@@ -409,7 +411,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             capture.goto_tools(Page(), 1.0)
 
         self.assertEqual(
-            [call.args[1] for call in press.call_args_list], ["Tab", "Tab"]
+            [call.args[1] for call in press.call_args_list], ["Tab", "Tab", "t"]
         )
         wait_screen.assert_called_once()
 
@@ -420,9 +422,9 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         screens = iter(
             [
-                "▸Overview Acting Tools",
-                "Overview ▸Acting Tools",
-                "▸Overview Acting Tools",
+                "▸Overview Activity Board",
+                "Overview ▸Activity Board",
+                "▸Overview Activity Board",
             ]
         )
         with (

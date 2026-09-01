@@ -299,7 +299,10 @@ type msg_anchor = {
 let chat_turn_phase = function
   | Message_user _ -> Turn_input
   | Message_status | Message_thinking | Message_memory -> Turn_progress
-  | Message_tool -> Turn_tool
+  (* Skill evidence is the tool phase of a turn: it is what the keeper reached
+     for, kept as its own row because serving, delivery, and observed actions
+     are separate facts. *)
+  | Message_tool | Message_skill _ -> Turn_tool
   | Message_keeper | Message_autonomous | Message_error -> Turn_output
 ;;
 
@@ -321,9 +324,9 @@ let same_turn_user left right =
       String.equal left.me_request_id right.me_request_id
       && String.equal left.me_text right.me_text
   | (Message_keeper | Message_autonomous | Message_status | Message_error
-    | Message_tool | Message_thinking | Message_memory), _
+    | Message_tool | Message_skill _ | Message_thinking | Message_memory), _
   | _, (Message_keeper | Message_autonomous | Message_status | Message_error
-       | Message_tool | Message_thinking | Message_memory) ->
+       | Message_tool | Message_skill _ | Message_thinking | Message_memory) ->
       false
 ;;
 

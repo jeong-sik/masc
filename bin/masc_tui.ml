@@ -4320,6 +4320,7 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         | Keeper_chat_history.Delivery_failed _
         | Keeper_chat_history.Tool_calls _
         | Keeper_chat_history.Reasoning _
+        | Keeper_chat_history.Skill_activity _
         | Keeper_chat_history.Memory_activity ->
             None)
       rows

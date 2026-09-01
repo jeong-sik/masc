@@ -122,14 +122,17 @@ let read_error_to_string = function
       detail
 ;;
 
-let artifact_to_json artifact =
+(* Annotated because [resolved_system_prompt] is declared later in this file
+   and also carries [bytes]: without it the compiler resolves this record to
+   that type and [content_ref] is not there. *)
+let artifact_to_json (artifact : artifact) =
   `Assoc
     [ "bytes", `Int artifact.bytes
     ; "content_ref", `String artifact.content_ref
     ]
 ;;
 
-let message_to_json message =
+let message_to_json (message : message) =
   `Assoc
     [ "index", `Int message.index
     ; "role", `String message.role
@@ -137,7 +140,7 @@ let message_to_json message =
     ]
 ;;
 
-let tool_schema_to_json tool =
+let tool_schema_to_json (tool : tool_schema) =
   `Assoc
     [ "index", `Int tool.index
     ; "name", `String tool.name
@@ -338,8 +341,8 @@ let reusable_artifacts snapshot =
     | Tool_output.Invalid_marker _ -> ()
   in
   Option.iter add snapshot.system_prompt;
-  List.iter (fun message -> add message.artifact) snapshot.messages;
-  List.iter (fun tool -> add tool.artifact) snapshot.tool_schemas;
+  List.iter (fun (message : message) -> add message.artifact) snapshot.messages;
+  List.iter (fun (tool : tool_schema) -> add tool.artifact) snapshot.tool_schemas;
   reusable
 ;;
 
@@ -347,7 +350,7 @@ let store_artifact store ~reusable ~mime bytes =
   let bytes_length = String.length bytes in
   let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
   match Hashtbl.find_opt reusable (sha256, mime) with
-  | Some artifact when artifact.bytes = bytes_length -> artifact
+  | Some (artifact : artifact) when artifact.bytes = bytes_length -> artifact
   | Some _ | None ->
     let reference = Tool_blob_store.put_durable store ~bytes ~mime in
     let reference = Tool_output.with_preview reference "" in
@@ -358,7 +361,7 @@ let store_artifact store ~reusable ~mime bytes =
 ;;
 
 let write_best_effort
-      ~config
+      ~(config : Workspace.config)
       ~keeper
       ~trace_id
       ~absolute_turn
@@ -521,7 +524,7 @@ let parse_artifact_json ~sha256 content =
 
 let rec resolve_messages store reversed = function
   | [] -> Ok (List.rev reversed)
-  | message :: rest ->
+  | (message : message) :: rest ->
     let* sha256, payload = fetch_artifact store message.artifact in
     let* content = parse_artifact_json ~sha256 payload in
     resolve_messages
@@ -575,7 +578,7 @@ let read_resolved ~config ~keeper ~turn_ref =
     }
 ;;
 
-let resolved_message_to_json message =
+let resolved_message_to_json (message : resolved_message) =
   `Assoc
     [ "index", `Int message.index
     ; "role", `String message.role
@@ -585,7 +588,7 @@ let resolved_message_to_json message =
     ]
 ;;
 
-let resolved_tool_schema_to_json tool =
+let resolved_tool_schema_to_json (tool : resolved_tool_schema) =
   `Assoc
     [ "index", `Int tool.index
     ; "name", `String tool.name
@@ -595,7 +598,7 @@ let resolved_tool_schema_to_json tool =
     ]
 ;;
 
-let resolved_to_json resolved =
+let resolved_to_json (resolved : resolved) =
   let snapshot = resolved.snapshot in
   `Assoc
     [ "schema", `String "masc.resolved-provider-input.v1"

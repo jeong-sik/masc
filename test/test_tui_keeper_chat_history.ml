@@ -749,7 +749,8 @@ let test_exact_skill_evidence_replaces_the_raw_call_and_names_actions () =
   | rows ->
       failf "expected Skill plus action Tools, got %d row(s): %s"
         (List.length rows)
-        (String.concat "; " (List.map (fun row -> kind_to_string row.kind) rows))
+        (String.concat "; "
+           (List.map (fun (row : History.row) -> kind_to_string row.History.kind) rows))
 
 let test_served_skill_without_delivery_does_not_claim_use () =
   let projection =

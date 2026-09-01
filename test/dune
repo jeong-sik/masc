@@ -3199,6 +3199,7 @@
   alcotest
   digestif
   masc_tui_context_inspector
+  masc.agent_core.llm_provider
   masc
   masc.masc_tool_blob_store
   masc.masc_types))

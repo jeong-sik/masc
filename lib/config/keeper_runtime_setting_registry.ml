@@ -542,6 +542,16 @@ let all =
       ~category:"media"
       "Maximum generated-media artifact age in seconds"
   ; setting
+      ~range:(float_range ~min:60.0 ~max:3600.0 ())
+      ~env_name:"MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC"
+      ~exposure:Env_only
+      ~value_kind:Float
+      ~default:"900.0"
+      ~reload_class:Next_cycle
+      ~consumers:[ "Keeper keepalive loop failure-route backoff" ]
+      ~category:"thresholds"
+      "Upper bound for the failure-route backoff sleep after a rate-limit or capacity cycle"
+  ; setting
       ~range:(float_range ~min:1.0 ~max:60.0 ())
       ~env_name:"MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"
       ~exposure:Env_only

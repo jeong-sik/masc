@@ -11,11 +11,12 @@ rotate with `Tab` in the order `surface_ring` spells in
 Board, Planning, Workspace, Runtime, Config, Resources, Tools, Logs.
 Eight more surfaces hang off parents instead of holding Tab stops:
 Planning's `v` walks Task Review, Evaluator Verdicts, Schedules, and Fusion;
-the Keepers roster reaches Changes with `f`; Runtime reaches Connectors with
-`c` and the standalone Lanes with `p` (its third stop); Workspace reaches
-Code with `Enter` on a repository row. Task Review, Schedules, Fusion,
-Lanes, Connectors, and Code also keep `go <name>` palette entries;
-Verdicts and Changes are reached from their parents only.
+the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
+Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
+third stop), and Workspace reaches Code with `Enter` on a repository row. Task
+Review, Schedules, Fusion, Lanes, and Code also keep `go <name>` palette
+entries; Verdicts, Changes, and Keeper operations are reached from their
+parents only.
 
 ## Quick Start
 
@@ -57,8 +58,8 @@ decides whether launching one is worth it.
 | Approvals | unavailable | `GET /api/v1/operator`, `POST /api/v1/operator/confirm` |
 | Board | unavailable | `GET /api/v1/board` |
 | Planning | unavailable | `GET /api/v1/dashboard/planning` |
-| Schedules | unavailable | `GET /api/v1/dashboard/scheduled-automation`; authenticated create/update/cancel routes |
-| Fusion | unavailable | `GET /api/v1/dashboard/fusion-runs`, then exact `/:run_id` detail |
+| Keeper Automation | unavailable | `GET /api/v1/dashboard/scheduled-automation`, filtered to the selected Keeper |
+| Keeper Runs | unavailable | `GET /api/v1/dashboard/fusion-runs`, filtered to the selected Keeper |
 | Runtime | unavailable | `GET /api/v1/runtime/resolved` + `GET /api/v1/dashboard/runtime-probe` |
 | Keeper message | unavailable | `POST /api/v1/keepers/chat/stream` |
 | System Logs | unavailable | `GET /api/v1/dashboard/logs` |
@@ -140,9 +141,9 @@ renderer as chat and Board; binary parts report their encoded size instead of
 pretending to render content. With detail focused, `[`/`]` read the previous
 or next resource without returning to the list. Responses are URI-stamped, so
 a slow older read cannot replace a newer selection. `Ctrl-W` switches between
-list and detail, and `j`/`k` move whichever pane has focus. Connectors hangs
-off Runtime: `c` opens it there, `Esc` returns to Runtime, and `b`/`u` open
-an editor form that binds or unbinds a channel.
+list and detail, and `j`/`k` move whichever pane has focus. The selected
+Keeper's Channels tab shows transport status; `b`/`u` open a binding form with
+that Keeper already named.
 
 Tools has five deliberately different questions under `p`: `available` is
 the effective surface delivered to the selected Keeper now; `async runs` is
@@ -1247,18 +1248,17 @@ Within a surface:
 
   Board     --Right/Enter-->  Board read
   Planning  --Right/Enter-->  Goal detail
-  Fusion    --Right/Enter-->  Run evidence detail
-
 Off-ring children:
 
-  Planning  --v-->  Task Review --v--> Verdicts --v--> Schedules --v--> Fusion
+  Planning  --v-->  Task Review --v--> Verdicts
   Keepers   --f-->  Changes
-  Runtime   --c-->  Connectors        Runtime --p--> ... --p--> Lanes
+  Keeper detail --[ / ]--> Channels / Automation / Runs
+  Runtime   --p--> ... --p--> Lanes
   Workspace --Enter-->  Code (the selected repository's tree)
 ```
 
 `2` reaches Keepers after the active field or panel has declined it.
-`Esc` returns one level within Keepers, Board, Planning, and Fusion.
+`Esc` returns one level within Keepers, Board, and Planning.
 
 ## Requirements
 

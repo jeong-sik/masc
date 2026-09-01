@@ -5892,7 +5892,10 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
            state.identity_cursor <- 0;
            state.identity_attempt_error <- None;
            state.identity_filter <- None;
-           launch_identity_view state ~mailbox keeper.k_name)
+           launch_identity_view state ~mailbox keeper.k_name
+       | Detail_channels -> launch_connectors_load state ~mailbox
+       | Detail_automation -> launch_schedules_load state ~mailbox
+       | Detail_runs -> launch_fusion_runs_load state ~mailbox)
 ;;
 
 let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
@@ -5926,6 +5929,9 @@ let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
       state.identity_view <- None;
       state.identity_view_error <- None;
       launch_identity_view state ~mailbox keeper.k_name
+  | Detail_channels -> launch_connectors_load state ~mailbox
+  | Detail_automation -> launch_schedules_load state ~mailbox
+  | Detail_runs -> launch_fusion_runs_load state ~mailbox
 ;;
 
 (* Enter on a Lanes overview row, shared with the mouse: a press on the row
@@ -9564,9 +9570,16 @@ let main () =
   let handle_connector_bind () =
     let host = server_peer_host in
     let port = state.port in
+    let keeper_name =
+      match selected_keeper state with
+      | Some keeper -> keeper.k_name
+      | None -> ""
+    in
     handle_connector_form ~action:"bind"
       ~stem:
-        "{\n  \"name\": \"discord\",\n  \"channel_id\": \"\",\n  \"keeper_name\": \"\"\n}\n"
+        (Printf.sprintf
+           "{\n  \"name\": \"discord\",\n  \"channel_id\": \"\",\n  \"keeper_name\": \"%s\"\n}\n"
+           (String.escaped keeper_name))
       ~post:(fun ~connector ~json ->
         Masc_tui_http.post_connector_bind ~host ~port ~connector
           ~body_json:(Yojson.Safe.to_string json))
@@ -11486,6 +11499,12 @@ and is loaded on demand through keeper_skill.
                 state.identity_view <- None;
                 state.identity_view_error <- None;
                 launch_identity_view state ~mailbox:async_messages keeper.k_name
+            | Some _, Detail_channels ->
+                launch_connectors_load state ~mailbox:async_messages
+            | Some _, Detail_automation ->
+                launch_schedules_load state ~mailbox:async_messages
+            | Some _, Detail_runs ->
+                launch_fusion_runs_load state ~mailbox:async_messages
             | _, Detail_info | _, Detail_secrets | None, _ -> ())
        (* One step through the list a detail was opened from, on every surface
           that has one. Each reuses the same open the Enter arm uses, so a
@@ -12601,12 +12620,7 @@ and is loaded on demand through keeper_skill.
                   state.system_logs_detail_scroll <- 0
                 end
                 else state.view <- Overview
-            | Connectors ->
-                (* Back to the parent that opened it, not to Overview: the
-                   ring highlights Runtime while Connectors is up. Loaded,
-                   so arriving by palette and leaving does not strand an
-                   unread Runtime until the next tick. *)
-                goto_surface state ~mailbox:async_messages Runtime
+            | Connectors -> state.view <- Keepers Keeper_detail
             | Memory ->
                 if Option.is_some state.memory_facts_keeper then begin
                   (* Close the fact browser back to the health table. The
@@ -14095,12 +14109,6 @@ and is loaded on demand through keeper_skill.
                     ~content_height:(keeper_log_content_height state);
                 state.view <- Keepers Keeper_logs
             | None -> ())
-       | Some "c" | Some "C"
-         when state.view = Runtime
-              && Option.is_none state.runtime_detail_target ->
-           (* Connectors hangs off Runtime the way Task Review hangs off
-              Planning: not on the Tab ring, one key from its parent. *)
-           goto_surface state ~mailbox:async_messages Connectors
        | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat from every row that names a Keeper. Standalone Lanes carry
               no Keeper identity; Keeper chat is owned by the Keepers surface.
@@ -14450,9 +14458,15 @@ and is loaded on demand through keeper_skill.
              (if state.prompts_show_runtime_assets then
                 "읽기 전용 런타임 프롬프트 자산을 표시합니다"
               else "재정의 가능한 프롬프트 레지스트리를 표시합니다")
-       | Some "b" when state.view = Connectors ->
-           handle_connector_bind ()
-       | Some "u" when state.view = Connectors ->
+       | Some "b"
+         when state.view = Connectors
+               || (state.view = Keepers Keeper_detail
+                   && state.detail_tab = Detail_channels) ->
+            handle_connector_bind ()
+       | Some "u"
+         when state.view = Connectors
+              || (state.view = Keepers Keeper_detail
+                  && state.detail_tab = Detail_channels) ->
            handle_connector_unbind ()
        | Some "a" | Some "A" ->
            (match state.view with

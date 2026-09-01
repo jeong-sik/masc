@@ -70,21 +70,36 @@ and, matching nothing, said `(no schedules for this Keeper)`. That sentence
 reports an unobserved store as an empty one. A separate change makes the tab
 say which of the two it is; it does not let the operator read the rows.
 
-### C — no turn carries the schedule that started it
+### C — the turn is reached and then loses its name
 
-The wake chain is instrumented as far as the turn's front door and stops there.
+The first draft of this section said no turn carries the schedule that started
+it. Reading the code changed the shape of the gap, and the correction matters
+because it moves the work.
 
-- `dispatch_receipt` carries `stimulus_id`, `keeper_name`,
-  `schedule_instance_id`, `stimulus: schedule_due`.
-- `Keeper_reaction_ledger.event_queue_reaction_evidence` records, per
-  `stimulus_id`: `stimulus_seen`, `turn_started_seen`, `event_queue_ack_seen`,
-  `event_queue_cancelled_seen`, and each one's timestamp.
-- `Keeper_world_observation_turn_types` has `Scheduled_automation_stimulus` —
-  a **kind**, not an id. `Keeper_turn_outcome` carries no stimulus at all.
+The chain from a schedule to a turn **exists and is already projected**. A live
+schedule row carries `keeper_reaction_evidence`:
 
-So the system knows a turn began because a schedule came due, and when. It does
-not know which schedule instance, and no tool call or result names one. The
-detail pane states this in the two lines it has:
+```
+{"projection_status": "...", "source": "keeper_reaction_ledger",
+ "keeper_name": "sangsu", "schedule_id": "sched-757df3...",
+ "stimulus": "schedule_due", "reaction_kind": "turn_started",
+ "stimulus_id": "dc125b31...", "stimulus_seen": ..., "turn_started_seen": ...}
+```
+
+So an operator can already read: this schedule fired, the stimulus was seen, a
+turn started, and here is when. What cannot be read is **which turn**.
+
+`Keeper_reaction_ledger.event_queue_turn_started_json` writes `stimulus_id`,
+`post_id`, `stimulus_kind`, and `recorded_at`. It writes no turn identity, and
+it cannot: `record_replay_owned_turn_started_reactions` runs in
+`keeper_heartbeat_loop.ml` *before* `run_keeper_cycle`, and
+`Keeper_unified_turn.turn_success` returns only `keeper_meta` afterwards.
+Neither side of that call has a turn identity to record, because **no durable
+turn identity exists**.
+
+That is the real finding. The join is missing not because the schedule side
+forgot to carry an id, but because the thing it would point at has no name. The
+detail pane states the consequence in the two lines it has:
 
 ```
 Attribution   wake/turn only; no schedule-to-tool/result join
@@ -119,17 +134,29 @@ due in the same minute are indistinguishable afterwards.
   selector bypasses the aggregate cache exactly as the `schedule_id` lookup
   already does.
 
-- **D4 — a turn records the stimulus that started it, by identity.** The
-  reaction ledger already binds `stimulus_id` to `turn_started`. What is absent
-  is the same id on the turn's own record, so a result can be traced back
-  without guessing from a clock. This is the one part of this RFC that adds
-  durable state, and it is the case the project's own rule admits: without it
-  the fact "this work happened because that schedule fired" is not recoverable
-  from the ledger at all — it is reconstructed by a human comparing timestamps,
-  which is not evidence.
+- **D4 — a turn gets a durable identity, and the reaction that starts it
+  records that identity.** Not the reverse. The schedule side already carries
+  `stimulus_id` and the ledger already binds it to `turn_started`; adding a
+  schedule id to a turn would duplicate a pointer that exists. What is absent
+  is a name for the turn, so the existing pointer has nothing to point at.
 
-  D4 does **not** introduce a schedule-to-tool join table. The turn carries the
-  id; the join is a read.
+  This is the one part of this RFC that adds durable state, and it is the case
+  the project's rule admits: "this work happened because that schedule fired"
+  is currently reconstructed by a human comparing a `turn_started` timestamp
+  against Keeper Calls, and two schedules due in the same minute are
+  indistinguishable afterwards. A reconstruction is not evidence.
+
+  D4 does **not** introduce a schedule-to-tool join table. The turn carries a
+  name; the join is a read.
+
+  **Cost, measured rather than assumed.** The identity has to be minted at the
+  turn boundary and travel two ways: back to the `turn_started` reaction that
+  is written before the cycle, and forward onto whatever a reader would filter
+  Keeper Calls by. `run_keeper_cycle` currently returns `turn_success`, which
+  carries `keeper_meta` alone. So D4 touches `Keeper_unified_turn`'s result
+  type and the heartbeat loop's ordering — the hottest path in the system —
+  which is why it is last here and why it is worth its own review rather than
+  riding with the projections.
 
 - **D5 — the three empty readings stay three sentences.** `no schedules exist`,
   `none on the page the server sent`, and `the store could not be read` are
@@ -166,6 +193,6 @@ surface that reads it, which D1–D3 build.
   the count against the total when the limit bites.
 - D3: a target selector over a fixture with more requests than the fleet limit
   returns all of that target's rows; the unselected aggregate still truncates.
-- D4: a turn record produced by a schedule wake carries the wake's
-  `stimulus_id`; a turn from any other stimulus carries that stimulus's own id
-  and never a schedule's.
+- D4: a turn started by a schedule wake and the `turn_started` reaction that
+  preceded it name the same turn identity; two schedules due in the same minute
+  resolve to two different turns; a turn with no stimulus still has a name.

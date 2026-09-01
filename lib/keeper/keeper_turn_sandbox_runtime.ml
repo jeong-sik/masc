@@ -595,6 +595,75 @@ let stop_and_delete_microvm_container ?timeout_sec container_name =
          (Keeper_sandbox_runtime.docker_failure_output_for_log delete_out))
 ;;
 
+(** The keeper's build volume, created if it is not there yet.
+
+    Refusing rather than starting without it is deliberate, and follows
+    [image_present] in the same lane: a guest that boots without the volume
+    writes its build output onto the virtiofs share, and that is what pinned
+    263,168 host vnodes and panicked the host three times. Falling back would
+    trade a keeper that does not start for a machine that stops. *)
+let microvm_build_volume ~keeper_name ~timeout_sec =
+  match Keeper_sandbox_microvm.build_volume_name ~keeper_name with
+  | Error message -> Error ("microvm_build_volume_unnamed: " ^ message)
+  | Ok volume_name ->
+    (match
+       Keeper_sandbox_microvm.ensure_build_volume
+         ~volume_name
+         ~size:(Env_config_sandbox.Runtime.microvm_build_volume_size ())
+         ~timeout_sec
+     with
+     | Error _ as err -> err
+     | Ok _ -> Ok volume_name)
+;;
+
+(** Point each checkout's [_build] at the volume, and create the directories
+    it points at.
+
+    Runs per turn rather than once per guest, because a keeper clones and adds
+    worktrees while its guest is already up; a boot-only pass would leave every
+    checkout made after boot writing to the share.
+
+    Two steps, because they happen on opposite sides of the boundary. The
+    symlink is written on the host, where the checkout lives. The directory it
+    points at is created in the guest, because it lives inside the volume's
+    ext4 image and dune will not create it -- measured, dune lstats [_build],
+    sees the link, and opens [_build/.lock] straight away.
+
+    Neither failure raises. A refused checkout is one that already holds real
+    build output: it stays exactly where it is, which is correct, just still on
+    the share. A failed [mkdir] leaves a build to fail with a message naming
+    the path, which is more useful than refusing the turn. *)
+let refresh_microvm_build_links ?timeout_sec (t : t) ~container_name =
+  let ctx = t.meta.name in
+  let rows = Keeper_sandbox_microvm.ensure_build_links ~playground_root:t.host_root in
+  List.iter
+    (fun (row : Keeper_sandbox_microvm.build_link_row) ->
+      match row.outcome with
+      | Ok `Unchanged -> ()
+      | Ok `Linked -> Log.info ~ctx "microvm build link installed: %s" row.path
+      | Ok `Relinked -> Log.info ~ctx "microvm build link retargeted: %s" row.path
+      | Error message -> Log.warn ~ctx "microvm build link skipped: %s" message)
+    rows;
+  match Keeper_sandbox_microvm.build_link_targets_to_create rows with
+  | [] -> ()
+  | targets ->
+    let argv =
+      Keeper_sandbox_microvm.build_target_mkdir_argv
+        ~container_name
+        ~uid:t.uid
+        ~gid:t.gid
+        ~targets
+    in
+    (match run_argv_with_status ?timeout_sec argv with
+     | Unix.WEXITED 0, _ -> ()
+     | _, out ->
+       Log.warn
+         ~ctx
+         "microvm build volume mkdir failed for %d target(s): %s"
+         (List.length targets)
+         out)
+;;
+
 let start_microvm_container_unlocked ?timeout_sec (t : t) =
   let image = resolve_image t in
   if String.trim image = ""
@@ -641,10 +710,15 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
         | None -> Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()
       in
       (match
-         Keeper_sandbox_microvm.image_present ~image ~timeout_sec:image_timeout
+         Result.bind
+           (Keeper_sandbox_microvm.image_present ~image ~timeout_sec:image_timeout)
+           (fun () ->
+             microvm_build_volume
+               ~keeper_name:t.meta.name
+               ~timeout_sec:image_timeout)
        with
        | Error _ as err -> err
-       | Ok () ->
+       | Ok build_volume_name ->
          let dns =
            match Env_config_sandbox.Runtime.microvm_dns () with
            | "" -> None
@@ -728,7 +802,12 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                (Keeper_sandbox_runtime.docker_config_mount_args
                   ~base_path:t.config.base_path
                   ~container_root:t.container_root
-                @ github_identity.args)
+                @ github_identity.args
+                (* Build output goes to a block device, not the share. See
+                   RFC-0399: virtiofs pins one host descriptor per inode the
+                   guest touches, and a host descriptor is a host vnode. *)
+                @ Keeper_sandbox_microvm.build_volume_mount_args
+                    ~volume_name:build_volume_name)
              ~image
          in
          let st, out = run_argv_with_status ?timeout_sec argv in
@@ -1106,7 +1185,8 @@ let start_container ?timeout_sec (t : t) =
 ;;
 
 let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
-  match get_state t with
+  let started =
+    match get_state t with
   | Running { container_name } ->
     if not validate_running
     then Ok container_name
@@ -1118,7 +1198,15 @@ let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
       | Error _ ->
         set_state t Not_started;
         start_container ?timeout_sec t)
-  | Not_started -> start_container ?timeout_sec t
+    | Not_started -> start_container ?timeout_sec t
+  in
+  (* After the guest is up, not before: the second half of this runs
+     [container exec] against it. *)
+  (match started with
+   | Ok container_name when is_microvm t ->
+     refresh_microvm_build_links ?timeout_sec t ~container_name
+   | _ -> ());
+  started
 ;;
 
 let retire_current_github_identity_snapshot t =

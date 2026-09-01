@@ -1038,6 +1038,200 @@ let test_apply_build_link_is_idempotent_and_refuses_real_output () =
 ;;
 
 
+
+(* The walk that finds checkouts, and the end-to-end shape over a real tree. *)
+
+let row_for_of rows path =
+  List.find_map
+    (fun (r : M.build_link_row) ->
+      if String.equal r.path path then Some r.outcome else None)
+    rows
+;;
+
+let rec rm_rf path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error _ -> ()
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Array.iter (fun e -> rm_rf (Filename.concat path e)) (Sys.readdir path);
+    (try Unix.rmdir path with Unix.Unix_error _ -> ())
+  | _ -> (try Unix.unlink path with Unix.Unix_error _ -> ())
+;;
+
+let with_tree f =
+  let root = Filename.temp_file "masc-playground" "" in
+  Sys.remove root;
+  Unix.mkdir root 0o700;
+  Fun.protect ~finally:(fun () -> rm_rf root) (fun () -> f root)
+;;
+
+let mkdirs root parts =
+  ignore
+    (List.fold_left
+       (fun acc part ->
+         let next = Filename.concat acc part in
+         (try Unix.mkdir next 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+         next)
+       root
+       parts
+     : string)
+;;
+
+let touch path = close_out (open_out path)
+
+let test_build_roots_finds_checkouts_at_both_observed_depths () =
+  with_tree (fun root ->
+    (* The two layouts actually measured: polisher/masc-t362 at depth 1 and
+       lane-smith/repos/wt-370 at depth 2. *)
+    mkdirs root [ "masc-t362" ];
+    touch (Filename.concat root "masc-t362/dune-project");
+    mkdirs root [ "repos"; "wt-370" ];
+    touch (Filename.concat root "repos/wt-370/dune-project");
+    mkdirs root [ "notes" ];
+    let found =
+      M.build_roots_under ~playground_root:root
+      |> List.filter_map (M.playground_relative ~playground_root:root)
+      |> List.sort String.compare
+    in
+    Alcotest.(check (list string))
+      "both depths, and nothing without the marker"
+      [ "masc-t362"; "repos/wt-370" ]
+      found)
+;;
+
+let test_build_roots_does_not_descend_into_build_or_git () =
+  with_tree (fun root ->
+    (* A nested dune-project under _build would be found by a naive walk. One
+       measured _build held 61,602 entries, so descending is also the
+       expensive answer. *)
+    mkdirs root [ "checkout"; "_build"; "default" ];
+    touch (Filename.concat root "checkout/dune-project");
+    touch (Filename.concat root "checkout/_build/default/dune-project");
+    mkdirs root [ "checkout"; ".git"; "modules" ];
+    touch (Filename.concat root "checkout/.git/modules/dune-project");
+    let found =
+      M.build_roots_under ~playground_root:root
+      |> List.filter_map (M.playground_relative ~playground_root:root)
+    in
+    Alcotest.(check (list string)) "only the checkout itself" [ "checkout" ] found)
+;;
+
+let test_build_roots_does_not_follow_symlinks () =
+  with_tree (fun root ->
+    (* A link back to the root would loop a walk that used stat. *)
+    mkdirs root [ "real" ];
+    touch (Filename.concat root "real/dune-project");
+    Unix.symlink root (Filename.concat root "loop");
+    Unix.symlink "/masc-build/masc-t362" (Filename.concat root "dangling");
+    let found =
+      M.build_roots_under ~playground_root:root
+      |> List.filter_map (M.playground_relative ~playground_root:root)
+    in
+    Alcotest.(check (list string)) "terminates, and only the real checkout" [ "real" ] found)
+;;
+
+let test_playground_relative_rejects_outsiders () =
+  Alcotest.(check (option string))
+    "below"
+    (Some "a/b")
+    (M.playground_relative ~playground_root:"/p" "/p/a/b");
+  Alcotest.(check (option string))
+    "trailing slash on the root is tolerated"
+    (Some "a")
+    (M.playground_relative ~playground_root:"/p/" "/p/a");
+  Alcotest.(check (option string))
+    "the root itself is not a relative path"
+    None
+    (M.playground_relative ~playground_root:"/p" "/p");
+  (* A prefix match on the string is not containment: /playground2 must not
+     read as being inside /playground. *)
+  Alcotest.(check (option string))
+    "a sibling sharing a name prefix is outside"
+    None
+    (M.playground_relative ~playground_root:"/p" "/p2/a")
+;;
+
+let test_ensure_build_links_reports_every_checkout () =
+  with_tree (fun root ->
+    mkdirs root [ "masc-t362" ];
+    touch (Filename.concat root "masc-t362/dune-project");
+    mkdirs root [ "repos"; "wt-370" ];
+    touch (Filename.concat root "repos/wt-370/dune-project");
+    (* One checkout already holds real build output. It must be reported and
+       left alone while the other is still linked. *)
+    mkdirs root [ "repos"; "wt-370"; "_build" ];
+    touch (Filename.concat root "repos/wt-370/_build/keep-me");
+    let rows = M.ensure_build_links ~playground_root:root in
+    let row_for path =
+      List.find_opt (fun (r : M.build_link_row) -> String.equal r.path path) rows
+    in
+    Alcotest.(check int) "a row per checkout" 2 (List.length rows);
+    let linked = Filename.concat root "masc-t362/_build" in
+    Alcotest.(check bool)
+      "the clean checkout is linked onto the volume"
+      true
+      (M.build_link_state_of_path linked = M.Build_symlink "/masc-build/masc-t362");
+    let refused = Filename.concat root "repos/wt-370/_build" in
+    Alcotest.(check bool)
+      "the occupied checkout is reported as an error"
+      true
+      (match row_for refused with
+       | Some { M.outcome = Error _; _ } -> true
+       | _ -> false);
+    Alcotest.(check bool)
+      "and its build output is still there"
+      true
+      (Sys.file_exists (Filename.concat refused "keep-me"));
+    (* Only the linked checkout needs a directory made in the guest: the
+       refused one keeps its real _build on the share. *)
+    Alcotest.(check (list string))
+      "targets to create skip the refused checkout"
+      [ "/masc-build/masc-t362" ]
+      (M.build_link_targets_to_create rows);
+    (* Running again changes nothing: the link is already correct. *)
+    let rows = M.ensure_build_links ~playground_root:root in
+    Alcotest.(check bool)
+      "second run is a no-op for the linked one"
+      true
+      (match row_for_of rows linked with
+       | Some (Ok `Unchanged) -> true
+       | _ -> false))
+;;
+
+let test_ensure_build_links_on_a_missing_playground_is_empty () =
+  Alcotest.(check int)
+    "no playground, no rows, no exception"
+    0
+    (List.length (M.ensure_build_links ~playground_root:"/nonexistent-playground-xyz"))
+;;
+
+
+
+let test_build_target_mkdir_is_one_exec_for_every_target () =
+  (* dune does not create the directory a _build symlink points at -- it
+     lstats _build, sees the link, and opens _build/.lock straight away
+     ("Error: open(_build/.lock): No such file or directory"). The host cannot
+     create it either, since it lives inside the volume's ext4 image. So the
+     guest does, and in one exec rather than one per checkout. *)
+  let argv =
+    M.build_target_mkdir_argv
+      ~container_name:"masc-keeper-vm-polisher-abc"
+      ~uid:501
+      ~gid:20
+      ~targets:[ "/masc-build/masc-t362"; "/masc-build/repos:wt-370" ]
+  in
+  Alcotest.(check bool) "goes through container exec" true (contains "exec" argv);
+  Alcotest.(check bool) "names the guest" true (contains "masc-keeper-vm-polisher-abc" argv);
+  Alcotest.(check bool) "runs as the keeper" true (adjacent ~flag:"--user" ~value:"501:20" argv);
+  Alcotest.(check bool) "mkdir -p, so repeating is safe" true (adjacent ~flag:"mkdir" ~value:"-p" argv);
+  Alcotest.(check bool) "first target" true (contains "/masc-build/masc-t362" argv);
+  Alcotest.(check bool) "second target" true (contains "/masc-build/repos:wt-370" argv);
+  Alcotest.(check int)
+    "one exec, not one per target"
+    1
+    (List.length (List.filter (String.equal "exec") argv))
+;;
+
+
 let () =
   Alcotest.run
     "keeper_sandbox_microvm"
@@ -1116,6 +1310,24 @@ let () =
             test_build_link_state_reads_the_three_answers
         ; Alcotest.test_case "apply is idempotent and refuses real output" `Quick
             test_apply_build_link_is_idempotent_and_refuses_real_output
+        ] )
+    ; ( "build link discovery"
+      , [ Alcotest.test_case "finds checkouts at both observed depths" `Quick
+            test_build_roots_finds_checkouts_at_both_observed_depths
+        ; Alcotest.test_case "skips _build and .git" `Quick
+            test_build_roots_does_not_descend_into_build_or_git
+        ; Alcotest.test_case "does not follow symlinks" `Quick
+            test_build_roots_does_not_follow_symlinks
+        ; Alcotest.test_case "relative path rejects outsiders" `Quick
+            test_playground_relative_rejects_outsiders
+        ; Alcotest.test_case "reports every checkout" `Quick
+            test_ensure_build_links_reports_every_checkout
+        ; Alcotest.test_case "missing playground is empty" `Quick
+            test_ensure_build_links_on_a_missing_playground_is_empty
+        ] )
+    ; ( "build link creation"
+      , [ Alcotest.test_case "mkdir is one exec for every target" `Quick
+            test_build_target_mkdir_is_one_exec_for_every_target
         ] )
     ; ( "guest env"
       , [ Alcotest.test_case "env follows the config mount" `Quick

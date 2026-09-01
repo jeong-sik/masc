@@ -88,6 +88,11 @@ val decode_provider_input :
   Yojson.Safe.t ->
   (provider_input, string) result
 
+val exact_input_category : exact_input_kind -> string
+(** The group an item is counted under on the input tab. A tool schema is
+    grouped with the other schemas rather than named after its own tool, so
+    the summary can say what the schemas cost together. *)
+
 val input_component_label : Turn_record.input_component_id -> string
 val exact_input_label : exact_input_kind -> string
 

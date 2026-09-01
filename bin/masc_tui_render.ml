@@ -14513,32 +14513,113 @@ let context_composition_lines ~cols
        them is a breakdown of another, and they do not add up."
 
 
-let context_exact_input_lines state
+(* Items grouped by kind, biggest group first, so the tab answers "what is
+   this request made of" before it answers "what is item 34". Counted from the
+   same items the list below draws, never from the composition tab's separate
+   meter. *)
+let context_exact_input_summary ~width (items : Masc_tui_context_inspector.exact_input_item list) =
+  let module Inspector = Masc_tui_context_inspector in
+  let tally = Hashtbl.create 8 in
+  let order = ref [] in
+  List.iter
+    (fun (item : Inspector.exact_input_item) ->
+      let key = Inspector.exact_input_category item.kind in
+      (match Hashtbl.find_opt tally key with
+       | None ->
+           order := key :: !order;
+           Hashtbl.replace tally key (1, item.bytes)
+       | Some (count, bytes) ->
+           Hashtbl.replace tally key (count + 1, bytes + item.bytes)))
+    items;
+  let groups =
+    List.filter_map
+      (fun key ->
+        match Hashtbl.find_opt tally key with
+        | None -> None
+        | Some (count, bytes) -> Some (key, count, bytes))
+      (List.rev !order)
+  in
+  let ranked =
+    List.stable_sort
+      (fun (_, _, left) (_, _, right) -> compare right left)
+      groups
+  in
+  let total = List.fold_left (fun sum (_, _, bytes) -> sum + bytes) 0 ranked in
+  let bar_width = min 60 width in
+  let bar =
+    if total = 0 then []
+    else
+      [ "  "
+        ^ Context_bars.stacked_bar ~width:bar_width
+            ~segments:(List.map (fun (_, _, bytes) -> ("", bytes)) ranked)
+      ]
+  in
+  let rows =
+    List.mapi
+      (fun index (key, count, bytes) ->
+        let share =
+          if total = 0 then 0. else float bytes /. float total *. 100.
+        in
+        let share_text =
+          if bytes > 0 && share < 0.05 then "<0.1%"
+          else Printf.sprintf "%.1f%%" share
+        in
+        (* Padded by cells, not by bytes: a category name carries a middle
+           dot, and %-22s would spend two of its twenty-two on one cell and
+           leave that row a column short of the rest. *)
+        let label =
+          key
+          ^ String.make
+              (max 0 (22 - Message_layout.display_width key))
+              ' '
+        in
+        Printf.sprintf "  %s %s %s%3d %s%s  %9s  %6s"
+          (Context_bars.segment_glyph index)
+          label Ansi.dim count
+          (if count = 1 then "item " else "items")
+          Ansi.reset
+          (Masc_tui_context_inspector.format_bytes bytes)
+          share_text)
+      ranked
+  in
+  ( [ "  "
+      ^ Context_bars.band ~width ~title:"BY KIND"
+          ~caption:
+            (Printf.sprintf "%d items, %s retained" (List.length items)
+               (Masc_tui_context_inspector.format_bytes total))
+    ]
+    @ bar @ rows
+  , total )
+
+let context_exact_input_lines ~cols state
     (input : Masc_tui_context_inspector.provider_input) =
   let module Inspector = Masc_tui_context_inspector in
   let items = Inspector.exact_input_items input in
+  let width = max 1 (framed_inner_width cols - 2) in
   match state.context_inspector_exact with
-  | Some index ->
-      (match List.nth_opt items index with
-       | None ->
-         [ (Theme.bad ()) ^ "  Selected input item is no longer present"
-           ^ Ansi.reset ]
-       | Some item ->
-           let width = max 8 (snd (get_terminal_size ()) - 6) in
-           let heading =
-             Printf.sprintf "  %s%s%s  ·  %s  ·  sha256 %s"
-               Ansi.bold
-               (Inspector.exact_input_label item.kind)
-               Ansi.reset
-               (Inspector.format_bytes item.bytes)
-               (String.sub item.sha256 0 12)
-           in
-           let body =
-             Message_layout.wrap_body ~max_cells:width
-               ~sanitize:Keeper_chat.terminal_safe_text item.text
-             |> List.map (fun line -> "  " ^ line)
-           in
-           heading :: "" :: body)
+  | Some index -> (
+      match List.nth_opt items index with
+      | None ->
+          ( [ (Theme.bad ()) ^ "  Selected input item is no longer present"
+              ^ Ansi.reset
+            ]
+          , None )
+      | Some item ->
+          let heading =
+            Printf.sprintf "  %s%s%s  ·  %s  ·  sha256 %s" Ansi.bold
+              (Inspector.exact_input_label item.kind)
+              Ansi.reset
+              (Inspector.format_bytes item.bytes)
+              (String.sub item.sha256 0 12)
+          in
+          let body =
+            Message_layout.wrap_body ~max_cells:width
+              ~sanitize:Keeper_chat.terminal_safe_text item.text
+            |> List.map (fun line -> "  " ^ line)
+          in
+          (* Reading one item scrolls by hand; there is no row to keep in
+             view. *)
+          (heading :: "" :: body, None))
   | None ->
       let identity =
         Printf.sprintf "  Exact provider input  %s  %s"
@@ -14546,37 +14627,69 @@ let context_exact_input_lines state
              (Ids.Turn_ref.to_string input.turn_ref))
           (Masc_domain.iso8601_of_unix_seconds input.captured_at)
       in
-      let rows =
-        List.mapi
-          (fun index (item : Inspector.exact_input_item) ->
-             let selected = index = state.context_inspector_cursor in
-             let marker, style =
-               if selected then (">", Theme.selection) else (" ", Ansi.reset)
-             in
-             Printf.sprintf "%s %s %3d  %-34s %9s  %s%s"
-               style marker (index + 1)
-               (Inspector.exact_input_label item.kind)
-               (Inspector.format_bytes item.bytes)
-               (String.sub item.sha256 0 12)
-               Ansi.reset)
-          items
-      in
-      [ identity
-      ; Printf.sprintf
-          "  Wire  %s · %s · %s · %s"
-          input.wire.provider
+      let wire =
+        Printf.sprintf "  Wire  %s · %s · %s · %s" input.wire.provider
           input.wire.model
           (Inspector.format_bytes input.wire.body_bytes)
           (String.sub input.wire.body_sha256 0 12)
-      ; ""
-      ; Ansi.bold ^ "  Canonical model input items" ^ Ansi.reset
-      ]
-      @ (if rows = [] then [ "  (this request carried no retained items)" ] else rows)
-      @ [ ""
-        ; Ansi.dim
-          ^ "  Enter opens one exact item. The wire digest binds this canonical input to the serialized provider request."
-          ^ Ansi.reset
-        ]
+      in
+      let summary, retained = context_exact_input_summary ~width items in
+      (* Both figures describe this one request, so the difference between
+         them is the envelope and whatever the serializer added -- worth
+         naming rather than leaving as two numbers that do not match. *)
+      let against_wire =
+        if retained > 0 && input.wire.body_bytes > 0 then
+          [ Printf.sprintf "  %s%s retained here, %s serialized on the wire%s"
+              Ansi.dim
+              (Inspector.format_bytes retained)
+              (Inspector.format_bytes input.wire.body_bytes)
+              Ansi.reset
+          ]
+        else []
+      in
+      let header =
+        [ identity; wire; "" ] @ summary @ against_wire @ [ "" ]
+        @ [ "  "
+            ^ Context_bars.band ~width ~title:"ITEMS"
+                ~caption:"in the order the request carries them"
+          ]
+      in
+      let rows =
+        List.mapi
+          (fun index (item : Inspector.exact_input_item) ->
+            let selected = index = state.context_inspector_cursor in
+            let marker, style =
+              if selected then (">", Theme.selection) else (" ", Ansi.reset)
+            in
+            Printf.sprintf "%s %s %3d  %-34s %9s  %s%s" style marker
+              (index + 1)
+              (Inspector.exact_input_label item.kind)
+              (Inspector.format_bytes item.bytes)
+              (String.sub item.sha256 0 12)
+              Ansi.reset)
+          items
+      in
+      let body =
+        if rows = [] then [ "  (this request carried no retained items)" ]
+        else rows
+      in
+      (* Where the highlight sits, so the pane can keep it in the window. *)
+      let selected =
+        if rows = [] then None
+        else
+          Some
+            (List.length header
+            + min (List.length rows - 1)
+                (max 0 state.context_inspector_cursor))
+      in
+      ( header @ body
+        @ [ ""
+          ; Ansi.dim
+            ^ "  Enter opens one exact item. The wire digest binds this \
+               canonical input to the serialized provider request."
+            ^ Ansi.reset
+          ]
+      , selected )
 
 let context_input_map_lines state (record : Turn_record.t)
     (provider_input : Masc_tui_context_inspector.provider_input option) =
@@ -14600,10 +14713,12 @@ let context_input_map_lines state (record : Turn_record.t)
                ~sanitize:Keeper_chat.terminal_safe_text text
              |> List.map (fun line -> "  " ^ line)
            in
-           heading :: "" :: body
+           (heading :: "" :: body, None)
        | Some _ | None ->
-           [ (Theme.bad ()) ^ "  Exact text is not retained for this component"
-             ^ Ansi.reset ])
+           ( [ (Theme.bad ())
+               ^ "  Exact text is not retained for this component" ^ Ansi.reset
+             ]
+           , None ))
   | None ->
       let identity =
         Printf.sprintf "  Provider request map  %s#%d"
@@ -14628,49 +14743,80 @@ let context_input_map_lines state (record : Turn_record.t)
                Ansi.reset)
           rows
       in
-      identity
-      :: [ ""
-         ; Ansi.bold ^ "  What reached the provider, and why" ^ Ansi.reset
-         ]
-      @ (if mapped = [] then [ "  (exact component attribution unavailable)" ]
-         else mapped)
-      @ [ ""
-        ; Ansi.dim
-          ^ "  Enter opens only text verified against this turn's digest. Other rows remain byte-only evidence."
-          ^ Ansi.reset
+      let header =
+        [ identity
+        ; ""
+        ; Ansi.bold ^ "  What reached the provider, and why" ^ Ansi.reset
         ]
+      in
+      let body =
+        if mapped = [] then [ "  (exact component attribution unavailable)" ]
+        else mapped
+      in
+      (* Where the highlight sits, so the pane can keep it in the window. *)
+      let selected =
+        if mapped = [] then None
+        else
+          Some
+            (List.length header
+            + min (List.length mapped - 1)
+                (max 0 state.context_inspector_cursor))
+      in
+      ( header @ body
+        @ [ ""
+          ; Ansi.dim
+            ^ "  Enter opens only text verified against this turn's digest. \
+               Other rows remain byte-only evidence."
+            ^ Ansi.reset
+          ]
+      , selected )
 
+(* The pane's rows and, when a tab carries a highlight, the row it sits on.
+   The highlight is reported rather than recomputed by the caller: only this
+   module knows how many header rows a tab draws above its list, and a caller
+   that guessed would scroll to the wrong row every time the header changed. *)
 let context_inspector_content_lines ~cols state =
   match state.context_inspector_reading with
   | None ->
-      [ if state.context_inspector_loading then "  Loading provider-input evidence..."
-        else "  No context reading has been requested." ]
+      ( [ (if state.context_inspector_loading then
+             "  Loading provider-input evidence..."
+           else "  No context reading has been requested.")
+        ]
+      , None )
   | Some (_, reading) ->
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Composition ->
            (match reading.turn with
-            | Ok selection -> context_composition_lines ~cols selection
+            | Ok selection -> (context_composition_lines ~cols selection, None)
             | Error detail ->
-                [ (Theme.bad ()) ^ "  Composition unavailable: "
-                  ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ])
+                ( [ (Theme.bad ()) ^ "  Composition unavailable: "
+                    ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
+                  ]
+                , None ))
        | Masc_tui_context_inspector.Exact_input ->
            (match reading.provider_input with
-            | Ok input -> context_exact_input_lines state input
+            | Ok input -> context_exact_input_lines ~cols state input
             | Error detail ->
-                [ (Theme.bad ()) ^ "  Exact input unavailable: "
-                  ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ])
+                ( [ (Theme.bad ()) ^ "  Exact input unavailable: "
+                    ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
+                  ]
+                , None ))
        | Masc_tui_context_inspector.Input_map ->
            (match reading.turn with
             | Error detail ->
-                [ (Theme.bad ()) ^ "  Input map unavailable: "
-                  ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ]
+                ( [ (Theme.bad ()) ^ "  Input map unavailable: "
+                    ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
+                  ]
+                , None )
             | Ok { Masc_tui_context_inspector.attributed = None; _ } ->
                 (* The map is a per-component table; with no attribution there
                    are no rows to draw, and inventing them from the latest
                    turn's totals would state bytes nobody measured. *)
-                [ (Theme.bad ())
-                  ^ "  No turn on this page recorded an exact input composition"
-                  ^ Ansi.reset ]
+                ( [ (Theme.bad ())
+                    ^ "  No turn on this page recorded an exact input \
+                       composition" ^ Ansi.reset
+                  ]
+                , None )
             | Ok { Masc_tui_context_inspector.attributed = Some { record; _ }; _ }
               ->
                 let provider_input =
@@ -14683,7 +14829,7 @@ let context_inspector_content_lines ~cols state =
 let context_inspector_viewport state =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  ( List.length (context_inspector_content_lines ~cols state)
+  ( List.length (fst (context_inspector_content_lines ~cols state))
   , framed_content_height ~rows )
 
 let render_context_inspector state =
@@ -14712,11 +14858,24 @@ let render_context_inspector state =
        ^ "  "
        ^ (tab_label Masc_tui_context_inspector.Input_map "3" "map"));
   framed_divider buf cols;
-  let lines = context_inspector_content_lines ~cols state in
+  let lines, selected = context_inspector_content_lines ~cols state in
   let content_height = framed_content_height ~rows in
   let scroll =
     Masc_tui_scroll.normalize ~count:(List.length lines)
       ~height:content_height state.context_inspector_scroll
+  in
+  (* On the list tabs j/k moves the highlight and nothing moved the window, so
+     a list longer than the pane walked the highlight out of sight and the keys
+     went on working against rows nobody could see. [Masc_tui_scroll] documents
+     this pairing -- the cursor names a row, the window follows it -- and this
+     surface was the one not holding up its end. *)
+  let scroll =
+    match selected with
+    | None -> scroll
+    | Some cursor ->
+        Masc_tui_scroll.normalize ~count:(List.length lines)
+          ~height:content_height
+          (Masc_tui_scroll.ensure_visible ~cursor ~height:content_height scroll)
   in
   lines
   |> List.filteri (fun index _ ->

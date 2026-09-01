@@ -4654,6 +4654,39 @@ let test_decode_lane_run_status_is_typed () =
              (Tui_decode.lane_run_status_label novel.Tui_decode.lrs_status)
        | _ -> Alcotest.fail "expected three runs")
 
+let test_decode_verifier_lane_summary_keeps_subject_and_verdict () =
+  let listing =
+    `Assoc
+      [ "has_more", `Bool false
+      ; ( "runs"
+        , `List
+            [ `Assoc
+                [ "run_id", `String "vrf-9"
+                ; "run_kind", `String "task_verification"
+                ; "lane", `String Runtime.verifier_exact_lane_id
+                ; "subject_id", `String "task-9"
+                ; "actor", `String Runtime.verifier_exact_lane_id
+                ; "started_at", `Float 100.
+                ; "status", `String "rejected"
+                ; "elapsed_s", `Float 3.
+                ; "selected_slot", `String "verifier-primary"
+                ] ] )
+      ]
+  in
+  match Tui_decode.decode_lane_run_page ~lane:Runtime.verifier_exact_lane_id listing with
+  | Error detail -> Alcotest.fail detail
+  | Ok page ->
+    (match page.Tui_decode.lrpg_runs with
+     | [ run ] ->
+       Alcotest.(check (option string)) "task subject" (Some "task-9")
+         run.Tui_decode.lrs_subject_id;
+       Alcotest.(check bool) "task run kind" true
+         (run.Tui_decode.lrs_run_kind = Tui_decode.Lane_run_task_verification);
+       Alcotest.(check bool) "rejection is a typed verdict" true
+         (run.Tui_decode.lrs_status
+          = Tui_decode.Lane_run_verifier_negative "rejected")
+     | _ -> Alcotest.fail "expected one verifier run")
+
 let lane_run_detail_json ?(output = true) run_id =
   `Assoc
     [ ( "run"
@@ -4682,8 +4715,12 @@ let test_decode_lane_run_detail_carries_prompt_and_output () =
   match Tui_decode.decode_lane_run_detail (lane_run_detail_json "cmp-1") with
   | Error detail -> Alcotest.fail detail
   | Ok detail ->
-      Alcotest.(check string) "run id" "cmp-1" detail.Tui_decode.lrd_run_id;
-      Alcotest.(check string) "lane" "board_attention_exact" detail.Tui_decode.lrd_lane;
+    Alcotest.(check string) "run id" "cmp-1" detail.Tui_decode.lrd_run_id;
+    Alcotest.(check bool) "legacy exact detail defaults its kind" true
+      (detail.Tui_decode.lrd_run_kind = Tui_decode.Lane_run_exact_output);
+    Alcotest.(check (option string)) "exact detail has no subject" None
+      detail.Tui_decode.lrd_subject_id;
+    Alcotest.(check string) "lane" "board_attention_exact" detail.Tui_decode.lrd_lane;
       Alcotest.(check (option (float 0.0))) "elapsed" (Some 0.5)
         detail.Tui_decode.lrd_elapsed_s;
       (match detail.Tui_decode.lrd_input_payload with
@@ -4708,6 +4745,53 @@ let test_decode_lane_run_detail_running_has_no_output () =
         detail.Tui_decode.lrd_elapsed_s;
       Alcotest.(check bool) "no output while running" true
         (Option.is_none detail.Tui_decode.lrd_output)
+
+let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
+  let json =
+    `Assoc
+      [ ( "run"
+        , `Assoc
+            [ "run_id", `String "vrf-9"
+            ; "run_kind", `String "task_verification"
+            ; "lane", `String Runtime.verifier_exact_lane_id
+            ; "subject_id", `String "task-9"
+            ; "actor", `String Runtime.verifier_exact_lane_id
+            ; "started_at", `Float 100.
+            ; "status", `String "approved"
+            ; "elapsed_s", `Float 3.
+            ; "selected_slot", `String "verifier-primary"
+            ; ( "input"
+              , `Assoc
+                  [ "kind", `String "exact"
+                  ; "payload", `Assoc [ "task_id", `String "task-9" ]
+                  ] )
+            ; ( "output"
+              , `Assoc
+                  [ "reason", `String "proof accepted"
+                  ; ( "tools"
+                    , `List
+                        [ `Assoc
+                            [ "tool_name", `String "masc_task_get"
+                            ; "disposition", `String "completed"
+                            ] ] )
+                  ] )
+            ] )
+      ]
+  in
+  match Tui_decode.decode_lane_run_detail json with
+  | Error detail -> Alcotest.fail detail
+  | Ok detail ->
+    Alcotest.(check bool) "task verification kind" true
+      (detail.Tui_decode.lrd_run_kind = Tui_decode.Lane_run_task_verification);
+    Alcotest.(check (option string)) "task subject" (Some "task-9")
+      detail.Tui_decode.lrd_subject_id;
+    Alcotest.(check string) "positive verdict label" "approved"
+      (Tui_decode.lane_run_status_label detail.Tui_decode.lrd_status);
+    (match detail.Tui_decode.lrd_output with
+     | Some (`Assoc fields) ->
+       Alcotest.(check bool) "tool evidence survives" true
+         (List.mem_assoc "tools" fields)
+     | _ -> Alcotest.fail "verifier result must be retained")
 
 let test_decode_lane_run_detail_requires_the_payload () =
   let json =
@@ -6102,10 +6186,14 @@ let () =
           test_decode_lane_run_page_running_run_has_no_completion_fields;
         Alcotest.test_case "status decodes to a variant, unknown preserved" `Quick
           test_decode_lane_run_status_is_typed;
+        Alcotest.test_case "verifier summary keeps subject and verdict" `Quick
+          test_decode_verifier_lane_summary_keeps_subject_and_verdict;
         Alcotest.test_case "detail carries prompt and output" `Quick
           test_decode_lane_run_detail_carries_prompt_and_output;
         Alcotest.test_case "running detail has no output" `Quick
           test_decode_lane_run_detail_running_has_no_output;
+        Alcotest.test_case "verifier detail keeps kind, subject, and tools" `Quick
+          test_decode_verifier_detail_keeps_kind_subject_and_tool_result;
         Alcotest.test_case "detail requires the payload" `Quick
           test_decode_lane_run_detail_requires_the_payload;
       ] );

@@ -6593,7 +6593,8 @@ def standalone_lanes_response() -> HttpResponse:
     )
 
 
-LANE_RUNS_PATH = "/api/v1/dashboard/exact-lane-runs?limit=200"
+def lane_runs_path(lane_id: str) -> str:
+    return f"/api/v1/dashboard/exact-lane-runs?limit=50&lane={lane_id}"
 
 
 def lane_runs_response(lane_id: str, count: int) -> HttpResponse:
@@ -6616,6 +6617,68 @@ def lane_runs_response(lane_id: str, count: int) -> HttpResponse:
                 for index in range(count)
             ],
             "has_more": False,
+        },
+    )
+
+
+def verifier_lane_runs_response() -> HttpResponse:
+    return (
+        200,
+        {
+            "runs": [
+                {
+                    "run_id": "vrf-fixture",
+                    "run_kind": "task_verification",
+                    "lane": "verifier_exact",
+                    "subject_id": "task-9",
+                    "actor": "verifier_exact",
+                    "started_at": 1787557000.0,
+                    "status": "rejected",
+                    "elapsed_s": 3.0,
+                    "selected_slot": "verifier-primary",
+                }
+            ],
+            "has_more": False,
+        },
+    )
+
+
+def verifier_lane_run_detail_response() -> HttpResponse:
+    return (
+        200,
+        {
+            "run": {
+                "run_id": "vrf-fixture",
+                "run_kind": "task_verification",
+                "lane": "verifier_exact",
+                "subject_id": "task-9",
+                "actor": "verifier_exact",
+                "started_at": 1787557000.0,
+                "status": "rejected",
+                "elapsed_s": 3.0,
+                "selected_slot": "verifier-primary",
+                "input": {
+                    "kind": "exact",
+                    "payload": {
+                        "kind": "task_verification",
+                        "task_id": "task-9",
+                        "producer": "alpha",
+                    },
+                },
+                "output": {
+                    "reason": "missing proof",
+                    "tools": [
+                        {
+                            "tool_name": "masc_task_get",
+                            "input": {"task_id": "task-9"},
+                            "disposition": "completed",
+                            "output_excerpt": "awaiting verification",
+                            "output_truncated": False,
+                            "duration_ms": 12.0,
+                        }
+                    ],
+                },
+            }
         },
     )
 
@@ -6919,10 +6982,33 @@ def keeper_lanes_interaction(
                 "refresh dragged the standalone selection into the Keeper "
                 f"table: {standalone_refresh!r}"
             )
-        # Enter on a standalone lane opens its run list -- with Verifier the
-        # one exception, since its runs live in the verification registries
-        # and get a notice pane instead. One k walks the band from Verifier
-        # to Librarian, whose run list is the paged exact-run summary.
+        # Verifier is a real drill-down now: task/Goal review registries are
+        # joined server-side before pagination, so the list carries the
+        # subject and verdict and detail carries durable tool evidence.
+        fixtures[lane_runs_path("verifier_exact")] = verifier_lane_runs_response()
+        fixtures[
+            "/api/v1/dashboard/exact-lane-runs/vrf-fixture"
+        ] = verifier_lane_run_detail_response()
+        verifier_runs = send_and_wait(
+            process, master_fd, output, b"\r", b"rejected"
+        )
+        verifier_runs_plain = CSI_RE.sub(b"", verifier_runs)
+        if b"task task-9" not in verifier_runs_plain:
+            raise AssertionError(
+                f"Verifier run list did not name its task subject: {verifier_runs!r}"
+            )
+        verifier_detail = send_and_wait(
+            process, master_fd, output, b"\r", b"RESULT / TOOL EVIDENCE (1 calls)"
+        )
+        verifier_detail_plain = CSI_RE.sub(b"", verifier_detail)
+        if b"masc_task_get" not in verifier_detail_plain:
+            raise AssertionError(
+                f"Verifier detail dropped durable tool evidence: {verifier_detail!r}"
+            )
+        send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
+        send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)
+        # One k walks the band from Verifier to Librarian, whose run list is
+        # the exact-output summary.
         banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
         send_and_wait(process, master_fd, output, b"k", banded_librarian)
         # PgDn moves the run cursor by a page and the window must follow
@@ -6930,7 +7016,9 @@ def keeper_lanes_interaction(
         # while the footer kept claiming scroll 0. The fetch caps the list at
         # 50 (lane_run_list_limit), and 50 rows are taller than one window,
         # so the scroll note renders and names the window's offset.
-        fixtures[LANE_RUNS_PATH] = lane_runs_response("librarian_exact", 60)
+        fixtures[lane_runs_path("librarian_exact")] = lane_runs_response(
+            "librarian_exact", 50
+        )
         run_list = send_and_wait(
             process, master_fd, output, b"\r", b"[50 runs, scroll 0]"
         )

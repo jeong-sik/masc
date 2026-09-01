@@ -1453,12 +1453,11 @@ let add_routes ~sw ~clock router =
               reqd)
          request
          reqd)
-  (* Paged, and without either exact payload. Serving every retained run with
-     its payloads made this one response 246 MB for 5,908 runs — the whole
-     rendered prompt of every lane run, to draw a table of timestamps — and the
-     panel re-fetched it on every internal_agent_runs_changed event. A page
-     carries identity and outcome; [exact-lane-runs/<run_id>] carries the
-     payloads for the one run an operator opened. *)
+  (* Paged, and without detail payloads. [lane=] filters BEFORE pagination so
+     the Verifier's task/Goal review registries cannot be hidden behind a busy
+     Librarian window. Serving every exact-output payload made this response
+     246 MB for 5,908 runs; [exact-lane-runs/<run_id>] carries the exact prompt
+     or retained review/tool evidence for the one run an operator opened. *)
   |> Http.Router.get "/api/v1/dashboard/exact-lane-runs" (fun request reqd ->
        with_token_permission_auth ~permission:exact_lane_run_permission
          (fun _state _agent_name req reqd ->
@@ -1479,27 +1478,22 @@ let add_routes ~sw ~clock router =
            | None, None -> Ok None
            | _ -> Error "before_started_at and before_run_id must be given together"
          in
+         let lane =
+           Option.bind
+             (Server_utils.query_param req "lane" |> Option.map String.trim)
+             (fun value -> if String.equal value "" then None else Some value)
+         in
          match before with
          | Error message -> respond_dashboard_error ~request:req reqd message
          | Ok before ->
-           let page =
-             Exact_lane_run_registry.recent_runs
-               (Exact_lane_run_registry.global ())
-               ~limit
-               ~before
-           in
-           let json =
-             `Assoc
-               [ ("generated_at", `String (Masc_domain.now_iso ()))
-               ; ("count", `Int (List.length page.runs))
-               ; ("total", `Int page.total)
-               ; ("has_more", `Bool page.has_more)
-               ; ( "runs"
-                 , `List
-                     (List.map Exact_lane_run_registry.run_summary_to_yojson page.runs) )
-               ]
-           in
-           Http.Response.json_value ~compress:true ~request:req json reqd
+           (match
+              Server_standalone_lane_projection.recent_run_page_json
+                ~limit ~before ~lane
+            with
+            | Error message ->
+              respond_dashboard_error ~request:req reqd message
+            | Ok json ->
+              Http.Response.json_value ~compress:true ~request:req json reqd)
        ) request reqd)
   |> Http.Router.prefix_get "/api/v1/dashboard/exact-lane-runs/" (fun request reqd ->
        with_token_permission_auth ~permission:exact_lane_run_permission
@@ -1516,23 +1510,24 @@ let add_routes ~sw ~clock router =
          if String.equal (String.trim run_id) ""
          then respond_dashboard_error ~request:req reqd "run_id is required"
          else (
-           match
-             Exact_lane_run_registry.get (Exact_lane_run_registry.global ()) ~run_id
-           with
-           | None ->
+           match Server_standalone_lane_projection.run_detail_json ~run_id with
+           | Server_standalone_lane_projection.Detail_not_found ->
              respond_dashboard_error
                ~status:`Not_found
                ~request:req
                reqd
-               ("no retained exact-lane run named " ^ run_id)
-           | Some run ->
+               ("no retained standalone lane run named " ^ run_id)
+           | Server_standalone_lane_projection.Detail_ambiguous ->
+             respond_dashboard_error
+               ~status:`Internal_server_error
+               ~request:req
+               reqd
+               ("multiple standalone run registries contain " ^ run_id)
+           | Server_standalone_lane_projection.Detail_found json ->
              Http.Response.json_value
                ~compress:true
                ~request:req
-               (`Assoc
-                  [ ("generated_at", `String (Masc_domain.now_iso ()))
-                  ; ("run", Exact_lane_run_registry.run_to_yojson run)
-                  ])
+               json
                reqd)
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/workspace" (fun request reqd ->

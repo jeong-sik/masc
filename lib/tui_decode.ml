@@ -5594,6 +5594,9 @@ type lane_run_status =
   | Lane_run_failed
   | Lane_run_completion_persistence_failed
   | Lane_run_completion_durability_unknown
+  | Lane_run_verifier_positive of string
+  | Lane_run_verifier_negative of string
+  | Lane_run_verifier_failed of string
   | Lane_run_other of string
 
 let lane_run_status_of_string = function
@@ -5603,6 +5606,13 @@ let lane_run_status_of_string = function
   | "failed" -> Lane_run_failed
   | "completion_persistence_failed" -> Lane_run_completion_persistence_failed
   | "completion_durability_unknown" -> Lane_run_completion_durability_unknown
+  | ("approved" | "reviewed" | "committed") as status ->
+    Lane_run_verifier_positive status
+  | ("rejected" | "deferred" | "review_cancelled") as status ->
+    Lane_run_verifier_negative status
+  | ("infrastructure_unavailable" | "not_reviewed" | "commit_failed" | "raised")
+    as status ->
+    Lane_run_verifier_failed status
   | other -> Lane_run_other other
 
 let lane_run_status_label = function
@@ -5612,11 +5622,34 @@ let lane_run_status_label = function
   | Lane_run_failed -> "failed"
   | Lane_run_completion_persistence_failed -> "completion_persistence_failed"
   | Lane_run_completion_durability_unknown -> "completion_durability_unknown"
-  | Lane_run_other other -> other
+  | Lane_run_verifier_positive status
+  | Lane_run_verifier_negative status
+  | Lane_run_verifier_failed status
+  | Lane_run_other status -> status
+
+type lane_run_kind =
+  | Lane_run_exact_output
+  | Lane_run_task_verification
+  | Lane_run_goal_verification
+  | Lane_run_kind_other of string
+
+let lane_run_kind_of_string = function
+  | "exact_output" -> Lane_run_exact_output
+  | "task_verification" -> Lane_run_task_verification
+  | "goal_verification" -> Lane_run_goal_verification
+  | other -> Lane_run_kind_other other
+
+let lane_run_kind_label = function
+  | Lane_run_exact_output -> "exact output"
+  | Lane_run_task_verification -> "task verification"
+  | Lane_run_goal_verification -> "goal verification"
+  | Lane_run_kind_other other -> other
 
 type lane_run_summary =
   { lrs_run_id : string
+  ; lrs_run_kind : lane_run_kind
   ; lrs_lane : string
+  ; lrs_subject_id : string option
   ; lrs_actor : string
   ; lrs_started_at : float
   ; lrs_status : lane_run_status
@@ -5631,7 +5664,9 @@ type lane_run_page =
 
 type lane_run_detail =
   { lrd_run_id : string
+  ; lrd_run_kind : lane_run_kind
   ; lrd_lane : string
+  ; lrd_subject_id : string option
   ; lrd_actor : string
   ; lrd_started_at : float
   ; lrd_status : lane_run_status
@@ -5643,7 +5678,9 @@ type lane_run_detail =
 
 let decode_lane_run_summary json =
   let* lrs_run_id = required_string_field json "run_id" in
+  let* lrs_run_kind = optional_string_field json "run_kind" in
   let* lrs_lane = required_string_field json "lane" in
+  let* lrs_subject_id = optional_string_field json "subject_id" in
   let* lrs_actor = required_string_field json "actor" in
   let* lrs_started_at = require_float_field json "started_at" in
   let* lrs_status = required_string_field json "status" in
@@ -5651,7 +5688,12 @@ let decode_lane_run_summary json =
   let* lrs_selected_slot = optional_string_field json "selected_slot" in
   Ok
     { lrs_run_id
+    ; lrs_run_kind =
+        (match lrs_run_kind with
+         | None -> Lane_run_exact_output
+         | Some kind -> lane_run_kind_of_string kind)
     ; lrs_lane
+    ; lrs_subject_id
     ; lrs_actor
     ; lrs_started_at
     ; lrs_status = lane_run_status_of_string lrs_status
@@ -5693,7 +5735,9 @@ let decode_lane_run_detail json =
   in
   Ok
     { lrd_run_id = summary.lrs_run_id
+    ; lrd_run_kind = summary.lrs_run_kind
     ; lrd_lane = summary.lrs_lane
+    ; lrd_subject_id = summary.lrs_subject_id
     ; lrd_actor = summary.lrs_actor
     ; lrd_started_at = summary.lrs_started_at
     ; lrd_status = summary.lrs_status

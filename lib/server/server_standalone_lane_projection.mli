@@ -26,6 +26,25 @@ type lane_configuration =
 
 val snapshot_json : unit -> Yojson.Safe.t
 
+type detail_lookup =
+  | Detail_found of Yojson.Safe.t
+  | Detail_not_found
+  | Detail_ambiguous
+
+val recent_run_page_json
+  :  limit:int
+  -> before:(float * string) option
+  -> lane:string option
+  -> (Yojson.Safe.t, string) result
+(** A cursor page over the same durable registries as {!snapshot_json}.
+    Filtering happens before pagination, so a quiet lane is not hidden behind
+    a busier lane's bounded page. [None] preserves the mixed admin listing. *)
+
+val run_detail_json : run_id:string -> detail_lookup
+(** Exact payload/result evidence for one retained run. Verifier results keep
+    their task/Goal subject, verdict reason, evaluator runtime, and durable
+    tool observations. Duplicate ids across registries fail explicitly. *)
+
 module For_testing : sig
   val snapshot_json_with
     :  now:float
@@ -35,4 +54,20 @@ module For_testing : sig
     -> verification_runs:Verification_run_registry.run list
     -> goal_verification_runs:Goal_verification_run_registry.run list
     -> Yojson.Safe.t
+
+  val recent_run_page_json_with
+    :  limit:int
+    -> before:(float * string) option
+    -> lane:string option
+    -> exact_runs:Exact_lane_run_registry.run list
+    -> verification_runs:Verification_run_registry.run list
+    -> goal_verification_runs:Goal_verification_run_registry.run list
+    -> (Yojson.Safe.t, string) result
+
+  val run_detail_json_with
+    :  run_id:string
+    -> exact_runs:Exact_lane_run_registry.run list
+    -> verification_runs:Verification_run_registry.run list
+    -> goal_verification_runs:Goal_verification_run_registry.run list
+    -> detail_lookup
 end

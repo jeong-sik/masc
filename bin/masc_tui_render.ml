@@ -4896,15 +4896,18 @@ let render_lanes_overview (state : state) =
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
 
-(* Status colours for exact-lane runs, keyed on the decoded variant; a label
+(* Status colours for standalone-lane runs, keyed on the decoded variant; a label
    the producer adds later decodes to [Lane_run_other] and reads muted until
    it is named here. *)
 let lane_run_status_style = function
   | Tui_decode.Lane_run_succeeded -> Theme.ok ()
-  | Tui_decode.Lane_run_cancelled -> Theme.warn ()
+  | Tui_decode.Lane_run_verifier_positive _ -> Theme.ok ()
+  | Tui_decode.Lane_run_cancelled
+  | Tui_decode.Lane_run_verifier_negative _ -> Theme.warn ()
   | Tui_decode.Lane_run_failed
   | Tui_decode.Lane_run_completion_persistence_failed
-  | Tui_decode.Lane_run_completion_durability_unknown -> Theme.bad ()
+  | Tui_decode.Lane_run_completion_durability_unknown
+  | Tui_decode.Lane_run_verifier_failed _ -> Theme.bad ()
   | Tui_decode.Lane_run_running -> Theme.info ()
   | Tui_decode.Lane_run_other _ -> Theme.muted ()
 
@@ -4926,8 +4929,18 @@ let standalone_lane_label (state : state) lane_id =
        | Some lane -> lane.sl_label
        | None -> lane_id)
 
-(** Recent exact runs of one standalone lane. The list is the paged summary:
-    no payload ever crosses it, so an Enter here is what fetches a prompt. *)
+let lane_run_subject (run : Tui_decode.lane_run_summary) =
+  match run.lrs_run_kind, run.lrs_subject_id with
+  | Tui_decode.Lane_run_task_verification, Some subject -> "task " ^ subject
+  | Tui_decode.Lane_run_goal_verification, Some subject -> "goal " ^ subject
+  | (Tui_decode.Lane_run_exact_output | Tui_decode.Lane_run_kind_other _), _
+  | (Tui_decode.Lane_run_task_verification | Tui_decode.Lane_run_goal_verification),
+    None ->
+    run.lrs_actor
+;;
+
+(** Recent retained runs of one standalone lane. The list is the paged summary:
+    no payload ever crosses it, so Enter fetches one exact detail. *)
 let render_lane_run_list (state : state) ~lane_id =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -4949,9 +4962,13 @@ let render_lane_run_list (state : state) ~lane_id =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  let identity_heading =
+    if String.equal lane_id Runtime.verifier_exact_lane_id then "SUBJECT"
+    else "ACTOR"
+  in
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  %-17s %-16s %-11s %-8s %-16s %s" "STARTED" "ACTOR"
-       "STATUS" "ELAPSED" "SLOT" "RUN ID");
+    (Printf.sprintf "  %-17s %-16s %-11s %-8s %-16s %s" "STARTED"
+       identity_heading "STATUS" "ELAPSED" "SLOT" "RUN ID");
   box_divider buf cols;
   (match state.lane_runs_error with
    | None -> ()
@@ -4974,7 +4991,7 @@ let render_lane_run_list (state : state) ~lane_id =
       with
       | Page_failed -> page_failed_note
       | Page_unread -> page_unread_note
-      | Page_empty -> "  (no retained exact runs for this lane)"
+      | Page_empty -> "  (no retained runs for this lane)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
@@ -4994,7 +5011,7 @@ let render_lane_run_list (state : state) ~lane_id =
           let line =
             Printf.sprintf "  %-17s %-16s %s%-11s%s %-8s %-16s %s"
               (lane_run_clock run.lrs_started_at)
-              (fit_width (Terminal_text.single_line run.lrs_actor) 16)
+              (fit_width (Terminal_text.single_line (lane_run_subject run)) 16)
               (lane_run_status_style run.lrs_status)
               (fit_width (Tui_decode.lane_run_status_label run.lrs_status) 11)
               Ansi.reset elapsed
@@ -5057,18 +5074,51 @@ let lane_run_detail_lines ~width (detail : Tui_decode.lane_run_detail) =
         Printf.sprintf "  ·  %.1fs  ·  slot %s" seconds
           (Terminal_text.single_line slot)
   in
+  let subject_line =
+    match detail.lrd_run_kind, detail.lrd_subject_id with
+    | Tui_decode.Lane_run_task_verification, Some subject ->
+      [ Ansi.reset, "  Task: " ^ Terminal_text.single_line subject ]
+    | Tui_decode.Lane_run_goal_verification, Some subject ->
+      [ Ansi.reset, "  Goal: " ^ Terminal_text.single_line subject ]
+    | (Tui_decode.Lane_run_exact_output | Tui_decode.Lane_run_kind_other _), _
+    | (Tui_decode.Lane_run_task_verification | Tui_decode.Lane_run_goal_verification),
+      None ->
+      []
+  in
+  let input_heading, output_heading =
+    match detail.lrd_run_kind with
+    | Tui_decode.Lane_run_exact_output -> "INPUT (prompt payload)", "OUTPUT"
+    | Tui_decode.Lane_run_task_verification
+    | Tui_decode.Lane_run_goal_verification ->
+      let tool_count =
+        match detail.lrd_output with
+        | Some json ->
+          (match json_assoc_member_opt "tools" json with
+           | Some (`List tools) -> Some (List.length tools)
+           | Some _ | None -> None)
+        | None -> None
+      in
+      ( "REQUEST"
+      , match tool_count with
+        | None -> "RESULT / TOOL EVIDENCE"
+        | Some count -> Printf.sprintf "RESULT / TOOL EVIDENCE (%d calls)" count )
+    | Tui_decode.Lane_run_kind_other _ -> "INPUT", "OUTPUT"
+  in
   [ Ansi.bold, "  RUN"
   ; Ansi.reset, "  Run: " ^ Terminal_text.single_line detail.lrd_run_id
+  ; Ansi.reset, "  Kind: " ^ Tui_decode.lane_run_kind_label detail.lrd_run_kind
   ; Ansi.reset, "  Lane: " ^ Terminal_text.single_line detail.lrd_lane
   ; Ansi.reset, "  Actor: " ^ Terminal_text.single_line detail.lrd_actor
-  ; Ansi.dim, "  Started: " ^ lane_run_clock detail.lrd_started_at
+  ]
+  @ subject_line
+  @ [ Ansi.dim, "  Started: " ^ lane_run_clock detail.lrd_started_at
   ; ( lane_run_status_style detail.lrd_status
     , "  Status: " ^ Tui_decode.lane_run_status_label detail.lrd_status ^ elapsed_slot )
   ; Ansi.dim, ""
-  ; Ansi.bold, "  INPUT (prompt payload)"
+  ; Ansi.bold, "  " ^ input_heading
   ]
   @ lane_run_payload_lines ~width detail.lrd_input_payload
-  @ [ Ansi.dim, ""; Ansi.bold, "  OUTPUT" ]
+  @ [ Ansi.dim, ""; Ansi.bold, "  " ^ output_heading ]
   @ (match detail.lrd_output with
      | None ->
          [ (Theme.muted ()), "  (run has not completed; no output recorded)" ]
@@ -5126,43 +5176,11 @@ let render_lane_run_detail (state : state) ~run_id =
   finish_surface state ~clamped:(Lane_run_detail_scroll scroll)
     ~surface_key:"lane-run" ~rows:terminal_rows ~cols buf
 
-(* The lane notice is static: it explains a recording boundary and fetches
-   nothing, so it draws its lines whole with no scroll model, and the text
-   itself lives in [Masc_tui_types.verifier_lane_notice_lines] where a test
-   can pin it. *)
-let render_lane_notice (state : state) ~lane_id =
-  let terminal_rows, cols = get_terminal_size () in
-  let buf = Buffer.create 2048 in
-  let header =
-    Printf.sprintf "%s · %s  %s"
-      (screen_title " MASC Lanes")
-      (fit_width
-         (Terminal_text.single_line (standalone_lane_label state lane_id))
-         20)
-      (connection_badge state)
-  in
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
-  List.iter
-    (fun line ->
-       match line with
-       | Lane_notice_heading text ->
-           box_line_styled buf cols ~style:Ansi.bold text
-       | Lane_notice_text text -> box_line buf cols text
-       | Lane_notice_dim text -> box_line_styled buf cols ~style:Ansi.dim text)
-    verifier_lane_notice_lines;
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:Masc_tui_keys.footer_hints_lane_notice);
-  finish_surface state ~surface_key:"lane-notice" ~rows:terminal_rows ~cols buf
-
 let render_lanes (state : state) =
   match state.lanes_mode with
   | Lanes_overview -> render_lanes_overview state
   | Lanes_run_list lane_id -> render_lane_run_list state ~lane_id
   | Lanes_run_detail (_, run_id) -> render_lane_run_detail state ~run_id
-  | Lanes_lane_notice lane_id -> render_lane_notice state ~lane_id
 
 (** Render keeper detail view with live context and scrolling *)
 (* The detail box alone -- borders, title, scrolled content -- written into

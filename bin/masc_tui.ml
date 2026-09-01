@@ -5746,17 +5746,8 @@ let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
 let open_lanes_standalone_selection state ~mailbox =
   match selected_standalone_lane state with
   | Some (lane : Tui_decode.standalone_lane) ->
-      if String.equal lane.sl_lane_id Runtime.verifier_exact_lane_id then begin
-        (* Verifier runs are recorded in the verification registries, which
-           have no LLM prompt/output -- the notice pane says what is recorded
-           instead of opening an empty list or faking a payload. *)
-        state.lanes_action_error <- None;
-        state.lanes_mode <- Lanes_lane_notice lane.sl_lane_id
-      end
-      else begin
-        state.lanes_action_error <- None;
-        open_lane_run_list state ~mailbox lane
-      end
+      state.lanes_action_error <- None;
+      open_lane_run_list state ~mailbox lane
   | None ->
       show_lanes_action_error state
         "Cannot open runs: standalone lane observation is unavailable"
@@ -8596,8 +8587,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                    stale, clearing them would turn a failed refresh into an
                    empty reading. *)
                 state.lane_runs_error <- Some detail)
-       | Lanes_run_list _ | Lanes_overview | Lanes_run_detail _
-       | Lanes_lane_notice _ -> ())
+       | Lanes_run_list _ | Lanes_overview | Lanes_run_detail _ -> ())
   | Lane_run_detail_loaded (run_id, result) ->
       (match state.lanes_mode with
        | Lanes_run_detail (_, open_run) when String.equal open_run run_id ->
@@ -8606,8 +8596,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 state.lane_run_detail <- Some detail;
                 state.lane_run_detail_error <- None
             | Error detail -> state.lane_run_detail_error <- Some detail)
-       | Lanes_run_detail _ | Lanes_overview | Lanes_run_list _
-       | Lanes_lane_notice _ -> ())
+       | Lanes_run_detail _ | Lanes_overview | Lanes_run_list _ -> ())
   | Harness_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -12048,8 +12037,7 @@ and is loaded on demand through keeper_skill.
                             Masc_tui_scroll.ensure_visible
                               ~cursor:state.lane_runs_cursor ~height
                               state.lane_runs_scroll)
-                 (* The notice is a static pane; there is nothing to page. *)
-                 | Lanes_lane_notice _ | Lanes_overview -> ())
+                 | Lanes_overview -> ())
             | Overview | Acting | Keepers _ | Approvals | Planning
             | Memory | Repositories | Changes | Connectors
             | Runtime | Config | Tools | Resources | System_logs -> ())
@@ -12108,9 +12096,7 @@ and is loaded on demand through keeper_skill.
                  | Lanes_run_detail (_, run_id) ->
                      launch_lane_run_detail_load state ~mailbox:async_messages
                        ~run_id
-                 (* The notice is static; the overview reload above is all it
-                    can ask for. *)
-                 | Lanes_lane_notice _ | Lanes_overview -> ())
+                 | Lanes_overview -> ())
             | Harness -> launch_harness_load state ~mailbox:async_messages
             | Fusion ->
                 launch_fusion_runs_load state ~mailbox:async_messages;
@@ -12310,9 +12296,6 @@ and is loaded on demand through keeper_skill.
                      state.lane_runs_error <- None;
                      state.lane_runs_cursor <- 0;
                      state.lane_runs_scroll <- 0
-                 (* The notice holds no fetched state, so leaving it is just
-                    the mode. *)
-                 | Lanes_lane_notice _ -> state.lanes_mode <- Lanes_overview
                  | Lanes_overview -> state.view <- Overview)
             | Acting | Keepers Keeper_list -> state.view <- Overview
             | Approvals ->
@@ -12456,7 +12439,6 @@ and is loaded on demand through keeper_skill.
                      state.lane_runs_error <- None;
                      state.lane_runs_cursor <- 0;
                      state.lane_runs_scroll <- 0
-                 | Lanes_lane_notice _ -> state.lanes_mode <- Lanes_overview
                  | Lanes_overview -> ())
             | Runtime ->
                 state.runtime_detail_target <- None;
@@ -12670,7 +12652,6 @@ and is loaded on demand through keeper_skill.
                  | Lanes_run_detail _ ->
                      state.lane_run_detail_scroll <-
                        state.lane_run_detail_scroll + 1
-                 | Lanes_lane_notice _ -> ()
                  | Lanes_run_list _ ->
                      (let cursor, scroll =
                         move_row_cursor state ~delta:1
@@ -12978,7 +12959,6 @@ and is loaded on demand through keeper_skill.
                  | Lanes_run_detail _ ->
                      state.lane_run_detail_scroll <-
                        max 0 (state.lane_run_detail_scroll - 1)
-                 | Lanes_lane_notice _ -> ()
                  | Lanes_run_list _ ->
                      (let cursor, scroll =
                         move_row_cursor state ~delta:(-1)
@@ -13267,7 +13247,7 @@ and is loaded on demand through keeper_skill.
                                  ~run_id:run.lrs_run_id
                            | None -> ())
                       | None -> ())
-                 | Lanes_run_detail _ | Lanes_lane_notice _ -> ()
+                 | Lanes_run_detail _ -> ()
                  | Lanes_overview ->
                      open_lanes_standalone_selection state
                        ~mailbox:async_messages)
@@ -13764,7 +13744,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_runtime_pick -> ()
             | Lanes ->
                 (match state.lanes_mode with
-                 | Lanes_run_list _ | Lanes_run_detail _ | Lanes_lane_notice _ -> ()
+                 | Lanes_run_list _ | Lanes_run_detail _ -> ()
                  | Lanes_overview ->
                      show_lanes_action_error state
                        "Cannot open chat: Standalone lanes have no Keeper; use Keepers")

@@ -328,6 +328,16 @@ value says its original byte count instead of ending in an unexplained `~`.
 A standalone lane has no Keeper identity, so `c` / `m` explains that chat
 belongs on Keepers instead of silently opening an unrelated Keeper.
 
+`Verifier` joins two durable review registries: task completion-authority
+reviews and Goal proof reviews. Its run list names `task <id>` or `goal <id>`
+in the subject column and keeps the producer verdict (`approved`, `rejected`,
+`committed`, `deferred`, or the exact failure) as the status, so approval and
+rejection do not require opening every row. Detail names the review kind and
+shows the request followed by the retained result, reason, evaluator runtime,
+and tool observations including input, disposition, output excerpt, duration,
+and truncation state. The server filters a lane before cursor pagination;
+Verifier history is therefore not hidden behind a busier Librarian window.
+
 ### Keeper detail
 
 Right or `Enter` from the Keeper list or Lanes. Live context comes from the

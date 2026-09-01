@@ -529,35 +529,6 @@ let lanes_state ?(keepers = [ "alpha"; "beta" ]) () =
   state.lanes <- Some (keeper_snapshot (List.map keeper_lane keepers));
   state
 
-let test_lane_notice_footer_names_the_way_back () =
-  (* The notice is static: no j/k, no Enter -- only the way back and the
-     shared tail. *)
-  check str "the lane notice keeps only the way back"
-    "Left / Esc:back  r:refresh  Tab:next  q:quit"
-    Masc_tui_keys.footer_hints_lane_notice
-
-let test_lane_notice_says_what_is_recorded () =
-  let rendered =
-    List.map
-      (function
-        | Lane_notice_heading text -> "H" ^ text
-        | Lane_notice_text text -> "T" ^ text
-        | Lane_notice_dim text -> "D" ^ text)
-      verifier_lane_notice_lines
-  in
-  Alcotest.(check (list string))
-    "the notice names the boundary and where to read runs"
-    [ "H  This lane records no LLM prompt/output"
-    ; "T"
-    ; "T  Verifier runs are kept by the verification registries, not the"
-    ; "T  exact-lane run store. A run records its outcome, elapsed time, and"
-    ; "T  tool observations with output excerpts -- never a prompt."
-    ; "T"
-    ; "D  Read them in Planning > Task Review: press v from Planning, or :"
-    ; "D  and type \"go Task Review\"."
-    ]
-    rendered
-
 let test_lanes_search_texts_lead_with_the_standalone_labels () =
   let state = lanes_state () in
   Alcotest.(check (option (list string)))
@@ -572,8 +543,8 @@ let test_lanes_sub_modes_stay_unsearchable () =
   state.lanes_mode <- Lanes_run_list "librarian_exact";
   Alcotest.(check (option (list string))) "run list keeps / closed" None
     (surface_row_texts state Lanes);
-  state.lanes_mode <- Lanes_lane_notice "verifier_exact";
-  Alcotest.(check (option (list string))) "lane notice keeps / closed" None
+  state.lanes_mode <- Lanes_run_detail ("verifier_exact", "vrf-1");
+  Alcotest.(check (option (list string))) "run detail keeps / closed" None
     (surface_row_texts state Lanes)
 
 let hit_to_string = function
@@ -738,10 +709,6 @@ let () =
             test_lanes_run_list_footer_names_the_drill_down
         ; Alcotest.test_case "Lanes run detail appends the scroll position" `Quick
             test_lanes_run_detail_footer_appends_the_scroll_position
-        ; Alcotest.test_case "lane notice footer names the way back" `Quick
-            test_lane_notice_footer_names_the_way_back
-        ; Alcotest.test_case "lane notice says what is recorded" `Quick
-            test_lane_notice_says_what_is_recorded
         ; Alcotest.test_case "Overview footer projects by focus" `Quick
             test_overview_footer_projects_by_focus
         ; Alcotest.test_case "System logs owns only real filter keys" `Quick

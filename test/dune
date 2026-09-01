@@ -1647,6 +1647,9 @@
  (libraries
   masc_test_deps
   masc_test_runtime
+  ;; The schedule exact-lookup test drives Schedule_store to produce the wakes
+  ;; the projection is asserted on, rather than hand-writing a store ledger.
+  masc.masc_schedule
   masc.embedded_config
   masc.skill_config
   masc.skill_reference

@@ -1056,9 +1056,30 @@ let scheduled_automation_exact_lookup_json config ~now ~schedule_id:raw_schedule
               state
               [ request ]
           in
+          (* The wake list rides the exact lookup and not the aggregate: the
+             fleet page has one row per schedule and no room for each row's
+             attempts, and until this endpoint carried them an operator could
+             read exactly one of the up-to-32 the store keeps. The ceiling
+             travels with the list so the count cannot be read as a complete
+             history. *)
+          let wakes =
+            Schedule_store.wakes_for_schedule_instance
+              state
+              ~schedule_instance_id:request.schedule_instance_id
+              ~schedule_id:request.schedule_id
+          in
           (match requests with
            | [ request_json ] ->
-             exact_lookup_json ~now ~schedule_id Found [ "request", request_json ]
+             exact_lookup_json
+               ~now
+               ~schedule_id
+               Found
+               [ "request", request_json
+               ; "wakes", `List (List.map wake_record_dashboard_json wakes)
+               ; "wake_count", `Int (List.length wakes)
+               ; ( "wake_retention_per_schedule"
+                 , `Int Schedule_store.terminal_wakes_retained_per_schedule )
+               ]
            | [] | _ :: _ :: _ ->
              exact_lookup_json
                ~now

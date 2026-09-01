@@ -168,3 +168,18 @@ val classify_keeper_schedule_absence :
   truncated:bool -> shown:int -> total:int option -> keeper_schedule_absence
 (** Why a Keeper's schedule filter matched nothing. A capped page cannot say
     the store is empty; it can only say it did not look at all of it. *)
+
+(** {1 Schedule wake reading} *)
+
+type wake_reading =
+  | Wake_history of { count : int; retention : int }
+  | Wake_never
+  | Wake_last_only
+  | Wake_history_failed of string
+
+val classify_wake_reading :
+  history_error:string option -> history:(int * int) option -> wake_reading
+(** What the schedule detail can say about a schedule's wakes. [history] is
+    (retained count, per-schedule ceiling) once the exact lookup answers.
+    [Wake_last_only] is the row's single newest attempt while the list is in
+    flight; it is not an empty history, and neither is a failed load. *)

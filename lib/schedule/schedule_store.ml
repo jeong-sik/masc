@@ -523,12 +523,18 @@ let make_wake_record ~now (request : schedule_request) =
   }
 ;;
 
-let last_wake_for_schedule_instance state ~schedule_instance_id ~schedule_id =
-  List.find_opt
+let wakes_for_schedule_instance state ~schedule_instance_id ~schedule_id =
+  List.filter
     (fun (wake : wake_record) ->
        String.equal wake.schedule_instance_id schedule_instance_id
        && String.equal wake.schedule_id schedule_id)
     state.wakes
+;;
+
+let last_wake_for_schedule_instance state ~schedule_instance_id ~schedule_id =
+  match wakes_for_schedule_instance state ~schedule_instance_id ~schedule_id with
+  | wake :: _ -> Some wake
+  | [] -> None
 ;;
 
 let update_latest_running_wake wakes ~schedule_id update =

@@ -1523,6 +1523,81 @@ let test_schedule_exact_lookup_rejects_blank_id () =
     (Some (Masc_domain.iso8601_of_unix_seconds now))
     (field "generated_at")
 
+(* The exact lookup is where a schedule's past is read, because the aggregate
+   sends one wake per row and 20 rows of 323. Until this projection carried the
+   list, one attempt of the up-to-32 the store keeps was all an operator could
+   see. The ceiling travels with the list so a count of three cannot be read as
+   "it has only ever woken three times" when the sweep has trimmed. *)
+let test_schedule_exact_lookup_carries_the_wake_history () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let schedule_id = "sched-wake-history" in
+  let request =
+    match
+      Schedule_domain.create_request
+        ~schedule_id
+        ~requested_by:
+          { Schedule_domain.id = "requester"
+          ; kind = Schedule_domain.Human_operator
+          ; display_name = None
+          }
+        ~scheduled_by:
+          { Schedule_domain.id = "scheduler"
+          ; kind = Schedule_domain.Human_operator
+          ; display_name = None
+          }
+        ~requested_at:100.0
+        ~due_at:200.0
+        ~payload:
+          (`Assoc
+            [ "kind", `String "consumer.note"
+            ; "body", `Assoc [ "text", `String "wake history fixture" ]
+            ])
+        ~source:Schedule_domain.Operator_request
+        ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+        ()
+    with
+    | Ok request -> request
+    | Error msg -> fail msg
+  in
+  (match Schedule_store.insert_request config request with
+   | Ok _ -> ()
+   | Error _ -> fail "the fixture schedule could not be inserted");
+  let occurrence now =
+    (match Schedule_store.refresh_due config ~now with
+     | Ok _ -> ()
+     | Error _ -> fail "refresh_due refused the fixture");
+    (match Schedule_store.start_due_candidate config ~now:(now +. 1.0) ~schedule_id with
+     | Ok _ -> ()
+     | Error _ -> fail "start_due_candidate refused the fixture");
+    match Schedule_store.accept_running config ~now:(now +. 2.0) ~schedule_id () with
+    | Ok _ -> ()
+    | Error _ -> fail "accept_running refused the fixture"
+  in
+  occurrence 201.0;
+  occurrence 261.0;
+  occurrence 321.0;
+  let body =
+    Server_dashboard_schedule_projection.scheduled_automation_exact_lookup_json
+      config
+      ~now:400.0
+      ~schedule_id
+  in
+  let open Yojson.Safe.Util in
+  check string "the lookup found it" "found" (body |> member "status" |> to_string);
+  let wakes = body |> member "wakes" |> to_list in
+  check int "every retained occurrence is listed" 3 (List.length wakes);
+  let started = List.map (fun w -> w |> member "started_at" |> to_float) wakes in
+  check
+    (list (float 0.001))
+    "newest first"
+    (List.sort (fun a b -> Float.compare b a) started)
+    started;
+  check int "the count states the list it sent" 3
+    (body |> member "wake_count" |> to_int);
+  check int "and the store's ceiling travels with it"
+    Schedule_store.terminal_wakes_retained_per_schedule
+    (body |> member "wake_retention_per_schedule" |> to_int)
+
 (* The window selects which rows the scan covers, so two windows must not share
    an entry. Seeding only the 24 h key and asking for 1 h has to miss. *)
 let test_agent_activity_keys_on_its_window () =
@@ -4418,6 +4493,8 @@ let () =
             test_dashboard_proof_http_json_surfaces_submission_index;
           test_case "scheduled-automation reads its cache key" `Quick
             test_scheduled_automation_reads_its_cache_key;
+          test_case "schedule exact lookup carries the wake history" `Quick
+            test_schedule_exact_lookup_carries_the_wake_history;
           test_case "schedule exact lookup names a blank id" `Quick
             test_schedule_exact_lookup_rejects_blank_id;
           test_case "agent-activity keys on its window" `Quick

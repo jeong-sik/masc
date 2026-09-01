@@ -3895,7 +3895,74 @@ let schedule_turn_rows
          | Some count -> string_of_int count)
       ]
 
-let schedule_detail_lines ~width (row : schedule_row) =
+(* The wake block. The row carries the newest attempt and the exact lookup
+   carries the retained list, so this pane reports whichever it has and says
+   which: one attempt out of up to 32 read as a schedule's whole past for as
+   long as the list was the only thing not projected. The three unloaded
+   readings stay three sentences. *)
+let schedule_wake_lines
+      ~(field : ?style:string -> string -> string -> string * string)
+      ~(timestamp : string option -> string) ~(row : schedule_row)
+      ~(history : schedule_wake_history option)
+      ~(history_error : (string * string) option) =
+  let last_wake_fields =
+    [ field
+        ~style:
+          (Option.fold ~none:Ansi.dim ~some:schedule_status_color
+             row.sch_last_wake_status)
+        "Status" (Option.value ~default:"\xe2\x80\x94" row.sch_last_wake_status)
+    ; field "Started" (timestamp row.sch_last_wake_started_at_iso)
+    ; field
+        ~style:(if Option.is_some row.sch_last_wake_error then Theme.bad () else Ansi.dim)
+        "Error" (Option.value ~default:"\xe2\x80\x94" row.sch_last_wake_error)
+    ]
+  in
+  match
+    Render_schedule.classify_wake_reading
+      ~history_error:(Option.map snd history_error)
+      ~history:
+        (Option.map
+           (fun h -> (List.length h.swh_wakes, h.swh_retention_per_schedule))
+           history)
+  with
+  | Render_schedule.Wake_history_failed err ->
+      (Ansi.bold, "  LAST WAKE")
+      :: last_wake_fields
+      @ [ (Theme.bad (), "  wake history unavailable: " ^ Terminal_text.single_line err) ]
+  | Render_schedule.Wake_last_only ->
+      (Ansi.bold, "  LAST WAKE")
+      :: last_wake_fields
+      @ [ (Ansi.dim, "  (loading the rest of this schedule's wakes\xe2\x80\xa6)") ]
+  | Render_schedule.Wake_never ->
+      [ Ansi.bold, "  WAKES"; (Ansi.dim, "  (this schedule has not woken)") ]
+  | Render_schedule.Wake_history { count; retention } ->
+      let wakes =
+        match history with Some h -> h.swh_wakes | None -> []
+      in
+        (Ansi.bold
+        , Printf.sprintf "  WAKES (%d retained, ceiling %d per schedule)"
+            count retention )
+        :: List.concat_map
+             (fun (wake : schedule_wake) ->
+                let started = timestamp wake.swk_started_at_iso in
+                let finished = timestamp wake.swk_finished_at_iso in
+                let head =
+                  ( schedule_status_color wake.swk_status
+                  , Printf.sprintf "  %-12s %s \xe2\x86\x92 %s"
+                      (Terminal_text.single_line wake.swk_status) started finished )
+                in
+                match wake.swk_error with
+                | None -> [ head ]
+                | Some err ->
+                    [ head
+                    ; ( Theme.bad ()
+                      , "               " ^ Terminal_text.single_line err )
+                    ])
+             wakes
+
+let schedule_detail_lines ~width (row : schedule_row)
+      ~(wake_history : schedule_wake_history option)
+      ~(wake_history_error : (string * string) option) =
   let field ?(style = Ansi.reset) label value =
     ( style
     , Printf.sprintf "  %-14s %s" label (Terminal_text.single_line value) )
@@ -3974,18 +4041,10 @@ let schedule_detail_lines ~width (row : schedule_row) =
   @ (document_markdown ~width:(max 1 (width - 4))
        ("```json\n" ^ Yojson.Safe.pretty_to_string row.sch_payload ^ "\n```")
     |> List.map (fun line -> Ansi.reset, "    " ^ line))
+  @ [ (Ansi.dim, "") ]
+  @ schedule_wake_lines ~field ~timestamp ~row ~history:wake_history
+      ~history_error:wake_history_error
   @ [ Ansi.dim, ""
-    ; Ansi.bold, "  LAST WAKE"
-    ; field
-        ~style:
-          (Option.fold ~none:Ansi.dim ~some:schedule_status_color
-             row.sch_last_wake_status)
-        "Status" (optional row.sch_last_wake_status)
-    ; field "Started" (timestamp row.sch_last_wake_started_at_iso)
-    ; field
-        ~style:(if Option.is_some row.sch_last_wake_error then Theme.bad () else Ansi.dim)
-        "Error" (optional row.sch_last_wake_error)
-    ; Ansi.dim, ""
     ; Ansi.bold, "  DELIVERY EVIDENCE"
     ; field
         ~style:
@@ -4015,7 +4074,13 @@ let schedule_detail_pane (state : state) ~rows ~cols (row : schedule_row) buf =
        (schedule_status_color row.sch_status)
        (Terminal_text.single_line row.sch_status) Ansi.reset);
   box_divider buf cols;
-  let lines = schedule_detail_lines ~width:(max 1 (framed_inner_width cols)) row in
+  let lines =
+    schedule_detail_lines
+      ~width:(max 1 (framed_inner_width cols))
+      row
+      ~wake_history:state.schedule_wake_history
+      ~wake_history_error:state.schedule_wake_history_error
+  in
   let content_height = max 1 (rows - 6) in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.schedule_scroll max_scroll) in

@@ -78,6 +78,21 @@ val last_wake_for_schedule_instance :
   schedule_id:string ->
   Schedule_domain.wake_record option
 
+val wakes_for_schedule_instance :
+  state ->
+  schedule_instance_id:string ->
+  schedule_id:string ->
+  Schedule_domain.wake_record list
+(** Every retained wake of one schedule instance, newest first. Bounded by the
+    store's own sweep, not by this call: in-flight wakes all survive and
+    terminal ones keep {!terminal_wakes_retained_per_schedule} per schedule.
+    [last_wake_for_schedule_instance] is the head of this list. *)
+
+val terminal_wakes_retained_per_schedule : int
+(** Terminal wakes the sweep keeps per schedule_id, newest first. A reader of
+    a wake list needs this number to know the list is a ceiling rather than a
+    complete history. *)
+
 val insert_request :
   Workspace_utils.config ->
   Schedule_domain.schedule_request ->

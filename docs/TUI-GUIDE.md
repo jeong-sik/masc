@@ -783,12 +783,24 @@ error instead of redrawing it as an empty result.
 
 ### Memory
 
-Keeper별 Memory OS 건강 상태를 한 표로 보여준다. 각 행은 revision, facts
-수, 최근 변화(+추가/-제거), 스냅샷 크기, 상태를 담는다. `STARVING`은
-Librarian 실행이 실패한 채 스냅샷이 없는 Keeper다 — 스스로 그 상태를
-벗어날 수 없으므로 가장 눈에 띄게 표시된다. `no-snapshot`은 아직 스냅샷이
-없을 뿐인 조용한 상태, `degraded`는 스냅샷은 있지만 Librarian 갱신이
-실패 중인 상태다.
+Keeper별 Memory OS 건강 상태를 한 표로 보여준다. ordinary current
+snapshot과 source-bound snapshot을 별도 열로 표시하며, 각 행은 두 저장소의
+revision, facts, 크기와 source invalidation 수, 최근 ordinary 변화
+(+추가/-제거), 상태를 담는다. `STARVING`은 Librarian 실행이 실패했고 두
+스냅샷 모두 없는 Keeper다. ordinary snapshot은 없지만 source-bound snapshot이
+남아 있으면 `source-only`로 표시한다. 이는 source 근거가 남았다는 뜻이지
+Librarian 선택이 성공했다거나 ordinary snapshot이 복구됐다는 뜻은 아니다.
+`no-current`는 아직 ordinary snapshot이 없는 조용한 상태, `degraded`는
+ordinary snapshot은 있지만 Librarian 갱신이 실패 중인 상태다. 두 저장소 중
+하나라도 읽지 못하면 `read-error`로 표시한다.
+
+상단의 `failed/no ordinary` 수는 서버가 `librarian_starvation`으로 판정한
+Keeper 수다. 따라서 source-bound snapshot이 남아 `source-only`로 표시되는
+행도 이 수에 포함될 수 있다. 표의 상태는 남아 있는 저장소를 말하고, 경고
+색과 상세 alert는 Librarian 실패의 서버 severity를 그대로 보존한다.
+Vision ingest 오류가 있으면 상세에 구조화된 reason별 횟수를 표시하고, 해당
+행을 warning으로 그린다. 이미지가 text placeholder로 대체된 실패를 정상
+ingest로 보이지 않게 하기 위함이다.
 
 커서가 가리키는 행의 전체 상태와 서버가 매긴 경고(alert) 목록이 표
 아래에 함께 나온다. `r`로 다시 불러온다.

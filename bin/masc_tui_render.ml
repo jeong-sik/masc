@@ -8776,9 +8776,9 @@ let render_repository_changes (state : state) =
    abbreviates, plus every alert the server already graded. *)
 let memory_context_lines (k : Masc.Tui_decode.memory_keeper_health) =
   let open Masc.Tui_decode in
-  let bytes_line =
-    Printf.sprintf "  snapshot r%d · %d bytes · %s" k.mkh_revision
-      k.mkh_snapshot_bytes
+  let current_line =
+    Printf.sprintf "  ordinary snapshot r%d · %s · %s" k.mkh_revision
+      (Masc_tui_context_inspector.format_bytes k.mkh_snapshot_bytes)
       (if k.mkh_snapshot_present then "present" else "absent")
   in
   let facts_line =
@@ -8789,6 +8789,26 @@ let memory_context_lines (k : Masc.Tui_decode.memory_keeper_health) =
     Printf.sprintf "  librarian lane-busy %d · failures %d"
       k.mkh_librarian_lane_busy k.mkh_librarian_failures
   in
+  let source_line =
+    Printf.sprintf
+      "  source-bound snapshot r%d · facts %d · invalidations %d · %s · %s"
+      k.mkh_source_revision k.mkh_source_facts k.mkh_source_invalidations
+      (Masc_tui_context_inspector.format_bytes k.mkh_source_snapshot_bytes)
+      (if k.mkh_source_snapshot_present then "present" else "absent")
+  in
+  let vision_line =
+    let reasons =
+      match k.mkh_vision_ingest_error_reasons with
+      | [] -> "none"
+      | reasons ->
+        String.concat ", "
+          (List.map
+             (fun (reason, count) -> Printf.sprintf "%s x%d" reason count)
+             reasons)
+    in
+    Printf.sprintf "  vision ingest errors %d · reasons %s"
+      k.mkh_vision_ingest_errors reasons
+  in
   let alert_lines =
     List.map
       (fun (a : memory_alert) ->
@@ -8797,34 +8817,85 @@ let memory_context_lines (k : Masc.Tui_decode.memory_keeper_health) =
       k.mkh_alerts
   in
   let read_error_lines =
-    match k.mkh_read_error with
-    | None -> []
-    | Some message -> [ "  read error: " ^ Terminal_text.single_line message ]
+    List.filter_map Fun.id
+      [ Option.map
+          (fun message ->
+            "  ordinary read error: " ^ Terminal_text.single_line message)
+          k.mkh_read_error
+      ; Option.map
+          (fun message ->
+            "  source-bound read error: " ^ Terminal_text.single_line message)
+          k.mkh_source_read_error
+      ]
   in
-  bytes_line :: facts_line :: librarian_line :: (read_error_lines @ alert_lines)
+  current_line :: facts_line :: source_line :: librarian_line :: vision_line
+  :: (read_error_lines @ alert_lines)
+
+let memory_state_label (k : Masc.Tui_decode.memory_keeper_health) =
+  let open Masc.Tui_decode in
+  if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
+  then "read-error"
+  else if
+    (not k.mkh_snapshot_present)
+    && k.mkh_librarian_failures > 0
+    && not k.mkh_source_snapshot_present
+  then "STARVING"
+  else if (not k.mkh_snapshot_present) && k.mkh_source_snapshot_present
+  then "source-only"
+  else if not k.mkh_snapshot_present
+  then "no-current"
+  else if k.mkh_librarian_failures > 0
+  then "degraded"
+  else if List.exists (fun alert -> String.equal alert.ma_severity "warn") k.mkh_alerts
+  then "warning"
+  else "ok"
 
 let memory_row_line (k : Masc.Tui_decode.memory_keeper_health) =
   let open Masc.Tui_decode in
-  let state_label =
-    if (not k.mkh_snapshot_present) && k.mkh_librarian_failures > 0
-    then "STARVING"
-    else if not k.mkh_snapshot_present
-    then "no-snapshot"
-    else if k.mkh_librarian_failures > 0
-    then "degraded"
-    else "ok"
+  let ordinary =
+    if k.mkh_snapshot_present
+    then
+      Printf.sprintf "r%d/%d/%s" k.mkh_revision k.mkh_facts
+        (Masc_tui_context_inspector.format_bytes k.mkh_snapshot_bytes)
+    else "-"
   in
-  Printf.sprintf "  %-18s r%-6d %6d %+5d/-%-4d %8d B  %s" k.mkh_keeper_id
-    k.mkh_revision k.mkh_facts k.mkh_added k.mkh_removed k.mkh_snapshot_bytes
-    state_label
+  let source =
+    if Option.is_some k.mkh_source_read_error
+    then "read-error"
+    else if k.mkh_source_snapshot_present
+    then
+      Printf.sprintf "r%d/%d/i%d/%s" k.mkh_source_revision k.mkh_source_facts
+        k.mkh_source_invalidations
+        (Masc_tui_context_inspector.format_bytes k.mkh_source_snapshot_bytes)
+    else "-"
+  in
+  Printf.sprintf "  %-18s %-14s %-18s %+5d/-%-4d  %s" k.mkh_keeper_id ordinary
+    source k.mkh_added k.mkh_removed (memory_state_label k)
 
 (* A starving keeper is an error the server graded; a keeper with a config
-   but no snapshot yet is quiet, not bad. *)
+   but no snapshot yet is quiet, not bad. A source-bound snapshot changes the
+   label, not the server's severity: the Librarian failure remains red and its
+   exact message stays in the detail pane. *)
 let memory_row_style (k : Masc.Tui_decode.memory_keeper_health) =
   let open Masc.Tui_decode in
-  if (not k.mkh_snapshot_present) && k.mkh_librarian_failures > 0
+  let server_error =
+    List.exists (fun alert -> String.equal alert.ma_severity "error") k.mkh_alerts
+  in
+  let server_warn =
+    List.exists (fun alert -> String.equal alert.ma_severity "warn") k.mkh_alerts
+  in
+  if server_error
+     ||
+     ((not k.mkh_snapshot_present)
+      && k.mkh_librarian_failures > 0
+      && not k.mkh_source_snapshot_present)
   then Some (Theme.bad ())
-  else if not k.mkh_snapshot_present || k.mkh_librarian_failures > 0
+  else if
+    server_warn
+    || not k.mkh_snapshot_present
+    || k.mkh_librarian_failures > 0
+    || Option.is_some k.mkh_read_error
+    || Option.is_some k.mkh_source_read_error
   then Some (Theme.warn ())
   else None
 
@@ -8849,9 +8920,10 @@ let render_memory (state : state) =
           (screen_title " MASC Memory") timestamp
           (connection_badge state)
     | Some s ->
-        Printf.sprintf "%s (%d keepers · %d starving · %d facts)  %s  %s"
+        Printf.sprintf
+          "%s (%d keepers · %d failed/no ordinary · %d ordinary facts · %d source facts)  %s  %s"
           (screen_title " MASC Memory") shown s.mhs_starving_keepers
-          s.mhs_total_facts timestamp
+          s.mhs_total_facts s.mhs_total_source_facts timestamp
           (connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"memory"
@@ -8859,8 +8931,8 @@ let render_memory (state : state) =
     ~body:(fun ~budget c ->
       c.push_styled ~style:(Theme.recede ())
         (Printf.sprintf
-           "  %-18s %-7s %6s %11s %10s  %s"
-           "Keeper" "Rev" "Facts" "+/-" "Snapshot" "State");
+           "  %-18s %-14s %-18s %11s  %s"
+           "Keeper" "Ordinary" "Source-bound" "+/-" "State");
       c.push_divider ();
       (match state.memory_health_error with
        | None -> ()

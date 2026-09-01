@@ -10,17 +10,21 @@ import { asNumber, isRecord } from '../components/common/normalize'
 
 export type KeeperMemoryHealthAlertCode =
   | 'snapshot_read_error'
+  | 'source_snapshot_read_error'
   | 'librarian_lane_busy'
   | 'librarian_failures'
   | 'librarian_starvation'
+  | 'vision_ingest_errors'
 
 export type KeeperMemoryHealthAlertSeverity = 'warn' | 'error'
 
 export type KeeperMemoryHealthAlertTarget =
   | 'snapshot_read_error'
+  | 'source_snapshot_read_error'
   | 'librarian_lane_busy'
   | 'librarian_failures'
   | 'librarian_starvation'
+  | 'vision_ingest_errors'
 
 // Mirrors the backend contract: each alert code carries exactly one severity
 // (starvation is the only error-level alert). The decoder rejects a payload
@@ -30,9 +34,11 @@ const KEEPER_MEMORY_HEALTH_ALERT_SEVERITY: Record<
   KeeperMemoryHealthAlertSeverity
 > = {
   snapshot_read_error: 'warn',
+  source_snapshot_read_error: 'warn',
   librarian_lane_busy: 'warn',
   librarian_failures: 'warn',
   librarian_starvation: 'error',
+  vision_ingest_errors: 'warn',
 }
 
 export interface KeeperMemoryHealthAlert {
@@ -45,6 +51,11 @@ export interface KeeperMemoryHealthAlert {
   threshold: number
 }
 
+export interface KeeperMemoryHealthVisionErrorReason {
+  reason: string
+  count: number
+}
+
 export interface KeeperMemoryHealthKeeperEntry {
   keeper_id: string
   revision: number
@@ -55,7 +66,15 @@ export interface KeeperMemoryHealthKeeperEntry {
   snapshot_present: boolean
   librarian_lane_busy: number
   librarian_failures: number
+  vision_ingest_errors: number
+  vision_ingest_error_reasons: KeeperMemoryHealthVisionErrorReason[]
   read_error: string | null
+  source_revision: number
+  source_facts: number
+  source_invalidations: number
+  source_snapshot_bytes: number
+  source_snapshot_present: boolean
+  source_read_error: string | null
   alerts: KeeperMemoryHealthAlert[]
 }
 
@@ -69,9 +88,14 @@ export interface KeeperMemoryHealthResponse {
     snapshot_bytes: number
     added: number
     removed: number
+    source_facts: number
+    source_invalidations: number
+    source_snapshot_bytes: number
     librarian_lane_busy: number
     librarian_failures: number
+    vision_ingest_errors: number
     read_errors: number
+    source_read_errors: number
   }
   alert_summary: {
     total_alerts: number
@@ -79,6 +103,7 @@ export interface KeeperMemoryHealthResponse {
     error_alerts: number
     keepers_with_alerts: number
     snapshot_read_error_keepers: number
+    source_snapshot_read_error_keepers: number
     librarian_lane_busy_keepers: number
     librarian_starving_keepers: number
   }
@@ -115,16 +140,20 @@ function decodeKeeperMemoryHealthAlert(raw: unknown): KeeperMemoryHealthAlert | 
   ])) return null
   const code =
     raw.code === 'snapshot_read_error'
+    || raw.code === 'source_snapshot_read_error'
     || raw.code === 'librarian_lane_busy'
     || raw.code === 'librarian_failures'
     || raw.code === 'librarian_starvation'
+    || raw.code === 'vision_ingest_errors'
       ? raw.code
       : null
   const target =
     raw.target === 'snapshot_read_error'
+    || raw.target === 'source_snapshot_read_error'
     || raw.target === 'librarian_lane_busy'
     || raw.target === 'librarian_failures'
     || raw.target === 'librarian_starvation'
+    || raw.target === 'vision_ingest_errors'
       ? raw.target
       : null
   const label = nonEmptyString(raw.label)
@@ -152,6 +181,13 @@ function decodeKeeperMemoryHealthAlert(raw: unknown): KeeperMemoryHealthAlert | 
   }
 }
 
+function decodeVisionErrorReason(raw: unknown): KeeperMemoryHealthVisionErrorReason | null {
+  if (!isRecord(raw) || !exactKeys(raw, ['reason', 'count'])) return null
+  const reason = nonEmptyString(raw.reason)
+  const count = nonNegativeInteger(raw.count)
+  return reason === null || count === null || count === 0 ? null : { reason, count }
+}
+
 function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEntry | null {
   if (!isRecord(raw) || !exactKeys(raw, [
     'keeper_id',
@@ -163,7 +199,15 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     'snapshot_present',
     'librarian_lane_busy',
     'librarian_failures',
+    'vision_ingest_errors',
+    'vision_ingest_error_reasons',
     'read_error',
+    'source_revision',
+    'source_facts',
+    'source_invalidations',
+    'source_snapshot_bytes',
+    'source_snapshot_present',
+    'source_read_error',
     'alerts',
   ])) return null
   const keeper_id = nonEmptyString(raw.keeper_id)
@@ -177,7 +221,21 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     : null
   const librarian_lane_busy = nonNegativeInteger(raw.librarian_lane_busy)
   const librarian_failures = nonNegativeInteger(raw.librarian_failures)
+  const vision_ingest_errors = nonNegativeInteger(raw.vision_ingest_errors)
+  const vision_ingest_error_reasons = Array.isArray(raw.vision_ingest_error_reasons)
+    ? raw.vision_ingest_error_reasons.map(decodeVisionErrorReason)
+    : null
   const read_error = raw.read_error === null ? null : nonEmptyString(raw.read_error)
+  const source_revision = nonNegativeInteger(raw.source_revision)
+  const source_facts = nonNegativeInteger(raw.source_facts)
+  const source_invalidations = nonNegativeInteger(raw.source_invalidations)
+  const source_snapshot_bytes = nonNegativeInteger(raw.source_snapshot_bytes)
+  const source_snapshot_present = typeof raw.source_snapshot_present === 'boolean'
+    ? raw.source_snapshot_present
+    : null
+  const source_read_error = raw.source_read_error === null
+    ? null
+    : nonEmptyString(raw.source_read_error)
   const alerts = Array.isArray(raw.alerts)
     ? raw.alerts.map(decodeKeeperMemoryHealthAlert)
     : null
@@ -191,9 +249,23 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     || snapshot_present === null
     || librarian_lane_busy === null
     || librarian_failures === null
+    || vision_ingest_errors === null
+    || vision_ingest_error_reasons === null
+    || vision_ingest_error_reasons.some(reason => reason === null)
     || (raw.read_error !== null && read_error === null)
+    || source_revision === null
+    || source_facts === null
+    || source_invalidations === null
+    || source_snapshot_bytes === null
+    || source_snapshot_present === null
+    || (raw.source_read_error !== null && source_read_error === null)
     || alerts === null
     || alerts.some(alert => alert === null)
+  ) return null
+  const visionReasons = vision_ingest_error_reasons as KeeperMemoryHealthVisionErrorReason[]
+  if (
+    new Set(visionReasons.map(reason => reason.reason)).size !== visionReasons.length
+    || visionReasons.reduce((total, reason) => total + reason.count, 0) !== vision_ingest_errors
   ) return null
   return {
     keeper_id,
@@ -205,7 +277,15 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     snapshot_present,
     librarian_lane_busy,
     librarian_failures,
+    vision_ingest_errors,
+    vision_ingest_error_reasons: visionReasons,
     read_error,
+    source_revision,
+    source_facts,
+    source_invalidations,
+    source_snapshot_bytes,
+    source_snapshot_present,
+    source_read_error,
     alerts: alerts as KeeperMemoryHealthAlert[],
   }
 }
@@ -219,7 +299,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     'totals',
     'alert_summary',
   ])) return null
-  if (raw.schema !== 'keeper.memory_os.current_health.v1') return null
+  if (raw.schema !== 'keeper.memory_os.current_health.v2') return null
   const generated_at = finiteNumber(raw.generated_at)
   const cadence_counter_entries = nonNegativeInteger(raw.cadence_counter_entries)
   const keepers = Array.isArray(raw.keepers)
@@ -243,18 +323,28 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     'snapshot_bytes',
     'added',
     'removed',
+    'source_facts',
+    'source_invalidations',
+    'source_snapshot_bytes',
     'librarian_lane_busy',
     'librarian_failures',
+    'vision_ingest_errors',
     'read_errors',
+    'source_read_errors',
   ])) return null
   const expectedTotals = {
     facts: sum(entry => entry.facts),
     snapshot_bytes: sum(entry => entry.snapshot_bytes),
     added: sum(entry => entry.added),
     removed: sum(entry => entry.removed),
+    source_facts: sum(entry => entry.source_facts),
+    source_invalidations: sum(entry => entry.source_invalidations),
+    source_snapshot_bytes: sum(entry => entry.source_snapshot_bytes),
     librarian_lane_busy: sum(entry => entry.librarian_lane_busy),
     librarian_failures: sum(entry => entry.librarian_failures),
+    vision_ingest_errors: sum(entry => entry.vision_ingest_errors),
     read_errors: sum(entry => entry.read_error === null ? 0 : 1),
+    source_read_errors: sum(entry => entry.source_read_error === null ? 0 : 1),
   }
   if (Object.entries(expectedTotals).some(([key, value]) => totals[key] !== value)) return null
   const alertSummary = raw.alert_summary
@@ -264,6 +354,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     'error_alerts',
     'keepers_with_alerts',
     'snapshot_read_error_keepers',
+    'source_snapshot_read_error_keepers',
     'librarian_lane_busy_keepers',
     'librarian_starving_keepers',
   ])) return null
@@ -276,6 +367,8 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     error_alerts: countAlertSeverity('error'),
     keepers_with_alerts: sum(entry => entry.alerts.length > 0 ? 1 : 0),
     snapshot_read_error_keepers: sum(entry => entry.read_error === null ? 0 : 1),
+    source_snapshot_read_error_keepers: sum(entry =>
+      entry.source_read_error === null ? 0 : 1),
     librarian_lane_busy_keepers: sum(entry => entry.librarian_lane_busy > 0 ? 1 : 0),
     librarian_starving_keepers: sum(entry =>
       entry.librarian_failures > 0 && !entry.snapshot_present ? 1 : 0),

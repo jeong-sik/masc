@@ -1,3 +1,4 @@
-(** Read-only fleet health over the same current snapshots recall consumes. *)
+(** Read-only fleet health over the ordinary and source-bound current snapshots
+    recall consumes. *)
 
 val keeper_memory_health_http_json : base_path:string -> Yojson.Safe.t

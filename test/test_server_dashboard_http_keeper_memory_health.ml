@@ -2,6 +2,7 @@
 
 module Types = Masc.Keeper_memory_os_types
 module Current = Masc.Keeper_memory_os_current
+module SourceCurrent = Masc.Keeper_memory_source_current
 module Metrics = Masc.Otel_metric_store
 module KeeperMetrics = Keeper_metrics
 module Health = Server_dashboard_http_keeper_memory_health
@@ -42,6 +43,23 @@ let write_snapshot ~keepers_dir ~keeper_id facts =
     ~facts
     ()
   |> require_ok
+;;
+
+let source_sha256 = "sha256:" ^ String.make 64 'a'
+
+let write_source_snapshot ~keepers_dir ~keeper_id ~facts ~invalidations =
+  Fs_compat.mkdir_p keepers_dir;
+  let snapshot : SourceCurrent.t =
+    { revision = 3
+    ; updated_at = test_now
+    ; trace_id = "source-health-test"
+    ; facts
+    ; invalidations
+    }
+  in
+  Fs_compat.save_file
+    (SourceCurrent.path_for_keepers_dir ~keepers_dir ~keeper_id)
+    (Yojson.Safe.pretty_to_string (SourceCurrent.to_json snapshot) ^ "\n")
 ;;
 
 let assoc_field name = function
@@ -158,7 +176,7 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let keeper = keeper_obj "solo" json in
   Alcotest.(check string)
     "schema"
-    "keeper.memory_os.current_health.v1"
+    "keeper.memory_os.current_health.v2"
     (string_field "schema" json);
   Alcotest.(check int) "revision" 2 (int_field "revision" keeper);
   Alcotest.(check int) "facts" 2 (int_field "facts" keeper);
@@ -168,6 +186,94 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   Alcotest.(check int) "no alerts" 0 (List.length (list_field "alerts" keeper));
   Alcotest.(check int) "total facts" 2 (int_field "facts" (totals json));
   Alcotest.(check bool) "generated_at" true (float_field "generated_at" json >= 0.0)
+;;
+
+let test_source_only_snapshot_is_enumerated_and_counted () =
+  let base = fresh_dir "masc-memory-health-source-only" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let facts : SourceCurrent.fact list =
+    [ { claim = "source-backed current fact"
+      ; first_seen = test_now
+      ; source = { path = "evidence/current.txt"; sha256 = source_sha256 }
+      }
+    ]
+  in
+  let invalidations : SourceCurrent.invalidation list =
+    [ { source_path = "evidence/old.txt"
+      ; invalidated_at = test_now
+      ; reason = SourceCurrent.Source_changed
+      }
+    ]
+  in
+  write_source_snapshot
+    ~keepers_dir
+    ~keeper_id:"source-only"
+    ~facts
+    ~invalidations;
+  Metrics.inc_counter
+    KeeperMetrics.(to_string MemoryOsLibrarianFailures)
+    ~labels:[ "keeper", "source-only"; "site", "memory_os_librarian" ]
+    ~delta:1.0
+    ();
+  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  Alcotest.(check (list string))
+    "source snapshot contributes identity"
+    [ "source-only" ]
+    (keeper_ids json);
+  let keeper = keeper_obj "source-only" json in
+  Alcotest.(check bool) "ordinary absent" false (bool_field "snapshot_present" keeper);
+  Alcotest.(check bool)
+    "source present"
+    true
+    (bool_field "source_snapshot_present" keeper);
+  Alcotest.(check int) "source revision" 3 (int_field "source_revision" keeper);
+  Alcotest.(check int) "source facts" 1 (int_field "source_facts" keeper);
+  Alcotest.(check int)
+    "source invalidations"
+    1
+    (int_field "source_invalidations" keeper);
+  Alcotest.(check bool)
+    "source bytes"
+    true
+    (int_field "source_snapshot_bytes" keeper > 0);
+  Alcotest.(check int) "total source facts" 1 (int_field "source_facts" (totals json));
+  Alcotest.(check int)
+    "total source invalidations"
+    1
+    (int_field "source_invalidations" (totals json));
+  let alerts = list_field "alerts" keeper in
+  Alcotest.(check (list string))
+    "ordinary starvation remains explicit"
+    [ "librarian_starvation" ]
+    (List.map (string_field "code") alerts);
+  Alcotest.(check string)
+    "alert acknowledges remaining source-bound memory"
+    "Librarian runs failed and no ordinary current-memory snapshot exists. A source-bound snapshot remains available, but it does not demonstrate or repair Librarian selection."
+    (string_field "message" (List.hd alerts))
+;;
+
+let test_corrupt_source_snapshot_is_visible () =
+  let base = fresh_dir "masc-memory-health-source-corrupt" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let path =
+    SourceCurrent.path_for_keepers_dir ~keepers_dir ~keeper_id:"source-broken"
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.save_file path {|{"schema":"wrong"}|};
+  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let keeper = keeper_obj "source-broken" json in
+  Alcotest.(check (list string))
+    "source read alert"
+    [ "source_snapshot_read_error" ]
+    (list_field "alerts" keeper |> List.map (string_field "code"));
+  Alcotest.(check int)
+    "source read errors"
+    1
+    (int_field "source_read_errors" (totals json));
+  Alcotest.(check int)
+    "source read error keepers"
+    1
+    (int_field "source_snapshot_read_error_keepers" (alert_summary json))
 ;;
 
 let test_reports_librarian_lane_busy_alert () =
@@ -398,6 +504,10 @@ let () =
             test_toml_name_override_uses_canonical_identity
         ; Alcotest.test_case "snapshot read site failures counted" `Quick
             test_counts_snapshot_read_site_failures
+        ; Alcotest.test_case "source-only snapshot counted" `Quick
+            test_source_only_snapshot_is_enumerated_and_counted
+        ; Alcotest.test_case "corrupt source snapshot visible" `Quick
+            test_corrupt_source_snapshot_is_visible
         ] )
     ]
 ;;

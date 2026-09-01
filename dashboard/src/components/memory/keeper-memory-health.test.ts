@@ -29,7 +29,15 @@ function makeEntry(
     snapshot_present: true,
     librarian_lane_busy: 0,
     librarian_failures: 0,
+    vision_ingest_errors: 0,
+    vision_ingest_error_reasons: [],
     read_error: null,
+    source_revision: 0,
+    source_facts: 0,
+    source_invalidations: 0,
+    source_snapshot_bytes: 0,
+    source_snapshot_present: false,
+    source_read_error: null,
     alerts: [],
     ...overrides,
   }
@@ -44,6 +52,7 @@ function makeAlertSummary(
     error_alerts: 0,
     keepers_with_alerts: 0,
     snapshot_read_error_keepers: 0,
+    source_snapshot_read_error_keepers: 0,
     librarian_lane_busy_keepers: 0,
     librarian_starving_keepers: 0,
     ...overrides,
@@ -56,7 +65,7 @@ function makeResponse(
   alertSummary = makeAlertSummary(),
 ): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v1',
+    schema: 'keeper.memory_os.current_health.v2',
     generated_at: 1_700_000_000,
     cadence_counter_entries: 3,
     keepers,
@@ -65,9 +74,14 @@ function makeResponse(
       snapshot_bytes: 0,
       added: 0,
       removed: 0,
+      source_facts: 0,
+      source_invalidations: 0,
+      source_snapshot_bytes: 0,
       librarian_lane_busy: 0,
       librarian_failures: 0,
+      vision_ingest_errors: 0,
       read_errors: 0,
+      source_read_errors: 0,
       ...totalsOverrides,
     },
     alert_summary: alertSummary,
@@ -123,6 +137,60 @@ describe('KeeperMemoryHealth', () => {
     expect(container.querySelector('.kmh-row--warn')).not.toBeNull()
     expect(statValue(container, 'read-errors')).toBe('1')
     expect(screen.getByText('읽기')).not.toBeNull()
+  })
+
+  it('renders source-bound facts, invalidations, and snapshot identity', async () => {
+    mockFetch.mockResolvedValue(makeResponse(
+      [makeEntry({
+        source_revision: 3,
+        source_facts: 2,
+        source_invalidations: 1,
+        source_snapshot_bytes: 1024,
+        source_snapshot_present: true,
+      })],
+      { source_facts: 2, source_invalidations: 1, source_snapshot_bytes: 1024 },
+    ))
+    const { container } = render(html`<${KeeperMemoryHealth} />`)
+
+    await waitFor(() => expect(screen.getByText('alpha')).not.toBeNull())
+    expect(statValue(container, 'source-facts')).toBe('2')
+    expect(statValue(container, 'source-invalidations')).toBe('1')
+    expect(statValue(container, 'source-snapshot-bytes')).toBe('1.0 KB')
+    expect(container.textContent).toContain('r3 · 2 / 무효 1')
+  })
+
+  it('shows Vision ingest counts with their exact reasons', async () => {
+    const alert = {
+      code: 'vision_ingest_errors' as const,
+      severity: 'warn' as const,
+      target: 'vision_ingest_errors' as const,
+      label: 'Vision',
+      message: 'Image ingestion failed 3 times.',
+      value: 3,
+      threshold: 0,
+    }
+    mockFetch.mockResolvedValue(makeResponse(
+      [makeEntry({
+        vision_ingest_errors: 3,
+        vision_ingest_error_reasons: [
+          { reason: 'fetch_failed', count: 2 },
+          { reason: 'unsupported_media_type', count: 1 },
+        ],
+        alerts: [alert],
+      })],
+      { vision_ingest_errors: 3 },
+      makeAlertSummary({
+        total_alerts: 1,
+        warn_alerts: 1,
+        keepers_with_alerts: 1,
+      }),
+    ))
+    const { container } = render(html`<${KeeperMemoryHealth} />`)
+
+    await waitFor(() => expect(screen.getByText('alpha')).not.toBeNull())
+    expect(statValue(container, 'vision-ingest-errors')).toBe('3')
+    expect(container.querySelector('[title="fetch_failed ×2, unsupported_media_type ×1"]')).not.toBeNull()
+    expect(screen.getByText('Vision')).not.toBeNull()
   })
 
   it('surfaces Librarian lane pressure without inventing a retry or GC state', async () => {
@@ -185,7 +253,7 @@ describe('KeeperMemoryHealth', () => {
     await waitFor(() => expect(screen.getByText('starving')).not.toBeNull())
     expect(container.querySelector('.kmh-row--error')).not.toBeNull()
     expect(container.querySelector('.kmh-badge--error')).not.toBeNull()
-    expect(screen.getByText('없음')).not.toBeNull()
+    expect(screen.getAllByText('없음')).toHaveLength(2)
     expect(statValue(container, 'librarian-failures')).toBe('4')
     expect(statValue(container, 'starving-keepers')).toBe('1')
     const alertStat = container.querySelector(
@@ -209,7 +277,7 @@ describe('KeeperMemoryHealth', () => {
     await waitFor(() => expect(screen.getByText('fresh')).not.toBeNull())
     expect(container.querySelector('.kmh-row--error')).toBeNull()
     expect(container.querySelector('.kmh-badge--muted')).not.toBeNull()
-    expect(screen.getByText('없음')).not.toBeNull()
+    expect(screen.getAllByText('없음')).toHaveLength(2)
   })
 
   it('shows loading, error, and empty current-snapshot states honestly', async () => {
@@ -226,7 +294,7 @@ describe('KeeperMemoryHealth', () => {
     mockFetch.mockResolvedValueOnce(makeResponse([]))
     render(html`<${KeeperMemoryHealth} />`)
     await waitFor(() => {
-      expect(screen.getByText('등록된 current-memory snapshot 없음.')).not.toBeNull()
+      expect(screen.getByText('등록된 current-memory snapshot 또는 Keeper 없음.')).not.toBeNull()
     })
   })
 })

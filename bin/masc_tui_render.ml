@@ -5348,6 +5348,61 @@ let lane_run_decision_badge (detail : Tui_decode.lane_run_detail) =
   | Tui_decode.Lane_run_not_a_decision -> Theme.info (), "NOT A VERDICT"
   | Tui_decode.Lane_run_decision_unknown -> Theme.muted (), "UNKNOWN"
 
+let lane_run_tool_disposition_presentation = function
+  | Tui_decode.Lane_run_tool_completed -> Theme.ok (), "✓"
+  | Tui_decode.Lane_run_tool_deferred -> Theme.warn (), "△"
+  | Tui_decode.Lane_run_tool_failed -> Theme.bad (), "✗"
+  | Tui_decode.Lane_run_tool_disposition_other _ -> Theme.warn (), "?"
+
+let lane_run_tool_call_summary (tool : Tui_decode.lane_run_tool) =
+  let style, mark =
+    lane_run_tool_disposition_presentation tool.lrt_disposition
+  in
+  let disposition =
+    Tui_decode.lane_run_tool_disposition_label tool.lrt_disposition
+    |> Terminal_text.single_line
+  in
+  Printf.sprintf "%s%s%s %s%s%s [%s · %.0fms]%s"
+    style Ansi.bold mark
+    (Terminal_text.single_line tool.lrt_name)
+    Ansi.reset style disposition tool.lrt_duration_ms Ansi.reset
+
+type lane_run_tool_counts =
+  { completed : int
+  ; deferred : int
+  ; failed : int
+  ; other : int
+  }
+
+let lane_run_tool_count_summary tools =
+  let counts =
+    List.fold_left
+      (fun counts (tool : Tui_decode.lane_run_tool) ->
+         match tool.lrt_disposition with
+         | Tui_decode.Lane_run_tool_completed ->
+           { counts with completed = counts.completed + 1 }
+         | Tui_decode.Lane_run_tool_deferred ->
+           { counts with deferred = counts.deferred + 1 }
+         | Tui_decode.Lane_run_tool_failed ->
+           { counts with failed = counts.failed + 1 }
+         | Tui_decode.Lane_run_tool_disposition_other _ ->
+           { counts with other = counts.other + 1 })
+      { completed = 0; deferred = 0; failed = 0; other = 0 }
+      tools
+  in
+  [ Theme.bad (), "✗", counts.failed, "failed"
+  ; Theme.warn (), "△", counts.deferred, "deferred"
+  ; Theme.warn (), "?", counts.other, "other"
+  ; Theme.ok (), "✓", counts.completed, "completed"
+  ]
+  |> List.filter_map (fun (style, mark, count, label) ->
+    if count = 0 then None
+    else
+      Some
+        (Printf.sprintf "%s%s%s %d %s%s" style Ansi.bold mark count label
+           Ansi.reset))
+  |> String.concat "  "
+
 let lane_run_tool_summary = function
   | Tui_decode.Lane_run_no_tools_by_contract ->
     Theme.muted (), "TOOLS  none · exact-output runs do not use the MASC tool loop"
@@ -5356,46 +5411,29 @@ let lane_run_tool_summary = function
   | Tui_decode.Lane_run_tools_contract_unknown ->
     Theme.muted (), "TOOLS  unknown · this run kind has no typed tool contract"
   | Tui_decode.Lane_run_tools_observed tools ->
-    let style =
-      if
-        List.exists
-          (fun (tool : Tui_decode.lane_run_tool) ->
-            match tool.lrt_disposition with
-            | Tui_decode.Lane_run_tool_failed -> true
-            | Tui_decode.Lane_run_tool_completed
-            | Tui_decode.Lane_run_tool_deferred
-            | Tui_decode.Lane_run_tool_disposition_other _ -> false)
-          tools
-      then Theme.bad ()
-      else if
-        List.exists
-          (fun (tool : Tui_decode.lane_run_tool) ->
-            match tool.lrt_disposition with
-            | Tui_decode.Lane_run_tool_deferred
-            | Tui_decode.Lane_run_tool_disposition_other _ -> true
-            | Tui_decode.Lane_run_tool_completed
-            | Tui_decode.Lane_run_tool_failed -> false)
-          tools
-      then Theme.warn ()
-      else Theme.ok ()
-    in
     let calls = List.length tools in
+    let counts = lane_run_tool_count_summary tools in
     let names =
-      List.map
-        (fun (tool : Tui_decode.lane_run_tool) ->
-          Printf.sprintf "%s [%s · %.0fms]"
-            (Terminal_text.single_line tool.lrt_name)
-            (Terminal_text.single_line
-               (Tui_decode.lane_run_tool_disposition_label
-                  tool.lrt_disposition))
-            tool.lrt_duration_ms)
-        tools
+      List.map lane_run_tool_call_summary tools
       |> String.concat "  ·  "
     in
-    ( style
-    , Printf.sprintf "TOOLS  %d %s%s" calls
-        (if calls = 1 then "call" else "calls")
-        (if String.equal names "" then "" else " · " ^ names) )
+    let evidence =
+      [ names ]
+      |> List.filter (fun value -> not (String.equal value ""))
+      |> String.concat "  ·  "
+    in
+    let call_count =
+      Printf.sprintf "%d %s" calls (if calls = 1 then "call" else "calls")
+    in
+    let overview =
+      if String.equal counts "" then call_count else counts ^ "  ·  " ^ call_count
+    in
+    (* fit_width clips the right edge, so put the worst typed disposition
+       immediately after the label. Even an ultra-narrow terminal retains the
+       operator-significant failure/deferred badge before call metadata. *)
+    ( Ansi.reset
+    , Printf.sprintf "%sTOOLS%s  %s%s" Ansi.bold Ansi.reset overview
+        (if String.equal evidence "" then "" else " · " ^ evidence) )
 
 let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
   let subject =

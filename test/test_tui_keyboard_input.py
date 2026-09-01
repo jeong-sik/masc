@@ -7281,12 +7281,51 @@ def verifier_lane_run_detail_response() -> HttpResponse:
                             "output_excerpt": "awaiting verification",
                             "output_truncated": False,
                             "duration_ms": 12.0,
+                        },
+                        {
+                            "tool_name": "tool_read_file",
+                            "input": {"file_path": "proof.json"},
+                            "disposition": "failed",
+                            "output_excerpt": "proof missing",
+                            "output_truncated": False,
+                            "duration_ms": 7.0,
                         }
                     ],
                 },
             }
         },
     )
+
+
+def assert_verifier_tool_color_summary(frame: bytes) -> None:
+    """The executed PTY path must preserve typed severity and per-call color."""
+    plain = CSI_RE.sub(b"", frame)
+    expected = (
+        b"TOOLS  \xe2\x9c\x97 1 failed  \xe2\x9c\x93 1 completed  \xc2\xb7  "
+        b"2 calls \xc2\xb7 \xe2\x9c\x93 masc_task_get "
+        b"[completed \xc2\xb7 12ms]  \xc2\xb7  \xe2\x9c\x97 "
+        b"tool_read_file [failed \xc2\xb7 7ms]"
+    )
+    if expected not in plain:
+        raise AssertionError(
+            f"Verifier detail omitted its typed Tool rollup/calls: {frame!r}"
+        )
+    if b"\x1b[1mTOOLS\x1b[0m  \x1b[91m" not in frame:
+        raise AssertionError(
+            "Verifier detail did not put the worst severity immediately after "
+            f"the emphasized Tool label: {frame!r}"
+        )
+    for style, mark, count, status, tool in (
+        (b"\x1b[91m", b"\xe2\x9c\x97", b"1", b"failed", b"tool_read_file"),
+        (b"\x1b[92m", b"\xe2\x9c\x93", b"1", b"completed", b"masc_task_get"),
+    ):
+        rollup = style + b"\x1b[1m" + mark + b" " + count + b" " + status
+        detail = style + b"\x1b[1m" + mark + b" " + tool
+        if rollup not in frame or detail not in frame:
+            raise AssertionError(
+                f"Verifier detail did not map {status!r} to its semantic "
+                f"color/glyph for {tool!r}: {frame!r}"
+            )
 
 
 def keeper_lanes_response(lanes: list[dict[str, object]]) -> HttpResponse:
@@ -7608,12 +7647,11 @@ def keeper_lanes_interaction(
             master_fd,
             output,
             b"\r",
-            b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (1 CALL)",
+            b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (2 CALLS)",
         )
         verifier_detail_plain = CSI_RE.sub(b"", verifier_detail)
         for evidence in (
             b"DECISION  REJECTED",
-            b"TOOLS  1 call \xc2\xb7 masc_task_get [completed \xc2\xb7 12ms]",
             b"INPUT \xc2\xb7 VERIFICATION REQUEST",
         ):
             if evidence not in verifier_detail_plain:
@@ -7621,6 +7659,7 @@ def keeper_lanes_interaction(
                     "Verifier detail omitted its split decision/tool summary "
                     f"{evidence!r}: {verifier_detail!r}"
                 )
+        assert_verifier_tool_color_summary(verifier_detail)
         split_heading = next(
             (
                 line
@@ -7653,7 +7692,7 @@ def keeper_lanes_interaction(
         )
         if (
             scrolled_heading is None
-            or b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (1 CALL)  2-"
+            or b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (2 CALLS)  2-"
             not in scrolled_heading
         ):
             raise AssertionError(
@@ -7694,7 +7733,7 @@ def keeper_lanes_interaction(
             master_fd,
             output,
             b"\x1b[6~",
-            b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (1 CALL)",
+            b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (2 CALLS)",
         )
         resize_and_wait(
             process,
@@ -7702,7 +7741,7 @@ def keeper_lanes_interaction(
             output,
             rows=30,
             columns=140,
-            needle=b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (1 CALL)",
+            needle=b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (2 CALLS)",
             controls=(FULL_REDRAW,),
         )
         send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
@@ -8042,6 +8081,61 @@ def keeper_lanes_ia_interaction(gate: GatedHttpResponse) -> Interaction:
                     f"Lanes omitted selected-lane detail {detail!r}: "
                     f"{lanes_plain!r}"
                 )
+
+        banded_hitl = re.compile(rb"\x1b\[7m[^\x1b\n]*HITL Auto Judge")
+        banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
+        banded_verifier = re.compile(rb"\x1b\[7m[^\x1b\n]*Verifier")
+        banded_board = re.compile(rb"\x1b\[7m[^\x1b\n]*Board Attention")
+        send_and_wait(process, master_fd, output, b"j", banded_hitl)
+        send_and_wait(process, master_fd, output, b"j", banded_librarian)
+        send_and_wait(process, master_fd, output, b"j", banded_verifier)
+        verifier_runs = send_and_wait(
+            process, master_fd, output, b"\r", b"task task-9"
+        )
+        if b"rejected" not in CSI_RE.sub(b"", verifier_runs):
+            raise AssertionError(
+                f"Verifier run list omitted its rejection: {verifier_runs!r}"
+            )
+        verifier_detail = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\r",
+            b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (2 CALLS)",
+        )
+        if b"DECISION  REJECTED" not in CSI_RE.sub(b"", verifier_detail):
+            raise AssertionError(
+                f"Verifier detail omitted its decision: {verifier_detail!r}"
+            )
+        assert_verifier_tool_color_summary(verifier_detail)
+        narrow_detail = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=28,
+            needle=b"TOOLS",
+            controls=(FULL_REDRAW,),
+        )
+        if b"\x1b[1mTOOLS\x1b[0m  \x1b[91m\x1b[1m\xe2\x9c\x97" not in narrow_detail:
+            raise AssertionError(
+                "Ultra-narrow Verifier detail clipped the worst Tool severity "
+                f"before its badge: {narrow_detail!r}"
+            )
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=140,
+            needle=b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (2 CALLS)",
+            controls=(FULL_REDRAW,),
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
+        send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)
+        send_and_wait(process, master_fd, output, b"k", banded_librarian)
+        send_and_wait(process, master_fd, output, b"k", banded_hitl)
+        send_and_wait(process, master_fd, output, b"k", banded_board)
         send_and_wait(
             process,
             master_fd,
@@ -10029,6 +10123,10 @@ def run_keyboard_regression(executable: str) -> None:
     )
     lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
     lanes_fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
+    lanes_fixtures[lane_runs_path("verifier_exact")] = verifier_lane_runs_response()
+    lanes_fixtures[
+        "/api/v1/dashboard/exact-lane-runs/vrf-fixture"
+    ] = verifier_lane_run_detail_response()
     runtime_fixtures, runtime_initial_probe, runtime_force_probe = (
         runtime_http_fixtures()
     )
@@ -10950,6 +11048,10 @@ def run_keeper_lanes_regression(executable: str) -> None:
     )
     fixtures[KEEPER_LANES_PATH] = gate
     fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
+    fixtures[lane_runs_path("verifier_exact")] = verifier_lane_runs_response()
+    fixtures[
+        "/api/v1/dashboard/exact-lane-runs/vrf-fixture"
+    ] = verifier_lane_run_detail_response()
     fixtures[RUNTIME_CONFIG_RAW_PATH] = (
         200,
         {

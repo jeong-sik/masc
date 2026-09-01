@@ -1712,7 +1712,7 @@ let next_system_log_category ~current entries =
       in
       step categories
 
-(* The verbose ladder. [None] asks the server for everything (its own
+(* The level-floor ladder. [None] asks the server for everything (its own
    default is debug); each press raises the floor. Debug and unknown
    spellings are readings, not rungs this cycle produces. *)
 let next_system_log_min_level = function

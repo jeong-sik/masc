@@ -1098,7 +1098,7 @@ let test_runtime_attempt_clears_previous_runtime_delivery () =
    side wins, not about the placeholder's value. *)
 
 let drift_defaults sandbox =
-  { Keeper_types_profile.empty_keeper_profile_defaults with
+  { Masc.Keeper_types_profile.empty_keeper_profile_defaults with
     manifest_path = Some "keepers/drift.toml"
   ; sandbox_profile = sandbox
   }

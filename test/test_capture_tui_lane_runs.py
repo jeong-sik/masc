@@ -39,12 +39,20 @@ class CaptureTuiLaneRunsTest(unittest.TestCase):
     def test_lane_index_reads_only_matrix_rows(self):
         screen = "\n".join(
             [
-                "Board Attention idle slots one active 0  runs 3  ok/fail/cancel 3/0/0",
-                "Verifier idle slots two active 0  runs 2  ok/fail/cancel 1/1/0",
+                "● Board Attention idle slots one active 0  runs 3  ok/fail/cancel 3/0/0",
+                "⠋ HITL Auto Judge running 3.2s slots an-extremely-long-fallback-chain~",
+                "● Librarian idle slots another-clipped-slot-list~",
+                "● Verifier idle slots two active 0  runs 2  ok/fail/cancel 1/1/0",
                 "Verifier · selected-row detail is not another matrix row",
             ]
         )
-        self.assertEqual(capture.standalone_lane_index(screen, "Verifier"), 1)
+        labels = capture.standalone_lane_labels(screen)
+        self.assertEqual(
+            labels,
+            ["Board Attention", "HITL Auto Judge", "Librarian", "Verifier"],
+        )
+        self.assertEqual(capture.standalone_lane_index(screen, "Verifier"), 3)
+        self.assertEqual(capture.selected_standalone_label(screen, labels), "Verifier")
 
     def test_exact_run_index_does_not_require_a_retired_box_border(self):
         screen = "\n".join(
@@ -90,6 +98,15 @@ class CaptureTuiLaneRunsTest(unittest.TestCase):
                 capture.sha256_file(executable),
                 "03ec85482967cdf3ba8c5643c48bc1069355a2af1c61e796853f7cb16f1257e8",
             )
+
+    def test_token_file_requires_exactly_one_non_empty_line(self):
+        with tempfile.TemporaryDirectory() as directory:
+            token_file = Path(directory) / "operator.token"
+            token_file.write_text("secret-bearer\n", encoding="utf-8")
+            self.assertEqual(capture.read_token_file(token_file), "secret-bearer")
+            token_file.write_text("first\nsecond\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                capture.read_token_file(token_file)
 
 
 if __name__ == "__main__":

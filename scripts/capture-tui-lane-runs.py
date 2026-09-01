@@ -23,7 +23,9 @@ Frames:
 
 Usage:
     python3 scripts/capture-tui-lane-runs.py \
-        --base-path ~/me --out /tmp/tui-lane-runs
+        --base-path ~/me \
+        --token-file /path/to/operator.token \
+        --out /tmp/tui-lane-runs
 
 Requires the live server on --api-port (default 8935) and a built TUI passed
 with --executable (defaults to _build/default/bin/masc_tui.exe).
@@ -53,7 +55,16 @@ DEFAULT_EXECUTABLE = WORKTREE / "_build/default/bin/masc_tui.exe"
 
 # The whole capture is one connected trip through the drill-down; the frame
 # list documents what each shot must prove, and main() walks it in order.
-LANE_ROW_RE = re.compile(r"\bactive\s+\d+\s+runs\s+\d+\s+ok/fail/cancel\b")
+# The dense row's right side is deliberately clipped to terminal width. Its
+# mark, fixed label, typed lifecycle, and ``slots`` column are the visible
+# prefix; counters such as ``active`` may be absent after a long slot chain.
+LANE_ROW_RE = re.compile(
+    # A running row cycles through spinner glyphs, so the mark is any one
+    # non-whitespace cell rather than only the idle/failure glyph set.
+    r"^\s*\S+\s+(.+?)\s+"
+    r"(?:running(?:\s+\S+)?|idle|degraded|none retained|unavailable)"
+    r"\s+slots(?:\s|$)"
+)
 TERMINAL_VERIFIER_STATUSES = (
     "approved",
     "rejected",
@@ -134,6 +145,16 @@ def redaction_pairs(names: list[str]) -> list[list[str]]:
     return pairs
 
 
+def read_token_file(path: Path) -> str:
+    """Read one bearer without copying it into evidence or output."""
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("token file must be a regular non-symlink file")
+    token = path.read_text(encoding="utf-8").strip()
+    if not token or "\n" in token or "\r" in token:
+        raise ValueError("token file must contain exactly one non-empty line")
+    return token
+
+
 def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -162,6 +183,7 @@ def ttyd_session(
     rows: int,
     workspace: str,
     executable: Path,
+    token: str | None,
 ) -> Iterator[Page]:
     web_port = free_port()
     env = dict(os.environ)
@@ -179,6 +201,8 @@ def ttyd_session(
             "no_proxy": "127.0.0.1,localhost",
         }
     )
+    if token is not None:
+        env["MASC_TOKEN"] = token
     command = [
         str(TTYD),
         "-p",
@@ -287,11 +311,25 @@ def goto_lanes(page: Page) -> None:
     page.wait_for_timeout(1_000)
 
 
-def select_board_attention(page: Page) -> None:
-    """k clamps at the first standalone row no matter where the cursor started
-    (up past the first keeper row crosses onto the last standalone row)."""
-    press(page, "k", times=10)
-    page.wait_for_timeout(400)
+def standalone_lane_labels(text: str) -> list[str]:
+    """Return visible standalone labels in matrix order."""
+    return [
+        match.group(1).rstrip()
+        for line in text.splitlines()
+        if (match := LANE_ROW_RE.search(line)) is not None
+    ]
+
+
+def selected_standalone_label(text: str, labels: list[str]) -> str | None:
+    """Read the selected row from its bold detail heading."""
+    matches = [
+        label
+        for label in labels
+        if any(
+            line.strip().startswith(f"{label} ·") for line in text.splitlines()
+        )
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def standalone_lane_index(text: str, label: str) -> int:
@@ -301,8 +339,10 @@ def standalone_lane_index(text: str, label: str) -> int:
     typed projection keeps the selected-row detail prose from becoming a
     second, accidental lane list.
     """
-    rows = [line for line in text.splitlines() if LANE_ROW_RE.search(line)]
-    matches = [index for index, line in enumerate(rows) if label in line]
+    labels = standalone_lane_labels(text)
+    matches = [
+        index for index, row_label in enumerate(labels) if label == row_label
+    ]
     if len(matches) != 1:
         raise WaitFailed(
             f"expected one standalone lane row for {label!r}, found {len(matches)}"
@@ -311,12 +351,27 @@ def standalone_lane_index(text: str, label: str) -> int:
 
 
 def select_standalone_lane(page: Page, label: str) -> None:
-    """Select a lane by the matrix the operator can see, not by a fixed count."""
-    select_board_attention(page)
-    index = standalone_lane_index(screen_text(page), label)
-    if index:
-        press(page, "j", times=index)
-    wait_text(page, f"{label} ·")
+    """Drive toward a lane, re-reading the visible selection after every key."""
+    text = screen_text(page)
+    labels = standalone_lane_labels(text)
+    target_index = standalone_lane_index(text, label)
+    deadline = time.monotonic() + 20.0
+    while time.monotonic() < deadline:
+        visible = screen_text(page)
+        selected = selected_standalone_label(visible, labels)
+        if selected == label:
+            return
+        if selected is None:
+            # Recover a readable selection from a transient repaint.
+            press(page, "k")
+        else:
+            selected_index = labels.index(selected)
+            press(page, "j" if selected_index < target_index else "k")
+        page.wait_for_timeout(250)
+    raise WaitFailed(
+        f"lane {label!r} was not selected after visible cursor navigation\n"
+        f"--- screen ---\n{screen_text(page)}"
+    )
 
 
 def first_succeeded_row_index(text: str) -> int:
@@ -396,7 +451,15 @@ def main() -> int:
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--cols", type=int, default=170)
     ap.add_argument("--rows", type=int, default=48)
-    ap.add_argument("--workspace", default="demo-workspace")
+    ap.add_argument(
+        "--workspace",
+        help="live workspace id (defaults to the base-path directory name)",
+    )
+    ap.add_argument(
+        "--token-file",
+        type=Path,
+        help="operator bearer file; its value is passed only to the child TUI",
+    )
     ap.add_argument("--executable", type=Path, default=DEFAULT_EXECUTABLE)
     args = ap.parse_args()
 
@@ -409,6 +472,16 @@ def main() -> int:
         return 1
 
     base = Path(args.base_path).expanduser()
+    workspace = args.workspace or base.name
+    try:
+        token = (
+            read_token_file(args.token_file.expanduser())
+            if args.token_file is not None
+            else None
+        )
+    except (OSError, UnicodeError, ValueError) as error:
+        print(f"invalid token file: {error}", file=sys.stderr)
+        return 1
     names = discover_keeper_names(base)
     pairs = redaction_pairs(names)
     args.out.mkdir(parents=True, exist_ok=True)
@@ -423,14 +496,16 @@ def main() -> int:
                 args.api_port,
                 args.cols,
                 args.rows,
-                args.workspace,
+                workspace,
                 executable,
+                token,
             ) as page:
                 dims = page.evaluate(
                     "() => ({cols: window.term.cols, rows: window.term.rows})"
                 )
 
                 goto_lanes(page)
+                wait_text(page, "[connected]")
 
                 # 1. Overview, selection band on the first standalone row.
                 select_standalone_lane(page, "Board Attention")
@@ -530,6 +605,8 @@ def main() -> int:
         },
         "terminal": dims,
         "api_port": args.api_port,
+        "operator_token_supplied": token is not None,
+        "required_connection_state": "connected",
         "keeper_names_redacted": len(names),
         "frames": saved,
     }

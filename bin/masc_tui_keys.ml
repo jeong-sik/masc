@@ -293,6 +293,11 @@ let for_surface = function
         (* Config combines persisted files, typed live params, and the local
            theme choice.  The pane strip says which meaning each key has. *)
       ; b Navigate "p" "runtime.toml / models / params / prompts / themes"
+      ; b Navigate "s" "resources"
+          ~help:"the MCP resource catalog, off the ring under Config"
+      ; b Navigate "t" "tools"
+          ~help:"the tool catalog, receipts, and usage, off the ring under \
+                 Config"
       ; b Act "e" "edit"
           ~help:"params use a type-aware field; runtime.toml previews; prompts save an override"
       ; b Act "E" "advanced JSON"
@@ -314,7 +319,8 @@ let for_surface = function
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while the detail is focused, read the adjacent resource"
       ; b Act "Enter" "read" ~help:"read the selected resource"
-      ; b Act "Esc" "list" ~help:"back to the list"
+      ; b Act "Esc" "back"
+          ~help:"the text hands back to the list; the list leaves for Config"
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
@@ -377,7 +383,7 @@ let for_surface = function
       ; b Navigate "[/]" "Keeper" ~help:"change the effective Keeper surface"
       ; b Act "e" "edit Skill"
           ~help:"open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish"
-      ; b Act "Esc" "overview"
+      ; b Act "Esc" "config" ~help:"back to the Config surface it hangs off"
       ]
       @ listing_meta
   | System_logs ->
@@ -519,8 +525,8 @@ let help_surfaces : (string * surface) list =
   ; "Changes", Changes
   ; "Runtime", Runtime
   ; "Config", Config
-  ; "Resources", Resources
-  ; "Tools", Tools
+  ; "Config / Resources", Resources
+  ; "Config / Tools", Tools
   ; "Logs", System_logs
   ]
 

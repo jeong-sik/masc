@@ -213,12 +213,12 @@ let test_schedule_update_form_preserves_exact_editable_definition () =
    can drift to any footer at all without a test noticing. *)
 let test_tools_footer_carries_the_keeper_axis () =
   check str "tools names the effective Keeper switch"
-    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [/]:Keeper  e:edit Skill  Esc:overview  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [/]:Keeper  e:edit Skill  Esc:config  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Tools)
 
 let test_resources_footer_steps_through_detail () =
   let tail =
-    "  h/l:pane  Ctrl-W:focus  J / K:scroll text  [ / ]:previous / next  Enter:read  Esc:list  r:reload  Tab:next  q:quit"
+    "  h/l:pane  Ctrl-W:focus  J / K:scroll text  [ / ]:previous / next  Enter:read  Esc:back  r:reload  Tab:next  q:quit"
   in
   check str "list names adjacent detail navigation" ("j/k:move" ^ tail)
     (Masc_tui_keys.footer_hints_resources ~detail_focus:false);
@@ -506,6 +506,50 @@ let test_code_is_a_workspace_child () =
        (fun (surface, label) ->
          surface = Repositories && String.equal label "Workspace")
        surface_ring)
+
+(* Resources and Tools are registration catalogs -- what is wired up here,
+   read rarely -- so they hang off Config under [s] and [t] instead of
+   holding Tab stops of their own. *)
+let test_resources_is_a_config_child () =
+  Alcotest.(check bool) "Resources is not a top-level ring entry" false
+    (List.exists (fun (surface, _) -> surface = Resources) surface_ring);
+  Alcotest.(check int) "Resources highlights Config"
+    (surface_ring_index Config)
+    (surface_ring_index Resources);
+  Alcotest.(check bool) "and the help sheet files it under Config" true
+    (List.exists
+       (fun (label, _) -> String.equal label "Config / Resources")
+       (Masc_tui_keys.help_sections ()));
+  let config_keys =
+    List.map
+      (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
+      (Masc_tui_keys.for_surface Config)
+  in
+  Alcotest.(check bool) "Config documents the [s] hop" true
+    (List.mem "s" config_keys)
+
+let test_tools_is_a_config_child () =
+  Alcotest.(check bool) "Tools is not a top-level ring entry" false
+    (List.exists (fun (surface, _) -> surface = Tools) surface_ring);
+  Alcotest.(check int) "Tools highlights Config"
+    (surface_ring_index Config)
+    (surface_ring_index Tools);
+  Alcotest.(check bool) "and the help sheet files it under Config" true
+    (List.exists
+       (fun (label, _) -> String.equal label "Config / Tools")
+       (Masc_tui_keys.help_sections ()));
+  let config_keys =
+    List.map
+      (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
+      (Masc_tui_keys.for_surface Config)
+  in
+  Alcotest.(check bool) "Config documents the [t] hop" true
+    (List.mem "t" config_keys)
+
+let test_config_footer_names_both_hops () =
+  check str "Config names its two off-ring children"
+    "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  Esc:overview  r:reload  Tab:next"
+    (Masc_tui_keys.footer_hints Config)
 
 let test_system_logs_owns_only_its_real_filter_keys () =
   (* g/G/f still belong to Acting. Logs owns the server level floor, direct
@@ -904,6 +948,12 @@ let () =
             test_lanes_is_a_runtime_child
         ; Alcotest.test_case "Code is a Workspace child" `Quick
             test_code_is_a_workspace_child
+        ; Alcotest.test_case "Resources is a Config child" `Quick
+            test_resources_is_a_config_child
+        ; Alcotest.test_case "Tools is a Config child" `Quick
+            test_tools_is_a_config_child
+        ; Alcotest.test_case "Config names both hops" `Quick
+            test_config_footer_names_both_hops
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick

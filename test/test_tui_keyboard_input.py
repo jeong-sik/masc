@@ -5580,7 +5580,10 @@ def skills_usage_clarity_interaction() -> Interaction:
             columns=160,
             needle=b"MASC Overview",
         )
-        send_and_wait(process, master_fd, output, b"\t" * 16, b"MASC Tools")
+        # Tools hangs off Config under [t] now, so the walk goes to the
+        # parent stop and hops from there.
+        tab_until(process, master_fd, output, b"MASC Config")
+        send_and_wait(process, master_fd, output, b"t", b"MASC Tools")
         usage = send_and_wait(
             process,
             master_fd,
@@ -10303,7 +10306,10 @@ def resources_detail_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"Event Log (JSON)")
+        # Resources hangs off Config under [s]; the listing row proves
+        # the surface arrived loaded through the hop.
+        tab_until(process, master_fd, output, b"MASC Config")
+        send_and_wait(process, master_fd, output, b"s", b"Event Log (JSON)")
         detail = send_and_wait(
             process, master_fd, output, b"\r", b'"status"'
         )

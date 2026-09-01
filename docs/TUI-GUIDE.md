@@ -8,15 +8,16 @@ Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
 `bin/masc_tui_types.ml`: Overview, Acting, Keepers, Memory, Approvals,
-Board, Planning, Workspace, Runtime, Config, Resources, Tools, Logs.
-Eight more surfaces hang off parents instead of holding Tab stops:
+Board, Planning, Workspace, Runtime, Config, Logs.
+Ten more surfaces hang off parents instead of holding Tab stops:
 Planning's `v` walks Task Review, Evaluator Verdicts, Schedules, and Fusion;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
 Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
-third stop), and Workspace reaches Code with `Enter` on a repository row. Task
-Review, Schedules, Fusion, Lanes, and Code also keep `go <name>` palette
-entries; Verdicts, Changes, and Keeper operations are reached from their
-parents only.
+third stop), Workspace reaches Code with `Enter` on a repository row, and
+Config reaches Resources with `s` and Tools with `t`. Task Review,
+Schedules, Fusion, Lanes, Code, Resources, and Tools also keep `go <name>`
+palette entries; Verdicts, Changes, and Keeper operations are reached from
+their parents only.
 
 ## Quick Start
 
@@ -133,7 +134,8 @@ remains marked when the detail has focus.
 
 The Config surface shows `runtime.toml` as the server reads it; `e` opens
 it in `$EDITOR` and the server's preview validation gates the write. The
-Resources surface lists every MCP resource; `Enter` reads one beside the
+Resources surface hangs off Config under `s` and lists every MCP
+resource; `Enter` reads one beside the
 list. The detail starts with the server's description, full URI, MIME type,
 and declared byte size, then the payload. JSON is pretty-printed; JSON, TOML,
 and YAML payloads use the shared code lexer, while Markdown uses the same
@@ -1042,7 +1044,7 @@ file, then climbs directories.
 
 ### Tools
 
-The Tools surface has five panes. Press `p` to move through the selected
+The Tools surface hangs off Config under `t` and has five panes. Press `p` to move through the selected
 Keeper's effective Tool surface, async requests, Skill activations, cross-Keeper
 Skill usage, and the registered Tool catalog. This keeps the Skill views from
 being buried below a long Tool list.
@@ -1237,7 +1239,7 @@ Tab cycles the surfaces:
 
   Overview -> Acting -> Keepers -> Memory -> Approvals -> Board
            -> Planning -> Workspace
-           -> Runtime -> Config -> Resources -> Tools -> Logs -> Overview
+           -> Runtime -> Config -> Logs -> Overview
 
 Within a surface:
 
@@ -1255,6 +1257,7 @@ Off-ring children:
   Keeper detail --[ / ]--> Channels / Automation / Runs
   Runtime   --p--> ... --p--> Lanes
   Workspace --Enter-->  Code (the selected repository's tree)
+  Config    --s-->  Resources        Config --t--> Tools
 ```
 
 `2` reaches Keepers after the active field or panel has declined it.

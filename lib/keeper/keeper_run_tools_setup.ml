@@ -219,6 +219,7 @@ let deferred_names_absent_from ~declared_names ~actual_names =
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(publication_recovery :
           Keeper_publication_recovery_availability.turn_context)
       ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
@@ -717,6 +718,7 @@ let prepare_agent_setup
     ; keeper_turn_id
     ; turn_kind
     ; meta
+    ; profile_defaults
     ; turn_ctx_cell
     ; final_agent_core_turn_ordinal_ref
     ; receipt_turn_count_ref

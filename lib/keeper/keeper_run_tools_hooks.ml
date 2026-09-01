@@ -82,6 +82,12 @@ type ctx =
   ; keeper_turn_id : int
   ; turn_kind : Turn_record.turn_kind
   ; meta : Keeper_meta_contract.keeper_meta
+  ; profile_defaults : Keeper_types_profile.keeper_profile_defaults
+    (* The TOML the turn was admitted with. Post-tool observers re-adopt the
+       registry projection's meta, and that projection omits TOML-owned
+       fields on purpose -- re-applying this overlay is what keeps a keeper
+       whose TOML says microvm from dispatching Execute as docker (#31178
+       drift, observer site). *)
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
     (* RFC-0225 §3.3: per-run carrier; written by the pre-request hook
        below, read by the post-tool hooks in Keeper_hooks_agent_core. *)
@@ -316,6 +322,29 @@ let observation_attribution_for_tool_input ?(tool_name = "") ~config ~meta input
          ~file_path:host_path)
 ;;
 
+(* The registry projection is durable keeper JSON, which omits the
+   TOML-owned fields on purpose; adopting it whole reverts sandbox_profile
+   to the decoder placeholder, so the turn's Execute dispatches as docker
+   while the TOML says microvm (#31178 drift, observer site). Re-apply the
+   TOML the turn was admitted with -- never a re-read, so two reads inside
+   one turn cannot disagree. A projection that cannot be made effective is
+   not a reason to run the rest of the turn under the placeholder: keep
+   the admitted meta. *)
+let adopt_projection_meta
+      ~(profile_defaults : keeper_profile_defaults)
+      ~(admitted : keeper_meta)
+      ~(projection : keeper_meta)
+      : keeper_meta =
+  match effective_meta_of_profile_defaults profile_defaults projection with
+  | Ok effective -> effective
+  | Error detail ->
+    Log.Keeper.warn
+      ~keeper_name:admitted.name
+      "kept the admitted meta: the registry projection could not be made \
+       effective: %s"
+      detail;
+    admitted
+
 let assemble_hooks
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
@@ -351,6 +380,7 @@ let assemble_hooks
   let keeper_turn_id = ctx.keeper_turn_id in
   let turn_kind = ctx.turn_kind in
   let meta = ctx.meta in
+  let profile_defaults = ctx.profile_defaults in
   let turn_ctx_cell = ctx.turn_ctx_cell in
   let final_agent_core_turn_ordinal_ref = ctx.final_agent_core_turn_ordinal_ref in
   let receipt_turn_count_ref = ctx.receipt_turn_count_ref in
@@ -514,8 +544,12 @@ let assemble_hooks
               in
               (match Keeper_registry.get ~base_path:config.base_path meta.name with
                | Some entry ->
-                 acc.meta <- entry.meta;
-                 meta_ref := entry.meta
+                 let adopted =
+                   adopt_projection_meta ~profile_defaults ~admitted:meta
+                     ~projection:entry.meta
+                 in
+                 acc.meta <- adopted;
+                 meta_ref := adopted
                | None -> ());
               let execution_outcome =
                 if success then Tool_result.Ok else Tool_result.Error

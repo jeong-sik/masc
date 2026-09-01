@@ -1,4 +1,4 @@
-(** Tests for Tool_dispatch — O(1) central dispatch registry. *)
+(** Tests for Tool_dispatch — immutable central dispatch snapshots. *)
 
 module Tool_dispatch = Tool_dispatch
 module Tool_result = Tool_result
@@ -202,35 +202,70 @@ let () =
           test_case "concurrent registration and lookup stay coherent" `Quick
             (fun () ->
               let registrations_per_domain = 24 in
+              let domain_count = 4 in
+              let ready = Atomic.make 0 in
+              let start = Atomic.make false in
               let domains =
-                List.init 4 (fun domain_index ->
+                List.init domain_count (fun domain_index ->
                   Domain.spawn (fun () ->
+                    Atomic.incr ready;
+                    while not (Atomic.get start) do
+                      Domain.cpu_relax ()
+                    done;
                     for registration_index = 1 to registrations_per_domain do
                       let tool_name =
                         Printf.sprintf "__test_dispatch_concurrent_%d_%d"
                           domain_index registration_index
                       in
+                      let schema = make_schema tool_name in
                       Tool_dispatch.register ~tool_name ~handler:echo_handler;
+                      Tool_dispatch.register_module_tag
+                        ~schemas:[ schema ]
+                        ~tag:Mod_misc;
                       if not (Tool_dispatch.is_registered tool_name) then
                         Alcotest.failf "registered handler %s was not visible"
+                          tool_name;
+                      if Tool_dispatch.lookup_tag tool_name <> Some Mod_misc
+                      then
+                        Alcotest.failf "registered tag %s was not visible" tool_name;
+                      if
+                        Tool_dispatch.lookup_schema tool_name
+                        <> Some schema.input_schema
+                      then
+                        Alcotest.failf
+                          "registered schema %s was not visible"
                           tool_name
                     done))
               in
+              while Atomic.get ready < domain_count do
+                Domain.cpu_relax ()
+              done;
+              Atomic.set start true;
               List.iter Domain.join domains;
-              for domain_index = 0 to 3 do
+              for domain_index = 0 to domain_count - 1 do
                 for registration_index = 1 to registrations_per_domain do
                   let tool_name =
                     Printf.sprintf "__test_dispatch_concurrent_%d_%d"
                       domain_index registration_index
                   in
                   check bool "registered snapshot contains handler" true
-                    (Tool_dispatch.is_registered tool_name)
+                    (Tool_dispatch.is_registered tool_name);
+                  check
+                    bool
+                    "routing snapshot contains tag"
+                    true
+                    (Tool_dispatch.lookup_tag tool_name = Some Mod_misc);
+                  check
+                    bool
+                    "routing snapshot contains schema"
+                    true
+                    (Option.is_some (Tool_dispatch.lookup_schema tool_name))
                 done
               done);
         ] );
       (* PR-S3: the OTel/Otel_metric_store span wrapper is injected, not referenced
          inline. These tests assert the injection MECHANISM fires — they prove
-         guarded_dispatch routes through [!span_wrapper_ref], so registering
+         guarded_dispatch captures the immutable hook snapshot, so registering
          [Tool_telemetry.with_span] at the composition root is sufficient for
          telemetry. (The actual Otel emission is verified by code-read; this
          covers the wiring contract that a green @check alone cannot.) *)

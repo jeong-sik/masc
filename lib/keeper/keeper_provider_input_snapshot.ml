@@ -77,6 +77,26 @@ type read_error =
 
 let ( let* ) = Result.bind
 
+let snapshot_cache : (string, t) Hashtbl.t = Hashtbl.create 16
+let snapshot_cache_mu = Eio.Mutex.create ()
+
+let snapshot_cache_key (config : Workspace.config) keeper =
+  config.base_path ^ "\000" ^ keeper
+;;
+
+let cached_snapshot config keeper =
+  Eio_guard.with_mutex snapshot_cache_mu (fun () ->
+    Hashtbl.find_opt snapshot_cache (snapshot_cache_key config keeper))
+;;
+
+let remember_snapshot config snapshot =
+  Eio_guard.with_mutex snapshot_cache_mu (fun () ->
+    Hashtbl.replace
+      snapshot_cache
+      (snapshot_cache_key config snapshot.keeper)
+      snapshot)
+;;
+
 let read_error_to_string = function
   | Unknown_keeper keeper -> Printf.sprintf "invalid keeper name: %s" keeper
   | Store_read_failed error -> Dated_jsonl.read_error_to_string error
@@ -307,12 +327,34 @@ let of_json = function
   | _ -> Error "snapshot must be an object"
 ;;
 
-let store_artifact store ~mime bytes =
-  let reference = Tool_blob_store.put_durable store ~bytes ~mime in
-  { bytes = String.length bytes
-  ; content_ref =
-      Tool_output.encode_for_agent_core (Tool_output.Stored reference)
-  }
+let reusable_artifacts snapshot =
+  let reusable = Hashtbl.create 32 in
+  let add artifact =
+    match Tool_output.decode_from_agent_core artifact.content_ref with
+    | Tool_output.Decoded reference when reference.bytes = artifact.bytes ->
+      Hashtbl.replace reusable (reference.sha256, reference.mime) artifact
+    | Tool_output.Decoded _
+    | Tool_output.Not_marker
+    | Tool_output.Invalid_marker _ -> ()
+  in
+  Option.iter add snapshot.system_prompt;
+  List.iter (fun message -> add message.artifact) snapshot.messages;
+  List.iter (fun tool -> add tool.artifact) snapshot.tool_schemas;
+  reusable
+;;
+
+let store_artifact store ~reusable ~mime bytes =
+  let bytes_length = String.length bytes in
+  let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  match Hashtbl.find_opt reusable (sha256, mime) with
+  | Some artifact when artifact.bytes = bytes_length -> artifact
+  | Some _ | None ->
+    let reference = Tool_blob_store.put_durable store ~bytes ~mime in
+    let reference = Tool_output.with_preview reference "" in
+    { bytes = bytes_length
+    ; content_ref =
+        Tool_output.encode_for_agent_core (Tool_output.Stored reference)
+    }
 ;;
 
 let write_best_effort
@@ -329,6 +371,11 @@ let write_best_effort
   let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn in
   let write () =
     let blob_store = Tool_blob_store.create ~base_path:config.base_path in
+    let reusable =
+      match cached_snapshot config keeper with
+      | Some snapshot -> reusable_artifacts snapshot
+      | None -> Hashtbl.create 0
+    in
     let system_prompt =
       if String.equal system_prompt ""
       then None
@@ -336,6 +383,7 @@ let write_best_effort
         Some
           (store_artifact
              blob_store
+             ~reusable
              ~mime:"text/plain; charset=utf-8"
              system_prompt)
     in
@@ -351,6 +399,7 @@ let write_best_effort
            ; artifact =
                store_artifact
                  blob_store
+                 ~reusable
                  ~mime:"application/vnd.masc.provider-input-message+json"
                  payload
            })
@@ -365,6 +414,7 @@ let write_best_effort
            ; artifact =
                store_artifact
                  blob_store
+                 ~reusable
                  ~mime:"application/vnd.masc.provider-input-tool-schema+json"
                  payload
            })
@@ -385,7 +435,8 @@ let write_best_effort
     in
     Dated_jsonl.append
       (Keeper_types_support.keeper_provider_input_store config keeper)
-      (to_json snapshot)
+      (to_json snapshot);
+    remember_snapshot config snapshot
   in
   match write () with
   | () -> ()

@@ -131,10 +131,38 @@ let test_repeated_history_is_content_deduplicated () =
     write config 7;
     let store = Tool_blob_store.create ~base_path:config.base_path in
     let first = Tool_blob_store.list_all store |> List.sort String.compare in
+    let first_snapshot = read config 7 in
+    let snapshot_json =
+      Snapshot.to_json first_snapshot.snapshot |> Yojson.Safe.to_string
+    in
+    check bool
+      "snapshot row does not preview the system prompt"
+      false
+      (String_util.contains_substring snapshot_json "exact system prompt");
+    check bool
+      "snapshot row does not preview message text"
+      false
+      (String_util.contains_substring snapshot_json "remember exact fact");
+    let prompt_sha =
+      match first_snapshot.resolved_system_prompt with
+      | Some prompt -> prompt.sha256
+      | None -> fail "system prompt artifact was not resolved"
+    in
+    let prompt_path =
+      Filename.concat
+        (Filename.concat (Tool_blob_store.root_dir store) (String.sub prompt_sha 0 2))
+        prompt_sha
+    in
+    let sentinel_mtime = 1_500_000_000. in
+    Unix.utimes prompt_path sentinel_mtime sentinel_mtime;
     write config 8;
     let second = Tool_blob_store.list_all store |> List.sort String.compare in
     check (list string) "same content keeps the same artifact set" first second;
     check int "system, message, and schema blobs" 3 (List.length second);
+    check (float 0.001)
+      "a repeated artifact is not rewritten"
+      sentinel_mtime
+      (Unix.stat prompt_path).st_mtime;
     ignore (read config 7);
     ignore (read config 8))
 ;;

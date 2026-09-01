@@ -14137,8 +14137,13 @@ let context_component_style = function
   | Turn_record.Message_document
   | Turn_record.Message_audio -> Ansi.reset
 
-let context_composition_lines (record : Turn_record.t) =
+let context_composition_lines (selection : Masc_tui_context_inspector.selection) =
   let module Inspector = Masc_tui_context_inspector in
+  (* Every reading above the component table describes the newest turn. The
+     table describes the newest turn that recorded an exact composition, which
+     is not always the same turn -- so the two are labelled separately rather
+     than drawn as one turn's report. *)
+  let record = selection.Inspector.latest in
   let selected_model =
     Option.value ~default:"model not observed" record.selected_model
   in
@@ -14152,7 +14157,7 @@ let context_composition_lines (record : Turn_record.t) =
       Ansi.reset
   in
   let turn =
-    Printf.sprintf "  Last observed  %s#%d  %s"
+    Printf.sprintf "  Latest turn  %s#%d  %s"
       (Keeper_chat.terminal_safe_text record.trace_id)
       record.absolute_turn
       (Masc_domain.iso8601_of_unix_seconds record.ts)
@@ -14209,13 +14214,35 @@ let context_composition_lines (record : Turn_record.t) =
     | None -> [ "  Conversation history window was not observed" ]
   in
   let components =
-    match record.input_components with
-    | None -> [ (Theme.bad ()) ^ "  Exact component attribution unavailable" ^ Ansi.reset ]
-    | Some components ->
-        let total = Option.value ~default:0 (Inspector.attributed_bytes record) in
+    match selection.Inspector.attributed with
+    | None ->
+        [ (Theme.bad ())
+          ^ "  No turn on this page recorded an exact input composition"
+          ^ Ansi.reset
+        ; Ansi.dim
+          ^ "  The readings above still describe the latest turn."
+          ^ Ansi.reset
+        ]
+    | Some { Inspector.record = attributed; components; turns_behind_latest } ->
+        let total =
+          List.fold_left
+            (fun total (component : Turn_record.input_component) ->
+              total + component.bytes)
+            0 components
+        in
         let heading =
-          Printf.sprintf "  %sInput composition%s  %s attributed"
-            Ansi.bold Ansi.reset (Inspector.format_bytes total)
+          if turns_behind_latest = 0 then
+            Printf.sprintf "  %sInput composition%s  %s attributed"
+              Ansi.bold Ansi.reset (Inspector.format_bytes total)
+          else
+            (* The gap is the whole point of showing it: without it an
+               operator reads a turn the keeper left behind as the current
+               one. *)
+            Printf.sprintf "  %sInput composition%s  %s attributed  %s#%d, %d turns back%s"
+              Ansi.bold Ansi.reset (Inspector.format_bytes total)
+              (Theme.warn ())
+              attributed.Turn_record.absolute_turn turns_behind_latest
+              Ansi.reset
         in
         heading
         :: List.map
@@ -14270,13 +14297,17 @@ let context_prompt_lines state (capture : Masc.Keeper_prompt_capture.capture) =
       in
       let relation =
         match state.context_inspector_reading with
-        | Some (_, { Masc_tui_context_inspector.turn = Ok record; _ })
+        | Some
+            ( _
+            , { Masc_tui_context_inspector.turn =
+                  Ok { Masc_tui_context_inspector.latest = record; _ }
+              ; _ } )
           when String.equal record.trace_id capture.trace_id
                && record.absolute_turn = capture.absolute_turn ->
             []
         | Some (_, { Masc_tui_context_inspector.turn = Ok _; _ }) ->
             [ (Theme.warn ())
-              ^ "  Prompt capture and component summary describe different turns."
+              ^ "  Prompt capture and the latest turn describe different turns."
               ^ Ansi.reset ]
         | Some _ | None -> []
       in
@@ -14376,7 +14407,7 @@ let context_inspector_content_lines state =
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Composition ->
            (match reading.turn with
-            | Ok record -> context_composition_lines record
+            | Ok selection -> context_composition_lines selection
             | Error detail ->
                 [ (Theme.bad ()) ^ "  Composition unavailable: "
                   ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ])
@@ -14391,7 +14422,15 @@ let context_inspector_content_lines state =
             | Error detail ->
                 [ (Theme.bad ()) ^ "  Input map unavailable: "
                   ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ]
-            | Ok record ->
+            | Ok { Masc_tui_context_inspector.attributed = None; _ } ->
+                (* The map is a per-component table; with no attribution there
+                   are no rows to draw, and inventing them from the latest
+                   turn's totals would state bytes nobody measured. *)
+                [ (Theme.bad ())
+                  ^ "  No turn on this page recorded an exact input composition"
+                  ^ Ansi.reset ]
+            | Ok { Masc_tui_context_inspector.attributed = Some { record; _ }; _ }
+              ->
                 let capture =
                   match reading.prompt with
                   | Ok capture -> Some capture

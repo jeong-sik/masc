@@ -49,14 +49,23 @@ let decode_turn_records = function
                  decode (record :: reversed) rest
            in
            let* records = decode [] rows in
-           let rec newest_observed = function
-             | [] -> Error "no turn has an exact provider-input composition"
-             | (record : Turn_record.t) :: rest ->
-                 (match record.input_components with
-                  | Some _ -> Ok record
-                  | None -> newest_observed rest)
-           in
-           newest_observed (List.rev records)
+           (match List.rev records with
+            | [] -> Error "turn-records returned no rows"
+            | (latest : Turn_record.t) :: _ as newest_first ->
+                let rec newest_attributed = function
+                  | [] -> None
+                  | (record : Turn_record.t) :: rest ->
+                      (match record.input_components with
+                       | Some components ->
+                           Some
+                             { record
+                             ; components
+                             ; turns_behind_latest =
+                                 latest.absolute_turn - record.absolute_turn
+                             }
+                       | None -> newest_attributed rest)
+                in
+                Ok { latest; attributed = newest_attributed newest_first })
        | Some _ -> Error "turn-records entries is not a list"
        | None -> Error "turn-records response is missing entries")
   | _ -> Error "turn-records response is not an object"
@@ -256,14 +265,6 @@ let input_map_rows (record : Turn_record.t) capture ~tool_surface =
            ; exact_text
            })
         components
-
-let attributed_bytes (record : Turn_record.t) =
-  Option.map
-    (List.fold_left
-       (fun total (component : Turn_record.input_component) ->
-          total + component.bytes)
-       0)
-    record.input_components
 
 let format_tokens tokens =
   if tokens >= 1_000_000 then Printf.sprintf "%.2fM" (float tokens /. 1_000_000.)

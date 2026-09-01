@@ -77,9 +77,38 @@ let test_newest_exact_composition_wins () =
   match Inspector.decode_turn_records (envelope [ observed; unobserved ]) with
   | Error detail -> fail detail
   | Ok decoded ->
-      check int "newest row with exact attribution" 1 decoded.absolute_turn;
-      check (option int) "attributed bytes" (Some 200)
-        (Inspector.attributed_bytes decoded)
+      check int "the latest row is the newest one, attributed or not" 2
+        decoded.Inspector.latest.absolute_turn;
+      (match decoded.Inspector.attributed with
+       | None -> fail "an attributed row was on the page and must be reported"
+       | Some attributed ->
+           check int "attribution comes from the newest attributed row" 1
+             attributed.Inspector.record.absolute_turn;
+           check int "and the reading says how far back that row is" 1
+             attributed.Inspector.turns_behind_latest;
+           check int "attributed bytes" 200
+             (List.fold_left
+                (fun total (component : Turn_record.input_component) ->
+                  total + component.bytes)
+                0 attributed.Inspector.components))
+
+(* On 2026-09-01 every row of rondo's and taskmaster's 50-turn page was
+   unattributed, and the reading failed outright -- discarding the token,
+   usage, wire and window readings the newest row did carry. *)
+let test_page_without_attribution_still_reads () =
+  let older = record ~trace:"trace-a" ~turn:7 () in
+  let newer = record ~trace:"trace-a" ~turn:8 () in
+  match Inspector.decode_turn_records (envelope [ older; newer ]) with
+  | Error detail -> fail detail
+  | Ok decoded ->
+      check int "the latest row is still reported" 8
+        decoded.Inspector.latest.absolute_turn;
+      check bool "with no attribution to show" true
+        (Option.is_none decoded.Inspector.attributed)
+
+let test_empty_page_is_an_error () =
+  check bool "an empty page has no latest row to report" true
+    (Result.is_error (Inspector.decode_turn_records (envelope [])))
 
 let test_malformed_row_is_not_dropped () =
   let good = record ~trace:"trace-a" ~turn:1 ~input_components:[] () in
@@ -344,6 +373,10 @@ let () =
     [ ( "decode"
       , [ test_case "selects newest exact composition" `Quick
             test_newest_exact_composition_wins
+        ; test_case "an unattributed page still reads" `Quick
+            test_page_without_attribution_still_reads
+        ; test_case "an empty page is an error" `Quick
+            test_empty_page_is_an_error
         ; test_case "rejects malformed rows" `Quick
             test_malformed_row_is_not_dropped
         ; test_case "binds exact prompt to Keeper" `Quick

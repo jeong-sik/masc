@@ -46,6 +46,25 @@
     ; escaped = has_backslash
     }
   ;;
+
+  (* A word is one or more adjacent pieces, and only the lexer can see
+     adjacency: whitespace produces no token, so a grammar-side piece
+     sequence cannot tell [ls -la] from [FOO=$BAR].  Menhir recorded
+     exactly that as a shift/reduce conflict on WORD/PARAM lookahead,
+     and the shift glued every argv word into one Concat — every
+     multi-word command line parsed as a single word and was refused.
+     The pieces are assembled here instead, so the grammar reads one
+     token per word.  A word that is a single literal stays WORD; the
+     redirect-target rule accepts only WORD, which keeps [> $OUT]
+     failing to parse rather than passing unchecked. *)
+  let assemble_word first rev_rest =
+    match List.rev rev_rest with
+    | [] ->
+      (match first with
+       | Shell_ir.Lit (s, meta) -> WORD (s, meta)
+       | piece -> MIXED_WORD piece)
+    | rest -> MIXED_WORD (Shell_ir.Concat (first :: rest))
+  ;;
 }
 
 (* WORD class: printable ASCII minus shell metacharacters that the
@@ -136,19 +155,23 @@ rule token = parse
      reaches the catch-all at the bottom and becomes a parse error. *)
   | "$(("           { excluded `Arith_expansion }
   | "$("            { excluded `Cmd_subst }
-  (* Simple parameter expansion — [$NAME] and [${NAME}] become a PARAM
-     token the grammar assembles into Shell_ir.Var.  Both forms come
-     before the bare ['\$'] exclusion so a name that does not follow
-     [param_name] (["\${NAME:-x}"], ["\$1"], ["\$" ...]) still falls
-     through to it and is refused as Param_expansion, keeping the
-     excluded vocabulary closed. *)
+  (* Simple parameter expansion — [$NAME] and [${NAME}] open a word
+     whose adjacent pieces [word_tail] collects into one token.  Both
+     forms come before the bare ['\$'] exclusion so a name that does
+     not follow [param_name] (["\${NAME:-x}"], ["\$1"], ["\$" ...])
+     still falls through to it and is refused as Param_expansion,
+     keeping the excluded vocabulary closed. *)
   | '$' (param_name as name) {
       incr_tokens ();
-      PARAM (name, meta_of_string name)
+      word_tail (Shell_ir.Var (name, meta_of_string name)) [] lexbuf
     }
   | "${" (param_name as name) "}" {
       incr_tokens ();
-      PARAM (name, { Shell_ir.quoted = false; glob = false; escaped = false })
+      word_tail
+        (Shell_ir.Var
+           (name, { Shell_ir.quoted = false; glob = false; escaped = false }))
+        []
+        lexbuf
     }
   | '`'             { excluded `Cmd_subst }
   | '$'             { excluded `Param_expansion }
@@ -180,11 +203,11 @@ rule token = parse
   | "/dev/null"    { incr_tokens (); DEV_NULL }
   | '\'' "/dev/null" '\'' { incr_tokens (); DEV_NULL }
   | '"' "/dev/null" '"' { incr_tokens (); DEV_NULL }
-  | (word_prefix as prefix) '\'' (sq_body as s) '\'' { incr_tokens (); WORD (prefix ^ s, { Shell_ir.quoted = true; glob = false; escaped = false }) }
-  | (word_prefix as prefix) '"' (dq_body as s) '"' { incr_tokens (); WORD (prefix ^ s, { Shell_ir.quoted = true; glob = false; escaped = false }) }
-  | '\'' (sq_body as s) '\'' { incr_tokens (); WORD (s, { Shell_ir.quoted = true; glob = false; escaped = false }) }
-  | '"' (dq_body as s) '"' { incr_tokens (); WORD (s, { Shell_ir.quoted = true; glob = false; escaped = false }) }
-  | word as w      { incr_tokens (); WORD (w, meta_of_string w) }
+  | (word_prefix as prefix) '\'' (sq_body as s) '\'' { incr_tokens (); word_tail (Shell_ir.Lit (prefix ^ s, { Shell_ir.quoted = true; glob = false; escaped = false })) [] lexbuf }
+  | (word_prefix as prefix) '"' (dq_body as s) '"' { incr_tokens (); word_tail (Shell_ir.Lit (prefix ^ s, { Shell_ir.quoted = true; glob = false; escaped = false })) [] lexbuf }
+  | '\'' (sq_body as s) '\'' { incr_tokens (); word_tail (Shell_ir.Lit (s, { Shell_ir.quoted = true; glob = false; escaped = false })) [] lexbuf }
+  | '"' (dq_body as s) '"' { incr_tokens (); word_tail (Shell_ir.Lit (s, { Shell_ir.quoted = true; glob = false; escaped = false })) [] lexbuf }
+  | word as w      { incr_tokens (); word_tail (Shell_ir.Lit (w, meta_of_string w)) [] lexbuf }
   | eof            { EOF }
   (* No rule matched. This is not [`Unknown_construct]: the rules above each
      name a shell feature the tool does not implement, and what arrives here
@@ -192,3 +215,45 @@ rule token = parse
      a quote the subset does take, just never closed. Saying "this tool does
      not run [']" would be false. [Parse_error] carries the position. *)
   | _ as c         { raise (Failure (Printf.sprintf "unexpected char %c" c)) }
+
+(* Adjacent pieces of the word opened in [token].  Each arm mirrors a
+   word-forming rule above; anything else — whitespace, an operator,
+   eof, an excluded construct's first char — matches the empty pattern,
+   which closes the word without consuming, and [token] reads on from
+   the boundary.  An excluded construct glued to a word ([foo$(bar)])
+   therefore still reaches its own rule and is refused by name. *)
+and word_tail first rev_rest = parse
+  | '$' (param_name as name) {
+      incr_tokens ();
+      word_tail first (Shell_ir.Var (name, meta_of_string name) :: rev_rest) lexbuf
+    }
+  | "${" (param_name as name) "}" {
+      incr_tokens ();
+      word_tail
+        first
+        (Shell_ir.Var
+           (name, { Shell_ir.quoted = false; glob = false; escaped = false })
+         :: rev_rest)
+        lexbuf
+    }
+  | '\'' (sq_body as s) '\'' {
+      incr_tokens ();
+      word_tail
+        first
+        (Shell_ir.Lit (s, { Shell_ir.quoted = true; glob = false; escaped = false })
+         :: rev_rest)
+        lexbuf
+    }
+  | '"' (dq_body as s) '"' {
+      incr_tokens ();
+      word_tail
+        first
+        (Shell_ir.Lit (s, { Shell_ir.quoted = true; glob = false; escaped = false })
+         :: rev_rest)
+        lexbuf
+    }
+  | word as w {
+      incr_tokens ();
+      word_tail first (Shell_ir.Lit (w, meta_of_string w) :: rev_rest) lexbuf
+    }
+  | "" { assemble_word first rev_rest }

@@ -32,7 +32,7 @@ let file_redirect fd target mode =
    See RFC v5 (docs/rfc/RFC-0005). */
 
 %token <string * Masc_exec.Shell_ir.arg_meta> WORD
-%token <string * Masc_exec.Shell_ir.arg_meta> PARAM
+%token <Masc_exec.Shell_ir.arg> MIXED_WORD
 %token DEV_NULL
 %token <int * int> FD_REDIRECT
 %token <int * Masc_exec.Redirect_scope.mode> FILE_REDIRECT_OP
@@ -55,31 +55,16 @@ literal_word:
   | value = WORD { value }
   | DEV_NULL { "/dev/null", Masc_exec.Shell_ir.default_meta }
 
-(* One piece of a shell word: a literal token or a simple parameter
-   expansion.  Adjacent pieces become one word — [prefix=$DIR] lexes as
-   WORD ["prefix="] then PARAM ["DIR"] and assembles to
-   Concat [Lit "prefix="; Var "DIR"] — the shape bash itself uses for
-   [FOO=bar$BAZ]. *)
-word_piece:
-  | value = literal_word {
-      let text, meta = value in
-      Masc_exec.Shell_ir.Lit (text, meta)
-    }
-  | param = PARAM {
-      let name, meta = param in
-      Masc_exec.Shell_ir.Var (name, meta)
-    }
-
-word_seq:
-  | piece = word_piece { [ piece ] }
-  | seq = word_seq piece = word_piece { seq @ [ piece ] }
-
+(* One shell word is one token: the lexer assembles adjacent pieces
+   ([prefix=$DIR] → Concat [Lit "prefix="; Var "DIR"]) because only it
+   sees adjacency — whitespace reaches the grammar as nothing at all,
+   so a grammar-side piece sequence could not tell [ls -la] from
+   [FOO=$BAR] and menhir's shift preference glued them alike.  A word
+   holding any expansion arrives as MIXED_WORD, which the redirect
+   target below does not accept. *)
 word:
-  | pieces = word_seq {
-      match pieces with
-      | [ single ] -> single
-      | many -> Masc_exec.Shell_ir.Concat many
-    }
+  | value = literal_word { let text, meta = value in Masc_exec.Shell_ir.Lit (text, meta) }
+  | arg = MIXED_WORD { arg }
 
 part:
   | arg = word { Arg arg }

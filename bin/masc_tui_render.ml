@@ -14224,15 +14224,7 @@ let help_lines (state : state) =
   | first :: rest ->
       section first @ slash_commands @ List.concat_map section rest
 
-let context_ratio_bar ~width ~tokens ~maximum =
-  let ratio =
-    if maximum <= 0 then 0.
-    else Float.min 1. (Float.max 0. (float tokens /. float maximum))
-  in
-  let filled = int_of_float (Float.round (ratio *. float width)) in
-  Ansi.cyan ^ String.make filled '#'
-  ^ Ansi.dim ^ String.make (max 0 (width - filled)) '-'
-  ^ Ansi.reset
+module Context_bars = Masc_tui_context_bars
 
 let context_component_style = function
   | Turn_record.Prompt_block Prompt_block_id.Memory_os_recall ->
@@ -14240,40 +14232,70 @@ let context_component_style = function
   | Turn_record.Prompt_block _ -> Ansi.bold
   | Turn_record.Tool_schemas -> (Theme.warn ())
   | Turn_record.Message_user -> (Theme.info ())
-  | Turn_record.Message_tool_use
-  | Turn_record.Message_tool_result -> Ansi.cyan
-  | Turn_record.Message_system
-  | Turn_record.Message_assistant_text
-  | Turn_record.Message_thinking
-  | Turn_record.Message_redacted_thinking
-  | Turn_record.Message_image
-  | Turn_record.Message_document
+  | Turn_record.Message_tool_use | Turn_record.Message_tool_result -> Ansi.cyan
+  | Turn_record.Message_system | Turn_record.Message_assistant_text
+  | Turn_record.Message_thinking | Turn_record.Message_redacted_thinking
+  | Turn_record.Message_image | Turn_record.Message_document
   | Turn_record.Message_audio -> Ansi.reset
 
-let context_composition_lines (selection : Masc_tui_context_inspector.selection) =
+let context_composition_lines ~cols
+    (selection : Masc_tui_context_inspector.selection) =
   let module Inspector = Masc_tui_context_inspector in
-  (* Every reading above the component table describes the newest turn. The
-     table describes the newest turn that recorded an exact composition, which
+  (* The usable cells after the two-space indent every row carries. No floor
+     above one: a floor wider than the pane makes the rows overrun and the
+     frame cut them, and every row builder here is exact at any width. *)
+  let width = max 1 (framed_inner_width cols - 2) in
+  let bar_width = min 60 width in
+  (* Every reading outside the composition band describes the newest turn. The
+     band describes the newest turn that recorded an exact composition, which
      is not always the same turn -- so the two are labelled separately rather
      than drawn as one turn's report. *)
   let record = selection.Inspector.latest in
+  (* The sentences under a bar carry what its number means, so they are folded
+     to the pane rather than cut by it. *)
+  let prose text =
+    List.map
+      (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset)
+      (Context_bars.wrap ~width text)
+  in
+  (* Same folding for a row of figures, which keeps its own colour. *)
+  let fact text =
+    List.map (fun line -> "  " ^ line) (Context_bars.wrap ~width text)
+  in
   let selected_model =
     Option.value ~default:"model not observed" record.selected_model
   in
+  (* Three short rows rather than one long one. Joined, the turn number and
+     the timestamp fall off the right edge of a narrow pane, and the turn
+     number is what an operator matches against the chat above. *)
   let identity =
-    Printf.sprintf "  %s%s%s  %s%s%s"
-      Ansi.bold
+    Printf.sprintf "  %s%s%s  %s%s%s" Ansi.bold
       (Keeper_chat.terminal_safe_text selected_model)
-      Ansi.reset
-      Ansi.dim
+      Ansi.reset Ansi.dim
       (Keeper_chat.terminal_safe_text record.runtime_profile)
       Ansi.reset
   in
   let turn =
-    Printf.sprintf "  Latest turn  %s#%d  %s"
-      (Keeper_chat.terminal_safe_text record.trace_id)
-      record.absolute_turn
+    Printf.sprintf "  %sturn #%d  ·  %s%s" Ansi.dim record.absolute_turn
       (Masc_domain.iso8601_of_unix_seconds record.ts)
+      Ansi.reset
+  in
+  let trace =
+    Printf.sprintf "  %s%s%s" Ansi.dim
+      (Keeper_chat.terminal_safe_text record.trace_id)
+      Ansi.reset
+  in
+  let wire_headline =
+    match record.request_wire_observation with
+    | Some observation ->
+        Printf.sprintf "  %s%s%s  %son the wire  ·  %s%s" Ansi.bold
+          (Inspector.format_bytes observation.body_bytes)
+          Ansi.reset Ansi.dim
+          (Keeper_chat.terminal_safe_text observation.runtime_profile)
+          Ansi.reset
+    | None ->
+        Printf.sprintf "  %sProvider request bytes were not observed%s"
+          (Theme.bad ()) Ansi.reset
   in
   let token_lines =
     match record.usage.scope with
@@ -14281,40 +14303,43 @@ let context_composition_lines (selection : Masc_tui_context_inspector.selection)
        dividing it by the window states an occupancy nobody measured. On
        2026-09-01 every turn whose reported input exceeded its own window --
        642 of them -- carried this scope, without a single exception. *)
-    | Runtime_usage_scope.Conversation_cumulative ->
-        (match record.usage.input_tokens, record.context_window with
-         | Some tokens, Some maximum when maximum > 0 ->
-             [ Printf.sprintf
-                 "  Conversation input  %s tokens  %s(cumulative; this turn's \
-                  share was not reported)%s"
-                 (Inspector.format_tokens tokens) Ansi.dim Ansi.reset
-             ; Printf.sprintf "  Context window  %s tokens"
-                 (Inspector.format_tokens maximum)
-             ]
-         | Some tokens, (None | Some _) ->
-             [ Printf.sprintf
-                 "  Conversation input  %s tokens  %s(cumulative; window not \
-                  observed)%s"
-                 (Inspector.format_tokens tokens) Ansi.dim Ansi.reset
-             ]
-         | None, _ -> [ "  Context usage was not reported for this turn" ])
-    | Runtime_usage_scope.Per_request | Runtime_usage_scope.Usage_scope_unavailable
-      ->
-        (match record.usage.input_tokens, record.context_window with
-         | Some tokens, Some maximum when maximum > 0 ->
-             let ratio = float tokens /. float maximum in
-             [ Printf.sprintf "  Context  %s / %s tokens  (%.1f%%)"
+    | Runtime_usage_scope.Conversation_cumulative -> (
+        match record.usage.input_tokens, record.context_window with
+        | Some tokens, Some maximum when maximum > 0 ->
+            [ Printf.sprintf
+                "  %s tokens counted across the conversation  %s(this \
+                 request's own share was not reported)%s"
+                (Inspector.format_tokens tokens) Ansi.dim Ansi.reset
+            ; Printf.sprintf "  %sWindow %s tokens; no per-request figure to \
+                              place in it%s"
+                Ansi.dim (Inspector.format_tokens maximum) Ansi.reset
+            ]
+        | Some tokens, (None | Some _) ->
+            [ Printf.sprintf
+                "  %s tokens counted across the conversation  %s(window not \
+                 observed)%s"
+                (Inspector.format_tokens tokens) Ansi.dim Ansi.reset
+            ]
+        | None, _ -> [ "  Context usage was not reported for this turn" ])
+    | Runtime_usage_scope.Per_request
+    | Runtime_usage_scope.Usage_scope_unavailable -> (
+        match record.usage.input_tokens, record.context_window with
+        | Some tokens, Some maximum when maximum > 0 ->
+            fact
+              (Printf.sprintf
+                 "%s / %s tokens  ·  %.1f%% of the window  ·  %s left"
                  (Inspector.format_tokens tokens)
                  (Inspector.format_tokens maximum)
-                 (ratio *. 100.)
-             ; "  " ^ context_ratio_bar ~width:30 ~tokens ~maximum
-             ; Printf.sprintf "  Remaining to context ceiling  %s tokens"
-                 (Inspector.format_tokens (max 0 (maximum - tokens)))
-             ]
-         | Some tokens, (None | Some _) ->
-             [ Printf.sprintf "  Context  %s input tokens; window not observed"
-                 (Inspector.format_tokens tokens) ]
-         | None, _ -> [ "  Context usage was not reported for this turn" ])
+                 (float tokens /. float maximum *. 100.)
+                 (Inspector.format_tokens (max 0 (maximum - tokens))))
+            @ [ "  "
+                ^ Context_bars.ratio_bar ~width:bar_width ~numerator:tokens
+                    ~denominator:maximum
+              ]
+        | Some tokens, (None | Some _) ->
+            [ Printf.sprintf "  %s input tokens; window not observed"
+                (Inspector.format_tokens tokens) ]
+        | None, _ -> [ "  Context usage was not reported for this turn" ])
   in
   let cache_lines =
     let parts =
@@ -14332,38 +14357,51 @@ let context_composition_lines (selection : Masc_tui_context_inspector.selection)
     in
     let label =
       match record.usage.scope with
-      | Runtime_usage_scope.Conversation_cumulative -> "  Usage (cumulative)  "
+      | Runtime_usage_scope.Conversation_cumulative -> "cumulative  "
       | Runtime_usage_scope.Per_request
-      | Runtime_usage_scope.Usage_scope_unavailable -> "  Usage  "
+      | Runtime_usage_scope.Usage_scope_unavailable -> ""
     in
-    match parts with [] -> [] | _ -> [ label ^ String.concat "  ·  " parts ]
-  in
-  let wire_lines =
-    match record.request_wire_observation with
-    | Some observation ->
-        [ Printf.sprintf "  Provider request  %s  ·  %s"
-            (Inspector.format_bytes observation.body_bytes)
-            (Keeper_chat.terminal_safe_text observation.runtime_profile) ]
-    | None -> [ "  Provider request bytes were not observed" ]
+    match parts with
+    | [] -> []
+    | _ -> prose (label ^ String.concat "  ·  " parts)
   in
   let history_lines =
     match record.model_input_window with
     | Some window ->
-        [ Printf.sprintf "  Conversation history  %d / %d atoms  ·  %s"
-            window.transmitted_atoms window.total_atoms
+        let transmitted = window.transmitted_atoms in
+        let total = window.total_atoms in
+        let share =
+          if total <= 0 then 0. else float transmitted /. float total *. 100.
+        in
+        [ Printf.sprintf "  %s%d of %d atoms%s  ·  %.1f%%  ·  %s%s%s" Ansi.bold
+            transmitted total Ansi.reset share Ansi.dim
             (match window.measurement with
              | Turn_record.Wire_shape -> "wire shape"
-             | Turn_record.Durable_shape -> "durable shape") ]
-    | None -> [ "  Conversation history window was not observed" ]
+             | Turn_record.Durable_shape -> "durable shape")
+            Ansi.reset
+        ; "  "
+          ^ Context_bars.reach_bar ~width:bar_width ~transmitted ~total
+              ~sent_style:(Theme.info ())
+        ; "  " ^ Context_bars.reach_pointer ~width:bar_width ~transmitted ~total
+        ]
+        @ prose
+            (Printf.sprintf
+               "%d older atoms stayed behind. A cut falls between atoms, so a \
+                tool result and the call it answers either both travel or \
+                neither does."
+               (max 0 (total - transmitted)))
+    | None ->
+        [ (Theme.bad ())
+          ^ "  Conversation history window was not observed" ^ Ansi.reset
+        ]
   in
-  let components =
+  let component_lines =
     match selection.Inspector.attributed with
     | None ->
         [ (Theme.bad ())
           ^ "  No turn on this page recorded an exact input composition"
           ^ Ansi.reset
-        ; Ansi.dim
-          ^ "  The readings above still describe the latest turn."
+        ; Ansi.dim ^ "  The readings above still describe the latest turn."
           ^ Ansi.reset
         ]
     | Some { Inspector.record = attributed; components; turns_behind_latest } ->
@@ -14373,42 +14411,107 @@ let context_composition_lines (selection : Masc_tui_context_inspector.selection)
               total + component.bytes)
             0 components
         in
-        let heading =
-          if turns_behind_latest = 0 then
-            Printf.sprintf "  %sInput composition%s  %s attributed"
-              Ansi.bold Ansi.reset (Inspector.format_bytes total)
+        (* The gap is the whole point of showing it: without it an operator
+           reads a turn the keeper left behind as the current one. *)
+        let gap =
+          if turns_behind_latest = 0 then []
           else
-            (* The gap is the whole point of showing it: without it an
-               operator reads a turn the keeper left behind as the current
-               one. *)
-            Printf.sprintf "  %sInput composition%s  %s attributed  %s#%d, %d turns back%s"
-              Ansi.bold Ansi.reset (Inspector.format_bytes total)
-              (Theme.warn ())
-              attributed.Turn_record.absolute_turn turns_behind_latest
-              Ansi.reset
+            [ Printf.sprintf
+                "  %sMeasured on turn #%d, %d turns before the readings \
+                 above.%s"
+                (Theme.warn ()) attributed.Turn_record.absolute_turn
+                turns_behind_latest Ansi.reset
+            ]
         in
-        heading
-        :: List.map
-             (fun (component : Turn_record.input_component) ->
-               let share =
-                 if total = 0 then 0.
-                 else float component.bytes /. float total *. 100.
-               in
-               Printf.sprintf "  %s%-24s%s %9s  %5.1f%%"
-                 (context_component_style component.component)
-                 (Inspector.input_component_label component.component)
-                 Ansi.reset
-                 (Inspector.format_bytes component.bytes)
-                 share)
-             components
+        (* Biggest share first. The record's order is neither prompt order nor
+           size order, and the stacked bar only reads as a picture when its
+           shades run from the largest share down: there are four shades and a
+           turn can carry nine components, so an unsorted row puts the repeated
+           shade next to unrelated sizes. *)
+        let ranked =
+          List.stable_sort
+            (fun (left : Turn_record.input_component)
+                 (right : Turn_record.input_component) ->
+              compare right.bytes left.bytes)
+            components
+        in
+        let bar =
+          if total = 0 then []
+          else
+            [ "  "
+              ^ Context_bars.stacked_bar ~width:bar_width
+                  ~segments:
+                    (List.map
+                       (fun (component : Turn_record.input_component) ->
+                         ( context_component_style component.component
+                         , component.bytes ))
+                       ranked)
+            ]
+        in
+        let rows =
+          List.mapi
+            (fun index (component : Turn_record.input_component) ->
+              let share =
+                if total = 0 then 0.
+                else float component.bytes /. float total *. 100.
+              in
+              (* A component with bytes in it must not print as 0.0%: the
+                 screen would then name a kind and deny it in the same row. *)
+              let share_text =
+                if component.bytes > 0 && share < 0.05 then "<0.1%"
+                else Printf.sprintf "%.1f%%" share
+              in
+              let style = context_component_style component.component in
+              Printf.sprintf "  %s%s %-22s%s %6s  %s%9s%s" style
+                (Context_bars.segment_glyph index)
+                (Inspector.input_component_label component.component)
+                Ansi.reset share_text Ansi.dim
+                (Inspector.format_bytes component.bytes)
+                Ansi.reset)
+            ranked
+        in
+        (* Attributed bytes and wire bytes are compared on the same turn, never
+           across two. They still disagree: on 2026-09-01 the attributed total
+           ran about a fifth above the wire figure across 1,556 turns, and the
+           cause is not identified. Printing the gap is what keeps an operator
+           from reading these bytes as the volume shipped. *)
+        let against_wire =
+          match attributed.Turn_record.request_wire_observation with
+          | Some observation when total > 0 && observation.body_bytes > 0 ->
+              prose
+                (Printf.sprintf
+                   "%s attributed here against %s on the wire, and the gap is \
+                    unexplained. Read the shares as proportions and the wire \
+                    line as this turn's size."
+                   (Inspector.format_bytes total)
+                   (Inspector.format_bytes observation.body_bytes))
+          | Some _ | None -> []
+        in
+        gap @ bar @ rows @ against_wire
   in
-  [ identity; turn; "" ] @ token_lines @ cache_lines @ [ "" ] @ wire_lines
-  @ history_lines @ [ "" ] @ components
-  @ [ ""
-    ; Ansi.dim
-      ^ "  Bytes are exact attributed content; provider-envelope bytes are shown separately."
-      ^ Ansi.reset
+  [ identity; turn; trace; "" ]
+  @ [ "  "
+      ^ Context_bars.band ~width ~title:"ON THE WIRE"
+          ~caption:"what the provider accepted"
     ]
+  @ (wire_headline :: token_lines)
+  @ cache_lines
+  @ [ "" ]
+  @ [ "  "
+      ^ Context_bars.band ~width ~title:"HISTORY REACH"
+          ~caption:"how far back this turn looked"
+    ]
+  @ history_lines
+  @ [ "" ]
+  @ [ "  "
+      ^ Context_bars.band ~width ~title:"COMPOSITION"
+          ~caption:"how this turn's content divides by kind"
+    ]
+  @ component_lines @ [ "" ]
+  @ prose
+      "Three measurements of one turn, not three views of one number: none of \
+       them is a breakdown of another, and they do not add up."
+
 
 let context_exact_input_lines state
     (input : Masc_tui_context_inspector.provider_input) =
@@ -14537,7 +14640,7 @@ let context_input_map_lines state (record : Turn_record.t)
           ^ Ansi.reset
         ]
 
-let context_inspector_content_lines state =
+let context_inspector_content_lines ~cols state =
   match state.context_inspector_reading with
   | None ->
       [ if state.context_inspector_loading then "  Loading provider-input evidence..."
@@ -14546,7 +14649,7 @@ let context_inspector_content_lines state =
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Composition ->
            (match reading.turn with
-            | Ok selection -> context_composition_lines selection
+            | Ok selection -> context_composition_lines ~cols selection
             | Error detail ->
                 [ (Theme.bad ()) ^ "  Composition unavailable: "
                   ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ])
@@ -14578,9 +14681,10 @@ let context_inspector_content_lines state =
                 context_input_map_lines state record provider_input))
 
 let context_inspector_viewport state =
-  let terminal_rows, _ = get_terminal_size () in
+  let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  (List.length (context_inspector_content_lines state), framed_content_height ~rows)
+  ( List.length (context_inspector_content_lines ~cols state)
+  , framed_content_height ~rows )
 
 let render_context_inspector state =
   let terminal_rows, cols = get_terminal_size () in
@@ -14608,7 +14712,7 @@ let render_context_inspector state =
        ^ "  "
        ^ (tab_label Masc_tui_context_inspector.Input_map "3" "map"));
   framed_divider buf cols;
-  let lines = context_inspector_content_lines state in
+  let lines = context_inspector_content_lines ~cols state in
   let content_height = framed_content_height ~rows in
   let scroll =
     Masc_tui_scroll.normalize ~count:(List.length lines)

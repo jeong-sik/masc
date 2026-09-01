@@ -521,8 +521,10 @@ let attach_keeper_chat_skill_activations ~config rows =
                  let activations =
                    Keeper_skill_activation_ledger.activations ledger
                    |> List.filter
-                        (fun activation ->
-                          Ids.Turn_ref.equal activation.turn_ref turn_ref)
+                        (fun
+                          (activation :
+                            Keeper_skill_activation_ledger.activation)
+                        -> Ids.Turn_ref.equal activation.turn_ref turn_ref)
                  in
                  (match activations, reports_skill with
                   | _ :: _, _ ->

@@ -298,7 +298,10 @@ type msg_anchor = {
 
 let chat_turn_phase = function
   | Message_user _ -> Turn_input
-  | Message_status | Message_thinking | Message_memory -> Turn_progress
+  (* Skill evidence rides the progress lane like thinking does — the render
+     side already groups [Message_skill _ | Message_thinking]. *)
+  | Message_status | Message_thinking | Message_memory | Message_skill _ ->
+      Turn_progress
   | Message_tool -> Turn_tool
   | Message_keeper | Message_autonomous | Message_error -> Turn_output
 ;;
@@ -321,9 +324,9 @@ let same_turn_user left right =
       String.equal left.me_request_id right.me_request_id
       && String.equal left.me_text right.me_text
   | (Message_keeper | Message_autonomous | Message_status | Message_error
-    | Message_tool | Message_thinking | Message_memory), _
+    | Message_tool | Message_thinking | Message_memory | Message_skill _), _
   | _, (Message_keeper | Message_autonomous | Message_status | Message_error
-       | Message_tool | Message_thinking | Message_memory) ->
+       | Message_tool | Message_thinking | Message_memory | Message_skill _) ->
       false
 ;;
 

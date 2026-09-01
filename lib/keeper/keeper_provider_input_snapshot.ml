@@ -122,14 +122,17 @@ let read_error_to_string = function
       detail
 ;;
 
-let artifact_to_json artifact =
+(* Annotated: [resolved_system_prompt] below also carries [bytes], so an
+   unannotated parameter re-infers to that later record and [.content_ref]
+   stops resolving. *)
+let artifact_to_json (artifact : artifact) =
   `Assoc
     [ "bytes", `Int artifact.bytes
     ; "content_ref", `String artifact.content_ref
     ]
 ;;
 
-let message_to_json message =
+let message_to_json (message : message) =
   `Assoc
     [ "index", `Int message.index
     ; "role", `String message.role
@@ -137,7 +140,7 @@ let message_to_json message =
     ]
 ;;
 
-let tool_schema_to_json tool =
+let tool_schema_to_json (tool : tool_schema) =
   `Assoc
     [ "index", `Int tool.index
     ; "name", `String tool.name
@@ -358,7 +361,7 @@ let store_artifact store ~reusable ~mime bytes =
 ;;
 
 let write_best_effort
-      ~config
+      ~(config : Workspace.config)
       ~keeper
       ~trace_id
       ~absolute_turn
@@ -521,7 +524,7 @@ let parse_artifact_json ~sha256 content =
 
 let rec resolve_messages store reversed = function
   | [] -> Ok (List.rev reversed)
-  | message :: rest ->
+  | (message : message) :: rest ->
     let* sha256, payload = fetch_artifact store message.artifact in
     let* content = parse_artifact_json ~sha256 payload in
     resolve_messages
@@ -575,7 +578,7 @@ let read_resolved ~config ~keeper ~turn_ref =
     }
 ;;
 
-let resolved_message_to_json message =
+let resolved_message_to_json (message : resolved_message) =
   `Assoc
     [ "index", `Int message.index
     ; "role", `String message.role
@@ -585,7 +588,7 @@ let resolved_message_to_json message =
     ]
 ;;
 
-let resolved_tool_schema_to_json tool =
+let resolved_tool_schema_to_json (tool : resolved_tool_schema) =
   `Assoc
     [ "index", `Int tool.index
     ; "name", `String tool.name

@@ -49,6 +49,7 @@ let chat_entry ~request_id ~role ~text ~at : Tui_types.msg_entry =
   ; me_timestamp = Printf.sprintf "%.0f" at
   ; me_request_id = request_id
   ; me_at = at
+  ; me_skill_activity = None
   }
 
 let ats entries =

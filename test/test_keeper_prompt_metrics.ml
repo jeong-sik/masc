@@ -390,7 +390,8 @@ let test_provider_content_messages_rejects_prompt_carrier_mismatch () =
         @ Agent_core.Types.Extra_system_context_provenance.metadata
     }
   in
-  (* The whole logged line, not the reason alone. Two of these five reach
+  (* The whole summary the log line carries, not the reason alone -- the
+     keeper prefixes keeper= and trace= around this value. Two of these five reach
      [Prompt_context_presence_mismatch] from opposite conditions -- announced
      and absent, arrived and unannounced -- and share a reason string, so
      [carrier_observed] is the only thing that tells an operator which one

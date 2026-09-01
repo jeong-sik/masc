@@ -261,10 +261,12 @@ let transition_ref transition =
         | Fusion_terminal _ -> [ "source_receipt_kind", `String "fusion" ]
         | Hitl_terminal _ -> [ "source_receipt_kind", `String "hitl" ]
         | Turn_completed -> [ "source_receipt_kind", `String "turn_completed" ]
-        | Turn_attempt_terminal { detail } ->
-          [ "source_receipt_kind", `String "turn_attempt_terminal"
-          ; "detail", `String detail
-          ]
+        | Turn_attempt_terminal _ ->
+          (* [detail] is diagnostic rather than operation authority: both the
+             full-receipt replay contract and retry callers may supply a newer
+             rendering for the same admitted attempt. Keep the compact
+             fingerprint aligned with that typed replay identity. *)
+          [ "source_receipt_kind", `String "turn_attempt_terminal" ]
       in
       [ "kind", `String "source_terminal"
       ; "source_ref", `String source_ref

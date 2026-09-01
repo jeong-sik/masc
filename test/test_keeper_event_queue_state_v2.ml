@@ -266,6 +266,41 @@ let test_turn_attempt_terminal_receipt_preserves_exact_source () =
       staged
     |> require_ok "project turn-attempt terminal receipt"
   in
+  let later_source = stimulus "later-terminal-source" 2.5 in
+  let with_later =
+    projected
+    |> State.with_revision (Int64.succ (State.revision projected))
+    |> State.with_pending (queue [ later_source ])
+  in
+  let later_selection = select with_later in
+  let later_staged, later_receipt =
+    match
+      State.terminalize_pending_turn_completed
+        ~applied_at:2.75
+        ~selection:later_selection
+        with_later
+      |> require_ok "terminalize later source"
+    with
+    | state, State.Transition_applied receipt -> state, receipt
+    | _, State.Transition_already_applied _ ->
+      Alcotest.fail "later terminal source was replayed"
+  in
+  let projected =
+    State.mark_transition_projected
+      ~transition_id:later_receipt.transition_id
+      later_staged
+    |> require_ok "displace turn-attempt receipt into compact history"
+  in
+  (match
+     State.projected_dispositions projected
+     |> List.find_opt (function
+       | State.Projected_witness witness ->
+         String.equal witness.post_id source.post_id
+       | State.Current_receipt _ -> false)
+   with
+   | Some (State.Projected_witness _) -> ()
+   | Some (State.Current_receipt _) | None ->
+     Alcotest.fail "turn-attempt terminal did not become a compact witness");
   (match
      State.terminalize_pending_turn_attempt
        ~applied_at:3.0

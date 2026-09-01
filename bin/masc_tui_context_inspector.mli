@@ -22,8 +22,34 @@ type tool_surface =
   | Surface_unresolved of { detail : string }
   | Surface_resolved of tool_surface_entry list
 
+type attributed_turn =
+  { record : Turn_record.t
+  ; components : Turn_record.input_component list
+        (** Carried out of the record rather than left behind its [option] so
+            a reader of this type cannot reach a state where an attributed
+            turn has no attribution. *)
+  ; turns_behind_latest : int
+        (** Absolute-turn distance from {!selection.latest}. [0] means the
+            newest row returned is itself attributed. *)
+  }
+
+(** What one turn-records page yields.
+
+    Two readings rather than one, because a keeper can keep turning while its
+    exact input composition stops being recorded. Returning only the newest
+    attributed row made the pane show a turn the keeper had already moved
+    past without saying so, and returning nothing when the page held no
+    attributed row threw away the token, usage, wire and window readings the
+    newest row did carry. [latest] is always the newest row on the page;
+    [attributed] is the newest row that also has an exact composition, when
+    the page holds one. *)
+type selection =
+  { latest : Turn_record.t
+  ; attributed : attributed_turn option
+  }
+
 type reading =
-  { turn : (Turn_record.t, string) result
+  { turn : (selection, string) result
   ; prompt : (Masc.Keeper_prompt_capture.capture, string) result
   ; tool_surface : tool_surface
   }
@@ -41,10 +67,14 @@ type input_map_row =
   ; exact_text : string option
   }
 
-val decode_turn_records : Yojson.Safe.t -> (Turn_record.t, string) result
-(** Strictly decode every returned row, then select the newest row that has an
-    exact input-component observation. A malformed row fails the reading; it
-    is never dropped to make the input look smaller. *)
+val decode_turn_records : Yojson.Safe.t -> (selection, string) result
+(** Strictly decode every returned row and report both the newest row and the
+    newest row carrying an exact input-component observation. A malformed row
+    fails the reading; it is never dropped to make the input look smaller.
+
+    An empty page is an error, but a page whose rows are all unattributed is
+    not: that is a fact about the keeper worth showing rather than an absent
+    reading. *)
 
 val decode_prompt_capture :
   expected_keeper:string -> Yojson.Safe.t ->
@@ -74,6 +104,5 @@ val input_map_rows :
     record's byte count and digest. Other provider-input components remain
     visible as byte-only evidence rather than being filled from another
     store. *)
-val attributed_bytes : Turn_record.t -> int option
 val format_bytes : int -> string
 val format_tokens : int -> string

@@ -819,7 +819,13 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
   let tool_surface =
     match turn with
     | Error _ -> Masc_tui_context_inspector.Surface_not_recorded
-    | Ok record ->
+    (* The listing belongs to the turn whose component rows will show it. A
+       page with no attributed row draws no rows, so no surface is fetched
+       for it; taking the newest row's surface instead would label one turn's
+       schemas with another turn's byte count. *)
+    | Ok { Masc_tui_context_inspector.attributed = None; _ } ->
+        Masc_tui_context_inspector.Surface_not_recorded
+    | Ok { Masc_tui_context_inspector.attributed = Some { record; _ }; _ } ->
         (match Masc_tui_context_inspector.tool_surface_sha256 record with
          | None -> Masc_tui_context_inspector.Surface_not_recorded
          | Some (Error detail) ->

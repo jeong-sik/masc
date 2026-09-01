@@ -1609,8 +1609,17 @@ export interface DashboardPromptItem {
   template_variables: string[]
 }
 
+export interface DashboardRuntimePromptAsset {
+  path: string
+  file_path: string
+  value: string
+  file_exists: boolean
+  char_count: number
+}
+
 interface DashboardPromptsResponse {
   prompts: DashboardPromptItem[]
+  runtime_assets?: DashboardRuntimePromptAsset[]
 }
 
 interface PromptMutationResponse {

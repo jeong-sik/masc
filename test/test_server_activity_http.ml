@@ -193,6 +193,43 @@ let test_prompt_override_request_rejects_noncanonical_shapes () =
     {|{"action":"set","key":"keeper","value":"a","value":"b"}|}
 ;;
 
+let test_runtime_prompt_assets_are_read_only_and_missing_visible () =
+  let prompts_dir = Filename.temp_file "masc_runtime_prompt_assets" "" in
+  Sys.remove prompts_dir;
+  Unix.mkdir prompts_dir 0o755;
+  let wake_path = Filename.concat prompts_dir "keeper.autonomous.wake.txt" in
+  let channel = open_out wake_path in
+  output_string channel "wake from runtime";
+  close_out channel;
+  Fun.protect
+    ~finally:(fun () ->
+      Sys.remove wake_path;
+      Unix.rmdir prompts_dir)
+    (fun () ->
+       let assets =
+         Server_routes_http_routes_activity.runtime_prompt_assets_json
+           ~prompts_dir
+           ~embedded_files:
+             [ "prompts/keeper.autonomous.wake.txt"
+             ; "prompts/harness.coding_keeper.txt"
+             ; "prompts/keeper.md"
+             ; "tools/ignored.txt"
+             ]
+       in
+       check int "only prompt txt assets" 2 (List.length assets);
+       let open Yojson.Safe.Util in
+       let missing = List.hd assets in
+       check string "sorted missing asset path" "harness.coding_keeper.txt"
+         (missing |> member "path" |> to_string);
+       check bool "missing asset remains visible" false
+         (missing |> member "file_exists" |> to_bool);
+       let wake = List.nth assets 1 in
+       check string "runtime projection content" "wake from runtime"
+         (wake |> member "value" |> to_string);
+       check bool "present runtime asset" true
+         (wake |> member "file_exists" |> to_bool))
+;;
+
 let () =
   run "Server_activity_http"
     [ ( "slice_default_events_to_limit"
@@ -209,5 +246,9 @@ let () =
             test_prompt_override_request_decodes_once
         ; test_case "rejects noncanonical request shapes" `Quick
             test_prompt_override_request_rejects_noncanonical_shapes
+        ] )
+    ; ( "runtime_prompt_assets"
+      , [ test_case "lists txt assets without making them overrideable" `Quick
+            test_runtime_prompt_assets_are_read_only_and_missing_visible
         ] )
     ]

@@ -2979,6 +2979,18 @@ let prompt_rows_for_state state =
         ~show_fragments:state.prompts_show_fragments snapshot
 ;;
 
+let runtime_prompt_assets_for_state state =
+  match state.prompts_snapshot with
+  | None -> []
+  | Some snapshot -> snapshot.Tui_decode.ps_runtime_assets
+;;
+
+let prompt_catalog_count_for_state state =
+  if state.prompts_show_runtime_assets
+  then List.length (runtime_prompt_assets_for_state state)
+  else List.length (prompt_rows_for_state state)
+;;
+
 let selected_prompt_for_state state =
   List.nth_opt (prompt_rows_for_state state) state.prompts_cursor
 ;;
@@ -7649,7 +7661,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.prompts_cursor <-
              max 0
                (min state.prompts_cursor
-                  (List.length (prompt_rows_for_state state) - 1));
+                  (prompt_catalog_count_for_state state - 1));
            state.prompts_error <- None
        | Error detail -> state.prompts_error <- Some detail)
   | Librarian_input_loaded (prompt_key, result) ->
@@ -12731,7 +12743,7 @@ and is loaded on demand through keeper_skill.
                 state.theme_cursor <- min (max 0 last) (state.theme_cursor + 1);
                 preview_theme_under_cursor ()
             | Config when state.config_pane = Config_prompts ->
-                let count = List.length (prompt_rows_for_state state) in
+                let count = prompt_catalog_count_for_state state in
                 if state.prompts_cursor < count - 1 then begin
                   state.prompts_cursor <- state.prompts_cursor + 1;
                   state.config_scroll <- 0;
@@ -14015,7 +14027,9 @@ and is loaded on demand through keeper_skill.
            sync_theme_page ()
        | Some "i" | Some "I"
          when state.view = Config && state.config_pane = Config_prompts ->
-           handle_librarian_input_read ()
+           if state.prompts_show_runtime_assets
+           then add_event state "system" "런타임 프롬프트 자산에는 기록된 모델 입력이 없습니다"
+           else handle_librarian_input_read ()
        | Some "p" | Some "P"
          when state.view = Runtime
               && Option.is_none state.runtime_detail_target ->
@@ -14229,7 +14243,10 @@ and is loaded on demand through keeper_skill.
                  | (Lanes_run_list _ | Lanes_run_detail _), _ -> ())
             | Config ->
                 (match state.config_pane with
-                 | Config_prompts -> handle_prompt_edit ()
+                 | Config_prompts ->
+                   if state.prompts_show_runtime_assets
+                   then add_event state "system" "런타임 프롬프트 자산은 읽기 전용입니다"
+                   else handle_prompt_edit ()
                  | Config_runtime -> handle_runtime_config_edit ()
                  | Config_params ->
                    handle_runtime_param_edit_open ~advanced:false ()
@@ -14279,9 +14296,12 @@ and is loaded on demand through keeper_skill.
             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs -> ())
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_prompts ->
-           handle_prompt_clear ()
+           if state.prompts_show_runtime_assets
+           then add_event state "system" "런타임 프롬프트 자산은 읽기 전용입니다"
+           else handle_prompt_clear ()
        | Some "a" | Some "A"
-         when state.view = Config && state.config_pane = Config_prompts ->
+         when state.view = Config && state.config_pane = Config_prompts
+              && not state.prompts_show_runtime_assets ->
            state.prompts_show_fragments <- not state.prompts_show_fragments;
            state.prompts_cursor <- 0;
            state.config_scroll <- 0;
@@ -14291,7 +14311,19 @@ and is loaded on demand through keeper_skill.
            add_event state "system"
              (if state.prompts_show_fragments then
                 "Prompt 목록에 내부 조각을 표시합니다"
-              else "Prompt 목록에 주 프롬프트만 표시합니다")
+             else "Prompt 목록에 주 프롬프트만 표시합니다")
+       | Some "o" | Some "O"
+         when state.view = Config && state.config_pane = Config_prompts ->
+           state.prompts_show_runtime_assets <- not state.prompts_show_runtime_assets;
+           state.prompts_cursor <- 0;
+           state.config_scroll <- 0;
+           state.prompts_librarian_input <- None;
+           state.prompts_librarian_input_error <- None;
+           state.prompts_librarian_input_loading <- false;
+           add_event state "system"
+             (if state.prompts_show_runtime_assets then
+                "읽기 전용 런타임 프롬프트 자산을 표시합니다"
+              else "재정의 가능한 프롬프트 레지스트리를 표시합니다")
        | Some "b" when state.view = Connectors ->
            handle_connector_bind ()
        | Some "u" when state.view = Connectors ->

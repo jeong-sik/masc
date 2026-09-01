@@ -3,8 +3,8 @@
    tree (the three read-only tools PR-1 declares).
 
    The rewrite itself is covered from the other side: PR-1a's dispatch
-   tests already lock the delegated round trip, and the conversion needs a
-   full turn context to build, which a unit test does not have. *)
+   tests lock the delegated round trip, while this unit locks declaration
+   discovery and positional argument mapping. *)
 
 let () =
   let module K = Keeper_shell_tool_command in

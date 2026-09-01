@@ -454,11 +454,28 @@ let test_provider_admission_requires_closed_tool_cycle () =
   | Ok () -> Alcotest.fail "open ToolUse suffix reached provider admission"
 ;;
 
+(* This test used to hold the interrupted-turn shape --
+
+     Assistant [use "missing"]; User "interstitial"; Assistant [use "next"]
+
+   -- and assert admission rejects it. That shape is not corruption: it is a
+   request whose results never arrived, which is what [close_open_tail]
+   already synthesizes a closer for when it lands at the tail. Rejecting the
+   same missing result because a later turn appended after it latched the
+   keeper at a fixed message_index on every turn forever (#31595). Admission
+   now repairs it; `close_open_cycles makes it dispatchable` covers that.
+
+   What this test is for survives unchanged: a history no synthesized result
+   can answer must still reject, with the typed error and the operator receipt
+   code. An orphaned result is that history -- there is no request to attach
+   it to, and inventing one would be fabricating a call the keeper never
+   made. *)
 let test_provider_admission_quarantines_malformed_overlap () =
   let poisoned =
-    [ message T.Assistant [ use "missing" ]
-    ; text T.User "interstitial"
-    ; message T.Assistant [ use "next" ]
+    [ text T.User "ask"
+    ; message T.Assistant [ use "answered" ]
+    ; message T.Tool [ result "answered" ]
+    ; message T.Tool [ result "never-requested" ]
     ]
   in
   let provider_dispatches = ref 0 in
@@ -469,9 +486,8 @@ let test_provider_admission_quarantines_malformed_overlap () =
   (match U.validate_provider_transcript poisoned with
    | Error
        (U.Invalid_transcript_structure
-         (U.Overlapping_tool_cycle
-           { message_index = 2; tool_use_id = "next" })) ->
-     ()
+         (U.Orphan_tool_result { message_index = 3; tool_use_id = "never-requested" }))
+     -> ()
    | Error error ->
      Alcotest.failf
        "wrong malformed transcript rejection: %s"
@@ -547,6 +563,211 @@ let test_interrupted_tool_cycle_is_closed_and_dispatched () =
 ;;
 
 
+(* The shape #31595 actually produces.
+
+   A turn dies mid-tool-call, and the next turn appends its own request. The
+   unclosed cycle is now in the middle, not at the tail, so [close_open_tail]
+   never reaches it and [partition] rejects with [Overlapping_tool_cycle] --
+   at the same fixed message_index on every turn, forever. Observed on
+   lab-sangsu (5+ turns) and again on 2026-09-01, where one keeper went an
+   hour without completing a turn. *)
+let interrupted_then_resumed =
+  [ text T.User "first ask"
+  ; message T.Assistant [ use "call-interrupted" ]
+    (* no result: the process died here *)
+  ; text T.User "second ask"
+  ; message T.Assistant [ use "call-next" ]
+  ; message T.Tool [ result "call-next" ]
+  ]
+;;
+
+let test_mid_history_open_cycle_is_the_shape_that_latches () =
+  match U.validate_provider_transcript interrupted_then_resumed with
+  | Ok () -> Alcotest.fail "this history is the one that used to latch"
+  | Error (U.Invalid_transcript_structure (U.Overlapping_tool_cycle _)) -> ()
+  | Error other ->
+    Alcotest.failf "expected Overlapping_tool_cycle, got %s"
+      (U.show_provider_transcript_error other)
+;;
+
+let test_close_open_cycles_makes_it_dispatchable () =
+  match U.close_open_cycles interrupted_then_resumed with
+  | Error _ -> Alcotest.fail "the missing result is answerable"
+  | Ok { U.messages; closed_tool_use_ids } ->
+    check_exact "only the interrupted id is closed" [ "call-interrupted" ]
+      closed_tool_use_ids;
+    (* The point of the whole change: the repaired history dispatches. *)
+    (match U.validate_provider_transcript messages with
+     | Ok () -> ()
+     | Error e ->
+       Alcotest.failf "repaired history must dispatch, got %s"
+         (U.show_provider_transcript_error e))
+;;
+
+let test_close_open_cycles_keeps_the_history () =
+  (* Not trimming and not resetting: every original message survives, in
+     order, with the closers inserted. The keeper keeps what it reasoned
+     over. *)
+  match U.close_open_cycles interrupted_then_resumed with
+  | Error _ -> Alcotest.fail "expected repair"
+  | Ok { U.messages; _ } ->
+    check_exact "one closer added"
+      (List.length interrupted_then_resumed + 1)
+      (List.length messages);
+    let texts =
+      List.filter_map
+        (fun (m : T.message) ->
+          match m.content with T.Text v :: _ -> Some v | _ -> None)
+        messages
+    in
+    check_exact "original text messages kept in order" [ "first ask"; "second ask" ] texts
+;;
+
+let test_close_open_cycles_inserts_before_the_exposing_request () =
+  (* Position matters: the closer has to land before the request that exposed
+     the open cycle, or the history is still overlapping. *)
+  match U.close_open_cycles interrupted_then_resumed with
+  | Error _ -> Alcotest.fail "expected repair"
+  | Ok { U.messages; _ } ->
+    let anchors =
+      List.filter_map
+        (fun (m : T.message) ->
+          match m.content with
+          | T.ToolUse { id; _ } :: _ -> Some ("use:" ^ id)
+          | T.ToolResult { tool_use_id; _ } :: _ -> Some ("result:" ^ tool_use_id)
+          | _ -> None)
+        messages
+    in
+    check_exact "closer precedes the next request"
+      [ "use:call-interrupted"
+      ; "result:call-interrupted"
+      ; "use:call-next"
+      ; "result:call-next"
+      ]
+      anchors
+;;
+
+let test_close_open_cycles_is_identity_on_a_closed_history () =
+  let closed =
+    [ text T.User "ask"
+    ; message T.Assistant [ use "call-a" ]
+    ; message T.Tool [ result "call-a" ]
+    ]
+  in
+  match U.close_open_cycles closed with
+  | Error _ -> Alcotest.fail "a closed history needs no repair"
+  | Ok { U.messages; closed_tool_use_ids } ->
+    check_exact "nothing closed" [] closed_tool_use_ids;
+    check_exact "history untouched" closed messages
+;;
+
+let test_close_open_cycles_leaves_other_breaks_latched () =
+  (* The claim this change rests on is that Overlapping_tool_cycle is the one
+     member a synthesized result can answer. An orphaned result has no
+     request to attach to, so it must still latch -- otherwise the repair is
+     papering over corruption. *)
+  let orphan = [ text T.User "ask"; message T.Tool [ result "never-requested" ] ] in
+  (match U.close_open_cycles orphan with
+   | Ok _ -> Alcotest.fail "an orphaned result is not a missing result"
+   | Error _ -> ());
+  let request_in_a_result_role =
+    [ text T.User "ask"; message T.Tool [ use "call-from-tool-role" ] ]
+  in
+  match U.close_open_cycles request_in_a_result_role with
+  | Ok _ -> Alcotest.fail "a request in a non-assistant role is not a missing result"
+  | Error _ -> ()
+;;
+
+let test_close_open_cycles_handles_several_interruptions () =
+  (* Two interruptions in one history, which is what a keeper that failed for
+     an hour accumulates. *)
+  let history =
+    [ message T.Assistant [ use "a" ]
+    ; message T.Assistant [ use "b" ]
+    ; message T.Assistant [ use "c" ]
+    ; message T.Tool [ result "c" ]
+    ]
+  in
+  match U.close_open_cycles history with
+  | Error _ -> Alcotest.fail "expected repair"
+  | Ok { U.messages; closed_tool_use_ids } ->
+    check_exact "both interrupted ids closed, in order" [ "a"; "b" ] closed_tool_use_ids;
+    (match U.validate_provider_transcript messages with
+     | Ok () -> ()
+     | Error e ->
+       Alcotest.failf "repaired history must dispatch, got %s"
+         (U.show_provider_transcript_error e))
+;;
+
+let test_close_open_cycles_closes_only_the_unanswered_ids () =
+  (* A parallel cycle where one call answered and the other did not: the
+     answered one must not be closed twice. *)
+  let history =
+    [ message T.Assistant [ use "answered"; use "lost" ]
+    ; message T.Tool [ result "answered" ]
+    ; message T.Assistant [ use "later" ]
+    ; message T.Tool [ result "later" ]
+    ]
+  in
+  match U.close_open_cycles history with
+  | Error _ -> Alcotest.fail "expected repair"
+  | Ok { U.messages; closed_tool_use_ids } ->
+    check_exact "only the unanswered id" [ "lost" ] closed_tool_use_ids;
+    (match U.validate_provider_transcript messages with
+     | Ok () -> ()
+     | Error e ->
+       Alcotest.failf "repaired history must dispatch, got %s"
+         (U.show_provider_transcript_error e))
+;;
+
+(* End to end: the shape that latched now reaches the provider.
+
+   The unit-level repair is only half the claim -- admission has to route
+   [Overlapping_tool_cycle] to it. Before this change the same history
+   produced zero dispatches and a typed terminal error on every turn. *)
+let test_admission_dispatches_an_interrupted_history () =
+  let interrupted =
+    [ message T.Assistant [ use "missing" ]
+    ; text T.User "interstitial"
+    ; message T.Assistant [ use "next" ]
+    ]
+  in
+  let dispatched = ref [] in
+  let dispatch admitted =
+    dispatched := admitted;
+    Ok ()
+  in
+  match
+    Masc.Keeper_agent_run.For_testing.dispatch_after_provider_transcript_admission
+      ~messages:interrupted
+      ~dispatch
+  with
+  | Error _ -> Alcotest.fail "an interrupted history must reach the provider"
+  | Ok () ->
+    (* What the provider receives is closed, not the raw history. *)
+    (match U.validate_provider_transcript !dispatched with
+     | Ok () -> ()
+     | Error e ->
+       Alcotest.failf "dispatched history must be closed, got %s"
+         (U.show_provider_transcript_error e));
+    (* Two requests get closers, not one: [missing] was interrupted, and
+       [next] is itself unanswered at the tail. Asserting the anchor order
+       says that, where a bare count would not. *)
+    let anchors =
+      List.filter_map
+        (fun (m : T.message) ->
+          match m.content with
+          | T.ToolUse { id; _ } :: _ -> Some ("use:" ^ id)
+          | T.ToolResult { tool_use_id; _ } :: _ -> Some ("result:" ^ tool_use_id)
+          | _ -> None)
+        !dispatched
+    in
+    check_exact "every request is answered, in order"
+      [ "use:missing"; "result:missing"; "use:next"; "result:next" ]
+      anchors
+;;
+
+
 let () =
   Alcotest.run "keeper_transcript_unit"
     [ ( "partition"
@@ -609,5 +830,23 @@ let () =
             test_close_open_tail_never_fabricates_success
         ; Alcotest.test_case "interrupted tool cycle is closed and dispatched" `Quick
             test_interrupted_tool_cycle_is_closed_and_dispatched
+        ; Alcotest.test_case "mid-history open cycle is the shape that latches" `Quick
+            test_mid_history_open_cycle_is_the_shape_that_latches
+        ; Alcotest.test_case "close_open_cycles makes it dispatchable" `Quick
+            test_close_open_cycles_makes_it_dispatchable
+        ; Alcotest.test_case "close_open_cycles keeps the history" `Quick
+            test_close_open_cycles_keeps_the_history
+        ; Alcotest.test_case "closer lands before the exposing request" `Quick
+            test_close_open_cycles_inserts_before_the_exposing_request
+        ; Alcotest.test_case "close_open_cycles is identity when closed" `Quick
+            test_close_open_cycles_is_identity_on_a_closed_history
+        ; Alcotest.test_case "other breaks stay latched" `Quick
+            test_close_open_cycles_leaves_other_breaks_latched
+        ; Alcotest.test_case "several interruptions in one history" `Quick
+            test_close_open_cycles_handles_several_interruptions
+        ; Alcotest.test_case "closes only the unanswered ids" `Quick
+            test_close_open_cycles_closes_only_the_unanswered_ids
+        ; Alcotest.test_case "admission dispatches an interrupted history" `Quick
+            test_admission_dispatches_an_interrupted_history
         ] )
     ]

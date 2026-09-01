@@ -109,6 +109,28 @@ type tail_closure =
         (** Empty when the history was already dispatchable. *)
   }
 
+val close_open_cycles
+  :  Agent_core.Types.message list
+  -> (tail_closure, structural_error) result
+(** Close every open tool cycle where it sits, not only one at the tail.
+
+    {!close_open_tail} repairs the shape an interruption leaves if nothing has
+    been appended since. That is not the shape a keeper reaches: a turn dies
+    mid-tool-call, the next turn appends its own request, and the unclosed
+    cycle is now in the middle. {!partition} reports
+    [Overlapping_tool_cycle] and rejects before any repair runs, so the keeper
+    fails at the same fixed [message_index] on every turn forever (#31595).
+
+    [Overlapping_tool_cycle] is the one member of [structural_error] that says
+    "a result is missing" rather than "this history cannot be read", so it is
+    the one a synthesized result can answer. Closers are inserted immediately
+    before the request that exposed the open cycle. Nothing is trimmed and
+    nothing is reset.
+
+    Every other structural break still returns unchanged and must keep
+    latching: there is no request for an orphaned result to attach to. On
+    [Ok], {!validate_provider_transcript} of [messages] returns [Ok ()]. *)
+
 val close_open_tail
   :  Agent_core.Types.message list
   -> (tail_closure, structural_error) result

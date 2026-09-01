@@ -367,23 +367,41 @@ let provider_transcript_admission messages =
             ; tool_use_ids
             }))
   in
+  let close_with ~close ~transcript_error =
+    match close messages with
+    | Ok { Keeper_transcript_unit.messages; closed_tool_use_ids } ->
+      Log.Keeper.info
+        "closed %d in-flight tool call(s) an interrupted turn left open: %s"
+        (List.length closed_tool_use_ids)
+        (String.concat "," closed_tool_use_ids);
+      Ok messages
+    | Error _ ->
+      (* Both closers pass a break they cannot answer through unchanged, and a
+         history that does not parse is corruption no synthesized result can
+         repair. *)
+      reject transcript_error
+  in
   match Keeper_transcript_unit.validate_provider_transcript messages with
   | Ok () -> Ok messages
+  | Error
+      (Keeper_transcript_unit.Invalid_transcript_structure
+         (Keeper_transcript_unit.Overlapping_tool_cycle _) as transcript_error) ->
+    (* The one structural error a result can answer.
+       [Overlapping_tool_cycle] does not mean the history is unreadable; it
+       means a request never got its results and a later request exposed it.
+       That is the same missing result the tail case synthesizes, sitting
+       mid-history because turns kept appending after the interruption.
+       Rejecting it latched the keeper at a fixed [message_index] on every
+       turn forever (#31595): one keeper went an hour without completing a
+       turn on 2026-09-01, another logged 585 of these in a day. *)
+    close_with ~close:Keeper_transcript_unit.close_open_cycles ~transcript_error
   | Error (Keeper_transcript_unit.Invalid_transcript_structure _ as transcript_error) ->
+    (* Every other member stays fatal: an orphaned result has no request to
+       attach to, and a request in a non-assistant role is not a missing
+       result. *)
     reject transcript_error
   | Error (Keeper_transcript_unit.Unresolved_tool_results _ as transcript_error) ->
-    (match Keeper_transcript_unit.close_open_tail messages with
-     | Ok { Keeper_transcript_unit.messages; closed_tool_use_ids } ->
-       Log.Keeper.info
-         "closed %d in-flight tool call(s) an interrupted turn left open: %s"
-         (List.length closed_tool_use_ids)
-         (String.concat "," closed_tool_use_ids);
-       Ok messages
-     | Error _ ->
-       (* [close_open_tail] passes a structural break through unchanged, and a
-          history that does not parse is corruption no synthesized result can
-          repair. *)
-       reject transcript_error)
+    close_with ~close:Keeper_transcript_unit.close_open_tail ~transcript_error
 ;;
 
 (* [dispatch] receives the admitted history, which is the input list unless an

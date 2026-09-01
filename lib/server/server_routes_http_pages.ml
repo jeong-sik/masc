@@ -364,13 +364,9 @@ let bonsai_keeper_status_of_phase phase =
 
 let bonsai_ctx_pct (meta : Keeper_meta_contract.keeper_meta) =
   match meta.max_context_override, meta.runtime.last_usage_resolution with
-  | ( Some max_tokens
-    , Some
-        { basis = Keeper_usage_resolution.Per_request
-        ; observation = Some observation
-        ; _ } )
-    when max_tokens > 0 && observation.input_tokens > 0 ->
-    min 100 (max 0 ((observation.input_tokens * 100) / max_tokens))
+  | Some max_tokens, Some { delta = Some delta; _ }
+    when max_tokens > 0 && delta.input_tokens > 0 ->
+    min 100 (max 0 ((delta.input_tokens * 100) / max_tokens))
   | Some _, (None | Some _) | None, _ -> 0
 
 (* #16 (38-bug campaign PR-5): project the composite observer's typed

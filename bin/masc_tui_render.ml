@@ -4832,6 +4832,27 @@ let standalone_lane_detail_lines ~width (lane : Tui_decode.standalone_lane) =
     Option.value ~default:"No consumer purpose reported by this server."
       lane.sl_purpose
   in
+  let exact_lane which =
+    Exact_lane_run_registry.lane_key which
+    |> String.equal lane.sl_lane_id
+  in
+  let output_meaning, evidence_contract =
+    if exact_lane Exact_lane_run_registry.Board_attention then
+      ( "Output meaning: the accepted candidate judgment JSON."
+      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
+    else if exact_lane Exact_lane_run_registry.Hitl_auto_judge then
+      ( "Output meaning: the validated and durably settled approval-context judgment summary."
+      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
+    else if exact_lane Exact_lane_run_registry.Librarian then
+      ( "Output meaning: selected memory facts plus committed snapshot metadata."
+      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
+    else if String.equal lane.sl_lane_id Runtime.verifier_exact_lane_id then
+      ( "Output meaning: Task completion or Goal proof verdict, reason, and evaluator runtime."
+      , "Evidence: Verifier review records also retain MASC tool observations; open a run to inspect inputs, dispositions, excerpts, duration, and truncation." )
+    else
+      ( "Output meaning: open a retained run for its exact result."
+      , "Evidence: this server did not report a known standalone-lane evidence contract." )
+  in
   wrap Ansi.bold
     (Printf.sprintf "%s · %s" (Terminal_text.single_line lane.sl_label)
        (Terminal_text.single_line purpose))
@@ -4854,6 +4875,8 @@ let standalone_lane_detail_lines ~width (lane : Tui_decode.standalone_lane) =
       "TOML spec: slots = required non-empty catalog-ref array; cli_slots = optional official-client runtime-id array."
   @ wrap Ansi.dim
       "Lane configuration is TOML. Run Input/Output is retained JSON evidence. Press e to open this section in the preview-checked runtime.toml editor."
+  @ wrap Ansi.reset output_meaning
+  @ wrap Ansi.dim evidence_contract
 
 let rec take_rows remaining acc = function
   | _ when remaining <= 0 -> List.rev acc

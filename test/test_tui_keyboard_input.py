@@ -7347,6 +7347,8 @@ def keeper_lanes_ia_interaction(gate: GatedHttpResponse) -> Interaction:
             "Catalog attempts (admitted order): 1 glm-coding.glm-5-turbo",
             "Then CLI (after catalog exhaustion): (none)",
             "Lane configuration is TOML. Run Input/Output is retained JSON evidence.",
+            "Output meaning: the accepted candidate judgment JSON.",
+            "Evidence: structured-output generation, not a MASC tool loop;",
         ):
             if detail not in lanes_plain:
                 raise AssertionError(

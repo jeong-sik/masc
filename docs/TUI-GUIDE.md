@@ -337,6 +337,16 @@ slots in declaration order, then CLI runtimes in declaration order. The
 configuration is TOML; an individual run's Input and Output are retained JSON
 evidence, not another lane configuration format.
 
+Board Attention, HITL Auto Judge, and Librarian are schema-constrained
+structured-output generation flows, not MASC tool loops. Their run evidence is
+the exact Input and Output, outcome, elapsed time, and selected slot; there is
+no omitted tool-call ledger for those runs. Their outputs mean, respectively,
+the accepted Board candidate judgment, the validated and durably settled HITL
+context judgment summary, and selected memory facts plus committed snapshot
+metadata. Verifier is different: its Task/Goal review records also retain the
+verdict reason, evaluator runtime, and MASC tool observations, which appear in
+the exact run detail.
+
 `j` / `k` moves the lane cursor. `e` opens that lane's exact table in the
 Config `runtime.toml` source pane; another `e` uses the existing editor,
 server-side preview, and save path. Right or `Enter`

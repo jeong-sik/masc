@@ -7,7 +7,7 @@
     순수 함수 — agent_core 의존 없이 fusion_core에서 단위 테스트 가능. AGENT_CORE의
     [tool_param list] schema 구성은 소비자(lib/fusion/fusion_judge)가 담당한다.
 
-    기대 JSON 형태 (LLM 지시용, {!expected_json_doc}와 일치):
+    기대 JSON 형태 (LLM 지시는 [config/prompts/fusion.judge.output.md]):
     {[
       {
         "consensus":        [ { "text": "...", "supporting_models": ["m1"] } ],
@@ -26,9 +26,6 @@
     - insufficient: [{ "kind": "insufficient", "missing": ["..."] }]
 
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 *)
-
-(** 심판 프롬프트에 임베드할, 기대 JSON 형태 설명 (LLM 지시용). *)
-val expected_json_doc : string
 
 (** Wire field names consumed by {!of_json}. Provider-native output schemas must
     use these constants instead of duplicating field strings. *)

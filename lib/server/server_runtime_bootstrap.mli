@@ -9,6 +9,10 @@
 val config_bootstrap_mode : unit -> [ `Auto | `Empty | `Skip ]
 val bootstrap_base_path_config_root : base_path:string -> unit
 val startup_config_resolution : base_path:string -> Config_dir_resolver.resolution
+val bootstrap_prompt_assets : unit -> unit
+(** Converge the runtime prompt directory onto the binary-embedded managed
+    assets. Standalone prompt consumers call this after resolving their base
+    path and before bootstrapping {!Prompt_defaults}. *)
 
 val configure_agent_core_model_catalog_env :
   ?env:(string -> string option) ->

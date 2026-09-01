@@ -182,6 +182,7 @@
  (package masc)
  (libraries
   masc
+  masc.prompt_registry
   masc.server
   masc.runtime
   masc.fusion_core
@@ -203,6 +204,7 @@
  (package masc)
  (libraries
   masc
+  masc.prompt_registry
   masc.server
   masc.runtime
   masc.fusion_core

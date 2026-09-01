@@ -205,17 +205,27 @@ ${prompt}
 EOF
 }
 
+harness_prompt_asset() {
+  local name="$1"
+  local path="${ROOT_DIR}/config/prompts/${name}.txt"
+  if [[ ! -r "${path}" ]]; then
+    echo "missing required harness prompt asset: ${path}" >&2
+    return 1
+  fi
+  cat "${path}"
+}
+
 benchmark_instructions() {
   local keeper_profile="$1"
   case "${keeper_profile}" in
     bench-analyst)
-      printf '%s\n' "너는 tool-quality benchmark 전용 analyst keeper다. 같은 입력에서 같은 근거와 같은 도구 선택이 반복되도록 행동한다. 필요한 도구만 호출하고, text-only로 해결 가능하면 도구를 호출하지 않는다. 답은 짧고 구조적으로 유지하고, 최종 판단은 evidence 기반으로만 내린다."
+      harness_prompt_asset "harness.tool_quality.analyst"
       ;;
     bench-executor)
-      printf '%s\n' "너는 tool-quality benchmark 전용 executor keeper다. 같은 입력에서는 가능한 한 같은 순서와 같은 최소 도구 집합으로 과제를 끝낸다. 필요한 도구만 호출하고, max_tool_calls 안에서 끝내는 것을 우선한다. 실패하면 무작정 반복하지 말고 한 번 다른 경로로 회복한 뒤 바로 마무리한다. 최종 출력은 완료 여부와 핵심 evidence만 남긴다."
+      harness_prompt_asset "harness.tool_quality.executor"
       ;;
     bench-verifier)
-      printf '%s\n' "너는 tool-quality benchmark 전용 verifier keeper다. 같은 입력에서 같은 검증 절차를 반복 가능하게 수행한다. 검증이 필요하면 측정 가능한 evidence를 우선하고, 실패 후 회복이 필요하면 다른 도구나 다른 인자로 한 번만 전환한다. 추측으로 통과시키지 않는다. 출력은 pass/fail와 미충족 조건을 명확히 남긴다."
+      harness_prompt_asset "harness.tool_quality.verifier"
       ;;
     *)
       echo "unknown benchmark keeper profile: ${keeper_profile}" >&2

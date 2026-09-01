@@ -11,35 +11,30 @@ type judgment = {
   rationale : string;
 }
 
-let system_prompt =
-  "You are a strict verification judge for a memory-continuity test. You \
-   will be shown facts that were established earlier in a conversation, and \
-   the reply an assistant gave when asked to recall all of them. Judge each \
-   fact independently: recalled means the reply demonstrably contains that \
-   fact's value (allowing reformatting or re-ordering, e.g. a date written \
-   differently), not merely a mention of its topic. Omission, contradiction \
-   or a wrong value means not recalled. Output only the requested JSON \
-   object — no prose before or after it."
+let required_prompt key =
+  let prompt = Prompt_registry.get_prompt key in
+  if String.trim prompt = "" then invalid_arg ("missing required canary prompt: " ^ key)
+  else prompt
+
+let system_prompt () = String.trim (required_prompt Prompt_names.keeper_canary_judge_system)
 
 let compose_prompt ~(facts : Keeper_canary_facts.fact list) ~(recall_reply : string)
   : string
   =
-  let buf = Buffer.create 1024 in
-  Buffer.add_string buf "Facts established earlier in the conversation:\n";
-  List.iter
-    (fun (f : Keeper_canary_facts.fact) ->
-      Buffer.add_string buf (Printf.sprintf "- %s: %s\n" f.category f.value))
-    facts;
-  Buffer.add_string buf "\nThe assistant's recall reply was:\n---\n";
-  Buffer.add_string buf recall_reply;
-  Buffer.add_string buf "\n---\n\n";
-  Buffer.add_string
-    buf
-    "Reply with a single JSON object and nothing else, of the exact shape:\n\
-     {\"per_fact\": [{\"category\": \"<category>\", \"recalled\": \
-     true|false}, ...], \"rationale\": \"<one short paragraph>\"}\n\
-     Include every category listed above exactly once and no others.";
-  Buffer.contents buf
+  let facts =
+    facts
+    |> List.map (fun (f : Keeper_canary_facts.fact) ->
+           Printf.sprintf "- %s: %s" f.category f.value)
+    |> String.concat "\n"
+  in
+  match
+    Prompt_registry.render_prompt_template Prompt_names.keeper_canary_judge_user
+      [ "facts", facts; "recall_reply", recall_reply ]
+  with
+  | Ok prompt -> String.trim prompt
+  | Error detail ->
+      invalid_arg
+        (Printf.sprintf "missing or invalid canary judge prompt: %s" detail)
 
 (* Code-fence tolerance mirrors Fusion_judge_parse.strip_fences: providers
    frequently wrap JSON in ```json fences even when told not to, and

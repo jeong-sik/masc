@@ -32,10 +32,6 @@ projected is reported and never dispatched: spending a turn on it would
 measure the projection policy, not the runtime.
 |}
 
-let default_prompt =
-  "Call the tool named {tool} exactly once, with any arguments that satisfy \
-   its schema. Reply with the tool call only — no explanation, no preamble."
-
 type config =
   { runtimes : string list
   ; tools : string list
@@ -51,7 +47,7 @@ let initial_config =
   { runtimes = []
   ; tools = []
   ; repeat = 1
-  ; prompt = default_prompt
+  ; prompt = ""
   ; base_path = Sys.getenv_opt "MASC_BASE_PATH"
   ; surface_only = false
   ; list_runtimes = false
@@ -295,7 +291,21 @@ let () =
     | Some path when String.trim path <> "" -> String.trim path
     | _ -> error "--base-path or MASC_BASE_PATH is required"
   in
+  Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
+  Server_runtime_bootstrap.bootstrap_prompt_assets ();
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path in
+  ignore
+    (Masc.Prompt_defaults.bootstrap_runtime ~workspace_path:base_path ~base_path : string);
+  let cfg =
+    if String.trim cfg.prompt <> "" then cfg
+    else
+        (match
+           Prompt_registry.render_prompt_template Prompt_names.keeper_capability_probe
+             [ "tool", "{tool}" ]
+         with
+         | Ok prompt -> { cfg with prompt }
+         | Error detail -> error ("default capability probe prompt: " ^ detail))
+  in
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run

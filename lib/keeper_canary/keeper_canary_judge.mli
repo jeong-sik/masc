@@ -30,7 +30,7 @@ type judgment = {
   rationale : string;  (** Non-empty free-text justification. *)
 }
 
-val system_prompt : string
+val system_prompt : unit -> string
 
 val compose_prompt :
   facts:Keeper_canary_facts.fact list -> recall_reply:string -> string

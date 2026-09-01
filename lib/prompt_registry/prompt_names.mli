@@ -44,4 +44,26 @@ val keeper_observation_rejected_digest_row : string
     metric/target reachable in principle? *)
 
 val librarian : string
+
+val fusion_judge : string
+val fusion_judge_refine : string
+val fusion_judge_meta : string
+val fusion_judge_output : string
+val mcp_full : string
+val mcp_managed_agent : string
+val mcp_operator_remote : string
+val keeper_workspace : string
+val keeper_identity : string
+val keeper_canary_judge_system : string
+val keeper_canary_judge_user : string
+val keeper_canary_recall : string
+val keeper_capability_probe : string
+val lane_cli_probe_librarian_system : string
+val lane_cli_probe_librarian_user : string
+val lane_cli_probe_hitl_system : string
+val lane_cli_probe_hitl_user : string
+val keeper_antigravity_system_instructions_label : string
+val keeper_antigravity_current_goal_label : string
+val eval_calibration_few_shot : string
+val eval_calibration_few_shot_example : string
 (** Current-memory selection. *)

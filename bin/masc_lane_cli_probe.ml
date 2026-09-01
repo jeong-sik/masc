@@ -25,6 +25,11 @@ type lane_case =
   ; prompt : string
   }
 
+let required_prompt key =
+  let prompt = Prompt_registry.get_prompt key in
+  if String.trim prompt = "" then invalid_arg ("missing required lane probe prompt: " ^ key)
+  else String.trim prompt
+
 (* Each case carries the lane's own schema, not a stand-in: a model that keeps
    one lane's shape may not keep another's, which is the whole reason these are
    measured per lane. *)
@@ -33,17 +38,8 @@ let librarian_case () =
       Agent_core.Exact_output.make_output_requirement
         ~schema:Masc.Keeper_structured_output_schema.librarian_current_output_schema
         ~minimum_guarantee:Agent_core.Exact_output.Json_syntax
-  ; system_prompt =
-      "You are a structured JSON librarian. Output ONLY valid JSON matching the \
-       requested schema."
-  ; prompt =
-      "Exact current memory:\n\
-       m1 [fact] The lane advances off a 429 but stops on a 403.\n\
-       m2 [lesson] A fenced answer is Invalid_json_output on this transport.\n\n\
-       Conversation history:\n\
-       user: 두 번째 슬롯이 주간 쿼터로 막혔어요.\n\
-       assistant: 다른 provider 는 살아 있습니다.\n\
-       user: 정리해줘.\n"
+  ; system_prompt = required_prompt Prompt_names.lane_cli_probe_librarian_system
+  ; prompt = required_prompt Prompt_names.lane_cli_probe_librarian_user ^ "\n"
   }
 ;;
 
@@ -52,12 +48,8 @@ let hitl_case () =
       Agent_core.Exact_output.make_output_requirement
         ~schema:Masc.Keeper_structured_output_schema.hitl_context_summary_schema
         ~minimum_guarantee:Agent_core.Exact_output.Json_syntax
-  ; system_prompt = "You judge one requested external effect. Answer with JSON only."
-  ; prompt =
-      "Keeper: taskmaster\n\
-       Requested effect: github_push_files\n\
-       Arguments: repo=jeong-sik/masc branch=taskmaster/evidence files=[docs/e.md]\n\
-       Recent context: 운영자가 근거 문서를 저장소에 남기라고 지시했습니다.\n"
+  ; system_prompt = required_prompt Prompt_names.lane_cli_probe_hitl_system
+  ; prompt = required_prompt Prompt_names.lane_cli_probe_hitl_user ^ "\n"
   }
 ;;
 
@@ -76,14 +68,6 @@ let () =
   if String.equal !lane "" || String.equal !runtime "" then (
     prerr_endline usage;
     exit 2);
-  let case =
-    match List.assoc_opt !lane cases with
-    | Some build -> build ()
-    | None ->
-      prerr_endline (Printf.sprintf "unknown lane %S; expected one of %s" !lane
-                       (String.concat ", " (List.map fst cases)));
-      exit 2
-  in
   (* The lane resolves this from the approval entry it is serving; a probe has
      no entry, so it takes the install root the same way the server is started
      with it. *)
@@ -93,7 +77,22 @@ let () =
     | Some _ | None ->
       Filename.concat (Option.value (Sys.getenv_opt "HOME") ~default:".") "me"
   in
+  Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:base_dir;
+  Server_runtime_bootstrap.bootstrap_prompt_assets ();
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path:base_dir in
+  ignore
+    (Masc.Prompt_defaults.bootstrap_runtime
+       ~workspace_path:base_dir
+       ~base_path:base_dir
+     : string);
+  let case =
+    match List.assoc_opt !lane cases with
+    | Some build -> build ()
+    | None ->
+      prerr_endline (Printf.sprintf "unknown lane %S; expected one of %s" !lane
+                       (String.concat ", " (List.map fst cases)));
+      exit 2
+  in
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run

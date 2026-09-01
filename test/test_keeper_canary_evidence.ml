@@ -46,7 +46,7 @@ let sample_evidence : Keeper_canary_evidence.run_evidence =
   ; recall =
       { turn_index = 2
       ; request_id = "canary-2"
-      ; prompt = Keeper_canary_facts.recall_prompt
+      ; prompt = Keeper_canary_facts.recall_prompt ()
       ; reply = "X"
       }
   ; timing = { min_s = 1.0; median_s = 1.25; max_s = 1.5 }

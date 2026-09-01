@@ -138,9 +138,10 @@ let generate ~seed ~count =
     let value = value_of_category ~seed category in
     { category; statement = statement_of ~category ~value; value })
 
-let recall_prompt =
-  "Without looking anything up, please list every fact I told you to \
-   remember earlier in this conversation, in the order I gave them to you."
+let recall_prompt () =
+  let prompt = Prompt_registry.get_prompt Prompt_names.keeper_canary_recall in
+  if String.trim prompt = "" then invalid_arg "missing required canary recall prompt"
+  else String.trim prompt
 
 type turn_plan_entry = { index : int; category : string option; message : string }
 
@@ -157,7 +158,7 @@ let plan ~(facts : fact list) : turn_plan_entry list =
       facts
   in
   let recall_entry =
-    { index = List.length facts + 1; category = None; message = recall_prompt }
+    { index = List.length facts + 1; category = None; message = recall_prompt () }
   in
   fact_entries @ [ recall_entry ]
 

@@ -191,12 +191,28 @@ module KeeperAutonomous = struct
 
   (** The wording used when neither the fleet nor a keeper configures one.
 
-      This is the single definition; [Keeper_unified_prompt.autonomous_wake_marker]
-      is an alias of it. Keeping the literal here rather than in the prompt
-      module lets the operator settings projection report the same effective
-      value the prompt builder would use, without the projection reaching up a
-      layer to ask. *)
-  let default_wake_prompt = "지금은 자율 턴입니다. 위 World State 와 직전 턴들이 남긴 것을 먼저 읽고, 이어서 할 일을 고릅니다."
+      Unlike model-facing markdown assets this sits below [Prompt_registry],
+      so it reads the synced config asset directly.  A missing asset is a boot
+      error: returning an empty user turn would silently change autonomy. *)
+  let default_wake_prompt =
+    let config_dir =
+      match Sys.getenv_opt "MASC_CONFIG_DIR" with
+      | Some dir when String.trim dir <> "" -> String.trim dir
+      | Some _ | None ->
+          (match Sys.getenv_opt "DUNE_SOURCEROOT" with
+           | Some root when String.trim root <> "" -> Filename.concat root "config"
+           | Some _ | None -> Filename.concat (Sys.getcwd ()) "config")
+    in
+    let path = Filename.concat config_dir "prompts/keeper.autonomous.wake.txt" in
+    if not (Sys.file_exists path) || Sys.is_directory path then
+      raise (Env_config_core.Config_error ("missing autonomous wake prompt asset: " ^ path));
+    let prompt = In_channel.with_open_text path In_channel.input_all |> String.trim in
+    match validate_wake_prompt prompt with
+    | Ok prompt -> prompt
+    | Error detail ->
+        raise
+          (Env_config_core.Config_error
+             (Printf.sprintf "invalid autonomous wake prompt asset %s: %s" path detail))
 
   (** Fleet-wide wake prompt, or [None] when unset. Read as a function: the
       value is steerable through the boot override store, and a keeper process

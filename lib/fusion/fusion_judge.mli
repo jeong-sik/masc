@@ -4,7 +4,7 @@
     (fusion_judge.ml:165-166)는 capability를 읽지 않고
     [Keeper_structured_output_schema.without_response_format]를 무조건 적용한다 —
     [response_format = Off]. 계약은 프롬프트의
-    {!Fusion_judge_parse.expected_json_doc} 지시로만 나가고, 응답은
+    [config/prompts/fusion.judge.output.md] 지시로만 나가고, 응답은
     {!Fusion_judge_parse.of_string}의 strict 파싱을 통과해야 하며 위반은
     [Parse_error]로 fail-loud한다.
 
@@ -31,8 +31,8 @@
     before HTTP" 가 미지원 preset 의 fusion 을 영구 불능으로 만들어 되돌려졌다.
     따라서 맞춰야 하는 쪽은 RFC 이며, §7.2 에 그 사실을 기재했다. *)
 
-(** 질문 + 패널 답들로 심판 프롬프트를 구성한다
-    ({!Fusion_judge_parse.expected_json_doc} 지시 포함). 순수 — 테스트 가능. *)
+(** 질문 + 패널 답들로 심판 프롬프트를 구성한다. JSON 지시는 등록된
+    [fusion.judge.output] asset에서 온다. *)
 val compose_prompt : question:string -> panel:Fusion_types.panel_outcome list -> string
 
 (** 심판 모델을 실행해 구조화 종합을 받는다.

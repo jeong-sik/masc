@@ -308,12 +308,23 @@ let select_examples ~(max_examples : int) : calibration_example list =
 let format_few_shot_block (examples : calibration_example list) : string =
   if examples = [] then ""
   else
-    let lines = List.mapi (fun i ex ->
-      Printf.sprintf "Example %d:\n  Task: %s\n  Notes: %s\n  Correct verdict: %s"
-        (i + 1) ex.task_title ex.notes_excerpt ex.correct_verdict
-    ) examples in
-    "Here are examples of correct verdicts for calibration:\n\n"
-    ^ String.concat "\n\n" lines
+    let render key vars =
+      match Prompt_registry.render_prompt_template key vars with
+      | Ok prompt -> String.trim prompt
+      | Error detail ->
+          invalid_arg (Printf.sprintf "missing or invalid calibration prompt %s: %s" key detail)
+    in
+    let examples =
+      examples
+      |> List.mapi (fun i ex ->
+             render Prompt_names.eval_calibration_few_shot_example
+               [ "index", string_of_int (i + 1)
+               ; "task_title", ex.task_title
+               ; "notes_excerpt", ex.notes_excerpt
+               ; "correct_verdict", ex.correct_verdict ])
+      |> String.concat "\n\n"
+    in
+    render Prompt_names.eval_calibration_few_shot [ "examples", examples ]
 
 
 (* ================================================================ *)

@@ -25,7 +25,7 @@ val generate : seed:string -> count:int -> fact list
     [seed] (via SHA-256 digests keyed per value, no PRNG) — calling this twice with the same
     [seed] and [count] always returns an identical list. *)
 
-val recall_prompt : string
+val recall_prompt : unit -> string
 (** The fixed final-turn prompt asking the keeper to list every established
     fact, in order, without tool use. *)
 
@@ -34,7 +34,7 @@ type turn_plan_entry = { index : int; category : string option; message : string
 val plan : facts:fact list -> turn_plan_entry list
 (** The pure turn sequence a run sends: [facts] in order as 1-indexed
     fact-injection turns ([category = Some _]), then one recall turn at
-    [List.length facts + 1] ([category = None], [message = recall_prompt]). *)
+    [List.length facts + 1] ([category = None], [message = recall_prompt ()]). *)
 
 type recall_result = {
   category : string;

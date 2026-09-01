@@ -10,7 +10,7 @@
     "code_revision_sha": "8ef224aa3fa47c8348a783219136017aa75e0e53",
     "evidence_branch": "polish/task-362-official-client-live-truth",
     "evidence_branch_head": "0b6a46b62ea8b7de639943912638c1936134c441",
-    "branch_delta_note": "evidence commits add docs/evidence only; no code change between code_revision_sha and evidence_branch_head",
+    "branch_delta_note": "evidence commits add docs/evidence only; no code change between code_revision_sha and evidence_branch_head. The merged PR also modified scripts/check-ssot.sh (code change outside this evidence delta).",
     "binary": "_build/default/bin/keeper_capability_probe_cli.exe",
     "binary_sha256": "a14b4a4b77feb890d6f2acd7b3c033b00fa6a6fbc550c93890f404db6f04b31f",
     "build_command": "dune build --root .",

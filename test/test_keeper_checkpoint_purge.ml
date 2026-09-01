@@ -5,6 +5,7 @@
 
 module Purge = Masc.Keeper_checkpoint_purge
 module Types = Agent_core.Types
+module Keeper_transcript_unit = Masc.Keeper_transcript_unit
 
 let text_message role text : Types.message =
   { role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
@@ -311,16 +312,69 @@ let test_purge_is_idempotent () =
     second_report.reasoning_blocks_stripped;
   Alcotest.(check int) "no further clears" 0 second_report.tool_results_cleared
 
-let test_broken_structure_is_refused () =
+(* Purge is the operator's recovery tool and a broken transcript is what it is
+   reached for. Refusing left one move: edit the checkpoint JSON by hand, which
+   is what 2026-09-01 came down to. The break is dropped rather than preserved,
+   because a preserved break returns a transcript that still cannot be saved
+   while reporting success. *)
+let test_broken_structure_is_recovered_not_refused () =
   let orphan =
     { (block_message Types.Tool [ tool_result "ghost" ]) with
       tool_call_id = Some "ghost"
     }
   in
   match Purge.purge_messages ~config:no_tail_config [ orphan ] with
-  | Error (Purge.Invalid_input_structure _) -> ()
-  | Ok _ -> Alcotest.fail "orphan tool_result was accepted"
+  | Error (Purge.Invalid_input_structure _) ->
+    Alcotest.fail "the recovery tool refused the transcript it exists for"
   | Error _ -> Alcotest.fail "orphan tool_result misclassified"
+  | Ok (purged, report) ->
+    Alcotest.(check int) "the orphan is gone" 0 (List.length purged);
+    Alcotest.(check int)
+      "and the cost is reported"
+      1
+      report.Purge.messages_dropped_at_structural_break
+
+(* The output of a recovery must be saveable, which is the whole point: a
+   keeper stuck on a break has to be able to checkpoint again afterwards. *)
+let test_recovered_output_is_structurally_sound () =
+  (* The live shape: a second tool_use opens while the first cycle is still
+     unanswered, which is Overlapping_tool_cycle. Two keepers sat on exactly
+     this on 2026-09-01. *)
+  let messages =
+    cycle "a"
+    @ cycle "b"
+    @ [ block_message Types.Assistant [ tool_use "c1" ]
+      ; block_message Types.Assistant [ tool_use "c2" ]
+      ; { (block_message Types.Tool [ tool_result "c1" ]) with
+          tool_call_id = Some "c1"
+        }
+      ; { (block_message Types.Tool [ tool_result "c2" ]) with
+          tool_call_id = Some "c2"
+        }
+      ]
+  in
+  match Purge.purge_messages ~config:no_tail_config messages with
+  | Error _ -> Alcotest.fail "the split cycle was refused"
+  | Ok (purged, report) ->
+    Alcotest.(check bool)
+      "the survivors validate"
+      true
+      (Result.is_ok (Keeper_transcript_unit.validate purged));
+    Alcotest.(check bool)
+      "and something was dropped to get there"
+      true
+      (report.Purge.messages_dropped_at_structural_break > 0)
+
+(* A sound transcript keeps its open tail: crash recovery depends on it, and
+   this is the path every ordinary purge takes. *)
+let test_sound_input_drops_nothing_at_a_break () =
+  match Purge.purge_messages ~config:no_tail_config (cycle "a" @ cycle "b") with
+  | Error _ -> Alcotest.fail "a sound transcript was refused"
+  | Ok (_, report) ->
+    Alcotest.(check int)
+      "nothing dropped at a break there is not"
+      0
+      report.Purge.messages_dropped_at_structural_break
 
 let test_config_bounds_are_enforced () =
   (match
@@ -438,9 +492,17 @@ let () =
             test_cycle_overlapping_protected_tail_is_untouched
         ; Alcotest.test_case "purge is idempotent" `Quick test_purge_is_idempotent
         ; Alcotest.test_case
-            "broken structure is refused"
+            "broken structure is recovered, not refused"
             `Quick
-            test_broken_structure_is_refused
+            test_broken_structure_is_recovered_not_refused
+        ; Alcotest.test_case
+            "recovered output is structurally sound"
+            `Quick
+            test_recovered_output_is_structurally_sound
+        ; Alcotest.test_case
+            "sound input drops nothing at a break"
+            `Quick
+            test_sound_input_drops_nothing_at_a_break
         ; Alcotest.test_case
             "config bounds are enforced"
             `Quick

@@ -29,6 +29,7 @@ type report =
   ; reasoning_blocks_stripped : int
   ; reasoning_messages_dropped : int
   ; tool_results_cleared : int
+  ; messages_dropped_at_structural_break : int
   }
 
 type purge_error =
@@ -187,9 +188,32 @@ let purge_messages ~config messages =
             "keep_recent_messages must be >= 0 (got %d)"
             config.keep_recent_messages))
   else (
-    match Keeper_transcript_unit.partition messages with
+    (* A structurally broken input is the case this tool exists for, and it
+       used to be the one case it refused. A keeper whose stored transcript
+       carries a break cannot save a checkpoint, so it fails every turn at the
+       same message; edgar.a.poe spent 32 consecutive turns on a single split
+       tool cycle before it was repaired by hand on 2026-09-01.
+
+       Quarantine alone would not help: it moves the break into the protected
+       suffix, which purge preserves verbatim, so the output would still be
+       unsaveable and the caller would be told it succeeded. Recovery therefore
+       drops the offending cycle and everything after it, and reports how many
+       messages that cost. *)
+    let inherited_break =
+      match Keeper_transcript_unit.validate messages with
+      | Ok () -> None
+      | Error structural -> Some structural
+    in
+    let recovering = Option.is_some inherited_break in
+    match Keeper_transcript_unit.partition ~quarantine:recovering messages with
     | Error structural -> Error (Invalid_input_structure structural)
     | Ok { closed_prefix; protected_suffix } ->
+      (* On a sound input the suffix is the open tail crash recovery needs, and
+         it is kept. On a broken one it starts at the break. *)
+      let dropped_at_break =
+        if recovering then List.length protected_suffix else 0
+      in
+      let protected_suffix = if recovering then [] else protected_suffix in
       let messages_before = List.length messages in
       let items =
         let flat_index = ref (-1) in
@@ -311,6 +335,7 @@ let purge_messages ~config messages =
              ; reasoning_blocks_stripped = !reasoning_blocks_stripped
              ; reasoning_messages_dropped = !reasoning_messages_dropped
              ; tool_results_cleared = !tool_results_cleared
+             ; messages_dropped_at_structural_break = dropped_at_break
              } )))
 ;;
 

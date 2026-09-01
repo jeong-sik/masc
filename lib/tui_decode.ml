@@ -6133,9 +6133,16 @@ type lane_run_status =
   | Lane_run_failed
   | Lane_run_completion_persistence_failed
   | Lane_run_completion_durability_unknown
-  | Lane_run_verifier_positive of string
-  | Lane_run_verifier_negative of string
-  | Lane_run_verifier_failed of string
+  | Lane_run_approved
+  | Lane_run_reviewed
+  | Lane_run_committed
+  | Lane_run_rejected
+  | Lane_run_deferred
+  | Lane_run_review_cancelled
+  | Lane_run_infrastructure_unavailable
+  | Lane_run_not_reviewed
+  | Lane_run_commit_failed
+  | Lane_run_raised
   | Lane_run_other of string
 
 let lane_run_status_of_string = function
@@ -6145,13 +6152,16 @@ let lane_run_status_of_string = function
   | "failed" -> Lane_run_failed
   | "completion_persistence_failed" -> Lane_run_completion_persistence_failed
   | "completion_durability_unknown" -> Lane_run_completion_durability_unknown
-  | ("approved" | "reviewed" | "committed") as status ->
-    Lane_run_verifier_positive status
-  | ("rejected" | "deferred" | "review_cancelled") as status ->
-    Lane_run_verifier_negative status
-  | ("infrastructure_unavailable" | "not_reviewed" | "commit_failed" | "raised")
-    as status ->
-    Lane_run_verifier_failed status
+  | "approved" -> Lane_run_approved
+  | "reviewed" -> Lane_run_reviewed
+  | "committed" -> Lane_run_committed
+  | "rejected" -> Lane_run_rejected
+  | "deferred" -> Lane_run_deferred
+  | "review_cancelled" -> Lane_run_review_cancelled
+  | "infrastructure_unavailable" -> Lane_run_infrastructure_unavailable
+  | "not_reviewed" -> Lane_run_not_reviewed
+  | "commit_failed" -> Lane_run_commit_failed
+  | "raised" -> Lane_run_raised
   | other -> Lane_run_other other
 
 let lane_run_status_label = function
@@ -6161,9 +6171,16 @@ let lane_run_status_label = function
   | Lane_run_failed -> "failed"
   | Lane_run_completion_persistence_failed -> "completion_persistence_failed"
   | Lane_run_completion_durability_unknown -> "completion_durability_unknown"
-  | Lane_run_verifier_positive status
-  | Lane_run_verifier_negative status
-  | Lane_run_verifier_failed status
+  | Lane_run_approved -> "approved"
+  | Lane_run_reviewed -> "reviewed"
+  | Lane_run_committed -> "committed"
+  | Lane_run_rejected -> "rejected"
+  | Lane_run_deferred -> "deferred"
+  | Lane_run_review_cancelled -> "review_cancelled"
+  | Lane_run_infrastructure_unavailable -> "infrastructure_unavailable"
+  | Lane_run_not_reviewed -> "not_reviewed"
+  | Lane_run_commit_failed -> "commit_failed"
+  | Lane_run_raised -> "raised"
   | Lane_run_other status -> status
 
 type lane_run_kind =
@@ -6183,6 +6200,94 @@ let lane_run_kind_label = function
   | Lane_run_task_verification -> "task verification"
   | Lane_run_goal_verification -> "goal verification"
   | Lane_run_kind_other other -> other
+
+type lane_run_decision =
+  | Lane_run_decision_approved
+  | Lane_run_decision_rejected
+  | Lane_run_decision_reviewed
+  | Lane_run_decision_committed
+  | Lane_run_decision_pending
+  | Lane_run_decision_not_reached
+  | Lane_run_not_a_decision
+  | Lane_run_decision_unknown
+
+let lane_run_decision ~run_kind ~status =
+  match run_kind with
+  | Lane_run_exact_output -> Lane_run_not_a_decision
+  | Lane_run_task_verification | Lane_run_goal_verification ->
+    (match status with
+     | Lane_run_approved -> Lane_run_decision_approved
+     | Lane_run_rejected -> Lane_run_decision_rejected
+     | Lane_run_reviewed -> Lane_run_decision_reviewed
+     | Lane_run_committed -> Lane_run_decision_committed
+     | Lane_run_running -> Lane_run_decision_pending
+     | Lane_run_deferred
+     | Lane_run_review_cancelled
+     | Lane_run_infrastructure_unavailable
+     | Lane_run_not_reviewed
+     | Lane_run_commit_failed
+     | Lane_run_raised
+     | Lane_run_cancelled
+     | Lane_run_failed
+     | Lane_run_completion_persistence_failed
+     | Lane_run_completion_durability_unknown ->
+       Lane_run_decision_not_reached
+     | Lane_run_succeeded | Lane_run_other _ -> Lane_run_decision_unknown)
+  | Lane_run_kind_other _ -> Lane_run_decision_unknown
+;;
+
+type lane_run_tool_disposition =
+  | Lane_run_tool_completed
+  | Lane_run_tool_deferred
+  | Lane_run_tool_failed
+  | Lane_run_tool_disposition_other of string
+
+let lane_run_tool_disposition_of_string = function
+  | "completed" -> Lane_run_tool_completed
+  | "deferred" -> Lane_run_tool_deferred
+  | "failed" -> Lane_run_tool_failed
+  | other -> Lane_run_tool_disposition_other other
+
+let lane_run_tool_disposition_label = function
+  | Lane_run_tool_completed -> "completed"
+  | Lane_run_tool_deferred -> "deferred"
+  | Lane_run_tool_failed -> "failed"
+  | Lane_run_tool_disposition_other other -> other
+
+type lane_run_tool =
+  { lrt_name : string
+  ; lrt_disposition : lane_run_tool_disposition
+  ; lrt_duration_ms : float
+  }
+
+type lane_run_tool_evidence =
+  | Lane_run_no_tools_by_contract
+  | Lane_run_tools_pending
+  | Lane_run_tools_observed of lane_run_tool list
+  | Lane_run_tools_contract_unknown
+
+let decode_lane_run_tool json =
+  let* lrt_name = required_string_field json "tool_name" in
+  let* disposition = required_string_field json "disposition" in
+  let* lrt_duration_ms = require_float_field json "duration_ms" in
+  Ok
+    { lrt_name
+    ; lrt_disposition = lane_run_tool_disposition_of_string disposition
+    ; lrt_duration_ms
+    }
+;;
+
+let decode_lane_run_tool_evidence ~run_kind ~output =
+  match run_kind, output with
+  | Lane_run_exact_output, _ -> Ok Lane_run_no_tools_by_contract
+  | (Lane_run_task_verification | Lane_run_goal_verification), None ->
+    Ok Lane_run_tools_pending
+  | (Lane_run_task_verification | Lane_run_goal_verification), Some output ->
+    let* tools = required_list_field output "tools" in
+    let* tools = decode_list "tools" decode_lane_run_tool tools in
+    Ok (Lane_run_tools_observed tools)
+  | Lane_run_kind_other _, _ -> Ok Lane_run_tools_contract_unknown
+;;
 
 type lane_run_summary =
   { lrs_run_id : string
@@ -6213,6 +6318,7 @@ type lane_run_detail =
   ; lrd_selected_slot : string option
   ; lrd_input_payload : Yojson.Safe.t
   ; lrd_output : Yojson.Safe.t option
+  ; lrd_tool_evidence : lane_run_tool_evidence
   }
 
 let decode_lane_run_summary json =
@@ -6272,6 +6378,10 @@ let decode_lane_run_detail json =
     | `Null -> None
     | value -> Some value
   in
+  let* lrd_tool_evidence =
+    decode_lane_run_tool_evidence ~run_kind:summary.lrs_run_kind
+      ~output:lrd_output
+  in
   Ok
     { lrd_run_id = summary.lrs_run_id
     ; lrd_run_kind = summary.lrs_run_kind
@@ -6284,6 +6394,7 @@ let decode_lane_run_detail json =
     ; lrd_selected_slot = summary.lrs_selected_slot
     ; lrd_input_payload
     ; lrd_output
+    ; lrd_tool_evidence
     }
 ;;
 

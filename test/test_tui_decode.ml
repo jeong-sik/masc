@@ -4966,7 +4966,11 @@ let test_decode_verifier_lane_summary_keeps_subject_and_verdict () =
          (run.Tui_decode.lrs_run_kind = Tui_decode.Lane_run_task_verification);
        Alcotest.(check bool) "rejection is a typed verdict" true
          (run.Tui_decode.lrs_status
-          = Tui_decode.Lane_run_verifier_negative "rejected")
+          = Tui_decode.Lane_run_rejected);
+       Alcotest.(check bool) "rejection is a decision" true
+         (Tui_decode.lane_run_decision ~run_kind:run.lrs_run_kind
+            ~status:run.lrs_status
+          = Tui_decode.Lane_run_decision_rejected)
      | _ -> Alcotest.fail "expected one verifier run")
 
 let lane_run_detail_json ?(output = true) run_id =
@@ -5015,7 +5019,14 @@ let test_decode_lane_run_detail_carries_prompt_and_output () =
        | Some (`Assoc fields) ->
            Alcotest.(check bool) "output payload" true
              (List.assoc_opt "summary" fields = Some (`String "done"))
-       | _ -> Alcotest.fail "a completed run carries its output")
+       | _ -> Alcotest.fail "a completed run carries its output");
+      Alcotest.(check bool) "exact output has no tool loop" true
+        (detail.Tui_decode.lrd_tool_evidence
+         = Tui_decode.Lane_run_no_tools_by_contract);
+      Alcotest.(check bool) "exact output is not a verdict" true
+        (Tui_decode.lane_run_decision ~run_kind:detail.lrd_run_kind
+           ~status:detail.lrd_status
+         = Tui_decode.Lane_run_not_a_decision)
 
 let test_decode_lane_run_detail_running_has_no_output () =
   match
@@ -5055,6 +5066,7 @@ let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
                         [ `Assoc
                             [ "tool_name", `String "masc_task_get"
                             ; "disposition", `String "completed"
+                            ; "duration_ms", `Float 12.
                             ] ] )
                   ] )
             ] )
@@ -5073,7 +5085,15 @@ let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
      | Some (`Assoc fields) ->
        Alcotest.(check bool) "tool evidence survives" true
          (List.mem_assoc "tools" fields)
-     | _ -> Alcotest.fail "verifier result must be retained")
+     | _ -> Alcotest.fail "verifier result must be retained");
+    (match detail.Tui_decode.lrd_tool_evidence with
+     | Tui_decode.Lane_run_tools_observed [ tool ] ->
+       Alcotest.(check string) "typed tool name" "masc_task_get" tool.lrt_name;
+       Alcotest.(check bool) "typed tool disposition" true
+         (tool.lrt_disposition = Tui_decode.Lane_run_tool_completed);
+       Alcotest.(check (float 0.0)) "typed tool duration" 12.
+         tool.lrt_duration_ms
+     | _ -> Alcotest.fail "verifier tool evidence must decode to one tool")
 
 let test_decode_lane_run_detail_requires_the_payload () =
   let json =

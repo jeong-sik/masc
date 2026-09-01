@@ -7218,12 +7218,36 @@ def keeper_lanes_interaction(
                 f"Verifier run list did not name its task subject: {verifier_runs!r}"
             )
         verifier_detail = send_and_wait(
-            process, master_fd, output, b"\r", b"RESULT / TOOL EVIDENCE (1 calls)"
+            process,
+            master_fd,
+            output,
+            b"\r",
+            b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (1 CALL)",
         )
         verifier_detail_plain = CSI_RE.sub(b"", verifier_detail)
-        if b"masc_task_get" not in verifier_detail_plain:
+        for evidence in (
+            b"DECISION  REJECTED",
+            b"TOOLS  1 call \xc2\xb7 masc_task_get [completed \xc2\xb7 12ms]",
+            b"INPUT \xc2\xb7 VERIFICATION REQUEST",
+        ):
+            if evidence not in verifier_detail_plain:
+                raise AssertionError(
+                    "Verifier detail omitted its split decision/tool summary "
+                    f"{evidence!r}: {verifier_detail!r}"
+                )
+        split_heading = next(
+            (
+                line
+                for line in verifier_detail_plain.splitlines()
+                if b"INPUT \xc2\xb7 VERIFICATION REQUEST" in line
+                and b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE" in line
+            ),
+            None,
+        )
+        if split_heading is None or b"\xe2\x94\x82" not in split_heading:
             raise AssertionError(
-                f"Verifier detail dropped durable tool evidence: {verifier_detail!r}"
+                "Verifier detail did not draw Input and Output on one split row: "
+                f"{verifier_detail!r}"
             )
         send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
         send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)

@@ -1481,9 +1481,16 @@ type lane_run_status =
   | Lane_run_failed
   | Lane_run_completion_persistence_failed
   | Lane_run_completion_durability_unknown
-  | Lane_run_verifier_positive of string
-  | Lane_run_verifier_negative of string
-  | Lane_run_verifier_failed of string
+  | Lane_run_approved
+  | Lane_run_reviewed
+  | Lane_run_committed
+  | Lane_run_rejected
+  | Lane_run_deferred
+  | Lane_run_review_cancelled
+  | Lane_run_infrastructure_unavailable
+  | Lane_run_not_reviewed
+  | Lane_run_commit_failed
+  | Lane_run_raised
   | Lane_run_other of string
 
 val lane_run_status_label : lane_run_status -> string
@@ -1495,6 +1502,41 @@ type lane_run_kind =
   | Lane_run_kind_other of string
 
 val lane_run_kind_label : lane_run_kind -> string
+
+type lane_run_decision =
+  | Lane_run_decision_approved
+  | Lane_run_decision_rejected
+  | Lane_run_decision_reviewed
+  | Lane_run_decision_committed
+  | Lane_run_decision_pending
+  | Lane_run_decision_not_reached
+  | Lane_run_not_a_decision
+  | Lane_run_decision_unknown
+
+val lane_run_decision :
+  run_kind:lane_run_kind -> status:lane_run_status -> lane_run_decision
+(** Separates a completed execution from a review decision. In particular,
+    an exact-output run that succeeded is still [Lane_run_not_a_decision]. *)
+
+type lane_run_tool_disposition =
+  | Lane_run_tool_completed
+  | Lane_run_tool_deferred
+  | Lane_run_tool_failed
+  | Lane_run_tool_disposition_other of string
+
+val lane_run_tool_disposition_label : lane_run_tool_disposition -> string
+
+type lane_run_tool =
+  { lrt_name : string
+  ; lrt_disposition : lane_run_tool_disposition
+  ; lrt_duration_ms : float
+  }
+
+type lane_run_tool_evidence =
+  | Lane_run_no_tools_by_contract
+  | Lane_run_tools_pending
+  | Lane_run_tools_observed of lane_run_tool list
+  | Lane_run_tools_contract_unknown
 
 type lane_run_summary =
   { lrs_run_id : string
@@ -1525,6 +1567,7 @@ type lane_run_detail =
   ; lrd_selected_slot : string option
   ; lrd_input_payload : Yojson.Safe.t
   ; lrd_output : Yojson.Safe.t option
+  ; lrd_tool_evidence : lane_run_tool_evidence
   }
 
 val decode_lane_run_page :
@@ -1535,9 +1578,9 @@ val decode_lane_run_page :
 
 val decode_lane_run_detail : Yojson.Safe.t -> (lane_run_detail, string) result
 (** The whole record of one standalone run. Exact-output runs carry their
-    prompt payload; task/Goal Verifier runs carry the reviewed subject and
-    their durable verdict/tool evidence under [output]. [lrd_output] is
-    [None] while the run is still running. *)
+    prompt payload and explicitly report no MASC tool loop. Task/Goal
+    Verifier runs carry typed tool observations alongside their durable raw
+    verdict evidence. [lrd_output] is [None] while the run is still running. *)
 
 type log_kind =
   | Log_turn

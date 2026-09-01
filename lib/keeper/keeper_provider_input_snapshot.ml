@@ -1,18 +1,23 @@
+(* Field names carry a per-record prefix. Four records here shared [bytes],
+   four shared [index], and two shared [artifact]; OCaml gives an unqualified
+   field to the last record that declared it, so every unannotated access was
+   resolving against whichever record happened to be defined last. That cost
+   twelve build repairs in one merge burst (#32298) and two more after it. *)
 type artifact =
-  { bytes : int
-  ; content_ref : string
+  { art_bytes : int
+  ; art_content_ref : string
   }
 
 type message =
-  { index : int
-  ; role : string
-  ; artifact : artifact
+  { msg_index : int
+  ; msg_role : string
+  ; msg_artifact : artifact
   }
 
 type tool_schema =
-  { index : int
-  ; name : string
-  ; artifact : artifact
+  { ts_index : int
+  ; ts_name : string
+  ; ts_artifact : artifact
   }
 
 type t =
@@ -29,32 +34,35 @@ type t =
   }
 
 type resolved_message =
-  { index : int
-  ; role : string
-  ; bytes : int
-  ; sha256 : string
-  ; content : Yojson.Safe.t
+  { rmsg_index : int
+  ; rmsg_role : string
+  ; rmsg_bytes : int
+  ; rmsg_sha256 : string
+  ; rmsg_content : Yojson.Safe.t
   }
 
 type resolved_tool_schema =
-  { index : int
-  ; name : string
-  ; bytes : int
-  ; sha256 : string
-  ; content : Yojson.Safe.t
+  { rts_index : int
+  ; rts_name : string
+  ; rts_bytes : int
+  ; rts_sha256 : string
+  ; rts_content : Yojson.Safe.t
   }
 
 type resolved_system_prompt =
-  { bytes : int
-  ; sha256 : string
-  ; text : string
+  { rsp_bytes : int
+  ; rsp_sha256 : string
+  ; rsp_text : string
   }
 
+(* The record was [resolved] and its fields repeated [resolved_], so a reader
+   met the word twice for one fact. The prefix now names the record, not the
+   state. *)
 type resolved =
-  { snapshot : t
-  ; resolved_system_prompt : resolved_system_prompt option
-  ; resolved_messages : resolved_message list
-  ; resolved_tool_schemas : resolved_tool_schema list
+  { rv_snapshot : t
+  ; rv_system_prompt : resolved_system_prompt option
+  ; rv_messages : resolved_message list
+  ; rv_tool_schemas : resolved_tool_schema list
   }
 
 type read_error =
@@ -122,29 +130,29 @@ let read_error_to_string = function
       detail
 ;;
 
-(* Annotated: [resolved_system_prompt] below also carries [bytes], so an
-   unannotated parameter re-infers to that later record and [.content_ref]
-   stops resolving. *)
-let artifact_to_json (artifact : artifact) =
+(* The JSON keys keep their old spelling: the prefixes name fields in OCaml,
+   not the persisted schema, and renaming those would strand every row already
+   on disk. *)
+let artifact_to_json artifact =
   `Assoc
-    [ "bytes", `Int artifact.bytes
-    ; "content_ref", `String artifact.content_ref
+    [ "bytes", `Int artifact.art_bytes
+    ; "content_ref", `String artifact.art_content_ref
     ]
 ;;
 
-let message_to_json (message : message) =
+let message_to_json message =
   `Assoc
-    [ "index", `Int message.index
-    ; "role", `String message.role
-    ; "artifact", artifact_to_json message.artifact
+    [ "index", `Int message.msg_index
+    ; "role", `String message.msg_role
+    ; "artifact", artifact_to_json message.msg_artifact
     ]
 ;;
 
-let tool_schema_to_json (tool : tool_schema) =
+let tool_schema_to_json tool =
   `Assoc
-    [ "index", `Int tool.index
-    ; "name", `String tool.name
-    ; "artifact", artifact_to_json tool.artifact
+    [ "index", `Int tool.ts_index
+    ; "name", `String tool.ts_name
+    ; "artifact", artifact_to_json tool.ts_artifact
     ]
 ;;
 
@@ -200,7 +208,7 @@ let artifact_of_json = function
     let* bytes = nonnegative_int "artifact.bytes" bytes_json in
     let* content_ref_json = field "content_ref" fields in
     let* content_ref = nonempty_string "artifact.content_ref" content_ref_json in
-    Ok { bytes; content_ref }
+    Ok { art_bytes = bytes; art_content_ref = content_ref }
   | `Assoc _ -> Error "artifact fields are not exact"
   | _ -> Error "artifact must be an object"
 ;;
@@ -225,7 +233,7 @@ let message_of_json = function
     let* role = nonempty_string "message.role" role_json in
     let* artifact_json = field "artifact" fields in
     let* artifact = artifact_of_json artifact_json in
-    Ok (index, { index; role; artifact })
+    Ok (index, { msg_index = index; msg_role = role; msg_artifact = artifact })
   | `Assoc _ -> Error "message fields are not exact"
   | _ -> Error "message must be an object"
 ;;
@@ -238,7 +246,7 @@ let tool_schema_of_json = function
     let* name = nonempty_string "tool_schema.name" name_json in
     let* artifact_json = field "artifact" fields in
     let* artifact = artifact_of_json artifact_json in
-    Ok (index, { index; name; artifact })
+    Ok (index, { ts_index = index; ts_name = name; ts_artifact = artifact })
   | `Assoc _ -> Error "tool_schema fields are not exact"
   | _ -> Error "tool_schema must be an object"
 ;;
@@ -333,29 +341,29 @@ let of_json = function
 let reusable_artifacts snapshot =
   let reusable = Hashtbl.create 32 in
   let add artifact =
-    match Tool_output.decode_from_agent_core artifact.content_ref with
-    | Tool_output.Decoded reference when reference.bytes = artifact.bytes ->
+    match Tool_output.decode_from_agent_core artifact.art_content_ref with
+    | Tool_output.Decoded reference when reference.bytes = artifact.art_bytes ->
       Hashtbl.replace reusable (reference.sha256, reference.mime) artifact
     | Tool_output.Decoded _
     | Tool_output.Not_marker
     | Tool_output.Invalid_marker _ -> ()
   in
   Option.iter add snapshot.system_prompt;
-  List.iter (fun (message : message) -> add message.artifact) snapshot.messages;
-  List.iter (fun (tool : tool_schema) -> add tool.artifact) snapshot.tool_schemas;
+  List.iter (fun message -> add message.msg_artifact) snapshot.messages;
+  List.iter (fun tool -> add tool.ts_artifact) snapshot.tool_schemas;
   reusable
 ;;
 
-let store_artifact store ~reusable ~mime bytes : artifact =
+let store_artifact store ~reusable ~mime bytes =
   let bytes_length = String.length bytes in
   let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
   match Hashtbl.find_opt reusable (sha256, mime) with
-  | Some (artifact : artifact) when artifact.bytes = bytes_length -> artifact
+  | Some artifact when artifact.art_bytes = bytes_length -> artifact
   | Some _ | None ->
     let reference = Tool_blob_store.put_durable store ~bytes ~mime in
     let reference = Tool_output.with_preview reference "" in
-    { bytes = bytes_length
-    ; content_ref =
+    { art_bytes = bytes_length
+    ; art_content_ref =
         Tool_output.encode_for_agent_core (Tool_output.Stored reference)
     }
 ;;
@@ -397,9 +405,9 @@ let write_best_effort
              Keeper_context_core_message_json.message_to_json message
              |> Yojson.Safe.to_string
            in
-           { index
-           ; role = Agent_core.Types.role_to_string message.role
-           ; artifact =
+           { msg_index = index
+           ; msg_role = Agent_core.Types.role_to_string message.role
+           ; msg_artifact =
                store_artifact
                  blob_store
                  ~reusable
@@ -412,9 +420,9 @@ let write_best_effort
       List.mapi
         (fun index (tool : Agent_core.Tool.t) ->
            let payload = Agent_core.Tool.schema_to_json tool |> Yojson.Safe.to_string in
-           { index
-           ; name = tool.schema.name
-           ; artifact =
+           { ts_index = index
+           ; ts_name = tool.schema.name
+           ; ts_artifact =
                store_artifact
                  blob_store
                  ~reusable
@@ -482,14 +490,15 @@ let find_snapshot ~config ~keeper ~turn_ref =
 ;;
 
 let artifact_reference artifact =
-  match Tool_output.decode_from_agent_core artifact.content_ref with
-  | Tool_output.Decoded reference when reference.bytes = artifact.bytes -> Ok reference
+  match Tool_output.decode_from_agent_core artifact.art_content_ref with
+  | Tool_output.Decoded reference when reference.bytes = artifact.art_bytes ->
+    Ok reference
   | Tool_output.Decoded reference ->
     Error
       (Invalid_artifact_reference
          (Printf.sprintf
             "declared bytes %d do not match marker bytes %d"
-            artifact.bytes
+            artifact.art_bytes
             reference.bytes))
   | Tool_output.Not_marker ->
     Error (Invalid_artifact_reference "value is not an artifact marker")
@@ -504,13 +513,13 @@ let fetch_artifact store artifact =
     Error
       (Artifact_read_failed (Tool_blob_store.fetch_error_to_string error))
   | Ok None -> Error (Artifact_missing reference.sha256)
-  | Ok (Some content) when String.length content = artifact.bytes ->
+  | Ok (Some content) when String.length content = artifact.art_bytes ->
     Ok (reference.sha256, content)
   | Ok (Some content) ->
     Error
       (Artifact_length_mismatch
          { sha256 = reference.sha256
-         ; expected = artifact.bytes
+         ; expected = artifact.art_bytes
          ; actual = String.length content
          })
 ;;
@@ -524,16 +533,16 @@ let parse_artifact_json ~sha256 content =
 
 let rec resolve_messages store reversed = function
   | [] -> Ok (List.rev reversed)
-  | (message : message) :: rest ->
-    let* sha256, payload = fetch_artifact store message.artifact in
+  | message :: rest ->
+    let* sha256, payload = fetch_artifact store message.msg_artifact in
     let* content = parse_artifact_json ~sha256 payload in
     resolve_messages
       store
-      ({ index = message.index
-       ; role = message.role
-       ; bytes = message.artifact.bytes
-       ; sha256
-       ; content
+      ({ rmsg_index = message.msg_index
+       ; rmsg_role = message.msg_role
+       ; rmsg_bytes = message.msg_artifact.art_bytes
+       ; rmsg_sha256 = sha256
+       ; rmsg_content = content
        }
        :: reversed)
       rest
@@ -542,15 +551,15 @@ let rec resolve_messages store reversed = function
 let rec resolve_tool_schemas store reversed = function
   | [] -> Ok (List.rev reversed)
   | tool :: rest ->
-    let* sha256, payload = fetch_artifact store tool.artifact in
+    let* sha256, payload = fetch_artifact store tool.ts_artifact in
     let* content = parse_artifact_json ~sha256 payload in
     resolve_tool_schemas
       store
-      ({ index = tool.index
-       ; name = tool.name
-       ; bytes = tool.artifact.bytes
-       ; sha256
-       ; content
+      ({ rts_index = tool.ts_index
+       ; rts_name = tool.ts_name
+       ; rts_bytes = tool.ts_artifact.art_bytes
+       ; rts_sha256 = sha256
+       ; rts_content = content
        }
        :: reversed)
       rest
@@ -564,42 +573,44 @@ let read_resolved ~config ~keeper ~turn_ref =
     | None -> Ok None
     | Some artifact ->
       let* sha256, text = fetch_artifact store artifact in
-      Ok (Some { bytes = artifact.bytes; sha256; text })
+      Ok
+        (Some
+           { rsp_bytes = artifact.art_bytes; rsp_sha256 = sha256; rsp_text = text })
   in
   let* resolved_messages = resolve_messages store [] snapshot.messages in
   let* resolved_tool_schemas =
     resolve_tool_schemas store [] snapshot.tool_schemas
   in
   Ok
-    { snapshot
-    ; resolved_system_prompt
-    ; resolved_messages
-    ; resolved_tool_schemas
+    { rv_snapshot = snapshot
+    ; rv_system_prompt = resolved_system_prompt
+    ; rv_messages = resolved_messages
+    ; rv_tool_schemas = resolved_tool_schemas
     }
 ;;
 
-let resolved_message_to_json (message : resolved_message) =
+let resolved_message_to_json message =
   `Assoc
-    [ "index", `Int message.index
-    ; "role", `String message.role
-    ; "bytes", `Int message.bytes
-    ; "sha256", `String message.sha256
-    ; "content", message.content
+    [ "index", `Int message.rmsg_index
+    ; "role", `String message.rmsg_role
+    ; "bytes", `Int message.rmsg_bytes
+    ; "sha256", `String message.rmsg_sha256
+    ; "content", message.rmsg_content
     ]
 ;;
 
-let resolved_tool_schema_to_json (tool : resolved_tool_schema) =
+let resolved_tool_schema_to_json tool =
   `Assoc
-    [ "index", `Int tool.index
-    ; "name", `String tool.name
-    ; "bytes", `Int tool.bytes
-    ; "sha256", `String tool.sha256
-    ; "content", tool.content
+    [ "index", `Int tool.rts_index
+    ; "name", `String tool.rts_name
+    ; "bytes", `Int tool.rts_bytes
+    ; "sha256", `String tool.rts_sha256
+    ; "content", tool.rts_content
     ]
 ;;
 
 let resolved_to_json resolved =
-  let snapshot = resolved.snapshot in
+  let snapshot = resolved.rv_snapshot in
   `Assoc
     [ "schema", `String "masc.resolved-provider-input.v1"
     ; "keeper", `String snapshot.keeper
@@ -611,19 +622,19 @@ let resolved_to_json resolved =
     ; ( "wire"
       , Llm_provider.Request_wire_observer.observation_to_yojson snapshot.wire )
     ; ( "system_prompt"
-      , match resolved.resolved_system_prompt with
+      , match resolved.rv_system_prompt with
         | Some prompt ->
           `Assoc
-            [ "bytes", `Int prompt.bytes
-            ; "sha256", `String prompt.sha256
-            ; "text", `String prompt.text
+            [ "bytes", `Int prompt.rsp_bytes
+            ; "sha256", `String prompt.rsp_sha256
+            ; "text", `String prompt.rsp_text
             ]
         | None -> `Null )
     ; ( "messages"
-      , `List (List.map resolved_message_to_json resolved.resolved_messages) )
+      , `List (List.map resolved_message_to_json resolved.rv_messages) )
     ; ( "tool_schemas"
       , `List
-          (List.map resolved_tool_schema_to_json resolved.resolved_tool_schemas)
+          (List.map resolved_tool_schema_to_json resolved.rv_tool_schemas)
       )
     ]
 ;;

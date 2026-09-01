@@ -88,21 +88,21 @@ let test_exact_turn_round_trip () =
   with_workspace (fun config ->
     write config 7;
     let resolved = read config 7 in
-    check string "keeper" keeper resolved.snapshot.keeper;
-    check int "absolute turn" 7 resolved.snapshot.absolute_turn;
+    check string "keeper" keeper resolved.rv_snapshot.keeper;
+    check int "absolute turn" 7 resolved.rv_snapshot.absolute_turn;
     check string
       "turn ref"
       "trace-provider-input#7"
-      (Ids.Turn_ref.to_string resolved.snapshot.turn_ref);
-    check string "wire provider" "openai-compatible" resolved.snapshot.wire.provider;
-    check int "wire bytes" 8192 resolved.snapshot.wire.body_bytes;
-    (match resolved.resolved_system_prompt with
+      (Ids.Turn_ref.to_string resolved.rv_snapshot.turn_ref);
+    check string "wire provider" "openai-compatible" resolved.rv_snapshot.wire.provider;
+    check int "wire bytes" 8192 resolved.rv_snapshot.wire.body_bytes;
+    (match resolved.rv_system_prompt with
      | None -> fail "system prompt artifact was not resolved"
-     | Some prompt -> check string "system prompt" "exact system prompt" prompt.text);
-    (match resolved.resolved_messages with
+     | Some prompt -> check string "system prompt" "exact system prompt" prompt.rsp_text);
+    (match resolved.rv_messages with
      | [ message ] ->
-       check int "message index" 0 message.index;
-       check string "message role" "user" message.role;
+       check int "message index" 0 message.rmsg_index;
+       check string "message role" "user" message.rmsg_role;
        check bool
          "message content"
          true
@@ -117,12 +117,12 @@ let test_exact_turn_round_trip () =
                         ]
                     ] )
               ])
-            message.content)
+            message.rmsg_content)
      | messages -> failf "expected one message, got %d" (List.length messages));
-    (match resolved.resolved_tool_schemas with
+    (match resolved.rv_tool_schemas with
      | [ schema ] ->
-       check int "schema index" 0 schema.index;
-       check string "schema name" "masc_status" schema.name
+       check int "schema index" 0 schema.rts_index;
+       check string "schema name" "masc_status" schema.rts_name
      | schemas -> failf "expected one tool schema, got %d" (List.length schemas)))
 ;;
 
@@ -133,7 +133,7 @@ let test_repeated_history_is_content_deduplicated () =
     let first = Tool_blob_store.list_all store |> List.sort String.compare in
     let first_snapshot = read config 7 in
     let snapshot_json =
-      Snapshot.to_json first_snapshot.snapshot |> Yojson.Safe.to_string
+      Snapshot.to_json first_snapshot.rv_snapshot |> Yojson.Safe.to_string
     in
     check bool
       "snapshot row does not preview the system prompt"
@@ -144,8 +144,8 @@ let test_repeated_history_is_content_deduplicated () =
       false
       (String_util.contains_substring snapshot_json "remember exact fact");
     let prompt_sha =
-      match first_snapshot.resolved_system_prompt with
-      | Some prompt -> prompt.sha256
+      match first_snapshot.rv_system_prompt with
+      | Some prompt -> prompt.rsp_sha256
       | None -> fail "system prompt artifact was not resolved"
     in
     let prompt_path =

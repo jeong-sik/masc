@@ -762,6 +762,13 @@ let planning_filter_label = function
   | Planning_filter_completed -> "completed"
   | Planning_filter_dropped -> "dropped"
 
+let planning_filter_explanation = function
+  | Planning_filter_all -> "all phases"
+  | Planning_filter_active -> "executing + verifying"
+  | Planning_filter_completed -> "completed only"
+  | Planning_filter_dropped -> "dropped only"
+;;
+
 let next_planning_filter = function
   | Planning_filter_all -> Planning_filter_active
   | Planning_filter_active -> Planning_filter_completed
@@ -779,6 +786,12 @@ let planning_sort_label = function
   | Planning_sort_phase_priority -> "phase/P1-P5"
   | Planning_sort_updated -> "updated"
   | Planning_sort_due -> "due"
+
+let planning_sort_explanation = function
+  | Planning_sort_phase_priority -> "phase order, then P1→P5"
+  | Planning_sort_updated -> "most recently updated first"
+  | Planning_sort_due -> "earliest due date first; undated last"
+;;
 
 let next_planning_sort = function
   | Planning_sort_phase_priority -> Planning_sort_updated
@@ -854,6 +867,14 @@ let board_sort_label = function
   | Board_recent -> "recent"
   | Board_updated -> "updated"
   | Board_discussed -> "discussed"
+
+let board_sort_explanation = function
+  | Board_hot -> "net votes first; newer breaks ties"
+  | Board_trending -> "net votes / √age-hours"
+  | Board_recent -> "newest post first"
+  | Board_updated -> "latest changed first"
+  | Board_discussed -> "most replies first; newer breaks ties"
+;;
 
 (** Sub-mode inside the Keepers surface *)
 type keeper_mode =

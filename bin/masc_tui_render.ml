@@ -2461,7 +2461,7 @@ let render_board_compose (state : state) =
    line joined them; naming it is what lets a tenth reader check the
    arithmetic instead of trusting a literal that two places have to agree
    on. *)
-let board_list_chrome_rows = 10
+let board_list_chrome_rows = 11
 
 (* Three steps for three bands, from the palette every other reading on this
    screen draws through. Emphasis only ever restates what the count beside it
@@ -2555,6 +2555,9 @@ let render_board_list (state : state) =
 
   box_top buf cols;
   box_line buf cols header;
+  box_line_styled buf cols ~style:(Theme.recede ())
+    (Printf.sprintf "  order %s · s cycles ranking"
+       (board_sort_explanation state.board_sort));
   box_line buf cols (board_hearth_census_line ~cols state);
   box_divider buf cols;
   (* The header is laid out by the same arithmetic as the rows below it,
@@ -2705,6 +2708,10 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
 
   box_top buf cols;
   box_line buf cols header;
+  box_line_styled buf cols ~style:(Theme.recede ())
+    (Printf.sprintf "  show %s · order %s"
+       (planning_filter_explanation state.planning_filter)
+       (planning_sort_explanation state.planning_sort));
   box_divider buf cols;
 
   let title_line = Printf.sprintf "  %s%s%s"
@@ -3119,7 +3126,7 @@ let render_planning_list (state : state) =
             box_line buf cols (data_unreliable_row ~cols err)
         | None ->
             box_line buf cols (Ansi.dim ^ page_unread_note ^ Ansi.reset));
-       for _ = 1 to rows - boxed_surface_chrome_rows do
+       for _ = 1 to rows - boxed_surface_chrome_rows - 1 do
          box_empty buf cols
        done
    | Some p ->
@@ -3161,12 +3168,12 @@ let render_planning_list (state : state) =
            | _ -> "  no goals in this filter (f to change)"
          in
          box_line buf cols (Ansi.dim ^ empty_note ^ Ansi.reset);
-         for _ = 1 to rows - 11 do
+         for _ = 1 to rows - 12 do
            box_empty buf cols
          done
        end else begin
          (* One row is reserved below the list for the selected goal's verdict. *)
-         let content_height = rows - 13 in
+         let content_height = rows - 14 in
          let scroll_offset =
            if state.planning_cursor >= content_height then
              state.planning_cursor - content_height + 1

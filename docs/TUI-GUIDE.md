@@ -621,6 +621,7 @@ Left or `Esc` returns to the list.
 
 ```
  MASC Board (50)  10:44:52  [connected]
+   order net votes first; newer breaks ties · s cycles ranking
  >   p-687c6844e~  polisher     [B1 mission draft v9] RW20 PoC scenario     +9  c39
      p-0323d8b3c~  dashboard    RFC-0370 Draft: rotation census             +4  c22
   j/k:move  Enter:read  r:refresh  Tab:next  | Port: 8935
@@ -629,6 +630,14 @@ Left or `Esc` returns to the list.
 Selection follows post identity across refreshes. Opening a post binds the
 detail view to that post's request, so a late response for a post you already
 left is discarded rather than rendered under the current title.
+
+`s` cycles five server-owned rankings, with the active formula printed above
+the table: `hot` is net votes descending with newer posts breaking ties;
+`trending` is net votes divided by the square root of age in hours; `recent`
+is newest creation first; `updated` is latest change first; and `discussed` is
+reply count descending with newer posts breaking ties. Replies do not inflate
+`hot` or `trending`. `f` cycles the hearth census shown on the next line, so
+ranking and topic narrowing remain separate axes.
 
 `w` on the list opens a new-post draft. The draft follows the commit-message
 convention: the first line is the title, the rest is the body. `Enter` makes
@@ -656,6 +665,7 @@ on a Task completion request.
 
 ```
  MASC Planning  ▸Goals  Task Review·2  10:44:57  [connected]
+   show executing + verifying · order phase order, then P1→P5
    Executing: 3  Paused/Blocked: 1  Verifying: 0  Done: 24  Dropped: 22
    Backlog: todo=4  claimed=0  running=6  done=109  cancelled=37
  >   [dropped ] P1  Reduce all kidsnote service backlogs to 0
@@ -665,6 +675,13 @@ on a Task completion request.
 
 The cursor tracks goal identity in visible order, so a refresh that reorders
 goals keeps the same goal selected.
+
+`f` cycles `all`, `active`, `completed`, and `dropped`; active means exactly
+Executing plus Verifying. `s` cycles `phase/P1-P5` (Executing, Verifying,
+Completed, Dropped, then priority), `updated` (most recently changed first),
+and `due` (earliest due date first, undated last). The current meanings are
+printed above the rollup. Status colour and the proof marker remain independent
+of ordering, so a row does not look successful merely because it sorted first.
 
 In a goal detail, `c` requests completion, `x` drops, `o` reopens. Each is
 armed rather than pressed - the first press shows what the same key again

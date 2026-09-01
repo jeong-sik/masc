@@ -226,13 +226,12 @@ val build_link_targets_to_create : build_link_row list -> string list
     and opens [_build/.lock] straight away --
     [Error: open(_build/.lock): No such file or directory]. The host cannot
     create it either, since it lives inside the volume's ext4 image.
-    [mkdir -p] is idempotent, so this is safe to repeat every turn. *)
-val build_target_mkdir_argv
-  :  container_name:string
-  -> uid:int
-  -> gid:int
-  -> targets:string list
-  -> string list
+    The named volume root is initially root-owned. Creation therefore runs as
+    root; a separate command makes the resulting directories writable by the
+    Keeper process identity. Both operations are idempotent. *)
+val build_target_mkdir_argv : container_name:string -> targets:string list -> string list
+
+val build_target_chmod_argv : container_name:string -> targets:string list -> string list
 
 val keeper_vm_container_kind : string
 

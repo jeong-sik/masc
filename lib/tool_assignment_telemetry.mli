@@ -11,8 +11,8 @@
     failed at T2 with error E."
 
     Storage: [Dated_jsonl] at [data/tool-events/YYYY-MM/DD.jsonl].
-    In-memory index: agent_id → latest assignment_id (survives lookups
-    but not server restarts; rebuild via [warm_up]). *)
+    In-memory index: immutable atomic agent_id → latest assignment_id snapshot
+    (survives lookups but not server restarts; rebuild via [warm_up]). *)
 
 type assignment_id = string
 
@@ -96,7 +96,8 @@ val find_latest_assignment_id : agent_id:string -> assignment_id option
 val read_recent : n:int -> (tool_event list, string) Result.t
 
 (** Rebuild the in-memory agent→assignment index from existing disk records.
-    Called once at server startup. *)
+    Runtime startup currently relies on fresh assignment events; callers that
+    need historical linkage must invoke this function explicitly. *)
 val warm_up : unit -> unit
 
 (** Clear in-memory state (for testing). Does not touch disk. *)

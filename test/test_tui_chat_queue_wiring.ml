@@ -123,7 +123,7 @@ let test_oldest_at_reports_the_cursor () =
     (Tui_types.oldest_at [])
 ;;
 
-let test_causal_timeline_keeps_turns_whole_without_timestamp_sorting () =
+let test_causal_turn_keeps_rows_whole_under_timestamp_skew () =
   let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
   let loaded =
     [ chat_entry ~operation_seq:0 ~request_id:"turn-d" ~role:user ~text:"D"
@@ -147,9 +147,8 @@ let test_causal_timeline_keeps_turns_whole_without_timestamp_sorting () =
   let timeline =
     Tui_types.chat_timeline ~loaded ~session
       ~queued_request_ids:[ "turn-next" ]
-      ~active_request_id:(Some "turn-active")
   in
-  check (list string) "causal rows, not wall-clock rows"
+  check (list string) "one turn remains input, progress, tool, output"
     [ "D"; "approved"; "Execute"; "D answer"; "active input" ]
     (Tui_types.chat_timeline_rows timeline
      |> List.map (fun row -> row.Tui_types.me_text));
@@ -228,31 +227,30 @@ let test_scroll_anchor_survives_session_user_persistence () =
   | Some _ | None -> fail "session USER pin was lost when history persisted it"
 ;;
 
-let test_absolute_turn_sequence_joins_direct_and_autonomous_sources () =
+let test_absolute_turn_sequence_breaks_equal_clock_ties () =
   let loaded =
     [ chat_entry ~turn_sequence:12 ~request_id:"direct-12"
-        ~role:Tui_types.Message_keeper ~text:"direct later" ~at:1. () ]
+        ~role:Tui_types.Message_keeper ~text:"direct later" ~at:10. () ]
   in
   let session =
     [ chat_entry ~turn_sequence:10 ~request_id:"trace#10"
-        ~role:Tui_types.Message_autonomous ~text:"autonomous earlier" ~at:999. ()
+        ~role:Tui_types.Message_autonomous ~text:"autonomous earlier" ~at:10. ()
     ; chat_entry ~request_id:"" ~role:Tui_types.Message_keeper
-        ~text:"unowned broadcast" ~at:2. ()
+        ~text:"unowned broadcast" ~at:10. ()
     ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
-        ~text:"journal lane" ~at:0. ()
+        ~text:"journal lane" ~at:10. ()
     ]
   in
   let timeline =
     Tui_types.chat_timeline ~loaded ~session ~queued_request_ids:[]
-      ~active_request_id:None
   in
-  check (list string) "absolute turn sequence, then producer-owned lanes"
+  check (list string) "absolute turn sequence, then typed auxiliary lanes"
     [ "autonomous earlier"; "direct later"; "unowned broadcast"; "journal lane" ]
     (Tui_types.chat_timeline_rows timeline
      |> List.map (fun row -> row.Tui_types.me_text))
 ;;
 
-let test_unsequenced_items_keep_producer_order_not_wall_clock_order () =
+let test_unsequenced_items_share_the_displayed_time_axis () =
   let loaded =
     [ chat_entry ~request_id:"first"
         ~role:Tui_types.Message_keeper ~text:"first producer row" ~at:999. ()
@@ -264,15 +262,14 @@ let test_unsequenced_items_keep_producer_order_not_wall_clock_order () =
   in
   let timeline =
     Tui_types.chat_timeline ~loaded ~session:[] ~queued_request_ids:[]
-      ~active_request_id:None
   in
-  check (list string) "unsequenced items retain producer order"
-    [ "first producer row"; "second producer row"; "third producer row" ]
+  check (list string) "unsequenced items read oldest to newest"
+    [ "second producer row"; "third producer row"; "first producer row" ]
     (Tui_types.chat_timeline_rows timeline
      |> List.map (fun row -> row.Tui_types.me_text))
 ;;
 
-let test_wall_clock_never_overrides_typed_turn_sequence () =
+let test_whole_turns_share_the_displayed_time_axis () =
   let loaded =
     [ chat_entry ~turn_sequence:2 ~request_id:"turn-2"
         ~role:Tui_types.Message_keeper ~text:"turn 2 clock 1" ~at:1. ()
@@ -282,12 +279,48 @@ let test_wall_clock_never_overrides_typed_turn_sequence () =
   in
   let timeline =
     Tui_types.chat_timeline ~loaded ~session:[] ~queued_request_ids:[]
-      ~active_request_id:None
   in
-  check (list string) "typed turn sequence wins over adversarial clocks"
-    [ "turn 1 clock 999"; "turn 2 clock 1" ]
+  check (list string) "the visible clock never runs backwards between turns"
+    [ "turn 2 clock 1"; "turn 1 clock 999" ]
     (Tui_types.chat_timeline_rows timeline
      |> List.map (fun row -> row.Tui_types.me_text))
+;;
+
+let test_running_turn_does_not_escape_the_displayed_time_axis () =
+  let loaded =
+    [ chat_entry ~turn_sequence:20 ~request_id:"settled-20"
+        ~role:Tui_types.Message_keeper ~text:"settled at 200" ~at:200. () ]
+  in
+  let session =
+    [ chat_entry ~turn_sequence:10 ~request_id:"running-10"
+        ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
+        ~text:"running at 100" ~at:100. () ]
+  in
+  let rows =
+    Tui_types.chat_timeline ~loaded ~session ~queued_request_ids:[]
+    |> Tui_types.chat_timeline_rows
+    |> List.map (fun row -> row.Tui_types.me_text)
+  in
+  check (list string) "a running request is not forcibly appended after newer rows"
+    [ "running at 100"; "settled at 200" ] rows
+;;
+
+let test_uncommitted_live_turn_inserts_only_at_a_group_boundary () =
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let messages =
+    [ chat_entry ~request_id:"skewed" ~role:user ~text:"input at 100" ~at:100.
+        ()
+    ; chat_entry ~turn_phase:Tui_types.Turn_output ~operation_seq:1
+        ~request_id:"skewed" ~role:Tui_types.Message_keeper
+        ~text:"output at 300" ~at:300. ()
+    ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
+        ~text:"journal at 200" ~at:200. ()
+    ]
+  in
+  check int "live at 150 follows the whole skewed turn" 2
+    (Tui_types.chat_live_insertion_index ~timeline_at:(Some 150.) messages);
+  check int "an equal-clock live turn precedes the Journal lane" 2
+    (Tui_types.chat_live_insertion_index ~timeline_at:(Some 200.) messages)
 ;;
 
 let test_producer_append_keeps_a_structural_scroll_pin () =
@@ -308,11 +341,11 @@ let test_producer_append_keeps_a_structural_scroll_pin () =
         ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
             ~text:"appended journal row" ~at:50. ()
         ]
-      ~session:[] ~queued_request_ids:[] ~active_request_id:None
+      ~session:[] ~queued_request_ids:[]
     |> Tui_types.chat_timeline_rows
   in
-  check (option (list string)) "producer append stays below the structural pin"
-    (Some [ "appended journal row" ])
+  check (option (list string)) "an older Journal append stays above the pin"
+    (Some [])
     (Tui_types.msg_entries_after_anchor with_appended_journal pin
      |> Option.map (List.map (fun row -> row.Tui_types.me_text)));
 
@@ -323,12 +356,12 @@ let test_producer_append_keeps_a_structural_scroll_pin () =
   in
   let moved =
     Tui_types.chat_timeline ~loaded:[ earlier; pinned; moved_turn ] ~session:[]
-      ~queued_request_ids:[] ~active_request_id:None
+      ~queued_request_ids:[]
     |> Tui_types.chat_timeline_rows
   in
   check (option (list string))
-    "a late row cannot move its typed turn below the structural pin"
-    (Some [])
+    "the identity pin survives when its whole turn moves on the time axis"
+    (Some [ "earlier turn" ])
     (Tui_types.msg_entries_after_anchor moved pin
      |> Option.map (List.map (fun row -> row.Tui_types.me_text)))
 ;;
@@ -350,7 +383,7 @@ let test_find_anchor_survives_a_producer_prepend () =
   let rows =
     Tui_types.chat_timeline
       ~loaded:[ backfilled; matched_older; matched_newer ] ~session:[]
-      ~queued_request_ids:[] ~active_request_id:None
+      ~queued_request_ids:[]
     |> Tui_types.chat_timeline_rows
   in
   let ceiling = Tui_types.msg_index_of_anchor rows anchor in
@@ -866,6 +899,20 @@ let test_the_support_threshold_reserves_the_scrollback_row () =
 
 let layout_binding = "keeper_message_layout_entries"
 
+(* Drawing and scroll-pin compensation must consume the same physical layout.
+   Re-laying out only the suffix forgets the preceding hour bucket and can
+   measure a rail the frame never draws, which moves the pinned conversation
+   even when its structural anchor is unchanged. *)
+let test_the_pane_builds_one_full_message_layout () =
+  let layout_calls =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_keeper_message"
+      ~callee:"keeper_message_layout_entries"
+  in
+  check int "one full layout owns measurement and drawing" 1 layout_calls
+;;
+
 let test_pending_input_is_not_mixed_into_the_transcript () =
   let transcript_reads =
     Ast_grep.count_calls_in_value_binding
@@ -1142,6 +1189,8 @@ let () =
             test_the_budget_and_the_pane_agree_about_the_scrollback_row
         ; test_case "the support threshold reserves the scrollback row" `Quick
             test_the_support_threshold_reserves_the_scrollback_row
+        ; test_case "the pane builds one full message layout" `Quick
+            test_the_pane_builds_one_full_message_layout
         ; test_case "pending input is not mixed into the transcript" `Quick
             test_pending_input_is_not_mixed_into_the_transcript
         ; test_case "queueing puts the line in the conversation" `Quick
@@ -1172,14 +1221,18 @@ let () =
             test_an_empty_refresh_keeps_the_transcript
         ; test_case "oldest_at reports the cursor" `Quick
             test_oldest_at_reports_the_cursor
-        ; test_case "causal timeline keeps turns whole" `Quick
-            test_causal_timeline_keeps_turns_whole_without_timestamp_sorting
-        ; test_case "absolute turn sequence joins transcript sources" `Quick
-            test_absolute_turn_sequence_joins_direct_and_autonomous_sources
-        ; test_case "unsequenced items keep producer order" `Quick
-            test_unsequenced_items_keep_producer_order_not_wall_clock_order
-        ; test_case "clock never overrides typed turn sequence" `Quick
-            test_wall_clock_never_overrides_typed_turn_sequence
+        ; test_case "causal turn stays whole under clock skew" `Quick
+            test_causal_turn_keeps_rows_whole_under_timestamp_skew
+        ; test_case "turn sequence breaks equal-clock ties" `Quick
+            test_absolute_turn_sequence_breaks_equal_clock_ties
+        ; test_case "unsequenced items share displayed time" `Quick
+            test_unsequenced_items_share_the_displayed_time_axis
+        ; test_case "whole turns share displayed time" `Quick
+            test_whole_turns_share_the_displayed_time_axis
+        ; test_case "running turn shares displayed time" `Quick
+            test_running_turn_does_not_escape_the_displayed_time_axis
+        ; test_case "uncommitted live inserts at a turn boundary" `Quick
+            test_uncommitted_live_turn_inserts_only_at_a_group_boundary
         ; test_case "producer append keeps scroll pin" `Quick
             test_producer_append_keeps_a_structural_scroll_pin
         ; test_case "find anchor survives producer prepend" `Quick

@@ -367,9 +367,16 @@ let batch_disposition_of_cycle_outcome
      | Keeper_unified_turn.Continuation_route_mismatch
      | Keeper_unified_turn.Continuation_no_terminal_effect_receipt
      | Keeper_unified_turn.Continuation_route_not_applicable ->
-       (* No exact direct-reply/ignore settlement exists. Leave the batch
-          pending rather than turning missing evidence into Ignored. *)
-       Batch_no_action)
+       (* No exact direct-reply/ignore settlement exists, so connector
+          attention stays pending instead of gaining an evidence-free
+          Ignored label (#32114 kept this narrow claim honest). The rest of
+          the admitted batch is still consumed: the completed turn projected
+          those rows and chose its actions with them in view, and the
+          Durable_stimulus_arrived checkpoint below already acks them on a
+          weaker outcome. Refusing both here replayed the same board rows
+          into every later turn — one post re-promoted 297 times and a
+          10-15s wake churn (#32277). *)
+       Batch_ack_durable_stimulus_yield)
   | Some
       (Cycle.Checkpointed
          { checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived

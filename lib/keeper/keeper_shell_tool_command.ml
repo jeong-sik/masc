@@ -20,6 +20,17 @@ let reserved_command = "masc"
 
 let ( let* ) = Result.bind
 
+(* {1 The runtime seam} *)
+
+(* What this conversion point needs from the tool runtime, passed in as a
+   value.  Naming the module instead would close a dependency cycle:
+   Keeper_tool_runtime dispatches to the Execute owner, the Execute owner
+   runs this rewrite, and this rewrite calls back into dispatch. *)
+type dispatch =
+  descriptor:Keeper_tool_descriptor.t
+  -> args:Yojson.Safe.t
+  -> Keeper_tool_execution.t option
+
 (* {1 Declaration table} *)
 
 (* One parse of the embedded tool tree, on first ask — the files are
@@ -51,6 +62,18 @@ let literal_word (arg : Shell_ir.arg) : string option =
   match arg with
   | Shell_ir.Lit (text, _) -> Some text
   | Shell_ir.Var _ | Shell_ir.Concat _ -> None
+
+(* All-or-none: one expanded word keeps the whole stage on the process
+   path, matching the literal-words-only reservation below. *)
+let literal_words (args : Shell_ir.arg list) : string list option =
+  let rec collect acc = function
+    | [] -> Some (List.rev acc)
+    | arg :: rest -> (
+      match literal_word arg with
+      | None -> None
+      | Some word -> collect (word :: acc) rest)
+  in
+  collect [] args
 
 (* PR-1 maps positional words onto the schema's required parameters, in
    the order the schema states them.  Optional parameters keep their
@@ -99,12 +122,12 @@ let args_json_of_words ~(descriptor : Keeper_tool_descriptor.t) words =
 (* What a tool's answer looks like as a process: the disposition decides
    the exit status, the raw output rides the stream its side says. *)
 let caller
-      ~(context : Keeper_tool_runtime.context)
+      ~(dispatch : dispatch)
       ~(descriptor : Keeper_tool_descriptor.t)
       (args_json : Yojson.Safe.t)
   : Sandbox_target.runner =
  fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ->
-  match Keeper_tool_runtime.handle context ~descriptor ~args:args_json with
+  match dispatch ~descriptor ~args:args_json with
   | None ->
     ( Unix.WEXITED 1
     , ""
@@ -132,12 +155,13 @@ let caller
    table.  Longer declared paths win over shorter ones, so a future
    [board] cannot shadow a declared [board post get]. *)
 let split_words (words : string list) : (string * string list) option =
-  let rec starts_with path = function
+  let rec starts_with path words =
+    match path, words with
     | [], rest -> Some rest
-    | _, [] -> None
+    | _ :: _, [] -> None
     | p :: path_rest, w :: word_rest when String.equal p w ->
       starts_with path_rest word_rest
-    | _, _ -> None
+    | _ :: _, _ :: _ -> None
   in
   let paths =
     Lazy.force entries
@@ -157,16 +181,16 @@ let split_words (words : string list) : (string * string list) option =
   try_path paths
 
 let rec rewrite
-      ~(context : Keeper_tool_runtime.context)
+      ~(dispatch : dispatch)
       (ir : Shell_ir.t)
   : (Shell_ir.t, string) result =
   match ir with
   | Shell_ir.Sequence { head; tail } ->
-    let* head = rewrite ~context head in
+    let* head = rewrite ~dispatch head in
     let rec loop acc = function
       | [] -> Ok (List.rev acc)
       | (connector, part) :: rest ->
-        let* part = rewrite ~context part in
+        let* part = rewrite ~dispatch part in
         loop ((connector, part) :: acc) rest
     in
     let* tail = loop [] tail in
@@ -177,7 +201,7 @@ let rec rewrite
        form — before the pipeline semantics were settled.  The recursion
        below reaches every stage, so the refusal comes from the masc
        stage itself, not from a shadowing predicate. *)
-    let rewrites = List.map (rewrite ~context) stages in
+    let rewrites = List.map (rewrite ~dispatch) stages in
     let rec collect acc = function
       | [] -> Ok (Shell_ir.Pipeline (List.rev acc))
       | stage :: rest -> (
@@ -194,7 +218,7 @@ let rec rewrite
     else if simple.Shell_ir.redirects <> []
     then Error "a masc stage takes no redirects; the tool answers with text"
     else
-      match List.map_opt literal_word simple.Shell_ir.args with
+      match literal_words simple.Shell_ir.args with
       | None ->
         Error "a masc stage's words must be literal; expansions stay on the direct tool call"
       | Some words -> (
@@ -205,15 +229,15 @@ let rec rewrite
                "no tool on this turn's shell surface answers %s; each tool declares its own path"
                (String.concat " " words))
         | Some (tool_name, argument_words) -> (
-          match Keeper_tool_runtime.descriptor_for_internal tool_name with
-          | None ->
+          match Keeper_tool_descriptor.descriptors_for_internal tool_name with
+          | [] ->
             Error
               (Printf.sprintf
                  "%s declares a shell path but has no descriptor this turn"
                  tool_name)
-          | Some descriptor ->
+          | descriptor :: _ ->
             let* args_json = args_json_of_words ~descriptor argument_words in
-            let tool_caller = caller ~context ~descriptor args_json in
+            let tool_caller = caller ~dispatch ~descriptor args_json in
             Ok
               (Shell_ir.Simple
                  { simple with

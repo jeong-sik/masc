@@ -212,7 +212,7 @@ let handle_tool_execute_typed
       ?continuation_channel
       ?gate_context
       ?gate_grant
-      ?(tool_context : Keeper_tool_runtime.context option)
+      ?(shell_tool_dispatch : Keeper_shell_tool_command.dispatch option)
       ~(args : Yojson.Safe.t)
       ()
   =
@@ -438,7 +438,7 @@ let handle_tool_execute_typed
         in
         (* RFC tools-as-shell-commands: the one conversion point.  Stages
            whose program is the bare reserved word [masc] become delegated
-           tool calls before dispatch.  Callers without a turn context
+           tool calls before dispatch.  Callers without a tool dispatch
            (replay) skip the rewrite, so a shell line stays process-only
            there.  A rewrite refusal reads as a typed refusal with its own
            code; both refusals travel the same failure shape below. *)
@@ -452,10 +452,10 @@ let handle_tool_execute_typed
           | Error e ->
             Error (typed_validation_error_text e, "typed_validation_failed")
           | Ok ir -> (
-            match tool_context with
+            match shell_tool_dispatch with
             | None -> Ok ir
-            | Some context -> (
-              match Keeper_shell_tool_command.rewrite ~context ir with
+            | Some dispatch -> (
+              match Keeper_shell_tool_command.rewrite ~dispatch ir with
               | Ok rewritten -> Ok rewritten
               | Error message ->
                 Error (message, "shell_tool_command_rejected")))
@@ -983,7 +983,7 @@ let handle_tool_execute_with_outcome
       ?continuation_channel
       ?gate_context
       ?gate_grant
-      ?tool_context
+      ?shell_tool_dispatch
       ~(args : Yojson.Safe.t)
       ()
   =
@@ -999,7 +999,7 @@ let handle_tool_execute_with_outcome
     ?continuation_channel
     ?gate_context
     ?gate_grant
-    ?tool_context
+    ?shell_tool_dispatch
     ~args
     ()
 ;;
@@ -1011,7 +1011,7 @@ let handle_tool_execute
       ?continuation_channel
       ?gate_context
       ?gate_grant
-      ?tool_context
+      ?shell_tool_dispatch
       ~args
       ()
   =
@@ -1022,7 +1022,7 @@ let handle_tool_execute
      ?continuation_channel
      ?gate_context
      ?gate_grant
-     ?tool_context
+     ?shell_tool_dispatch
      ~args
      ()).raw_output
 ;;

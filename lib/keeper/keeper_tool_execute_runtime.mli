@@ -8,11 +8,13 @@ val handle_tool_execute :
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
   ?gate_grant:Keeper_gate.cycle_grant ->
-  ?tool_context:Keeper_tool_runtime.context ->
-    (** The calling turn's tool context. Present on a real turn, absent on
-        replay — present is what lets a shell-line [masc] stage reach the
-        tool runtime (RFC tools-as-shell-commands), absent keeps replay
-        process-only. *)
+  ?shell_tool_dispatch:Keeper_shell_tool_command.dispatch ->
+    (** The calling turn's way back into tool dispatch. Present on a real
+        turn, absent on replay — present is what lets a shell-line [masc]
+        stage reach the tool runtime (RFC tools-as-shell-commands), absent
+        keeps replay process-only. Passed as a value: naming
+        Keeper_tool_runtime here would close a module cycle through the
+        Execute owner. *)
   args:Yojson.Safe.t ->
   unit ->
   string
@@ -44,11 +46,13 @@ val handle_tool_execute_with_outcome :
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
   ?gate_grant:Keeper_gate.cycle_grant ->
-  ?tool_context:Keeper_tool_runtime.context ->
-    (** The calling turn's tool context. Present on a real turn, absent on
-        replay — present is what lets a shell-line [masc] stage reach the
-        tool runtime (RFC tools-as-shell-commands), absent keeps replay
-        process-only. *)
+  ?shell_tool_dispatch:Keeper_shell_tool_command.dispatch ->
+    (** The calling turn's way back into tool dispatch. Present on a real
+        turn, absent on replay — present is what lets a shell-line [masc]
+        stage reach the tool runtime (RFC tools-as-shell-commands), absent
+        keeps replay process-only. Passed as a value: naming
+        Keeper_tool_runtime here would close a module cycle through the
+        Execute owner. *)
   args:Yojson.Safe.t ->
   unit ->
   Keeper_tool_execution.t

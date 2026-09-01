@@ -778,7 +778,13 @@ new one. Running and terminal rows return the server's explicit refusal.
 Right or `Enter` opens the selected schedule. The detail includes schedule and instance
 identity, dispatch state, requesting actors, timestamps, recurrence, payload
 kind/tool/digest/summary, the pretty full payload JSON, last wake, and
-queue/reaction evidence. Left or `Esc` returns
+queue/reaction evidence. Keeper wakes also show the durable Keeper,
+stimulus/occurrence ids, every recorded step timestamp, and the projection's
+exact failure or quarantine reason. This receipt proves wake delivery and
+whether a turn started; it does not causally attribute later tool calls or a
+work result to the schedule. The detail says so explicitly and points to
+Keeper Calls or Acting for execution evidence after the recorded turn start,
+instead of presenting an unrelated tool output as the schedule result. Left or `Esc` returns
 to the list; `j`/`k` scroll by a row and `PgUp`/`PgDn` by a page.
 
 ### Fusion

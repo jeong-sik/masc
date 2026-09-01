@@ -8403,8 +8403,22 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
                         "pending_count": 2,
                     },
                     "keeper_reaction_evidence": {
-                        "projection_status": "matched_recorded",
+                        "projection_status": "matched_consumed_ack",
+                        "keeper_name": "alpha",
+                        "stimulus_id": "schedule-stimulus-proof-701",
+                        "post_id": "schedule-occurrence-proof-701",
+                        "reaction_kind": "turn_started",
+                        "stimulus_seen": True,
+                        "turn_started_seen": True,
+                        "event_queue_ack_seen": True,
+                        "event_queue_cancelled_seen": False,
+                        "quarantined_record_count": 0,
+                        "stimulus_recorded_at_iso": "2026-08-25T09:30:10Z",
+                        "turn_started_recorded_at_iso": "2026-08-25T09:30:20Z",
+                        "event_queue_ack_recorded_at_iso": "2026-08-25T09:31:00Z",
+                        "event_queue_cancelled_recorded_at_iso": None,
                         "latest_recorded_at_iso": "2026-08-25T09:31:00Z",
+                        "reason": None,
                     },
                 }
             ],
@@ -8430,7 +8444,7 @@ def schedule_detail_interaction() -> Interaction:
             # which the identity line above the delivery row already names.
             b"status:running",
             b"queue:matched_pending/2 pending",
-            b"reaction:matched_recorded",
+            b"reaction:matched_consumed_ack",
         ):
             if needle not in listing_plain:
                 raise AssertionError(
@@ -8465,7 +8479,13 @@ def schedule_detail_interaction() -> Interaction:
             b"LAST WAKE",
             b"DELIVERY EVIDENCE",
             b"pending=2",
-            b"matched_recorded",
+            b"matched_consumed_ack",
+            b"masc://keepers/alpha",
+            b"schedule-stimulus-proof-701",
+            b"schedule-occurrence-proof-701",
+            b"2026-08-25T09:30:20",
+            b"no schedule-to-tool/result join",
+            b"Keeper Calls or Acting",
         ):
             if needle not in evidence_plain:
                 raise AssertionError(

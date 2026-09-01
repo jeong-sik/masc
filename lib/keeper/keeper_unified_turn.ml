@@ -662,7 +662,14 @@ let run_keeper_cycle
                    Keeper_sandbox_control.checkout_freshness_rows ~config ~meta ()
                  with
                  | Ok rows -> rows
-                 | Error scan_error ->
+                 (* A keeper that has never materialized its playground has no
+                    checkouts to report — absence, not a failure worth a warn
+                    on every turn. *)
+                 | Error (Keeper_playground_checkouts.Root_missing _) -> []
+                 | Error
+                     ((Keeper_playground_checkouts.Root_not_directory _
+                      | Keeper_playground_checkouts.Root_unreadable _) as
+                      scan_error) ->
                    Log.Keeper.warn
                      "repository freshness scan unavailable keeper=%s: %s"
                      meta.name

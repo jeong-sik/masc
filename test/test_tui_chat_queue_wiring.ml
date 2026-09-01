@@ -12,6 +12,7 @@ open Alcotest
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Tui_types = Masc_tui_types
+module Interrupt_signal = Masc_tui_interrupt_signal
 
 let calls ~module_path ~callee = Ast_grep.count_calls ~module_path ~callee
 
@@ -247,17 +248,38 @@ let test_absolute_turn_sequence_joins_direct_and_autonomous_sources () =
      |> List.map (fun row -> row.Tui_types.me_text))
 ;;
 
-(* [test_interrupt_receipt_is_bound_to_the_exact_request] lived here and is
-   removed, not disabled. It called Masc_tui_http.decode_interrupt_signal
-   directly, but masc_tui_http is a module of the masc_tui executable rather
-   than a library, so this suite cannot link it -- the stanza reaches bin only
-   through (source_tree ../bin), which serves ast_grep's text scans. The suite
-   compiled nowhere and took main's build down with it.
+(* A late answer to an earlier interrupt must not be read as this one's
+   outcome, so the decode rejects a response whose echoed request_id is not
+   the one asked about.
 
-   Restoring the check needs decode_interrupt_signal to live somewhere a test
-   can link: either its own library beside masc_tui_types, or an ast_grep
-   assertion in the style the rest of this file uses. Re-adding the call as it
-   was will fail the same way. *)
+   The decode now lives in masc_tui_interrupt_signal, a library, because
+   masc_tui_http is a module of the masc_tui executable and no test can link
+   it. #32330 removed this check for exactly that reason. *)
+let test_interrupt_receipt_is_bound_to_the_exact_request () =
+  let response request_id =
+    `Assoc
+      [ "signalled", `Bool true
+      ; "request_id", `String request_id
+      ]
+  in
+  (match
+     Interrupt_signal.decode_interrupt_signal ~expected_request_id:"parent-a"
+       (response "parent-a")
+   with
+   | Ok (Interrupt_signal.Signalled _) -> ()
+   | Ok (Interrupt_signal.Not_signalled _) | Error _ ->
+     Alcotest.fail "the keeper's own receipt was not accepted");
+  match
+    Interrupt_signal.decode_interrupt_signal ~expected_request_id:"parent-a"
+      (response "parent-b")
+  with
+  | Ok _ -> Alcotest.fail "another request's receipt was read as this one's"
+  | Error detail ->
+    Alcotest.(check bool)
+      "the mismatch is named"
+      true
+      (Astring.String.is_infix ~affix:"request_id mismatch" detail)
+;;
 let test_enter_during_a_turn_queues () =
   let n = calls ~module_path:"bin/masc_tui.ml" ~callee:"queue_keeper_message" in
   if n < 1 then
@@ -923,7 +945,9 @@ let () =
   run
     "tui_chat_queue_wiring"
     [ ( "wiring"
-      , [ test_case "Enter during a turn queues" `Quick
+      , [ test_case "an interrupt receipt is bound to the exact request" `Quick
+            test_interrupt_receipt_is_bound_to_the_exact_request
+        ; test_case "Enter during a turn queues" `Quick
             test_enter_during_a_turn_queues
         ; test_case "a settled turn drains the queue" `Quick
             test_a_settled_turn_drains_the_queue

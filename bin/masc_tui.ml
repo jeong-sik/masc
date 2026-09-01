@@ -1034,7 +1034,7 @@ let own_typed_messages (state : state) =
             | Message_user (Sent_by_operator _) -> true
             | Message_user (Sent_by_other _) -> false
             | Message_keeper | Message_autonomous | Message_status
-            | Message_error | Message_tool
+            | Message_error | Message_tool | Message_skill _
             | Message_thinking | Message_memory ->
                 false)
            && String.equal entry.me_keeper_name target)
@@ -1623,7 +1623,7 @@ let clock_text_of_unix at =
   Printf.sprintf "%02d:%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
     time.Unix.tm_sec
 
-let append_chat_history ?tool_block ?at state request role text =
+let append_chat_history ?tool_block ?skill_activity ?at state request role text =
   let text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text in
   let at = Option.value ~default:(Unix.gettimeofday ()) at in
   state.msg_history <-
@@ -1632,6 +1632,7 @@ let append_chat_history ?tool_block ?at state request role text =
           me_role = role;
           me_text = text;
           me_tool_block = tool_block;
+          me_skill_activity = skill_activity;
           me_timestamp = clock_text_of_unix at;
           me_keeper_name = request.Keeper_chat.keeper_name;
           me_request_id = request.request_id;
@@ -1827,19 +1828,26 @@ let settle_live_turn state (request : Keeper_chat.request) =
   | Some entry
     when Keeper_chat.same_request_identity entry.sent_request request ->
       let live = entry.live in
-      let block =
-        Keeper_chat_transcript.tool_block
-          (Keeper_chat_transcript.tool_calls live)
-      in
-      let projection =
-        Keeper_chat_transcript.project_tool_block Keeper_chat_transcript.Full
-          block
-      in
-      (match projection.rows with
-       | [] -> ()
-       | rows ->
-           append_chat_history ~tool_block:block state request Message_tool
-             (String.concat "\n" rows));
+      List.iter
+        (function
+          | Keeper_chat_transcript.Trail_skill skill ->
+              append_chat_history ~skill_activity:skill state request
+                (Message_skill skill.state)
+                (String.concat "\n"
+                   (Keeper_chat_transcript.skill_rows ~full:false skill))
+          | Keeper_chat_transcript.Trail_tools block ->
+              let projection =
+                Keeper_chat_transcript.project_tool_block
+                  Keeper_chat_transcript.Full block
+              in
+              (match projection.rows with
+               | [] -> ()
+               | rows ->
+                   append_chat_history ~tool_block:block state request
+                     Message_tool (String.concat "\n" rows))
+          | Keeper_chat_transcript.Trail_thinking _
+          | Keeper_chat_transcript.Trail_text _ -> ())
+        (Keeper_chat_transcript.trail live);
       (match state.msg_live with
        | Some visible
          when String.equal
@@ -4328,6 +4336,7 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         | Keeper_chat_history.Said_by_keeper
         | Keeper_chat_history.Autonomous_reply
         | Keeper_chat_history.Tool_calls _
+        | Keeper_chat_history.Skill_activity _
         | Keeper_chat_history.Reasoning _
         | Keeper_chat_history.Memory_activity -> None)
       rows
@@ -4354,13 +4363,13 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
             not
               (List.exists (String.equal entry.me_request_id)
                  user_turns_the_transcript_holds)
-        | Message_keeper | Message_autonomous | Message_tool
+        | Message_keeper | Message_autonomous | Message_tool | Message_skill _
         | Message_thinking | Message_memory ->
             false)
       state.msg_history
 
 let msg_entry_of_history_row state keeper_name (row : Keeper_chat_history.row) =
-  let role, text, tool_block =
+  let role, text, tool_block, skill_activity =
     match row.Keeper_chat_history.kind with
     | Keeper_chat_history.Addressed_to_keeper { speaker; surface } ->
         (* The label is what the row draws; the speaker is what it is. Both
@@ -4372,11 +4381,13 @@ let msg_entry_of_history_row state keeper_name (row : Keeper_chat_history.row) =
           | Keeper_chat_history.Named _
           | Keeper_chat_history.Unresolved _ -> Sent_by_other label
         in
-        (Message_user author, row.text, None)
-    | Keeper_chat_history.Said_by_keeper -> (Message_keeper, row.text, None)
+        (Message_user author, row.text, None, None)
+    | Keeper_chat_history.Said_by_keeper ->
+        (Message_keeper, row.text, None, None)
     | Keeper_chat_history.Autonomous_reply ->
         ( Message_autonomous
         , (if String.trim row.text = "" then "\xc2\xb7" else row.text)
+        , None
         , None )
     | Keeper_chat_history.Delivery_failed { recovered_at; _ } ->
         let text, recovered =
@@ -4386,14 +4397,22 @@ let msg_entry_of_history_row state keeper_name (row : Keeper_chat_history.row) =
           | Some presented -> presented
           | None -> row.text, false
         in
-        ((if recovered then Message_status else Message_error), text, None)
+        ((if recovered then Message_status else Message_error), text, None, None)
     | Keeper_chat_history.Tool_calls block ->
         ( Message_tool
         , String.concat "\n" (Keeper_chat_history.tool_rows block)
-        , Some block )
+        , Some block
+        , None )
+    | Keeper_chat_history.Skill_activity activity ->
+        ( Message_skill activity.Keeper_chat_transcript.state
+        , String.concat "\n"
+            (Keeper_chat_transcript.skill_rows ~full:false activity)
+        , None
+        , Some activity )
     | Keeper_chat_history.Reasoning lines ->
-        (Message_thinking, String.concat "\n" lines, None)
-    | Keeper_chat_history.Memory_activity -> (Message_memory, row.text, None)
+        (Message_thinking, String.concat "\n" lines, None, None)
+    | Keeper_chat_history.Memory_activity ->
+        (Message_memory, row.text, None, None)
   in
   let submitted_at =
     Option.bind row.Keeper_chat_history.turn_id (fun request_id ->
@@ -4424,6 +4443,7 @@ let msg_entry_of_history_row state keeper_name (row : Keeper_chat_history.row) =
   { me_role = role
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
   ; me_tool_block = tool_block
+  ; me_skill_activity = skill_activity
   ; me_timestamp = timestamp
   ; me_keeper_name = keeper_name
   ; (* Direct rows retain their typed delivery key; autonomous rows retain the
@@ -4953,6 +4973,7 @@ let chat_notice state ~keeper_name ~role text =
               me_role = role;
               me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
               me_tool_block = None;
+              me_skill_activity = None;
               me_timestamp = current_clock_text ();
               me_keeper_name = keeper;
               me_request_id = "";

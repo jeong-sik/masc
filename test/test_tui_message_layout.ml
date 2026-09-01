@@ -1330,6 +1330,29 @@ let test_every_speaker_mark_is_distinct () =
   check int "no two speakers share a mark" (List.length marks)
     (List.length (List.sort_uniq String.compare marks))
 
+let test_skill_marks_keep_state_without_colour () =
+  check (list string) "live used warning and failure keep distinct shapes"
+    [ "\xe2\x97\x87"; "\xe2\x97\x86"; "\xe2\x96\xb3"; "\xe2\x9c\x97" ]
+    (List.map Layout.speaker_mark
+       [ Layout.Skill Layout.Skill_live
+       ; Layout.Skill Layout.Skill_used
+       ; Layout.Skill Layout.Skill_attention
+       ; Layout.Skill Layout.Skill_failure
+       ]);
+  List.iter
+    (fun tone ->
+      let rows =
+        Layout.visible_rows ~inner_width:40 ~height:10
+          [ entry (Layout.Skill tone) "SKILL" "trace-1#54" "evidence" ]
+      in
+      check bool "Skill evidence is a quoted machine-produced block" true
+        (List.for_all
+           (fun (row : Layout.row) -> row.shade = Layout.Shade_quoted)
+           rows))
+    [ Layout.Skill_live; Layout.Skill_used; Layout.Skill_attention
+    ; Layout.Skill_failure
+    ]
+
 (* The badge is drawn in reverse video, and a right-aligned label carries its
    alignment as leading spaces. Reversing the two together painted a dozen
    cells of highlighted nothing in front of a four-letter name. *)
@@ -1613,6 +1636,8 @@ let () =
             test_a_continuation_does_not_borrow_the_reasoning_glyph
         ; test_case "every speaker mark is distinct" `Quick
             test_every_speaker_mark_is_distinct
+        ; test_case "Skill states keep shapes without colour" `Quick
+            test_skill_marks_keep_state_without_colour
         ; test_case "alignment padding is kept apart from the name" `Quick
             test_alignment_padding_is_kept_apart_from_the_name
         ; test_case "a continuation survives the renderer cut" `Quick

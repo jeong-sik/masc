@@ -63,6 +63,7 @@ type kind =
       ; recovered_at : float option
       }
   | Tool_calls of Transcript.tool_block
+  | Skill_activity of Transcript.skill_activity
   | Reasoning of string list
   | Memory_activity
 
@@ -660,6 +661,189 @@ let trace_summary_of fields =
       }
   | Some _ | None -> empty_trace
 
+let skill_projection_schema = "masc.keeper_chat.skill_activations.v1"
+
+type skill_projection =
+  { activities : Transcript.skill_activity list
+  ; replaces_raw_skill_tools : bool
+  }
+
+let no_skill_projection = { activities = []; replaces_raw_skill_tools = false }
+
+let required_string fields name =
+  match string_field fields name with
+  | Some value when String.trim value <> "" -> Ok value
+  | Some _ | None -> Error ("missing or blank " ^ name)
+
+let skill_problem state detail =
+  Transcript.make_skill_activity ~skill_name:"Skill evidence" ~state
+    ~actions:[] ~detail ()
+
+let decode_skill_action = function
+  | `Assoc fields -> required_string fields "tool_name"
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Error "Skill action is not an object"
+
+let decode_skill_activation = function
+  | `Assoc fields ->
+      let ( let* ) = Result.bind in
+      let* identity =
+        match List.assoc_opt "identity" fields with
+        | Some (`Assoc identity) -> Ok identity
+        | Some _ | None -> Error "Skill activation identity is not an object"
+      in
+      let* skill_name = required_string identity "name" in
+      let* skill_tool_use_id = required_string fields "skill_tool_use_id" in
+      let* turn_ref = required_string fields "turn_ref" in
+      let* content_revision = required_string fields "content_revision" in
+      let* runtime_id = required_string fields "runtime_id" in
+      let* actions =
+        match List.assoc_opt "actions" fields with
+        | Some (`List actions) ->
+            List.fold_left
+              (fun result action ->
+                let* reversed = result in
+                let* name = decode_skill_action action in
+                Ok (name :: reversed))
+              (Ok []) actions
+            |> Result.map List.rev
+        | Some _ | None -> Error "Skill activation actions is not a list"
+      in
+      let* delivered =
+        match List.assoc_opt "delivery" fields with
+        | Some `Null -> Ok false
+        | Some (`Assoc _) -> Ok true
+        | Some _ | None -> Error "Skill activation delivery is invalid"
+      in
+      let state =
+        match delivered, actions with
+        | false, _ -> Transcript.Skill_served_only
+        | true, [] -> Transcript.Skill_delivered
+        | true, _ :: _ -> Transcript.Skill_used
+      in
+      Ok
+        (Transcript.make_skill_activity ~skill_tool_use_id ~turn_ref
+           ~content_revision ~runtime_id ~skill_name ~state ~actions ())
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Error "Skill activation is not an object"
+
+let skill_projection_of_fields fields =
+  match List.assoc_opt "skill_activations" fields with
+  | None | Some `Null -> no_skill_projection
+  | Some (`Assoc projection) ->
+      let schema = string_field projection "schema" in
+      let status = string_field projection "status" in
+      if schema <> Some skill_projection_schema then
+        { activities =
+            [ skill_problem Transcript.Skill_evidence_unavailable
+                "Skill evidence schema is unavailable to this TUI" ]
+        ; replaces_raw_skill_tools = false
+        }
+      else
+        (match status with
+         | Some "available" ->
+             (match List.assoc_opt "activations" projection with
+              | Some (`List activations) ->
+                  let decoded = List.map decode_skill_activation activations in
+                  let activities =
+                    List.map
+                      (function
+                        | Ok activity -> activity
+                        | Error detail ->
+                            skill_problem Transcript.Skill_evidence_unavailable
+                              detail)
+                      decoded
+                  in
+                  let complete =
+                    activations <> []
+                    && List.for_all
+                         (function Ok _ -> true | Error _ -> false)
+                         decoded
+                  in
+                  if activities = [] then
+                    { activities =
+                        [ skill_problem Transcript.Skill_evidence_missing
+                            "The exact turn ledger contains no matching activation" ]
+                    ; replaces_raw_skill_tools = false
+                    }
+                  else
+                    { activities; replaces_raw_skill_tools = complete }
+              | Some _ | None ->
+                  { activities =
+                      [ skill_problem Transcript.Skill_evidence_unavailable
+                          "Skill activation evidence is not a list" ]
+                  ; replaces_raw_skill_tools = false
+                  })
+         | Some "missing" ->
+             { activities =
+                 [ skill_problem Transcript.Skill_evidence_missing
+                     (Option.value ~default:"No activation matched this exact turn"
+                        (string_field projection "detail")) ]
+             ; replaces_raw_skill_tools = false
+             }
+         | Some "not_recorded" | Some "unavailable" | Some "invalid_turn_ref" ->
+             { activities =
+                 [ skill_problem Transcript.Skill_evidence_unavailable
+                     (Option.value ~default:"Skill activation evidence is unavailable"
+                        (string_field projection "detail")) ]
+             ; replaces_raw_skill_tools = false
+             }
+         | Some _ | None ->
+             { activities =
+                 [ skill_problem Transcript.Skill_evidence_unavailable
+                     "Skill evidence status is unknown" ]
+             ; replaces_raw_skill_tools = false
+             })
+  | Some _ ->
+      { activities =
+          [ skill_problem Transcript.Skill_evidence_unavailable
+              "Skill activation evidence is not an object" ]
+      ; replaces_raw_skill_tools = false
+      }
+
+let without_raw_skill_tools summary =
+  { summary with
+    tools =
+      List.filter
+        (fun activity -> Option.is_none (Transcript.skill_activity_of_tool activity))
+        summary.tools
+  }
+
+let reconcile_skill_projection_with_trace summary projection =
+  if not projection.replaces_raw_skill_tools then projection
+  else
+    let raw_skill_count =
+      List.fold_left
+        (fun count activity ->
+          if Option.is_some (Transcript.skill_activity_of_tool activity) then
+            count + 1
+          else count)
+        0 summary.tools
+    in
+    let exact_count = List.length projection.activities in
+    if raw_skill_count = 0 || raw_skill_count = exact_count then projection
+    else
+      { activities =
+          projection.activities
+          @ [ skill_problem Transcript.Skill_evidence_unavailable
+                (Printf.sprintf
+                   "Skill evidence count mismatch: %d exact activation(s), %d raw call(s); raw calls retained"
+                   exact_count raw_skill_count) ]
+      ; replaces_raw_skill_tools = false
+      }
+
+let rows_of_skill_projection ~turn_id at projection =
+  List.map
+    (fun activity ->
+      Utterance
+        { at
+        ; turn_id
+        ; kind = Skill_activity activity
+        ; text = ""
+        ; attachments = []
+        })
+    projection.activities
+
 let plural count noun =
   Printf.sprintf "%d %s%s" count noun (if count = 1 then "" else "s")
 
@@ -785,10 +969,11 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
               (* An autonomous turn persists what it did as a trace block and
                  often says nothing in [content]: on one live keeper 32 of
                  183 assistant rows were blank that way, and each drew as a
-                 timestamp over an empty line. The trace rows come first
-                 because the turn ran them first; the text, when there is
-                 any, is what it said afterwards. A row with neither keeps
-                 its empty line -- that is what the server holds for it.
+                 timestamp over an empty line. Exact Skill evidence leads the
+                 turn as its own card; reasoning and ordinary calls follow as
+                 the trace carried them, then the text, when there is any, is
+                 what the turn said afterwards. A row with neither keeps its
+                 empty line -- that is what the server holds for it.
 
                  Only a row the server marks [autonomous_turn] is read this
                  way. A direct-conversation turn can carry a trace block too
@@ -800,10 +985,21 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                 | Some (`Assoc _) -> true
                 | Some _ | None -> false
               in
-              let trace_rows =
+              let skill_projection = skill_projection_of_fields fields in
+              let skill_rows, trace_rows =
                 if autonomous then
-                  rows_of_trace ~turn_id at (trace_summary_of fields)
-                else []
+                  let summary = trace_summary_of fields in
+                  let skill_projection =
+                    reconcile_skill_projection_with_trace summary skill_projection
+                  in
+                  let summary =
+                    if skill_projection.replaces_raw_skill_tools then
+                      without_raw_skill_tools summary
+                    else summary
+                  in
+                  ( rows_of_skill_projection ~turn_id at skill_projection
+                  , rows_of_trace ~turn_id at summary )
+                else rows_of_skill_projection ~turn_id at skill_projection, []
               in
               let said =
                 if String.equal content "" && trace_rows <> [] then []
@@ -817,7 +1013,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                       }
                   ]
               in
-              trace_rows @ said)
+              skill_rows @ trace_rows @ said)
       | Some "system" ->
           (* Durable approval lifecycle rows are server-owned status, never
              Keeper speech. The TUI's existing [Memory_activity] presentation
@@ -916,7 +1112,7 @@ let annotate_recovered_interruptions rows =
                 { origin_request_id = failure.origin_request_id; recovered_at }
           }, later_reply_at
         | Addressed_to_keeper _ | Said_by_keeper | Autonomous_reply
-        | Tool_calls _ | Reasoning _ | Memory_activity ->
+        | Tool_calls _ | Skill_activity _ | Reasoning _ | Memory_activity ->
           row, later_reply_at
       in
       loop later_reply_at (row :: acc) rest

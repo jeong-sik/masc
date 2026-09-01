@@ -922,6 +922,10 @@ let test_a_registered_length_name_passes_through_whole () =
 let trail_item_to_string : Transcript.trail_item -> string = function
   | Transcript.Trail_thinking lines ->
       "thinking(" ^ String.concat "\\n" lines ^ ")"
+  | Transcript.Trail_skill skill ->
+      "skill("
+      ^ String.concat "\\n" (Transcript.skill_rows ~full:true skill)
+      ^ ")"
   | Transcript.Trail_tools block ->
       "tools(" ^ String.concat "\\n" (full_tool_rows block) ^ ")"
   | Transcript.Trail_text text -> "text(" ^ text ^ ")"
@@ -1003,6 +1007,54 @@ let test_trail_drops_blank_stretches () =
   check (list trail_item) "blank stretches draw nothing" []
     (Transcript.trail t)
 
+let test_live_skill_is_not_folded_into_generic_tools () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; tool_started "skill-use-1" "keeper_skill"
+    ; tool_args_snapshot "skill-use-1"
+        {|{"identity":{"source_id":"local","package_id":"ops","name":"ci-red-attribution"}}|}
+    ; tool_ended "skill-use-1"
+    ; tool_result "skill-use-1" "exec-skill-1"
+    ; Live.Text "done"
+    ];
+  match Transcript.trail t with
+  | [ Transcript.Trail_skill skill; Transcript.Trail_text "done" ] ->
+      check string "the nested identity names the Skill" "ci-red-attribution"
+        skill.skill_name;
+      check bool "a returned body is not yet claimed as used" true
+        (skill.state = Transcript.Skill_served_pending);
+      (match Transcript.skill_rows ~full:false skill with
+       | [ row ] ->
+           check bool "the Skill name is bold" true
+             (contains ~needle:"**ci-red-attribution**" row);
+           check bool "the pending delivery state is explicit" true
+             (contains ~needle:"**SERVED \xc2\xb7 DELIVERY PENDING**" row)
+       | rows -> failf "expected one compact Skill row, got %d" (List.length rows))
+  | items ->
+      failf "expected skill/text, got %d item(s): %s" (List.length items)
+        (String.concat "; " (List.map trail_item_to_string items))
+
+let test_full_skill_rows_show_actions_and_exact_proof () =
+  let skill =
+    Transcript.make_skill_activity ~skill_name:"ci-red-attribution"
+      ~skill_tool_use_id:"skill-use-1234567890abcdef"
+      ~turn_ref:"trace-1#54" ~content_revision:"sha256:abcdef1234567890"
+      ~runtime_id:"codex-app-server" ~state:Transcript.Skill_used
+      ~actions:[ "Execute"; "Read" ] ()
+  in
+  let body = String.concat "\n" (Transcript.skill_rows ~full:true skill) in
+  check bool "used is stated in the strongest evidence vocabulary" true
+    (contains ~needle:"**DELIVERED \xc2\xb7 USED**" body);
+  check bool "observed Execute is visible" true
+    (contains ~needle:"**Execute** \xc2\xb7 observed action" body);
+  check bool "observed Read is visible" true
+    (contains ~needle:"**Read** \xc2\xb7 observed action" body);
+  check bool "the exact turn coordinate is visible" true
+    (contains ~needle:"turn=trace-1#54" body);
+  check bool "the runtime coordinate is visible" true
+    (contains ~needle:"runtime=codex-app-server" body)
+
 let () =
   run "tui_keeper_chat_transcript"
     [ ( "content"
@@ -1022,6 +1074,10 @@ let () =
             test_trail_updates_a_call_after_later_stretches_open
         ; test_case "blank stretches are dropped" `Quick
             test_trail_drops_blank_stretches
+        ; test_case "live Skill is separate from generic tools" `Quick
+            test_live_skill_is_not_folded_into_generic_tools
+        ; test_case "full Skill rows show actions and exact proof" `Quick
+            test_full_skill_rows_show_actions_and_exact_proof
         ] )
     ; ( "tool calls"
       , [ test_case "named as the other surfaces name it" `Quick

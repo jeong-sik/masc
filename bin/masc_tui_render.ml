@@ -460,7 +460,7 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
              (Printf.sprintf "[%s]  %s  %s" timestamp
                 (String.trim role_label) request_label)
        | Message_layout.User | Message_layout.Inbound | Message_layout.Keeper
-       | Message_layout.Status | Message_layout.Error ->
+       | Message_layout.Status | Message_layout.Error | Message_layout.Skill _ ->
            (* [role_label] arrives right-aligned in a sixteen-to-twenty-four
               cell column so the request column stays put down the pane. The
               reverse span used to swallow that alignment, so "AUTO" -- four
@@ -764,6 +764,17 @@ let tool_block_style (projection : Keeper_chat_transcript.tool_projection) =
       | Keeper_chat_transcript.Never_returned
       | Keeper_chat_transcript.Outcome_unrecorded ) ->
     Message_layout.Status
+
+let skill_tone_of_state :
+    Keeper_chat_transcript.skill_state -> Message_layout.skill_tone = function
+  | Keeper_chat_transcript.Skill_calling
+  | Keeper_chat_transcript.Skill_served_pending
+  | Keeper_chat_transcript.Skill_delivered -> Message_layout.Skill_live
+  | Keeper_chat_transcript.Skill_used -> Message_layout.Skill_used
+  | Keeper_chat_transcript.Skill_served_only
+  | Keeper_chat_transcript.Skill_evidence_missing -> Message_layout.Skill_attention
+  | Keeper_chat_transcript.Skill_failed
+  | Keeper_chat_transcript.Skill_evidence_unavailable -> Message_layout.Skill_failure
 ;;
 
 (* The strip above every surface: the Tab ring with the active family
@@ -6523,6 +6534,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     | Message_status -> "STATUS"
     | Message_error -> "ERROR"
     | Message_tool -> "TOOLS"
+    | Message_skill _ -> "SKILL"
     | Message_thinking -> "THINKING"
     | Message_memory -> "MEMORY"
   in
@@ -6596,7 +6608,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
                        (tool_projection_mode state) block))
           | Message_user _ | Message_keeper | Message_autonomous
           | Message_status | Message_memory | Message_error
-          | Message_thinking ->
+          | Message_skill _ | Message_thinking ->
               None
         in
         let style =
@@ -6610,6 +6622,8 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
               match tool_projection with
               | None -> Message_layout.Tool
               | Some projection -> tool_block_style projection)
+          | Message_skill state ->
+              Message_layout.Skill (skill_tone_of_state state)
           | Message_thinking -> Message_layout.Thinking
         in
         let role_label = grouped_role_label in
@@ -6624,6 +6638,14 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
           | Message_thinking
             when state.msg_reasoning_visibility = Reasoning_folded ->
               folded_thinking_summary message.me_text
+          | Message_skill _ -> (
+              match message.me_skill_activity with
+              | None -> message.me_text
+              | Some activity ->
+                  Keeper_chat_transcript.skill_rows
+                    ~full:(state.msg_tool_visibility = Tools_full)
+                    activity
+                  |> String.concat "\n")
           (* The Memory journal's change arrives inside a ["```diff"]
              fence, so a leading [+] is fence content rather than a list
              marker and needs no escaping. The escape that used to be here
@@ -6653,7 +6675,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
            it is; a URL in prose is the one standing on its own. *)
         let body =
           match message.me_role with
-          | Message_tool -> body
+          | Message_tool | Message_skill _ -> body
           | Message_thinking | Message_user _ | Message_keeper
           | Message_autonomous | Message_status | Message_error
           | Message_memory -> (
@@ -7046,6 +7068,22 @@ let render_keeper_message (state : state) =
                             })
                        (tool_block_style projection) "TOOLS"
                        (String.concat "\n" (projected_tool_rows projection)))
+              | Keeper_chat_transcript.Trail_skill skill ->
+                  Some
+                    (entry
+                       ~markdown_source:
+                         (Message_layout.Markdown_growing
+                            { keeper_name;
+                              request_id;
+                              entry_index;
+                            })
+                       (Message_layout.Skill
+                          (skill_tone_of_state skill.state))
+                       "SKILL"
+                       (String.concat "\n"
+                          (Keeper_chat_transcript.skill_rows
+                             ~full:(state.msg_tool_visibility = Tools_full)
+                             skill)))
               | Keeper_chat_transcript.Trail_text text ->
                   Some
                     (entry

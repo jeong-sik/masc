@@ -65,6 +65,55 @@ type tool_activity = private
           so they retain [None]. *)
   }
 
+(** What exact Skill evidence says, kept separate from ordinary tool outcome.
+    A successful [keeper_skill] call proves that Skill content was served; it
+    does not prove the provider received it or that a later action used it. *)
+type skill_state =
+  | Skill_calling
+  | Skill_served_pending
+  | Skill_served_only
+  | Skill_delivered
+  | Skill_used
+  | Skill_failed
+  | Skill_evidence_missing
+  | Skill_evidence_unavailable
+
+type skill_activity = private
+  { skill_name : string
+  ; skill_tool_use_id : string option
+  ; turn_ref : string option
+  ; content_revision : string option
+  ; runtime_id : string option
+  ; state : skill_state
+  ; actions : string list
+  ; detail : string option
+  }
+
+val make_skill_activity :
+  ?skill_tool_use_id:string ->
+  ?turn_ref:string ->
+  ?content_revision:string ->
+  ?runtime_id:string ->
+  ?detail:string ->
+  skill_name:string ->
+  state:skill_state ->
+  actions:string list ->
+  unit ->
+  skill_activity
+(** Construct one typed Skill evidence row. Optional identity fields remain
+    absent when the producer did not carry them; the renderer never invents a
+    join key. *)
+
+val skill_activity_of_tool : tool_activity -> skill_activity option
+(** Project a live Skill-as-tool call. [Some] is returned only for the stable
+    Skill tool family. A returned call is [Skill_served_pending] until durable
+    delivery evidence replaces the live row. *)
+
+val skill_rows : full:bool -> skill_activity -> string list
+(** Markdown rows for one Skill card. The first row emphasizes the exact Skill
+    name and lifecycle; [full] additionally exposes actions and exact proof
+    coordinates. *)
+
 (** A contiguous block of tool calls. [omitted_steps] is a durable transcript
     fact, not the number of rows a compact projection hides. *)
 type tool_block = private
@@ -179,6 +228,9 @@ val unreadable : t -> unreadable option
 type trail_item =
   | Trail_thinking of string list
       (** Non-blank reasoning lines of one contiguous stretch. *)
+  | Trail_skill of skill_activity
+      (** A Skill-as-tool call separated from generic tools so the chat can
+          give its delivery/usage semantics a distinct visual treatment. *)
   | Trail_tools of tool_block
       (** One contiguous run of typed calls. A call keeps updating its facts
           (arguments, outcome) after later stretches open. *)

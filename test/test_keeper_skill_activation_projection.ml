@@ -226,6 +226,69 @@ let test_exact_trace_projection_uses_typed_ledger () =
   | Projection.Trace_unavailable _ -> fail "exact trace projection was unavailable"
 ;;
 
+let chat_row turn_ref =
+  `Assoc
+    [ "id", `String ("autonomous:" ^ turn_ref)
+    ; "role", `String "assistant"
+    ; "content", `Null
+    ; "turn_ref", `String turn_ref
+    ; "autonomous_turn", `Assoc [ "turn_id", `String turn_ref ]
+    ; ( "blocks"
+      , `List
+          [ `Assoc
+              [ "t", `String "trace"
+              ; ( "trace"
+                , `List
+                    [ `Assoc
+                        [ "kind", `String "tool"
+                        ; "name", `String "keeper_skill"
+                        ; "status", `String "ok"
+                        ]
+                    ] )
+              ]
+          ] )
+    ]
+;;
+
+let attached_skill_projection config turn_ref =
+  let open Yojson.Safe.Util in
+  Server_dashboard_http_keeper_api.attach_keeper_chat_skill_activations
+    ~config (`List [ chat_row turn_ref ])
+  |> to_list |> List.hd |> member "skill_activations"
+;;
+
+let test_chat_history_attaches_the_exact_activation () =
+  with_workspace @@ fun config ->
+  let keeper_name = "chat-projection-keeper" in
+  let meta = persist_session config keeper_name in
+  record_one config meta;
+  let projection = attached_skill_projection config "trace-projection#1" in
+  let open Yojson.Safe.Util in
+  check string "typed chat projection schema"
+    "masc.keeper_chat.skill_activations.v1"
+    (projection |> member "schema" |> to_string);
+  check string "the exact activation is available" "available"
+    (projection |> member "status" |> to_string);
+  let activation = projection |> member "activations" |> to_list |> List.hd in
+  check string "the canonical ledger identity reaches chat" "review"
+    (activation |> member "identity" |> member "name" |> to_string);
+  check bool "served content does not invent delivery" true
+    (activation |> member "delivery" = `Null)
+;;
+
+let test_chat_history_marks_an_unmatched_raw_skill_call () =
+  with_workspace @@ fun config ->
+  let keeper_name = "chat-missing-projection-keeper" in
+  let meta = persist_session config keeper_name in
+  record_one config meta;
+  let projection = attached_skill_projection config "trace-projection#2" in
+  let open Yojson.Safe.Util in
+  check string "same trace but another turn is not borrowed" "missing"
+    (projection |> member "status" |> to_string);
+  check int "no activation is attached across turn_refs" 0
+    (projection |> member "activations" |> to_list |> List.length)
+;;
+
 let test_missing_exact_trace_is_not_recorded () =
   with_workspace @@ fun config ->
   let trace_id =
@@ -292,6 +355,10 @@ let () =
             test_corrupt_ledger_is_unavailable_not_empty
         ; test_case "exact trace uses typed ledger" `Quick
             test_exact_trace_projection_uses_typed_ledger
+        ; test_case "chat history attaches exact Skill evidence" `Quick
+            test_chat_history_attaches_the_exact_activation
+        ; test_case "chat history does not borrow another turn" `Quick
+            test_chat_history_marks_an_unmatched_raw_skill_call
         ; test_case "missing exact trace is not recorded" `Quick
             test_missing_exact_trace_is_not_recorded
         ; test_case "invalid exact trace is rejected" `Quick

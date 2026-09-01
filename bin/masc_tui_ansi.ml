@@ -220,6 +220,14 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Status -> Theme.warn ()
     | Masc_tui_message_layout.Error -> Theme.bad ()
     | Masc_tui_message_layout.Tool -> Theme.tool_origin ()
+    | Masc_tui_message_layout.Skill Masc_tui_message_layout.Skill_live ->
+      Theme.info ()
+    | Masc_tui_message_layout.Skill Masc_tui_message_layout.Skill_used ->
+      Theme.ok ()
+    | Masc_tui_message_layout.Skill Masc_tui_message_layout.Skill_attention ->
+      Theme.warn ()
+    | Masc_tui_message_layout.Skill Masc_tui_message_layout.Skill_failure ->
+      Theme.bad ()
     | Masc_tui_message_layout.Thinking -> Theme.quiet_origin ()
 
   let body : Masc_tui_message_layout.style -> string = function
@@ -228,6 +236,8 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Status -> Theme.warn ()
     | Masc_tui_message_layout.Error -> Theme.bad ()
     | Masc_tui_message_layout.Tool -> Ansi.reset
+    | Masc_tui_message_layout.Skill skill ->
+      origin (Masc_tui_message_layout.Skill skill)
     | Masc_tui_message_layout.Thinking -> Ansi.dim
 
   let link_foreground : Masc_tui_message_layout.style -> string = function
@@ -235,7 +245,7 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Error -> Theme.bad ()
     | Masc_tui_message_layout.User | Masc_tui_message_layout.Inbound
     | Masc_tui_message_layout.Keeper | Masc_tui_message_layout.Tool
-    | Masc_tui_message_layout.Thinking ->
+    | Masc_tui_message_layout.Skill _ | Masc_tui_message_layout.Thinking ->
       Ansi.default_fg
 
   let link_style_restore style =
@@ -294,6 +304,7 @@ module Chat_theme = struct
       | Masc_tui_message_layout.Status
       | Masc_tui_message_layout.Error
       | Masc_tui_message_layout.Tool
+      | Masc_tui_message_layout.Skill _
       | Masc_tui_message_layout.Thinking ), _ ->
       { opening
       ; markdown_close = Ansi.reset

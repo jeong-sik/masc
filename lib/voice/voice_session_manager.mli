@@ -2,16 +2,12 @@
 
     Maintains an in-memory map [agent_id -> session] with on-disk
     mirror under [<config_path>/voice_sessions/<agent_id>.json].
-    Internal Hashtbl + [Eio.Mutex] live behind {!type-t}; the lock and
-    file-IO helpers ([with_lock] / [ensure_session_dir] /
+    One atomic immutable map snapshot lives behind {!type-t}; the cooperative
+    effect lock and file-IO helpers ([with_mutation] / [ensure_session_dir] /
     [session_file] / [save_session] / [load_session] /
-    [delete_session_file]) are hidden so callers cannot mutate session
-    state without going through the lifecycle functions.
-
-    The [session] record carries mutable fields ([last_activity],
-    [turn_count], [status]) under that same lock, so {!type-session} is
-    abstract — callers route reads through {!session_to_json} and
-    writes through the lifecycle and activity functions below. *)
+    [delete_session_file]) are hidden. Mutations persist the next immutable
+    session before publishing its map snapshot; readers take one lock-free
+    snapshot and cannot receive mutable aliases. *)
 
 (** {1 Types} *)
 
@@ -31,13 +27,11 @@ type conversation_mode =
     frames. *)
 
 type session
-(** A single agent's active voice session. Mutable internals
-    ([last_activity], [turn_count], [status]) are guarded by the
-    parent {!type-t}'s mutex. *)
+(** An immutable snapshot of one agent's voice session. *)
 
 type t
-(** Session manager handle. Wraps a [(string, session) Hashtbl.t] +
-    [Eio.Mutex.t] + on-disk session directory. *)
+(** Session manager handle. Wraps an atomic immutable session map, a
+    cooperative cross-context effect lock, and the on-disk session directory. *)
 
 (** {1 ID + status helpers} *)
 

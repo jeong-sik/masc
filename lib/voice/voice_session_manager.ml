@@ -23,26 +23,25 @@ type session = {
   agent_id: string;
   voice: string;
   started_at: float;
-  mutable last_activity: float;
-  mutable turn_count: int;
-  mutable status: session_status;
-  mutable conversation_mode: conversation_mode;
+  last_activity: float;
+  turn_count: int;
+  status: session_status;
+  conversation_mode: conversation_mode;
+}
+
+module Session_by_agent = Set_util.StringMap
+
+type state = {
+  sessions : session Session_by_agent.t;
 }
 
 type t = {
-  sessions: (string, session) Hashtbl.t;  (* agent_id -> session *)
+  state : state Atomic.t;
   config_path: string;
   session_dir: string;
-  sessions_mu: Eio.Mutex.t;
-  (** Serialises every read/write on [sessions] and every mutation of
-      the [mutable] fields of a [session] value.  Keeper fibers call
-      start_session / heartbeat / end_session from
-      different turns concurrently, and without the lock the Hashtbl
-      races on TOCTOU ([find_opt] + [add]) and the session record's
-      mutable [turn_count]/[last_activity]/[status] are non-atomic.
-
-      Eio.Mutex via [Eio_guard.with_mutex] so contending fibers
-      suspend instead of blocking the whole domain during file I/O. *)
+  mutation_lock : Cross_context_mutex.t;
+  (** Serialises filesystem effects with publication of the next immutable
+      session-map snapshot. Readers never acquire this lock. *)
 }
 
 (** {1 Utilities} *)
@@ -221,14 +220,14 @@ let session_of_json json =
 let create ~config_path =
   let session_dir = Filename.concat config_path "voice_sessions" in
   {
-    sessions = Hashtbl.create 16;
+    state = Atomic.make { sessions = Session_by_agent.empty };
     config_path;
     session_dir;
-    sessions_mu = Eio.Mutex.create ();
+    mutation_lock = Cross_context_mutex.create ();
   }
 
-let with_lock t f =
-  Eio_guard.with_mutex t.sessions_mu f
+let with_mutation t f =
+  Cross_context_mutex.with_durable_lock t.mutation_lock f
 
 (** {1 Internal Helpers} *)
 
@@ -271,15 +270,24 @@ let delete_session_file t agent_id =
 (** {1 Session Lifecycle} *)
 
 let start_session t ~agent_id ?voice ?(conversation_mode = Turn_based) () =
-  with_lock t (fun () ->
+  with_mutation t (fun () ->
+    let current = Atomic.get t.state in
     (* Check if session already exists *)
-    match Hashtbl.find_opt t.sessions agent_id with
+    match Session_by_agent.find_opt agent_id current.sessions with
     | Some existing ->
-      existing.status <- Active;
-      existing.last_activity <- Time_compat.now ();
-      existing.conversation_mode <- conversation_mode;
-      save_session t existing;
-      existing
+      let session =
+        {
+          existing with
+          status = Active;
+          last_activity = Time_compat.now ();
+          conversation_mode;
+        }
+      in
+      save_session t session;
+      Atomic.set
+        t.state
+        { sessions = Session_by_agent.add agent_id session current.sessions };
+      session
     | None ->
       (* Get default voice from Voice_bridge *)
       let voice = match voice with
@@ -297,91 +305,124 @@ let start_session t ~agent_id ?voice ?(conversation_mode = Turn_based) () =
         status = Active;
         conversation_mode;
       } in
-      Hashtbl.add t.sessions agent_id session;
       save_session t session;
+      Atomic.set
+        t.state
+        { sessions = Session_by_agent.add agent_id session current.sessions };
       session)
 
 let end_session t ~agent_id =
-  with_lock t (fun () ->
-    match Hashtbl.find_opt t.sessions agent_id with
+  with_mutation t (fun () ->
+    let current = Atomic.get t.state in
+    match Session_by_agent.find_opt agent_id current.sessions with
     | Some _ ->
-      Hashtbl.remove t.sessions agent_id;
       delete_session_file t agent_id;
+      Atomic.set
+        t.state
+        { sessions = Session_by_agent.remove agent_id current.sessions };
       true
     | None -> false)
 
 
 let resume_session t ~agent_id =
-  with_lock t (fun () ->
-    match Hashtbl.find_opt t.sessions agent_id with
+  with_mutation t (fun () ->
+    let current = Atomic.get t.state in
+    match Session_by_agent.find_opt agent_id current.sessions with
     | Some session ->
-      session.status <- Active;
-      session.last_activity <- Time_compat.now ();
-      save_session t session
+      let session =
+        { session with status = Active; last_activity = Time_compat.now () }
+      in
+      save_session t session;
+      Atomic.set
+        t.state
+        { sessions = Session_by_agent.add agent_id session current.sessions }
     | None -> ())
 
 (** {1 Session Query} *)
 
 let get_session t ~agent_id =
-  with_lock t (fun () -> Hashtbl.find_opt t.sessions agent_id)
+  Session_by_agent.find_opt agent_id (Atomic.get t.state).sessions
 
 let list_sessions t =
-  with_lock t (fun () ->
-    Hashtbl.fold (fun _ session acc -> session :: acc) t.sessions [])
+  Session_by_agent.bindings (Atomic.get t.state).sessions
+  |> List.map snd
 
 let session_count t =
-  with_lock t (fun () -> Hashtbl.length t.sessions)
+  Session_by_agent.cardinal (Atomic.get t.state).sessions
 
 (** {1 Activity Tracking} *)
 
 let heartbeat t ~agent_id =
-  with_lock t (fun () ->
-    match Hashtbl.find_opt t.sessions agent_id with
+  with_mutation t (fun () ->
+    let current = Atomic.get t.state in
+    match Session_by_agent.find_opt agent_id current.sessions with
     | Some session ->
-      session.last_activity <- Time_compat.now ();
-      save_session t session
+      let session = { session with last_activity = Time_compat.now () } in
+      save_session t session;
+      Atomic.set
+        t.state
+        { sessions = Session_by_agent.add agent_id session current.sessions }
     | None -> ())
 
 let increment_turn t ~agent_id =
-  with_lock t (fun () ->
-    match Hashtbl.find_opt t.sessions agent_id with
+  with_mutation t (fun () ->
+    let current = Atomic.get t.state in
+    match Session_by_agent.find_opt agent_id current.sessions with
     | Some session ->
-      session.turn_count <- session.turn_count + 1;
-      session.last_activity <- Time_compat.now ();
-      save_session t session
+      let session =
+        {
+          session with
+          turn_count = session.turn_count + 1;
+          last_activity = Time_compat.now ();
+        }
+      in
+      save_session t session;
+      Atomic.set
+        t.state
+        { sessions = Session_by_agent.add agent_id session current.sessions }
     | None -> ())
 
 (** {1 Persistence} *)
 
 let persist t =
-  ensure_session_dir t;
-  with_lock t (fun () ->
-    Hashtbl.iter (fun _ session -> save_session t session) t.sessions)
+  with_mutation t (fun () ->
+    ensure_session_dir t;
+    Session_by_agent.iter
+      (fun _ session -> save_session t session)
+      (Atomic.get t.state).sessions)
 
 let restore t =
-  if Sys.file_exists t.session_dir && Sys.is_directory t.session_dir then begin
-    let files = Sys.readdir t.session_dir in
-    with_lock t (fun () ->
-      Array.iter (fun filename ->
-        if Filename.check_suffix filename ".json" then begin
-          let agent_id = Filename.chop_suffix filename ".json" in
-          match load_session t agent_id with
-          | Some session ->
-            Hashtbl.add t.sessions agent_id session
-          | None -> ()
-        end
-      ) files)
-  end
+  with_mutation t (fun () ->
+    if Sys.file_exists t.session_dir && Sys.is_directory t.session_dir
+    then (
+      let files = Sys.readdir t.session_dir in
+      let current = Atomic.get t.state in
+      let sessions =
+        Array.fold_left
+          (fun sessions filename ->
+            if Filename.check_suffix filename ".json"
+            then (
+              let agent_id = Filename.chop_suffix filename ".json" in
+              match load_session t agent_id with
+              | Some session -> Session_by_agent.add agent_id session sessions
+              | None -> sessions)
+            else sessions)
+          current.sessions
+          files
+      in
+      Atomic.set t.state { sessions }))
 
 (** {1 Status} *)
 
 let status_json t =
-  let sessions_json = list_sessions t
-    |> List.map session_to_json
-    |> (fun l -> `List l)
+  let snapshot = Atomic.get t.state in
+  let sessions_json =
+    Session_by_agent.bindings snapshot.sessions
+    |> List.map (fun (_, session) -> session_to_json session)
+    |> fun sessions -> `List sessions
   in
   `Assoc [
-    ("session_count", `Int (session_count t));
+    ("session_count", `Int (Session_by_agent.cardinal snapshot.sessions));
     ("config_path", `String t.config_path);
     ("sessions", sessions_json);
   ]

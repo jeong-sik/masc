@@ -5,10 +5,10 @@
     tracking; TTS (agent_speak) still goes through direct HTTP
     endpoints (ElevenLabs, etc).
 
-    Internal: 3 helpers stay private —
+    Internal helpers stay private —
     \[resolved_base_path_opt\] / \[masc_base_dir\] (base-path
-    resolution chain), and the [session_manager_ref] lazy
-    singleton cell.  All consumed only inside
+    resolution chain), plus the atomic lifecycle and cooperative
+    initialisation lock. All are consumed only inside
     {!get_session_manager}.
 
     @since 2.95.0 *)
@@ -25,6 +25,6 @@ val get_session_manager : unit -> Voice_session_manager.t
     + [Voice_session_manager.restore mgr] (rehydrates persisted
       sessions from disk).
 
-    Thread-safety: safe under a single Eio domain — all fibers
-    share one OS thread, so the underlying [ref] read/write
-    cannot race.  No [Eio.Mutex] needed. *)
+    The completed manager is published once as an immutable atomic lifecycle
+    state. The effectful create/restore slow path is serialized across Eio
+    fibers, threads, and Domains by a cooperative cross-context lock. *)

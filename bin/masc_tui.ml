@@ -2523,7 +2523,7 @@ let launch_code_history_load state ~mailbox ~path =
               | Ok (repo_id, file_path) -> (
                   match
                     Masc_tui_http.fetch_ide_file_activity
-                      ~host ~port ?repo_id ~file_path
+                      ~host ~port ~repo_id ~file_path
                   with
                   | Error detail ->
                     [], "Keeper activity unavailable: " ^ detail

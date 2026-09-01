@@ -488,44 +488,38 @@ let test_readonly_execute_omitted_cwd_does_not_create_write_root () =
    under. Measured 2026-09-01 -- a [remote_ssh] keeper built and ran OCaml on
    the host while its endpoint container sat empty.
 
-   Every profile has to refuse, so every profile is named. If a new one is
-   added, the exhaustive match inside the gate stops compiling and this list
-   is where the answer gets recorded. *)
-let test_spawn_start_is_refused_under_every_profile () =
-  List.iter
-    (fun (profile, label) ->
-       let result =
-         Masc.Keeper_tool_in_process_runtime.spawn_outside_boundary
-           ~name:"keeper_spawn"
-           ~profile
-       in
-       let payload = result.Masc.Keeper_tool_execution.raw_output in
-       let refused =
-         match result.Masc.Keeper_tool_execution.disposition with
-         | Tool_result.Failed _ -> true
-         | Tool_result.Completed _ | Tool_result.Deferred _ -> false
-       in
-       Alcotest.(check bool)
-         (Printf.sprintf "%s refuses to start a process" label)
-         true
-         refused;
-       Alcotest.(check bool)
-         (Printf.sprintf "%s proves no process began" label)
-         true
-         (result.Masc.Keeper_tool_execution.failure_effect_disposition
-          = Tool_result.Proven_pre_effect);
-       Alcotest.(check bool)
-         (Printf.sprintf "%s names itself in the refusal" label)
-         true
-         (String_util.contains_substring payload label))
-    (List.map
-       (fun profile ->
-          ( profile
-          , Keeper_types_profile_sandbox.sandbox_profile_to_string profile ))
-       [ Keeper_types_profile_sandbox.Docker
-       ; Keeper_types_profile_sandbox.Micro_vm
-       ; Keeper_types_profile_sandbox.Remote_ssh
-       ])
+   A start goes through the container now, so the profiles that have a
+   container no longer refuse. [remote_ssh] still does: the exec shim speaks a
+   framed protocol over one connection, so there is no argv to hand a spawner,
+   and going around the shim would go around its path jail with it.
+
+   What is pinned is the refusal itself -- that it is a policy rejection and
+   that it proves nothing started. A refusal that read as a runtime failure
+   would tell a caller to retry a call that can never work. *)
+let test_a_start_it_cannot_place_refuses_without_starting () =
+  let result =
+    Masc.Keeper_tool_in_process_runtime.spawn_outside_boundary
+      ~name:"keeper_spawn"
+      ~profile:Keeper_types_profile_sandbox.Remote_ssh
+      ~detail:"no argv to background"
+  in
+  let payload = result.Masc.Keeper_tool_execution.raw_output in
+  Alcotest.(check bool)
+    "it is a refusal, not a runtime failure"
+    true
+    (match result.Masc.Keeper_tool_execution.disposition with
+     | Tool_result.Failed Tool_result.Policy_rejection -> true
+     | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
+       false);
+  Alcotest.(check bool)
+    "it proves no process began"
+    true
+    (result.Masc.Keeper_tool_execution.failure_effect_disposition
+     = Tool_result.Proven_pre_effect);
+  Alcotest.(check bool)
+    "it names the profile it could not place the start under"
+    true
+    (String_util.contains_substring payload "remote_ssh")
 ;;
 
 let () =
@@ -564,8 +558,8 @@ let () =
           Alcotest.test_case "docker other container root stays blocked"
             `Quick test_docker_other_container_root_stays_blocked;
           Alcotest.test_case
-            "spawn start is refused under every sandbox profile"
-            `Quick test_spawn_start_is_refused_under_every_profile;
+            "a start it cannot place refuses without starting"
+            `Quick test_a_start_it_cannot_place_refuses_without_starting;
           Alcotest.test_case
             "read-only Execute omitted cwd does not create write root"
             `Quick

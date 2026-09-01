@@ -1497,6 +1497,63 @@ let test_execute_outside_playground_rejects_before_image_preflight () =
   Alcotest.(check bool) "docker run skipped" false
     (String_util.contains_substring log "\nrun ")
 
+(* A sandboxed spawn is the Execute argv handed to a spawner instead of run,
+   so what has to hold is that the argv is the container's: an [exec] against
+   the running container, as the keeper's uid, with the container cwd. If this
+   drifts from what [run_exec_with_status_split] uses, a spawn and an Execute
+   for the same command stop landing in the same place.
+
+   This pins the construction. It does not run it -- see the PR note on what
+   is left unproven. *)
+let test_exec_argv_is_the_container_argv () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta
+  @@ fun factory ->
+  match Keeper_sandbox_factory.resolve_opt (Some factory) ~cwd:playground with
+  | Keeper_sandbox_factory.No_factory | Keeper_sandbox_factory.Remote_ssh_profile ->
+    Alcotest.fail "a docker keeper must resolve to a runtime"
+  | Keeper_sandbox_factory.Runtime runtime ->
+    (match
+       Keeper_turn_sandbox_runtime.exec_argv
+         ~validate_cached_container:false
+         runtime
+         ~cwd:playground
+         ~command_argv:[ "printf"; "hello" ]
+     with
+     | Error detail -> Alcotest.failf "exec_argv must build an argv: %s" detail
+     | Ok argv ->
+       let joined = String.concat " " argv in
+       Alcotest.(check bool)
+         (Printf.sprintf "it is a container exec: %s" joined)
+         true
+         (List.exists (String.equal "exec") argv);
+       Alcotest.(check bool)
+         "it runs as the keeper uid"
+         true
+         (List.exists (String.equal "--user") argv);
+       Alcotest.(check bool)
+         "it names the keeper container"
+         true
+         (List.exists
+            (fun a -> String_util.contains_substring a "masc-keeper-")
+            argv);
+       Alcotest.(check bool)
+         "the command is the tail"
+         true
+         (match List.rev argv with
+          | "hello" :: "printf" :: _ -> true
+          | _ -> false))
+;;
+
 let test_docker_shell_mounts_masc_config_runtime_paths () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -2373,6 +2430,10 @@ let () =
             "docker run does not retry generic timeout"
             `Quick
             test_docker_run_does_not_retry_generic_timeout;
+          Alcotest.test_case
+            "exec_argv is the container argv"
+            `Quick
+            test_exec_argv_is_the_container_argv;
           Alcotest.test_case
             "container removal reclaims anonymous volumes"
             `Quick

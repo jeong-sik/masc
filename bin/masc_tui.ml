@@ -9402,9 +9402,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               msg_entries_of_history_rows state keeper_name
                 page.Keeper_chat_history.decoded.Keeper_chat_history.rows
             in
-            (* Prepended, not timestamp-merged: the paging cursor establishes
-               that these producer rows precede the window already held;
-               turn_sequence orders cross-store turn groups inside it. *)
+            (* The paging cursor owns the raw storage window, so an older page
+               is prepended here. [chat_timeline] then recomputes the one
+               displayed-time projection across that complete window; scroll
+               pins retain row identity rather than this cache position. *)
             state.msg_loaded <- rows @ state.msg_loaded;
             state.msg_loaded_dropped <-
               state.msg_loaded_dropped
@@ -12354,11 +12355,16 @@ and is loaded on demand through keeper_skill.
                   ~keeper_name:keeper.k_name
             | None -> ())
        | Some k when message_mode ->
-           let reasoning_key =
-             String.length k = 1 && Char.code k.[0] = 18
-           in
-           let tool_view_key =
-             String.length k = 1 && Char.code k.[0] = 4
+           (* Ctrl-R/Ctrl-D/Ctrl-F/Ctrl-N shape what the transcript draws,
+              not what the composer holds, so a viewport too small for the
+              composer still owes them a working transcript. Named as one set
+              because they were admitted one by one and forgotten one by one:
+              Ctrl-F never made this list, then Ctrl-N repeated the miss. *)
+           let display_toggle_key =
+             String.length k = 1
+             &&
+             let byte = Char.code k.[0] in
+             byte = 18 || byte = 4 || byte = 6 || byte = 14
            in
            let switch_key = String.length k = 1 && Char.code k.[0] = 7 in
            let queue_management_key =
@@ -12372,8 +12378,7 @@ and is loaded on demand through keeper_skill.
            if
              keeper_message_input_supported state
              || String.equal k "esc"
-             || reasoning_key
-             || tool_view_key
+             || display_toggle_key
              || switch_key
              || queue_management_key
              || scroll_recovery_key

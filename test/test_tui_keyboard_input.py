@@ -5366,6 +5366,9 @@ def memory_journal_backfill_fixture() -> HttpResponse:
 
 
 def memory_journal_chat_fixture() -> HttpResponse:
+    # The absolute turns deliberately disagree with the clocks. The pane keeps
+    # each turn whole but must still draw the shared visible axis oldest first;
+    # otherwise a 22:00 rail is followed by an earlier hour lower on screen.
     return (
         200,
         [
@@ -5374,14 +5377,14 @@ def memory_journal_chat_fixture() -> HttpResponse:
                 "role": "assistant",
                 "content": "direct turn before Librarian",
                 "ts": 1787344889.0,
-                "turn_ref": "trace-before#54",
+                "turn_ref": "trace-before#55",
             },
             {
                 "id": "assistant:after-journal",
                 "role": "assistant",
                 "content": "direct turn after Librarian",
                 "ts": 1787348491.0,
-                "turn_ref": "trace-after#55",
+                "turn_ref": "trace-after#54",
             },
         ],
     )
@@ -5502,11 +5505,10 @@ def memory_journal_timeline_interaction(
         before = plain_resting.find(b"direct turn before Librarian")
         journal = plain_resting.find(b"Librarian committed current memory revision 9")
         after = plain_resting.find(b"direct turn after Librarian")
-        if not (0 <= earlier_rail < before < later_rail < after < journal):
+        if not (0 <= earlier_rail < before < later_rail < journal < after):
             raise AssertionError(
-                "Civil-hour rails did not display clock transitions while chat "
-                "turns and the Journal lane retained typed turn then producer "
-                f"order: {resting!r}"
+                "Civil-hour rails, whole chat turns, and the Journal lane did "
+                f"not share one oldest-to-newest time axis: {resting!r}"
             )
         if re.search("\u25c8\\s+JOURNAL".encode(), plain_resting) is None:
             raise AssertionError(
@@ -5577,11 +5579,10 @@ def memory_journal_timeline_interaction(
         before = plain_visible.find(b"direct turn before Librarian")
         journal = plain_visible.find(b"Librarian committed current memory revision 9")
         after = plain_visible.find(b"direct turn after Librarian")
-        if not (0 <= earlier_rail < before < later_rail < after < journal):
+        if not (0 <= earlier_rail < before < later_rail < journal < after):
             raise AssertionError(
-                "Civil-hour rails did not display clock transitions while chat "
-                "turns and the Journal lane retained typed turn then producer "
-                f"order: {visible!r}"
+                "Civil-hour rails, whole chat turns, and the Journal lane did "
+                f"not share one oldest-to-newest time axis: {visible!r}"
             )
         if re.search("\u25c8\\s+JOURNAL".encode(), plain_visible) is None:
             raise AssertionError(
@@ -5695,6 +5696,40 @@ def memory_journal_timeline_interaction(
         if b"superseded by provider grouping" in restored:
             raise AssertionError(
                 f"Summary mode drew the change fence after restore: {restored!r}"
+            )
+
+        # A viewport too small for the composer still owes the display
+        # toggles a working gate. The gate reads the live terminal size at
+        # dispatch, so keys pressed on the too-small screen decide there
+        # and prove themselves on the way back up. Ctrl-R/Ctrl-D always
+        # passed it while Ctrl-F and then Ctrl-N (#32367) were swallowed,
+        # because the gate admitted keys one by one instead of the
+        # display-toggle set.
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=8,
+            columns=100,
+            needle=b"terminal too small",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        os.write(master_fd, b"\x0e\x06")
+        wait_for_terminal_input_consumed(_slave_fd)
+        widened = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=31,
+            columns=100,
+            needle=b"memory:full",
+            controls=(FULL_REDRAW,),
+        )
+        if b"memory:full clock:inline" not in CSI_RE.sub(b"", widened):
+            raise AssertionError(
+                "A display toggle pressed on the too-small screen was "
+                f"swallowed by the compact-viewport gate: {widened!r}"
             )
         send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         os.write(master_fd, b"q")

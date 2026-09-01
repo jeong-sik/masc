@@ -308,7 +308,8 @@ type msg_entry = {
   me_turn_phase: chat_turn_phase;
   me_turn_sequence: int option;
       (** Absolute Keeper turn sequence from a persisted turn_ref. This is the
-          cross-store ordering authority for complete turn groups. *)
+          stable tie-breaker when complete turn groups share one display
+          clock. Request identity, not this sequence, groups rows into a turn. *)
   me_operation_seq: int;
       (** Structural producer position within one request. Timestamps never
           break ties or move rows; phase then this sequence is the order. *)
@@ -326,8 +327,9 @@ type msg_entry = {
   me_timestamp: string;
   me_keeper_name: string;
   me_request_id: string;
-  (* Producer observation time. Used for display, pagination cursors, and
-     render-cache identity only. Causal turn ownership decides row order. *)
+  (* Producer observation time. Whole causal turns and auxiliary rows use the
+     displayed time to share one chronological surface; rows inside one turn
+     remain ordered by typed phase and operation sequence. *)
   me_at: float;
 }
 
@@ -342,16 +344,15 @@ type chat_timeline_item =
   | Chat_unowned of msg_entry
   | Chat_memory of msg_entry
       (** Explicit auxiliary journal lane. Memory rows have no conversational
-          request owner and never borrow wall-clock order from chat turns. *)
+          request owner; their recorded time places them between whole chat
+          turns without making them part of either turn. *)
 
 type chat_timeline = {
-  ctl_settled: chat_timeline_item list;
-  ctl_active: chat_turn option;
+  ctl_items: chat_timeline_item list;
 }
 
-(* The clock a row displays and contributes to civil-hour rails. This helper
-   deliberately sits outside [compare_chat_timeline_items]: submitted/observed
-   time is presentation and pagination data, never conversation order. *)
+(* The clock a row displays, contributes to civil-hour rails, and uses to place
+   its whole causal group on the shared timeline. *)
 let message_display_at row =
   let valid at = Float.is_finite at && at > 0. in
   match row.me_submitted_at with
@@ -444,11 +445,12 @@ let append_chat_timeline_row items row =
     append [] items
 ;;
 
-(* Complete turns cross direct/autonomous stores through the persisted typed
-   turn sequence. Items without that authority keep producer order: inventing
-   one from a display clock would let clock skew or a late write rewrite the
-   conversation. [List.stable_sort] below is part of this contract. *)
-let compare_chat_timeline_items left right =
+let chat_timeline_item_display_at = function
+  | Chat_turn { ct_rows; _ } -> List.find_map message_display_at ct_rows
+  | Chat_unowned row | Chat_memory row -> message_display_at row
+;;
+
+let compare_chat_timeline_tie left right =
   match left, right with
   | Chat_turn left, Chat_turn right ->
       (match left.ct_turn_sequence, right.ct_turn_sequence with
@@ -456,15 +458,30 @@ let compare_chat_timeline_items left right =
        | Some _, None -> -1
        | None, Some _ -> 1
        | None, None -> 0)
-  | Chat_turn { ct_turn_sequence = Some _; _ },
-    (Chat_unowned _ | Chat_memory _) -> -1
-  | (Chat_unowned _ | Chat_memory _),
-    Chat_turn { ct_turn_sequence = Some _; _ } -> 1
-  | (Chat_turn _ | Chat_unowned _ | Chat_memory _),
-    (Chat_turn _ | Chat_unowned _ | Chat_memory _) -> 0
+  | Chat_turn _, (Chat_unowned _ | Chat_memory _) -> -1
+  | (Chat_unowned _ | Chat_memory _), Chat_turn _ -> 1
+  | Chat_unowned _, Chat_memory _ -> -1
+  | Chat_memory _, Chat_unowned _ -> 1
+  | Chat_unowned _, Chat_unowned _ | Chat_memory _, Chat_memory _ -> 0
 ;;
 
-let chat_timeline ~loaded ~session ~queued_request_ids ~active_request_id =
+(* The pane promises one readable clock axis. Sort whole causal turns,
+   broadcasts, and Journal observations by the same displayed time that draws
+   their civil-hour rails; never sort rows inside a turn. This prevents a
+   22:00 rail from being followed by a 17:00 rail merely because the latter
+   row came from another store. Unknown clocks stay last. Exact ties retain a
+   typed, stable order: sequenced turns, unowned conversation, then Journal. *)
+let compare_chat_timeline_items left right =
+  match chat_timeline_item_display_at left, chat_timeline_item_display_at right with
+  | Some left_at, Some right_at ->
+      let by_time = Float.compare left_at right_at in
+      if by_time <> 0 then by_time else compare_chat_timeline_tie left right
+  | Some _, None -> -1
+  | None, Some _ -> 1
+  | None, None -> compare_chat_timeline_tie left right
+;;
+
+let chat_timeline ~loaded ~session ~queued_request_ids =
   let queued request_id =
     List.exists (String.equal request_id) queued_request_ids
   in
@@ -475,18 +492,7 @@ let chat_timeline ~loaded ~session ~queued_request_ids ~active_request_id =
     List.fold_left append_chat_timeline_row [] (loaded @ visible_session)
     |> List.stable_sort compare_chat_timeline_items
   in
-  let active, settled =
-    List.fold_left
-      (fun (active, settled) item ->
-        match item, active_request_id with
-        | Chat_turn turn, Some request_id
-          when String.equal turn.ct_request_id request_id ->
-            Some turn, settled
-        | (Chat_turn _ | Chat_unowned _ | Chat_memory _), (Some _ | None) ->
-            active, item :: settled)
-      (None, []) items
-  in
-  { ctl_settled = List.rev settled; ctl_active = active }
+  { ctl_items = items }
 ;;
 
 let chat_timeline_rows timeline =
@@ -494,11 +500,47 @@ let chat_timeline_rows timeline =
     | Chat_turn turn -> turn.ct_rows
     | Chat_unowned row | Chat_memory row -> [ row ]
   in
-  List.concat (List.map rows_of_item timeline.ctl_settled)
-  @
-  match timeline.ctl_active with
-  | None -> []
-  | Some turn -> turn.ct_rows
+  List.concat (List.map rows_of_item timeline.ctl_items)
+;;
+
+(* Where a live turn with no committed row belongs in an already projected
+   message list. The index is always a whole-group boundary: looking at each
+   row's clock could insert a live turn between a group's input and its skewed
+   output. A live turn has no persisted sequence yet, so an exact clock tie
+   follows existing turns and precedes unowned/Journal rows, matching
+   [compare_chat_timeline_tie]. *)
+let chat_live_insertion_index ~timeline_at messages =
+  let live_precedes (row : msg_entry) =
+    match timeline_at, message_display_at row with
+    | Some live_at, Some row_at ->
+        let by_time = Float.compare live_at row_at in
+        if by_time <> 0
+        then by_time < 0
+        else row.me_role = Message_memory || String.equal row.me_request_id ""
+    | Some _, None -> true
+    | None, Some _ -> false
+    | None, None ->
+        row.me_role = Message_memory || String.equal row.me_request_id ""
+  in
+  let rec after_turn request_id index = function
+    | row :: rest
+      when row.me_role <> Message_memory
+           && String.equal row.me_request_id request_id ->
+        after_turn request_id (index + 1) rest
+    | rest -> index, rest
+  in
+  let rec find index = function
+    | [] -> index
+    | row :: rest ->
+        if live_precedes row
+        then index
+        else if row.me_role = Message_memory || String.equal row.me_request_id ""
+        then find (index + 1) rest
+        else
+          let index, rest = after_turn row.me_request_id (index + 1) rest in
+          find index rest
+  in
+  find 0 messages
 ;;
 
 let msg_anchor entry =
@@ -3144,10 +3186,9 @@ let visible_system_log_entries (state : state) =
    "registered" answers true while the send path is closed; counting on that
    answer hid the unavailable row and left the send hint reading Enter:send. *)
 (* The rows the chat pane draws for one Keeper. Durable and session rows join
-   only through request ownership. Turn order follows typed turn sequence or
-   stable producer order; each turn is Input -> Progress -> Tool -> Output.
-   Pending requests are withheld for the separate NEXT lane. Wall clocks never
-   decide conversation order. *)
+   only through request ownership. Whole turns and auxiliary lanes share one
+   displayed-time axis; each turn remains Input -> Progress -> Tool -> Output.
+   Pending requests are withheld for the separate NEXT lane. *)
 (* What a polled surface can say when it has no rows to draw. Three facts,
    not one: nothing has been read yet, the read failed, or the read came back
    with nothing. The first was drawn as the third -- "nothing waiting on a
@@ -3180,13 +3221,7 @@ let chat_rows_for (state : state) keeper_name =
     Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name
     |> List.map (fun item -> item.Masc_tui_keeper_chat_queue.request.request_id)
   in
-  let active_request_id =
-    Option.map
-      (fun entry -> entry.sent_request.request_id)
-      (inflight_for_keeper state keeper_name)
-  in
-  chat_timeline ~loaded ~session ~queued_request_ids ~active_request_id
-  |> chat_timeline_rows
+  chat_timeline ~loaded ~session ~queued_request_ids |> chat_timeline_rows
 
 (* The one place [msg_scroll] moves, so the pin it counts back from cannot be
    forgotten at one of the dozen keys that scroll. Leaving the bottom takes the

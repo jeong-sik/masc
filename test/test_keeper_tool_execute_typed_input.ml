@@ -1065,7 +1065,7 @@ let docker_test_sandbox () =
 
 let check_docker_sandbox label simple =
   match simple.Masc_exec.Shell_ir.sandbox with
-  | Masc_exec.Sandbox_target.Host | Ssh _ ->
+  | Masc_exec.Sandbox_target.Host | Micro_vm _ | Ssh _ | Delegated _ ->
     Alcotest.fail (label ^ ": expected Docker sandbox")
   | Docker { image; _ } -> Alcotest.(check string) (label ^ " image") "typed-docker" image
 ;;

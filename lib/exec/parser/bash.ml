@@ -61,6 +61,11 @@ let rec arg_as_assignment (arg : Shell_ir.arg) :
       in
       binding_of_literal_name_value name (value_of_pieces pieces))
   | Shell_ir.Concat [] -> None
+  | Shell_ir.Concat ((Shell_ir.Var _ | Shell_ir.Concat _) :: _) ->
+    (* A binding name is literal text. [$FOO=bar] assigns nothing in bash
+       either — it runs the expansion as a program. Spelled out rather than
+       left to a catch-all so a new [arg] constructor has to decide here. *)
+    None
 
 let split_env_prefix (args : Shell_ir.arg list) =
   let rec loop env = function
@@ -81,7 +86,8 @@ type stage_error =
   | Stage_parse_error of Parsed.parse_error
   | Stage_outside_subset of Parsed.reason_too_complex
 
-let raw_to_simple (args : Shell_ir.arg list, redirects)
+let raw_to_simple
+      ((args, redirects) : Shell_ir.arg list * Redirect_scope.t list)
     : (Shell_ir.simple, stage_error) result =
   match split_env_prefix args with
   | Error e -> Error (Stage_parse_error e)

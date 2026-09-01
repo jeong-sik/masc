@@ -534,7 +534,10 @@ let () =
   assert (result.stderr = "mock_stderr");
   (* Verify the kind discriminator is surfaced correctly. *)
   (match docker_sandbox with
-   | Masc_exec.Sandbox_target.Host | Masc_exec.Sandbox_target.Ssh _ -> assert false
+   | Masc_exec.Sandbox_target.Host
+   | Masc_exec.Sandbox_target.Micro_vm _
+   | Masc_exec.Sandbox_target.Ssh _
+   | Masc_exec.Sandbox_target.Delegated _ -> assert false
    | Masc_exec.Sandbox_target.Docker { image; _ } ->
        assert (image = "test-image"))
 

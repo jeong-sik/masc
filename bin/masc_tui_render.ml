@@ -6679,7 +6679,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     List.mapi (fun entry_index message -> (entry_index, message)) messages
   in
   let grouped_messages =
-    let rec loop previous_turn reversed = function
+    let rec loop previous_turn previous_turn_at reversed = function
       | [] -> List.rev reversed
       | (entry_index, message) :: rest ->
           let turn_id = message.me_request_id in
@@ -6708,10 +6708,22 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
           let next_previous =
             if grouped then Some turn_id else previous_turn
           in
-          loop next_previous
-            ((entry_index, message, role_label) :: reversed) rest
+          (* A turn is one causal block on the outer time axis. Its first row
+             chooses the hour rail for the entire block, so a skewed tool or
+             result clock cannot insert an older rail halfway through the
+             input -> progress -> tool -> output sequence. The row keeps its
+             own clock in the origin column; only the group rail is shared. *)
+          let timeline_at =
+            if starts_turn || not grouped then message_display_at message
+            else previous_turn_at
+          in
+          let next_previous_at =
+            if grouped then timeline_at else previous_turn_at
+          in
+          loop next_previous next_previous_at
+            ((entry_index, message, role_label, timeline_at) :: reversed) rest
     in
-    loop None [] visible_messages
+    loop None None [] visible_messages
   in
   let projected_tool_rows =
     keeper_message_tool_rows state ~keeper_name ~chat_cols
@@ -6724,7 +6736,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
        fields tie. A history reorder can only cause a miss: the exact body is
        another cache-key field, so an index never authorizes stale rows. *)
     List.map
-      (fun (entry_index, message, grouped_role_label) ->
+      (fun (entry_index, message, grouped_role_label, timeline_at) ->
         (* Projected once: the style is read off it and the body is built
            from it, and projecting twice would let a fold decide the colour
            from one reading and the text from another. *)
@@ -6842,7 +6854,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
              timestamp = message.me_timestamp;
              timeline_bucket =
                Option.map keeper_message_timeline_bucket
-                 (message_display_at message);
+                 timeline_at;
              role_label;
              role_label_mark_cells =
                Message_layout.role_label_mark_cells
@@ -7128,25 +7140,40 @@ let render_keeper_message (state : state) =
     let projected_tool_rows =
       keeper_message_tool_rows state ~keeper_name ~chat_cols
     in
-    let committed_layout_entries =
-      keeper_message_layout_entries state ~keeper_name ~chat_cols
+    let committed_messages =
+      keeper_message_visible_messages state ~keeper_name
     in
-    (* Rows for the turn still streaming, drawn under the committed history so
-       the streaming reply sits at the bottom edge, where the eye rests while
-       waiting for it. Reasoning is kept to its last line: it arrives faster
-       than anything else and a full transcript of it would push the reply and
-       the tool rows off the pane. *)
-    let live_entries =
+    let committed_layout_entries =
+      keeper_message_layout_entries ~messages:committed_messages state
+        ~keeper_name ~chat_cols
+    in
+    (* Rows for the turn still streaming. They join the committed/session row
+       for the same request rather than escaping to a second bottom-only lane:
+       one request has one position and one hour rail on the outer timeline. *)
+    let live_projection =
       match state.msg_live with
       | Some live
         when String.equal (Keeper_chat_transcript.keeper_name live) keeper_name
         ->
           let request_id = Keeper_chat_transcript.request_id live in
           let request_label = Keeper_chat.compact_request_id request_id in
+          let timeline_at =
+            List.find_map
+              (fun (message : msg_entry) ->
+                 if String.equal message.me_request_id request_id
+                 then message_display_at message
+                 else None)
+              committed_messages
+            |> function
+            | Some _ as observed -> observed
+            | None ->
+                let started_at = Keeper_chat_transcript.started_at live in
+                if Float.is_finite started_at && started_at > 0.
+                then Some started_at
+                else None
+          in
           let timeline_bucket =
-            Some
-              (keeper_message_timeline_bucket
-                 (Keeper_chat_transcript.started_at live))
+            Option.map keeper_message_timeline_bucket timeline_at
           in
           let entry ~markdown_source style role_label body =
             (* One alignment, on the label the row actually carries. Aligning
@@ -7196,8 +7223,9 @@ let render_keeper_message (state : state) =
              an append; the cache detects that (the new text no longer starts
              with the old) and falls back to one full render, the same work
              the uncached streaming path did on every frame. *)
-          List.filter_map Fun.id
-          @@ List.mapi
+          let entries =
+            List.filter_map Fun.id
+            @@ List.mapi
                (fun entry_index (item : Keeper_chat_transcript.trail_item) ->
               match item with
               | Keeper_chat_transcript.Trail_thinking _
@@ -7257,10 +7285,46 @@ let render_keeper_message (state : state) =
                               entry_index;
                             })
                        Message_layout.Keeper keeper_label text))
-            (Keeper_chat_transcript.trail live)
-      | Some _ | None -> []
+                 (Keeper_chat_transcript.trail live)
+          in
+          Some (request_id, timeline_at, entries)
+      | Some _ | None -> None
     in
-    let layout_entries = committed_layout_entries @ live_entries in
+    let committed_tagged =
+      List.combine committed_messages committed_layout_entries
+      |> List.map (fun (message, entry) -> Some message, entry)
+    in
+    let rec insert_at index inserted reversed = function
+      | rest when index <= 0 -> List.rev_append reversed (inserted @ rest)
+      | item :: rest -> insert_at (index - 1) inserted (item :: reversed) rest
+      | [] -> List.rev_append reversed inserted
+    in
+    let tagged_layout_entries =
+      match live_projection with
+      | None -> committed_tagged
+      | Some (request_id, timeline_at, live_entries) ->
+          let _, after_request =
+            List.fold_left
+              (fun (index, found) (message, _) ->
+                 ( index + 1
+                 , match message with
+                   | Some message
+                     when String.equal message.me_request_id request_id ->
+                       Some (index + 1)
+                   | Some _ | None -> found ))
+              (0, None) committed_tagged
+          in
+          let insertion =
+            match after_request with
+            | Some index -> index
+            | None ->
+                chat_live_insertion_index ~timeline_at committed_messages
+          in
+          insert_at insertion
+            (List.map (fun entry -> None, entry) live_entries)
+            [] committed_tagged
+    in
+    let layout_entries = List.map snd tagged_layout_entries in
     let inner_width = max 1 (framed_inner_width chat_cols) in
     (* Clamped here rather than where the key is handled: the limit depends on
        the terminal width and the pane's height, and a resize changes both
@@ -7275,26 +7339,55 @@ let render_keeper_message (state : state) =
        In both cases those rows sit between the anchor and bottom, so adding
        their height is what keeps the same anchored content still. *)
     let rows_since_pin =
-      match state.msg_scroll_pin with
-      | None -> 0
-      | Some pin -> (
-          match msg_entries_after_anchor (chat_rows_for state keeper_name) pin with
-          | None | Some [] -> 0
-          | Some arrived ->
-              let arrived =
-                keeper_message_layout_entries ~messages:arrived state
-                  ~keeper_name ~chat_cols
-              in
-              let previous =
-                let previous_index =
-                  List.length committed_layout_entries - List.length arrived
-                  - 1
+      match state.msg_scroll_pin, live_projection with
+      | None, _ -> 0
+      | Some _, Some _ ->
+          (* A live trail has no durable row identity and may already have
+             many wrapped rows when the operator first leaves the bottom.
+             Treating that existing height as newly arrived double-counts it
+             on the first key press. Structural compensation resumes when the
+             trail settles into committed rows with exact identities. *)
+          0
+      | Some pin, None ->
+          let rendered_suffix =
+            let rec find_visible = function
+              | [] -> None
+              | (Some message, entry) :: rest ->
+                  if same_msg_anchor pin message
+                  then Some (Some entry, List.map snd rest)
+                  else find_visible rest
+              | (None, _) :: rest -> find_visible rest
+            in
+            match find_visible tagged_layout_entries with
+            | Some _ as found -> found
+            | None ->
+                (* A hidden Memory/thinking row can own the logical pin but no
+                   layout entry. Start at the first visible identity after it,
+                   preserving the preceding entry from the full layout so an
+                   hour rail is measured exactly as the frame measures it. *)
+                let raw_after =
+                  Option.value ~default:[]
+                    (msg_entries_after_anchor (chat_rows_for state keeper_name) pin)
                 in
-                if previous_index < 0 then None
-                else List.nth_opt committed_layout_entries previous_index
-              in
-              Message_layout.total_rows ~markdown
-                ~origin:state.msg_origin_display ?previous ~inner_width arrived)
+                let after_anchors = List.map msg_anchor raw_after in
+                let belongs message =
+                  List.exists
+                    (fun anchor -> same_msg_anchor anchor message)
+                    after_anchors
+                in
+                let rec find_after previous = function
+                  | [] -> None
+                  | (Some message, entry) :: rest when belongs message ->
+                      Some (previous, entry :: List.map snd rest)
+                  | (_, entry) :: rest -> find_after (Some entry) rest
+                in
+                find_after None tagged_layout_entries
+          in
+          (match rendered_suffix with
+           | None | Some (_, []) -> 0
+           | Some (previous, arrived) ->
+               Message_layout.total_rows ~markdown
+                 ~origin:state.msg_origin_display ?previous ~inner_width arrived)
     in
     let scroll, visible_rows =
       Message_layout.clamped_scrolled_rows ~markdown
@@ -7634,14 +7727,11 @@ let render_keeper_message (state : state) =
         let compact_scroll_hint =
           if scroll = 0 then "PgUp:history" else "PgDn:newest"
         in
-        Printf.sprintf
-          "%s  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-F:layout  %s  %s"
-          compact_enter_hint compact_scroll_hint escape_hint
+        Masc_tui_footer.compact_chat_hints ~enter_hint:compact_enter_hint
+          ~scroll_hint:compact_scroll_hint ~escape_hint
       else
-        Printf.sprintf
-          "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:memory  \
-           Ctrl-F:layout  Ctrl-O:image  %s%s  %s  Ctrl-U:clear"
-          enter_hint scroll_hint switch_hint escape_hint
+        Masc_tui_footer.chat_hints ~enter_hint ~scroll_hint ~switch_hint
+          ~escape_hint
     in
     Buffer.add_string chat_buf
       (footer_line state ~max_cells:chat_cols ~hints:footer_hints);
@@ -14653,32 +14743,113 @@ let context_composition_lines ~cols
        them is a breakdown of another, and they do not add up."
 
 
-let context_exact_input_lines state
+(* Items grouped by kind, biggest group first, so the tab answers "what is
+   this request made of" before it answers "what is item 34". Counted from the
+   same items the list below draws, never from the composition tab's separate
+   meter. *)
+let context_exact_input_summary ~width (items : Masc_tui_context_inspector.exact_input_item list) =
+  let module Inspector = Masc_tui_context_inspector in
+  let tally = Hashtbl.create 8 in
+  let order = ref [] in
+  List.iter
+    (fun (item : Inspector.exact_input_item) ->
+      let key = Inspector.exact_input_category item.kind in
+      (match Hashtbl.find_opt tally key with
+       | None ->
+           order := key :: !order;
+           Hashtbl.replace tally key (1, item.bytes)
+       | Some (count, bytes) ->
+           Hashtbl.replace tally key (count + 1, bytes + item.bytes)))
+    items;
+  let groups =
+    List.filter_map
+      (fun key ->
+        match Hashtbl.find_opt tally key with
+        | None -> None
+        | Some (count, bytes) -> Some (key, count, bytes))
+      (List.rev !order)
+  in
+  let ranked =
+    List.stable_sort
+      (fun (_, _, left) (_, _, right) -> compare right left)
+      groups
+  in
+  let total = List.fold_left (fun sum (_, _, bytes) -> sum + bytes) 0 ranked in
+  let bar_width = min 60 width in
+  let bar =
+    if total = 0 then []
+    else
+      [ "  "
+        ^ Context_bars.stacked_bar ~width:bar_width
+            ~segments:(List.map (fun (_, _, bytes) -> ("", bytes)) ranked)
+      ]
+  in
+  let rows =
+    List.mapi
+      (fun index (key, count, bytes) ->
+        let share =
+          if total = 0 then 0. else float bytes /. float total *. 100.
+        in
+        let share_text =
+          if bytes > 0 && share < 0.05 then "<0.1%"
+          else Printf.sprintf "%.1f%%" share
+        in
+        (* Padded by cells, not by bytes: a category name carries a middle
+           dot, and %-22s would spend two of its twenty-two on one cell and
+           leave that row a column short of the rest. *)
+        let label =
+          key
+          ^ String.make
+              (max 0 (22 - Message_layout.display_width key))
+              ' '
+        in
+        Printf.sprintf "  %s %s %s%3d %s%s  %9s  %6s"
+          (Context_bars.segment_glyph index)
+          label Ansi.dim count
+          (if count = 1 then "item " else "items")
+          Ansi.reset
+          (Masc_tui_context_inspector.format_bytes bytes)
+          share_text)
+      ranked
+  in
+  ( [ "  "
+      ^ Context_bars.band ~width ~title:"BY KIND"
+          ~caption:
+            (Printf.sprintf "%d items, %s retained" (List.length items)
+               (Masc_tui_context_inspector.format_bytes total))
+    ]
+    @ bar @ rows
+  , total )
+
+let context_exact_input_lines ~cols state
     (input : Masc_tui_context_inspector.provider_input) =
   let module Inspector = Masc_tui_context_inspector in
   let items = Inspector.exact_input_items input in
+  let width = max 1 (framed_inner_width cols - 2) in
   match state.context_inspector_exact with
-  | Some index ->
-      (match List.nth_opt items index with
-       | None ->
-         [ (Theme.bad ()) ^ "  Selected input item is no longer present"
-           ^ Ansi.reset ]
-       | Some item ->
-           let width = max 8 (snd (get_terminal_size ()) - 6) in
-           let heading =
-             Printf.sprintf "  %s%s%s  ·  %s  ·  sha256 %s"
-               Ansi.bold
-               (Inspector.exact_input_label item.kind)
-               Ansi.reset
-               (Inspector.format_bytes item.bytes)
-               (String.sub item.sha256 0 12)
-           in
-           let body =
-             Message_layout.wrap_body ~max_cells:width
-               ~sanitize:Keeper_chat.terminal_safe_text item.text
-             |> List.map (fun line -> "  " ^ line)
-           in
-           heading :: "" :: body)
+  | Some index -> (
+      match List.nth_opt items index with
+      | None ->
+          ( [ (Theme.bad ()) ^ "  Selected input item is no longer present"
+              ^ Ansi.reset
+            ]
+          , None )
+      | Some item ->
+          let heading =
+            Printf.sprintf "  %s%s%s  ·  %s  ·  sha256 %s" Ansi.bold
+              (Inspector.exact_input_label item.kind)
+              Ansi.reset
+              (Inspector.format_bytes item.bytes)
+              (String.sub item.sha256 0 12)
+          in
+          let body =
+            Message_layout.wrap_body ~max_cells:width
+              ~sanitize:Keeper_chat.terminal_safe_text item.text
+            |> List.map (fun line -> "  " ^ line)
+          in
+          (* Reading one item scrolls by hand; there is no row to keep in
+             view. *)
+          (heading :: "" :: body, None))
   | None ->
       let identity =
         Printf.sprintf "  Exact provider input  %s  %s"
@@ -14686,37 +14857,69 @@ let context_exact_input_lines state
              (Ids.Turn_ref.to_string input.turn_ref))
           (Masc_domain.iso8601_of_unix_seconds input.captured_at)
       in
-      let rows =
-        List.mapi
-          (fun index (item : Inspector.exact_input_item) ->
-             let selected = index = state.context_inspector_cursor in
-             let marker, style =
-               if selected then (">", Theme.selection) else (" ", Ansi.reset)
-             in
-             Printf.sprintf "%s %s %3d  %-34s %9s  %s%s"
-               style marker (index + 1)
-               (Inspector.exact_input_label item.kind)
-               (Inspector.format_bytes item.bytes)
-               (String.sub item.sha256 0 12)
-               Ansi.reset)
-          items
-      in
-      [ identity
-      ; Printf.sprintf
-          "  Wire  %s · %s · %s · %s"
-          input.wire.provider
+      let wire =
+        Printf.sprintf "  Wire  %s · %s · %s · %s" input.wire.provider
           input.wire.model
           (Inspector.format_bytes input.wire.body_bytes)
           (String.sub input.wire.body_sha256 0 12)
-      ; ""
-      ; Ansi.bold ^ "  Canonical model input items" ^ Ansi.reset
-      ]
-      @ (if rows = [] then [ "  (this request carried no retained items)" ] else rows)
-      @ [ ""
-        ; Ansi.dim
-          ^ "  Enter opens one exact item. The wire digest binds this canonical input to the serialized provider request."
-          ^ Ansi.reset
-        ]
+      in
+      let summary, retained = context_exact_input_summary ~width items in
+      (* Both figures describe this one request, so the difference between
+         them is the envelope and whatever the serializer added -- worth
+         naming rather than leaving as two numbers that do not match. *)
+      let against_wire =
+        if retained > 0 && input.wire.body_bytes > 0 then
+          [ Printf.sprintf "  %s%s retained here, %s serialized on the wire%s"
+              Ansi.dim
+              (Inspector.format_bytes retained)
+              (Inspector.format_bytes input.wire.body_bytes)
+              Ansi.reset
+          ]
+        else []
+      in
+      let header =
+        [ identity; wire; "" ] @ summary @ against_wire @ [ "" ]
+        @ [ "  "
+            ^ Context_bars.band ~width ~title:"ITEMS"
+                ~caption:"in the order the request carries them"
+          ]
+      in
+      let rows =
+        List.mapi
+          (fun index (item : Inspector.exact_input_item) ->
+            let selected = index = state.context_inspector_cursor in
+            let marker, style =
+              if selected then (">", Theme.selection) else (" ", Ansi.reset)
+            in
+            Printf.sprintf "%s %s %3d  %-34s %9s  %s%s" style marker
+              (index + 1)
+              (Inspector.exact_input_label item.kind)
+              (Inspector.format_bytes item.bytes)
+              (String.sub item.sha256 0 12)
+              Ansi.reset)
+          items
+      in
+      let body =
+        if rows = [] then [ "  (this request carried no retained items)" ]
+        else rows
+      in
+      (* Where the highlight sits, so the pane can keep it in the window. *)
+      let selected =
+        if rows = [] then None
+        else
+          Some
+            (List.length header
+            + min (List.length rows - 1)
+                (max 0 state.context_inspector_cursor))
+      in
+      ( header @ body
+        @ [ ""
+          ; Ansi.dim
+            ^ "  Enter opens one exact item. The wire digest binds this \
+               canonical input to the serialized provider request."
+            ^ Ansi.reset
+          ]
+      , selected )
 
 let context_input_map_lines state (record : Turn_record.t)
     (provider_input : Masc_tui_context_inspector.provider_input option) =
@@ -14740,10 +14943,12 @@ let context_input_map_lines state (record : Turn_record.t)
                ~sanitize:Keeper_chat.terminal_safe_text text
              |> List.map (fun line -> "  " ^ line)
            in
-           heading :: "" :: body
+           (heading :: "" :: body, None)
        | Some _ | None ->
-           [ (Theme.bad ()) ^ "  Exact text is not retained for this component"
-             ^ Ansi.reset ])
+           ( [ (Theme.bad ())
+               ^ "  Exact text is not retained for this component" ^ Ansi.reset
+             ]
+           , None ))
   | None ->
       let identity =
         Printf.sprintf "  Provider request map  %s#%d"
@@ -14768,49 +14973,80 @@ let context_input_map_lines state (record : Turn_record.t)
                Ansi.reset)
           rows
       in
-      identity
-      :: [ ""
-         ; Ansi.bold ^ "  What reached the provider, and why" ^ Ansi.reset
-         ]
-      @ (if mapped = [] then [ "  (exact component attribution unavailable)" ]
-         else mapped)
-      @ [ ""
-        ; Ansi.dim
-          ^ "  Enter opens only text verified against this turn's digest. Other rows remain byte-only evidence."
-          ^ Ansi.reset
+      let header =
+        [ identity
+        ; ""
+        ; Ansi.bold ^ "  What reached the provider, and why" ^ Ansi.reset
         ]
+      in
+      let body =
+        if mapped = [] then [ "  (exact component attribution unavailable)" ]
+        else mapped
+      in
+      (* Where the highlight sits, so the pane can keep it in the window. *)
+      let selected =
+        if mapped = [] then None
+        else
+          Some
+            (List.length header
+            + min (List.length mapped - 1)
+                (max 0 state.context_inspector_cursor))
+      in
+      ( header @ body
+        @ [ ""
+          ; Ansi.dim
+            ^ "  Enter opens only text verified against this turn's digest. \
+               Other rows remain byte-only evidence."
+            ^ Ansi.reset
+          ]
+      , selected )
 
+(* The pane's rows and, when a tab carries a highlight, the row it sits on.
+   The highlight is reported rather than recomputed by the caller: only this
+   module knows how many header rows a tab draws above its list, and a caller
+   that guessed would scroll to the wrong row every time the header changed. *)
 let context_inspector_content_lines ~cols state =
   match state.context_inspector_reading with
   | None ->
-      [ if state.context_inspector_loading then "  Loading provider-input evidence..."
-        else "  No context reading has been requested." ]
+      ( [ (if state.context_inspector_loading then
+             "  Loading provider-input evidence..."
+           else "  No context reading has been requested.")
+        ]
+      , None )
   | Some (_, reading) ->
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Composition ->
            (match reading.turn with
-            | Ok selection -> context_composition_lines ~cols selection
+            | Ok selection -> (context_composition_lines ~cols selection, None)
             | Error detail ->
-                [ (Theme.bad ()) ^ "  Composition unavailable: "
-                  ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ])
+                ( [ (Theme.bad ()) ^ "  Composition unavailable: "
+                    ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
+                  ]
+                , None ))
        | Masc_tui_context_inspector.Exact_input ->
            (match reading.provider_input with
-            | Ok input -> context_exact_input_lines state input
+            | Ok input -> context_exact_input_lines ~cols state input
             | Error detail ->
-                [ (Theme.bad ()) ^ "  Exact input unavailable: "
-                  ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ])
+                ( [ (Theme.bad ()) ^ "  Exact input unavailable: "
+                    ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
+                  ]
+                , None ))
        | Masc_tui_context_inspector.Input_map ->
            (match reading.turn with
             | Error detail ->
-                [ (Theme.bad ()) ^ "  Input map unavailable: "
-                  ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ]
+                ( [ (Theme.bad ()) ^ "  Input map unavailable: "
+                    ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
+                  ]
+                , None )
             | Ok { Masc_tui_context_inspector.attributed = None; _ } ->
                 (* The map is a per-component table; with no attribution there
                    are no rows to draw, and inventing them from the latest
                    turn's totals would state bytes nobody measured. *)
-                [ (Theme.bad ())
-                  ^ "  No turn on this page recorded an exact input composition"
-                  ^ Ansi.reset ]
+                ( [ (Theme.bad ())
+                    ^ "  No turn on this page recorded an exact input \
+                       composition" ^ Ansi.reset
+                  ]
+                , None )
             | Ok { Masc_tui_context_inspector.attributed = Some { record; _ }; _ }
               ->
                 let provider_input =
@@ -14823,7 +15059,7 @@ let context_inspector_content_lines ~cols state =
 let context_inspector_viewport state =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  ( List.length (context_inspector_content_lines ~cols state)
+  ( List.length (fst (context_inspector_content_lines ~cols state))
   , framed_content_height ~rows )
 
 let render_context_inspector state =
@@ -14852,11 +15088,24 @@ let render_context_inspector state =
        ^ "  "
        ^ (tab_label Masc_tui_context_inspector.Input_map "3" "map"));
   framed_divider buf cols;
-  let lines = context_inspector_content_lines ~cols state in
+  let lines, selected = context_inspector_content_lines ~cols state in
   let content_height = framed_content_height ~rows in
   let scroll =
     Masc_tui_scroll.normalize ~count:(List.length lines)
       ~height:content_height state.context_inspector_scroll
+  in
+  (* On the list tabs j/k moves the highlight and nothing moved the window, so
+     a list longer than the pane walked the highlight out of sight and the keys
+     went on working against rows nobody could see. [Masc_tui_scroll] documents
+     this pairing -- the cursor names a row, the window follows it -- and this
+     surface was the one not holding up its end. *)
+  let scroll =
+    match selected with
+    | None -> scroll
+    | Some cursor ->
+        Masc_tui_scroll.normalize ~count:(List.length lines)
+          ~height:content_height
+          (Masc_tui_scroll.ensure_visible ~cursor ~height:content_height scroll)
   in
   lines
   |> List.filteri (fun index _ ->

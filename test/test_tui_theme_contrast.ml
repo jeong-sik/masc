@@ -11,6 +11,7 @@
 
 let check = Alcotest.check
 let bool = Alcotest.bool
+let string = Alcotest.string
 
 module Color = Masc_tui_color
 module Palette = Masc_tui_terminal_palette

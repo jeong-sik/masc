@@ -590,9 +590,21 @@ let chunk_rows ~traces entries =
           let updated =
             match attach [] existing with
             | Some chunks -> chunks
-            | None ->
-                apply_member (empty_chunk ~keeper ~turn:None ~at) ~at member
-                :: existing
+            | None -> (
+                match member with
+                | Member_quiet ->
+                    (* A state observation may refresh a turn it can see;
+                       it cannot conjure one. A chunk born from telemetry
+                       draws as [turn ? | running] for a keeper the scope
+                       shows nothing else about (live capture 2026-09-01,
+                       #32208). *)
+                    existing
+                | Member_turn_marker _ | Member_wire_call _
+                | Member_wire_return _ | Member_settle _
+                | Member_ledger_tool _ ->
+                    apply_member (empty_chunk ~keeper ~turn:None ~at) ~at
+                      member
+                    :: existing)
           in
           Hashtbl.replace chunks keeper updated)
     oldest_first;

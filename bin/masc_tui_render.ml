@@ -10348,7 +10348,7 @@ let render_runtime (state : state) =
     (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf
-            "%sj/k:scroll  Enter:detail  p:%s  c:connectors  Tab:next  q:quit  r:live refresh"
+            "%sj/k:scroll  Enter:detail  p:%s  Tab:next  q:quit  r:live refresh"
             scroll_hint
             (match state.runtime_mode with
              | Masc_tui_types.Runtime_lanes -> "all runtimes"

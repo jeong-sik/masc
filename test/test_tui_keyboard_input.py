@@ -424,19 +424,6 @@ def send_and_wait(
     return bytes(output[start:frame_end])
 
 
-def palette_go(
-    process: subprocess.Popen[bytes],
-    master_fd: int,
-    output: bytearray,
-    query: bytes,
-    needle: Needle,
-) -> bytes:
-    """Jump through the command palette. Surfaces that hang off a parent
-    instead of holding a Tab stop (Lanes, Connectors, Task Review, Code) keep a
-    'go <label>' palette entry, so this is how a scenario reaches them."""
-    return send_and_wait(process, master_fd, output, b":" + query + b"\r", needle)
-
-
 def copy_reference(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -6018,10 +6005,6 @@ def planning_review_hierarchy_interaction() -> Interaction:
                     f"Evaluator Verdicts did not explain itself ({needle!r}): "
                     f"{verdicts_plain!r}"
                 )
-        # The walk continues through the two children that keep their own
-        # headers, then wraps back round to Goals.
-        send_and_wait(process, master_fd, output, b"v", b"MASC Schedules")
-        send_and_wait(process, master_fd, output, b"v", b"MASC Fusion")
         goals_again = send_and_wait(
             process, master_fd, output, b"v", b"\xe2\x96\xb81 Goals"
         )
@@ -6029,8 +6012,8 @@ def planning_review_hierarchy_interaction() -> Interaction:
             raise AssertionError(
                 f"Goals did not retain the Task Review sibling: {goals_again!r}"
             )
-        # The children are [v] stops, not the next top-level Tab destination.
-        send_and_wait(process, master_fd, output, b"\t", b"MASC Workspace")
+        # Task Review is a child, not the next top-level Tab destination.
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Schedules")
         os.write(master_fd, b"q")
 
     return interact
@@ -6123,7 +6106,7 @@ def repository_add_interaction(requests: HttpRequests) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Workspace")
+        tab_until(process, master_fd, output, b"MASC Repositories")
         wait_for_output(
             process, master_fd, output, b"ready", start=0, timeout=3.0
         )
@@ -6157,7 +6140,7 @@ def repositories_path_interaction(
     _base_path: str,
 ) -> None:
     """Show paths, inspect Git changes, then enter the repository."""
-    tab_until(process, master_fd, output, b"MASC Workspace")
+    tab_until(process, master_fd, output, b"MASC Repositories")
     narrow = resize_and_wait(
         process,
         master_fd,
@@ -6222,7 +6205,7 @@ def repositories_path_interaction(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Workspace")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Repositories")
     code = send_and_wait(process, master_fd, output, b"\r", b"src")
     code_plain = CSI_RE.sub(b"", code).decode("utf-8")
     if "masc ▸ /" not in code_plain:
@@ -6241,7 +6224,7 @@ def project_changes_interaction(
 ) -> None:
     """List an unregistered project's Git changes from Code, return to the
     tree, then reopen the list and enter the selected file."""
-    palette_go(process, master_fd, output, b"go code", b"README.md")
+    tab_until(process, master_fd, output, b"README.md")
     changes_wide = send_and_wait(process, master_fd, output, b"d", b"lib/a.ml")
     changes_narrow = resize_and_wait(
         process,
@@ -6300,7 +6283,7 @@ def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Workspace")
+        tab_until(process, master_fd, output, b"MASC Repositories")
         wait_for_output(
             process, master_fd, output, b"ready", start=0, timeout=3.0
         )
@@ -6781,7 +6764,7 @@ def keeper_lanes_interaction(
             b"j",
             keeper_row_selected(b"beta"),
         )
-        unread = palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
+        unread = tab_until(process, master_fd, output, b"MASC Lanes")
         # The body note is "(not loaded yet — press r)": #30945 added the
         # key hint without updating this needle.
         if b"(not loaded)" not in unread or b"(not loaded yet" not in unread:
@@ -7154,7 +7137,7 @@ def keeper_lanes_interaction(
                 f"{right_detail!r}"
             )
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
-        palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
+        tab_until(process, master_fd, output, b"MASC Lanes")
         enter_detail = send_and_wait(
             process,
             master_fd,
@@ -7168,7 +7151,7 @@ def keeper_lanes_interaction(
                 f"{enter_detail!r}"
             )
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
-        palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
+        tab_until(process, master_fd, output, b"MASC Lanes")
         orphan_count = 24
         fixtures[KEEPER_LANES_PATH] = keeper_lanes_response(
             [
@@ -7344,7 +7327,7 @@ def keeper_lanes_ia_interaction(gate: GatedHttpResponse) -> Interaction:
                     f"{keepers_plain!r}"
                 )
 
-        palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
+        tab_until(process, master_fd, output, b"MASC Lanes")
         lanes = resize_and_wait(
             process,
             master_fd,
@@ -7796,7 +7779,7 @@ def code_lane_interaction(
     """The Code surface: one directory level, Enter drills, a file opens
     lexed. The keyword's yellow span and the dim gutter are the claim that
     the file was lexed, not just printed."""
-    listing = palette_go(process, master_fd, output, b"go code", b"README.md")
+    listing = tab_until(process, master_fd, output, b"README.md")
     plain = CSI_RE.sub(b"", listing).decode("utf-8")
     for needle in ("lib", "README.md"):
         if needle not in plain:
@@ -8190,15 +8173,22 @@ def runtime_surface_interaction(
     ) -> None:
         completed = False
         try:
-            # Connectors and Code both left the Tab ring, so the ring
-            # predecessor of Runtime is now Workspace. The hop is
+            # Channels now lives under the selected Keeper, so the ring
+            # predecessor of Runtime is Code. Each hop is
             # needle-verified so an async frame between presses cannot lap
             # the walk; the last Tab stays bare because the probe fixture
             # must observe its request after [start].
-            tab_until(process, master_fd, output, b"MASC Workspace")
+            tab_until(process, master_fd, output, b"MASC Repositories")
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"\t",  # Repos -> Code
+                b"(Enter opens the selected file)",
+            )
             read_available(master_fd, output)
             start = len(output)
-            os.write(master_fd, b"\t")  # Workspace -> Runtime
+            os.write(master_fd, b"\t")  # Code -> Runtime
             if not wait_for_fixture_event(
                 process, master_fd, output, initial_probe.requested, timeout=10.0
             ):
@@ -8410,10 +8400,6 @@ def runtime_surface_interaction(
                     raise AssertionError(
                         f"Runtime discarded its prior rows after failure: {preserved_plain!r}"
                     )
-            # The [c] hop opens Connectors off the ring, and Esc returns to
-            # the Runtime parent rather than Overview.
-            send_and_wait(process, master_fd, output, b"c", b"MASC Connectors")
-            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Runtime")
             send_and_wait(process, master_fd, output, b"\t", b"MASC Config")
             os.write(master_fd, b"q")
             completed = True
@@ -8507,9 +8493,7 @@ def schedule_detail_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        listing = palette_go(
-            process, master_fd, output, b"go schedules", b"MASC Schedules"
-        )
+        listing = tab_until(process, master_fd, output, b"MASC Schedules")
         listing_plain = CSI_RE.sub(b"", listing)
         for needle in (
             b"wake:succeeded",

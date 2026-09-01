@@ -3502,7 +3502,6 @@ let workspace_entries_count_label total =
 let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
   @ [ "go Task Review", Palette_goto Verification ]
-  @ [ "go Connectors", Palette_goto Connectors ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring

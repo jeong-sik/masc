@@ -153,9 +153,10 @@ type checkpoint_reason =
   | Awaiting_external_effect
   | Repeated_tool_call
   | Repeated_assistant_text
-(** Why a healthy turn checkpointed before [Completed]. Only
-    [Durable_stimulus_arrived] proves that a newer durable source, rather than
-    unfinished work in the admitted source, caused the yield. *)
+(** Why a healthy turn checkpointed before [Completed].
+    [Durable_stimulus_arrived] proves that a newer durable source caused the
+    yield. [Repeated_assistant_text] is a typed loop guard whose durable
+    checkpoint preserves the turn after admitted attention was projected. *)
 
 type turn_success =
   | Turn_completed of
@@ -174,10 +175,11 @@ type turn_success =
     [Turn_completed] proves that the requested action path finished.
     [Turn_checkpointed] and [Turn_input_required] are healthy runtime exits.
     The checkpoint reason lets the heartbeat retire an admitted attention
-    batch only when a newer durable source caused the yield; other checkpoints
-    preserve it for continuation. Supervisor cancellation and a non-executable
-    phase remain distinct so a durable source cannot be acknowledged as
-    completed work. *)
+    batch when a newer durable source caused the yield or the typed
+    repeated-assistant loop guard durably preserved the already-projected
+    attention; other checkpoints preserve it for continuation. Supervisor cancellation
+    and a non-executable phase remain distinct so a durable source cannot be
+    acknowledged as completed work. *)
 
 val hitl_replay_preemption_request
   :  resolution_deliverable:(Keeper_event_queue.hitl_resolution -> bool)

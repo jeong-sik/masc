@@ -3,8 +3,8 @@
     Provider, configuration, context-window, and tool failures describe the
     runtime attempt, not the independent Board/Schedule/Task facts admitted to
     that attempt. Every such outcome therefore maps to [Batch_no_action]; only
-    a completed turn or a yield specifically caused by a newer durable source
-    can advance admitted attention. *)
+    a completed turn or a typed checkpoint that durably preserves a turn after
+    projecting admitted attention can advance that attention. *)
 
 open Alcotest
 
@@ -53,7 +53,7 @@ let deferred_lane =
 let assert_no_queue_action label outcome =
   match Loop.batch_disposition_of_cycle_outcome (Some outcome) with
   | Loop.Batch_no_action -> ()
-  | Loop.Batch_ack_completed _ | Loop.Batch_ack_durable_stimulus_yield ->
+  | Loop.Batch_ack_completed _ | Loop.Batch_ack_attention_only ->
     failf "%s incorrectly authorized ACK of failed-turn input" label
 ;;
 
@@ -92,6 +92,18 @@ let test_nonterminal_outcomes_preserve_batch () =
          ; checkpoint_reason = Turn.Awaiting_external_effect
          ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
          })
+  ; Some
+      (Cycle.Checkpointed
+         { meta
+         ; checkpoint_reason = Turn.Operation_queued
+         ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
+         })
+  ; Some
+      (Cycle.Checkpointed
+         { meta
+         ; checkpoint_reason = Turn.Repeated_tool_call
+         ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
+         })
   ; Some (Cycle.Input_required meta)
   ; Some (Cycle.Cancelled meta)
   ; Some (Cycle.Skipped meta)
@@ -99,7 +111,7 @@ let test_nonterminal_outcomes_preserve_batch () =
   |> List.iter (fun outcome ->
     match Loop.batch_disposition_of_cycle_outcome outcome with
     | Loop.Batch_no_action -> ()
-    | Loop.Batch_ack_completed _ | Loop.Batch_ack_durable_stimulus_yield ->
+    | Loop.Batch_ack_completed _ | Loop.Batch_ack_attention_only ->
       fail "an unfinished turn incorrectly authorized Event Queue ACK")
 ;;
 
@@ -114,11 +126,45 @@ let test_durable_stimulus_checkpoint_acks_admitted_batch () =
             ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
             }))
   with
-  | Loop.Batch_ack_durable_stimulus_yield -> ()
+  | Loop.Batch_ack_attention_only -> ()
   | Loop.Batch_ack_completed _ ->
     fail "a checkpoint was treated as a fully completed connector disposition"
   | Loop.Batch_no_action ->
     fail "a newer durable stimulus left the already-admitted batch pending"
+;;
+
+let test_repeated_assistant_checkpoint_acks_admitted_attention () =
+  let meta = test_meta () in
+  match
+    Loop.batch_disposition_of_cycle_outcome
+      (Some
+         (Cycle.Checkpointed
+            { meta
+            ; checkpoint_reason = Turn.Repeated_assistant_text
+            ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
+            }))
+  with
+  | Loop.Batch_ack_attention_only -> ()
+  | Loop.Batch_ack_completed _ ->
+    fail "a loop-guard checkpoint was treated as a completed connector disposition"
+  | Loop.Batch_no_action ->
+    fail "a repeated-assistant checkpoint retained already-observed attention"
+;;
+
+let test_repeated_assistant_checkpoint_records_hitl_continuation () =
+  let meta = test_meta () in
+  let outcome =
+    Cycle.Checkpointed
+      { meta
+      ; checkpoint_reason = Turn.Repeated_assistant_text
+      ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
+      }
+  in
+  check bool
+    "HITL continuation projection is required before ACK"
+    true
+    (Loop.batch_disposition_of_cycle_outcome (Some outcome)
+     |> Loop.For_testing.batch_disposition_records_continuation)
 ;;
 
 let () =
@@ -137,6 +183,14 @@ let () =
             "durable-stimulus yield advances the admitted batch"
             `Quick
             test_durable_stimulus_checkpoint_acks_admitted_batch
+        ; test_case
+            "repeated-assistant checkpoint advances admitted attention"
+            `Quick
+            test_repeated_assistant_checkpoint_acks_admitted_attention
+        ; test_case
+            "repeated-assistant checkpoint projects HITL continuation"
+            `Quick
+            test_repeated_assistant_checkpoint_records_hitl_continuation
         ] )
     ]
 ;;

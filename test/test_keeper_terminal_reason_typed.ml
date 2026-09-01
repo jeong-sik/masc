@@ -992,6 +992,7 @@ let () =
         ?(usage_scope = Runtime_usage_scope.Per_request)
         ~last_outcome
         ~last_reason
+        ()
     =
     let proactive_rt =
       { prior.runtime.proactive_rt with last_outcome; last_reason }
@@ -1050,6 +1051,7 @@ let () =
     reactive_success
       ~last_outcome:KMC.Proactive_error
       ~last_reason:"provider failure detail without a classifier prefix"
+      ()
   in
   check
     "reactive success clears typed proactive error"
@@ -1061,6 +1063,7 @@ let () =
     reactive_success
       ~last_outcome:KMC.Proactive_text_response
       ~last_reason:error_like_reason
+      ()
   in
   check
     "reactive success ignores error-like reason text"
@@ -1088,6 +1091,7 @@ let () =
       ~usage_scope:Runtime_usage_scope.Conversation_cumulative
       ~last_outcome:KMC.Proactive_unknown
       ~last_reason:"cumulative usage"
+      ()
   in
   check
     "conversation cumulative input is not added as a turn delta"
@@ -1116,6 +1120,7 @@ let () =
       ~usage_scope:Runtime_usage_scope.Per_request
       ~last_outcome:KMC.Proactive_unknown
       ~last_reason:"per-request usage"
+      ()
   in
   check
     "per-request input remains additive"

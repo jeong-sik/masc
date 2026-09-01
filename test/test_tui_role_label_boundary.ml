@@ -18,6 +18,7 @@ let styles =
   [ ("user", Layout.User)
   ; ("keeper", Layout.Keeper)
   ; ("status", Layout.Status)
+  ; ("journal", Layout.Journal)
   ; ("error", Layout.Error)
   ; ("tool", Layout.Tool)
   ; ("thinking", Layout.Thinking)

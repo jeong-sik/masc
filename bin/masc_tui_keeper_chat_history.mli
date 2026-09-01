@@ -31,10 +31,10 @@
 
     {2 Ordering}
 
-    Rows are decoded in producer order. [turn_sequence] joins direct and
-    autonomous sources on the persisted absolute turn; [structural_id] keeps
-    row identity through refresh. [ts] is display/pagination metadata and has
-    no conversation-order authority. *)
+    Rows are decoded in producer order. The pane groups rows by [turn_id],
+    keeps each group causal, then orders whole groups and unowned/broadcast
+    rows by [ts]. [turn_sequence] breaks an exact timestamp tie between turn
+    groups; [structural_id] keeps row identity through refresh. *)
 
 (** The surface a row arrived on, mirrored from [Surface_ref.t] in the server.
     This library carries no [masc] dependency, so it cannot name that type;
@@ -141,14 +141,15 @@ type attachment_note =
 
 type row =
   { at : float
-      (** Producer wall clock for display and pagination only; never a
-          conversation ordering key. *)
+      (** Producer wall clock for display, pagination, and chronological
+          placement of a whole turn group or unowned row. Never reorders rows
+          inside one [turn_id]. *)
   ; structural_id : string option
       (** Stable server row identity plus a projection discriminator when one
           source row expands to reasoning/tool/reply rows. *)
   ; turn_sequence : int option
       (** Absolute Keeper turn from persisted [turn_ref], when present. This
-          orders turn groups across direct and autonomous stores. *)
+          resolves exact-time ties between grouped turns. *)
   ; turn_id : string option
       (** Exact producer identity for grouping rows from one turn: the typed
           delivery key for direct turns, otherwise the persisted [turn_ref].

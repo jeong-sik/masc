@@ -28,13 +28,42 @@ const committed = {
   outcome: 'committed',
   recorded_at: 1786000000,
   revision: 223,
-  source: { kind: 'librarian', trace_id: 'trace-a', generation: 1 },
+  source: { kind: 'librarian', trace_id: 'trace-a' },
   change: {
-    added: [{ claim: 'x', category: 'fact', first_seen: 1785990000 }],
+    added: [{
+      claim: 'x',
+      category: 'fact',
+      first_seen: 1785990000,
+      last_seen: 1785990001,
+      reinforcement: 1,
+      origin: { kind: 'injected', trace_id: '' },
+      basis: { kind: 'observed' },
+    }],
     removed: [],
     retained: 3,
+    invalidated: [{
+      fact: {
+        claim: 'derived x',
+        category: 'fact',
+        first_seen: 1785980000,
+        last_seen: 1785980001,
+        reinforcement: 0,
+        origin: { kind: 'authored', trace_id: 'trace-before' },
+        basis: {
+          kind: 'derived',
+          derivations: [{
+            rule_id: 'rule-x',
+            premise_ids: [`sha256:${'a'.repeat(64)}`],
+          }],
+        },
+      },
+      missing_premise_ids: [`sha256:${'a'.repeat(64)}`],
+    }],
   },
-  dropped: [{ memory_id: 'id:gone', reason: 'superseded by the openssl decision' }],
+  dropped: [{
+    memory_id: `sha256:${'b'.repeat(64)}`,
+    reason: 'superseded by the openssl decision',
+  }],
 }
 
 const failed = {
@@ -49,7 +78,13 @@ const failed = {
 }
 
 function payload(entries: unknown[], undecodable = 0) {
-  return { keeper: 'kidsnote', returned: entries.length, undecodable_lines: undecodable, entries }
+  return {
+    keeper: 'kidsnote',
+    dashboard_surface: '/api/v1/keepers/:name/memory-journal',
+    returned: entries.length,
+    undecodable_lines: undecodable,
+    entries,
+  }
 }
 
 describe('memory journal', () => {
@@ -75,7 +110,16 @@ describe('memory journal', () => {
     const entry = journal.entries[0]
     if (!entry?.ok || entry.outcome !== 'committed') throw new Error('expected a commit')
     expect(entry.sourceKind).toBe('librarian')
-    expect(entry.added).toEqual([{ claim: 'x', category: 'fact', firstSeen: 1785990000 }])
+    expect(entry.added[0]).toMatchObject({
+      claim: 'x',
+      category: 'fact',
+      basis: { kind: 'observed' },
+      origin: { kind: 'injected', traceId: '' },
+    })
+    expect(entry.invalidated[0]).toMatchObject({
+      fact: { claim: 'derived x', basis: { kind: 'derived' } },
+      missingPremiseIds: [`sha256:${'a'.repeat(64)}`],
+    })
     expect(entry.drops).toHaveLength(1)
     expect(entry.drops[0]?.reason).toBe('superseded by the openssl decision')
   })
@@ -102,6 +146,11 @@ describe('memory journal', () => {
 
   it('rejects a commit whose memory producer is unknown', async () => {
     stubFetch(payload([{ ...committed, source: { ...committed.source, kind: 'legacy_writer' } }]))
+    await expect(fetchKeeperMemoryJournal('kidsnote')).rejects.toThrow('memory journal')
+  })
+
+  it('rejects an unknown field instead of projecting past a wider journal contract', async () => {
+    stubFetch(payload([{ ...committed, future_field: true }]))
     await expect(fetchKeeperMemoryJournal('kidsnote')).rejects.toThrow('memory journal')
   })
 })

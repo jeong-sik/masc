@@ -698,7 +698,7 @@ describe('keeper tool telemetry fetchers', () => {
           update_source: null,
           read_errors: [],
           facts: { shown: 0, current: 0, items: [] },
-          change: { added: [], removed: [], retained: 0 },
+          change: { added: [], removed: [], retained: 0, invalidated: [] },
         },
         entries: [
           {
@@ -783,20 +783,27 @@ describe('parseMemoryOsFactCategory (SSOT mirror of category_of_string)', () => 
 })
 
 describe('decodeMemoryOsFact via fetchKeeperTurnRecords', () => {
+  const memoryId = (digit: string) => `sha256:${digit.repeat(64)}`
+
   function turnRecordsPayload() {
     const first = {
-      memory_id: 'id:retention-d0',
+      memory_id: memoryId('a'),
       claim: 'retention D0 = signup day',
       category: 'constraint',
       first_seen: 1_789_000_000,
       current: true,
+      basis: { kind: 'observed' },
     }
     const second = {
-      memory_id: 'id:provider-observation',
+      memory_id: memoryId('b'),
       claim: 'provider observation',
       category: 'fact',
       first_seen: 1_789_100_000,
       current: true,
+      basis: {
+        kind: 'derived',
+        derivations: [{ rule_id: 'provider_rule', premise_ids: [memoryId('a')] }],
+      },
     }
     return {
       keeper: 'keeper-alpha',
@@ -825,7 +832,6 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords', () => {
         update_source: {
           kind: 'librarian',
           trace_id: 't-1',
-          generation: 1,
         },
         read_errors: [],
         facts: {
@@ -833,7 +839,7 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords', () => {
           current: 2,
           items: [first, second],
         },
-        change: { added: [first, second], removed: [], retained: 0 },
+        change: { added: [first, second], removed: [], retained: 0, invalidated: [] },
       },
     }
   }
@@ -857,6 +863,56 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords', () => {
     expect(first?.category).toEqual({ tag: 'constraint' })
 
     expect(second?.category).toEqual({ tag: 'fact' })
+  })
+
+  it('closes a reverse-ordered derived chain with the worklist projection', async () => {
+    const payload = turnRecordsPayload()
+    const indexedMemoryId = (index: number) => `sha256:${index.toString(16).padStart(64, '0')}`
+    const root = {
+      memory_id: indexedMemoryId(0),
+      claim: 'chain root',
+      category: 'fact',
+      first_seen: 1_789_000_000,
+      current: true,
+      basis: { kind: 'observed' },
+    }
+    const forward: Array<Record<string, unknown>> = [root]
+    let premiseId = root.memory_id
+    const chainLength = 256
+    for (let index = 1; index <= chainLength; index += 1) {
+      const conclusion = {
+        memory_id: indexedMemoryId(index),
+        claim: `chain conclusion ${index}`,
+        category: 'fact',
+        first_seen: 1_789_000_000 + index,
+        current: true,
+        basis: {
+          kind: 'derived',
+          derivations: [{
+            rule_id: `chain_rule_${index}`,
+            premise_ids: [premiseId],
+          }],
+        },
+      }
+      forward.push(conclusion)
+      premiseId = conclusion.memory_id
+    }
+    const reverseTopological = [...forward].reverse()
+    Object.assign(payload.memory_os.facts, {
+      shown: reverseTopological.length,
+      current: reverseTopological.length,
+      items: reverseTopological,
+    })
+    Object.assign(payload.memory_os.change, {
+      added: reverseTopological,
+      removed: [],
+      retained: 0,
+      invalidated: [],
+    })
+    stubTurnRecords(payload)
+
+    const result = await fetchKeeperTurnRecords('keeper-alpha')
+    expect(result.memory_os.facts.items).toHaveLength(chainLength + 1)
   })
 
   it('preserves exact persisted claim bytes instead of trimming them', async () => {
@@ -902,6 +958,34 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords', () => {
     )
   })
 
+  it('rejects an added fact that is not the exact current payload', async () => {
+    const payload = turnRecordsPayload()
+    payload.memory_os.change.added[1] = {
+      ...payload.memory_os.change.added[1]!,
+      claim: 'forged delta claim',
+    }
+    stubTurnRecords(payload)
+
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects duplicate removed identities in one exact delta', async () => {
+    const payload = turnRecordsPayload()
+    const removed = {
+      ...payload.memory_os.facts.items[0]!,
+      category: 'lesson',
+      current: false,
+    }
+    Object.assign(payload.memory_os.change, { removed: [removed, removed] })
+    stubTurnRecords(payload)
+
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
   it.each([
     'claim_kind',
     'salience',
@@ -933,6 +1017,21 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords', () => {
   it('rejects an empty claim instead of rendering a blank fact', async () => {
     const payload = turnRecordsPayload()
     Object.assign(payload.memory_os.facts.items[0]!, { claim: '' })
+    stubTurnRecords(payload)
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it.each([
+    `sha256:${'a'.repeat(63)}`,
+    `sha256:${'a'.repeat(65)}`,
+    `sha256:${'A'.repeat(64)}`,
+    `sha256:${'a'.repeat(64)}\n`,
+  ])('rejects non-canonical memory identity %s', async (memoryId) => {
+    const payload = turnRecordsPayload()
+    payload.memory_os.facts.items[0]!.memory_id = memoryId
+    payload.memory_os.change.added[0]!.memory_id = memoryId
     stubTurnRecords(payload)
     await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',

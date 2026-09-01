@@ -182,6 +182,12 @@ let test_memory_surface_keeps_the_starvation_axes () =
     (reads ~binding_name:"render_memory" ~fields:[ "mhs_starving_keepers" ] > 0);
   Alcotest.(check bool) "the title keeps source facts separate" true
     (reads ~binding_name:"render_memory" ~fields:[ "mhs_total_source_facts" ] > 0);
+  Alcotest.(check bool) "the title keeps derived facts separate" true
+    (reads ~binding_name:"render_memory" ~fields:[ "mhs_total_derived_facts" ] > 0);
+  Alcotest.(check bool) "the title exposes support retractions" true
+    (reads ~binding_name:"render_memory"
+       ~fields:[ "mhs_total_support_invalidations" ]
+     > 0);
   List.iter
     (fun field ->
       Alcotest.(check bool) ("memory row reads " ^ field) true
@@ -195,7 +201,12 @@ let test_memory_surface_keeps_the_starvation_axes () =
     (fun field ->
       Alcotest.(check bool) ("memory context reads " ^ field) true
         (reads ~binding_name:"memory_context_lines" ~fields:[ field ] > 0))
-    [ "mkh_vision_ingest_errors"; "mkh_vision_ingest_error_reasons" ]
+    [ "mkh_vision_ingest_errors"
+    ; "mkh_vision_ingest_error_reasons"
+    ; "mkh_observed_facts"
+    ; "mkh_derived_facts"
+    ; "mkh_support_invalidations"
+    ]
 
 let test_repository_changes_keep_the_git_axes () =
   let producer = "lib/server/server_routes_http_routes_repositories.ml" in

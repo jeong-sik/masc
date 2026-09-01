@@ -177,7 +177,21 @@ let memory_os_fact_json ~current (fact : Keeper_memory_os_types.fact) =
     ; "category", `String (Keeper_memory_os_types.category_to_string fact.category)
     ; "first_seen", `Float fact.first_seen
     ; "current", `Bool current
+    ; "basis", Keeper_memory_os_types.basis_to_json fact.basis
      ]
+;;
+
+let memory_os_support_invalidation_json
+    (invalidation : Keeper_memory_os_current.support_invalidation)
+  =
+  `Assoc
+    [ "fact", memory_os_fact_json ~current:false invalidation.fact
+    ; ( "missing_premise_ids"
+      , `List
+          (List.map
+             (fun premise_id -> `String premise_id)
+             invalidation.missing_premise_ids) )
+    ]
 ;;
 
 let memory_os_change_json (change : Keeper_memory_os_current.change) =
@@ -185,6 +199,9 @@ let memory_os_change_json (change : Keeper_memory_os_current.change) =
     [ "added", `List (List.map (memory_os_fact_json ~current:true) change.added)
     ; "removed", `List (List.map (memory_os_fact_json ~current:false) change.removed)
     ; "retained", `Int change.retained
+    ; ( "invalidated"
+      , `List
+          (List.map memory_os_support_invalidation_json change.invalidated) )
     ]
 ;;
 
@@ -206,7 +223,12 @@ let memory_os_dashboard_json ~(config : Workspace.config) ~keeper_id =
     match snapshot with
     | None ->
       ( []
-      , `Assoc [ "added", `List []; "removed", `List []; "retained", `Int 0 ]
+      , `Assoc
+          [ "added", `List []
+          ; "removed", `List []
+          ; "retained", `Int 0
+          ; "invalidated", `List []
+          ]
       , 0
       , None
       , `Null )
@@ -1118,6 +1140,21 @@ let handle_keeper_get_subroutes state req request reqd =
           ; "last_seen", `Float fact.last_seen
           ; "reinforcement", `Int fact.reinforcement
           ; "memory_id", `String (Keeper_memory_os_types.memory_id fact)
+          ; "basis", Keeper_memory_os_types.basis_to_json fact.basis
+          ]
+      in
+      let support_invalidation_json
+          (invalidation : Keeper_memory_os_current.support_invalidation)
+        =
+        `Assoc
+          [ "memory_id", `String (Keeper_memory_os_types.memory_id invalidation.fact)
+          ; "claim", `String invalidation.fact.claim
+          ; "basis", Keeper_memory_os_types.basis_to_json invalidation.fact.basis
+          ; ( "missing_premise_ids"
+            , `List
+                (List.map
+                   (fun premise_id -> `String premise_id)
+                   invalidation.missing_premise_ids) )
           ]
       in
       let ordinary =
@@ -1134,6 +1171,11 @@ let handle_keeper_get_subroutes state req request reqd =
             ; "revision", `Int snapshot.Keeper_memory_os_current.revision
             ; "updated_at", `Float snapshot.Keeper_memory_os_current.updated_at
             ; "facts", `List (List.map fact_json snapshot.facts)
+            ; ( "support_invalidations"
+              , `List
+                  (List.map
+                     support_invalidation_json
+                     snapshot.change.invalidated) )
             ]
       in
       let source_fact_json (fact : Keeper_memory_source_current.fact) =

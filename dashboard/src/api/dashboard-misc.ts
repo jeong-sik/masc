@@ -60,6 +60,9 @@ export interface KeeperMemoryHealthKeeperEntry {
   keeper_id: string
   revision: number
   facts: number
+  observed_facts: number
+  derived_facts: number
+  support_invalidations: number
   snapshot_bytes: number
   added: number
   removed: number
@@ -85,6 +88,9 @@ export interface KeeperMemoryHealthResponse {
   keepers: KeeperMemoryHealthKeeperEntry[]
   totals: {
     facts: number
+    observed_facts: number
+    derived_facts: number
+    support_invalidations: number
     snapshot_bytes: number
     added: number
     removed: number
@@ -193,6 +199,9 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     'keeper_id',
     'revision',
     'facts',
+    'observed_facts',
+    'derived_facts',
+    'support_invalidations',
     'snapshot_bytes',
     'added',
     'removed',
@@ -213,6 +222,9 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
   const keeper_id = nonEmptyString(raw.keeper_id)
   const revision = nonNegativeInteger(raw.revision)
   const facts = nonNegativeInteger(raw.facts)
+  const observed_facts = nonNegativeInteger(raw.observed_facts)
+  const derived_facts = nonNegativeInteger(raw.derived_facts)
+  const support_invalidations = nonNegativeInteger(raw.support_invalidations)
   const snapshot_bytes = nonNegativeInteger(raw.snapshot_bytes)
   const added = nonNegativeInteger(raw.added)
   const removed = nonNegativeInteger(raw.removed)
@@ -243,6 +255,10 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     keeper_id === null
     || revision === null
     || facts === null
+    || observed_facts === null
+    || derived_facts === null
+    || support_invalidations === null
+    || observed_facts + derived_facts !== facts
     || snapshot_bytes === null
     || added === null
     || removed === null
@@ -271,6 +287,9 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     keeper_id,
     revision,
     facts,
+    observed_facts,
+    derived_facts,
+    support_invalidations,
     snapshot_bytes,
     added,
     removed,
@@ -299,7 +318,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     'totals',
     'alert_summary',
   ])) return null
-  if (raw.schema !== 'keeper.memory_os.current_health.v2') return null
+  if (raw.schema !== 'keeper.memory_os.current_health.v3') return null
   const generated_at = finiteNumber(raw.generated_at)
   const cadence_counter_entries = nonNegativeInteger(raw.cadence_counter_entries)
   const keepers = Array.isArray(raw.keepers)
@@ -320,6 +339,9 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
   const totals = raw.totals
   if (!exactKeys(totals, [
     'facts',
+    'observed_facts',
+    'derived_facts',
+    'support_invalidations',
     'snapshot_bytes',
     'added',
     'removed',
@@ -334,6 +356,9 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
   ])) return null
   const expectedTotals = {
     facts: sum(entry => entry.facts),
+    observed_facts: sum(entry => entry.observed_facts),
+    derived_facts: sum(entry => entry.derived_facts),
+    support_invalidations: sum(entry => entry.support_invalidations),
     snapshot_bytes: sum(entry => entry.snapshot_bytes),
     added: sum(entry => entry.added),
     removed: sum(entry => entry.removed),

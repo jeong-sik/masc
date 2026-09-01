@@ -62,6 +62,12 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
       <td>${entry.keeper_id}</td>
       <td>${entry.revision}</td>
       <td>${entry.facts.toLocaleString()}</td>
+      <td>${entry.observed_facts.toLocaleString()} / ${entry.derived_facts.toLocaleString()}</td>
+      <td>
+        ${entry.support_invalidations > 0
+          ? html`<span class="kmh-badge kmh-badge--muted">${entry.support_invalidations}</span>`
+          : html`<span class="kmh-badge kmh-badge--ok">0</span>`}
+      </td>
       <td>${formatBytes(entry.snapshot_bytes)}</td>
       <td><span class="kmh-badge kmh-badge--ok">+${entry.added}</span></td>
       <td><span class="kmh-badge kmh-badge--ok">−${entry.removed}</span></td>
@@ -198,6 +204,20 @@ export function KeeperMemoryHealth() {
             <span class="kmh-stat-label">전체 사실</span>
             <span class="kmh-stat-value">${data.totals.facts.toLocaleString()}</span>
           </div>
+          <div class="kmh-stat" data-stat-key="observed-facts">
+            <span class="kmh-stat-label">관측 사실</span>
+            <span class="kmh-stat-value">${data.totals.observed_facts.toLocaleString()}</span>
+          </div>
+          <div class="kmh-stat" data-stat-key="derived-facts">
+            <span class="kmh-stat-label">파생 사실</span>
+            <span class="kmh-stat-value">${data.totals.derived_facts.toLocaleString()}</span>
+          </div>
+          <div class="kmh-stat" data-stat-key="support-invalidations">
+            <span class="kmh-stat-label">지지 무효화</span>
+            <span class="kmh-stat-value">
+              ${data.totals.support_invalidations.toLocaleString()}
+            </span>
+          </div>
           <div class="kmh-stat" data-stat-key="snapshot-bytes">
             <span class="kmh-stat-label">스냅샷 크기</span>
             <span class="kmh-stat-value">${formatBytes(data.totals.snapshot_bytes)}</span>
@@ -288,6 +308,8 @@ export function KeeperMemoryHealth() {
                   <th>키퍼</th>
                   <th>revision</th>
                   <th>사실</th>
+                  <th>관측 / 파생</th>
+                  <th>지지 무효화</th>
                   <th>bytes</th>
                   <th>추가</th>
                   <th>제거</th>

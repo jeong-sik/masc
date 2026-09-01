@@ -12,7 +12,21 @@ let fresh_dir prefix = Filename.temp_dir prefix ""
 
 let fact claim : Types.fact =
   Types.observed ~claim ~category:Types.Fact ~now:test_now
-    ~origin:{ kind = Types.Legacy; trace_id = "" }
+    ~origin:{ kind = Types.Authored; trace_id = "" }
+;;
+
+let derived_fact ~claim ~premise =
+  match
+    Types.derived
+      ~claim
+      ~category:Types.Fact
+      ~now:test_now
+      ~origin:{ kind = Types.Authored; trace_id = "health-test" }
+      ~derivations:
+        [ { rule_id = "health_support"; premise_ids = [ Types.memory_id premise ] } ]
+  with
+  | Ok fact -> fact
+  | Error detail -> Alcotest.fail detail
 ;;
 
 let source =
@@ -176,16 +190,45 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let keeper = keeper_obj "solo" json in
   Alcotest.(check string)
     "schema"
-    "keeper.memory_os.current_health.v2"
+    "keeper.memory_os.current_health.v3"
     (string_field "schema" json);
   Alcotest.(check int) "revision" 2 (int_field "revision" keeper);
   Alcotest.(check int) "facts" 2 (int_field "facts" keeper);
+  Alcotest.(check int) "observed facts" 2 (int_field "observed_facts" keeper);
+  Alcotest.(check int) "derived facts" 0 (int_field "derived_facts" keeper);
+  Alcotest.(check int) "support invalidations" 0
+    (int_field "support_invalidations" keeper);
   Alcotest.(check bool) "snapshot bytes" true (int_field "snapshot_bytes" keeper > 0);
   Alcotest.(check int) "added" 2 (int_field "added" keeper);
   Alcotest.(check int) "removed" 1 (int_field "removed" keeper);
   Alcotest.(check int) "no alerts" 0 (List.length (list_field "alerts" keeper));
   Alcotest.(check int) "total facts" 2 (int_field "facts" (totals json));
+  Alcotest.(check int) "total observed facts" 2
+    (int_field "observed_facts" (totals json));
   Alcotest.(check bool) "generated_at" true (float_field "generated_at" json >= 0.0)
+;;
+
+let test_reports_derived_facts_and_support_invalidations () =
+  let base = fresh_dir "masc-memory-health-support" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let premise = fact "dependency is healthy" in
+  let conclusion = derived_fact ~claim:"rollout can proceed" ~premise in
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"support" [ premise; conclusion ]);
+  let supported = Health.keeper_memory_health_http_json ~base_path:base in
+  let supported_keeper = keeper_obj "support" supported in
+  Alcotest.(check int) "one observed fact" 1
+    (int_field "observed_facts" supported_keeper);
+  Alcotest.(check int) "one derived fact" 1
+    (int_field "derived_facts" supported_keeper);
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"support" [ conclusion ]);
+  let invalidated = Health.keeper_memory_health_http_json ~base_path:base in
+  let invalidated_keeper = keeper_obj "support" invalidated in
+  Alcotest.(check int) "unsupported conclusion is absent" 0
+    (int_field "facts" invalidated_keeper);
+  Alcotest.(check int) "support retraction is visible" 1
+    (int_field "support_invalidations" invalidated_keeper);
+  Alcotest.(check int) "fleet total includes support retraction" 1
+    (int_field "support_invalidations" (totals invalidated))
 ;;
 
 let test_source_only_snapshot_is_enumerated_and_counted () =
@@ -488,6 +531,8 @@ let () =
             test_uses_explicit_base_path_not_ambient_resolver
         ; Alcotest.test_case "revision bytes and delta" `Quick
             test_reports_revision_snapshot_bytes_and_latest_delta
+        ; Alcotest.test_case "derived facts and support invalidations" `Quick
+            test_reports_derived_facts_and_support_invalidations
         ; Alcotest.test_case "librarian lane busy alert" `Quick
             test_reports_librarian_lane_busy_alert
         ; Alcotest.test_case "corrupt snapshot visible" `Quick

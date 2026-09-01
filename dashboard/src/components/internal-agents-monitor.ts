@@ -299,13 +299,14 @@ function LibrarianJournal({
               <strong>revision ${entry.revision}</strong>
               <time class="text-[var(--color-fg-muted)]" dateTime=${new Date(entry.recordedAt * 1000).toISOString()}>${formatDateTimeKo(entry.recordedAt)}</time>
               <span class="text-[var(--color-fg-muted)]">
-                추가 ${entry.added.length} · 제거 ${entry.removed.length} · 유지 ${entry.retained}
+                추가 ${entry.added.length} · 제거 ${entry.removed.length} · 지지 무효화 ${entry.invalidated.length} · 유지 ${entry.retained}
               </span>
             </div>
             <div class="grid gap-3 lg:grid-cols-2">
               <${JsonViewerCard} title=${`추가된 기억 ${entry.added.length}건`} data=${entry.added} />
               <${JsonViewerCard} title=${`제거된 기억 ${entry.removed.length}건`} data=${entry.removed} />
             </div>
+            <${JsonViewerCard} title=${`지지 무효화 ${entry.invalidated.length}건`} data=${entry.invalidated} />
             <${JsonViewerCard} title=${`제거 판단 ${entry.drops.length}건`} data=${entry.drops} />
           </li>`
         })}
@@ -325,12 +326,13 @@ function LibrarianJournal({
                     <code>${entry.sourceKind}</code>
                     <strong>revision ${entry.revision}</strong>
                     <time class="text-[var(--color-fg-muted)]" dateTime=${new Date(entry.recordedAt * 1000).toISOString()}>${formatDateTimeKo(entry.recordedAt)}</time>
-                    <span class="text-[var(--color-fg-muted)]">추가 ${entry.added.length} · 제거 ${entry.removed.length} · 유지 ${entry.retained}</span>
+                    <span class="text-[var(--color-fg-muted)]">추가 ${entry.added.length} · 제거 ${entry.removed.length} · 지지 무효화 ${entry.invalidated.length} · 유지 ${entry.retained}</span>
                   </div>
                   <div class="grid gap-2 lg:grid-cols-2">
                     <${JsonViewerCard} title=${`별도 producer 추가 ${entry.added.length}건`} data=${entry.added} />
                     <${JsonViewerCard} title=${`별도 producer 제거 ${entry.removed.length}건`} data=${entry.removed} />
                   </div>
+                  <${JsonViewerCard} title=${`별도 producer 지지 무효화 ${entry.invalidated.length}건`} data=${entry.invalidated} />
                 </li>
               `)}
               ${traceOnlyFailures.map((entry, index) => html`

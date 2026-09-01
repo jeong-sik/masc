@@ -384,8 +384,11 @@ export type {
   TurnRecordRow,
   MemoryOsFactCategoryTag,
   MemoryOsFactCategory,
+  MemoryOsDerivation,
+  MemoryOsFactBasis,
   MemoryOsFact,
   MemoryOsUpdateSource,
+  MemoryOsSupportInvalidation,
   MemoryOsTurnRecordSnapshot,
   TurnRecordsResponse,
   TurnTranscriptLine,
@@ -395,6 +398,7 @@ export {
   fetchKeeperTurnRecords,
   fetchKeeperTurnTranscript,
   parseMemoryOsFactCategory,
+  isMemoryOsMemoryId,
 } from './dashboard-turn-records'
 
 export type {

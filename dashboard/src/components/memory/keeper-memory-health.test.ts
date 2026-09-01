@@ -23,6 +23,9 @@ function makeEntry(
     keeper_id: 'alpha',
     revision: 7,
     facts: 10,
+    observed_facts: 8,
+    derived_facts: 2,
+    support_invalidations: 0,
     snapshot_bytes: 512,
     added: 2,
     removed: 1,
@@ -65,12 +68,15 @@ function makeResponse(
   alertSummary = makeAlertSummary(),
 ): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v2',
+    schema: 'keeper.memory_os.current_health.v3',
     generated_at: 1_700_000_000,
     cadence_counter_entries: 3,
     keepers,
     totals: {
       facts: 0,
+      observed_facts: 0,
+      derived_facts: 0,
+      support_invalidations: 0,
       snapshot_bytes: 0,
       added: 0,
       removed: 0,
@@ -100,7 +106,14 @@ describe('KeeperMemoryHealth', () => {
   it('renders the current snapshot totals and exact latest delta', async () => {
     mockFetch.mockResolvedValue(makeResponse(
       [makeEntry()],
-      { facts: 10, snapshot_bytes: 1536, added: 2, removed: 1 },
+      {
+        facts: 10,
+        observed_facts: 8,
+        derived_facts: 2,
+        snapshot_bytes: 1536,
+        added: 2,
+        removed: 1,
+      },
     ))
     const { container } = render(html`<${KeeperMemoryHealth} />`)
 
@@ -108,7 +121,23 @@ describe('KeeperMemoryHealth', () => {
     expect(statValue(container, 'snapshot-bytes')).toBe('1.5 KB')
     expect(statValue(container, 'added')).toBe('+2')
     expect(statValue(container, 'removed')).toBe('−1')
+    expect(statValue(container, 'observed-facts')).toBe('8')
+    expect(statValue(container, 'derived-facts')).toBe('2')
     expect(container.textContent).toContain('7')
+  })
+
+  it('renders support retractions as observable state, not an alert', async () => {
+    mockFetch.mockResolvedValue(
+      makeResponse(
+        [makeEntry({ support_invalidations: 2 })],
+        { support_invalidations: 2 },
+      ),
+    )
+    const { container } = render(html`<${KeeperMemoryHealth} />`)
+
+    await waitFor(() => expect(screen.getByText('alpha')).not.toBeNull())
+    expect(statValue(container, 'support-invalidations')).toBe('2')
+    expect(container.querySelector('.kmh-row--warn')).toBeNull()
   })
 
   it('uses backend snapshot-read alerts as the row warning authority', async () => {
@@ -235,6 +264,8 @@ describe('KeeperMemoryHealth', () => {
         keeper_id: 'starving',
         revision: 0,
         facts: 0,
+        observed_facts: 0,
+        derived_facts: 0,
         snapshot_bytes: 0,
         snapshot_present: false,
         librarian_failures: 4,
@@ -268,6 +299,8 @@ describe('KeeperMemoryHealth', () => {
         keeper_id: 'fresh',
         revision: 0,
         facts: 0,
+        observed_facts: 0,
+        derived_facts: 0,
         snapshot_bytes: 0,
         snapshot_present: false,
       })],

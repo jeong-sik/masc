@@ -2600,13 +2600,17 @@ let test_decode_repository_requires_resolved_local_path () =
    memoryless. *)
 let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   let keeper id present failures source_present =
+    let ordinary_count value = if present then value else 0 in
     `Assoc
       [ ("keeper_id", `String id)
-      ; ("revision", `Int 3)
-      ; ("facts", `Int 12)
+      ; ("revision", `Int (ordinary_count 3))
+      ; ("facts", `Int (ordinary_count 12))
+      ; ("observed_facts", `Int (ordinary_count 10))
+      ; ("derived_facts", `Int (ordinary_count 2))
+      ; ("support_invalidations", `Int (ordinary_count 1))
       ; ("snapshot_bytes", `Int (if present then 4096 else 0))
-      ; ("added", `Int 2)
-      ; ("removed", `Int 1)
+      ; ("added", `Int (ordinary_count 2))
+      ; ("removed", `Int (ordinary_count 1))
       ; ("snapshot_present", `Bool present)
       ; ("librarian_lane_busy", `Int 0)
       ; ("librarian_failures", `Int failures)
@@ -2627,23 +2631,26 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       ; ("source_snapshot_present", `Bool source_present)
       ; ("source_read_error", `Null)
       ; ( "alerts"
-        , `List
-            [ `Assoc
-                [ ("code", `String "librarian_starvation")
-                ; ("severity", `String "error")
-                ; ("target", `String "librarian_starvation")
-                ; ("label", `String "Librarian")
-                ; ( "message"
-                  , `String "running memoryless and cannot leave that state" )
-                ; ("value", `Float 4.0)
-                ; ("threshold", `Float 0.0)
-                ]
-            ] )
+        , if failures > 0
+          then
+            `List
+              [ `Assoc
+                  [ ("code", `String "librarian_starvation")
+                  ; ("severity", `String "error")
+                  ; ("target", `String "librarian_starvation")
+                  ; ("label", `String "Librarian")
+                  ; ( "message"
+                    , `String "running memoryless and cannot leave that state" )
+                  ; ("value", `Float 4.0)
+                  ; ("threshold", `Float 0.0)
+                  ]
+              ]
+          else `List [] )
       ]
   in
   let json =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v2")
+      [ ("schema", `String "keeper.memory_os.current_health.v3")
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ("cadence_counter_entries", `Int 0)
       ; ( "keepers"
@@ -2654,6 +2661,9 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       ; ( "totals"
         , `Assoc
             [ ("facts", `Int 12)
+            ; ("observed_facts", `Int 10)
+            ; ("derived_facts", `Int 2)
+            ; ("support_invalidations", `Int 1)
             ; ("snapshot_bytes", `Int 4096)
             ; ("added", `Int 2)
             ; ("removed", `Int 1)
@@ -2679,6 +2689,105 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ] )
       ]
   in
+  let replace_field name value = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (field, current) ->
+              if String.equal field name then field, value else field, current)
+           fields)
+    | json -> json
+  in
+  let mismatched_totals =
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (field, value) ->
+              if String.equal field "totals"
+              then field, replace_field "facts" (`Int 13) value
+              else field, value)
+           fields)
+    | json -> json
+  in
+  let negative_counter = replace_field "cadence_counter_entries" (`Int (-1)) json in
+  let unknown_field =
+    match json with
+    | `Assoc fields -> `Assoc (("unexpected", `Bool true) :: fields)
+    | json -> json
+  in
+  let duplicate_keeper =
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (field, value) ->
+              if String.equal field "keepers"
+              then
+                match value with
+                | `List (first :: _) -> field, `List [ first; first ]
+                | _ -> field, value
+              else field, value)
+           fields)
+    | json -> json
+  in
+  let map_keeper target_index update = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (field, value) ->
+              if String.equal field "keepers"
+              then
+                match value with
+                | `List keepers ->
+                  field, `List (List.mapi (fun index keeper ->
+                    if index = target_index then update keeper else keeper) keepers)
+                | _ -> field, value
+              else field, value)
+           fields)
+    | json -> json
+  in
+  let wrong_alert_target =
+    map_keeper
+      0
+      (function
+        | `Assoc fields ->
+          `Assoc
+            (List.map
+               (fun (field, value) ->
+                  if String.equal field "alerts"
+                  then
+                    match value with
+                    | `List (first :: rest) ->
+                      field, `List (replace_field "target" (`String "librarian_failures") first :: rest)
+                    | _ -> field, value
+                  else field, value)
+               fields)
+        | json -> json)
+      json
+  in
+  let duplicate_vision_reason =
+    let reason count =
+      `Assoc [ "reason", `String "fetch_failed"; "count", `Int count ]
+    in
+    map_keeper
+      1
+      (replace_field
+         "vision_ingest_error_reasons"
+         (`List [ reason 1; reason 2 ]))
+      json
+  in
+  List.iter
+    (fun (label, invalid) ->
+       Alcotest.(check bool) label true
+         (Result.is_error (Tui_decode.decode_memory_health_snapshot invalid)))
+    [ "fleet total mismatch rejects", mismatched_totals
+    ; "negative observation counter rejects", negative_counter
+    ; "unknown root field rejects", unknown_field
+    ; "duplicate keeper identity rejects", duplicate_keeper
+    ; "alert target mismatch rejects", wrong_alert_target
+    ; "duplicate vision reason rejects", duplicate_vision_reason
+    ];
   match Tui_decode.decode_memory_health_snapshot json with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok snapshot ->
@@ -2687,6 +2796,10 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       Alcotest.(check int) "error alerts" 1 snapshot.mhs_error_alerts;
       Alcotest.(check int) "source facts total" 2
         snapshot.mhs_total_source_facts;
+      Alcotest.(check int) "derived facts total" 2
+        snapshot.mhs_total_derived_facts;
+      Alcotest.(check int) "support invalidations total" 1
+        snapshot.mhs_total_support_invalidations;
       Alcotest.(check int) "source invalidations total" 1
         snapshot.mhs_total_source_invalidations;
       Alcotest.(check int) "vision ingest errors total" 3

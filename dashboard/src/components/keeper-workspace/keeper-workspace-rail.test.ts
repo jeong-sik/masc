@@ -49,7 +49,7 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
         update_source: null,
         read_errors: [],
         facts: { shown: 0, current: 0, items: [] },
-        change: { added: [], removed: [], retained: 0 },
+        change: { added: [], removed: [], retained: 0, invalidated: [] },
       },
       entries: [
         {

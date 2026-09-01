@@ -8889,8 +8889,10 @@ let memory_context_lines (k : Masc.Tui_decode.memory_keeper_health) =
       (if k.mkh_snapshot_present then "present" else "absent")
   in
   let facts_line =
-    Printf.sprintf "  facts %d · last change +%d / -%d" k.mkh_facts k.mkh_added
-      k.mkh_removed
+    Printf.sprintf
+      "  facts %d (observed %d / derived %d) · last change +%d / -%d / support-invalidated %d"
+      k.mkh_facts k.mkh_observed_facts k.mkh_derived_facts k.mkh_added
+      k.mkh_removed k.mkh_support_invalidations
   in
   let librarian_line =
     Printf.sprintf "  librarian lane-busy %d · failures %d"
@@ -9028,9 +9030,10 @@ let render_memory (state : state) =
           (connection_badge state)
     | Some s ->
         Printf.sprintf
-          "%s (%d keepers · %d failed/no ordinary · %d ordinary facts · %d source facts)  %s  %s"
+          "%s (%d keepers · %d failed/no ordinary · %d ordinary facts [o%d/d%d] · %d support-invalidated · %d source facts)  %s  %s"
           (screen_title " MASC Memory") shown s.mhs_starving_keepers
-          s.mhs_total_facts s.mhs_total_source_facts timestamp
+          s.mhs_total_facts s.mhs_total_observed_facts s.mhs_total_derived_facts
+          s.mhs_total_support_invalidations s.mhs_total_source_facts timestamp
           (connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"memory"

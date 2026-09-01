@@ -4,6 +4,9 @@ type keeper_health =
   { keeper_id : string
   ; revision : int
   ; facts : int
+  ; observed_facts : int
+  ; derived_facts : int
+  ; support_invalidations : int
   ; snapshot_bytes : int
   ; added : int
   ; removed : int
@@ -160,6 +163,9 @@ let keeper_health ~keepers_dir keeper_id =
     { keeper_id
     ; revision = 0
     ; facts = 0
+    ; observed_facts = 0
+    ; derived_facts = 0
+    ; support_invalidations = 0
     ; snapshot_bytes = 0
     ; added = 0
     ; removed = 0
@@ -178,9 +184,21 @@ let keeper_health ~keepers_dir keeper_id =
     ; source_read_error = source_health.read_error
     }
   | Ok (Some snapshot) ->
+    let observed_facts, derived_facts =
+      List.fold_left
+        (fun (observed, derived) fact ->
+           match fact.Keeper_memory_os_types.basis with
+           | Keeper_memory_os_types.Observed -> observed + 1, derived
+           | Keeper_memory_os_types.Derived _ -> observed, derived + 1)
+        (0, 0)
+        snapshot.facts
+    in
     { keeper_id
     ; revision = snapshot.revision
     ; facts = List.length snapshot.facts
+    ; observed_facts
+    ; derived_facts
+    ; support_invalidations = List.length snapshot.change.invalidated
     ; snapshot_bytes = file_size_bytes snapshot_path
     ; added = List.length snapshot.change.added
     ; removed = List.length snapshot.change.removed
@@ -202,6 +220,9 @@ let keeper_health ~keepers_dir keeper_id =
     { keeper_id
     ; revision = 0
     ; facts = 0
+    ; observed_facts = 0
+    ; derived_facts = 0
+    ; support_invalidations = 0
     ; snapshot_bytes = file_size_bytes snapshot_path
     ; added = 0
     ; removed = 0
@@ -341,6 +362,9 @@ let keeper_health_entry_to_json (h : keeper_health) =
     [ "keeper_id", `String h.keeper_id
     ; "revision", `Int h.revision
     ; "facts", `Int h.facts
+    ; "observed_facts", `Int h.observed_facts
+    ; "derived_facts", `Int h.derived_facts
+    ; "support_invalidations", `Int h.support_invalidations
     ; "snapshot_bytes", `Int h.snapshot_bytes
     ; "added", `Int h.added
     ; "removed", `Int h.removed
@@ -395,7 +419,7 @@ let keeper_memory_health_http_json ~base_path =
          all_alerts)
   in
   `Assoc
-    [ "schema", `String "keeper.memory_os.current_health.v2"
+    [ "schema", `String "keeper.memory_os.current_health.v3"
     ; "generated_at", `Float generated_at
     ; ( "cadence_counter_entries"
       , `Int (Keeper_librarian_runtime.cadence_counter_entries ()) )
@@ -403,6 +427,10 @@ let keeper_memory_health_http_json ~base_path =
     ; ( "totals"
       , `Assoc
           [ "facts", `Int (sum (fun entry -> entry.facts))
+          ; "observed_facts", `Int (sum (fun entry -> entry.observed_facts))
+          ; "derived_facts", `Int (sum (fun entry -> entry.derived_facts))
+          ; ( "support_invalidations"
+            , `Int (sum (fun entry -> entry.support_invalidations)) )
           ; "snapshot_bytes", `Int (sum (fun entry -> entry.snapshot_bytes))
           ; "added", `Int (sum (fun entry -> entry.added))
           ; "removed", `Int (sum (fun entry -> entry.removed))

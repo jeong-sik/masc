@@ -30,8 +30,9 @@
     ]
   },
   "steer": {
-    "scenario_started": false,
-    "reason": "responsive scenario final HTTP accounting failed first"
+    "browser_scenario_started": false,
+    "browser_reason": "responsive scenario final HTTP accounting failed first",
+    "pty_evidence": "steer-pty.json"
   },
   "terminal_failure": {
     "type": "AssertionError",

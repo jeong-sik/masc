@@ -7,10 +7,11 @@ The macOS arm64 binary came from release run
 embeds artifact commit `cc6fa8e2a11f0cbf1b2cb3728ab2c8e612558920`,
 and differs from the product commit only in `.github/workflows/release.yml`.
 
-The evidence is deliberately marked **partial**, not passed. The responsive
-queue scenario reached every visual and causal assertion through screenshot
-07, then failed its final HTTP accounting because one ancillary POST was not
-in the fixture allow-list. The steer scenario therefore did not start.
+The browser evidence is deliberately marked **partial**, not passed. The
+responsive queue scenario reached every visual and causal assertion through
+screenshot 07, then failed its final HTTP accounting because one ancillary
+POST was not in the fixture allow-list. The browser steer scenario therefore
+did not start.
 
 The important frames are:
 
@@ -27,3 +28,10 @@ The important frames are:
 `evidence.partial.json` records the exact SHA/hash boundary and the failed
 terminal assertion. It does **not** claim that this binary is exact to the
 later PR merge head.
+
+`steer-pty.json` is a separate fresh PTY interaction against the same exact
+artifact binary. It passed the incremental-frame-safe assertions, observed
+ordinary NEXT before STEER, observed STEER ahead of NEXT after the interrupt,
+and recorded dispatch order `original`, `corrected-course`, `ordinary-next`.
+The interrupt body carries the exact original request ID. This is interaction
+and HTTP evidence, not a browser screenshot.

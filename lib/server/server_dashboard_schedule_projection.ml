@@ -904,15 +904,64 @@ let schedule_request_rows_dashboard_json ~config ~now state request_rows =
     request_rows_with_wakes
 ;;
 
-let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
+(* A target-scoped page answers "what is scheduled for this one Keeper", which
+   the fleet page cannot: it caps at 20 rows with active ones first, so a
+   Keeper whose schedules are terminal or simply further down is invisible
+   there. The scoped limit is its own number because the fleet cap exists to
+   bound a whole-store scan and this request is already bounded by the
+   target. *)
+let schedule_projection_target_request_limit = 200
+
+let scheduled_automation_dashboard_json
+  ?(payload_target : string option)
+  (config : Workspace.config)
+  : Yojson.Safe.t
+  =
   (* Read-only projection; the schedule store remains the status SSOT. *)
   let now = Unix.gettimeofday () in
-  let signal_rows, signal_errors =
+  let request_limit =
+    match payload_target with
+    | Some _ -> schedule_projection_target_request_limit
+    | None -> schedule_projection_request_limit
+  in
+  let selects (request : Schedule_domain.schedule_request) =
+    match payload_target with
+    | None -> true
+    | Some target ->
+      (match Schedule_payload_projection.target_summary request with
+       | Some request_target, _ -> String.equal request_target target
+       | None, _ -> false)
+  in
+  let all_signal_rows, signal_errors =
     schedule_signal_rows_and_errors config schedule_signal_projection_limit
   in
-  let base_fields =
+  (* A scoped page keeps only the signals of the schedules it selected.
+     Fleet-wide signal rows on a one-Keeper page read as that Keeper's. The
+     store read below is the only place that knows which schedule ids belong to
+     the target, so the filter is applied there and this is the unscoped
+     default. *)
+  let signal_rows_for schedules =
+    match payload_target with
+    | None -> all_signal_rows
+    | Some _ ->
+      let selected_ids =
+        List.filter_map
+          (fun (request : Schedule_domain.schedule_request) ->
+             Some request.schedule_id)
+          schedules
+      in
+      List.filter
+        (fun (signal : Schedule_runner.wake_signal) ->
+           List.exists (String.equal signal.schedule_id) selected_ids)
+        all_signal_rows
+  in
+  let base_fields_for signal_rows =
     [ "schema", `String "masc.dashboard.scheduled_automation.v1"
     ; "source", `String "schedule_store"
+      (* A reader that cannot tell a scoped page from the fleet page would
+         read one Keeper's counts as the fleet's. *)
+    ; ( "payload_target_selector"
+      , match payload_target with None -> `Null | Some target -> `String target )
     ; "generated_at", `String (Masc_domain.now_iso ())
     ; "signal_source", `String "schedule_runner_signals"
     ; "signal_count", `Int (List.length signal_rows)
@@ -927,7 +976,7 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
       "schedule store read failed: " ^ Schedule_store.read_error_to_string err
     in
     `Assoc
-      (base_fields
+      (base_fields_for (signal_rows_for [])
        @ [ "status", `String "unknown"
          ; "schedule_store_known", `Bool false
          ; "schedule_store_read_error", `String read_error
@@ -947,7 +996,7 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
          ; "requests", `List []
          ])
   | Ok state ->
-    let schedules = state.schedules in
+    let schedules = List.filter selects state.schedules in
     let active_count =
       List.fold_left
         (fun count request ->
@@ -969,18 +1018,18 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
         | _, _, due_cmp when due_cmp <> 0 -> due_cmp
         | _ -> String.compare left.schedule_id right.schedule_id)
     in
-    let request_rows = take schedule_projection_request_limit sorted in
+    let request_rows = take request_limit sorted in
     let request_jsons =
       schedule_request_rows_dashboard_json ~config ~now state request_rows
     in
     `Assoc
-      (base_fields
+      (base_fields_for (signal_rows_for schedules)
        @ [ "status", `String "ok"
          ; "schedule_store_known", `Bool true
          ; "schedule_store_read_error", `Null
          ; "request_count", `Int (List.length schedules)
-         ; "request_limit", `Int schedule_projection_request_limit
-         ; "truncated", `Bool (List.length schedules > schedule_projection_request_limit)
+         ; "request_limit", `Int request_limit
+         ; "truncated", `Bool (List.length schedules > request_limit)
          ; "counts", schedule_counts_json schedules
          ; "payload_support", payload_support
          ; ( "live_supported_non_terminal_evidence"

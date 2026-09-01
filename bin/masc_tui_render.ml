@@ -6053,17 +6053,24 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
               snapshot.cs_connectors
     in
     let automation_lines =
-      let target = "keeper:" ^ k.k_name in
-      match state.schedules with
-      | None -> [ Ansi.dim ^ "  (loading this Keeper's schedules…)" ^ Ansi.reset ]
-      | Some snapshot ->
-          let rows =
-            List.filter
-              (fun (row : schedule_row) ->
-                 Option.equal String.equal row.sch_payload_target (Some target))
-              snapshot.scs_rows
-          in
-          if rows = [] then
+      (* This tab reads the Keeper's own page from the server rather than
+         filtering the fleet page: that page caps at its own limit with active
+         rows first, so a Keeper whose schedules are terminal or further down
+         was absent from it and the tab said none existed. The page it asks for
+         can still truncate, which is why the absence reading stays. *)
+      match state.keeper_schedules_error, state.keeper_schedules with
+      | Some (keeper_name, err), _ when String.equal keeper_name k.k_name ->
+          [ (Theme.bad ()) ^ "  schedules unavailable: "
+            ^ Terminal_text.single_line err ^ Ansi.reset ]
+      | _, Some (keeper_name, snapshot) when String.equal keeper_name k.k_name ->
+          let rows = snapshot.scs_rows in
+          if not (String.equal snapshot.scs_status "ok") then
+            [ (Theme.bad ())
+              ^ (match snapshot.scs_read_error with
+                 | Some err -> "  " ^ Terminal_text.single_line err
+                 | None -> "  (schedule store unreadable)")
+              ^ Ansi.reset ]
+          else if rows = [] then
             match
               Render_schedule.classify_keeper_schedule_absence
                 ~truncated:snapshot.scs_truncated
@@ -6094,6 +6101,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                    (Terminal_text.single_line
                       (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)))
               rows
+      | _, _ ->
+          [ Ansi.dim ^ "  (loading this Keeper's schedules…)" ^ Ansi.reset ]
     in
     let run_lines =
       match state.fusion_runs with

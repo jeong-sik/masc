@@ -5,10 +5,23 @@
     router and the H2 gateway. No other module renders this projection, and it
     is not embedded in any other response. *)
 
-val scheduled_automation_dashboard_json : Workspace.config -> Yojson.Safe.t
+val schedule_projection_target_request_limit : int
+(** Row ceiling for a target-scoped page. Its own number, larger than the fleet
+    cap, because a request already narrowed to one target does not need the
+    bound that exists to keep a whole-store scan small. *)
+
+val scheduled_automation_dashboard_json :
+  ?payload_target:string -> Workspace.config -> Yojson.Safe.t
 (** Renders the read-only dashboard projection for scheduled internal
     automation. This summarizes the schedule store as a small FSM envelope
     plus recent request rows; it does not refresh due state or run work.
+
+    [payload_target] narrows every part of the response -- rows, counts, FSM
+    envelope, and signals -- to the schedules aimed at that target, and the
+    response echoes it in [payload_target_selector] so a scoped page cannot be
+    read as the fleet's. The fleet page caps at 20 rows with active ones first,
+    which is why a Keeper whose schedules are terminal or further down is
+    absent from it; a scoped page is where those are read.
 
     Reads the schedule ledger from disk, so callers on an Eio fiber wrap this
     in [Domain_pool_ref.submit_io_or_inline].

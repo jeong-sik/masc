@@ -1989,6 +1989,13 @@ type state = {
   mutable schedule_wake_history: schedule_wake_history option;
   mutable schedule_wake_history_error: (string * string) option;
   mutable schedule_wake_history_inflight: string option;
+  (* The selected Keeper's own schedule page, carrying the keeper it was asked
+     about. The Automation tab used to filter the fleet page, which caps at its
+     own limit with active rows first, so a Keeper whose schedules sat past it
+     read as having none. *)
+  mutable keeper_schedules: (string * schedule_snapshot) option;
+  mutable keeper_schedules_error: (string * string) option;
+  mutable keeper_schedules_inflight: string option;
   (* A cancel armed for a second keypress: which schedule. The cursor can move
      between the two presses, so the schedule id is captured at arm time and a
      press on a different row re-arms for that row. *)
@@ -2631,6 +2638,9 @@ let create_state
   schedule_wake_history = None;
   schedule_wake_history_error = None;
   schedule_wake_history_inflight = None;
+  keeper_schedules = None;
+  keeper_schedules_error = None;
+  keeper_schedules_inflight = None;
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
   lanes = None;

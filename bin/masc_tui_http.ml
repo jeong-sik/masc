@@ -1398,6 +1398,16 @@ let fetch_schedule_detail ~(host : string) ~(port : int) ~(schedule_id : string)
     ~path:
       (Printf.sprintf "/api/v1/dashboard/scheduled-automation?schedule_id=%s"
          (percent_encode_query_value schedule_id))
+(** Fetch the schedules aimed at one target. The fleet page caps at its own
+    limit with active rows first, so a Keeper whose schedules are terminal or
+    further down does not appear on it; this asks for that Keeper's own page. *)
+let fetch_schedules_for_target ~(host : string) ~(port : int)
+    ~(payload_target : string) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:
+      (Printf.sprintf
+         "/api/v1/dashboard/scheduled-automation?payload_target=%s"
+         (percent_encode_query_value payload_target))
 
 (** Create or atomically modify a schedule from the JSON form the TUI handed
     to [$EDITOR]. The server validates each against its canonical Tool schema;

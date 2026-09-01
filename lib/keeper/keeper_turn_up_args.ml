@@ -195,6 +195,17 @@ let parse_max_context_override args =
    unlisted key would make the gate reject valid traffic; a listed-but-dead
    key would certify exactly the silent drop this gate exists to kill
    (R09: [turn_up_arg_unknown]). Keep exactly in sync with [parse]. *)
+(* Carries a value for each field rather than an empty one: a form whose own
+   defaults are refused teaches its requirements through a rejection. *)
+let creation_stem =
+  {json|{
+  "name": "new-keeper",
+  "sandbox_profile": "docker",
+  "instructions": "Replace this with what this keeper is for."
+}
+|json}
+;;
+
 let known_turn_up_args =
   [ "name"
   ; "runtime_id"

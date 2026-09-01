@@ -72,7 +72,7 @@ let docker_image_preflight ~image ~timeout_sec =
 let guest_target_with_docker_image_preflight
       ~docker_image_preflight
       ~turn_sandbox_factory
-      ~meta
+      ~(meta : keeper_meta)
       ~cwd
       ?timeout_sec
       ()

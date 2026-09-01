@@ -142,11 +142,11 @@ rule token = parse
      [param_name] (["\${NAME:-x}"], ["\$1"], ["\$" ...]) still falls
      through to it and is refused as Param_expansion, keeping the
      excluded vocabulary closed. *)
-  | '$' (name = param_name) {
+  | '$' (param_name as name) {
       incr_tokens ();
       PARAM (name, meta_of_string name)
     }
-  | "${" (name = param_name) "}" {
+  | "${" (param_name as name) "}" {
       incr_tokens ();
       PARAM (name, { Shell_ir.quoted = false; glob = false; escaped = false })
     }

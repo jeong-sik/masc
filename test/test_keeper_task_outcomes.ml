@@ -237,7 +237,40 @@ let test_tasks_list_reports_truncation () =
        check int "page holds the limit" 2 U.(cut |> member "snapshot" |> to_list |> List.length);
        let whole = list_with_limit 50 in
        check int "whole backlog matches" 4 U.(whole |> member "matching_count" |> to_int);
-       check bool "whole backlog is not truncated" false U.(whole |> member "truncated" |> to_bool))
+       check bool "whole backlog is not truncated" false U.(whole |> member "truncated" |> to_bool);
+       (* Re-issuing the truncated page's revision must answer [unchanged]
+          without the row statistics: a response that carries zero rows and
+          still said `truncated:true, returned_count:2` contradicted itself,
+          and models resolved the contradiction by repeating the identical
+          call (211 back-to-back identical pairs on 2026-09-01). *)
+       let unchanged_execution =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_tasks_list"
+           ~args:
+             (`Assoc
+               [ "limit", `Int 2
+               ; "if_revision", `String U.(cut |> member "revision" |> to_string)
+               ])
+       in
+       let unchanged_cut =
+         match unchanged_execution.data with
+         | Some data -> data
+         | None -> fail "expected producer-owned unchanged response"
+       in
+       check string
+         "truncated page revision answers unchanged"
+         "unchanged"
+         U.(unchanged_cut |> member "kind" |> to_string);
+       List.iter
+         (fun field ->
+            check
+              bool
+              (Printf.sprintf "unchanged carries no %s" field)
+              false
+              (List.mem field (U.keys unchanged_cut)))
+         [ "matching_count"; "returned_count"; "truncated" ])
 ;;
 
 let test_tasks_list_returns_snapshot_and_unchanged () =
@@ -293,7 +326,38 @@ let test_tasks_list_returns_snapshot_and_unchanged () =
        check string
          "raw rendering derives from unchanged response"
          (Yojson.Safe.to_string unchanged_data)
-       unchanged.raw_output)
+         unchanged.raw_output;
+       (* Exact key sets, not member-null probes: the snapshot keeps the row
+          statistics, the unchanged variant must not carry them (it has no
+          rows for them to describe). *)
+       let sorted_keys json = List.sort String.compare (U.keys json) in
+       check
+         (list string)
+         "snapshot key set"
+         [ "backlog_authority"
+         ; "degraded"
+         ; "kind"
+         ; "matching_count"
+         ; "projection"
+         ; "returned_count"
+         ; "revision"
+         ; "snapshot"
+         ; "truncated"
+         ]
+         (sorted_keys snapshot);
+       check
+         (list string)
+         "unchanged key set"
+         [ "backlog_authority"; "degraded"; "kind"; "projection"; "revision" ]
+         (sorted_keys unchanged_data);
+       check string
+         "unchanged backlog authority stays primary"
+         "primary"
+         U.(unchanged_data |> member "backlog_authority" |> to_string);
+       check bool
+         "unchanged is not degraded"
+         false
+         U.(unchanged_data |> member "degraded" |> to_bool))
 
 let test_tasks_list_projection_compact_by_default_full_on_request () =
   let base_path = temp_dir () in

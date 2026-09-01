@@ -3,7 +3,7 @@ open Alcotest
 module Librarian = Masc.Keeper_librarian
 module Runtime = Masc.Keeper_librarian_runtime
 module Memory = Masc.Keeper_memory_os_types
-module Budget = Masc.Keeper_memory_os_budget
+module Render = Masc.Keeper_memory_os_render
 module Post_turn_memory = Masc.Keeper_agent_run_post_turn_memory
 module Keeper_chat_store = Masc.Keeper_chat_store
 module Keeper_counterpart_observation = Masc.Keeper_counterpart_observation
@@ -36,7 +36,7 @@ let () =
 
 let fact ~claim : Memory.fact =
   Memory.observed ~claim ~category:Memory.Fact ~now:1_000_000.
-    ~origin:{ kind = Memory.Legacy; trace_id = "" }
+    ~origin:{ kind = Memory.Authored; trace_id = "" }
 ;;
 
 let current_a = fact ~claim:"keep A"
@@ -53,7 +53,6 @@ let input () : Librarian.input =
   ; current =
       Some
         { Librarian.facts = [ current_a; current_b ] }
-  ; max_recall_fact_bytes = 64 * 1024
   ; messages =
       [ Agent_core.Types.make_message
           ~role:Agent_core.Types.User
@@ -147,8 +146,7 @@ let test_new_claim_is_materialized_after_retained_facts () =
       (List.map (fun (fact : Memory.fact) -> fact.claim) selection.facts)
 ;;
 
-let test_oversized_selection_is_rejected_without_local_truncation () =
-  let constrained = { (input ()) with max_recall_fact_bytes = 256 } in
+let test_large_selection_is_accepted_without_budget_control () =
   let json =
     selection_json
       ~retained:[]
@@ -157,29 +155,13 @@ let test_oversized_selection_is_rejected_without_local_truncation () =
       ()
   in
   match
-    Librarian.selection_of_json_result ~now:2_000_000. constrained json
+    Librarian.selection_of_json_result ~now:2_000_000. (input ()) json
   with
-  | Error (Librarian.Recall_fact_budget_exceeded { actual_bytes; max_bytes }) ->
-    check int "declared budget" 256 max_bytes;
-    check bool "exact rendered payload exceeds budget" true (actual_bytes > max_bytes)
   | Error error ->
-    failf "wrong budget error: %s" (Librarian.parse_error_to_string error)
-  | Ok _ -> fail "oversized selection was accepted"
-;;
-
-let test_budget_measurement_matches_exact_rendered_utf8_bytes () =
-  let facts =
-    [ fact ~claim:"plain ASCII"
-    ; { (fact ~claim:"한글과 emoji 🧠") with category = Memory.Lesson }
-    ]
-  in
-  let expected = String.length (Budget.render_facts facts) in
-  check int "incremental bytes equal rendered bytes" expected (Budget.rendered_bytes facts);
-  match Budget.measure ~max_bytes:expected facts with
-  | Budget.Fits { actual_bytes; max_bytes } ->
-    check int "measured bytes" expected actual_bytes;
-    check int "boundary is inclusive" expected max_bytes
-  | Budget.Exceeds _ -> fail "exact boundary rejected"
+    failf "large selection rejected: %s" (Librarian.parse_error_to_string error)
+  | Ok selection ->
+    check int "large claim bytes are preserved" 512
+      (String.length (List.hd selection.facts).claim)
 ;;
 
 (* The Keeper prompt says memory "records what was true when it was written:
@@ -189,7 +171,7 @@ let test_budget_measurement_matches_exact_rendered_utf8_bytes () =
    the field so the exact-bytes accounting above cannot be satisfied by
    dropping it again. *)
 let test_rendered_fact_states_when_it_was_recorded () =
-  let rendered = Budget.render_facts [ fact ~claim:"plain ASCII" ] in
+  let rendered = Render.render_facts [ fact ~claim:"plain ASCII" ] in
   let contains needle =
     let n = String.length needle in
     let rec scan i =
@@ -714,22 +696,6 @@ let test_prompt_input_and_rendered_prompt_share_the_same_window () =
       (String_util.contains_substring rendered "counterpart-0003")
 ;;
 
-let test_prompt_carries_recall_fact_byte_budget () =
-  let constrained = { (input ()) with max_recall_fact_bytes = 12_345 } in
-  check string "budget variable is exact"
-    "12345"
-    (List.assoc
-       "max_recall_fact_bytes"
-       (Librarian.prompt_variables constrained));
-  match Runtime.messages_for_librarian constrained with
-  | Error detail -> failf "librarian render failed: %s" detail
-  | Ok messages ->
-    check bool "rendered prompt states the capacity" true
-      (String_util.contains_substring
-         (user_text_of_messages messages)
-         "within 12345 UTF-8 bytes")
-;;
-
 let test_prompt_omits_tool_result_payload_and_has_one_message () =
   let sentinel = "UNTRUSTED_TOOL_RESULT_MUST_NOT_REACH_MEMORY_FINALIZER" in
   let tool_message =
@@ -963,13 +929,9 @@ let () =
         ; test_case "new claim materialized" `Quick
             test_new_claim_is_materialized_after_retained_facts
         ; test_case
-            "oversized selection rejects without truncation"
+            "large selection has no budget control"
             `Quick
-            test_oversized_selection_is_rejected_without_local_truncation
-        ; test_case
-            "incremental budget equals rendered UTF-8 bytes"
-            `Quick
-            test_budget_measurement_matches_exact_rendered_utf8_bytes
+            test_large_selection_is_accepted_without_budget_control
         ; test_case
             "rendered fact states when it was recorded"
             `Quick
@@ -999,8 +961,6 @@ let () =
             test_durable_speaker_attribution_reaches_counterpart_observations
         ; test_case "counterpart sources retain direct and attention fallback" `Quick
             test_counterpart_observations_keep_direct_and_attention_fallback
-        ; test_case "prompt carries recall byte budget" `Quick
-            test_prompt_carries_recall_fact_byte_budget
         ; test_case "prompt omits tool payload and stays single-message" `Quick
             test_prompt_omits_tool_result_payload_and_has_one_message
         ; test_case

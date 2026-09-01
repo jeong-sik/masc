@@ -130,8 +130,6 @@ let run
             { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
             ; keeper_instructions = meta.instructions
             ; current = current_selection
-            ; max_recall_fact_bytes =
-                Env_config.KeeperMemoryOs.recall_facts_max_bytes ()
             ; messages = librarian_messages
             ; tool_observations
             ; counterpart_observations

@@ -39,7 +39,7 @@ let () =
 
 let fact ~claim : Memory.fact =
   Memory.observed ~claim ~category:Memory.Fact ~now:1_000_000.
-    ~origin:{ kind = Memory.Legacy; trace_id = "" }
+    ~origin:{ kind = Memory.Authored; trace_id = "" }
 ;;
 
 let current_a = fact ~claim:"keep A"
@@ -49,7 +49,6 @@ let input () : Librarian.input =
   { turn_ref = Ids.Turn_ref.make ~trace_id:"trace-cli-lane" ~absolute_turn:7
   ; keeper_instructions = "You are the cli-lane keeper."
   ; current = Some { Librarian.facts = [ current_a; current_b ] }
-  ; max_recall_fact_bytes = 64 * 1024
   ; messages =
       [ Agent_core.Types.make_message
           ~role:Agent_core.Types.User

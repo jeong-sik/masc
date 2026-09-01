@@ -97,7 +97,6 @@ function defaultPromptItems(): DashboardPromptItem[] {
         'conversation_history',
         'counterpart_observations',
         'keeper_instructions',
-        'max_recall_fact_bytes',
       ],
     }),
   ]
@@ -192,7 +191,6 @@ describe('PromptRegistryPanel', () => {
       'current_memory',
       'conversation_history',
       'counterpart_observations',
-      'max_recall_fact_bytes',
     ]) expect(contract?.textContent).toContain(input)
 
     const open = Array.from(contract?.querySelectorAll('button') ?? []).find(button =>

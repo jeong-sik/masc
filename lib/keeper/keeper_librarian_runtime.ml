@@ -684,7 +684,6 @@ let exact_input_payload
   `Assoc
     [ "turn_ref", Ids.Turn_ref.to_yojson inp.turn_ref
     ; "keeper_instructions", `String inp.keeper_instructions
-    ; "max_recall_fact_bytes", `Int inp.max_recall_fact_bytes
     ; "prompt", prompt_material_payload prompt_material
     ; ( "rendered_prompt_variables"
       , `Assoc
@@ -760,8 +759,6 @@ let run_best_effort
                       prompt_material
                   ; "message_count", `Int (List.length prompt_input.messages)
                   ; "current_fact_count", `Int current_fact_count
-                  ; ( "max_recall_fact_bytes"
-                    , `Int prompt_input.max_recall_fact_bytes )
                   ]));
         let complete ?selected_slot outcome output =
           let elapsed_s = Eio.Time.now clock -. started_at_monotonic in

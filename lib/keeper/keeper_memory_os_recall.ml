@@ -4,11 +4,9 @@ open Keeper_memory_os_types
 
 type unavailable_reason =
   | Read_error
-  | Fact_budget_exceeded
 
 let unavailable_reason_to_label = function
   | Read_error -> "read_error"
-  | Fact_budget_exceeded -> "fact_budget_exceeded"
 ;;
 
 let record_unavailable reason =
@@ -40,19 +38,10 @@ let render_snapshot ~now:_ snapshot =
   match facts with
   | [] -> omit ()
   | _ ->
-    let max_bytes = Env_config.KeeperMemoryOs.recall_facts_max_bytes () in
-    (match Keeper_memory_os_budget.measure ~max_bytes facts with
-     | Exceeds { actual_bytes; max_bytes } ->
-       Log.Keeper.warn
-         "memory os recall fact payload exceeds byte budget actual_bytes=%d max_bytes=%d"
-         actual_bytes
-         max_bytes;
-       omit ~reason:Fact_budget_exceeded ()
-     | Fits _ ->
-       recall_block
-         ~revision:snapshot.revision
-         ~updated_at:(Masc_domain.iso8601_of_unix_seconds snapshot.updated_at)
-         ~facts:(Keeper_memory_os_budget.render_facts facts))
+    recall_block
+      ~revision:snapshot.revision
+      ~updated_at:(Masc_domain.iso8601_of_unix_seconds snapshot.updated_at)
+      ~facts:(Keeper_memory_os_render.render_facts facts)
 ;;
 
 let render_context_result ~keepers_dir ~keeper_id ~now =
@@ -110,7 +99,7 @@ let render_with_source_revalidation ~config ~meta ~keepers_dir ~keeper_id ~now =
         ordinary_snapshot
     in
     let lines =
-      List.map Keeper_memory_os_budget.render_fact ordinary_facts
+      List.map Keeper_memory_os_render.render_fact ordinary_facts
       @ List.map Keeper_memory_source_current.render_fact source_facts
       @ List.map Keeper_memory_source_current.render_invalidation invalidations
     in
@@ -118,28 +107,18 @@ let render_with_source_revalidation ~config ~meta ~keepers_dir ~keeper_id ~now =
     if String.equal payload ""
     then omit ()
     else
-      let max_bytes = Env_config.KeeperMemoryOs.recall_facts_max_bytes () in
-      let actual_bytes = String.length payload in
-      if actual_bytes > max_bytes
-      then (
-        Log.Keeper.warn
-          "memory os recall combined payload exceeds byte budget actual_bytes=%d max_bytes=%d"
-          actual_bytes
-          max_bytes;
-        omit ~reason:Fact_budget_exceeded ())
-      else
-        let ordinary_revision =
-          Option.fold
-            ~none:"absent"
-            ~some:(fun snapshot -> string_of_int snapshot.Keeper_memory_os_current.revision)
-            ordinary_snapshot
-        in
-        Printf.sprintf
-          "--- Memory OS Recall ---\nCurrent memory after source revalidation at %s (memory_revision=%s source_revision=%d).\n%s"
-          (Masc_domain.iso8601_of_unix_seconds now)
-          ordinary_revision
-          source_snapshot.revision
-          payload
+      let ordinary_revision =
+        Option.fold
+          ~none:"absent"
+          ~some:(fun snapshot -> string_of_int snapshot.Keeper_memory_os_current.revision)
+          ordinary_snapshot
+      in
+      Printf.sprintf
+        "--- Memory OS Recall ---\nCurrent memory after source revalidation at %s (memory_revision=%s source_revision=%d).\n%s"
+        (Masc_domain.iso8601_of_unix_seconds now)
+        ordinary_revision
+        source_snapshot.revision
+        payload
 ;;
 
 let enabled () =

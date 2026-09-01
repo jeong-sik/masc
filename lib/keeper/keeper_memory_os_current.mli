@@ -20,11 +20,26 @@ type source =
   ; trace_id : string
   }
 
+(** A proposed derived fact that did not survive truth maintenance because no
+    complete proof path remained current. [missing_premise_ids] is the union
+    of premises absent from the maintained fixed point across its derivations. *)
+type support_invalidation =
+  { fact : Keeper_memory_os_types.fact
+  ; missing_premise_ids : string list
+  }
+
 type change =
   { added : Keeper_memory_os_types.fact list
   ; removed : Keeper_memory_os_types.fact list
   ; retained : int
+  ; invalidated : support_invalidation list
   }
+
+type upsert_error =
+  | Unsupported_derivation of support_invalidation
+  | Upsert_persistence_failed of string
+
+val upsert_error_to_string : upsert_error -> string
 
 type t =
   { revision : int
@@ -101,10 +116,9 @@ val append_librarian_failure :
   -> unit
 
 (** Last [limit] journal lines, oldest first, one result per line. A line this
-    build cannot parse is [Error] with the reason rather than being dropped:
-    lines written before the [outcome] tag existed report as such instead of
-    being reinterpreted as commits. A missing journal file is an empty list,
-    which is why the result is a list and not [(list, string) result]. *)
+    build cannot parse is [Error] with the reason rather than being dropped.
+    A missing journal file is an empty list, which is why the result is a list
+    and not [(list, string) result]. *)
 val read_journal_tail :
   keepers_dir:string
   -> keeper_id:string
@@ -124,7 +138,6 @@ val read_for_keepers_dir :
 val replace
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?dropped_statements:Keeper_memory_os_types.dropped_statement list
-  -> ?max_fact_bytes:int
   -> keepers_dir:string
   -> keeper_id:string
   -> expected_revision:int option
@@ -134,12 +147,8 @@ val replace
   -> unit
   -> (t, string) result
 (** Atomically replace the complete current snapshot only when its revision
-    still equals [expected_revision]. Duplicate fact identities and an
-    ordinary + source-bound rendered payload above [max_fact_bytes] reject
-    before writing. Both stores share an outer commit lock, so the source
-    reservation cannot change between measurement and commit. The bound is
-    floored to 1 byte; its default is the Memory OS capacity policy. Existing
-    state must parse as the exact current schema; malformed, non-current, or
+    still equals [expected_revision]. Existing state must parse as the exact
+    current schema; malformed, non-current, or
     concurrently changed state fails closed and is not overwritten.
 
     [dropped_statements], when present, is the writer's own account of every
@@ -150,13 +159,12 @@ val replace
 
 val upsert_fact
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> ?max_fact_bytes:int
   -> keepers_dir:string
   -> keeper_id:string
   -> now:float
   -> source:source
   -> Keeper_memory_os_types.fact
-  -> (t, string) result
+  -> (t, upsert_error) result
 (** Atomically insert or replace one explicit keeper-authored fact while
     preserving the rest of the current snapshot. A matching identity (same
     claim bytes) is a re-observation, not a duplicate: the authoritative
@@ -164,7 +172,14 @@ val upsert_fact
     re-observing an authored row must not repaint it), [last_seen] moves to
     the later of the two, and [reinforcement] counts the re-observation —
     the byte-identical reinjection loop accumulates a count, not rows. The
-    same combined rendered-payload byte budget and 1-byte floor as [replace]
-    apply; no local importance, recency, or echo heuristic participates. *)
+    basis join preserves an existing observation, promotes a derived fact
+    re-observed directly to an observation, replaces the premise set for an
+    existing rule identity, and appends a distinct rule identity.
+    It never evicts an existing fact to admit the incoming fact; no local
+    importance, recency, budget, or echo heuristic changes truth.
+
+    A derived incoming fact commits only when it survives support maintenance
+    in the same locked update. Missing support is a typed
+    [Unsupported_derivation] and writes no snapshot or journal revision. *)
 
 val to_json : t -> Yojson.Safe.t

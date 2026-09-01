@@ -124,26 +124,6 @@ let test_every_kind_round_trips () =
       decoded)
 ;;
 
-let test_untagged_line_is_an_error () =
-  with_keepers_dir (fun keepers_dir ->
-    (* The shape written before [outcome] existed. Decoding it as a commit
-       would let a retired shape keep flowing through a reader that believes
-       every line says what it is. *)
-    append_raw
-      ~keepers_dir
-      {|{"recorded_at":1.0,"revision":3,"source":{"kind":"librarian","trace_id":"t","generation":3},"change":{"added":[],"removed":[],"retained":0}}|};
-    match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
-    | [ Error reason ] ->
-      check
-        bool
-        "the reason names the missing tag"
-        true
-        (Astring.String.is_infix ~affix:"outcome" reason)
-    | [ Ok _ ] -> fail "an untagged legacy line decoded as a valid entry"
-    | entries ->
-      fail (Printf.sprintf "expected exactly one line, got %d" (List.length entries)))
-;;
-
 let test_unknown_kind_is_an_error () =
   with_keepers_dir (fun keepers_dir ->
     append_raw
@@ -172,6 +152,23 @@ let test_unknown_outcome_is_an_error () =
         true
         (Astring.String.is_infix ~affix:"deferred" reason)
     | [ Ok _ ] -> fail "an unknown outcome decoded into a known constructor"
+    | entries ->
+      fail (Printf.sprintf "expected exactly one line, got %d" (List.length entries)))
+;;
+
+let test_unknown_outer_field_is_an_error () =
+  with_keepers_dir (fun keepers_dir ->
+    append_raw
+      ~keepers_dir
+      {|{"outcome":"failed","recorded_at":1.0,"trace_id":"t","kind":"unhandled_exception","detail":"d","snapshot_present":false,"cadence_deferred":false,"unexpected":true}|};
+    match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
+    | [ Error reason ] ->
+      check
+        bool
+        "closed journal shape reports the rejected field set"
+        true
+        (Astring.String.is_infix ~affix:"unknown" reason)
+    | [ Ok _ ] -> fail "an unknown outer field crossed the journal boundary"
     | entries ->
       fail (Printf.sprintf "expected exactly one line, got %d" (List.length entries)))
 ;;
@@ -257,7 +254,7 @@ let test_committed_line_decodes_as_a_commit () =
   with_keepers_dir (fun keepers_dir ->
     let fact : Types.fact =
       Types.observed ~claim:"a claim" ~category:Fact ~now:1_700_000_000.0
-        ~origin:{ kind = Legacy; trace_id = "" }
+        ~origin:{ kind = Authored; trace_id = "" }
     in
     match
       Current.replace
@@ -282,6 +279,68 @@ let test_committed_line_decodes_as_a_commit () =
          fail (Printf.sprintf "expected exactly one line, got %d" (List.length entries))))
 ;;
 
+let test_committed_line_requires_fact_basis () =
+  with_keepers_dir (fun keepers_dir ->
+    let fact =
+      Types.observed ~claim:"a claim" ~category:Fact ~now:1_700_000_000.0
+        ~origin:{ kind = Authored; trace_id = "" }
+    in
+    (match
+       Current.replace
+         ~keepers_dir
+         ~keeper_id
+         ~expected_revision:None
+         ~now:1_700_000_000.0
+         ~source:{ kind = Librarian; trace_id = "trace-commit" }
+         ~facts:[ fact ]
+         ()
+     with
+     | Ok _ -> ()
+     | Error reason -> fail ("replace failed: " ^ reason));
+    let path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+    let without_basis = function
+      | `Assoc fields ->
+        `Assoc (List.filter (fun (field, _) -> not (String.equal field "basis")) fields)
+      | json -> json
+    in
+    let broken =
+      Fs_compat.load_file path
+      |> String.trim
+      |> Yojson.Safe.from_string
+      |> function
+      | `Assoc fields ->
+        `Assoc
+          (List.map
+             (fun (field, value) ->
+                if String.equal field "change"
+                then
+                  match value with
+                  | `Assoc change_fields ->
+                    ( field
+                    , `Assoc
+                        (List.map
+                           (fun (change_field, change_value) ->
+                              if String.equal change_field "added"
+                              then
+                                match change_value with
+                                | `List facts ->
+                                  change_field, `List (List.map without_basis facts)
+                                | _ -> change_field, change_value
+                              else change_field, change_value)
+                           change_fields) )
+                  | _ -> field, value
+                else field, value)
+             fields)
+      | json -> json
+    in
+    Fs_compat.save_file path (Yojson.Safe.to_string broken ^ "\n");
+    match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
+    | [ Error _ ] -> ()
+    | [ Ok _ ] -> fail "a journal fact without basis decoded as current"
+    | entries ->
+      fail (Printf.sprintf "expected exactly one line, got %d" (List.length entries)))
+;;
+
 let () =
   run
     "librarian journal failures"
@@ -289,9 +348,12 @@ let () =
       , [ test_case "missing journal reads empty" `Quick test_missing_journal_reads_empty
         ; test_case "failure round trips" `Quick test_failure_round_trips
         ; test_case "every kind round trips" `Quick test_every_kind_round_trips
-        ; test_case "untagged line is an error" `Quick test_untagged_line_is_an_error
         ; test_case "unknown kind is an error" `Quick test_unknown_kind_is_an_error
         ; test_case "unknown outcome is an error" `Quick test_unknown_outcome_is_an_error
+        ; test_case
+            "unknown outer field is an error"
+            `Quick
+            test_unknown_outer_field_is_an_error
         ; test_case
             "one bad line does not hide its neighbours"
             `Quick
@@ -305,6 +367,10 @@ let () =
             "committed line decodes as a commit"
             `Quick
             test_committed_line_decodes_as_a_commit
+        ; test_case
+            "committed fact basis is required"
+            `Quick
+            test_committed_line_requires_fact_basis
         ] )
     ]
 ;;

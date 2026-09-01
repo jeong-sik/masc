@@ -389,35 +389,11 @@ let update_locked ?clock ~keepers_dir ~keeper_id build =
     if changed then save_snapshot path next else Ok next)
 ;;
 
-let combined_payload ordinary source =
-  match String.equal ordinary "", String.equal source "" with
-  | true, _ -> source
-  | _, true -> ordinary
-  | false, false -> ordinary ^ "\n" ^ source
-;;
-
-let validate_recall_budget ~ordinary_payload ~facts ~invalidations =
-  let source_payload = render_payload facts invalidations in
-  let actual_bytes =
-    combined_payload ordinary_payload source_payload |> String.length
-  in
-  let max_bytes = Env_config.KeeperMemoryOs.recall_facts_max_bytes () in
-  if actual_bytes <= max_bytes
-  then Ok ()
-  else
-    Error
-      (Printf.sprintf
-         "source-bound memory would exceed combined recall byte budget actual_bytes=%d max_bytes=%d"
-         actual_bytes
-         max_bytes)
-;;
-
 let upsert_file_fact
       ?clock
       ~config
       ~meta
       ~keepers_dir
-      ~ordinary_payload
       ~now
       ~claim
       ~source_path
@@ -477,13 +453,6 @@ let upsert_file_fact
         List.filter
           (fun invalidation -> not (String.equal invalidation.source_path source_path))
           previous_invalidations
-      in
-      let* ordinary_payload = ordinary_payload () in
-      let* () =
-        validate_recall_budget
-          ~ordinary_payload
-          ~facts
-          ~invalidations
       in
       Ok
         ( { revision

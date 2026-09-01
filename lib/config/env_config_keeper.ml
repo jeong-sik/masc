@@ -264,7 +264,6 @@ module KeeperMemoryOs = struct
   let librarian_enabled_default = true
   let librarian_cadence_turns_default = 3
   let librarian_max_messages_default = 24
-  let recall_facts_max_bytes_default = 64 * 1024
 
   (* Env-key SSOT: the config-introspection registry
      (env_config_snapshot.ml memory_entries) and the tests reference these
@@ -274,7 +273,6 @@ module KeeperMemoryOs = struct
   let librarian_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
   let librarian_cadence_turns_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
   let librarian_max_messages_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
-  let recall_facts_max_bytes_env_key = "MASC_KEEPER_MEMORY_OS_RECALL_FACTS_MAX_BYTES"
 
   let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =
     Env_config_memory.get_bool_logged
@@ -328,18 +326,6 @@ module KeeperMemoryOs = struct
       (get_int_logged
          librarian_max_messages_env_key
          ~default:librarian_max_messages_default)
-  ;;
-
-  (** Maximum UTF-8 bytes for the exact rendered fact lines injected by recall.
-      The Librarian owns selection within this capacity boundary.
-      @category Policies
-      @ops_class operator *)
-  let recall_facts_max_bytes () =
-    max
-      1
-      (get_int_logged
-         recall_facts_max_bytes_env_key
-         ~default:recall_facts_max_bytes_default)
   ;;
 
 end

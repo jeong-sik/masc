@@ -14,11 +14,30 @@ type source =
   ; trace_id : string
   }
 
+type support_invalidation =
+  { fact : fact
+  ; missing_premise_ids : string list
+  }
+
 type change =
   { added : fact list
   ; removed : fact list
   ; retained : int
+  ; invalidated : support_invalidation list
   }
+
+type upsert_error =
+  | Unsupported_derivation of support_invalidation
+  | Upsert_persistence_failed of string
+
+let upsert_error_to_string = function
+  | Unsupported_derivation invalidation ->
+    Printf.sprintf
+      "derived Memory OS fact has no complete support path memory_id=%s missing_premise_ids=%s"
+      (memory_id invalidation.fact)
+      (String.concat "," invalidation.missing_premise_ids)
+  | Upsert_persistence_failed detail -> detail
+;;
 
 type t =
   { revision : int
@@ -151,29 +170,227 @@ let facts_to_json facts =
   `List (List.map fact_to_json facts)
 ;;
 
+module Identity_map = Map.Make (String)
+
+let fact_payload fact =
+  fact_to_json fact |> Yojson.Safe.to_string
+;;
+
+let derivations_supported current_ids derivations =
+  List.exists
+    (fun derivation ->
+       List.for_all
+         (fun premise_id -> Set_util.StringSet.mem premise_id current_ids)
+         derivation.premise_ids)
+    derivations
+;;
+
+let missing_premises_for current_ids derivations =
+  List.fold_left
+    (fun missing derivation ->
+       List.fold_left
+         (fun missing premise_id ->
+            if Set_util.StringSet.mem premise_id current_ids
+            then missing
+            else Set_util.StringSet.add premise_id missing)
+         missing
+         derivation.premise_ids)
+    Set_util.StringSet.empty
+    derivations
+  |> Set_util.StringSet.elements
+;;
+
+let support_closure_ids facts =
+  let rules =
+    List.concat_map
+      (fun fact ->
+         match fact.basis with
+         | Observed -> []
+         | Derived derivations ->
+           List.map
+             (fun derivation -> memory_id fact, derivation.premise_ids)
+             derivations)
+      facts
+    |> Array.of_list
+  in
+  let remaining = Array.map (fun (_, premise_ids) -> List.length premise_ids) rules in
+  let dependents = Hashtbl.create (Array.length rules) in
+  Array.iteri
+    (fun rule_index (_, premise_ids) ->
+       List.iter
+         (fun premise_id ->
+            let current = Hashtbl.find_opt dependents premise_id |> Option.value ~default:[] in
+            Hashtbl.replace dependents premise_id (rule_index :: current))
+         premise_ids)
+    rules;
+  let current = ref Set_util.StringSet.empty in
+  let pending = Queue.create () in
+  let activate identity =
+    if not (Set_util.StringSet.mem identity !current)
+    then (
+      current := Set_util.StringSet.add identity !current;
+      Queue.add identity pending)
+  in
+  List.iter
+    (fun fact ->
+       match fact.basis with
+       | Observed -> activate (memory_id fact)
+       | Derived _ -> ())
+    facts;
+  while not (Queue.is_empty pending) do
+    let identity = Queue.take pending in
+    Hashtbl.find_opt dependents identity
+    |> Option.value ~default:[]
+    |> List.iter (fun rule_index ->
+      remaining.(rule_index) <- remaining.(rule_index) - 1;
+      if remaining.(rule_index) = 0
+      then activate (fst rules.(rule_index)))
+  done;
+  !current
+;;
+
+let support_invalidation_to_json invalidation =
+  let missing_premise_ids = invalidation.missing_premise_ids in
+  if
+    missing_premise_ids = []
+    || not (List.for_all Keeper_memory_os_types.is_memory_id missing_premise_ids)
+    || not
+         (List.equal
+            String.equal
+            missing_premise_ids
+            (List.sort_uniq String.compare missing_premise_ids))
+  then invalid_arg "support invalidation must carry canonical missing premise identities";
+  `Assoc
+    [ "fact", fact_to_json invalidation.fact
+    ; ( "missing_premise_ids"
+      , `List
+          (List.map
+             (fun premise_id -> `String premise_id)
+             invalidation.missing_premise_ids) )
+    ]
+;;
+
+let support_invalidation_of_json = function
+  | `Assoc fields
+    when exact_object_fields [ "fact"; "missing_premise_ids" ] fields ->
+    (match
+       List.assoc_opt "fact" fields
+       , List.assoc_opt "missing_premise_ids" fields
+     with
+     | Some fact_json, Some (`List premise_values) ->
+       let rec premise_ids previous acc = function
+         | [] -> Some (List.rev acc)
+         | `String premise_id :: rest
+           when Keeper_memory_os_types.is_memory_id premise_id
+                && (match previous with
+                    | None -> true
+                    | Some previous -> String.compare previous premise_id < 0) ->
+           premise_ids
+             (Some premise_id)
+             (premise_id :: acc)
+             rest
+         | _ -> None
+       in
+       (match fact_of_json fact_json, premise_ids None [] premise_values with
+        | Some fact, Some (_ :: _ as missing_premise_ids) ->
+          Some { fact; missing_premise_ids }
+        | Some _, Some [] | Some _, None | None, _ -> None)
+     | _ -> None)
+  | _ -> None
+;;
+
 let change_to_json change =
   `Assoc
     [ "added", facts_to_json change.added
     ; "removed", facts_to_json change.removed
     ; "retained", `Int change.retained
+    ; ( "invalidated"
+      , `List (List.map support_invalidation_to_json change.invalidated) )
     ]
 ;;
 
 let change_of_json = function
   | `Assoc fields
-    when exact_object_fields [ "added"; "removed"; "retained" ] fields ->
+    when exact_object_fields
+           [ "added"; "removed"; "retained"; "invalidated" ]
+           fields ->
     (match
        List.assoc_opt "added" fields
        , List.assoc_opt "removed" fields
        , List.assoc_opt "retained" fields
+       , List.assoc_opt "invalidated" fields
      with
-     | Some added, Some removed, Some (`Int retained) ->
-       (match facts_of_json added, facts_of_json removed with
-        | Some added, Some removed when retained >= 0 ->
-          Some { added; removed; retained }
-        | (Some _, Some _) | (Some _, None) | (None, _) -> None)
+     | Some added, Some removed, Some (`Int retained), Some (`List invalidated_json) ->
+       let rec invalidations seen acc = function
+         | [] -> Some (List.rev acc)
+         | json :: rest ->
+           (match support_invalidation_of_json json with
+            | Some invalidation ->
+              let identity = memory_id invalidation.fact in
+              if Set_util.StringSet.mem identity seen
+              then None
+              else
+                invalidations
+                  (Set_util.StringSet.add identity seen)
+                  (invalidation :: acc)
+                  rest
+            | None -> None)
+       in
+       (match
+          facts_of_json added
+          , facts_of_json removed
+          , invalidations Set_util.StringSet.empty [] invalidated_json
+        with
+        | Some added, Some removed, Some invalidated when retained >= 0 ->
+          Some { added; removed; retained; invalidated }
+        | _ -> None)
      | _ -> None)
   | _ -> None
+;;
+
+let valid_snapshot_change ~facts ~current_ids ~change =
+  let current_by_id =
+    List.fold_left
+      (fun by_id fact -> Identity_map.add (memory_id fact) fact by_id)
+      Identity_map.empty
+      facts
+  in
+  let added_are_current =
+    List.for_all
+      (fun added ->
+         match Identity_map.find_opt (memory_id added) current_by_id with
+         | Some current -> String.equal (fact_payload added) (fact_payload current)
+         | None -> false)
+      change.added
+  in
+  let removed_are_not_current_payloads =
+    List.for_all
+      (fun removed ->
+         match Identity_map.find_opt (memory_id removed) current_by_id with
+         | Some current ->
+           not (String.equal (fact_payload removed) (fact_payload current))
+         | None -> true)
+      change.removed
+  in
+  let invalidations_match_current_support =
+    List.for_all
+      (fun invalidation ->
+         not (Set_util.StringSet.mem (memory_id invalidation.fact) current_ids)
+         &&
+         match invalidation.fact.basis with
+         | Observed -> false
+         | Derived derivations ->
+           (not (derivations_supported current_ids derivations))
+           && List.equal
+                String.equal
+                invalidation.missing_premise_ids
+                (missing_premises_for current_ids derivations))
+      change.invalidated
+  in
+  added_are_current
+  && removed_are_not_current_payloads
+  && invalidations_match_current_support
+  && change.retained + List.length change.added = List.length facts
 ;;
 
 let to_json snapshot =
@@ -227,13 +444,19 @@ let of_json = function
           when revision >= 1
                && Float.is_finite updated_at
                && updated_at >= 0.0 ->
-          Some
-            { revision
-            ; updated_at
-            ; source
-            ; facts
-            ; change
-            }
+          let current_ids = support_closure_ids facts in
+          if
+            Set_util.StringSet.cardinal current_ids = List.length facts
+            && valid_snapshot_change ~facts ~current_ids ~change
+          then
+            Some
+              { revision
+              ; updated_at
+              ; source
+              ; facts
+              ; change
+              }
+          else None
         | _ -> None)
      | _ -> None)
   | _ -> None
@@ -267,12 +490,6 @@ let read_for_keepers_dir ~keepers_dir ~keeper_id =
          message)
 ;;
 
-module Identity_map = Map.Make (String)
-
-let fact_payload fact =
-  fact_to_json fact |> Yojson.Safe.to_string
-;;
-
 let map_facts facts =
   let rec loop map = function
     | [] -> Ok map
@@ -285,7 +502,7 @@ let map_facts facts =
   loop Identity_map.empty facts
 ;;
 
-let compute_change ~previous ~next =
+let compute_change ~previous ~next ~invalidated =
   let* previous_by_id = map_facts previous in
   let* next_by_id = map_facts next in
   let added_rev, retained =
@@ -316,7 +533,59 @@ let compute_change ~previous ~next =
     { added = List.rev added_rev
     ; removed = List.rev removed_rev
     ; retained
+    ; invalidated
     }
+;;
+
+(* Truth maintenance over positive support sets. Observations seed a worklist;
+   each newly supported identity advances only the derivations that name it.
+   A derived fact activates when one whole derivation reaches zero missing
+   premises. Unsupported cycles never enter the worklist. *)
+let maintain_supported_facts facts =
+  let current_ids = support_closure_ids facts in
+  let current_rev, invalidated_rev =
+    List.fold_left
+      (fun (current_rev, invalidated_rev) fact ->
+         if Set_util.StringSet.mem (memory_id fact) current_ids
+         then fact :: current_rev, invalidated_rev
+         else
+           match fact.basis with
+           | Observed -> fact :: current_rev, invalidated_rev
+           | Derived derivations ->
+             let missing_premise_ids =
+               missing_premises_for current_ids derivations
+             in
+             current_rev, { fact; missing_premise_ids } :: invalidated_rev)
+      ([], [])
+      facts
+  in
+  List.rev current_rev, List.rev invalidated_rev
+;;
+
+let merge_basis existing incoming =
+  match existing, incoming with
+  | Observed, Observed | Observed, Derived _ -> Observed
+  | Derived _, Observed -> Observed
+  | Derived existing, Derived incoming ->
+    let derivations =
+      List.fold_left
+        (fun derivations candidate ->
+           if
+             List.exists
+               (fun current -> String.equal current.rule_id candidate.rule_id)
+               derivations
+           then
+             List.map
+               (fun current ->
+                  if String.equal current.rule_id candidate.rule_id
+                  then candidate
+                  else current)
+               derivations
+           else derivations @ [ candidate ])
+        existing
+        incoming
+    in
+    Derived derivations
 ;;
 
 let librarian_failure_kind_to_string = function
@@ -432,6 +701,20 @@ let append_librarian_failure
 ;;
 
 let committed_entry_of_fields fields =
+  let fields_are_exact =
+    exact_object_fields
+      [ "outcome"; "recorded_at"; "revision"; "source"; "change" ]
+      fields
+    || exact_object_fields
+         [ "outcome"
+         ; "recorded_at"
+         ; "revision"
+         ; "source"
+         ; "change"
+         ; "dropped"
+         ]
+         fields
+  in
   let dropped_of_json = function
     | `List items ->
       List.fold_left
@@ -444,6 +727,9 @@ let committed_entry_of_fields fields =
       |> Option.map List.rev
     | _ -> None
   in
+  if not fields_are_exact
+  then Error "committed line has unknown, duplicate, or missing fields"
+  else
   match
     ( List.assoc_opt "recorded_at" fields
     , List.assoc_opt "revision" fields
@@ -467,6 +753,20 @@ let committed_entry_of_fields fields =
 ;;
 
 let failed_entry_of_fields fields =
+  if
+    not
+      (exact_object_fields
+         [ "outcome"
+         ; "recorded_at"
+         ; "trace_id"
+         ; "kind"
+         ; "detail"
+         ; "snapshot_present"
+         ; "cadence_deferred"
+         ]
+         fields)
+  then Error "failed line has unknown, duplicate, or missing fields"
+  else
   match
     ( List.assoc_opt "recorded_at" fields
     , List.assoc_opt "trace_id" fields
@@ -492,10 +792,6 @@ let failed_entry_of_fields fields =
       "failed line is missing recorded_at/trace_id/kind/detail/snapshot_present/cadence_deferred"
 ;;
 
-(* Lines written before the [outcome] tag existed decode to [Error]. Guessing
-   that an untagged line is a commit would let the pre-tag shape keep flowing
-   through a reader that believes every line is self-describing, and no
-   migration code is written for retired shapes. *)
 let journal_entry_of_json = function
   | `Assoc fields ->
     (match List.assoc_opt "outcome" fields with
@@ -533,20 +829,34 @@ let read_journal_tail ~keepers_dir ~keeper_id ~limit =
           Error (Printf.sprintf "journal line is not valid JSON: %s" message)))
 ;;
 
-let update_locked
+let update_locked_with_error
       ?clock
       ?dropped_statements
+      ~store_error
       ~keepers_dir
       ~keeper_id
       build
   =
-  Fs_compat.mkdir_p keepers_dir;
-  let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-  Keeper_memory_os_aggregate_lock.with_lock
-    ?clock
-    ~keepers_dir
-    ~keeper_id
-    (fun () ->
+  let dropped_statements_are_valid =
+    match dropped_statements with
+    | None -> true
+    | Some statements ->
+      List.for_all
+        (fun (statement : Keeper_memory_os_types.dropped_statement) ->
+           Keeper_memory_os_types.is_memory_id statement.memory_id
+           && not (String.equal (String.trim statement.reason) ""))
+        statements
+  in
+  if not dropped_statements_are_valid
+  then Error (store_error "dropped statements must carry canonical identities and reasons")
+  else (
+    Fs_compat.mkdir_p keepers_dir;
+    let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+    Keeper_memory_os_aggregate_lock.with_lock
+      ?clock
+      ~keepers_dir
+      ~keeper_id
+      (fun () ->
        (* File_lock_eio.with_lock appends ".lock" itself; a pre-suffixed path
           locked "<snapshot>.lock.lock" and left a stray file per keeper. *)
        File_lock_eio.with_lock ?clock snapshot_path (fun () ->
@@ -554,66 +864,51 @@ let update_locked
            match Fs_compat.load_file_opt snapshot_path with
            | None -> Ok None
            | Some content ->
-             let+ snapshot = parse snapshot_path content in
+             let+ snapshot =
+               parse snapshot_path content |> Result.map_error store_error
+             in
              Some snapshot
          in
-         let* source_payload =
-           match
-             Keeper_memory_source_current.read_for_keepers_dir
-               ~keepers_dir
-               ~keeper_id
-           with
-           | Ok None -> Ok ""
-           | Ok (Some snapshot) ->
-             Ok
-               (Keeper_memory_source_current.render_payload
-                  snapshot.facts
-                  snapshot.invalidations)
-           | Error detail -> Error detail
-         in
-         let* next = build ~source_payload previous in
+         let* next = build previous in
          let content = Yojson.Safe.pretty_to_string (to_json next) ^ "\n" in
          match Fs_compat.save_file_atomic snapshot_path content with
          | Ok () ->
            append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements next;
+           List.iter
+             (fun invalidation ->
+                Log.Keeper.info
+                  "memory os support retracted keeper=%s revision=%d memory_id=%s missing_premise_ids=%s"
+                  keeper_id
+                  next.revision
+                  (memory_id invalidation.fact)
+                  (String.concat "," invalidation.missing_premise_ids))
+             next.change.invalidated;
            Ok next
          | Error message ->
            Error
-             (Printf.sprintf
-                "current Memory OS atomic write failed path=%s: %s"
-                snapshot_path
-                message)))
+             (store_error
+                (Printf.sprintf
+                   "current Memory OS atomic write failed path=%s: %s"
+                   snapshot_path
+                   message)))))
 ;;
 
-let combined_measure ~max_bytes ~source_payload facts =
-  let ordinary_bytes = Keeper_memory_os_budget.rendered_bytes facts in
-  let source_bytes = String.length source_payload in
-  let separator_bytes =
-    if ordinary_bytes > 0 && source_bytes > 0 then 1 else 0
-  in
-  let saturated_add left right =
-    if left > Int.max_int - right then Int.max_int else left + right
-  in
-  let actual_bytes =
-    ordinary_bytes
-    |> saturated_add source_bytes
-    |> saturated_add separator_bytes
-  in
-  let measurement : Keeper_memory_os_budget.measurement =
-    { actual_bytes; max_bytes }
-  in
-  if actual_bytes <= max_bytes
-  then Keeper_memory_os_budget.Fits measurement
-  else Keeper_memory_os_budget.Exceeds measurement
+let update_locked ?clock ?dropped_statements ~keepers_dir ~keeper_id build =
+  update_locked_with_error
+    ?clock
+    ?dropped_statements
+    ~store_error:Fun.id
+    ~keepers_dir
+    ~keeper_id
+    build
 ;;
 
-let make_snapshot
-      ~max_fact_bytes
-      ~source_payload
+let make_snapshot_from_maintained
       ~previous
       ~now
       ~source
       ~facts
+      ~invalidated
       ()
   =
   let previous_facts, revision =
@@ -621,28 +916,35 @@ let make_snapshot
     | None -> [], 1
     | Some snapshot -> snapshot.facts, snapshot.revision + 1
   in
-  let max_fact_bytes = max 1 max_fact_bytes in
-  match combined_measure ~max_bytes:max_fact_bytes ~source_payload facts with
-  | Exceeds { actual_bytes; max_bytes } ->
-    Error
-      (Printf.sprintf
-         "combined Memory OS rendered payload exceeds byte budget actual_bytes=%d max_bytes=%d"
-         actual_bytes
-         max_bytes)
-  | Fits _ ->
-    let+ change = compute_change ~previous:previous_facts ~next:facts in
-    { revision
-    ; updated_at = now
-    ; source
-    ; facts
-    ; change
-    }
+  let+ change = compute_change ~previous:previous_facts ~next:facts ~invalidated in
+  { revision
+  ; updated_at = now
+  ; source
+  ; facts
+  ; change
+  }
+;;
+
+let make_snapshot
+      ~previous
+      ~now
+      ~source
+      ~facts
+      ()
+  =
+  let facts, invalidated = maintain_supported_facts facts in
+  make_snapshot_from_maintained
+    ~previous
+    ~now
+    ~source
+    ~facts
+    ~invalidated
+    ()
 ;;
 
 let replace
       ?clock
       ?dropped_statements
-      ?(max_fact_bytes=Env_config.KeeperMemoryOs.recall_facts_max_bytes ())
       ~keepers_dir
       ~keeper_id
       ~expected_revision
@@ -656,7 +958,7 @@ let replace
     ?dropped_statements
     ~keepers_dir
     ~keeper_id
-    (fun ~source_payload previous ->
+    (fun previous ->
     let observed_revision =
       Option.map (fun snapshot -> snapshot.revision) previous
     in
@@ -669,8 +971,6 @@ let replace
            (Option.fold ~none:"absent" ~some:string_of_int observed_revision))
     else
       make_snapshot
-        ~max_fact_bytes
-        ~source_payload
         ~previous
         ~now
         ~source
@@ -680,22 +980,40 @@ let replace
 
 let upsert_fact
       ?clock
-      ?(max_fact_bytes=Env_config.KeeperMemoryOs.recall_facts_max_bytes ())
       ~keepers_dir
       ~keeper_id
       ~now
       ~source
       incoming
   =
-  update_locked
+  update_locked_with_error
     ?clock
+    ~store_error:(fun detail -> Upsert_persistence_failed detail)
     ~keepers_dir
     ~keeper_id
-    (fun ~source_payload previous ->
+    (fun previous ->
     let current_facts =
       match previous with
       | None -> []
       | Some snapshot -> snapshot.facts
+    in
+    let current_ids =
+      List.fold_left
+        (fun ids fact -> Set_util.StringSet.add (memory_id fact) ids)
+        Set_util.StringSet.empty
+        current_facts
+    in
+    let* () =
+      match incoming.basis with
+      | Observed -> Ok ()
+      | Derived derivations when derivations_supported current_ids derivations ->
+        Ok ()
+      | Derived derivations ->
+        Error
+          (Unsupported_derivation
+             { fact = incoming
+             ; missing_premise_ids = missing_premises_for current_ids derivations
+             })
     in
     let incoming_identity = memory_id incoming in
     let found = ref false in
@@ -718,62 +1036,30 @@ let upsert_fact
              ; last_seen = Float.max existing.last_seen incoming.last_seen
              ; reinforcement = existing.reinforcement + 1
              ; origin = existing.origin
+             ; basis = merge_basis existing.basis incoming.basis
              })
            else existing)
         current_facts
     in
     let facts = if !found then facts else facts @ [ incoming ] in
-    (* When the rendered payload exceeds the byte budget, evict the stalest
-       facts (by [last_seen], the most recent re-observation of the same claim
-       bytes) other than the incoming one until it fits, so an explicit write
-       never deadlocks a full memory and a fact that keeps proving relevant
-       outlives budget pressure instead of dying of insertion age. A single
-       incoming fact larger than the whole budget still fails closed below. *)
-    let facts =
-      match
-        combined_measure ~max_bytes:max_fact_bytes ~source_payload facts
-      with
-      | Fits _ -> facts
-      | Exceeds _ ->
-        let incoming_id = memory_id incoming in
-        let others, incoming_fact =
-          List.partition
-            (fun f -> not (String.equal (memory_id f) incoming_id))
-            facts
-        in
-        let others =
-          List.sort
-            (fun a b -> Float.compare a.last_seen b.last_seen)
-            others
-        in
-        let rec evict_oldest remaining =
-          match remaining with
-          | [] -> remaining
-          | _ :: rest ->
-            (match
-               combined_measure
-                 ~max_bytes:max_fact_bytes
-                 ~source_payload
-                 (incoming_fact @ remaining)
-             with
-             | Fits _ -> remaining
-             | Exceeds _ -> evict_oldest rest)
-        in
-        let evicted = evict_oldest others in
-        Log.Keeper.warn
-          "memory os upsert evicted %d fact(s) to fit byte budget keeper=%s"
-          (List.length others - List.length evicted)
-          keeper_id;
-        incoming_fact @ evicted
-    in
-    make_snapshot
-      ~max_fact_bytes
-      ~source_payload
-      ~previous
-      ~now
-      ~source
-      ~facts
-      ())
+    let facts, invalidated = maintain_supported_facts facts in
+    let incoming_identity = memory_id incoming in
+    match
+      List.find_opt
+        (fun invalidation ->
+           String.equal (memory_id invalidation.fact) incoming_identity)
+        invalidated
+    with
+    | Some invalidation -> Error (Unsupported_derivation invalidation)
+    | None ->
+      make_snapshot_from_maintained
+        ~previous
+        ~now
+        ~source
+        ~facts
+        ~invalidated
+        ()
+      |> Result.map_error (fun detail -> Upsert_persistence_failed detail))
 ;;
 
 (* Read-side projection. The write-side [journal_entry_to_json] above encodes a

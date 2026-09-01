@@ -48,7 +48,6 @@ const LIBRARIAN_INPUT_CONTRACT: ReadonlyArray<{ name: string; meaning: string }>
   { name: 'current_memory', meaning: 'commit 직전의 complete current-memory snapshot' },
   { name: 'conversation_history', meaning: 'cadence 시점에 선택된 bounded recent message window' },
   { name: 'counterpart_observations', meaning: 'host provenance가 붙은 최근 상대 관측' },
-  { name: 'max_recall_fact_bytes', meaning: '새 current memory 전체가 지켜야 하는 byte 상한' },
 ]
 
 function LibrarianRuntimeContract({

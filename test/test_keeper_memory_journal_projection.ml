@@ -72,7 +72,7 @@ let test_failure_and_commit_project_to_different_shapes () =
       ~cadence_deferred:true;
     let fact : Types.fact =
       Types.observed ~claim:"a claim" ~category:Fact ~now:1_700_000_000.0
-        ~origin:{ kind = Legacy; trace_id = "" }
+        ~origin:{ kind = Authored; trace_id = "" }
     in
     (match
        Current.replace
@@ -158,21 +158,6 @@ let test_undecodable_line_keeps_its_position_and_reason () =
     | lines -> Alcotest.failf "expected three lines, got %d" (List.length lines))
 ;;
 
-(* A line written before the outcome tag existed decodes to Error, and the
-   projection says so rather than presenting it as a commit. *)
-let test_untagged_legacy_line_is_reported_not_reinterpreted () =
-  with_keepers_dir (fun keepers_dir ->
-    append_raw
-      ~keepers_dir
-      {|{"recorded_at":1.0,"revision":3,"source":{"kind":"librarian","trace_id":"t","generation":3},"change":{"added":[],"removed":[],"retained":0}}|};
-    match read_json ~keepers_dir with
-    | [ line ] ->
-      Alcotest.(check bool) "not presented as decoded" false (U.to_bool (field line "ok"));
-      Alcotest.(check bool) "and not presented as a commit" true
-        (field line "outcome" = `Null)
-    | lines -> Alcotest.failf "expected one line, got %d" (List.length lines))
-;;
-
 (* Drop reasons are the librarian's own account of what it forgot. They ride
    the journal line and nothing else stores them, so losing them in the
    projection loses them entirely. *)
@@ -180,14 +165,17 @@ let test_drop_reasons_survive_the_projection () =
   with_keepers_dir (fun keepers_dir ->
     let fact : Types.fact =
       Types.observed ~claim:"kept" ~category:Fact ~now:1_700_000_000.0
-        ~origin:{ kind = Legacy; trace_id = "" }
+        ~origin:{ kind = Authored; trace_id = "" }
     in
     match
       Current.replace
         ~keepers_dir
         ~keeper_id:keeper
         ~dropped_statements:
-          [ { memory_id = "id:gone"; reason = "superseded by the openssl decision" } ]
+          [ { memory_id = "sha256:" ^ String.make 64 'a'
+            ; reason = "superseded by the openssl decision"
+            }
+          ]
         ~expected_revision:None
         ~now:1_700_000_000.0
         ~source:{ kind = Librarian; trace_id = "trace-a" }
@@ -259,8 +247,6 @@ let () =
     ; ( "honesty"
       , [ Alcotest.test_case "undecodable line keeps its position and reason" `Quick
             test_undecodable_line_keeps_its_position_and_reason
-        ; Alcotest.test_case "untagged legacy line is reported, not reinterpreted" `Quick
-            test_untagged_legacy_line_is_reported_not_reinterpreted
         ; Alcotest.test_case "cancelled pass is recorded and named" `Quick
             test_cancelled_pass_is_recorded_and_named
         ] )

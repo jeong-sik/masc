@@ -74,15 +74,13 @@ val read_source :
     are read inside this call; callers cannot supply their own digest. A
     successful replacement clears the pending invalidation for that path.
 
-    [ordinary_payload] is evaluated while the shared aggregate lock is held.
-    It must read, but not write or lock, the ordinary current snapshot and
-    return its exact rendered fact payload. *)
+    The write is independent of prompt rendering capacity; current truth is
+    never rejected because of a presentation threshold. *)
 val upsert_file_fact :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> keepers_dir:string
-  -> ordinary_payload:(unit -> (string, string) result)
   -> now:float
   -> claim:string
   -> source_path:string

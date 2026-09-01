@@ -74,10 +74,9 @@ let with_test_context f =
       in
       f ctx)
 
-(* Every case below is about some other argument. The tool schema defaults
-   [sandbox_profile] to "docker", and [parse] is called directly here, so the
-   fixture states what a caller would rather than leaving it out. That the
-   argument is required at all is pinned once, by
+(* Every case below is about some other argument, and [parse] refuses a call
+   that states no [sandbox_profile], so the fixture states one rather than
+   leaving it out. That the argument is required at all is pinned once, by
    [test_parse_requires_a_sandbox_profile], instead of being restated in each
    case. *)
 let parse_stating_a_profile ctx json =
@@ -1292,6 +1291,49 @@ let test_the_creation_stem_is_a_declaration_parse_accepts () =
       (Keeper_types_profile.tool_result_body result)
 ;;
 
+(* The schema the model reads and the parse that answers it have to say the
+   same thing about [sandbox_profile]. They did not: the schema advertised
+   [default = "docker"] -- nothing in masc applies it, it is a statement to
+   the caller that omitting the field is safe -- while [parse] rejects the
+   omission and the same param's own description says "Pass explicitly".
+   #32078 settled which one is right: absence is an error, because "execution
+   outside a boundary is not a profile the fleet offers".
+
+   Pinned from both sides so removing either half fails: the schema must not
+   offer a default, and the parse must still refuse the omission. A later
+   change that re-adds the default has to delete this test to do it. *)
+let test_the_schema_does_not_promise_a_default_parse_refuses () =
+  let schema =
+    match
+      List.find_opt
+        (fun (schema : Masc_domain.tool_schema) ->
+           String.equal schema.name "masc_keeper_up")
+        Masc.Keeper_schema.schemas
+    with
+    | Some schema -> schema.input_schema
+    | None -> fail "masc_keeper_up must have a schema"
+  in
+  let advertised_default =
+    Yojson.Safe.Util.(
+      schema
+      |> member "properties"
+      |> member "sandbox_profile"
+      |> member "default")
+  in
+  check
+    bool
+    "the schema offers no default for sandbox_profile"
+    true
+    (advertised_default = `Null);
+  with_test_context
+  @@ fun ctx ->
+  match
+    Keeper_turn_up_args.parse ctx (`Assoc [ "name", `String "no-default-fixture" ])
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "omitting sandbox_profile must stay an error"
+;;
+
 let test_parse_requires_a_sandbox_profile () =
   with_test_context @@ fun ctx ->
   match
@@ -1414,6 +1456,10 @@ let () =
             "the creation stem is a declaration parse accepts"
             `Quick
             test_the_creation_stem_is_a_declaration_parse_accepts
+        ; test_case
+            "the schema does not promise a default parse refuses"
+            `Quick
+            test_the_schema_does_not_promise_a_default_parse_refuses
         ; test_case
             "remote endpoint required and registry-resolved"
             `Quick

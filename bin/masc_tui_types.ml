@@ -1196,14 +1196,10 @@ let surface_ring : (surface * string) list =
     (Acting, "Acting");
     (Keepers Keeper_list, "Keepers");
     (Memory, "Memory");
-    (Lanes, "Lanes");
     (Approvals, "Approvals");
     (Board, "Board");
     (Planning, "Planning");
-    (Schedules, "Schedules");
-    (Fusion, "Fusion");
-    (Repositories, "Repos");
-    (Code, "Code");
+    (Repositories, "Workspace");
     (Runtime, "Runtime");
     (Config, "Config");
     (Resources, "Resources");
@@ -1215,15 +1211,20 @@ let surface_ring : (surface * string) list =
    onto Keepers, Task Review and Verdicts collapse onto Planning, Changes
    collapses onto Keepers -- its rows are one keeper's file writes, chosen by
    the roster cursor, so it was never a destination of its own -- and
-   Connectors collapses onto Runtime: four channel rows are part of "is the
-   substrate alive", not a peer of Board or Planning. *)
+   Connectors and standalone Lanes collapse onto Runtime: channel rows and
+   service-lane observation are both parts of "is the substrate alive", not
+   peers of Board or Planning. Code collapses onto Workspace (the
+   Repositories surface): its tree is always somebody's checkout -- a
+   registered repository, a keeper workspace, or the project -- and Enter on
+   a Workspace row is already how a reader walks into it. *)
 let surface_ring_index (view : surface) =
   let family =
     match view with
     | Keepers _ -> Keepers Keeper_list
-    | Verification | Harness -> Planning
+    | Verification | Harness | Schedules | Fusion -> Planning
     | Changes -> Keepers Keeper_list
-    | Connectors -> Runtime
+    | Connectors | Lanes -> Runtime
+    | Code -> Repositories
     | v -> v
   in
   let rec find i = function
@@ -3501,6 +3502,10 @@ let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
   @ [ "go Task Review", Palette_goto Verification ]
   @ [ "go Connectors", Palette_goto Connectors ]
+  @ [ "go Lanes", Palette_goto Lanes ]
+  @ [ "go Schedules", Palette_goto Schedules ]
+  @ [ "go Fusion", Palette_goto Fusion ]
+  @ [ "go Code", Palette_goto Code ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring

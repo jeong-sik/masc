@@ -564,7 +564,7 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
      is, so a fact placed there cannot be read on a surface whose own keys
      already fill the row -- which is every surface at eighty columns. The
      outcomes of the editor-backed actions used to go only to the event log,
-     which Overview alone draws, so an operator who pressed [a] on Repos
+     which Overview alone draws, so an operator who pressed [a] on Workspace
      could not tell a registration from an editor that never started.
 
      Expired here rather than cleared by the setter: the setter is a key
@@ -3054,11 +3054,15 @@ let planning_workspace_title (state : state) ~(tab : planning_tab) =
       (Theme.info ()) ^ Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
     else Ansi.dim ^ label ^ Ansi.reset
   in
-  Printf.sprintf "%s  %s  %s  %s"
+  Printf.sprintf "%s  %s  %s  %s  %s  %s"
     (screen_title " MASC Planning")
     (draw ~active:(tab = Planning_goals) "1 Goals")
     (draw ~active:(tab = Planning_task_review) ("2 Task Review" ^ review_count))
     (draw ~active:(tab = Planning_verdicts) "3 Evaluator Verdicts")
+    (* The next two [v] stops keep their own headers; the strip still names
+       them so the walk is visible from its first three stops. *)
+    (draw ~active:false "4 Schedules")
+    (draw ~active:false "5 Fusion")
 
 (* Where the goal stands with the completion judge, in one column. The phase
    reads [executing] both for a goal nobody asked about and for one the judge
@@ -8722,11 +8726,11 @@ let render_repository_list (state : state) =
     match state.repositories with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Repositories") timestamp
+          (screen_title " MASC Workspace") timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s (%d)  %s  %s"
-          (screen_title " MASC Repositories") shown timestamp
+          (screen_title " MASC Workspace") shown timestamp
           (connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"repositories"
@@ -10287,7 +10291,7 @@ let render_runtime (state : state) =
             scroll_hint
             (match state.runtime_mode with
              | Masc_tui_types.Runtime_lanes -> "all runtimes"
-             | Masc_tui_types.Runtime_all -> "lanes")
+             | Masc_tui_types.Runtime_all -> "service lanes")
           ^ (match state.runtime_mode with
              | Masc_tui_types.Runtime_lanes -> "  e:add failover"
              | Masc_tui_types.Runtime_all -> "")));

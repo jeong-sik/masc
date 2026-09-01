@@ -128,7 +128,9 @@ let for_surface = function
           ~help:"open the standalone lane's exact runs"
       ; b Navigate "e" "lane config"
           ~help:"open this lane's runtime.exact_output_lanes section"
-      ; b Act "Esc" "overview"
+      ; b Navigate "p" "runtime"
+          ~help:"back to the Runtime surface this hangs off"
+      ; b Act "Esc" "runtime" ~help:"back to the Runtime surface it hangs off"
       ]
       @ listing_meta
   | Board ->
@@ -168,7 +170,8 @@ let for_surface = function
   | Planning ->
       [ b Navigate "j/k" "move"
       ; b Navigate "v" "next Planning tab"
-          ~help:"1 Goals \xe2\x86\x92 2 Task Review \xe2\x86\x92 3 Evaluator Verdicts"
+          ~help:"1 Goals \xe2\x86\x92 2 Task Review \xe2\x86\x92 3 Evaluator \
+                 Verdicts \xe2\x86\x92 4 Schedules \xe2\x86\x92 5 Fusion"
       ; b Act "Right / Enter" "detail"
       ; b Act "Left / Esc" "back"
       ; b Navigate "f" "filter" ~help:"cycle all / active / completed / dropped"
@@ -183,6 +186,7 @@ let for_surface = function
       @ listing_meta
   | Schedules ->
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the payload"
+      ; b Navigate "v" "next Planning tab" ~help:"on to 5 Fusion"
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Right / Enter" "details" ~help:"open schedule details"
       ; b Act "Left / Esc" "back" ~help:"back to the schedule list"
@@ -209,7 +213,7 @@ let for_surface = function
       @ listing_meta
   | Harness ->
       [ b Navigate "j/k" "move" ~help:"move; in a verdict, scroll"
-      ; b Navigate "v" "next Planning tab" ~help:"back round to 1 Goals"
+      ; b Navigate "v" "next Planning tab" ~help:"on to 4 Schedules"
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Right / Enter" "verdict" ~help:"open the full evaluator verdict"
       ; b Act "Left / Esc" "back" ~help:"back to the verdict list"
@@ -225,12 +229,13 @@ let for_surface = function
          footer is [footer_hints_fusion_detail], which also appends the live
          scroll position this static table cannot know. *)
       [ b Navigate "j/k" "move"
+      ; b Navigate "v" "next Planning tab" ~help:"back round to 1 Goals"
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Enter" "detail" ~help:"Right or Enter opens detail"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
-      ; b Act "Esc" "back" ~help:"leave detail, or return to Overview"
+      ; b Act "Esc" "back" ~help:"leave detail, or return to Planning"
       ]
       @ listing_meta
   | Memory ->
@@ -275,6 +280,9 @@ let for_surface = function
       ; b Navigate "PgUp/PgDn" "detail page"
       ; b Act "Right / Enter" "detail"
           ~help:"show the full runtime, lane, dispatch, and probe fields"
+      ; b Navigate "p" "keeper lanes / all runtimes / service lanes"
+          ~help:"walk the three substrate readings; the third is the \
+                 standalone Lanes surface"
       ; b Act "c" "connectors" ~help:"channel bindings and reachability"
       ; b Act "Left / Esc" "back"
       ]
@@ -320,11 +328,13 @@ let for_surface = function
       ; b Navigate "h/l" "pane" ~help:"focus the tree or open file"
       ; b Act "Right / Enter" "open" ~help:"drill in, or open the file"
         (* Esc walks back out the way Enter came in: it closes an open file
-           first, and only climbs a directory once no file is open
-           (masc_tui.ml:6001). A key that works and is not listed is the same
-           drift as a listed key that does nothing, pointing the other way. *)
+           first, and only climbs a directory once no file is open. From the
+           project root it lands on Workspace, the ring parent. A key that
+           works and is not listed is the same drift as a listed key that
+           does nothing, pointing the other way. *)
       ; b Act "Left / Esc" "back"
-          ~help:"close the history, then the file, then climb one directory"
+          ~help:"close the history, then the file, then climb one \
+                 directory, then Workspace"
       ; b Navigate "Shift-Left / Shift-Right" "pan"
           ~help:"with a file open, scroll it sideways one cell at a time"
       ; b Search "/" "find"
@@ -480,16 +490,17 @@ let help_surfaces : (string * surface) list =
   ; "Keepers", Keepers Keeper_list
   ; "Keeper detail", Keepers Keeper_detail
   ; "Chat", Keepers Keeper_message
-  ; "Lanes", Lanes
+  ; "Runtime / Lanes", Lanes
   ; "Board", Board
   ; "Approvals", Approvals
   ; "Planning / Goals", Planning
   ; "Planning / Task Review", Verification
   ; "Planning / Verdicts", Harness
-  ; "Schedules", Schedules
-  ; "Fusion", Fusion
+  ; "Planning / Schedules", Schedules
+  ; "Planning / Fusion", Fusion
   ; "Memory", Memory
-  ; "Repos", Repositories
+  ; "Workspace", Repositories
+  ; "Workspace / Code", Code
   ; "Changes", Changes
   ; "Runtime / Connectors", Connectors
   ; "Runtime", Runtime

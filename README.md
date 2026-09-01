@@ -215,20 +215,21 @@ Keeper names and the base path in this frame were replaced with stand-ins of the
 same width; the [surface inventory](docs/screenshots/tui/2026-08-26/surfaces/README.md)
 holds four more and the capture metadata.
 
-`Tab` rotates through 20 surfaces, and the active one is highlighted in a strip
-on the top row:
+`Tab` rotates through the top-level surfaces, and the active one is
+highlighted in a strip on the top row. Child surfaces open from their parent
+(and from the `go <name>` palette entries) instead of holding Tab stops:
 
 | Surface | Shows |
 |---|---|
 | Overview | Workspace summary, the task backlog, and what needs attention |
 | Acting | Every Keeper's tool calls, turn boundaries, and settlements as they land |
-| Keepers | The roster, plus per-Keeper chat, logs, tool calls, runtime, and the names of the secrets it holds |
-| Lanes, Runtime | Runtime lanes, their ordered candidates, and provider reachability |
+| Keepers (`f` Changes) | The roster, plus per-Keeper chat, logs, tool calls, runtime, recent edits, and the names of the secrets it holds |
+| Runtime (`p` Lanes, `c` Connectors) | Runtime lanes, ordered candidates, provider reachability, standalone service lanes, and external channels |
 | Approvals | The Gate queue, approved or denied from the terminal, and the questions Keepers are waiting on an answer to |
 | Board | Posts from people, agents, automation, and the system |
-| Planning, Schedules, Verify | Plans and goals, scheduled work, and verification verdicts |
-| Repositories, Code, Changes | Registered repositories, a file browser over them, and recent Keeper edits |
-| Harness, Fusion, Tools, Resources, Config, Connectors, Logs | Harness runs, panel and judge runs, the tool tree, MCP resources, `runtime.toml`, external channels, and the runtime log |
+| Planning (`v` Task Review, Verdicts, Schedules, Fusion) | Plans and goals, completion reviews, evaluator verdicts, scheduled work, and panel/judge runs |
+| Workspace (`Enter` Code) | Registered repositories and, through a row's `Enter`, the Code file browser over the selected checkout |
+| Memory, Tools, Resources, Config, Logs | Memory OS health, the tool tree, MCP resources, `runtime.toml`, and the runtime log |
 
 Above the input row, one line on every surface names the next scheduled wake
 and whichever Keeper is stopped waiting on a person. It is absent when there is

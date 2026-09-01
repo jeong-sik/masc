@@ -422,10 +422,12 @@ let handle_read_file_with_outcome
 (** Resolve a [path] when the tool caller omits [cwd]. The verifier
     tool_read_file path is supposed to be repository-relative, and
     most live tool calls in this codebase are produced by a
-    Repository actor whose checkout lives at [<ownership_root>/<repo>/]
-    rather than at [<ownership_root>/] itself; honour that single
-    sub-repo layout without guessing when the playground holds more
-    than one.
+    Repository actor whose checkout lives at
+    [<ownership_root>/<repo>/] (single well) or
+    [<ownership_root>/<group>/<repo>/] (two-level well, e.g. the
+    "repos/<repo>/" playground layout from issue #28950). The
+    helper honours both layouts without guessing when the
+    playground holds more than one.
 
     The returned pair is (cwd_abs, target_path) so the caller can
     apply the same [Filename.concat cwd_abs target_path] regardless
@@ -433,34 +435,67 @@ let handle_read_file_with_outcome
     segment — the helper strips the redundant prefix when it
     descends.
 
+    Descent rules (monotone: a deeper descent is taken only when
+    every level is uniquely named):
+    - 0 sub-dirs at depth-1: root itself is the repo, return
+      [(ownership_root, path)].
+    - 1 sub-dir at depth-1, 0 or several at depth-2: descend one
+      level only. If the caller's [path] names the depth-1 sub-dir
+      as its first segment, strip that prefix; otherwise return
+      [(ownership_root, path)] (no guess when the first segment
+      mismatches).
+    - 1 sub-dir at depth-1 AND 1 sub-dir at depth-2: descend two
+      levels. If the caller's [path] names "a/b" as its leading
+      two segments, strip that leading two-segment prefix; if the
+      path's first segment is "a" (single-level prefix) but not
+      "a/b", strip "a" only and treat the rest as relative to the
+      depth-2 dir; otherwise (form A: bare repo-relative path like
+      "lib/...") leave the path alone and treat it as relative to
+      the depth-2 dir.
+    - 2+ sub-dirs at depth-1: return [(ownership_root, path)]. A
+      silent pick among them would be a lie.
+
     Returns [(ownership_root, path)] when:
     - the root cannot be read (no permission, race, ...);
     - the root itself is the repository (no sub-directory);
-    - the root contains zero or several sub-directories, so a silent
-      choice would be a lie;
-    - the single sub-directory's name does not match the first
-      segment of [path].
+    - the root contains 2+ sub-directories at depth-1;
+    - depth-2 is 2+ when depth-1 is 1;
+    - the descent target exists but the path's first segment
+      mismatches the depth-1 sub-dir name (single-level descent
+      only — the helper does not guess which sub-dir).
 
     Exposed for testing so [test_owned_read_cwd] can pin the
     contract directly. *)
 let default_owned_target ~ownership_root ~path =
-  let entries =
-    match Sys.readdir ownership_root with
+  let entries ~root =
+    match Sys.readdir root with
     | e -> Array.to_list e
     | exception _ -> []
   in
-  let subdirs =
+  let subdirs_of ~root ~skip =
     List.filter
       (fun name ->
-        let p = Filename.concat ownership_root name in
+        let p = Filename.concat root name in
         match Sys.is_directory p with
-        | true -> not (String.equal name (Filename.basename ownership_root))
+        | true -> not (String.equal name skip)
         | _ -> false)
-      entries
+      (entries ~root)
   in
-  let first_segment path =
+  let strip_prefix prefix p =
+    let plen = String.length prefix in
+    if String.length p >= plen + 1
+       && String.sub p 0 plen = prefix
+       && p.[plen] = '/'
+    then String.sub p (plen + 1) (String.length p - plen - 1)
+    else p
+  in
+  let strip_two_segment_prefix a b p =
+    let prefix = a ^ "/" ^ b in
+    strip_prefix prefix p
+  in
+  let first_segment p =
     let stripped =
-      if Filename.is_relative path then path else Filename.basename path
+      if Filename.is_relative p then p else Filename.basename p
     in
     let seg =
       match String.split_on_char '/' stripped with
@@ -471,24 +506,24 @@ let default_owned_target ~ownership_root ~path =
     | first :: _ when not (String.equal first "") -> Some first
     | _ -> None
   in
-  let strip_prefix prefix p =
-    let plen = String.length prefix in
-    let p_without_leading =
-      if String.length p >= plen + 1
-         && String.sub p 0 plen = prefix
-         && p.[plen] = '/'
-      then String.sub p (plen + 1) (String.length p - plen - 1)
-      else p
-    in
-    p_without_leading
-  in
-  match subdirs with
-  | [ single ] ->
-    (match first_segment path with
-     | Some first when String.equal first single ->
-       (Filename.concat ownership_root single, strip_prefix single path)
-     | _ -> (ownership_root, path))
-  | _ -> (ownership_root, path)
+  match subdirs_of ~root:ownership_root ~skip:(Filename.basename ownership_root) with
+  | [] -> (ownership_root, path)
+  | _ :: _ :: _ -> (ownership_root, path)
+  | [ a ] ->
+    let depth1 = Filename.concat ownership_root a in
+    (match subdirs_of ~root:depth1 ~skip:a with
+     | [ b ] ->
+       let depth2 = Filename.concat depth1 b in
+       let stripped = strip_two_segment_prefix a b path in
+       let first = first_segment path in
+       (match stripped, first with
+        | s, _ when s <> path -> (depth2, s)
+        | _, Some first when String.equal first a -> (depth1, strip_prefix a path)
+        | _ -> (depth2, path))
+     | _ ->
+       (match first_segment path with
+        | Some first when String.equal first a -> (depth1, strip_prefix a path)
+        | _ -> (ownership_root, path)))
 [@@coverage off]
 
 let handle_owned_read_file_with_outcome

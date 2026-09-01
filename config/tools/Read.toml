@@ -7,8 +7,10 @@ repo-relative reads. Read never inherits Execute cwd. For a line range, pass \
 offset (1-based line) and limit (max lines) — do not run sed -n via Execute \
 for this. The payload carries the exact current bytes (no line numbers) plus \
 offset, returned_lines, truncated; when truncated=true a next_offset field \
-gives the offset that continues the read. Before Edit, Read the target \
-region so old_string matches current bytes."""
+gives the next line offset. If last_line_partial=true, the byte budget cut \
+inside the final returned line and next_offset intentionally skips that \
+line's unseen remainder rather than continuing byte-for-byte. Before Edit, \
+Read the target region so old_string matches current bytes."""
 
 # Closed: the runtime handler reads exactly these four, and an unread key on a
 # read is a silent no-op the caller cannot see. Edit is closed too
@@ -37,7 +39,9 @@ name = "offset"
 type = "integer"
 description = """
 1-based line number to start reading from (default 1). To continue a \
-truncated read, pass the next_offset value from the previous response."""
+truncated read, pass the next_offset value from the previous response. When \
+last_line_partial=true, that offset starts at the following line because the \
+remainder of the byte-capped line is intentionally skipped."""
 
 [[params]]
 name = "limit"

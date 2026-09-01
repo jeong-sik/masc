@@ -213,7 +213,7 @@ let handle_tool_execute_typed
       ?gate_context
       ?gate_grant
       ?(shell_ir_rewrite :
-          (Shell_ir.t -> (Shell_ir.t, string) result) option)
+          (Masc_exec.Shell_ir.t -> (Masc_exec.Shell_ir.t, string) result) option)
       ~(args : Yojson.Safe.t)
       ()
   =

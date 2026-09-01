@@ -952,11 +952,11 @@ def buffer_line(page: Page, row: int) -> str:
 
 def find_composer_row(page: Page) -> int:
     return page.evaluate(
-        """() => {
+        r"""() => {
           const buffer = window.term.buffer.active;
-          for (let row = 0; row < buffer.length; row += 1) {
+          for (let row = 0; row < window.term.rows; row += 1) {
             const line = buffer.getLine(buffer.baseY + row);
-            if (line && line.translateToString(false).includes("> ~")) return row;
+            if (line && /^\s*> /.test(line.translateToString(false))) return row;
           }
           return -1;
         }"""

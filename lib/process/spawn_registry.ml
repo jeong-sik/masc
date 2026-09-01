@@ -155,17 +155,22 @@ let drain ~flow ~buffer ~limit ~changed =
   `Stop_daemon
 ;;
 
+(* [cwd] is a string rather than a path because that is what a caller has: the
+   spawn tool takes it off the wire, and [Process_eio] already owns the rule
+   for turning one into the other. Taking [Eio.Fs.dir_ty Eio.Path.t] here left
+   the tool with no way to pass what it was given, so it passed nothing and
+   the parameter it advertised was discarded. *)
 let spawn ~sw registry ?env ?cwd argv =
-  match Process_eio.get_proc_mgr () with
-  | Error message -> Error message
-  | Ok manager ->
+  match Process_eio.get_proc_mgr (), Process_eio.cwd_path cwd with
+  | Error message, _ | _, Error message -> Error message
+  | Ok manager, Ok cwd ->
     (match argv with
      | [] -> Error "spawn needs a program to run"
      | _ :: _ ->
        let stdout_r, stdout_w = Eio.Process.pipe ~sw manager in
        let stderr_r, stderr_w = Eio.Process.pipe ~sw manager in
        let process =
-         Eio.Process.spawn ~sw manager ?cwd ?env ~stdout:stdout_w ~stderr:stderr_w argv
+         Eio.Process.spawn ~sw manager ~cwd ?env ~stdout:stdout_w ~stderr:stderr_w argv
        in
        Eio.Flow.close stdout_w;
        Eio.Flow.close stderr_w;

@@ -781,11 +781,9 @@ let fetch_lane_run_detail ~(host : string) ~(port : int) ~(run_id : string) :
          | exception Yojson.Json_error detail ->
              Error ("lane run detail was not JSON: " ^ detail))
 
-(** Fetch the two independent observations the context inspector joins. A
-    failure on one stays beside the other instead of blanking the whole view:
-    turn records can still prove composition when exact prompt text was never
-    captured, and the prompt can still be read during a transient record-store
-    failure. *)
+(** Fetch one completed turn and the immutable provider-input snapshot joined
+    by that turn's exact [turn_ref]. A failure on either side stays visible;
+    no mutable latest-prompt value is allowed to fill another turn. *)
 let fetch_keeper_context_inspector ~(host : string) ~(port : int)
     ~(keeper_name : string) : Masc_tui_context_inspector.reading =
   let fetch ~label ~path ~decode =
@@ -805,47 +803,25 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
       ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=50" encoded)
       ~decode:Masc_tui_context_inspector.decode_turn_records
   in
-  let prompt =
-    fetch ~label:"last-prompt"
-      ~path:(Printf.sprintf "/api/v1/keepers/%s/last-prompt" encoded)
-      ~decode:
-        (Masc_tui_context_inspector.decode_prompt_capture
-           ~expected_keeper:keeper_name)
-  in
-  (* The turn record names its tool surface by content address rather than
-     carrying the listing, so the listing costs a request only when a record
-     that has one is actually read. Serving it inside the turn-records page
-     would multiply that page by the surface for every one of its 50 rows. *)
-  let tool_surface =
+  let provider_input =
     match turn with
-    | Error _ -> Masc_tui_context_inspector.Surface_not_recorded
-    (* The listing belongs to the turn whose component rows will show it. A
-       page with no attributed row draws no rows, so no surface is fetched
-       for it; taking the newest row's surface instead would label one turn's
-       schemas with another turn's byte count. *)
+    | Error detail -> Error ("provider-input turn unavailable: " ^ detail)
     | Ok { Masc_tui_context_inspector.attributed = None; _ } ->
-        Masc_tui_context_inspector.Surface_not_recorded
+      Error "provider-input unavailable: no turn on this page recorded an exact input composition"
     | Ok { Masc_tui_context_inspector.attributed = Some { record; _ }; _ } ->
-        (match Masc_tui_context_inspector.tool_surface_sha256 record with
-         | None -> Masc_tui_context_inspector.Surface_not_recorded
-         | Some (Error detail) ->
-             Masc_tui_context_inspector.Surface_unresolved { detail }
-         | Some (Ok sha256) ->
-             (* The artifact endpoint is gated at CanAdmin, the same tier
-                the file-changes fetch above already clears, so an operator
-                who can read one pane can read this row. A lighter gate on
-                that endpoint is not the answer: it serves every externalized
-                tool output, not just this listing. *)
-             (match
-                fetch ~label:"tool surface"
-                  ~path:(Printf.sprintf "/api/v1/artifacts/%s" sha256)
-                  ~decode:Masc_tui_context_inspector.decode_tool_surface
-              with
-              | Ok entries -> Masc_tui_context_inspector.Surface_resolved entries
-              | Error detail ->
-                  Masc_tui_context_inspector.Surface_unresolved { detail }))
+      let turn_ref = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
+      fetch ~label:"provider-input"
+        ~path:
+          (Printf.sprintf
+             "/api/v1/keepers/%s/provider-input?turn_ref=%s"
+             encoded
+             (percent_encode_query_value turn_ref))
+        ~decode:
+          (Masc_tui_context_inspector.decode_provider_input
+             ~expected_keeper:keeper_name
+             ~expected_turn_ref:record.Turn_record.turn_ref)
   in
-  { Masc_tui_context_inspector.turn; prompt; tool_surface }
+  { Masc_tui_context_inspector.turn; provider_input }
 
 (** Fetch one page of chat rows older than [before].
 

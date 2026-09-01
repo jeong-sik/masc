@@ -2,7 +2,14 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchKeeperToolCalls, fetchKeeperTurnRecords, fetchKeeperTurnTranscript, type ToolCallsResponse, type TurnRecordsResponse, type TurnTranscript } from '../api/dashboard'
+import {
+  fetchKeeperProviderInput,
+  fetchKeeperToolCalls,
+  fetchKeeperTurnRecords,
+  type ProviderInputSnapshot,
+  type ToolCallsResponse,
+  type TurnRecordsResponse,
+} from '../api/dashboard'
 import {
   initialTurnRowForTimestamp,
   initialTurnRowForTurnRef,
@@ -12,35 +19,75 @@ import {
 
 vi.mock('../api/dashboard', () => {
   return {
+    fetchKeeperProviderInput: vi.fn(),
     fetchKeeperToolCalls: vi.fn(),
     fetchKeeperTurnRecords: vi.fn(),
-    fetchKeeperTurnTranscript: vi.fn(),
   }
 })
 
+const fetchKeeperProviderInputMock = vi.mocked(fetchKeeperProviderInput)
 const fetchKeeperToolCallsMock = vi.mocked(fetchKeeperToolCalls)
 const fetchKeeperTurnRecordsMock = vi.mocked(fetchKeeperTurnRecords)
-const fetchKeeperTurnTranscriptMock = vi.mocked(fetchKeeperTurnTranscript)
 
-function emptyTranscript(): TurnTranscript {
+function providerInputForTurn(): ProviderInputSnapshot {
   return {
     keeper: 'albini',
-    turn_ref: 'trace-active#42',
-    found: false,
-    source: 'keeper_chat_store',
-    user: [],
-    assistant: [],
-  }
-}
-
-function transcriptForTurn(): TurnTranscript {
-  return {
-    keeper: 'albini',
-    turn_ref: 'trace-active#42',
-    found: true,
-    source: 'keeper_chat_store',
-    user: [{ role: 'user', content: 'deploy the staging build', ts: 1_781_587_540 }],
-    assistant: [{ role: 'assistant', content: 'staging build deployed', ts: 1_781_587_560 }],
+    traceId: 'trace-active',
+    absoluteTurn: 42,
+    turnRef: 'trace-active#42',
+    runtimeProfile: 'local',
+    capturedAt: 1_781_587_559,
+    wire: {
+      phase: 'Pre_dispatch_serialization',
+      captureId: 'capture-42',
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      httpCodec: 'openai-compatible',
+      stream: true,
+      bodyBytes: 560_513,
+      bodySha256: 'a'.repeat(64),
+    },
+    systemPrompt: {
+      bytes: 25,
+      sha256: 'b'.repeat(64),
+      text: 'exact system prompt T42',
+    },
+    messages: [
+      {
+        index: 0,
+        role: 'user',
+        bytes: 58,
+        sha256: 'c'.repeat(64),
+        content: { role: 'user', content: 'deploy the staging build' },
+      },
+      {
+        index: 1,
+        role: 'assistant',
+        bytes: 65,
+        sha256: 'd'.repeat(64),
+        content: { role: 'assistant', content: 'previous keeper reply' },
+      },
+      {
+        index: 2,
+        role: 'tool',
+        bytes: 96,
+        sha256: 'e'.repeat(64),
+        content: { role: 'tool', content: 'large tool result retained in this turn' },
+      },
+    ],
+    toolSchemas: [
+      {
+        index: 0,
+        name: 'masc_board_post_get',
+        bytes: 87,
+        sha256: 'f'.repeat(64),
+        content: {
+          name: 'masc_board_post_get',
+          description: 'read a board post',
+          input_schema: { type: 'object' },
+        },
+      },
+    ],
   }
 }
 
@@ -311,7 +358,7 @@ describe('KeeperMemoryOsRecallPanel', () => {
 describe('KeeperTurnInspector v2 drawer', () => {
   beforeEach(() => {
     fetchKeeperToolCallsMock.mockResolvedValue(toolCallsForTurn())
-    fetchKeeperTurnTranscriptMock.mockResolvedValue(emptyTranscript())
+    fetchKeeperProviderInputMock.mockResolvedValue(providerInputForTurn())
     Object.defineProperty(navigator, 'clipboard', {
       value: {
         writeText: vi.fn().mockResolvedValue(undefined),
@@ -606,7 +653,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.querySelector('[data-testid="turn-tab-messages"]')?.classList.contains('on')).toBe(true)
     })
 
-    expect(container.textContent).toContain('모델에 전달된 시퀀스')
+    expect(container.textContent).toContain('실제 전송 메시지')
 
     fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
 
@@ -883,11 +930,6 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(drawerText).toContain('54ms')
     expect(drawerText).not.toContain('0.50s')
 
-    fireEvent.click(container.querySelector('[data-testid="turn-tab-messages"]')!)
-
-    await waitFor(() => {
-      expect(container.textContent).toContain('agent subturn T9001')
-    })
   })
 
   it('keeps joined tool calls with missing duration unmeasured, not 0ms', async () => {
@@ -912,14 +954,9 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(drawerText).not.toContain('0ms')
     expect(drawerText).not.toContain('0.50s')
 
-    fireEvent.click(container.querySelector('[data-testid="turn-tab-messages"]')!)
-
-    await waitFor(() => {
-      expect(container.textContent).toContain('duration 없음')
-    })
   })
 
-  it('renders real tool call input and output in the messages tab (RFC-0233)', async () => {
+  it('loads and renders the exact provider messages for the selected turn_ref', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 
     const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
@@ -936,83 +973,61 @@ describe('KeeperTurnInspector v2 drawer', () => {
     fireEvent.click(container.querySelector('[data-testid="turn-tab-messages"]')!)
 
     await waitFor(() => {
-      const text = container.textContent ?? ''
-      // Real tool I/O joined from the tool-call log by execution_id.
-      expect(text).toContain('요청 · input')
-      expect(text).toContain('응답 · result')
-      expect(text).toContain('post_id')
-      expect(text).toContain('p-1')
-    })
-    const text = container.textContent ?? ''
-    // The deferred placeholders must be gone.
-    expect(text).not.toContain('도구 결과는 별도 execution trace 에서 확인')
-  })
-
-  it('renders explicit tool I/O absence when no tool-call entry matches the execution (RFC-0233)', async () => {
-    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
-    // execution_id 'exec-42' on the record has no matching tool-call entry.
-    fetchKeeperToolCallsMock.mockResolvedValue(emptyToolCalls())
-
-    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
-
-    await waitFor(() => {
-      expect(container.textContent).toContain('T42')
+      expect(container.querySelector('[data-testid="turn-provider-messages"]')).toBeTruthy()
     })
 
-    fireEvent.click(container.querySelector('.ti-turn-summary')!)
-    await waitFor(() => {
-      expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
-    })
-
-    fireEvent.click(container.querySelector('[data-testid="turn-tab-messages"]')!)
-
-    await waitFor(() => {
-      expect(container.querySelector('[data-testid="turn-tool-io-absent"]')).toBeTruthy()
-    })
-    // No fabricated result text.
-    expect(container.textContent ?? '').not.toContain('응답 · result')
-  })
-
-  it('renders the real operator request and keeper response from the transcript (RFC-0233 §7)', async () => {
-    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
-    fetchKeeperTurnTranscriptMock.mockResolvedValue(transcriptForTurn())
-
-    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
-
-    await waitFor(() => {
-      expect(container.textContent).toContain('T42')
-    })
-
-    fireEvent.click(container.querySelector('.ti-turn-summary')!)
-    await waitFor(() => {
-      expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
-    })
-
-    // Transcript is fetched lazily for the open turn's join key.
-    expect(fetchKeeperTurnTranscriptMock).toHaveBeenCalledWith(
+    expect(fetchKeeperProviderInputMock).toHaveBeenCalledWith(
       'albini',
       'trace-active#42',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
-
-    fireEvent.click(container.querySelector('[data-testid="turn-tab-messages"]')!)
-
-    await waitFor(() => {
-      expect(container.querySelector('[data-testid="turn-transcript-user"]')?.textContent ?? '').toContain(
-        'deploy the staging build',
-      )
-    })
-    expect(container.querySelector('[data-testid="turn-transcript-assistant"]')?.textContent ?? '').toContain(
-      'staging build deployed',
-    )
     const text = container.textContent ?? ''
-    expect(text).not.toContain('직전 operator 요청 — 본 대화의 사용자 메시지')
-    expect(text).not.toContain('keeper 응답 — 본 턴의 출력 메시지')
+    expect(text).toContain('실제 전송 메시지')
+    expect(text).toContain('trace-active#42')
+    expect(text).toContain('deploy the staging build')
+    expect(text).toContain('previous keeper reply')
+    expect(text).toContain('large tool result retained in this turn')
+    expect(text).toContain('560,513B')
+    expect(text).toContain('a'.repeat(64))
+    expect(text).not.toContain('요청 · input')
+    expect(text).not.toContain('응답 · result')
   })
 
-  it('renders explicit transcript absence when the turn has no joinable rows (RFC-0233 §7)', async () => {
+  it('renders the exact system prompt and tool schemas in the context tab', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
-    fetchKeeperTurnTranscriptMock.mockResolvedValue(emptyTranscript())
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="turn-tab-context"]')!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-provider-system-prompt"]')).toBeTruthy()
+    })
+    const text = container.textContent ?? ''
+    expect(text).toContain('exact system prompt T42')
+    expect(text).toContain('실제 도구 스키마')
+    expect(text).toContain('masc_board_post_get')
+    expect(text).toContain('read a board post')
+    expect(text).not.toContain('당신은 MASC 코디네이션 서버의 keeper')
+    expect(text).not.toContain('주입 컨텍스트')
+  })
+
+  it('rejects a provider-input response for a different turn', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+    fetchKeeperProviderInputMock.mockResolvedValue({
+      ...providerInputForTurn(),
+      absoluteTurn: 41,
+      turnRef: 'trace-active#41',
+    })
 
     const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
 
@@ -1028,9 +1043,33 @@ describe('KeeperTurnInspector v2 drawer', () => {
     fireEvent.click(container.querySelector('[data-testid="turn-tab-messages"]')!)
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="turn-transcript-user-absent"]')).toBeTruthy()
+      expect(container.querySelector('[data-testid="turn-provider-input-error"]')).toBeTruthy()
     })
-    expect(container.querySelector('[data-testid="turn-transcript-assistant-absent"]')).toBeTruthy()
+    expect(container.textContent).toContain('provider-input이 선택한 keeper 턴과 일치하지 않습니다')
+    expect(container.textContent).not.toContain('deploy the staging build')
+  })
+
+  it('renders explicit absence when the provider-input snapshot cannot be loaded', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+    fetchKeeperProviderInputMock.mockRejectedValue(new Error('snapshot not found'))
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="turn-tab-messages"]')!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-provider-input-error"]')).toBeTruthy()
+    })
+    expect(container.textContent).toContain('snapshot not found')
   })
 
   it('warns when the timing source fails while keeping turn records visible', async () => {

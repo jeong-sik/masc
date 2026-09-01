@@ -5260,7 +5260,6 @@ def context_inspector_fixtures() -> HttpFixtures:
         "dynamic_context": "exact dynamic context from the turn",
         "memory_os_recall": "remember the operator preference",
     }
-    assembled_prompt = "\n".join(prompt_texts.values())
 
     def prompt_record(block_id: str) -> dict[str, object]:
         text = prompt_texts[block_id]
@@ -5328,33 +5327,72 @@ def context_inspector_fixtures() -> HttpFixtures:
             ]
         },
     )
-    fixtures["/api/v1/keepers/alpha/last-prompt"] = (
+    provider_body = b'{"model":"claude-opus-5","messages":[]}'
+
+    def exact_message(index: int, role: str, text: str) -> dict[str, object]:
+        content = {
+            "role": role,
+            "content_blocks": [{"type": "text", "text": text}],
+        }
+        encoded = json.dumps(content, separators=(",", ":")).encode()
+        return {
+            "index": index,
+            "role": role,
+            "bytes": len(encoded),
+            "sha256": hashlib.sha256(encoded).hexdigest(),
+            "content": content,
+        }
+
+    tool_schema = {
+        "name": "masc_execute",
+        "description": "Execute one command",
+        "input_schema": {"type": "object"},
+    }
+    encoded_tool_schema = json.dumps(tool_schema, separators=(",", ":")).encode()
+    fixtures["/api/v1/keepers/alpha/provider-input?turn_ref=trace-context%2342"] = (
         200,
         {
+            "dashboard_surface": "/api/v1/keepers/:name/provider-input",
+            "schema": "masc.resolved-provider-input.v1",
             "keeper": "alpha",
-            "dashboard_surface": "/api/v1/keepers/:name/last-prompt",
-            "captured_at": 1787600000.0,
             "trace_id": "trace-context",
             "absolute_turn": 42,
-            "blocks": [
-                {
-                    "id": "keeper_instructions",
-                    "bytes": len(prompt_texts["keeper_instructions"].encode()),
-                    "text": prompt_texts["keeper_instructions"],
-                },
-                {
-                    "id": "dynamic_context",
-                    "bytes": len(prompt_texts["dynamic_context"].encode()),
-                    "text": prompt_texts["dynamic_context"],
-                },
-                {
-                    "id": "memory_os_recall",
-                    "bytes": len(prompt_texts["memory_os_recall"].encode()),
-                    "text": prompt_texts["memory_os_recall"],
-                },
+            "turn_ref": "trace-context#42",
+            "runtime_profile": "anthropic.claude-opus-5",
+            "captured_at": 1787600000.0,
+            "wire": {
+                "phase": "Pre_dispatch_serialization",
+                "capture_id": "capture-context",
+                "provider": "anthropic",
+                "model": "claude-opus-5",
+                "http_codec": "anthropic_messages",
+                "stream": True,
+                "body_bytes": len(provider_body),
+                "body_sha256": hashlib.sha256(provider_body).hexdigest(),
+            },
+            "system_prompt": {
+                "bytes": len(prompt_texts["keeper_instructions"].encode()),
+                "sha256": hashlib.sha256(
+                    prompt_texts["keeper_instructions"].encode()
+                ).hexdigest(),
+                "text": prompt_texts["keeper_instructions"],
+            },
+            "messages": [
+                exact_message(0, "system", prompt_texts["dynamic_context"]),
+                exact_message(1, "system", prompt_texts["memory_os_recall"]),
+                exact_message(2, "user", "operator request"),
+                exact_message(3, "assistant", "assistant response"),
+                exact_message(4, "tool", "tool result body"),
             ],
-            "assembled": assembled_prompt,
-            "assembled_bytes": len(assembled_prompt.encode()),
+            "tool_schemas": [
+                {
+                    "index": 0,
+                    "name": "masc_execute",
+                    "bytes": len(encoded_tool_schema),
+                    "sha256": hashlib.sha256(encoded_tool_schema).hexdigest(),
+                    "content": tool_schema,
+                }
+            ],
         },
     )
     return fixtures
@@ -5403,20 +5441,35 @@ def context_inspector_interaction() -> Interaction:
                     f"Context composition omitted {needle!r}: {composition!r}"
                 )
 
-        prompt = send_and_wait(process, master_fd, output, b"2", b"Exact turn-added prompt text")
-        prompt_plain = CSI_RE.sub(b"", prompt)
-        for needle in (b"Keeper instructions", b"Dynamic context", b"Memory recall"):
-            if needle not in prompt_plain:
-                raise AssertionError(f"Prompt block list omitted {needle!r}: {prompt!r}")
+        exact_input = send_and_wait(
+            process, master_fd, output, b"2", b"Canonical model input items"
+        )
+        exact_input_plain = CSI_RE.sub(b"", exact_input)
+        for needle in (
+            b"trace-context#42",
+            b"System prompt",
+            b"Message \xc2\xb7 system",
+            b"Message \xc2\xb7 tool",
+            b"Tool schema \xc2\xb7 masc_execute",
+            b"Wire  anthropic",
+        ):
+            if needle not in exact_input_plain:
+                raise AssertionError(
+                    f"Exact provider input omitted {needle!r}: {exact_input!r}"
+                )
 
         send_and_wait(process, master_fd, output, b"j", b"Dynamic context")
         exact = send_and_wait(
             process, master_fd, output, b"\r", b"exact dynamic context from the turn"
         )
-        if b"Base prompt" in CSI_RE.sub(b"", exact):
-            raise AssertionError(f"Exact block view retained the list disclosure: {exact!r}")
+        if b"Canonical model input items" in CSI_RE.sub(b"", exact):
+            raise AssertionError(
+                f"Exact item view retained the list disclosure: {exact!r}"
+            )
 
-        send_and_wait(process, master_fd, output, b"\x1b", b"Exact turn-added prompt text")
+        send_and_wait(
+            process, master_fd, output, b"\x1b", b"Canonical model input items"
+        )
         input_map = send_and_wait(
             process, master_fd, output, b"3", b"Provider request map"
         )
@@ -5426,8 +5479,7 @@ def context_inspector_interaction() -> Interaction:
             b"included by turn prompt assembly",
             b"verified exact text",
             b"included by effective tool surface",
-            b"schema bytes only",
-            b"content not retained",
+            b"exact items in input tab",
         ):
             if needle not in input_map_plain:
                 raise AssertionError(

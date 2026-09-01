@@ -22,6 +22,7 @@ let keeper_suffix_directive = "/directive"
 let keeper_suffix_paused_work = "/paused-work"
 let keeper_suffix_raw_traces = "/raw-traces"
 let keeper_suffix_raw_trace = "/raw-trace"
+let keeper_suffix_provider_input = "/provider-input"
 let keeper_suffix_memory_journal = "/memory-journal"
 let keeper_suffix_memory_facts = "/memory-facts"
 let keeper_suffix_turn_records = "/turn-records"
@@ -199,6 +200,7 @@ let keeper_get_permission ?(include_thinking = false) req_path =
   else if
     keeper_path_ends_with req_path keeper_suffix_raw_traces
     || keeper_path_ends_with req_path keeper_suffix_raw_trace
+    || keeper_path_ends_with req_path keeper_suffix_provider_input
     || keeper_path_ends_with req_path keeper_suffix_memory_journal
     (* Same data, same gate: the fact rows are the journal's committed
        content, read back as the current set. *)

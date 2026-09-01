@@ -1322,6 +1322,74 @@ let handle_keeper_get_subroutes state req request reqd =
          (`Assoc
             [ "error", `String (Keeper_prompt_capture.read_error_to_string error) ])
          reqd)
+  else if ends_with "/provider-input" then
+    let name = extract_name "/provider-input" in
+    if String.length name = 0
+    then respond_error reqd "keeper name is required"
+    else if not (Keeper_config.validate_name name)
+    then
+      Http.Response.json_value
+        ~status:`Bad_request
+        (`Assoc [ "error", `String (Printf.sprintf "invalid keeper name: %s" name) ])
+        reqd
+    else
+      (match Server_utils.query_param req "turn_ref" with
+       | None ->
+         Http.Response.json_value
+           ~status:`Bad_request
+           (`Assoc [ "error", `String "turn_ref query parameter is required" ])
+           reqd
+       | Some raw_turn_ref ->
+         (match Ids.Turn_ref.of_string raw_turn_ref with
+          | None ->
+            Http.Response.json_value
+              ~status:`Bad_request
+              (`Assoc
+                 [ "error"
+                 , `String (Printf.sprintf "invalid turn_ref: %s" raw_turn_ref)
+                 ])
+              reqd
+          | Some turn_ref ->
+            (match
+               Keeper_provider_input_snapshot.read_resolved
+                 ~config:(Mcp_server.workspace_config state)
+                 ~keeper:name
+                 ~turn_ref
+             with
+             | Ok resolved ->
+               Http.Response.json_value
+                 ~compress:true
+                 ~request:req
+                 (match
+                    Keeper_provider_input_snapshot.resolved_to_json resolved
+                  with
+                  | `Assoc fields ->
+                    `Assoc
+                      (( "dashboard_surface"
+                       , `String "/api/v1/keepers/:name/provider-input" )
+                       :: fields)
+                  | json -> json)
+                 reqd
+             | Error
+                 (Keeper_provider_input_snapshot.Snapshot_not_found _ as error)
+               ->
+               Http.Response.json_value
+                 ~status:`Not_found
+                 (`Assoc
+                    [ "error"
+                    , `String
+                        (Keeper_provider_input_snapshot.read_error_to_string error)
+                    ])
+                 reqd
+             | Error error ->
+               Http.Response.json_value
+                 ~status:`Service_unavailable
+                 (`Assoc
+                    [ "error"
+                    , `String
+                        (Keeper_provider_input_snapshot.read_error_to_string error)
+                    ])
+                 reqd)))
   else if ends_with "/raw-traces" then
     (* The turn record already carries a raw_trace_run_ref naming this file;
        until now nothing served it, so the pointer reached the dashboard type

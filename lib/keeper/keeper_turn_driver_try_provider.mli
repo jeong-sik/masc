@@ -80,6 +80,7 @@ type try_provider_ctx =
       (runtime_id:string ->
        max_request_body_bytes:int ->
        body_bytes:int ->
+       serialized:Llm_provider.Request_wire_observer.observation option ->
        unit)
         option
   ; on_model_input_window_observation :
@@ -220,6 +221,7 @@ module For_testing : sig
       (runtime_id:string ->
        max_request_body_bytes:int ->
        body_bytes:int ->
+       serialized:Llm_provider.Request_wire_observer.observation option ->
        unit)
         option ->
     Agent_core.Error.t ->

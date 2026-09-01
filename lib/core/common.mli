@@ -45,6 +45,7 @@ type keeper_runtime_store =
   | Keeper_metrics
   | Keeper_execution_receipts
   | Keeper_turn_records
+  | Keeper_provider_inputs
   | Keeper_reaction_ledger
   | Keeper_trajectories
   | Keeper_crash_events

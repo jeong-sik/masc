@@ -62,6 +62,7 @@ type keeper_runtime_store =
   | Keeper_metrics
   | Keeper_execution_receipts
   | Keeper_turn_records
+  | Keeper_provider_inputs
   | Keeper_reaction_ledger
   | Keeper_trajectories
   | Keeper_crash_events
@@ -72,6 +73,7 @@ let keeper_runtime_store_dirname = function
   | Keeper_metrics -> "metrics"
   | Keeper_execution_receipts -> "execution-receipts"
   | Keeper_turn_records -> "turn-records"
+  | Keeper_provider_inputs -> "provider-inputs"
   | Keeper_reaction_ledger -> "reaction-ledger"
   | Keeper_trajectories -> "trajectories"
   | Keeper_crash_events -> "crash-events"
@@ -82,6 +84,7 @@ let keeper_runtime_stores =
   ; Keeper_metrics
   ; Keeper_execution_receipts
   ; Keeper_turn_records
+  ; Keeper_provider_inputs
   ; Keeper_reaction_ledger
   ; Keeper_trajectories
   ; Keeper_crash_events
@@ -97,6 +100,7 @@ let keeper_runtime_store_placement = function
   | Keeper_metrics
   | Keeper_execution_receipts
   | Keeper_turn_records
+  | Keeper_provider_inputs
   | Keeper_crash_events -> Keeper_scoped_dated
   | Keeper_reaction_ledger -> Keeper_scoped_versioned
   | Keeper_runtime_manifests -> Keeper_scoped_rotated

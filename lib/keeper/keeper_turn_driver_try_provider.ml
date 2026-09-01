@@ -149,6 +149,7 @@ type try_provider_ctx =
       (runtime_id:string ->
        max_request_body_bytes:int ->
        body_bytes:int ->
+       serialized:Llm_provider.Request_wire_observer.observation option ->
        unit)
         option
   ; on_model_input_window_observation :
@@ -409,7 +410,11 @@ let observe_request_wire_error
        typed refusal carries the same exact byte count; forwarding it here
        keeps the failed turn observable without parsing an error string or
        guessing which runtime attempted the request. *)
-    observe ~runtime_id ~max_request_body_bytes ~body_bytes:actual_bytes
+    observe
+      ~runtime_id
+      ~max_request_body_bytes
+      ~body_bytes:actual_bytes
+      ~serialized:None
   | None, _ | Some _, None ->
     ()
 ;;
@@ -889,7 +894,8 @@ let run_try_provider
                           ~max_request_body_bytes:ctx.max_request_body_bytes
                           ~body_bytes:
                             observation
-                              .Llm_provider.Request_wire_observer.body_bytes)
+                              .Llm_provider.Request_wire_observer.body_bytes
+                          ~serialized:(Some observation))
                      ctx.on_request_wire_observation;
                    Ok ())
           ; raw_trace = ctx.raw_trace

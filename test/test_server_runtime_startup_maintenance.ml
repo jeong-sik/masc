@@ -77,12 +77,15 @@ let record_visit dir =
   0
 
 let test_keeper_scoped_store_list_is_ssot () =
-  (* Drift guard: the 24h periodic pass used to prune execution-receipts
-     only while startup pruned all three. Pin the shared list so neither
-     loop can silently drop a store again. turn-records joined 2026-07-31. *)
+  (* Drift guard: every keeper-scoped dated store has one retention owner. *)
   Alcotest.(check (list string))
-    "keeper-scoped stores = metrics + crash-events + execution-receipts + turn-records"
-    [ "crash-events"; "execution-receipts"; "metrics"; "turn-records" ]
+    "keeper-scoped dated stores"
+    [ "crash-events"
+    ; "execution-receipts"
+    ; "metrics"
+    ; "provider-inputs"
+    ; "turn-records"
+    ]
     (List.sort String.compare SM.keeper_scoped_dated_stores)
 
 let test_top_level_store_list_is_ssot () =
@@ -166,6 +169,9 @@ let test_prune_shared_jsonl_stores_production_geometry () =
   let logs_fresh = p [ "logs"; "system_log_2999-01-01.jsonl" ] in
   (* keeper-scoped dated store *)
   let turn_old = p [ "keepers"; "keeper-a"; "turn-records"; "2020-01"; "01.jsonl" ] in
+  let provider_input_old =
+    p [ "keepers"; "keeper-a"; "provider-inputs"; "2020-01"; "01.jsonl" ]
+  in
   (* keeper-scoped flat stores *)
   let raw_old = p [ "keepers"; "keeper-a"; "raw-traces"; "turn-old.jsonl" ] in
   let manifest_old = p [ "keepers"; "keeper-a"; "runtime-manifests"; "trace-x.jsonl.1" ] in
@@ -194,6 +200,7 @@ let test_prune_shared_jsonl_stores_production_geometry () =
     ; logs_old
     ; logs_fresh
     ; turn_old
+    ; provider_input_old
     ; raw_old
     ; manifest_old
     ; manifest_fresh
@@ -217,7 +224,7 @@ let test_prune_shared_jsonl_stores_production_geometry () =
     else 0
   in
   let n = SM.prune_shared_jsonl_stores ~prune_dir ~days:30 ~masc_root in
-  Alcotest.(check int) "eleven stale files pruned" 11 n;
+  Alcotest.(check int) "twelve stale files pruned" 12 n;
   Alcotest.(check bool) "stale message removed" false (Sys.file_exists message_old);
   Alcotest.(check bool) "fresh message kept" true (Sys.file_exists message_fresh);
   Alcotest.(check bool) "stale tool_usage day removed" false (Sys.file_exists tool_usage_old);
@@ -238,6 +245,10 @@ let test_prune_shared_jsonl_stores_production_geometry () =
   Alcotest.(check bool) "stale log day removed" false (Sys.file_exists logs_old);
   Alcotest.(check bool) "fresh log day kept" true (Sys.file_exists logs_fresh);
   Alcotest.(check bool) "stale turn-records day removed" false (Sys.file_exists turn_old);
+  Alcotest.(check bool)
+    "stale provider-inputs day removed"
+    false
+    (Sys.file_exists provider_input_old);
   Alcotest.(check bool) "stale raw-trace removed" false (Sys.file_exists raw_old);
   Alcotest.(check bool)
     "stale manifest rotation removed" false (Sys.file_exists manifest_old);
@@ -245,7 +256,7 @@ let test_prune_shared_jsonl_stores_production_geometry () =
 
 let test_prune_keeper_scoped_stores_visits_all_stores () =
   (* Regression for the 24h loop drift: both loops call this function, so
-     every keeper must see prune_dir invoked for all three stores. *)
+     every keeper must visit every dated store in the shared registry. *)
   visited := [];
   let masc_root = fresh_dir "masc_keeper_scoped" in
   let keepers = Filename.concat masc_root "keepers" in

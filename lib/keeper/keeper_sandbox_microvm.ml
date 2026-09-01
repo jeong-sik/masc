@@ -582,6 +582,154 @@ let apply_build_link ~path plan =
          path)
 ;;
 
+(* ── Finding the checkouts that build ──────────────────────────────── *)
+
+(** How far below a keeper's playground a checkout is looked for.
+
+    Observed layouts put them at depth 1 ([polisher/masc-t362]) and depth 2
+    ([lane-smith/repos/wt-370]). Three leaves room for one more level without
+    turning this into a whole-tree walk. *)
+let build_root_scan_depth = 3
+
+(** A checkout is a directory holding [dune-project].
+
+    That is the marker for the build output this addresses: [_build] is
+    dune's name and dune's alone. Other ecosystems pin host descriptors the
+    same way through their own output directories -- [node_modules],
+    [target], [dist] -- and are {i not} handled here. The mechanism carries
+    over unchanged; only the marker and the directory name differ. Naming
+    that gap is deliberate, so a reader does not read this as covering every
+    keeper. *)
+let build_root_marker = "dune-project"
+
+let build_output_dir_name = "_build"
+
+(** Directories skipped rather than descended.
+
+    [_build] because it is the thing being moved and holds the file counts
+    that make a walk expensive -- one measured at 61,602 entries. [.git]
+    because nothing under it builds. *)
+let build_scan_skipped = [ build_output_dir_name; ".git" ]
+
+let build_roots_under ~playground_root =
+  let rec walk dir depth acc =
+    if depth > build_root_scan_depth
+    then acc
+    else (
+      let acc =
+        if Sys.file_exists (Filename.concat dir build_root_marker)
+        then dir :: acc
+        else acc
+      in
+      match Sys.readdir dir with
+      | exception Sys_error _ -> acc
+      | entries ->
+        Array.sort String.compare entries;
+        Array.fold_left
+          (fun acc entry ->
+            if List.exists (String.equal entry) build_scan_skipped
+            then acc
+            else (
+              let child = Filename.concat dir entry in
+              (* [lstat], not [stat]: a symlink is never followed, which keeps
+                 the walk from looping and from descending through the very
+                 links this module installs. *)
+              match Unix.lstat child with
+              | { Unix.st_kind = Unix.S_DIR; _ } -> walk child (depth + 1) acc
+              | _ | (exception Unix.Unix_error _) -> acc))
+          acc
+          entries)
+  in
+  match Unix.lstat playground_root with
+  | { Unix.st_kind = Unix.S_DIR; _ } -> List.rev (walk playground_root 0 [])
+  | _ | (exception Unix.Unix_error _) -> []
+;;
+
+(** The path of [dir] relative to [playground_root], or [None] when it is not
+    below it. *)
+let playground_relative ~playground_root dir =
+  let root =
+    let n = String.length playground_root in
+    if n > 1 && Char.equal playground_root.[n - 1] '/'
+    then String.sub playground_root 0 (n - 1)
+    else playground_root
+  in
+  let root_slash = root ^ "/" in
+  let n = String.length root_slash in
+  if String.length dir > n && String.equal (String.sub dir 0 n) root_slash
+  then Some (String.sub dir n (String.length dir - n))
+  else None
+;;
+
+type build_link_row =
+  { path : string
+  ; target : string option
+  ; outcome : ([ `Linked | `Relinked | `Unchanged ], string) result
+  }
+
+(** Point every checkout's [_build] at the volume, and report each one.
+
+    A row per checkout rather than a single verdict: one refusal must not hide
+    the checkouts that were linked, and the caller has to be able to say which
+    one stayed on the share. [target] carries the guest path so the caller can
+    create it -- see {!build_target_mkdir_argv} for why that is a separate
+    step. *)
+let ensure_build_links ~playground_root =
+  build_roots_under ~playground_root
+  |> List.map (fun root ->
+    let path = Filename.concat root build_output_dir_name in
+    match playground_relative ~playground_root root with
+    | None ->
+      { path
+      ; target = None
+      ; outcome = Error (Printf.sprintf "%s is not below %s" root playground_root)
+      }
+    | Some relative ->
+      (match build_link_target ~playground_relative:relative with
+       | Error message -> { path; target = None; outcome = Error message }
+       | Ok target ->
+         { path
+         ; target = Some target
+         ; outcome =
+             apply_build_link ~path (plan_build_link ~target (build_link_state_of_path path))
+         }))
+;;
+
+(** Create the link targets inside the guest.
+
+    Measured, and the reason this step exists: dune does not create the
+    directory a [_build] symlink points at. It lstats [_build], sees something
+    there, and opens [_build/.lock] straight away --
+
+    {v Error: open(_build/.lock): No such file or directory v}
+
+    The host cannot create it either, because it lives inside the volume's
+    ext4 image. So the guest does, in one exec for every target rather than
+    one per checkout. [mkdir -p] is idempotent, so this is safe to repeat each
+    turn and says nothing when the directories are already there. *)
+let build_target_mkdir_argv ~container_name ~uid ~gid ~targets =
+  exec_argv
+    ~container_name
+    ~uid
+    ~gid
+    ~container_cwd:build_volume_guest_root
+    ~stdin:false
+    ~command_argv:("mkdir" :: "-p" :: targets)
+;;
+
+(** Targets that a build will write through, from the rows above.
+
+    A refused checkout contributes nothing: it keeps its real [_build] on the
+    share, so there is no volume directory for it to need. *)
+let build_link_targets_to_create rows =
+  List.filter_map
+    (fun row ->
+      match row.outcome, row.target with
+      | Ok (`Linked | `Relinked | `Unchanged), Some target -> Some target
+      | _ -> None)
+    rows
+;;
+
 (** Label value distinguishing a keeper-lifetime guest from turn
     containers. The guest outlives turns, so it carries no turn id. *)
 let keeper_vm_container_kind = "keeper-vm"

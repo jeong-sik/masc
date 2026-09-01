@@ -101,6 +101,10 @@ module Runtime = struct
 
   let microvm_cpus () = get_string ~default:"" "MASC_KEEPER_MICROVM_CPUS"
 
+  let microvm_build_volume_size () =
+    get_string ~default:"128g" "MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE"
+  ;;
+
   let docker_playground_enabled () =
     Feature_flag_registry.get_bool "MASC_KEEPER_DOCKER_PLAYGROUND"
 

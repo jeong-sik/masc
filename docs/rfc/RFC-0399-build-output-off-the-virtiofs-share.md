@@ -121,7 +121,7 @@ removing a symlink loses no data.
 
 ## Scope of this change
 
-Landed here — everything except the call site:
+All of it, including the call site:
 
 - naming and argv: `build_volume_guest_root`, `build_volume_name`,
   `build_volume_create_argv`, `build_volume_mount_args`
@@ -130,7 +130,9 @@ Landed here — everything except the call site:
   `Build_absent | Build_symlink | Build_real_directory`
 - provisioning: `volume_names_of_json`, `classify_volume_probe`,
   `volume_probe`, `ensure_build_volume`
-- applying: `build_link_state_of_path`, `apply_build_link`
+- discovery and application: `build_roots_under`, `playground_relative`,
+  `ensure_build_links`, `build_target_mkdir_argv`
+- the gate and the per-turn refresh in `keeper_turn_sandbox_runtime.ml`
 
 `container volume create` is not idempotent — a second call errors with
 "already exists" — so existence is settled by a probe, not by reading that
@@ -141,29 +143,101 @@ is confirmed against `container volume list --format json`, mirroring
 `classify_image_probe`. Every ambiguous outcome is `Volume_probe_failed`, never
 `Volume_absent`.
 
-Deliberately not here: the call site. Threading the volume through
-`keeper_turn_sandbox_runtime.ml` — provisioning next to the existing
-`image_present` gate, adding the mount, and walking the playground to apply
-plans — changes the path live keepers boot through, and its acceptance is a
-live measurement rather than a unit test. It lands as the next stack.
+A guest that cannot get its volume does not start. This follows `image_present`
+in the same lane, and the reason is the panic: falling back means writing build
+output onto the share, which is what pinned the vnode table three times. A
+keeper that does not start is a smaller failure than a machine that stops.
 
-The gate's shape is decided, though, and follows the precedent in the same
-module: a missing image returns `microvm_image_missing` and refuses to start
-the guest. A build volume that cannot be established does the same rather than
-falling back to the leaking layout, because the failure that fallback invites
-is a host panic.
+### What the acceptance run changed
+
+The design as first written did not work, and running it is what said so:
+
+```
+Error: open(_build/.lock): No such file or directory
+```
+
+dune does not create the directory a `_build` symlink points at. It lstats
+`_build`, sees the link, and opens `_build/.lock` straight away. The host
+cannot create the target either — it lives inside the volume's ext4 image. So
+the guest does, through `build_target_mkdir_argv`: one `container exec
+mkdir -p` covering every target rather than one per checkout, idempotent, and
+repeated each turn so a recreated volume repairs itself.
+
+The links are refreshed per turn rather than once per guest, because a keeper
+clones repositories and adds worktrees while its guest is already up. A
+boot-only pass would leave every checkout made after boot writing to the share.
+The two halves run on opposite sides of the boundary — the symlink on the host
+where the checkout lives, the directory in the guest where the volume is — so
+the refresh runs after the guest is confirmed up, not before.
 
 ## Verification
 
-`test/test_keeper_sandbox_microvm.exe` — 37 tests, 14 new. The two that matter:
+`test/test_keeper_sandbox_microvm.exe` — 44 tests, 21 new. The ones that
+matter:
 
 - `plan never deletes real build output` — a real `_build` is reported and left
   alone, and the test asserts the directory still exists afterwards.
-- `ambiguity is never read as absence` — four ways the probe can be unsure, none
-  of which become "create it".
+- `ambiguity is never read as absence` — four ways the probe can be unsure,
+  none of which become "create it".
+- `does not follow symlinks` — a link back to the playground root would loop a
+  walk built on `stat`; this one uses `lstat`.
+- `mkdir is one exec for every target` — not one per checkout.
 
-Acceptance for the call site, when it lands: run a full `dune build` in a
-microvm keeper checkout and show the VM process's host descriptor count flat
-across it. Measured today on a keeper mid-build, that count moved from 31 to
-33,295 in twenty minutes — about one per file written, and roughly 100k/hour
-against a table of 263,168.
+### Acceptance, measured
+
+Run in a live guest (`masc-keeper-sandbox:local`, container 1.3.1, dune
+3.24.2), same 120-module project built twice — once with `_build` on the
+share, once linked onto the volume:
+
+| | host fds | `_build` on |
+|---|---|---|
+| baseline | 25 | — |
+| `dune build`, `_build` on virtiofs | +137 | share |
+| `dune build`, `_build` linked to the volume | +100 | `/dev/vdc` (ext4) |
+
+The output landed on the volume (`/masc-build/linked/default/m.exe`, `df`
+showing the image growing), which is the part that had to be proven end to
+end. The remaining +100 is the 123 **source** files, which stay on the share by
+design and are bounded by the checkout.
+
+That ratio is what this is for. In this toy the build emits 24 files against
+123 sources, so the two columns look close. On the real thing they do not:
+masc is 10,543 tracked files and a full `_build` measured at 53,771 — five
+times the source tree, growing with every build, and none of it read by the
+host.
+
+The mechanism itself was measured separately and cleanly, with both mounts on
+one container and 20,000 files written to each: virtiofs 26 → 20,027 host
+descriptors, ext4 volume 26 → 26, `_build` symlinked onto the volume 59 → 61.
+
+### Where this sits against common practice
+
+Splitting a container's source (bind mount) from its build and dependency
+directories (named volume) is the documented recommendation on macOS, not
+something invented here. VS Code's dev container performance guide names it
+directly — a named volume "is ideal for storing package folders like
+`node_modules`, data folders, or output folders like `build`" — and the same
+split is standard advice for `node_modules`, `target` and `vendor`.
+
+One difference is worth stating, because it avoids a known failure. The common
+form mounts the volume *inside* the bind mount, at `<workspace>/node_modules`.
+On Docker for Mac, touching that path from the host silently unmounts the
+volume in the container (docker/for-mac#3976). This design cannot hit that: the
+volume is mounted at its own top-level path and reached through a symlink, so
+there is no submount to lose. That was not a choice made for safety — checkout
+paths here are created by the keeper at runtime and are not known when the
+guest starts, so a fixed submount was never available — but it is the safer
+shape either way.
+
+## Known gaps
+
+`_build` is dune's name and dune's alone. Other ecosystems pin host descriptors
+the same way through `node_modules`, `target` or `dist`, and are not handled.
+The mechanism carries over unchanged; only the marker file and the directory
+name differ. This is named rather than left implicit, so the change is not read
+as covering every keeper.
+
+The volume size is a ceiling, not an allocation — the image is sparse, 4 GiB
+nominal measured at 84 MB on disk — but a build that exceeds it fails inside
+the guest with ENOSPC. The default of 128 GiB is set against a measurement: one
+keeper's playground held three 29 GB `_build` directories, 87 GB together.

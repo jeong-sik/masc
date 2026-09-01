@@ -189,6 +189,51 @@ val apply_build_link
   -> build_link_plan
   -> ([ `Linked | `Relinked | `Unchanged ], string) result
 
+(** A checkout is a directory holding [dune-project], searched to
+    {!build_root_scan_depth} below a keeper's playground.
+
+    [_build] is dune's name and dune's alone. Other ecosystems pin host
+    descriptors the same way through [node_modules], [target] or [dist] and
+    are not handled here; the mechanism carries over unchanged, only the
+    marker and directory name differ. The gap is named so this is not read as
+    covering every keeper. *)
+val build_roots_under : playground_root:string -> string list
+
+(** Path relative to the playground root, or [None] when not below it. *)
+val playground_relative : playground_root:string -> string -> string option
+
+type build_link_row =
+  { path : string
+  ; target : string option
+  ; outcome : ([ `Linked | `Relinked | `Unchanged ], string) result
+  }
+
+(** Point every checkout's [_build] at the volume.
+
+    One row per checkout, not one verdict: a refusal must not hide the
+    checkouts that were linked, and the caller has to be able to say which one
+    stayed on the virtiofs share. *)
+val ensure_build_links : playground_root:string -> build_link_row list
+
+(** Targets a build will write through. A refused checkout contributes
+    nothing -- it keeps its real [_build] on the share. *)
+val build_link_targets_to_create : build_link_row list -> string list
+
+(** Create those targets inside the guest, in one exec.
+
+    Measured, and the reason this is a separate step: dune does not create the
+    directory a [_build] symlink points at. It lstats [_build], sees something,
+    and opens [_build/.lock] straight away --
+    [Error: open(_build/.lock): No such file or directory]. The host cannot
+    create it either, since it lives inside the volume's ext4 image.
+    [mkdir -p] is idempotent, so this is safe to repeat every turn. *)
+val build_target_mkdir_argv
+  :  container_name:string
+  -> uid:int
+  -> gid:int
+  -> targets:string list
+  -> string list
+
 val keeper_vm_container_kind : string
 
 val inspect_argv : container_name:string -> string list

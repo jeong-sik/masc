@@ -820,6 +820,16 @@ let effective_cwd default_cwd = function
   | None -> default_cwd
   | Some dir -> Eio.Path.(default_cwd / dir)
 
+(* The single place a caller's [cwd] string becomes a path. [Spawn_registry]
+   needs the rule the run/capture paths already use -- an absolute path
+   replaces the default, a relative one appends to it -- and a second copy of
+   that rule would be a second answer to the same question. *)
+let cwd_path cwd =
+  match get_cwd_default () with
+  | Error _ as error -> error
+  | Ok default -> Ok (effective_cwd default cwd)
+;;
+
 let pipeline_status statuses =
   List.fold_left
     (fun acc status ->
@@ -966,9 +976,7 @@ let run_argv_with_stdin_and_status_split
             fallback_with_callbacks ()
         | Ok pm, Ok clk, Ok default_cwd ->
             let effective_cwd =
-              match cwd with
-              | None -> default_cwd
-              | Some dir -> Eio.Path.(default_cwd / dir)
+              effective_cwd default_cwd cwd
             in
             let stdout_buf = create_capture () in
             let stderr_buf = create_capture () in
@@ -1078,9 +1086,7 @@ let run_argv_with_stdin_held_open_and_status_split
       , "Process_eio.run_argv_with_stdin_held_open_and_status_split: initialized Eio runtime required" )
     | Ok pm, Ok clk, Ok default_cwd ->
       let effective_cwd =
-        match cwd with
-        | None -> default_cwd
-        | Some dir -> Eio.Path.(default_cwd / dir)
+        effective_cwd default_cwd cwd
       in
       let stdout_buf = create_capture () in
       let stderr_buf = create_capture () in
@@ -1277,9 +1283,7 @@ let run_argv_with_status_split ?timeout_sec ?env ?cwd
               argv
         | Ok pm, Ok clk, Ok default_cwd ->
             let effective_cwd =
-              match cwd with
-              | None -> default_cwd
-              | Some dir -> Eio.Path.(default_cwd / dir)
+              effective_cwd default_cwd cwd
             in
             let stdout_buf = create_capture () in
             let stderr_buf = create_capture () in
@@ -1373,9 +1377,7 @@ let run_argv_with_status_split_streaming
           fallback_with_callbacks ()
         | Ok pm, Ok clk, Ok default_cwd ->
           let effective_cwd =
-            match cwd with
-            | None -> default_cwd
-            | Some dir -> Eio.Path.(default_cwd / dir)
+            effective_cwd default_cwd cwd
           in
           let stdout_buf = create_capture () in
           let stderr_buf = create_capture () in

@@ -58,14 +58,17 @@ val spawn
   :  sw:Eio.Switch.t
   -> t
   -> ?env:string array
-  -> ?cwd:Eio.Fs.dir_ty Eio.Path.t
+  -> ?cwd:string
   -> string list
   -> (Spawn_handle.t, string) result
 (** Start [argv] and return while it runs.
 
     The process is registered with [sw]: when the switch ends, for any reason,
     the process is signalled and reaped. A spawned process cannot outlive its
-    switch, which is not a step a caller can forget to take. *)
+    switch, which is not a step a caller can forget to take.
+
+    [cwd] resolves through {!Process_eio.cwd_path}: absolute replaces the
+    initialized default, relative appends to it. Omitted means the default. *)
 
 val read
   :  t

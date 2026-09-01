@@ -168,8 +168,20 @@ val run_argv_with_stdin_held_open_and_status_split :
     @param env Optional environment (Unix-style ["K=V"; ...]).
     @param cwd Override working directory for the spawned process.
            Absolute paths replace the default cwd; relative paths append to it.
+           Both go through the capability [init] was given, so how far an
+           absolute path reaches is that capability's business: the binaries
+           pass [Eio.Stdenv.fs] and reach anywhere, while a test harness
+           passing [Eio.Stdenv.cwd] gets "Capabilities insufficient" outside
+           its own root.
            Ignored when falling back to Unix process execution.
     @since 2.45.0 *)
+val cwd_path : string option -> (Eio.Fs.dir_ty Eio.Path.t, string) result
+(** Resolve an optional [cwd] string against the initialized default.
+
+    Absolute replaces the default, relative appends to it -- the same rule the
+    [?cwd:string] entry points above apply, and the same dependence on the
+    capability [init] was given. [Error] when [init] has not run. *)
+
 val run_argv_with_status : ?timeout_sec:float -> ?env:string array -> ?cwd:string -> string list -> (Unix.process_status * string)
 
 val run_argv_with_status_split :

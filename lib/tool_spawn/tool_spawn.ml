@@ -103,11 +103,32 @@ let handle_of args =
   | None -> Error (Printf.sprintf "%S is not a handle keeper_spawn issued" text)
 ;;
 
+(* [cwd] is declared in keeper_spawn.toml and was read by nobody: the word did
+   not appear in this file, [Spawn_registry.spawn] took a path rather than a
+   string, and the argument was simply never passed. 55 calls on 2026-09-01
+   sent a cwd and every one of them ran somewhere else.
+
+   Blank is an error rather than "use the default". A caller that sends the
+   key is naming a directory, and silently substituting a different one is how
+   the first version of this went wrong. *)
+let cwd_of args =
+  match Json_util.assoc_member_opt "cwd" args with
+  | None -> Ok None
+  | Some (`String value) ->
+    (match String_util.trim_nonempty value with
+     | Some value -> Ok (Some value)
+     | None -> Error "cwd must not be blank")
+  | Some _ -> Error "cwd must be a string"
+;;
+
 let handle_start ~tool_name ~start_time ctx args =
   match argv_of args with
   | Error message -> workflow_error ~tool_name ~start_time message
   | Ok argv ->
-    (match Spawn_registry.spawn ~sw:ctx.sw ctx.registry argv with
+    (match cwd_of args with
+     | Error message -> workflow_error ~tool_name ~start_time message
+     | Ok cwd ->
+    (match Spawn_registry.spawn ~sw:ctx.sw ctx.registry ?cwd argv with
      | Error message -> runtime_error ~tool_name ~start_time message
      | Ok handle ->
        ok
@@ -116,7 +137,7 @@ let handle_start ~tool_name ~start_time ctx args =
          (`Assoc
              [ "status", `String "running"
              ; "handle", `String (Spawn_handle.to_string handle)
-             ]))
+             ])))
 ;;
 
 let handle_read ~tool_name ~start_time ctx args =

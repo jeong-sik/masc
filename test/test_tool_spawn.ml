@@ -48,10 +48,10 @@ let string_field result key =
   | other -> Alcotest.failf "%s must be a string, got %s" key (Yojson.Safe.to_string other)
 ;;
 
-let spawn_handle ctx argv =
+let spawn_handle ctx ?(extra = []) argv =
   let result =
     call ctx ~name:"keeper_spawn"
-      (`Assoc [ "argv", `List (List.map (fun a -> `String a) argv) ])
+      (`Assoc (("argv", `List (List.map (fun a -> `String a) argv)) :: extra))
   in
   Alcotest.(check string) "a spawn is running" "running" (string_field result "status");
   string_field result "handle"
@@ -275,6 +275,105 @@ let test_the_boot_projection_keeps_all_four () =
     [ "keeper_spawn"; "keeper_spawn_read"; "keeper_spawn_wait"; "keeper_spawn_stop" ]
 ;;
 
+(* keeper_spawn.toml has declared [cwd] all along and nothing read it: the
+   word did not appear in tool_spawn.ml and [Spawn_registry.spawn] took a path
+   the tool could not build. 55 calls on 2026-09-01 named a directory and ran
+   somewhere else. This asks the process where it is. *)
+let test_a_start_runs_where_the_caller_said () =
+  with_eio
+  @@ fun () ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let ctx = context ~sw in
+  (* Made here rather than named from the tree: dune runs this in a sandbox
+     directory, so any path that exists relative to the repository does not
+     exist relative to the test. *)
+  let dir = "spawn_cwd_probe" in
+  (try Unix.mkdir dir 0o700 with
+   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  let handle = spawn_handle ctx ~extra:[ "cwd", `String dir ] [ "pwd" ] in
+  let waited =
+    call ctx ~name:"keeper_spawn_wait"
+      (`Assoc
+          [ "handle", `String handle
+          ; "until", `String "exit"
+          ; "timeout_sec", `Float generous_bound_sec
+          ])
+  in
+  Alcotest.(check string) "it exited" "exited" (string_field waited "status");
+  let read =
+    call ctx ~name:"keeper_spawn_read" (`Assoc [ "handle", `String handle ])
+  in
+  let where = String.trim (string_field read "bytes") in
+  Alcotest.(check string)
+    "it ran in the directory the call named"
+    dir
+    (Filename.basename where)
+;;
+
+(* [cwd] is resolved through the capability [Process_eio.init] was handed, not
+   around it. This harness passes [Eio.Stdenv.cwd], rooted at the test's own
+   directory, so "/" is refused with "Capabilities insufficient" -- the
+   binaries pass [Eio.Stdenv.fs] and would open it. What is pinned here is
+   that spawn goes through the capability at all; the reach itself belongs to
+   whoever calls [init]. *)
+let test_an_absolute_cwd_goes_through_the_capability () =
+  with_eio
+  @@ fun () ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let ctx = context ~sw in
+  let result =
+    call ctx ~name:"keeper_spawn"
+      (`Assoc [ "argv", `List [ `String "pwd" ]; "cwd", `String "/" ])
+  in
+  Alcotest.(check bool)
+    "the capability answered, not a bypass"
+    true
+    (Tool_result.is_failed result);
+  let message = error_message result in
+  Alcotest.(check bool)
+    ("the capability refusal is named -- got: " ^ message)
+    true
+    (Astring.String.is_infix ~affix:"Capabilities insufficient" message)
+;;
+
+(* A blank [cwd] is refused rather than read as "use the default": a caller
+   that sends the key is naming a directory, and quietly substituting another
+   one is the failure this whole change is about. *)
+let test_a_blank_cwd_is_refused () =
+  with_eio
+  @@ fun () ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let ctx = context ~sw in
+  let result =
+    call ctx ~name:"keeper_spawn"
+      (`Assoc [ "argv", `List [ `String "true" ]; "cwd", `String "   " ])
+  in
+  Alcotest.(check bool)
+    "it did not start"
+    true
+    (Tool_result.is_failed result);
+  Alcotest.(check string) "the blank field is named" "cwd must not be blank"
+    (error_message result)
+;;
+
+let test_a_non_string_cwd_is_refused () =
+  with_eio
+  @@ fun () ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let ctx = context ~sw in
+  let result =
+    call ctx ~name:"keeper_spawn"
+      (`Assoc [ "argv", `List [ `String "true" ]; "cwd", `Int 123 ])
+  in
+  Alcotest.(check bool) "it did not start" true (Tool_result.is_failed result);
+  Alcotest.(check string) "the malformed field is named" "cwd must be a string"
+    (error_message result)
+;;
+
 let () =
   Alcotest.run
     "tool_spawn"
@@ -310,6 +409,22 @@ let () =
             "another tool is not this one"
             `Quick
             test_another_tool_is_not_this_one
+        ; Alcotest.test_case
+            "a start runs where the caller said"
+            `Quick
+            test_a_start_runs_where_the_caller_said
+        ; Alcotest.test_case
+            "an absolute cwd goes through the capability"
+            `Quick
+            test_an_absolute_cwd_goes_through_the_capability
+        ; Alcotest.test_case
+            "a blank cwd is refused"
+            `Quick
+            test_a_blank_cwd_is_refused
+        ; Alcotest.test_case
+            "a non-string cwd is refused"
+            `Quick
+            test_a_non_string_cwd_is_refused
         ] )
     ; ( "surface"
       , [ Alcotest.test_case

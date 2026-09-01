@@ -976,9 +976,7 @@ let run_argv_with_stdin_and_status_split
             fallback_with_callbacks ()
         | Ok pm, Ok clk, Ok default_cwd ->
             let effective_cwd =
-              match cwd with
-              | None -> default_cwd
-              | Some dir -> Eio.Path.(default_cwd / dir)
+              effective_cwd default_cwd cwd
             in
             let stdout_buf = create_capture () in
             let stderr_buf = create_capture () in
@@ -1088,9 +1086,7 @@ let run_argv_with_stdin_held_open_and_status_split
       , "Process_eio.run_argv_with_stdin_held_open_and_status_split: initialized Eio runtime required" )
     | Ok pm, Ok clk, Ok default_cwd ->
       let effective_cwd =
-        match cwd with
-        | None -> default_cwd
-        | Some dir -> Eio.Path.(default_cwd / dir)
+        effective_cwd default_cwd cwd
       in
       let stdout_buf = create_capture () in
       let stderr_buf = create_capture () in
@@ -1287,9 +1283,7 @@ let run_argv_with_status_split ?timeout_sec ?env ?cwd
               argv
         | Ok pm, Ok clk, Ok default_cwd ->
             let effective_cwd =
-              match cwd with
-              | None -> default_cwd
-              | Some dir -> Eio.Path.(default_cwd / dir)
+              effective_cwd default_cwd cwd
             in
             let stdout_buf = create_capture () in
             let stderr_buf = create_capture () in
@@ -1383,9 +1377,7 @@ let run_argv_with_status_split_streaming
           fallback_with_callbacks ()
         | Ok pm, Ok clk, Ok default_cwd ->
           let effective_cwd =
-            match cwd with
-            | None -> default_cwd
-            | Some dir -> Eio.Path.(default_cwd / dir)
+            effective_cwd default_cwd cwd
           in
           let stdout_buf = create_capture () in
           let stderr_buf = create_capture () in

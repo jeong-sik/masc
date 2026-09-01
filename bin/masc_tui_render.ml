@@ -7147,6 +7147,7 @@ let render_keeper_message (state : state) =
     let projected_tool_rows =
       keeper_message_tool_rows state ~keeper_name ~chat_cols
     in
+    let promoted = promoted_inflight_for_keeper state keeper_name in
     let committed_messages =
       keeper_message_visible_messages state ~keeper_name
     in
@@ -7161,6 +7162,7 @@ let render_keeper_message (state : state) =
       match state.msg_live with
       | Some live
         when String.equal (Keeper_chat_transcript.keeper_name live) keeper_name
+             && Option.is_none promoted
         ->
           let request_id = Keeper_chat_transcript.request_id live in
           let request_label = Keeper_chat.compact_request_id request_id in
@@ -7419,6 +7421,52 @@ let render_keeper_message (state : state) =
       done
     end;
 
+    (* Queue provenance survives promotion in [inflight.origin]. While that
+       request runs, draw its USER in the exact slot NEXT owned and withhold its
+       session copy from the settled transcript. Settlement drops the inflight
+       provenance and the durable typed turn takes over. *)
+    (match promoted with
+     | Some entry ->
+         let request = entry.sent_request in
+         box_line_styled chat_buf chat_cols ~style:(Theme.info ())
+           (Printf.sprintf "  [%s]  ▶              TURN · YOU  %s"
+              (keeper_message_clock entry.submitted_at)
+              (Keeper_chat.compact_request_id request.request_id));
+         box_line_styled chat_buf chat_cols ~style:(Theme.info ())
+           ("    " ^ Terminal_text.single_line request.message)
+     | None -> ());
+    (* Pending input owns the exact two-row shape of the USER entry it will
+       become: one lane header and one body row. [history_height] subtracts
+       these rows through [keeper_message_status_rows], so promotion exchanges
+       NEXT for the promoted USER without moving the divider, composer, or
+       footer. The model has not seen pending input yet. *)
+    let pending =
+      Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
+        ~keeper_name
+      |> keeper_message_pending_preview
+    in
+    List.iter
+      (function
+        | Pending_preview_item (position, item) ->
+            let intent, style =
+              match item.Masc_tui_keeper_chat_queue.intent with
+              | Masc_tui_keeper_chat_queue.Next -> "NEXT", Theme.recede ()
+              | Masc_tui_keeper_chat_queue.Steer_after_interrupt ->
+                  "STEER", Theme.warn ()
+            in
+            let request = item.Masc_tui_keeper_chat_queue.request in
+            box_line_styled chat_buf chat_cols ~style
+              (Printf.sprintf "  %s %d · %s" intent position
+                 (keeper_message_clock item.submitted_at));
+            box_line_styled chat_buf chat_cols ~style
+              ("    " ^ Terminal_text.single_line request.Keeper_chat.message)
+        | Pending_preview_omitted omitted ->
+            box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
+              (Printf.sprintf
+                 "  … %d pending row(s) hidden · Ctrl-K:cancel last · Ctrl-P:edit last"
+                 omitted))
+      pending;
+
     (* Input area divider *)
     box_divider chat_buf chat_cols;
 
@@ -7464,31 +7512,6 @@ let render_keeper_message (state : state) =
                   (Keeper_chat.compact_request_id entry.sent_request.request_id)
                   (sending_age entry)))
            others);
-    let pending =
-      Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
-        ~keeper_name
-    in
-    let pending = keeper_message_pending_preview pending in
-    List.iter
-      (function
-        | Pending_preview_item (position, item) ->
-            let intent, style =
-              match item.Masc_tui_keeper_chat_queue.intent with
-              | Masc_tui_keeper_chat_queue.Next -> "NEXT", Theme.recede ()
-              | Masc_tui_keeper_chat_queue.Steer_after_interrupt ->
-                  "STEER", Theme.warn ()
-            in
-            let request = item.Masc_tui_keeper_chat_queue.request in
-            box_line_styled chat_buf chat_cols ~style
-              (Printf.sprintf "  %s %d · %s · %s" intent position
-                 (keeper_message_clock item.submitted_at)
-                 (Terminal_text.single_line request.Keeper_chat.message))
-        | Pending_preview_omitted omitted ->
-            box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-              (Printf.sprintf
-                 "  … %d pending row(s) hidden · Ctrl-K:cancel last · Ctrl-P:edit last"
-                 omitted))
-      pending;
     (match state.msg_loaded_error with
      | Some detail ->
          (* Cause first. The consequence -- this session only -- is the same

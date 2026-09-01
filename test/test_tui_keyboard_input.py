@@ -4567,7 +4567,14 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
         plain = CSI_RE.sub(b"", frame)
         # Pending messages are visible but not represented as turns the model
         # has already received.
-        for expected in (b"NEXT 1", b"queued-one", b"NEXT 2", b"queued-two"):
+        turn_user = "TURN · YOU".encode()
+        for expected in (
+            turn_user,
+            b"NEXT 1",
+            b"queued-one",
+            b"NEXT 2",
+            b"queued-two",
+        ):
             if expected not in plain:
                 raise AssertionError(
                     f"a waiting line is not shown in NEXT; "
@@ -4575,8 +4582,8 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
                 )
         if b"TURN \xc2\xb7 QUEUED" in plain:
             raise AssertionError(f"pending input leaked into the transcript: {plain!r}")
-        if plain.find(b"ACTIVE TURN") > plain.find(b"NEXT 1"):
-            raise AssertionError(f"NEXT was drawn inside the active turn: {plain!r}")
+        if plain.find(turn_user) > plain.find(b"NEXT 1"):
+            raise AssertionError(f"NEXT was drawn inside the causal transcript: {plain!r}")
         if b"Enter:queue(2)" not in plain:
             raise AssertionError(f"the footer lost its count: {plain!r}")
 
@@ -5366,9 +5373,8 @@ def memory_journal_backfill_fixture() -> HttpResponse:
 
 
 def memory_journal_chat_fixture() -> HttpResponse:
-    # The absolute turns deliberately disagree with the clocks. The pane keeps
-    # each turn whole but must still draw the shared visible axis oldest first;
-    # otherwise a 22:00 rail is followed by an earlier hour lower on screen.
+    # The absolute turns deliberately disagree with the clocks. Typed turn
+    # sequence remains the ordering authority; clocks only label the rails.
     return (
         200,
         [
@@ -5489,8 +5495,6 @@ def memory_journal_timeline_interaction(
         later_hour = time.strftime(
             "%Y-%m-%d · %H:00", time.localtime(1787348490.35)
         ).encode()
-        earlier_rail = plain_resting.find(earlier_hour)
-        later_rail = plain_resting.find(later_hour)
         for label in (earlier_hour, later_hour):
             styled_rail = re.compile(
                 rb"\x1b\[[0-9;]*m\x1b\[1m"
@@ -5505,10 +5509,10 @@ def memory_journal_timeline_interaction(
         before = plain_resting.find(b"direct turn before Librarian")
         journal = plain_resting.find(b"Librarian committed current memory revision 9")
         after = plain_resting.find(b"direct turn after Librarian")
-        if not (0 <= earlier_rail < before < later_rail < journal < after):
+        if not (0 <= after < before < journal):
             raise AssertionError(
-                "Civil-hour rails, whole chat turns, and the Journal lane did "
-                f"not share one oldest-to-newest time axis: {resting!r}"
+                "Typed turn sequence and the Journal producer lane lost "
+                f"structural order under adversarial clocks: {resting!r}"
             )
         if re.search("\u25c8\\s+JOURNAL".encode(), plain_resting) is None:
             raise AssertionError(
@@ -5563,8 +5567,6 @@ def memory_journal_timeline_interaction(
         later_hour = time.strftime(
             "%Y-%m-%d · %H:00", time.localtime(1787348490.35)
         ).encode()
-        earlier_rail = plain_visible.find(earlier_hour)
-        later_rail = plain_visible.find(later_hour)
         for label in (earlier_hour, later_hour):
             styled_rail = re.compile(
                 rb"\x1b\[[0-9;]*m\x1b\[1m"
@@ -5579,10 +5581,10 @@ def memory_journal_timeline_interaction(
         before = plain_visible.find(b"direct turn before Librarian")
         journal = plain_visible.find(b"Librarian committed current memory revision 9")
         after = plain_visible.find(b"direct turn after Librarian")
-        if not (0 <= earlier_rail < before < later_rail < journal < after):
+        if not (0 <= after < before < journal):
             raise AssertionError(
-                "Civil-hour rails, whole chat turns, and the Journal lane did "
-                f"not share one oldest-to-newest time axis: {visible!r}"
+                "Typed turn sequence and the Journal producer lane lost "
+                f"structural order under adversarial clocks: {visible!r}"
             )
         if re.search("\u25c8\\s+JOURNAL".encode(), plain_visible) is None:
             raise AssertionError(

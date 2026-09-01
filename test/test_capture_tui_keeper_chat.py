@@ -154,6 +154,46 @@ class CaptureTuiKeeperChatTest(unittest.TestCase):
         self.assertEqual(state.summary()["requests"], [first, second])
         self.assertEqual(capture.request_identity(state, "second"), second)
 
+    def test_history_reloads_only_completed_causal_turns_in_typed_order(self):
+        state = capture.Fixture("causal")
+        first = {
+            "request_id": "tui-0198f0de-1234-7abc-8def-0123456789ab",
+            "name": "alpha",
+            "message": "first",
+        }
+        second = {
+            "request_id": "tui-0198f0df-5678-7abc-9def-0123456789ab",
+            "name": "alpha",
+            "message": "second",
+        }
+        state.note_submission("first", 10.0)
+        state.note_submission("second", 20.0)
+        state.parse_request(json.dumps(first).encode())
+        state.parse_request(json.dumps(second).encode())
+        state.complete_request(first["request_id"])
+
+        first_history = state.chat_history()
+        self.assertEqual(
+            [row["role"] for row in first_history],
+            ["user", "tool", "assistant"],
+        )
+        self.assertTrue(
+            all(
+                row["delivery_key"]["operation_id"] == first["request_id"]
+                for row in first_history
+            )
+        )
+        self.assertTrue(all(row["ts"] == 10.0 for row in first_history))
+
+        state.complete_request(second["request_id"])
+        history = state.chat_history()
+        self.assertEqual(
+            [row["role"] for row in history],
+            ["user", "tool", "assistant", "user", "assistant"],
+        )
+        self.assertEqual(history[3]["ts"], 20.0)
+        self.assertEqual(history[4]["content"], "reply-second")
+
     def test_stream_payload_carries_reply_and_structural_turn_sequence(self):
         request = {
             "request_id": "tui-0198f0de-1234-7abc-8def-0123456789ab",

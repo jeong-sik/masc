@@ -4783,8 +4783,18 @@ let take_pending_attachments state =
   staged
 ;;
 
-let launch_keeper_request ?submitted_at state ~mailbox request =
-  let submitted_at = Option.value ~default:(Unix.gettimeofday ()) submitted_at in
+let launch_keeper_request ?promoted state ~mailbox request =
+  let submitted_at, origin =
+    match promoted with
+    | None -> Unix.gettimeofday (), Direct_submission
+    | Some (item : Chat_queue.item) ->
+        ( item.submitted_at
+        , Promoted_queue
+            { submission_seq = item.submission_seq
+            ; intent = item.intent
+            ; causal_parent_request_id = item.causal_parent_request_id
+            } )
+  in
   let live =
     Keeper_chat_transcript.create
       ~keeper_name:request.Keeper_chat.keeper_name
@@ -4795,6 +4805,7 @@ let launch_keeper_request ?submitted_at state ~mailbox request =
     { sent_request = request
     ; submitted_at
     ; sent_at = Unix.gettimeofday ()
+    ; origin
     ; phase = Turn_streaming
     ; live
     }
@@ -4977,8 +4988,8 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                  | None -> ()
                  | Some (item, rest) ->
                      state.msg_queued <- rest;
-                     launch_keeper_request ~submitted_at:item.submitted_at state
-                       ~mailbox item.request)
+                     launch_keeper_request ~promoted:item state ~mailbox
+                       item.request)
       | Some _ ->
           add_event state "error"
             "Queued edit belongs to another Keeper; switch back or press Ctrl-U"
@@ -5058,7 +5069,7 @@ let drain_queued_message state ~base_path ~mailbox =
              when the operator pressed Enter, so dispatch neither re-reads the
              staged attachments nor mints a second identity for a line the
              conversation already shows. *)
-          launch_keeper_request ~submitted_at:item.submitted_at state ~mailbox request;
+          launch_keeper_request ~promoted:item state ~mailbox request;
           next ())
         else (
           (* The keeper this was written to is no longer registered. Sending it

@@ -1,0 +1,29 @@
+{
+  "schema": "masc.tui_keeper_chat_steer_pty_evidence.v1",
+  "status": "passed",
+  "captured_at": "2026-09-02T02:49:28+09:00",
+  "source": {
+    "product_commit": "2d541c8c7a834b4ffd93269fd75628e17f16f47e",
+    "artifact_commit": "cc6fa8e2a11f0cbf1b2cb3728ab2c8e612558920",
+    "harness_source_commit": "566ef63285ef3dba66ec2e71184ed2e6a34fee21",
+    "artifact_build_run": "https://github.com/jeong-sik/masc/actions/runs/33524854233",
+    "binary_sha256": "e00e0c990ebaf2d6850afc65518bff7a71636db0f07b88844ebc22c8532a60b6"
+  },
+  "scenario": "steer_interrupt_precedes_ordinary_next",
+  "assertions": {
+    "ordinary_next_visible_before_steer": true,
+    "steer_visible_before_next_after_interrupt": true,
+    "dispatch_messages": [
+      "original",
+      "corrected-course",
+      "ordinary-next"
+    ],
+    "interrupt_count": 1,
+    "interrupt_matches_original_request_id": true
+  },
+  "interrupt": {
+    "name": "alpha",
+    "request_id": "tui-01a05e16-df17-7000-8c9e-2f1015a66c1b"
+  },
+  "method_note": "The PTY renderer repaints unchanged rows incrementally. The interaction verifies ordinary-next in the NEXT 1 frame, then STEER 1 and NEXT 2 ordering in the interrupt frame, before asserting the three HTTP dispatch bodies and exact interrupt request ID."
+}

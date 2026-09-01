@@ -1,0 +1,71 @@
+{
+  "schema": "masc.tui_keeper_chat_partial_evidence.v1",
+  "status": "partial",
+  "captured_at": "2026-09-02T02:20:00+09:00",
+  "target_pr": 32397,
+  "source": {
+    "product_commit": "2d541c8c7a834b4ffd93269fd75628e17f16f47e",
+    "artifact_commit": "cc6fa8e2a11f0cbf1b2cb3728ab2c8e612558920",
+    "capture_harness_commit": "e2c3f8b1d06e4647fff09df2311fc92770f1ae29",
+    "artifact_product_diff": [
+      ".github/workflows/release.yml"
+    ],
+    "artifact_build_run": "https://github.com/jeong-sik/masc/actions/runs/33524854233",
+    "binary_sha256": "e00e0c990ebaf2d6850afc65518bff7a71636db0f07b88844ebc22c8532a60b6",
+    "binary_embedded_artifact_commit_occurrences": 1,
+    "whole_binary_exact_artifact_commit": true,
+    "whole_binary_exact_later_pr_merge_head": false
+  },
+  "responsive_queue": {
+    "visual_assertions_through_settlement": true,
+    "queued_submitted_clock": "02:20:37",
+    "assertions_reached": [
+      "unseen input rendered in a NEXT lane outside the transcript",
+      "NEXT header and body reserved one USER-shaped slot",
+      "queueing did not send a second POST",
+      "queue-to-active promotion retained submitted_at",
+      "queue-to-active promotion retained the physical USER slot",
+      "composer and footer slots stayed stable across promotion",
+      "durable reload retained USER then TOOL then ASSISTANT turn grouping"
+    ]
+  },
+  "steer": {
+    "browser_scenario_started": false,
+    "browser_reason": "responsive scenario final HTTP accounting failed first",
+    "pty_evidence": "steer-pty.json"
+  },
+  "terminal_failure": {
+    "type": "AssertionError",
+    "detail": "final HTTP counts: chat_stream_post_count=2, interrupt_post_count=0, chat_operation_get_count=0, other_post_count=1, unexpected_chat_route_count=0; expected other_post_count=0"
+  },
+  "screenshots": [
+    {
+      "file": "01-chat-tiny-resize-gate.png",
+      "sha256": "f54da09797d222c2cd80a7f1f7f5572a691f376e01df8d6bc89743fd8e7e2b18"
+    },
+    {
+      "file": "02-chat-long-tail.png",
+      "sha256": "4d2064dc53769edd69eabff0efe492eeff741fc5fac2b2f3d0b3235a4e5b4794"
+    },
+    {
+      "file": "03-chat-long-tail-backspace.png",
+      "sha256": "3ed854ddbd73dc036930a58ee031dfdefed013ba2d922f8cb471d564d6c24c69"
+    },
+    {
+      "file": "04-chat-unicode-draft.png",
+      "sha256": "e9eba4c809d3d2937dc1f591b54ac672e32212104f8749101ab8ffbf16f6ebd4"
+    },
+    {
+      "file": "05-chat-next-separated.png",
+      "sha256": "5eff57280f63dd6cc1232c9b1b4235659b43dc477fa59f2f593c3d18e4446ef9"
+    },
+    {
+      "file": "06-chat-next-active-same-slot.png",
+      "sha256": "da5809c34170952c011959abce13e1c92a8e886c467a31768a755e4890814ea5"
+    },
+    {
+      "file": "07-chat-causal-turns-settled.png",
+      "sha256": "18577119990b7f4e71c1ac977844bcfcba88ff1494e459e628052ed355787b0f"
+    }
+  ]
+}

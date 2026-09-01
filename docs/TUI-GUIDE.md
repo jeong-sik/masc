@@ -1072,8 +1072,11 @@ The first count is what the fetched page shows after its category filter;
 `774273` is what the ring has seen. A page count on its own would read as
 "that is all there is".
 
-`l` raises the server-side level floor through INFO, WARN, and ERROR, then opens
-it back to every level; changing it refetches the page. `c` cycles `all` and
+`v` toggles verbose DEBUG rows directly: off uses the INFO floor and on asks
+the server for every level. The header always says `verbose:on` or
+`verbose:off`. `l` remains the full server-side floor ladder through INFO,
+WARN, and ERROR, then opens back to every level; changing either control
+refetches the page. `c` cycles `all` and
 each category observed on the loaded page. Right or `Enter` opens the exact
 sequence under the cursor with its untruncated timestamp, level, category,
 source, module, keeper, turn, message, and pretty syntax-highlighted JSON

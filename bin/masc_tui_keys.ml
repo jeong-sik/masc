@@ -370,6 +370,8 @@ let for_surface = function
           ~help:"while detail is open, inspect the adjacent visible log entry"
       ; b Act "l" "level floor"
           ~help:"raise the minimum level; after error, back to everything"
+      ; b Act "v" "verbose"
+          ~help:"toggle DEBUG rows directly; off uses the INFO floor"
       ; b Act "c" "category"
           ~help:"cycle through the categories this page carries"
       ; b Act "Right / Enter" "detail"

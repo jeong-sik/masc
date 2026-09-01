@@ -62,7 +62,7 @@ let test_plain_listing_footer_shape () =
 
 let test_system_logs_footer_names_browser_controls () =
   check str "logs names filters and detail"
-    "j/k:move / scroll  PgUp/PgDn:detail page  [ / ]:previous / next  l:level floor  c:category  Right / Enter:detail  Left / Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:move / scroll  PgUp/PgDn:detail page  [ / ]:previous / next  l:level floor  v:verbose  c:category  Right / Enter:detail  Left / Esc:back  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints System_logs)
 
 let test_lanes_footer_opens_standalone_runs () =
@@ -348,8 +348,8 @@ let test_changes_is_a_keeper_child () =
     (surface_ring_index Changes)
 
 let test_system_logs_owns_only_its_real_filter_keys () =
-  (* g/G/f still belong to Acting. Logs owns the server level floor and the
-     category cycle under l/c. *)
+  (* g/G/f still belong to Acting. Logs owns the server level floor, direct
+     verbose toggle, and category cycle under l/v/c. *)
   let keys =
     List.map
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
@@ -358,6 +358,7 @@ let test_system_logs_owns_only_its_real_filter_keys () =
   Alcotest.(check bool) "no g/G on System logs" false (List.mem "g / G" keys);
   Alcotest.(check bool) "no f on System logs" false (List.mem "f" keys);
   Alcotest.(check bool) "level floor is documented" true (List.mem "l" keys);
+  Alcotest.(check bool) "verbose is documented" true (List.mem "v" keys);
   Alcotest.(check bool) "category filter is documented" true (List.mem "c" keys);
   let acting =
     List.map

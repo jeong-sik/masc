@@ -1722,6 +1722,14 @@ let next_system_log_min_level = function
   | Some System_error -> None
   | Some System_debug | Some (System_level_unknown _) -> None
 
+(* A direct verbose switch beside the full level ladder. [None] is the route's
+   DEBUG default; every explicit floor is a non-verbose reading. Turning
+   verbose off always lands on INFO rather than remembering WARN/ERROR, because
+   the action is "hide debug", not "restore an unrelated prior filter". *)
+let toggle_system_log_verbose = function
+  | None -> Some System_info
+  | Some _ -> None
+
 (* The wire spelling the /logs route validates (lowercase, fail-closed). *)
 let system_log_level_query = function
   | System_debug -> "debug"

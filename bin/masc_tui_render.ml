@@ -7052,9 +7052,9 @@ let render_system_logs (state : state) =
   let filter_note =
     let level =
       match state.system_logs_min_level with
-      | None -> ""
+      | None -> "  level\xe2\x89\xa5DEBUG  verbose:on"
       | Some floor ->
-          Printf.sprintf "  level\xe2\x89\xa5%s"
+          Printf.sprintf "  level\xe2\x89\xa5%s  verbose:off"
             (String.trim (Masc.Tui_decode.system_log_level_label floor))
     in
     let category =

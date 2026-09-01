@@ -165,9 +165,16 @@ let test_chat_hint_widths_keep_one_row_and_whole_items () =
     ; Masc_tui_footer.Server_base_path "/Users/dancer/me"
     ]
   in
+  (* Built through the same function the chat pane uses, so the widths
+     checked here are the widths drawn there. The hand-copied strings this
+     replaces drifted twice: Ctrl-F/Ctrl-O never reached them, then Ctrl-N
+     (#32367) did not either, and the guarantee was proven ~40 cells short. *)
   let idle_hints =
-    "Enter:send  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  \
-     PgUp:scroll back  Esc:list  Ctrl-U:clear"
+    Masc_tui_footer.chat_hints ~enter_hint:"Enter:send"
+      ~scroll_hint:
+        (Masc_tui_message_layout.scroll_hint ~scrolled_back:0
+           ~older_exist:true)
+      ~switch_hint:"" ~escape_hint:"Esc:list"
   in
   let render hints max_cells =
     Masc_tui_footer.line ~status ~dim:"\x1b[2m" ~reset:"\x1b[0m"
@@ -191,12 +198,17 @@ let test_chat_hint_widths_keep_one_row_and_whole_items () =
     (contains ~needle:"Base:" narrow || contains ~needle:"/Users/dancer" narrow);
   (* This is the real active-chat shape: queue controls, transcript paging,
      Keeper switching, and interrupt status can all be present together. Its
-     hints exceed 200 cells; #30465 deliberately keeps hints before facts. *)
+     hints exceed 200 cells; #30465 deliberately keeps hints before facts.
+     Every hole carries its widest live value, through the same producers the
+     pane reads. *)
   let active_hints =
-    "Enter:queue (12 waiting)  Ctrl-K:cancel last  Ctrl-P:edit last  \
-     Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  \
-     \226\134\145/\226\134\147:line  PgUp/PgDn:page  Ctrl-E:newest  (999 back)  \
-     Ctrl-G:next Keeper  Esc:interrupt turn  Ctrl-U:clear"
+    Masc_tui_footer.chat_hints
+      ~enter_hint:
+        "Enter:queue (12 waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
+      ~scroll_hint:
+        (Masc_tui_message_layout.scroll_hint ~scrolled_back:999
+           ~older_exist:true)
+      ~switch_hint:"  Ctrl-G:next Keeper" ~escape_hint:"Esc:interrupt turn"
   in
   let active = render active_hints 240 in
   check_at_most_cells "worst-case active footer fits 240 cells" 240 active;

@@ -39,12 +39,32 @@ type make_error =
   | Invalid_sha256 of invalid_sha256
   | Negative_bytes of int
   | Empty_mime
+  | Unencodable_mime of string
 
 let make_error_to_string = function
   | Invalid_sha256 err -> invalid_sha256_to_string err
   | Negative_bytes n ->
     Printf.sprintf "byte count must be non-negative, got %d" n
   | Empty_mime -> "media type must be non-empty"
+  | Unencodable_mime mime ->
+    Printf.sprintf
+      "media type must not contain whitespace, got %S; the agent-core marker \
+       writes it unquoted between spaces"
+      mime
+
+(* [encode_for_agent_core] writes mime unquoted between two spaces, and the
+   decoder reads it with [%s@ ]. A media type carrying a parameter the usual
+   way -- "text/plain; charset=utf-8" -- therefore ends at the space, and the
+   decoder then meets "charset=" where it wants "preview=". The failure lands
+   at read time as a scanf error naming a character position, far from the
+   write that caused it, so the constraint is enforced where the value is
+   built instead. *)
+let mime_is_encodable mime =
+  String.for_all
+    (function
+      | ' ' | '\t' | '\n' | '\r' -> false
+      | _ -> true)
+    mime
 
 let make_artifact_ref ~sha256 ~bytes ~preview ~mime =
   match validate_sha256 sha256 with
@@ -52,6 +72,7 @@ let make_artifact_ref ~sha256 ~bytes ~preview ~mime =
   | Ok () ->
     if bytes < 0 then Error (Negative_bytes bytes)
     else if String.equal (String.trim mime) "" then Error Empty_mime
+    else if not (mime_is_encodable mime) then Error (Unencodable_mime mime)
     else Ok { sha256; bytes; preview; mime }
 
 let with_preview artifact_ref preview = { artifact_ref with preview }

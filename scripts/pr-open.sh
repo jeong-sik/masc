@@ -11,14 +11,14 @@ Options:
   -t, --title <title>         PR title (default: gh --fill)
   -B, --body-file <path>      PR body markdown file
   -l, --labels <a,b,c>        Extra labels to add
-      --no-watch              Skip `gh pr checks --watch`
   -h, --help                  Show help
 
 Behavior:
   1) push current branch
   2) create draft PR if absent
   3) add extra labels
-  4) optionally watch checks
+  4) sync commit lineage
+  5) print the PR URL
 USAGE
 }
 
@@ -138,7 +138,6 @@ base="main"
 title=""
 body_file=""
 extra_labels=""
-watch_checks=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -147,7 +146,6 @@ while [[ $# -gt 0 ]]; do
     -t|--title) title="$2"; shift 2 ;;
     -B|--body-file) body_file="$2"; shift 2 ;;
     -l|--labels) extra_labels="$2"; shift 2 ;;
-    --no-watch) watch_checks=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown option: $1" >&2; usage; exit 1 ;;
   esac
@@ -219,12 +217,3 @@ ensure_pr_is_draft "$pr_number" "commit lineage sync"
 
 pr_link="$(gh pr view "$pr_number" --repo "$repo" --json url --jq .url)"
 echo "PR: $pr_link"
-
-if [[ $watch_checks -eq 1 ]]; then
-  gh pr checks "$pr_number" --repo "$repo" --watch || true
-  echo "PR status:"
-  gh pr view "$pr_number" --repo "$repo" \
-    --json state,isDraft,mergeStateStatus,headRefOid,url \
-    --jq '"state=\(.state) draft=\(.isDraft) mergeState=\(.mergeStateStatus) head=\(.headRefOid)\nurl=\(.url)"' \
-    || true
-fi

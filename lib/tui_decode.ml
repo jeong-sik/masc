@@ -6354,7 +6354,10 @@ let decode_lane_run_gate_judgment ~lane ~status ~output =
       | Lane_run_raised
       | Lane_run_other _ )
       , _
-    | Lane_run_succeeded, None ->
+    | ( Lane_run_succeeded
+      | Lane_run_completion_persistence_failed
+      | Lane_run_completion_durability_unknown )
+      , None ->
       Ok Lane_run_gate_judgment_not_reached
 ;;
 

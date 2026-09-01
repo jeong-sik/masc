@@ -405,7 +405,8 @@ let input_map_rows (record : Turn_record.t) provider_input =
                  |> List.find_opt
                       (fun (block : Turn_record.prompt_block) ->
                          block.block = block_id && block.bytes = item.bytes)
-                 |> Option.map (fun block -> block.digest)
+                 |> Option.map (fun (block : Turn_record.prompt_block) ->
+                        block.digest)
              | Turn_record.Tool_schemas
              | Turn_record.Message_user
              | Turn_record.Message_system

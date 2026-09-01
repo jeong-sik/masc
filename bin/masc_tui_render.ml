@@ -8201,20 +8201,18 @@ let fusion_tool_event_lines ~width = function
       ]
       @ fusion_tool_preview_lines ~width ~label:"Input" event.fte_input
   | Fusion_tool_completed event ->
-      let status, style, output, failure =
+      let status, style, output, failure_suffix =
         match event.fte_completion with
-        | Fusion_tool_succeeded output -> "succeeded", Theme.ok (), output, None
-        | Fusion_tool_failed failure ->
-            "failed", Theme.bad (), failure.ftc_output, Some failure
-      in
-      let failure_suffix =
-        match failure with
-        | None -> ""
-        | Some failure ->
-            Printf.sprintf "  recoverable=%b%s" failure.ftc_recoverable
-              (match failure.ftc_error_class with
+        | Fusion_tool_succeeded output -> ("succeeded", Theme.ok (), output, "")
+        | Fusion_tool_failed { ftc_output; ftc_recoverable; ftc_error_class }
+          ->
+          ( "failed"
+          , Theme.bad ()
+          , ftc_output
+          , Printf.sprintf "  recoverable=%b%s" ftc_recoverable
+              (match ftc_error_class with
                | Some class_ -> " class=" ^ Terminal_text.single_line class_
-               | None -> " class=unavailable")
+               | None -> " class=unavailable") )
       in
       [ ( style
         , Printf.sprintf "  [%s] %s%s  %s  turn %d/%d  id=%s%s" status

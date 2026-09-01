@@ -1367,7 +1367,7 @@ let fetch_schedules ~(host : string) ~(port : int) : (Yojson.Safe.t, string) res
 (** Create or atomically modify a schedule from the JSON form the TUI handed
     to [$EDITOR]. The server validates each against its canonical Tool schema;
     update requires [schedule_id] and refuses running or terminal rows. *)
-let post_schedule_create ~(host : string) ~(port : int) ~(body_json : string) =
+let post_schedule_create_json ~(host : string) ~(port : int) ~(body_json : string) =
   post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_create"
     ~body:body_json
 

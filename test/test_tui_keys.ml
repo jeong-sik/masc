@@ -54,7 +54,7 @@ let test_one_spelling_per_key () =
     every_surface
 
 let test_plain_listing_footer_shape () =
-  let canonical = "j/k:scroll  Esc:overview  r:refresh  Tab:next  q:quit" in
+  let canonical = "j/k:scroll  l:level floor  c:category  Esc:overview  r:refresh  Tab:next  q:quit" in
   check str "the plain listing keeps its footer" canonical
     (Masc_tui_keys.footer_hints System_logs)
 
@@ -98,7 +98,7 @@ let test_harness_footer_links_to_overview_task () =
 
 let test_schedules_footer_names_write_and_read_controls () =
   check str "Schedules names create and modify"
-    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  Right / Enter:details  Left / Esc:back  n:new  e:modify  x:cancel  Y:copy link  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  Right / Enter:details  Left / Esc:back  n:new  e:modify  x:cancel  a:new wake  Y:copy link  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Schedules)
 
 let schedule_form_row : schedule_row =
@@ -162,7 +162,7 @@ let test_schedule_create_form_names_the_canonical_required_fields () =
   check str "message is explicit" "" (form |> member "message" |> to_string);
   check str "one-shot is the visible default" "one_shot"
     (form |> member "recurrence_kind" |> to_string);
-  check int "interval alternative is discoverable" 3600
+  check Alcotest.int "interval alternative is discoverable" 3600
     (form |> member "recurrence_interval_sec" |> to_int);
   check str "cron alternative is discoverable" "0 9 * * *"
     (form |> member "recurrence_cron" |> to_string)
@@ -179,14 +179,14 @@ let test_schedule_update_form_preserves_exact_editable_definition () =
     (form |> member "message" |> to_string);
   check str "urgency" "low" (form |> member "urgency" |> to_string);
   check str "daily kind" "daily" (form |> member "recurrence_kind" |> to_string);
-  check int "hour" 9 (form |> member "recurrence_hour" |> to_int);
-  check int "minute" 30 (form |> member "recurrence_minute" |> to_int);
-  check int "second" 5 (form |> member "recurrence_second" |> to_int);
+  check Alcotest.int "hour" 9 (form |> member "recurrence_hour" |> to_int);
+  check Alcotest.int "minute" 30 (form |> member "recurrence_minute" |> to_int);
+  check Alcotest.int "second" 5 (form |> member "recurrence_second" |> to_int);
   check str "timezone" "Asia/Seoul"
     (form |> member "recurrence_timezone" |> to_string);
   check str "due timestamp" "2026-09-02T00:00:00Z"
     (form |> member "due_at_iso" |> to_string);
-  check bool "expiry remains present" true
+  check Alcotest.bool "expiry remains present" true
     (form |> member "expires_at_unix" <> `Null)
 
 (* Tools left the plain group when it grew a per-Keeper axis: the pane now

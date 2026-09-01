@@ -10374,7 +10374,7 @@ and is loaded on demand through keeper_skill.
     handle_schedule_form ~action:"create"
       ~stem:(Masc_tui_types.schedule_create_form_json ())
       ~post:(fun body_json ->
-        Masc_tui_http.post_schedule_create ~host:server_peer_host
+        Masc_tui_http.post_schedule_create_json ~host:server_peer_host
           ~port:state.port ~body_json)
   in
   let handle_schedule_modify () =
@@ -14289,7 +14289,7 @@ and is loaded on demand through keeper_skill.
                        ~mode:(Masc.Keeper_gate_mode.to_string next))
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
-            | Board | Planning | Schedules | Verification | Harness
+            | Board | Planning | Verification | Harness
             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs -> ())
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_prompts ->

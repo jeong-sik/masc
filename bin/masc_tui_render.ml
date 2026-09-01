@@ -12953,6 +12953,19 @@ let render_config_models (state : state) =
          box_empty buf cols
        done
    | None, Some _ ->
+       let detail =
+         List.nth_opt state.config_models_rows state.config_models_cursor
+         |> Option.map Masc_tui_model_runtime_table.detail_lines
+         |> Option.value ~default:[]
+       in
+       (* Keep the explanation attached to the selected row. Five rows are
+          enough to name both owning sections without adding another modal or
+          another editor path. On a very short terminal the table still keeps
+          one visible row. *)
+       let detail_height = min (List.length detail) (max 0 (content_height - 2)) in
+       let table_height =
+         max 1 (content_height - detail_height - if detail_height > 0 then 1 else 0)
+       in
        (* [box_line] spends cells on the two border glyphs and the padding
           either side, and this pane adds two more for its own indent. A
           width that ignores them wraps the last column onto its own row,
@@ -12963,7 +12976,7 @@ let render_config_models (state : state) =
            state.config_models_rows
        in
        let total = List.length table in
-       let max_scroll = max 0 (total - content_height) in
+       let max_scroll = max 0 (total - table_height) in
        (* The window follows the cursor rather than the other way round: a
           cursor the frame does not draw is a selection the reader cannot
           see, and [e] would act on a row that is off screen. *)
@@ -12971,13 +12984,13 @@ let render_config_models (state : state) =
        let scroll = max 0 (min state.config_scroll max_scroll) in
        let scroll =
          if cursor_line < scroll then cursor_line
-         else if cursor_line >= scroll + content_height
-         then min max_scroll (cursor_line - content_height + 1)
+         else if cursor_line >= scroll + table_height
+         then min max_scroll (cursor_line - table_height + 1)
          else scroll
        in
        (* Row 0 of [table] is the header, so a cursor over the data rows is
           one lower than the line it marks. *)
-       for i = 0 to content_height - 1 do
+       for i = 0 to table_height - 1 do
          let index = scroll + i in
          match List.nth_opt table index with
          | Some line ->
@@ -12988,11 +13001,25 @@ let render_config_models (state : state) =
              in
              box_line buf cols marked
          | None -> box_empty buf cols
-       done);
+       done;
+       if detail_height > 0
+       then (
+         box_divider buf cols;
+         List.iteri
+           (fun i line ->
+             if i < detail_height
+             then (
+               let line =
+                 "  " ^ fit_width (Terminal_text.single_line line) (max 1 (cols - 6))
+               in
+               if i = 0
+               then box_line_styled buf cols ~style:(Ansi.bold ^ Theme.info ()) line
+               else box_line_styled buf cols ~style:(Theme.recede ()) line))
+           detail));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:row  e:open in runtime.toml  p:next pane  r:reload  Tab:next");
+       ~hints:"j/k:row  e:open [models.NAME]  p:next pane  r:reload  Tab:next");
   finish_surface state ~surface_key:"config_models" ~rows:terminal_rows ~cols buf
 
 let config_content_height (state : state) =

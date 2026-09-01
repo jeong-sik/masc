@@ -131,6 +131,51 @@ let tokens_text = function
   | Some n -> string_of_int n
   | None -> absent
 
+let value_or_absent = Option.value ~default:absent
+
+let is_bare_key_char = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true
+  | _ -> false
+
+let toml_key name =
+  if String.length name > 0 && String.for_all is_bare_key_char name
+  then name
+  else (
+    let escaped = Buffer.create (String.length name + 4) in
+    String.iter
+      (function
+        | '\\' -> Buffer.add_string escaped "\\\\"
+        | '"' -> Buffer.add_string escaped "\\\""
+        | '\n' -> Buffer.add_string escaped "\\n"
+        | '\r' -> Buffer.add_string escaped "\\r"
+        | '\t' -> Buffer.add_string escaped "\\t"
+        | c -> Buffer.add_char escaped c)
+      name;
+    Printf.sprintf "\"%s\"" (Buffer.contents escaped))
+
+let section head model = Printf.sprintf "[%s.%s]" head (toml_key model)
+
+let detail_lines row =
+  let api_name, api_note =
+    match row.api_name with
+    | Some api when not (String.equal api row.model) -> api, " (api-name override)"
+    | Some api -> api, " (same as binding)"
+    | None -> row.model, " (default; api-name key absent)"
+  in
+  [ Printf.sprintf "Binding: provider=%s  model=%s" row.provider row.model
+  ; Printf.sprintf "API model: %s%s" api_name api_note
+  ; Printf.sprintf
+      "%s  reasoning-effort=%s  temperature=%s"
+      (section "models" row.model)
+      (value_or_absent row.reasoning_effort)
+      (value_or_absent row.temperature)
+  ; Printf.sprintf
+      "%s  max-tokens=%s"
+      (section row.provider row.model)
+      (tokens_text row.max_tokens)
+  ; "- means that key is absent; add or edit it in the section shown above."
+  ]
+
 let pad s n =
   let len = String.length s in
   if len >= n then s else s ^ String.make (n - len) ' '
@@ -176,7 +221,7 @@ let render ~width rows =
     ^ String.make gutter ' '
     ^ pad (effort_text r.reasoning_effort) effort_width
     ^ String.make gutter ' '
-    ^ pad (Option.value ~default:absent r.temperature) temperature_width
+    ^ pad (value_or_absent r.temperature) temperature_width
     ^ String.make gutter ' '
     ^ tokens_text r.max_tokens
   in

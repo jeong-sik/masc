@@ -1027,9 +1027,14 @@ full-width band, so navigation always has a visible position.
 
 Models is a read-only index over the same file. It puts each binding's
 `reasoning-effort`, `temperature`, and provider `max-tokens` beside the model
-name; `-` means the field is genuinely absent. `e` returns to that model's
-section in `runtime.toml`, whose preview-checked editor remains the one write
-path. Params are different: they come from the typed live registry, and
+name; `-` means the key is genuinely absent, not that an empty value was
+loaded. The selected-row detail names the effective API model and the exact
+owning sections: effort and temperature belong in `[models.NAME]`, while the
+token cap belongs in `[PROVIDER.NAME]`. Thus adding only an effort is a
+one-line change under the named model section; copying a sibling block is not
+required. `e` returns to that `[models.NAME]` section in `runtime.toml`, whose
+preview-checked editor remains the one write path. Params are different: they
+come from the typed live registry, and
 `Enter` edits one value while `x` restores its registered default.
 
 Prompt overrides open as a reduced operator catalog: the six complete prompts

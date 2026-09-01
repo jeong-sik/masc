@@ -5591,7 +5591,7 @@ def chat_visibility_modes_interaction() -> Interaction:
             master_fd,
             output,
             b"m",
-            "\u2717 Tools 2".encode(),
+            b"ci-red-attribution",
         )
         wait_for_output(
             process,
@@ -5605,15 +5605,16 @@ def chat_visibility_modes_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"2 details folded",
+            "\u2717 masc_fusion \u00b7 1200ms".encode(),
             start=pane_start,
             timeout=5.0,
         )
         for needle in (
             b"AUTO",
             b"gate:auto_judge",
-            b"Skill 1",
-            b"Fusion 1",
+            "\u25c6".encode(),
+            "DELIVERED \u00b7 USED".encode(),
+            b"masc_fusion",
             b"Ctrl-D: details / diffs",
         ):
             wait_for_output(
@@ -5627,10 +5628,12 @@ def chat_visibility_modes_interaction() -> Interaction:
         initial += bytes(output[pane_start:])
         if b"2 reasoning steps, content withheld" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
-        if "TURN · TOOLS".encode() not in CSI_RE.sub(b"", initial):
+        if "TURN · SKILL".encode() not in CSI_RE.sub(b"", initial):
             raise AssertionError(
-                f"the first visible block did not start its turn: {initial!r}"
+                f"the exact Skill evidence did not start its turn: {initial!r}"
             )
+        if b"\x1b[1mci-red-attribution" not in initial:
+            raise AssertionError(f"the Skill name was not bold: {initial!r}")
 
         folded = send_and_wait(
             process, master_fd, output, b"\x12", b"reasoning:folded"
@@ -5660,16 +5663,20 @@ def chat_visibility_modes_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"keeper_skill",
+            b"observed action",
             start=tools_start,
             timeout=5.0,
         )
         tools += bytes(output[tools_start:])
-        for needle in (b"keeper_skill", b"masc_fusion"):
+        for needle in (b"masc_fusion", b"turn=trace-1787333555531-00020#54"):
             if needle not in tools:
                 raise AssertionError(
                     f"full tool view did not restore {needle!r}: {tools!r}"
                 )
+        if b"keeper_skill" in CSI_RE.sub(b"", tools):
+            raise AssertionError(
+                f"exact Skill evidence was duplicated as a generic tool: {tools!r}"
+            )
         send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         os.write(master_fd, b"q")
 
@@ -5685,6 +5692,34 @@ def chat_clarity_http_fixtures() -> HttpFixtures:
     trace = history_rows[0]["blocks"][0]["trace"]
     trace[1]["name"] = "keeper_skill"
     trace[3]["name"] = "masc_fusion"
+    history_rows[0]["skill_activations"] = {
+        "schema": "masc.keeper_chat.skill_activations.v1",
+        "status": "available",
+        "activations": [
+            {
+                "identity": {
+                    "source_id": "workspace",
+                    "package_id": "ops",
+                    "name": "ci-red-attribution",
+                },
+                "content_revision": "sha256:content-rev-1",
+                "snapshot_revision": "sha256:snapshot-rev-1",
+                "turn_ref": "trace-1787333555531-00020#54",
+                "runtime_id": "anthropic.claude-opus-5",
+                "skill_tool_use_id": "skill-use-1",
+                "agent_core_turn": 54,
+                "invocation": {"kind": "instruction"},
+                "delivery": {"boundary": {"kind": "model_response"}},
+                "actions": [
+                    {
+                        "tool_name": "masc_fusion",
+                        "runtime_id": "anthropic.claude-opus-5",
+                    }
+                ],
+                "activated_at": "2026-09-01T08:00:00Z",
+            }
+        ],
+    }
     fixtures["/api/v1/keepers/alpha/chat/history"] = history
     fixtures["/api/v1/dashboard/gate"] = (
         200,

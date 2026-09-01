@@ -1,3 +1,9 @@
+type skill_tone =
+  | Skill_live
+  | Skill_used
+  | Skill_attention
+  | Skill_failure
+
 type style =
   | User
   | Inbound
@@ -5,6 +11,7 @@ type style =
   | Status
   | Error
   | Tool
+  | Skill of skill_tone
   | Thinking
 
 type markdown_source =
@@ -591,6 +598,10 @@ let speaker_mark : style -> string = function
   | Status -> "?"
   | Error -> "\xe2\x9c\x97"
   | Tool -> "\xe2\x96\xa0"
+  | Skill Skill_live -> "\xe2\x97\x87"
+  | Skill Skill_used -> "\xe2\x97\x86"
+  | Skill Skill_attention -> "\xe2\x96\xb3"
+  | Skill Skill_failure -> "\xe2\x9c\x97"
   | Thinking -> "\xc2\xb7"
 
 (* Cells the speaker mark and its separator occupy at the head of a label, or
@@ -868,7 +879,7 @@ let continued_mark style = speaker_mark style
 
    Reasoning is the Keeper's own, not a quotation, however folded it is. *)
 let shade_of_style : style -> shade = function
-  | Tool | Status -> Shade_quoted
+  | Tool | Skill _ | Status -> Shade_quoted
   | User | Inbound | Keeper | Error | Thinking -> Shade_none
 
 let origin_gutter ~origin ~previous ~inner_width entry =

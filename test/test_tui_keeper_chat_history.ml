@@ -69,7 +69,8 @@ let origin_request_id = function
   | History.Delivery_failed { origin_request_id; _ } -> origin_request_id
   | History.Addressed_to_keeper _ | History.Said_by_keeper
   | History.Autonomous_reply
-  | History.Tool_calls _ | History.Reasoning _ | History.Memory_activity -> None
+  | History.Tool_calls _ | History.Skill_activity _ | History.Reasoning _
+  | History.Memory_activity -> None
 
 let full_tool_rows = History.tool_rows
 
@@ -81,6 +82,9 @@ let kind_to_string : History.kind -> string = function
   | History.Delivery_failed _ -> "delivery_failed"
   | History.Tool_calls block ->
       Printf.sprintf "tools[%s]" (String.concat " | " (full_tool_rows block))
+  | History.Skill_activity skill ->
+      Printf.sprintf "skill[%s]"
+        (String.concat " | " (Transcript.skill_rows ~full:true skill))
   | History.Reasoning lines ->
       Printf.sprintf "thinking[%s]" (String.concat " | " lines)
   | History.Memory_activity -> "memory"
@@ -91,7 +95,7 @@ let kind_to_string : History.kind -> string = function
    ([server_dashboard_http_keeper_api.ml], the autonomous row encoder), so
    the default here is the wire's shape, not an empty string. *)
 let autonomous_turn ?(ts = 1.0) ?(content = `Null) ?(marked = true) ?omitted
-    ?turn_ref steps =
+    ?turn_ref ?skill_activations steps =
   `Assoc
     ([ "id", `String "autonomous:trace-1#54"
      ; "role", `String "assistant"
@@ -99,6 +103,9 @@ let autonomous_turn ?(ts = 1.0) ?(content = `Null) ?(marked = true) ?omitted
      ; "ts", `Float ts
      ]
     @ (match turn_ref with None -> [] | Some id -> [ "turn_ref", `String id ])
+    @ (match skill_activations with
+       | None -> []
+       | Some json -> [ "skill_activations", json ])
     @ (if marked then
          [ "autonomous_turn", `Assoc [ "turn_id", `String "trace-1#54" ] ]
        else [])
@@ -126,6 +133,30 @@ let tool ?execution_id ?tool_call_id ?status ?dur name =
         | Some id -> [ "tool_call_id", `String id ])
      @ (match status with None -> [] | Some s -> [ "status", `String s ])
      @ (match dur with None -> [] | Some d -> [ "dur", `String d ]))
+
+let skill_activation ?(delivery = `Assoc []) ?(actions = [])
+    ?(name = "ci-red-attribution") () =
+  `Assoc
+    [ "identity", `Assoc [ "name", `String name ]
+    ; "content_revision", `String "sha256:content-1"
+    ; "turn_ref", `String "trace-1#54"
+    ; "runtime_id", `String "codex-app-server"
+    ; "skill_tool_use_id", `String "skill-use-1"
+    ; "delivery", delivery
+    ; ( "actions"
+      , `List
+          (List.map
+             (fun tool_name -> `Assoc [ "tool_name", `String tool_name ])
+             actions) )
+    ]
+
+let skill_projection ?detail ~status activations =
+  `Assoc
+    ([ "schema", `String "masc.keeper_chat.skill_activations.v1"
+     ; "status", `String status
+     ; "activations", `List activations
+     ]
+     @ (match detail with None -> [] | Some value -> [ "detail", `String value ]))
 
 let decode json =
   match History.rows_of_json json with
@@ -337,7 +368,8 @@ let test_an_addressed_row_says_who_sent_it_not_only_what_to_draw () =
     | History.Addressed_to_keeper { speaker; _ } -> speaker
     | History.Said_by_keeper | History.Autonomous_reply
     | History.Delivery_failed _ | History.Tool_calls _
-    | History.Reasoning _ | History.Memory_activity ->
+    | History.Skill_activity _ | History.Reasoning _
+    | History.Memory_activity ->
         failf "expected an addressed row"
   in
   let is_operator json =
@@ -366,7 +398,8 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
         History.addressed_label speaker surface
     | History.Said_by_keeper | History.Autonomous_reply
     | History.Delivery_failed _ | History.Tool_calls _
-    | History.Reasoning _ | History.Memory_activity ->
+    | History.Skill_activity _ | History.Reasoning _
+    | History.Memory_activity ->
         failf "expected an addressed row"
   in
   let surface kind extra = `Assoc (("kind", `String kind) :: extra) in
@@ -527,7 +560,8 @@ let test_consecutive_tool_rows_become_one_block () =
                   block.activities)
        | History.Addressed_to_keeper _ | History.Said_by_keeper
        | History.Autonomous_reply
-       | History.Delivery_failed _ | History.Reasoning _
+       | History.Delivery_failed _ | History.Skill_activity _
+       | History.Reasoning _
        | History.Memory_activity ->
            fail "expected the middle row to be a tool block");
       check (float 0.0) "the block is keyed to its first call" 2.0
@@ -660,11 +694,139 @@ let test_an_autonomous_turn_draws_what_it_did () =
              (starts_with "? read_file" (row 3))
        | History.Addressed_to_keeper _ | History.Said_by_keeper
        | History.Autonomous_reply
-       | History.Delivery_failed _ | History.Reasoning _
+       | History.Delivery_failed _ | History.Skill_activity _
+       | History.Reasoning _
        | History.Memory_activity ->
            fail "expected the second row to be a tool block");
       check (float 0.0) "both rows are keyed to the turn" 5.0 tools.History.at
   | rows -> failf "expected two rows, got %d" (List.length rows)
+
+let test_exact_skill_evidence_replaces_the_raw_call_and_names_actions () =
+  let projection =
+    skill_projection ~status:"available"
+      [ skill_activation ~actions:[ "Execute"; "Read" ] () ]
+  in
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~turn_ref:"trace-1#54"
+             ~skill_activations:projection
+             [ tool ~status:"ok" "keeper_skill"
+             ; tool ~status:"ok" "Execute"
+             ; tool ~status:"ok" "Read"
+             ]
+         ])
+  in
+  match decoded.History.rows with
+  | [ skill_row; tools_row ] ->
+      (match skill_row.kind with
+       | History.Skill_activity skill ->
+           check string "the exact ledger names the Skill" "ci-red-attribution"
+             skill.skill_name;
+           check bool "delivery plus observed actions means used" true
+             (skill.state = Transcript.Skill_used);
+           check (list string) "the exact action sequence is kept"
+             [ "Execute"; "Read" ] skill.actions;
+           let rows = Transcript.skill_rows ~full:true skill in
+           check string "the strongest evidence state is bold"
+             "**ci-red-attribution** \xc2\xb7 **DELIVERED \xc2\xb7 USED** \xc2\xb7 2 actions"
+             (List.hd rows);
+           check bool "the exact turn proof is visible" true
+             (List.exists
+                (String.starts_with ~prefix:"  proof \xc2\xb7 turn=trace-1#54")
+                rows)
+       | other ->
+           failf "expected a Skill row, got %s" (kind_to_string other));
+      (match tools_row.kind with
+       | History.Tool_calls block ->
+           check (list string) "the raw Skill tool is replaced, not duplicated"
+             [ "Execute"; "Read" ]
+             (List.map
+                (fun (activity : Transcript.tool_activity) -> activity.tool_name)
+                block.activities)
+       | other ->
+           failf "expected an action Tool block, got %s" (kind_to_string other))
+  | rows ->
+      failf "expected Skill plus action Tools, got %d row(s): %s"
+        (List.length rows)
+        (String.concat "; " (List.map (fun row -> kind_to_string row.kind) rows))
+
+let test_served_skill_without_delivery_does_not_claim_use () =
+  let projection =
+    skill_projection ~status:"available"
+      [ skill_activation ~delivery:`Null () ]
+  in
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~turn_ref:"trace-1#54"
+             ~skill_activations:projection
+             [ tool ~status:"ok" "keeper_skill" ]
+         ])
+  in
+  match decoded.History.rows with
+  | [ { History.kind = History.Skill_activity skill; _ } ] ->
+      check bool "served is weaker than delivered" true
+        (skill.state = Transcript.Skill_served_only);
+      check (list string) "the UI says delivery was not recorded"
+        [ "**ci-red-attribution** \xc2\xb7 **SERVED ONLY \xc2\xb7 DELIVERY NOT RECORDED**" ]
+        (Transcript.skill_rows ~full:false skill)
+  | rows -> failf "expected one served-only Skill row, got %d" (List.length rows)
+
+let test_missing_skill_evidence_stays_visible_beside_the_raw_call () =
+  let projection =
+    skill_projection ~status:"missing"
+      ~detail:"No activation matched this exact turn" []
+  in
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~turn_ref:"trace-1#54"
+             ~skill_activations:projection
+             [ tool ~status:"ok" "keeper_skill" ]
+         ])
+  in
+  match decoded.History.rows with
+  | [ { History.kind = History.Skill_activity warning; _ }
+    ; { History.kind = History.Tool_calls raw; _ }
+    ] ->
+      check bool "the evidence gap is a typed warning" true
+        (warning.state = Transcript.Skill_evidence_missing);
+      check string "the producer's raw call is retained" "keeper_skill"
+        (List.hd raw.activities).tool_name;
+      check (option string) "the exact failure reason is visible"
+        (Some "No activation matched this exact turn") warning.detail
+  | rows ->
+      failf "expected warning plus raw Skill tool, got %d row(s)" (List.length rows)
+
+let test_skill_evidence_count_mismatch_retains_every_raw_call () =
+  let projection =
+    skill_projection ~status:"available" [ skill_activation () ]
+  in
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~turn_ref:"trace-1#54"
+             ~skill_activations:projection
+             [ tool ~status:"ok" "keeper_skill"
+             ; tool ~status:"ok" "keeper_skill"
+             ]
+         ])
+  in
+  match decoded.History.rows with
+  | [ { History.kind = History.Skill_activity exact; _ }
+    ; { History.kind = History.Skill_activity warning; _ }
+    ; { History.kind = History.Tool_calls raw; _ }
+    ] ->
+      check string "the exact activation is still shown" "ci-red-attribution"
+        exact.skill_name;
+      check bool "the count mismatch is a visible evidence error" true
+        (warning.state = Transcript.Skill_evidence_unavailable);
+      check int "neither unmatched raw call is hidden" 2
+        (List.length raw.activities)
+  | rows ->
+      failf "expected exact evidence, warning, and raw calls; got %d row(s)"
+        (List.length rows)
 
 let test_a_turn_that_also_spoke_keeps_the_order_it_ran_in () =
   let decoded =
@@ -1161,6 +1323,14 @@ let () =
         ; test_case "the server's order is kept" `Quick test_server_order_is_kept
         ; test_case "an autonomous turn draws what it did" `Quick
             test_an_autonomous_turn_draws_what_it_did
+        ; test_case "exact Skill evidence replaces the raw call" `Quick
+            test_exact_skill_evidence_replaces_the_raw_call_and_names_actions
+        ; test_case "served Skill does not claim delivery" `Quick
+            test_served_skill_without_delivery_does_not_claim_use
+        ; test_case "missing Skill evidence remains visible" `Quick
+            test_missing_skill_evidence_stays_visible_beside_the_raw_call
+        ; test_case "Skill evidence count mismatch keeps raw calls" `Quick
+            test_skill_evidence_count_mismatch_retains_every_raw_call
         ; test_case "blank autonomous turn keeps its origin" `Quick
             test_a_blank_autonomous_turn_has_an_explicit_origin
         ; test_case "a turn that also spoke keeps the order it ran in" `Quick

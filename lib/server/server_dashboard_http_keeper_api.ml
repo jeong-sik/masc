@@ -421,6 +421,155 @@ let keeper_chat_trace_blocks config name =
     None
 ;;
 
+let keeper_chat_skill_projection_schema =
+  "masc.keeper_chat.skill_activations.v1"
+;;
+
+let chat_row_turn_ref fields =
+  match List.assoc_opt "turn_ref" fields with
+  | Some (`String value) when String.trim value <> "" -> Some value
+  | Some _ | None -> (
+      match List.assoc_opt "autonomous_turn" fields with
+      | Some (`Assoc autonomous) -> (
+          match List.assoc_opt "turn_id" autonomous with
+          | Some (`String value) when String.trim value <> "" -> Some value
+          | Some _ | None -> None)
+      | Some _ | None -> None)
+;;
+
+let chat_row_reports_skill_activation fields =
+  let is_skill_activation fields =
+    match List.assoc_opt "name" fields with
+    | Some (`String name) ->
+      String.equal name Keeper_tool_composition_catalog.skill_tool_name
+      || Option.is_some
+           (Keeper_tool_composition_catalog.skill_source_of_tool_name name)
+    | Some _ | None -> false
+  in
+  match List.assoc_opt "blocks" fields with
+  | Some (`List blocks) ->
+    List.exists
+      (function
+        | `Assoc block -> (
+            match List.assoc_opt "t" block, List.assoc_opt "trace" block with
+            | Some (`String "trace"), Some (`List steps) ->
+              List.exists
+                (function
+                  | `Assoc step -> is_skill_activation step
+                  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _
+                  | `Null | `String _ -> false)
+                steps
+            | Some _, Some _ | Some _, None | None, _ -> false)
+        | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null
+        | `String _ -> false)
+      blocks
+  | Some _ | None -> false
+;;
+
+let keeper_chat_skill_activations_json ~status ?detail activations =
+  `Assoc
+    ([ "schema", `String keeper_chat_skill_projection_schema
+     ; "status", `String status
+     ; ( "activations"
+       , `List
+           (List.map
+              Keeper_skill_activation_ledger.activation_to_yojson
+              activations) )
+     ]
+     @ Json_util.string_field_if_present "detail" detail)
+;;
+
+let attach_keeper_chat_skill_activations ~config rows =
+  let resolved_by_trace = Hashtbl.create 4 in
+  let resolve_trace trace_id =
+    match Hashtbl.find_opt resolved_by_trace trace_id with
+    | Some outcome -> outcome
+    | None ->
+      let outcome =
+        Keeper_skill_activation_projection.resolve_trace_string ~config trace_id
+      in
+      Hashtbl.replace resolved_by_trace trace_id outcome;
+      outcome
+  in
+  let enrich = function
+    | `Assoc fields as row -> (
+        match List.assoc_opt "role" fields, chat_row_turn_ref fields with
+        | Some (`String "assistant"), Some turn_ref_raw ->
+          let reports_skill = chat_row_reports_skill_activation fields in
+          let projection =
+            match Ids.Turn_ref.of_string turn_ref_raw with
+            | None ->
+              if reports_skill then
+                Some
+                  (keeper_chat_skill_activations_json
+                     ~status:"invalid_turn_ref"
+                     ~detail:"The chat row carries an invalid exact turn_ref"
+                     [])
+              else None
+            | Some turn_ref ->
+              let trace_id = Ids.Turn_ref.trace_id turn_ref in
+              (match resolve_trace trace_id with
+               | Error detail ->
+                 if reports_skill then
+                   Some
+                     (keeper_chat_skill_activations_json ~status:"unavailable"
+                        ~detail [])
+                 else None
+               | Ok
+                   (Keeper_skill_activation_projection.Trace_available
+                      { ledger; _ }) ->
+                 let activations =
+                   Keeper_skill_activation_ledger.activations ledger
+                   |> List.filter
+                        (fun activation ->
+                          Ids.Turn_ref.equal activation.turn_ref turn_ref)
+                 in
+                 (match activations, reports_skill with
+                  | _ :: _, _ ->
+                    Some
+                      (keeper_chat_skill_activations_json ~status:"available"
+                         activations)
+                  | [], true ->
+                    Some
+                      (keeper_chat_skill_activations_json ~status:"missing"
+                         ~detail:
+                           "The exact turn ledger contains no activation for the recorded Skill call"
+                         [])
+                  | [], false -> None)
+               | Ok
+                   (Keeper_skill_activation_projection.Trace_not_recorded _) ->
+                 if reports_skill then
+                   Some
+                     (keeper_chat_skill_activations_json ~status:"not_recorded"
+                        ~detail:
+                          "No retained Skill activation ledger exists for this exact trace"
+                        [])
+                 else None
+               | Ok
+                   (Keeper_skill_activation_projection.Trace_unavailable
+                      { reason; detail; _ }) ->
+                 if reports_skill then
+                   Some
+                     (keeper_chat_skill_activations_json ~status:"unavailable"
+                        ~detail:(reason ^ ": " ^ detail) [])
+                 else None)
+          in
+          (match projection with
+           | None -> row
+           | Some projection ->
+             `Assoc
+               (("skill_activations", projection)
+                :: List.remove_assoc "skill_activations" fields))
+        | Some _, Some _ | Some _, None | None, _ -> row)
+    | (`Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _)
+      as row -> row
+  in
+  match rows with
+  | `List rows -> `List (List.map enrich rows)
+  | (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _)
+    as other -> other
+;;
+
 let keeper_chat_history_json config name =
   let base_dir = (config : Workspace.config).base_path in
   let messages = Keeper_chat_store.load ~base_dir ~keeper_name:name in
@@ -434,16 +583,19 @@ let keeper_chat_history_json config name =
     Keeper_autonomous_turn_source.load_recent ~config ~keeper_name:name ()
     |> List.map autonomous_turn_json
   in
-  match autonomous_rows, chat_rows with
-  | [], _ -> chat_rows
-  | _ :: _, `List rows -> `List (rows @ autonomous_rows)
-  | _ :: _, other ->
-    Log.Keeper.warn
-      "dashboard keeper chat history: chat store for %s did not emit an array; %d \
-       autonomous turn(s) omitted"
-      name
-      (List.length autonomous_rows);
-    other
+  let rows =
+    match autonomous_rows, chat_rows with
+    | [], _ -> chat_rows
+    | _ :: _, `List rows -> `List (rows @ autonomous_rows)
+    | _ :: _, other ->
+      Log.Keeper.warn
+        "dashboard keeper chat history: chat store for %s did not emit an array; %d \
+         autonomous turn(s) omitted"
+        name
+        (List.length autonomous_rows);
+      other
+  in
+  attach_keeper_chat_skill_activations ~config rows
 ;;
 
 (* Direct-conversation rows older than [before], one [Keeper_chat_store] window
@@ -484,10 +636,13 @@ let keeper_chat_history_page_json config name ~before =
       None
       messages
   in
+  let messages =
+    Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref messages
+    |> attach_keeper_chat_skill_activations ~config
+  in
   `Assoc
     [ "schema", `String "masc.keeper_chat_history.page.v1"
-    ; ( "messages"
-      , Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref messages )
+    ; "messages", messages
     ; "has_more", `Bool has_more
     ; "next_before", (match next_before with Some t -> `Float t | None -> `Null)
     ]

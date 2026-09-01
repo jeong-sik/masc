@@ -34,6 +34,7 @@ let entry_at at : Tui_types.msg_entry =
   ; me_role = Tui_types.Message_keeper
   ; me_text = Printf.sprintf "row at %.0f" at
   ; me_tool_block = None
+  ; me_skill_activity = None
   ; me_timestamp = ""
   ; me_request_id = ""
   ; me_at = at

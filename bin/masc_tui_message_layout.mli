@@ -1,3 +1,9 @@
+type skill_tone =
+  | Skill_live
+  | Skill_used
+  | Skill_attention
+  | Skill_failure
+
 type style =
   | User  (** The operator of this workspace -- what you sent. *)
   | Inbound
@@ -11,6 +17,7 @@ type style =
   | Status
   | Error
   | Tool
+  | Skill of skill_tone
   | Thinking
 
 type markdown_source =

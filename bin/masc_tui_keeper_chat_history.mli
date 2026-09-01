@@ -108,6 +108,10 @@ type kind =
       (** One typed block of calls. Either consecutive [role: "tool"] rows,
           or the tool steps of one autonomous turn's trace block. Rendering is
           deferred to the shared [Compact | Full] projector. *)
+  | Skill_activity of Masc_tui_keeper_chat_transcript.skill_activity
+      (** Exact per-turn Skill activation evidence derived by the server from
+          the durable activation ledger. It distinguishes served content from
+          provider delivery and observed post-delivery actions. *)
   | Reasoning of string list
       (** What the keeper reasoned during one autonomous turn, as the trace
           block carried it: the lines the server kept, and a count of the

@@ -39,6 +39,27 @@ type tool_activity =
   ; duration : string option
   }
 
+type skill_state =
+  | Skill_calling
+  | Skill_served_pending
+  | Skill_served_only
+  | Skill_delivered
+  | Skill_used
+  | Skill_failed
+  | Skill_evidence_missing
+  | Skill_evidence_unavailable
+
+type skill_activity =
+  { skill_name : string
+  ; skill_tool_use_id : string option
+  ; turn_ref : string option
+  ; content_revision : string option
+  ; runtime_id : string option
+  ; state : skill_state
+  ; actions : string list
+  ; detail : string option
+  }
+
 type tool_block =
   { activities : tool_activity list
   ; omitted_steps : int
@@ -412,8 +433,9 @@ type activity_kind =
 let activity_kind (activity : tool_activity) =
   let name = activity.tool_name in
   if
-    String.equal name "keeper_skill"
-    || String.starts_with ~prefix:"keeper_compose_" name
+    String.equal name Masc.Keeper_tool_composition_catalog.skill_tool_name
+    || Option.is_some
+         (Masc.Keeper_tool_composition_catalog.skill_source_of_tool_name name)
   then Skill_activity
   else if String.starts_with ~prefix:"masc_fusion" name then Fusion_activity
   else if
@@ -421,6 +443,93 @@ let activity_kind (activity : tool_activity) =
     || String.starts_with ~prefix:"keeper_" name
   then Keeper_activity
   else Tool_activity
+
+let make_skill_activity ?skill_tool_use_id ?turn_ref ?content_revision
+    ?runtime_id ?detail ~skill_name ~state ~actions () =
+  { skill_name = safe_line skill_name
+  ; skill_tool_use_id = Option.map safe_line (nonblank skill_tool_use_id)
+  ; turn_ref = Option.map safe_line (nonblank turn_ref)
+  ; content_revision = Option.map safe_line (nonblank content_revision)
+  ; runtime_id = Option.map safe_line (nonblank runtime_id)
+  ; state
+  ; actions = List.map safe_line actions
+  ; detail = Option.map safe_line (nonblank detail)
+  }
+
+let skill_activity_of_tool (activity : tool_activity) =
+  match activity_kind activity with
+  | Tool_activity | Keeper_activity | Fusion_activity -> None
+  | Skill_activity ->
+      let state =
+        match activity.outcome with
+        | Started | Awaiting_result | Never_returned -> Skill_calling
+        | Returned -> Skill_served_pending
+        | Failed -> Skill_failed
+        | Outcome_unrecorded -> Skill_evidence_missing
+      in
+      let skill_name =
+        Option.value activity.subject
+          ~default:(display_tool_name activity.tool_name)
+      in
+      Some
+        (make_skill_activity ?skill_tool_use_id:activity.call_id
+           ~skill_name ~state ~actions:[] ())
+
+let skill_state_label = function
+  | Skill_calling -> "CALLING"
+  | Skill_served_pending -> "SERVED \xc2\xb7 DELIVERY PENDING"
+  | Skill_served_only -> "SERVED ONLY \xc2\xb7 DELIVERY NOT RECORDED"
+  | Skill_delivered -> "DELIVERED \xc2\xb7 NO ACTION OBSERVED"
+  | Skill_used -> "DELIVERED \xc2\xb7 USED"
+  | Skill_failed -> "FAILED"
+  | Skill_evidence_missing -> "EVIDENCE MISSING"
+  | Skill_evidence_unavailable -> "EVIDENCE UNAVAILABLE"
+
+let short_proof value =
+  let value = safe_line value in
+  if String.length value <= 18 then value
+  else
+    String.sub value 0 8 ^ "\xe2\x80\xa6"
+    ^ String.sub value (String.length value - 8) 8
+
+let skill_rows ~full (activity : skill_activity) =
+  let action_count = List.length activity.actions in
+  let summary =
+    Printf.sprintf "**%s** \xc2\xb7 **%s**%s"
+      activity.skill_name
+      (skill_state_label activity.state)
+      (if action_count = 0 then ""
+       else Printf.sprintf " \xc2\xb7 %s" (plural action_count "action"))
+  in
+  if not full then [ summary ]
+  else
+    let actions =
+      List.map
+        (fun action ->
+          Printf.sprintf "  \xe2\x86\xb3 **%s** \xc2\xb7 observed action" action)
+        activity.actions
+    in
+    let proof_parts =
+      List.filter_map Fun.id
+        [ Option.map (fun turn -> "turn=" ^ turn) activity.turn_ref
+        ; Option.map (fun id -> "use=" ^ short_proof id)
+            activity.skill_tool_use_id
+        ; Option.map (fun runtime -> "runtime=" ^ runtime) activity.runtime_id
+        ; Option.map (fun revision -> "rev=" ^ short_proof revision)
+            activity.content_revision
+        ]
+    in
+    let proof =
+      match proof_parts with
+      | [] -> []
+      | parts -> [ "  proof \xc2\xb7 " ^ String.concat " \xc2\xb7 " parts ]
+    in
+    let detail =
+      match activity.detail with
+      | None -> []
+      | Some detail -> [ "  " ^ detail ]
+    in
+    summary :: actions @ proof @ detail
 
 (* Generic tools are already named by [compact_tool_mix]. These three tags
    retain the operational kind a compact fold used to erase. *)
@@ -487,6 +596,7 @@ let tool_rows t =
 
 type trail_item =
   | Trail_thinking of string list
+  | Trail_skill of skill_activity
   | Trail_tools of tool_block
   | Trail_text of string
 
@@ -503,13 +613,22 @@ let trail t =
       t.reversed_tool_calls
   in
   let flush_tools acc group =
-    match group with
-    | [] -> acc
-    | calls ->
-        let activities =
-          calls |> List.rev |> List.map activity_of_live_call
-        in
-        Trail_tools (tool_block activities) :: acc
+    let flush_generic acc generic =
+      match generic with
+      | [] -> acc
+      | activities ->
+          Trail_tools (tool_block (List.rev activities)) :: acc
+    in
+    let rec split acc generic = function
+      | [] -> flush_generic acc generic
+      | activity :: rest -> (
+          match skill_activity_of_tool activity with
+          | None -> split acc (activity :: generic) rest
+          | Some skill ->
+              let acc = flush_generic acc generic in
+              split (Trail_skill skill :: acc) [] rest)
+    in
+    group |> List.rev |> List.map activity_of_live_call |> split acc []
   in
   let rec walk acc group = function
     | [] -> List.rev (flush_tools acc group)

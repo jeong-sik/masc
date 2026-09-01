@@ -64,6 +64,14 @@ include module type of Server_dashboard_http_keeper_api_types
 
 (** {1 Chat history paging} *)
 
+val attach_keeper_chat_skill_activations :
+  config:Workspace.config -> Yojson.Safe.t -> Yojson.Safe.t
+(** Attach the exact-turn Skill activation projection to assistant chat rows.
+    A row that reports [keeper_skill] but has no matching retained activation
+    receives an explicit missing/unavailable status; no timestamp or row-order
+    inference is used. Exposed so the server JSON contract can be tested
+    without opening an HTTP listener. *)
+
 val keeper_chat_history_json : Workspace.config -> string -> Yojson.Safe.t
 (** Body for [GET /chat/history]: the chat-store tail window plus every
     autonomous turn retention still holds. Every row carries a stable [id] —

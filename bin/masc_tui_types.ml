@@ -129,6 +129,10 @@ type msg_role =
           drew while it ran. The strict stream decode carries no tool
           information, so without this a turn that read six files and edited
           two scrolls back looking like one answered from memory. *)
+  | Message_skill of Masc_tui_keeper_chat_transcript.skill_state
+      (** Exact Skill lifecycle evidence for one turn. Kept apart from a
+          generic tool row because [keeper_skill] returning proves content was
+          served, while delivery and observed actions are separate facts. *)
   | Message_thinking
       (** The reasoning of one autonomous turn as the transcript carried it:
           the lines the server kept and the count it withheld. Drawn with the
@@ -257,6 +261,7 @@ type msg_entry = {
   me_role: msg_role;
   me_text: string;
   me_tool_block: Masc_tui_keeper_chat_transcript.tool_block option;
+  me_skill_activity: Masc_tui_keeper_chat_transcript.skill_activity option;
   me_timestamp: string;
   me_keeper_name: string;
   me_request_id: string;

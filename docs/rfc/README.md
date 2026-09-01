@@ -261,6 +261,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-keeper-vision-delegation-tool | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | - |
 | RFC-keeper-workspace-root-only | 시스템은 workspace root 만 정한다 (레이아웃 규정 폐기) | Draft | - |
 | RFC-memory-os-bounded-context-and-librarian-curator | Memory OS 2.0 — bounded working set 전송 계약과 librarian curator 계약 | Draft | - |
+| RFC-observe-by-waking-not-polling | 관찰은 폴링이 아니라 깨움으로 — 조건 충족 시 턴을 돌려준다 | Draft | - |
 | RFC-one-provider-two-wires | One provider, two wires | Implemented | - |
 | RFC-per-keeper-github-cli-identity | Keeper-specific GitHub CLI identity | Draft | - |
 | RFC-prompts-and-tool-definitions-outside-ocaml | 프롬프트와 도구 정의를 OCaml 밖으로 — 모델이 읽는 모든 글은 config 파일이 소유한다 | Draft | - |

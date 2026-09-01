@@ -3810,9 +3810,12 @@ let keeper_message_status_rows (state : state) =
               ~now:(Unix.gettimeofday ()) live))
   + (match state.msg_target_keeper_name with
      | Some keeper_name ->
-         Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
-           ~keeper_name
-         |> keeper_message_pending_status_rows
+         (* Direct application, not a pipeline: the budget/pane contract test
+            counts this callee with ast-grep, which only sees application
+            heads. *)
+         keeper_message_pending_status_rows
+           (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
+              ~keeper_name)
      | None -> 0)
   (* Pending input owns a NEXT row below the causal transcript. When its turn
      starts that row is handed to the active user row one-for-one, so the text

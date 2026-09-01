@@ -4982,6 +4982,7 @@ let lane_run_detail_json ?(output = true) run_id =
            ; "actor", `String "omicron"
            ; "started_at", `Float 100.
            ; "status", `String (if output then "succeeded" else "running")
+           ; "skill_evidence", `Assoc [ "state", `String "no_keeper_skills" ]
            ; ( "input"
              , `Assoc
                  [ "kind", `String "exact"
@@ -5039,7 +5040,7 @@ let test_decode_lane_run_detail_running_has_no_output () =
       Alcotest.(check bool) "no output while running" true
         (Option.is_none detail.Tui_decode.lrd_output)
 
-let hitl_lane_run_detail_json judgment =
+let hitl_lane_run_detail_json ?(status = "succeeded") judgment =
   `Assoc
     [ ( "run"
       , `Assoc
@@ -5048,9 +5049,10 @@ let hitl_lane_run_detail_json judgment =
           ; "lane", `String "hitl_auto_judge"
           ; "actor", `String "auto_judge"
           ; "started_at", `Float 100.
-          ; "status", `String "succeeded"
+          ; "status", `String status
           ; "elapsed_s", `Float 2.
           ; "selected_slot", `String "judge-primary"
+          ; "skill_evidence", `Assoc [ "state", `String "no_keeper_skills" ]
           ; ( "input"
             , `Assoc
                 [ "kind", `String "exact"
@@ -5082,6 +5084,24 @@ let test_decode_hitl_detail_rejects_unknown_advisory () =
   | Ok _ -> Alcotest.fail "an unknown HITL judgment must not become approval"
   | Error _ -> ()
 
+let test_decode_hitl_detail_keeps_advisory_across_persistence_status () =
+  [ "completion_persistence_failed"; "completion_durability_unknown" ]
+  |> List.iter (fun status ->
+    match
+      Tui_decode.decode_lane_run_detail
+        (hitl_lane_run_detail_json ~status "approve")
+    with
+    | Error detail -> Alcotest.fail detail
+    | Ok detail ->
+      (match detail.Tui_decode.lrd_gate_judgment with
+       | Tui_decode.Lane_run_gate_advisory
+           Keeper_approval_queue_rules_types.Approve ->
+         ()
+       | _ ->
+         Alcotest.failf
+           "%s must keep the advisory judgment independently"
+           status))
+
 let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
   let json =
     `Assoc
@@ -5096,6 +5116,7 @@ let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
             ; "status", `String "approved"
             ; "elapsed_s", `Float 3.
             ; "selected_slot", `String "verifier-primary"
+            ; "skill_evidence", `Assoc [ "state", `String "no_keeper_skills" ]
             ; ( "input"
               , `Assoc
                   [ "kind", `String "exact"
@@ -6606,6 +6627,8 @@ let () =
           test_decode_hitl_detail_separates_advisory_from_gate_resolution;
         Alcotest.test_case "HITL unknown advisory is rejected" `Quick
           test_decode_hitl_detail_rejects_unknown_advisory;
+        Alcotest.test_case "HITL persistence status keeps advisory" `Quick
+          test_decode_hitl_detail_keeps_advisory_across_persistence_status;
         Alcotest.test_case "verifier detail keeps kind, subject, and tools" `Quick
           test_decode_verifier_detail_keeps_kind_subject_and_tool_result;
         Alcotest.test_case "detail requires the payload" `Quick

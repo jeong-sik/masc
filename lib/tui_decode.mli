@@ -1593,9 +1593,10 @@ val decode_lane_run_detail : Yojson.Safe.t -> (lane_run_detail, string) result
 (** The whole record of one standalone run. Exact-output runs carry their
     prompt payload and explicitly report no MASC tool loop. Task/Goal
     Verifier runs carry typed tool observations alongside their durable raw
-    verdict evidence. Every known standalone path explicitly reports that it
-    does not load Keeper Skills. HITL model judgment stays separate from the
-    Gate resolution that may later grant or reject authorization.
+    verdict evidence. The server's closed retained-run projection explicitly
+    reports that every current standalone path does not load Keeper Skills;
+    the decoder does not infer that fact from [run_kind]. HITL model judgment
+    stays separate from the Gate resolution that may later grant or reject authorization.
     [lrd_output] is [None] while the run is still running. *)
 
 type log_kind =

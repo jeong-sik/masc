@@ -1036,14 +1036,15 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
            ; message
            ; data =
                `Assoc
-                 [ "error", `String message
-                 ; "validation", `String "agent_core_tool_middleware"
-                 ; "reason", `String "invalid_args"
-                 ; ( "failure_class"
-                   , `String
-                       (Tool_result.tool_failure_class_to_string
-                          Tool_result.Policy_rejection) )
-                 ]
+                 ( [ "schema_shape", schema_shape_json schema
+                   ; "error", `String message
+                   ; "validation", `String "agent_core_tool_middleware"
+                   ; "reason", `String "invalid_args"
+                   ; ( "failure_class"
+                     , `String
+                         (Tool_result.tool_failure_class_to_string
+                            Tool_result.Policy_rejection) )
+                   ] )
            ; metadata = None
            ; tool_name = name
            ; duration_ms = 0.0

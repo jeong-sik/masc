@@ -900,14 +900,18 @@ let run_turn
              ~projection_input:messages
              ~projected_messages
          with
-         | Some provider_content ->
+         | Ok provider_content ->
            current_request_input_messages_ref := Some provider_content
-         | None ->
+         | Error failure ->
            current_request_input_messages_ref := None;
+           let detail =
+             Keeper_agent_prompt_metrics.provenance_failure_detail failure
+           in
            Log.Keeper.warn
-             "turn input composition unavailable: keeper=%s trace=%s \
-              reason=model_input_projection_provenance_unavailable"
-             meta.name trace_id);
+             "turn input composition unavailable: keeper=%s trace=%s reason=%s%s"
+             meta.name trace_id
+             (Keeper_agent_prompt_metrics.provenance_failure_reason failure)
+             (if String.equal detail "" then "" else " " ^ detail));
         result
     in
     (* 8. Run Agent *)

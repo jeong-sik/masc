@@ -32,17 +32,51 @@ type ctx_composition_metrics =
   ; segments : (Turn_record.input_component_id * prompt_segment_metrics) list
   }
 
+(** Why a turn has no exact provider-input composition.
+
+    One constructor per condition the check can actually distinguish, because
+    the conditions do not share a fix. [Input_prefix_dropped] says the
+    projection returned fewer messages than it was handed, which is what a
+    history-cutting window does; [Input_prefix_rewritten] says the result was
+    long enough but diverged, which is what a rewriting or reordering
+    projection does. The carrier constructors separate malformed metadata from
+    a carrier count that disagrees with the assembler. Collapsing these into
+    one "provenance unavailable" reason is what made the antigravity turns
+    unattributable without saying which of the five had happened. *)
+type provenance_failure =
+  | Input_prefix_dropped of
+      { projection_input_messages : int
+      ; projected_messages : int
+      }
+  | Input_prefix_rewritten of { first_divergent_index : int }
+  | Prompt_context_carrier_metadata_invalid
+  | Prompt_context_carrier_metadata_duplicate
+  | Prompt_context_carrier_repeated
+  | Prompt_context_presence_mismatch of
+      { carrier_observed : bool
+      ; prompt_context_present : bool
+      }
+
+val provenance_failure_reason : provenance_failure -> string
+(** Stable snake_case identifier for logs and durable records. *)
+
+val provenance_failure_detail : provenance_failure -> string
+(** Measured values carried by the failure, or [""] when it carries none.
+    Kept apart from {!provenance_failure_reason} so a reader can group by
+    reason without the counts splitting every group. *)
+
 (** Return concrete provider content messages only when their provenance is
     unambiguous. The AGENT_CORE-generated [extra_system_context] carrier is removed by
     its typed metadata identity, never by position or content. Its presence must
     exactly agree with [prompt_context_present]. Projection-only messages remain
     included when the projection preserves the exact input prefix; a rewrite,
-    reorder, missing carrier, or duplicate/invalid carrier returns [None]. *)
+    reorder, missing carrier, or duplicate/invalid carrier returns the matching
+    {!provenance_failure}. *)
 val provider_content_messages :
   prompt_context_present:bool ->
   projection_input:Agent_core.Types.message list ->
   projected_messages:Agent_core.Types.message list ->
-  Agent_core.Types.message list option
+  (Agent_core.Types.message list, provenance_failure) result
 
 val build_prompt_metrics :
   system_prompt:string ->

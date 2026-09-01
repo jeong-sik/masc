@@ -952,8 +952,11 @@ let test_extra_system_context_keeps_typed_provenance () =
          ~projection_input:messages
          ~projected_messages:messages
      with
-     | None -> fail "input composition could not identify the typed carrier"
-     | Some retained ->
+     | Error failure ->
+       fail
+         ("input composition could not identify the typed carrier: "
+          ^ Keeper_agent_prompt_metrics.provenance_failure_reason failure)
+     | Ok retained ->
        check int "typed carrier is removed exactly once" 1 (List.length retained);
        check string
          "original history remains"

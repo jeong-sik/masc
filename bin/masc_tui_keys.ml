@@ -328,11 +328,13 @@ let for_surface = function
       ; b Navigate "h/l" "pane" ~help:"focus the tree or open file"
       ; b Act "Right / Enter" "open" ~help:"drill in, or open the file"
         (* Esc walks back out the way Enter came in: it closes an open file
-           first, and only climbs a directory once no file is open
-           (masc_tui.ml:6001). A key that works and is not listed is the same
-           drift as a listed key that does nothing, pointing the other way. *)
+           first, and only climbs a directory once no file is open. From the
+           project root it lands on Workspace, the ring parent. A key that
+           works and is not listed is the same drift as a listed key that
+           does nothing, pointing the other way. *)
       ; b Act "Left / Esc" "back"
-          ~help:"close the history, then the file, then climb one directory"
+          ~help:"close the history, then the file, then climb one \
+                 directory, then Workspace"
       ; b Navigate "Shift-Left / Shift-Right" "pan"
           ~help:"with a file open, scroll it sideways one cell at a time"
       ; b Search "/" "find"
@@ -497,7 +499,8 @@ let help_surfaces : (string * surface) list =
   ; "Planning / Schedules", Schedules
   ; "Planning / Fusion", Fusion
   ; "Memory", Memory
-  ; "Repos", Repositories
+  ; "Workspace", Repositories
+  ; "Workspace / Code", Code
   ; "Changes", Changes
   ; "Runtime / Connectors", Connectors
   ; "Runtime", Runtime

@@ -228,7 +228,7 @@ highlighted in a strip on the top row. Child surfaces open from their parent
 | Approvals | The Gate queue, approved or denied from the terminal, and the questions Keepers are waiting on an answer to |
 | Board | Posts from people, agents, automation, and the system |
 | Planning (`v` Task Review, Verdicts, Schedules, Fusion) | Plans and goals, completion reviews, evaluator verdicts, scheduled work, and panel/judge runs |
-| Repositories, Code | Registered repositories and a file browser over them |
+| Workspace (`Enter` Code) | Registered repositories and, through a row's `Enter`, the Code file browser over the selected checkout |
 | Memory, Tools, Resources, Config, Logs | Memory OS health, the tool tree, MCP resources, `runtime.toml`, and the runtime log |
 
 Above the input row, one line on every surface names the next scheduled wake

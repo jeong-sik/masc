@@ -432,7 +432,7 @@ def palette_go(
     needle: Needle,
 ) -> bytes:
     """Jump through the command palette. Surfaces that hang off a parent
-    instead of holding a Tab stop (Lanes, Connectors, Task Review) keep a
+    instead of holding a Tab stop (Lanes, Connectors, Task Review, Code) keep a
     'go <label>' palette entry, so this is how a scenario reaches them."""
     return send_and_wait(process, master_fd, output, b":" + query + b"\r", needle)
 
@@ -6030,7 +6030,7 @@ def planning_review_hierarchy_interaction() -> Interaction:
                 f"Goals did not retain the Task Review sibling: {goals_again!r}"
             )
         # The children are [v] stops, not the next top-level Tab destination.
-        send_and_wait(process, master_fd, output, b"\t", b"MASC Repositories")
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Workspace")
         os.write(master_fd, b"q")
 
     return interact
@@ -6123,7 +6123,7 @@ def repository_add_interaction(requests: HttpRequests) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Repositories")
+        tab_until(process, master_fd, output, b"MASC Workspace")
         wait_for_output(
             process, master_fd, output, b"ready", start=0, timeout=3.0
         )
@@ -6157,7 +6157,7 @@ def repositories_path_interaction(
     _base_path: str,
 ) -> None:
     """Show paths, inspect Git changes, then enter the repository."""
-    tab_until(process, master_fd, output, b"MASC Repositories")
+    tab_until(process, master_fd, output, b"MASC Workspace")
     narrow = resize_and_wait(
         process,
         master_fd,
@@ -6222,7 +6222,7 @@ def repositories_path_interaction(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Repositories")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Workspace")
     code = send_and_wait(process, master_fd, output, b"\r", b"src")
     code_plain = CSI_RE.sub(b"", code).decode("utf-8")
     if "masc ▸ /" not in code_plain:
@@ -6241,7 +6241,7 @@ def project_changes_interaction(
 ) -> None:
     """List an unregistered project's Git changes from Code, return to the
     tree, then reopen the list and enter the selected file."""
-    tab_until(process, master_fd, output, b"README.md")
+    palette_go(process, master_fd, output, b"go code", b"README.md")
     changes_wide = send_and_wait(process, master_fd, output, b"d", b"lib/a.ml")
     changes_narrow = resize_and_wait(
         process,
@@ -6300,7 +6300,7 @@ def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Repositories")
+        tab_until(process, master_fd, output, b"MASC Workspace")
         wait_for_output(
             process, master_fd, output, b"ready", start=0, timeout=3.0
         )
@@ -7796,7 +7796,7 @@ def code_lane_interaction(
     """The Code surface: one directory level, Enter drills, a file opens
     lexed. The keyword's yellow span and the dim gutter are the claim that
     the file was lexed, not just printed."""
-    listing = tab_until(process, master_fd, output, b"README.md")
+    listing = palette_go(process, master_fd, output, b"go code", b"README.md")
     plain = CSI_RE.sub(b"", listing).decode("utf-8")
     for needle in ("lib", "README.md"):
         if needle not in plain:
@@ -8190,22 +8190,15 @@ def runtime_surface_interaction(
     ) -> None:
         completed = False
         try:
-            # Connectors left the Tab ring (it hangs off Runtime under [c]),
-            # so the ring predecessor of Runtime is now Code. Each hop is
+            # Connectors and Code both left the Tab ring, so the ring
+            # predecessor of Runtime is now Workspace. The hop is
             # needle-verified so an async frame between presses cannot lap
             # the walk; the last Tab stays bare because the probe fixture
             # must observe its request after [start].
-            tab_until(process, master_fd, output, b"MASC Repositories")
-            send_and_wait(
-                process,
-                master_fd,
-                output,
-                b"\t",  # Repos -> Code
-                b"(Enter opens the selected file)",
-            )
+            tab_until(process, master_fd, output, b"MASC Workspace")
             read_available(master_fd, output)
             start = len(output)
-            os.write(master_fd, b"\t")  # Code -> Runtime
+            os.write(master_fd, b"\t")  # Workspace -> Runtime
             if not wait_for_fixture_event(
                 process, master_fd, output, initial_probe.requested, timeout=10.0
             ):

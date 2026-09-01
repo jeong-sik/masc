@@ -1199,8 +1199,7 @@ let surface_ring : (surface * string) list =
     (Approvals, "Approvals");
     (Board, "Board");
     (Planning, "Planning");
-    (Repositories, "Repos");
-    (Code, "Code");
+    (Repositories, "Workspace");
     (Runtime, "Runtime");
     (Config, "Config");
     (Resources, "Resources");
@@ -1214,7 +1213,10 @@ let surface_ring : (surface * string) list =
    the roster cursor, so it was never a destination of its own -- and
    Connectors and standalone Lanes collapse onto Runtime: channel rows and
    service-lane observation are both parts of "is the substrate alive", not
-   peers of Board or Planning. *)
+   peers of Board or Planning. Code collapses onto Workspace (the
+   Repositories surface): its tree is always somebody's checkout -- a
+   registered repository, a keeper workspace, or the project -- and Enter on
+   a Workspace row is already how a reader walks into it. *)
 let surface_ring_index (view : surface) =
   let family =
     match view with
@@ -1222,6 +1224,7 @@ let surface_ring_index (view : surface) =
     | Verification | Harness | Schedules | Fusion -> Planning
     | Changes -> Keepers Keeper_list
     | Connectors | Lanes -> Runtime
+    | Code -> Repositories
     | v -> v
   in
   let rec find i = function
@@ -3502,6 +3505,7 @@ let palette_entries (state : state) =
   @ [ "go Lanes", Palette_goto Lanes ]
   @ [ "go Schedules", Palette_goto Schedules ]
   @ [ "go Fusion", Palette_goto Fusion ]
+  @ [ "go Code", Palette_goto Code ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring

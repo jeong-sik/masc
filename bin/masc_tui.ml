@@ -12378,7 +12378,10 @@ and is loaded on demand through keeper_skill.
                   state.code_entries_error <- None;
                   launch_code_entries_load state ~mailbox:async_messages
                 end
-                else state.view <- Overview
+                else
+                  (* Off-ring child: the way out of the project root is the
+                     ring parent, loaded, same as Connectors and Lanes. *)
+                  goto_surface state ~mailbox:async_messages Repositories
             | Keepers Keeper_detail ->
                 state.view <- Keepers Keeper_list;
                 state.detail_scroll <- 0

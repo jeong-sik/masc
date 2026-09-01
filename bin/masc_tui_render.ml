@@ -564,7 +564,7 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
      is, so a fact placed there cannot be read on a surface whose own keys
      already fill the row -- which is every surface at eighty columns. The
      outcomes of the editor-backed actions used to go only to the event log,
-     which Overview alone draws, so an operator who pressed [a] on Repos
+     which Overview alone draws, so an operator who pressed [a] on Workspace
      could not tell a registration from an editor that never started.
 
      Expired here rather than cleared by the setter: the setter is a key
@@ -8726,11 +8726,11 @@ let render_repository_list (state : state) =
     match state.repositories with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Repositories") timestamp
+          (screen_title " MASC Workspace") timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s (%d)  %s  %s"
-          (screen_title " MASC Repositories") shown timestamp
+          (screen_title " MASC Workspace") shown timestamp
           (connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"repositories"

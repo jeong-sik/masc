@@ -13,7 +13,7 @@ let every_surface =
   [ Overview; Acting; Keepers Keeper_list; Keepers Keeper_detail
   ; Keepers Keeper_logs; Keepers Keeper_calls; Keepers Keeper_message
   ; Keepers Keeper_runtime_pick; Lanes; Board; Approvals; Planning
-  ; Schedules; Verification; Harness; Fusion; Repositories; Changes
+  ; Schedules; Verification; Harness; Fusion; Repositories; Code; Changes
   ; Connectors; Runtime; Config; Resources; Tools; System_logs
   ]
 
@@ -423,6 +423,26 @@ let test_fusion_is_a_planning_child () =
        (fun (label, _) -> String.equal label "Planning / Fusion")
        (Masc_tui_keys.help_sections ()))
 
+(* Code's tree is always somebody's checkout -- a registered repository, a
+   keeper workspace, or the project -- and Enter on a Workspace row is
+   already how a reader walks into it, so it hangs off Workspace instead of
+   holding a Tab stop of its own. *)
+let test_code_is_a_workspace_child () =
+  Alcotest.(check bool) "Code is not a top-level ring entry" false
+    (List.exists (fun (surface, _) -> surface = Code) surface_ring);
+  Alcotest.(check int) "Code highlights Workspace"
+    (surface_ring_index Repositories)
+    (surface_ring_index Code);
+  Alcotest.(check bool) "and the help sheet files it under Workspace" true
+    (List.exists
+       (fun (label, _) -> String.equal label "Workspace / Code")
+       (Masc_tui_keys.help_sections ()));
+  Alcotest.(check bool) "and the ring stop is spelled Workspace" true
+    (List.exists
+       (fun (surface, label) ->
+         surface = Repositories && String.equal label "Workspace")
+       surface_ring)
+
 let test_system_logs_owns_only_its_real_filter_keys () =
   (* g/G/f still belong to Acting. Logs owns the server level floor, direct
      verbose toggle, and category cycle under l/v/c. *)
@@ -811,6 +831,8 @@ let () =
             test_schedules_is_a_planning_child
         ; Alcotest.test_case "Fusion is a Planning child" `Quick
             test_fusion_is_a_planning_child
+        ; Alcotest.test_case "Code is a Workspace child" `Quick
+            test_code_is_a_workspace_child
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick

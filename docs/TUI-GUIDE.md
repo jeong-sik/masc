@@ -8,12 +8,13 @@ Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
 `bin/masc_tui_types.ml`: Overview, Acting, Keepers, Memory, Approvals,
-Board, Planning, Repos, Code, Runtime, Config, Resources, Tools, Logs.
-Seven more surfaces hang off parents instead of holding Tab stops:
+Board, Planning, Workspace, Runtime, Config, Resources, Tools, Logs.
+Eight more surfaces hang off parents instead of holding Tab stops:
 Planning's `v` walks Task Review, Evaluator Verdicts, Schedules, and Fusion;
 the Keepers roster reaches Changes with `f`; Runtime reaches Connectors with
-`c` and the standalone Lanes with `p` (its third stop). Every off-ring
-surface keeps a `go <name>` palette entry.
+`c` and the standalone Lanes with `p` (its third stop); Workspace reaches
+Code with `Enter` on a repository row. Every off-ring surface keeps a
+`go <name>` palette entry.
 
 ## Quick Start
 
@@ -908,9 +909,10 @@ ingest로 보이지 않게 하기 위함이다.
 커서가 가리키는 행의 전체 상태와 서버가 매긴 경고(alert) 목록이 표
 아래에 함께 나온다. `r`로 다시 불러온다.
 
-### Repositories
+### Workspace
 
-등록된 저장소와 서버가 실제로 해석한 체크아웃 경로를 보여준다. 목록의
+등록된 저장소와 서버가 실제로 해석한 체크아웃 경로를 보여준다. Tab 링의
+아홉 번째 정거장이며, Code 화면은 이 화면에 매달린 자식이다. 목록의
 `Path` 열은 폭이 부족하면 가운데를 줄여 표시하지만, 선택한 행 아래의
 `Path:`에는 전체 경로가 줄바꿈되어 나온다. 설정에 저장된 값이 상대 경로라면
 `Stored as:`가 함께 표시되고, 담당 Keeper는 `Keepers:`에서 확인할 수 있다.
@@ -956,12 +958,13 @@ moves the line cursor to the first match, Enter keeps the query for
 
 Which workspace is a scope the header always names: the project tree by
 default, a keeper's playground after a Changes `v` jump (`alpha ▸ repos/…`),
-or a registered repository after `Enter` on a Repositories row
-(`masc ▸ /`). `Esc` at a scoped root returns to the project tree. The three
+or a registered repository after `Enter` on a Workspace row
+(`masc ▸ /`). `Esc` at a scoped root returns to the project tree, and at the project
+root it lands on Workspace, the ring parent. The three
 scopes are one field, so the surface cannot read two workspaces at once.
 
 프로젝트 tree에 초점이 있을 때 `d`를 누르면 현재 프로젝트의 Git 변경
-파일을 모두 보여준다. 이 프로젝트는 Repositories에 등록되어 있지 않아도
+파일을 모두 보여준다. 이 프로젝트는 Workspace에 등록되어 있지 않아도
 된다. 목록은 staged, worktree, untracked, conflict를 구분하고, `Enter`로
 선택한 파일을 연다. Left 또는 `Esc`를 누르면 같은 프로젝트 tree로
 돌아간다. 파일 pane에 초점이 있을 때의 `d`는 아래처럼 그 파일 하나의
@@ -996,7 +999,7 @@ in place:
 
 - `m` swaps it for the notes anchored to the file — who left each one, its
   kind, the line span, and the task it rides with. Notes are keyed by the
-  server-minted codebase slug, which only a Repositories row carries, so
+  server-minted codebase slug, which only a Workspace row carries, so
   `m` answers in repository scope and says why not in the others. Inside
   the notes view `w` adds one through the `$EDITOR` form (kind: Comment /
   Decision / Question / Bookmark); the acting identity is the bearer's.
@@ -1179,11 +1182,11 @@ Per surface:
 | `v` | Changes | View the row's file on the Code surface, in the keeper's workspace |
 | `a` twice | Verification | Approve the row under the cursor |
 | `x` | Verification | Reject it, with a reason through `$EDITOR` |
-| Right / `Enter` | Repositories | Browse the repository's tree on the Code surface |
-| `d` | Repositories | Show the repository's current Git working-tree changes |
+| Right / `Enter` | Workspace | Browse the repository's tree on the Code surface |
+| `d` | Workspace | Show the repository's current Git working-tree changes |
 | `d` | Code, project tree focused | Show every Git change in the current project, even when it is not registered |
 | Right / `Enter` | Code | Drill into a directory / open the file |
-| Left / `Esc` | Code | Close the overlay, then the file, then climb a directory |
+| Left / `Esc` | Code | Close the overlay, then the file, then climb a directory; the project root lands on Workspace |
 | `/`, `n` / `N` | Code | Jump the tree cursor to a match |
 | `h` / `l` | Code, file open | Pan the file sideways by one cell |
 | `H` | Code, file open | The commits that touched the file, newest first |
@@ -1213,7 +1216,7 @@ Per surface:
 Tab cycles the surfaces:
 
   Overview -> Acting -> Keepers -> Memory -> Approvals -> Board
-           -> Planning -> Repos -> Code
+           -> Planning -> Workspace
            -> Runtime -> Config -> Resources -> Tools -> Logs -> Overview
 
 Within a surface:
@@ -1232,6 +1235,7 @@ Off-ring children:
   Planning  --v-->  Task Review --v--> Verdicts --v--> Schedules --v--> Fusion
   Keepers   --f-->  Changes
   Runtime   --c-->  Connectors        Runtime --p--> ... --p--> Lanes
+  Workspace --Enter-->  Code (the selected repository's tree)
 ```
 
 `2` reaches Keepers after the active field or panel has declined it.

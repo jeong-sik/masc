@@ -78,6 +78,21 @@ val run_command_with_status :
   unit ->
   (Unix.process_status * string, string) result
 
+val exec_argv :
+  ?stdin:bool ->
+  ?timeout_sec:float ->
+  validate_cached_container:bool ->
+  t ->
+  cwd:string ->
+  command_argv:string list ->
+  (string list, string) result
+(** The argv that runs [command_argv] inside the turn-scoped container.
+
+    Exactly what {!run_exec_with_status_split} blocks on, handed over instead
+    of run: a command that must not hold the turn is spawned, and it has to
+    land in the same container as the same uid under the same rewritten paths.
+    Building that argv twice would be building the boundary twice. *)
+
 val run_exec_with_status_split :
   ?stdin_content:string ->
   ?on_stdout_chunk:(string -> unit) ->

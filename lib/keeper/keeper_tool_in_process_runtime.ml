@@ -1721,35 +1721,26 @@ let handle_keeper_webmcp_with_outcome ~name ~args =
 
 (* RFC spawn-a-process-that-outlives-the-call §3.1: a backgrounded command
    "crosses the same gate as any other: path scope, redirect policy, and the
-   sandbox target all apply before a process exists". None of that happened.
-   The handler never received [meta], so it could not read the profile even to
-   refuse, and [Tool_spawn.dispatch] reached [Eio.Process.spawn] directly --
-   on the host, in the server's own cwd, whatever boundary the keeper was
-   declared under.
+   sandbox target all apply before a process exists".
 
-   Measured 2026-09-01: a [remote_ssh] keeper ran
-   [bash -c "cd /tmp/masc860 && dune build ./tmp_probe/probe_load.exe"] on the
-   host while its endpoint container held no processes and an empty
-   playground. The tool's own description says "No shell" -- true of argv, and
-   irrelevant once the program named is bash.
+   It did not, and #32212 closed that by refusing every start. Refusing is not
+   where this ends: a command that takes minutes has to run without holding
+   the turn, or the keeper stops answering while it waits -- #31364 is that
+   failure. Execute is the blocking shape; spawn is how the same command runs
+   beside the turn. Removing it left no way to do the thing at all.
 
-   Every profile is a boundary: [Local] went in #32078 because "execution
-   outside a boundary is not a profile the fleet offers"
-   ([Keeper_sandbox_config]), so there is no arm to allow this under. The
-   match is exhaustive rather than [_ ->] so a profile added later has to
-   answer this question instead of inheriting an answer. *)
-let spawn_outside_boundary ~name ~(profile : sandbox_profile) =
+   So spawn goes through the container instead of around it. The argv comes
+   from [Keeper_turn_sandbox_runtime.exec_argv], the same construction
+   [run_exec_with_status_split] blocks on, and lands in the same container as
+   the same uid under the same rewritten paths. What changes is that the argv
+   is spawned rather than awaited.
+
+   [Remote_ssh] still refuses. The shim speaks a length-prefixed frame
+   protocol over one connection, so there is no argv to hand a spawner, and
+   reaching past the shim would reach past the path jail with it. *)
+let spawn_outside_boundary ~name ~(profile : sandbox_profile) ~detail =
   let profile_name =
     Keeper_types_profile_sandbox.sandbox_profile_to_string profile
-  in
-  let detail =
-    match profile with
-    | Docker | Micro_vm | Remote_ssh ->
-      Printf.sprintf
-        "spawn runs on the host, so it cannot start a process for a keeper \
-         under the %s boundary. Run the command with Execute, which crosses \
-         it."
-        profile_name
   in
   Keeper_tool_execution.failure
     ~class_:Tool_result.Policy_rejection
@@ -1762,7 +1753,29 @@ let spawn_outside_boundary ~name ~(profile : sandbox_profile) =
            ]))
 ;;
 
-let handle_keeper_spawn_with_outcome ~(meta : keeper_meta) ~name ~args =
+let spawn_sandbox_argv ~turn_sandbox_factory ~cwd ~command_argv =
+  match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
+  | Keeper_sandbox_factory.No_factory ->
+    Error "spawn needs a turn sandbox and this turn has no factory"
+  | Keeper_sandbox_factory.Remote_ssh_profile ->
+    Error
+      "spawn does not cross the remote_ssh boundary: the exec shim speaks a \
+       framed protocol over one connection, so there is no argv to background. \
+       Run the command with Execute."
+  | Keeper_sandbox_factory.Runtime runtime ->
+    Keeper_turn_sandbox_runtime.exec_argv
+      ~validate_cached_container:false
+      runtime
+      ~cwd
+      ~command_argv
+
+let handle_keeper_spawn_with_outcome
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~turn_sandbox_factory
+      ~name
+      ~args
+  =
   match Spawn_turn_registry.get_opt (), Eio_context.get_switch_opt () with
   | Some registry, Some sw ->
     let definition = Tool_schemas_spawn.find_definition name in
@@ -1785,7 +1798,81 @@ let handle_keeper_spawn_with_outcome ~(meta : keeper_meta) ~name ~args =
        refusing them too would hide handles a caller still has to reap. *)
     (match definition with
      | Some { action = Tool_schemas_spawn.Start; _ } ->
-       spawn_outside_boundary ~name ~profile:meta.sandbox_profile
+       (* The host cwd the container argv is built against: what the caller
+          named, else the keeper's own playground root. [exec_argv] maps it to
+          the container path, so the spawned process starts where an Execute
+          for the same directory would. *)
+       let host_cwd =
+         match Json_util.get_string args "cwd" with
+         | Some value when String.trim value <> "" -> String.trim value
+         | Some _ | None ->
+           (* From the profile already in [meta], not
+              [host_root_abs_of_agent]: that one resolves the profile by
+              reading the keeper TOML and raises when there is none, which
+              turns an omitted cwd into an uncaught exception. The path is the
+              same either way. *)
+           Filename.concat
+             config.Workspace.base_path
+             (Keeper_sandbox.host_root_rel_of_profile
+                meta.sandbox_profile
+                meta.name)
+       in
+       (match Json_util.get_array args "argv" with
+        | None ->
+          Keeper_tool_execution.failure
+            ~class_:Tool_result.Policy_rejection
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            (Yojson.Safe.to_string
+               (`Assoc [ "error", `String "argv is required"; "tool", `String name ]))
+        | Some (`List entries) ->
+          let command_argv =
+            List.filter_map
+              (function `String value -> Some value | _ -> None)
+              entries
+          in
+          if List.length command_argv <> List.length entries || command_argv = []
+          then
+            Keeper_tool_execution.failure
+              ~class_:Tool_result.Policy_rejection
+              ~effect_disposition:Tool_result.Proven_pre_effect
+              (Yojson.Safe.to_string
+                 (`Assoc
+                     [ ( "error"
+                       , `String "argv must be a non-empty array of strings" )
+                     ; "tool", `String name
+                     ]))
+          else (
+            match
+              spawn_sandbox_argv ~turn_sandbox_factory ~cwd:host_cwd ~command_argv
+            with
+            | Error detail ->
+              spawn_outside_boundary ~name ~profile:meta.sandbox_profile ~detail
+            | Ok sandbox_argv ->
+              (* [cwd] is dropped: [exec_argv] already put it on the container
+                 command as -w, and a host path handed to the spawner would
+                 name a directory the process never sees. *)
+              let args =
+                match args with
+                | `Assoc fields ->
+                  `Assoc
+                    (("argv", `List (List.map (fun a -> `String a) sandbox_argv))
+                     :: List.filter
+                          (fun (k, _) ->
+                             not (String.equal k "argv" || String.equal k "cwd"))
+                          fields)
+                | other -> other
+              in
+              Tool_spawn.dispatch { Tool_spawn.registry; sw } ~name ~args
+              |> dispatch_option_to_execution ~failure_effect_disposition ~name)
+        | Some _ ->
+          Keeper_tool_execution.failure
+            ~class_:Tool_result.Policy_rejection
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            (Yojson.Safe.to_string
+               (`Assoc
+                   [ "error", `String "argv must be an array"
+                   ; "tool", `String name
+                   ])))
      | Some
          { action =
              ( Tool_schemas_spawn.Read

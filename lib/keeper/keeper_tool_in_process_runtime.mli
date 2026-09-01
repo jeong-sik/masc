@@ -278,15 +278,19 @@ val handle_keeper_webmcp_with_outcome
 val spawn_outside_boundary
   :  name:string
   -> profile:Keeper_types_profile_sandbox.sandbox_profile
+  -> detail:string
   -> Keeper_tool_execution.t
-(** The refusal {!handle_keeper_spawn_with_outcome} answers a start with.
+(** The refusal {!handle_keeper_spawn_with_outcome} answers a start it cannot
+    place inside the keeper's boundary with.
 
     Exported so a test can pin it: reaching it through the handler needs a
     turn registry and a live switch, and a decision only reachable that way is
     a decision no test pins. *)
 
 val handle_keeper_spawn_with_outcome
-  :  meta:Keeper_meta_contract.keeper_meta
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> turn_sandbox_factory:Keeper_sandbox_factory.t option
   -> name:string
   -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
@@ -296,9 +300,10 @@ val handle_keeper_spawn_with_outcome
     live that a later call could reach, and saying so beats creating a registry
     nothing else can find.
 
-    [meta] is here for the sandbox profile. Starting a process runs it on the
-    host, which no profile permits, so the start action is refused and the
-    handle actions are left alone. *)
+    A start runs inside the keeper's turn container, through the same argv
+    [Keeper_turn_sandbox_runtime.exec_argv] builds for a blocking Execute, so
+    a command that must not hold the turn still runs behind the boundary.
+    [Remote_ssh] has no argv to background and is refused. *)
 
 (** RFC-0234 — [handle_masc_schedule_with_outcome] is the descriptor-projection
     cluster handler for [masc_schedule_*] tools. *)

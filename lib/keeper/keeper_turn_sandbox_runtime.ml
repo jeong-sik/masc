@@ -1263,16 +1263,12 @@ let prepare_github_identity_secret_files ?timeout_sec t =
        | Ok (Some dir) -> Ok [ Filename.concat dir "hosts.yml" ])
 ;;
 
-let run_exec_with_status_split_once
-      ?(validate_cached_container = false)
-      ?(stdin_content : string option)
-      ?on_stdout_chunk
-      ?on_stderr_chunk
-      ?timeout_sec
-      (t : t)
-      ~(cwd : string)
-      ~(command_argv : string list)
-  =
+(* The argv assembly [run_exec_with_status_split_once] used to carry inline.
+   Named because a second caller needs the same argv without the running: a
+   command that must not block the turn is spawned rather than awaited, and it
+   has to land inside the same container, as the same uid, under the same
+   rewritten paths. Two constructions of that would be two boundaries. *)
+let exec_argv ?stdin ?timeout_sec ~validate_cached_container (t : t) ~cwd ~command_argv =
   match ensure_started ~validate_running:validate_cached_container ?timeout_sec t with
   | Error _ as err -> err
   | Ok container_name ->
@@ -1295,10 +1291,32 @@ let run_exec_with_status_split_once
                rewritten)
         command_argv
     in
-    let argv =
-      exec_prefix t ~container_cwd ~stdin:(Option.is_some stdin_content)
-      @ (container_name :: command_argv)
-    in
+    Ok
+      (exec_prefix t ~container_cwd ~stdin:(Option.value stdin ~default:false)
+       @ (container_name :: command_argv))
+;;
+
+let run_exec_with_status_split_once
+      ?(validate_cached_container = false)
+      ?(stdin_content : string option)
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      ?timeout_sec
+      (t : t)
+      ~(cwd : string)
+      ~(command_argv : string list)
+  =
+  match
+    exec_argv
+      ~stdin:(Option.is_some stdin_content)
+      ?timeout_sec
+      ~validate_cached_container
+      t
+      ~cwd
+      ~command_argv
+  with
+  | Error _ as err -> err
+  | Ok argv ->
     let has_output_callback =
       Option.is_some on_stdout_chunk || Option.is_some on_stderr_chunk
     in

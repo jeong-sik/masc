@@ -369,7 +369,9 @@ let handle_in_process ctx descriptor args =
   | Tool_keeper_spawn_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_keeper_spawn_with_outcome
+         ~config:ctx.config
          ~meta:ctx.meta
+         ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~name
          ~args)
   | Tool_keeper_code_query_dispatch ->

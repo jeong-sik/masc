@@ -570,7 +570,11 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       ; b Search "/" "filter"
       ; b Meta "R" "refresh"
       ]
-  | Detail_info | Detail_secrets -> []
+  | Detail_channels ->
+      [ b Act "b / u" "bind / unbind"
+          ~help:"bind or unbind a channel for this Keeper"
+      ]
+  | Detail_info | Detail_secrets | Detail_automation | Detail_runs -> []
 
 (* The compact strip beside the tab row. Same [key:label] spelling the
    footer uses, and the tab switch leads because it is on every tab. *)

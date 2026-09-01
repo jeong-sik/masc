@@ -446,25 +446,25 @@ let test_changes_is_a_keeper_child () =
     (surface_ring_index (Keepers Keeper_list))
     (surface_ring_index Changes)
 
-(* Connectors is four channel rows about substrate reachability, so it hangs
-   off Runtime with [c] instead of holding a Tab stop of its own. *)
-let test_connectors_is_a_runtime_child () =
-  Alcotest.(check bool) "Connectors is not a top-level ring entry" false
-    (List.exists (fun (surface, _) -> surface = Connectors) surface_ring);
-  Alcotest.(check int) "Connectors highlights Runtime"
-    (surface_ring_index Runtime)
-    (surface_ring_index Connectors);
-  Alcotest.(check bool) "and the help sheet files it under Runtime" true
-    (List.exists
-       (fun (label, _) -> String.equal label "Runtime / Connectors")
-       (Masc_tui_keys.help_sections ()));
-  let runtime_keys =
-    List.map
-      (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
-      (Masc_tui_keys.for_surface Runtime)
-  in
-  Alcotest.(check bool) "Runtime documents the [c] hop" true
-    (List.mem "c" runtime_keys)
+let test_keeper_operations_are_not_top_level_tabs () =
+  List.iter
+    (fun (surface, label) ->
+       Alcotest.(check bool) (label ^ " is not a top-level ring entry") false
+         (List.exists (fun (entry, _) -> entry = surface) surface_ring);
+       Alcotest.(check int) (label ^ " highlights Keepers")
+         (surface_ring_index (Keepers Keeper_list))
+         (surface_ring_index surface))
+    [ Connectors, "Channels"; Schedules, "Automation"; Fusion, "Runs" ];
+  Alcotest.(check (list string)) "Keeper operation tab labels"
+    [ "Channels"; "Automation"; "Runs" ]
+    (List.filter_map
+       (fun tab ->
+          match tab with
+          | Detail_channels | Detail_automation | Detail_runs ->
+              Some (keeper_detail_tab_label tab)
+          | Detail_info | Detail_sandbox | Detail_instructions | Detail_secrets
+          | Detail_github | Detail_identity -> None)
+       keeper_detail_tabs)
 
 (* Standalone Lanes is service-lane observation -- one more reading of "is
    the substrate alive" -- so it hangs off Runtime as [p]'s third stop
@@ -486,31 +486,6 @@ let test_lanes_is_a_runtime_child () =
   in
   Alcotest.(check bool) "Lanes documents the [p] way back" true
     (List.mem "p" lanes_keys)
-
-(* Schedules and Fusion are the fourth and fifth [v] stops of the Planning
-   walk: wakes start more work, fusion runs judge it, and both were peers of
-   Planning on the ring with nothing saying they were the same subject. *)
-let test_schedules_is_a_planning_child () =
-  Alcotest.(check bool) "Schedules is not a top-level ring entry" false
-    (List.exists (fun (surface, _) -> surface = Schedules) surface_ring);
-  Alcotest.(check int) "Schedules highlights Planning"
-    (surface_ring_index Planning)
-    (surface_ring_index Schedules);
-  Alcotest.(check bool) "and the help sheet files it under Planning" true
-    (List.exists
-       (fun (label, _) -> String.equal label "Planning / Schedules")
-       (Masc_tui_keys.help_sections ()))
-
-let test_fusion_is_a_planning_child () =
-  Alcotest.(check bool) "Fusion is not a top-level ring entry" false
-    (List.exists (fun (surface, _) -> surface = Fusion) surface_ring);
-  Alcotest.(check int) "Fusion highlights Planning"
-    (surface_ring_index Planning)
-    (surface_ring_index Fusion);
-  Alcotest.(check bool) "and the help sheet files it under Planning" true
-    (List.exists
-       (fun (label, _) -> String.equal label "Planning / Fusion")
-       (Masc_tui_keys.help_sections ()))
 
 (* Code's tree is always somebody's checkout -- a registered repository, a
    keeper workspace, or the project -- and Enter on a Workspace row is
@@ -816,6 +791,9 @@ let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   ; Detail_secrets, []
   ; Detail_github, [ "L" ]
   ; Detail_identity, [ "arrows+enter"; "T"; "A"; "/"; "R" ]
+  ; Detail_channels, [ "b / u" ]
+  ; Detail_automation, []
+  ; Detail_runs, []
   ]
 
 let test_detail_tab_bindings_cover_the_live_keys () =
@@ -920,14 +898,10 @@ let () =
             test_verdicts_is_a_planning_child
         ; Alcotest.test_case "Changes is a Keepers child" `Quick
             test_changes_is_a_keeper_child
-        ; Alcotest.test_case "Connectors is a Runtime child" `Quick
-            test_connectors_is_a_runtime_child
+        ; Alcotest.test_case "Keeper operations are detail tabs" `Quick
+            test_keeper_operations_are_not_top_level_tabs
         ; Alcotest.test_case "Lanes is a Runtime child" `Quick
             test_lanes_is_a_runtime_child
-        ; Alcotest.test_case "Schedules is a Planning child" `Quick
-            test_schedules_is_a_planning_child
-        ; Alcotest.test_case "Fusion is a Planning child" `Quick
-            test_fusion_is_a_planning_child
         ; Alcotest.test_case "Code is a Workspace child" `Quick
             test_code_is_a_workspace_child
         ; Alcotest.test_case "help documents what was missing" `Quick

@@ -555,16 +555,13 @@ type planning_mode =
 
 (** Lanes surface sub-mode. The overview lists standalone LLM lane rows;
     [Lanes_run_list] drills into one standalone
-    lane's recent exact runs, and [Lanes_run_detail] reads one run's recorded
-    prompt and output. The lane id rides along so Left/Esc from a run returns
-    to the list it came from. [Lanes_lane_notice] answers Enter on a lane
-    whose runs record no LLM prompt/output at all: a static pane that says
-    what is recorded instead, rather than a run list that would read empty. *)
+    lane's recent durable runs, and [Lanes_run_detail] reads one run's exact
+    prompt/output or Verifier request/verdict/tool evidence. The lane id rides
+    along so Left/Esc from a run returns to the list it came from. *)
 type lanes_mode =
   | Lanes_overview
   | Lanes_run_list of string
   | Lanes_run_detail of string * string
-  | Lanes_lane_notice of string
 
 (** One authority for the Fusion surface's list/detail state. The top-level
     [surface] only says Fusion is open; it does not repeat this mode. *)
@@ -3016,11 +3013,9 @@ let lanes_scrolled (state : state) =
       ; sc_overflow_takes_row = true
       ; sc_preview_keep = None
       }
-  | Lanes_run_detail _ | Lanes_lane_notice _ ->
-      (* The detail's and the notice's lines are built by the drawing; the
-         frame reports the clamp through [clamped_scroll], so no count is
-         knowable here. The notice is shorter than any frame and never
-         scrolls, but it shares the shape. *)
+  | Lanes_run_detail _ ->
+      (* The detail's lines are built by the drawing; the frame reports the
+         clamp through [clamped_scroll], so no count is knowable here. *)
       { sc_count = 0
       ; sc_chrome = 0
       ; sc_overflow_takes_row = false
@@ -3043,36 +3038,6 @@ let lanes_scrolled (state : state) =
   ; sc_overflow_takes_row = true
   ; sc_preview_keep = None
   }
-
-(** One styled line of the lane notice pane. The text is static -- the pane
-    explains a recording boundary and fetches nothing -- so the style travels
-    with the line and the renderer only translates constructors into Theme
-    tokens. *)
-type lane_notice_line =
-  | Lane_notice_heading of string
-  | Lane_notice_text of string
-  | Lane_notice_dim of string
-
-(* What the Verifier lane notice says. Its runs live in the verification
-   registries (lib/verification_run_registry.ml and
-   lib/goal_verification_run_registry.ml) with outcome, elapsed and tool
-   observations but no LLM prompt/output, so the run-list drill-down would be
-   an empty reading; the pane names what is recorded and where it is read
-   instead. *)
-let verifier_lane_notice_lines =
-  [ Lane_notice_heading "  This lane records no LLM prompt/output"
-  ; Lane_notice_text ""
-  ; Lane_notice_text
-      "  Verifier runs are kept by the verification registries, not the"
-  ; Lane_notice_text
-      "  exact-lane run store. A run records its outcome, elapsed time, and"
-  ; Lane_notice_text
-      "  tool observations with output excerpts -- never a prompt."
-  ; Lane_notice_text ""
-  ; Lane_notice_dim
-      "  Read them in Planning > Task Review: press v from Planning, or :"
-  ; Lane_notice_dim "  and type \"go Task Review\"."
-  ]
 
 (** Where a left-button press lands on the Standalone-only Lanes overview. *)
 type lanes_overview_hit =
@@ -3123,7 +3088,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
            | Some s -> List.length s.Tui_decode.vs_requests)
   | Lanes ->
       (match state.lanes_mode with
-       | Lanes_run_detail _ | Lanes_lane_notice _ -> None
+       | Lanes_run_detail _ -> None
        | Lanes_overview | Lanes_run_list _ -> Some (lanes_scrolled state))
   | Harness ->
       if Option.is_some state.harness_detail then None
@@ -3231,7 +3196,7 @@ let surface_row_texts (state : state) : surface -> string list option = function
       Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
   | Lanes ->
       (match state.lanes_mode with
-       | Lanes_run_list _ | Lanes_run_detail _ | Lanes_lane_notice _ -> None
+       | Lanes_run_list _ | Lanes_run_detail _ -> None
        | Lanes_overview ->
            let standalone =
              match state.standalone_lanes with

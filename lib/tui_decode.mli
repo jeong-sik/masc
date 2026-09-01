@@ -1395,13 +1395,26 @@ type lane_run_status =
   | Lane_run_failed
   | Lane_run_completion_persistence_failed
   | Lane_run_completion_durability_unknown
+  | Lane_run_verifier_positive of string
+  | Lane_run_verifier_negative of string
+  | Lane_run_verifier_failed of string
   | Lane_run_other of string
 
 val lane_run_status_label : lane_run_status -> string
 
+type lane_run_kind =
+  | Lane_run_exact_output
+  | Lane_run_task_verification
+  | Lane_run_goal_verification
+  | Lane_run_kind_other of string
+
+val lane_run_kind_label : lane_run_kind -> string
+
 type lane_run_summary =
   { lrs_run_id : string
+  ; lrs_run_kind : lane_run_kind
   ; lrs_lane : string
+  ; lrs_subject_id : string option
   ; lrs_actor : string
   ; lrs_started_at : float
   ; lrs_status : lane_run_status
@@ -1416,7 +1429,9 @@ type lane_run_page =
 
 type lane_run_detail =
   { lrd_run_id : string
+  ; lrd_run_kind : lane_run_kind
   ; lrd_lane : string
+  ; lrd_subject_id : string option
   ; lrd_actor : string
   ; lrd_started_at : float
   ; lrd_status : lane_run_status
@@ -1428,13 +1443,15 @@ type lane_run_detail =
 
 val decode_lane_run_page :
   lane:string -> Yojson.Safe.t -> (lane_run_page, string) result
-(** One cursor page of exact-lane summaries, filtered to [lane]. [lrpg_next]
-    is the page cursor of the unfiltered page, so paging does not stall on a
-    page where the lane has no runs. *)
+(** One cursor page of standalone-lane summaries. The server filters before
+    pagination; the decoder still checks [lane] so a mismatched response
+    cannot move the cursor onto another lane. *)
 
 val decode_lane_run_detail : Yojson.Safe.t -> (lane_run_detail, string) result
-(** The whole record of one exact-lane run, [input.payload] and [output]
-    included; [lrd_output] is [None] while the run is still running. *)
+(** The whole record of one standalone run. Exact-output runs carry their
+    prompt payload; task/Goal Verifier runs carry the reviewed subject and
+    their durable verdict/tool evidence under [output]. [lrd_output] is
+    [None] while the run is still running. *)
 
 type log_kind =
   | Log_turn

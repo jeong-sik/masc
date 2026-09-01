@@ -58,6 +58,263 @@ let lane_specs =
   ]
 ;;
 
+(* The overview above joins three durable registries into four lanes. The run
+   drill-down must read the same set: serving only [Exact_lane_run_registry]
+   made the Verifier row open an empty list even while its task and Goal
+   registries held reviews, tool observations, and verdicts. Keep the source
+   variant private so no caller can accidentally flatten away which durable
+   record owns the detail. *)
+type retained_run =
+  | Exact_run of Exact_lane_run_registry.run
+  | Task_verification_run of Verification_run_registry.run
+  | Goal_verification_run of Goal_verification_run_registry.run
+
+type detail_lookup =
+  | Detail_found of Yojson.Safe.t
+  | Detail_not_found
+  | Detail_ambiguous
+
+let retained_run_id = function
+  | Exact_run run -> run.Exact_lane_run_registry.run_id
+  | Task_verification_run run -> run.Verification_run_registry.verification_id
+  | Goal_verification_run run -> run.Goal_verification_run_registry.run_id
+;;
+
+let retained_run_lane = function
+  | Exact_run run -> Exact_lane_run_registry.lane_key run.Exact_lane_run_registry.lane
+  | Task_verification_run _ | Goal_verification_run _ -> Runtime.verifier_exact_lane_id
+;;
+
+let retained_run_started_at = function
+  | Exact_run run -> run.Exact_lane_run_registry.started_at
+  | Task_verification_run run -> run.Verification_run_registry.started_at
+  | Goal_verification_run run -> run.Goal_verification_run_registry.started_at
+;;
+
+let known_lane lane_id =
+  List.exists (fun spec -> String.equal spec.lane_id lane_id) lane_specs
+;;
+
+let selected_slot_field = function
+  | None -> "selected_slot", `Null
+  | Some slot -> "selected_slot", `String slot
+;;
+
+let task_verification_summary_fields (run : Verification_run_registry.run) =
+  let completion =
+    match run.status with
+    | Verification_run_registry.Running -> []
+    | Verification_run_registry.Completed
+        { evaluator_runtime; elapsed_s; _ } ->
+      [ "elapsed_s", `Float elapsed_s; selected_slot_field evaluator_runtime ]
+  in
+  [ "run_id", `String run.verification_id
+  ; "run_kind", `String "task_verification"
+  ; "lane", `String Runtime.verifier_exact_lane_id
+  ; "subject_id", `String run.task_id
+  ; "actor", `String run.authority_actor
+  ; "started_at", `Float run.started_at
+  ; "status", `String (Verification_run_registry.status_label run.status)
+  ]
+  @ completion
+;;
+
+let goal_verification_summary_fields (run : Goal_verification_run_registry.run) =
+  let completion =
+    match run.status with
+    | Goal_verification_run_registry.Running -> []
+    | Goal_verification_run_registry.Completed
+        { evaluator_runtime; elapsed_s; _ } ->
+      [ "elapsed_s", `Float elapsed_s; selected_slot_field evaluator_runtime ]
+  in
+  [ "run_id", `String run.run_id
+  ; "run_kind", `String "goal_verification"
+  ; "lane", `String Runtime.verifier_exact_lane_id
+  ; "subject_id", `String run.goal_id
+  ; "actor", `String run.authority_actor
+  ; "started_at", `Float run.started_at
+  ; "status", `String (Goal_verification_run_registry.status_label run.status)
+  ]
+  @ completion
+;;
+
+let assoc_fields = function
+  | `Assoc fields -> fields
+  | _ -> invalid_arg "standalone lane run serializer returned a non-object"
+;;
+
+let retained_run_summary_json = function
+  | Exact_run run ->
+    `Assoc
+      (("run_kind", `String "exact_output")
+       :: assoc_fields (Exact_lane_run_registry.run_summary_to_yojson run))
+  | Task_verification_run run -> `Assoc (task_verification_summary_fields run)
+  | Goal_verification_run run -> `Assoc (goal_verification_summary_fields run)
+;;
+
+let verifier_input ~kind ~subject_key ~subject_id fields =
+  `Assoc
+    [ "kind", `String "exact"
+    ; ( "payload"
+      , `Assoc
+          ([ "kind", `String kind; subject_key, `String subject_id ] @ fields) )
+    ]
+;;
+
+let retained_run_detail_json = function
+  | Exact_run run ->
+    `Assoc
+      (("run_kind", `String "exact_output")
+       :: assoc_fields (Exact_lane_run_registry.run_to_yojson run))
+  | Task_verification_run run ->
+    let output =
+      match run.Verification_run_registry.status with
+      | Verification_run_registry.Running -> []
+      | Verification_run_registry.Completed _ ->
+        [ "output", Verification_run_registry.run_to_yojson run ]
+    in
+    `Assoc
+      (task_verification_summary_fields run
+       @ [ ( "input"
+           , verifier_input
+               ~kind:"task_verification"
+               ~subject_key:"task_id"
+               ~subject_id:run.task_id
+               [ "producer", `String run.producer
+               ; "authority_kind", `String run.authority_kind
+               ; "authority_actor", `String run.authority_actor
+               ] ) ]
+       @ output)
+  | Goal_verification_run run ->
+    let output =
+      match run.Goal_verification_run_registry.status with
+      | Goal_verification_run_registry.Running -> []
+      | Goal_verification_run_registry.Completed _ ->
+        [ "output", Goal_verification_run_registry.run_to_yojson run ]
+    in
+    `Assoc
+      (goal_verification_summary_fields run
+       @ [ ( "input"
+           , verifier_input
+               ~kind:"goal_verification"
+               ~subject_key:"goal_id"
+               ~subject_id:run.goal_id
+               [ "review_kind", `String "proof"
+               ; "authority_actor", `String run.authority_actor
+               ] ) ]
+       @ output)
+;;
+
+let newer_first left right =
+  match Float.compare (retained_run_started_at right) (retained_run_started_at left) with
+  | 0 -> String.compare (retained_run_id right) (retained_run_id left)
+  | order -> order
+;;
+
+let is_older_than ~before run =
+  match before with
+  | None -> true
+  | Some (started_at, run_id) ->
+    Float.compare (retained_run_started_at run) started_at < 0
+    || (Float.equal (retained_run_started_at run) started_at
+        && String.compare (retained_run_id run) run_id < 0)
+;;
+
+let retained_runs ~exact_runs ~verification_runs ~goal_verification_runs =
+  List.map (fun run -> Exact_run run) exact_runs
+  @ List.map (fun run -> Task_verification_run run) verification_runs
+  @ List.map (fun run -> Goal_verification_run run) goal_verification_runs
+;;
+
+let take_page ~limit runs =
+  let rec loop taken count = function
+    | [] -> List.rev taken, false
+    | _ :: _ when count >= limit -> List.rev taken, true
+    | run :: rest -> loop (run :: taken) (count + 1) rest
+  in
+  if limit <= 0 then [], false else loop [] 0 runs
+;;
+
+let recent_run_page_json_with
+      ~limit
+      ~before
+      ~lane
+      ~exact_runs
+      ~verification_runs
+      ~goal_verification_runs
+  =
+  match lane with
+  | Some lane_id when not (known_lane lane_id) ->
+    Error (Printf.sprintf "unknown standalone lane %S" lane_id)
+  | None | Some _ ->
+    let all = retained_runs ~exact_runs ~verification_runs ~goal_verification_runs in
+    let relevant =
+      match lane with
+      | None -> all
+      | Some lane_id ->
+        List.filter (fun run -> String.equal (retained_run_lane run) lane_id) all
+    in
+    let candidates =
+      relevant |> List.filter (is_older_than ~before) |> List.sort newer_first
+    in
+    let runs, has_more = take_page ~limit candidates in
+    Ok
+      (`Assoc
+        [ "generated_at", `String (Masc_domain.now_iso ())
+        ; "count", `Int (List.length runs)
+        ; "total", `Int (List.length relevant)
+        ; "has_more", `Bool has_more
+        ; "runs", `List (List.map retained_run_summary_json runs)
+        ])
+;;
+
+let recent_run_page_json ~limit ~before ~lane =
+  recent_run_page_json_with
+    ~limit
+    ~before
+    ~lane
+    ~exact_runs:
+      (Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ()))
+    ~verification_runs:
+      (Verification_run_registry.list_runs (Verification_run_registry.global ()))
+    ~goal_verification_runs:
+      (Goal_verification_run_registry.list_runs
+         (Goal_verification_run_registry.global ()))
+;;
+
+let run_detail_json_with
+      ~run_id
+      ~exact_runs
+      ~verification_runs
+      ~goal_verification_runs
+  =
+  let matches =
+    retained_runs ~exact_runs ~verification_runs ~goal_verification_runs
+    |> List.filter (fun run -> String.equal (retained_run_id run) run_id)
+  in
+  match matches with
+  | [] -> Detail_not_found
+  | [ run ] ->
+    Detail_found
+      (`Assoc
+        [ "generated_at", `String (Masc_domain.now_iso ())
+        ; "run", retained_run_detail_json run
+        ])
+  | _ -> Detail_ambiguous
+;;
+
+let run_detail_json ~run_id =
+  run_detail_json_with
+    ~run_id
+    ~exact_runs:
+      (Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ()))
+    ~verification_runs:
+      (Verification_run_registry.list_runs (Verification_run_registry.global ()))
+    ~goal_verification_runs:
+      (Goal_verification_run_registry.list_runs
+         (Goal_verification_run_registry.global ()))
+;;
+
 let terminal_kind_to_string = function
   | Succeeded -> "succeeded"
   | Failed -> "failed"
@@ -421,4 +678,6 @@ let snapshot_json () =
 
 module For_testing = struct
   let snapshot_json_with = snapshot_json_with
+  let recent_run_page_json_with = recent_run_page_json_with
+  let run_detail_json_with = run_detail_json_with
 end

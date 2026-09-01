@@ -677,27 +677,16 @@ let fetch_latest_librarian_input ~(host : string) ~(port : int) :
              Error (label ^ " was not JSON: " ^ detail))
   in
   let open Result.Syntax in
-  let rec find_run_id ~pages_left before =
-    if pages_left <= 0 then
-      Error "Librarian run search exceeded 50 exact-lane pages"
-    else
-      let path =
-        match before with
-        | None -> "/api/v1/dashboard/exact-lane-runs?limit=200"
-        | Some (started_at, run_id) ->
-            Printf.sprintf
-              "/api/v1/dashboard/exact-lane-runs?limit=200&before_started_at=%.17g&before_run_id=%s"
-              started_at
-              (percent_encode_path_segment run_id)
-      in
-      let* listing = get_json ~label:"exact lane run listing" path in
-      let* page = Masc.Tui_decode.decode_librarian_run_page listing in
-      match page.lrp_run_id, page.lrp_next with
-      | Some run_id, _ -> Ok run_id
-      | None, Some cursor -> find_run_id ~pages_left:(pages_left - 1) (Some cursor)
-      | None, None -> Error "no retained Librarian exact run"
+  let* listing =
+    get_json
+      ~label:"exact lane run listing"
+      "/api/v1/dashboard/exact-lane-runs?limit=1&lane=librarian_exact"
   in
-  let* run_id = find_run_id ~pages_left:50 None in
+  let* page = Masc.Tui_decode.decode_librarian_run_page listing in
+  let* run_id =
+    page.lrp_run_id
+    |> Option.to_result ~none:"no retained Librarian exact run"
+  in
   let* detail =
     get_json
       ~label:"Librarian exact run detail"
@@ -705,12 +694,10 @@ let fetch_latest_librarian_input ~(host : string) ~(port : int) :
   in
   Masc.Tui_decode.decode_librarian_actual_input ~run_id detail
 
-(* The listing endpoint mixes every lane and never carries a payload, so one
-   lane's recent runs are a client-side filter over cursor pages. The page cap
-   matches the server retention bound (2 000 runs, 200 a page): past it the
-   lane's runs are simply older than anything the server still holds. *)
+(* The server filters before it pages. A quiet Verifier lane must not be hidden
+   behind a busy Librarian lane's bounded window, and the TUI must not impose a
+   second arbitrary search cap over the durable registry. *)
 let lane_run_list_limit = 50
-let lane_run_list_page_cap = 10
 
 (* One run's payloads can be megabytes of conversation history (a 136 MB
    [conversation_history] field is why the listing drops payloads); beyond a
@@ -718,37 +705,22 @@ let lane_run_list_page_cap = 10
    would truncate anyway. *)
 let lane_run_detail_max_body_bytes = 4 * 1024 * 1024
 
-(** Recent run summaries of one exact lane, newest first. *)
+(** Recent run summaries of one standalone lane, newest first. *)
 let fetch_lane_runs ~(host : string) ~(port : int) ~(lane : string) :
     (Masc.Tui_decode.lane_run_summary list, string) result =
   let open Result.Syntax in
-  let rec collect ~pages_left before acc =
-    if pages_left <= 0 then
-      Error "lane run listing exceeded 10 exact-lane pages"
-    else
-      let path =
-        match before with
-        | None -> "/api/v1/dashboard/exact-lane-runs?limit=200"
-        | Some (started_at, run_id) ->
-            Printf.sprintf
-              "/api/v1/dashboard/exact-lane-runs?limit=200&before_started_at=%.17g&before_run_id=%s"
-              started_at
-              (percent_encode_path_segment run_id)
-      in
-      let* listing = get_json ~host ~port ~path in
-      let* page = Masc.Tui_decode.decode_lane_run_page ~lane listing in
-      let acc = acc @ page.lrpg_runs in
-      if List.length acc >= lane_run_list_limit then
-        Ok
-          (List.filteri (fun index _ -> index < lane_run_list_limit) acc)
-      else
-        match page.lrpg_next with
-        | Some cursor -> collect ~pages_left:(pages_left - 1) (Some cursor) acc
-        | None -> Ok acc
+  let path =
+    Printf.sprintf
+      "/api/v1/dashboard/exact-lane-runs?limit=%d&lane=%s"
+      lane_run_list_limit
+      (percent_encode_path_segment lane)
   in
-  collect ~pages_left:lane_run_list_page_cap None []
+  let* listing = get_json ~host ~port ~path in
+  let* page = Masc.Tui_decode.decode_lane_run_page ~lane listing in
+  Ok page.lrpg_runs
 
-(** The full record of one exact-lane run, prompt and output included. *)
+(** The full record of one standalone-lane run, including exact prompt/output
+    or Verifier request/verdict/tool evidence. *)
 let fetch_lane_run_detail ~(host : string) ~(port : int) ~(run_id : string) :
     (Masc.Tui_decode.lane_run_detail, string) result =
   match

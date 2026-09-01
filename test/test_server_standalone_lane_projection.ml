@@ -3,6 +3,7 @@ open Alcotest
 module Projection = Server_standalone_lane_projection
 module Exact = Masc.Exact_lane_run_registry
 module Verification = Masc.Verification_run_registry
+module Goal_verification = Masc.Goal_verification_run_registry
 
 let exact_run ~run_id ~lane ~started_at ~status : Exact.run =
   { run_id
@@ -319,7 +320,166 @@ let test_latest_terminal_uses_completion_time () =
     110.
     (librarian
      |> Yojson.Safe.Util.member "last_terminal_at"
-     |> Yojson.Safe.Util.to_float)
+    |> Yojson.Safe.Util.to_float)
+;;
+
+let verifier_tool : Verification.tool_observation =
+  { tool_name = "masc_task_get"
+  ; input = `Assoc [ "task_id", `String "task-9" ]
+  ; disposition = Tool_result.Completed ()
+  ; output_excerpt = "{\"status\":\"awaiting_verification\"}"
+  ; output_truncated = false
+  ; duration_ms = 12.
+  ; finished_at = 111.
+  }
+;;
+
+let task_verification_run ~verification_id ~started_at : Verification.run =
+  { verification_id
+  ; task_id = "task-9"
+  ; producer = "keeper-test"
+  ; authority_kind = "system_llm"
+  ; authority_actor = Runtime.verifier_exact_lane_id
+  ; started_at
+  ; status =
+      Verification.Completed
+        { outcome = Verification.Rejected { reason = "missing proof" }
+        ; evaluator_runtime = Some "verifier-primary"
+        ; elapsed_s = 3.
+        ; tools = [ verifier_tool ]
+        }
+  }
+;;
+
+let goal_verification_run ~run_id ~started_at : Goal_verification.run =
+  { run_id
+  ; goal_id = "goal-4"
+  ; review_kind = Goal_verification.Proof
+  ; authority_actor = Runtime.verifier_exact_lane_id
+  ; started_at
+  ; status =
+      Goal_verification.Completed
+        { outcome = Goal_verification.Committed
+        ; evaluator_runtime = Some "verifier-secondary"
+        ; elapsed_s = 2.
+        ; tools = []
+        }
+  }
+;;
+
+let run_page_or_fail result =
+  match result with
+  | Ok json -> json
+  | Error detail -> fail detail
+;;
+
+let test_verifier_runs_are_filtered_before_pagination () =
+  let busy_exact_runs =
+    List.init 20 (fun index ->
+      exact_run
+        ~run_id:(Printf.sprintf "lib-%02d" index)
+        ~lane:Exact.Librarian
+        ~started_at:(200. +. Float.of_int index)
+        ~status:Exact.Running)
+  in
+  let task = task_verification_run ~verification_id:"vrf-9" ~started_at:100. in
+  let goal = goal_verification_run ~run_id:"goal-run-4" ~started_at:90. in
+  let page =
+    Projection.For_testing.recent_run_page_json_with
+      ~limit:1
+      ~before:None
+      ~lane:(Some Runtime.verifier_exact_lane_id)
+      ~exact_runs:busy_exact_runs
+      ~verification_runs:[ task ]
+      ~goal_verification_runs:[ goal ]
+    |> run_page_or_fail
+  in
+  check int "total counts only verifier runs" 2
+    (page |> Yojson.Safe.Util.member "total" |> Yojson.Safe.Util.to_int);
+  check bool "one verifier row leaves another page" true
+    (page |> Yojson.Safe.Util.member "has_more" |> Yojson.Safe.Util.to_bool);
+  let first =
+    page |> Yojson.Safe.Util.member "runs" |> Yojson.Safe.Util.to_list
+    |> List.hd
+  in
+  check string "task review is newest" "vrf-9"
+    (first |> Yojson.Safe.Util.member "run_id" |> Yojson.Safe.Util.to_string);
+  check string "verdict is visible in the list" "rejected"
+    (first |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+  check string "subject is visible in the list" "task-9"
+    (first |> Yojson.Safe.Util.member "subject_id" |> Yojson.Safe.Util.to_string);
+  let next =
+    Projection.For_testing.recent_run_page_json_with
+      ~limit:1
+      ~before:(Some (100., "vrf-9"))
+      ~lane:(Some Runtime.verifier_exact_lane_id)
+      ~exact_runs:busy_exact_runs
+      ~verification_runs:[ task ]
+      ~goal_verification_runs:[ goal ]
+    |> run_page_or_fail
+  in
+  let second =
+    next |> Yojson.Safe.Util.member "runs" |> Yojson.Safe.Util.to_list
+    |> List.hd
+  in
+  check string "goal review is on the next verifier page" "goal-run-4"
+    (second |> Yojson.Safe.Util.member "run_id" |> Yojson.Safe.Util.to_string);
+  check string "goal review kind" "goal_verification"
+    (second |> Yojson.Safe.Util.member "run_kind" |> Yojson.Safe.Util.to_string)
+;;
+
+let test_verifier_detail_keeps_verdict_reason_and_tools () =
+  let task = task_verification_run ~verification_id:"vrf-9" ~started_at:100. in
+  match
+    Projection.For_testing.run_detail_json_with
+      ~run_id:"vrf-9"
+      ~exact_runs:[]
+      ~verification_runs:[ task ]
+      ~goal_verification_runs:[]
+  with
+  | Projection.Detail_not_found | Projection.Detail_ambiguous ->
+    fail "expected one verifier detail"
+  | Projection.Detail_found json ->
+    let run = Yojson.Safe.Util.member "run" json in
+    check string "detail kind" "task_verification"
+      (run |> Yojson.Safe.Util.member "run_kind" |> Yojson.Safe.Util.to_string);
+    let output = Yojson.Safe.Util.member "output" run in
+    check string "verdict reason" "missing proof"
+      (output |> Yojson.Safe.Util.member "reason" |> Yojson.Safe.Util.to_string);
+    let tools = output |> Yojson.Safe.Util.member "tools" |> Yojson.Safe.Util.to_list in
+    check int "one durable tool observation" 1 (List.length tools);
+    check string "tool name" "masc_task_get"
+      (List.hd tools |> Yojson.Safe.Util.member "tool_name"
+       |> Yojson.Safe.Util.to_string)
+;;
+
+let test_unknown_lane_and_duplicate_identity_fail_explicitly () =
+  (match
+     Projection.For_testing.recent_run_page_json_with
+       ~limit:10
+       ~before:None
+       ~lane:(Some "invented")
+       ~exact_runs:[]
+       ~verification_runs:[]
+       ~goal_verification_runs:[]
+   with
+   | Ok _ -> fail "unknown lane must not look empty"
+   | Error detail -> check bool "error names unknown lane" true (String.length detail > 0));
+  let exact =
+    exact_run ~run_id:"collision" ~lane:Exact.Librarian ~started_at:10.
+      ~status:Exact.Running
+  in
+  let goal = goal_verification_run ~run_id:"collision" ~started_at:9. in
+  match
+    Projection.For_testing.run_detail_json_with
+      ~run_id:"collision"
+      ~exact_runs:[ exact ]
+      ~verification_runs:[]
+      ~goal_verification_runs:[ goal ]
+  with
+  | Projection.Detail_ambiguous -> ()
+  | Projection.Detail_found _ | Projection.Detail_not_found ->
+    fail "duplicate retained run ids must not pick a registry by precedence"
 ;;
 
 let () =
@@ -338,6 +498,18 @@ let () =
             "no verdict is failed; synthetic elapsed skips p50"
             `Quick
             test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50
+        ; test_case
+            "verifier runs are filtered before pagination"
+            `Quick
+            test_verifier_runs_are_filtered_before_pagination
+        ; test_case
+            "verifier detail keeps verdict reason and tools"
+            `Quick
+            test_verifier_detail_keeps_verdict_reason_and_tools
+        ; test_case
+            "unknown lane and duplicate identity fail explicitly"
+            `Quick
+            test_unknown_lane_and_duplicate_identity_fail_explicitly
         ] )
     ]
 ;;

@@ -457,13 +457,6 @@ let footer_hints_lanes_run_detail ~scroll ~max_scroll =
         @ listing_meta))
     scroll max_scroll
 
-(* The lane notice is static — there is nothing to move through, so it keeps
-   only the way back plus the shared tail. *)
-let footer_hints_lane_notice =
-  hints_of_bindings
-    ([ b Act "Left / Esc" "back" ~help:"back to the lane overview" ]
-     @ listing_meta)
-
 let footer_hints_git_changes =
   hints_of_bindings
     ([ b Navigate "j/k" "move"

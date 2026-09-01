@@ -6,6 +6,7 @@ val append_metrics_snapshot :
   observation:Keeper_world_observation.world_observation ->
   result:Keeper_agent_run.run_result ->
   latency_ms:int ->
+  usage_resolution:Keeper_usage_resolution.t ->
   turn_cost:float ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   checkpoint_bytes:int ->

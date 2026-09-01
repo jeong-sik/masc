@@ -32,6 +32,8 @@ type field =
   | Last_input_tokens
   | Last_output_tokens
   | Last_total_tokens
+  | Usage_cursor
+  | Last_usage_resolution
   | Last_latency_ms
   | Proactive_count_total
   | Last_proactive_ts
@@ -66,6 +68,8 @@ let all_fields =
   ; Last_input_tokens
   ; Last_output_tokens
   ; Last_total_tokens
+  ; Usage_cursor
+  ; Last_usage_resolution
   ; Last_latency_ms
   ; Proactive_count_total
   ; Last_proactive_ts
@@ -101,6 +105,8 @@ let field_name = function
   | Last_input_tokens -> "last_input_tokens"
   | Last_output_tokens -> "last_output_tokens"
   | Last_total_tokens -> "last_total_tokens"
+  | Usage_cursor -> "usage_cursor"
+  | Last_usage_resolution -> "last_usage_resolution"
   | Last_latency_ms -> "last_latency_ms"
   | Proactive_count_total -> "proactive_count_total"
   | Last_proactive_ts -> "last_proactive_ts"

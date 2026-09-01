@@ -13,6 +13,7 @@ val append_decision_record :
   ?fallback_reason:string ->
   ?turn_mode:Keeper_unified_metrics_support.turn_mode ->
   ?result:Keeper_agent_run.run_result option ->
+  ?usage_resolution:Keeper_usage_resolution.t option ->
   ?error:string ->
   ?terminal_reason:Keeper_turn_terminal.t ->
   unit ->

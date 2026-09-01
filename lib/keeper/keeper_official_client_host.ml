@@ -334,6 +334,7 @@ let host_stop_result ~runtime_id ~model ~session_id ~turn_id ~turns_used ~latenc
       { Runtime_agent.response
       ; checkpoint = None
       ; session_id
+      ; session_resumed = None
       ; turns = turns_used
       ; trace_ref = None
       ; run_validation = None

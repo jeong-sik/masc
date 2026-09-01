@@ -15,7 +15,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
      writers, and meta readers do not see a blank or downgraded keeper between
      TOML load and prompt render. *)
   object_of_field_values
-    [ Schema, `String "masc.keeper_meta.v1"
+    [ Schema, `String "masc.keeper_meta.v2"
     ; Name, `String m.name
     ; Instructions, `String m.instructions
     ; Trace_id, `String (Keeper_id.Trace_id.to_string rt.trace_id)
@@ -32,6 +32,16 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; Last_input_tokens, `Int rt.usage.last_input_tokens
     ; Last_output_tokens, `Int rt.usage.last_output_tokens
     ; Last_total_tokens, `Int rt.usage.last_total_tokens
+    ; ( Usage_cursor
+      , Option.fold
+          ~none:`Null
+          ~some:Keeper_usage_resolution.cursor_to_json
+          rt.usage_cursor )
+    ; ( Last_usage_resolution
+      , Option.fold
+          ~none:`Null
+          ~some:Keeper_usage_resolution.to_json
+          rt.last_usage_resolution )
     ; Last_latency_ms, `Int rt.usage.last_latency_ms
     ; Proactive_count_total, `Int rt.proactive_rt.count_total
     ; Last_proactive_ts, `Float rt.proactive_rt.last_ts

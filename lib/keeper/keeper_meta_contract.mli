@@ -191,6 +191,8 @@ val runtime_attempt_record_to_json :
 
 type agent_runtime_state = {
   usage : usage_metrics;
+  usage_cursor : Keeper_usage_resolution.cursor option;
+  last_usage_resolution : Keeper_usage_resolution.t option;
   proactive_rt : proactive_runtime;
   trace_id : Keeper_id.Trace_id.t;
   trace_history : string list;

@@ -53,6 +53,8 @@ let wrong_value = function
 
 let nullable_field_names =
   [ "message_scope_ack_id"
+  ; "usage_cursor"
+  ; "last_usage_resolution"
   ; "last_runtime_attempt"
   ; "latched_reason"
   ; "current_task_id"
@@ -156,6 +158,63 @@ let test_retired_compaction_failure_authority_requires_reset () =
      |> replace_field "compaction_consecutive_failures" (`Int 3))
 ;;
 
+let test_v1_requires_reset_and_v2_usage_state_roundtrips () =
+  expect_rejected
+    "v1 schema"
+    (current_json () |> replace_field "schema" (`String "masc.keeper_meta.v1"));
+  let sample : Keeper_usage_resolution.sample =
+    { input_tokens = 160
+    ; output_tokens = 20
+    ; cache_creation_input_tokens = 4
+    ; cache_read_input_tokens = 100
+    ; cost_usd = Some 1.6
+    }
+  in
+  let basis =
+    Keeper_usage_resolution.Conversation_counter
+      { runtime_id = "antigravity"
+      ; conversation_id = "conversation-1"
+      ; position = Keeper_usage_resolution.Resumed
+      }
+  in
+  let resolution, cursor =
+    Keeper_usage_resolution.resolve
+      ~cursor:None
+      ~basis
+      ~observation:(Some sample)
+      ~observed_at:1_700_000_000.0
+  in
+  let json =
+    current_json ()
+    |> replace_field
+         "usage_cursor"
+         (Option.fold
+            ~none:`Null
+            ~some:Keeper_usage_resolution.cursor_to_json
+            cursor)
+    |> replace_field
+         "last_usage_resolution"
+         (Keeper_usage_resolution.to_json resolution)
+  in
+  let inconsistent_resolution =
+    match Keeper_usage_resolution.to_json resolution with
+    | `Assoc fields ->
+      `Assoc (("status", `String "exact") :: List.remove_assoc "status" fields)
+    | _ -> fail "usage resolution encoder did not return an object"
+  in
+  expect_rejected
+    "contradictory exact resolution"
+    (json |> replace_field "last_usage_resolution" inconsistent_resolution);
+  match Keeper_meta_json_parse.meta_of_json json with
+  | Error detail -> failf "v2 usage state rejected: %s" detail
+  | Ok meta ->
+    check bool "cursor roundtrips" true (meta.runtime.usage_cursor = cursor);
+    check bool
+      "last resolution roundtrips"
+      true
+      (meta.runtime.last_usage_resolution = Some resolution)
+;;
+
 let () =
   run
     "keeper_meta_current_schema"
@@ -180,6 +239,8 @@ let () =
             test_retired_compaction_failure_authority_requires_reset
         ; test_case "writer rejects non-finite values" `Quick
             test_current_writer_rejects_non_finite_values
+        ; test_case "v1 cut and v2 usage state roundtrip" `Quick
+            test_v1_requires_reset_and_v2_usage_state_roundtrips
         ] )
     ]
 ;;

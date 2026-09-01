@@ -518,6 +518,7 @@ let test_traced_turn_yields_result_level_fields () =
       response = response ();
       checkpoint = None;
       session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id;
+      session_resumed = None;
       turns = 1;
       trace_ref;
       run_validation;

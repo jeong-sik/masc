@@ -12,6 +12,7 @@ include Keeper_unified_metrics_json_support
 let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(result : Keeper_agent_run.run_result) ~(latency_ms : int)
+    ~(usage_resolution : Keeper_usage_resolution.t)
     ~(turn_cost : float)
     ~(channel : Keeper_world_observation.keeper_cycle_channel)
     ~(checkpoint_bytes : int)
@@ -34,20 +35,25 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
   let tool_call_count = Keeper_agent_result.tool_call_count result in
   let metrics_store = Keeper_types_support.keeper_metrics_store config meta.name in
   let usage_json =
-    if result.usage_reported then
+    match usage_resolution.delta with
+    | Some delta ->
+      let delta_usage = Keeper_usage_resolution.api_usage_of_sample delta in
       `Assoc
         ([
           ( "usage_scope"
           , `String (Runtime_usage_scope.to_string result.usage_scope) );
-          ("input_tokens", `Int result.usage.input_tokens);
-          ("output_tokens", `Int result.usage.output_tokens);
-          ("cache_creation_tokens", `Int result.usage.cache_creation_input_tokens);
-          ("cache_read_tokens", `Int result.usage.cache_read_input_tokens);
+          ("input_tokens", `Int delta.input_tokens);
+          ("output_tokens", `Int delta.output_tokens);
+          ("cache_creation_tokens", `Int delta.cache_creation_input_tokens);
+          ("cache_read_tokens", `Int delta.cache_read_input_tokens);
           ("total_tokens",
-           `Int (Inference_utils.total_tokens result.usage));
+           `Int (Inference_utils.total_tokens delta_usage));
+          ( "resolution_status"
+          , `String
+              (Keeper_usage_resolution.status_to_string usage_resolution.status) );
         ]
         @ usage_trust_json_fields usage_trust)
-    else
+    | None ->
       `Assoc
         ([
           ( "usage_scope"
@@ -57,11 +63,15 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
           ("cache_creation_tokens", `Null);
           ("cache_read_tokens", `Null);
           ("total_tokens", `Null);
+          ( "resolution_status"
+          , `String (Keeper_usage_resolution.status_to_string usage_resolution.status) );
         ]
         @ usage_trust_json_fields usage_trust)
   in
   let cost_json =
-    if result.usage_reported then `Float turn_cost else `Null
+    match usage_resolution.delta with
+    | Some { cost_usd = Some _; _ } -> `Float turn_cost
+    | Some { cost_usd = None; _ } | None -> `Null
   in
   (* #9943: per-keeper turn-latency bucket counter + WARN if the
      turn crossed the long-turn threshold (default 600s, env-
@@ -99,6 +109,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
         ("ctx_composition", Keeper_agent_run.ctx_composition_to_json result.ctx_composition);
         ("usage", usage_json);
+        ("usage_resolution", Keeper_usage_resolution.to_json usage_resolution);
         ("usage_trust", `String (usage_trust_to_string usage_trust));
         ( "usage_anomaly_reasons",
           `List

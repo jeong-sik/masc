@@ -779,7 +779,7 @@ def keeper_metadata(name: str) -> dict[str, object]:
     # keeper meta schema, and the current-schema validator rejects metas
     # carrying fields it does not know.
     metadata: dict[str, object] = {
-        "schema": "masc.keeper_meta.v1",
+        "schema": "masc.keeper_meta.v2",
         "name": name,
         "instructions": "",
         "trace_id": f"trace-{name}",
@@ -790,6 +790,8 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "last_proactive_reason": "",
         "last_proactive_preview": "",
         "message_scope_ack_id": None,
+        "usage_cursor": None,
+        "last_usage_resolution": None,
         "last_runtime_attempt": None,
         "paused": False,
         "latched_reason": None,

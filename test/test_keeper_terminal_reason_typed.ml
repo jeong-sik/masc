@@ -915,6 +915,7 @@ let () =
         ?(stop_reason = Runtime_agent.Completed)
         ?(usage = Masc.Inference_utils.zero_usage)
         ?(usage_scope = Runtime_usage_scope.Per_request)
+        ?usage_basis
         ()
     : Masc.Keeper_agent_run.run_result
     =
@@ -936,6 +937,16 @@ let () =
       ; runtime_config_path = None
       }
     in
+    let usage_basis =
+      Option.value
+        ~default:
+          (match usage_scope with
+           | Runtime_usage_scope.Per_request -> Masc.Keeper_usage_resolution.Per_request
+           | Runtime_usage_scope.Conversation_cumulative
+           | Runtime_usage_scope.Usage_scope_unavailable ->
+             Masc.Keeper_usage_resolution.Unavailable)
+        usage_basis
+    in
     { response_text = "completed"
     ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
     ; terminal_effect_receipt = None
@@ -950,6 +961,7 @@ let () =
     ; usage
     ; usage_reported = true
     ; usage_scope
+    ; usage_basis
     ; tool_calls = []
     ; completion_contract_result = R.Completion_tool_execution_observed
     ; operator_disposition = None
@@ -990,6 +1002,7 @@ let () =
         ?(prior = meta)
         ?(usage = Masc.Inference_utils.zero_usage)
         ?(usage_scope = Runtime_usage_scope.Per_request)
+        ?usage_basis
         ~last_outcome
         ~last_reason
         ()
@@ -1040,12 +1053,22 @@ let () =
       ; own_recent_actions = []
       }
     in
+    let result = run_result ~usage ~usage_scope ?usage_basis () in
+    let usage_resolution, usage_cursor =
+      Masc.Keeper_usage_resolution.resolve
+        ~cursor:prior.runtime.usage_cursor
+        ~basis:result.usage_basis
+        ~observation:(Some (Masc.Keeper_usage_resolution.sample_of_api_usage usage))
+        ~observed_at:42.0
+    in
     Masc.Keeper_unified_metrics.update_metrics_from_result
       prior
       ~latency_ms:1
       ~observation
+      ~usage_resolution
+      ~usage_cursor
       ~is_autonomous_turn:false
-      (run_result ~usage ~usage_scope ())
+      result
   in
   let updated =
     reactive_success
@@ -1089,23 +1112,141 @@ let () =
       ~prior
       ~usage:cumulative_usage
       ~usage_scope:Runtime_usage_scope.Conversation_cumulative
+      ~usage_basis:
+        (Masc.Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity"
+           ; conversation_id = "conversation-1"
+           ; position = Masc.Keeper_usage_resolution.Fresh
+           })
       ~last_outcome:KMC.Proactive_unknown
       ~last_reason:"cumulative usage"
       ()
   in
   check
-    "conversation cumulative input is not added as a turn delta"
-    (cumulative.runtime.usage.total_input_tokens = 100);
+    "fresh conversation cumulative input is the first exact delta"
+    (cumulative.runtime.usage.total_input_tokens = 9_100);
   check
-    "conversation cumulative output is not added as a turn delta"
-    (cumulative.runtime.usage.total_output_tokens = 20);
+    "fresh conversation cumulative output is the first exact delta"
+    (cumulative.runtime.usage.total_output_tokens = 920);
   check
-    "conversation cumulative cost is not added as a turn cost"
-    (Float.equal cumulative.runtime.usage.total_cost_usd 1.5);
+    "fresh conversation cumulative cost is the first exact delta"
+    (Float.equal cumulative.runtime.usage.total_cost_usd 13.5);
   check
     "conversation cumulative raw observation remains visible"
     (cumulative.runtime.usage.last_input_tokens = 9_000
      && cumulative.runtime.usage.last_output_tokens = 900);
+  let resumed_usage =
+    { cumulative_usage with
+      input_tokens = 9_500
+    ; output_tokens = 940
+    ; cost_usd = Some 12.4
+    }
+  in
+  let resumed =
+    reactive_success
+      ~prior:cumulative
+      ~usage:resumed_usage
+      ~usage_scope:Runtime_usage_scope.Conversation_cumulative
+      ~usage_basis:
+        (Masc.Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity"
+           ; conversation_id = "conversation-1"
+           ; position = Masc.Keeper_usage_resolution.Resumed
+           })
+      ~last_outcome:KMC.Proactive_unknown
+      ~last_reason:"resumed cumulative usage"
+  in
+  check
+    "resumed cumulative input adds only the exact delta"
+    (resumed.runtime.usage.total_input_tokens = 9_600);
+  check
+    "resumed cumulative output adds only the exact delta"
+    (resumed.runtime.usage.total_output_tokens = 960);
+  check
+    "resumed cumulative cost adds only the exact delta"
+    (Float.abs (resumed.runtime.usage.total_cost_usd -. 13.9) < 0.000_001);
+  let resumed_without_baseline, established_cursor =
+    Masc.Keeper_usage_resolution.resolve
+      ~cursor:None
+      ~basis:
+        (Masc.Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity"
+           ; conversation_id = "conversation-after-restart"
+           ; position = Masc.Keeper_usage_resolution.Resumed
+           })
+      ~observation:
+        (Some (Masc.Keeper_usage_resolution.sample_of_api_usage cumulative_usage))
+      ~observed_at:43.0
+  in
+  check
+    "resumed cumulative without a durable baseline stays unavailable"
+    (resumed_without_baseline.status = Masc.Keeper_usage_resolution.Baseline_missing
+     && Option.is_none resumed_without_baseline.delta
+     && Option.is_some established_cursor);
+  let regressed_usage =
+    { cumulative_usage with input_tokens = 8_999 }
+    |> Masc.Keeper_usage_resolution.sample_of_api_usage
+  in
+  let regressed, retained_cursor =
+    Masc.Keeper_usage_resolution.resolve
+      ~cursor:cumulative.runtime.usage_cursor
+      ~basis:
+        (Masc.Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity"
+           ; conversation_id = "conversation-1"
+           ; position = Masc.Keeper_usage_resolution.Resumed
+           })
+      ~observation:(Some regressed_usage)
+      ~observed_at:44.0
+  in
+  check
+    "same-conversation counter regression is not guessed to be a reset"
+    (regressed.status = Masc.Keeper_usage_resolution.Counter_regressed
+     && Option.is_none regressed.delta
+     && retained_cursor = cumulative.runtime.usage_cursor);
+  let cost_regressed_usage =
+    { resumed_usage with cost_usd = Some 11.0 }
+    |> Masc.Keeper_usage_resolution.sample_of_api_usage
+  in
+  let cost_regressed, _ =
+    Masc.Keeper_usage_resolution.resolve
+      ~cursor:cumulative.runtime.usage_cursor
+      ~basis:
+        (Masc.Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity"
+           ; conversation_id = "conversation-1"
+           ; position = Masc.Keeper_usage_resolution.Resumed
+           })
+      ~observation:(Some cost_regressed_usage)
+      ~observed_at:44.5
+  in
+  check
+    "cost counter regression cannot be labeled exact"
+    (cost_regressed.status = Masc.Keeper_usage_resolution.Counter_regressed
+     && Option.is_none cost_regressed.delta);
+  let switched, switched_cursor =
+    Masc.Keeper_usage_resolution.resolve
+      ~cursor:cumulative.runtime.usage_cursor
+      ~basis:
+        (Masc.Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity-next"
+           ; conversation_id = "conversation-2"
+           ; position = Masc.Keeper_usage_resolution.Fresh
+           })
+      ~observation:
+        (Some (Masc.Keeper_usage_resolution.sample_of_api_usage cumulative_usage))
+      ~observed_at:45.0
+  in
+  check
+    "runtime and conversation switch with Fresh replaces the cursor"
+    ( switched.delta
+      = Some (Masc.Keeper_usage_resolution.sample_of_api_usage cumulative_usage)
+      && Option.fold
+           ~none:false
+           ~some:(fun cursor ->
+             String.equal cursor.Masc.Keeper_usage_resolution.runtime_id "antigravity-next"
+             && String.equal cursor.conversation_id "conversation-2")
+           switched_cursor );
   let per_request_usage =
     { Masc.Inference_utils.zero_usage with
       input_tokens = 40

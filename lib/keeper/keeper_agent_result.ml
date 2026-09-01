@@ -92,6 +92,7 @@ type run_result =
   ; usage : Agent_core.Types.api_usage
   ; usage_reported : bool
   ; usage_scope : Runtime_usage_scope.t
+  ; usage_basis : Keeper_usage_resolution.basis
   ; tool_calls : tool_call_detail list
   ; completion_contract_result : Keeper_execution_receipt.completion_contract_result
   ; operator_disposition : operator_disposition option

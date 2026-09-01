@@ -76,15 +76,18 @@ let read_cost_entries_dated ~base_path ~since_unix
       ~until:(Log.format_utc_date_of now)
       (function
         | Dated_jsonl.Parsed json ->
-          (match parse_cost_entry json ~since_unix with
-           | Ok entry -> entries := entry :: !entries
-           | Error Out_of_window -> ()
-           | Error err ->
-             incr schema_violation_rows;
-             Log.Model_inference_metrics.warn
-               "cost ledger schema drop: reason=%s detail=%s"
-               (parse_error_label err)
-               (parse_error_detail err))
+          (match Cost_ledger.of_json json with
+           | Ok { usage_projection = Cost_ledger.Raw_observation; _ } -> ()
+           | Ok _ | Error _ ->
+             (match parse_cost_entry json ~since_unix with
+              | Ok entry -> entries := entry :: !entries
+              | Error Out_of_window -> ()
+              | Error err ->
+                incr schema_violation_rows;
+                Log.Model_inference_metrics.warn
+                  "cost ledger schema drop: reason=%s detail=%s"
+                  (parse_error_label err)
+                  (parse_error_detail err)))
         | Dated_jsonl.Malformed_json { path; line_number; detail } ->
           incr malformed_rows;
           let location =
@@ -152,29 +155,20 @@ let merge_exact_inference decision cost =
       value_or ~preferred:cost.peak_memory_gb ~fallback:decision.peak_memory_gb
   ; thinking_enabled = decision.thinking_enabled
   ; latency_ms = value_or ~preferred:cost.latency_ms ~fallback:decision.latency_ms
-  ; input_tokens =
-      value_or ~preferred:cost.input_tokens ~fallback:decision.input_tokens
-  ; output_tokens =
-      value_or ~preferred:cost.output_tokens ~fallback:decision.output_tokens
-  ; cache_read_tokens =
-      value_or
-        ~preferred:cost.cache_read_tokens
-        ~fallback:decision.cache_read_tokens
-  ; cache_creation_tokens =
-      value_or
-        ~preferred:cost.cache_creation_tokens
-        ~fallback:decision.cache_creation_tokens
+  ; (* Decision usage is the single normalized per-turn authority. Cost rows
+       retain the provider observation and may be conversation-cumulative. *)
+    input_tokens = decision.input_tokens
+  ; output_tokens = decision.output_tokens
+  ; cache_read_tokens = decision.cache_read_tokens
+  ; cache_creation_tokens = decision.cache_creation_tokens
   ; reasoning_tokens =
       value_or
         ~preferred:cost.reasoning_tokens
         ~fallback:decision.reasoning_tokens
-  ; cost_usd = value_or ~preferred:cost.cost_usd ~fallback:decision.cost_usd
+  ; cost_usd = decision.cost_usd
   ; tool_call_count = decision.tool_call_count
   ; tools_used = decision.tools_used
-  ; usage_reported =
-      value_or
-        ~preferred:cost.usage_reported
-        ~fallback:decision.usage_reported
+  ; usage_reported = decision.usage_reported
   ; telemetry_reported =
       value_or
         ~preferred:cost.telemetry_reported

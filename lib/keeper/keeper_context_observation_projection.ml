@@ -199,18 +199,9 @@ let context_fields ~config ~keeper_name ~current_trace_id =
 let last_turn_usage_json_of_meta
       (meta : Keeper_meta_contract.keeper_meta)
   =
-  let usage = meta.runtime.usage in
-  match usage.last_usage_reported_at with
+  match meta.runtime.last_usage_resolution with
   | None -> `Null
-  | Some observed_at ->
-    `Assoc
-      [ "input_tokens", `Int usage.last_input_tokens
-      ; "output_tokens", `Int usage.last_output_tokens
-      ; "total_tokens", `Int usage.last_total_tokens
-      ; ( "observed_at"
-        , `String (Masc_domain.iso8601_of_unix_seconds observed_at) )
-      ; "source", `String "keeper_runtime_usage"
-      ]
+  | Some resolution -> Keeper_usage_resolution.to_json resolution
 ;;
 
 let last_turn_usage_json ~base_path

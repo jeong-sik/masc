@@ -185,6 +185,7 @@ let cost_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=50)
     ("output_tokens", `Int output_tokens);
     ("cost_usd", `Float 0.0);
     ("usage_missing", `Bool false);
+    ("usage_projection", `String "resolved_delta");
     ("source", `String "auto_trajectory");
     ("trace_id", `String trace_id);
     ("keeper_turn_id", `Int keeper_turn_id);

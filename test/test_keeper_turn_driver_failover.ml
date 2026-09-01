@@ -76,6 +76,7 @@ let completed_run_result () : Runtime_agent.run_result =
       }
   ; checkpoint = Some (checkpoint_with_session_id "selected-runtime")
   ; session_id = "selected-runtime"
+  ; session_resumed = None
   ; turns = 1
   ; trace_ref = None
   ; run_validation = None

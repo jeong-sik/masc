@@ -55,6 +55,7 @@ let run_result ?content ?stop_reason ?checkpoint () : Runtime_agent.run_result =
     response = response ?content ?stop_reason ();
     checkpoint;
     session_id = "session-test";
+    session_resumed = None;
     turns = 1;
     trace_ref = None;
     run_validation = None;

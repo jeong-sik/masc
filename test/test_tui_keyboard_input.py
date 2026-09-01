@@ -6883,10 +6883,14 @@ def verifier_lane_run_detail_response() -> HttpResponse:
                         "kind": "task_verification",
                         "task_id": "task-9",
                         "producer": "alpha",
+                        "evidence": [
+                            f"request-evidence-{index:02d}" for index in range(24)
+                        ],
                     },
                 },
                 "output": {
                     "reason": "missing proof",
+                    "checks": [f"verifier-check-{index:02d}" for index in range(24)],
                     "tools": [
                         {
                             "tool_name": "masc_task_get",
@@ -7249,6 +7253,76 @@ def keeper_lanes_interaction(
                 "Verifier detail did not draw Input and Output on one split row: "
                 f"{verifier_detail!r}"
             )
+        scrolled_detail = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"j",
+            b"INPUT \xc2\xb7 VERIFICATION REQUEST  2-",
+        )
+        scrolled_detail_plain = CSI_RE.sub(b"", scrolled_detail)
+        scrolled_heading = next(
+            (
+                line
+                for line in scrolled_detail_plain.splitlines()
+                if b"INPUT \xc2\xb7 VERIFICATION REQUEST  2-" in line
+            ),
+            None,
+        )
+        if (
+            scrolled_heading is None
+            or b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (1 CALL)  2-"
+            not in scrolled_heading
+        ):
+            raise AssertionError(
+                "Lane detail did not scroll both evidence panes together: "
+                f"{scrolled_detail!r}"
+            )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"k",
+            b"INPUT \xc2\xb7 VERIFICATION REQUEST  1-",
+        )
+        stacked_detail = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=100,
+            needle=b"INPUT \xc2\xb7 VERIFICATION REQUEST",
+            controls=(FULL_REDRAW,),
+        )
+        stacked_detail_plain = CSI_RE.sub(b"", stacked_detail)
+        if not any(
+            b"INPUT \xc2\xb7 VERIFICATION REQUEST" in line
+            for line in stacked_detail_plain.splitlines()
+        ) or any(
+            b"INPUT \xc2\xb7 VERIFICATION REQUEST" in line
+            and b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE" in line
+            for line in stacked_detail_plain.splitlines()
+        ):
+            raise AssertionError(
+                "Narrow Lane detail did not fold the comparison into one column: "
+                f"{stacked_detail!r}"
+            )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b[6~",
+            b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (1 CALL)",
+        )
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=140,
+            needle=b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (1 CALL)",
+            controls=(FULL_REDRAW,),
+        )
         send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
         send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)
         # One k walks the band from Verifier to Librarian, whose run list is

@@ -561,7 +561,7 @@ let test_logs_is_an_activity_child () =
        (Masc_tui_keys.help_sections ()));
   Alcotest.(check bool) "and the ring stop is spelled Activity" true
     (List.exists
-       (fun (surface, label) ->
+       (fun ((surface : surface), label) ->
          surface = Acting && String.equal label "Activity")
        surface_ring);
   let acting_keys =
@@ -617,7 +617,7 @@ let test_help_documents_what_was_missing () =
   Alcotest.(check bool) "the palette has a row" true (List.mem ":" global);
   Alcotest.(check bool) "the cross-surface Keepers jump has a row" true
     (List.mem "2" global);
-  let logs = List.map fst (section "Logs") in
+  let logs = List.map fst (section "Activity / Logs") in
   Alcotest.(check bool) "Logs documents only what is bound" false
     (List.mem "g / G" logs)
 

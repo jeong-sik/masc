@@ -473,7 +473,7 @@ let test_retract_cascades_through_public_tool_and_journals_reason () =
     "missing fact is proven before domain effect"
     true
     (missing.Masc.Keeper_tool_execution.failure_effect_disposition
-     = Masc.Tool_result.Proven_pre_effect);
+     = Tool_result.Proven_pre_effect);
   let current =
     match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name with
     | Ok (Some snapshot) -> snapshot

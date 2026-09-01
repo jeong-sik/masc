@@ -48,7 +48,22 @@ class RawHttpResponse:
         self.headers = headers
 
 
-HttpFixture = HttpResponse | RawHttpResponse | Callable[[], HttpResponse]
+class RequestHttpResponse:
+    """A fixture whose JSON-RPC answer must echo fields from the POST body."""
+
+    def __init__(
+        self,
+        resolve: Callable[[bytes], HttpResponse | RawHttpResponse],
+    ) -> None:
+        self.resolve = resolve
+
+
+HttpFixture = (
+    HttpResponse
+    | RawHttpResponse
+    | RequestHttpResponse
+    | Callable[[], HttpResponse]
+)
 HttpFixtures = dict[str, HttpFixture]
 HttpRequests = list[tuple[str, bytes]]
 WorkspaceSetup = Callable[[str], None]
@@ -143,7 +158,7 @@ def test_http_endpoint(
         workspace_base_path = base_path
 
     class FixtureHandler(BaseHTTPRequestHandler):
-        def respond(self) -> None:
+        def respond(self, request_body: bytes | None = None) -> None:
             fixture = fixtures.get(
                 self.path,
                 (200, {})
@@ -152,7 +167,10 @@ def test_http_endpoint(
                 if self.path == "/health?full=1"
                 else (503, {"error": "fixture endpoint unavailable"}),
             )
-            resolved = fixture() if callable(fixture) else fixture
+            if isinstance(fixture, RequestHttpResponse):
+                resolved = fixture.resolve(request_body or b"")
+            else:
+                resolved = fixture() if callable(fixture) else fixture
             extra_headers: tuple[tuple[str, str], ...] = ()
             if isinstance(resolved, RawHttpResponse):
                 status = resolved.status
@@ -195,7 +213,7 @@ def test_http_endpoint(
         def do_POST(self) -> None:
             length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(length)
-            self.respond()
+            self.respond(body)
             if requests is not None:
                 requests.append((self.path, body))
 
@@ -9557,6 +9575,207 @@ def run_runtime_regression(executable: str) -> None:
     )
 
 
+def resources_mcp_fixture() -> HttpFixtures:
+    events = {"status": "ok", "count": 2}
+    for index in range(32):
+        events[f"event_{index:02d}"] = f"event value {index:02d}"
+    events["tail_marker"] = "visible after scrolling"
+    handbook_lines = "\n".join(
+        f"- handbook evidence line {index:02d}" for index in range(28)
+    )
+    handbook = (
+        "# Operator handbook\n\n"
+        "- Read the description before the payload.\n\n"
+        "```toml\nslots = 4\n```\n\n"
+        f"{handbook_lines}\n\n"
+        "```json\n{\n  \"nested\": true,\n  \"proof\": 42\n}\n```\n\n"
+        "markdown_tail_marker"
+    )
+
+    def answer(body: bytes) -> RawHttpResponse:
+        request = json.loads(body)
+        request_id = request.get("id")
+        method = request.get("method")
+        headers: tuple[tuple[str, str], ...] = ()
+        if method == "initialize":
+            result: object = {}
+            headers = (("Mcp-Session-Id", "resource_fixture_session"),)
+        elif method == "resources/list":
+            result = {
+                "resources": [
+                    {
+                        "uri": "masc://events.json?limit=50",
+                        "name": "Recent Events (JSON)",
+                        "title": "Event Log (JSON)",
+                        "description": "Recent event log snapshot as JSON",
+                        "mimeType": "application/json",
+                        "size": 321,
+                    },
+                    {
+                        "uri": "masc://operator-handbook.md",
+                        "name": "Operator Handbook",
+                        "title": "Operator Handbook",
+                        "description": "How an operator reads MCP resources",
+                        "mimeType": "text/markdown",
+                        "size": 96,
+                    },
+                ]
+            }
+        elif method == "resources/read":
+            uri = request.get("params", {}).get("uri")
+            if uri == "masc://events.json?limit=50":
+                result = {
+                    "contents": [
+                        {
+                            "uri": uri,
+                            "mimeType": "application/json",
+                            "text": json.dumps(events, separators=(",", ":")),
+                        }
+                    ]
+                }
+            elif uri == "masc://operator-handbook.md":
+                result = {
+                    "contents": [
+                        {
+                            "uri": uri,
+                            "mimeType": "text/markdown",
+                            "text": handbook,
+                        }
+                    ]
+                }
+            else:
+                result = {"contents": []}
+        else:
+            result = {}
+        payload = {"jsonrpc": "2.0", "id": request_id, "result": result}
+        return RawHttpResponse(
+            200,
+            json.dumps(payload).encode(),
+            content_type="application/json",
+            headers=headers,
+        )
+
+    fixtures = overview_event_http_fixtures()
+    fixtures["/mcp"] = RequestHttpResponse(answer)
+    return fixtures
+
+
+def resources_detail_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"Event Log (JSON)")
+        detail = send_and_wait(
+            process, master_fd, output, b"\r", b'"status"'
+        )
+        plain = CSI_RE.sub(b"", detail)
+        for needle in (
+            b"MCP resource",
+            b"read-only data exposed by this server",
+            b"masc://events.json?limit=50",
+            b"application/json",
+            b"321 bytes",
+            b'"status": "ok"',
+        ):
+            if needle not in plain:
+                raise AssertionError(
+                    f"Resources JSON detail omitted {needle!r}: {plain!r}"
+                )
+        lexed_key = re.compile(
+            rb"\x1b\[[0-9;]*m" + re.escape(b'"status"') + rb"\x1b\[0m"
+        )
+        if lexed_key.search(detail) is None:
+            raise AssertionError(
+                f"Resources JSON was pretty but not syntax-highlighted: {detail!r}"
+            )
+
+        narrow = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=80,
+            needle=b"MCP resource",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        narrow_plain = CSI_RE.sub(b"", narrow)
+        for needle in (b"Recent event log snapshot", b"application/json"):
+            if needle not in narrow_plain:
+                raise AssertionError(
+                    f"80-column Resources detail omitted {needle!r}: {narrow_plain!r}"
+                )
+
+        wide = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=140,
+            needle=b"masc://events.json?limit=50",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        if b'"status": "ok"' not in CSI_RE.sub(b"", wide):
+            raise AssertionError(f"140-column JSON detail lost its payload: {wide!r}")
+
+        markdown = send_and_wait(
+            process, master_fd, output, b"]", b"Operator handbook"
+        )
+        markdown_plain = CSI_RE.sub(b"", markdown)
+        for needle in (b"Operator handbook", b"slots = 4", b"96 bytes"):
+            if needle not in markdown_plain:
+                raise AssertionError(
+                    f"] did not open the next resource detail ({needle!r}): "
+                    f"{markdown_plain!r}"
+                )
+        markdown_tail = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"j" * 48,
+            b"markdown_tail_marker",
+        )
+        markdown_tail_plain = CSI_RE.sub(b"", markdown_tail)
+        for needle in (b'"nested": true', b"markdown_tail_marker"):
+            if needle not in markdown_tail_plain:
+                raise AssertionError(
+                    f"Markdown fenced-code scrolling omitted {needle!r}: "
+                    f"{markdown_tail_plain!r}"
+                )
+
+        previous = send_and_wait(
+            process, master_fd, output, b"[", b'"status"'
+        )
+        if b"Event Log (JSON)" not in CSI_RE.sub(b"", previous):
+            raise AssertionError(f"[ did not reopen the previous resource: {previous!r}")
+        tail = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"j" * 48,
+            b"visible after scrolling",
+        )
+        if b"tail_marker" not in CSI_RE.sub(b"", tail):
+            raise AssertionError(f"long JSON could not be scrolled to its tail: {tail!r}")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def run_resources_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="Resources metadata, pretty payload, and detail stepping",
+        interact=resources_detail_interaction(),
+        http_fixtures=resources_mcp_fixture(),
+    )
+
+
 def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
         run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
@@ -9586,10 +9805,14 @@ def main() -> None:
         run_runtime_regression(os.path.abspath(sys.argv[1]))
         print("tui Runtime regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "resources":
+        run_resources_regression(os.path.abspath(sys.argv[1]))
+        print("tui Resources regression: PASS")
+        return
     if len(sys.argv) != 2:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
-            "[cli-base-path|planning-review|repositories|project-changes|config|chat-clarity|runtime]"
+            "[cli-base-path|planning-review|repositories|project-changes|config|chat-clarity|runtime|resources]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

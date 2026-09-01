@@ -201,7 +201,7 @@ let test_tools_footer_carries_the_keeper_axis () =
 
 let test_resources_footer_steps_through_detail () =
   let tail =
-    "  h/l:pane  Ctrl-W:focus  J / K:scroll text  [ / ]:previous / next  Enter:read  Esc:list  r:reload  Tab:next"
+    "  h/l:pane  Ctrl-W:focus  J / K:scroll text  [ / ]:previous / next  Enter:read  Esc:list  r:reload  Tab:next  q:quit"
   in
   check str "list names adjacent detail navigation" ("j/k:move" ^ tail)
     (Masc_tui_keys.footer_hints_resources ~detail_focus:false);
@@ -285,6 +285,7 @@ let test_every_detail_surface_steps_through_its_list () =
     ; "Fusion", Fusion
     ; "Board", Board
     ; "Changes", Changes
+    ; "Resources", Resources
     ; "Keeper detail", Keepers Keeper_detail
     ]
 

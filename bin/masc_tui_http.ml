@@ -2021,7 +2021,7 @@ let call_mcp_resources_list ~(host : string) ~(port : int)
 (** One [resources/read] over the MCP endpoint, on an open session. *)
 let call_mcp_resources_read ~(host : string) ~(port : int)
     ~(session_id : string) ~(request_id : string) ~(uri : string) :
-    (string, string) result =
+    (Masc_tui_mcp.resource_content list, string) result =
   let headers =
     json_headers
       (("Accept", "application/json, text/event-stream")
@@ -2034,7 +2034,7 @@ let call_mcp_resources_read ~(host : string) ~(port : int)
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
       Error (Printf.sprintf "resources/read returned %d: %s" status body)
-  | Ok (_, body) -> Masc_tui_mcp.resource_text_of_body ~request_id body
+  | Ok (_, body) -> Masc_tui_mcp.resource_contents_of_body ~request_id body
 
 (** POST /api/v1/keepers/:name/github-login — the device-flow login as the
     server streams it: gh's own (redacted) output, then an error or the

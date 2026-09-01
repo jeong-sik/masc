@@ -1520,7 +1520,8 @@ type async_msg =
   (* (question, symbol, answer) — the note the pane shows names both. *)
   | Code_lsp_answered of
       string * string * (Masc.Tui_decode.lsp_answer, string) result
-  | Resource_read of string * (string list, string) result
+  | Resource_read of
+      string * (Masc_tui_mcp.resource_content list, string) result
   | Github_identity_view_loaded of string * (string list, string) result
   | Identity_providers_loaded of
       string * (Masc_tui_types.identity_provider list, string) result
@@ -2368,16 +2369,9 @@ let launch_resource_read state ~mailbox ~uri =
         in
         match session_result with
         | Error detail -> Error detail
-        | Ok session_id -> (
-            match
-              Masc_tui_http.call_mcp_resources_read ~host ~port ~session_id
-                ~request_id ~uri
-            with
-            | Ok text ->
-                Ok
-                  (String.split_on_char '\n' text
-                   |> List.map Masc.Tui_decode.sanitize_terminal_text)
-            | Error _ as error -> error)
+        | Ok session_id ->
+            Masc_tui_http.call_mcp_resources_read ~host ~port ~session_id
+              ~request_id ~uri
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -7899,8 +7893,30 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       | Some pending_uri when String.equal pending_uri uri ->
           state.resource_pending_uri <- None;
           (match result with
-           | Ok lines ->
-               state.resource_content <- Some (uri, lines);
+           | Ok contents ->
+               let sanitize_document text =
+                 String.split_on_char '\n' text
+                 |> List.map Masc.Tui_decode.sanitize_terminal_text
+                 |> String.concat "\n"
+               in
+               let contents =
+                 List.map
+                   (fun (content : Masc_tui_mcp.resource_content) ->
+                     { Masc_tui_mcp.rc_uri =
+                         Option.map Masc.Tui_decode.sanitize_terminal_text
+                           content.rc_uri
+                     ; rc_mime_type =
+                         Option.map Masc.Tui_decode.sanitize_terminal_text
+                           content.rc_mime_type
+                     ; rc_kind =
+                         (match content.rc_kind with
+                          | Masc_tui_mcp.Resource_text text ->
+                              Masc_tui_mcp.Resource_text (sanitize_document text)
+                          | Masc_tui_mcp.Resource_blob _ as blob -> blob)
+                     })
+                   contents
+               in
+               state.resource_content <- Some (uri, contents);
                state.resource_content_error <- None;
                state.resource_scroll <- 0
            | Error detail ->

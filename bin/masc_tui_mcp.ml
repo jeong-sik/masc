@@ -32,6 +32,7 @@ let string_field fields name =
 let int_field fields name =
   match List.assoc_opt name fields with
   | Some (`Int value) -> Some value
+  | Some (`Intlit value) -> int_of_string_opt value
   | Some _ | None -> None
 
 (* The response object, whichever framing carried it. An SSE body holds it
@@ -135,6 +136,16 @@ let resources_read_request_body ~request_id ~uri =
   plain_request_body ~request_id ~method_:"resources/read"
     ~params:(`Assoc [ ("uri", `String uri) ])
 
+type resource_content_kind =
+  | Resource_text of string
+  | Resource_blob of { base64_bytes : int }
+
+type resource_content = {
+  rc_uri : string option;
+  rc_mime_type : string option;
+  rc_kind : resource_content_kind;
+}
+
 (* Every data payload on the stream, in order. A Streamable-HTTP server may
    put notifications ahead of the response, and the colon-no-space spelling
    is legal SSE, so this reads more than [response_json]'s first line. *)
@@ -235,57 +246,38 @@ let resources_of_body ~request_id body =
            rows)
   | Some _ | None -> Error "resources/list answered with no resources"
 
-let resource_text_of_body ~request_id body =
+let resource_contents_of_body ~request_id body =
   let* result = result_of_body ~request_id ~label:"resources/read" body in
   match List.assoc_opt "contents" result with
   | Some (`List parts) ->
-      (* A blob-only part must not read as an empty text file: name it. *)
-      let rendered =
+      let contents =
         List.filter_map
           (fun part ->
             match part with
             | `Assoc fields -> (
                 match string_field fields "text" with
-                | Some text -> Some text
+                | Some text ->
+                    Some
+                      { rc_uri = string_field fields "uri"
+                      ; rc_mime_type = string_field fields "mimeType"
+                      ; rc_kind = Resource_text text
+                      }
                 | None -> (
                     match string_field fields "blob" with
                     | Some blob ->
                         Some
-                          (Printf.sprintf
-                             "(binary resource \xe2\x80\x94 %d base64 bytes, not rendered)"
-                             (String.length blob))
+                          { rc_uri = string_field fields "uri"
+                          ; rc_mime_type = string_field fields "mimeType"
+                          ; rc_kind =
+                              Resource_blob { base64_bytes = String.length blob }
+                          }
                     | None -> None))
             | _ -> None)
           parts
       in
-      Ok (String.concat "\n" rendered)
+      if contents = [] then Error "resources/read answered with no readable contents"
+      else Ok contents
   | Some _ | None -> Error "resources/read answered with no contents"
-
-let resource_body_for_markdown resource text =
-  let media_type =
-    resource.mime_type
-    |> Option.map (fun value ->
-           let media_type =
-             match String.split_on_char ';' value with
-             | first :: _ -> first
-             | [] -> value
-           in
-           media_type |> String.trim |> String.lowercase_ascii)
-  in
-  let is_json =
-    match media_type with
-    | Some "application/json" -> true
-    | Some value -> String.ends_with ~suffix:"+json" value
-    | None -> false
-  in
-  if is_json then
-    let pretty =
-      match Yojson.Safe.from_string text with
-      | json -> Yojson.Safe.pretty_to_string json
-      | exception Yojson.Json_error _ -> text
-    in
-    "```json\n" ^ pretty ^ "\n```"
-  else text
 
 (* Cancel is an exit-class action on the masc_transition contract: it wants
    [reason] and a non-empty [handoff_context.summary]. The one operator-typed

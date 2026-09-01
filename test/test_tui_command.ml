@@ -264,29 +264,6 @@ let test_resource_catalog_keeps_explanatory_metadata () =
       check (option string) "missing purpose stays absent" None minimal.description
   | Ok rows -> failf "expected two resources, got %d" (List.length rows)
 
-let test_json_resource_body_is_pretty_fenced () =
-  let resource : Mcp.resource =
-    { uri = "masc://status.json"
-    ; name = "status"
-    ; title = None
-    ; description = None
-    ; mime_type = Some "application/problem+json; charset=utf-8"
-    ; size = None
-    }
-  in
-  let rendered = Mcp.resource_body_for_markdown resource "{\"answer\":42,\"ok\":true}" in
-  let prefix = "```json\n" and suffix = "\n```" in
-  check bool "json fence opens" true (String.starts_with ~prefix rendered);
-  check bool "json fence closes" true (String.ends_with ~suffix rendered);
-  let body_length = String.length rendered - String.length prefix - String.length suffix in
-  let inside = String.sub rendered (String.length prefix) body_length in
-  check bool "pretty body remains the same JSON" true
-    (Yojson.Safe.from_string inside
-     = `Assoc [ ("answer", `Int 42); ("ok", `Bool true) ]);
-  let plain = { resource with mime_type = Some "text/markdown" } in
-  check string "markdown remains authored text" "# Status\nready"
-    (Mcp.resource_body_for_markdown plain "# Status\nready")
-
 let describe_hint = function
   | Command.No_command -> "none"
   | Command.Chosen entry -> "chosen:" ^ entry.Command.word
@@ -521,6 +498,27 @@ let test_cancel_arguments_carry_reason_as_summary () =
     (assoc "handoff_context"
     = Some (`Assoc [ ("summary", `String "wrong scope") ]))
 
+let test_resource_read_keeps_each_part_type () =
+  let body =
+    {|{"jsonrpc":"2.0","id":"resource-2","result":{"contents":[{"uri":"masc://events.json","mimeType":"application/json","text":"{\"ok\":true}"},{"uri":"masc://proof.bin","mimeType":"application/octet-stream","blob":"QUJDRA=="}]}}|}
+  in
+  match Mcp.resource_contents_of_body ~request_id:"resource-2" body with
+  | Error detail -> Alcotest.fail detail
+  | Ok
+      [ { rc_uri = Some "masc://events.json"
+        ; rc_mime_type = Some "application/json"
+        ; rc_kind = Mcp.Resource_text "{\"ok\":true}"
+        }
+      ; { rc_uri = Some "masc://proof.bin"
+        ; rc_mime_type = Some "application/octet-stream"
+        ; rc_kind = Mcp.Resource_blob { base64_bytes = 8 }
+        }
+      ] ->
+      ()
+  | Ok contents ->
+      Alcotest.failf "unexpected resource contents (%d parts)"
+        (List.length contents)
+
 let () =
   run "tui command"
     [ ( "composer"
@@ -582,7 +580,7 @@ let () =
     ; ( "resources"
       , [ test_case "catalog keeps explanatory metadata" `Quick
             test_resource_catalog_keeps_explanatory_metadata
-        ; test_case "JSON body is pretty fenced" `Quick
-            test_json_resource_body_is_pretty_fenced
+        ; test_case "read keeps each part type" `Quick
+            test_resource_read_keeps_each_part_type
         ] )
     ]

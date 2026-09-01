@@ -294,7 +294,8 @@ let for_surface = function
       ; b Meta "Tab" "next"
       ]
   | Resources ->
-      [ b Navigate "j/k" "move" ~help:"move the list; with the text focused, scroll it"
+      [ b Navigate "j/k" "move"
+          ~help:"move the list; with the text focused, scroll it"
       ; b Navigate "h/l" "pane" ~help:"focus the resource list or text"
       ; b Navigate "Ctrl-W" "focus" ~help:"switch between resource list and text"
       ; b Navigate "J / K" "scroll text"
@@ -304,6 +305,7 @@ let for_surface = function
       ; b Act "Esc" "list" ~help:"back to the list"
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"
+      ; b Meta "q" "quit"
       ]
   | Code ->
       (* A row surface: masc_tui_types gives it a searchable row list

@@ -62,9 +62,6 @@ type wire_error =
     [<root>] is the document itself. *)
 val wire_error_to_string : wire_error -> string
 
-val wire_path_to_string : wire_step list -> string
-val wire_reason_to_string : wire_reason -> string
-
 (** Reject at [path] relative to the decoder that calls it. *)
 val wire_fail : wire_step list -> wire_reason -> ('a, wire_error) result
 

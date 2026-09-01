@@ -6018,6 +6018,10 @@ def planning_review_hierarchy_interaction() -> Interaction:
                     f"Evaluator Verdicts did not explain itself ({needle!r}): "
                     f"{verdicts_plain!r}"
                 )
+        # The walk continues through the two children that keep their own
+        # headers, then wraps back round to Goals.
+        send_and_wait(process, master_fd, output, b"v", b"MASC Schedules")
+        send_and_wait(process, master_fd, output, b"v", b"MASC Fusion")
         goals_again = send_and_wait(
             process, master_fd, output, b"v", b"\xe2\x96\xb81 Goals"
         )
@@ -6025,8 +6029,8 @@ def planning_review_hierarchy_interaction() -> Interaction:
             raise AssertionError(
                 f"Goals did not retain the Task Review sibling: {goals_again!r}"
             )
-        # Task Review is a child, not the next top-level Tab destination.
-        send_and_wait(process, master_fd, output, b"\t", b"MASC Schedules")
+        # The children are [v] stops, not the next top-level Tab destination.
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Repositories")
         os.write(master_fd, b"q")
 
     return interact
@@ -8510,7 +8514,9 @@ def schedule_detail_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        listing = tab_until(process, master_fd, output, b"MASC Schedules")
+        listing = palette_go(
+            process, master_fd, output, b"go schedules", b"MASC Schedules"
+        )
         listing_plain = CSI_RE.sub(b"", listing)
         for needle in (
             b"wake:succeeded",

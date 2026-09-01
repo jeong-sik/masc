@@ -12441,7 +12441,8 @@ and is loaded on demand through keeper_skill.
                      state.fusion_detail_error <- None;
                      state.fusion_detail_generation <-
                        state.fusion_detail_generation + 1
-                 | Fusion_list -> state.view <- Overview)
+                 | Fusion_list ->
+                     goto_surface state ~mailbox:async_messages Planning)
             | Overview ->
                 (* Back out one level: an open task detail closes to the panel,
                    a focused task panel hands j/k back to the event log. *)
@@ -12455,19 +12456,19 @@ and is loaded on demand through keeper_skill.
                   state.schedule_detail_id <- None;
                   state.schedule_scroll <- 0
                 end
-                else state.view <- Overview
+                else goto_surface state ~mailbox:async_messages Planning
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then begin
                   state.verification_detail_request_id <- None;
                   state.verification_detail_scroll <- 0
                 end
-                else state.view <- Overview
+                else goto_surface state ~mailbox:async_messages Planning
             | Harness ->
                 if Option.is_some state.harness_detail then begin
                   state.harness_detail <- None;
                   state.harness_detail_scroll <- 0
                 end
-                else state.view <- Overview
+                else goto_surface state ~mailbox:async_messages Planning
             | Resources ->
                 if state.resource_focus = Right_pane then
                   state.resource_focus <- Left_pane
@@ -12534,8 +12535,10 @@ and is loaded on demand through keeper_skill.
                 else state.view <- Overview
             | Connectors ->
                 (* Back to the parent that opened it, not to Overview: the
-                   ring highlights Runtime while Connectors is up. *)
-                state.view <- Runtime
+                   ring highlights Runtime while Connectors is up. Loaded,
+                   so arriving by palette and leaving does not strand an
+                   unread Runtime until the next tick. *)
+                goto_surface state ~mailbox:async_messages Runtime
             | Memory | Config | Tools -> state.view <- Overview)
        | Some "left" ->
            (* Left is the non-destructive structural back key. Unlike Esc it
@@ -13762,17 +13765,21 @@ and is loaded on demand through keeper_skill.
                           ~keeper:(Some change.Masc.Tui_decode.fc_keeper) ~path)))
        | Some "v" | Some "V"
          when state.view = Planning || state.view = Verification
-              || state.view = Harness ->
-           (* Planning is the parent workspace; [v] walks its three child
-              modes without putting any of them back on the top-level ring.
-              The order is the life of one task verdict: the goals the work
-              hangs off, the queue waiting for a ruling, and the rulings the
-              judge recorded. *)
+              || state.view = Harness || state.view = Schedules
+              || state.view = Fusion ->
+           (* Planning is the parent workspace; [v] walks its child modes
+              without putting any of them back on the top-level ring. The
+              order is the life of one piece of work: the goals it hangs
+              off, the queue waiting for a ruling, the rulings the judge
+              recorded, the wakes that will start more of it, and the
+              fusion runs that judged it across models. *)
            goto_surface state ~mailbox:async_messages
              (match state.view with
               | Planning -> Verification
               | Verification -> Harness
-              | Harness | _ -> Planning)
+              | Harness -> Schedules
+              | Schedules -> Fusion
+              | Fusion | _ -> Planning)
        | Some "v" when state.view = Changes ->
            (* View the selected change on the Code surface. The clone-relative
               address resolves through the same ?keeper= axis the git-diff

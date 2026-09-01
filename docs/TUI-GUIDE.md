@@ -8,11 +8,12 @@ Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
 `bin/masc_tui_types.ml`: Overview, Acting, Keepers, Memory, Approvals,
-Board, Planning, Schedules, Fusion, Repos, Code, Runtime, Config, Resources,
-Tools, Logs. Verification, Harness, Changes, Connectors, and Lanes are not on
-the ring: Planning reaches the first two with `v`, the Keepers roster reaches
-Changes with `f`, and Runtime reaches Connectors with `c` and the standalone
-Lanes with `p` (its third stop).
+Board, Planning, Repos, Code, Runtime, Config, Resources, Tools, Logs.
+Seven more surfaces hang off parents instead of holding Tab stops:
+Planning's `v` walks Task Review, Evaluator Verdicts, Schedules, and Fusion;
+the Keepers roster reaches Changes with `f`; Runtime reaches Connectors with
+`c` and the standalone Lanes with `p` (its third stop). Every off-ring
+surface keeps a `go <name>` palette entry.
 
 ## Quick Start
 
@@ -728,8 +729,9 @@ authored Markdown.
 Planning is one workspace with three ordered child views: `1 Goals` groups the
 outcome and its linked Tasks; `2 Task Review` holds Task completion requests
 waiting for an operator decision; `3 Evaluator Verdicts` shows automatic Gate
-rulings recorded afterward. Press `v` to move through that order. Evaluator
-Verdicts is the old Harness ledger, not a Goal completion proof.
+rulings recorded afterward; `4 Schedules` and `5 Fusion` keep their own
+headers but continue the same walk. Press `v` to move through that order.
+Evaluator Verdicts is the old Harness ledger, not a Goal completion proof.
 
 ```
  MASC Planning  ▸1 Goals  2 Task Review·2  3 Evaluator Verdicts  10:44:57  [connected]
@@ -780,7 +782,9 @@ boundary.
 
 The scheduled-automation list: every wake the runtime has queued, active rows
 first by due time. This is the surface that answers "why is this keeper about
-to wake up".
+to wake up". It is the fourth stop of Planning's `v` walk rather than a Tab
+stop; `v` moves on to Fusion, `Esc` returns to Planning, and the palette
+keeps `go Schedules`.
 
 ```
  MASC Schedules  [me]  10:44:57  [connected]
@@ -831,7 +835,9 @@ to the list; `j`/`k` scroll by a row and `PgUp`/`PgDn` by a page.
 
 ### Fusion
 
-The retained Fusion run registry is the list. While a run is active, `STATE`
+The retained Fusion run registry is the list. It is the fifth stop of
+Planning's `v` walk rather than a Tab stop; `v` wraps back to Goals, `Esc`
+returns to Planning, and the palette keeps `go Fusion`. While a run is active, `STATE`
 shows the exact process-local stage: `accepted`, `panel(N)`, `judge(A/F)`,
 `computed(A/F)`, or `recording(A/F)`. A successful terminal row also carries a
 bounded decision and resolved-answer preview when the current producer wrote
@@ -1207,7 +1213,7 @@ Per surface:
 Tab cycles the surfaces:
 
   Overview -> Acting -> Keepers -> Memory -> Approvals -> Board
-           -> Planning -> Schedules -> Fusion -> Repos -> Code
+           -> Planning -> Repos -> Code
            -> Runtime -> Config -> Resources -> Tools -> Logs -> Overview
 
 Within a surface:
@@ -1220,6 +1226,12 @@ Within a surface:
   Board     --Right/Enter-->  Board read
   Planning  --Right/Enter-->  Goal detail
   Fusion    --Right/Enter-->  Run evidence detail
+
+Off-ring children:
+
+  Planning  --v-->  Task Review --v--> Verdicts --v--> Schedules --v--> Fusion
+  Keepers   --f-->  Changes
+  Runtime   --c-->  Connectors        Runtime --p--> ... --p--> Lanes
 ```
 
 `2` reaches Keepers after the active field or panel has declined it.

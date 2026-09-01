@@ -1199,8 +1199,6 @@ let surface_ring : (surface * string) list =
     (Approvals, "Approvals");
     (Board, "Board");
     (Planning, "Planning");
-    (Schedules, "Schedules");
-    (Fusion, "Fusion");
     (Repositories, "Repos");
     (Code, "Code");
     (Runtime, "Runtime");
@@ -1221,7 +1219,7 @@ let surface_ring_index (view : surface) =
   let family =
     match view with
     | Keepers _ -> Keepers Keeper_list
-    | Verification | Harness -> Planning
+    | Verification | Harness | Schedules | Fusion -> Planning
     | Changes -> Keepers Keeper_list
     | Connectors | Lanes -> Runtime
     | v -> v
@@ -3502,6 +3500,8 @@ let palette_entries (state : state) =
   @ [ "go Task Review", Palette_goto Verification ]
   @ [ "go Connectors", Palette_goto Connectors ]
   @ [ "go Lanes", Palette_goto Lanes ]
+  @ [ "go Schedules", Palette_goto Schedules ]
+  @ [ "go Fusion", Palette_goto Fusion ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring

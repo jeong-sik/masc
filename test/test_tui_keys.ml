@@ -398,6 +398,31 @@ let test_lanes_is_a_runtime_child () =
   Alcotest.(check bool) "Lanes documents the [p] way back" true
     (List.mem "p" lanes_keys)
 
+(* Schedules and Fusion are the fourth and fifth [v] stops of the Planning
+   walk: wakes start more work, fusion runs judge it, and both were peers of
+   Planning on the ring with nothing saying they were the same subject. *)
+let test_schedules_is_a_planning_child () =
+  Alcotest.(check bool) "Schedules is not a top-level ring entry" false
+    (List.exists (fun (surface, _) -> surface = Schedules) surface_ring);
+  Alcotest.(check int) "Schedules highlights Planning"
+    (surface_ring_index Planning)
+    (surface_ring_index Schedules);
+  Alcotest.(check bool) "and the help sheet files it under Planning" true
+    (List.exists
+       (fun (label, _) -> String.equal label "Planning / Schedules")
+       (Masc_tui_keys.help_sections ()))
+
+let test_fusion_is_a_planning_child () =
+  Alcotest.(check bool) "Fusion is not a top-level ring entry" false
+    (List.exists (fun (surface, _) -> surface = Fusion) surface_ring);
+  Alcotest.(check int) "Fusion highlights Planning"
+    (surface_ring_index Planning)
+    (surface_ring_index Fusion);
+  Alcotest.(check bool) "and the help sheet files it under Planning" true
+    (List.exists
+       (fun (label, _) -> String.equal label "Planning / Fusion")
+       (Masc_tui_keys.help_sections ()))
+
 let test_system_logs_owns_only_its_real_filter_keys () =
   (* g/G/f still belong to Acting. Logs owns the server level floor, direct
      verbose toggle, and category cycle under l/v/c. *)
@@ -782,6 +807,10 @@ let () =
             test_connectors_is_a_runtime_child
         ; Alcotest.test_case "Lanes is a Runtime child" `Quick
             test_lanes_is_a_runtime_child
+        ; Alcotest.test_case "Schedules is a Planning child" `Quick
+            test_schedules_is_a_planning_child
+        ; Alcotest.test_case "Fusion is a Planning child" `Quick
+            test_fusion_is_a_planning_child
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick

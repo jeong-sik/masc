@@ -170,7 +170,8 @@ let for_surface = function
   | Planning ->
       [ b Navigate "j/k" "move"
       ; b Navigate "v" "next Planning tab"
-          ~help:"1 Goals \xe2\x86\x92 2 Task Review \xe2\x86\x92 3 Evaluator Verdicts"
+          ~help:"1 Goals \xe2\x86\x92 2 Task Review \xe2\x86\x92 3 Evaluator \
+                 Verdicts \xe2\x86\x92 4 Schedules \xe2\x86\x92 5 Fusion"
       ; b Act "Right / Enter" "detail"
       ; b Act "Left / Esc" "back"
       ; b Navigate "f" "filter" ~help:"cycle all / active / completed / dropped"
@@ -185,6 +186,7 @@ let for_surface = function
       @ listing_meta
   | Schedules ->
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the payload"
+      ; b Navigate "v" "next Planning tab" ~help:"on to 5 Fusion"
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Right / Enter" "details" ~help:"open schedule details"
       ; b Act "Left / Esc" "back" ~help:"back to the schedule list"
@@ -211,7 +213,7 @@ let for_surface = function
       @ listing_meta
   | Harness ->
       [ b Navigate "j/k" "move" ~help:"move; in a verdict, scroll"
-      ; b Navigate "v" "next Planning tab" ~help:"back round to 1 Goals"
+      ; b Navigate "v" "next Planning tab" ~help:"on to 4 Schedules"
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Right / Enter" "verdict" ~help:"open the full evaluator verdict"
       ; b Act "Left / Esc" "back" ~help:"back to the verdict list"
@@ -227,12 +229,13 @@ let for_surface = function
          footer is [footer_hints_fusion_detail], which also appends the live
          scroll position this static table cannot know. *)
       [ b Navigate "j/k" "move"
+      ; b Navigate "v" "next Planning tab" ~help:"back round to 1 Goals"
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Enter" "detail" ~help:"Right or Enter opens detail"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
-      ; b Act "Esc" "back" ~help:"leave detail, or return to Overview"
+      ; b Act "Esc" "back" ~help:"leave detail, or return to Planning"
       ]
       @ listing_meta
   | Memory ->
@@ -491,8 +494,8 @@ let help_surfaces : (string * surface) list =
   ; "Planning / Goals", Planning
   ; "Planning / Task Review", Verification
   ; "Planning / Verdicts", Harness
-  ; "Schedules", Schedules
-  ; "Fusion", Fusion
+  ; "Planning / Schedules", Schedules
+  ; "Planning / Fusion", Fusion
   ; "Memory", Memory
   ; "Repos", Repositories
   ; "Changes", Changes

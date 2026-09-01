@@ -3054,11 +3054,15 @@ let planning_workspace_title (state : state) ~(tab : planning_tab) =
       (Theme.info ()) ^ Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
     else Ansi.dim ^ label ^ Ansi.reset
   in
-  Printf.sprintf "%s  %s  %s  %s"
+  Printf.sprintf "%s  %s  %s  %s  %s  %s"
     (screen_title " MASC Planning")
     (draw ~active:(tab = Planning_goals) "1 Goals")
     (draw ~active:(tab = Planning_task_review) ("2 Task Review" ^ review_count))
     (draw ~active:(tab = Planning_verdicts) "3 Evaluator Verdicts")
+    (* The next two [v] stops keep their own headers; the strip still names
+       them so the walk is visible from its first three stops. *)
+    (draw ~active:false "4 Schedules")
+    (draw ~active:false "5 Fusion")
 
 (* Where the goal stands with the completion judge, in one column. The phase
    reads [executing] both for a goal nobody asked about and for one the judge

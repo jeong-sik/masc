@@ -20,6 +20,18 @@ let reserved_command = "masc"
 
 let ( let* ) = Result.bind
 
+type runtime =
+  { descriptor_for_internal : string -> Keeper_tool_descriptor.t option
+  ; call :
+      descriptor:Keeper_tool_descriptor.t ->
+      args:Yojson.Safe.t ->
+      Keeper_tool_execution.t option
+  }
+
+let create_runtime ~descriptor_for_internal ~call =
+  { descriptor_for_internal; call }
+;;
+
 (* {1 Declaration table} *)
 
 (* One parse of the embedded tool tree, on first ask — the files are
@@ -99,12 +111,12 @@ let args_json_of_words ~(descriptor : Keeper_tool_descriptor.t) words =
 (* What a tool's answer looks like as a process: the disposition decides
    the exit status, the raw output rides the stream its side says. *)
 let caller
-      ~(context : Keeper_tool_runtime.context)
+      ~(runtime : runtime)
       ~(descriptor : Keeper_tool_descriptor.t)
       (args_json : Yojson.Safe.t)
   : Sandbox_target.runner =
  fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ->
-  match Keeper_tool_runtime.handle context ~descriptor ~args:args_json with
+  match runtime.call ~descriptor ~args:args_json with
   | None ->
     ( Unix.WEXITED 1
     , ""
@@ -157,16 +169,16 @@ let split_words (words : string list) : (string * string list) option =
   try_path paths
 
 let rec rewrite
-      ~(context : Keeper_tool_runtime.context)
+      ~(runtime : runtime)
       (ir : Shell_ir.t)
   : (Shell_ir.t, string) result =
   match ir with
   | Shell_ir.Sequence { head; tail } ->
-    let* head = rewrite ~context head in
+    let* head = rewrite ~runtime head in
     let rec loop acc = function
       | [] -> Ok (List.rev acc)
       | (connector, part) :: rest ->
-        let* part = rewrite ~context part in
+        let* part = rewrite ~runtime part in
         loop ((connector, part) :: acc) rest
     in
     let* tail = loop [] tail in
@@ -177,7 +189,7 @@ let rec rewrite
        form — before the pipeline semantics were settled.  The recursion
        below reaches every stage, so the refusal comes from the masc
        stage itself, not from a shadowing predicate. *)
-    let rewrites = List.map (rewrite ~context) stages in
+    let rewrites = List.map (rewrite ~runtime) stages in
     let rec collect acc = function
       | [] -> Ok (Shell_ir.Pipeline (List.rev acc))
       | stage :: rest -> (
@@ -205,7 +217,7 @@ let rec rewrite
                "no tool on this turn's shell surface answers %s; each tool declares its own path"
                (String.concat " " words))
         | Some (tool_name, argument_words) -> (
-          match Keeper_tool_runtime.descriptor_for_internal tool_name with
+          match runtime.descriptor_for_internal tool_name with
           | None ->
             Error
               (Printf.sprintf
@@ -213,7 +225,7 @@ let rec rewrite
                  tool_name)
           | Some descriptor ->
             let* args_json = args_json_of_words ~descriptor argument_words in
-            let tool_caller = caller ~context ~descriptor args_json in
+            let tool_caller = caller ~runtime ~descriptor args_json in
             Ok
               (Shell_ir.Simple
                  { simple with

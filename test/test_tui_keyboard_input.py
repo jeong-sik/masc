@@ -8174,9 +8174,18 @@ def runtime_surface_interaction(
         completed = False
         try:
             # Connectors left the Tab ring (it hangs off Runtime under [c]),
-            # so the ring predecessor of Runtime is now Code.
+            # so the ring predecessor of Runtime is now Code. Each hop is
+            # needle-verified so an async frame between presses cannot lap
+            # the walk; the last Tab stays bare because the probe fixture
+            # must observe its request after [start].
             tab_until(process, master_fd, output, b"MASC Repositories")
-            os.write(master_fd, b"\t")  # Repos -> Code
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"\t",  # Repos -> Code
+                b"(Enter opens the selected file)",
+            )
             read_available(master_fd, output)
             start = len(output)
             os.write(master_fd, b"\t")  # Code -> Runtime

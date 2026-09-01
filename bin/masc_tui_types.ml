@@ -1208,8 +1208,6 @@ let surface_ring : (surface * string) list =
     (Repositories, "Workspace");
     (Runtime, "Runtime");
     (Config, "Config");
-    (Resources, "Resources");
-    (Tools, "Tools");
     (System_logs, "Logs");
   ]
 
@@ -1218,7 +1216,10 @@ let surface_ring : (surface * string) list =
    collapses onto Keepers -- its rows are one keeper's file writes, chosen by
    the roster cursor, so it was never a destination of its own. Channels,
    Automation, and Runs are selected-Keeper detail tabs; standalone Lanes
-   remain Runtime observation, and Code remains a Workspace child. *)
+   remain Runtime observation, and Code remains a Workspace child.
+   Resources and Tools collapse onto Config: an MCP resource catalog and
+   the tool catalog with its receipts and usage are both answers to "what
+   is registered here", read rarely and never raced against. *)
 let surface_ring_index (view : surface) =
   let family =
     match view with
@@ -1227,6 +1228,7 @@ let surface_ring_index (view : surface) =
     | Changes | Connectors | Schedules | Fusion -> Keepers Keeper_list
     | Lanes -> Runtime
     | Code -> Repositories
+    | Resources | Tools -> Config
     | v -> v
   in
   let rec find i = function
@@ -3633,6 +3635,8 @@ let palette_entries (state : state) =
   @ [ "go Schedules", Palette_goto Schedules ]
   @ [ "go Fusion", Palette_goto Fusion ]
   @ [ "go Code", Palette_goto Code ]
+  @ [ "go Resources", Palette_goto Resources ]
+  @ [ "go Tools", Palette_goto Tools ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring

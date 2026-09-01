@@ -229,7 +229,8 @@ highlighted in a strip on the top row. Child surfaces open from their parent
 | Board | Posts from people, agents, automation, and the system |
 | Planning (`v` Task Review, Verdicts, Schedules, Fusion) | Plans and goals, completion reviews, evaluator verdicts, scheduled work, and panel/judge runs |
 | Workspace (`Enter` Code) | Registered repositories and, through a row's `Enter`, the Code file browser over the selected checkout |
-| Memory, Tools, Resources, Config, Logs | Memory OS health, the tool tree, MCP resources, `runtime.toml`, and the runtime log |
+| Config (`s` Resources, `t` Tools) | `runtime.toml`, typed params, prompts, and themes, plus the MCP resource catalog and the tool tree off the ring |
+| Memory, Logs | Memory OS health with the per-Keeper fact browser, and the runtime log |
 
 Above the input row, one line on every surface names the next scheduled wake
 and whichever Keeper is stopped waiting on a person. It is absent when there is

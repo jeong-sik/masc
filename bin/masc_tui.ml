@@ -11738,6 +11738,15 @@ and is loaded on demand through keeper_skill.
                (Masc_tui_types.memory_fact_categories state);
            state.memory_facts_cursor <- 0;
            state.memory_facts_scroll <- 0
+       (* Resources and Tools hang off Config the way Connectors hangs off
+          Runtime: not on the Tab ring, one key from their parent. Guarded
+          off while a param edit field is open, which owns the letters. *)
+       | Some "s"
+         when state.view = Config && state.runtime_param_edit = None ->
+           goto_surface state ~mailbox:async_messages Resources
+       | Some "t"
+         when state.view = Config && state.runtime_param_edit = None ->
+           goto_surface state ~mailbox:async_messages Tools
        | Some (("n" | "N") as direction)
          when state.search_last <> ""
               && Option.is_some (surface_row_texts state state.view) ->
@@ -12559,7 +12568,10 @@ and is loaded on demand through keeper_skill.
             | Resources ->
                 if state.resource_focus = Right_pane then
                   state.resource_focus <- Left_pane
-                else state.view <- Overview
+                else
+                  (* Off-ring child: the way out of the list is the ring
+                     parent, loaded, same as Connectors and Code. *)
+                  goto_surface state ~mailbox:async_messages Config
             | Lanes ->
                 state.lanes_action_error <- None;
                 (match state.lanes_mode with
@@ -12634,7 +12646,10 @@ and is loaded on demand through keeper_skill.
                   state.memory_facts_category <- None
                 end
                 else state.view <- Overview
-            | Config | Tools -> state.view <- Overview)
+            | Tools ->
+                (* Off-ring child: back to the parent that opened it. *)
+                goto_surface state ~mailbox:async_messages Config
+            | Config -> state.view <- Overview)
        | Some "left" ->
            (* Left is the non-destructive structural back key. Unlike Esc it
               never interrupts a live chat turn; it only closes a detail the

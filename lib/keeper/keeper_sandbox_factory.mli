@@ -6,7 +6,7 @@
     invariant, evaluates [in_playground] from the call-site [cwd] only for
     runtime workspace reuse, and memoizes one runtime per
     [(in_playground, network_mode)]
-    so a Docker container is created at most once per compatible dispatch
+    so a guest runtime is created at most once per compatible dispatch
     context within a turn.  The runtime can still execute from different cwd
     values via [Keeper_turn_sandbox_runtime.container_cwd_of_host].
 
@@ -22,12 +22,25 @@
     [keeper_sandbox_docker] only consumes [Keeper_turn_sandbox_runtime.t]
     as a parameter and never constructs one itself. *)
 
+type guest_profile =
+  | Docker_guest
+  | Micro_vm_guest
+
+type runtime_binding =
+  { runtime : Keeper_turn_sandbox_runtime.t
+  ; guest_profile : guest_profile
+  ; image : string
+  }
+      (** The immutable execution contract frozen with the runtime. Consumers
+          use these fields instead of pairing the runtime with another meta
+          snapshot. *)
+
 type resolve_result =
-  | Runtime of Keeper_turn_sandbox_runtime.t
+  | Runtime of runtime_binding
   | No_factory
   | Remote_ssh_profile
       (** The effective profile is [Remote_ssh]. A constructor of its own so
-          no Docker-shaped consumer reads it as a runtime it can use: they
+          no guest consumer reads it as a runtime it can use: they
           fail closed on it, and SSH dispatch has its own path. *)
 
 type t
@@ -45,16 +58,16 @@ val resolve :
   t ->
   cwd:string ->
   resolve_result
-(** Returns [Runtime runtime] when {!Keeper_sandbox_runner.effective_sandbox_profile}
-    yields [Docker] for the construction meta. [in_playground] is
+(** Returns [Runtime binding] when {!Keeper_sandbox_runner.effective_sandbox_profile}
+    yields a guest profile for the construction meta. [in_playground] is
     derived from [cwd] vs the keeper's playground root for runtime workspace
     reuse only. Memoizes per [(in_playground, network_mode, host_root, image)]
-    so subsequent compatible calls reuse the same container without crossing
+    so subsequent compatible calls reuse the same guest without crossing
     sandbox-profile or image drift. Registry changes are observed by the next
     turn's factory, never midway through the current turn.
 
     [Remote_ssh_profile] is returned when the effective profile is
-    [Remote_ssh] (there is no Docker runtime to resolve for it; consumers fail
+    [Remote_ssh] (there is no guest runtime to resolve for it; consumers fail
     closed). [No_factory] is only produced by {!resolve_opt}. *)
 
 val resolve_opt :

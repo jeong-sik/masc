@@ -9,6 +9,7 @@ type target_error =
 type guest_dispatch =
   { target : Masc_exec.Sandbox_target.t
   ; runtime : Keeper_turn_sandbox_runtime.t
+  ; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile
   }
 
 type ssh_dispatch = { target : Masc_exec.Sandbox_target.t }
@@ -19,30 +20,23 @@ val target_error
   -> string
   -> target_error
 
-(** Build the Shell IR target for a Docker or Apple Container guest. Docker's
-    image-store preflight runs only for Docker; the microVM runtime owns its
-    Apple Container image check. *)
+val profile_contract_mismatch
+  :  expected:Keeper_types_profile_sandbox.sandbox_profile
+  -> actual:Keeper_types_profile_sandbox.sandbox_profile
+  -> target_error
+(** A typed pre-effect rejection for a caller meta that disagrees with the
+    turn factory. *)
+
+(** Build the Shell IR target from the factory's immutable runtime binding.
+    Docker and Apple Container runtimes each own their creation-time image
+    check. A caller meta that disagrees with the factory fails before dispatch. *)
 val guest_target
-  :  turn_sandbox_factory:Keeper_sandbox_factory.t option
+  :  binding:Keeper_sandbox_factory.runtime_binding
   -> meta:Keeper_meta_contract.keeper_meta
   -> cwd:string
   -> ?timeout_sec:float
   -> unit
   -> (guest_dispatch, target_error) result
-
-module For_testing : sig
-  val guest_target_with_docker_image_preflight
-    :  docker_image_preflight:
-         (image:string
-          -> timeout_sec:float option
-          -> (unit, Keeper_sandbox_runtime.classified_error) result)
-    -> turn_sandbox_factory:Keeper_sandbox_factory.t option
-    -> meta:Keeper_meta_contract.keeper_meta
-    -> cwd:string
-    -> ?timeout_sec:float
-    -> unit
-    -> (guest_dispatch, target_error) result
-end
 
 val ssh_target
   :  base_path:string

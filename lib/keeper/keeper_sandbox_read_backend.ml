@@ -197,9 +197,12 @@ let run_command_with_status ?turn_sandbox_factory
     Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd
   in
   let image =
-    match meta.sandbox_image with
-    | Some img when String.trim img <> "" -> img
-    | _ -> Env_config_sandbox.Runtime.docker_image ()
+    match resolve_result with
+    | Runtime binding -> binding.image
+    | No_factory | Remote_ssh_profile ->
+      (match meta.sandbox_image with
+       | Some img when String.trim img <> "" -> img
+       | _ -> Env_config_sandbox.Runtime.docker_image ())
   in
   let no_runtime =
     match resolve_result with
@@ -222,7 +225,7 @@ let run_command_with_status ?turn_sandbox_factory
       match command_argv with prog :: _ -> prog | [] -> "?"
     in
     match resolve_result with
-    | Runtime runtime ->
+    | Runtime { runtime; _ } ->
       Keeper_turn_sandbox_runtime.run_command_with_status
         ~ok_exit_codes runtime ~timeout_sec ~cwd ~command_argv ~max_bytes ()
     | Remote_ssh_profile ->

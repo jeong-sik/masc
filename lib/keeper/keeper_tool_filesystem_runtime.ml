@@ -1365,7 +1365,7 @@ let check_invariant_sandbox_isolation
         ([Remote_ssh_profile] included: its calls are scoped on the remote
         side, not against a local guest root). *)
      | No_factory | Remote_ssh_profile -> Ok ()
-     | Runtime runtime ->
+     | Runtime { runtime; _ } ->
        let host_root = Keeper_turn_sandbox_runtime.host_root runtime in
        Keeper_invariant.sandbox_isolation
          ~sandbox_roots:[ host_root ]

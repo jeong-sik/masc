@@ -1,5 +1,15 @@
+type guest_profile =
+  | Docker_guest
+  | Micro_vm_guest
+
+type runtime_binding =
+  { runtime : Keeper_turn_sandbox_runtime.t
+  ; guest_profile : guest_profile
+  ; image : string
+  }
+
 type resolve_result =
-  | Runtime of Keeper_turn_sandbox_runtime.t
+  | Runtime of runtime_binding
   | No_factory
   | Remote_ssh_profile
 
@@ -55,16 +65,7 @@ let resolve (t : t) ~cwd =
     let actual_network =
       Option.value t.default_network_override ~default:effective_network
     in
-    match effective_profile with
-    (* Callers must not read this as "host execution is fine". Docker-shaped
-       consumers fail closed on this constructor; SSH dispatch has its own
-       path. *)
-    | Keeper_types_profile_sandbox.Remote_ssh -> Remote_ssh_profile
-    (* Both guest profiles share the runtime value; the runtime itself
-       branches on [meta.sandbox_profile] for every CLI it builds (start,
-       exec, inspect, stop), so a VM keeper's commands run under Apple's
-       [container] and are never handed to docker (#31225, #31178). *)
-    | Keeper_types_profile_sandbox.Micro_vm | Keeper_types_profile_sandbox.Docker ->
+    let resolve_guest guest_profile =
       let host_root =
         Keeper_sandbox.host_root_abs_of_meta ~config:t.config meta
         |> normalize
@@ -76,18 +77,33 @@ let resolve (t : t) ~cwd =
         , host_root
         , image )
       in
+      let bind runtime =
+        Runtime { runtime; guest_profile; image }
+      in
       match Hashtbl.find_opt t.cache key with
-      | Some r -> Runtime r
+      | Some runtime -> bind runtime
       | None ->
-        let r =
+        let runtime =
           Keeper_turn_sandbox_runtime.create
             ~config:t.config
             ~meta
             ~network_mode:actual_network
             ()
         in
-        Hashtbl.add t.cache key r;
-        Runtime r)
+        Hashtbl.add t.cache key runtime;
+        bind runtime
+    in
+    match effective_profile with
+    (* Callers must not read this as "host execution is fine". Guest
+       consumers fail closed on this constructor; SSH dispatch has its own
+       path. *)
+    | Keeper_types_profile_sandbox.Remote_ssh -> Remote_ssh_profile
+    (* Both guest profiles share the runtime value; the runtime itself
+       branches on [meta.sandbox_profile] for every CLI it builds (start,
+       exec, inspect, stop), so a VM keeper's commands run under Apple's
+       [container] and are never handed to docker (#31225, #31178). *)
+    | Keeper_types_profile_sandbox.Micro_vm -> resolve_guest Micro_vm_guest
+    | Keeper_types_profile_sandbox.Docker -> resolve_guest Docker_guest)
 
 let resolve_opt t_opt ~cwd =
   match t_opt with

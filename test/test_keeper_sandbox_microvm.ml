@@ -237,36 +237,35 @@ let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
        factory
        ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta)
    with
-   | Runtime _ ->
-     (* The runtime carries the profile; every CLI it builds branches on
-        it, which the argv pins below and the docker-entrypoint refusals
-        keep honest. *)
-     ()
+   | Runtime { guest_profile = Micro_vm_guest; _ } -> ()
+   | Runtime { guest_profile = Docker_guest; _ } ->
+     Alcotest.fail "microvm factory froze a Docker contract"
    | No_factory ->
      Alcotest.fail "expected a runtime for Micro_vm"
    | Remote_ssh_profile ->
      Alcotest.fail "microvm meta must never resolve to Remote_ssh_profile");
   Masc.Keeper_sandbox_factory.cleanup factory
 
-let test_guest_target_runs_docker_preflight_only_for_docker () =
+let test_guest_target_follows_the_factory_contract () =
   with_eio_fs @@ fun () ->
-  let base = temp_dir "guest_target_preflight_" in
+  let base = temp_dir "guest_target_contract_" in
   let config = Masc.Workspace.default_config base in
-  let preflight_calls = ref 0 in
-  let docker_image_preflight ~image:_ ~timeout_sec:_ =
-    incr preflight_calls;
-    Ok ()
-  in
   let resolve (meta : Masc.Keeper_meta_contract.keeper_meta) =
     let factory = Masc.Keeper_sandbox_factory.create ~config ~meta () in
     let result =
-      Masc.Keeper_sandbox_shell_ir_target.For_testing
-      .guest_target_with_docker_image_preflight
-        ~docker_image_preflight
-        ~turn_sandbox_factory:(Some factory)
-        ~meta
-        ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta)
-        ()
+      match
+        Masc.Keeper_sandbox_factory.resolve
+          factory
+          ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta)
+      with
+      | Runtime binding ->
+        Masc.Keeper_sandbox_shell_ir_target.guest_target
+          ~binding
+          ~meta
+          ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta)
+          ()
+      | No_factory -> Alcotest.fail "expected a guest runtime"
+      | Remote_ssh_profile -> Alcotest.fail "expected a guest, not remote SSH"
     in
     Masc.Keeper_sandbox_factory.cleanup factory;
     match result, meta.sandbox_profile with
@@ -275,16 +274,41 @@ let test_guest_target_runs_docker_preflight_only_for_docker () =
     | Ok _, _ -> Alcotest.fail "guest target kind differs from the keeper profile"
     | Error error, _ -> Alcotest.fail error.message
   in
-  resolve (microvm_meta ~name:"microvm-preflight-probe");
-  Alcotest.(check int)
-    "microvm does not inspect Docker's image store"
-    0
-    !preflight_calls;
-  resolve (docker_meta ~name:"docker-preflight-probe");
-  Alcotest.(check int)
-    "docker still performs its image preflight"
-    1
-    !preflight_calls
+  resolve (microvm_meta ~name:"microvm-contract-probe");
+  resolve (docker_meta ~name:"docker-contract-probe")
+
+let test_guest_target_refuses_a_profile_mismatch () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir "guest_target_mismatch_" in
+  let config = Masc.Workspace.default_config base in
+  let docker = docker_meta ~name:"contract-mismatch" in
+  let microvm = { docker with sandbox_profile = Profile.Micro_vm } in
+  let factory = Masc.Keeper_sandbox_factory.create ~config ~meta:docker () in
+  let result =
+    match
+      Masc.Keeper_sandbox_factory.resolve
+        factory
+        ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config microvm)
+    with
+    | Runtime binding ->
+      Masc.Keeper_sandbox_shell_ir_target.guest_target
+        ~binding
+        ~meta:microvm
+        ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config microvm)
+        ()
+    | No_factory -> Alcotest.fail "expected a guest runtime"
+    | Remote_ssh_profile -> Alcotest.fail "expected a guest, not remote SSH"
+  in
+  Masc.Keeper_sandbox_factory.cleanup factory;
+  match result with
+  | Ok _ -> Alcotest.fail "a mismatched factory and caller profile reached dispatch"
+  | Error error ->
+    Alcotest.(check (option string))
+      "typed mismatch code"
+      (Some "sandbox_profile_contract_mismatch")
+      (match List.assoc_opt "code" error.fields with
+       | Some (`String code) -> Some code
+       | Some _ | None -> None)
 
 let test_turn_start_argv_shape () =
   let a =
@@ -1312,8 +1336,10 @@ let () =
     ; ( "turn"
       , [ Alcotest.test_case "factory resolves to a profile-carrying runtime" `Quick
             test_factory_resolves_microvm_to_a_profile_carrying_runtime
-        ; Alcotest.test_case "guest target and Docker preflight follow the profile" `Quick
-            test_guest_target_runs_docker_preflight_only_for_docker
+        ; Alcotest.test_case "guest target follows the factory contract" `Quick
+            test_guest_target_follows_the_factory_contract
+        ; Alcotest.test_case "guest target refuses a profile mismatch" `Quick
+            test_guest_target_refuses_a_profile_mismatch
         ; Alcotest.test_case "turn start argv shape" `Quick
             test_turn_start_argv_shape
         ; Alcotest.test_case "inspect state parser" `Quick

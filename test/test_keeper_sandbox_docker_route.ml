@@ -326,7 +326,7 @@ let test_turn_sandbox_factory_ignores_mid_turn_registry_profile_drift () =
   @@ fun () ->
   let docker_playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   match Keeper_sandbox_factory.resolve factory ~cwd:docker_playground with
-  | Runtime runtime ->
+  | Runtime { runtime; _ } ->
     Alcotest.(check string)
       "runtime host root stays on the turn's Docker profile"
       (Keeper_alerting_path.normalize_path_for_check_stripped docker_playground)
@@ -1521,7 +1521,7 @@ let test_exec_argv_is_the_container_argv () =
   match Keeper_sandbox_factory.resolve_opt (Some factory) ~cwd:playground with
   | Keeper_sandbox_factory.No_factory | Keeper_sandbox_factory.Remote_ssh_profile ->
     Alcotest.fail "a docker keeper must resolve to a runtime"
-  | Keeper_sandbox_factory.Runtime runtime ->
+  | Keeper_sandbox_factory.Runtime { runtime; _ } ->
     (match
        Keeper_turn_sandbox_runtime.exec_argv
          ~validate_cached_container:false

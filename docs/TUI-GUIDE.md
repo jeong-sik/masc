@@ -13,8 +13,9 @@ Eight more surfaces hang off parents instead of holding Tab stops:
 Planning's `v` walks Task Review, Evaluator Verdicts, Schedules, and Fusion;
 the Keepers roster reaches Changes with `f`; Runtime reaches Connectors with
 `c` and the standalone Lanes with `p` (its third stop); Workspace reaches
-Code with `Enter` on a repository row. Every off-ring surface keeps a
-`go <name>` palette entry.
+Code with `Enter` on a repository row. Task Review, Schedules, Fusion,
+Lanes, Connectors, and Code also keep `go <name>` palette entries;
+Verdicts and Changes are reached from their parents only.
 
 ## Quick Start
 
@@ -912,7 +913,7 @@ ingest로 보이지 않게 하기 위함이다.
 ### Workspace
 
 등록된 저장소와 서버가 실제로 해석한 체크아웃 경로를 보여준다. Tab 링의
-아홉 번째 정거장이며, Code 화면은 이 화면에 매달린 자식이다. 목록의
+정거장이며, Code 화면은 이 화면에 매달린 자식이다. 목록의
 `Path` 열은 폭이 부족하면 가운데를 줄여 표시하지만, 선택한 행 아래의
 `Path:`에는 전체 경로가 줄바꿈되어 나온다. 설정에 저장된 값이 상대 경로라면
 `Stored as:`가 함께 표시되고, 담당 Keeper는 `Keepers:`에서 확인할 수 있다.
@@ -1186,7 +1187,7 @@ Per surface:
 | `d` | Workspace | Show the repository's current Git working-tree changes |
 | `d` | Code, project tree focused | Show every Git change in the current project, even when it is not registered |
 | Right / `Enter` | Code | Drill into a directory / open the file |
-| Left / `Esc` | Code | Close the overlay, then the file, then climb a directory; the project root lands on Workspace |
+| Left / `Esc` | Code | Close the overlay, then the file, then climb a directory; `Esc` at the project root leaves for Workspace |
 | `/`, `n` / `N` | Code | Jump the tree cursor to a match |
 | `h` / `l` | Code, file open | Pan the file sideways by one cell |
 | `H` | Code, file open | The commits that touched the file, newest first |

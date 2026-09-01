@@ -114,12 +114,11 @@ let clock_half ~now ~localtime ~cells row =
 (* The same [label·count] shape the surface strip's Approvals badge uses, so
    two counts of blocked work on one screen read as one vocabulary.
 
-   Not a second copy of that badge. The strip windows its ring to fit, and the
-   window grows around the active entry: on Connectors at eighty columns it
-   read "‹11 Repos Code Changes ▸Connectors Runtime Config Resources Tools 1›",
-   with Approvals among the eleven it had dropped and its count with it. This
-   row is not windowed, so the count is on screen from wherever the operator
-   is standing. *)
+   Not a second copy of that badge. The strip windows its ring to fit, and
+   the window grows around the active entry: at eighty columns the entries
+   far from the active one drop out, Approvals among them and its count with
+   it. This row is not windowed, so the count is on screen from wherever the
+   operator is standing. *)
 let waiting_half waiting =
   if waiting <= 0 then "" else Printf.sprintf "Awaiting you\xc2\xb7%d" waiting
 ;;

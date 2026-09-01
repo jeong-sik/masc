@@ -1751,7 +1751,7 @@ type state = {
   (* What the last key the operator pressed actually did, and the clock
      reading it was set at. These outcomes go to [add_event], and the event
      log is drawn by Overview alone -- so the operator who pressed [a] on
-     Repos stood on the one surface that could not answer them, and a
+     Workspace stood on the one surface that could not answer them, and a
      registration that succeeded looked the same as an editor that never
      started. The footer every surface draws answers instead, and only for
      [last_action_window_s]: an outcome that stayed would go on claiming a

@@ -381,7 +381,7 @@ let add_event (state : state) event_type content =
 (* An outcome the operator pressed a key for, rather than something that
    happened on its own. It goes to the event log like any other event, and to
    the footer, because the log is drawn by Overview alone: the operator who
-   pressed [a] on Repos stood on the one surface that could not show them
+   pressed [a] on Workspace stood on the one surface that could not show them
    whether the registration landed, the declaration was refused, or the
    editor never started. *)
 let report_action (state : state) event_type content =

@@ -329,12 +329,13 @@ let for_surface = function
       ; b Act "Right / Enter" "open" ~help:"drill in, or open the file"
         (* Esc walks back out the way Enter came in: it closes an open file
            first, and only climbs a directory once no file is open. From the
-           project root it lands on Workspace, the ring parent. A key that
-           works and is not listed is the same drift as a listed key that
-           does nothing, pointing the other way. *)
+           project root, Esc alone leaves for Workspace, the ring parent --
+           Left stays on the surface, the same convention as every other
+           off-ring child. A key that works and is not listed is the same
+           drift as a listed key that does nothing, pointing the other way. *)
       ; b Act "Left / Esc" "back"
           ~help:"close the history, then the file, then climb one \
-                 directory, then Workspace"
+                 directory; Esc at the project root leaves for Workspace"
       ; b Navigate "Shift-Left / Shift-Right" "pan"
           ~help:"with a file open, scroll it sideways one cell at a time"
       ; b Search "/" "find"

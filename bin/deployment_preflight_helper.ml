@@ -876,6 +876,73 @@ let board_posts_store =
   }
 ;;
 
+let provider_input_store =
+  { store = "keeper provider-input snapshots"
+  ; on_refusal =
+      "the administrator exact-input endpoint cannot resolve that turn, and "
+      ^ "a malformed newer row can mask older exact-input observations"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir =
+           Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
+         in
+         let store_dir =
+           Common.keeper_runtime_store_dirname Common.Keeper_provider_inputs
+         in
+         let snapshot_files keeper_dir =
+           files_under (Filename.concat keeper_dir store_dir) ~keep:(fun name ->
+             not (String.starts_with ~prefix:"." name))
+           |> List.concat_map (fun month ->
+             files_under month ~keep:(fun name ->
+               Filename.check_suffix name ".jsonl"))
+         in
+         let rec scan_rows input path line_number report =
+           match input_line input with
+           | exception End_of_file -> report
+           | line ->
+             let report =
+               if String.trim line = ""
+               then report
+               else
+                 count_row
+                   report
+                   (match Yojson.Safe.from_string line with
+                    | exception Yojson.Json_error detail ->
+                      Error
+                        (Printf.sprintf
+                           "%s:%d: %s"
+                           path
+                           line_number
+                           detail)
+                    | json ->
+                      Keeper_provider_input_snapshot.of_json json
+                      |> Result.map (fun _ -> ())
+                      |> Result.map_error (fun detail ->
+                        Printf.sprintf
+                          "%s:%d: %s"
+                          path
+                          line_number
+                          detail))
+             in
+             scan_rows input path (line_number + 1) report
+         in
+         let scan_file report path =
+           match open_in path with
+           | exception Sys_error detail ->
+             count_row report (Error (path ^ ": " ^ detail))
+           | input ->
+             Fun.protect
+               ~finally:(fun () -> close_in_noerr input)
+               (fun () -> scan_rows input path 1 report)
+         in
+         Ok
+           (files_under keepers_dir ~keep:(fun name ->
+              not (Filename.check_suffix name ".json"))
+            |> List.concat_map snapshot_files
+            |> List.fold_left scan_file empty_report))
+  }
+;;
+
 (* #29590 removed [generation] from TurnRecord as well as from the memory
    snapshot. [Turn_record.of_json] rejects unknown fields, and
    [Keeper_raw_trace_retention.protected_references] folds the whole sweep on
@@ -982,6 +1049,7 @@ let durable_stores =
   ; memory_source_current_store
   ; disposition_receipt_store
   ; board_posts_store
+  ; provider_input_store
   ; turn_record_store
   ]
 ;;

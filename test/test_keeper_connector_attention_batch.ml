@@ -59,14 +59,8 @@ let enqueue_exn ~base_path keeper_name source =
    These build the minimum valid [Keeper_heartbeat_loop_cycle.cycle_outcome]
    payload for each branch under test. *)
 
-let completed_outcome ~addressed meta : Keeper_heartbeat_loop_cycle.cycle_outcome =
-  Keeper_heartbeat_loop_cycle.Completed
-    { meta
-    ; continuation_route =
-        (if addressed
-         then Keeper_unified_turn.Continuation_route_addressed
-         else Keeper_unified_turn.Continuation_route_not_addressed)
-    }
+let completed_outcome ~route meta : Keeper_heartbeat_loop_cycle.cycle_outcome =
+  Keeper_heartbeat_loop_cycle.Completed { meta; continuation_route = route }
 ;;
 
 let failed_outcome ~source_disposition ~route ~deferred_runtime_lane meta
@@ -429,7 +423,7 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
   let meta = test_meta "batch-disposition-pure" in
   (match
      Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
-       (Some (completed_outcome ~addressed:true meta))
+       (Some (completed_outcome ~route:Keeper_unified_turn.Continuation_route_addressed meta))
    with
    | Keeper_heartbeat_loop.Batch_ack_completed
        { connector_attention_outcome = Keeper_heartbeat_loop.Attention_resolved }
@@ -438,14 +432,17 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
      fail "Completed + addressed route must drive Batch_ack_completed/Attention_resolved");
   (match
      Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
-       (Some (completed_outcome ~addressed:false meta))
+       (Some
+          (completed_outcome
+             ~route:Keeper_unified_turn.Continuation_memory_write_completed
+             meta))
    with
    | Keeper_heartbeat_loop.Batch_ack_completed
        { connector_attention_outcome = Keeper_heartbeat_loop.Attention_ignored }
      -> ()
    | _ ->
      fail
-       "Completed + not-addressed route must drive Batch_ack_completed/Attention_ignored");
+       "Completed + memory-write receipt must drive Batch_ack_completed/Attention_ignored");
   (match
      Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
        (Some
@@ -481,11 +478,32 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
         (Keeper_heartbeat_loop_cycle.Checkpointed
            { meta
            ; checkpoint_reason = Keeper_unified_turn.Awaiting_external_effect
-           ; continuation_route = Keeper_unified_turn.Continuation_route_not_addressed
+           ; continuation_route =
+               Keeper_unified_turn.Continuation_no_terminal_effect_receipt
            })
     ; Some (Keeper_heartbeat_loop_cycle.Input_required meta)
     ; Some (Keeper_heartbeat_loop_cycle.Cancelled meta)
     ; Some (Keeper_heartbeat_loop_cycle.Skipped meta)
+    ]
+;;
+
+(* #32096: mismatch and missing/inapplicable receipt evidence say nothing
+   about model intent. They must NOT be recorded as Ignored. *)
+let test_batch_disposition_keeps_unsettled_evidence_pending () =
+  let meta = test_meta "batch-disposition-pending" in
+  List.iter
+    (fun route ->
+       match
+         Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
+           (Some (completed_outcome ~route meta))
+       with
+       | Keeper_heartbeat_loop.Batch_no_action -> ()
+       | Keeper_heartbeat_loop.Batch_ack_completed _ ->
+         fail
+           "unsettled route evidence must not ACK (no judgement was made)")
+    [ Keeper_unified_turn.Continuation_route_mismatch
+    ; Keeper_unified_turn.Continuation_no_terminal_effect_receipt
+    ; Keeper_unified_turn.Continuation_route_not_applicable
     ]
 ;;
 
@@ -706,7 +724,7 @@ let test_batch_completion_acks_every_member () =
       (List.length intake.consumed_selections);
     (match
        Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
-         (Some (completed_outcome ~addressed:true meta))
+         (Some (completed_outcome ~route:Keeper_unified_turn.Continuation_route_addressed meta))
      with
      | Keeper_heartbeat_loop.Batch_ack_completed _ ->
        let acked =
@@ -805,6 +823,10 @@ let () =
             "pins every branch of the pure disposition function"
             `Quick
             test_batch_disposition_of_cycle_outcome_pure_branches
+        ; test_case
+            "unsettled route evidence stays pending, never Ignored"
+            `Quick
+            test_batch_disposition_keeps_unsettled_evidence_pending
         ; test_case
             "every terminalizing disposition settles its attention rows"
             `Quick

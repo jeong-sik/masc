@@ -100,7 +100,10 @@ let execution_boundary_of_turn_failure error =
 
 type continuation_route_disposition =
   | Continuation_route_addressed
-  | Continuation_route_not_addressed
+  | Continuation_route_mismatch
+  | Continuation_memory_write_completed
+  | Continuation_no_terminal_effect_receipt
+  | Continuation_route_not_applicable
 
 type checkpoint_reason =
   | Operation_queued
@@ -1290,7 +1293,28 @@ let run_keeper_cycle
                                 target
                                 channel ->
                          Continuation_route_addressed
-                       | _ -> Continuation_route_not_addressed
+                       | ( Some _
+                         , Some
+                             (Keeper_tool_execution.Surface_post_completed _) ) ->
+                         (* A terminal surface post landed on a different channel
+                            than the one that woke this turn. Not a judgement to
+                            ignore: leave it pending for investigation. *)
+                         Continuation_route_mismatch
+                       | ( Some _
+                         , Some
+                             (Keeper_tool_execution.Memory_write_completed _) ) ->
+                         (* Exact receipt evidence only: a memory write
+                            completed, while no direct surface post did.  Do
+                            not invent a mental "observed and chose" state. *)
+                         Continuation_memory_write_completed
+                       | ( Some _, None ) ->
+                         (* Absence of a receipt proves neither observation nor
+                            intent. Keep only the absence we actually saw. *)
+                         Continuation_no_terminal_effect_receipt
+                       | ( None, _ ) ->
+                         (* This turn has no continuation route against which a
+                            terminal effect can be compared. *)
+                         Continuation_route_not_applicable
                      in
                      Ok
                        (turn_success_of_stop_reason

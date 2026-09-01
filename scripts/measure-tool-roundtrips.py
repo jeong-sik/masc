@@ -30,6 +30,21 @@ shape) — re-open the investigation instead of stacking mitigations.
 The classifier only groups calls inside one turn; cross-turn repeats are a
 different behaviour (memory, not batching) and are deliberately out of scope.
 
+Method-multiplexed tools (a single tool name whose `input.method` string
+selects the operation, e.g. the github connector's pull-request reader) are
+split into sub-tools for classification: consecutive calls that switch method
+are different operations, not the model probing for an argument shape. Their
+batching opportunity is visible in the batch_size distribution, not in the
+same-tool run classes.
+
+Artifact paging: keeper_artifact_read calls are additionally grouped by
+(keeper, sha256) to measure page arithmetic — a blob whose total_bytes fits
+one 65536-byte page should cost one call. `excess calls` counts calls beyond
+ceil(total_bytes / page) per blob; `small explicit slices` counts calls that
+lowered max_bytes below the default. Both are expected to approach zero after
+the description fix in PR #32412 deploys; if they persist over a full day,
+the wording diagnosis was wrong — re-open instead of stacking mitigations.
+
 Usage:
     scripts/measure-tool-roundtrips.py --date 2026-09-01
     MASC_BASE_PATH=/srv/masc scripts/measure-tool-roundtrips.py --date 2026-09-01 --top 10
@@ -45,6 +60,24 @@ import pathlib
 import sys
 
 DEFAULT_BASE = pathlib.Path(os.environ.get("MASC_BASE_PATH", pathlib.Path.home() / "me"))
+
+# Mirrors Common.max_tool_output_bytes, the artifact_read page bound (both the
+# max_bytes default/maximum and the response-envelope budget).
+ARTIFACT_PAGE_BYTES = 65_536
+
+ARTIFACT_READ_TOOL = "keeper_artifact_read"
+
+
+def run_key(row: dict) -> str:
+    """Classification identity of a call: the tool name, plus `input.method`
+    for method-multiplexed tools so a method switch is not read as probing."""
+    tool = row.get("tool") or "?"
+    value = row.get("input")
+    if isinstance(value, dict):
+        method = value.get("method")
+        if isinstance(method, str) and method:
+            return f"{tool}:{method}"
+    return tool
 
 
 def normalized_args(value: object) -> str:
@@ -113,13 +146,13 @@ def classify_runs(turns: dict[tuple, list[dict]]):
         index = 0
         while index < len(calls):
             end = index
-            while end + 1 < len(calls) and calls[end + 1].get("tool") == calls[index].get("tool"):
+            while end + 1 < len(calls) and run_key(calls[end + 1]) == run_key(calls[index]):
                 end += 1
             length = end - index + 1
             if length > 1:
                 args = [calls[position].get("input") for position in range(index, end + 1)]
                 serialized = [normalized_args(value) for value in args]
-                tool = calls[index].get("tool") or "?"
+                tool = run_key(calls[index])
                 if len(set(serialized)) == 1:
                     label = "duplicate"
                 elif len({key_set(value) for value in args}) > 1:
@@ -137,12 +170,12 @@ def unchanged_recall_pairs(turns: dict[tuple, list[dict]]) -> collections.Counte
     pairs = collections.Counter()
     for calls in turns.values():
         for first, second in zip(calls, calls[1:]):
-            if first.get("tool") != second.get("tool"):
+            if run_key(first) != run_key(second):
                 continue
             if normalized_args(first.get("input")) != normalized_args(second.get("input")):
                 continue
             if parse_output_kind(first.get("output")) == "unchanged":
-                pairs[first.get("tool") or "?"] += 1
+                pairs[run_key(first)] += 1
     return pairs
 
 
@@ -155,7 +188,7 @@ def probe_pairs(turns: dict[tuple, list[dict]]) -> tuple[int, int]:
     first_failed = 0
     for calls in turns.values():
         for first, second in zip(calls, calls[1:]):
-            if first.get("tool") != second.get("tool"):
+            if run_key(first) != run_key(second):
                 continue
             if key_set(first.get("input")) == key_set(second.get("input")):
                 continue
@@ -163,6 +196,71 @@ def probe_pairs(turns: dict[tuple, list[dict]]) -> tuple[int, int]:
             if first.get("success") is False:
                 first_failed += 1
     return total, first_failed
+
+
+def parse_output_object(output: object) -> dict | None:
+    if isinstance(output, dict):
+        return output
+    if isinstance(output, str):
+        try:
+            parsed = json.loads(output)
+        except ValueError:
+            return None
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def artifact_paging(rows: list[dict]) -> dict[str, int]:
+    """Per-blob call arithmetic for keeper_artifact_read.
+
+    Groups calls by (keeper, sha256). A blob whose total_bytes fits one page
+    should cost one call; anything beyond ceil(total_bytes / page) is excess.
+    total_bytes comes from the blob's first parseable response.
+    """
+    per_blob: dict[tuple[object, str], dict[str, object]] = {}
+    small_slices = 0
+    for row in rows:
+        if row.get("tool") != ARTIFACT_READ_TOOL:
+            continue
+        value = row.get("input")
+        if not isinstance(value, dict):
+            continue
+        sha = value.get("sha256")
+        if not isinstance(sha, str):
+            continue
+        max_bytes = value.get("max_bytes")
+        if isinstance(max_bytes, int) and max_bytes < ARTIFACT_PAGE_BYTES:
+            small_slices += 1
+        entry = per_blob.setdefault(
+            (row.get("keeper"), sha), {"calls": 0, "total_bytes": None}
+        )
+        entry["calls"] = int(entry["calls"]) + 1  # type: ignore[arg-type]
+        if entry["total_bytes"] is None:
+            parsed = parse_output_object(row.get("output"))
+            if parsed is not None and isinstance(parsed.get("total_bytes"), int):
+                entry["total_bytes"] = parsed["total_bytes"]
+
+    calls_per_blob = [int(entry["calls"]) for entry in per_blob.values()]  # type: ignore[arg-type]
+    excess = 0
+    sized_blobs = 0
+    for entry in per_blob.values():
+        total_bytes = entry["total_bytes"]
+        if isinstance(total_bytes, int):
+            sized_blobs += 1
+            minimal = max(1, -(-total_bytes // ARTIFACT_PAGE_BYTES))
+            blob_calls = int(entry["calls"])  # type: ignore[arg-type]
+            if blob_calls > minimal:
+                excess += blob_calls - minimal
+    return {
+        "blobs": len(per_blob),
+        "calls": sum(calls_per_blob),
+        "one_call_blobs": sum(1 for count in calls_per_blob if count == 1),
+        "max_calls": max(calls_per_blob, default=0),
+        "excess_calls": excess,
+        "sized_blobs": sized_blobs,
+        "small_slices": small_slices,
+    }
 
 
 def batch_size_histogram(rows: list[dict]) -> collections.Counter:
@@ -211,6 +309,30 @@ def render(rows: list[dict], top: int) -> str:
     lines.append("")
     lines.append(f"- pairs: {probes}")
     lines.append(f"- pairs whose first call failed: {probes_first_failed}")
+    lines.append("")
+    paging = artifact_paging(rows)
+    lines.append("## artifact paging (keeper_artifact_read)")
+    lines.append("")
+    if paging["blobs"]:
+        one_call_share = 100.0 * paging["one_call_blobs"] / paging["blobs"]
+        lines.append(
+            f"- blobs read: {paging['blobs']} (calls: {paging['calls']}, "
+            f"max calls on one blob: {paging['max_calls']})"
+        )
+        lines.append(
+            f"- blobs finished in one call: {paging['one_call_blobs']} "
+            f"({one_call_share:.1f}% of blobs)"
+        )
+        lines.append(
+            f"- excess calls beyond page arithmetic: {paging['excess_calls']} "
+            f"(measured over {paging['sized_blobs']} blobs with a parseable total_bytes)"
+        )
+        lines.append(
+            f"- small explicit slices (max_bytes < {ARTIFACT_PAGE_BYTES}): "
+            f"{paging['small_slices']}"
+        )
+    else:
+        lines.append("- no keeper_artifact_read calls")
     lines.append("")
     lines.append("## batch_size distribution")
     lines.append("")

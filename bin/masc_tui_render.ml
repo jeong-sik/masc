@@ -3038,9 +3038,9 @@ let planning_workspace_title (state : state) ~(tab : planning_tab) =
   in
   Printf.sprintf "%s  %s  %s  %s"
     (screen_title " MASC Planning")
-    (draw ~active:(tab = Planning_goals) "Goals")
-    (draw ~active:(tab = Planning_task_review) ("Task Review" ^ review_count))
-    (draw ~active:(tab = Planning_verdicts) "Verdicts")
+    (draw ~active:(tab = Planning_goals) "1 Goals")
+    (draw ~active:(tab = Planning_task_review) ("2 Task Review" ^ review_count))
+    (draw ~active:(tab = Planning_verdicts) "3 Evaluator Verdicts")
 
 (* Where the goal stands with the completion judge, in one column. The phase
    reads [executing] both for a goal nobody asked about and for one the judge
@@ -7615,8 +7615,7 @@ let render_harness_list (state : state) =
      by whom, and where a fallback answered instead of the evaluator the Gate
      names. *)
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  Rulings on the tasks Task Review was waiting on \xe2\x80\x94 who judged \
-     each one, and where a fallback answered instead.";
+    "  Evaluator Verdicts = automatic Gate rulings (old Harness); not Goal proof.";
   List.iter (box_line buf cols) (harness_ledger_lines ~cols state.harness);
   (* A ledger that quietly stopped is this screen's own failure mode: it once
      starved for a month while the judge kept running, and the stale rows
@@ -7835,7 +7834,7 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
         , String.trim
             (String.sub whole (at + 1) (String.length whole - at - 1)) )
   in
-  [ Ansi.bold, "  HARNESS VERDICT"
+  [ Ansi.bold, "  EVALUATOR VERDICT"
   ; field "Task link" (Link.reference Task verdict.hv_task_id)
   ; field "Task" verdict.hv_task_id
   ]

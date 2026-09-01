@@ -107,7 +107,9 @@ let headline (event : Tui_decode.goal_timeline_event) =
    what it is instead of rendering as an empty history. *)
 let timeline ~width ~goal_id
     (loaded : (string * (Tui_decode.goal_timeline, string) result) option) =
-  let header = { tone = Note; text = "TIMELINE" } in
+  let header =
+    { tone = Note; text = "RELATED ACTIVITY · latest state per linked item" }
+  in
   let rows =
     match loaded with
     | Some (id, result) when String.equal id goal_id -> (

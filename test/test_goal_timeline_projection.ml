@@ -157,6 +157,69 @@ let node : DG.tree_node =
   }
 ;;
 
+let test_task_snapshot_names_actor_and_handoff () =
+  let handoff : Masc_domain.task_handoff_context =
+    { summary = "continue from the saved checkpoint"
+    ; reason = None
+    ; next_step = None
+    ; failure_mode = None
+    ; reclaim_policy = None
+    ; evidence_refs = []
+    ; updated_at = Some "2026-08-21T03:00:00Z"
+    ; updated_by = Some "alpha"
+    }
+  in
+  let task : Masc_domain.task =
+    { id = "task-actor"
+    ; title = "Actor-visible task"
+    ; description = ""
+    ; task_status =
+        Masc_domain.Done
+          { assignee = "beta"
+          ; completed_at = "2026-08-21T04:00:00Z"
+          ; notes = None
+          }
+    ; priority = 1
+    ; files = []
+    ; created_at = "2026-08-21T01:00:00Z"
+    ; created_by = Some "planner"
+    ; predecessor_task_id = None
+    ; contract = None
+    ; execution_links = Masc_domain.no_execution_links
+    ; handoff_context = Some handoff
+    ; cycle_count = 1
+    ; reclaim_policy = None
+    ; do_not_reclaim_reason = None
+    ; skills = []
+    }
+  in
+  let timeline_node : DGT.tree_node =
+    { goal
+    ; children = []
+    ; tasks = [ task ]
+    ; last_activity_at = "2026-08-21T04:00:00Z"
+    ; stagnation_seconds = Some 0
+    ; linked_keeper_names = []
+    ; pending_approval_count = 0
+    ; latest_keeper_ref = None
+    ; latest_turn_ref = None
+    ; activity_observation = "task_status"
+    }
+  in
+  let event =
+    match DGT.build_goal_timeline timeline_node [] [] [] with
+    | [ event ] -> event
+    | events -> failf "expected one task event, got %d" (List.length events)
+  in
+  check
+    (option string)
+    "status, typed actor role, and handoff author survive"
+    (Some
+       "done · completed by beta · handoff by alpha: continue from the saved \
+        checkpoint")
+    (field "summary" event)
+;;
+
 let timeline_events_of json =
   match Yojson.Safe.Util.member "timeline_events" json with
   | `List items -> items
@@ -205,6 +268,8 @@ let () =
             "unknown event type keeps its token"
             `Quick
             test_unknown_event_type_keeps_its_token
+        ; test_case "task snapshot names actor and handoff" `Quick
+            test_task_snapshot_names_actor_and_handoff
         ] )
     ; ( "tree field"
       , [ test_case "timeline_events is normalized" `Quick test_tree_field_is_normalized

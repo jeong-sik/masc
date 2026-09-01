@@ -669,13 +669,14 @@ authored Markdown.
 
 ### Planning
 
-Planning is one workspace with two child views: `Goals` and `Task Review`.
-Press `v` to switch between them. They share navigation but not authority:
-Goals manages Goal lifecycle, while Task Review records an operator verdict
-on a Task completion request.
+Planning is one workspace with three ordered child views: `1 Goals` groups the
+outcome and its linked Tasks; `2 Task Review` holds Task completion requests
+waiting for an operator decision; `3 Evaluator Verdicts` shows automatic Gate
+rulings recorded afterward. Press `v` to move through that order. Evaluator
+Verdicts is the old Harness ledger, not a Goal completion proof.
 
 ```
- MASC Planning  ▸Goals  Task Review·2  10:44:57  [connected]
+ MASC Planning  ▸1 Goals  2 Task Review·2  3 Evaluator Verdicts  10:44:57  [connected]
    show executing + verifying · order phase order, then P1→P5
    Executing: 3  Paused/Blocked: 1  Verifying: 0  Done: 24  Dropped: 22
    Backlog: todo=4  claimed=0  running=6  done=109  cancelled=37
@@ -693,6 +694,12 @@ Completed, Dropped, then priority), `updated` (most recently changed first),
 and `due` (earliest due date first, undated last). The current meanings are
 printed above the rollup. Status colour and the proof marker remain independent
 of ordering, so a row does not look successful merely because it sorted first.
+
+Goal detail's `RELATED ACTIVITY` block is not a complete Task history. It shows
+the latest state per linked Task and Keeper, pending approvals, and Goal phase
+events. Task rows name the typed actor role (`claimed by`, `submitted by`,
+`completed by`, or `cancelled by`) and the latest handoff author and summary
+when present.
 
 In a goal detail, `c` requests completion, `x` drops, `o` reopens. Each is
 armed rather than pressed - the first press shows what the same key again

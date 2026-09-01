@@ -449,7 +449,9 @@ let handle_read_file_with_outcome
       two segments, strip that leading two-segment prefix; if the
       path's first segment is "a" (single-level prefix) but not
       "a/b", strip "a" only and treat the rest as relative to the
-      depth-2 dir; otherwise (form A: bare repo-relative path like
+      depth-1 dir — the caller named "a", so the reference stays
+      literal instead of guessing "b"; otherwise (form A: bare
+      repo-relative path like
       "lib/...") leave the path alone and treat it as relative to
       the depth-2 dir.
     - 2+ sub-dirs at depth-1: return [(ownership_root, path)]. A

@@ -1271,6 +1271,27 @@ let contains needle haystack =
   let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
   scan 0
 
+(* The form an operator edits and the parse that answers it drifted: the stem
+   named two fields while [parse] required a third, so every keeper created
+   through the TUI came back rejected and nothing failed until a human tried
+   it. Running the stem through [parse] moves that cost here. *)
+let test_the_creation_stem_is_a_declaration_parse_accepts () =
+  with_test_context
+  @@ fun ctx ->
+  let json =
+    match Yojson.Safe.from_string Keeper_turn_up_args.creation_stem with
+    | json -> json
+    | exception Yojson.Json_error message ->
+      failf "the stem must be JSON: %s" message
+  in
+  match Keeper_turn_up_args.parse ctx json with
+  | Ok _ -> ()
+  | Error result ->
+    failf
+      "the stem the form offers must be a declaration parse accepts: %s"
+      (Keeper_types_profile.tool_result_body result)
+;;
+
 let test_parse_requires_a_sandbox_profile () =
   with_test_context @@ fun ctx ->
   match
@@ -1389,6 +1410,10 @@ let () =
             "a call that states no sandbox_profile is rejected"
             `Quick
             test_parse_requires_a_sandbox_profile
+        ; test_case
+            "the creation stem is a declaration parse accepts"
+            `Quick
+            test_the_creation_stem_is_a_declaration_parse_accepts
         ; test_case
             "remote endpoint required and registry-resolved"
             `Quick

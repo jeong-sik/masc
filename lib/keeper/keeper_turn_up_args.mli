@@ -53,6 +53,16 @@ val parse :
     is derived from, not documentation of it. A consumed-but-unlisted key
     makes [parse] reject valid traffic; a listed-but-dead key certifies the
     silent drop the gate exists to kill. Keep exactly in sync with [parse]. *)
+val creation_stem : string
+(** A declaration [parse] accepts, rendered for a human to fill in.
+
+    Lives beside [parse] because which fields a creation cannot omit is
+    [parse]'s business. Stating them anywhere else drifts: the TUI form
+    carried a two-field stem across the whole time [sandbox_profile] was
+    required, so every keeper made through it came back rejected. A test runs
+    this through [parse], which puts a new requirement's cost here rather than
+    in an operator's editor. *)
+
 val known_turn_up_args : string list
 
 (** Typed rejection (R09 [turn_up_arg_unknown]) naming every unrecognised

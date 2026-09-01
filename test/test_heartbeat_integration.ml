@@ -251,7 +251,7 @@ let seed_keeper_sandbox_profile ~base_dir name =
   Fs_compat.mkdir_p keepers_dir;
   Fs_compat.save_file
     (Filename.concat keepers_dir (name ^ ".toml"))
-    ("[keeper]\nsandbox_profile = \"local\"\ninstructions = \"# " ^ name ^ "\"\n")
+    ("[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"# " ^ name ^ "\"\n")
 
 let dashboard_purge_cleanup requested_name
     (meta : Keeper_meta_contract.keeper_meta)
@@ -4897,30 +4897,28 @@ let test_field_only_update_honors_toml_declared_profile () =
            ~base_path:config.base_path
            name
           : Masc.Keeper_keepalive.joined_stop_result);
-      (* Control: without any declared profile the same update still
-         resolves Local and the gate stays closed. *)
+      (* Control: with no declared profile there is nothing to resolve. The
+         retired Local arm was the old gate (#32078); enforcement now lives
+         where a profile is actually resolved, and that resolver refuses a
+         keeper with no profile source. *)
       let bare = "no-declaration-keeper" in
       let bare_meta = make_meta bare in
       create_owner_meta_exn config bare_meta;
-      let bare_parsed =
-        { parsed with
-          name = bare
-        ; profile_defaults =
-            Keeper_profile_defaults.empty_keeper_profile_defaults
-        ; instructions_opt = None
-        }
+      let bare_defaults =
+        Keeper_profile_defaults.empty_keeper_profile_defaults
       in
-      let bare_result =
-        Turn_up_update.update_keeper
-          ~expected_config_revision:(config_revision_exn config bare)
-          ctx
-          bare_parsed
-          bare_meta
-      in
-      check bool
-        "update without any declared profile still fails closed on Local"
-        false
-        (Keeper_types_profile.tool_result_success bare_result))
+      check string
+        "resolver rejects a keeper with no profile source"
+        (Keeper_meta_contract.missing_required_sandbox_profile_error
+           ~keeper_name:bare
+           bare_defaults)
+        (match
+           Keeper_meta_contract.effective_meta_of_profile_defaults
+             bare_defaults
+             bare_meta
+         with
+        | Error message -> message
+        | Ok _ -> ""))
 ;;
 
 let () =

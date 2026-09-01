@@ -288,6 +288,8 @@ class Fixture:
     lock: threading.Lock = field(default_factory=threading.Lock)
     request: dict[str, str] | None = None
     requests: list[dict[str, str]] = field(default_factory=list)
+    submitted_at_by_message: dict[str, float] = field(default_factory=dict)
+    completed_request_ids: set[str] = field(default_factory=set)
     records: list[dict[str, Any]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     operation_sequence: int = 0
@@ -302,6 +304,14 @@ class Fixture:
     get1_done: threading.Event = field(default_factory=threading.Event)
     get2_seen: threading.Event = field(default_factory=threading.Event)
     get2_release: threading.Event = field(default_factory=threading.Event)
+
+    def note_submission(self, message: str, submitted_at: float) -> None:
+        with self.lock:
+            self.submitted_at_by_message[message] = submitted_at
+
+    def complete_request(self, request_id: str) -> None:
+        with self.lock:
+            self.completed_request_ids.add(request_id)
 
     def record(self, method: str, path: str) -> dict[str, Any]:
         with self.lock:
@@ -349,6 +359,7 @@ class Fixture:
             return None
         request = {key: value[key] for key in ("request_id", "name", "message")}
         with self.lock:
+            self.submitted_at_by_message.setdefault(request["message"], time.time())
             if any(
                 previous["request_id"] == request["request_id"] and previous != request
                 for previous in self.requests
@@ -410,6 +421,67 @@ class Fixture:
         }
         # fmt: on
 
+    def chat_history(self) -> list[dict[str, object]]:
+        with self.lock:
+            completed = set(self.completed_request_ids)
+            requests = [
+                dict(request)
+                for request in self.requests
+                if request["request_id"] in completed
+            ]
+            submitted_at_by_message = dict(self.submitted_at_by_message)
+        rows: list[dict[str, object]] = []
+        for turn_sequence, request in enumerate(requests, 1):
+            request_id = request["request_id"]
+            submitted_at = submitted_at_by_message[request["message"]]
+            delivery_key = {"kind": "operation", "operation_id": request_id}
+            turn_ref = f"trace-chat#{turn_sequence}"
+            rows.append(
+                {
+                    "id": f"user-{request_id}",
+                    "role": "user",
+                    "content": request["message"],
+                    "ts": submitted_at,
+                    "speaker_authority": "owner",
+                    "delivery_key": delivery_key,
+                    "transcript_slot": {"kind": "accepted_user"},
+                    "turn_ref": turn_ref,
+                }
+            )
+            if turn_sequence == 1:
+                tool_call_id = f"tool-call-{request_id}"
+                execution_id = f"execution-{request_id}"
+                rows.append(
+                    {
+                        "id": f"tool-{request_id}",
+                        "role": "tool",
+                        "content": '{"probe":"causal-order"}',
+                        "ts": submitted_at,
+                        "delivery_key": delivery_key,
+                        "transcript_slot": {
+                            "kind": "tool_call",
+                            "execution_id": execution_id,
+                            "ordinal": 0,
+                        },
+                        "turn_ref": turn_ref,
+                        "tool_call_id": tool_call_id,
+                        "execution_id": execution_id,
+                        "tool_call_name": "evidence_probe",
+                    }
+                )
+            rows.append(
+                {
+                    "id": f"assistant-{request_id}",
+                    "role": "assistant",
+                    "content": f"reply-{request['message']}",
+                    "ts": submitted_at,
+                    "delivery_key": delivery_key,
+                    "transcript_slot": {"kind": "terminal_assistant"},
+                    "turn_ref": turn_ref,
+                }
+            )
+        return rows
+
 
 class FixtureServer(ThreadingHTTPServer):
     daemon_threads = False
@@ -449,6 +521,8 @@ def fixture_static_response(state: Fixture, path: str) -> object | None:
             }
         ],
     }
+    if path == CHAT_HISTORY_GET:
+        return state.chat_history()
     return {
         "/health": {"paths": paths},
         "/health?full=1": {
@@ -470,7 +544,6 @@ def fixture_static_response(state: Fixture, path: str) -> object | None:
         "/api/v1/board?sort_by=hot": {"posts": []},
         "/api/v1/dashboard/planning": PLANNING,
         "/api/v1/gate/keepers?detailed=true": roster,
-        CHAT_HISTORY_GET: [],
         MEMORY_JOURNAL_GET: {
             "keeper": KEEPER,
             "returned": 0,
@@ -645,6 +718,7 @@ def fixture_server(state: Fixture) -> Iterator[int]:
                     reply=reply,
                     turn_sequence=ordinal,
                 )
+                state.complete_request(request["request_id"])
             elif state.mode in ("success", "rejection"):
                 if not state.post_release.wait(30):
                     state.errors.append("POST gate timeout")
@@ -658,6 +732,7 @@ def fixture_server(state: Fixture) -> Iterator[int]:
                     )
                     return
                 payload = stream_payload(request, True)
+                state.complete_request(request["request_id"])
             else:
                 # Clean EOF after acceptance, but before any terminal SSE event.
                 payload = stream_payload(request, False)
@@ -1257,6 +1332,7 @@ def success_scenario(
                                      SUCCESS_MESSAGE, "Enter:send", expected_cursor=(25, composer_row),
                                      input_row_markers=(f"> {SUCCESS_MESSAGE}",)))
                 # fmt: on
+                state.note_submission(SUCCESS_MESSAGE, time.time())
                 started = time.monotonic()
                 press(page, "Enter")
                 await_event(state.post_seen, "success POST")
@@ -1288,6 +1364,7 @@ def success_scenario(
                     latency <= 500 and not state.post_release.is_set(),
                     f"draft latency/release violated: {latency:.3f}ms",
                 )
+                state.note_submission("draft-during-send", time.time())
                 queue_enter_started = time.monotonic()
                 press(page, "Enter")
                 wait_text(page, "NEXT 1")
@@ -1300,9 +1377,7 @@ def success_scenario(
                 queued_text = screen_text(page)
                 composer_row_with_queue = cursor_position(page)["y"]
                 next_row, next_line = unique_screen_line(queued_text, "NEXT 1")
-                next_body_row, _ = unique_screen_line(
-                    queued_text, "draft-during-send"
-                )
+                next_body_row, _ = unique_screen_line(queued_text, "draft-during-send")
                 require(
                     next_body_row == next_row + 1,
                     "NEXT header and body do not reserve one USER-shaped slot",
@@ -1432,9 +1507,7 @@ def success_scenario(
                 first_user_row, _ = unique_screen_line(
                     visible, request_label, "TURN · YOU"
                 )
-                first_tool_row, _ = unique_screen_line(
-                    visible, "✓", "evidence_probe"
-                )
+                first_tool_row, _ = unique_screen_line(visible, "✓", "evidence_probe")
                 first_keeper_row, _ = unique_screen_line(visible, request_label, KEEPER)
                 second_user_row, second_user_line = unique_screen_line(
                     visible, queued_request_label, "TURN · YOU"
@@ -1842,6 +1915,7 @@ def steer_scenario(
             with ttyd_session(browser, base, api_port, executable) as (page, _started):
                 open_message(page)
                 type_text(page, "original-course")
+                state.note_submission("original-course", time.time())
                 press(page, "Enter")
                 await_event(state.post_seen, "steer original POST")
                 original = request_identity(state, "original-course")
@@ -1851,9 +1925,11 @@ def steer_scenario(
                 wait_text(page, f"(sending {original_label}")
 
                 type_text(page, "ordinary-next")
+                state.note_submission("ordinary-next", time.time())
                 press(page, "Enter")
                 wait_text(page, "NEXT 1")
                 type_text(page, "/steer corrected-course")
+                state.note_submission("corrected-course", time.time())
                 steer_started = time.monotonic()
                 press(page, "Enter")
                 wait_text(page, "STEER 1")
@@ -1873,8 +1949,7 @@ def steer_scenario(
                 next_row, _ = unique_screen_line(queued_text, "NEXT 2")
                 next_body_row, _ = unique_screen_line(queued_text, "ordinary-next")
                 require(
-                    steer_body_row == steer_row + 1
-                    and next_body_row == next_row + 1,
+                    steer_body_row == steer_row + 1 and next_body_row == next_row + 1,
                     "STEER/NEXT lanes do not reserve USER-shaped slots",
                 )
                 require(

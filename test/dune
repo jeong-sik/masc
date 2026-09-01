@@ -3536,6 +3536,18 @@
  (deps (alias runtest-test_capture_keeper_skill_tui_proof)))
 
 (rule
+ (alias runtest-test_capture_tui_lane_runs)
+ (deps
+  test_capture_tui_lane_runs.py
+  (source_tree ../scripts))
+ (action
+  (run python3 %{dep:test_capture_tui_lane_runs.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_capture_tui_lane_runs)))
+
+(rule
  (alias runtest-test_dune_build_input_fingerprint)
  (deps
   test_dune_build_input_fingerprint.py

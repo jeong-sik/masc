@@ -1,9 +1,14 @@
 name = "Read"
 description = """
-Read one existing file from the keeper sandbox or an allowed path with no \
-implicit cwd. Read targets a single FILE; to list a directory use the Execute \
-tool with ls. Pass cwd explicitly for repo-relative reads. Read never inherits \
-Execute cwd."""
+Read one existing file, or a line range of one file, from the keeper sandbox \
+or an allowed path with no implicit cwd. Read targets a single FILE; to list \
+a directory use the Execute tool with ls. Pass cwd explicitly for \
+repo-relative reads. Read never inherits Execute cwd. For a line range, pass \
+offset (1-based line) and limit (max lines) — do not run sed -n via Execute \
+for this. The payload carries the exact current bytes (no line numbers) plus \
+offset, returned_lines, truncated; when truncated=true a next_offset field \
+gives the offset that continues the read. Before Edit, Read the target \
+region so old_string matches current bytes."""
 
 # Closed: the runtime handler reads exactly these four, and an unread key on a
 # read is a silent no-op the caller cannot see. Edit is closed too

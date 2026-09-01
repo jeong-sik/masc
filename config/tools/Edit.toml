@@ -1,6 +1,10 @@
 name = "Edit"
 description = """
-Patch an existing file by replacing an exact string. Read the file \
+Patch an existing file by replacing an exact string. Prefer Edit over \
+sed -i/awk/perl via Execute for file changes: the exact-match check and \
+the 'not found' error keep a failed edit from writing anything. Each call \
+replaces one exact string (every occurrence with replace_all=true); apply \
+several disjoint changes as successive Edit calls. Read the file \
 first and copy old_string verbatim from its current bytes, including \
 leading whitespace, indentation, and newlines; the match is exact and \
 byte-sensitive. On 'old_string not found', re-Read the file to get the \

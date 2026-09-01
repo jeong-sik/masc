@@ -95,11 +95,9 @@ health, and dashboard surfaces report the read failure explicitly.
 ## Recall Contract
 
 Recall reads the same current snapshot projected by the dashboard and renders
-every claim in stored order. It does not rank or trim individual claims. If the
-complete rendered block exceeds the current 64 KiB byte budget, recall is
-reported unavailable for that turn rather than injecting a partial block. A
-malformed snapshot is likewise reported as unavailable rather than silently
-treated as empty memory.
+every claim in stored order. It does not rank or trim individual claims. A
+malformed snapshot is reported as unavailable rather than silently treated as
+empty memory.
 
 Explicit Memory OS search filters exact query substrings and preserves snapshot
 order. It does not emit a relevance score or reorder facts by timestamp.

@@ -61,7 +61,7 @@ Measured from `<base>/.masc/keepers/*.memory-journal.jsonl` and `<base>/.masc/ex
 
 - **D4 — a failed pass records the model's output.** `failed_output` carries the parsed JSON the lane received. Without it, no future decision about this contract can be evidence-based, and the operator cannot see which memory a rejection names. The failure detail additionally carries the first 80 bytes of the offending claim alongside the digest.
 
-- **D5 — re-evaluation of stored memories becomes its own pass.** `config/prompts/librarian.md` currently asks the model to re-judge every stored memory on every pass, which the roster transcription was the mechanism for. Under D1 that mechanism is gone. Re-judging moves to a prune pass triggered by the recall byte budget (`recall_facts_max_bytes`, current snapshots: sangsu 83 facts / 15.9 KB against a 64 KiB budget), which receives the full roster and returns only `dropped`. Ordinary passes stop paying for it.
+- **D5 — re-evaluation of stored memories becomes its own pass.** `config/prompts/librarian.md` currently asks the model to re-judge every stored memory on every pass, which the roster transcription was the mechanism for. Under D1 that mechanism is gone. Re-judging moves to a prune pass that receives the full roster and returns only `dropped`. Ordinary passes stop paying for it. This RFC does not decide what starts that pass.
 
 - **D6 — hard cut.** No reader accepts the old three-field shape, no converter, no migration. A snapshot is claim text plus category plus timestamp and is unaffected by the wire change, so fresh-state contract applies to the wire only.
 

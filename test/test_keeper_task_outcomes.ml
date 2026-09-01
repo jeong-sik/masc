@@ -270,7 +270,51 @@ let test_tasks_list_reports_truncation () =
               (Printf.sprintf "unchanged carries no %s" field)
               false
               (List.mem field (U.keys unchanged_cut)))
-         [ "matching_count"; "returned_count"; "truncated" ])
+         [ "matching_count"; "returned_count"; "truncated" ];
+       (* Backlog movement beyond the page must break the revision. The new
+          task sorts behind the two-row page (higher priority number), so the
+          page bytes are identical — before matching_count joined the hash,
+          this re-issue answered [unchanged] and a polling caller never
+          learned the backlog had grown. *)
+       ignore
+         (Task.handle_keeper_task_tool
+            ~config
+            ~meta
+            ~name:"keeper_task_create"
+            ~args:
+              (`Assoc
+                [ "title", `String "beyond the page"
+                ; "description", `String "truncation fixture"
+                ; "priority", `Int 9
+                ]));
+       let grown =
+         match
+           (Task.handle_keeper_task_tool_with_outcome
+              ~config
+              ~meta
+              ~name:"keeper_tasks_list"
+              ~args:
+                (`Assoc
+                  [ "limit", `Int 2
+                  ; "if_revision", `String U.(cut |> member "revision" |> to_string)
+                  ]))
+             .data
+         with
+         | Some data -> data
+         | None -> fail "expected producer-owned snapshot after backlog growth"
+       in
+       check string
+         "backlog growth beyond the page breaks the revision"
+         "snapshot"
+         U.(grown |> member "kind" |> to_string);
+       check int
+         "fresh snapshot reports the grown backlog"
+         5
+         U.(grown |> member "matching_count" |> to_int);
+       check int
+         "page rows are unchanged in content"
+         2
+         U.(grown |> member "snapshot" |> to_list |> List.length))
 ;;
 
 let test_tasks_list_returns_snapshot_and_unchanged () =

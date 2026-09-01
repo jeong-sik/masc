@@ -226,87 +226,69 @@ let test_scroll_anchor_survives_session_user_persistence () =
   | Some _ | None -> fail "session USER pin was lost when history persisted it"
 ;;
 
-let test_top_level_timeline_is_chronological_across_sources () =
+let test_absolute_turn_sequence_joins_direct_and_autonomous_sources () =
   let loaded =
     [ chat_entry ~turn_sequence:12 ~request_id:"direct-12"
-        ~role:Tui_types.Message_keeper ~text:"direct at 1" ~at:1. () ]
+        ~role:Tui_types.Message_keeper ~text:"direct later" ~at:1. () ]
   in
   let session =
     [ chat_entry ~turn_sequence:10 ~request_id:"trace#10"
-        ~role:Tui_types.Message_autonomous ~text:"autonomous at 999" ~at:999. ()
+        ~role:Tui_types.Message_autonomous ~text:"autonomous earlier" ~at:999. ()
     ; chat_entry ~request_id:"" ~role:Tui_types.Message_keeper
-        ~text:"unowned broadcast at 2" ~at:2. ()
+        ~text:"unowned broadcast" ~at:2. ()
+    ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
+        ~text:"journal lane" ~at:0. ()
     ]
   in
   let timeline =
     Tui_types.chat_timeline ~loaded ~session ~queued_request_ids:[]
       ~active_request_id:None
   in
-  check (list string) "whole turn groups and auxiliary lanes use actual time"
-    [ "direct at 1"; "unowned broadcast at 2"; "autonomous at 999" ]
+  check (list string) "absolute turn sequence, then producer-owned lanes"
+    [ "autonomous earlier"; "direct later"; "unowned broadcast"; "journal lane" ]
     (Tui_types.chat_timeline_rows timeline
      |> List.map (fun row -> row.Tui_types.me_text))
 ;;
 
-let test_memory_lane_uses_recorded_time_between_whole_turns () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+let test_unsequenced_items_keep_producer_order_not_wall_clock_order () =
   let loaded =
-    [ chat_entry ~turn_sequence:20 ~request_id:"turn-20"
-        ~role:Tui_types.Message_keeper ~text:"turn 20" ~at:200. ()
+    [ chat_entry ~request_id:"first"
+        ~role:Tui_types.Message_keeper ~text:"first producer row" ~at:999. ()
     ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
-        ~text:"journal between" ~at:150. ()
-    ; chat_entry ~turn_sequence:10 ~request_id:"turn-10"
-        ~role:Tui_types.Message_keeper ~text:"turn 10 answer" ~at:90. ()
-    ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
-        ~text:"journal before" ~at:50. ()
-    ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
-        ~text:"journal inside turn clocks" ~at:95. ()
-    ; chat_entry ~turn_sequence:10 ~request_id:"turn-10" ~role:user
-        ~text:"turn 10 input" ~at:100. ()
-    ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
-        ~text:"journal time unavailable" ~at:0. ()
+        ~text:"second producer row" ~at:1. ()
+    ; chat_entry ~request_id:"third"
+        ~role:Tui_types.Message_keeper ~text:"third producer row" ~at:2. ()
     ]
   in
   let timeline =
     Tui_types.chat_timeline ~loaded ~session:[] ~queued_request_ids:[]
       ~active_request_id:None
   in
-  check (list string) "recorded journal time between causal turn groups"
-    [ "journal before"
-    ; "journal inside turn clocks"
-    ; "turn 10 input"
-    ; "turn 10 answer"
-    ; "journal between"
-    ; "turn 20"
-    ; "journal time unavailable"
-    ]
+  check (list string) "unsequenced items retain producer order"
+    [ "first producer row"; "second producer row"; "third producer row" ]
     (Tui_types.chat_timeline_rows timeline
      |> List.map (fun row -> row.Tui_types.me_text))
 ;;
 
-let test_equal_clock_items_have_one_total_tie_order () =
+let test_wall_clock_never_overrides_typed_turn_sequence () =
   let loaded =
-    [ chat_entry ~request_id:"" ~role:Tui_types.Message_memory ~text:"journal"
-        ~at:100. ()
-    ; chat_entry ~turn_sequence:2 ~request_id:"turn-2"
-        ~role:Tui_types.Message_keeper ~text:"turn 2" ~at:100. ()
-    ; chat_entry ~request_id:"" ~role:Tui_types.Message_keeper
-        ~text:"broadcast" ~at:100. ()
+    [ chat_entry ~turn_sequence:2 ~request_id:"turn-2"
+        ~role:Tui_types.Message_keeper ~text:"turn 2 clock 1" ~at:1. ()
     ; chat_entry ~turn_sequence:1 ~request_id:"turn-1"
-        ~role:Tui_types.Message_keeper ~text:"turn 1" ~at:100. ()
+        ~role:Tui_types.Message_keeper ~text:"turn 1 clock 999" ~at:999. ()
     ]
   in
   let timeline =
     Tui_types.chat_timeline ~loaded ~session:[] ~queued_request_ids:[]
       ~active_request_id:None
   in
-  check (list string) "turn sequence, unowned, then Journal on an exact tie"
-    [ "turn 1"; "turn 2"; "broadcast"; "journal" ]
+  check (list string) "typed turn sequence wins over adversarial clocks"
+    [ "turn 1 clock 999"; "turn 2 clock 1" ]
     (Tui_types.chat_timeline_rows timeline
      |> List.map (fun row -> row.Tui_types.me_text))
 ;;
 
-let test_chronological_backfill_keeps_a_structural_scroll_pin () =
+let test_producer_append_keeps_a_structural_scroll_pin () =
   let pinned =
     chat_entry ~turn_sequence:20 ~operation_seq:1 ~request_id:"turn-20"
       ~role:Tui_types.Message_keeper ~text:"pinned output" ~at:200. ()
@@ -316,20 +298,20 @@ let test_chronological_backfill_keeps_a_structural_scroll_pin () =
       ~role:Tui_types.Message_keeper ~text:"earlier turn" ~at:100. ()
   in
   let pin = Tui_types.msg_anchor pinned in
-  let with_older_journal =
+  let with_appended_journal =
     Tui_types.chat_timeline
       ~loaded:
         [ earlier
         ; pinned
         ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
-            ~text:"older journal backfill" ~at:50. ()
+            ~text:"appended journal row" ~at:50. ()
         ]
       ~session:[] ~queued_request_ids:[] ~active_request_id:None
     |> Tui_types.chat_timeline_rows
   in
-  check (option (list string)) "older backfill stays before the pinned newest row"
-    (Some [])
-    (Tui_types.msg_entries_after_anchor with_older_journal pin
+  check (option (list string)) "producer append stays below the structural pin"
+    (Some [ "appended journal row" ])
+    (Tui_types.msg_entries_after_anchor with_appended_journal pin
      |> Option.map (List.map (fun row -> row.Tui_types.me_text)));
 
   let moved_turn =
@@ -343,13 +325,13 @@ let test_chronological_backfill_keeps_a_structural_scroll_pin () =
     |> Tui_types.chat_timeline_rows
   in
   check (option (list string))
-    "suffix reflects rows now below a structurally pinned moved turn"
-    (Some [ "earlier turn" ])
+    "a late row cannot move its typed turn below the structural pin"
+    (Some [])
     (Tui_types.msg_entries_after_anchor moved pin
      |> Option.map (List.map (fun row -> row.Tui_types.me_text)))
 ;;
 
-let test_find_anchor_survives_a_chronological_backfill () =
+let test_find_anchor_survives_a_producer_prepend () =
   let matched_older =
     chat_entry ~request_id:"older" ~role:Tui_types.Message_keeper
       ~text:"match older" ~at:100. ()
@@ -365,12 +347,12 @@ let test_find_anchor_survives_a_chronological_backfill () =
   in
   let rows =
     Tui_types.chat_timeline
-      ~loaded:[ matched_older; matched_newer; backfilled ] ~session:[]
+      ~loaded:[ backfilled; matched_older; matched_newer ] ~session:[]
       ~queued_request_ids:[] ~active_request_id:None
     |> Tui_types.chat_timeline_rows
   in
   let ceiling = Tui_types.msg_index_of_anchor rows anchor in
-  check (option int) "newer match resolves at its new structural position"
+  check (option int) "newer match resolves after a producer prepend"
     (Some 2) ceiling;
   let older_matches =
     match ceiling with
@@ -1167,16 +1149,16 @@ let () =
             test_oldest_at_reports_the_cursor
         ; test_case "causal timeline keeps turns whole" `Quick
             test_causal_timeline_keeps_turns_whole_without_timestamp_sorting
-        ; test_case "top-level timeline is chronological across sources" `Quick
-            test_top_level_timeline_is_chronological_across_sources
-        ; test_case "memory lane uses time between whole turns" `Quick
-            test_memory_lane_uses_recorded_time_between_whole_turns
-        ; test_case "equal clocks have a total typed order" `Quick
-            test_equal_clock_items_have_one_total_tie_order
-        ; test_case "chronological backfill keeps scroll pin" `Quick
-            test_chronological_backfill_keeps_a_structural_scroll_pin
-        ; test_case "find anchor survives chronological backfill" `Quick
-            test_find_anchor_survives_a_chronological_backfill
+        ; test_case "absolute turn sequence joins transcript sources" `Quick
+            test_absolute_turn_sequence_joins_direct_and_autonomous_sources
+        ; test_case "unsequenced items keep producer order" `Quick
+            test_unsequenced_items_keep_producer_order_not_wall_clock_order
+        ; test_case "clock never overrides typed turn sequence" `Quick
+            test_wall_clock_never_overrides_typed_turn_sequence
+        ; test_case "producer append keeps scroll pin" `Quick
+            test_producer_append_keeps_a_structural_scroll_pin
+        ; test_case "find anchor survives producer prepend" `Quick
+            test_find_anchor_survives_a_producer_prepend
         ; test_case "scroll anchor follows structure" `Quick
             test_scroll_anchor_follows_structure_not_clock
         ; test_case "scroll anchor distinguishes duplicate text" `Quick

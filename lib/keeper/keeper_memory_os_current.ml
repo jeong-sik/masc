@@ -977,7 +977,7 @@ let journal_entry_of_json = function
   | _ -> Error "journal line is not a JSON object"
 ;;
 
-let read_journal_tail ~keepers_dir ~keeper_id ~limit =
+let read_journal_tail_indexed ~keepers_dir ~keeper_id ~limit =
   if limit <= 0
   then []
   else (
@@ -992,12 +992,18 @@ let read_journal_tail ~keepers_dir ~keeper_id ~limit =
       let total = List.length lines in
       let skip = if total > limit then total - limit else 0 in
       lines
-      |> List.filteri (fun index _ -> index >= skip)
-      |> List.map (fun line ->
+      |> List.mapi (fun index line -> index, line)
+      |> List.filter (fun (index, _) -> index >= skip)
+      |> List.map (fun (index, line) ->
         match Yojson.Safe.from_string line with
-        | json -> journal_entry_of_json json
+        | json -> index, journal_entry_of_json json
         | exception Yojson.Json_error message ->
-          Error (Printf.sprintf "journal line is not valid JSON: %s" message)))
+          ( index
+          , Error (Printf.sprintf "journal line is not valid JSON: %s" message) )))
+;;
+
+let read_journal_tail ~keepers_dir ~keeper_id ~limit =
+  read_journal_tail_indexed ~keepers_dir ~keeper_id ~limit |> List.map snd
 ;;
 
 let update_locked_with_error
@@ -1331,4 +1337,21 @@ let journal_line_to_json = function
      | `Assoc fields -> `Assoc (("ok", `Bool true) :: fields)
      | json -> json)
   | Error reason -> `Assoc [ "ok", `Bool false; "error", `String reason ]
+;;
+
+let journal_projection_identity ~keeper_id line_index =
+  Printf.sprintf "memory:journal:%d:%s:%d" (String.length keeper_id) keeper_id
+    line_index
+;;
+
+let read_journal_tail_projection ~keepers_dir ~keeper_id ~limit =
+  read_journal_tail_indexed ~keepers_dir ~keeper_id ~limit
+  |> List.map (fun (line_index, result) ->
+       match journal_line_to_json result with
+       | `Assoc fields ->
+         `Assoc
+           (( "structural_id"
+            , `String (journal_projection_identity ~keeper_id line_index) )
+            :: fields)
+       | json -> json)
 ;;

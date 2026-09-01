@@ -132,10 +132,11 @@ val read_journal_tail :
   -> limit:int
   -> (journal_entry, string) result list
 
-(** Wire projection of one line as read, including the ones this build could
-    not decode. An undecodable line keeps its position and carries its reason,
-    so a journal with a torn line is distinguishable from a shorter one. *)
-val journal_line_to_json : (journal_entry, string) result -> Yojson.Safe.t
+(** Dashboard projection of the last [limit] lines. Every row carries a
+    producer-stable [structural_id] derived from the keeper and its absolute
+    nonblank journal-line number, including rows this build cannot decode. *)
+val read_journal_tail_projection :
+  keepers_dir:string -> keeper_id:string -> limit:int -> Yojson.Safe.t list
 
 val list_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 

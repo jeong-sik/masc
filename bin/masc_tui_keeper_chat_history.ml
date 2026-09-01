@@ -428,6 +428,32 @@ let memory_source_label (fields : (string * Yojson.Safe.t) list) =
        | None -> "Memory")
   | Some _ | None -> "Memory"
 
+let memory_float_identity at =
+  Printf.sprintf "%Lx" (Int64.bits_of_float at)
+;;
+
+let identity_text value =
+  Printf.sprintf "%d:%s" (String.length value) value
+;;
+
+(* The Memory journal wire has no generic row id. A committed revision is its
+   producer identity; a failed observation has no revision, so its exact
+   producer fields form the key. Length-prefixing text keeps the identity
+   injective without a delimiter heuristic or a lossy digest. *)
+let memory_committed_structural_id ~at ~revision =
+  Printf.sprintf "memory:committed:%d:%s" revision (memory_float_identity at)
+;;
+
+let memory_failed_structural_id ~at ~trace_id ~kind ~detail ~snapshot_present
+    ~cadence_deferred =
+  Printf.sprintf "memory:failed:%s:%s:%s:%s:%b:%b"
+    (memory_float_identity at)
+    (identity_text trace_id)
+    (identity_text kind)
+    (identity_text detail)
+    snapshot_present cadence_deferred
+;;
+
 let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
   match
     float_field fields "recorded_at",
@@ -475,7 +501,8 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
                       retained
                   in
                   { at
-                  ; structural_id = None
+                  ; structural_id =
+                      Some (memory_committed_structural_id ~at ~revision)
                   ; turn_sequence = None
                   ; turn_id = None
                   ; kind = Memory_activity
@@ -502,15 +529,24 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
 let memory_failed_row (fields : (string * Yojson.Safe.t) list) =
   match
     float_field fields "recorded_at",
+    string_field fields "trace_id",
     string_field fields "kind",
     string_field fields "detail",
     bool_field_opt fields "snapshot_present",
     bool_field_opt fields "cadence_deferred"
   with
-  | Some at, Some kind, Some detail, Some snapshot_present, Some cadence_deferred ->
+  | ( Some at
+    , Some trace_id
+    , Some kind
+    , Some detail
+    , Some snapshot_present
+    , Some cadence_deferred ) ->
       Some
         { at
-        ; structural_id = None
+        ; structural_id =
+            Some
+              (memory_failed_structural_id ~at ~trace_id ~kind ~detail
+                 ~snapshot_present ~cadence_deferred)
         ; turn_sequence = None
         ; turn_id = None
         ; kind = Memory_activity
@@ -523,27 +559,29 @@ let memory_failed_row (fields : (string * Yojson.Safe.t) list) =
               (if snapshot_present then "yes" else "no")
               (if cadence_deferred then "yes" else "no")
         }
-  | Some _, Some _, Some _, Some _, None
-  | Some _, Some _, Some _, None, _
-  | Some _, Some _, None, _, _
-  | Some _, None, _, _, _
-  | None, _, _, _, _ -> None
+  | Some _, Some _, Some _, Some _, Some _, None
+  | Some _, Some _, Some _, Some _, None, _
+  | Some _, Some _, Some _, None, _, _
+  | Some _, Some _, None, _, _, _
+  | Some _, None, _, _, _, _
+  | None, _, _, _, _, _ -> None
 
 let memory_row_of_json = function
   | `Assoc fields ->
       (match bool_field_opt fields "ok" with
        | Some false ->
-           Option.map
-             (fun error ->
+           (match string_field fields "error", string_field fields "structural_id" with
+            | Some error, Some structural_id ->
+              Some
                 { at = 0.0
-                ; structural_id = None
+                ; structural_id = Some structural_id
                 ; turn_sequence = None
                 ; turn_id = None
                 ; kind = Memory_activity
                 ; text = "Memory journal unreadable: " ^ error
                 ; attachments = []
-                })
-             (string_field fields "error")
+                }
+            | Some _, None | None, Some _ | None, None -> None)
        | Some true ->
            (match string_field fields "outcome" with
             | Some "committed" -> memory_committed_row fields

@@ -1109,6 +1109,8 @@ let test_memory_commit_names_added_removed_and_drop_reason () =
   | Error detail -> failf "memory journal decode failed: %s" detail
   | Ok { History.rows = [ row ]; dropped = 0 } ->
       check (float 0.0) "journal timestamp retained" 1_700_000_010.0 row.at;
+      check bool "journal has a stable producer identity" true
+        (Option.is_some row.structural_id);
       check bool "typed as memory activity" true (row.kind = History.Memory_activity);
       List.iter
         (fun needle ->
@@ -1142,6 +1144,7 @@ let test_memory_failure_keeps_kind_and_detail () =
                 [ "ok", `Bool true
                 ; "outcome", `String "failed"
                 ; "recorded_at", `Float 1_700_000_020.0
+                ; "trace_id", `String "trace-memory-failure"
                 ; "kind", `String "exact_execution_failure"
                 ; "detail", `String "provider returned 503"
                 ; "snapshot_present", `Bool true
@@ -1152,6 +1155,8 @@ let test_memory_failure_keeps_kind_and_detail () =
   in
   match History.memory_rows_of_json payload with
   | Ok { History.rows = [ row ]; dropped = 0 } ->
+      check bool "failed observation has a stable producer identity" true
+        (Option.is_some row.structural_id);
       check bool "failure kind survives" true
         (contains row.text "exact_execution_failure");
       check bool "failure detail survives" true
@@ -1160,6 +1165,92 @@ let test_memory_failure_keeps_kind_and_detail () =
       failf "expected one failed memory row, got %d/%d"
         (List.length decoded.rows) decoded.dropped
   | Error detail -> failf "memory failure decode failed: %s" detail
+;;
+
+let memory_commit_entry ~revision ~recorded_at =
+  `Assoc
+    [ "ok", `Bool true
+    ; "outcome", `String "committed"
+    ; "recorded_at", `Float recorded_at
+    ; "revision", `Int revision
+    ; "source", `Assoc [ "kind", `String "librarian" ]
+    ; ( "change"
+      , `Assoc
+          [ "added", `List []
+          ; "removed", `List []
+          ; "retained", `Int revision
+          ] )
+    ; "dropped", `List []
+    ]
+;;
+
+let memory_failed_entry trace_id =
+  `Assoc
+    [ "ok", `Bool true
+    ; "outcome", `String "failed"
+    ; "recorded_at", `Float 1_700_000_020.0
+    ; "trace_id", `String trace_id
+    ; "kind", `String "exact_execution_failure"
+    ; "detail", `String "provider returned 503"
+    ; "snapshot_present", `Bool true
+    ; "cadence_deferred", `Bool false
+    ]
+;;
+
+let memory_structural_ids entries =
+  match History.memory_rows_of_json (`Assoc [ "entries", `List entries ]) with
+  | Ok { History.rows; dropped = 0 } ->
+      List.map (fun row -> row.History.structural_id) rows
+  | Ok decoded ->
+      failf "memory identity fixture dropped %d row(s)" decoded.dropped
+  | Error detail -> failf "memory identity fixture failed: %s" detail
+;;
+
+let test_memory_identity_survives_a_producer_prepend () =
+  let current = memory_commit_entry ~revision:7 ~recorded_at:1_700_000_010.0 in
+  let backfill = memory_commit_entry ~revision:6 ~recorded_at:1_800_000_000.0 in
+  match memory_structural_ids [ current ], memory_structural_ids [ backfill; current ] with
+  | [ Some before ], [ Some backfilled; Some after ] ->
+      check string "the existing Journal identity survives prepend" before after;
+      check bool "the prepended Journal row has a distinct identity" true
+        (not (String.equal backfilled after))
+  | before, after ->
+      failf "expected stable Journal identities, got %d then %d"
+        (List.length before) (List.length after)
+;;
+
+let test_failed_memory_identity_includes_trace_id () =
+  match memory_structural_ids [ memory_failed_entry "trace-a"; memory_failed_entry "trace-b" ] with
+  | [ Some left; Some right ] ->
+      check bool "two failure traces have distinct identities" true
+        (not (String.equal left right))
+  | identities ->
+      failf "expected two failed Journal identities, got %d"
+        (List.length identities)
+;;
+
+let test_unreadable_memory_identity_is_server_supplied () =
+  let structural_id = "memory:journal:5:alpha:17" in
+  let payload =
+    `Assoc
+      [ ( "entries"
+        , `List
+            [ `Assoc
+                [ "structural_id", `String structural_id
+                ; "ok", `Bool false
+                ; "error", `String "journal line is not valid JSON"
+                ]
+            ] )
+      ]
+  in
+  match History.memory_rows_of_json payload with
+  | Ok { History.rows = [ row ]; dropped = 0 } ->
+      check (option string) "unreadable row keeps storage identity"
+        (Some structural_id) row.structural_id
+  | Ok decoded ->
+      failf "expected one unreadable Journal row, got %d/%d"
+        (List.length decoded.rows) decoded.dropped
+  | Error detail -> failf "unreadable Journal fixture failed: %s" detail
 ;;
 
 (* The store has carried [attachments] since the composer learned to stage a
@@ -1411,5 +1502,11 @@ let () =
             test_memory_commit_names_added_removed_and_drop_reason
         ; test_case "failure keeps kind and detail" `Quick
             test_memory_failure_keeps_kind_and_detail
+        ; test_case "producer prepend keeps structural identities" `Quick
+            test_memory_identity_survives_a_producer_prepend
+        ; test_case "failed identity includes trace id" `Quick
+            test_failed_memory_identity_includes_trace_id
+        ; test_case "unreadable row keeps server identity" `Quick
+            test_unreadable_memory_identity_is_server_supplied
         ] )
     ]

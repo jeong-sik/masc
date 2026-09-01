@@ -4406,21 +4406,77 @@ def paste_to_file_interaction(requests: HttpRequests) -> Interaction:
 
 
 def keeper_chat_succeeded_response(request_body: bytes) -> RawHttpResponse:
-    request_id = json.loads(request_body).get("request_id")
-    accepted = {
-        "type": "CUSTOM",
-        "threadId": "keeper:alpha",
-        "timestamp": 1.0,
-        "name": "KEEPER_CHAT_OPERATION_ACCEPTED",
-        "value": {
-            "operation_id": request_id,
-            "state": "Succeeded",
-            "queued_count": 0,
+    request = json.loads(request_body)
+    request_id = request.get("request_id")
+    keeper_name = request.get("name")
+    message = request.get("message")
+    run_id = f"keeper-operation-run-{request_id}"
+    message_id = f"keeper-operation-message-{request_id}"
+    reply = f"reply-{message}"
+    thread_id = f"keeper:{keeper_name}"
+    events = [
+        {
+            "type": "CUSTOM",
+            "threadId": "default",
+            "timestamp": 1.0,
+            "name": "KEEPER_CHAT_OPERATION_ACCEPTED",
+            "value": {
+                "operation_id": request_id,
+                "state": "Queued",
+                "queued_count": 0,
+            },
         },
-    }
+        {
+            "type": "RUN_STARTED",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+        },
+        {
+            "type": "TEXT_MESSAGE_START",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+            "messageId": message_id,
+            "role": "assistant",
+        },
+        {
+            "type": "TEXT_MESSAGE_CONTENT",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+            "messageId": message_id,
+            "delta": reply,
+        },
+        {
+            "type": "CUSTOM",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+            "name": "KEEPER_REPLY_DETAILS",
+            "value": {
+                "reply": reply,
+                "turn_outcome": "visible_reply",
+                "turn_ref": "trace-pty#1",
+            },
+        },
+        {
+            "type": "TEXT_MESSAGE_END",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+            "messageId": message_id,
+        },
+        {
+            "type": "RUN_FINISHED",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+        },
+    ]
     return RawHttpResponse(
         200,
-        ("data: " + json.dumps(accepted) + "\n\n").encode(),
+        "".join(f"data: {json.dumps(event)}\n\n" for event in events).encode(),
         content_type="text/event-stream",
     )
 
@@ -4608,7 +4664,6 @@ def chat_steer_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
         request_id = json.loads(request_body).get("request_id")
         return 200, {
             "signalled": True,
-            "turn_id": 71,
             "request_id": request_id,
         }
 
@@ -4862,6 +4917,24 @@ def chat_reconcile_interaction(
                     f"terminal reconciliation did not release NEXT: {messages!r}"
                 )
             time.sleep(0.02)
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"Enter:send",
+            start=0,
+            timeout=10.0,
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b",
+            b"Keepers \xe2\x96\xb8 \x1b[1malpha",
+        )
+        send_and_wait(
+            process, master_fd, output, b"\x1b", b"MASC Keepers"
+        )
         os.write(master_fd, b"q")
 
     return interact
@@ -5281,6 +5354,7 @@ def memory_journal_backfill_fixture() -> HttpResponse:
             "ok": True,
             "outcome": "failed",
             "recorded_at": 1787348480.0,
+            "trace_id": "trace-backfilled-probe",
             "kind": "backfilled_probe",
             "detail": "older Journal observation",
             "snapshot_present": True,
@@ -5298,8 +5372,9 @@ def memory_journal_chat_fixture() -> HttpResponse:
             {
                 "id": "assistant:before-journal",
                 "role": "assistant",
-                "content": "broadcast before Librarian",
+                "content": "direct turn before Librarian",
                 "ts": 1787344889.0,
+                "turn_ref": "trace-before#54",
             },
             {
                 "id": "assistant:after-journal",
@@ -5421,16 +5496,14 @@ def memory_journal_timeline_interaction(
                     "Civil-hour rail was not drawn in its semantic colour "
                     f"and bold weight for {label!r}: {visible!r}"
                 )
-        before = plain_visible.find(b"broadcast before Librarian")
+        before = plain_visible.find(b"direct turn before Librarian")
         journal = plain_visible.find(b"Librarian committed current memory revision 9")
         after = plain_visible.find(b"direct turn after Librarian")
-        if not (
-            0 <= earlier_rail < before < later_rail < journal < after
-        ):
+        if not (0 <= earlier_rail < before < later_rail < after < journal):
             raise AssertionError(
-                "Civil-hour rails and parallel chat/journal lanes were not "
-                "ordered by recorded time without splitting conversation "
-                f"turns: {visible!r}"
+                "Civil-hour rails did not display clock transitions while chat "
+                "turns and the Journal lane retained typed turn then producer "
+                f"order: {visible!r}"
             )
         if re.search("\u25c8\\s+JOURNAL".encode(), plain_visible) is None:
             raise AssertionError(
@@ -5480,6 +5553,9 @@ def memory_journal_timeline_interaction(
             raise AssertionError(
                 f"Scroll setup did not keep the intended Journal anchor: {scrolled_frame!r}"
             )
+        anchor_row_before = frame_row_of(scrolled_frame, anchor)
+        status_row_before = frame_row_of(scrolled_frame, b"reading back 1 row(s)")
+        anchor_offset_before = anchor_row_before - status_row_before
         memory.responses.append(memory_journal_backfill_fixture())
         served_before_backfill = memory.served
         wait_for_fixture_served(
@@ -5488,7 +5564,7 @@ def memory_journal_timeline_interaction(
             output,
             memory,
             after=served_before_backfill,
-            description="chronological Journal backfill",
+            description="Journal producer backfill",
             timeout=5.0,
         )
         drain_until_quiet(process, master_fd, output)
@@ -5503,8 +5579,17 @@ def memory_journal_timeline_interaction(
         )
         if anchor not in CSI_RE.sub(b"", refreshed_frame):
             raise AssertionError(
-                "An older chronological Journal backfill moved the scroll pin: "
+                "A producer-side Journal backfill moved the structural scroll pin: "
                 f"{refreshed_frame!r}"
+            )
+        anchor_row_after = frame_row_of(refreshed_frame, anchor)
+        status_row_after = frame_row_of(refreshed_frame, b"reading back 1 row(s)")
+        anchor_offset_after = anchor_row_after - status_row_after
+        if anchor_offset_after != anchor_offset_before:
+            raise AssertionError(
+                "Journal prepend changed the pinned row's footer-relative slot: "
+                f"before={anchor_offset_before} after={anchor_offset_after} "
+                f"frame={refreshed_frame!r}"
             )
         send_and_wait(
             process,

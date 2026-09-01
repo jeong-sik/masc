@@ -136,6 +136,11 @@ type decoded =
   | Event of event
   | Undecodable of string
 
+val chat_appended_keeper : event -> string option
+(** The keeper whose chat just gained a turn — [Some] only for
+    {!Keeper_chat_appended}. The chat pane reloads its history on this
+    and on nothing else. *)
+
 val event_of_json : Yojson.Safe.t -> (event, string) result
 (** Decode one [data:] payload. [Error] for a payload with no [type], or an
     [agent_core:*] payload missing [event_type] or [ts_unix], which every

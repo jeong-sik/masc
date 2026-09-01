@@ -106,6 +106,19 @@ type decoded =
   | Event of event
   | Undecodable of string
 
+(* The keeper whose chat just gained a turn, when the event says so.
+   The chat pane reloads its history on this and on nothing else, so
+   the arms are spelled out: a new variant has to decide here whether
+   it means the transcript changed, instead of being swallowed by a
+   wildcard. *)
+let chat_appended_keeper = function
+  | Keeper_chat_appended { keeper; _ } -> Some keeper
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _ | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Snapshot _ | Other _ ->
+      None
+
 (* Field readers over one object's assoc list. Each answers [None] for an
    absent field and for one of the wrong shape; the required readers below
    turn that into the error the caller reports. *)

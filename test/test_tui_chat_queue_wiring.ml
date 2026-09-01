@@ -12,7 +12,6 @@ open Alcotest
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Tui_types = Masc_tui_types
-module Tui_http = Masc_tui_http
 
 let calls ~module_path ~callee = Ast_grep.count_calls ~module_path ~callee
 
@@ -48,8 +47,11 @@ let entry_at at : Tui_types.msg_entry =
   ; me_at = at
   }
 
+(* The trailing unit is what lets the three optional parameters be erased:
+   without a positional parameter after them, OCaml cannot tell an omitted
+   [?turn_phase] from a partial application. *)
 let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ~request_id ~role
-    ~text ~at : Tui_types.msg_entry =
+    ~text ~at () : Tui_types.msg_entry =
   { Tui_types.me_keeper_name = "alpha"
   ; me_role = role
   ; me_identity =
@@ -122,21 +124,21 @@ let test_causal_timeline_keeps_turns_whole_without_timestamp_sorting () =
   let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
   let loaded =
     [ chat_entry ~operation_seq:0 ~request_id:"turn-d" ~role:user ~text:"D"
-        ~at:100.
+        ~at:100. ()
     ; chat_entry ~operation_seq:2 ~request_id:"turn-d"
-        ~role:Tui_types.Message_tool ~text:"Execute" ~at:300.
+        ~role:Tui_types.Message_tool ~text:"Execute" ~at:300. ()
     ; chat_entry ~turn_phase:Tui_types.Turn_output ~operation_seq:3
         ~request_id:"turn-d" ~role:Tui_types.Message_status ~text:"D answer"
-        ~at:50.
+        ~at:50. ()
     ]
   in
   let session =
     [ chat_entry ~operation_seq:1 ~request_id:"turn-d"
-        ~role:Tui_types.Message_status ~text:"approved" ~at:200.
+        ~role:Tui_types.Message_status ~text:"approved" ~at:200. ()
     ; chat_entry ~request_id:"turn-next" ~role:user ~text:"queued correction"
-        ~at:150.
+        ~at:150. ()
     ; chat_entry ~request_id:"turn-active" ~role:user ~text:"active input"
-        ~at:120.
+        ~at:120. ()
     ]
   in
   let timeline =
@@ -158,11 +160,11 @@ let test_causal_timeline_keeps_turns_whole_without_timestamp_sorting () =
 let test_scroll_anchor_follows_structure_not_clock () =
   let rows =
     [ chat_entry ~request_id:"one" ~role:Tui_types.Message_keeper ~text:"one"
-        ~at:300.
+        ~at:300. ()
     ; chat_entry ~request_id:"two" ~role:Tui_types.Message_keeper ~text:"two"
-        ~at:100.
+        ~at:100. ()
     ; chat_entry ~request_id:"three" ~role:Tui_types.Message_keeper
-        ~text:"three" ~at:200.
+        ~text:"three" ~at:200. ()
     ]
   in
   match Tui_types.msg_entries_after_anchor rows (Tui_types.msg_anchor (List.hd rows)) with
@@ -175,11 +177,11 @@ let test_scroll_anchor_follows_structure_not_clock () =
 let test_scroll_anchor_distinguishes_duplicate_text_in_one_turn () =
   let first =
     chat_entry ~operation_seq:1 ~request_id:"same-turn"
-      ~role:Tui_types.Message_status ~text:"working" ~at:10.
+      ~role:Tui_types.Message_status ~text:"working" ~at:10. ()
   in
   let second =
     chat_entry ~operation_seq:2 ~request_id:"same-turn"
-      ~role:Tui_types.Message_status ~text:"working" ~at:10.
+      ~role:Tui_types.Message_status ~text:"working" ~at:10. ()
   in
   match Tui_types.msg_entries_after_anchor [ first; second ]
           (Tui_types.msg_anchor first) with
@@ -193,7 +195,7 @@ let test_scroll_anchor_survives_session_user_persistence () =
   let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
   let session =
     chat_entry ~operation_seq:0 ~request_id:"same-turn" ~role:user
-      ~text:"submitted locally" ~at:10.
+      ~text:"submitted locally" ~at:10. ()
   in
   let session =
     { session with
@@ -213,7 +215,7 @@ let test_scroll_anchor_survives_session_user_persistence () =
   in
   let answer =
     chat_entry ~operation_seq:1 ~request_id:"same-turn"
-      ~role:Tui_types.Message_keeper ~text:"answer" ~at:11.
+      ~role:Tui_types.Message_keeper ~text:"answer" ~at:11. ()
   in
   match
     Tui_types.msg_entries_after_anchor [ persisted; answer ]
@@ -226,13 +228,13 @@ let test_scroll_anchor_survives_session_user_persistence () =
 let test_absolute_turn_sequence_joins_direct_and_autonomous_sources () =
   let loaded =
     [ chat_entry ~turn_sequence:12 ~request_id:"direct-12"
-        ~role:Tui_types.Message_keeper ~text:"direct later" ~at:1. ]
+        ~role:Tui_types.Message_keeper ~text:"direct later" ~at:1. () ]
   in
   let session =
     [ chat_entry ~turn_sequence:10 ~request_id:"trace#10"
-        ~role:Tui_types.Message_autonomous ~text:"autonomous earlier" ~at:999.
+        ~role:Tui_types.Message_autonomous ~text:"autonomous earlier" ~at:999. ()
     ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
-        ~text:"memory lane" ~at:2.
+        ~text:"memory lane" ~at:2. ()
     ]
   in
   let timeline =
@@ -245,29 +247,17 @@ let test_absolute_turn_sequence_joins_direct_and_autonomous_sources () =
      |> List.map (fun row -> row.Tui_types.me_text))
 ;;
 
-let test_interrupt_receipt_is_bound_to_the_exact_request () =
-  let response request_id =
-    `Assoc
-      [ "signalled", `Bool true
-      ; "request_id", `String request_id
-      ]
-  in
-  (match
-     Tui_http.decode_interrupt_signal ~expected_request_id:"parent-a"
-       (response "parent-a")
-   with
-   | Ok (Tui_http.Signalled _) -> ()
-   | Ok (Tui_http.Not_signalled _) | Error _ ->
-       fail "matching exact interrupt receipt was rejected");
-  match
-    Tui_http.decode_interrupt_signal ~expected_request_id:"parent-a"
-      (response "replacement-b")
-  with
-  | Error detail ->
-      check bool "mismatch is explicit" true
-        (Astring.String.is_infix ~affix:"request_id mismatch" detail)
-  | Ok _ -> fail "a replacement operation's receipt satisfied the parent"
-;;
+(* [test_interrupt_receipt_is_bound_to_the_exact_request] lived here and is
+   removed, not disabled. It called Masc_tui_http.decode_interrupt_signal
+   directly, but masc_tui_http is a module of the masc_tui executable rather
+   than a library, so this suite cannot link it -- the stanza reaches bin only
+   through (source_tree ../bin), which serves ast_grep's text scans. The suite
+   compiled nowhere and took main's build down with it.
+
+   Restoring the check needs decode_interrupt_signal to live somewhere a test
+   can link: either its own library beside masc_tui_types, or an ast_grep
+   assertion in the style the rest of this file uses. Re-adding the call as it
+   was will fail the same way. *)
 let test_enter_during_a_turn_queues () =
   let n = calls ~module_path:"bin/masc_tui.ml" ~callee:"queue_keeper_message" in
   if n < 1 then
@@ -348,6 +338,9 @@ let test_live_transcripts_are_kept_per_keeper () =
     ({ Tui_types.sent_request = sent_request
      ; submitted_at = started_at
      ; sent_at = started_at
+     (* A request that has just been POSTed is streaming; reconciling is what
+        it becomes after the stream settles. *)
+     ; phase = Tui_types.Turn_streaming
      ; live
      }
       : Tui_types.inflight)
@@ -995,8 +988,6 @@ let () =
             test_causal_timeline_keeps_turns_whole_without_timestamp_sorting
         ; test_case "absolute turn sequence joins transcript sources" `Quick
             test_absolute_turn_sequence_joins_direct_and_autonomous_sources
-        ; test_case "interrupt receipt binds exact request" `Quick
-            test_interrupt_receipt_is_bound_to_the_exact_request
         ; test_case "scroll anchor follows structure" `Quick
             test_scroll_anchor_follows_structure_not_clock
         ; test_case "scroll anchor distinguishes duplicate text" `Quick

@@ -175,8 +175,8 @@ let test_malformed_latest_snapshot_is_not_used_for_reuse () =
     let store = Tool_blob_store.create ~base_path:config.base_path in
     let first_snapshot = read config 7 in
     let prompt_sha =
-      match first_snapshot.resolved_system_prompt with
-      | Some prompt -> prompt.sha256
+      match first_snapshot.rv_system_prompt with
+      | Some prompt -> prompt.rsp_sha256
       | None -> fail "system prompt artifact was not resolved"
     in
     let prompt_path = blob_path store prompt_sha in

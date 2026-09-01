@@ -348,6 +348,9 @@
  (modules masc_tui_keeper_chat_history)
  (libraries
   masc.keeper_chat_delivery_identity
+  ; turn_sequence_of_fields reads Ids.Turn_ref, and implicit_transitive_deps
+  ; is false, so the module is not reachable through the others.
+  masc.masc_types
   masc_tui_keeper_chat_transcript
   yojson))
 

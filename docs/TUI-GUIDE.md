@@ -219,11 +219,17 @@ settled, `?` something needing attention, `·` the quiet kinds. A returned
 call shows how long it took when its start is among the events held; a
 call that began before the feed opened shows none.
 
-`f` switches between `actions` - what keepers did - and `everything`, which
-adds heartbeats, composite and snapshot pushes, and telemetry. On the live
-runtime those were more than half of the feed and said nothing a row could
-act on, so `actions` is the default. An event kind this build was not taught
-draws under both, by its name, so a new kind is noticed rather than hidden.
+`f` cycles three explicit scopes. `turns` is the default and folds each Keeper
+turn to one row while leaving internal agent runs and approvals separate.
+`actions` shows the flat calls, returns, turn boundaries, settlements, and chat
+events. `everything` additionally shows heartbeats, composite/snapshot pushes,
+chat stream frames, waiting-queue changes, and telemetry. Its quiet gray `·`
+rows are state observations, not failures; `composite` specifically means the
+Keeper composite snapshot changed. `agent start`/`agent done` are internal
+agent runs rather than Keeper turn boundaries. The current scope and these
+meanings are printed above the table, not hidden in this guide. An event kind
+this build was not taught always draws by its wire name, so a new kind is
+noticed rather than filtered away.
 
 Scrolling down into older rows (`j`) freezes the view: new events count up
 in `N new above (g)` on the status row instead of pushing the rows you are

@@ -11649,6 +11649,8 @@ let render_acting (state : state) =
   in
   box_line_styled buf cols ~style:(Theme.recede ())
     (Printf.sprintf "  %s%s%s%s" feed dropped undecodable unseen);
+  box_line_styled buf cols ~style:(Theme.recede ())
+    ("  " ^ Acting.filter_explanation state.acting_filter);
   box_divider buf cols;
   let col_hdr =
     Printf.sprintf "  %-8s %-16s %s %-16s %s" "Time" "Keeper" " " "Event"
@@ -11658,7 +11660,7 @@ let render_acting (state : state) =
   box_divider buf cols;
   (* The page indicator has a row of its own whether or not it is drawn, so a
      list that overflows does not push the help line off the bottom. *)
-  let chrome_rows = 10 in
+  let chrome_rows = 11 in
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.acting_scroll max_scroll) in
@@ -11729,7 +11731,9 @@ let render_acting (state : state) =
   else box_empty buf cols;
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  g:newest  G:oldest  f:filter  Tab:next  q:quit");
+    (footer_line state ~max_cells:cols
+       ~hints:
+         "j/k:scroll  g:newest  G:oldest  f:turns/actions/everything  Tab:next  q:quit");
   finish_surface state ~clamped:(Acting scroll) ~surface_key:"acting" ~rows:terminal_rows ~cols buf
 
 (** Render the runtime picker: the dispatchable catalogue, with the keeper it

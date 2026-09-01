@@ -15,6 +15,15 @@ let filter_label = function
   | Actions -> "actions"
   | Everything -> "everything"
 
+let filter_explanation = function
+  | Turns ->
+      "scope turns · one row per Keeper turn · agent start/done = internal run"
+  | Actions ->
+      "scope actions · flat calls/returns/turn/chat · state pushes hidden"
+  | Everything ->
+      "scope everything · gray · = state/telemetry · composite = Keeper snapshot changed"
+;;
+
 (* One feed event as the screen holds it. The arrival time is here rather than
    read back off the event because the screen is a feed: rows are held and
    drawn in the order they arrived, and two event kinds carry no clock at all

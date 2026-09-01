@@ -23,6 +23,9 @@ type filter =
 
 val next_filter : filter -> filter
 val filter_label : filter -> string
+val filter_explanation : filter -> string
+(** Short in-frame scope legend. It names what the current projection folds or
+    hides and explains the quiet rows that [Everything] adds. *)
 
 type entry = {
   ae_at : float;  (** when the TUI received it *)

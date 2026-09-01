@@ -52,6 +52,18 @@ let entries_of events =
          { Acting.ae_at = 100. +. float_of_int index; ae_event = event })
        events)
 
+let test_filter_explanations_name_scope_and_quiet_rows () =
+  check string "turns explains internal agents"
+    "scope turns · one row per Keeper turn · agent start/done = internal run"
+    (Acting.filter_explanation Acting.Turns);
+  check string "actions says state is hidden"
+    "scope actions · flat calls/returns/turn/chat · state pushes hidden"
+    (Acting.filter_explanation Acting.Actions);
+  check string "everything explains gray composite rows"
+    "scope everything · gray · = state/telemetry · composite = Keeper snapshot changed"
+    (Acting.filter_explanation Acting.Everything)
+;;
+
 let ledger_tool ?duration_ms ~keeper tool : Observer.event =
   Observer.Keeper_tool_call
     { Observer.kt_keeper = keeper
@@ -461,6 +473,8 @@ let () =
     [ ( "rows"
       , [ test_case "actions hide what says nothing a row can act on" `Quick
             test_actions_hide_what_says_nothing_a_row_can_act_on
+        ; test_case "filter explanations name scope and quiet rows" `Quick
+            test_filter_explanations_name_scope_and_quiet_rows
         ; test_case "one reply does not bury the actions it sits between" `Quick
             test_one_reply_does_not_bury_the_actions_it_sits_between
         ; test_case "a stream frame draws its keeper and what it was" `Quick

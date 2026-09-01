@@ -376,6 +376,10 @@ type schedule_row = {
   sch_reaction_projection_status: string option;
   sch_reaction_latest_at_iso: string option;
   sch_reaction_kind: string option;
+  sch_reaction_keeper_name: string option;
+  sch_reaction_stimulus_id: string option;
+  sch_reaction_post_id: string option;
+  sch_reaction_reason: string option;
   sch_wake_seen: bool option;
       (** Whether the woken Keeper's ledger recorded the stimulus arriving.
           [None] is "the ledger did not say", which is not [Some false] --
@@ -388,6 +392,10 @@ type schedule_row = {
           of these at once. *)
   sch_queue_ack_seen: bool option;
   sch_wake_cancelled: bool option;
+  sch_stimulus_recorded_at_iso: string option;
+  sch_turn_started_recorded_at_iso: string option;
+  sch_queue_ack_recorded_at_iso: string option;
+  sch_wake_cancelled_recorded_at_iso: string option;
   sch_reaction_quarantined: int option;
       (** Ledger records the projection could not match. Nonzero is why a
           status reads worse than the steps below it look. *)

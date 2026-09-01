@@ -680,6 +680,18 @@ let decode_schedule_row json =
   let* sch_reaction_kind =
     optional_nested_string_field json "keeper_reaction_evidence" "reaction_kind"
   in
+  let* sch_reaction_keeper_name =
+    optional_nested_string_field json "keeper_reaction_evidence" "keeper_name"
+  in
+  let* sch_reaction_stimulus_id =
+    optional_nested_string_field json "keeper_reaction_evidence" "stimulus_id"
+  in
+  let* sch_reaction_post_id =
+    optional_nested_string_field json "keeper_reaction_evidence" "post_id"
+  in
+  let* sch_reaction_reason =
+    optional_nested_string_field json "keeper_reaction_evidence" "reason"
+  in
   let* sch_wake_seen =
     optional_nested_bool_field json "keeper_reaction_evidence" "stimulus_seen"
   in
@@ -694,6 +706,22 @@ let decode_schedule_row json =
   let* sch_wake_cancelled =
     optional_nested_bool_field json "keeper_reaction_evidence"
       "event_queue_cancelled_seen"
+  in
+  let* sch_stimulus_recorded_at_iso =
+    optional_nested_string_field json "keeper_reaction_evidence"
+      "stimulus_recorded_at_iso"
+  in
+  let* sch_turn_started_recorded_at_iso =
+    optional_nested_string_field json "keeper_reaction_evidence"
+      "turn_started_recorded_at_iso"
+  in
+  let* sch_queue_ack_recorded_at_iso =
+    optional_nested_string_field json "keeper_reaction_evidence"
+      "event_queue_ack_recorded_at_iso"
+  in
+  let* sch_wake_cancelled_recorded_at_iso =
+    optional_nested_string_field json "keeper_reaction_evidence"
+      "event_queue_cancelled_recorded_at_iso"
   in
   let* sch_reaction_quarantined =
     optional_nested_int_field json "keeper_reaction_evidence"
@@ -726,10 +754,18 @@ let decode_schedule_row json =
     ; sch_queue_pending_count
     ; sch_reaction_projection_status
     ; sch_reaction_kind
+    ; sch_reaction_keeper_name
+    ; sch_reaction_stimulus_id
+    ; sch_reaction_post_id
+    ; sch_reaction_reason
     ; sch_wake_seen
     ; sch_turn_started
     ; sch_queue_ack_seen
     ; sch_wake_cancelled
+    ; sch_stimulus_recorded_at_iso
+    ; sch_turn_started_recorded_at_iso
+    ; sch_queue_ack_recorded_at_iso
+    ; sch_wake_cancelled_recorded_at_iso
     ; sch_reaction_quarantined
     ; sch_reaction_latest_at_iso
     }

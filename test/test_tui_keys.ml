@@ -153,10 +153,18 @@ let schedule_form_row : schedule_row =
   ; sch_reaction_projection_status = None
   ; sch_reaction_latest_at_iso = None
   ; sch_reaction_kind = None
+  ; sch_reaction_keeper_name = None
+  ; sch_reaction_stimulus_id = None
+  ; sch_reaction_post_id = None
+  ; sch_reaction_reason = None
   ; sch_wake_seen = None
   ; sch_turn_started = None
   ; sch_queue_ack_seen = None
   ; sch_wake_cancelled = None
+  ; sch_stimulus_recorded_at_iso = None
+  ; sch_turn_started_recorded_at_iso = None
+  ; sch_queue_ack_recorded_at_iso = None
+  ; sch_wake_cancelled_recorded_at_iso = None
   ; sch_reaction_quarantined = None
   }
 

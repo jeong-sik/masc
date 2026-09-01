@@ -3790,33 +3790,77 @@ let render_schedule_list (state : state) =
 let schedule_turn_rows
       ~(field : ?style:string -> string -> string -> string * string)
       (row : schedule_row) =
-  let observed =
+  let step_observed =
     [ row.sch_wake_seen
     ; row.sch_turn_started
     ; row.sch_queue_ack_seen
     ; row.sch_wake_cancelled
     ]
+    |> List.exists Option.is_some
   in
-  if List.for_all Option.is_none observed then []
+  let metadata_observed =
+    [ row.sch_reaction_keeper_name
+    ; row.sch_reaction_stimulus_id
+    ; row.sch_reaction_post_id
+    ; row.sch_reaction_reason
+    ; row.sch_stimulus_recorded_at_iso
+    ; row.sch_turn_started_recorded_at_iso
+    ; row.sch_queue_ack_recorded_at_iso
+    ; row.sch_wake_cancelled_recorded_at_iso
+    ]
+    |> List.exists Option.is_some
+  in
+  if not (step_observed || metadata_observed || Option.is_some row.sch_reaction_quarantined)
+  then []
   else
     (* [None] is not [false]. A step the ledger never spoke about draws the
        same dash every unknown draws on this pane, in the dim every unknown
        takes -- claiming "no" for it would report a failure nobody observed. *)
-    let step ?(bad_when_true = false) label = function
+    let step ?(bad_when_true = false) label observed recorded_at =
+      match observed with
       | None -> field label "\xe2\x80\x94"
       | Some value ->
           let tone =
             if value = bad_when_true then Theme.bad () else Theme.ok ()
           in
-          field ~style:tone label (if value then "yes" else "no")
+          let at =
+            match value, recorded_at with
+            | true, Some timestamp ->
+              " \xc2\xb7 " ^ Tui_decode.short_timestamp_for_terminal timestamp
+            | _, _ -> ""
+          in
+          field ~style:tone label ((if value then "yes" else "no") ^ at)
+    in
+    let identity_rows =
+      [ Option.map
+          (fun keeper ->
+             field "Keeper evidence"
+               (Link.reference Keeper (Terminal_text.single_line keeper)))
+          row.sch_reaction_keeper_name
+      ; Option.map
+          (fun stimulus -> field "Stimulus" stimulus)
+          row.sch_reaction_stimulus_id
+      ; Option.map
+          (fun occurrence -> field "Occurrence" occurrence)
+          row.sch_reaction_post_id
+      ]
+      |> List.filter_map Fun.id
     in
     [ Ansi.dim, ""
     ; Ansi.bold, "  TURN"
-    ; step "Wake seen" row.sch_wake_seen
-    ; step "Turn started" row.sch_turn_started
-    ; step "Queue ack" row.sch_queue_ack_seen
-    ; step ~bad_when_true:true "Cancelled" row.sch_wake_cancelled
-    ; field "Reaction kind" (Option.value ~default:"\xe2\x80\x94" row.sch_reaction_kind)
+    ]
+    @ identity_rows
+    @ [ step "Wake seen" row.sch_wake_seen row.sch_stimulus_recorded_at_iso
+      ; step "Turn started" row.sch_turn_started
+          row.sch_turn_started_recorded_at_iso
+      ; step "Queue ack" row.sch_queue_ack_seen row.sch_queue_ack_recorded_at_iso
+      ; step ~bad_when_true:true "Cancelled" row.sch_wake_cancelled
+          row.sch_wake_cancelled_recorded_at_iso
+      ; field "Reaction kind"
+          (Option.value ~default:"\xe2\x80\x94" row.sch_reaction_kind)
+      ; field
+          ~style:(if Option.is_some row.sch_reaction_reason then Theme.warn () else Ansi.dim)
+          "Reason" (Option.value ~default:"\xe2\x80\x94" row.sch_reaction_reason)
     ; field
         ~style:
           (match row.sch_reaction_quarantined with
@@ -3826,7 +3870,7 @@ let schedule_turn_rows
         (match row.sch_reaction_quarantined with
          | None -> "\xe2\x80\x94"
          | Some count -> string_of_int count)
-    ]
+      ]
 
 let schedule_detail_lines ~width (row : schedule_row) =
   let field ?(style = Ansi.reset) label value =
@@ -3858,9 +3902,14 @@ let schedule_detail_lines ~width (row : schedule_row) =
   let summary =
     Option.value ~default:"(no payload summary)" row.sch_payload_summary
   in
+  let keeper_wake =
+    match row.sch_payload_kind with
+    | Some ("keeper_wake" | "masc.keeper_wake") -> true
+    | Some _ | None -> false
+  in
   let target_link =
-    match row.sch_payload_kind, row.sch_payload_target with
-    | Some "keeper_wake", Some keeper ->
+    match keeper_wake, row.sch_payload_target with
+    | true, Some keeper ->
         [ field "Keeper link"
             (Link.reference Keeper (Terminal_text.single_line keeper))
         ]
@@ -3927,6 +3976,13 @@ let schedule_detail_lines ~width (row : schedule_row) =
         "Reaction" reaction
     ]
   @ schedule_turn_rows ~field row
+  @ (if keeper_wake then
+       [ Ansi.dim, ""
+       ; Ansi.bold, "  WORK RESULT"
+       ; field "Attribution" "wake/turn only; no schedule-to-tool/result join"
+       ; field "Inspect" "Keeper Calls or Acting after the recorded turn start"
+       ]
+     else [])
 
 let schedule_detail_pane (state : state) ~rows ~cols (row : schedule_row) buf =
   box_top buf cols;

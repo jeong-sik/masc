@@ -45,6 +45,62 @@ let rec split_at count rev_prefix values =
     | [] -> None
 ;;
 
+type provenance_failure =
+  | Input_prefix_dropped of
+      { projection_input_messages : int
+      ; projected_messages : int
+      }
+  | Input_prefix_rewritten of { first_divergent_index : int }
+  | Prompt_context_carrier_metadata_invalid
+  | Prompt_context_carrier_metadata_duplicate
+  | Prompt_context_carrier_repeated
+  | Prompt_context_presence_mismatch of
+      { carrier_observed : bool
+      ; prompt_context_present : bool
+      }
+
+let provenance_failure_reason = function
+  | Input_prefix_dropped _ -> "projection_dropped_input_prefix"
+  | Input_prefix_rewritten _ -> "projection_rewrote_input_prefix"
+  | Prompt_context_carrier_metadata_invalid ->
+    "prompt_context_carrier_metadata_invalid"
+  | Prompt_context_carrier_metadata_duplicate ->
+    "prompt_context_carrier_metadata_duplicate"
+  | Prompt_context_carrier_repeated -> "prompt_context_carrier_repeated"
+  | Prompt_context_presence_mismatch _ -> "prompt_context_presence_mismatch"
+;;
+
+let provenance_failure_detail = function
+  | Input_prefix_dropped { projection_input_messages; projected_messages } ->
+    Printf.sprintf "handed=%d returned=%d" projection_input_messages
+      projected_messages
+  | Input_prefix_rewritten { first_divergent_index } ->
+    Printf.sprintf "first_divergent_index=%d" first_divergent_index
+  | Prompt_context_carrier_metadata_invalid
+  | Prompt_context_carrier_metadata_duplicate
+  | Prompt_context_carrier_repeated -> ""
+  | Prompt_context_presence_mismatch { carrier_observed; prompt_context_present }
+    ->
+    Printf.sprintf "carrier_observed=%b prompt_context_present=%b"
+      carrier_observed prompt_context_present
+;;
+
+(* The index is reported rather than a bare "not equal" because the two
+   rewrites this separates need different fixes: a carrier the assembler
+   inserted lands at a low index, a reordered tail lands near the end. *)
+let first_divergent_index prefix input =
+  let rec walk index prefix input =
+    match prefix, input with
+    | [], [] -> None
+    | prefix_head :: prefix_rest, input_head :: input_rest ->
+      if prefix_head = input_head
+      then walk (index + 1) prefix_rest input_rest
+      else Some index
+    | [], _ :: _ | _ :: _, [] -> Some index
+  in
+  walk 0 prefix input
+;;
+
 let provider_content_messages
       ~prompt_context_present
       ~(projection_input : Agent_core.Types.message list)
@@ -52,31 +108,50 @@ let provider_content_messages
   =
   let projection_input_count = List.length projection_input in
   match split_at projection_input_count [] projected_messages with
-  | Some (projected_prefix, projection_suffix)
-    when List.equal ( = ) projected_prefix projection_input ->
-    let rec remove_prompt_context seen rev_retained = function
-      | [] ->
-        if Bool.equal seen prompt_context_present
-        then Some (List.rev rev_retained)
-        else None
-      | (message : Agent_core.Types.message) :: rest ->
-        (match
-         Agent_core.Types.Extra_system_context_provenance.classify
-             message.metadata
-         with
-         | Agent_core.Types.Extra_system_context_provenance.Absent ->
-           remove_prompt_context seen (message :: rev_retained) rest
-         | Agent_core.Types.Extra_system_context_provenance.Present
-           when prompt_context_present && not seen ->
-           remove_prompt_context true rev_retained rest
-         | Agent_core.Types.Extra_system_context_provenance.Present
-         | Agent_core.Types.Extra_system_context_provenance.Invalid
-         | Agent_core.Types.Extra_system_context_provenance.Duplicate -> None)
-    in
-    Option.map
-       (fun retained_input -> retained_input @ projection_suffix)
-       (remove_prompt_context false [] projection_input)
-  | Some _ | None -> None
+  | None ->
+    Error
+      (Input_prefix_dropped
+         { projection_input_messages = projection_input_count
+         ; projected_messages = List.length projected_messages
+         })
+  | Some (projected_prefix, projection_suffix) ->
+    (match first_divergent_index projected_prefix projection_input with
+     | Some first_divergent_index ->
+       Error (Input_prefix_rewritten { first_divergent_index })
+     | None ->
+       let rec remove_prompt_context seen rev_retained = function
+         | [] ->
+           if Bool.equal seen prompt_context_present
+           then Ok (List.rev rev_retained)
+           else
+             Error
+               (Prompt_context_presence_mismatch
+                  { carrier_observed = seen; prompt_context_present })
+         | (message : Agent_core.Types.message) :: rest ->
+           (match
+            Agent_core.Types.Extra_system_context_provenance.classify
+                message.metadata
+            with
+            | Agent_core.Types.Extra_system_context_provenance.Absent ->
+              remove_prompt_context seen (message :: rev_retained) rest
+            | Agent_core.Types.Extra_system_context_provenance.Present
+              when prompt_context_present && not seen ->
+              remove_prompt_context true rev_retained rest
+            | Agent_core.Types.Extra_system_context_provenance.Present ->
+              if seen
+              then Error Prompt_context_carrier_repeated
+              else
+                Error
+                  (Prompt_context_presence_mismatch
+                     { carrier_observed = true; prompt_context_present })
+            | Agent_core.Types.Extra_system_context_provenance.Invalid ->
+              Error Prompt_context_carrier_metadata_invalid
+            | Agent_core.Types.Extra_system_context_provenance.Duplicate ->
+              Error Prompt_context_carrier_metadata_duplicate)
+       in
+       Result.map
+         (fun retained_input -> retained_input @ projection_suffix)
+         (remove_prompt_context false [] projection_input))
 ;;
 
 let empty_prompt_segment_metrics =

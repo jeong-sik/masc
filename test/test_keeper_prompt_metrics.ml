@@ -381,10 +381,11 @@ let test_provider_content_messages_removes_typed_prompt_carrier () =
   let history = [ message "history"; message "current user" ] in
   let prompt_context = prompt_carrier "[system context] dynamic and memory blocks" in
   let gate_evidence = message "typed gate replay payload" in
-  let message_texts =
-    Option.map
-      (List.map (fun (message : Agent_core.Types.message) ->
-         Agent_core.Types.text_of_content message.Agent_core.Types.content))
+  let message_texts result =
+    Result.to_option result
+    |> Option.map
+         (List.map (fun (message : Agent_core.Types.message) ->
+            Agent_core.Types.text_of_content message.Agent_core.Types.content))
   in
   check
     (option (list string))
@@ -433,37 +434,61 @@ let test_provider_content_messages_rejects_prompt_carrier_mismatch () =
         @ Agent_core.Types.Extra_system_context_provenance.metadata
     }
   in
-  let unavailable ~prompt_context_present messages =
-    KAPM.provider_content_messages
-      ~prompt_context_present
-      ~projection_input:messages
-      ~projected_messages:messages
-    |> Option.map List.length
+  (* The reason, not just the rejection: an operator reading a turn with no
+     composition needs to know which of these five happened, because the fix
+     differs for each. *)
+  let failure_reason ~prompt_context_present messages =
+    match
+      KAPM.provider_content_messages
+        ~prompt_context_present
+        ~projection_input:messages
+        ~projected_messages:messages
+    with
+    | Ok retained -> Printf.sprintf "attributed(%d)" (List.length retained)
+    | Error failure -> KAPM.provenance_failure_reason failure
   in
-  check (option int) "missing typed carrier is rejected" None
-    (unavailable ~prompt_context_present:true [ plain ]);
-  check (option int) "unexpected typed carrier is rejected" None
-    (unavailable ~prompt_context_present:false [ marked ]);
-  check (option int) "multiple typed carriers are rejected" None
-    (unavailable ~prompt_context_present:true [ marked; marked ]);
-  check (option int) "invalid typed carrier is rejected" None
-    (unavailable ~prompt_context_present:true [ invalid ]);
-  check (option int) "duplicate metadata key is rejected" None
-    (unavailable ~prompt_context_present:true [ duplicate ])
+  check string "missing typed carrier is a presence mismatch"
+    "prompt_context_presence_mismatch"
+    (failure_reason ~prompt_context_present:true [ plain ]);
+  check string "unexpected typed carrier is a presence mismatch"
+    "prompt_context_presence_mismatch"
+    (failure_reason ~prompt_context_present:false [ marked ]);
+  check string "a second typed carrier is repeated, not missing"
+    "prompt_context_carrier_repeated"
+    (failure_reason ~prompt_context_present:true [ marked; marked ]);
+  check string "invalid carrier metadata is named as such"
+    "prompt_context_carrier_metadata_invalid"
+    (failure_reason ~prompt_context_present:true [ invalid ]);
+  check string "duplicate carrier metadata is named as such"
+    "prompt_context_carrier_metadata_duplicate"
+    (failure_reason ~prompt_context_present:true [ duplicate ])
 ;;
 
 let test_provider_content_messages_rejects_projection_rewrite () =
   let first = message "first" in
   let second = message "second" in
-  check
-    (option int)
-    "a rewritten prefix is not attributed"
-    None
-    (KAPM.provider_content_messages
-       ~prompt_context_present:false
-       ~projection_input:[ first; second ]
-       ~projected_messages:[ second; first ]
-     |> Option.map List.length)
+  let outcome ~projection_input ~projected_messages =
+    match
+      KAPM.provider_content_messages
+        ~prompt_context_present:false
+        ~projection_input
+        ~projected_messages
+    with
+    | Ok retained -> Printf.sprintf "attributed(%d)" (List.length retained)
+    | Error failure ->
+      KAPM.provenance_failure_reason failure
+      ^ " " ^ KAPM.provenance_failure_detail failure
+  in
+  (* A reorder and a cut both used to read as one "provenance unavailable".
+     They are separated here because only the second is what a history window
+     does on every large turn. *)
+  check string "a rewritten prefix names the rewrite and where it diverged"
+    "projection_rewrote_input_prefix first_divergent_index=0"
+    (outcome ~projection_input:[ first; second ]
+       ~projected_messages:[ second; first ]);
+  check string "a shortened projection names the dropped prefix with its counts"
+    "projection_dropped_input_prefix handed=2 returned=1"
+    (outcome ~projection_input:[ first; second ] ~projected_messages:[ second ])
 ;;
 
 (* ── Suite ────────────────────────────────────────────── *)

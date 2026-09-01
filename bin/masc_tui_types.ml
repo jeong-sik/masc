@@ -456,11 +456,12 @@ let compare_chat_timeline_items left right =
        | Some _, None -> -1
        | None, Some _ -> 1
        | None, None -> 0)
-  | Chat_turn _, (Chat_unowned _ | Chat_memory _) -> -1
-  | (Chat_unowned _ | Chat_memory _), Chat_turn _ -> 1
-  | Chat_unowned _, Chat_memory _ -> -1
-  | Chat_memory _, Chat_unowned _ -> 1
-  | Chat_unowned _, Chat_unowned _ | Chat_memory _, Chat_memory _ -> 0
+  | Chat_turn { ct_turn_sequence = Some _; _ },
+    (Chat_unowned _ | Chat_memory _) -> -1
+  | (Chat_unowned _ | Chat_memory _),
+    Chat_turn { ct_turn_sequence = Some _; _ } -> 1
+  | (Chat_turn _ | Chat_unowned _ | Chat_memory _),
+    (Chat_turn _ | Chat_unowned _ | Chat_memory _) -> 0
 ;;
 
 let chat_timeline ~loaded ~session ~queued_request_ids =

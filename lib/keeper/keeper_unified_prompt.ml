@@ -1128,6 +1128,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ?(task_skill_surfaces :
         (string * Keeper_skill_catalog.exact_surface list) list = [])
     ?(active_goal_summaries : goal_summary list option)
+    ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
     ?(context_budget_bytes : int option)
     ~(observation : Keeper_world_observation.world_observation)
     () : turn_prompt_parts
@@ -1426,6 +1427,98 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
              observation.running_keeper_fiber_count);
         Buffer.add_char ubuf '\n';
         Buffer.contents ubuf)
+    (* Repository freshness — semi-stable standing context: it moves when the
+       keeper commits or upstream advances, not per cycle. Projection only —
+       it states where each checkout stands so the keeper can choose to
+       fetch/rebase; nothing here schedules or forces that work. *)
+    | Keeper_context_layers.Repository_freshness ->
+      (match repository_freshness with
+       | [] -> None
+       | rows ->
+         (* Measured rows render individually, drifted first — the layer
+            exists to surface drift, and a current checkout is the least
+            actionable line. Unmeasurable rows collapse into one count: a
+            live playground answered 19 of 32 rows with the same
+            budget-exhausted reason (2026-09-01 field probe), and repeating
+            an identical failure line 19 times per turn is noise the
+            keeper_status tool already carries in full. *)
+         let measured, unmeasured =
+           List.partition
+             (fun (row : Keeper_sandbox_control.freshness_row) ->
+               match row.Keeper_sandbox_control.row_freshness with
+               | Keeper_sandbox_control.Freshness_unavailable _ -> false
+               | Keeper_sandbox_control.Current _
+               | Keeper_sandbox_control.Ahead _
+               | Keeper_sandbox_control.Behind _
+               | Keeper_sandbox_control.Diverged _ -> true)
+             rows
+         in
+         let drift_rank (row : Keeper_sandbox_control.freshness_row) =
+           match row.Keeper_sandbox_control.row_freshness with
+           | Keeper_sandbox_control.Diverged _ -> 0
+           | Keeper_sandbox_control.Behind _ -> 1
+           | Keeper_sandbox_control.Ahead _ -> 2
+           | Keeper_sandbox_control.Current _ -> 3
+           | Keeper_sandbox_control.Freshness_unavailable _ -> 4
+         in
+         let measured =
+           List.stable_sort
+             (fun left right -> compare (drift_rank left) (drift_rank right))
+             measured
+         in
+         let line (row : Keeper_sandbox_control.freshness_row) =
+           let branch_part =
+             match row.Keeper_sandbox_control.row_branch with
+             | Some branch -> " branch=" ^ branch
+             | None -> ""
+           in
+           let dirty_part =
+             match row.Keeper_sandbox_control.row_changed_files with
+             (* [Some 0] is a clean tree and [None] a failed status probe;
+                neither earns a line of the keeper's attention here — a
+                broken probe already surfaces as [Freshness_unavailable]. *)
+             | Some 0 | None -> ""
+             | Some changed -> Printf.sprintf " dirty_files=%d" changed
+           in
+           let standing =
+             match row.Keeper_sandbox_control.row_freshness with
+             | Keeper_sandbox_control.Current { target_ref; _ } ->
+               "current with " ^ target_ref
+             | Keeper_sandbox_control.Ahead { target_ref; ahead; _ } ->
+               Printf.sprintf "ahead of %s by %d" target_ref ahead
+             | Keeper_sandbox_control.Behind { target_ref; behind; _ } ->
+               Printf.sprintf "behind %s by %d" target_ref behind
+             | Keeper_sandbox_control.Diverged { target_ref; ahead; behind; _ } ->
+               Printf.sprintf
+                 "diverged from %s: behind %d, ahead %d"
+                 target_ref
+                 behind
+                 ahead
+             | Keeper_sandbox_control.Freshness_unavailable reason ->
+               "freshness unavailable: " ^ reason
+           in
+           Printf.sprintf
+             "- %s%s%s — %s"
+             row.Keeper_sandbox_control.row_checkout_path
+             branch_part
+             dirty_part
+             standing
+         in
+         let unmeasured_line =
+           match List.length unmeasured with
+           | 0 -> []
+           | count ->
+             [ Printf.sprintf
+                 "- %d checkout(s) not measurable this turn — the keeper_status \
+                  tool carries each reason"
+                 count
+             ]
+         in
+         Some
+           (Printf.sprintf "### Repository Checkouts (%d)\n" (List.length rows)
+            ^ "Where each checkout stands against its upstream default branch.\n"
+            ^ String.concat "\n" (List.map line measured @ unmeasured_line)
+            ^ "\n\n"))
     (* 4. Autonomous trigger — lower churn than reactive inboxes. *)
     | Keeper_context_layers.Autonomous_trigger ->
       if autonomous_trigger <> [] then
@@ -1545,6 +1638,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
       | Keeper_context_layers.Approval_authority
       | Keeper_context_layers.Connected_surfaces
       | Keeper_context_layers.Namespace_state
+      | Keeper_context_layers.Repository_freshness
       | Keeper_context_layers.Autonomous_trigger
       | Keeper_context_layers.Scheduled_automation
       | Keeper_context_layers.Completion_authority
@@ -1627,6 +1721,7 @@ let build_prompt
       ~current_task
       ?task_skill_surfaces
       ?active_goal_summaries
+      ?repository_freshness
       ?context_budget_bytes
       ~observation
       ()
@@ -1640,6 +1735,7 @@ let build_prompt
       ~current_task
       ?task_skill_surfaces
       ?active_goal_summaries
+      ?repository_freshness
       ?context_budget_bytes
       ~observation
       ()
@@ -1655,6 +1751,7 @@ let build_prompt_preview
       ~current_task
       ?task_skill_surfaces
       ?active_goal_summaries
+      ?repository_freshness
       ~observation
       ()
   =
@@ -1666,6 +1763,7 @@ let build_prompt_preview
     ~current_task
     ?task_skill_surfaces
     ?active_goal_summaries
+    ?repository_freshness
     ~observation
     ()
 ;;

@@ -42,6 +42,47 @@ val repository_checkouts_json :
     checkout directory; freshness is measured against the local tracking ref.
     Missing or ambiguous evidence is returned as an explicit typed state. *)
 
+(** Where a checkout's HEAD stands relative to [origin/<default_branch>] of
+    its catalog repository, measured against the checkout's locally known
+    remote refs (the server's periodic repository sync keeps those fetched).
+    [Freshness_unavailable] carries the reason a probe could not answer —
+    unregistered origin, exhausted inspection budget, or a failed git call. *)
+type checkout_freshness =
+  | Current of { target_ref : string; upstream_head : string }
+  | Ahead of { target_ref : string; upstream_head : string; ahead : int }
+  | Behind of { target_ref : string; upstream_head : string; behind : int }
+  | Diverged of
+      { target_ref : string
+      ; upstream_head : string
+      ; ahead : int
+      ; behind : int
+      }
+  | Freshness_unavailable of string
+
+(** One checkout's freshness projection for the turn context. Read off the
+    same per-checkout probe as {!repository_checkouts_json}, so the tool
+    surface and the turn context can never disagree about the same checkout. *)
+type freshness_row = {
+  row_checkout_path : string;
+      (** Playground-relative path — the cwd the keeper passes to its tools.
+          Basenames collide across a playground; paths do not. *)
+  row_branch : string option;  (** [None] when the branch probe failed. *)
+  row_changed_files : int option;  (** [None] when the status probe failed. *)
+  row_freshness : checkout_freshness;
+}
+
+val checkout_freshness_rows :
+  ?inspection_budget_sec:float ->
+  config:Workspace.config ->
+  meta:keeper_meta ->
+  unit ->
+  (freshness_row list, Keeper_playground_checkouts.scan_error) result
+(** Measure every discovered checkout for the turn-context freshness layer.
+    [Ok []] means the playground holds no checkout; a failed scan is the
+    typed [scan_error], not an empty list. [?inspection_budget_sec] bounds
+    the total git subprocess time across all checkouts (default
+    {!Repo_git.inspection_timeout_sec}). *)
+
 module For_testing : sig
   val repository_checkouts_json_with_budget :
     inspection_budget_sec:float ->

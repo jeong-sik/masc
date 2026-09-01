@@ -125,6 +125,7 @@ val build_prompt :
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
   ?active_goal_summaries:goal_summary list ->
+  ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   ?context_budget_bytes:int ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
@@ -140,7 +141,10 @@ val build_prompt :
       state. [No_current_task] omits the layer.
     - [?active_goal_summaries]: renders goal titles next to ids in the Active
       Goals layer, with a proof-pending annotation on [Verifying] goals
-      (RFC-0387 stage 2). Omitted or empty: bare ids. *)
+      (RFC-0387 stage 2). Omitted or empty: bare ids.
+    - [?repository_freshness]: rows for the Repository Checkouts layer,
+      measured by {!Keeper_sandbox_control.checkout_freshness_rows}. Omitted
+      or empty, the layer is absent. *)
 
 val build_prompt_preview :
   meta:Keeper_meta_contract.keeper_meta ->
@@ -149,6 +153,7 @@ val build_prompt_preview :
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
   ?active_goal_summaries:goal_summary list ->
+  ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
   turn_prompt_parts

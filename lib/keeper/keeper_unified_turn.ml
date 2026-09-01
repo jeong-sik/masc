@@ -652,6 +652,23 @@ let run_keeper_cycle
                let active_goal_summaries =
                  Keeper_unified_prompt.active_goal_summaries_of_store ~config
                in
+               (* Repository freshness projection (context only, never a
+                  gate): where each playground checkout stands against its
+                  upstream default branch. A failed scan is logged and the
+                  layer stays absent — the keeper_status tool still carries
+                  the full typed answer. *)
+               let repository_freshness =
+                 match
+                   Keeper_sandbox_control.checkout_freshness_rows ~config ~meta ()
+                 with
+                 | Ok rows -> rows
+                 | Error scan_error ->
+                   Log.Keeper.warn
+                     "repository freshness scan unavailable keeper=%s: %s"
+                     meta.name
+                     (Keeper_playground_checkouts.scan_error_to_string scan_error);
+                   []
+               in
                (* The briefing is pinned, so it is bounded here rather than
                   left to the model input projection, which can only cut the
                   conversation window. Sized from the runtime's own declared
@@ -672,6 +689,7 @@ let run_keeper_cycle
                    ~current_task
                    ~task_skill_surfaces
                    ~active_goal_summaries
+                   ~repository_freshness
                    ?context_budget_bytes
                    ~observation
                    ()

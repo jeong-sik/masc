@@ -18,6 +18,10 @@ type layer_id =
   | Approval_authority
   | Connected_surfaces
   | Namespace_state
+  | Repository_freshness
+      (** Where each playground checkout stands against its upstream default
+          branch — semi-stable standing context: it moves when the keeper
+          commits or upstream advances, not per cycle. *)
   | Autonomous_trigger
   | Scheduled_automation
   | Completion_authority

@@ -66,4 +66,21 @@ val keeper_antigravity_system_instructions_label : string
 val keeper_antigravity_current_goal_label : string
 val eval_calibration_few_shot : string
 val eval_calibration_few_shot_example : string
+
+(** Repository checkout freshness fragments. *)
+val keeper_context_checkouts_section : string
+val keeper_context_checkouts_row : string
+val keeper_context_checkouts_standing_current : string
+val keeper_context_checkouts_standing_ahead : string
+val keeper_context_checkouts_standing_behind : string
+val keeper_context_checkouts_standing_diverged : string
+val keeper_context_checkouts_standing_unavailable : string
+val keeper_context_checkouts_unmeasured : string
+
+(** Approval authority fragments. *)
+val keeper_context_approval_authority_heading : string
+val keeper_context_approval_authority_state_complete : string
+val keeper_context_approval_authority_state_partial : string
+val keeper_context_approval_authority_state_unavailable : string
+val keeper_context_approval_authority_footer : string
 (** Current-memory selection. *)

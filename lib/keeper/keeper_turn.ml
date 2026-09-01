@@ -71,6 +71,7 @@ let direct_turn_dynamic_context
       ~(current_task : Keeper_world_observation_inputs.current_task_observation)
       ~(held_task_skills : Keeper_world_observation_inputs.held_task_skills list)
       ~(task_skill_surfaces : (string * Keeper_skill_catalog.exact_surface list) list)
+      ~(approval_authority_text : string)
       ~(recent_direct_conversation_text : string)
       ~(worktree_text : string)
       ~(telemetry_feedback_text : string)
@@ -78,6 +79,7 @@ let direct_turn_dynamic_context
   : string
   =
   [ direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces
+  ; approval_authority_text
   ; recent_direct_conversation_text
   ; worktree_text
   ; telemetry_feedback_text
@@ -555,6 +557,13 @@ let run_keeper_invocation_turn_admitted_inner
                   ~current_task
                   ~held_task_skills
             in
+            (* Direct owner turns need the same fresh Gate authority as
+               autonomous turns. Build it before the prompt callback so the
+               model-facing projection and the receipt classifier share one
+               observation snapshot. *)
+            let world_observation =
+              direct_turn_observation ~config:ctx.config meta
+            in
             let build_turn_prompt ~base_system_prompt ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
@@ -613,6 +622,9 @@ let run_keeper_invocation_turn_admitted_inner
                   ~current_task
                   ~held_task_skills
                   ~task_skill_surfaces
+                  ~approval_authority_text:
+                    (Keeper_unified_prompt.format_approval_authority_observation
+                       world_observation.approval_authority)
                   ~recent_direct_conversation_text
                   ~worktree_text
                   ~telemetry_feedback_text
@@ -629,7 +641,6 @@ let run_keeper_invocation_turn_admitted_inner
             in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();
-            let world_observation = direct_turn_observation ~config:ctx.config meta in
             (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
 	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
 	            let run_result, latency_ms =

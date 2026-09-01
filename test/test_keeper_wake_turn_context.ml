@@ -77,6 +77,8 @@ let base_observation : WO.world_observation =
     held_task_skills = [];
     failed_task_count = 0;
     scheduled_automation = WO.empty_scheduled_automation_observation;
+    approval_authority =
+      { revision = 1; state = WO.Approval_authority_complete; pending = [] };
     backlog_revision = Some 1;
     running_keeper_fiber_count = 0;
     connected_surfaces = [];
@@ -573,6 +575,7 @@ let test_direct_turn_reuses_current_task_context () =
       ~current_task:(Inputs.Current_task task)
       ~held_task_skills:[]
       ~task_skill_surfaces:[]
+      ~approval_authority_text:"approval authority"
       ~recent_direct_conversation_text:"recent owner message"
       ~worktree_text:"worktree state"
       ~telemetry_feedback_text:"telemetry state"
@@ -587,7 +590,9 @@ let test_direct_turn_reuses_current_task_context () =
   check bool "handoff is available to direct reply" true
     (contains ~needle:"parser is ready for a direct reply" context);
   check bool "other fresh direct context is preserved" true
-    (contains ~needle:"recent owner message" context)
+    (contains ~needle:"recent owner message" context);
+  check bool "direct reply carries current approval authority" true
+    (contains ~needle:"approval authority" context)
 
 (* task-364: the direct-message lane carries the held tasks' skills even when
    no task is current, so an owner asking the keeper about the work it just
@@ -603,6 +608,7 @@ let test_direct_turn_carries_held_task_skills () =
           }
         ]
       ~task_skill_surfaces:[]
+      ~approval_authority_text:"approval authority"
       ~recent_direct_conversation_text:"recent owner message"
       ~worktree_text:""
       ~telemetry_feedback_text:""
@@ -624,6 +630,7 @@ let test_direct_turn_has_no_synthetic_task_context () =
       ~current_task:Inputs.No_current_task
       ~held_task_skills:[]
       ~task_skill_surfaces:[]
+      ~approval_authority_text:""
       ~recent_direct_conversation_text:"recent owner message"
       ~worktree_text:""
       ~telemetry_feedback_text:""

@@ -456,6 +456,62 @@ let format_prompt_row fields =
   |> ( ^ ) "- "
 ;;
 
+let approval_observation_fields
+      (approval : Keeper_world_observation.pending_approval_observation)
+  =
+  [ "approval_id", approval.approval_id
+  ; "status", "pending"
+  ; "tool", approval.tool_name
+  ; "sequence", string_of_int approval.sequence
+  ; ( "requested_at"
+    , Masc_domain.iso8601_of_unix_seconds approval.requested_at )
+  ]
+  @ (match approval.task_id with
+     | None -> []
+     | Some task_id -> [ "task_id", task_id ])
+  @ (match approval.goal_id with
+     | None -> []
+     | Some goal_id -> [ "goal_id", goal_id ])
+;;
+
+let format_approval_authority_observation
+      (observation : Keeper_world_observation.approval_authority_observation)
+  =
+  let buffer = Buffer.create 512 in
+  Buffer.add_string buffer "### Current Approval Authority\n";
+  Buffer.add_string buffer
+    (Printf.sprintf "- revision=%d" observation.revision);
+  (match observation.state with
+   | Keeper_world_observation.Approval_authority_complete ->
+     Buffer.add_string buffer
+       (Printf.sprintf
+          " state=complete pending_count=%d\n"
+          (List.length observation.pending));
+     Buffer.add_string buffer
+       "- Only listed IDs are pending; absent historical IDs are stale.\n"
+   | Keeper_world_observation.Approval_authority_partial { read_error_count } ->
+     Buffer.add_string buffer
+       (Printf.sprintf
+          " state=partial known_pending_count=%d read_error_count=%d\n"
+          (List.length observation.pending)
+          read_error_count);
+     Buffer.add_string buffer
+       "- Missing IDs are unknown, not resolved; re-read Gate before changing conditional constraints.\n"
+   | Keeper_world_observation.Approval_authority_unavailable ->
+     Buffer.add_string buffer " state=unavailable\n";
+     Buffer.add_string buffer
+       "- No pending/resolved inference is valid.\n");
+  List.iter
+    (fun approval ->
+       Buffer.add_string buffer
+         (format_prompt_row (approval_observation_fields approval));
+       Buffer.add_char buffer '\n')
+    observation.pending;
+  Buffer.add_string buffer
+    "- Gate state does not prove effect application.\n\n";
+  Buffer.contents buffer
+;;
+
 let board_reaction_fields
     (reaction : Keeper_world_observation.board_reaction_event) =
   [ "reaction", if reaction.reacted then "added" else "removed"
@@ -1231,6 +1287,13 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
        | None, None -> None
        | Some block, None | None, Some block -> Some block
        | Some current, Some held -> Some (current ^ held))
+    (* 1c. Current approval authority — a fresh typed Gate read on every turn.
+       It is intentionally explicit when empty: omitting a readable zero lets
+       a historical owner instruction keep an already-resolved approval alive
+       in the conversation checkpoint. *)
+    | Keeper_context_layers.Approval_authority ->
+      Some
+        (format_approval_authority_observation observation.approval_authority)
     (* 2. Connected surfaces — connector presence, changes only on bind/unbind
        or transport flaps (RFC-0223 P2). Omitted when only the implicit
        dashboard is attached: every keeper has the dashboard, so dashboard-only
@@ -1479,6 +1542,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     | Keeper_context_layers.Own_recent_actions -> own_recent_actions_section
     | ( Keeper_context_layers.Active_goals
       | Keeper_context_layers.Current_task
+      | Keeper_context_layers.Approval_authority
       | Keeper_context_layers.Connected_surfaces
       | Keeper_context_layers.Namespace_state
       | Keeper_context_layers.Autonomous_trigger

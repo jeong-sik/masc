@@ -393,6 +393,19 @@ val list_pending_dashboard_json_for_workspace :
 val list_pending_entries_for_workspace :
   base_path:string -> (pending_approval list, storage_error) result
 
+type pending_entries_snapshot =
+  { revision : int
+  ; entries : pending_approval list
+  ; read_errors : storage_error list
+  }
+
+val pending_entries_snapshot_for_workspace :
+  base_path:string -> (pending_entries_snapshot, storage_error) result
+(** Read the revision, readable pending rows, and per-entry errors under the
+    same queue lock. Consumers that publish current-state authority must use
+    this snapshot rather than joining {!store_revision_for_workspace} to a
+    second list read. *)
+
 val list_pending_entries_with_read_errors_for_workspace :
   base_path:string ->
   (pending_approval list * storage_error list, storage_error) result

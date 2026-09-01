@@ -365,10 +365,14 @@ let clear_store_unavailable_unlocked ~base_path =
   bump_store_revision_unlocked ~base_path
 ;;
 
-let store_revision_for_workspace ~base_path =
+let store_revision_unlocked ~base_path =
   Option.value
     (SMap.find_opt base_path (Atomic.get store_revisions))
     ~default:0
+;;
+
+let store_revision_for_workspace ~base_path =
+  store_revision_unlocked ~base_path
 ;;
 
 let pending_store_path ~base_path =
@@ -4063,22 +4067,41 @@ let pending_entries_in_sequence_order () =
   |> List.sort compare_pending_order
 ;;
 
-let list_pending_entries_with_read_errors_for_workspace ~base_path =
-  with_pending_store_lock (fun () ->
-    let entries () =
-      pending_entries_in_sequence_order ()
-      |> List.filter (fun (entry : pending_approval) ->
-        String.equal entry.audit_base_path base_path)
-    in
-    match SMap.find_opt base_path (Atomic.get unavailable_stores) with
-    | Some _ when SMap.mem base_path (Atomic.get pending_read_errors) ->
-      Ok
-        ( entries ()
-        , Option.value
+type pending_entries_snapshot =
+  { revision : int
+  ; entries : pending_approval list
+  ; read_errors : storage_error list
+  }
+
+let pending_entries_snapshot_unlocked ~base_path =
+  let entries =
+    pending_entries_in_sequence_order ()
+    |> List.filter (fun (entry : pending_approval) ->
+      String.equal entry.audit_base_path base_path)
+  in
+  let revision = store_revision_unlocked ~base_path in
+  match SMap.find_opt base_path (Atomic.get unavailable_stores) with
+  | Some _ when SMap.mem base_path (Atomic.get pending_read_errors) ->
+    Ok
+      { revision
+      ; entries
+      ; read_errors =
+          Option.value
             (SMap.find_opt base_path (Atomic.get pending_read_errors))
-            ~default:[] )
-    | Some error -> Error error
-    | None -> Ok (entries (), []))
+            ~default:[]
+      }
+  | Some error -> Error error
+  | None -> Ok { revision; entries; read_errors = [] }
+;;
+
+let pending_entries_snapshot_for_workspace ~base_path =
+  with_pending_store_lock (fun () ->
+    pending_entries_snapshot_unlocked ~base_path)
+;;
+
+let list_pending_entries_with_read_errors_for_workspace ~base_path =
+  pending_entries_snapshot_for_workspace ~base_path
+  |> Result.map (fun snapshot -> snapshot.entries, snapshot.read_errors)
 ;;
 
 let list_pending_entries_for_workspace ~base_path =

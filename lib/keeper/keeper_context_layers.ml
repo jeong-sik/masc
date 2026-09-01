@@ -3,6 +3,7 @@
 type layer_id =
   | Active_goals
   | Current_task
+  | Approval_authority
   | Connected_surfaces
   | Namespace_state
   | Autonomous_trigger
@@ -29,6 +30,7 @@ type layer_id =
 let ordered =
   [ Active_goals
   ; Current_task
+  ; Approval_authority
   ; Connected_surfaces
   ; Namespace_state
   ; Autonomous_trigger
@@ -50,18 +52,19 @@ let ordered =
 let order_index = function
   | Active_goals -> 0
   | Current_task -> 1
-  | Connected_surfaces -> 2
-  | Namespace_state -> 3
-  | Autonomous_trigger -> 4
-  | Scheduled_automation -> 5
-  | Completion_authority -> 6
-  | Task_cancellations -> 7
-  | Pending_mentions -> 8
-  | Scope_messages -> 9
-  | Own_board_posts -> 10
-  | Board_activity -> 11
-  | Own_recent_actions -> 12
-  | Fleet_messages -> 13
+  | Approval_authority -> 2
+  | Connected_surfaces -> 3
+  | Namespace_state -> 4
+  | Autonomous_trigger -> 5
+  | Scheduled_automation -> 6
+  | Completion_authority -> 7
+  | Task_cancellations -> 8
+  | Pending_mentions -> 9
+  | Scope_messages -> 10
+  | Own_board_posts -> 11
+  | Board_activity -> 12
+  | Own_recent_actions -> 13
+  | Fleet_messages -> 14
 ;;
 
 type retention =
@@ -81,6 +84,7 @@ type retention =
 let retention = function
   | Active_goals -> Required
   | Current_task -> Required
+  | Approval_authority -> Required
   | Connected_surfaces -> Required
   | Namespace_state -> Required
   | Autonomous_trigger -> Required

@@ -18,6 +18,8 @@ let base_observation : WO.world_observation =
     held_task_skills = [];
     failed_task_count = 0;
     scheduled_automation = WO.empty_scheduled_automation_observation;
+    approval_authority =
+      { revision = 1; state = WO.Approval_authority_complete; pending = [] };
     backlog_revision = Some 1;
     running_keeper_fiber_count = 0;
     connected_surfaces = [];
@@ -937,6 +939,90 @@ let test_world_state_frame_states_its_provenance () =
   check bool "frame says the keeper did not retrieve it" true
     (contains_sub "You did not retrieve them" world_state)
 
+let test_complete_approval_authority_invalidates_historical_pending_claims () =
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt ~meta:minimal_meta base_observation
+  in
+  check bool "approval authority is always visible" true
+    (contains_sub "### Current Approval Authority" world_state);
+  check bool "readable empty is explicit" true
+    (contains_sub "state=complete pending_count=0" world_state);
+  check bool "historical pending claims lose current authority" true
+    (contains_sub
+       "Only listed IDs are pending; absent historical IDs are stale"
+       world_state);
+  check bool "effect truth stays separate" true
+    (contains_sub
+       "Gate state does not prove effect application"
+       world_state)
+;;
+
+let test_complete_approval_authority_lists_exact_current_ids () =
+  let approval : WO.pending_approval_observation =
+    { approval_id = "appr_current"
+    ; tool_name = "tool_execute"
+    ; sequence = 42
+    ; requested_at = 1_788_055_151.0
+    ; task_id = Some "task-1037"
+    ; goal_id = None
+    }
+  in
+  let approval_authority : WO.approval_authority_observation =
+    { revision = 91
+    ; state = WO.Approval_authority_complete
+    ; pending = [ approval ]
+    }
+  in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt
+      ~meta:minimal_meta
+      { base_observation with approval_authority }
+  in
+  check bool "revision is visible" true
+    (contains_sub "revision=91" world_state);
+  check bool "exact pending identity is visible" true
+    (contains_sub "approval_id=\"appr_current\"" world_state);
+  check bool "task scope is visible" true
+    (contains_sub "task_id=\"task-1037\"" world_state)
+;;
+
+let test_incomplete_approval_authority_forbids_resolution_inference () =
+  let partial : WO.approval_authority_observation =
+    { revision = 92
+    ; state = WO.Approval_authority_partial { read_error_count = 2 }
+    ; pending = []
+    }
+  in
+  let unavailable : WO.approval_authority_observation =
+    { revision = 93
+    ; state = WO.Approval_authority_unavailable
+    ; pending = []
+    }
+  in
+  let render approval_authority =
+    (build_prompt
+       ~meta:minimal_meta
+       { base_observation with approval_authority })
+      .Masc.Keeper_unified_prompt.world_state
+  in
+  let partial_text = render partial in
+  let unavailable_text = render unavailable in
+  check bool "partial is not rendered as zero" true
+    (contains_sub "state=partial" partial_text);
+  check bool "partial absence is non-authoritative" true
+    (contains_sub
+       "Missing IDs are unknown, not resolved"
+       partial_text);
+  check bool "unavailable is not rendered as zero" true
+    (contains_sub "state=unavailable" unavailable_text);
+  check bool "unavailable omits internal storage detail" false
+    (contains_sub "read_error" unavailable_text);
+  check bool "unavailable forbids current inference" true
+    (contains_sub
+       "No pending/resolved inference is valid"
+       unavailable_text)
+;;
+
 let test_world_state_never_in_persisted_user_message () =
   let obs = { base_observation with pending_board_events = [ sample_board_event ] } in
   let { Masc.Keeper_unified_prompt.world_state; user_message; _ } =
@@ -1263,6 +1349,16 @@ let () =
           test_case
             "world-state frame states that the runtime assembled it"
             `Quick test_world_state_frame_states_its_provenance;
+          test_case
+            "prompt: complete approval authority invalidates historical pending claims"
+            `Quick
+            test_complete_approval_authority_invalidates_historical_pending_claims;
+          test_case
+            "prompt: approval authority lists exact current ids"
+            `Quick test_complete_approval_authority_lists_exact_current_ids;
+          test_case
+            "prompt: incomplete approval authority forbids resolution inference"
+            `Quick test_incomplete_approval_authority_forbids_resolution_inference;
           test_case
             "invariant: world-state frame never enters the persisted user message"
             `Quick test_world_state_never_in_persisted_user_message;

@@ -6,10 +6,11 @@
     This store persists those values as content-addressed artifacts and joins
     them to the TurnRecord with the same [turn_ref]. Repeated history messages
     therefore occupy one blob even when many turns transmit them, and a
-    successful prior snapshot lets the next turn reuse those durable
-    references without rewriting and fsyncing the same bytes. Snapshot rows
-    keep empty artifact previews, so message text lives only in the blob and
-    is exposed through the administrator-only resolving endpoint. *)
+    newest durable snapshot lets the next turn derive an immutable reuse map
+    without process-global cache state or rewriting and fsyncing the same
+    bytes. Snapshot rows keep empty artifact previews, so message text lives
+    only in the blob and is exposed through the administrator-only resolving
+    endpoint. *)
 
 type artifact =
   { art_bytes : int

@@ -84,6 +84,12 @@ let read config absolute_turn =
     failf "provider input read failed: %s" (Snapshot.read_error_to_string error)
 ;;
 
+let blob_path store sha256 =
+  Filename.concat
+    (Filename.concat (Tool_blob_store.root_dir store) (String.sub sha256 0 2))
+    sha256
+;;
+
 let test_exact_turn_round_trip () =
   with_workspace (fun config ->
     write config 7;
@@ -148,11 +154,7 @@ let test_repeated_history_is_content_deduplicated () =
       | Some prompt -> prompt.rsp_sha256
       | None -> fail "system prompt artifact was not resolved"
     in
-    let prompt_path =
-      Filename.concat
-        (Filename.concat (Tool_blob_store.root_dir store) (String.sub prompt_sha 0 2))
-        prompt_sha
-    in
+    let prompt_path = blob_path store prompt_sha in
     let sentinel_mtime = 1_500_000_000. in
     Unix.utimes prompt_path sentinel_mtime sentinel_mtime;
     write config 8;
@@ -164,6 +166,30 @@ let test_repeated_history_is_content_deduplicated () =
       sentinel_mtime
       (Unix.stat prompt_path).st_mtime;
     ignore (read config 7);
+    ignore (read config 8))
+;;
+
+let test_malformed_latest_snapshot_is_not_used_for_reuse () =
+  with_workspace (fun config ->
+    write config 7;
+    let store = Tool_blob_store.create ~base_path:config.base_path in
+    let first_snapshot = read config 7 in
+    let prompt_sha =
+      match first_snapshot.resolved_system_prompt with
+      | Some prompt -> prompt.sha256
+      | None -> fail "system prompt artifact was not resolved"
+    in
+    let prompt_path = blob_path store prompt_sha in
+    let sentinel_mtime = 1_500_000_000. in
+    Unix.utimes prompt_path sentinel_mtime sentinel_mtime;
+    Dated_jsonl.append
+      (Keeper_types_support.keeper_provider_input_store config keeper)
+      (`Assoc [ "schema", `String "broken" ]);
+    write config 8;
+    check bool
+      "malformed newest row forces a fresh durable write"
+      true
+      (Float.abs ((Unix.stat prompt_path).st_mtime -. sentinel_mtime) > 0.001);
     ignore (read config 8))
 ;;
 
@@ -192,6 +218,10 @@ let () =
             "repeated history is content-deduplicated"
             `Quick
             test_repeated_history_is_content_deduplicated
+        ; test_case
+            "malformed latest snapshot is not reused"
+            `Quick
+            test_malformed_latest_snapshot_is_not_used_for_reuse
         ] )
     ; ( "turn boundary"
       , [ test_case

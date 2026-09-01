@@ -85,25 +85,17 @@ type read_error =
 
 let ( let* ) = Result.bind
 
-let snapshot_cache : (string, t) Hashtbl.t = Hashtbl.create 16
-let snapshot_cache_mu = Eio.Mutex.create ()
+module Artifact_key = struct
+  type t = string * string
 
-let snapshot_cache_key (config : Workspace.config) keeper =
-  config.base_path ^ "\000" ^ keeper
-;;
+  let compare (left_sha, left_mime) (right_sha, right_mime) =
+    match String.compare left_sha right_sha with
+    | 0 -> String.compare left_mime right_mime
+    | order -> order
+  ;;
+end
 
-let cached_snapshot config keeper =
-  Eio_guard.with_mutex snapshot_cache_mu (fun () ->
-    Hashtbl.find_opt snapshot_cache (snapshot_cache_key config keeper))
-;;
-
-let remember_snapshot config snapshot =
-  Eio_guard.with_mutex snapshot_cache_mu (fun () ->
-    Hashtbl.replace
-      snapshot_cache
-      (snapshot_cache_key config snapshot.keeper)
-      snapshot)
-;;
+module Artifact_map = Map.Make (Artifact_key)
 
 let read_error_to_string = function
   | Unknown_keeper keeper -> Printf.sprintf "invalid keeper name: %s" keeper
@@ -339,33 +331,68 @@ let of_json = function
 ;;
 
 let reusable_artifacts snapshot =
-  let reusable = Hashtbl.create 32 in
-  let add artifact =
+  let add reusable artifact =
     match Tool_output.decode_from_agent_core artifact.art_content_ref with
     | Tool_output.Decoded reference when reference.bytes = artifact.art_bytes ->
-      Hashtbl.replace reusable (reference.sha256, reference.mime) artifact
+      Artifact_map.add (reference.sha256, reference.mime) artifact reusable
     | Tool_output.Decoded _
     | Tool_output.Not_marker
-    | Tool_output.Invalid_marker _ -> ()
+    | Tool_output.Invalid_marker _ -> reusable
   in
-  Option.iter add snapshot.system_prompt;
-  List.iter (fun message -> add message.msg_artifact) snapshot.messages;
-  List.iter (fun tool -> add tool.ts_artifact) snapshot.tool_schemas;
-  reusable
+  let reusable =
+    match snapshot.system_prompt with
+    | Some artifact -> add Artifact_map.empty artifact
+    | None -> Artifact_map.empty
+  in
+  let reusable =
+    List.fold_left
+      (fun reusable message -> add reusable message.msg_artifact)
+      reusable
+      snapshot.messages
+  in
+  List.fold_left
+    (fun reusable tool -> add reusable tool.ts_artifact)
+    reusable
+    snapshot.tool_schemas
+;;
+
+let snapshot_of_recent_entry = function
+  | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+    Error
+      (Malformed_snapshot
+         (Printf.sprintf
+            "%s:%s: %s"
+            path
+            (Option.fold ~none:"?" ~some:string_of_int line_number)
+            detail))
+  | Dated_jsonl.Parsed json ->
+    Result.map_error (fun detail -> Malformed_snapshot detail) (of_json json)
+;;
+
+let latest_snapshot_for_reuse store =
+  match Dated_jsonl.find_latest_entry_result store (fun entry ->
+    Some (snapshot_of_recent_entry entry)) with
+  | Error error -> Error (Store_read_failed error)
+  | Ok None -> Ok None
+  | Ok (Some (Ok snapshot)) -> Ok (Some snapshot)
+  | Ok (Some (Error error)) -> Error error
 ;;
 
 let store_artifact store ~reusable ~mime bytes =
   let bytes_length = String.length bytes in
   let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
-  match Hashtbl.find_opt reusable (sha256, mime) with
-  | Some artifact when artifact.art_bytes = bytes_length -> artifact
+  match Artifact_map.find_opt (sha256, mime) reusable with
+  | Some artifact when artifact.art_bytes = bytes_length -> artifact, reusable
   | Some _ | None ->
     let reference = Tool_blob_store.put_durable store ~bytes ~mime in
     let reference = Tool_output.with_preview reference "" in
-    { art_bytes = bytes_length
-    ; art_content_ref =
-        Tool_output.encode_for_agent_core (Tool_output.Stored reference)
-    }
+    let artifact =
+      { art_bytes = bytes_length
+      ; art_content_ref =
+          Tool_output.encode_for_agent_core (Tool_output.Stored reference)
+      }
+    in
+    artifact, Artifact_map.add (sha256, mime) artifact reusable
 ;;
 
 let write_best_effort
@@ -383,52 +410,69 @@ let write_best_effort
   let write () =
     let blob_store = Tool_blob_store.create ~base_path:config.base_path in
     let reusable =
-      match cached_snapshot config keeper with
-      | Some snapshot -> reusable_artifacts snapshot
-      | None -> Hashtbl.create 0
+      let store = Keeper_types_support.keeper_provider_input_store config keeper in
+      match latest_snapshot_for_reuse store with
+      | Ok (Some snapshot) -> reusable_artifacts snapshot
+      | Ok None -> Artifact_map.empty
+      | Error error ->
+        Log.Keeper.warn
+          ~keeper_name:keeper
+          "provider-input artifact reuse unavailable: %s"
+          (read_error_to_string error);
+        Artifact_map.empty
     in
-    let system_prompt =
+    let system_prompt, reusable =
       if String.equal system_prompt ""
-      then None
+      then None, reusable
       else
-        Some
-          (store_artifact
-             blob_store
-             ~reusable
-             ~mime:"text/plain; charset=utf-8"
-             system_prompt)
+        let artifact, reusable =
+          store_artifact
+            blob_store
+            ~reusable
+            ~mime:"text/plain; charset=utf-8"
+            system_prompt
+        in
+        Some artifact, reusable
     in
-    let messages =
-      List.mapi
-        (fun index (message : Agent_core.Types.message) ->
+    let (reusable, _), messages =
+      List.fold_left_map
+        (fun (reusable, index) (message : Agent_core.Types.message) ->
            let payload =
              Keeper_context_core_message_json.message_to_json message
              |> Yojson.Safe.to_string
            in
-           { msg_index = index
-           ; msg_role = Agent_core.Types.role_to_string message.role
-           ; msg_artifact =
-               store_artifact
-                 blob_store
-                 ~reusable
-                 ~mime:"application/vnd.masc.provider-input-message+json"
-                 payload
-           })
+           let artifact, reusable =
+             store_artifact
+               blob_store
+               ~reusable
+               ~mime:"application/vnd.masc.provider-input-message+json"
+               payload
+           in
+           ( (reusable, index + 1)
+           , { msg_index = index
+             ; msg_role = Agent_core.Types.role_to_string message.role
+             ; msg_artifact = artifact
+             } ))
+        (reusable, 0)
         messages
     in
-    let tool_schemas =
-      List.mapi
-        (fun index (tool : Agent_core.Tool.t) ->
+    let _, tool_schemas =
+      List.fold_left_map
+        (fun (reusable, index) (tool : Agent_core.Tool.t) ->
            let payload = Agent_core.Tool.schema_to_json tool |> Yojson.Safe.to_string in
-           { ts_index = index
-           ; ts_name = tool.schema.name
-           ; ts_artifact =
-               store_artifact
-                 blob_store
-                 ~reusable
-                 ~mime:"application/vnd.masc.provider-input-tool-schema+json"
-                 payload
-           })
+           let artifact, reusable =
+             store_artifact
+               blob_store
+               ~reusable
+               ~mime:"application/vnd.masc.provider-input-tool-schema+json"
+               payload
+           in
+           ( reusable, index + 1 )
+           , { ts_index = index
+             ; ts_name = tool.schema.name
+             ; ts_artifact = artifact
+             })
+        (reusable, 0)
         tools
     in
     let snapshot =
@@ -446,8 +490,7 @@ let write_best_effort
     in
     Dated_jsonl.append
       (Keeper_types_support.keeper_provider_input_store config keeper)
-      (to_json snapshot);
-    remember_snapshot config snapshot
+      (to_json snapshot)
   in
   match write () with
   | () -> ()
@@ -467,22 +510,12 @@ let find_snapshot ~config ~keeper ~turn_ref =
   else
     let store = Keeper_types_support.keeper_provider_input_store config keeper in
     match
-      Dated_jsonl.find_latest_entry_result store (function
-        | Dated_jsonl.Malformed_json { path; line_number; detail } ->
-          Some
-            (Error
-               (Malformed_snapshot
-                  (Printf.sprintf
-                     "%s:%s: %s"
-                     path
-                     (Option.fold ~none:"?" ~some:string_of_int line_number)
-                     detail)))
-        | Dated_jsonl.Parsed json ->
-          (match of_json json with
-           | Error detail -> Some (Error (Malformed_snapshot detail))
-           | Ok snapshot when Ids.Turn_ref.equal snapshot.turn_ref turn_ref ->
-             Some (Ok snapshot)
-           | Ok _ -> None))
+      Dated_jsonl.find_latest_entry_result store (fun entry ->
+        match snapshot_of_recent_entry entry with
+        | Error error -> Some (Error error)
+        | Ok snapshot when Ids.Turn_ref.equal snapshot.turn_ref turn_ref ->
+          Some (Ok snapshot)
+        | Ok _ -> None)
     with
     | Error error -> Error (Store_read_failed error)
     | Ok None -> Error (Snapshot_not_found turn_ref)

@@ -231,6 +231,95 @@ let test_repositories_footer_offers_code_and_git_changes () =
     "j/k:scroll  Enter:browse  d:Git changes  a:add  Left / Esc:back  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Repositories)
 
+let test_memory_footer_offers_the_fact_browser () =
+  check str "the health table names the way into the facts"
+    "j/k:scroll  [ / ]:keeper  Enter:facts  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Memory)
+
+let test_memory_facts_footer_names_filter_and_way_back () =
+  check str "the browser names movement, the category cycle, and Esc"
+    "j/k:move  c:category  Esc:health  /:find  r:refresh  Tab:next  q:quit"
+    Masc_tui_keys.footer_hints_memory_facts
+
+let sample_memory_fact ~category ~claim : Tui_decode.memory_fact =
+  { Tui_decode.mf_claim = claim
+  ; mf_category = category
+  ; mf_origin = "authored"
+  ; mf_first_seen = 0.
+  ; mf_last_seen = 0.
+  ; mf_reinforcement = 1
+  ; mf_memory_id = claim
+  }
+
+let memory_state_with_facts () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.memory_facts_keeper <- Some "alpha";
+  state.memory_facts <-
+    Some
+      { Tui_decode.mfs_keeper = "alpha"
+      ; mfs_ordinary =
+          Tui_decode.Memory_store_present
+            { Tui_decode.mos_revision = 1
+            ; mos_updated_at = 0.
+            ; mos_facts =
+                [ sample_memory_fact ~category:"lesson" ~claim:"a"
+                ; sample_memory_fact ~category:"blocker" ~claim:"b"
+                ]
+            }
+      ; mfs_source =
+          Tui_decode.Memory_store_present
+            { Tui_decode.mss_revision = 1
+            ; mss_updated_at = 0.
+            ; mss_facts =
+                [ { Tui_decode.msf_claim = "bound"
+                  ; msf_first_seen = 0.
+                  ; msf_path = "docs/a.md"
+                  ; msf_sha256 = "cafe"
+                  }
+                ]
+            ; mss_invalidations =
+                [ { Tui_decode.mi_source_path = "docs/old.md"
+                  ; mi_invalidated_at = 0.
+                  ; mi_reason = "source_changed"
+                  }
+                ]
+            }
+      };
+  state
+
+let test_memory_fact_rows_follow_the_category_filter () =
+  let state = memory_state_with_facts () in
+  Alcotest.(check int) "All lists both stores plus the drops" 4
+    (List.length (memory_fact_rows state));
+  state.memory_facts_category <- Some "lesson";
+  (match memory_fact_rows state with
+   | [ Memory_row_fact fact
+     ; Memory_row_source_fact _
+     ; Memory_row_invalidation _
+     ] ->
+       check str "the filter narrows ordinary facts only" "a"
+         fact.Tui_decode.mf_claim
+   | rows ->
+       Alcotest.fail
+         (Printf.sprintf "unexpected filtered shape (%d rows)"
+            (List.length rows)));
+  Alcotest.(check (list string)) "categories are the loaded ones, sorted"
+    [ "blocker"; "lesson" ]
+    (memory_fact_categories state)
+
+let test_memory_category_cycle_returns_to_all () =
+  let categories = [ "blocker"; "lesson" ] in
+  Alcotest.(check (option string)) "All steps to the first" (Some "blocker")
+    (next_memory_category None categories);
+  Alcotest.(check (option string)) "then to the next" (Some "lesson")
+    (next_memory_category (Some "blocker") categories);
+  Alcotest.(check (option string)) "the last returns to All" None
+    (next_memory_category (Some "lesson") categories);
+  Alcotest.(check (option string)) "a vanished category restarts at All" None
+    (next_memory_category (Some "gone") categories);
+  Alcotest.(check (option string)) "no categories keeps All" None
+    (next_memory_category None [])
+
 let test_git_changes_footer_names_only_changed_file_actions () =
   check str "Git changes has one shared row footer"
     "j/k:move  Enter:open file  Left / Esc:back  r:refresh  Tab:next  q:quit"
@@ -797,6 +886,14 @@ let () =
             test_schedule_update_form_preserves_exact_editable_definition
         ; Alcotest.test_case "Repositories offers Code and Git changes" `Quick
             test_repositories_footer_offers_code_and_git_changes
+        ; Alcotest.test_case "Memory offers the fact browser" `Quick
+            test_memory_footer_offers_the_fact_browser
+        ; Alcotest.test_case "Memory facts footer names filter and back"
+            `Quick test_memory_facts_footer_names_filter_and_way_back
+        ; Alcotest.test_case "Memory fact rows follow the category filter"
+            `Quick test_memory_fact_rows_follow_the_category_filter
+        ; Alcotest.test_case "Memory category cycle returns to All" `Quick
+            test_memory_category_cycle_returns_to_all
         ; Alcotest.test_case "Git changes has changed-file actions only" `Quick
             test_git_changes_footer_names_only_changed_file_actions
         ; Alcotest.test_case "Verification carries the verdict keys" `Quick

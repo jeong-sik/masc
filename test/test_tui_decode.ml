@@ -2723,6 +2723,137 @@ let test_decode_memory_health_rejects_stale_schema () =
   Alcotest.(check bool) "v1 cannot masquerade as the source-aware shape" true
     (Result.is_error (Tui_decode.decode_memory_health_snapshot json))
 
+let memory_fact_snapshot_json ~ordinary ~source_bound =
+  `Assoc
+    [ "keeper", `String "alpha"
+    ; "dashboard_surface", `String "/api/v1/keepers/:name/memory-facts"
+    ; "ordinary", ordinary
+    ; "source_bound", source_bound
+    ]
+
+let test_decode_memory_facts_keeps_both_stores () =
+  let ordinary =
+    `Assoc
+      [ "present", `Bool true
+      ; "revision", `Int 7
+      ; "updated_at", `Float 1_775_000_100.0
+      ; ( "facts"
+        , `List
+            [ `Assoc
+                [ "claim", `String "the deploy needs assets"
+                ; "category", `String "lesson"
+                ; "origin", `String "authored"
+                ; "first_seen", `Float 1_775_000_000.0
+                ; "last_seen", `Float 1_775_000_050.0
+                ; "reinforcement", `Int 3
+                ; "memory_id", `String "mem-1"
+                ]
+            ] )
+      ]
+  in
+  let source_bound =
+    `Assoc
+      [ "present", `Bool true
+      ; "revision", `Int 2
+      ; "updated_at", `Float 1_775_000_100.0
+      ; ( "facts"
+        , `List
+            [ `Assoc
+                [ "claim", `String "the config floor is masc.core"
+                ; "first_seen", `Float 1_775_000_000.0
+                ; "path", `String "docs/config.md"
+                ; "sha256", `String "abcdef0123456789"
+                ]
+            ] )
+      ; ( "invalidations"
+        , `List
+            [ `Assoc
+                [ "source_path", `String "docs/old.md"
+                ; "invalidated_at", `Float 1_775_000_090.0
+                ; "reason", `String "source_changed"
+                ]
+            ] )
+      ]
+  in
+  match
+    Tui_decode.decode_memory_fact_snapshot
+      (memory_fact_snapshot_json ~ordinary ~source_bound)
+  with
+  | Error err -> Alcotest.fail err
+  | Ok snapshot -> (
+      Alcotest.(check string) "keeper" "alpha" snapshot.Tui_decode.mfs_keeper;
+      (match snapshot.Tui_decode.mfs_ordinary with
+       | Tui_decode.Memory_store_present store ->
+           Alcotest.(check int) "revision" 7 store.Tui_decode.mos_revision;
+           (match store.Tui_decode.mos_facts with
+            | [ fact ] ->
+                Alcotest.(check string) "category as the server spelled it"
+                  "lesson" fact.Tui_decode.mf_category;
+                Alcotest.(check string) "origin" "authored"
+                  fact.Tui_decode.mf_origin;
+                Alcotest.(check int) "reinforcement" 3
+                  fact.Tui_decode.mf_reinforcement
+            | facts ->
+                Alcotest.fail
+                  (Printf.sprintf "expected one fact, got %d"
+                     (List.length facts)))
+       | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+         ->
+           Alcotest.fail "ordinary store should be present");
+      match snapshot.Tui_decode.mfs_source with
+      | Tui_decode.Memory_store_present store -> (
+          (match store.Tui_decode.mss_facts with
+           | [ fact ] ->
+               Alcotest.(check string) "bound path" "docs/config.md"
+                 fact.Tui_decode.msf_path
+           | facts ->
+               Alcotest.fail
+                 (Printf.sprintf "expected one source fact, got %d"
+                    (List.length facts)));
+          match store.Tui_decode.mss_invalidations with
+          | [ row ] ->
+              Alcotest.(check string) "reason as the server spelled it"
+                "source_changed" row.Tui_decode.mi_reason
+          | rows ->
+              Alcotest.fail
+                (Printf.sprintf "expected one invalidation, got %d"
+                   (List.length rows)))
+      | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+        ->
+          Alcotest.fail "source store should be present")
+
+let test_decode_memory_facts_keeps_store_states_apart () =
+  let json =
+    memory_fact_snapshot_json
+      ~ordinary:(`Assoc [ "read_error", `String "corrupt row 12" ])
+      ~source_bound:(`Assoc [ "present", `Bool false ])
+  in
+  match Tui_decode.decode_memory_fact_snapshot json with
+  | Error err -> Alcotest.fail err
+  | Ok snapshot ->
+      (match snapshot.Tui_decode.mfs_ordinary with
+       | Tui_decode.Memory_store_read_error detail ->
+           Alcotest.(check string) "the reason survives" "corrupt row 12"
+             detail
+       | Tui_decode.Memory_store_absent | Tui_decode.Memory_store_present _ ->
+           Alcotest.fail "a read error must not pass as a store state");
+      (match snapshot.Tui_decode.mfs_source with
+       | Tui_decode.Memory_store_absent -> ()
+       | Tui_decode.Memory_store_read_error _
+       | Tui_decode.Memory_store_present _ ->
+           Alcotest.fail "an absent store must stay absent")
+
+let test_decode_memory_facts_rejects_a_shapeless_store () =
+  (* Neither read_error nor present: the store object answers nothing, and
+     an empty listing would hide that. *)
+  let json =
+    memory_fact_snapshot_json
+      ~ordinary:(`Assoc [ "revision", `Int 3 ])
+      ~source_bound:(`Assoc [ "present", `Bool false ])
+  in
+  Alcotest.(check bool) "a shapeless store is a decode error, not empty" true
+    (Result.is_error (Tui_decode.decode_memory_fact_snapshot json))
+
 let test_decode_repository_changes_keeps_git_axes () =
   let json =
     `Assoc
@@ -6253,6 +6384,12 @@ let () =
           test_decode_memory_health_keeps_ordinary_and_source_axes;
         Alcotest.test_case "memory health rejects stale schema" `Quick
           test_decode_memory_health_rejects_stale_schema;
+        Alcotest.test_case "memory facts keep both stores" `Quick
+          test_decode_memory_facts_keeps_both_stores;
+        Alcotest.test_case "memory facts keep store states apart" `Quick
+          test_decode_memory_facts_keeps_store_states_apart;
+        Alcotest.test_case "memory facts reject a shapeless store" `Quick
+          test_decode_memory_facts_rejects_a_shapeless_store;
         Alcotest.test_case "project changes keep project scope" `Quick
           test_decode_project_changes_keeps_project_scope;
       ] );

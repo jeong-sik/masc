@@ -1119,6 +1119,13 @@ let load_memory_health ~(host : string) ~(port : int) :
   | Error err -> Error ("memory health load failed: " ^ err)
   | Ok json -> Tui_decode.decode_memory_health_snapshot json
 
+(** Load one keeper's remembered facts, both stores. *)
+let load_memory_facts ~(host : string) ~(port : int) ~(keeper_name : string) :
+    (Tui_decode.memory_fact_snapshot, string) result =
+  match fetch_keeper_memory_facts ~host ~port ~keeper_name with
+  | Error err -> Error ("memory facts load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_memory_fact_snapshot json
+
 (** Load the current project's Git working-tree changes. *)
 let load_project_changes ~(host : string) ~(port : int) :
     (Tui_decode.repository_change_snapshot, string) result =

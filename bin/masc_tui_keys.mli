@@ -70,6 +70,10 @@ val footer_hints_git_changes : string
 (** The shared Git changes list under Repositories and Code. It omits actions
     such as repository registration that do not act on a changed-file row. *)
 
+val footer_hints_memory_facts : string
+(** The Memory fact browser opened by Enter on a health row: row movement,
+    the category cycle, search, and the way back to the table. *)
+
 val keeper_detail_tab_bindings :
   Masc_tui_types.keeper_detail_tab -> binding list
 (** A detail tab's own keys. Separate from {!for_surface} because they are

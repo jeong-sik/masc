@@ -624,6 +624,64 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
+(** One remembered fact from a keeper's ordinary Memory OS store. The
+    category and origin are the server's closed taxonomy, carried as the
+    strings it spelled them in: this side renders and groups them by exact
+    equality and never classifies on its own. *)
+type memory_fact = {
+  mf_claim : string;
+  mf_category : string;
+  mf_origin : string;
+  mf_first_seen : float;
+  mf_last_seen : float;
+  mf_reinforcement : int;
+  mf_memory_id : string;
+}
+
+(** A fact bound to a file: it holds only while the file at [msf_path] still
+    hashes to [msf_sha256]. *)
+type memory_source_fact = {
+  msf_claim : string;
+  msf_first_seen : float;
+  msf_path : string;
+  msf_sha256 : string;
+}
+
+(** A source-bound fact the store dropped, and the server's reason string. *)
+type memory_invalidation = {
+  mi_source_path : string;
+  mi_invalidated_at : float;
+  mi_reason : string;
+}
+
+(** One store's reading. The server answers each store independently --
+    a read error, no snapshot yet, or the snapshot -- so one failing store
+    never blanks the other, and this side keeps the three states apart
+    instead of collapsing them into an empty list. *)
+type 'a memory_store_reading =
+  | Memory_store_read_error of string
+  | Memory_store_absent
+  | Memory_store_present of 'a
+
+type memory_ordinary_store = {
+  mos_revision : int;
+  mos_updated_at : float;
+  mos_facts : memory_fact list;
+}
+
+type memory_source_store = {
+  mss_revision : int;
+  mss_updated_at : float;
+  mss_facts : memory_source_fact list;
+  mss_invalidations : memory_invalidation list;
+}
+
+type memory_fact_snapshot = {
+  mfs_keeper : string;
+  mfs_ordinary : memory_ordinary_store memory_store_reading;
+  mfs_source : memory_source_store memory_store_reading;
+}
+
 (** One verdict the harness recorded: which gate ran on which task, what it
     decided, and which evaluator decided it. *)
 type harness_verdict = {
@@ -1610,6 +1668,13 @@ val decode_memory_health_snapshot :
 (** Decode the fleet memory-health snapshot served at
     [/api/v1/dashboard/keeper-memory-health]. Every consumed field is
     required: a keeper the server left out is invisible here, not defaulted. *)
+
+val decode_memory_fact_snapshot :
+  Yojson.Safe.t -> (memory_fact_snapshot, string) result
+(** Decode one keeper's fact listing served at
+    [/api/v1/keepers/:name/memory-facts]. Each store object is read by which
+    field it carries -- [read_error], [present]:false, or [present]:true with
+    its rows -- and any other shape is a decode error, not an empty store. *)
 
 val decode_harness_snapshot :
   Yojson.Safe.t -> (harness_snapshot, string) result

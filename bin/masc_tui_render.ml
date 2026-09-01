@@ -9101,6 +9101,213 @@ let render_memory (state : state) =
            c.push_divider ();
            List.iter (c.push_styled ~style:(Theme.recede ())) lines))
 
+(* The fact browser Enter opens over a health row: what the keeper actually
+   remembers, row by row, with the cursor row unpacked below the list. The
+   category and origin strings are drawn exactly as the server spelled
+   them. *)
+let memory_fact_row_line (row : Masc_tui_types.memory_fact_row) =
+  let open Masc.Tui_decode in
+  match row with
+  | Masc_tui_types.Memory_row_fact fact ->
+      Printf.sprintf "  [%s] %s \xc3\x97%d" fact.mf_category
+        (Terminal_text.single_line fact.mf_claim)
+        fact.mf_reinforcement
+  | Masc_tui_types.Memory_row_source_fact fact ->
+      Printf.sprintf "  [source] %s \xe2\x80\x94 %s" fact.msf_path
+        (Terminal_text.single_line fact.msf_claim)
+  | Masc_tui_types.Memory_row_invalidation row ->
+      Printf.sprintf "  [dropped] %s \xe2\x80\x94 %s" row.mi_source_path
+        row.mi_reason
+
+let memory_fact_age_label ts =
+  keeper_lane_idle_text (int_of_float (Unix.gettimeofday () -. ts))
+
+let memory_fact_detail_lines (row : Masc_tui_types.memory_fact_row) =
+  let open Masc.Tui_decode in
+  match row with
+  | Masc_tui_types.Memory_row_fact fact ->
+      [ "  " ^ Terminal_text.single_line fact.mf_claim
+      ; Printf.sprintf
+          "  category %s · origin %s · reinforced \xc3\x97%d · first %s · last %s · id %s"
+          fact.mf_category fact.mf_origin fact.mf_reinforcement
+          (memory_fact_age_label fact.mf_first_seen)
+          (memory_fact_age_label fact.mf_last_seen)
+          fact.mf_memory_id
+      ]
+  | Masc_tui_types.Memory_row_source_fact fact ->
+      let sha_short =
+        if String.length fact.msf_sha256 > 12 then
+          String.sub fact.msf_sha256 0 12
+        else fact.msf_sha256
+      in
+      [ "  " ^ Terminal_text.single_line fact.msf_claim
+      ; Printf.sprintf "  bound to %s · sha %s · first %s" fact.msf_path
+          sha_short
+          (memory_fact_age_label fact.msf_first_seen)
+      ]
+  | Masc_tui_types.Memory_row_invalidation row ->
+      [ Printf.sprintf "  dropped %s ago · reason %s"
+          (memory_fact_age_label row.mi_invalidated_at)
+          row.mi_reason
+      ; "  was bound to " ^ row.mi_source_path
+      ]
+
+(* One store's state for the summary strip: its rows are in the list only
+   when the reading is present, so the strip is where a failed or absent
+   store stays visible instead of passing as "remembers nothing". *)
+let memory_store_state_label name = function
+  | Masc.Tui_decode.Memory_store_read_error _ -> name ^ " read failed"
+  | Masc.Tui_decode.Memory_store_absent -> name ^ " absent"
+  | Masc.Tui_decode.Memory_store_present _ -> name ^ " ok"
+
+let render_memory_facts (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let open Masc.Tui_decode in
+  let keeper_name = Option.value state.memory_facts_keeper ~default:"" in
+  let rows = Masc_tui_types.memory_fact_rows state in
+  let total = List.length rows in
+  let cursor = max 0 (min state.memory_facts_cursor (total - 1)) in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let filter_label =
+    match state.memory_facts_category with
+    | None -> "All"
+    | Some category -> category
+  in
+  let title =
+    match state.memory_facts with
+    | None ->
+        Printf.sprintf "%s \xe2\x96\xb8 %s  (not loaded)  %s  %s"
+          (screen_title " MASC Memory") keeper_name timestamp
+          (connection_badge state)
+    | Some _ ->
+        Printf.sprintf "%s \xe2\x96\xb8 %s (%d rows · filter %s)  %s  %s"
+          (screen_title " MASC Memory") keeper_name total filter_label
+          timestamp (connection_badge state)
+  in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"memory-facts"
+    ~title ~hints:Masc_tui_keys.footer_hints_memory_facts
+    ~body:(fun ~budget c ->
+      let summary =
+        match state.memory_facts with
+        | None -> "  (loading facts\xe2\x80\xa6)"
+        | Some snapshot ->
+            let ordinary_label =
+              match snapshot.mfs_ordinary with
+              | Memory_store_present store ->
+                  Printf.sprintf "ordinary r%d · %d facts"
+                    store.mos_revision
+                    (List.length store.mos_facts)
+              | (Memory_store_read_error _ | Memory_store_absent) as reading
+                ->
+                  memory_store_state_label "ordinary" reading
+            in
+            let source_label =
+              match snapshot.mfs_source with
+              | Memory_store_present store ->
+                  Printf.sprintf "source-bound r%d · %d facts · %d dropped"
+                    store.mss_revision
+                    (List.length store.mss_facts)
+                    (List.length store.mss_invalidations)
+              | (Memory_store_read_error _ | Memory_store_absent) as reading
+                ->
+                  memory_store_state_label "source-bound" reading
+            in
+            "  " ^ ordinary_label ^ " \xc2\xb7 " ^ source_label
+      in
+      c.push_styled ~style:(Theme.recede ()) summary;
+      c.push_divider ();
+      (match state.memory_facts_error with
+       | None -> ()
+       | Some detail ->
+           c.push_styled ~style:(Theme.bad ())
+             ("  " ^ Keeper_chat.terminal_safe_text detail);
+           c.push_divider ());
+      (* A store that failed to read keeps its reason on screen, not only a
+         "read failed" tag in the strip. Two matches because the two stores
+         carry different payloads; only the error text is shared. *)
+      (match state.memory_facts with
+       | None -> ()
+       | Some snapshot ->
+           (match snapshot.mfs_ordinary with
+            | Memory_store_read_error detail ->
+                c.push_styled ~style:(Theme.bad ())
+                  ("  ordinary store: "
+                   ^ Keeper_chat.terminal_safe_text detail)
+            | Memory_store_absent | Memory_store_present _ -> ());
+           (match snapshot.mfs_source with
+            | Memory_store_read_error detail ->
+                c.push_styled ~style:(Theme.bad ())
+                  ("  source-bound store: "
+                   ^ Keeper_chat.terminal_safe_text detail)
+            | Memory_store_absent | Memory_store_present _ -> ()));
+      let detail_lines =
+        match List.nth_opt rows cursor with
+        | None -> []
+        | Some row -> memory_fact_detail_lines row
+      in
+      let detail_rows =
+        match detail_lines with [] -> 0 | lines -> 1 + List.length lines
+      in
+      let store_error_rows =
+        match state.memory_facts with
+        | None -> 0
+        | Some snapshot ->
+            (match snapshot.mfs_ordinary with
+             | Memory_store_read_error _ -> 1
+             | Memory_store_absent | Memory_store_present _ -> 0)
+            + (match snapshot.mfs_source with
+               | Memory_store_read_error _ -> 1
+               | Memory_store_absent | Memory_store_present _ -> 0)
+      in
+      let fixed =
+        2 + detail_rows + store_error_rows
+        + (if Option.is_some state.memory_facts_error then 2 else 0)
+      in
+      let room = max 1 (budget - fixed) in
+      let overflowing = total > room in
+      let content_height = if overflowing then max 1 (room - 1) else room in
+      let max_scroll = max 0 (total - content_height) in
+      let scroll = max 0 (min state.memory_facts_scroll max_scroll) in
+      if total = 0 then
+        (let empty =
+           match state.memory_facts, state.memory_facts_category with
+           | None, _ -> "  (waiting for the server)"
+           | Some _, Some category ->
+               Printf.sprintf "  (no facts in category %s \xe2\x80\x94 c cycles)"
+                 category
+           | Some _, None -> "  (no facts in either store)"
+         in
+         c.push_styled ~style:(Theme.recede ()) empty)
+      else begin
+        for i = 0 to content_height - 1 do
+          let idx = i + scroll in
+          match List.nth_opt rows idx with
+          | None -> c.push_empty ()
+          | Some row ->
+              if idx = cursor then c.push_selected (memory_fact_row_line row)
+              else
+                (match row with
+                 | Masc_tui_types.Memory_row_invalidation _ ->
+                     c.push_styled ~style:(Theme.recede ())
+                       (memory_fact_row_line row)
+                 | Masc_tui_types.Memory_row_fact _
+                 | Masc_tui_types.Memory_row_source_fact _ ->
+                     c.push (memory_fact_row_line row))
+        done;
+        if overflowing then
+          c.push_styled ~style:(Theme.recede ())
+            (Printf.sprintf "[%d rows, scroll %d]" total scroll)
+      end;
+      (match detail_lines with
+       | [] -> ()
+       | lines ->
+           c.push_divider ();
+           List.iter (c.push_styled ~style:(Theme.recede ())) lines))
+
 let render_repositories (state : state) =
   if state.repository_changes_open then render_repository_changes state
   else render_repository_list state
@@ -13520,7 +13727,10 @@ let render_surface (state : state) =
       (match state.fusion_mode with
        | Fusion_list -> render_fusion_list state
        | Fusion_detail run_id -> render_fusion_detail state run_id)
-  | Memory -> render_memory state
+  | Memory ->
+      if Option.is_some state.memory_facts_keeper then
+        render_memory_facts state
+      else render_memory state
   | Repositories -> render_repositories state
   | Changes -> render_changes state
   | Connectors -> render_connectors state

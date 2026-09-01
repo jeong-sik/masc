@@ -1427,6 +1427,11 @@ type async_msg =
       int * string * (Masc.Tui_decode.fusion_detail, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Memory_loaded of (Masc.Tui_decode.memory_health_snapshot, string) result
+  (* Carries the keeper it was asked about: the browser can be closed or
+     pointed at another keeper while a load is in flight, and a late answer
+     for somebody else must be dropped, not filed under whoever is open. *)
+  | Memory_facts_loaded of
+      string * (Masc.Tui_decode.memory_fact_snapshot, string) result
   | Repository_changes_loaded of
       Masc.Tui_decode.repository_change_scope
       * (Masc.Tui_decode.repository_change_snapshot, string) result
@@ -3347,6 +3352,26 @@ let launch_memory_health_load state ~mailbox =
   | None ->
       enqueue_async mailbox (Memory_loaded (Error "Eio switch is unavailable"))
 
+let launch_memory_facts_load state ~mailbox ~keeper_name =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Memory_facts_loaded (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Memory_facts_loaded (keeper_name, Error "Eio switch is unavailable"))
+
 let repository_change_scope_equal left right =
   match left, right with
   | Tui_decode.Repository_change_project, Tui_decode.Repository_change_project ->
@@ -3815,7 +3840,11 @@ let search_row_cursor state =
       if Option.is_some state.verification_detail_request_id then None
       else Some state.verification_cursor
   | Harness -> Some state.harness_cursor
-  | Memory -> Some state.memory_health_cursor
+  | Memory ->
+      Some
+        (if Option.is_some state.memory_facts_keeper then
+           state.memory_facts_cursor
+         else state.memory_health_cursor)
   | Repositories ->
       Some
         (if state.repository_changes_open then state.repository_changes_cursor
@@ -3856,8 +3885,16 @@ let search_land state index =
       state.harness_cursor <- index;
       follow state.harness_scroll (fun s -> state.harness_scroll <- s)
   | Memory ->
-      state.memory_health_cursor <- index;
-      follow state.memory_health_scroll (fun s -> state.memory_health_scroll <- s)
+      if Option.is_some state.memory_facts_keeper then begin
+        state.memory_facts_cursor <- index;
+        follow state.memory_facts_scroll
+          (fun s -> state.memory_facts_scroll <- s)
+      end
+      else begin
+        state.memory_health_cursor <- index;
+        follow state.memory_health_scroll
+          (fun s -> state.memory_health_scroll <- s)
+      end
   | Repositories ->
       if state.repository_changes_open then begin
         state.repository_changes_cursor <- index;
@@ -8647,6 +8684,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.memory_health <- Some snapshot;
           state.memory_health_error <- None
       | Error detail -> state.memory_health_error <- Some detail)
+  | Memory_facts_loaded (keeper_name, result) ->
+      (* Only the keeper the browser is still open on: a late answer for a
+         browser that closed, or for the keeper the reader already left,
+         is dropped whole. *)
+      if
+        Option.equal String.equal state.memory_facts_keeper (Some keeper_name)
+      then (
+        match result with
+        | Ok snapshot ->
+            state.memory_facts <- Some snapshot;
+            state.memory_facts_error <- None
+        | Error detail -> state.memory_facts_error <- Some detail)
   | Repository_changes_loaded (scope, result) ->
       if
         state.repository_changes_open
@@ -11659,6 +11708,17 @@ and is loaded on demand through keeper_skill.
               end)
        | Some "c" when state.view = Tools -> handle_skill_create ~composition:false ()
        | Some "C" when state.view = Tools -> handle_skill_create ~composition:true ()
+       | Some "c"
+         when state.view = Memory
+              && Option.is_some state.memory_facts_keeper ->
+           (* Cycle the category filter: All, then each category the loaded
+              store holds, in sorted order. The cursor restarts because the
+              row under it belongs to the listing being replaced. *)
+           state.memory_facts_category <-
+             Masc_tui_types.next_memory_category state.memory_facts_category
+               (Masc_tui_types.memory_fact_categories state);
+           state.memory_facts_cursor <- 0;
+           state.memory_facts_scroll <- 0
        | Some (("n" | "N") as direction)
          when state.search_last <> ""
               && Option.is_some (surface_row_texts state state.view) ->
@@ -12294,7 +12354,13 @@ and is loaded on demand through keeper_skill.
                  | Fusion_detail run_id ->
                      launch_fusion_detail_load state ~mailbox:async_messages
                        ~run_id)
-            | Memory -> launch_memory_health_load state ~mailbox:async_messages
+            | Memory ->
+                launch_memory_health_load state ~mailbox:async_messages;
+                (match state.memory_facts_keeper with
+                 | Some keeper_name ->
+                     launch_memory_facts_load state ~mailbox:async_messages
+                       ~keeper_name
+                 | None -> ())
             | Repositories ->
                 if state.repository_changes_open then
                   refresh_repository_changes state ~mailbox:async_messages
@@ -12541,7 +12607,20 @@ and is loaded on demand through keeper_skill.
                    so arriving by palette and leaving does not strand an
                    unread Runtime until the next tick. *)
                 goto_surface state ~mailbox:async_messages Runtime
-            | Memory | Config | Tools -> state.view <- Overview)
+            | Memory ->
+                if Option.is_some state.memory_facts_keeper then begin
+                  (* Close the fact browser back to the health table. The
+                     listing is dropped with it: facts are cheap to re-ask
+                     and a kept copy would redraw stale rows on reopen. *)
+                  state.memory_facts_keeper <- None;
+                  state.memory_facts <- None;
+                  state.memory_facts_error <- None;
+                  state.memory_facts_cursor <- 0;
+                  state.memory_facts_scroll <- 0;
+                  state.memory_facts_category <- None
+                end
+                else state.view <- Overview
+            | Config | Tools -> state.view <- Overview)
        | Some "left" ->
            (* Left is the non-destructive structural back key. Unlike Esc it
               never interrupts a live chat turn; it only closes a detail the
@@ -12879,13 +12958,24 @@ and is loaded on demand through keeper_skill.
                    state.harness_cursor <- cursor;
                    state.harness_scroll <- scroll)
             | Memory ->
-                let cursor, scroll =
-                  move_row_cursor state ~delta:1
-                    ~cursor:state.memory_health_cursor
-                    ~scroll:state.memory_health_scroll
-                in
-                state.memory_health_cursor <- cursor;
-                state.memory_health_scroll <- scroll
+                if Option.is_some state.memory_facts_keeper then begin
+                  let cursor, scroll =
+                    move_row_cursor state ~delta:1
+                      ~cursor:state.memory_facts_cursor
+                      ~scroll:state.memory_facts_scroll
+                  in
+                  state.memory_facts_cursor <- cursor;
+                  state.memory_facts_scroll <- scroll
+                end
+                else begin
+                  let cursor, scroll =
+                    move_row_cursor state ~delta:1
+                      ~cursor:state.memory_health_cursor
+                      ~scroll:state.memory_health_scroll
+                  in
+                  state.memory_health_cursor <- cursor;
+                  state.memory_health_scroll <- scroll
+                end
             | Repositories ->
                 if state.repository_changes_open then
                   let cursor, scroll =
@@ -13184,13 +13274,24 @@ and is loaded on demand through keeper_skill.
                    state.harness_cursor <- cursor;
                    state.harness_scroll <- scroll)
             | Memory ->
-                let cursor, scroll =
-                  move_row_cursor state ~delta:(-1)
-                    ~cursor:state.memory_health_cursor
-                    ~scroll:state.memory_health_scroll
-                in
-                state.memory_health_cursor <- cursor;
-                state.memory_health_scroll <- scroll
+                if Option.is_some state.memory_facts_keeper then begin
+                  let cursor, scroll =
+                    move_row_cursor state ~delta:(-1)
+                      ~cursor:state.memory_facts_cursor
+                      ~scroll:state.memory_facts_scroll
+                  in
+                  state.memory_facts_cursor <- cursor;
+                  state.memory_facts_scroll <- scroll
+                end
+                else begin
+                  let cursor, scroll =
+                    move_row_cursor state ~delta:(-1)
+                      ~cursor:state.memory_health_cursor
+                      ~scroll:state.memory_health_scroll
+                  in
+                  state.memory_health_cursor <- cursor;
+                  state.memory_health_scroll <- scroll
+                end
             | Repositories ->
                 if state.repository_changes_open then
                   let cursor, scroll =
@@ -13544,9 +13645,34 @@ and is loaded on demand through keeper_skill.
                            ~mailbox:async_messages ~scope change)
                 | _ -> ())
             | Memory -> (
-                (* The detail panel already follows the cursor, so Enter has
-                   no second view to open here. *)
-                ())
+                match state.memory_facts_keeper with
+                | Some _ ->
+                    (* The browser's rows are leaves; the detail lines
+                       already follow the cursor. *)
+                    ()
+                | None -> (
+                    (* Enter opens what the health row only counts: the
+                       keeper's facts themselves. *)
+                    match state.memory_health with
+                    | None -> ()
+                    | Some snapshot -> (
+                        match
+                          List.nth_opt snapshot.Masc.Tui_decode.mhs_keepers
+                            state.memory_health_cursor
+                        with
+                        | None -> ()
+                        | Some keeper ->
+                            let keeper_name =
+                              keeper.Masc.Tui_decode.mkh_keeper_id
+                            in
+                            state.memory_facts_keeper <- Some keeper_name;
+                            state.memory_facts <- None;
+                            state.memory_facts_error <- None;
+                            state.memory_facts_cursor <- 0;
+                            state.memory_facts_scroll <- 0;
+                            state.memory_facts_category <- None;
+                            launch_memory_facts_load state
+                              ~mailbox:async_messages ~keeper_name)))
             | Repositories -> (
                 (* Enter opens the repository's own tree on the Code surface,
                    through the ?repo_id= axis its row already names. *)

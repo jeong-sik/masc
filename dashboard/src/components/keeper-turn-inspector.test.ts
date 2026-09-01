@@ -408,7 +408,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
 
     const drawerText = container.querySelector('[data-testid="turn-detail-drawer"]')?.textContent ?? ''
     expect(drawerText).toContain('턴 상세')
-    expect(drawerText).toContain('trace-active_0042')
+    expect(drawerText).toContain('trace-active#42')
     expect(drawerText).toContain('local')
   })
 
@@ -568,7 +568,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     })
 
     const drawerText = container.querySelector('[data-testid="turn-detail-drawer"]')?.textContent ?? ''
-    expect(drawerText).toContain('trace-active_0042')
+    expect(drawerText).toContain('trace-active#42')
     expect(container.querySelector('[data-testid="turn-linked-empty"]')).toBeFalsy()
   })
 
@@ -645,7 +645,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     })
 
     expect(container.querySelector('[data-testid="turn-tab-timeline"]')?.classList.contains('on')).toBe(true)
-    expect(container.textContent).toContain('턴 워터폴')
+    expect(container.textContent).toContain('단계별 실측 시간')
 
     fireEvent.click(container.querySelector('[data-testid="turn-tab-messages"]')!)
 
@@ -896,6 +896,38 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(stats).not.toContain('미상')
   })
 
+  it('renders missing token observations as unknown without synthetic values', async () => {
+    const response = turnRecordsWithMemoryOs()
+    const record = response.entries[1]!.record
+    delete record.input_tokens
+    delete record.output_tokens
+    fetchKeeperTurnRecordsMock.mockResolvedValue(response)
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-summary-stats"]')).toBeTruthy()
+    })
+
+    const stats = container.querySelector('[data-testid="turn-summary-stats"]')?.textContent ?? ''
+    expect(stats).toContain('입력미상')
+    expect(stats).toContain('출력미상')
+    expect(stats).toContain('추정비용미상')
+
+    const tokenBar = container.querySelector('[data-testid="turn-token-bar"]')
+    expect(tokenBar?.textContent).toContain('측정 없음')
+    expect(tokenBar?.textContent).toContain('입력 미상')
+    expect(tokenBar?.textContent).toContain('출력 미상')
+    expect(tokenBar?.querySelector('.seg-in')).toBeNull()
+    expect(tokenBar?.querySelector('.seg-out')).toBeNull()
+  })
+
   it('joins tool-call duration and agent subturn by execution_id', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 
@@ -953,6 +985,9 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(drawerText).toContain('측정 없음')
     expect(drawerText).not.toContain('0ms')
     expect(drawerText).not.toContain('0.50s')
+    const toolRow = Array.from(container.querySelectorAll('.ti-wf-row'))
+      .find(row => row.textContent?.includes('masc_board_post_get'))
+    expect(toolRow?.querySelector('.ti-wf-bar')).toBeNull()
 
   })
 
@@ -1136,7 +1171,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     fireEvent.click(copyButtons[0]!)
 
     await waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('trace-active_0042')
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('trace-active#42')
     })
   })
 

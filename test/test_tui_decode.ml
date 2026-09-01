@@ -5040,27 +5040,28 @@ let test_decode_lane_run_detail_running_has_no_output () =
       Alcotest.(check bool) "no output while running" true
         (Option.is_none detail.Tui_decode.lrd_output)
 
-let hitl_lane_run_detail_json ?(status = "succeeded") judgment =
-  `Assoc
-    [ ( "run"
+let hitl_lane_run_detail_json ?(status = "succeeded") ?(output = true) judgment =
+  let fields =
+    [ "run_id", `String "hitl-9"
+    ; "run_kind", `String "exact_output"
+    ; "lane", `String "hitl_auto_judge"
+    ; "actor", `String "auto_judge"
+    ; "started_at", `Float 100.
+    ; "status", `String status
+    ; "elapsed_s", `Float 2.
+    ; "selected_slot", `String "judge-primary"
+    ; "skill_evidence", `Assoc [ "state", `String "no_keeper_skills" ]
+    ; ( "input"
       , `Assoc
-          [ "run_id", `String "hitl-9"
-          ; "run_kind", `String "exact_output"
-          ; "lane", `String "hitl_auto_judge"
-          ; "actor", `String "auto_judge"
-          ; "started_at", `Float 100.
-          ; "status", `String status
-          ; "elapsed_s", `Float 2.
-          ; "selected_slot", `String "judge-primary"
-          ; "skill_evidence", `Assoc [ "state", `String "no_keeper_skills" ]
-          ; ( "input"
-            , `Assoc
-                [ "kind", `String "exact"
-                ; "payload", `Assoc [ "tool_name", `String "network_read" ]
-                ] )
-          ; "output", `Assoc [ "judgment", `String judgment ]
+          [ "kind", `String "exact"
+          ; "payload", `Assoc [ "tool_name", `String "network_read" ]
           ] )
+    ; "output", `Assoc [ "judgment", `String judgment ]
     ]
+  in
+  let fields = if output then fields else List.remove_assoc "output" fields in
+  `Assoc
+    [ "run", `Assoc fields ]
 
 let test_decode_hitl_detail_separates_advisory_from_gate_resolution () =
   match Tui_decode.decode_lane_run_detail (hitl_lane_run_detail_json "approve") with
@@ -5101,6 +5102,21 @@ let test_decode_hitl_detail_keeps_advisory_across_persistence_status () =
          Alcotest.failf
            "%s must keep the advisory judgment independently"
            status))
+
+let test_decode_hitl_persistence_status_without_output_is_not_reached () =
+  [ "completion_persistence_failed"; "completion_durability_unknown" ]
+  |> List.iter (fun status ->
+    match
+      Tui_decode.decode_lane_run_detail
+        (hitl_lane_run_detail_json ~status ~output:false "unused")
+    with
+    | Error detail -> Alcotest.fail detail
+    | Ok detail ->
+      Alcotest.(check bool) "no output was retained" true
+        (Option.is_none detail.Tui_decode.lrd_output);
+      Alcotest.(check bool) "no output means no advisory was reached" true
+        (detail.Tui_decode.lrd_gate_judgment
+         = Tui_decode.Lane_run_gate_judgment_not_reached))
 
 let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
   let json =
@@ -6629,6 +6645,8 @@ let () =
           test_decode_hitl_detail_rejects_unknown_advisory;
         Alcotest.test_case "HITL persistence status keeps advisory" `Quick
           test_decode_hitl_detail_keeps_advisory_across_persistence_status;
+        Alcotest.test_case "HITL persistence status without output is not reached"
+          `Quick test_decode_hitl_persistence_status_without_output_is_not_reached;
         Alcotest.test_case "verifier detail keeps kind, subject, and tools" `Quick
           test_decode_verifier_detail_keeps_kind_subject_and_tool_result;
         Alcotest.test_case "detail requires the payload" `Quick

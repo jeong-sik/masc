@@ -9402,9 +9402,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               msg_entries_of_history_rows state keeper_name
                 page.Keeper_chat_history.decoded.Keeper_chat_history.rows
             in
-            (* Prepended, not timestamp-merged: the paging cursor establishes
-               that these producer rows precede the window already held;
-               turn_sequence orders cross-store turn groups inside it. *)
+            (* The paging cursor owns the raw storage window, so an older page
+               is prepended here. [chat_timeline] then recomputes the one
+               displayed-time projection across that complete window; scroll
+               pins retain row identity rather than this cache position. *)
             state.msg_loaded <- rows @ state.msg_loaded;
             state.msg_loaded_dropped <-
               state.msg_loaded_dropped

@@ -6679,7 +6679,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     List.mapi (fun entry_index message -> (entry_index, message)) messages
   in
   let grouped_messages =
-    let rec loop previous_turn reversed = function
+    let rec loop previous_turn previous_turn_at reversed = function
       | [] -> List.rev reversed
       | (entry_index, message) :: rest ->
           let turn_id = message.me_request_id in
@@ -6708,10 +6708,22 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
           let next_previous =
             if grouped then Some turn_id else previous_turn
           in
-          loop next_previous
-            ((entry_index, message, role_label) :: reversed) rest
+          (* A turn is one causal block on the outer time axis. Its first row
+             chooses the hour rail for the entire block, so a skewed tool or
+             result clock cannot insert an older rail halfway through the
+             input -> progress -> tool -> output sequence. The row keeps its
+             own clock in the origin column; only the group rail is shared. *)
+          let timeline_at =
+            if starts_turn || not grouped then message_display_at message
+            else previous_turn_at
+          in
+          let next_previous_at =
+            if grouped then timeline_at else previous_turn_at
+          in
+          loop next_previous next_previous_at
+            ((entry_index, message, role_label, timeline_at) :: reversed) rest
     in
-    loop None [] visible_messages
+    loop None None [] visible_messages
   in
   let projected_tool_rows =
     keeper_message_tool_rows state ~keeper_name ~chat_cols
@@ -6724,7 +6736,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
        fields tie. A history reorder can only cause a miss: the exact body is
        another cache-key field, so an index never authorizes stale rows. *)
     List.map
-      (fun (entry_index, message, grouped_role_label) ->
+      (fun (entry_index, message, grouped_role_label, timeline_at) ->
         (* Projected once: the style is read off it and the body is built
            from it, and projecting twice would let a fold decide the colour
            from one reading and the text from another. *)
@@ -6842,7 +6854,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
              timestamp = message.me_timestamp;
              timeline_bucket =
                Option.map keeper_message_timeline_bucket
-                 (message_display_at message);
+                 timeline_at;
              role_label;
              role_label_mark_cells =
                Message_layout.role_label_mark_cells
@@ -7128,25 +7140,40 @@ let render_keeper_message (state : state) =
     let projected_tool_rows =
       keeper_message_tool_rows state ~keeper_name ~chat_cols
     in
-    let committed_layout_entries =
-      keeper_message_layout_entries state ~keeper_name ~chat_cols
+    let committed_messages =
+      keeper_message_visible_messages state ~keeper_name
     in
-    (* Rows for the turn still streaming, drawn under the committed history so
-       the streaming reply sits at the bottom edge, where the eye rests while
-       waiting for it. Reasoning is kept to its last line: it arrives faster
-       than anything else and a full transcript of it would push the reply and
-       the tool rows off the pane. *)
-    let live_entries =
+    let committed_layout_entries =
+      keeper_message_layout_entries ~messages:committed_messages state
+        ~keeper_name ~chat_cols
+    in
+    (* Rows for the turn still streaming. They join the committed/session row
+       for the same request rather than escaping to a second bottom-only lane:
+       one request has one position and one hour rail on the outer timeline. *)
+    let live_projection =
       match state.msg_live with
       | Some live
         when String.equal (Keeper_chat_transcript.keeper_name live) keeper_name
         ->
           let request_id = Keeper_chat_transcript.request_id live in
           let request_label = Keeper_chat.compact_request_id request_id in
+          let timeline_at =
+            List.find_map
+              (fun (message : msg_entry) ->
+                 if String.equal message.me_request_id request_id
+                 then message_display_at message
+                 else None)
+              committed_messages
+            |> function
+            | Some _ as observed -> observed
+            | None ->
+                let started_at = Keeper_chat_transcript.started_at live in
+                if Float.is_finite started_at && started_at > 0.
+                then Some started_at
+                else None
+          in
           let timeline_bucket =
-            Some
-              (keeper_message_timeline_bucket
-                 (Keeper_chat_transcript.started_at live))
+            Option.map keeper_message_timeline_bucket timeline_at
           in
           let entry ~markdown_source style role_label body =
             (* One alignment, on the label the row actually carries. Aligning
@@ -7196,8 +7223,9 @@ let render_keeper_message (state : state) =
              an append; the cache detects that (the new text no longer starts
              with the old) and falls back to one full render, the same work
              the uncached streaming path did on every frame. *)
-          List.filter_map Fun.id
-          @@ List.mapi
+          let entries =
+            List.filter_map Fun.id
+            @@ List.mapi
                (fun entry_index (item : Keeper_chat_transcript.trail_item) ->
               match item with
               | Keeper_chat_transcript.Trail_thinking _
@@ -7257,10 +7285,46 @@ let render_keeper_message (state : state) =
                               entry_index;
                             })
                        Message_layout.Keeper keeper_label text))
-            (Keeper_chat_transcript.trail live)
-      | Some _ | None -> []
+                 (Keeper_chat_transcript.trail live)
+          in
+          Some (request_id, timeline_at, entries)
+      | Some _ | None -> None
     in
-    let layout_entries = committed_layout_entries @ live_entries in
+    let committed_tagged =
+      List.combine committed_messages committed_layout_entries
+      |> List.map (fun (message, entry) -> Some message, entry)
+    in
+    let rec insert_at index inserted reversed = function
+      | rest when index <= 0 -> List.rev_append reversed (inserted @ rest)
+      | item :: rest -> insert_at (index - 1) inserted (item :: reversed) rest
+      | [] -> List.rev_append reversed inserted
+    in
+    let tagged_layout_entries =
+      match live_projection with
+      | None -> committed_tagged
+      | Some (request_id, timeline_at, live_entries) ->
+          let _, after_request =
+            List.fold_left
+              (fun (index, found) (message, _) ->
+                 ( index + 1
+                 , match message with
+                   | Some message
+                     when String.equal message.me_request_id request_id ->
+                       Some (index + 1)
+                   | Some _ | None -> found ))
+              (0, None) committed_tagged
+          in
+          let insertion =
+            match after_request with
+            | Some index -> index
+            | None ->
+                chat_live_insertion_index ~timeline_at committed_messages
+          in
+          insert_at insertion
+            (List.map (fun entry -> None, entry) live_entries)
+            [] committed_tagged
+    in
+    let layout_entries = List.map snd tagged_layout_entries in
     let inner_width = max 1 (framed_inner_width chat_cols) in
     (* Clamped here rather than where the key is handled: the limit depends on
        the terminal width and the pane's height, and a resize changes both
@@ -7275,26 +7339,55 @@ let render_keeper_message (state : state) =
        In both cases those rows sit between the anchor and bottom, so adding
        their height is what keeps the same anchored content still. *)
     let rows_since_pin =
-      match state.msg_scroll_pin with
-      | None -> 0
-      | Some pin -> (
-          match msg_entries_after_anchor (chat_rows_for state keeper_name) pin with
-          | None | Some [] -> 0
-          | Some arrived ->
-              let arrived =
-                keeper_message_layout_entries ~messages:arrived state
-                  ~keeper_name ~chat_cols
-              in
-              let previous =
-                let previous_index =
-                  List.length committed_layout_entries - List.length arrived
-                  - 1
+      match state.msg_scroll_pin, live_projection with
+      | None, _ -> 0
+      | Some _, Some _ ->
+          (* A live trail has no durable row identity and may already have
+             many wrapped rows when the operator first leaves the bottom.
+             Treating that existing height as newly arrived double-counts it
+             on the first key press. Structural compensation resumes when the
+             trail settles into committed rows with exact identities. *)
+          0
+      | Some pin, None ->
+          let rendered_suffix =
+            let rec find_visible = function
+              | [] -> None
+              | (Some message, entry) :: rest ->
+                  if same_msg_anchor pin message
+                  then Some (Some entry, List.map snd rest)
+                  else find_visible rest
+              | (None, _) :: rest -> find_visible rest
+            in
+            match find_visible tagged_layout_entries with
+            | Some _ as found -> found
+            | None ->
+                (* A hidden Memory/thinking row can own the logical pin but no
+                   layout entry. Start at the first visible identity after it,
+                   preserving the preceding entry from the full layout so an
+                   hour rail is measured exactly as the frame measures it. *)
+                let raw_after =
+                  Option.value ~default:[]
+                    (msg_entries_after_anchor (chat_rows_for state keeper_name) pin)
                 in
-                if previous_index < 0 then None
-                else List.nth_opt committed_layout_entries previous_index
-              in
-              Message_layout.total_rows ~markdown
-                ~origin:state.msg_origin_display ?previous ~inner_width arrived)
+                let after_anchors = List.map msg_anchor raw_after in
+                let belongs message =
+                  List.exists
+                    (fun anchor -> same_msg_anchor anchor message)
+                    after_anchors
+                in
+                let rec find_after previous = function
+                  | [] -> None
+                  | (Some message, entry) :: rest when belongs message ->
+                      Some (previous, entry :: List.map snd rest)
+                  | (_, entry) :: rest -> find_after (Some entry) rest
+                in
+                find_after None tagged_layout_entries
+          in
+          (match rendered_suffix with
+           | None | Some (_, []) -> 0
+           | Some (previous, arrived) ->
+               Message_layout.total_rows ~markdown
+                 ~origin:state.msg_origin_display ?previous ~inner_width arrived)
     in
     let scroll, visible_rows =
       Message_layout.clamped_scrolled_rows ~markdown

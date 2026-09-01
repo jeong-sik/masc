@@ -1538,6 +1538,17 @@ type lane_run_tool_evidence =
   | Lane_run_tools_observed of lane_run_tool list
   | Lane_run_tools_contract_unknown
 
+type lane_run_skill_evidence =
+  | Lane_run_no_skills_by_contract
+  | Lane_run_skills_contract_unknown
+
+type lane_run_gate_judgment =
+  | Lane_run_not_gate_judgment
+  | Lane_run_gate_judgment_pending
+  | Lane_run_gate_judgment_not_reached
+  | Lane_run_gate_advisory of
+      Keeper_approval_queue_rules_types.advisory_judgment
+
 type lane_run_summary =
   { lrs_run_id : string
   ; lrs_run_kind : lane_run_kind
@@ -1568,6 +1579,8 @@ type lane_run_detail =
   ; lrd_input_payload : Yojson.Safe.t
   ; lrd_output : Yojson.Safe.t option
   ; lrd_tool_evidence : lane_run_tool_evidence
+  ; lrd_skill_evidence : lane_run_skill_evidence
+  ; lrd_gate_judgment : lane_run_gate_judgment
   }
 
 val decode_lane_run_page :
@@ -1580,7 +1593,10 @@ val decode_lane_run_detail : Yojson.Safe.t -> (lane_run_detail, string) result
 (** The whole record of one standalone run. Exact-output runs carry their
     prompt payload and explicitly report no MASC tool loop. Task/Goal
     Verifier runs carry typed tool observations alongside their durable raw
-    verdict evidence. [lrd_output] is [None] while the run is still running. *)
+    verdict evidence. Every known standalone path explicitly reports that it
+    does not load Keeper Skills. HITL model judgment stays separate from the
+    Gate resolution that may later grant or reject authorization.
+    [lrd_output] is [None] while the run is still running. *)
 
 type log_kind =
   | Log_turn

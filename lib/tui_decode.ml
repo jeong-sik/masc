@@ -6266,6 +6266,17 @@ type lane_run_tool_evidence =
   | Lane_run_tools_observed of lane_run_tool list
   | Lane_run_tools_contract_unknown
 
+type lane_run_skill_evidence =
+  | Lane_run_no_skills_by_contract
+  | Lane_run_skills_contract_unknown
+
+type lane_run_gate_judgment =
+  | Lane_run_not_gate_judgment
+  | Lane_run_gate_judgment_pending
+  | Lane_run_gate_judgment_not_reached
+  | Lane_run_gate_advisory of
+      Keeper_approval_queue_rules_types.advisory_judgment
+
 let decode_lane_run_tool json =
   let* lrt_name = required_string_field json "tool_name" in
   let* disposition = required_string_field json "disposition" in
@@ -6287,6 +6298,57 @@ let decode_lane_run_tool_evidence ~run_kind ~output =
     let* tools = decode_list "tools" decode_lane_run_tool tools in
     Ok (Lane_run_tools_observed tools)
   | Lane_run_kind_other _, _ -> Ok Lane_run_tools_contract_unknown
+;;
+
+let lane_run_skill_evidence = function
+  | Lane_run_exact_output
+  | Lane_run_task_verification
+  | Lane_run_goal_verification ->
+    Lane_run_no_skills_by_contract
+  | Lane_run_kind_other _ -> Lane_run_skills_contract_unknown
+;;
+
+let decode_lane_run_gate_judgment ~lane ~status ~output =
+  let hitl_lane =
+    Exact_lane_run_registry.lane_key Exact_lane_run_registry.Hitl_auto_judge
+  in
+  if not (String.equal lane hitl_lane)
+  then Ok Lane_run_not_gate_judgment
+  else
+    match status, output with
+    | Lane_run_running, _ -> Ok Lane_run_gate_judgment_pending
+    | Lane_run_succeeded, Some output ->
+      let* judgment = required_string_field output "judgment" in
+      (match
+         Keeper_approval_queue_rules_types.advisory_judgment_of_string judgment
+       with
+       | Some judgment -> Ok (Lane_run_gate_advisory judgment)
+       | None ->
+         Error
+           (Printf.sprintf
+              "HITL lane run judgment %S is not %s"
+              judgment
+              (String.concat
+                 "/"
+                 Keeper_approval_queue_rules_types.advisory_judgment_values)))
+    | ( Lane_run_cancelled
+      | Lane_run_failed
+      | Lane_run_completion_persistence_failed
+      | Lane_run_completion_durability_unknown
+      | Lane_run_approved
+      | Lane_run_reviewed
+      | Lane_run_committed
+      | Lane_run_rejected
+      | Lane_run_deferred
+      | Lane_run_review_cancelled
+      | Lane_run_infrastructure_unavailable
+      | Lane_run_not_reviewed
+      | Lane_run_commit_failed
+      | Lane_run_raised
+      | Lane_run_other _ )
+      , _
+    | Lane_run_succeeded, None ->
+      Ok Lane_run_gate_judgment_not_reached
 ;;
 
 type lane_run_summary =
@@ -6319,6 +6381,8 @@ type lane_run_detail =
   ; lrd_input_payload : Yojson.Safe.t
   ; lrd_output : Yojson.Safe.t option
   ; lrd_tool_evidence : lane_run_tool_evidence
+  ; lrd_skill_evidence : lane_run_skill_evidence
+  ; lrd_gate_judgment : lane_run_gate_judgment
   }
 
 let decode_lane_run_summary json =
@@ -6382,6 +6446,11 @@ let decode_lane_run_detail json =
     decode_lane_run_tool_evidence ~run_kind:summary.lrs_run_kind
       ~output:lrd_output
   in
+  let lrd_skill_evidence = lane_run_skill_evidence summary.lrs_run_kind in
+  let* lrd_gate_judgment =
+    decode_lane_run_gate_judgment ~lane:summary.lrs_lane
+      ~status:summary.lrs_status ~output:lrd_output
+  in
   Ok
     { lrd_run_id = summary.lrs_run_id
     ; lrd_run_kind = summary.lrs_run_kind
@@ -6395,6 +6464,8 @@ let decode_lane_run_detail json =
     ; lrd_input_payload
     ; lrd_output
     ; lrd_tool_evidence
+    ; lrd_skill_evidence
+    ; lrd_gate_judgment
     }
 ;;
 

@@ -5,18 +5,16 @@
 
     [register] runs when a subsystem fiber is forked, [mark_dead] when a
     supervisor fiber observes the crash, and [to_yojson] from the HTTP
-    /health handler — three different fibers. [Stdlib.Mutex] protects only
-    the state swap/snapshot because the registry may cross domains; clock
-    observation and JSON rendering stay outside the critical section. *)
+    /health handler — three different fibers. An atomic immutable snapshot
+    makes cross-domain reads wait-free; clock observation and JSON rendering
+    stay outside the compare-and-set retry loop. *)
 
 module State = Subsystem_health_state
 
-let state = ref State.empty
-let registry_mu = Stdlib.Mutex.create ()
+let state = Atomic.make State.empty
 
 let apply event =
-  Stdlib.Mutex.protect registry_mu (fun () ->
-    state := State.apply !state event)
+  Atomic_util.update state (fun current -> State.apply current event)
 ;;
 
 let register name = apply (State.Registered { name })
@@ -27,7 +25,7 @@ let mark_dead name =
 ;;
 
 let to_yojson () : Yojson.Safe.t =
-  let snapshot = Stdlib.Mutex.protect registry_mu (fun () -> !state) in
+  let snapshot = Atomic.get state in
   let entry_to_json (name, health) =
     let fields =
       match health with

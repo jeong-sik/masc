@@ -204,28 +204,68 @@ let test_reset_clears_cached_session_mappings () =
   check bool "session mapping cleared by reset" true
     (id1.session_key <> id2.session_key)
 
-let test_concurrent_access () =
+let test_shutdown_close_rejects_late_publication () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Client_registry_eio.reset_for_testing ();
+  ignore
+    (Client_registry_eio.get_or_create_identity
+       ~mcp_session_id:"before-shutdown"
+       (Yojson.Safe.from_string {|{"_agent_name":"before-shutdown"}|}));
+  Client_registry_eio.clear_all ();
+  ignore
+    (Client_registry_eio.get_or_create_identity
+       ~mcp_session_id:"after-shutdown"
+       (Yojson.Safe.from_string {|{"_agent_name":"after-shutdown"}|}));
+  Client_registry_eio.set_resolved_name
+    "after-shutdown"
+    "after-shutdown"
+    ~is_ephemeral:false;
+  check int "closed registry stays empty" 0 (Client_registry_eio.total_count ());
+  check
+    (option (pair string bool))
+    "closed registry stores no resolved name"
+    None
+    (Client_registry_eio.get_resolved_name "after-shutdown");
+  Client_registry_eio.reset_for_testing ()
 
-  (* Simulate concurrent access *)
-  Eio.Fiber.all (List.init 5 (fun i () ->
-    let params = `Assoc [
-      ("_agent_name", `String (Printf.sprintf "concurrent-agent-%d-%d" i (Random.int 10000)))
-    ] in
-    for _ = 1 to 10 do
-      let _ = Client_registry_eio.get_or_create_identity params in
-      Eio.Fiber.yield ()
-    done
-  ));
-
-  ()
+let test_cross_domain_distinct_sessions_are_lossless () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Client_registry_eio.reset_for_testing ();
+  let domain_count = 4 in
+  let sessions_per_domain = 100 in
+  let workers =
+    List.init domain_count (fun domain_index ->
+      Domain.spawn (fun () ->
+        for session_index = 1 to sessions_per_domain do
+          let suffix =
+            (domain_index * sessions_per_domain) + session_index
+          in
+          let session_id = Printf.sprintf "domain-session-%d" suffix in
+          let params =
+            Yojson.Safe.from_string
+              (Printf.sprintf
+                 {|{"_agent_name":"domain-agent-%d"}|}
+                 suffix)
+          in
+          ignore
+            (Client_registry_eio.get_or_create_identity
+               ~mcp_session_id:session_id
+               params)
+        done))
+  in
+  List.iter Domain.join workers;
+  check
+    int
+    "every cross-domain registration is retained"
+    (domain_count * sessions_per_domain)
+    (Client_registry_eio.total_count ())
 
 (** Contract: N fibers racing to create an identity for the same
     [mcp_session_id] converge to one [session_key]. Candidate materialization
-    happens outside the mutex, so [Client_registry_state.install_session] must
-    recheck the immutable snapshot at the atomic commit. *)
+    happens outside the CAS loop, so [Client_registry_state.install_session]
+    must recheck the immutable snapshot at the atomic commit. *)
 let test_concurrent_same_mcp_session_id () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -233,8 +273,7 @@ let test_concurrent_same_mcp_session_id () =
   let mcp_sid =
     Printf.sprintf "race-session-%d" (Random.int 1_000_000)
   in
-  let collected : Client_identity.t list ref = ref [] in
-  let collect_mu = Eio.Mutex.create () in
+  let collected = Atomic.make [] in
   Eio.Fiber.all (List.init 8 (fun _i () ->
     let params =
       `Assoc [("_agent_name", `String "racing-agent")]
@@ -242,11 +281,13 @@ let test_concurrent_same_mcp_session_id () =
     let id =
       Client_registry_eio.get_or_create_identity ~mcp_session_id:mcp_sid params
     in
-    Eio.Mutex.use_rw ~protect:true collect_mu (fun () ->
-      collected := id :: !collected)));
+    Atomic_util.update collected (fun identities -> id :: identities)));
   let keys =
-    List.sort_uniq compare (List.map (fun id -> id.Client_identity.session_key)
-                              !collected)
+    List.sort_uniq
+      compare
+      (List.map
+         (fun id -> id.Client_identity.session_key)
+         (Atomic.get collected))
   in
   check int "all fibers converged to a single session_key" 1 (List.length keys);
   (* And the map-resolved identity is the same key. *)
@@ -285,9 +326,16 @@ let () =
         test_unregister_preserves_same_name_sibling;
       test_case "reset_clears_cached_session_mappings" `Quick
         test_reset_clears_cached_session_mappings;
+      test_case
+        "shutdown close rejects late publication"
+        `Quick
+        test_shutdown_close_rejects_late_publication;
     ];
     "concurrency", [
-      test_case "concurrent_access" `Quick test_concurrent_access;
+      test_case
+        "cross-domain distinct sessions are lossless"
+        `Quick
+        test_cross_domain_distinct_sessions_are_lossless;
       test_case "concurrent_same_mcp_session_id" `Quick
         test_concurrent_same_mcp_session_id;
     ];

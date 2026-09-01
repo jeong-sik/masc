@@ -7,7 +7,6 @@
     - Rate_limit (token bucket under contention)
     - Failure_observation (outcome recording under contention)
     - Otel_metric_store (metric increments under contention)
-    - Client_registry_eio (identity resolution under contention)
 *)
 
 open Alcotest

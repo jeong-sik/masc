@@ -74,8 +74,8 @@ val emit
   -> panel:Fusion_types.panel_outcome list
   -> judge:(Fusion_types.judge_synthesis, Fusion_types.judge_failure) result
   -> judges:Fusion_types.judge_outcome list
+  -> tool_trace:Fusion_types.tool_trace option
   -> judge_usage:Fusion_types.usage
-  -> ?tool_trace:Fusion_types.tool_trace
   -> (unit, string) result
 
 (** RFC-0266: 심의 완료/실패 시 호출 키퍼를 typed [Fusion_completed] stimulus로 깨운다.

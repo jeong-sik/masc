@@ -6816,7 +6816,10 @@ let schedule_create_timing_fields (spec : Masc_tui_types.schedule_create_spec)
 
 (* Send the submitted form through the create tool. Same fiber-and-mailbox
    shape as the cancel; whether the wake is creatable (time syntax, timezone
-   spelling, unknown keeper) is the tool's contract to answer. *)
+   spelling, unknown keeper) is the tool's contract to answer. The typed spec
+   is serialized here and rides the same body-carrying request the editor
+   form uses; the route stamps the operator actor from its own headers
+   ([schedule_stamp_operator_actor]), so the body carries no actor claims. *)
 let start_schedule_create state ~mailbox
     ~(request : Masc_tui_types.schedule_create_request) =
   state.schedule_create_error <- None;
@@ -6824,15 +6827,17 @@ let start_schedule_create state ~mailbox
     (Printf.sprintf "creating a wake for %s" request.Masc_tui_types.scr_keeper);
   let host = server_peer_host in
   let port = state.port in
+  let body_json =
+    Yojson.Safe.to_string
+      (`Assoc
+        (("keeper_name", `String request.Masc_tui_types.scr_keeper)
+         :: ("message", `String request.Masc_tui_types.scr_message)
+         :: ("source", `String "operator_request")
+         :: schedule_create_timing_fields request.Masc_tui_types.scr_spec))
+  in
   let run_create () =
     let result =
-      match
-        Masc_tui_http.post_schedule_create ~host ~port
-          ~keeper_name:request.Masc_tui_types.scr_keeper
-          ~message:request.Masc_tui_types.scr_message
-          ~timing_fields:
-            (schedule_create_timing_fields request.Masc_tui_types.scr_spec)
-      with
+      match Masc_tui_http.post_schedule_create ~host ~port ~body_json with
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
     in
@@ -14289,7 +14294,7 @@ and is loaded on demand through keeper_skill.
                        ~mode:(Masc.Keeper_gate_mode.to_string next))
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
-            | Board | Planning | Schedules | Verification | Harness
+            | Board | Planning | Verification | Harness
             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs -> ())
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_prompts ->

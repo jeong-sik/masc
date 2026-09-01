@@ -513,8 +513,12 @@ let delivery_key_of_run_id run_id =
     Printf.sprintf "invalid Fusion run delivery identity: %s" detail)
 ;;
 
+(* [tool_trace] is a required labeled option rather than [?tool_trace]: this
+   signature has no positional argument at all, so an optional here can never
+   be erased (warning 16). The one caller already holds an option and passes
+   it through. *)
 let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges
-      ~judge_usage ?tool_trace :
+      ~tool_trace ~judge_usage :
     (unit, string) result =
   let ( let* ) = Result.bind in
   let* delivery_key = delivery_key_of_run_id run_id in

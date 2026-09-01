@@ -8201,18 +8201,22 @@ let fusion_tool_event_lines ~width = function
       ]
       @ fusion_tool_preview_lines ~width ~label:"Input" event.fte_input
   | Fusion_tool_completed event ->
-      let status, style, output, failure =
+      (* The failure payload is an inlined record, which cannot leave its
+         match arm as a value; the two fields the suffix reads are copied out
+         instead. *)
+      let status, style, output, failure_reading =
         match event.fte_completion with
         | Fusion_tool_succeeded output -> "succeeded", Theme.ok (), output, None
-        | Fusion_tool_failed failure ->
-            "failed", Theme.bad (), failure.ftc_output, Some failure
+        | Fusion_tool_failed { ftc_output; ftc_recoverable; ftc_error_class } ->
+            "failed", Theme.bad (), ftc_output,
+            Some (ftc_recoverable, ftc_error_class)
       in
       let failure_suffix =
-        match failure with
+        match failure_reading with
         | None -> ""
-        | Some failure ->
-            Printf.sprintf "  recoverable=%b%s" failure.ftc_recoverable
-              (match failure.ftc_error_class with
+        | Some (recoverable, error_class) ->
+            Printf.sprintf "  recoverable=%b%s" recoverable
+              (match error_class with
                | Some class_ -> " class=" ^ Terminal_text.single_line class_
                | None -> " class=unavailable")
       in

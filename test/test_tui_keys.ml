@@ -8,6 +8,8 @@ open Masc_tui_types
 
 let check = Alcotest.check
 let str = Alcotest.string
+let int = Alcotest.int
+let bool = Alcotest.bool
 
 let every_surface =
   [ Overview; Acting; Keepers Keeper_list; Keepers Keeper_detail

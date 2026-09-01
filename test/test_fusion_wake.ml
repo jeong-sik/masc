@@ -445,7 +445,8 @@ let test_emit_success_projects_board_chat_and_registry () =
       ~started_at:2.0;
     let result =
       Fusion_sink.emit ~registry ~base_dir ~keeper ~run_id ~channel:discord_channel
-        ~question ~panel ~judge:(Ok synthesis) ~judges ~judge_usage ~tool_trace
+        ~question ~panel ~judge:(Ok synthesis) ~judges ~judge_usage
+        ~tool_trace:(Some tool_trace)
     in
     check bool "emit succeeds" true (Result.is_ok result);
     let post =
@@ -550,7 +551,7 @@ let test_emit_success_projects_board_chat_and_registry () =
     let replay =
       Fusion_sink.emit ~registry ~base_dir ~keeper ~run_id
         ~channel:discord_channel ~question ~panel ~judge:(Ok synthesis) ~judges
-        ~judge_usage ~tool_trace
+        ~judge_usage ~tool_trace:(Some tool_trace)
     in
     check bool "same completion replay succeeds" true (Result.is_ok replay);
     let posts_for_run =
@@ -578,7 +579,8 @@ let test_emit_success_projects_board_chat_and_registry () =
     let conflicting_replay =
       Fusion_sink.emit ~registry ~base_dir ~keeper ~run_id
         ~channel:discord_channel ~question:(question ^ " changed") ~panel
-        ~judge:(Ok synthesis) ~judges ~judge_usage ~tool_trace
+        ~judge:(Ok synthesis) ~judges ~judge_usage
+        ~tool_trace:(Some tool_trace)
     in
     check bool "changed completion replay is rejected" true
       (Result.is_error conflicting_replay);

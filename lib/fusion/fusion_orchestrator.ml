@@ -472,7 +472,7 @@ let project
     Fusion_sink.emit ~registry ~base_dir ~keeper:request.keeper ~run_id:request.run_id
       ~channel ~question:deliberation.question ~panel:deliberation.panel
       ~judge:deliberation.judge ~judges:deliberation.judges
-      ~judge_usage:deliberation.judge_usage ?tool_trace:deliberation.tool_trace
+      ~judge_usage:deliberation.judge_usage ~tool_trace:deliberation.tool_trace
   with
   | Ok () ->
     Fusion_metrics.record_invocation ~topology `Completed;

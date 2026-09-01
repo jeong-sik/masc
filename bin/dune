@@ -750,6 +750,7 @@
  (modules masc_tui_types)
  (libraries
   masc
+  masc.time_codec
   masc_tui_model_runtime_table
   masc_tui_mcp
   masc.masc_goal

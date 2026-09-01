@@ -47,3 +47,11 @@ val mutate_runtime_param_with_effects :
 (** Run a string-keyed parameter mutation and derive its wake effects as one
     serialized operation for the Keeper cadence key. Other keys remain
     independent and do not contend on the cadence side-effect lock. *)
+
+val schedule_stamp_operator_actor :
+  agent_name:string -> Yojson.Safe.t -> Yojson.Safe.t
+(** Stamp the schedule tool's four actor fields (requested_by / scheduled_by,
+    both human_operator) onto an argument object, replacing any actor claims
+    the body carried: over HTTP the acting agent is the header-derived one,
+    never the payload's. A non-object passes through untouched for the tool's
+    own validation to refuse. *)

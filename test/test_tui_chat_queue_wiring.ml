@@ -12,6 +12,7 @@ open Alcotest
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Tui_types = Masc_tui_types
+module Tui_http = Masc_tui_interrupt_signal
 
 let calls ~module_path ~callee = Ast_grep.count_calls ~module_path ~callee
 
@@ -247,17 +248,30 @@ let test_absolute_turn_sequence_joins_direct_and_autonomous_sources () =
      |> List.map (fun row -> row.Tui_types.me_text))
 ;;
 
-(* [test_interrupt_receipt_is_bound_to_the_exact_request] lived here and is
-   removed, not disabled. It called Masc_tui_http.decode_interrupt_signal
-   directly, but masc_tui_http is a module of the masc_tui executable rather
-   than a library, so this suite cannot link it -- the stanza reaches bin only
-   through (source_tree ../bin), which serves ast_grep's text scans. The suite
-   compiled nowhere and took main's build down with it.
+let test_interrupt_receipt_is_bound_to_the_exact_request () =
+  let response request_id =
+    `Assoc
+      [ "signalled", `Bool true
+      ; "request_id", `String request_id
+      ]
+  in
+  (match
+     Tui_http.decode_interrupt_signal ~expected_request_id:"parent-a"
+       (response "parent-a")
+   with
+   | Ok (Tui_http.Signalled _) -> ()
+   | Ok (Tui_http.Not_signalled _) | Error _ ->
+       fail "matching exact interrupt receipt was rejected");
+  match
+    Tui_http.decode_interrupt_signal ~expected_request_id:"parent-a"
+      (response "replacement-b")
+  with
+  | Error detail ->
+      check bool "mismatch is explicit" true
+        (Astring.String.is_infix ~affix:"request_id mismatch" detail)
+  | Ok _ -> fail "a replacement operation's receipt satisfied the parent"
+;;
 
-   Restoring the check needs decode_interrupt_signal to live somewhere a test
-   can link: either its own library beside masc_tui_types, or an ast_grep
-   assertion in the style the rest of this file uses. Re-adding the call as it
-   was will fail the same way. *)
 let test_enter_during_a_turn_queues () =
   let n = calls ~module_path:"bin/masc_tui.ml" ~callee:"queue_keeper_message" in
   if n < 1 then
@@ -988,6 +1002,8 @@ let () =
             test_causal_timeline_keeps_turns_whole_without_timestamp_sorting
         ; test_case "absolute turn sequence joins transcript sources" `Quick
             test_absolute_turn_sequence_joins_direct_and_autonomous_sources
+        ; test_case "interrupt receipt binds exact request" `Quick
+            test_interrupt_receipt_is_bound_to_the_exact_request
         ; test_case "scroll anchor follows structure" `Quick
             test_scroll_anchor_follows_structure_not_clock
         ; test_case "scroll anchor distinguishes duplicate text" `Quick

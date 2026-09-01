@@ -929,7 +929,11 @@ let test_timeline_breaks_follow_civil_hours () =
         | Layout.Metadata (Layout.Timeline_break bucket) ->
             Some (bucket.tb_hour, row.text)
         | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
-        | Layout.Body ->
+        | Layout.Body
+        (* The fold marker is not a timeline rail. Named rather than matched
+           by a wildcard, so the next row kind fails here instead of being
+           silently counted as "not a rail". *)
+        | Layout.Viewport_gap _ ->
             None)
       rows
   in
@@ -1024,7 +1028,8 @@ let test_repeated_dst_hour_has_distinct_rails () =
          match row.kind with
          | Layout.Metadata (Layout.Timeline_break _) -> Some row.text
          | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
-         | Layout.Body ->
+         | Layout.Body
+         | Layout.Viewport_gap _ ->
              None)
   in
   check int "the repeated civil hour keeps both rails" 2 (List.length labels);
@@ -1597,10 +1602,28 @@ let test_skill_marks_keep_state_without_colour () =
         Layout.visible_rows ~inner_width:40 ~height:10
           [ entry (Layout.Skill tone) "SKILL" "trace-1#54" "evidence" ]
       in
+      (* [Body] only. The evidence is the machine output; the rows around it
+         are chrome -- the metadata header naming the trace, and the fold
+         marker a short viewport inserts. Neither is quoted, and neither
+         should be: a [for_all] over every row read their shade as the
+         evidence losing its own.
+
+         This assertion could not have held since [visible_rows] began
+         emitting the header row. It went unseen because the suite did not
+         compile, so nothing ran it. *)
+      let evidence =
+        List.filter
+          (fun (row : Layout.row) ->
+            match row.kind with
+            | Layout.Body -> true
+            | Layout.Metadata _ | Layout.Viewport_gap _ -> false)
+          rows
+      in
+      check bool "the sample holds evidence rows" true (evidence <> []);
       check bool "Skill evidence is a quoted machine-produced block" true
         (List.for_all
            (fun (row : Layout.row) -> row.shade = Layout.Shade_quoted)
-           rows))
+           evidence))
     [ Layout.Skill_live; Layout.Skill_used; Layout.Skill_attention
     ; Layout.Skill_failure
     ]

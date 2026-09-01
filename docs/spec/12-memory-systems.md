@@ -13,7 +13,7 @@ side derives memory from a model-authored state envelope.
 | Store | Owner | Purpose |
 |---|---|---|
 | agent core checkpoint/context | agent core | active transcript and restartable agent context |
-| Memory OS current snapshot | MASC | current claims selected by the librarian plus explicit writes |
+| Memory OS current snapshot | MASC | supported current claims from librarian updates and explicit writes, minus exact retractions |
 | Procedural memory | MASC | verified reusable procedures |
 | Tool/history logs | MASC | observable evidence and recall source |
 
@@ -27,9 +27,13 @@ or fall back to alternate store layouts.
 A memory claim must come from an explicit memory operation or the librarian
 lane's typed result. A claim stores only its exact text, typed category, and
 insertion timestamp. Its `memory_id` is the SHA-256 digest of the exact claim
-bytes and is used only for retention references, duplicate rejection, recall
-evidence, and observability. The complete snapshot carries its revision,
-direct writer trace/generation, and exact added/removed/retained delta.
+bytes and is used for exact write receipts, derivation premises, duplicate
+rejection, retraction, recall evidence, and observability. An observed fact has
+no premises. A derived fact carries one or more typed derivations, each with an
+opaque rule identity and exact premise identities; it remains current while at
+least one complete derivation remains supported. The complete snapshot carries
+its revision, direct writer trace, and exact added/removed/retained/invalidation
+delta.
 
 The same claim store owns durable counterpart and relationship knowledge. It
 does not add a parallel people graph or a `person` category: the existing
@@ -41,8 +45,9 @@ label. The authenticated owner/operator is a role when no external actor
 identity exists. The librarian may retain an explicitly stated preference,
 stable responsibility, ongoing commitment, or jointly validated history, but
 must not infer a personality, sensitive trait, or motive from an isolated
-exchange. A changed relationship is ordinary explicit replacement: drop the
-superseded claim with a reason and add the corrected claim.
+exchange. A changed relationship is two explicit operations: retract the
+superseded claim by exact identity with a durable reason, then write the
+corrected claim.
 
 Speaker provenance reaches the Librarian through bounded recent projections of
 the producer-owned durable stores, not by parsing the AGENT_CORE checkpoint
@@ -95,12 +100,17 @@ health, and dashboard surfaces report the read failure explicitly.
 ## Recall Contract
 
 Recall reads the same current snapshot projected by the dashboard and renders
-every claim in stored order. It does not rank or trim individual claims. A
-malformed snapshot is reported as unavailable rather than silently treated as
-empty memory.
+every supported claim in stored order. It does not rank, trim, or hide claims
+behind a byte threshold. A malformed snapshot is reported as unavailable
+rather than silently treated as empty memory.
 
 Explicit Memory OS search filters exact query substrings and preserves snapshot
 order. It does not emit a relevance score or reorder facts by timestamp.
+It returns exact fact identities and derivation support. The
+`keeper_memory_retract` tool accepts one of those ordinary-current identities
+plus a non-empty reason, atomically removes it, and records every derived fact
+invalidated by the resulting support fixed point. Source-bound facts remain a
+separate exact-bytes store and are not accepted by this retraction surface.
 
 The runtime may inject selected memory into a future prompt as context. That
 context is advisory and cannot mutate task, goal, lifecycle, HITL, connector,

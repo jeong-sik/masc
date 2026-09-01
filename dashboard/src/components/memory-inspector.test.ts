@@ -86,7 +86,7 @@ function turnRecordsPayload() {
       revision: 12,
       updated_at: 1_700_000_000,
       update_source: {
-        kind: 'librarian',
+        kind: 'explicit_retract',
         trace_id: 'trace-a',
       },
       read_errors: [],
@@ -240,7 +240,7 @@ describe('MemoryInspector current snapshot', () => {
     expect(headers).toEqual([
       '최종 provider 입력 구성',
       '회상 연결 · Full Prompt',
-      '현재 기억 계약 · librarian',
+      '현재 기억 계약 · explicit_retract',
       '장기 메모리 스토어 · memory-os',
       '최근 회상 · 주입',
     ])

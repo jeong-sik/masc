@@ -852,9 +852,12 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords', () => {
   }
 
   it('decodes the exact current fact, provenance, and selection-policy contract', async () => {
-    stubTurnRecords(turnRecordsPayload())
+    const payload = turnRecordsPayload()
+    payload.memory_os.update_source.kind = 'explicit_retract'
+    stubTurnRecords(payload)
 
     const result = await fetchKeeperTurnRecords('keeper-alpha')
+    expect(result.memory_os.update_source?.kind).toBe('explicit_retract')
     const items = result.memory_os.facts.items
     expect(items).toHaveLength(2)
 

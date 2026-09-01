@@ -25,6 +25,10 @@ let make_derived_args ~content ~rule_id ~premise_ids =
     ]
 ;;
 
+let make_retract_args ~memory_id ~reason =
+  `Assoc [ "memory_id", `String memory_id; "reason", `String reason ]
+;;
+
 let memory_id digit = "sha256:" ^ String.make 64 digit
 
 let error_label = Runtime.memory_write_error_kind_to_string
@@ -105,6 +109,17 @@ let int_field key json =
   match json_field key json with
   | `Int value -> value
   | _ -> Alcotest.failf "expected int field: %s" key
+;;
+
+let string_list_field key json =
+  match json_field key json with
+  | `List values ->
+    List.map
+      (function
+        | `String value -> value
+        | _ -> Alcotest.failf "expected string list field: %s" key)
+      values
+  | _ -> Alcotest.failf "expected list field: %s" key
 ;;
 
 let match_texts json =
@@ -202,6 +217,31 @@ let test_validation_taxonomy () =
   |> assert_invalid ~expected:"derived_source_path_unsupported"
 ;;
 
+let test_retract_validation_taxonomy () =
+  let error_label = Runtime.memory_retract_error_kind_to_string in
+  let assert_invalid expected = function
+    | Runtime.Memory_retract_invalid kind ->
+      Alcotest.(check string) "retract error kind" expected (error_label kind)
+    | Runtime.Memory_retract_ok _ ->
+      Alcotest.failf "expected invalid memory retraction: %s" expected
+  in
+  Runtime.validate_memory_retract_args
+    (make_retract_args ~memory_id:"not-an-id" ~reason:"incorrect")
+  |> assert_invalid "memory_id_invalid";
+  Runtime.validate_memory_retract_args
+    (make_retract_args ~memory_id:(memory_id 'a') ~reason:"   ")
+  |> assert_invalid "reason_empty";
+  match
+    Runtime.validate_memory_retract_args
+      (make_retract_args ~memory_id:(memory_id 'a') ~reason:"  corrected  ")
+  with
+  | Runtime.Memory_retract_ok { memory_id = identity; reason } ->
+    Alcotest.(check string) "exact identity" (memory_id 'a') identity;
+    Alcotest.(check string) "normalized reason" "corrected" reason
+  | Runtime.Memory_retract_invalid kind ->
+    Alcotest.failf "valid memory retraction rejected: %s" (error_label kind)
+;;
+
 let test_valid_body_composition () =
   Runtime.validate_memory_write_args (make_args ~title:"" ~content:"body")
   |> assert_ok ~body:"body";
@@ -289,6 +329,8 @@ let test_write_comes_back_through_recall () =
        revision
    | Some (Masc.Keeper_tool_execution.Surface_post_completed _) ->
      Alcotest.fail "memory write returned a surface-post receipt"
+   | Some (Masc.Keeper_tool_execution.Memory_retract_completed _) ->
+     Alcotest.fail "memory write returned a memory-retract receipt"
    | None -> Alcotest.fail "successful memory write has no terminal receipt");
   let facts = current_facts ~keepers_dir ~keeper_id:meta.name in
   Alcotest.(check int) "one durable claim" 1 (List.length facts);
@@ -305,6 +347,144 @@ let test_write_comes_back_through_recall () =
     "producer timestamp recorded"
     true
     (fact.Masc.Keeper_memory_os_types.first_seen > 0.0)
+;;
+
+let test_retract_cascades_through_public_tool_and_journals_reason () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "retract-support-chain" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let write args =
+    Runtime.keeper_memory_write_with_outcome ~config ~meta ~args
+    |> fun execution ->
+    execution.Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
+  in
+  let first = write (make_args ~title:"" ~content:"manifest selects region A") in
+  let second = write (make_args ~title:"" ~content:"region A capacity is healthy") in
+  let first_id = string_field "memory_id" first in
+  let second_id = string_field "memory_id" second in
+  let conclusion =
+    write
+      (make_derived_args
+         ~content:"deployment may proceed"
+         ~rule_id:"deployment_ready"
+         ~premise_ids:[ first_id; second_id ])
+  in
+  let conclusion_id = string_field "memory_id" conclusion in
+  let consequence =
+    write
+      (make_derived_args
+         ~content:"announce the rollout"
+         ~rule_id:"announce_when_ready"
+         ~premise_ids:[ conclusion_id ])
+  in
+  let consequence_id = string_field "memory_id" consequence in
+  let execution =
+    Runtime.keeper_memory_retract_with_outcome
+      ~config
+      ~meta
+      ~args:
+        (make_retract_args
+           ~memory_id:first_id
+           ~reason:"manifest now selects region B")
+  in
+  let response =
+    execution.Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
+  in
+  Alcotest.(check bool)
+    "retraction succeeds"
+    true
+    (json_field "ok" response = `Bool true);
+  Alcotest.(check (list string))
+    "direct target and both unsupported conclusions are removed"
+    [ first_id; conclusion_id; consequence_id ]
+    (string_list_field "removed_memory_ids" response);
+  let invalidations =
+    match json_field "support_invalidations" response with
+    | `List values -> values
+    | _ -> Alcotest.fail "support_invalidations is not a list"
+  in
+  Alcotest.(check (list string))
+    "receipt names cascaded identities"
+    [ conclusion_id; consequence_id ]
+    (List.map (string_field "memory_id") invalidations);
+  Alcotest.(check (list string))
+    "first conclusion names the direct missing premise"
+    [ first_id ]
+    (string_list_field "missing_premise_ids" (List.hd invalidations));
+  Alcotest.(check (list string))
+    "second conclusion names its now-missing conclusion premise"
+    [ conclusion_id ]
+    (string_list_field "missing_premise_ids" (List.nth invalidations 1));
+  (match execution.Masc.Keeper_tool_execution.terminal_effect_receipt with
+   | Some (Masc.Keeper_tool_execution.Memory_retract_completed { revision }) ->
+     Alcotest.(check int) "receipt revision" (int_field "revision" response) revision
+   | Some (Masc.Keeper_tool_execution.Memory_write_completed _) ->
+     Alcotest.fail "memory retract returned a memory-write receipt"
+   | Some (Masc.Keeper_tool_execution.Surface_post_completed _) ->
+     Alcotest.fail "memory retract returned a surface-post receipt"
+   | None -> Alcotest.fail "successful memory retract has no terminal receipt");
+  Alcotest.(check (list string))
+    "recall authority retains only the independent observation"
+    [ second_id ]
+    (current_facts ~keepers_dir ~keeper_id:meta.name
+     |> List.map Masc.Keeper_memory_os_types.memory_id);
+  let journal =
+    Current.read_journal_tail ~keepers_dir ~keeper_id:meta.name ~limit:10
+  in
+  Alcotest.(check int) "four writes and one retract are journaled" 5 (List.length journal);
+  (match List.rev journal |> List.hd with
+   | Ok
+       (Current.Journal_committed
+          { source = { kind = Current.Explicit_retract; _ }
+          ; dropped = Some [ dropped ]
+          ; change
+          ; _
+          }) ->
+     Alcotest.(check string) "journal direct target" first_id dropped.memory_id;
+     Alcotest.(check string)
+       "journal durable reason"
+       "manifest now selects region B"
+       dropped.reason;
+     Alcotest.(check int) "journal cascaded support evidence" 2 (List.length change.invalidated)
+   | Ok _ -> Alcotest.fail "last journal line is not the exact retract commit"
+   | Error detail -> Alcotest.fail detail);
+  let revision_before_missing = int_field "revision" response in
+  let missing =
+    Runtime.keeper_memory_retract_with_outcome
+      ~config
+      ~meta
+      ~args:
+        (make_retract_args
+           ~memory_id:first_id
+           ~reason:"duplicate retraction must not commit")
+  in
+  let missing_json =
+    missing.Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
+  in
+  Alcotest.(check string)
+    "missing fact is typed"
+    "fact_not_found"
+    (string_field "error_kind" missing_json);
+  Alcotest.(check bool)
+    "missing fact is proven before domain effect"
+    true
+    (missing.Masc.Keeper_tool_execution.failure_effect_disposition
+     = Masc.Tool_result.Proven_pre_effect);
+  let current =
+    match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name with
+    | Ok (Some snapshot) -> snapshot
+    | Ok None -> Alcotest.fail "retract snapshot disappeared"
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check int) "missing target does not advance revision" revision_before_missing current.revision;
+  Alcotest.(check int)
+    "missing target does not append journal"
+    5
+    (List.length (Current.read_journal_tail ~keepers_dir ~keeper_id:meta.name ~limit:10))
 ;;
 
 let test_derived_write_uses_exact_premise_receipt () =
@@ -862,6 +1042,10 @@ let () =
     [ ( "validation"
       , [ Alcotest.test_case "typed validation failures" `Quick test_validation_taxonomy
         ; Alcotest.test_case
+            "typed retract validation failures"
+            `Quick
+            test_retract_validation_taxonomy
+        ; Alcotest.test_case
             "runtime validation is proven pre-effect"
             `Quick
             test_invalid_write_is_proven_pre_effect
@@ -883,6 +1067,10 @@ let () =
             "derived write uses exact premise receipt"
             `Quick
             test_derived_write_uses_exact_premise_receipt
+        ; Alcotest.test_case
+            "retract cascades and journals durable reason"
+            `Quick
+            test_retract_cascades_through_public_tool_and_journals_reason
         ; Alcotest.test_case
             "source change discards stale claim until recreation"
             `Quick

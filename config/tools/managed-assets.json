@@ -18,6 +18,7 @@
     "keeper_library_read.toml",
     "keeper_library_search.toml",
     "keeper_memory_search.toml",
+    "keeper_memory_retract.toml",
     "keeper_memory_write.toml",
     "keeper_person_note_set.toml",
     "keeper_skill.toml",

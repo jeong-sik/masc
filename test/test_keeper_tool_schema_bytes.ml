@@ -144,6 +144,7 @@ let all_surface_golden_names =
   ; "keeper_library_read"
   ; "keeper_library_search"
   ; "keeper_memory_search"
+  ; "keeper_memory_retract"
   ; "keeper_memory_write"
   ; "keeper_person_note_set"
   ; "keeper_spawn"

@@ -57,6 +57,7 @@ let lookup name =
 let curated_with_examples =
   [
     "keeper_task_done";
+    "keeper_memory_retract";
     "keeper_memory_write";
     "keeper_tasks_list";
   ]
@@ -64,7 +65,7 @@ let curated_with_examples =
 let curated_with_alternatives = []
 
 let curated_terminal =
-  [ "keeper_memory_write"; "keeper_tasks_list" ]
+  [ "keeper_memory_retract"; "keeper_memory_write"; "keeper_tasks_list" ]
 
 let test_examples_populated () =
   List.iter

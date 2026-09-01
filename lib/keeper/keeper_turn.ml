@@ -877,6 +877,11 @@ let run_keeper_invocation_turn_admitted_inner
                     [ Keeper_tool_execution.memory_revision_wire_key
                     , `Int revision
                     ]
+                  | Some
+                      (Keeper_tool_execution.Memory_retract_completed { revision }) ->
+                    [ Keeper_tool_execution.memory_revision_wire_key
+                    , `Int revision
+                    ]
                   | None -> []
                 in
                 `Assoc ([

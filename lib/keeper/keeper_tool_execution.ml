@@ -10,6 +10,7 @@ let deferred_kind_to_string = function
 type terminal_effect_receipt =
   | Surface_post_completed of Keeper_surface_post.post_target
   | Memory_write_completed of { revision : int }
+  | Memory_retract_completed of { revision : int }
 
 let memory_revision_wire_key = "memory_revision"
 
@@ -130,6 +131,13 @@ let with_memory_write_receipt ~revision result =
   match result.disposition with
   | Tool_result.Completed () ->
     { result with terminal_effect_receipt = Some (Memory_write_completed { revision }) }
+  | Tool_result.Deferred () | Tool_result.Failed _ -> result
+;;
+
+let with_memory_retract_receipt ~revision result =
+  match result.disposition with
+  | Tool_result.Completed () ->
+    { result with terminal_effect_receipt = Some (Memory_retract_completed { revision }) }
   | Tool_result.Deferred () | Tool_result.Failed _ -> result
 ;;
 

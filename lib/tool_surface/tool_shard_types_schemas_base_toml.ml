@@ -25,6 +25,7 @@ let schema_of_name name : Masc_domain.tool_schema =
 let time_now = schema_of_name "keeper_time_now"
 let context_status = schema_of_name "keeper_context_status"
 let memory_search = schema_of_name "keeper_memory_search"
+let memory_retract = schema_of_name "keeper_memory_retract"
 let memory_write = schema_of_name "keeper_memory_write"
 let capability_search = schema_of_name "keeper_capability_search"
 let tools_list = schema_of_name "keeper_tools_list"

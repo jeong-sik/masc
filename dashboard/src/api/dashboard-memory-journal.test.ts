@@ -124,6 +124,15 @@ describe('memory journal', () => {
     expect(entry.drops[0]?.reason).toBe('superseded by the openssl decision')
   })
 
+  it('keeps explicit retraction as a typed committed source', async () => {
+    stubFetch(payload([{ ...committed, source: { kind: 'explicit_retract', trace_id: 'trace-r' } }]))
+    const journal = await fetchKeeperMemoryJournal('kidsnote')
+    const entry = journal.entries[0]
+    if (!entry?.ok || entry.outcome !== 'committed') throw new Error('expected a commit')
+    expect(entry.sourceKind).toBe('explicit_retract')
+    expect(entry.traceId).toBe('trace-r')
+  })
+
   it('keeps a torn line in place with its reason', async () => {
     stubFetch(payload([committed, { ok: false, error: 'not valid JSON' }], 1))
     const journal = await fetchKeeperMemoryJournal('kidsnote')

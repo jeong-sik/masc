@@ -222,7 +222,7 @@ export type MemoryOsFact = {
 }
 
 export type MemoryOsUpdateSource = {
-  readonly kind: 'librarian' | 'explicit_write'
+  readonly kind: 'librarian' | 'explicit_write' | 'explicit_retract'
   readonly trace_id: string
 }
 
@@ -771,7 +771,9 @@ function decodeMemoryOsUpdateSource(raw: unknown): MemoryOsUpdateSource | null {
   const kind = decodeExactNonEmptyString(raw.kind)
   const trace_id = decodeExactNonEmptyString(raw.trace_id)
   if (
-    (kind !== 'librarian' && kind !== 'explicit_write')
+    (kind !== 'librarian'
+      && kind !== 'explicit_write'
+      && kind !== 'explicit_retract')
     || trace_id === null
   ) return null
   return { kind, trace_id }

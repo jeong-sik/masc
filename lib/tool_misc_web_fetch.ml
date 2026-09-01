@@ -514,32 +514,38 @@ type cache_entry = {
   expires_at : float;
 }
 
-let initial_cache_capacity = 32
-let cache_entries : (string, cache_entry) Hashtbl.t =
-  Hashtbl.create initial_cache_capacity
-let cache_mutex = Eio.Mutex.create ()
+module Cache_by_key = Set_util.StringMap
+
+let cache_entries = Atomic.make Cache_by_key.empty
 let cache_ttl_sec () = Env_config.Tools.web_search_cache_ttl_sec ()
 
 let cache_lookup key now =
   let ttl = cache_ttl_sec () in
-  if Stdlib.Float.compare ttl 0.0 <= 0 then None
-  else
-    Eio.Mutex.use_rw ~protect:true cache_mutex (fun () ->
-        Hashtbl.filter_map_inplace
-          (fun _ entry ->
-            if Stdlib.Float.compare entry.expires_at now <= 0 then None
-            else Some entry)
-          cache_entries;
-        match Hashtbl.find_opt cache_entries key with
-        | Some entry when Stdlib.Float.compare entry.expires_at now > 0 ->
-            Some entry.response
-        | _ -> None)
+  if Stdlib.Float.compare ttl 0.0 <= 0
+  then None
+  else (
+    let rec publish_pruned_snapshot () =
+      let current = Atomic.get cache_entries in
+      let next =
+        Cache_by_key.filter
+          (fun _ entry -> Stdlib.Float.compare entry.expires_at now > 0)
+          current
+      in
+      let response =
+        Option.map (fun entry -> entry.response) (Cache_by_key.find_opt key next)
+      in
+      if Atomic.compare_and_set cache_entries current next
+      then response
+      else publish_pruned_snapshot ()
+    in
+    publish_pruned_snapshot ())
 
 let cache_store key response now =
   let ttl = cache_ttl_sec () in
-  if Stdlib.Float.compare ttl 0.0 > 0 then
-    Eio.Mutex.use_rw ~protect:true cache_mutex (fun () ->
-        Hashtbl.replace cache_entries key { response; expires_at = now +. ttl })
+  if Stdlib.Float.compare ttl 0.0 > 0
+  then
+    Atomic_util.update cache_entries (fun current ->
+      Cache_by_key.add key { response; expires_at = now +. ttl } current)
 
 (** Redact transport error detail before the " for " suffix *)
 let redact_transport_error_detail message =
@@ -647,22 +653,14 @@ let default_http_fetch ~timeout_sec ~headers ~max_response_bytes url =
   in
   loop ~redirect_count:0 url
 
-let http_fetch_mutex = Mutex.create ()
-let http_fetch_ref = ref default_http_fetch
+let http_fetch_cell = Atomic.make default_http_fetch
 
-let current_http_fetch () =
-  Mutex.protect http_fetch_mutex (fun () -> !http_fetch_ref)
+let current_http_fetch () = Atomic.get http_fetch_cell
 
 let with_http_fetch_for_test http_fetch f =
-  let previous =
-    Mutex.protect http_fetch_mutex (fun () ->
-        let previous = !http_fetch_ref in
-        http_fetch_ref := http_fetch;
-        previous)
-  in
+  let previous = Atomic.exchange http_fetch_cell http_fetch in
   Stdlib.Fun.protect
-    ~finally:(fun () ->
-      Mutex.protect http_fetch_mutex (fun () -> http_fetch_ref := previous))
+    ~finally:(fun () -> Atomic.set http_fetch_cell previous)
     f
 
 let with_http_get_for_test http_get f =

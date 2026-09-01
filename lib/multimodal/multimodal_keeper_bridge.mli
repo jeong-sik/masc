@@ -4,12 +4,14 @@
 
     {1 What this module is}
 
-    A pure function [raw_artifact → Multimodal.Artifact.any] that
+    A typed conversion [raw_artifact → Multimodal.Artifact.any] that
     takes a JSON-shaped representation of an artifact (as the
     keeper or any external producer might emit) and converts it
     into a typed multimodal artifact. The [kind_hint] field
     discriminates Code/Image/Audio/Doc; unknown hints yield
-    [None].
+    [None]. A malformed external id is replaced by a newly generated
+    artifact id, so callers that may retry a pure state transition must
+    hydrate before entering that transition.
 
     {1 Why this module}
 

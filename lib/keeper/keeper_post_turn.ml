@@ -78,34 +78,35 @@ let apply_multimodal_wirein
        lifecycle
      | Ok (raws, wc_rest) ->
        (try
-          let added_count = ref 0 in
-          let last_id = ref None in
-          Multimodal.Workspace_holder.update (fun ws ->
-              let ws', added =
-                Multimodal.Multimodal_keeper_bridge
-                .hydrate_with_workspace ws raws
-                  ~now
-                  ~created_by:lifecycle.updated_meta.name
-              in
-              added_count := List.length added;
-              (match List.rev added with
-               | [] -> ()
-               | last :: _ ->
-                   last_id :=
-                     Some
-                       (Shared_types.Artifact_id.to_string
-                          (Multimodal.Artifact.any_id last)));
-              ws')
-          ;
+          let artifacts =
+            Multimodal.Multimodal_keeper_bridge.hydrate_batch
+              raws
+              ~now
+              ~created_by:lifecycle.updated_meta.name
+          in
+          let last_id =
+            match List.rev artifacts with
+            | [] -> None
+            | last :: _ ->
+              Some
+                (Shared_types.Artifact_id.to_string
+                   (Multimodal.Artifact.any_id last))
+          in
           let workspace_size =
-            Multimodal.Workspace.size
-              (Multimodal.Workspace_holder.get ())
+            Multimodal.Workspace_holder.update (fun workspace ->
+              let next =
+                List.fold_left
+                  Multimodal.Workspace.add
+                  workspace
+                  artifacts
+              in
+              next, Multimodal.Workspace.size next)
           in
           let meta =
             `Assoc
               [
                 ("workspace_size", `Int workspace_size);
-                ( "last_artifact_id", Json_util.string_opt_to_json !last_id );
+                ( "last_artifact_id", Json_util.string_opt_to_json last_id );
                 ("at", `Float now);
               ]
           in

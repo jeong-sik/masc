@@ -29,9 +29,7 @@
     [default_provider_order] / [provider_order],
     [take_results], [normalize_hits], [provider_error],
     [result_data], the per-provider \[fetch_*\] HTTP fetchers,
-    [fetch_provider], the cache state cells
-    (\[initial_cache_capacity = 32\], [cache_entries] hashtable,
-    [cache_mutex]),
+    [fetch_provider], the atomic immutable [cache_entries] map,
     [cache_key], [cache_lookup], [cache_store],
     and [search_impl].  All consumed
     only inside {!handle} / {!simulate_for_test} pipelines. *)

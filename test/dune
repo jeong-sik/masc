@@ -3,7 +3,7 @@
 (test
  (name test_server_standalone_lane_projection)
  (modules test_server_standalone_lane_projection)
- (libraries alcotest masc masc.runtime masc.server yojson))
+ (libraries alcotest masc masc.runtime masc.server masc.tool_types yojson))
 
 (test
  (name test_keeper_effective_tool_surface)

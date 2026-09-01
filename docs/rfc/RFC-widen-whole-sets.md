@@ -1,0 +1,89 @@
+---
+rfc: "widen-whole-sets"
+title: "도구 검색은 묶음을 데려온다 — 회수 단위가 호출 하나면 필요한 세트가 남는다"
+status: Draft
+created: 2026-09-01
+updated: 2026-09-01
+author: claude
+supersedes: []
+superseded_by: null
+related: ["attached-service-tool-scoping", "keeper-writes-own-compositions"]
+implementation_prs: []
+---
+
+# RFC: 도구 검색은 묶음을 데려온다 (widen-whole-sets)
+
+## 0. Summary
+
+`keeper_tool_search`가 도구 한 개씩을 widen하는 데서, **작업에 필요한 묶음 전체**를
+한 번에 데려오게 한다. 회수 단위가 호출 하나면 "필요한 세트"의 나머지가 여전히
+검색 밖에 남는다.
+
+## 1. 배경 (실측 + 외부)
+
+- widen 자체는 잘 동작한다: 337회 중 329회 성공(97.6%).
+- 그러나 **widen하고 안 쓴 턴 92건**(08-29~09-01, github_* 계열). 부착 서비스
+  도구(atlassian/datadog/slack 대부분)는 7일 0~2회 — 검색이 성공해도 실사용으로
+  이어지지 않는다.
+- 외부 근거: ToolRet(ACL 2025) — 강한 IR 모델도 nDCG@10 = 33. COLT(2024) —
+  "top-k 관련 도구" 회수로는 부족하고 **필요 도구 집합의 완전성(completeness)**이
+  회수의 올바른 단위다.
+
+가설: keeper가 한 도구를 찾아 widen한 뒤, 곧바로 필요해진 **같은 작업의 다른
+도구**가 여전히 listing 뒤에 있어 흐름이 끊긴다. 미사용 92건이 이 가설을 지지하는지
+**먼저 분해해야 한다**(3.1).
+
+## 2. 설계
+
+### 2.1 회수 단위 — 묶음의 원본은 카탈로그다
+
+widen의 단위에 "묶음"을 추가한다:
+
+- composition 카탈로그의 노드 집합(`skills/<name>/SKILL.md`의 `[[compositions]]`).
+- 작전 2(keeper-writes-own-compositions)가 쌓는 제안 묶음.
+
+즉 검색이 `github_pr` 하나를 데려오는 게 아니라, 카탈로그에 "pr-review 묶음"이
+있으면 그 노드 전체를 한 번에 표면에 올린다. Anthropic의 회수 규칙과 같은 방향 —
+tool_reference 확장도 요청당 묶음을 싣는다.
+
+### 2.2 미구분 회수의 실패는 설명된다
+
+묶음에 없는 이름을 달라고 하면 조용히 빈 결과가 아니라 "이 묶음 안에 없고,
+카탈로그에 이 이름의 묶음도 없다"로 답한다. 등록되지 않은 이름의 등장은
+composition 카탈로그 제안(작전 2)으로 이어지는 관측 데이터가 된다.
+
+### 2.3 측정 — 스킵 금지
+
+구현에 앞서 미사용 92건을 분해한다:
+
+- widen한 도구가 그 턴에서 0회 호출된 이유 분포: (a) 다른 도구만 쓰고 끝
+  (b) 턴이 먼저 끝남 (c) 오류로 중단.
+- (a)가 우세하면 묶음 회수가 정답. (b)·(c)가 우세하면 이 RFC의 전제가 틀렸다 —
+  widen이 문제가 아니라 턴 수명/실패가 문제다. 그 경우 이 RFC를 닫고 해당 축으로
+  간다.
+
+## 3. PoC 판정 기준
+
+- 묶음 widen 1회가 도구 n회의 개별 widen을 대체한 턴 수.
+- 묶음 widen 후 **실사용률**(개별 widen 대비). 개별 72% 대비 상승하지 않으면
+  회수 단위가 병목이 아니었다는 뜻 — 기각.
+
+## 4. 단계
+
+- **PR-0**(측정만): 미사용 92건 분해. 스크립트 + 결과 기록.
+- **PR-1**: 묶음 단위 widen + 설명된 미회수 응답.
+
+## 5. 반론과 답
+
+- **"묶음이 오래되면?"** — 카탈로그 자체가 stale이면 그것은 카탈로그의 문제이지
+  회수 단위의 문제가 아니다. composition 카탈로그는 증거와 함께 이미 검증기를
+  갖는다.
+- **"widen이 커진 만큼 overflow 위험"** — 묶음은 노드 수가 카탈로그에 적혀 있다.
+  묶음 단위로 청구량을 미리 계산할 수 있어 개별 회수보다 예측이 쉽다.
+
+## 6. 근거
+
+- 내부: `.tmp/toolstudy/masc-gap.md` §2 (widen 97.6%, 미사용 92건, 사장 도구)
+- 외부: `.tmp/toolstudy/survey-research.md` §2 (ToolRet, COLT), §2 (Anthropic
+  tool_reference 묶음 적재)
+- 백로그: issue #32369 작전 5

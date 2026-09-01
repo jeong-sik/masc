@@ -7412,6 +7412,39 @@ let render_keeper_message (state : state) =
       done
     end;
 
+    (* Pending input owns the exact two-row shape of the USER entry it will
+       become: one lane header and one body row. [history_height] already
+       subtracts these rows through [keeper_message_status_rows], so promotion
+       gives the same two physical rows back to the active USER without moving
+       the divider, composer, or footer. The lane is outside the transcript and
+       immediately below it; the model has not seen this input yet. *)
+    let pending =
+      Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
+        ~keeper_name
+      |> keeper_message_pending_preview
+    in
+    List.iter
+      (function
+        | Pending_preview_item (position, item) ->
+            let intent, style =
+              match item.Masc_tui_keeper_chat_queue.intent with
+              | Masc_tui_keeper_chat_queue.Next -> "NEXT", Theme.recede ()
+              | Masc_tui_keeper_chat_queue.Steer_after_interrupt ->
+                  "STEER", Theme.warn ()
+            in
+            let request = item.Masc_tui_keeper_chat_queue.request in
+            box_line_styled chat_buf chat_cols ~style
+              (Printf.sprintf "  %s %d · %s" intent position
+                 (keeper_message_clock item.submitted_at));
+            box_line_styled chat_buf chat_cols ~style
+              ("    " ^ Terminal_text.single_line request.Keeper_chat.message)
+        | Pending_preview_omitted omitted ->
+            box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
+              (Printf.sprintf
+                 "  … %d pending row(s) hidden · Ctrl-K:cancel last · Ctrl-P:edit last"
+                 omitted))
+      pending;
+
     (* Input area divider *)
     box_divider chat_buf chat_cols;
 
@@ -7551,35 +7584,6 @@ let render_keeper_message (state : state) =
                   box_line_styled chat_buf chat_cols ~style ("  " ^ text)))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
      | Some _ | None -> ());
-    (* Pending input is the next causal lane, not part of the active turn.
-       Draw it only after every active-turn status row so the screen reads in
-       the same order as dispatch: current USER/status/tools/assistant first,
-       then input the model has not seen yet. *)
-    let pending =
-      Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
-        ~keeper_name
-    in
-    let pending = keeper_message_pending_preview pending in
-    List.iter
-      (function
-        | Pending_preview_item (position, item) ->
-            let intent, style =
-              match item.Masc_tui_keeper_chat_queue.intent with
-              | Masc_tui_keeper_chat_queue.Next -> "NEXT", Theme.recede ()
-              | Masc_tui_keeper_chat_queue.Steer_after_interrupt ->
-                  "STEER", Theme.warn ()
-            in
-            let request = item.Masc_tui_keeper_chat_queue.request in
-            box_line_styled chat_buf chat_cols ~style
-              (Printf.sprintf "  %s %d · %s · %s" intent position
-                 (keeper_message_clock item.submitted_at)
-                 (Terminal_text.single_line request.Keeper_chat.message))
-        | Pending_preview_omitted omitted ->
-            box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-              (Printf.sprintf
-                 "  … %d pending row(s) hidden · Ctrl-K:cancel last · Ctrl-P:edit last"
-                 omitted))
-      pending;
     if not target_registered then begin
       let unavailable_message =
         match state.keepers_error with

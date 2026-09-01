@@ -1299,8 +1299,13 @@ def success_scenario(
                 queued_visible_at = time.monotonic()
                 queued_text = screen_text(page)
                 composer_row_with_queue = cursor_position(page)["y"]
-                next_row, next_line = unique_screen_line(
-                    queued_text, "NEXT 1", "draft-during-send"
+                next_row, next_line = unique_screen_line(queued_text, "NEXT 1")
+                next_body_row, _ = unique_screen_line(
+                    queued_text, "draft-during-send"
+                )
+                require(
+                    next_body_row == next_row + 1,
+                    "NEXT header and body do not reserve one USER-shaped slot",
                 )
                 footer_with_queue, _ = unique_screen_line(queued_text, "Enter:queue(1)")
                 require(
@@ -1312,16 +1317,18 @@ def success_scenario(
                     "NEXT moved the composer cursor row",
                 )
                 queued_clock_match = re.search(
-                    r"NEXT\s+1\s+·\s+(\d{2}:\d{2}:\d{2})\s+·\s+draft-during-send",
+                    r"NEXT\s+1\s+·\s+(\d{2}:\d{2}:\d{2})",
                     next_line,
                 )
                 require(queued_clock_match is not None, "NEXT omitted submitted_at")
                 assert queued_clock_match is not None
                 queued_clock = queued_clock_match.group(1)
-                active_row, _ = unique_screen_line(queued_text, "ACTIVE TURN")
+                current_user_row, _ = unique_screen_line(
+                    queued_text, request_label, "TURN · YOU"
+                )
                 require(
-                    active_row < next_row,
-                    "NEXT was drawn inside or ahead of the active causal turn",
+                    current_user_row < next_row,
+                    "NEXT was drawn inside or ahead of the causal transcript",
                 )
                 measurements.update(
                     {
@@ -1854,10 +1861,15 @@ def steer_scenario(
                     "STEER dispatched a replacement before the parent terminal",
                 )
                 queued_text = screen_text(page)
-                steer_row, _ = unique_screen_line(
-                    queued_text, "STEER 1", "corrected-course"
+                steer_row, _ = unique_screen_line(queued_text, "STEER 1")
+                steer_body_row, _ = unique_screen_line(queued_text, "corrected-course")
+                next_row, _ = unique_screen_line(queued_text, "NEXT 2")
+                next_body_row, _ = unique_screen_line(queued_text, "ordinary-next")
+                require(
+                    steer_body_row == steer_row + 1
+                    and next_body_row == next_row + 1,
+                    "STEER/NEXT lanes do not reserve USER-shaped slots",
                 )
-                next_row, _ = unique_screen_line(queued_text, "NEXT 2", "ordinary-next")
                 require(
                     steer_row < next_row,
                     "STEER does not precede ordinary NEXT in the pending lane",
@@ -1894,7 +1906,12 @@ def steer_scenario(
                 wait_text(page, "STEER 1", present=False)
                 active_text = screen_text(page)
                 _, _ = unique_screen_line(active_text, corrected_label, "TURN · YOU")
-                _, _ = unique_screen_line(active_text, "NEXT 1", "ordinary-next")
+                next_row, _ = unique_screen_line(active_text, "NEXT 1")
+                next_body_row, _ = unique_screen_line(active_text, "ordinary-next")
+                require(
+                    next_body_row == next_row + 1,
+                    "remaining NEXT lane lost its USER-shaped slot",
+                )
                 measurements["interrupt_release_to_steer_active_ms"] = round(
                     (time.monotonic() - release_started) * 1000,
                     3,

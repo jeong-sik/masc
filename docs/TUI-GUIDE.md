@@ -574,13 +574,13 @@ in the conversation itself already has its calls in the transcript as tool
 rows, so its trace block is not drawn a second time.
 
 Conversation turns remain structural: rows inside one request use typed
-Input → Progress → Tool → Output phase and producer operation sequence. Whole
-turns, broadcasts, and Memory journal observations then share the displayed
-clock as one chronological axis, so an hour rail never falls from `22:00` back
-to `17:00`. Stable server row IDs keep scroll anchors through refresh; sorting
-the groups does not split a turn or replace its identity. A turn that is still
-streaming stays beside its committed input on that axis instead of escaping to
-a separate bottom-only lane.
+Input → Progress → Tool → Output phase and producer operation sequence. Typed
+turn sequence orders complete turns across stores; unsequenced broadcasts and
+Memory journal observations retain producer order. Their clocks only label
+rows and civil-hour rails, so skew or a late write cannot rewrite the apparent
+conversation. Stable server row IDs keep scroll anchors through refresh. A
+turn that is still streaming stays beside its committed input instead of
+escaping to a separate bottom-only lane.
 
 Only a request-correlated terminal keeper result is rendered as a reply.
 Interrupted streams, protocol errors, rejected turns, and terminal outcomes

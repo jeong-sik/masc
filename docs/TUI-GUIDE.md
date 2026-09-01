@@ -590,6 +590,26 @@ running for one keeper does not decide what `Enter` does in another's window;
 sends going elsewhere show as `(also sending to X)`. Drafts are retained per
 keeper while navigating.
 
+#### Context inspector
+
+`/context` opens three readings for the selected Keeper: `1:stack` summarizes
+the recorded context composition, `2:request` lists the exact canonical input
+items retained for the provider request, and `3:proof` explains each recorded
+component's source and evidence strength. At 110 columns and wider, the request
+and proof tabs use a `STACK │ SELECTED` layout so `j`/`k` can move the left
+list while the selected item's text or provenance remains visible on the
+right. Narrow terminals keep the same facts in one column; `Enter` opens exact
+text at full width.
+
+Evidence badges are claims, not decoration. `VERIFIED` means exact text was
+checked against the producer digest and byte count. `SERIALIZED` means an exact
+same-turn pre-dispatch request snapshot exists but no item-level key joins that
+component to one retained item; it does not claim transport began or the
+provider accepted anything. `DIGEST ONLY` means a producer prompt-block digest
+is retained without same-turn exact text. `BYTES ONLY` means only the component
+byte count is available. The inspector never joins independent readings by
+label, position, or similar-looking content.
+
 #### Pasting
 
 The surface turns bracketed paste on (`ESC[?2004h`) while it runs. Without it a

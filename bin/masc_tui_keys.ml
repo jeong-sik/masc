@@ -126,6 +126,8 @@ let for_surface = function
       [ b Navigate "j/k" "move" ~help:"move the lane cursor"
       ; b Act "Right / Enter" "runs"
           ~help:"open the standalone lane's exact runs"
+      ; b Navigate "e" "lane config"
+          ~help:"open this lane's runtime.exact_output_lanes section"
       ; b Act "Esc" "overview"
       ]
       @ listing_meta
@@ -370,6 +372,8 @@ let for_surface = function
           ~help:"while detail is open, inspect the adjacent visible log entry"
       ; b Act "l" "level floor"
           ~help:"raise the minimum level; after error, back to everything"
+      ; b Act "v" "verbose"
+          ~help:"toggle DEBUG rows directly; off uses the INFO floor"
       ; b Act "c" "category"
           ~help:"cycle through the categories this page carries"
       ; b Act "Right / Enter" "detail"

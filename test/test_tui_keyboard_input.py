@@ -6540,10 +6540,30 @@ def standalone_lane_fixture(
 ) -> dict[str, object]:
     """One row of the observation matrix, in the wire shape the strict
     decoder accepts: every known lane exactly once, observation_only set."""
+    lane_contracts = {
+        "board_attention_exact": (
+            "Judges one durable Board candidate for Keeper attention.",
+            True,
+        ),
+        "hitl_auto_judge": (
+            "Produces the structured judgment for one held approval.",
+            True,
+        ),
+        "librarian_exact": (
+            "Selects the next Memory OS snapshot from immutable Keeper history.",
+            False,
+        ),
+        "verifier_exact": (
+            "Reviews Task completion and Goal proof evidence.",
+            False,
+        ),
+    }
+    purpose, required = lane_contracts[lane_id]
     return {
         "lane_id": lane_id,
         "label": label,
-        "required": True,
+        "purpose": purpose,
+        "required": required,
         "observation_only": True,
         "configured": True,
         "configuration_state": "ready",
@@ -7328,6 +7348,20 @@ def keeper_lanes_ia_interaction(gate: GatedHttpResponse) -> Interaction:
                     f"Lanes still repeated Keeper column {duplicate!r}: "
                     f"{lanes_plain!r}"
                 )
+        for detail in (
+            "Judges one durable Board candidate for Keeper attention.",
+            "Config: [runtime.exact_output_lanes.board_attention_exact]",
+            "Catalog attempts (admitted order): 1 glm-coding.glm-5-turbo",
+            "Then CLI (after catalog exhaustion): (none)",
+            "Lane configuration is TOML. Run Input/Output is retained JSON evidence.",
+            "Output meaning: the accepted candidate judgment JSON.",
+            "Evidence: structured-output generation, not a MASC tool loop;",
+        ):
+            if detail not in lanes_plain:
+                raise AssertionError(
+                    f"Lanes omitted selected-lane detail {detail!r}: "
+                    f"{lanes_plain!r}"
+                )
         send_and_wait(
             process,
             master_fd,
@@ -7335,6 +7369,18 @@ def keeper_lanes_ia_interaction(gate: GatedHttpResponse) -> Interaction:
             b"c",
             b"Standalone lanes have no Keeper; use Keepers",
         )
+        config = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"e",
+            b"runtime.exact_output_lanes.board_attention_exact",
+        )
+        config_plain = CSI_RE.sub(b"", config).decode("utf-8")
+        if 'slots = ["glm-coding.glm-5-turbo"]' not in config_plain:
+            raise AssertionError(
+                f"Lanes e did not land on the selected TOML table: {config_plain!r}"
+            )
         os.write(master_fd, b"q")
 
     return interact
@@ -8403,8 +8449,22 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
                         "pending_count": 2,
                     },
                     "keeper_reaction_evidence": {
-                        "projection_status": "matched_recorded",
+                        "projection_status": "matched_consumed_ack",
+                        "keeper_name": "alpha",
+                        "stimulus_id": "schedule-stimulus-proof-701",
+                        "post_id": "schedule-occurrence-proof-701",
+                        "reaction_kind": "turn_started",
+                        "stimulus_seen": True,
+                        "turn_started_seen": True,
+                        "event_queue_ack_seen": True,
+                        "event_queue_cancelled_seen": False,
+                        "quarantined_record_count": 0,
+                        "stimulus_recorded_at_iso": "2026-08-25T09:30:10Z",
+                        "turn_started_recorded_at_iso": "2026-08-25T09:30:20Z",
+                        "event_queue_ack_recorded_at_iso": "2026-08-25T09:31:00Z",
+                        "event_queue_cancelled_recorded_at_iso": None,
                         "latest_recorded_at_iso": "2026-08-25T09:31:00Z",
+                        "reason": None,
                     },
                 }
             ],
@@ -8430,7 +8490,7 @@ def schedule_detail_interaction() -> Interaction:
             # which the identity line above the delivery row already names.
             b"status:running",
             b"queue:matched_pending/2 pending",
-            b"reaction:matched_recorded",
+            b"reaction:matched_consumed_ack",
         ):
             if needle not in listing_plain:
                 raise AssertionError(
@@ -8465,7 +8525,13 @@ def schedule_detail_interaction() -> Interaction:
             b"LAST WAKE",
             b"DELIVERY EVIDENCE",
             b"pending=2",
-            b"matched_recorded",
+            b"matched_consumed_ack",
+            b"masc://keepers/alpha",
+            b"schedule-stimulus-proof-701",
+            b"schedule-occurrence-proof-701",
+            b"2026-08-25T09:30:20",
+            b"no schedule-to-tool/result join",
+            b"Keeper Calls or Acting",
         ):
             if needle not in evidence_plain:
                 raise AssertionError(
@@ -10167,6 +10233,27 @@ def run_keeper_lanes_regression(executable: str) -> None:
     )
     fixtures[KEEPER_LANES_PATH] = gate
     fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
+    fixtures[RUNTIME_CONFIG_RAW_PATH] = (
+        200,
+        {
+            "path": "/workspace/config/runtime.toml",
+            "source_text": "\n".join(
+                [
+                    "[runtime.exact_output_lanes.board_attention_exact]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                    "",
+                    "[runtime.exact_output_lanes.hitl_auto_judge]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                    "",
+                    "[runtime.exact_output_lanes.librarian_exact]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                    "",
+                    "[runtime.exact_output_lanes.verifier_exact]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                ]
+            ),
+        },
+    )
     run_terminal_scenario(
         executable,
         description="Keepers operations and Standalone-only Lanes",

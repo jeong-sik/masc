@@ -38,23 +38,31 @@ type observed_run =
 type lane_spec =
   { lane_id : string
   ; label : string
+  ; purpose : string
   ; required : bool
   }
 
 let lane_specs =
   [ { lane_id = Exact_lane_run_registry.lane_key Exact_lane_run_registry.Board_attention
     ; label = "Board Attention"
+    ; purpose = "Judges one durable Board candidate for Keeper attention."
     ; required = true
     }
   ; { lane_id = Exact_lane_run_registry.lane_key Exact_lane_run_registry.Hitl_auto_judge
     ; label = "HITL Auto Judge"
+    ; purpose = "Produces the structured judgment for one held approval."
     ; required = true
     }
   ; { lane_id = Exact_lane_run_registry.lane_key Exact_lane_run_registry.Librarian
     ; label = "Librarian"
+    ; purpose = "Selects the next Memory OS snapshot from immutable Keeper history."
     ; required = false
     }
-  ; { lane_id = Runtime.verifier_exact_lane_id; label = "Verifier"; required = false }
+  ; { lane_id = Runtime.verifier_exact_lane_id
+    ; label = "Verifier"
+    ; purpose = "Reviews Task completion and Goal proof evidence."
+    ; required = false
+    }
   ]
 ;;
 
@@ -538,6 +546,7 @@ let lane_json
   `Assoc
     [ "lane_id", `String spec.lane_id
     ; "label", `String spec.label
+    ; "purpose", `String spec.purpose
     ; "required", `Bool spec.required
     ; "observation_only", `Bool true
     ; "configured", (match configured with None -> `Null | Some value -> `Bool value)

@@ -839,6 +839,9 @@ type standalone_lane_slot_count = {
 type standalone_lane = {
   sl_lane_id : string;
   sl_label : string;
+  sl_purpose : string option;
+      (** Human-readable consumer purpose. Optional so a newer TUI can still
+          read a retained v1 snapshot written before the field was added. *)
   sl_required : bool;
   sl_status : standalone_lane_status;
   sl_configuration_state : string;
@@ -1616,8 +1619,14 @@ val next_system_log_category :
 
 val next_system_log_min_level :
   system_log_level option -> system_log_level option
-(** One step of the verbose ladder: [None] (server default, everything) ->
+(** One step of the level-floor ladder: [None] (server default, everything) ->
     info -> warn -> error -> [None]. *)
+
+val toggle_system_log_verbose :
+  system_log_level option -> system_log_level option
+(** [None] (the route's DEBUG default) becomes INFO; any explicit floor opens
+    back to DEBUG. This is the direct verbose on/off control beside the full
+    level ladder. *)
 
 val system_log_level_query : system_log_level -> string
 (** The lowercase spelling the [/api/v1/dashboard/logs] route validates. *)

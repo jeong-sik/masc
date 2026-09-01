@@ -113,6 +113,21 @@ let test_the_schedule_detail_says_what_became_of_the_wake () =
         true
         (reads ~binding_name:"schedule_turn_rows" ~fields:[ step ] > 0))
     steps;
+  List.iter
+    (fun field ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the durable trace reads %s" field)
+        true
+        (reads ~binding_name:"schedule_turn_rows" ~fields:[ field ] > 0))
+    [ "sch_reaction_keeper_name"
+    ; "sch_reaction_stimulus_id"
+    ; "sch_reaction_post_id"
+    ; "sch_reaction_reason"
+    ; "sch_stimulus_recorded_at_iso"
+    ; "sch_turn_started_recorded_at_iso"
+    ; "sch_queue_ack_recorded_at_iso"
+    ; "sch_wake_cancelled_recorded_at_iso"
+    ];
   Alcotest.(check bool) "and the detail draws that block" true
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"schedule_detail_lines" ~callee:"schedule_turn_rows"

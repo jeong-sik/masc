@@ -24,7 +24,8 @@ type entry =
 
 val entries : unit -> entry list
 (** Every bundled scheme with what picking it would cost, measured against
-    the same floor the renderer lifts to. *)
+    the same floor the renderer lifts to. Native-pass schemes come first;
+    equal lift counts are ordered by name. *)
 
 val contrast_status : lift_on:bool -> entry -> string
 (** A compact, explicit reading of the measurement. [native 7/7] means every

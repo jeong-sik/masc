@@ -103,8 +103,12 @@ The table measures the seven colours MASC uses for semantic text against a
 4.5:1 contrast floor. `native 7/7` means the theme clears it without help;
 `lift N/7` means MASC raises those colours to the floor. With
 `[tui].lift_colours = false`, the same risk is shown as `N/7 low` instead of
-pretending the colours were lifted. Theme names are fitted by terminal cells,
-so long bundled names keep the swatch, page, and contrast columns aligned.
+pretending the colours were lifted. Native-pass schemes are listed first;
+assisted schemes follow by lift count, and equal counts are alphabetical. The
+header reports both the bundled total and the native-pass count, so the
+high-contrast candidates no longer have to be found by scanning an unordered
+catalog. Theme names are fitted by terminal cells, so long bundled names keep
+the swatch, page, and contrast columns aligned.
 
 Keeper sub-views spell their position as a breadcrumb in the header:
 `Keepers ▸ <name> ▸ chat` (also `logs`, `calls`, `runtime`).
@@ -312,14 +316,44 @@ Standalone execution lanes only. Keeper lifecycle and turn-cycle facts live on
 Keepers, so this surface no longer repeats a second Keeper table.
 
 ```
- MASC Lanes · Standalone (6 lanes)  17:02:53  [connected]
+ MASC Lanes · Standalone (4 lanes)  17:02:53  [connected]
   Standalone LLM lanes · READ-ONLY OBSERVATION · observed 17:02:52
  >● Librarian       running 12s    slots librarian-exact  active 1  runs 50  ok/fail/cancel 47/2/1
 ```
 
 Rows come from `GET /api/v1/dashboard/standalone-lanes`. They show admission slots,
 current activity, retained run counts, execution outcomes, latency, and the
-slots actually selected. `j` / `k` moves the lane cursor; Right or `Enter`
+slots actually selected. This build projects four fixed consumers:
+`Board Attention` judges one durable Board attention candidate, `HITL Auto
+Judge` judges one held approval, `Librarian` selects the next Memory OS
+snapshot from immutable Keeper history, and `Verifier` reviews Task completion
+and Goal proof evidence.
+
+The selected row expands underneath the matrix instead of forcing its long
+identifiers through the clipped comparison row. It names the exact
+`[runtime.exact_output_lanes.<lane-id>]` table, every admitted catalog slot in
+attempt order, the official-client runtime suffix used only after catalog
+exhaustion, publication-dropped slots that will not execute, and any admission
+error. In `runtime.toml`, `slots` is a required non-empty array of opaque
+catalog references; `cli_slots` is an optional array of official-client runtime
+ids. Blank values and duplicates are rejected. The lane tries admitted catalog
+slots in declaration order, then CLI runtimes in declaration order. The
+configuration is TOML; an individual run's Input and Output are retained JSON
+evidence, not another lane configuration format.
+
+Board Attention, HITL Auto Judge, and Librarian are schema-constrained
+structured-output generation flows, not MASC tool loops. Their run evidence is
+the exact Input and Output, outcome, elapsed time, and selected slot; there is
+no omitted tool-call ledger for those runs. Their outputs mean, respectively,
+the accepted Board candidate judgment, the validated and durably settled HITL
+context judgment summary, and selected memory facts plus committed snapshot
+metadata. Verifier is different: its Task/Goal review records also retain the
+verdict reason, evaluator runtime, and MASC tool observations, which appear in
+the exact run detail.
+
+`j` / `k` moves the lane cursor. `e` opens that lane's exact table in the
+Config `runtime.toml` source pane; another `e` uses the existing editor,
+server-side preview, and save path. Right or `Enter`
 opens that lane's recent exact runs, and another Right or `Enter` opens the
 exact run record. Input and output are pretty-printed as syntax-highlighted
 JSON and long JSON lines wrap by terminal cells, so a value does not disappear
@@ -778,7 +812,13 @@ new one. Running and terminal rows return the server's explicit refusal.
 Right or `Enter` opens the selected schedule. The detail includes schedule and instance
 identity, dispatch state, requesting actors, timestamps, recurrence, payload
 kind/tool/digest/summary, the pretty full payload JSON, last wake, and
-queue/reaction evidence. Left or `Esc` returns
+queue/reaction evidence. Keeper wakes also show the durable Keeper,
+stimulus/occurrence ids, every recorded step timestamp, and the projection's
+exact failure or quarantine reason. This receipt proves wake delivery and
+whether a turn started; it does not causally attribute later tool calls or a
+work result to the schedule. The detail says so explicitly and points to
+Keeper Calls or Acting for execution evidence after the recorded turn start,
+instead of presenting an unrelated tool output as the schedule result. Left or `Esc` returns
 to the list; `j`/`k` scroll by a row and `PgUp`/`PgDn` by a page.
 
 ### Fusion
@@ -1061,7 +1101,7 @@ effective prompt through `$EDITOR`, and `x` clears only its persisted override.
 The server's log ring, the same source the dashboard `logs` tab reads.
 
 ```
- MASC System Logs (247 of 774273, seq 774272)  level≥INFO
+ MASC System Logs (247 of 774273, seq 774272)  level≥INFO  verbose:off
    Time     Level   Module           Keeper       Category  Message
    03:09:21 INFO    Discord          system       routine   presence update: idle
    03:09:18 WARN    Keeper           alpha        turn      turn budget exceeded
@@ -1072,8 +1112,11 @@ The first count is what the fetched page shows after its category filter;
 `774273` is what the ring has seen. A page count on its own would read as
 "that is all there is".
 
-`l` raises the server-side level floor through INFO, WARN, and ERROR, then opens
-it back to every level; changing it refetches the page. `c` cycles `all` and
+`v` toggles verbose DEBUG rows directly: off uses the INFO floor and on asks
+the server for every level. The header always says `verbose:on` or
+`verbose:off`. `l` remains the full server-side floor ladder through INFO,
+WARN, and ERROR, then opens back to every level; changing either control
+refetches the page. `c` cycles `all` and
 each category observed on the loaded page. Right or `Enter` opens the exact
 sequence under the cursor with its untruncated timestamp, level, category,
 source, module, keeper, turn, message, and pretty syntax-highlighted JSON

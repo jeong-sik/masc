@@ -206,6 +206,37 @@ let set_runtime_config_cursor_near state ~direction ~target =
       ~height:(Masc_tui_render.config_content_height state)
       state.config_scroll
 
+(* Resolve a server-owned runtime.toml table heading without reparsing TOML in
+   the client. Callers supply the complete dotted table name; the raw source
+   view remains the one authority for both what is shown and what $EDITOR
+   later receives. *)
+let runtime_config_section_line ~section rows =
+  let header = "[" ^ section ^ "]" in
+  let rec scan index = function
+    | [] -> None
+    | segments :: rest ->
+      let text = String.trim (String.concat "" (List.map fst segments)) in
+      if String.equal text header then Some index else scan (index + 1) rest
+  in
+  scan 0 rows
+
+(* Consume a cross-surface source jump after runtime.toml has landed. The
+   cursor itself stays on a value row, while the viewport leaves the table
+   heading visible as context. *)
+let apply_runtime_config_jump state =
+  match state.runtime_config_jump_section, state.runtime_config_view with
+  | Some section, Some (_, rows) ->
+    state.runtime_config_jump_section <- None;
+    state.config_pane <- Config_runtime;
+    let found = runtime_config_section_line ~section rows in
+    (match found with
+     | Some index ->
+       set_runtime_config_cursor_near state ~direction:1 ~target:index;
+       state.config_scroll <- max 0 (index - 3)
+     | None -> ());
+    Some (section, Option.is_some found)
+  | None, _ | Some _, None -> None
+
 let move_runtime_config_cursor state ~delta =
   let direction = if delta >= 0 then 1 else -1 in
   set_runtime_config_cursor_near state ~direction
@@ -7635,8 +7666,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             Masc_tui_model_runtime_table.parse lines;
           set_runtime_config_cursor_near state ~direction:1
             ~target:state.runtime_config_cursor;
-          state.runtime_config_view_error <- None
-      | Error detail -> state.runtime_config_view_error <- Some detail)
+          state.runtime_config_view_error <- None;
+          (match apply_runtime_config_jump state with
+           | None -> ()
+           | Some (section, true) ->
+             add_event state "info"
+               (Printf.sprintf "runtime.toml at [%s] - e to edit" section)
+           | Some (section, false) ->
+             add_event state "error"
+               (Printf.sprintf "runtime.toml has no [%s] section" section))
+      | Error detail ->
+          state.runtime_config_jump_section <- None;
+          state.runtime_config_view_error <- Some detail)
   | Code_entries_loaded (dir, result) ->
       if String.equal dir state.code_dir then (
         match result with
@@ -13784,6 +13825,16 @@ and is loaded on demand through keeper_skill.
            state.system_logs_scroll <- 0;
            state.system_logs_cursor <- 0;
            launch_system_logs_load state ~mailbox:async_messages
+       | Some ("v" | "V") when state.view = System_logs ->
+           (* Unlike [l]'s four-step floor ladder, this answers the common
+              operational question directly: DEBUG rows on or off. Both
+              states refetch because the server owns level filtering. *)
+           state.system_logs_min_level <-
+             Masc.Tui_decode.toggle_system_log_verbose
+               state.system_logs_min_level;
+           state.system_logs_scroll <- 0;
+           state.system_logs_cursor <- 0;
+           launch_system_logs_load state ~mailbox:async_messages
        | Some ("c" | "C") when state.view = System_logs ->
            (* Category narrows what this page shows, not what it fetched.
               The vocabulary is the categories the loaded rows carry, so the
@@ -14052,6 +14103,35 @@ and is loaded on demand through keeper_skill.
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_settings_edit ()
+            | Lanes ->
+                (match state.lanes_mode, selected_standalone_lane state with
+                 | Lanes_overview, Some lane ->
+                   let section =
+                     "runtime.exact_output_lanes." ^ lane.Tui_decode.sl_lane_id
+                   in
+                   state.view <- Config;
+                   state.config_pane <- Config_runtime;
+                   state.runtime_config_jump_section <- Some section;
+                   (match state.runtime_config_view with
+                    | None ->
+                      add_event state "info"
+                        (Printf.sprintf "loading runtime.toml for [%s]" section);
+                      launch_runtime_config_load state ~mailbox:async_messages
+                    | Some _ ->
+                      (match apply_runtime_config_jump state with
+                       | Some (_, true) ->
+                         add_event state "info"
+                           (Printf.sprintf
+                              "runtime.toml at [%s] - e to edit" section)
+                       | Some (_, false) ->
+                         add_event state "error"
+                           (Printf.sprintf
+                              "runtime.toml has no [%s] section" section)
+                       | None -> ()))
+                 | Lanes_overview, None ->
+                   show_lanes_action_error state
+                     "Cannot open config: no standalone lane is selected"
+                 | (Lanes_run_list _ | Lanes_run_detail _), _ -> ())
             | Config ->
                 (match state.config_pane with
                  | Config_prompts -> handle_prompt_edit ()
@@ -14099,7 +14179,7 @@ and is loaded on demand through keeper_skill.
                        ~mailbox:async_messages
                        ~mode:(Masc.Keeper_gate_mode.to_string next))
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
-            | Keepers Keeper_message | Lanes
+            | Keepers Keeper_message
             | Board | Planning | Verification | Harness
             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs -> ())
        | Some "x" | Some "X"

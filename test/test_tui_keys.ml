@@ -62,12 +62,12 @@ let test_plain_listing_footer_shape () =
 
 let test_system_logs_footer_names_browser_controls () =
   check str "logs names filters and detail"
-    "j/k:move / scroll  PgUp/PgDn:detail page  [ / ]:previous / next  l:level floor  c:category  Right / Enter:detail  Left / Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:move / scroll  PgUp/PgDn:detail page  [ / ]:previous / next  l:level floor  v:verbose  c:category  Right / Enter:detail  Left / Esc:back  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints System_logs)
 
 let test_lanes_footer_opens_standalone_runs () =
-  check str "Lanes names its standalone run drill-down"
-    "j/k:move  Right / Enter:runs  Esc:overview  r:refresh  Tab:next  q:quit"
+  check str "Lanes names its run drill-down and exact config source"
+    "j/k:move  Right / Enter:runs  e:lane config  Esc:overview  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =
@@ -153,10 +153,18 @@ let schedule_form_row : schedule_row =
   ; sch_reaction_projection_status = None
   ; sch_reaction_latest_at_iso = None
   ; sch_reaction_kind = None
+  ; sch_reaction_keeper_name = None
+  ; sch_reaction_stimulus_id = None
+  ; sch_reaction_post_id = None
+  ; sch_reaction_reason = None
   ; sch_wake_seen = None
   ; sch_turn_started = None
   ; sch_queue_ack_seen = None
   ; sch_wake_cancelled = None
+  ; sch_stimulus_recorded_at_iso = None
+  ; sch_turn_started_recorded_at_iso = None
+  ; sch_queue_ack_recorded_at_iso = None
+  ; sch_wake_cancelled_recorded_at_iso = None
   ; sch_reaction_quarantined = None
   }
 
@@ -348,8 +356,8 @@ let test_changes_is_a_keeper_child () =
     (surface_ring_index Changes)
 
 let test_system_logs_owns_only_its_real_filter_keys () =
-  (* g/G/f still belong to Acting. Logs owns the server level floor and the
-     category cycle under l/c. *)
+  (* g/G/f still belong to Acting. Logs owns the server level floor, direct
+     verbose toggle, and category cycle under l/v/c. *)
   let keys =
     List.map
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
@@ -358,6 +366,7 @@ let test_system_logs_owns_only_its_real_filter_keys () =
   Alcotest.(check bool) "no g/G on System logs" false (List.mem "g / G" keys);
   Alcotest.(check bool) "no f on System logs" false (List.mem "f" keys);
   Alcotest.(check bool) "level floor is documented" true (List.mem "l" keys);
+  Alcotest.(check bool) "verbose is documented" true (List.mem "v" keys);
   Alcotest.(check bool) "category filter is documented" true (List.mem "c" keys);
   let acting =
     List.map
@@ -471,6 +480,7 @@ let test_without_a_surface_the_order_is_the_strips () =
 let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
   { Tui_decode.sl_lane_id = lane_id
   ; sl_label = label
+  ; sl_purpose = None
   ; sl_required = false
   ; sl_status = Tui_decode.Standalone_idle
   ; sl_configuration_state = "ready"

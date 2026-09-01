@@ -3790,33 +3790,77 @@ let render_schedule_list (state : state) =
 let schedule_turn_rows
       ~(field : ?style:string -> string -> string -> string * string)
       (row : schedule_row) =
-  let observed =
+  let step_observed =
     [ row.sch_wake_seen
     ; row.sch_turn_started
     ; row.sch_queue_ack_seen
     ; row.sch_wake_cancelled
     ]
+    |> List.exists Option.is_some
   in
-  if List.for_all Option.is_none observed then []
+  let metadata_observed =
+    [ row.sch_reaction_keeper_name
+    ; row.sch_reaction_stimulus_id
+    ; row.sch_reaction_post_id
+    ; row.sch_reaction_reason
+    ; row.sch_stimulus_recorded_at_iso
+    ; row.sch_turn_started_recorded_at_iso
+    ; row.sch_queue_ack_recorded_at_iso
+    ; row.sch_wake_cancelled_recorded_at_iso
+    ]
+    |> List.exists Option.is_some
+  in
+  if not (step_observed || metadata_observed || Option.is_some row.sch_reaction_quarantined)
+  then []
   else
     (* [None] is not [false]. A step the ledger never spoke about draws the
        same dash every unknown draws on this pane, in the dim every unknown
        takes -- claiming "no" for it would report a failure nobody observed. *)
-    let step ?(bad_when_true = false) label = function
+    let step ?(bad_when_true = false) label observed recorded_at =
+      match observed with
       | None -> field label "\xe2\x80\x94"
       | Some value ->
           let tone =
             if value = bad_when_true then Theme.bad () else Theme.ok ()
           in
-          field ~style:tone label (if value then "yes" else "no")
+          let at =
+            match value, recorded_at with
+            | true, Some timestamp ->
+              " \xc2\xb7 " ^ Tui_decode.short_timestamp_for_terminal timestamp
+            | _, _ -> ""
+          in
+          field ~style:tone label ((if value then "yes" else "no") ^ at)
+    in
+    let identity_rows =
+      [ Option.map
+          (fun keeper ->
+             field "Keeper evidence"
+               (Link.reference Keeper (Terminal_text.single_line keeper)))
+          row.sch_reaction_keeper_name
+      ; Option.map
+          (fun stimulus -> field "Stimulus" stimulus)
+          row.sch_reaction_stimulus_id
+      ; Option.map
+          (fun occurrence -> field "Occurrence" occurrence)
+          row.sch_reaction_post_id
+      ]
+      |> List.filter_map Fun.id
     in
     [ Ansi.dim, ""
     ; Ansi.bold, "  TURN"
-    ; step "Wake seen" row.sch_wake_seen
-    ; step "Turn started" row.sch_turn_started
-    ; step "Queue ack" row.sch_queue_ack_seen
-    ; step ~bad_when_true:true "Cancelled" row.sch_wake_cancelled
-    ; field "Reaction kind" (Option.value ~default:"\xe2\x80\x94" row.sch_reaction_kind)
+    ]
+    @ identity_rows
+    @ [ step "Wake seen" row.sch_wake_seen row.sch_stimulus_recorded_at_iso
+      ; step "Turn started" row.sch_turn_started
+          row.sch_turn_started_recorded_at_iso
+      ; step "Queue ack" row.sch_queue_ack_seen row.sch_queue_ack_recorded_at_iso
+      ; step ~bad_when_true:true "Cancelled" row.sch_wake_cancelled
+          row.sch_wake_cancelled_recorded_at_iso
+      ; field "Reaction kind"
+          (Option.value ~default:"\xe2\x80\x94" row.sch_reaction_kind)
+      ; field
+          ~style:(if Option.is_some row.sch_reaction_reason then Theme.warn () else Ansi.dim)
+          "Reason" (Option.value ~default:"\xe2\x80\x94" row.sch_reaction_reason)
     ; field
         ~style:
           (match row.sch_reaction_quarantined with
@@ -3826,7 +3870,7 @@ let schedule_turn_rows
         (match row.sch_reaction_quarantined with
          | None -> "\xe2\x80\x94"
          | Some count -> string_of_int count)
-    ]
+      ]
 
 let schedule_detail_lines ~width (row : schedule_row) =
   let field ?(style = Ansi.reset) label value =
@@ -3858,9 +3902,14 @@ let schedule_detail_lines ~width (row : schedule_row) =
   let summary =
     Option.value ~default:"(no payload summary)" row.sch_payload_summary
   in
+  let keeper_wake =
+    match row.sch_payload_kind with
+    | Some ("keeper_wake" | "masc.keeper_wake") -> true
+    | Some _ | None -> false
+  in
   let target_link =
-    match row.sch_payload_kind, row.sch_payload_target with
-    | Some "keeper_wake", Some keeper ->
+    match keeper_wake, row.sch_payload_target with
+    | true, Some keeper ->
         [ field "Keeper link"
             (Link.reference Keeper (Terminal_text.single_line keeper))
         ]
@@ -3927,6 +3976,13 @@ let schedule_detail_lines ~width (row : schedule_row) =
         "Reaction" reaction
     ]
   @ schedule_turn_rows ~field row
+  @ (if keeper_wake then
+       [ Ansi.dim, ""
+       ; Ansi.bold, "  WORK RESULT"
+       ; field "Attribution" "wake/turn only; no schedule-to-tool/result join"
+       ; field "Inspect" "Keeper Calls or Acting after the recorded turn start"
+       ]
+     else [])
 
 let schedule_detail_pane (state : state) ~rows ~cols (row : schedule_row) buf =
   box_top buf cols;
@@ -4809,6 +4865,80 @@ let standalone_lane_row ~now ~frame width (lane : Tui_decode.standalone_lane) =
   in
   fit_width line width
 
+(* The row is deliberately dense for comparison, but it cannot also carry
+   full slot ids, the consumer contract, and the fallback rule without
+   clipping. Keep those facts in a wrapped selected-row block underneath the
+   four-row matrix. The order is the execution contract: admitted catalog
+   slots first, official-client runtimes only after catalog exhaustion. *)
+let standalone_lane_detail_lines ~width (lane : Tui_decode.standalone_lane) =
+  let ordered values =
+    match values with
+    | [] -> "(none)"
+    | values ->
+      values
+      |> List.mapi (fun index value ->
+        Printf.sprintf "%d %s" (index + 1) (Terminal_text.single_line value))
+      |> String.concat "  →  "
+  in
+  let wrap style text =
+    Message_layout.wrap_words ~max_cells:(max 1 (width - 4)) text
+    |> List.map (fun line -> style, "  " ^ line)
+  in
+  let purpose =
+    Option.value ~default:"No consumer purpose reported by this server."
+      lane.sl_purpose
+  in
+  let exact_lane which =
+    Exact_lane_run_registry.lane_key which
+    |> String.equal lane.sl_lane_id
+  in
+  let output_meaning, evidence_contract =
+    if exact_lane Exact_lane_run_registry.Board_attention then
+      ( "Output meaning: the accepted candidate judgment JSON."
+      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
+    else if exact_lane Exact_lane_run_registry.Hitl_auto_judge then
+      ( "Output meaning: the validated and durably settled approval-context judgment summary."
+      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
+    else if exact_lane Exact_lane_run_registry.Librarian then
+      ( "Output meaning: selected memory facts plus committed snapshot metadata."
+      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
+    else if String.equal lane.sl_lane_id Runtime.verifier_exact_lane_id then
+      ( "Output meaning: Task completion or Goal proof verdict, reason, and evaluator runtime."
+      , "Evidence: Verifier review records also retain MASC tool observations; open a run to inspect inputs, dispositions, excerpts, duration, and truncation." )
+    else
+      ( "Output meaning: open a retained run for its exact result."
+      , "Evidence: this server did not report a known standalone-lane evidence contract." )
+  in
+  wrap Ansi.bold
+    (Printf.sprintf "%s · %s" (Terminal_text.single_line lane.sl_label)
+       (Terminal_text.single_line purpose))
+  @ wrap Ansi.dim
+      (Printf.sprintf "Config: [runtime.exact_output_lanes.%s]"
+         (Terminal_text.single_line lane.sl_lane_id))
+  @ wrap Ansi.reset
+      ("Catalog attempts (admitted order): " ^ ordered lane.sl_admitted_slots)
+  @ wrap Ansi.reset
+      ("Then CLI (after catalog exhaustion): " ^ ordered lane.sl_cli_slots)
+  @ wrap
+      (if lane.sl_dropped_slots = [] then Ansi.dim else Theme.warn ())
+      ("Dropped before execution: " ^ ordered lane.sl_dropped_slots)
+  @ (match lane.sl_admission_error with
+     | None -> []
+     | Some error ->
+       wrap (Theme.bad ())
+         ("Admission error: " ^ Terminal_text.single_line error))
+  @ wrap Ansi.dim
+      "TOML spec: slots = required non-empty catalog-ref array; cli_slots = optional official-client runtime-id array."
+  @ wrap Ansi.dim
+      "Lane configuration is TOML. Run Input/Output is retained JSON evidence. Press e to open this section in the preview-checked runtime.toml editor."
+  @ wrap Ansi.reset output_meaning
+  @ wrap Ansi.dim evidence_contract
+
+let rec take_rows remaining acc = function
+  | _ when remaining <= 0 -> List.rev acc
+  | [] -> List.rev acc
+  | row :: rest -> take_rows (remaining - 1) (row :: acc) rest
+
 let render_lanes_overview (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -4882,6 +5012,35 @@ let render_lanes_overview (state : state) =
           | Some detail ->
               (Theme.bad ()) ^ "  standalone lane observation unavailable: "
               ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset));
+  (* Use only the body's remaining rows. At small terminal heights the matrix
+     stays complete and the detail truncates explicitly; at ordinary heights
+     the wrapped block shows every slot id without the row's [fit_width]. *)
+  (match selected_standalone_lane state with
+   | None -> ()
+   | Some lane ->
+       let action_error_rows =
+         match state.lanes_action_error with None -> 0 | Some _ -> 1
+       in
+       let available =
+         max 0
+           (rows - List.length (frame_lines buf) - action_error_rows - 3)
+       in
+       if available > 0 then begin
+         box_divider buf cols;
+         let detail = standalone_lane_detail_lines ~width:inner lane in
+         let shown = take_rows available [] detail in
+         let shown =
+           if List.length detail <= available then shown
+           else
+             match List.rev shown with
+             | [] -> []
+             | _ :: rest ->
+               List.rev ((Theme.warn (), "  … more; enlarge the terminal") :: rest)
+         in
+         List.iter
+           (fun (style, line) -> box_line_styled buf cols ~style line)
+           shown
+       end);
   (match state.lanes_action_error with
    | None -> ()
    | Some detail ->
@@ -7052,9 +7211,9 @@ let render_system_logs (state : state) =
   let filter_note =
     let level =
       match state.system_logs_min_level with
-      | None -> ""
+      | None -> "  level\xe2\x89\xa5DEBUG  verbose:on"
       | Some floor ->
-          Printf.sprintf "  level\xe2\x89\xa5%s"
+          Printf.sprintf "  level\xe2\x89\xa5%s  verbose:off"
             (String.trim (Masc.Tui_decode.system_log_level_label floor))
     in
     let category =
@@ -12902,15 +13061,23 @@ let render_themes (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
+  let entries = Theme_choice.entries () in
+  let native_count =
+    List.fold_left
+      (fun count (entry : Theme_choice.entry) ->
+        if entry.lifted = 0 then count + 1 else count)
+      0 entries
+  in
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s  %s"
-       (screen_title " MASC Themes")
+       (screen_title
+          (Printf.sprintf " MASC Themes · %d bundled · %d native-pass"
+             (List.length entries) native_count))
        (config_pane_strip state)
        (connection_badge state));
   box_divider buf cols;
   let chosen = state.theme_choice in
-  let entries = Theme_choice.entries () in
   let content_height = max 1 (rows - 7) in
   let cursor = max 0 (min state.theme_cursor (List.length entries - 1)) in
   let scroll = max 0 (cursor - content_height + 1) in
@@ -12929,9 +13096,9 @@ let render_themes (state : state) =
   ;
   box_line_styled buf cols ~style:Ansi.dim
     (if lift_on then
-       "  contrast: native=all 7 pass 4.5:1  lift N=N colours raised to pass"
+       "  order: least assistance, then name · native 7/7=no lift · lift N/7=N raised"
      else
-       "  contrast: native=all 7 pass 4.5:1  N low=N below floor (lift off)");
+       "  order: fewest low colours, then name · native 7/7=all pass · N/7 low=below 4.5:1");
   List.iteri
     (fun index (entry : Theme_choice.entry) ->
       if index >= scroll && index < scroll + content_height then begin

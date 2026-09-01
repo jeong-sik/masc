@@ -2862,12 +2862,14 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
       Alcotest.(check bool) "error names the missing field" true
         (String.starts_with ~prefix:"snapshots[0]: missing required field 'idle_seconds'" detail)
 
-let standalone_lane_json ?(status = "idle") ?(retained = 3)
+let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ?(running = 0) ?(selected_slots = []) lane_id label =
   `Assoc
-    [ "lane_id", `String lane_id
-    ; "label", `String label
-    ; "required", `Bool true
+    ([ "lane_id", `String lane_id
+     ; "label", `String label
+     ]
+     @ (match purpose with None -> [] | Some text -> [ "purpose", `String text ])
+     @ [ "required", `Bool true
     ; "observation_only", `Bool true
     ; "configured", `Bool true
     ; "configuration_state", `String "ready"
@@ -2886,7 +2888,7 @@ let standalone_lane_json ?(status = "idle") ?(retained = 3)
     ; "last_outcome", (if retained = 0 then `Null else `String "succeeded")
     ; "p50_elapsed_s", (if retained = 0 then `Null else `Float 1.)
     ; "selected_slots", `List selected_slots
-    ]
+    ])
 
 (* The start of the newest run. The fixture has carried it since this suite
    was written and the decoder read it into an underscore, so the field
@@ -2944,7 +2946,9 @@ let test_decode_standalone_lane_keeps_the_run_start () =
 
 let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
   let lanes =
-    [ standalone_lane_json ~status:"running" ~running:1
+    [ standalone_lane_json
+        ~purpose:"Judges one durable Board candidate for Keeper attention."
+        ~status:"running" ~running:1
         "board_attention_exact" "Board Attention"
     ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
     ; standalone_lane_json
@@ -2974,7 +2978,12 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
       let first = List.hd snapshot.sls_lanes in
       Alcotest.(check string) "running status" "running"
         (Tui_decode.standalone_lane_status_to_string first.sl_status);
+      Alcotest.(check (option string)) "consumer purpose"
+        (Some "Judges one durable Board candidate for Keeper attention.")
+        first.sl_purpose;
       let verifier = List.nth snapshot.sls_lanes 3 in
+      Alcotest.(check (option string)) "older v1 row remains readable" None
+        verifier.sl_purpose;
       Alcotest.(check string)
         "none retained"
         "none retained"
@@ -3656,6 +3665,15 @@ let test_system_log_level_ladder_cycles () =
     (next_system_log_min_level (Some System_error) = None);
   Alcotest.(check string) "the wire spelling is the route's lowercase" "warn"
     (system_log_level_query System_warn)
+
+let test_system_log_verbose_toggles_debug_directly () =
+  let open Tui_decode in
+  Alcotest.(check bool) "verbose off uses info" true
+    (toggle_system_log_verbose None = Some System_info);
+  Alcotest.(check bool) "info opens verbose" true
+    (toggle_system_log_verbose (Some System_info) = None);
+  Alcotest.(check bool) "a stricter floor also opens verbose" true
+    (toggle_system_log_verbose (Some System_error) = None)
 
 let test_decode_system_log_accepts_both_warn_spellings () =
   let label spelling =
@@ -6236,6 +6254,8 @@ let () =
           test_system_log_category_filter_vocabulary_and_cycle;
         Alcotest.test_case "level ladder cycles" `Quick
           test_system_log_level_ladder_cycles;
+        Alcotest.test_case "verbose toggles DEBUG directly" `Quick
+          test_system_log_verbose_toggles_debug_directly;
         Alcotest.test_case "an unnamed level stays itself" `Quick
           test_decode_system_log_keeps_an_unnamed_level_as_itself;
         Alcotest.test_case "null keeper is absent" `Quick

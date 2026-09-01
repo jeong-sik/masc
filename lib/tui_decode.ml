@@ -147,6 +147,7 @@ type standalone_lane_slot_count = {
 type standalone_lane = {
   sl_lane_id : string;
   sl_label : string;
+  sl_purpose : string option;
   sl_required : bool;
   sl_status : standalone_lane_status;
   sl_configuration_state : string;
@@ -1712,7 +1713,7 @@ let next_system_log_category ~current entries =
       in
       step categories
 
-(* The verbose ladder. [None] asks the server for everything (its own
+(* The level-floor ladder. [None] asks the server for everything (its own
    default is debug); each press raises the floor. Debug and unknown
    spellings are readings, not rungs this cycle produces. *)
 let next_system_log_min_level = function
@@ -1721,6 +1722,14 @@ let next_system_log_min_level = function
   | Some System_warn -> Some System_error
   | Some System_error -> None
   | Some System_debug | Some (System_level_unknown _) -> None
+
+(* A direct verbose switch beside the full level ladder. [None] is the route's
+   DEBUG default; every explicit floor is a non-verbose reading. Turning
+   verbose off always lands on INFO rather than remembering WARN/ERROR, because
+   the action is "hide debug", not "restore an unrelated prior filter". *)
+let toggle_system_log_verbose = function
+  | None -> Some System_info
+  | Some _ -> None
 
 (* The wire spelling the /logs route validates (lowercase, fail-closed). *)
 let system_log_level_query = function
@@ -4141,6 +4150,7 @@ let decode_standalone_lane_slot_count json =
 let decode_standalone_lane json =
   let* sl_lane_id = required_string_field json "lane_id" in
   let* sl_label = required_string_field json "label" in
+  let* sl_purpose = optional_string_field json "purpose" in
   let* sl_required = required_bool_field json "required" in
   let* observation_only = required_bool_field json "observation_only" in
   let* () =
@@ -4195,6 +4205,7 @@ let decode_standalone_lane json =
   Ok
     { sl_lane_id
     ; sl_label
+    ; sl_purpose
     ; sl_required
     ; sl_status
     ; sl_configuration_state

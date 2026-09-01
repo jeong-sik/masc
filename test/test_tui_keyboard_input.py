@@ -5698,20 +5698,22 @@ def memory_journal_timeline_interaction(
                 f"Summary mode drew the change fence after restore: {restored!r}"
             )
 
-        # A viewport too small for the composer still owes the display
-        # toggles a working gate. The gate reads the live terminal size at
-        # dispatch, so keys pressed on the too-small screen decide there
-        # and prove themselves on the way back up. Ctrl-R/Ctrl-D always
-        # passed it while Ctrl-F and then Ctrl-N (#32367) were swallowed,
-        # because the gate admitted keys one by one instead of the
-        # display-toggle set.
+        # A chat pane too narrow for the composer still owes the display
+        # toggles a working gate. Twelve columns keeps the frame painted
+        # (the global compact fallback is row-driven and owns every key on
+        # its screen), draws only the "needs a larger terminal" notice, and
+        # makes keeper_message_input_supported false — the regime where the
+        # gate decides. Ctrl-R/Ctrl-D always passed it while Ctrl-F and then
+        # Ctrl-N (#32367) were swallowed, because the gate admitted keys one
+        # by one instead of the display-toggle set. The toggles land on the
+        # notice screen and prove themselves on the way back up.
         resize_and_wait(
             process,
             master_fd,
             output,
-            rows=8,
-            columns=100,
-            needle=b"terminal too small",
+            rows=31,
+            columns=12,
+            needle=b"Keeper ch~",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
@@ -5728,8 +5730,8 @@ def memory_journal_timeline_interaction(
         )
         if b"memory:full clock:inline" not in CSI_RE.sub(b"", widened):
             raise AssertionError(
-                "A display toggle pressed on the too-small screen was "
-                f"swallowed by the compact-viewport gate: {widened!r}"
+                "A display toggle pressed on the narrow-pane notice screen "
+                f"was swallowed by the composer gate: {widened!r}"
             )
         send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         os.write(master_fd, b"q")

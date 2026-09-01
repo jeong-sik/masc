@@ -210,6 +210,14 @@ let test_write_comes_back_through_recall () =
     "routed to the current snapshot"
     "current_memory_snapshot"
     (string_field "store" response);
+  (* rfc3339_of_unix renders exactly "YYYY-MM-DDTHH:MM:SSZ" (20 bytes). The
+     receipt echoes the persisted snapshot stamp so the authoring model sees
+     an authoritative UTC time next to the prose it just wrote. *)
+  let recorded_at = string_field "recorded_at" response in
+  Alcotest.(check bool)
+    "receipt carries the persisted UTC stamp"
+    true
+    (String.length recorded_at = 20 && String.ends_with ~suffix:"Z" recorded_at);
   let response_revision = int_field "revision" response in
   (match execution.Masc.Keeper_tool_execution.terminal_effect_receipt with
    | Some

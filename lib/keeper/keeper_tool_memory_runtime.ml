@@ -621,6 +621,10 @@ let keeper_memory_write_with_outcome
                ~error_kind:No_memory_write_error
                [ "rows_written", `Int 1
                ; "revision", `Int snapshot.revision
+                 (* Same persisted-stamp echo as the current-snapshot branch. *)
+               ; ( "recorded_at"
+                 , `String
+                     (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at) )
                ; "outcome", `String "persisted_source_bound_current"
                ; "store", `String "source_bound_current_memory"
                ; "source_path", `String source_path
@@ -669,6 +673,14 @@ let keeper_memory_write_with_outcome
          ~error_kind:No_memory_write_error
          [ "rows_written", `Int 1
          ; "revision", `Int snapshot.revision
+           (* [recorded_at] echoes the persisted snapshot stamp rather than
+              reading a second clock: the receipt and the stored fact cannot
+              disagree, and the authoring model gets an authoritative UTC
+              time at the exact moment it writes prose claims — hand-typed
+              timestamps in claims have drifted by whole hours (lane-smith,
+              2026-09-01: a 02:42Z event recorded as "03:42Z"). *)
+         ; ( "recorded_at"
+           , `String (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at) )
          ; "outcome", `String "persisted_current_snapshot"
          ; "store", `String "current_memory_snapshot"
          ]

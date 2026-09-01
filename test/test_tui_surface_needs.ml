@@ -45,19 +45,14 @@ let test_every_keeper_sub_mode_still_asks_for_the_roster () =
 ;;
 
 let test_forward_navigation_fetches_only_new_surface_datasets () =
-  (* Walk the ring forward from Overview up to the last stop, exclusive.
-     Logs is excluded the way Tools was when it held this position: the
-     walk is about the surfaces between the two ends, and the pinned sum
-     should not move when the ring's tail changes owners. *)
-  let rec through_logs = function
-    | [] -> fail "System logs is absent from the surface ring"
-    | (Types.System_logs, _) :: _ -> []
-    | (surface, _) :: rest -> surface :: through_logs rest
-  in
+  (* Walk the whole ring forward from Overview. A named stop marker rotted
+     twice as ring surfaces moved under parents, so the walk now takes the
+     ring as it is: the pinned sum only moves when a ring surface actually
+     starts or stops fetching a dataset. *)
   let destinations =
     match Types.surface_ring with
     | [] -> fail "the surface ring is empty"
-    | _overview :: rest -> through_logs rest
+    | _overview :: rest -> List.map fst rest
   in
   let add_delta (previous, count) surface =
     let next = needs surface in

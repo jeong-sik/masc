@@ -546,6 +546,32 @@ let test_tools_is_a_config_child () =
   Alcotest.(check bool) "Config documents the [t] hop" true
     (List.mem "t" config_keys)
 
+(* Tool calls settling and the server's own log lines are two readings of
+   one fleet timeline, so Logs hangs off Activity (the Acting surface)
+   under [l] instead of holding a Tab stop of its own. *)
+let test_logs_is_an_activity_child () =
+  Alcotest.(check bool) "Logs is not a top-level ring entry" false
+    (List.exists (fun (surface, _) -> surface = System_logs) surface_ring);
+  Alcotest.(check int) "Logs highlights Activity"
+    (surface_ring_index Acting)
+    (surface_ring_index System_logs);
+  Alcotest.(check bool) "and the help sheet files it under Activity" true
+    (List.exists
+       (fun (label, _) -> String.equal label "Activity / Logs")
+       (Masc_tui_keys.help_sections ()));
+  Alcotest.(check bool) "and the ring stop is spelled Activity" true
+    (List.exists
+       (fun (surface, label) ->
+         surface = Acting && String.equal label "Activity")
+       surface_ring);
+  let acting_keys =
+    List.map
+      (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
+      (Masc_tui_keys.for_surface Acting)
+  in
+  Alcotest.(check bool) "Activity documents the [l] hop" true
+    (List.mem "l" acting_keys)
+
 let test_config_footer_names_both_hops () =
   check str "Config names its two off-ring children"
     "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  Esc:overview  r:reload  Tab:next"
@@ -954,6 +980,8 @@ let () =
             test_tools_is_a_config_child
         ; Alcotest.test_case "Config names both hops" `Quick
             test_config_footer_names_both_hops
+        ; Alcotest.test_case "Logs is an Activity child" `Quick
+            test_logs_is_an_activity_child
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick

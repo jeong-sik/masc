@@ -222,7 +222,7 @@ highlighted in a strip on the top row. Child surfaces open from their parent
 | Surface | Shows |
 |---|---|
 | Overview | Workspace summary, the task backlog, and what needs attention |
-| Acting | Every Keeper's tool calls, turn boundaries, and settlements as they land |
+| Activity (`l` Logs) | Every Keeper's tool calls, turn boundaries, and settlements as they land, with the server's own log browser off the ring |
 | Keepers (`f` Changes) | The roster, plus per-Keeper chat, logs, tool calls, runtime, recent edits, and the names of the secrets it holds |
 | Runtime (`p` Lanes, `c` Connectors) | Runtime lanes, ordered candidates, provider reachability, standalone service lanes, and external channels |
 | Approvals | The Gate queue, approved or denied from the terminal, and the questions Keepers are waiting on an answer to |
@@ -230,7 +230,7 @@ highlighted in a strip on the top row. Child surfaces open from their parent
 | Planning (`v` Task Review, Verdicts, Schedules, Fusion) | Plans and goals, completion reviews, evaluator verdicts, scheduled work, and panel/judge runs |
 | Workspace (`Enter` Code) | Registered repositories and, through a row's `Enter`, the Code file browser over the selected checkout |
 | Config (`s` Resources, `t` Tools) | `runtime.toml`, typed params, prompts, and themes, plus the MCP resource catalog and the tool tree off the ring |
-| Memory, Logs | Memory OS health with the per-Keeper fact browser, and the runtime log |
+| Memory | Memory OS health with the per-Keeper fact browser |
 
 Above the input row, one line on every surface names the next scheduled wake
 and whichever Keeper is stopped waiting on a person. It is absent when there is

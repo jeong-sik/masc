@@ -1199,7 +1199,7 @@ type surface =
    called "Harness" said neither. *)
 let surface_ring : (surface * string) list =
   [ (Overview, "Overview");
-    (Acting, "Acting");
+    (Acting, "Activity");
     (Keepers Keeper_list, "Keepers");
     (Memory, "Memory");
     (Approvals, "Approvals");
@@ -1208,7 +1208,6 @@ let surface_ring : (surface * string) list =
     (Repositories, "Workspace");
     (Runtime, "Runtime");
     (Config, "Config");
-    (System_logs, "Logs");
   ]
 
 (* Ring position of the family a view belongs to. Keeper sub-modes collapse
@@ -1219,7 +1218,10 @@ let surface_ring : (surface * string) list =
    remain Runtime observation, and Code remains a Workspace child.
    Resources and Tools collapse onto Config: an MCP resource catalog and
    the tool catalog with its receipts and usage are both answers to "what
-   is registered here", read rarely and never raced against. *)
+   is registered here", read rarely and never raced against. System logs
+   collapse onto Activity (the Acting surface): tool calls settling and the
+   server's own log lines are two readings of the same fleet timeline, and
+   the ring stop that answers "what happened" is one. *)
 let surface_ring_index (view : surface) =
   let family =
     match view with
@@ -1229,6 +1231,7 @@ let surface_ring_index (view : surface) =
     | Lanes -> Runtime
     | Code -> Repositories
     | Resources | Tools -> Config
+    | System_logs -> Acting
     | v -> v
   in
   let rec find i = function
@@ -3637,6 +3640,7 @@ let palette_entries (state : state) =
   @ [ "go Code", Palette_goto Code ]
   @ [ "go Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]
+  @ [ "go Logs", Palette_goto System_logs ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring

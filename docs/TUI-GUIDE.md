@@ -7,17 +7,18 @@ status: runbook
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
-`bin/masc_tui_types.ml`: Overview, Acting, Keepers, Memory, Approvals,
-Board, Planning, Workspace, Runtime, Config, Logs.
-Ten more surfaces hang off parents instead of holding Tab stops:
+`bin/masc_tui_types.ml`: Overview, Activity, Keepers, Memory, Approvals,
+Board, Planning, Workspace, Runtime, Config.
+Eleven more surfaces hang off parents instead of holding Tab stops:
 Planning's `v` walks Task Review, Evaluator Verdicts, Schedules, and Fusion;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
 Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
 third stop), Workspace reaches Code with `Enter` on a repository row, and
-Config reaches Resources with `s` and Tools with `t`. Task Review,
-Schedules, Fusion, Lanes, Code, Resources, and Tools also keep `go <name>`
-palette entries; Verdicts, Changes, and Keeper operations are reached from
-their parents only.
+Config reaches Resources with `s` and Tools with `t`, and Activity
+reaches the server log with `l`. Task Review, Schedules, Fusion, Lanes,
+Code, Resources, Tools, and Logs also keep `go <name>` palette entries;
+Verdicts, Changes, and Keeper operations are reached from their parents
+only.
 
 ## Quick Start
 
@@ -204,7 +205,7 @@ The same row ends with the runtime event feed: `feed: live 1240` while the
 TUI is subscribed to `GET /mcp?sse_kind=observer` and counting the frames it
 has received, `feed: opening` while the MCP session and the subscription are
 being set up, and `feed: closed after N` once the stream has ended (the
-reason is in Recent Events and on the Acting status row) -
+reason is in Recent Events and on the Activity status row) -
 the count stays so a stream that dropped after a thousand events and one that
 never opened do not read alike. The feed is opened after the first refresh
 that reaches the server and reopened on the refresh cadence after it closes;
@@ -216,7 +217,7 @@ Tasks show terminal states in Planning rollups but not in this list. A task
 detail that is open when its task turns terminal stays open - the detail reads
 the full backlog rows, not the active projection.
 
-### Acting
+### Activity
 
 Every keeper's actions as the runtime event feed delivers them, newest first:
 tool calls and their returns, turn boundaries and settlements, chat rows
@@ -224,7 +225,7 @@ landing. This is the surface for watching ten keepers at once without
 opening ten chats.
 
 ```
- MASC Acting (212 of 640 held, actions)  01:12:04  [connected]
+ MASC Activity (212 of 640 held, actions)  01:12:04  [connected]
    feed: live 640  dropped 0
    Time     Keeper             Event            Detail
    01:12:03 analyst          ▶ call             read_file [1/2] · turn 2086 · task-494
@@ -834,7 +835,7 @@ stimulus/occurrence ids, every recorded step timestamp, and the projection's
 exact failure or quarantine reason. This receipt proves wake delivery and
 whether a turn started; it does not causally attribute later tool calls or a
 work result to the schedule. The detail says so explicitly and points to
-Keeper Calls or Acting for execution evidence after the recorded turn start,
+Keeper Calls or Activity for execution evidence after the recorded turn start,
 instead of presenting an unrelated tool output as the schedule result. Left or `Esc` returns
 to the list; `j`/`k` scroll by a row and `PgUp`/`PgDn` by a page.
 
@@ -1134,6 +1135,8 @@ effective prompt through `$EDITOR`, and `x` clears only its persisted override.
 
 ### System Logs
 
+The log browser hangs off Activity under `l`; Esc returns there.
+
 The server's log ring, the same source the dashboard `logs` tab reads.
 
 ```
@@ -1172,7 +1175,7 @@ Cross-surface shortcuts. An active field or panel handles its own keys first:
 
 | Key | Action |
 |-----|--------|
-| `Tab` | Next surface: Overview -> Acting -> Keepers -> Lanes -> Approvals -> Board -> Planning -> ... -> System Logs -> Overview |
+| `Tab` | Next surface, in the ring order the strip draws |
 | `2` | Jump to Keepers when the active field or panel does not use the number |
 | `r` | Force refresh |
 | `q` twice | Quit; any other input after the first `q` cancels |
@@ -1237,9 +1240,9 @@ Per surface:
 ```
 Tab cycles the surfaces:
 
-  Overview -> Acting -> Keepers -> Memory -> Approvals -> Board
+  Overview -> Activity -> Keepers -> Memory -> Approvals -> Board
            -> Planning -> Workspace
-           -> Runtime -> Config -> Logs -> Overview
+           -> Runtime -> Config -> Overview
 
 Within a surface:
 
@@ -1258,6 +1261,7 @@ Off-ring children:
   Runtime   --p--> ... --p--> Lanes
   Workspace --Enter-->  Code (the selected repository's tree)
   Config    --s-->  Resources        Config --t--> Tools
+  Activity  --l-->  System Logs
 ```
 
 `2` reaches Keepers after the active field or panel has declined it.

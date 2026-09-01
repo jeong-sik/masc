@@ -11747,6 +11747,10 @@ and is loaded on demand through keeper_skill.
        | Some "t"
          when state.view = Config && state.runtime_param_edit = None ->
            goto_surface state ~mailbox:async_messages Tools
+       (* System logs hang off Activity the same way: one key from the
+          parent, off the Tab ring. *)
+       | Some "l" when state.view = Acting ->
+           goto_surface state ~mailbox:async_messages System_logs
        | Some (("n" | "N") as direction)
          when state.search_last <> ""
               && Option.is_some (surface_row_texts state state.view) ->
@@ -12631,7 +12635,10 @@ and is loaded on demand through keeper_skill.
                   state.system_logs_detail_seq <- None;
                   state.system_logs_detail_scroll <- 0
                 end
-                else state.view <- Overview
+                else
+                  (* Off-ring child: the way out of the list is Activity,
+                     the ring parent, same as the other hang-offs. *)
+                  goto_surface state ~mailbox:async_messages Acting
             | Connectors -> state.view <- Keepers Keeper_detail
             | Memory ->
                 if Option.is_some state.memory_facts_keeper then begin

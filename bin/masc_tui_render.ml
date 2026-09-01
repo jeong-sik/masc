@@ -1240,7 +1240,7 @@ let render_overview (state : state) =
            | Observer_opening -> "  feed: opening"
            | Observer_live { events; _ } -> Printf.sprintf "  feed: live %d" events
            | Observer_closed { events; _ } ->
-               (* The reason is in TUI Session Events and on the Acting status
+               (* The reason is in TUI Session Events and on the Activity status
                   row; here it would push the count off a narrow row. *)
                Printf.sprintf "  feed: closed after %d" events
          in
@@ -4002,7 +4002,7 @@ let schedule_detail_lines ~width (row : schedule_row) =
        [ Ansi.dim, ""
        ; Ansi.bold, "  WORK RESULT"
        ; field "Attribution" "wake/turn only; no schedule-to-tool/result join"
-       ; field "Inspect" "Keeper Calls or Acting after the recorded turn start"
+       ; field "Inspect" "Keeper Calls or Activity after the recorded turn start"
        ]
      else [])
 
@@ -12020,7 +12020,7 @@ let render_acting (state : state) =
   let header =
     Printf.sprintf "%s  %s  %s"
       (screen_title
-         (Printf.sprintf " MASC Acting (%d of %d held, %s)" shown held
+         (Printf.sprintf " MASC Activity (%d of %d held, %s)" shown held
             (Acting.filter_label state.acting_filter)))
       timestamp
       (connection_badge state)

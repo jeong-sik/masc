@@ -480,6 +480,46 @@ let test_classify_all_preserves_order () =
   check (list string) "order" [ "first"; "second" ] befores
 ;;
 
+let test_repo_file_filter_is_exact_and_preserves_order () =
+  let rows =
+    [ row ~keeper:"alpha" ~target_path:"repos/masc/bin/a.ml"
+        (edit_input ~before:"first" ~after:"1" ())
+    ; row ~keeper:"beta" ~target_path:"repos/other/bin/a.ml"
+        (edit_input ~before:"other repo" ~after:"2" ())
+    ; row ~keeper:"gamma" ~target_path:"repos/masc/bin/b.ml"
+        (edit_input ~before:"other file" ~after:"3" ())
+    ; row ~keeper:"delta" ~target_path:"repos/masc/bin/a.ml"
+        (edit_input ~before:"second" ~after:"4" ())
+    ; row ~keeper:"epsilon" ~target_path:"scratch/bin/a.ml"
+        (edit_input ~before:"bundle" ~after:"5" ())
+    ]
+  in
+  let changes = (Change.classify_all rows).Change.changes in
+  let filtered =
+    Change.for_repo_file ~repo_id:"masc" ~relative_path:"bin/a.ml" changes
+  in
+  check (list string) "keepers in source order" [ "alpha"; "delta" ]
+    (List.map (fun change -> change.Change.keeper) filtered)
+;;
+
+let test_unreadable_filter_uses_independent_resolved_target () =
+  let rows =
+    [ row ~target_path:"repos/masc/bin/a.ml" (`String "oversized input preview")
+    ; row ~target_path:"repos/masc/bin/b.ml" (`String "other oversized preview")
+    ]
+  in
+  let tally = Change.classify_all rows in
+  check int "both rows exceed the inline budget" 2 tally.Change.over_budget;
+  let filtered =
+    Change.unreadable_for_repo_file ~repo_id:"masc"
+      ~relative_path:"bin/a.ml" tally.Change.unreadable_rows
+  in
+  check int "only the exact resolved target" 1 (List.length filtered);
+  match (List.hd filtered).Change.ur_reason with
+  | Change.Input_exceeded_log_budget -> ()
+  | Change.Malformed detail -> failf "expected log budget, got %s" detail
+;;
+
 let () =
   run "keeper_tool_call_file_change"
     [ ( "kind"
@@ -526,6 +566,10 @@ let () =
     ; ( "classify_all"
       , [ test_case "counts each outcome" `Quick test_classify_all_counts_each_outcome
         ; test_case "preserves order" `Quick test_classify_all_preserves_order
+        ; test_case "repo file filter is exact" `Quick
+            test_repo_file_filter_is_exact_and_preserves_order
+        ; test_case "unreadable filter uses resolved target" `Quick
+            test_unreadable_filter_uses_independent_resolved_target
         ] )
     ]
 ;;

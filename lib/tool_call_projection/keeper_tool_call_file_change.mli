@@ -106,8 +106,19 @@ val classify : Yojson.Safe.t -> classification
     the keeper's bundle, and where that bundle sits on disk — local or
     Docker — does not change the address of a file inside it. *)
 
+type unreadable_row = {
+  ur_location : location option;
+      (** The resolved action-radius target when that independent field was
+          readable. [None] means this row could belong to any file. *)
+  ur_reason : unreadable_reason;
+}
+
 type tally = {
   changes : t list;  (** In the order the rows came. *)
+  unreadable_rows : unreadable_row list;
+      (** File-writing rows that could not become full {!t} values, in source
+          order. Kept beside the legacy counts so a file-centric reader can
+          distinguish an exact incomplete row from a fleet-wide unknown. *)
   not_file_changes : int;
   over_budget : int;
       (** File changes whose text the log did not keep. A caller that draws
@@ -121,5 +132,15 @@ val classify_all : Yojson.Safe.t list -> tally
 (** [classify_all rows] classifies each row and counts the
     outcomes. The counts are returned rather than logged so a caller can put
     them in its own answer. *)
+
+val for_repo_file : repo_id:string -> relative_path:string -> t list -> t list
+(** Exact repository-address filter for a file-centric projection. Bundle and
+    absolute writes never match: neither has a repository address, and path
+    text alone is not permission to assign one. Order is preserved. *)
+
+val unreadable_for_repo_file :
+  repo_id:string -> relative_path:string -> unreadable_row list -> unreadable_row list
+(** Exact address filter for incomplete rows whose independent action-radius
+    target survived. Rows with no readable target never match. *)
 
 val to_json : t -> Yojson.Safe.t

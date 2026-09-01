@@ -6031,6 +6031,19 @@ type file_change_snapshot = {
   fcs_malformed : int;
 }
 
+type file_activity_snapshot = {
+  fas_codebase : string;
+  fas_repo_id : string;
+  fas_file_path : string;
+  fas_window_hours : float;
+  fas_calls_in_window : int;
+  fas_changes : file_change list;
+  fas_incomplete_over_budget : int;
+  fas_incomplete_malformed : int;
+  fas_unattributed_over_budget : int;
+  fas_unattributed_malformed : int;
+}
+
 let optional_int_or_null json key =
   match member key json with
   | `Int value -> Ok (Some value)
@@ -6235,6 +6248,62 @@ let decode_file_change_snapshot json =
     ; fcs_changes
     ; fcs_over_budget
     ; fcs_malformed
+    }
+
+let decode_file_activity_snapshot json =
+  let* schema = required_string_field json "schema" in
+  let* () =
+    if String.equal schema "masc.ide.file_activity.v1"
+    then Ok ()
+    else Error (Printf.sprintf "unknown file activity schema %S" schema)
+  in
+  let* fas_codebase = required_string_field json "codebase" in
+  let* fas_repo_id = required_string_field json "repo_id" in
+  let* fas_file_path = required_string_field json "file_path" in
+  let* fas_window_hours = require_float_field json "window_hours" in
+  let* fas_calls_in_window = required_int_field json "calls_in_window" in
+  let* changes_json = required_list_field json "changes" in
+  let* fas_changes = decode_list "changes" decode_file_change changes_json in
+  let* () =
+    match
+      List.find_opt
+        (fun change ->
+          match change.fc_location with
+          | Fc_in_repo { repo_id; relative_path } ->
+            not
+              (String.equal repo_id fas_repo_id
+               && String.equal relative_path fas_file_path)
+          | Fc_in_bundle _ | Fc_at_absolute_path _ -> true)
+        fas_changes
+    with
+    | None -> Ok ()
+    | Some _ ->
+      Error
+        "file activity contains a change outside its declared repository address"
+  in
+  let* fas_incomplete_over_budget =
+    required_int_field json "incomplete_over_budget"
+  in
+  let* fas_incomplete_malformed =
+    required_int_field json "incomplete_malformed"
+  in
+  let* fas_unattributed_over_budget =
+    required_int_field json "unattributed_over_budget"
+  in
+  let* fas_unattributed_malformed =
+    required_int_field json "unattributed_malformed"
+  in
+  Ok
+    { fas_codebase
+    ; fas_repo_id
+    ; fas_file_path
+    ; fas_window_hours
+    ; fas_calls_in_window
+    ; fas_changes
+    ; fas_incomplete_over_budget
+    ; fas_incomplete_malformed
+    ; fas_unattributed_over_budget
+    ; fas_unattributed_malformed
     }
 
 (* ── git diff: what the tree holds ─────────────────────────────────── *)

@@ -454,6 +454,39 @@ let fetch_ide_annotations ~(host : string) ~(port : int) ~(codebase : string)
           Error ("annotations were not JSON: " ^ detail)
       | json -> Masc.Tui_decode.decode_ide_annotations json)
 
+(** Durable Keeper writes over one repository file. Unlike the removed IDE
+    region store, this reads the tool-call log projection and therefore keeps
+    working after the producing turn exits. *)
+let fetch_ide_file_activity ~(host : string) ~(port : int)
+    ?repo_id ~(file_path : string) :
+    (Masc.Tui_decode.file_activity_snapshot, string) result =
+  let route =
+    "/api/v1/ide/file-activity?file_path="
+    ^ percent_encode_query_value file_path
+    ^ Option.fold ~none:"" ~some:(fun repo_id ->
+        "&repo_id=" ^ percent_encode_query_value repo_id)
+        repo_id
+  in
+  match http_get ~host ~port ~path:route with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "file activity returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | `Assoc fields -> (
+          match List.assoc_opt "ok" fields, List.assoc_opt "data" fields with
+          | Some (`Bool true), Some data ->
+            Masc.Tui_decode.decode_file_activity_snapshot data
+          | Some (`Bool false), _ -> (
+              match List.assoc_opt "error" fields with
+              | Some (`String detail) -> Error detail
+              | Some _ | None -> Error "file activity rejected")
+          | Some _ | None, _ -> Error "unexpected file activity envelope")
+      | _ -> Error "unexpected file activity envelope"
+      | exception Yojson.Json_error detail ->
+        Error ("file activity was not JSON: " ^ detail))
+
 (** Ask the language server about a name on a line
     ([GET /api/v1/lsp/question]). [question] is the route's own word
     (definition / hover); positions are 1-based both ways. *)

@@ -1395,11 +1395,20 @@ type code_workspace_scope =
   | Code_scope_keeper of string
   | Code_scope_repo of string
 
-(* One row of the file pane's history view: the commits that touched the
-   open file, most recent first. *)
-type code_history_entry = Hist_commit of Tui_decode.git_log_row
+(* One row of the file pane's history view. Git owns committed history;
+   Keeper file changes are durable tool-call facts. They share only their
+   timestamp and exact repository address, which is enough to sort a display
+   timeline without claiming that an attempted write became a commit. *)
+type code_history_entry =
+  | Hist_commit of Tui_decode.git_log_row
+  | Hist_keeper_change of Tui_decode.file_change
 
-type code_history_listing = { chl_entries: code_history_entry list }
+type code_history_listing = {
+  chl_entries: code_history_entry list;
+  chl_activity_note: string;
+      (** Coverage or failure of the durable Keeper-change read. Git commits
+          remain visible when this says unavailable. *)
+}
 
 (* Which list the Config surface is showing. A bool held two and could not
    hold a third. *)
@@ -2034,9 +2043,9 @@ type state = {
   mutable code_file_max_width: int;
   mutable code_focus_file: pane_focus;
   (* The file pane's history view: H on an open file swaps the content for
-     the commits that touched it, newest first -- keyed by the path they
-     were fetched for so opening another file drops a stale listing rather
-     than captioning it. *)
+     commits and durable Keeper file changes over that repository address,
+     newest first. Keyed by the path they were fetched for so opening another
+     file drops a stale listing rather than captioning it. *)
   mutable code_history: (string * code_history_listing) option;
   mutable code_history_error: string option;
   mutable code_history_open: bool;

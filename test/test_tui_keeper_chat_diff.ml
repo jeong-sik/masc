@@ -62,6 +62,21 @@ let snapshot_json changes =
     ; "malformed", `Int 0
     ]
 
+let activity_snapshot_json changes =
+  `Assoc
+    [ "schema", `String "masc.ide.file_activity.v1"
+    ; "codebase", `String "github.com_jeong-sik_masc"
+    ; "repo_id", `String "masc"
+    ; "file_path", `String "lib/example.ml"
+    ; "window_hours", `Float 24.0
+    ; "calls_in_window", `Int 44
+    ; "changes", `List changes
+    ; "incomplete_over_budget", `Int 3
+    ; "incomplete_malformed", `Int 1
+    ; "unattributed_over_budget", `Int 2
+    ; "unattributed_malformed", `Int 1
+    ]
+
 let replace_field key value = function
   | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
   | _ -> invalid_arg "replace_field expects an object"
@@ -142,6 +157,32 @@ let test_mixed_keeper_snapshot_is_rejected () =
       check bool "both keeper stamps are named" true
         (contains ~needle:"keeper beta inside snapshot for alpha" detail)
   | Ok _ -> fail "mixed-Keeper file-change snapshot was accepted"
+;;
+
+let test_file_activity_accepts_multiple_keepers_at_one_address () =
+  match
+    Masc.Tui_decode.decode_file_activity_snapshot
+      (activity_snapshot_json
+         [ change_json ~keeper:"alpha" (); change_json ~keeper:"beta" () ])
+  with
+  | Error detail -> fail detail
+  | Ok snapshot ->
+    check int "two exact changes" 2 (List.length snapshot.fas_changes);
+    check int "exact-address incomplete rows remain visible" 3
+      snapshot.fas_incomplete_over_budget;
+    check int "unattributed budget rows remain visible" 2
+      snapshot.fas_unattributed_over_budget
+;;
+
+let test_file_activity_rejects_a_change_from_another_file () =
+  match
+    Masc.Tui_decode.decode_file_activity_snapshot
+      (activity_snapshot_json [ change_json ~path:"lib/other.ml" () ])
+  with
+  | Error detail ->
+    check bool "mixed address is named" true
+      (contains ~needle:"outside its declared repository address" detail)
+  | Ok _ -> fail "mixed-address file activity was accepted"
 ;;
 
 let test_unknown_change_kind_is_rejected () =
@@ -642,6 +683,10 @@ let () =
             test_missing_canonical_identity_is_counted
         ; test_case "mixed keeper snapshot is rejected" `Quick
             test_mixed_keeper_snapshot_is_rejected
+        ; test_case "file activity accepts multiple keepers" `Quick
+            test_file_activity_accepts_multiple_keepers_at_one_address
+        ; test_case "file activity rejects another file" `Quick
+            test_file_activity_rejects_a_change_from_another_file
         ; test_case "unknown change kind is rejected" `Quick
             test_unknown_change_kind_is_rejected
         ; test_case "unknown location kind is rejected" `Quick

@@ -311,9 +311,15 @@ let classify row =
 
 type tally = {
   changes : t list;
+  unreadable_rows : unreadable_row list;
   not_file_changes : int;
   over_budget : int;
   malformed : int;
+}
+
+and unreadable_row = {
+  ur_location : location option;
+  ur_reason : unreadable_reason;
 }
 
 let classify_all rows =
@@ -323,13 +329,55 @@ let classify_all rows =
         match classify row with
         | File_change change -> { tally with changes = change :: tally.changes }
         | Not_a_file_change -> { tally with not_file_changes = tally.not_file_changes + 1 }
-        | Unreadable Input_exceeded_log_budget ->
-            { tally with over_budget = tally.over_budget + 1 }
-        | Unreadable (Malformed _) -> { tally with malformed = tally.malformed + 1 })
-      { changes = []; not_file_changes = 0; over_budget = 0; malformed = 0 }
+        | Unreadable reason ->
+          let ur_location =
+            match target_path_of_row row with
+            | Ok target_path -> Some (location_of_target ~target_path)
+            | Error _ -> None
+          in
+          { tally with
+            unreadable_rows = { ur_location; ur_reason = reason } :: tally.unreadable_rows
+          ; over_budget =
+              (match reason with
+               | Input_exceeded_log_budget -> tally.over_budget + 1
+               | Malformed _ -> tally.over_budget)
+          ; malformed =
+              (match reason with
+               | Input_exceeded_log_budget -> tally.malformed
+               | Malformed _ -> tally.malformed + 1)
+          })
+      { changes = []
+      ; unreadable_rows = []
+      ; not_file_changes = 0
+      ; over_budget = 0
+      ; malformed = 0
+      }
       rows
   in
-  { tally with changes = List.rev tally.changes }
+  { tally with
+    changes = List.rev tally.changes
+  ; unreadable_rows = List.rev tally.unreadable_rows
+  }
+
+let for_repo_file ~repo_id ~relative_path changes =
+  List.filter
+    (fun change ->
+      match change.location with
+      | In_repo address ->
+        String.equal address.repo_id repo_id
+        && String.equal address.relative_path relative_path
+      | In_bundle _ | At_absolute_path _ -> false)
+    changes
+
+let unreadable_for_repo_file ~repo_id ~relative_path rows =
+  List.filter
+    (fun row ->
+      match row.ur_location with
+      | Some (In_repo address) ->
+        String.equal address.repo_id repo_id
+        && String.equal address.relative_path relative_path
+      | Some (In_bundle _ | At_absolute_path _) | None -> false)
+    rows
 
 let location_to_json = function
   | In_repo { repo_id; relative_path } ->

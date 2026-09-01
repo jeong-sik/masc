@@ -1,7 +1,7 @@
 type outcome =
   | Succeeded
   | Succeeded_with_summary of
-      { decision : string
+      { decision_preview : string
       ; summary : string
       }
   | Failed of
@@ -92,10 +92,10 @@ module Payload = struct
 
   let completion_to_yojson = function
     | Succeeded -> `Assoc [ "outcome", `String "succeeded" ]
-    | Succeeded_with_summary { decision; summary } ->
+    | Succeeded_with_summary { decision_preview; summary } ->
       `Assoc
         [ "outcome", `String "succeeded"
-        ; "decision", `String decision
+        ; "decision", `String decision_preview
         ; "summary", `String summary
         ]
     | Failed { reason; code } ->
@@ -124,8 +124,8 @@ module Payload = struct
       in
       (match decision, summary with
        | None, None -> Ok Succeeded
-       | Some decision, Some summary ->
-         Ok (Succeeded_with_summary { decision; summary })
+       | Some decision_preview, Some summary ->
+         Ok (Succeeded_with_summary { decision_preview; summary })
        | Some _, None | None, Some _ ->
          Error "succeeded fusion completion requires decision and summary together")
     | "failed" ->
@@ -287,8 +287,8 @@ let run_to_yojson run =
   let outcome_fields =
     match run.status with
     | Running | Completed Succeeded -> []
-    | Completed (Succeeded_with_summary { decision; summary }) ->
-      [ "decision", `String decision; "summary", `String summary ]
+    | Completed (Succeeded_with_summary { decision_preview; summary }) ->
+      [ "decision", `String decision_preview; "summary", `String summary ]
     | Completed (Failed { reason; code }) ->
       [ "error", `String reason; "failure_code", `String code ]
   in

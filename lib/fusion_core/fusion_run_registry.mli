@@ -3,7 +3,11 @@
 type outcome =
   | Succeeded
   | Succeeded_with_summary of
-      { decision : string
+      { decision_preview : string
+        (** A byte-capped preview of the judge's rendered decision text, for
+            listings — not the decision itself, which lives typed as
+            {!Fusion_types.judge_decision} on the synthesis. The wire key
+            stays ["decision"] so recorded rows keep replaying. *)
       ; summary : string
       }
   | Failed of

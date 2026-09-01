@@ -604,7 +604,7 @@ let test_emit_success_projects_board_chat_and_registry () =
     | Some
         { Fusion_run_registry.status =
             Fusion_run_registry.Completed
-              (Fusion_run_registry.Succeeded_with_summary { decision; summary })
+              (Fusion_run_registry.Succeeded_with_summary { decision_preview = decision; summary })
         ; _
         } ->
       check string "registry decision preview" ("answer — " ^ resolved_answer)
@@ -1069,7 +1069,7 @@ let test_tool_handle_async_success_projects_running_then_completed () =
     | Some
         { Fusion_run_registry.status =
             Fusion_run_registry.Completed
-              (Fusion_run_registry.Succeeded_with_summary { decision; summary })
+              (Fusion_run_registry.Succeeded_with_summary { decision_preview = decision; summary })
         ; _
         } ->
       check string "async registry decision preview"

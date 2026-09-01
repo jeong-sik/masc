@@ -269,7 +269,7 @@ let test_detail_uses_exact_typed_board_origin () =
     ~run_id:recorded_run_id
     ~outcome:
       (Fusion_run_registry.Succeeded_with_summary
-         { decision = "answer"; summary = "answer-sentinel" });
+         { decision_preview = "answer"; summary = "answer-sentinel" });
   let recorded_status, recorded_json =
     Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response
       ~registry

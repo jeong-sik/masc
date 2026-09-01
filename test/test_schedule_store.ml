@@ -175,6 +175,130 @@ let test_cancel_request_marks_cancelled () =
   | None -> fail "schedule missing"
 ;;
 
+(* task-370 follow-up: the durable store previously treated [Wake_running]
+   rows of a Running schedule as terminal-toward-prune once the schedule
+   itself became Cancelled or any non-{Scheduled,Due,Running} status, so
+   they could not be settled by the runner that owned them. The repair
+   in [prune_wakes] now asks the live schedule set whether the wake still
+   has a runner that can settle it; this regression pins both directions:
+   a Running schedule's in-flight wake is kept live, and a Due-only
+   schedule's cancel still leaves the (empty) wake list clean. *)
+let test_running_wake_is_settleable_so_prune_keeps_it () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~schedule_id:"running-stale" () in
+  ignore (insert_ok config req);
+  (match refresh_due config ~now:201.0 with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  (match start_due_candidate config ~now:202.0 ~schedule_id:req.schedule_id with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  let after_start = read_state config in
+  let running_count =
+    List.length
+      (List.filter
+         (fun (w : Schedule_domain.wake_record) ->
+            String.equal w.schedule_id req.schedule_id
+            && Schedule_domain.(match w.status with Wake_running -> true | _ -> false))
+         after_start.wakes)
+  in
+  check int "running wake present" 1 running_count;
+  (* Trying to cancel a Running schedule must refuse -- a runner owns the
+     wake, and the store must not orphan it under the runner. *)
+  (match cancel_request config ~schedule_id:req.schedule_id with
+   | Error (Invalid_status_transition _) -> ()
+   | Ok _ -> fail "cancel of Running schedule must be refused"
+   | Error err -> fail (store_error_to_string err));
+  let after_cancel_refused = read_state config in
+  let still_running =
+    List.exists
+      (fun (w : Schedule_domain.wake_record) ->
+         String.equal w.schedule_id req.schedule_id
+         && Schedule_domain.(match w.status with Wake_running -> true | _ -> false))
+      after_cancel_refused.wakes
+  in
+  check bool "running wake survived refused cancel" true still_running
+;;
+
+(* Disposition of legacy in-flight rows (task-1198): the live cancel paths
+   never meet a [Wake_running] row, because a Running schedule refuses
+   cancel in both [cancel_request] and [cancel_matching] -- so the retained
+   rows observed live (17 cancelled schedules holding awaiting_ack
+   occurrence receipts up to 22.8 days, all recurring) were written by older
+   builds. This reproduces exactly that ledger shape directly -- a Cancelled
+   schedule with a still-[Wake_running] row -- and checks the next store
+   mutation pass disposes it: [prune_wakes] transitions the row to terminal
+   with the sweep origin, instead of dropping it as the old code did. *)
+let test_legacy_running_wake_against_cancelled_schedule_is_disposed_by_sweep () =
+  with_workspace
+  @@ fun config ->
+  let legacy_id = "legacy-cancelled-with-running-wake" in
+  let req = make_request ~schedule_id:legacy_id ~recurrence:(Interval { interval_sec = 60 }) () in
+  ignore (insert_ok config req);
+  (* Land the schedule in Cancelled the honest way, then rewrite the ledger
+     with an in-flight wake row for it -- the exact shape older builds left
+     behind on this workspace's live ledger. *)
+  (match cancel_request config ~schedule_id:legacy_id with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  let state = read_state config in
+  let legacy_wake =
+    { schedule_instance_id = legacy_id ^ ".legacy"
+    ; schedule_id = legacy_id
+    ; started_at = 100.0
+    ; finished_at = None
+    ; due_at = 100.0
+    ; payload_digest = "digest-" ^ legacy_id
+    ; status = Wake_running
+    ; detail = Some (`String "receipt-must-survive-disposition")
+    ; error = None
+    }
+  in
+  let legacy_state = { state with wakes = legacy_wake :: state.wakes } in
+  let legacy_state_json : Yojson.Safe.t =
+    `Assoc
+      [ ("version", `Int legacy_state.version)
+      ; ("updated_at", `Float legacy_state.updated_at)
+      ; ("schedules", `List (List.map Schedule_domain.schedule_request_to_yojson legacy_state.schedules))
+      ; ("wakes", `List (List.map Schedule_domain.wake_record_to_yojson legacy_state.wakes))
+      ]
+  in
+  Workspace_core.write_text config
+    (schedules_path config)
+    (Yojson.Safe.to_string legacy_state_json);
+  (* A different schedule's cancel forces a store write pass; the sweep in
+     [prune_wakes] must dispose the legacy row (transition, not drop). *)
+  let other_id = "other-schedule-to-force-sweep" in
+  let other = make_request ~schedule_id:other_id () in
+  ignore (insert_ok config other);
+  (match cancel_request config ~schedule_id:other_id with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  let after = read_state config in
+  match
+    List.find_opt
+      (fun (w : Schedule_domain.wake_record) ->
+         String.equal w.schedule_id legacy_id)
+      after.wakes
+  with
+  | None -> Alcotest.fail "legacy running wake was dropped instead of disposed"
+  | Some w ->
+    (match w.status with
+     | Wake_running -> Alcotest.fail "legacy wake still running after sweep"
+     | Wake_succeeded | Wake_failed ->
+       check string
+         "sweep disposition origin is asserted verbatim"
+         "schedule left running; wake disposed at store sweep"
+         (Option.value ~default:"" w.error);
+       check bool
+         "receipt detail survives disposition"
+         true
+         (match w.detail with
+          | Some (`String s) -> String.equal s "receipt-must-survive-disposition"
+          | _ -> false))
+;;
+
 let test_due_candidates_dispatch_without_scheduler_authorization_state () =
   with_workspace
   @@ fun config ->
@@ -1095,6 +1219,10 @@ let () =
             test_store_rejects_non_scheduled_initial_status;
           test_case "cancel request marks cancelled" `Quick
             test_cancel_request_marks_cancelled;
+          test_case "running wake stays live across refused cancel" `Quick
+            test_running_wake_is_settleable_so_prune_keeps_it;
+          test_case "legacy running wake against cancelled schedule is disposed by sweep" `Quick
+            test_legacy_running_wake_against_cancelled_schedule_is_disposed_by_sweep;
         ] );
       ( "due",
         [

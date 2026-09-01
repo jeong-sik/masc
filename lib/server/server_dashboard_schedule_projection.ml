@@ -418,6 +418,16 @@ let schedule_keeper_queue_evidence_dashboard_json
                 @ schedule_queue_match_fields ~now "pending" match_)
            | None, _ :: _ ->
              `Assoc (("projection_status", `String "read_error") :: base_fields)
+           | None, [] when schedule_cancelled ->
+             (* Cancel propagation (task-370): the cancel boundary withdraws a
+                cancelled schedule's enqueued utterance from the durable queue,
+                so an absent pending match is the healthy outcome here, not a
+                lost wake. Rows written before that propagation may still show
+                a legacy [retained_terminal_wake] match above. *)
+             `Assoc
+               (( "projection_status"
+                , `String "withdrawn_at_cancel" )
+                :: base_fields)
            | None, [] ->
              `Assoc (("projection_status", `String "not_found") :: base_fields))))
 ;;

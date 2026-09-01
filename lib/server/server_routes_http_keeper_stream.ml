@@ -501,7 +501,7 @@ let handle_keeper_turn_interrupt state request reqd =
         match Yojson.Safe.from_string body_str with
         | `Assoc fields ->
           (match List.assoc_opt "name" fields with
-           | Some (`String s) ->
+           | Some (`String s) when String.trim s <> "" ->
              let request_id_result =
                match List.assoc_opt "request_id" fields with
                | None -> Ok None
@@ -513,6 +513,10 @@ let handle_keeper_turn_interrupt state request reqd =
              Result.map
                (fun request_id -> String.trim s, request_id)
                request_id_result
+           (* A blank name trims to "" and then reads as an unregistered
+              keeper, so the caller saw 404 for what is a bad request. The
+              request_id check below already worked this way. *)
+           | Some (`String _) -> Error "name must be non-blank"
            | _ -> Error "name (string) is required")
         | _ -> Error "JSON object body required"
       with
@@ -540,9 +544,9 @@ let handle_keeper_turn_interrupt state request reqd =
                   ~keeper_name operation_id
               with
               | Ok Keeper_owner.Operation_interrupt_signalled ->
-                Log.Keeper.info
-                  "keeper_turn_interrupt: keeper=%s request_id=%s exact=true"
-                  keeper_name request_id;
+                Log.Keeper.info ~keeper_name
+                  "keeper_turn_interrupt: request_id=%s exact=true"
+                  request_id;
                 respond_json_value_with_cors ~status:`OK request reqd
                   (`Assoc
                      [ "signalled", `Bool true
@@ -594,7 +598,8 @@ let handle_keeper_turn_interrupt state request reqd =
            true] read as that outcome and hid a 63-minute hang (#29229). *)
         (match Keeper_registry.interrupt_current_turn ~base_path keeper_name with
         | Keeper_registry.Exact_turn_cancelled turn_id ->
-          Log.Keeper.info "keeper_turn_interrupt: keeper=%s turn_id=%d" keeper_name turn_id;
+          Log.Keeper.info ~keeper_name ~turn_id
+            "keeper_turn_interrupt: exact turn cancelled";
           respond_json_value_with_cors ~status:`OK request reqd
             (`Assoc [ ("signalled", `Bool true); ("turn_id", `Int turn_id) ])
         | Keeper_registry.Exact_no_turn_in_flight ->

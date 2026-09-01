@@ -97,6 +97,14 @@ let count_calls_in_value_binding ~module_path ~binding_name ~callee =
         expr =
           (fun self e ->
             (match e.pexp_desc with
+             (* [x |> f] is a call to [f]. Counting only direct application
+                made every structural invariant blind to piped call sites, so
+                a binding that reached its callee through [|>] read as zero. *)
+             | Pexp_apply
+                 ( { pexp_desc = Pexp_ident { txt = Lident "|>"; _ }; _ }
+                 , [ (_, _); (_, { pexp_desc = Pexp_ident { txt; _ }; _ }) ] )
+               ->
+               if longident_to_string txt = callee then incr count
              | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, _) ->
                if longident_to_string txt = callee then incr count
              | _ -> ());

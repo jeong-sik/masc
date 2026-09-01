@@ -1432,7 +1432,7 @@ type async_msg =
   | Keeper_chat_stream_deltas of Keeper_chat.request * Keeper_chat_live.delta list
   | Keeper_chat_stream_unavailable of Keeper_chat.request * string
   | Keeper_chat_interrupt_done of
-      Keeper_chat.request * (Masc_tui_http.interrupt_signal, string) result
+      Keeper_chat.request * (Masc_tui_interrupt_signal.interrupt_signal, string) result
   | Keeper_chat_history_loaded of
       int
       * string
@@ -8942,9 +8942,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            let live = entry.live in
            let noted =
              match result with
-             | Ok (Masc_tui_http.Signalled { turn_id }) ->
+             | Ok (Masc_tui_interrupt_signal.Signalled { turn_id }) ->
                  Keeper_chat_transcript.Signal_sent { turn_id }
-             | Ok (Masc_tui_http.Not_signalled { reason; detail }) ->
+             | Ok (Masc_tui_interrupt_signal.Not_signalled { reason; detail }) ->
                  Keeper_chat_transcript.Signal_declined
                    (match detail with
                     | None -> reason

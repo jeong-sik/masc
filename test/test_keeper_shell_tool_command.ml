@@ -7,7 +7,7 @@
    full turn context to build, which a unit test does not have. *)
 
 let () =
-  let module K = Keeper_shell_tool_command in
+  let module K = Masc.Keeper_shell_tool_command in
   assert (
     K.split_words [ "board"; "post"; "get"; "p-1" ]
     = Some ("masc_board_post_get", [ "p-1" ]));
@@ -28,17 +28,17 @@ let () =
     = Some ("masc_board_post_get", [ "p-9"; "extra" ]))
 
 let () =
-  (match Keeper_tool_runtime.descriptor_for_internal "masc_board_post_get" with
+  (match Masc.Keeper_tool_runtime.descriptor_for_internal "masc_board_post_get" with
    | None -> assert false
    | Some descriptor ->
      (* Positional words land on the schema's required parameters, in the
         order the schema states them. *)
      (match
-        Keeper_shell_tool_command.args_json_of_words ~descriptor [ "p-123" ]
+        Masc.Keeper_shell_tool_command.args_json_of_words ~descriptor [ "p-123" ]
       with
       | Ok (`Assoc [ ("post_id", `String "p-123") ]) -> ()
       | Ok _ | Error _ -> assert false);
-     (match Keeper_shell_tool_command.args_json_of_words ~descriptor [] with
+     (match Masc.Keeper_shell_tool_command.args_json_of_words ~descriptor [] with
       | Error message ->
         (* "shell command takes 1 argument, got 0" *)
         assert (String.length message > 0)
@@ -46,10 +46,14 @@ let () =
      (* A schema with no required key states zero required parameters, so
         an optional-only tool answers the path alone.  This is the review
         finding that made [masc board list] and [masc time now] work. *)
-     (match Keeper_tool_runtime.descriptor_for_internal "masc_board_list" with
+     (match Masc.Keeper_tool_runtime.descriptor_for_internal "masc_board_list" with
       | None -> assert false
       | Some list_descriptor -> (
-        match Keeper_shell_tool_command.args_json_of_words ~list_descriptor [] with
+        match
+          Masc.Keeper_shell_tool_command.args_json_of_words
+            ~descriptor:list_descriptor
+            []
+        with
         | Ok (`Assoc []) -> ()
         | Ok _ | Error _ -> assert false)))
 

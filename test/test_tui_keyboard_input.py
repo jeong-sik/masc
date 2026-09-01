@@ -1164,6 +1164,34 @@ def planning_selection_http_fixtures() -> HttpFixtures:
     return fixtures
 
 
+def planning_activity_http_fixtures() -> HttpFixtures:
+    goal_id = "goal-actor-clarity"
+    fixtures = overview_event_http_fixtures()
+    fixtures[PLANNING_PATH] = planning_snapshot(
+        [planning_goal(goal_id, "Actor-visible goal activity")]
+    )
+    fixtures[f"/api/v1/dashboard/goals/detail?goal_id={goal_id}"] = (
+        200,
+        {
+            "approval_queue_state": {"state": "ready"},
+            "timeline": [
+                {
+                    "ts": "2026-08-21T04:00:00Z",
+                    "kind": "task",
+                    "lane": "task:task-actor",
+                    "title": "Actor-visible task",
+                    "summary": (
+                        "done · completed by beta · handoff by alpha: "
+                        "continue from the saved checkpoint"
+                    ),
+                    "severity": "ok",
+                }
+            ],
+        },
+    )
+    return fixtures
+
+
 def approval_selection_item(
     token: str,
     *,
@@ -5946,24 +5974,76 @@ def planning_review_hierarchy_interaction() -> Interaction:
         _base_path: str,
     ) -> None:
         goals = tab_until(process, master_fd, output, b"MASC Planning")
-        if b"\xe2\x96\xb8Goals" not in goals or b"Task Review" not in goals:
-            raise AssertionError(f"Planning did not expose both child views: {goals!r}")
+        for needle in (
+            b"\xe2\x96\xb81 Goals",
+            b"2 Task Review",
+            b"3 Evaluator Verdicts",
+        ):
+            if needle not in goals:
+                raise AssertionError(
+                    f"Planning did not expose its ordered child views "
+                    f"({needle!r}): {goals!r}"
+                )
         review = send_and_wait(
-            process, master_fd, output, b"v", b"\xe2\x96\xb8Task Review"
+            process, master_fd, output, b"v", b"\xe2\x96\xb82 Task Review"
         )
         wait_for_output(process, master_fd, output, b"task-901", start=0, timeout=3.0)
         plain_review = CSI_RE.sub(b"", review)
         if b"MASC Planning" not in plain_review:
             raise AssertionError(f"Task Review lost its Planning parent: {plain_review!r}")
-        goals_again = send_and_wait(
-            process, master_fd, output, b"v", b"\xe2\x96\xb8Goals"
+        verdicts = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"v",
+            b"\xe2\x96\xb83 Evaluator Verdicts",
         )
-        if b"Task Review" not in goals_again:
+        verdicts_plain = CSI_RE.sub(b"", verdicts)
+        for needle in (b"old Harness", b"not Goal proof", b"Evaluator"):
+            if needle not in verdicts_plain:
+                raise AssertionError(
+                    f"Evaluator Verdicts did not explain itself ({needle!r}): "
+                    f"{verdicts_plain!r}"
+                )
+        goals_again = send_and_wait(
+            process, master_fd, output, b"v", b"\xe2\x96\xb81 Goals"
+        )
+        if b"2 Task Review" not in goals_again:
             raise AssertionError(
                 f"Goals did not retain the Task Review sibling: {goals_again!r}"
             )
         # Task Review is a child, not the next top-level Tab destination.
         send_and_wait(process, master_fd, output, b"\t", b"MASC Schedules")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def planning_activity_actor_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Planning")
+        detail = send_and_wait(
+            process, master_fd, output, b"\r", b"completed by beta"
+        )
+        plain = CSI_RE.sub(b"", detail)
+        for needle in (
+            b"RELATED ACTIVITY",
+            b"latest state per linked item",
+            b"task-actor",
+            b"completed by beta",
+            b"handoff by",
+            b"alpha:",
+        ):
+            if needle not in plain:
+                raise AssertionError(
+                    f"Planning activity omitted {needle!r}: {plain!r}"
+                )
         os.write(master_fd, b"q")
 
     return interact
@@ -9661,6 +9741,12 @@ def run_planning_review_regression(executable: str) -> None:
         description="Planning owns Goals and Task Review",
         interact=planning_review_hierarchy_interaction(),
         http_fixtures=verification_verdict_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="Planning activity names actor role and handoff author",
+        interact=planning_activity_actor_interaction(),
+        http_fixtures=planning_activity_http_fixtures(),
     )
 
 

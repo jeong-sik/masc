@@ -284,6 +284,33 @@ let goal_event_timeline_json event =
   in
   timeline_event_json ~ts ~kind:event_type ~lane:"goal" ~title ~summary ~severity
 
+let task_timeline_summary (task : Masc_domain.task) =
+  let status = Masc_domain.task_status_to_string task.task_status in
+  let actor =
+    match task.task_status with
+    | Masc_domain.Todo ->
+        Option.map (fun name -> "created by " ^ name) task.created_by
+    | Masc_domain.Claimed { assignee; _ } -> Some ("claimed by " ^ assignee)
+    | Masc_domain.InProgress { assignee; _ } -> Some ("working: " ^ assignee)
+    | Masc_domain.AwaitingVerification { assignee; _ } ->
+        Some ("submitted by " ^ assignee)
+    | Masc_domain.Done { assignee; _ } -> Some ("completed by " ^ assignee)
+    | Masc_domain.Cancelled { cancelled_by; _ } ->
+        Some ("cancelled by " ^ cancelled_by)
+  in
+  let handoff =
+    Option.bind task.handoff_context (fun context ->
+      let summary = String.trim context.summary in
+      if String.equal summary "" then None
+      else
+        Some
+          (match context.updated_by with
+           | Some author when not (String.equal (String.trim author) "") ->
+               Printf.sprintf "handoff by %s: %s" (String.trim author) summary
+           | Some _ | None -> "handoff: " ^ summary))
+  in
+  status :: List.filter_map Fun.id [ actor; handoff ] |> String.concat " · "
+
 let build_goal_timeline node linked_keepers approvals goal_events =
   let task_events =
     node.tasks
@@ -292,8 +319,7 @@ let build_goal_timeline node linked_keepers approvals goal_events =
            timeline_event_json ~ts:(task_updated_at task) ~kind:"task"
              ~lane:("task:" ^ task.id)
              ~title:task.title
-             ~summary:
-               status
+             ~summary:(task_timeline_summary task)
              ~severity:
                (match status with
                 | "cancelled" -> "bad"

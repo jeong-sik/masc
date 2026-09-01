@@ -141,6 +141,30 @@ let test_turns_pass_non_lifecycle_rows_through () =
     ]
     (List.map text rows)
 
+(* What [visible Turns] hides must not come back through the fold as
+   pass-through rows. The live screen this pins showed 128 rows under
+   "scope turns" dominated by composite pushes and heartbeats
+   (2026-09-01). *)
+let test_turns_do_not_readmit_what_the_scope_hides () =
+  let events_oldest_first =
+    [ agent_core ~kind:Observer.Turn_ready ~turn:7 "analyst"
+    ; Observer.Keeper_composite_changed { keeper = "analyst"; at = 100. }
+    ; heartbeat "analyst"
+    ; Observer.Keeper_chat_stream_frame
+        { keeper = "analyst"; frame = Some "text_delta"; at = 100. }
+    ; Observer.Keeper_waiting_inventory_changed
+        { keeper = "analyst"; queue_kind = Some "event_queue"; at = 100. }
+    ; Observer.Snapshot "keepers"
+    ; Observer.Other "operator_digest"
+    ]
+  in
+  let rows = Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) in
+  check (list string) "only the turn and the untaught server row remain"
+    [ "? server operator_digest | "
+    ; "\xe2\x96\xb6 analyst turn 7 | running"
+    ]
+    (List.map text rows)
+
 (* A running turn names what it is doing right now: the call alone puts the
    tool on screen, before any return or ledger row exists. *)
 let test_a_running_turn_names_its_in_flight_call () =
@@ -510,6 +534,8 @@ let () =
             test_a_running_turn_names_its_in_flight_call
         ; test_case "turns pass non-lifecycle rows through" `Quick
             test_turns_pass_non_lifecycle_rows_through
+        ; test_case "turns do not readmit what the scope hides" `Quick
+            test_turns_do_not_readmit_what_the_scope_hides
         ; test_case "turns fall back to the wire when the ledger is silent"
             `Quick test_turns_fall_back_to_the_wire_when_the_ledger_is_silent
         ] )

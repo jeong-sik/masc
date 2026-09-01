@@ -4,11 +4,12 @@ module Layout = Masc_tui_message_layout
 module Frame = Masc_tui_frame
 module Markdown_cache = Masc_tui_markdown_render_cache
 
-let entry ?(timestamp = "12:34:56")
+let entry ?(timestamp = "12:34:56") ?timeline_bucket
     ?(markdown_source = Layout.Markdown_streaming) style role request_label body :
     Layout.entry =
   { style
   ; timestamp
+  ; timeline_bucket
   ; role_label = role
   ; role_label_mark_cells =
       Layout.role_label_mark_cells ~style ()
@@ -533,6 +534,7 @@ let transcript count =
   List.init count (fun index ->
       { Layout.style = Layout.Keeper;
         timestamp = Printf.sprintf "12:%02d:00" (index mod 60);
+        timeline_bucket = None;
         role_label = "code-reviewer";
         request_label = Printf.sprintf "turn-%d" index;
         body =
@@ -894,6 +896,153 @@ let test_metadata_keeps_a_typed_origin () =
       check string "origin request" "tui-..aaaaaaaa" request_label;
       check string "continuation timestamp" "12:35:01" continued_at
   | _ -> fail "message rows lost their typed origin/body structure"
+;;
+
+let timeline_bucket ?(is_dst = false) hour : Layout.timeline_bucket =
+  { tb_year = 2026
+  ; tb_month = 9
+  ; tb_day = 1
+  ; tb_hour = hour
+  ; tb_is_dst = is_dst
+  }
+;;
+
+let test_timeline_breaks_follow_civil_hours () =
+  let first =
+    entry ~timeline_bucket:(timeline_bucket 18) Layout.Inbound "broadcast"
+      "broadcast-18" "earlier lane"
+  in
+  let second =
+    entry ~timeline_bucket:(timeline_bucket 18) Layout.Journal "JOURNAL"
+      "journal-18" "same hour"
+  in
+  let third =
+    entry ~timeline_bucket:(timeline_bucket 19) Layout.Keeper "keeper.one"
+      "turn-19" "later hour"
+  in
+  let entries = [ first; second; third ] in
+  let rows = Layout.visible_rows ~inner_width:60 ~height:30 entries in
+  let breaks =
+    List.filter_map
+      (fun (row : Layout.row) ->
+        match row.kind with
+        | Layout.Metadata (Layout.Timeline_break bucket) ->
+            Some (bucket.tb_hour, row.text)
+        | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
+        | Layout.Body ->
+            None)
+      rows
+  in
+  check (list int) "one rail at the first row of each civil hour" [ 18; 19 ]
+    (List.map fst breaks);
+  check bool "the first rail names its local date and hour" true
+    (String.starts_with
+       ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 18:00 "
+       (List.assoc 18 breaks));
+  check bool "the later rail names its local date and hour" true
+    (String.starts_with
+       ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 19:00 "
+       (List.assoc 19 breaks));
+  check int "full transcript counts two rails" 8
+    (Layout.total_rows ~inner_width:60 entries);
+  check int "suffix count reuses the preceding hour rail" 5
+    (Layout.total_rows ~previous:first ~inner_width:60 [ second; third ])
+;;
+
+let test_tiny_viewport_keeps_message_over_hour_rail () =
+  let newest =
+    entry ~timeline_bucket:(timeline_bucket 19) Layout.Keeper "keeper.one"
+      "turn-19" "latest body"
+  in
+  match Layout.visible_rows ~inner_width:60 ~height:2 [ newest ] with
+  | [ { Layout.kind = Layout.Metadata (Layout.Origin _); _ }
+    ; { Layout.kind = Layout.Body; text; _ }
+    ] ->
+      check string "the newest body remains visible" "  latest body" text
+  | _ -> fail "a cramped viewport let the hour rail hide the newest message"
+;;
+
+let test_oversized_hour_group_counts_its_deferred_rail () =
+  let newest =
+    entry ~timeline_bucket:(timeline_bucket 19) Layout.Keeper "keeper.one"
+      "turn-19" (String.make 160 'x')
+  in
+  let all = Layout.visible_rows ~inner_width:20 ~height:100 [ newest ] in
+  (match Layout.visible_rows ~inner_width:20 ~height:3 [ newest ] with
+   | [ { Layout.kind = Layout.Metadata (Layout.Origin _); _ }
+     ; { Layout.kind = Layout.Viewport_gap { hidden_rows }; _ }
+     ; { Layout.kind = Layout.Body; _ }
+     ] ->
+       check int "the explicit gap counts the deferred rail and body middle"
+         (List.length all - 2) hidden_rows
+   | _ -> fail "an oversized hour group hid rows without its typed gap");
+  match
+    Layout.scrolled_rows ~inner_width:20 ~height:1
+      ~from_bottom:(List.length all - 1) [ newest ]
+  with
+  | [ { Layout.kind = Layout.Metadata (Layout.Timeline_break _); _ } ] -> ()
+  | _ -> fail "the deferred hour rail was not reachable in scrollback"
+;;
+
+let test_compact_origin_modes_keep_and_reach_the_hour_rail () =
+  let newest =
+    entry ~timeline_bucket:(timeline_bucket 19) Layout.Keeper "keeper.one"
+      "turn-19" "latest body"
+  in
+  List.iter
+    (fun (name, origin) ->
+      (match
+         Layout.visible_rows ~origin ~inner_width:60 ~height:2 [ newest ]
+       with
+       | [ { Layout.kind = Layout.Metadata (Layout.Timeline_break _); _ }
+         ; { Layout.kind = Layout.Body; text; _ }
+         ] ->
+           check string (name ^ " body follows its fitting hour rail")
+             "  latest body" text
+       | _ -> fail (name ^ " dropped an hour rail that fit exactly"));
+      match
+        Layout.scrolled_rows ~origin ~inner_width:60 ~height:1 ~from_bottom:1
+          [ newest ]
+      with
+      | [ { Layout.kind = Layout.Metadata (Layout.Timeline_break _); _ } ] -> ()
+      | _ -> fail (name ^ " made a cramped hour rail unreachable by scrolling"))
+    [ "inline", Layout.Origin_inline; "bare", Layout.Origin_bare ]
+;;
+
+let test_repeated_dst_hour_has_distinct_rails () =
+  let daylight =
+    entry ~timeline_bucket:(timeline_bucket ~is_dst:true 1) Layout.Inbound
+      "broadcast" "daylight" "first 01:00"
+  in
+  let standard =
+    entry ~timeline_bucket:(timeline_bucket 1) Layout.Keeper "keeper.one"
+      "standard" "second 01:00"
+  in
+  let labels =
+    Layout.visible_rows ~inner_width:60 ~height:10 [ daylight; standard ]
+    |> List.filter_map (fun (row : Layout.row) ->
+         match row.kind with
+         | Layout.Metadata (Layout.Timeline_break _) -> Some row.text
+         | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
+         | Layout.Body ->
+             None)
+  in
+  check int "the repeated civil hour keeps both rails" 2 (List.length labels);
+  match labels with
+  | daylight_label :: standard_label :: [] ->
+      check bool "the daylight occurrence says DST" true
+        (String.starts_with
+           ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 01:00 DST "
+           daylight_label);
+      check bool "the standard occurrence is visibly distinct" true
+        (String.starts_with
+           ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 01:00 "
+           standard_label);
+      check bool "the standard occurrence does not claim daylight time" false
+        (String.starts_with
+           ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 01:00 DST "
+           standard_label)
+  | _ -> fail "the repeated civil hour did not produce two labels"
 ;;
 
 (* Scrollback. Ten one-line entries render to twenty rows -- a metadata row and
@@ -1639,6 +1788,16 @@ let () =
             test_oversized_entry_small_height_policy
         ; test_case "scrolling shows transcript rows without synthetic gaps" `Quick
             test_scrolling_into_an_oversized_entry_shows_transcript_rows_only
+        ; test_case "civil-hour rails are structural and deduplicated" `Quick
+            test_timeline_breaks_follow_civil_hours
+        ; test_case "a tiny viewport keeps the message before its hour rail"
+            `Quick test_tiny_viewport_keeps_message_over_hour_rail
+        ; test_case "oversized hour groups count their deferred rail" `Quick
+            test_oversized_hour_group_counts_its_deferred_rail
+        ; test_case "compact origin modes keep and reach the hour rail" `Quick
+            test_compact_origin_modes_keep_and_reach_the_hour_rail
+        ; test_case "DST fallback hours remain visibly distinct" `Quick
+            test_repeated_dst_hour_has_distinct_rails
         ; test_case "terminal cell width and UTF-8 fit" `Quick
             test_terminal_cell_width_and_fit
         ; test_case "the scroll hint says how far back" `Quick

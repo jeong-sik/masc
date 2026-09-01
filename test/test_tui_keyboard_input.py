@@ -5299,7 +5299,7 @@ def memory_journal_chat_fixture() -> HttpResponse:
                 "id": "assistant:before-journal",
                 "role": "assistant",
                 "content": "broadcast before Librarian",
-                "ts": 1787348489.0,
+                "ts": 1787344889.0,
             },
             {
                 "id": "assistant:after-journal",
@@ -5402,13 +5402,35 @@ def memory_journal_timeline_interaction(
             b"Librarian committed current memory revision 9",
         )
         plain_visible = CSI_RE.sub(b"", visible)
+        earlier_hour = time.strftime(
+            "%Y-%m-%d · %H:00", time.localtime(1787344889.0)
+        ).encode()
+        later_hour = time.strftime(
+            "%Y-%m-%d · %H:00", time.localtime(1787348490.35)
+        ).encode()
+        earlier_rail = plain_visible.find(earlier_hour)
+        later_rail = plain_visible.find(later_hour)
+        for label in (earlier_hour, later_hour):
+            styled_rail = re.compile(
+                rb"\x1b\[[0-9;]*m\x1b\[1m"
+                + "── ".encode()
+                + re.escape(label)
+            )
+            if styled_rail.search(visible) is None:
+                raise AssertionError(
+                    "Civil-hour rail was not drawn in its semantic colour "
+                    f"and bold weight for {label!r}: {visible!r}"
+                )
         before = plain_visible.find(b"broadcast before Librarian")
         journal = plain_visible.find(b"Librarian committed current memory revision 9")
         after = plain_visible.find(b"direct turn after Librarian")
-        if not (0 <= before < journal < after):
+        if not (
+            0 <= earlier_rail < before < later_rail < journal < after
+        ):
             raise AssertionError(
-                "Parallel chat/journal lanes were not ordered by recorded time "
-                f"without splitting conversation turns: {visible!r}"
+                "Civil-hour rails and parallel chat/journal lanes were not "
+                "ordered by recorded time without splitting conversation "
+                f"turns: {visible!r}"
             )
         if re.search("\u25c8\\s+JOURNAL".encode(), plain_visible) is None:
             raise AssertionError(

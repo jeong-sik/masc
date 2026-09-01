@@ -15,6 +15,12 @@ let rows ?(now = origin) t = Transcript.status_rows ~now t
 
 let feed t deltas = List.iter (Transcript.apply t) deltas
 
+let test_started_at_keeps_the_dispatch_instant () =
+  let transcript = fresh () in
+  check (float 0.) "live timeline source" origin
+    (Transcript.started_at transcript)
+;;
+
 let occurrence ?(scope = 0) ?block_index call_id =
   { Live.stream_scope = scope
   ; block_index = Option.value ~default:(Hashtbl.hash call_id) block_index
@@ -1058,7 +1064,9 @@ let test_full_skill_rows_show_actions_and_exact_proof () =
 let () =
   run "tui_keeper_chat_transcript"
     [ ( "content"
-      , [ test_case "text and reasoning accumulate separately" `Quick
+      , [ test_case "started_at keeps the dispatch instant" `Quick
+            test_started_at_keeps_the_dispatch_instant
+        ; test_case "text and reasoning accumulate separately" `Quick
             test_text_and_thinking_accumulate
         ; test_case "the whole reasoning trail is kept" `Quick
             test_the_whole_reasoning_trail_is_kept

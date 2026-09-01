@@ -208,6 +208,7 @@ let trail_text t text =
 
 let keeper_name t = t.keeper_name
 let request_id t = t.request_id
+let started_at t = t.started_at
 let phase t = t.phase
 let interrupt t = t.interrupt
 let note_interrupt t interrupt = t.interrupt <- interrupt

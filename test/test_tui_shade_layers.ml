@@ -20,6 +20,7 @@ module Layout = Masc_tui_message_layout
 let entry style body : Layout.entry =
   { style
   ; timestamp = "01:41:00"
+  ; timeline_bucket = None
   ; role_label = "LABEL"
   (* No speaker mark on this fixture: the shade layers are what it is about,
      and a mark would only widen the label. #30744 added the field while this

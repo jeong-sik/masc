@@ -35,20 +35,28 @@ Three separate gaps, at three different costs.
 
 | | What is missing | Where it already exists |
 |---|---|---|
-| A | Every wake but the newest | `Schedule_store.state.wakes` holds them all |
+| A | Every retained wake but the newest | `Schedule_store.state.wakes` holds up to 32 per schedule |
 | B | 303 of 323 requests | The store holds them; the projection caps at 20 |
 | C | What the wake produced | Nowhere: no turn carries the schedule's identity |
 
 ### A — the wake history is stored and not projected
 
-`Schedule_store.state` is `{ version; updated_at; schedules; wakes }`. Every
-wake attempt is already durable, with `started_at`, `finished_at`, `due_at`,
-`payload_digest`, `status`, `detail`, and `error`. The projection calls
-`Schedule_store.last_wake_for_schedule_instance` and emits one row, so the
-detail pane can only ever say `LAST WAKE`. A schedule that has woken ninety
-times shows its ninetieth and hides eighty-nine.
+`Schedule_store.state` is `{ version; updated_at; schedules; wakes }`. A wake
+record carries `started_at`, `finished_at`, `due_at`, `payload_digest`,
+`status`, `detail`, and `error`. The store keeps every in-flight wake and, per
+schedule, the newest `terminal_wakes_retained_per_schedule = 32` terminal ones
+(`schedule_store.ml`, `prune_wakes`); the list is newest-first because each new
+wake is consed onto it.
+
+The projection calls `Schedule_store.last_wake_for_schedule_instance`, which is
+a `List.find_opt` returning the first match, and emits that one row. So the
+detail pane can only ever say `LAST WAKE`: of the up-to-32 attempts the store
+kept, an operator reads one.
 
 Nothing needs to be recorded for A. It is a projection that was never written.
+The 32 is a real ceiling and this RFC does not raise it -- it makes the
+difference between 1 and 32 readable, and says which of the two numbers a
+reader is looking at.
 
 ### B — the page is capped and the cap is invisible where it matters
 
@@ -132,8 +140,9 @@ due in the same minute are indistinguishable afterwards.
 ## What this does not do
 
 - No new store. A, B, and their projections read `Schedule_store` as it is.
-- No retention change. Wake history is already kept; this RFC does not decide
-  how long it should be.
+- No retention change. `terminal_wakes_retained_per_schedule` stays 32. A
+  schedule that woke ninety times has 32 readable attempts, not ninety, and the
+  projection states the retained count rather than implying completeness.
 - No result *content* on the schedule surface. D4 makes the trace possible; the
   operator still reads the work itself on Keeper Calls or Activity, now by
   identity rather than by clock.
@@ -150,7 +159,9 @@ surface that reads it, which D1–D3 build.
 ## Verification
 
 - D1: a store fixture with three wakes for one instance and one for a replaced
-  instance projects exactly the three, newest first, and states 3 of 3.
+  instance projects exactly the three, newest first, and states 3 of 3. A
+  fixture at the retention ceiling states what it kept, never a larger total it
+  cannot produce.
 - D2: the pane renders `WAKES (3 of 3)` and each attempt's error, and reports
   the count against the total when the limit bites.
 - D3: a target selector over a fixture with more requests than the fleet limit

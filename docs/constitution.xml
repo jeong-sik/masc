@@ -4,11 +4,12 @@
   [2] execution_protocol : 영속. 작업 방식 규약.
   [3] mission : 매 턴 교체. 목표 지점으로 전진하기 위한 구체적 작업 단위.
 
-  이 파일은 2026-08-20 코드 감사(14개 영역) 결과를 반영해 레포에 버전 관리되는 SSOT다.
+  이 파일은 2026-08-20 코드 감사(14개 영역) 결과와 2026-09-01 사용자 재확인을
+  반영해 레포에 버전 관리되는 SSOT다.
   잔여 갭 추적: docs/audits/constitution-code-parity-matrix.md
 -->
 
-<masc_constitution version="2026-08-20">
+<masc_constitution version="2026-09-01">
 
   <project>
     <name>MASC (Multi Agent Streaming Coordination)</name>
@@ -20,12 +21,12 @@
     <env>
       <repo>https://github.com/jeong-sik/masc</repo>
       <workdir>~/me/workspace/yousleepwhen/masc</workdir>
-      <runtime_dir><base-path>/.masc</runtime_dir>
+      <runtime_dir>&lt;base-path&gt;/.masc</runtime_dir>
       <lang>OCaml 5.5, TypeScript</lang>
     </env>
   </project>
 
-  <providers note="Rate Limit 에 따라 가용성이 바뀐다. 런타임 설정은 <base-path>/.masc 참고.">
+  <providers note="Rate Limit 에 따라 가용성이 바뀐다. 런타임 설정은 &lt;base-path&gt;/.masc 참고.">
     <subscription>
       <p name="OpenAI Codex" plan="Codex Pro $200"/>
       <p name="Anthropic Claude Code" plan="Max $200"/>
@@ -295,6 +296,28 @@
     <research>이미 잘 설계된 세기의 제품과 케이스를 참고한다. 검색은 필수.</research>
   </engineering>
 
+  <!-- ================= 실행 프로토콜 ================= -->
+  <execution_protocol>
+    <work_unit>
+      작업 분량은 항상 20k token 이하로 유지한다.
+      연속 작업에 실제 의존성이 있으면 Stacked PR 로 나눈다.
+      독립적인 수정은 main 기반의 별도 PR 로 나눈다.
+    </work_unit>
+    <build_and_ci>
+      로컬 빌드는 하지 않는다. 기능 구현을 먼저 진행하고 CI 는 작업 마무리 경계에서 실행한다.
+      CI 가 도는 동안 timer 를 보며 기다리거나 반복 조회하지 않는다.
+      현재 맥락에 맞는 다음 구현을 미리 진행한다. 독립 기능일 수도 있고 다음 Stack 일 수도 있다.
+      한 작업이나 관련 없는 CI 수리에 매몰되지 않고 전체 제품 맥락이 보이게 구현한다.
+    </build_and_ci>
+    <review>
+      한 작업에서 다음 작업으로 넘어갈 때 이전 작업에 적대적 리뷰 에이전트를 병렬로 붙인다.
+      리뷰가 도착하면 리뷰 대응 에이전트를 병렬로 붙여 검토하고 대응한다.
+      리뷰 에이전트의 존재는 직접 읽고 판단해야 할 책임을 대체하지 않는다.
+      사용자가 다른 세션에서 전달한 리뷰도 반영한다.
+      진행에 사용자 도움이 필요하면 구체적인 도움을 요청할 수 있다.
+    </review>
+  </execution_protocol>
+
   <prior_art note="다들 잘하는 게 있고 못하는 게 있다. 흡수하고 개선한다.">
     <ref>Hermes Agent</ref>
     <ref>Orca</ref>
@@ -396,7 +419,7 @@
     <req>결과물에 로그 + 실측 + 브라우저 스크린샷을 포함한다.</req>
   </evidence>
 
-  <runtime_data path="<base-path>/.masc">
+  <runtime_data path="&lt;base-path&gt;/.masc">
     <rule>기능 개발에 불필요하고 용량이 부담되면 지우고 새로 한다.</rule>
     <rule>Keeper 프롬프트도 변화시키면서 진행해도 된다.</rule>
   </runtime_data>

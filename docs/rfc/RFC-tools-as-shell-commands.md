@@ -28,7 +28,7 @@ masc board post get p-123; masc tasks list --status claimed; masc memory search 
 
 ### 1.1 순차 결합의 병목은 provider 왕복이다 (실측)
 
-2026-08-25~09-01 라이브 로그(`~/me/.masc/tool_calls/`, 97,450 호출 / 9,179 턴):
+2026-08-25~09-01 라이브 로그(`<base-path>/.masc/tool_calls/`, 97,450 호출 / 9,179 턴):
 
 - 한 assistant 메시지에 복수 `tool_use`를 묶은 호출(batch_size≥2)은 **11.8%** 뿐이다.
   나머지 88%는 한 번에 하나씩 발행한다. 도구 A 결과를 보고 다음 요청에서 B를 부르는

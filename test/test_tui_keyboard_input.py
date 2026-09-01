@@ -6540,23 +6540,30 @@ def standalone_lane_fixture(
 ) -> dict[str, object]:
     """One row of the observation matrix, in the wire shape the strict
     decoder accepts: every known lane exactly once, observation_only set."""
-    purposes = {
+    lane_contracts = {
         "board_attention_exact": (
-            "Judges one durable Board candidate for Keeper attention."
+            "Judges one durable Board candidate for Keeper attention.",
+            True,
         ),
         "hitl_auto_judge": (
-            "Produces the structured judgment for one held approval."
+            "Produces the structured judgment for one held approval.",
+            True,
         ),
         "librarian_exact": (
-            "Selects the next Memory OS snapshot from immutable Keeper history."
+            "Selects the next Memory OS snapshot from immutable Keeper history.",
+            False,
         ),
-        "verifier_exact": "Reviews Task completion and Goal proof evidence.",
+        "verifier_exact": (
+            "Reviews Task completion and Goal proof evidence.",
+            False,
+        ),
     }
+    purpose, required = lane_contracts[lane_id]
     return {
         "lane_id": lane_id,
         "label": label,
-        "purpose": purposes[lane_id],
-        "required": True,
+        "purpose": purpose,
+        "required": required,
         "observation_only": True,
         "configured": True,
         "configuration_state": "ready",

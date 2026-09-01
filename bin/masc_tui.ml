@@ -13825,6 +13825,16 @@ and is loaded on demand through keeper_skill.
            state.system_logs_scroll <- 0;
            state.system_logs_cursor <- 0;
            launch_system_logs_load state ~mailbox:async_messages
+       | Some ("v" | "V") when state.view = System_logs ->
+           (* Unlike [l]'s four-step floor ladder, this answers the common
+              operational question directly: DEBUG rows on or off. Both
+              states refetch because the server owns level filtering. *)
+           state.system_logs_min_level <-
+             Masc.Tui_decode.toggle_system_log_verbose
+               state.system_logs_min_level;
+           state.system_logs_scroll <- 0;
+           state.system_logs_cursor <- 0;
+           launch_system_logs_load state ~mailbox:async_messages
        | Some ("c" | "C") when state.view = System_logs ->
            (* Category narrows what this page shows, not what it fetched.
               The vocabulary is the categories the loaded rows carry, so the

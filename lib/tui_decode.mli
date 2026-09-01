@@ -1619,8 +1619,14 @@ val next_system_log_category :
 
 val next_system_log_min_level :
   system_log_level option -> system_log_level option
-(** One step of the verbose ladder: [None] (server default, everything) ->
+(** One step of the level-floor ladder: [None] (server default, everything) ->
     info -> warn -> error -> [None]. *)
+
+val toggle_system_log_verbose :
+  system_log_level option -> system_log_level option
+(** [None] (the route's DEBUG default) becomes INFO; any explicit floor opens
+    back to DEBUG. This is the direct verbose on/off control beside the full
+    level ladder. *)
 
 val system_log_level_query : system_log_level -> string
 (** The lowercase spelling the [/api/v1/dashboard/logs] route validates. *)

@@ -3666,6 +3666,15 @@ let test_system_log_level_ladder_cycles () =
   Alcotest.(check string) "the wire spelling is the route's lowercase" "warn"
     (system_log_level_query System_warn)
 
+let test_system_log_verbose_toggles_debug_directly () =
+  let open Tui_decode in
+  Alcotest.(check bool) "verbose off uses info" true
+    (toggle_system_log_verbose None = Some System_info);
+  Alcotest.(check bool) "info opens verbose" true
+    (toggle_system_log_verbose (Some System_info) = None);
+  Alcotest.(check bool) "a stricter floor also opens verbose" true
+    (toggle_system_log_verbose (Some System_error) = None)
+
 let test_decode_system_log_accepts_both_warn_spellings () =
   let label spelling =
     match
@@ -6245,6 +6254,8 @@ let () =
           test_system_log_category_filter_vocabulary_and_cycle;
         Alcotest.test_case "level ladder cycles" `Quick
           test_system_log_level_ladder_cycles;
+        Alcotest.test_case "verbose toggles DEBUG directly" `Quick
+          test_system_log_verbose_toggles_debug_directly;
         Alcotest.test_case "an unnamed level stays itself" `Quick
           test_decode_system_log_keeps_an_unnamed_level_as_itself;
         Alcotest.test_case "null keeper is absent" `Quick

@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""Measure wasted tool round-trips in keeper tool-call logs.
+
+Reads one day of `<base-path>/tool_calls/YYYY-MM/DD.jsonl` and reports, per
+turn (keeper, keeper_turn_id, trace_id), how many round-trips were spent on
+consecutive calls to the same tool, classified by why the repeat happened:
+
+- fanout     — same argument shape, different values. Independent lookups sent
+               one at a time; the batch executor (agent_tool_batch_plan) would
+               run them concurrently if they arrived in one response.
+- duplicate  — byte-identical (tool, args) repeated back to back.
+- probing    — the argument key set changed between consecutive calls; the
+               model is feeling for a shape the schema/error did not teach.
+
+Two focused sub-measurements drive specific fixes:
+
+- unchanged-recall pairs: back-to-back identical (tool, args) calls whose
+  first response carried `"kind":"unchanged"`. These measure the
+  keeper_tasks_list self-contradiction (row stats on a row-less response);
+  the fix removes matching_count/returned_count/truncated from unchanged
+  responses, so this count is expected to approach zero after deploy.
+- probe pairs whose first call failed: errors that did not teach the model
+  the corrective argument (e.g. enum violations rendered as "wrong type").
+
+Falsification: if after deploying the unchanged fix this script still reports
+a comparable unchanged-recall pair count over a full day, the
+self-contradiction diagnosis was wrong (or another producer emits the same
+shape) — re-open the investigation instead of stacking mitigations.
+
+The classifier only groups calls inside one turn; cross-turn repeats are a
+different behaviour (memory, not batching) and are deliberately out of scope.
+
+Usage:
+    scripts/measure-tool-roundtrips.py --date 2026-09-01
+    scripts/measure-tool-roundtrips.py --tool-calls-dir ~/me/.masc/tool_calls --date 2026-09-01 --top 10
+"""
+
+from __future__ import annotations
+
+import argparse
+import collections
+import json
+import pathlib
+import sys
+
+
+def normalized_args(value: object) -> str:
+    if value is None:
+        return ""
+    return json.dumps(value, sort_keys=True, ensure_ascii=False)
+
+
+def key_set(value: object) -> frozenset[str]:
+    if isinstance(value, dict):
+        return frozenset(value.keys())
+    return frozenset()
+
+
+def parse_output_kind(output: object) -> str | None:
+    """Return the `kind` field of a tool output when it parses as JSON."""
+    if isinstance(output, dict):
+        kind = output.get("kind")
+        return kind if isinstance(kind, str) else None
+    if isinstance(output, str):
+        try:
+            parsed = json.loads(output)
+        except ValueError:
+            return None
+        if isinstance(parsed, dict):
+            kind = parsed.get("kind")
+            return kind if isinstance(kind, str) else None
+    return None
+
+
+def load_rows(path: pathlib.Path) -> list[dict]:
+    rows: list[dict] = []
+    with path.open(encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if row.get("record_kind") == "tool_call":
+                rows.append(row)
+    rows.sort(key=lambda row: float(row.get("ts", 0.0)))
+    return rows
+
+
+def group_turns(rows: list[dict]) -> dict[tuple, list[dict]]:
+    turns: dict[tuple, list[dict]] = collections.defaultdict(list)
+    for row in rows:
+        key = (row.get("keeper"), row.get("keeper_turn_id"), row.get("trace_id"))
+        turns[key].append(row)
+    return turns
+
+
+def classify_runs(turns: dict[tuple, list[dict]]):
+    """Classify each same-tool consecutive run inside a turn.
+
+    A run of length L costs L-1 avoidable round-trips relative to sending the
+    calls in one response (fanout/duplicate) or getting a teaching error
+    (probing).
+    """
+    saved = collections.Counter()
+    by_tool: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    for calls in turns.values():
+        index = 0
+        while index < len(calls):
+            end = index
+            while end + 1 < len(calls) and calls[end + 1].get("tool") == calls[index].get("tool"):
+                end += 1
+            length = end - index + 1
+            if length > 1:
+                args = [calls[position].get("input") for position in range(index, end + 1)]
+                serialized = [normalized_args(value) for value in args]
+                tool = calls[index].get("tool") or "?"
+                if len(set(serialized)) == 1:
+                    label = "duplicate"
+                elif len({key_set(value) for value in args}) > 1:
+                    label = "probing"
+                else:
+                    label = "fanout"
+                saved[label] += length - 1
+                by_tool[label][tool] += length - 1
+            index = end + 1
+    return saved, by_tool
+
+
+def unchanged_recall_pairs(turns: dict[tuple, list[dict]]) -> collections.Counter:
+    """Back-to-back identical (tool, args) pairs whose first output was `unchanged`."""
+    pairs = collections.Counter()
+    for calls in turns.values():
+        for first, second in zip(calls, calls[1:]):
+            if first.get("tool") != second.get("tool"):
+                continue
+            if normalized_args(first.get("input")) != normalized_args(second.get("input")):
+                continue
+            if parse_output_kind(first.get("output")) == "unchanged":
+                pairs[first.get("tool") or "?"] += 1
+    return pairs
+
+
+def probe_pairs(turns: dict[tuple, list[dict]]) -> tuple[int, int]:
+    """Consecutive same-tool pairs whose argument key set changed.
+
+    Returns (pair_count, pairs_whose_first_call_failed).
+    """
+    total = 0
+    first_failed = 0
+    for calls in turns.values():
+        for first, second in zip(calls, calls[1:]):
+            if first.get("tool") != second.get("tool"):
+                continue
+            if key_set(first.get("input")) == key_set(second.get("input")):
+                continue
+            total += 1
+            if first.get("success") is False:
+                first_failed += 1
+    return total, first_failed
+
+
+def batch_size_histogram(rows: list[dict]) -> collections.Counter:
+    histogram = collections.Counter()
+    for row in rows:
+        histogram[int(row.get("batch_size", 1))] += 1
+    return histogram
+
+
+def render(rows: list[dict], top: int) -> str:
+    turns = group_turns(rows)
+    saved, by_tool = classify_runs(turns)
+    unchanged = unchanged_recall_pairs(turns)
+    probes, probes_first_failed = probe_pairs(turns)
+    batches = batch_size_histogram(rows)
+
+    total_saved = sum(saved.values())
+    total_calls = len(rows)
+    single = batches.get(1, 0)
+
+    lines: list[str] = []
+    lines.append("# Tool round-trip waste")
+    lines.append("")
+    lines.append(f"- tool_call rows: {total_calls}")
+    lines.append(f"- turns: {len(turns)}")
+    share = (100.0 * total_saved / total_calls) if total_calls else 0.0
+    lines.append(f"- avoidable round-trips (same-tool runs): {total_saved} ({share:.1f}% of calls)")
+    lines.append("")
+    lines.append("## Classification")
+    lines.append("")
+    lines.append("| class | avoidable round-trips | top tools |")
+    lines.append("|---|---:|---|")
+    for label in ("fanout", "duplicate", "probing"):
+        tops = ", ".join(f"{tool} {count}" for tool, count in by_tool[label].most_common(3))
+        lines.append(f"| {label} | {saved[label]} | {tops} |")
+    lines.append("")
+    lines.append("## unchanged-recall pairs (keeper_tasks_list self-contradiction)")
+    lines.append("")
+    if unchanged:
+        for tool, count in unchanged.most_common(top):
+            lines.append(f"- {tool}: {count}")
+    else:
+        lines.append("- none")
+    lines.append("")
+    lines.append("## probe pairs (argument shape changed between consecutive calls)")
+    lines.append("")
+    lines.append(f"- pairs: {probes}")
+    lines.append(f"- pairs whose first call failed: {probes_first_failed}")
+    lines.append("")
+    lines.append("## batch_size distribution")
+    lines.append("")
+    share_single = (100.0 * single / total_calls) if total_calls else 0.0
+    lines.append(f"- batch_size=1: {single} ({share_single:.1f}% of calls)")
+    for size, count in sorted(batches.items()):
+        if size != 1:
+            lines.append(f"- batch_size={size}: {count}")
+    return "\n".join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
+    parser.add_argument(
+        "--tool-calls-dir",
+        default=str(pathlib.Path.home() / "me" / ".masc" / "tool_calls"),
+        help="Root of the dated tool-call log tree (default: ~/me/.masc/tool_calls)",
+    )
+    parser.add_argument(
+        "--date",
+        required=True,
+        help="Day to measure, as YYYY-MM-DD (selects <dir>/YYYY-MM/DD.jsonl)",
+    )
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=5,
+        help="How many tools to list per section (default: 5)",
+    )
+    options = parser.parse_args()
+
+    year_month, _, day = options.date.rpartition("-")
+    log_path = pathlib.Path(options.tool_calls_dir).expanduser() / year_month / f"{day}.jsonl"
+    if not log_path.is_file():
+        print(f"no such log file: {log_path}", file=sys.stderr)
+        return 1
+
+    rows = load_rows(log_path)
+    print(render(rows, options.top))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

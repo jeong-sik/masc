@@ -97,7 +97,7 @@ redirect도 마찬가지로 거절한다(도구 호출이 표준 입력을 소�
    셸 builtin(`if`, `while`)과 같은 문법적 사실이며, 대상 도구 이름은 코드에
    하드코딩되지 않고 그 턴의 tool registry에서 온다.
 2. **한 곳에서만 판정한다.** 여러 분기에 흩뿌리는 휴리스틱이 아니라 Execute 실행
-   경로의 단일 문(desingle gate front-door)이다. `script`/`argv` 경계(#32087)가
+   경로의 단일한 앞문이다. `script`/`argv` 경계(#32087)가
    `Shell_costume`의 closed list로 임의 문자열→임의 프로그램을 막았던 것과 같은
    구조다.
 3. **등록되지 않은 도구 이름은 에러다.** `masc unknown-tool ...`은 조용한 noop가

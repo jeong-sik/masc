@@ -7,7 +7,7 @@
 
     [t] is a variant rather than a record so that the [Host] case needs
     no runner.  The dispatch path in [Exec_dispatch] routes [Host]
-    directly to [Process_eio], and [Docker] / [Ssh] via the carried
+    directly to [Process_eio], and guest / SSH targets via the carried
     [runner]. *)
 
 (** A runner closure executes an argv with the given env / cwd and returns
@@ -55,6 +55,7 @@ type ssh_endpoint = {
 type t =
   | Host
   | Docker of { image : string; runner : runner; pipeline_runner : pipeline_runner option }
+  | Micro_vm of { image : string; runner : runner; pipeline_runner : pipeline_runner option }
   | Ssh of { endpoint : ssh_endpoint; runner : runner; pipeline_runner : pipeline_runner option }
   | Delegated of { caller : runner }
       (** A stage that is not a process at all: the [caller] decides what
@@ -75,6 +76,11 @@ val delegated : caller:runner -> unit -> t
     the runner closure; this keeps [lib/exec] from having to know about
     [Keeper_turn_sandbox_runtime] or any other keeper-side construct. *)
 val docker : image:string -> runner:runner -> ?pipeline_runner:pipeline_runner -> unit -> t
+
+(** Build an Apple Container microVM target. The runner owns guest startup and
+    command execution; keeping this distinct from [Docker] prevents policy and
+    telemetry consumers from reporting the wrong backend. *)
+val micro_vm : image:string -> runner:runner -> ?pipeline_runner:pipeline_runner -> unit -> t
 
 (** Build an SSH target.  As with {!docker}, the caller (the keeper layer)
     supplies the runner closure over its own SSH runtime; [lib/exec] only

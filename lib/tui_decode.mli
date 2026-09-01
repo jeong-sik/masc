@@ -1757,6 +1757,26 @@ type file_change_snapshot = {
   fcs_malformed : int;
 }
 
+type file_activity_snapshot = {
+  fas_codebase : string;
+  fas_repo_id : string;
+  fas_file_path : string;
+  fas_window_hours : float;
+  fas_calls_in_window : int;
+  fas_changes : file_change list;
+      (** Durable changes from every Keeper over this exact repository file,
+          in tool-log order. *)
+  fas_incomplete_over_budget : int;
+      (** Exact-address writes whose body outgrew the inline log budget. *)
+  fas_incomplete_malformed : int;
+      (** Exact-address file-writing rows that violated the projection
+          contract. *)
+  fas_unattributed_over_budget : int;
+      (** Fleet-wide file writes whose input outgrew the log budget. Their
+          target is unknowable, so they are not claimed for this file. *)
+  fas_unattributed_malformed : int;
+}
+
 val file_change_target_line : file_change -> int
 (** Exact producer-recorded line to open. A deletion opens at its old start,
     which is the post-edit position of the following line. Historical,
@@ -1768,6 +1788,11 @@ val decode_file_change_snapshot :
 (** Decode one Keeper-stamped snapshot. Every inner change must carry the same
     Keeper identity; a mixed response is rejected rather than indexed under
     the top-level name. *)
+
+val decode_file_activity_snapshot :
+  Yojson.Safe.t -> (file_activity_snapshot, string) result
+(** Decode [masc.ide.file_activity.v1]. Every carried change must match the
+    declared repository id and relative path; a mixed response is rejected. *)
 
 (** {1 What the tree holds}
 

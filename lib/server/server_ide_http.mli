@@ -2,14 +2,16 @@
 
     Routes:
     - GET  /api/v1/ide/annotations
+    - GET  /api/v1/ide/file-activity
     - POST /api/v1/ide/annotations
     - DELETE /api/v1/ide/annotations/:id
     - GET  /api/v1/ide/events
     - GET  /api/v1/ide/presence
 
-    All routes use the workspace base resolution from
-    {!Server_routes_http_routes_workspace} so the IDE reads/writes
-    from the correct project or keeper playground. *)
+    Annotation routes use the canonical codebase scope. [file-activity] is not
+    the removed region observation store: it resolves a supplied registered
+    repository id, or an exact project-base checkout match, then filters the
+    durable Keeper tool-call log by that repository address. *)
 
 module Http = Http_server_eio
 

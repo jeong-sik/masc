@@ -13,6 +13,12 @@ val tool_calls_fleet_cache_key : masc_root:string -> string
 (** Return the bounded fleet-row cache key after invalidating its cached value
     when the durable tool-call revision has advanced. *)
 
+val file_changes_default_window_hours : float
+val file_changes_max_window_hours : float
+(** Shared read-cost bounds for durable file-change projections. The
+    per-Keeper and file-centric routes must state and clamp the same trailing
+    window rather than silently scanning different histories. *)
+
 (** {1 Trajectory projection} *)
 
 val handle_keeper_fusion_post :

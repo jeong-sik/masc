@@ -73,6 +73,129 @@ let ide_memory_episodic_status = "not_configured"
 
 let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
 
+let file_activity_window_hours uri =
+  match Uri.get_query_param uri "window_hours" with
+  | None -> Ok Server_dashboard_http_keeper_api.file_changes_default_window_hours
+  | Some raw -> (
+      match float_of_string_opt (String.trim raw) with
+      | Some hours when hours > 0. ->
+        Ok (Float.min hours Server_dashboard_http_keeper_api.file_changes_max_window_hours)
+      | Some _ | None ->
+        Error (Printf.sprintf "window_hours must be a positive number: %s" raw))
+
+let required_query_param uri name =
+  match Uri.get_query_param uri name with
+  | Some raw when String.trim raw <> "" -> Ok (String.trim raw)
+  | Some _ | None -> Error (Printf.sprintf "%s is required" name)
+
+let optional_query_param uri name =
+  match Uri.get_query_param uri name with
+  | Some raw when String.trim raw <> "" -> Some (String.trim raw)
+  | Some _ | None -> None
+
+let canonical_path path =
+  try Unix.realpath path with
+  | Unix.Unix_error _ -> path
+
+let resolve_file_activity_repository ~base_path ~repo_id =
+  match Repo_store.load_all ~base_path with
+  | Error detail -> Error (`Unavailable detail)
+  | Ok repositories -> (
+      let matches =
+        match repo_id with
+        | Some repo_id ->
+          List.filter
+            (fun (repository : Repo_manager_types.repository) ->
+              String.equal repository.id repo_id)
+            repositories
+        | None ->
+          let project_path = canonical_path base_path in
+          List.filter
+            (fun (repository : Repo_manager_types.repository) ->
+              String.equal
+                (canonical_path (Repo_store.local_path ~base_path repository))
+                project_path)
+            repositories
+      in
+      match matches with
+      | [] ->
+        Error
+          (`Not_found
+            (match repo_id with
+             | Some repo_id -> "repository is not registered: " ^ repo_id
+             | None ->
+               "the project base path is not a registered repository checkout"))
+      | _ :: _ :: _ ->
+        Error
+          (`Ambiguous
+            (match repo_id with
+             | Some repo_id ->
+               "more than one registered repository uses id " ^ repo_id
+             | None ->
+               "more than one registered repository resolves to the project base path"))
+      | [ repository ] -> (
+          match Agent_observation.canonical_url_of_remote repository.url with
+          | Some codebase -> Ok (repository, codebase)
+          | None ->
+            Error
+              (`No_codebase
+                (Printf.sprintf
+                   "repository %s has no canonical codebase"
+                   repository.id))))
+
+let file_activity_json ~codebase ~repo_id ~file_path ~window_hours =
+  let rows = Keeper_tool_call_log.read_window ~window_hours () in
+  let tally = Keeper_tool_call_file_change.classify_all rows in
+  let changes =
+    Keeper_tool_call_file_change.for_repo_file
+      ~repo_id ~relative_path:file_path tally.changes
+  in
+  let incomplete =
+    Keeper_tool_call_file_change.unreadable_for_repo_file
+      ~repo_id ~relative_path:file_path tally.unreadable_rows
+  in
+  let count_reason reason =
+    List.fold_left
+      (fun total row -> if row.Keeper_tool_call_file_change.ur_reason = reason then total + 1 else total)
+      0
+  in
+  let incomplete_over_budget = count_reason Keeper_tool_call_file_change.Input_exceeded_log_budget incomplete in
+  let incomplete_malformed =
+    List.fold_left
+      (fun total row ->
+        match row.Keeper_tool_call_file_change.ur_reason with
+        | Keeper_tool_call_file_change.Malformed _ -> total + 1
+        | Keeper_tool_call_file_change.Input_exceeded_log_budget -> total)
+      0 incomplete
+  in
+  let unattributed =
+    List.filter
+      (fun row -> Option.is_none row.Keeper_tool_call_file_change.ur_location)
+      tally.unreadable_rows
+  in
+  let unattributed_over_budget =
+    count_reason Keeper_tool_call_file_change.Input_exceeded_log_budget unattributed
+  in
+  let unattributed_malformed =
+    List.length unattributed - unattributed_over_budget
+  in
+  `Assoc
+    [ "schema", `String "masc.ide.file_activity.v1"
+    ; "codebase", `String codebase
+    ; "repo_id", `String repo_id
+    ; "file_path", `String file_path
+    ; "window_hours", `Float window_hours
+    ; "calls_in_window", `Int (List.length rows)
+    ; "changes", `List (List.map Keeper_tool_call_file_change.to_json changes)
+    ; "incomplete_over_budget", `Int incomplete_over_budget
+    ; "incomplete_malformed", `Int incomplete_malformed
+    (* These rows lost even their independent action-radius target. Keep the
+       counts explicitly fleet-wide; do not imply that they belong to this
+       file or silently omit them. *)
+    ; "unattributed_over_budget", `Int unattributed_over_budget
+    ; "unattributed_malformed", `Int unattributed_malformed
+    ]
+
 (* ── Observation snapshot endpoint (task-1686) ─────────────────────── *)
 
 (** GET /api/v1/ide/observations/snapshot — returns accumulated observation
@@ -406,6 +529,58 @@ let add_routes router =
            reqd)
       request
       reqd)
+  |> Http.Router.get "/api/v1/ide/file-activity" (fun request reqd ->
+    with_public_read
+      (fun state _req reqd ->
+        let uri = Uri.of_string request.target in
+        match required_query_param uri "file_path", file_activity_window_hours uri with
+        | Error detail, _ | _, Error detail ->
+          Http.Response.json_value
+            ~status:`Bad_request ~request (json_error detail) reqd
+        | Ok file_path, Ok window_hours ->
+          let base_path = base_path_of_state state in
+          let requested_repo_id = optional_query_param uri "repo_id" in
+          (match
+             resolve_file_activity_repository ~base_path
+               ~repo_id:requested_repo_id
+           with
+              | Error (`Unavailable detail) ->
+                Http.Response.json_value
+                  ~status:`Internal_server_error ~request
+                  (json_error ~code:"repository_catalog_unavailable" detail)
+                  reqd
+              | Error (`Not_found detail) ->
+                Http.Response.json_value
+                  ~status:`Not_found ~request
+                  (json_error ~code:"repository_not_found" detail)
+                  reqd
+              | Error (`Ambiguous detail) ->
+                Http.Response.json_value
+                  ~status:`Conflict ~request
+                  (json_error ~code:"repository_ambiguous" detail)
+                  reqd
+              | Error (`No_codebase detail) ->
+                Http.Response.json_value
+                  ~status:`Bad_request ~request
+                  (json_error ~code:"repository_has_no_codebase" detail)
+                  reqd
+              | Ok (repository, codebase) ->
+                let repo_id = repository.Repo_manager_types.id in
+                (match Agent_observation.Code_address.v ~codebase ~path:file_path with
+                 | Error invalid ->
+                   Http.Response.json_value
+                     ~status:`Bad_request ~request
+                     (json_error
+                        ~code:"invalid_file_path"
+                        (Agent_observation.Code_address.invalid_to_string invalid))
+                     reqd
+                 | Ok _ ->
+                   Http.Response.json_value ~compress:true ~request
+                     (json_ok
+                        (file_activity_json
+                           ~codebase ~repo_id ~file_path ~window_hours))
+                     reqd)))
+      request reqd)
   |> Http.Router.get "/api/v1/ide/annotations" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->

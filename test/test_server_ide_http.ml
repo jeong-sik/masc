@@ -36,7 +36,9 @@ let test_delete_annotation_route_is_registered () =
 let test_read_routes_stay_public () =
   let router = Server_ide_http.add_routes (Http.Router.create ()) in
   check bool "GET /api/v1/ide/annotations" true
-    (has_route `GET "/api/v1/ide/annotations" router)
+    (has_route `GET "/api/v1/ide/annotations" router);
+  check bool "GET /api/v1/ide/file-activity" true
+    (has_route `GET "/api/v1/ide/file-activity" router)
 ;;
 
 (* ── End-to-end request/response harness ─────────────────────────────── *)
@@ -751,6 +753,53 @@ let test_get_memory_rejects_non_positive_limit () =
       (error_message_of_response response))
 ;;
 
+let test_get_file_activity_requires_a_file_path () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request = http_request ~meth:`GET ~path:"/api/v1/ide/file-activity" () in
+    let response = dispatch router request in
+    check_status "GET file activity without file path returns 400" 400 response;
+    check string "typed missing file path" "file_path is required"
+      (error_message_of_response response))
+;;
+
+let test_get_file_activity_rejects_invalid_window () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request =
+      http_request ~meth:`GET
+        ~path:
+          "/api/v1/ide/file-activity?repo_id=masc&file_path=bin/x.ml&window_hours=0"
+        ()
+    in
+    let response = dispatch router request in
+    check_status "GET file activity invalid window returns 400" 400 response;
+    check string "typed invalid window"
+      "window_hours must be a positive number: 0"
+      (error_message_of_response response))
+;;
+
+let test_get_file_activity_resolves_the_project_checkout_exactly () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let repository =
+      repository_fixture ~id:"project-masc" ~url:masc_remote
+        ~local_path:base_path
+    in
+    (match Repo_store.save_all ~base_path [ repository ] with
+     | Ok () -> ()
+     | Error detail -> fail detail);
+    let request =
+      http_request ~meth:`GET
+        ~path:"/api/v1/ide/file-activity?file_path=bin/masc_tui.ml" ()
+    in
+    let response = dispatch router request in
+    check_status "GET project file activity returns 200" 200 response;
+    let envelope = response |> response_body |> Yojson.Safe.from_string in
+    let data = Json.member "data" envelope in
+    check string "server-derived repository id" "project-masc"
+      (json_string_member "file activity" "repo_id" data);
+    check string "durable projection schema" "masc.ide.file_activity.v1"
+      (json_string_member "file activity" "schema" data))
+;;
+
 let () =
   run
     "server_ide_http"
@@ -804,6 +853,12 @@ let () =
             test_get_events_rejects_negative_offset
         ; test_case "GET memory rejects non-positive limit" `Quick
             test_get_memory_rejects_non_positive_limit
+        ; test_case "GET file activity requires file path" `Quick
+            test_get_file_activity_requires_a_file_path
+        ; test_case "GET file activity rejects invalid window" `Quick
+            test_get_file_activity_rejects_invalid_window
+        ; test_case "GET file activity resolves project checkout" `Quick
+            test_get_file_activity_resolves_the_project_checkout_exactly
         ] )
     ; ( "mutation_auth"
       , [ test_case "POST annotation rejects client keeper_id" `Quick

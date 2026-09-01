@@ -1509,7 +1509,9 @@ type async_msg =
       string * (Masc.Tui_decode.workspace_tree_node list, string) result
   | Code_file_loaded of string * (string, string) result
   | Code_history_loaded of
-      string * (Masc_tui_types.code_history_listing, string) result
+      code_workspace_scope
+      * string
+      * (Masc_tui_types.code_history_listing, string) result
   | Code_diff_loaded of
       string * (Masc.Tui_decode.git_diff, string) result
   | Code_notes_loaded of
@@ -2392,11 +2394,12 @@ let launch_resource_read state ~mailbox ~uri =
    selection. *)
 (* The scope, as the two optional query axes the fetchers take. The match
    is exhaustive: a fourth scope must decide its axis here. *)
-let code_scope_axes state =
-  match state.code_scope with
+let code_scope_axes_of = function
   | Code_scope_project -> (None, None)
   | Code_scope_keeper keeper -> (Some keeper, None)
   | Code_scope_repo repo -> (None, Some repo)
+
+let code_scope_axes state = code_scope_axes_of state.code_scope
 
 let launch_code_entries_load state ~mailbox =
   let host = server_peer_host in
@@ -2453,9 +2456,10 @@ let code_history_limit = 50
    read. *)
 let tree_diff_base_ref = "HEAD"
 
-(* The annotation and region routes are scoped by the server-minted codebase
-   slug (RFC-0378), and only a Repositories row carries one -- the other
-   scopes say so instead of guessing a slug. *)
+(* Annotation routes are scoped by the server-minted codebase slug
+   (RFC-0378), and only a Repositories row carries one -- the other scopes say
+   so instead of guessing a slug. Durable file activity below is different:
+   its repository id is resolved server-side against the tool-call log. *)
 let code_scope_codebase state =
   match state.code_scope with
   | Code_scope_repo repo_id -> (
@@ -2482,35 +2486,99 @@ let code_scope_codebase state =
   | Code_scope_project ->
       Error "the project tree is not a registered repository; no notes here"
 
+let code_file_activity_address scope path =
+  match scope with
+  | Code_scope_repo repo_id -> Ok (Some repo_id, path)
+  | Code_scope_keeper _ -> (
+      match Playground_paths.parse_bundle_relative_repo_path path with
+      | Some (repo_id, relative_path) -> Ok (Some repo_id, relative_path)
+      | None ->
+        Error
+          "this Keeper file is outside a registered repository clone, so it has no shared repository address")
+  | Code_scope_project -> Ok (None, path)
+
 let code_history_entry_at_ms = function
   | Hist_commit (row : Masc.Tui_decode.git_log_row) -> row.gl_at_ms
+  | Hist_keeper_change (change : Masc.Tui_decode.file_change) ->
+    change.fc_at *. 1000.
 
 let launch_code_history_load state ~mailbox ~path =
   let host = server_peer_host in
   let port = state.port in
+  let scope = state.code_scope in
+  let activity_address = code_file_activity_address scope path in
   let run () =
     let result =
       try
-        let keeper, repo = code_scope_axes state in
+        let keeper, repo = code_scope_axes_of scope in
         match
           Masc_tui_http.fetch_git_log ?keeper ?repo ~host ~port ~path
             ~limit:code_history_limit ()
         with
         | Error detail -> Error detail
         | Ok commits ->
+            let changes, chl_activity_note =
+              match activity_address with
+              | Error detail -> [], "Keeper activity unavailable: " ^ detail
+              | Ok (repo_id, file_path) -> (
+                  match
+                    Masc_tui_http.fetch_ide_file_activity
+                      ~host ~port ?repo_id ~file_path
+                  with
+                  | Error detail ->
+                    [], "Keeper activity unavailable: " ^ detail
+                  | Ok snapshot ->
+                    let incomplete =
+                      snapshot.fas_incomplete_over_budget
+                      + snapshot.fas_incomplete_malformed
+                    in
+                    let unattributed =
+                      snapshot.fas_unattributed_over_budget
+                      + snapshot.fas_unattributed_malformed
+                    in
+                    let missing_note =
+                      [ (if incomplete = 0
+                         then None
+                         else
+                           Some
+                             (Printf.sprintf
+                                "%d exact-address row%s incomplete"
+                                incomplete (if incomplete = 1 then "" else "s")))
+                      ; (if unattributed = 0
+                         then None
+                         else
+                           Some
+                             (Printf.sprintf
+                                "%d fleet row%s had no readable address"
+                                unattributed (if unattributed = 1 then "" else "s")))
+                      ]
+                      |> List.filter_map Fun.id
+                      |> function
+                      | [] -> ""
+                      | notes -> "; " ^ String.concat "; " notes
+                    in
+                    ( snapshot.fas_changes
+                    , Printf.sprintf
+                        "Keeper activity: %.0fh durable window, %d exact change%s%s"
+                        snapshot.fas_window_hours
+                        (List.length snapshot.fas_changes)
+                        (if List.length snapshot.fas_changes = 1 then "" else "s")
+                        missing_note ))
+            in
             let chl_entries =
               List.stable_sort
                 (fun a b ->
                   Float.compare (code_history_entry_at_ms b)
                     (code_history_entry_at_ms a))
-                (List.map (fun c -> Hist_commit c) commits)
+                (List.map (fun c -> Hist_commit c) commits
+                 @ List.map (fun change -> Hist_keeper_change change) changes)
             in
-            Ok { chl_entries }
+            Ok { chl_entries; chl_activity_note }
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Code_history_loaded (path, result))
+    enqueue_async mailbox (Code_history_loaded (scope, path, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -2519,7 +2587,8 @@ let launch_code_history_load state ~mailbox ~path =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Code_history_loaded (path, Error "Eio switch is unavailable"))
+        (Code_history_loaded
+           (scope, path, Error "Eio switch is unavailable"))
 
 let launch_code_diff_load state ~mailbox ~path =
   let host = server_peer_host in
@@ -7731,11 +7800,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             state.code_diff_error <- None;
             state.code_diff_scroll <- 0
         | Error detail -> state.code_diff_error <- Some detail)
-  | Code_history_loaded (path, result) ->
-      (* Keyed to the file still open: a listing that raced a file switch
-         describes bytes no longer on screen. *)
+  | Code_history_loaded (scope, path, result) ->
+      (* Keyed to the scope and file still open: two repositories can carry
+         the same relative path, so path alone would let a slow old response
+         put the wrong Keeper activity under the new file. *)
       let still_current =
-        match state.code_file with
+        state.code_scope = scope
+        && match state.code_file with
         | Some (open_path, _) -> String.equal open_path path
         | None -> false
       in
@@ -13125,8 +13196,9 @@ and is loaded on demand through keeper_skill.
                 else if state.code_history_open then (
                   (* The top visible row is the selected one, the way the
                      Changes list treats its scroll. A commit answers with
-                     its PR -- the subject's "(#N)" against the repository's
-                     remote, or why there is no link. *)
+                     its PR; a durable Keeper change jumps to its
+                     producer-recorded line without claiming it was
+                     committed. *)
                   match state.code_history with
                   | None -> ()
                   | Some (_, listing) -> (
@@ -13135,6 +13207,25 @@ and is loaded on demand through keeper_skill.
                           state.code_history_scroll
                       with
                       | None -> ()
+                      | Some (Hist_keeper_change change) -> (
+                          match state.code_file with
+                          | None -> ()
+                          | Some (_, rows) ->
+                            push_code_jump state;
+                            state.code_history_open <- false;
+                            let cursor =
+                              max 0
+                                (min
+                                   (Masc.Tui_decode.file_change_target_line change
+                                    - 1)
+                                   (List.length rows - 1))
+                            in
+                            state.code_file_cursor <- cursor;
+                            state.code_file_scroll <-
+                              Masc_tui_scroll.ensure_visible ~cursor
+                                ~height:
+                                  (Masc_tui_render.code_pane_content_height state)
+                                state.code_file_scroll)
                       | Some (Hist_commit row) ->
                           let open Masc.Tui_decode in
                           state.code_lsp_note <-

@@ -924,11 +924,18 @@ in place:
 - `h`/`l` pan sideways by one display cell — the gutter stays put, the
   title says `(col N)`, and a double-width glyph on the boundary pads
   rather than splits.
-- `H` swaps the content for the commits that touched the file
-  (`/api/v1/git/log`), newest first. `Enter` on the top visible row
-  answers with the commit's pull request link (its subject's `(#N)`
-  against the repository's registered remote). An untracked file honestly
-  answers that no commit touches it.
+- `H` swaps the content for one newest-first timeline: commits from
+  `/api/v1/git/log` and durable Keeper `Edit`/`Write` calls from
+  `/api/v1/ide/file-activity`. The latter is filtered by the exact registered
+  repository id and repo-relative path; it does not revive the removed,
+  always-empty IDE region store. The coverage row states the trailing window,
+  exact match count, exact-address rows whose truncated/malformed body could
+  not be rendered, and fleet rows that lost even their address. `Enter` on a commit answers with its pull
+  request link (the subject's `(#N)` against the registered remote). `Enter`
+  on a Keeper change returns to the file at its producer-recorded line. A
+  project tree is joined automatically only when the server base path exactly
+  matches one registered repository's resolved path; otherwise it keeps Git
+  history and explicitly says why Keeper activity cannot be joined.
 - `d` swaps it for the working tree's diff against HEAD, drawn by the same
   renderer the Changes surface uses. A clean file says it matches its last
   commit.
@@ -939,9 +946,11 @@ in place:
   `m` answers in repository scope and says why not in the others. Inside
   the notes view `w` adds one through the `$EDITOR` form (kind: Comment /
   Decision / Question / Bookmark); the acting identity is the bearer's.
-- Once the notes have been read (m), the lines they anchor to carry a
-  gutter mark — an accent dot. The pane decorates only what is already
-  loaded; it does not fetch to decorate.
+- Once notes or history have been read (`m` or `H`), their exact producer
+  ranges mark the gutter: an accent dot for a note, a dim dot for a durable
+  Keeper change. Historical changes without line evidence remain in the
+  timeline as `L?` and do not invent a range. The pane decorates only what is
+  already loaded; it does not fetch to decorate.
 - `K` asks the language server what a name on the cursor line is, and `D`
   where it is defined. The line's own names are the candidates (the pane
   has no character cursor): one name is asked about at once, several open

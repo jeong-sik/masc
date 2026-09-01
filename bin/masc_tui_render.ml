@@ -8964,6 +8964,23 @@ let file_change_evidence_label = function
        then Some changed
        else Some (Printf.sprintf "%s (+%d)" changed (occurrence_count - 1)))
 
+let file_change_ranges (change : Masc.Tui_decode.file_change) =
+  match change.fc_line_evidence with
+  | Some (Masc.Keeper_file_change_evidence.Written { new_range = Some range }) ->
+    [ range ]
+  | Some
+      (Masc.Keeper_file_change_evidence.Edited
+        { occurrences = Some occurrences; _ }) ->
+    List.map
+      (fun (occurrence : Masc.Keeper_file_change_evidence.edit_occurrence) ->
+        Option.value ~default:occurrence.old_range occurrence.new_range)
+      occurrences
+  | Some (Masc.Keeper_file_change_evidence.Written { new_range = None })
+  | Some
+      (Masc.Keeper_file_change_evidence.Edited
+        { occurrences = None; _ })
+  | None -> []
+
 (* One line of what the change put there. An edit shows the text it wrote
    rather than the text it removed: the question a reader has is what the file
    says now. A write shows its size, because the whole body is never one row
@@ -12076,14 +12093,20 @@ let render_code (state : state) =
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, Some (_, { chl_entries = [] }) ->
+       | None, Some (_, { chl_entries = []; chl_activity_note }) ->
            box_line pane_buf pane_cols
-             (Ansi.dim ^ "  (no commit touches this file)" ^ Ansi.reset);
-           for _ = 2 to content_height do
+             (Ansi.dim
+              ^ "  (no commit or exact Keeper change touches this file)"
+              ^ Ansi.reset);
+           box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
+             ("  " ^ Terminal_text.single_line chl_activity_note);
+           for _ = 3 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, Some (_, { chl_entries }) ->
-           let list_height = max 1 content_height in
+       | None, Some (_, { chl_entries; chl_activity_note }) ->
+           box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
+             ("  " ^ Terminal_text.single_line chl_activity_note);
+           let list_height = max 1 (content_height - 1) in
            let total = List.length chl_entries in
            let max_scroll = max 0 (total - list_height) in
            let scroll = max 0 (min state.code_history_scroll max_scroll) in
@@ -12094,6 +12117,44 @@ let render_code (state : state) =
            in
            for i = 0 to list_height - 1 do
              match List.nth_opt chl_entries (scroll + i) with
+             | Some (Hist_keeper_change change) ->
+                 let open Masc.Tui_decode in
+                 (* File-change rows carry Unix seconds; git history carries
+                    epoch milliseconds. [at_of] takes the latter because the
+                    two kinds are sorted in that unit too. *)
+                 let at = at_of (change.fc_at *. 1000.) in
+                 let anchor =
+                   Option.value ~default:"L?"
+                     (file_change_evidence_label change.fc_line_evidence)
+                 in
+                 let kind =
+                   match change.fc_kind with
+                   | Fc_edited _ -> "EDIT"
+                   | Fc_written _ -> "WRITE"
+                 in
+                 let result_style, result =
+                   if change.fc_succeeded
+                   then Theme.ok (), "✓"
+                   else Theme.bad (), "✗"
+                 in
+                 let provenance =
+                   [ Option.map (fun task -> "task " ^ task) change.fc_task_id
+                   ; Option.map
+                       (fun turn -> Printf.sprintf "turn %d" turn)
+                       change.fc_turn
+                   ; Option.map (fun id -> "exec " ^ id) change.fc_execution_id
+                   ]
+                   |> List.filter_map Fun.id
+                   |> String.concat " · "
+                 in
+                 box_line pane_buf pane_cols
+                   (Printf.sprintf
+                      "  %s%s%s  %s%s%s  %s%s%s %-5s  %s%s%s  %s"
+                      Ansi.dim at Ansi.reset Ansi.dim (fit_width anchor 12)
+                      Ansi.reset result_style result Ansi.reset kind Ansi.cyan
+                      (Terminal_text.single_line change.fc_keeper)
+                      Ansi.reset
+                      (Terminal_text.single_line provenance))
              | Some (Hist_commit row) ->
                  let open Masc.Tui_decode in
                  box_line pane_buf pane_cols
@@ -12127,9 +12188,9 @@ let render_code (state : state) =
                (min state.code_file_hscroll
                   (max 0 (state.code_file_max_width - 1)))
            in
-           (* Which lines carry a note -- only what is already loaded (m
-              has been opened for this file); the pane does not fetch to
-              decorate. *)
+           (* Which lines carry a note or a durable Keeper change -- only what
+              is already loaded (m or H has been opened for this file); the
+              pane does not fetch merely to decorate. *)
            let matches_open_file loaded_path =
              match state.code_file with
              | Some (open_path, _) -> String.equal loaded_path open_path
@@ -12143,6 +12204,20 @@ let render_code (state : state) =
                    (fun (n : Masc.Tui_decode.ide_annotation) ->
                      (n.ia_line_start, n.ia_line_end))
                    notes
+             | _ -> []
+           in
+           let keeper_spans =
+             match state.code_history with
+             | Some (loaded_path, listing) when matches_open_file loaded_path ->
+                 List.concat_map
+                   (function
+                     | Hist_keeper_change change ->
+                       List.map
+                         (fun range -> (range.Masc.Keeper_file_change_evidence.start_line,
+                           range.end_line))
+                         (file_change_ranges change)
+                     | Hist_commit _ -> [])
+                   listing.chl_entries
              | _ -> []
            in
            let covers line spans =
@@ -12169,6 +12244,7 @@ let render_code (state : state) =
                    if covers line note_spans then
                      Masc_tui_theme.tone Masc_tui_theme.Accent
                      ^ "\xe2\x97\x8f" ^ Ansi.reset
+                   else if covers line keeper_spans then Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset
                    else " "
                  in
                  box_line pane_buf pane_cols

@@ -29,9 +29,18 @@ type markdown_source =
     }
   | Markdown_streaming
 
+type timeline_bucket = {
+  tb_year : int;
+  tb_month : int;
+  tb_day : int;
+  tb_hour : int;
+  tb_is_dst : bool;
+}
+
 type entry = {
   style : style;
   timestamp : string;
+  timeline_bucket : timeline_bucket option;
   role_label : string;
   role_label_mark_cells : int;
   request_label : string;
@@ -40,6 +49,7 @@ type entry = {
 }
 
 type metadata =
+  | Timeline_break of timeline_bucket
   | Origin of {
       timestamp : string;
       role_label : string;
@@ -805,6 +815,45 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
       ; gutter = ""
       }
 
+let same_timeline_bucket left right =
+  Int.equal left.tb_year right.tb_year
+  && Int.equal left.tb_month right.tb_month
+  && Int.equal left.tb_day right.tb_day
+  && Int.equal left.tb_hour right.tb_hour
+  && Bool.equal left.tb_is_dst right.tb_is_dst
+
+let timeline_break_row ~(previous : entry option) ~inner_width (entry : entry) =
+  match entry.timeline_bucket with
+  | None -> None
+  | Some bucket
+    when Option.exists
+           (fun (previous : entry) ->
+             Option.exists (same_timeline_bucket bucket)
+               previous.timeline_bucket)
+           previous ->
+      None
+  | Some bucket ->
+      let label =
+        Printf.sprintf "%04d-%02d-%02d \xc2\xb7 %02d:00" bucket.tb_year
+          bucket.tb_month bucket.tb_day bucket.tb_hour
+        ^ (if bucket.tb_is_dst then " DST" else "")
+      in
+      let lead = "\xe2\x94\x80\xe2\x94\x80 " ^ label ^ " " in
+      let rule_cells = max 0 (inner_width - display_width lead) in
+      let rule =
+        String.concat ""
+          (List.init rule_cells (fun _ -> "\xe2\x94\x80"))
+      in
+      let text, _, _ = cell_prefix (lead ^ rule) inner_width in
+      Some
+        { style = entry.style
+        ; kind = Metadata (Timeline_break bucket)
+        ; shade = Shade_none
+        ; text
+        ; gutter_label_at = 0
+        ; gutter = ""
+        }
+
 (* A body is a document, not a row. [sanitize] is applied to each line rather
    than to the whole, because escaping a newline the way a terminal escape is
    escaped turns the document into one unbroken run with the escape printed
@@ -1005,12 +1054,17 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
       ; gutter = (if index = 0 then margin else blank)
       })
   in
-  match origin with
-  | Origin_inline | Origin_bare -> body_rows
-  | Origin_row -> (
-      match metadata_row ~previous ~inner_width entry with
-      | None -> body_rows
-      | Some metadata -> metadata :: body_rows)
+  let message_rows =
+    match origin with
+    | Origin_inline | Origin_bare -> body_rows
+    | Origin_row -> (
+        match metadata_row ~previous ~inner_width entry with
+        | None -> body_rows
+        | Some metadata -> metadata :: body_rows)
+  in
+  match timeline_break_row ~previous ~inner_width entry with
+  | None -> message_rows
+  | Some timeline_break -> timeline_break :: message_rows
 
 let viewport_gap_text ~inner_width hidden_rows =
   let candidates =
@@ -1032,6 +1086,17 @@ let viewport_gap_text ~inner_width hidden_rows =
    makes the missing middle explicit; without it, inline mode looked like one
    continuous message even though rows had disappeared. *)
 let newest_entry_window ~inner_width ~height rows =
+  (* A civil-hour rail is context, while the origin and latest body are the
+     message. If all of them do not fit at the live edge, lay out the message
+     first and count the rail among the explicitly hidden physical rows. The
+     transcript itself is unchanged, so ordinary scrollback reaches the rail. *)
+  let hidden_timeline_rows, rows =
+    match rows with
+    | { kind = Metadata (Timeline_break _); _ } :: rest
+      when List.length rows > height ->
+        1, rest
+    | _ -> 0, rows
+  in
   match height, rows with
   | 0, _ | _, [] -> []
   | 1, first :: _ -> [ first ]
@@ -1044,7 +1109,10 @@ let newest_entry_window ~inner_width ~height rows =
         | (Metadata _ | Body | Viewport_gap _), _ -> [ first ], rest
       in
       let tail = take_last (height - 1 - List.length start) rest in
-      let hidden_rows = List.length rows - List.length start - List.length tail in
+      let hidden_rows =
+        List.length rows - List.length start - List.length tail
+        + hidden_timeline_rows
+      in
       let gap =
         { style = Status
         ; kind = Viewport_gap { hidden_rows }
@@ -1077,14 +1145,14 @@ let visible_rows ?markdown ?origin ~inner_width ~height entries =
   in
   collect height [] (List.rev entries)
 
-let total_rows ?markdown ?origin ~inner_width entries =
+let total_rows ?markdown ?origin ?previous ~inner_width entries =
   let inner_width = max 1 inner_width in
   List.fold_left
     (fun (previous, total) entry ->
        ( Some entry
        , total
          + List.length (rows_of_entry ?markdown ?origin ~inner_width ~previous entry) ))
-    (None, 0) entries
+    (previous, 0) entries
   |> snd
 
 let max_scroll ?markdown ?origin ~inner_width ~height entries =

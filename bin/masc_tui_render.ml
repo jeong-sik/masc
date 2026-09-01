@@ -455,6 +455,8 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
                (Chat_theme.body row.style) (dress rest) Ansi.reset))
       else
         box_line_styled buf cols ~style:context.opening (dress text)
+  | Message_layout.Metadata (Message_layout.Timeline_break _) ->
+      box_line_styled buf cols ~style:(Theme.info () ^ Ansi.bold) row.text
   | Message_layout.Metadata (Message_layout.Continued_at { timestamp }) ->
       box_line_styled buf cols ~style:(Theme.recede ())
         (Printf.sprintf "[%s]" timestamp)
@@ -6570,6 +6572,17 @@ let keeper_message_clock at =
     time.Unix.tm_sec
 ;;
 
+let keeper_message_timeline_bucket at =
+  let time = Unix.localtime at in
+  ({ tb_year = time.Unix.tm_year + 1900;
+     tb_month = time.Unix.tm_mon + 1;
+     tb_day = time.Unix.tm_mday;
+     tb_hour = time.Unix.tm_hour;
+     tb_is_dst = time.Unix.tm_isdst;
+   }
+    : Message_layout.timeline_bucket)
+;;
+
 (* How one finished turn's tool block becomes rows: the operator's
    compact/full choice, the width the aligned badge leaves, and this keeper's
    own file changes. The committed history and the turn still streaming both
@@ -6807,6 +6820,9 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
         in
         ({ style;
              timestamp = message.me_timestamp;
+             timeline_bucket =
+               Option.map keeper_message_timeline_bucket
+                 (message_timeline_at message);
              role_label;
              role_label_mark_cells =
                Message_layout.role_label_mark_cells
@@ -6887,7 +6903,7 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
     in
     match matched with
     | None -> None
-    | Some (at, _) ->
+    | Some (at, matched_entry) ->
         (* Everything newer than the match, which is exactly what a scroll
            position counts back over. *)
         let newer = List.filteri (fun index _ -> index > at) entries in
@@ -6895,6 +6911,7 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
           Message_layout.total_rows
             ~markdown:(cached_chat_markdown ~theme:(Chat_theme.snapshot ()))
             ~origin:state.msg_origin_display
+            ~previous:matched_entry
             ~inner_width:(max 1 (framed_inner_width chat_cols))
             newer
         in
@@ -7091,7 +7108,7 @@ let render_keeper_message (state : state) =
     let projected_tool_rows =
       keeper_message_tool_rows state ~keeper_name ~chat_cols
     in
-    let layout_entries =
+    let committed_layout_entries =
       keeper_message_layout_entries state ~keeper_name ~chat_cols
     in
     (* Rows for the turn still streaming, drawn under the committed history so
@@ -7106,6 +7123,11 @@ let render_keeper_message (state : state) =
         ->
           let request_id = Keeper_chat_transcript.request_id live in
           let request_label = Keeper_chat.compact_request_id request_id in
+          let timeline_bucket =
+            Some
+              (keeper_message_timeline_bucket
+                 (Keeper_chat_transcript.started_at live))
+          in
           let entry ~markdown_source style role_label body =
             (* One alignment, on the label the row actually carries. Aligning
                the continuation mark and then aligning the result again pays
@@ -7113,6 +7135,7 @@ let render_keeper_message (state : state) =
                first had already fitted. *)
             ({ style;
                timestamp = "live";
+               timeline_bucket;
                role_label =
                  Message_layout.align_role_label ~column:role_label_column
                    (* Same reasoning as the history rows above: the column
@@ -7217,7 +7240,7 @@ let render_keeper_message (state : state) =
             (Keeper_chat_transcript.trail live)
       | Some _ | None -> []
     in
-    let layout_entries = layout_entries @ live_entries in
+    let layout_entries = committed_layout_entries @ live_entries in
     let inner_width = max 1 (framed_inner_width chat_cols) in
     (* Clamped here rather than where the key is handled: the limit depends on
        the terminal width and the pane's height, and a resize changes both
@@ -7242,8 +7265,16 @@ let render_keeper_message (state : state) =
                 keeper_message_layout_entries ~messages:arrived state
                   ~keeper_name ~chat_cols
               in
+              let previous =
+                let previous_index =
+                  List.length committed_layout_entries - List.length arrived
+                  - 1
+                in
+                if previous_index < 0 then None
+                else List.nth_opt committed_layout_entries previous_index
+              in
               Message_layout.total_rows ~markdown
-                ~origin:state.msg_origin_display ~inner_width arrived)
+                ~origin:state.msg_origin_display ?previous ~inner_width arrived)
     in
     let scroll, visible_rows =
       Message_layout.clamped_scrolled_rows ~markdown

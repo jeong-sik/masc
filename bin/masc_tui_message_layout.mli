@@ -45,9 +45,25 @@ type markdown_source =
     A growing reply keeps only its closed top-level blocks. Other live rows can
     change non-append-only facts and continue to bypass every render cache. *)
 
+type timeline_bucket = {
+  tb_year : int;
+  tb_month : int;
+  tb_day : int;
+  tb_hour : int;
+  tb_is_dst : bool;
+}
+(** One local civil hour on the conversation timeline. Calendar fields, rather
+    than a formatted label, are the grouping authority. [tb_is_dst] keeps the
+    repeated hour at a daylight-saving transition from being merged with the
+    hour that preceded it and marks the daylight occurrence in its label. *)
+
 type entry = {
   style : style;
   timestamp : string;
+  timeline_bucket : timeline_bucket option;
+      (** The civil-hour rail this entry belongs under. [None] is reserved for
+          rows without a trustworthy observation time; they do not invent a
+          timeline heading from display text. *)
   role_label : string;
   role_label_mark_cells : int;
       (** Cells the speaker mark occupies at the head of {!role_label}, from
@@ -61,6 +77,9 @@ type entry = {
 }
 
 type metadata =
+  | Timeline_break of timeline_bucket
+      (** The first entry in a different civil hour. It is structural metadata
+          so scrolling and search measure the same row the renderer paints. *)
   | Origin of {
       timestamp : string;
       role_label : string;
@@ -307,6 +326,8 @@ val visible_rows :
     its first row and latest rows with a typed viewport-gap row between them.
     A smaller caller receives the best bounded fallback: first row, then latest
     row when two rows of height are available.
+    An optional hour rail yields first when it would hide the newest entry's
+    origin or body; the typed gap counts it, and scrollback still reaches it.
 
     [markdown] renders one entry into rows already wrapped to the width it is
     given. The whole entry is supplied so a caller can distinguish stable
@@ -319,11 +340,13 @@ val visible_rows :
 val total_rows :
   ?markdown:(entry:entry -> width:int -> string list) ->
   ?origin:origin_display ->
+  ?previous:entry ->
   inner_width:int ->
   entry list ->
   int
 (** How many physical rows [entries] render to at this width — what a scroll
-    position is measured against. *)
+    position is measured against. [previous] supplies the entry immediately
+    before a suffix, so the suffix does not invent a duplicate hour rail. *)
 
 val scrolled_rows :
   ?markdown:(entry:entry -> width:int -> string list) ->

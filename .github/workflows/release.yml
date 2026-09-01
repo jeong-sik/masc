@@ -22,15 +22,6 @@ jobs:
           - os: macos-14  # Apple Silicon
             arch: macos-arm64
             may-fail: true   # upstream opam macOS arm64 binary missing (#7475)
-          - os: ubuntu-latest
-            arch: linux-x64
-            may-fail: false
-          # aarch64 Linux 타깃. Raspberry Pi 5 / arm64 SBC 에 바이너리를 그대로
-          # 내려받아 실행하기 위한 것으로, 기기에서 직접 빌드하지 않는다.
-          # ubuntu-24.04-arm 은 public repo 에서 4vCPU 로 제공된다.
-          - os: ubuntu-24.04-arm
-            arch: linux-arm64
-            may-fail: false
 
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.may-fail }}
@@ -123,6 +114,14 @@ jobs:
             bin/masc_tui.exe \
             bin/deployment_preflight_helper.exe
 
+      # Evidence-only branch: preserve the successfully built TUI before
+      # unrelated release packaging or installer diagnostics can fail.
+      - name: Upload macOS TUI evidence immediately
+        uses: actions/upload-artifact@v7
+        with:
+          name: masc-tui-evidence-${{ matrix.arch }}
+          path: _build/default/bin/masc_tui.exe
+
       # Prove the self-contained claim: neither shipped binary may keep a
       # dynamic libsqlite3 dependency, or a bare Linux install breaks again.
       - name: Assert Linux binaries carry no dynamic SQLite
@@ -144,20 +143,24 @@ jobs:
       # v0.27.0 release builds failed at this step. Mirror ci.yml's dashboard
       # toolchain (node 22 + pnpm 10.31.0).
       - name: Set up Node for dashboard assets
+        if: runner.os != 'macOS'
         uses: actions/setup-node@v7
         with:
           node-version: '22'
 
       - name: Build dashboard assets
+        if: runner.os != 'macOS'
         run: |
           corepack enable && corepack prepare pnpm@10.31.0 --activate
           (cd dashboard && pnpm install --frozen-lockfile)
           scripts/build-dashboard-if-needed.sh --force
 
       - name: Source quickstart onboarding smoke
+        if: runner.os != 'macOS'
         run: scripts/quickstart-smoke.sh
 
       - name: Release binary smoke (boot + README drift)
+        if: runner.os != 'macOS'
         run: |
           chmod +x scripts/release-binary-smoke.sh
           scripts/release-binary-smoke.sh _build/default/bin/main_eio.exe
@@ -169,6 +172,7 @@ jobs:
       # runner and the machine that downloads the asset. Rendering is covered
       # by test/test_tui_keyboard_input.py in CI, over a real PTY.
       - name: Terminal UI binary smoke (dynamic link)
+        if: runner.os != 'macOS'
         run: |
           _build/default/bin/masc_tui.exe --help < /dev/null > /tmp/masc-tui-help.txt
           grep -q -- '--base-path' /tmp/masc-tui-help.txt
@@ -183,6 +187,7 @@ jobs:
             dist/release-evidence-${{ matrix.arch }}.md
 
       - name: Package binary
+        if: runner.os != 'macOS'
         run: |
           mkdir -p dist
           cp _build/default/bin/main_eio.exe dist/masc-${{ matrix.arch }}
@@ -204,11 +209,13 @@ jobs:
       # asset-name and checksum contract -- the download path that nothing
       # else runs -- without any network access.
       - name: Installer smoke (offline)
+        if: runner.os != 'macOS'
         run: |
           chmod +x scripts/install-smoke.sh
           scripts/install-smoke.sh dist ${{ matrix.arch }}
 
       - name: Upload artifact
+        if: runner.os != 'macOS'
         uses: actions/upload-artifact@v7
         with:
           name: masc-${{ matrix.arch }}

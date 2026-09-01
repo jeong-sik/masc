@@ -5892,7 +5892,7 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
            state.identity_cursor <- 0;
            state.identity_attempt_error <- None;
            state.identity_filter <- None;
-           launch_identity_view state ~mailbox keeper.k_name)
+           launch_identity_view state ~mailbox keeper.k_name
        | Detail_channels -> launch_connectors_load state ~mailbox
        | Detail_automation -> launch_schedules_load state ~mailbox
        | Detail_runs -> launch_fusion_runs_load state ~mailbox)

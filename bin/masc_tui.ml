@@ -12452,7 +12452,11 @@ and is loaded on demand through keeper_skill.
                   state.system_logs_detail_scroll <- 0
                 end
                 else state.view <- Overview
-            | Memory | Connectors | Config | Tools -> state.view <- Overview)
+            | Connectors ->
+                (* Back to the parent that opened it, not to Overview: the
+                   ring highlights Runtime while Connectors is up. *)
+                state.view <- Runtime
+            | Memory | Config | Tools -> state.view <- Overview)
        | Some "left" ->
            (* Left is the non-destructive structural back key. Unlike Esc it
               never interrupts a live chat turn; it only closes a detail the
@@ -13876,6 +13880,12 @@ and is loaded on demand through keeper_skill.
                     ~content_height:(keeper_log_content_height state);
                 state.view <- Keepers Keeper_logs
             | None -> ())
+       | Some "c" | Some "C"
+         when state.view = Runtime
+              && Option.is_none state.runtime_detail_target ->
+           (* Connectors hangs off Runtime the way Task Review hangs off
+              Planning: not on the Tab ring, one key from its parent. *)
+           goto_surface state ~mailbox:async_messages Connectors
        | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat from every row that names a Keeper. Standalone Lanes carry
               no Keeper identity; Keeper chat is owned by the Keepers surface.

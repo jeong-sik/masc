@@ -1204,7 +1204,6 @@ let surface_ring : (surface * string) list =
     (Fusion, "Fusion");
     (Repositories, "Repos");
     (Code, "Code");
-    (Connectors, "Connectors");
     (Runtime, "Runtime");
     (Config, "Config");
     (Resources, "Resources");
@@ -1213,15 +1212,18 @@ let surface_ring : (surface * string) list =
   ]
 
 (* Ring position of the family a view belongs to. Keeper sub-modes collapse
-   onto Keepers, Task Review and Verdicts collapse onto Planning, and Changes
+   onto Keepers, Task Review and Verdicts collapse onto Planning, Changes
    collapses onto Keepers -- its rows are one keeper's file writes, chosen by
-   the roster cursor, so it was never a destination of its own. *)
+   the roster cursor, so it was never a destination of its own -- and
+   Connectors collapses onto Runtime: four channel rows are part of "is the
+   substrate alive", not a peer of Board or Planning. *)
 let surface_ring_index (view : surface) =
   let family =
     match view with
     | Keepers _ -> Keepers Keeper_list
     | Verification | Harness -> Planning
     | Changes -> Keepers Keeper_list
+    | Connectors -> Runtime
     | v -> v
   in
   let rec find i = function
@@ -3498,6 +3500,7 @@ let workspace_entries_count_label total =
 let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
   @ [ "go Task Review", Palette_goto Verification ]
+  @ [ "go Connectors", Palette_goto Connectors ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring

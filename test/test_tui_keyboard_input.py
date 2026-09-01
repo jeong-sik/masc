@@ -8173,10 +8173,13 @@ def runtime_surface_interaction(
     ) -> None:
         completed = False
         try:
-            tab_until(process, master_fd, output, b"MASC Connectors")
+            # Connectors left the Tab ring (it hangs off Runtime under [c]),
+            # so the ring predecessor of Runtime is now Code.
+            tab_until(process, master_fd, output, b"MASC Repositories")
+            os.write(master_fd, b"\t")  # Repos -> Code
             read_available(master_fd, output)
             start = len(output)
-            os.write(master_fd, b"\t")
+            os.write(master_fd, b"\t")  # Code -> Runtime
             if not wait_for_fixture_event(
                 process, master_fd, output, initial_probe.requested, timeout=10.0
             ):
@@ -8388,6 +8391,10 @@ def runtime_surface_interaction(
                     raise AssertionError(
                         f"Runtime discarded its prior rows after failure: {preserved_plain!r}"
                     )
+            # The [c] hop opens Connectors off the ring, and Esc returns to
+            # the Runtime parent rather than Overview.
+            send_and_wait(process, master_fd, output, b"c", b"MASC Connectors")
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Runtime")
             send_and_wait(process, master_fd, output, b"\t", b"MASC Config")
             os.write(master_fd, b"q")
             completed = True

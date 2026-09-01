@@ -1088,6 +1088,102 @@ let handle_keeper_get_subroutes state req request reqd =
        | Error (`Io msg) ->
          Http.Response.json_value ~status:`Internal_server_error
            (`Assoc [ ("error", `String msg) ]) reqd)
+  else if ends_with "/memory-facts" then
+    (* What this keeper remembers, fact by fact. The store keeps a closed
+       taxonomy, provenance, and reinforcement on every row, and the health
+       projection reports only counts. Ordinary and source-bound stores are
+       two readings and stay two fields, each with its own read error, so
+       one failing store never blanks the other. *)
+    let name = extract_name "/memory-facts" in
+    if not (Keeper_config.validate_name name)
+    then
+      Http.Response.json_value ~status:`Bad_request
+        (`Assoc
+           [ "error", `String (Printf.sprintf "invalid keeper name: %s" name) ])
+        reqd
+    else (
+      let config = Mcp_server.workspace_config state in
+      let keepers_dir = memory_os_keepers_dir config in
+      let fact_json (fact : Keeper_memory_os_types.fact) =
+        `Assoc
+          [ "claim", `String fact.claim
+          ; ( "category"
+            , `String (Keeper_memory_os_types.category_to_string fact.category)
+            )
+          ; ( "origin"
+            , `String
+                (Keeper_memory_os_types.origin_kind_to_string fact.origin.kind)
+            )
+          ; "first_seen", `Float fact.first_seen
+          ; "last_seen", `Float fact.last_seen
+          ; "reinforcement", `Int fact.reinforcement
+          ; "memory_id", `String (Keeper_memory_os_types.memory_id fact)
+          ]
+      in
+      let ordinary =
+        match
+          Keeper_memory_os_current.read_for_keepers_dir
+            ~keepers_dir
+            ~keeper_id:name
+        with
+        | Error detail -> `Assoc [ "read_error", `String detail ]
+        | Ok None -> `Assoc [ "present", `Bool false ]
+        | Ok (Some snapshot) ->
+          `Assoc
+            [ "present", `Bool true
+            ; "revision", `Int snapshot.Keeper_memory_os_current.revision
+            ; "updated_at", `Float snapshot.Keeper_memory_os_current.updated_at
+            ; "facts", `List (List.map fact_json snapshot.facts)
+            ]
+      in
+      let source_fact_json (fact : Keeper_memory_source_current.fact) =
+        `Assoc
+          [ "claim", `String fact.claim
+          ; "first_seen", `Float fact.first_seen
+          ; "path", `String fact.source.path
+          ; "sha256", `String fact.source.sha256
+          ]
+      in
+      let invalidation_json (row : Keeper_memory_source_current.invalidation) =
+        `Assoc
+          [ "source_path", `String row.source_path
+          ; "invalidated_at", `Float row.invalidated_at
+          ; ( "reason"
+            , `String
+                (match row.reason with
+                 | Keeper_memory_source_current.Source_changed ->
+                   "source_changed"
+                 | Keeper_memory_source_current.Source_unavailable ->
+                   "source_unavailable") )
+          ]
+      in
+      let source_bound =
+        match
+          Keeper_memory_source_current.read_for_keepers_dir
+            ~keepers_dir
+            ~keeper_id:name
+        with
+        | Error detail -> `Assoc [ "read_error", `String detail ]
+        | Ok None -> `Assoc [ "present", `Bool false ]
+        | Ok (Some snapshot) ->
+          `Assoc
+            [ "present", `Bool true
+            ; "revision", `Int snapshot.Keeper_memory_source_current.revision
+            ; ( "updated_at"
+              , `Float snapshot.Keeper_memory_source_current.updated_at )
+            ; "facts", `List (List.map source_fact_json snapshot.facts)
+            ; ( "invalidations"
+              , `List (List.map invalidation_json snapshot.invalidations) )
+            ]
+      in
+      Http.Response.json_value ~compress:true ~request:req
+        (`Assoc
+           [ "keeper", `String name
+           ; "dashboard_surface", `String "/api/v1/keepers/:name/memory-facts"
+           ; "ordinary", ordinary
+           ; "source_bound", source_bound
+           ])
+        reqd)
   else if ends_with "/memory-journal" then
     (* Why this keeper's memory looks the way it does. The librarian's passes
        reach disk here — committed and failed alike since RFC-0361 Part 5 — and

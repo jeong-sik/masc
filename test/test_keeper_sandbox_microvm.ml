@@ -865,6 +865,179 @@ let test_plan_build_link_never_deletes_real_build_output () =
 ;;
 
 
+
+(* The volume probe's ambiguity, and the two filesystem answers that decide
+   whether a checkout's build output leaves the share. *)
+
+let wexited code stdout stderr = Unix.WEXITED code, stdout, stderr
+
+let listing_json names =
+  "["
+  ^ String.concat
+      ","
+      (List.map
+         (fun n ->
+           Printf.sprintf {|{"id":%S,"configuration":{"name":%S,"format":"ext4"}}|} n n)
+         names)
+  ^ "]"
+;;
+
+let test_volume_names_of_json_reads_ids () =
+  let json = Yojson.Safe.from_string (listing_json [ "a"; "masc-keeper-build-polisher" ]) in
+  match M.volume_names_of_json json with
+  | Error e -> Alcotest.failf "expected Ok, got %S" e
+  | Ok names ->
+    Alcotest.(check (list string))
+      "ids in order"
+      [ "a"; "masc-keeper-build-polisher" ]
+      names
+;;
+
+let test_volume_names_of_json_refuses_non_arrays () =
+  match M.volume_names_of_json (`String "nope") with
+  | Ok _ -> Alcotest.fail "expected Error for a non-array payload"
+  | Error _ -> ()
+;;
+
+let test_volume_probe_exit_zero_is_present () =
+  Alcotest.(check bool)
+    "inspect 0 needs no listing"
+    true
+    (M.classify_volume_probe
+       ~volume_name:"v"
+       ~inspect:(wexited 0 "{}" "")
+       ~listing:None
+     = M.Volume_present)
+;;
+
+let test_volume_probe_confirms_exit_one_against_the_listing () =
+  (* The point of the second command: exit 1 alone does not distinguish
+     "no such volume" from a stopped container system, and creating over an
+     existing volume would land on a keeper's build cache. *)
+  Alcotest.(check bool)
+    "absent when the listing does not carry it"
+    true
+    (M.classify_volume_probe
+       ~volume_name:"masc-keeper-build-polisher"
+       ~inspect:(wexited 1 "" "not found")
+       ~listing:(Some (wexited 0 (listing_json [ "other" ]) ""))
+     = M.Volume_absent);
+  Alcotest.(check bool)
+    "present when the listing does carry it, despite inspect exiting 1"
+    true
+    (M.classify_volume_probe
+       ~volume_name:"masc-keeper-build-polisher"
+       ~inspect:(wexited 1 "" "not found")
+       ~listing:(Some (wexited 0 (listing_json [ "masc-keeper-build-polisher" ]) ""))
+     = M.Volume_present)
+;;
+
+let test_volume_probe_refuses_to_guess () =
+  let failed = function
+    | M.Volume_probe_failed _ -> true
+    | _ -> false
+  in
+  Alcotest.(check bool)
+    "exit 1 with no listing is not read as absence"
+    true
+    (failed
+       (M.classify_volume_probe
+          ~volume_name:"v"
+          ~inspect:(wexited 1 "" "")
+          ~listing:None));
+  Alcotest.(check bool)
+    "a failing listing is not read as absence"
+    true
+    (failed
+       (M.classify_volume_probe
+          ~volume_name:"v"
+          ~inspect:(wexited 1 "" "")
+          ~listing:(Some (wexited 125 "" "container system is not running"))));
+  Alcotest.(check bool)
+    "invalid listing JSON is not read as absence"
+    true
+    (failed
+       (M.classify_volume_probe
+          ~volume_name:"v"
+          ~inspect:(wexited 1 "" "")
+          ~listing:(Some (wexited 0 "not json" ""))));
+  Alcotest.(check bool)
+    "an unexpected inspect status is not read as presence"
+    true
+    (failed
+       (M.classify_volume_probe ~volume_name:"v" ~inspect:(wexited 3 "" "") ~listing:None))
+;;
+
+let with_temp_dir f =
+  let dir = Filename.temp_file "masc-build-link" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      Array.iter (fun e -> try Unix.unlink (Filename.concat dir e) with _ -> ())
+        (try Sys.readdir dir with _ -> [||]);
+      try Unix.rmdir dir with _ -> ())
+    (fun () -> f dir)
+;;
+
+let test_build_link_state_reads_the_three_answers () =
+  with_temp_dir (fun dir ->
+    let absent = Filename.concat dir "absent" in
+    Alcotest.(check bool) "missing" true (M.build_link_state_of_path absent = M.Build_absent);
+    let link = Filename.concat dir "link" in
+    (* The target does not exist on the host -- it is a guest path -- and the
+       state must still read as a symlink rather than as absent. *)
+    Unix.symlink "/masc-build/masc-t362" link;
+    Alcotest.(check bool)
+      "dangling symlink still reads as a link"
+      true
+      (M.build_link_state_of_path link = M.Build_symlink "/masc-build/masc-t362");
+    let real = Filename.concat dir "real" in
+    Unix.mkdir real 0o700;
+    Alcotest.(check bool)
+      "directory"
+      true
+      (M.build_link_state_of_path real = M.Build_real_directory);
+    Unix.rmdir real;
+    let plain = Filename.concat dir "plain" in
+    close_out (open_out plain);
+    Alcotest.(check bool)
+      "a plain file reads conservatively, so the plan refuses it"
+      true
+      (M.build_link_state_of_path plain = M.Build_real_directory))
+;;
+
+let test_apply_build_link_is_idempotent_and_refuses_real_output () =
+  with_temp_dir (fun dir ->
+    let path = Filename.concat dir "_build" in
+    let target = "/masc-build/masc-t362" in
+    let step () =
+      M.apply_build_link ~path (M.plan_build_link ~target (M.build_link_state_of_path path))
+    in
+    Alcotest.(check bool) "first run links" true (step () = Ok `Linked);
+    Alcotest.(check bool) "second run is a no-op" true (step () = Ok `Unchanged);
+    Alcotest.(check bool)
+      "the link survives as written"
+      true
+      (M.build_link_state_of_path path = M.Build_symlink target);
+    (* A stale link is retargeted: removing a symlink loses no data. *)
+    Unix.unlink path;
+    Unix.symlink "/masc-build/stale" path;
+    Alcotest.(check bool) "stale link is retargeted" true (step () = Ok `Relinked);
+    (* Real build output is refused, and the directory is still there after. *)
+    Unix.unlink path;
+    Unix.mkdir path 0o700;
+    (match step () with
+     | Ok _ -> Alcotest.fail "a real _build directory must not be adopted"
+     | Error _ -> ());
+    Alcotest.(check bool)
+      "the refused directory is left in place, not deleted"
+      true
+      (Sys.file_exists path && Sys.is_directory path);
+    Unix.rmdir path)
+;;
+
+
 let () =
   Alcotest.run
     "keeper_sandbox_microvm"
@@ -927,6 +1100,22 @@ let () =
             test_build_link_target_refuses_ambiguous_paths
         ; Alcotest.test_case "plan never deletes real build output" `Quick
             test_plan_build_link_never_deletes_real_build_output
+        ] )
+    ; ( "build volume provisioning"
+      , [ Alcotest.test_case "volume names parse from the listing" `Quick
+            test_volume_names_of_json_reads_ids
+        ; Alcotest.test_case "listing must be an array" `Quick
+            test_volume_names_of_json_refuses_non_arrays
+        ; Alcotest.test_case "exit 0 is present" `Quick
+            test_volume_probe_exit_zero_is_present
+        ; Alcotest.test_case "exit 1 is confirmed against the listing" `Quick
+            test_volume_probe_confirms_exit_one_against_the_listing
+        ; Alcotest.test_case "ambiguity is never read as absence" `Quick
+            test_volume_probe_refuses_to_guess
+        ; Alcotest.test_case "link state reads the three answers" `Quick
+            test_build_link_state_reads_the_three_answers
+        ; Alcotest.test_case "apply is idempotent and refuses real output" `Quick
+            test_apply_build_link_is_idempotent_and_refuses_real_output
         ] )
     ; ( "guest env"
       , [ Alcotest.test_case "env follows the config mount" `Quick

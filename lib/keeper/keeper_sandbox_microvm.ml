@@ -431,6 +431,157 @@ let plan_build_link ~target = function
   | Build_real_directory -> Link_refused_real_directory
 ;;
 
+(* ── Provisioning the build volume ─────────────────────────────────── *)
+
+(** Volume ids in a [container volume list --format json] payload. *)
+let volume_names_of_json = function
+  | `List entries ->
+    let open Yojson.Safe.Util in
+    Ok
+      (List.filter_map
+         (fun entry ->
+           match member "id" entry with
+           | `String id -> Some id
+           | _ ->
+             (match entry |> member "configuration" |> member "name" with
+              | `String name -> Some name
+              | _ -> None))
+         entries)
+  | _ -> Error "container volume list did not return a JSON array"
+;;
+
+type volume_probe_outcome =
+  | Volume_present
+  | Volume_absent
+  | Volume_probe_failed of string
+
+(** [container volume inspect] answers 0 for present, but its 1 covers "no
+    such volume" together with a stopped container system and other faults,
+    so a 1 is confirmed against the listing rather than trusted. This mirrors
+    [classify_image_probe], and for the same reason: treating an ambiguous
+    exit code as "absent" would make provisioning try to create a volume that
+    already holds a keeper's build cache. *)
+let classify_volume_probe ~volume_name ~inspect ~listing =
+  let described label (status, stdout, stderr) =
+    Printf.sprintf
+      "container volume %s: %s (%s)"
+      label
+      (match status with
+       | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+       | Unix.WSIGNALED n -> Printf.sprintf "signalled %d" n
+       | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
+      (output_for_log ~stdout ~stderr)
+  in
+  match inspect with
+  | Unix.WEXITED 0, _, _ -> Volume_present
+  | Unix.WEXITED 1, _, _ ->
+    (match listing with
+     | None ->
+       Volume_probe_failed
+         "container volume inspect exited 1 and no listing was taken to           confirm whether the volume is absent"
+     | Some (Unix.WEXITED 0, stdout, _) ->
+       (match Yojson.Safe.from_string stdout with
+        | exception Yojson.Json_error message ->
+          Volume_probe_failed ("container volume list emitted invalid JSON: " ^ message)
+        | json ->
+          (match volume_names_of_json json with
+           | Error message -> Volume_probe_failed message
+           | Ok names ->
+             if List.exists (String.equal volume_name) names
+             then Volume_present
+             else Volume_absent))
+     | Some outcome -> Volume_probe_failed (described "list" outcome))
+  | outcome -> Volume_probe_failed (described "inspect" outcome)
+;;
+
+let volume_probe ~volume_name ~timeout_sec =
+  let inspect_argv = command_argv () @ [ "volume"; "inspect"; volume_name ] in
+  let inspect = Process_eio.run_argv_with_status_split ~timeout_sec inspect_argv in
+  let listing =
+    match inspect with
+    | Unix.WEXITED 1, _, _ ->
+      let list_argv = command_argv () @ [ "volume"; "list"; "--format"; "json" ] in
+      Some (Process_eio.run_argv_with_status_split ~timeout_sec list_argv)
+    | _ -> None
+  in
+  classify_volume_probe ~volume_name ~inspect ~listing
+;;
+
+(** Create the volume when it is absent, and say so when it cannot be
+    established either way.
+
+    [container volume create] is not idempotent -- a second call errors with
+    "already exists" -- so existence is settled by the probe above rather than
+    by reading that message. The size is a ceiling: the image is sparse, and
+    4 GiB nominal measured 84 MB on disk. *)
+let ensure_build_volume ~volume_name ~size ~timeout_sec =
+  match volume_probe ~volume_name ~timeout_sec with
+  | Volume_present -> Ok `Already_present
+  | Volume_probe_failed message ->
+    Error ("microvm_build_volume_probe_failed: " ^ message)
+  | Volume_absent ->
+    let argv = build_volume_create_argv ~volume_name ~size in
+    (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
+     | Unix.WEXITED 0, _, _ -> Ok `Created
+     | status, stdout, stderr ->
+       Error
+         (Printf.sprintf
+            "microvm_build_volume_create_failed: %s (%s; %s)"
+            volume_name
+            (match status with
+             | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+             | Unix.WSIGNALED n -> Printf.sprintf "signalled %d" n
+             | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
+            (output_for_log ~stdout ~stderr)))
+;;
+
+(* ── Binding a checkout's _build to the volume ─────────────────────── *)
+
+(** What [_build] is on the host right now.
+
+    Anything that is neither absent nor a symlink -- a directory, but also a
+    plain file -- reads as [Build_real_directory] so the plan refuses it. The
+    conservative reading is the safe one: the only action taken on that answer
+    is to leave the path alone. *)
+let build_link_state_of_path path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Build_absent
+  | exception Unix.Unix_error _ -> Build_real_directory
+  | { Unix.st_kind = Unix.S_LNK; _ } ->
+    (match Unix.readlink path with
+     | target -> Build_symlink target
+     | exception Unix.Unix_error _ -> Build_real_directory)
+  | _ -> Build_real_directory
+;;
+
+(** Carry out one plan.
+
+    The link points at a guest path, so on the host it dangles by
+    construction. [Unix.symlink] does not care, and the host never follows it:
+    the readers under [Playground_paths] read sources, not build output. *)
+let apply_build_link ~path plan =
+  match plan with
+  | Link_already_correct -> Ok `Unchanged
+  | Link_create target ->
+    (match Unix.symlink target path with
+     | () -> Ok `Linked
+     | exception Unix.Unix_error (err, _, _) ->
+       Error (Printf.sprintf "could not link %s: %s" path (Unix.error_message err)))
+  | Link_retarget target ->
+    (match
+       Unix.unlink path;
+       Unix.symlink target path
+     with
+     | () -> Ok `Relinked
+     | exception Unix.Unix_error (err, _, _) ->
+       Error (Printf.sprintf "could not relink %s: %s" path (Unix.error_message err)))
+  | Link_refused_real_directory ->
+    Error
+      (Printf.sprintf
+         "%s is a real directory holding build output this code did not           create; it is left on the virtiofs share rather than deleted. Next:           remove or move it by hand if the build cache is not wanted, and the           link is installed on the following turn."
+         path)
+;;
+
 (** Label value distinguishing a keeper-lifetime guest from turn
     containers. The guest outlives turns, so it carries no turn id. *)
 let keeper_vm_container_kind = "keeper-vm"

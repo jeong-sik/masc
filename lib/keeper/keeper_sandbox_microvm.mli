@@ -147,6 +147,48 @@ type build_link_plan =
     module did not create. A stale symlink is retargeted, which loses no data. *)
 val plan_build_link : target:string -> build_link_state -> build_link_plan
 
+(** Volume ids in a [container volume list --format json] payload. *)
+val volume_names_of_json : Yojson.Safe.t -> (string list, string) result
+
+type volume_probe_outcome =
+  | Volume_present
+  | Volume_absent
+  | Volume_probe_failed of string
+
+(** [container volume inspect] exits 1 for "no such volume" and also for a
+    stopped container system, so a 1 is confirmed against the listing instead
+    of being read as absence -- creating over an existing volume would land on
+    a keeper's build cache. Pure, so the ambiguity is testable. *)
+val classify_volume_probe
+  :  volume_name:string
+  -> inspect:Unix.process_status * string * string
+  -> listing:(Unix.process_status * string * string) option
+  -> volume_probe_outcome
+
+val volume_probe : volume_name:string -> timeout_sec:float -> volume_probe_outcome
+
+(** Create the volume when absent. [container volume create] is not
+    idempotent, so existence is settled by the probe rather than by reading
+    its "already exists" message. *)
+val ensure_build_volume
+  :  volume_name:string
+  -> size:string
+  -> timeout_sec:float
+  -> ([ `Created | `Already_present ], string) result
+
+(** Anything that is neither absent nor a symlink reads as
+    [Build_real_directory], so the plan refuses it. The conservative answer is
+    the safe one: the only action on it is to leave the path alone. *)
+val build_link_state_of_path : string -> build_link_state
+
+(** The link points at a guest path and so dangles on the host by
+    construction. Refusing a real directory is an error, not a silent skip,
+    because the caller should say which checkout stayed on virtiofs. *)
+val apply_build_link
+  :  path:string
+  -> build_link_plan
+  -> ([ `Linked | `Relinked | `Unchanged ], string) result
+
 val keeper_vm_container_kind : string
 
 val inspect_argv : container_name:string -> string list

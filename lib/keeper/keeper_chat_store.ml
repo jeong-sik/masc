@@ -795,6 +795,7 @@ let validate_delivery_execution_identity ~execution_id
         | Keeper_chat_delivery_identity.Terminal_assistant
         | Keeper_chat_delivery_identity.Approval_resolution
         | Keeper_chat_delivery_identity.Approval_replay
+        | Keeper_chat_delivery_identity.Approval_replay_correction
         | Keeper_chat_delivery_identity.Approval_continuation ),
         None ->
           Ok ()
@@ -802,6 +803,7 @@ let validate_delivery_execution_identity ~execution_id
         | Keeper_chat_delivery_identity.Terminal_assistant
         | Keeper_chat_delivery_identity.Approval_resolution
         | Keeper_chat_delivery_identity.Approval_replay
+        | Keeper_chat_delivery_identity.Approval_replay_correction
         | Keeper_chat_delivery_identity.Approval_continuation ),
         Some _ ->
           Error "non-tool transcript slot forbids row execution_id")
@@ -814,6 +816,7 @@ let validate_delivery_role ~role_label
   | Keeper_chat_delivery_identity.Terminal_assistant, "assistant"
   | ( Keeper_chat_delivery_identity.Approval_resolution
     | Keeper_chat_delivery_identity.Approval_replay
+    | Keeper_chat_delivery_identity.Approval_replay_correction
     | Keeper_chat_delivery_identity.Approval_continuation ),
     "system"
   | ( Keeper_chat_delivery_identity.Tool_call _
@@ -826,6 +829,7 @@ let validate_delivery_role ~role_label
     Error "terminal_assistant transcript slot requires an assistant row"
   | ( Keeper_chat_delivery_identity.Approval_resolution
     | Keeper_chat_delivery_identity.Approval_replay
+    | Keeper_chat_delivery_identity.Approval_replay_correction
     | Keeper_chat_delivery_identity.Approval_continuation ),
     _ ->
     Error "approval lifecycle transcript slot requires a system row"
@@ -1014,6 +1018,7 @@ let provenance_index_of_existing existing =
       | Keeper_chat_delivery_identity.Terminal_assistant
       | Keeper_chat_delivery_identity.Approval_resolution
       | Keeper_chat_delivery_identity.Approval_replay
+      | Keeper_chat_delivery_identity.Approval_replay_correction
       | Keeper_chat_delivery_identity.Approval_continuation -> None
     in
     Option.iter
@@ -1042,6 +1047,7 @@ let provenance_index_of_existing existing =
     | Keeper_chat_delivery_identity.Terminal_assistant
     | Keeper_chat_delivery_identity.Approval_resolution
     | Keeper_chat_delivery_identity.Approval_replay
+    | Keeper_chat_delivery_identity.Approval_replay_correction
     | Keeper_chat_delivery_identity.Approval_continuation -> ()
   in
   existing
@@ -1102,6 +1108,7 @@ let find_indexed_provenance index ~provenance =
       | Keeper_chat_delivery_identity.Terminal_assistant
       | Keeper_chat_delivery_identity.Approval_resolution
       | Keeper_chat_delivery_identity.Approval_replay
+      | Keeper_chat_delivery_identity.Approval_replay_correction
       | Keeper_chat_delivery_identity.Approval_continuation -> Ok ()
     in
     let ( let* ) = Result.bind in
@@ -1114,6 +1121,7 @@ let find_indexed_provenance index ~provenance =
       | Keeper_chat_delivery_identity.Terminal_assistant
       | Keeper_chat_delivery_identity.Approval_resolution
       | Keeper_chat_delivery_identity.Approval_replay
+      | Keeper_chat_delivery_identity.Approval_replay_correction
       | Keeper_chat_delivery_identity.Approval_continuation -> None
     in
     (match
@@ -1468,6 +1476,7 @@ let transcript_slot_ordinal = function
   | Keeper_chat_delivery_identity.Terminal_assistant
   | Keeper_chat_delivery_identity.Approval_resolution
   | Keeper_chat_delivery_identity.Approval_replay
+  | Keeper_chat_delivery_identity.Approval_replay_correction
   | Keeper_chat_delivery_identity.Approval_continuation -> None
 ;;
 
@@ -1500,6 +1509,7 @@ let validate_append_once_lines lines =
         | Keeper_chat_delivery_identity.Terminal_assistant
         | Keeper_chat_delivery_identity.Approval_resolution
         | Keeper_chat_delivery_identity.Approval_replay
+        | Keeper_chat_delivery_identity.Approval_replay_correction
         | Keeper_chat_delivery_identity.Approval_continuation -> None
       in
       let* () =
@@ -2440,7 +2450,27 @@ let approval_lifecycle_content lifecycle =
     Printf.sprintf "승인 후 후속 작업 이어가기 기록됨 · %s" tool
 ;;
 
-let append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
+type approval_lifecycle_append =
+  | Approval_lifecycle_exact of append_once_result
+  | Approval_lifecycle_conflict of approval_lifecycle
+
+let approval_lifecycle_is_replay = function
+  | Approval_replay_applied
+  | Approval_replay_applied_with_warning
+  | Approval_replay_failed
+  | Approval_replay_indeterminate -> true
+  | Approval_resolved_approved
+  | Approval_resolved_rejected
+  | Approval_continuation_recorded -> false
+;;
+
+let append_approval_lifecycle_at_slot_once
+      ~base_dir
+      ~keeper_name
+      ~lifecycle
+      ~transcript_slot
+      ~corrected
+  =
   let open Keeper_chat_delivery_identity in
   match Request_id.of_string lifecycle.approval_id with
   | Error detail -> Error detail
@@ -2450,21 +2480,22 @@ let append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
        let redaction = redaction_for ~base_dir ~keeper_name in
        let lifecycle = redact_approval_lifecycle redaction lifecycle in
        let delivery_key = Approval_lifecycle approval_id in
-       let transcript_slot =
-         match lifecycle.phase with
-         | Approval_resolved_approved | Approval_resolved_rejected ->
-           Approval_resolution
-         | Approval_replay_applied
-         | Approval_replay_applied_with_warning
-         | Approval_replay_failed
-         | Approval_replay_indeterminate -> Approval_replay
-         | Approval_continuation_recorded -> Approval_continuation
-       in
        let provenance = { delivery_key; transcript_slot } in
        let path = chat_path ~base_dir ~keeper_name in
        let ts = Time_compat.now () in
        let row_id = mint_message_id ~ts in
        let content = approval_lifecycle_content lifecycle in
+       let content =
+         if corrected
+         then
+           String.concat
+             "\n"
+             [ "승인 작업 결과 정정"
+             ; content
+             ; "이전 표시보다 durable replay journal 결과가 우선합니다."
+             ]
+         else content
+       in
        let line =
          encode_line
            ~role:Role.System
@@ -2477,16 +2508,19 @@ let append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
        in
        match append_line_once path ~provenance ~row_id line with
        | Error _ as error -> error
-       | Ok (Appended _ as result) -> Ok result
+       | Ok (Appended _ as result) -> Ok (Approval_lifecycle_exact result)
        | Ok (Already_present { row_id } as result) ->
          (match
             load_all ~base_dir ~keeper_name
             |> List.find_opt (fun message -> String.equal message.id row_id)
           with
           | Some { approval_lifecycle = Some existing; _ }
-            when approval_lifecycle_equal existing lifecycle -> Ok result
+            when approval_lifecycle_equal existing lifecycle ->
+            Ok (Approval_lifecycle_exact result)
+          | Some { approval_lifecycle = Some existing; _ } ->
+            Ok (Approval_lifecycle_conflict existing)
           | Some _ ->
-            Error "approval lifecycle provenance exists with conflicting content"
+            Error "approval lifecycle provenance row has no lifecycle content"
           | None -> Error "approval lifecycle provenance row is unreadable")
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -2497,6 +2531,107 @@ let append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
          (sanitize_name keeper_name)
          detail;
        Error detail)
+
+let append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
+  let open Keeper_chat_delivery_identity in
+  let transcript_slot =
+    match lifecycle.phase with
+    | Approval_resolved_approved | Approval_resolved_rejected ->
+      Approval_resolution
+    | Approval_replay_applied
+    | Approval_replay_applied_with_warning
+    | Approval_replay_failed
+    | Approval_replay_indeterminate -> Approval_replay
+    | Approval_continuation_recorded -> Approval_continuation
+  in
+  match
+    append_approval_lifecycle_at_slot_once
+      ~base_dir
+      ~keeper_name
+      ~lifecycle
+      ~transcript_slot
+      ~corrected:false
+  with
+  | Error _ as error -> error
+  | Ok (Approval_lifecycle_exact result) -> Ok result
+  | Ok (Approval_lifecycle_conflict _) ->
+    Error "approval lifecycle provenance exists with conflicting content"
+;;
+
+let existing_approval_lifecycle_at_slot
+      ~base_dir
+      ~keeper_name
+      ~approval_id
+      ~transcript_slot
+  =
+  let open Keeper_chat_delivery_identity in
+  load_all ~base_dir ~keeper_name
+  |> List.find_map (fun message ->
+    match message.delivery_provenance, message.approval_lifecycle with
+    | ( Some
+          { delivery_key = Approval_lifecycle existing_approval_id
+          ; transcript_slot = existing_slot
+          }
+      , Some existing_lifecycle )
+      when String.equal (Request_id.to_string existing_approval_id) approval_id
+           && transcript_slot_equal existing_slot transcript_slot ->
+      Some (message.id, existing_lifecycle)
+    | _ -> None)
+;;
+
+let reconcile_approval_replay_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
+  let open Keeper_chat_delivery_identity in
+  if not (approval_lifecycle_is_replay lifecycle.phase)
+  then Error "approval replay reconciliation requires a replay lifecycle phase"
+  else
+    let redaction = redaction_for ~base_dir ~keeper_name in
+    let redacted_lifecycle = redact_approval_lifecycle redaction lifecycle in
+    match
+      existing_approval_lifecycle_at_slot
+        ~base_dir
+        ~keeper_name
+        ~approval_id:lifecycle.approval_id
+        ~transcript_slot:Approval_replay_correction
+    with
+    | Some (row_id, existing)
+      when approval_lifecycle_equal existing redacted_lifecycle ->
+      Ok (Already_present { row_id })
+    | Some _ -> Error "approval replay correction exists with conflicting content"
+    | None ->
+      (match
+         append_approval_lifecycle_at_slot_once
+           ~base_dir
+           ~keeper_name
+           ~lifecycle
+           ~transcript_slot:Approval_replay
+           ~corrected:false
+       with
+       | Error _ as error -> error
+       | Ok (Approval_lifecycle_exact result) -> Ok result
+       | Ok (Approval_lifecycle_conflict previous) ->
+         (match
+            append_approval_lifecycle_at_slot_once
+              ~base_dir
+              ~keeper_name
+              ~lifecycle
+              ~transcript_slot:Approval_replay_correction
+              ~corrected:true
+          with
+          | Error _ as error -> error
+          | Ok
+              (Approval_lifecycle_exact
+                (Appended _ as result)) ->
+            Log.Keeper.warn
+              ~keeper_name
+              "approval replay chat correction appended approval=%s previous_phase=%s canonical_phase=%s"
+              lifecycle.approval_id
+              (approval_lifecycle_phase_to_label previous.phase)
+              (approval_lifecycle_phase_to_label lifecycle.phase);
+            Ok result
+          | Ok (Approval_lifecycle_exact result) -> Ok result
+          | Ok (Approval_lifecycle_conflict _) ->
+            Error "approval replay correction exists with conflicting content"))
+;;
 
 let approval_lifecycle_phase_present
       ~base_dir

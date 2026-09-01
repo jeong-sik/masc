@@ -30,6 +30,7 @@ type transcript_slot =
   | Terminal_assistant
   | Approval_resolution
   | Approval_replay
+  | Approval_replay_correction
   | Approval_continuation
 
 (** [Tool_call] identifies a row by the canonical execution committed by the

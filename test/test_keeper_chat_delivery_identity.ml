@@ -62,6 +62,7 @@ let test_transcript_slot_roundtrip () =
     ; Identity.Terminal_assistant
     ; Identity.Approval_resolution
     ; Identity.Approval_replay
+    ; Identity.Approval_replay_correction
     ; Identity.Approval_continuation
     ]
   in

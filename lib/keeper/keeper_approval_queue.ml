@@ -2984,13 +2984,7 @@ let deliver_resolution ~base_path (entry : pending_approval) decision =
     ~channel:entry.continuation_channel
 ;;
 
-let append_chat_projection ~base_path ~keeper_name lifecycle =
-  match
-    Keeper_chat_store.append_approval_lifecycle_once
-      ~base_dir:base_path
-      ~keeper_name
-      ~lifecycle
-  with
+let publish_chat_projection_append ~keeper_name = function
   | Error _ as error -> error
   | Ok (Keeper_chat_store.Already_present _) -> Ok ()
   | Ok (Keeper_chat_store.Appended _) ->
@@ -2999,6 +2993,14 @@ let append_chat_projection ~base_path ~keeper_name lifecycle =
       ~source:"approval_lifecycle"
       ();
     Ok ()
+;;
+
+let append_chat_projection ~base_path ~keeper_name lifecycle =
+  Keeper_chat_store.append_approval_lifecycle_once
+    ~base_dir:base_path
+    ~keeper_name
+    ~lifecycle
+  |> publish_chat_projection_append ~keeper_name
 ;;
 
 let ensure_resolution_chat_projection
@@ -3041,14 +3043,16 @@ let ensure_replay_chat_projection
     | Replay_indeterminate artifact_ref ->
       Keeper_chat_store.Approval_replay_indeterminate, artifact_ref
   in
-  append_chat_projection
-    ~base_path
+  Keeper_chat_store.reconcile_approval_replay_lifecycle_once
+    ~base_dir:base_path
     ~keeper_name
-    { Keeper_chat_store.approval_id
-    ; tool_name
-    ; phase
-    ; artifact_ref = Some artifact_ref
-    }
+    ~lifecycle:
+      { Keeper_chat_store.approval_id
+      ; tool_name
+      ; phase
+      ; artifact_ref = Some artifact_ref
+      }
+  |> publish_chat_projection_append ~keeper_name
 ;;
 
 let ensure_continuation_chat_projection

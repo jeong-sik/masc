@@ -47,6 +47,7 @@ type transcript_slot =
   | Terminal_assistant
   | Approval_resolution
   | Approval_replay
+  | Approval_replay_correction
   | Approval_continuation
 
 type delivery_provenance =
@@ -172,6 +173,8 @@ let transcript_slot_to_yojson = function
   | Terminal_assistant -> `Assoc [ "kind", `String "terminal_assistant" ]
   | Approval_resolution -> `Assoc [ "kind", `String "approval_resolution" ]
   | Approval_replay -> `Assoc [ "kind", `String "approval_replay" ]
+  | Approval_replay_correction ->
+    `Assoc [ "kind", `String "approval_replay_correction" ]
   | Approval_continuation -> `Assoc [ "kind", `String "approval_continuation" ]
   | Tool_call { execution_id; ordinal } ->
     `Assoc
@@ -226,6 +229,14 @@ let transcript_slot_of_yojson = function
            fields
        in
        Ok Approval_replay
+     | "approval_replay_correction" ->
+       let* () =
+         validate_fields
+           ~context:"approval replay correction transcript slot"
+           ~expected:[ "kind" ]
+           fields
+       in
+       Ok Approval_replay_correction
      | "approval_continuation" ->
        let* () =
          validate_fields
@@ -268,18 +279,20 @@ let transcript_slot_equal left right =
   | Terminal_assistant, Terminal_assistant
   | Approval_resolution, Approval_resolution
   | Approval_replay, Approval_replay
+  | Approval_replay_correction, Approval_replay_correction
   | Approval_continuation, Approval_continuation -> true
   | Tool_call left, Tool_call right ->
     Ids.Execution_id.equal left.execution_id right.execution_id
     && Int.equal left.ordinal right.ordinal
   | Tool_delivery left, Tool_delivery right -> Int.equal left.ordinal right.ordinal
-  | Accepted_user, (Terminal_assistant | Tool_call _ | Tool_delivery _ | Approval_resolution | Approval_replay | Approval_continuation)
-  | Terminal_assistant, (Accepted_user | Tool_call _ | Tool_delivery _ | Approval_resolution | Approval_replay | Approval_continuation)
-  | Tool_call _, (Accepted_user | Terminal_assistant | Tool_delivery _ | Approval_resolution | Approval_replay | Approval_continuation)
-  | Tool_delivery _, (Accepted_user | Terminal_assistant | Tool_call _ | Approval_resolution | Approval_replay | Approval_continuation)
-  | Approval_resolution, (Accepted_user | Terminal_assistant | Tool_call _ | Tool_delivery _ | Approval_replay | Approval_continuation)
-  | Approval_replay, (Accepted_user | Terminal_assistant | Tool_call _ | Tool_delivery _ | Approval_resolution | Approval_continuation)
-  | Approval_continuation, (Accepted_user | Terminal_assistant | Tool_call _ | Tool_delivery _ | Approval_resolution | Approval_replay) -> false
+  | Accepted_user, (Terminal_assistant | Tool_call _ | Tool_delivery _ | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
+  | Terminal_assistant, (Accepted_user | Tool_call _ | Tool_delivery _ | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
+  | Tool_call _, (Accepted_user | Terminal_assistant | Tool_delivery _ | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
+  | Tool_delivery _, (Accepted_user | Terminal_assistant | Tool_call _ | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
+  | Approval_resolution, (Accepted_user | Terminal_assistant | Tool_call _ | Tool_delivery _ | Approval_replay | Approval_replay_correction | Approval_continuation)
+  | Approval_replay, (Accepted_user | Terminal_assistant | Tool_call _ | Tool_delivery _ | Approval_resolution | Approval_replay_correction | Approval_continuation)
+  | Approval_replay_correction, (Accepted_user | Terminal_assistant | Tool_call _ | Tool_delivery _ | Approval_resolution | Approval_replay | Approval_continuation)
+  | Approval_continuation, (Accepted_user | Terminal_assistant | Tool_call _ | Tool_delivery _ | Approval_resolution | Approval_replay | Approval_replay_correction) -> false
 ;;
 
 let delivery_provenance_fields { delivery_key; transcript_slot } =

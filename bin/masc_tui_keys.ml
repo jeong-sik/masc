@@ -366,14 +366,17 @@ let for_surface = function
       ]
       @ listing_meta
   | System_logs ->
-      (* j/k only: g, G, and f are Acting's keys. The old help table listed
-         them here, documenting keys that did nothing. *)
-      [ b Navigate "j/k" "scroll"
+      [ b Navigate "j/k" "move / scroll"
+      ; b Navigate "PgUp/PgDn" "detail page"
+      ; b Navigate "[ / ]" "previous / next"
+          ~help:"while detail is open, inspect the adjacent visible log entry"
       ; b Act "l" "level floor"
           ~help:"raise the minimum level; after error, back to everything"
       ; b Act "c" "category"
           ~help:"cycle through the categories this page carries"
-      ; b Act "Esc" "overview"
+      ; b Act "Right / Enter" "detail"
+          ~help:"show the full message, source, category, turn, and JSON details"
+      ; b Act "Left / Esc" "back"
       ]
       @ listing_meta
 

@@ -132,13 +132,25 @@ type system_log_level =
           written rather than folded into an existing level, so a new level is
           visible instead of silently rendering as one of these. *)
 
+type system_log_source =
+  | System_structured
+  | System_legacy_stderr
+  | System_legacy_traceln
+  | System_client_tool_host
+  | System_source_unknown of string
+
+val system_log_source_label : system_log_source -> string
+
 type system_log_entry = {
   sl_seq : int;
   sl_ts : string;
   sl_level : system_log_level;
+  sl_source : system_log_source;
   sl_module : string;
   sl_keeper : string option;
+  sl_turn : int option;
   sl_message : string;
+  sl_details : Yojson.Safe.t;
   sl_category : string option;
       (** The producer's typed category, as its wire string ([Null] rows carry
           none). The vocabulary is the server's closed set; this reader keeps

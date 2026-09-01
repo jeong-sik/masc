@@ -54,8 +54,15 @@ let test_one_spelling_per_key () =
     every_surface
 
 let test_plain_listing_footer_shape () =
-  let canonical = "j/k:scroll  l:level floor  c:category  Esc:overview  r:refresh  Tab:next  q:quit" in
+  let canonical =
+    "j/k:scroll  b / u:bind / unbind  Esc:overview  r:refresh  Tab:next  q:quit"
+  in
   check str "the plain listing keeps its footer" canonical
+    (Masc_tui_keys.footer_hints Connectors)
+
+let test_system_logs_footer_names_browser_controls () =
+  check str "logs names filters and detail"
+    "j/k:move / scroll  PgUp/PgDn:detail page  [ / ]:previous / next  l:level floor  c:category  Right / Enter:detail  Left / Esc:back  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints System_logs)
 
 let test_lanes_footer_opens_the_selected_keeper () =
@@ -287,6 +294,7 @@ let test_every_detail_surface_steps_through_its_list () =
     ; "Changes", Changes
     ; "Resources", Resources
     ; "Keeper detail", Keepers Keeper_detail
+    ; "System logs", System_logs
     ]
 
 let test_planning_footer_carries_filter_and_sort () =
@@ -326,9 +334,9 @@ let test_changes_is_a_keeper_child () =
     (surface_ring_index (Keepers Keeper_list))
     (surface_ring_index Changes)
 
-let test_system_logs_lost_the_keys_it_never_had () =
-  (* The old help table documented g, G, and f on System logs; the dispatch
-     binds them on Acting only. *)
+let test_system_logs_owns_only_its_real_filter_keys () =
+  (* g/G/f still belong to Acting. Logs owns the server level floor and the
+     category cycle under l/c. *)
   let keys =
     List.map
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
@@ -336,6 +344,8 @@ let test_system_logs_lost_the_keys_it_never_had () =
   in
   Alcotest.(check bool) "no g/G on System logs" false (List.mem "g / G" keys);
   Alcotest.(check bool) "no f on System logs" false (List.mem "f" keys);
+  Alcotest.(check bool) "level floor is documented" true (List.mem "l" keys);
+  Alcotest.(check bool) "category filter is documented" true (List.mem "c" keys);
   let acting =
     List.map
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
@@ -694,6 +704,8 @@ let () =
     ; ( "projections"
       , [ Alcotest.test_case "plain listing footer shape" `Quick
             test_plain_listing_footer_shape
+        ; Alcotest.test_case "System logs browser footer" `Quick
+            test_system_logs_footer_names_browser_controls
         ; Alcotest.test_case "Tools carries the Keeper axis" `Quick
             test_tools_footer_carries_the_keeper_axis
         ; Alcotest.test_case "Resources steps through detail" `Quick
@@ -728,8 +740,8 @@ let () =
             test_lane_notice_says_what_is_recorded
         ; Alcotest.test_case "Overview footer projects by focus" `Quick
             test_overview_footer_projects_by_focus
-        ; Alcotest.test_case "System logs lost the keys it never had" `Quick
-            test_system_logs_lost_the_keys_it_never_had
+        ; Alcotest.test_case "System logs owns only real filter keys" `Quick
+            test_system_logs_owns_only_its_real_filter_keys
         ; Alcotest.test_case "every detail surface steps through its list"
             `Quick test_every_detail_surface_steps_through_its_list
         ; Alcotest.test_case "Planning carries filter and sort" `Quick

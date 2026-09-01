@@ -1419,17 +1419,19 @@ let test_bounded_parent_depth_stops_on_cycle () =
   Alcotest.(check int) "cycle stops at first repeated parent" 1 depth
 
 let system_log_entry_json ?(seq = 774272) ?(level = "INFO")
-    ?(keeper = `String "system") ?(category = `Null) () =
+    ?(source = "structured")
+    ?(keeper = `String "system") ?(turn = `Null) ?(details = `Null)
+    ?(category = `Null) () =
   `Assoc
     [ ("seq", `Int seq)
     ; ("ts", `String "2026-08-23T03:09:21Z")
     ; ("level", `String level)
-    ; ("source", `String "structured")
+    ; ("source", `String source)
     ; ("module", `String "Discord")
     ; ("keeper_name", keeper)
-    ; ("turn_id", `Null)
+    ; ("turn_id", turn)
     ; ("message", `String "presence update: idle")
-    ; ("details", `Null)
+    ; ("details", details)
     ; ("category", category)
     ]
 
@@ -3546,7 +3548,11 @@ let test_decode_system_log_snapshot_reads_the_live_shape () =
            Alcotest.(check (option string)) "a null category decodes as none"
              None entry.Tui_decode.sl_category;
            Alcotest.(check string) "level label" "INFO "
-             (Tui_decode.system_log_level_label entry.Tui_decode.sl_level)
+             (Tui_decode.system_log_level_label entry.Tui_decode.sl_level);
+           Alcotest.(check string) "source" "structured"
+             (Tui_decode.system_log_source_label entry.Tui_decode.sl_source);
+           Alcotest.(check (option int)) "turn" None entry.Tui_decode.sl_turn;
+           Alcotest.(check bool) "details" true (entry.Tui_decode.sl_details = `Null)
        | entries ->
            Alcotest.failf "expected one entry, got %d" (List.length entries))
 
@@ -3639,14 +3645,44 @@ let test_decode_system_log_null_keeper_is_absent_not_empty () =
         e.Tui_decode.sl_keeper
   | Ok _ -> Alcotest.fail "expected one entry"
 
+let test_decode_system_log_keeps_browser_metadata () =
+  let details = `Assoc [ ("tool", `String "Read"); ("duration_ms", `Int 18) ] in
+  match
+    Tui_decode.decode_system_log_snapshot
+      (system_log_snapshot_json
+         [ system_log_entry_json ~source:"client_tool_host" ~turn:(`Int 7)
+             ~details ~category:(`String "tool") () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok { Tui_decode.sys_entries = [ entry ]; _ } ->
+      Alcotest.(check string) "source" "client tool host"
+        (Tui_decode.system_log_source_label entry.sl_source);
+      Alcotest.(check (option int)) "turn" (Some 7) entry.sl_turn;
+      Alcotest.(check (option string)) "category" (Some "tool")
+        entry.sl_category;
+      Alcotest.(check bool) "structured details" true (entry.sl_details = details)
+  | Ok _ -> Alcotest.fail "expected one entry"
+
+let test_decode_system_log_preserves_unknown_source_and_category () =
+  match
+    Tui_decode.decode_system_log_snapshot
+      (system_log_snapshot_json
+         [ system_log_entry_json ~source:"future_source"
+             ~category:(`String "future_category") () ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok { Tui_decode.sys_entries = [ entry ]; _ } ->
+      Alcotest.(check string) "unknown source" "future_source"
+        (Tui_decode.system_log_source_label entry.sl_source);
+      Alcotest.(check (option string)) "unknown category" (Some "future_category")
+        entry.sl_category
+  | Ok _ -> Alcotest.fail "expected one entry"
+
 let test_decode_system_log_requires_the_message () =
   let without_message =
-    `Assoc
-      [ ("seq", `Int 1)
-      ; ("ts", `String "2026-08-23T03:09:21Z")
-      ; ("level", `String "INFO")
-      ; ("module", `String "Discord")
-      ]
+    match system_log_entry_json () with
+    | `Assoc fields -> `Assoc (List.remove_assoc "message" fields)
+    | _ -> Alcotest.fail "system log fixture must be an object"
   in
   match
     Tui_decode.decode_system_log_snapshot
@@ -6060,6 +6096,10 @@ let () =
           test_decode_system_log_keeps_an_unnamed_level_as_itself;
         Alcotest.test_case "null keeper is absent" `Quick
           test_decode_system_log_null_keeper_is_absent_not_empty;
+        Alcotest.test_case "keeps browser metadata" `Quick
+          test_decode_system_log_keeps_browser_metadata;
+        Alcotest.test_case "unknown source/category survive" `Quick
+          test_decode_system_log_preserves_unknown_source_and_category;
         Alcotest.test_case "message is required" `Quick
           test_decode_system_log_requires_the_message;
       ] );

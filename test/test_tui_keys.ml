@@ -302,6 +302,19 @@ let test_planning_footer_carries_filter_and_sort () =
     "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Planning)
 
+let test_board_and_planning_explain_their_order () =
+  check str "hot formula" "net votes first; newer breaks ties"
+    (board_sort_explanation Board_hot);
+  check str "trending formula" "net votes / √age-hours"
+    (board_sort_explanation Board_trending);
+  check str "active phase set" "executing + verifying"
+    (planning_filter_explanation Planning_filter_active);
+  check str "phase and priority order" "phase order, then P1→P5"
+    (planning_sort_explanation Planning_sort_phase_priority);
+  check str "due order" "earliest due date first; undated last"
+    (planning_sort_explanation Planning_sort_due)
+;;
+
 let test_task_review_is_a_planning_child () =
   Alcotest.(check bool) "Task Review is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Verification) surface_ring);
@@ -737,6 +750,8 @@ let () =
             `Quick test_every_detail_surface_steps_through_its_list
         ; Alcotest.test_case "Planning carries filter and sort" `Quick
             test_planning_footer_carries_filter_and_sort
+        ; Alcotest.test_case "Board and Planning explain order" `Quick
+            test_board_and_planning_explain_their_order
         ; Alcotest.test_case "Task Review is a Planning child" `Quick
             test_task_review_is_a_planning_child
         ; Alcotest.test_case "Verdicts is a Planning child" `Quick

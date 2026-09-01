@@ -774,7 +774,10 @@ let test_served_skill_without_delivery_does_not_claim_use () =
       check (list string) "the UI says delivery was not recorded"
         [ "**ci-red-attribution** \xc2\xb7 **SERVED ONLY \xc2\xb7 DELIVERY NOT RECORDED**" ]
         (Transcript.skill_rows ~full:false skill)
-  | rows -> failf "expected one served-only Skill row, got %d" (List.length rows)
+  | rows ->
+      failf "expected one served-only Skill row, got %d: %s" (List.length rows)
+        (String.concat "; "
+           (List.map (fun (r : History.row) -> kind_to_string r.kind) rows))
 
 let test_missing_skill_evidence_stays_visible_beside_the_raw_call () =
   let projection =

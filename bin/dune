@@ -754,6 +754,7 @@
   masc_tui_mcp
   masc.masc_goal
   masc.masc_types
+  masc.time_codec
   masc_tui_acting
   masc_tui_composer
   masc_tui_agenda

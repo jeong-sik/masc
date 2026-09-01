@@ -514,7 +514,7 @@ let delivery_key_of_run_id run_id =
 ;;
 
 let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges
-      ~judge_usage ?tool_trace :
+      ~judge_usage ~(tool_trace : Fusion_types.tool_trace option) :
     (unit, string) result =
   let ( let* ) = Result.bind in
   let* delivery_key = delivery_key_of_run_id run_id in

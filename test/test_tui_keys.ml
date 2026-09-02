@@ -871,7 +871,7 @@ let test_detail_tab_hint_projects_the_table () =
    GitHub tab, e for the settings form). *)
 let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   [ Detail_info, []
-  ; Detail_sandbox, [ "R" ]
+  ; Detail_sandbox, [ "o"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []
   ; Detail_github, [ "L" ]
@@ -893,6 +893,15 @@ let test_detail_tab_bindings_cover_the_live_keys () =
          (keeper_detail_tab_label tab ^ " tab keys")
          expected actual)
     live_tab_keys
+
+let test_keeper_detail_reserves_lowercase_u_for_channel_unbind () =
+  let keys =
+    Masc_tui_keys.for_surface (Keepers Keeper_detail)
+    |> List.map (fun (binding : Masc_tui_keys.binding) -> binding.key)
+  in
+  Alcotest.(check bool) "uppercase runtime remains" true (List.mem "U" keys);
+  Alcotest.(check bool) "lowercase u is free for Channels" false
+    (List.mem "u" keys)
 
 let test_detail_tab_keys_reach_the_help_sheet () =
   let sheet = Masc_tui_keys.help_sections ~current:(Keepers Keeper_detail) () in
@@ -1001,6 +1010,8 @@ let () =
             test_logs_is_an_activity_child
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
+        ; Alcotest.test_case "Keeper detail reserves u for channel unbind"
+            `Quick test_keeper_detail_reserves_lowercase_u_for_channel_unbind
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick
             test_keepers_jump_uses_one_binding_for_dispatch_and_help
         ; Alcotest.test_case "the sheet opens on the current surface" `Quick

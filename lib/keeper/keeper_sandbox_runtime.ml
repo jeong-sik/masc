@@ -34,6 +34,12 @@ type live_container =
   ; owner_pid : int option
   ; started_at : float option
   ; ttl_sec : float option
+  ; cpus : int option
+  ; memory_bytes : int option
+  ; hostname : string option
+  ; ipv4_address : string option
+  ; ipv6_address : string option
+  ; gateway : string option
   }
 
 type cleanup_remove_outcome =
@@ -185,6 +191,12 @@ let parse_live_container_line line =
       ; owner_pid = int_opt owner_pid
       ; started_at = float_opt started_at
       ; ttl_sec = float_opt ttl_sec
+      ; cpus = None
+      ; memory_bytes = None
+      ; hostname = None
+      ; ipv4_address = None
+      ; ipv6_address = None
+      ; gateway = None
       }
   | _ ->
     Error
@@ -534,6 +546,12 @@ let live_container_to_yojson (c : live_container) =
     ; option_int_field "owner_pid" c.owner_pid
     ; option_float_field "started_at" c.started_at
     ; option_float_field "ttl_sec" c.ttl_sec
+    ; option_int_field "cpus" c.cpus
+    ; option_int_field "memory_bytes" c.memory_bytes
+    ; option_string_field "hostname" c.hostname
+    ; option_string_field "ipv4_address" c.ipv4_address
+    ; option_string_field "ipv6_address" c.ipv6_address
+    ; option_string_field "gateway" c.gateway
     ]
 ;;
 

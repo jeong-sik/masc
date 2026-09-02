@@ -10,7 +10,9 @@ val decode :
 
 val view_lines : width:int -> t -> string list
 (** Render declared -> effective -> observed flow plus live containers,
-    errors, explanations, and identity warnings. [width] is the available
+    configured resources, actual CPU/memory/network facts, host and guest
+    paths, errors, explanations, and log-navigation hints. Unobserved facts
+    remain explicit rather than being inferred. [width] is the available
     content width, so long server explanations wrap instead of disappearing
     at the pane edge.
 

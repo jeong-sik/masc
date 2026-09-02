@@ -697,6 +697,74 @@ let microvm_build_volume_json ~(config : Workspace.config) ~(meta : keeper_meta)
       ]
 ;;
 
+let sandbox_resource_config_json (meta : keeper_meta) =
+  match meta.sandbox_profile with
+  | Micro_vm ->
+    let memory =
+      match Env_config_sandbox.Runtime.microvm_memory () with
+      | "" -> Env_config_sandbox.Hardening.memory ()
+      | configured -> configured
+    in
+    let cpus =
+      match Env_config_sandbox.Runtime.microvm_cpus () with
+      | "" -> `Null
+      | configured -> `String configured
+    in
+    `Assoc
+      [ "memory", `String memory
+      ; "cpus", cpus
+      ; "work_volume_size", `String (Env_config_sandbox.Runtime.microvm_work_volume_size ())
+      ; "build_volume_size", `String (Env_config_sandbox.Runtime.microvm_build_volume_size ())
+      ; "pids_limit", `Null
+      ; "tmpfs_size", `Null
+      ]
+  | Docker ->
+    `Assoc
+      [ "memory", `String (Env_config_sandbox.Hardening.memory ())
+      ; "cpus", `Null
+      ; "work_volume_size", `Null
+      ; "build_volume_size", `Null
+      ; "pids_limit", `Int (Env_config_sandbox.Hardening.pids_limit ())
+      ; "tmpfs_size", `String (Env_config_sandbox.Hardening.tmpfs_size ())
+      ]
+  | Remote_ssh -> `Null
+;;
+
+let sandbox_paths_json ~(config : Workspace.config) (meta : keeper_meta) =
+  let host_workspace =
+    Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path
+  in
+  match meta.sandbox_profile with
+  | Remote_ssh ->
+    `Assoc
+      [ "host_workspace", `String host_workspace
+      ; "guest_home", `Null
+      ; "guest_workspace", `Null
+      ; "guest_config", `Null
+      ; "guest_work_volume", `Null
+      ; "guest_build_volume", `Null
+      ]
+  | Docker | Micro_vm ->
+    let guest_workspace = Keeper_sandbox.container_root meta.name in
+    `Assoc
+      [ "host_workspace", `String host_workspace
+      ; "guest_home", `Null
+      ; "guest_workspace", `String guest_workspace
+      ; ( "guest_config"
+        , `String
+            (Keeper_sandbox_runtime.container_masc_config_dir
+               ~container_root:guest_workspace) )
+      ; ( "guest_work_volume"
+        , match meta.sandbox_profile with
+          | Micro_vm -> `String Keeper_sandbox_microvm.work_volume_guest_root
+          | Docker | Remote_ssh -> `Null )
+      ; ( "guest_build_volume"
+        , match meta.sandbox_profile with
+          | Micro_vm -> `String Keeper_sandbox_microvm.build_volume_guest_root
+          | Docker | Remote_ssh -> `Null )
+      ]
+;;
+
 let live_status_json ?(include_preflight = true)
     ?preflight_override
     ?containers_override
@@ -763,6 +831,8 @@ let live_status_json ?(include_preflight = true)
             preflight
         else `Null );
       ("build_volume", microvm_build_volume_json ~config ~meta);
+      ("resource_config", sandbox_resource_config_json meta);
+      ("paths", sandbox_paths_json ~config meta);
       ("container_error", Json_util.string_opt_to_json container_error);
       ("why_no_container", Json_util.string_opt_to_json why_no_container);
       ( "repository_checkouts",

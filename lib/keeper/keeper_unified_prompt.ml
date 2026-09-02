@@ -1142,35 +1142,35 @@ let backlog_statement_of_observation
    unfinished work and makes them again. Measured 2026-09-01 from
    turn-records: kidsnote-pr-jira-checker ended 259 of 361 turns on the same
    repeated query, lane-smith 136 of 342, polisher 84 of 424, and each next
-   turn repeated the call. The sentence names the tool and the count so the
-   model can match it against its history. *)
+   turn repeated the call. The sentences live under [config/prompts] with the
+   other prompt text and name the tool and the count so the model can match
+   them against its history. A template that fails to render logs and
+   contributes no line: the checkpoint still carries the calls themselves.
+   The three yields that are not loop guards (a queued chat operation, a
+   newer durable stimulus, an awaited approval) explain themselves through
+   the stimulus that follows and render nothing here. *)
 let previous_turn_stop_lines (stop : Keeper_turn_checkpoint_reason.t option) :
     string list =
+  let line key vars =
+    match String.trim (observation_prose key vars ~fallback:"") with
+    | "" -> []
+    | text -> [ text ]
+  in
   match stop with
   | None -> []
   | Some (Keeper_turn_checkpoint_reason.Repeated_tool_call { tool_name; repeated_count })
     ->
-      [ Printf.sprintf
-          "- Previous turn: the runtime ended it after `%s` was called %d times \
-           with the same input and returned the same result. That result is \
-           already in your history; another identical call returns the same \
-           bytes. If you are waiting for it to change, end this turn — the \
-           scheduler wakes you again."
-          tool_name repeated_count;
-      ]
+      line
+        Prompt_names.keeper_observation_previous_turn_stop_repeated_tool_call
+        [ "tool_name", tool_name; "repeated_count", string_of_int repeated_count ]
   | Some (Keeper_turn_checkpoint_reason.Repeated_assistant_text { repeated_count }) ->
-      [ Printf.sprintf
-          "- Previous turn: the runtime ended it after you wrote the same \
-           message %d times without a tool call in between."
-          repeated_count;
-      ]
-  | Some Keeper_turn_checkpoint_reason.Operation_queued ->
-      [ "- Previous turn: it yielded because a chat operation was queued for you." ]
-  | Some Keeper_turn_checkpoint_reason.Durable_stimulus_arrived ->
-      [ "- Previous turn: it yielded because a newer durable stimulus arrived." ]
-  | Some Keeper_turn_checkpoint_reason.Awaiting_external_effect ->
-      [ "- Previous turn: it yielded on a tool call that awaited approval; the \
-         resolution reaches you as a stimulus." ]
+      line
+        Prompt_names.keeper_observation_previous_turn_stop_repeated_assistant_text
+        [ "repeated_count", string_of_int repeated_count ]
+  | Some
+      ( Keeper_turn_checkpoint_reason.Operation_queued
+      | Keeper_turn_checkpoint_reason.Durable_stimulus_arrived
+      | Keeper_turn_checkpoint_reason.Awaiting_external_effect ) -> []
 
 let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)

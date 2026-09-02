@@ -33,6 +33,15 @@ val keeper_observation_recovered_current_task : string
 val keeper_observation_current_task_absent : string
 val keeper_observation_current_task_absent_in_recovery : string
 val keeper_observation_current_task_unobservable : string
+
+val keeper_observation_previous_turn_stop_repeated_tool_call : string
+(** Rendered into the next turn's Autonomous Trigger layer when the runtime's
+    repeated-call guard ended the previous turn. Variables: [tool_name],
+    [repeated_count]. *)
+
+val keeper_observation_previous_turn_stop_repeated_assistant_text : string
+(** The same for the repeated-assistant-text guard. Variable: [repeated_count]. *)
+
 val keeper_current_task_skills : string
 val keeper_held_task_skills : string
 val keeper_held_task_skills_heading : string

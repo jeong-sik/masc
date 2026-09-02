@@ -39,6 +39,14 @@ let keeper_observation_current_task_unobservable =
   "keeper.observation.current_task_unobservable"
 ;;
 
+let keeper_observation_previous_turn_stop_repeated_tool_call =
+  "keeper.observation.previous_turn_stop.repeated_tool_call"
+;;
+
+let keeper_observation_previous_turn_stop_repeated_assistant_text =
+  "keeper.observation.previous_turn_stop.repeated_assistant_text"
+;;
+
 let keeper_observation_rejected_digest_heading =
   "keeper.observation.rejected_digest_heading"
 ;;

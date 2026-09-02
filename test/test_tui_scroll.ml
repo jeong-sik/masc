@@ -70,6 +70,26 @@ let test_the_window_follows_the_cursor () =
     (Masc_tui_scroll.ensure_visible ~cursor:5 ~height:5 3)
 
 
+(* The context-inspector tabs draw a detail column that begins on the
+   selected row's own line and runs downward. [ensure_visible] answers a row
+   that fell below the fold by pinning it to the window's last line, which
+   held that whole detail behind the bottom edge: the keys on those tabs move
+   the cursor, so every press re-pinned the next row to the same edge and the
+   content under it never entered the window. A row that carries content
+   below it has to lead the window instead. *)
+let test_a_row_with_content_under_it_leads_the_window () =
+  check int "a row below the fold leads from one line above it" 9
+    (Masc_tui_scroll.ensure_leading ~cursor:10 ~height:5 0);
+  check int "not pinned to the last line as a bare row would be" 6
+    (Masc_tui_scroll.ensure_visible ~cursor:10 ~height:5 0);
+  check int "a row above the window leads there too" 1
+    (Masc_tui_scroll.ensure_leading ~cursor:2 ~height:5 4);
+  check int "a visible row moves nothing" 3
+    (Masc_tui_scroll.ensure_leading ~cursor:5 ~height:5 3);
+  check int "the first row cannot lead from below zero" 0
+    (Masc_tui_scroll.ensure_leading ~cursor:0 ~height:5 4)
+
+
 (* Changes draws a preview under its list. The list keeps five rows and the
    preview takes up to half of what is left, so on a twenty-row body the list
    draws ten. The keypress used to move against the full twenty: with fifteen
@@ -137,6 +157,8 @@ let () =
             test_the_cursor_stays_inside_the_list
         ; Alcotest.test_case "the window follows the cursor" `Quick
             test_the_window_follows_the_cursor
+        ; Alcotest.test_case "a row with content under it leads the window"
+            `Quick test_a_row_with_content_under_it_leads_the_window
         ] )
     ; ( "layout"
       , [ Alcotest.test_case "conditional overflow row" `Quick

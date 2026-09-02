@@ -22,6 +22,19 @@ let ensure_visible ~cursor ~height scroll =
   else if cursor > scroll + height - 1 then cursor - height + 1
   else max 0 scroll
 
+(* [ensure_visible] answers a row that fell below the fold by pinning it to
+   the window's last line. That answer assumes nothing lives under the row.
+   On a surface whose detail column begins on the selected row's own line and
+   runs downward, the bottom pin holds that detail behind the last line for
+   good: the keys there move the cursor, and every move re-pins the next row
+   to the same edge. When the window has to move at all, lead it from one
+   line above the row, so the row and the content under it fill the window.
+   The one-line lead keeps the detail column's own header on the first
+   line. *)
+let ensure_leading ~cursor ~height scroll =
+  let followed = ensure_visible ~cursor ~height scroll in
+  if followed = scroll then followed else max 0 (cursor - 1)
+
 let preview_height ~total ~keep = max 0 (min (total - keep) (total / 2))
 let body_height ~total ~keep = max 1 (total - preview_height ~total ~keep)
 

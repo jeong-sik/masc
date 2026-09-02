@@ -15279,14 +15279,18 @@ let render_context_inspector state =
      a list longer than the pane walked the highlight out of sight and the keys
      went on working against rows nobody could see. [Masc_tui_scroll] documents
      this pairing -- the cursor names a row, the window follows it -- and this
-     surface was the one not holding up its end. *)
+     surface was the one not holding up its end. It follows with
+     [ensure_leading] rather than [ensure_visible]: the split tabs start the
+     detail column on the selected row's own line, so pinning that row to the
+     window's last line held the detail -- the content the tab was opened for
+     -- behind the bottom edge where no key on these tabs scrolls. *)
   let scroll =
     match selected with
     | None -> scroll
     | Some cursor ->
         Masc_tui_scroll.normalize ~count:(List.length lines)
           ~height:content_height
-          (Masc_tui_scroll.ensure_visible ~cursor ~height:content_height scroll)
+          (Masc_tui_scroll.ensure_leading ~cursor ~height:content_height scroll)
   in
   lines
   |> List.filteri (fun index _ ->

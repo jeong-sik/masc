@@ -237,7 +237,7 @@ let support_closure_ids facts =
     List.concat_map
       (fun fact ->
          match fact.basis with
-         | Observed -> []
+         | Observed _ -> []
          | Derived derivations ->
            List.map
              (fun derivation -> memory_id fact, derivation.premise_ids)
@@ -266,7 +266,7 @@ let support_closure_ids facts =
   List.iter
     (fun fact ->
        match fact.basis with
-       | Observed -> activate (memory_id fact)
+       | Observed _ -> activate (memory_id fact)
        | Derived _ -> ())
     facts;
   while not (Queue.is_empty pending) do
@@ -511,7 +511,7 @@ let snapshot_change_rejection ~facts ~current_ids ~change =
       then Some (Invalidated_row_is_current identity)
       else (
         match invalidation.fact.basis with
-        | Observed -> Some (Invalidated_row_is_observed identity)
+        | Observed _ -> Some (Invalidated_row_is_observed identity)
         | Derived derivations ->
           if derivations_supported current_ids derivations
           then Some (Invalidated_row_is_still_supported identity)
@@ -706,7 +706,7 @@ let maintain_supported_facts facts =
          then fact :: current_rev, invalidated_rev
          else
            match fact.basis with
-           | Observed -> fact :: current_rev, invalidated_rev
+           | Observed _ -> fact :: current_rev, invalidated_rev
            | Derived derivations ->
              let missing_premise_ids =
                missing_premises_for current_ids derivations
@@ -718,10 +718,23 @@ let maintain_supported_facts facts =
   List.rev current_rev, List.rev invalidated_rev
 ;;
 
+(* The same claim bytes seen again: an observation outranks a derivation, and
+   a Board reference outranks the transcript because it names a source the
+   transcript cannot. Two Board references keep the first; the second reading
+   is already counted as reinforcement. *)
+let merge_observation existing incoming =
+  match existing, incoming with
+  | Board _, (Board _ | Transcript) -> existing
+  | Transcript, Board _ -> incoming
+  | Transcript, Transcript -> Transcript
+;;
+
 let merge_basis existing incoming =
   match existing, incoming with
-  | Observed, Observed | Observed, Derived _ -> Observed
-  | Derived _, Observed -> Observed
+  | Observed existing, Observed incoming ->
+    Observed (merge_observation existing incoming)
+  | Observed existing, Derived _ -> Observed existing
+  | Derived _, Observed incoming -> Observed incoming
   | Derived existing, Derived incoming ->
     let derivations =
       List.fold_left
@@ -1290,7 +1303,7 @@ let upsert_fact
     in
     let* () =
       match incoming.basis with
-      | Observed -> Ok ()
+      | Observed _ -> Ok ()
       | Derived derivations when derivations_supported current_ids derivations ->
         Ok ()
       | Derived derivations ->

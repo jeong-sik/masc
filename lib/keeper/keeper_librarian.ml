@@ -271,19 +271,40 @@ let fact_of_json ~now (json : Yojson.Safe.t) : fact option =
           | Some _ | None -> None)
      with
      | Some claim, Some category ->
-       (* Origin is the extraction itself: this row is a copy of something
-          the keeper already saw. [trace_id] is empty by construction — the
-          committing journal entry (snapshot-level source) carries the exact
-          trace; the row never guesses one. *)
-       Some
-         { claim
-         ; category
-         ; first_seen = now
-         ; last_seen = now
-         ; reinforcement = 0
-         ; origin = { kind = Keeper_memory_os_types.Injected; trace_id = "" }
-         ; basis = Keeper_memory_os_types.Observed
-         }
+       (* Where the claim was read: a Board post the librarian names, or the
+          transcript. A named post whose ids fail the Board grammar rejects
+          the claim like any other malformed claim field. *)
+       let board_post_id =
+         string_field Keeper_memory_os_types.wire_field_board_post_id fields
+       in
+       let board_comment_id =
+         string_field Keeper_memory_os_types.wire_field_board_comment_id fields
+       in
+       let observation =
+         match board_post_id, board_comment_id with
+         | None, None -> Some Keeper_memory_os_types.Transcript
+         | None, Some _ -> None
+         | Some post_id, comment_id ->
+           (match Keeper_memory_os_types.board_ref_of_ids ~post_id ~comment_id with
+            | Ok board -> Some (Keeper_memory_os_types.Board board)
+            | Error _ -> None)
+       in
+       (match observation with
+        | None -> None
+        | Some observation ->
+          (* Origin is the extraction itself: this row is a copy of something
+             the keeper already saw. [trace_id] is empty by construction — the
+             committing journal entry (snapshot-level source) carries the exact
+             trace; the row never guesses one. *)
+          Some
+            { claim
+            ; category
+            ; first_seen = now
+            ; last_seen = now
+            ; reinforcement = 0
+            ; origin = { kind = Keeper_memory_os_types.Injected; trace_id = "" }
+            ; basis = Keeper_memory_os_types.Observed observation
+            })
      | (Some _, None) | (None, _) -> None)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;

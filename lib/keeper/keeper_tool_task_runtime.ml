@@ -373,6 +373,32 @@ let handle_keeper_task_tool_with_outcome
          ~class_:Tool_result.Policy_rejection
          (validation_error_json message)
      | Ok (projection, if_revision) ->
+       let call_filter =
+         { Keeper_tasks_list_cursor.status = status_filter
+         ; include_done
+         ; projection = task_projection_to_string projection
+         }
+       in
+       (* A cursor names the row the previous page ended on and the filter it
+          was issued under. Anything else -- a string this runtime did not
+          issue, a non-string, a cursor from another filter -- is refused as a
+          rejected argument; it never falls back to the first page, which the
+          caller would read as the whole backlog (#29101). *)
+       let cursor =
+         match Safe_ops.safe_member "cursor" args with
+         | `Null -> Ok None
+         | `String raw ->
+           Result.map Option.some (Keeper_tasks_list_cursor.of_string ~call:call_filter raw)
+         | _ -> Error Keeper_tasks_list_cursor.Cursor_unparseable
+       in
+       (match cursor with
+        | Error error ->
+          let data = Keeper_tasks_list_cursor.rejection_json error in
+          Keeper_tool_execution.failure_data
+            ~class_:Tool_result.Policy_rejection
+            ~message:(Yojson.Safe.to_string data)
+            data
+        | Ok cursor ->
        match Workspace.read_backlog_observation_with_source_r config with
      | Error message ->
        let data =
@@ -407,20 +433,43 @@ let handle_keeper_task_tool_with_outcome
            (include_done || not (Masc_domain.task_status_is_done task.task_status))
            && not is_cancelled
        in
+       let page_key (task : Masc_domain.task) =
+         { Keeper_tasks_list_cursor.priority = task.priority
+         ; created_at = task.created_at
+         ; id = task.id
+         }
+       in
        let matching =
          backlog.tasks
          |> List.filter visible
          |> List.sort (fun (left : Masc_domain.task) right ->
-           Int.compare left.priority right.priority)
+           Keeper_tasks_list_cursor.compare_key (page_key left) (page_key right))
        in
        let matching_count = List.length matching in
-       (* The sort is stable and keys on priority alone, so within one priority
-          the oldest task stays in front and the newest falls off the end of
-          [limit]. A keeper that saw only the first page had no way to know more
-          existed: eight tasks registered at priority 2 and 3 stayed invisible
-          across nineteen todo listings while the caller read the page as the
-          whole backlog (#29101). *)
-       let tasks = matching |> List.filteri (fun index _ -> index < limit) in
+       (* The order is total -- priority, then created_at, then id -- so a page
+          is "the first [limit] rows after the cursor's key" and the same row
+          never appears on two pages nor vanishes between them. Eight tasks
+          once stayed invisible across nineteen todo listings because the
+          caller read the first page as the whole backlog (#29101); the page
+          now names the row it ended on, and the next call starts there. *)
+       let after_cursor =
+         match cursor with
+         | None -> matching
+         | Some (cursor : Keeper_tasks_list_cursor.t) ->
+           List.filter
+             (fun task -> Keeper_tasks_list_cursor.compare_key (page_key task) cursor.after > 0)
+             matching
+       in
+       let tasks = after_cursor |> List.filteri (fun index _ -> index < limit) in
+       let remaining = List.length after_cursor - List.length tasks in
+       let next_cursor =
+         match remaining > 0, List.rev tasks with
+         | true, last :: _ ->
+           Some
+             (Keeper_tasks_list_cursor.to_string
+                { Keeper_tasks_list_cursor.after = page_key last; filter = call_filter })
+         | true, [] | false, _ -> None
+       in
        let row_to_yojson =
          match projection with
          | Compact -> Masc_domain.task_compact_to_yojson
@@ -449,6 +498,13 @@ let handle_keeper_task_tool_with_outcome
                   path. With it, `unchanged` states that the whole response —
                   rows and statistics — is the one the caller already holds. *)
              ; "matching_count", `Int matching_count
+               (* A later page is a different answer from the first one even
+                  when the backlog is the same, so the cursor it was read
+                  through is part of the revision. *)
+             ; ( "cursor_after"
+               , match cursor with
+                 | None -> `Null
+                 | Some cursor -> Keeper_tasks_list_cursor.to_yojson cursor )
              ; "snapshot", tasks_json
              ])
        in
@@ -484,14 +540,17 @@ let handle_keeper_task_tool_with_outcome
              | Snapshot_protocol.Snapshot _ ->
                [ "matching_count", `Int matching_count
                ; "returned_count", `Int (List.length tasks)
-               ; "truncated", `Bool (matching_count > limit)
+               ; "truncated", `Bool (remaining > 0)
                ]
+               @ (match next_cursor with
+                  | Some next_cursor -> [ "next_cursor", `String next_cursor ]
+                  | None -> [])
              | Snapshot_protocol.Unchanged _ -> []
            in
            `Assoc (provenance @ row_stats @ fields)
          | payload -> payload
        in
-       Keeper_tool_execution.success_data data)
+       Keeper_tool_execution.success_data data))
     | Tasks_audit ->
     let limit = Safe_ops.json_int ~default:20 "limit" args |> max 1 |> min 50 in
     let orphans =

@@ -95,10 +95,12 @@ let audience_of_address ~visibility ~unaddressed = function
    is its attention collector: an unaddressed Unlisted post is thread
    activity, reaching a keeper only by explicit address or by joining its
    thread, and no keeper pays an attention judgment for it. The runtime
-   writes verification requests and verdict receipts this way; a rejection
-   reaches the producer as a typed stimulus, and an approval shows as the
-   Done transition clearing the producer's current task. A stalled review
-   stays Internal because the Board is its only path to the producer. *)
+   writes verification requests, verdict receipts, and fusion results this
+   way. A rejection reaches the producer as a typed stimulus and a fusion
+   result reaches its requester as [Fusion_completed]; an approval wakes
+   nobody — the task leaves the backlog as Done, and the producer's current
+   task was already cleared when it submitted. A stalled review stays
+   Internal because the Board is its only path to the producer. *)
 let audience_for_post ~visibility ~title ~content =
   explicit_address_of_text (address_text ~title ~content)
   |> audience_of_address ~visibility ~unaddressed:(fun () ->

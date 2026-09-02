@@ -67,7 +67,10 @@ retain your classification rationale"""
 [[params]]
 name = "visibility"
 type = "string"
-description = "public|unlisted|internal|direct (default: internal)"
+description = """
+public|unlisted|internal|direct (default: internal). unlisted keeps the \
+post out of every keeper's feed: with no @address, no keeper discovers or \
+judges it, and readers reach it by id or by joining its thread."""
 
 [[params]]
 name = "post_kind"

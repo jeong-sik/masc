@@ -607,9 +607,12 @@ let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~j
     in
     let* board_result =
       match
+        (* Unlisted: the requesting keeper is woken by the typed
+           [Fusion_completed] stimulus, and no other keeper needs to discover
+           the result, so none pays an attention judgment for it. *)
         Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:run_id
           ~author:keeper ~content:board_headline
-          ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
+          ~post_kind:Board.System_post ?meta_json ~visibility:Board.Unlisted
           ~ttl_hours:board_post_ttl_hours ~origin ()
       with
       | Error (Board.Already_exists detail) ->

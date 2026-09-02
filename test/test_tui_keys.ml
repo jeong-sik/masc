@@ -1049,7 +1049,16 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
   check Alcotest.bool "an overlay keeps the note write" true
     (holds "w:add note" overlay);
   check Alcotest.bool "and the open file does not offer it" false
-    (holds "w:add note" file)
+    (holds "w:add note" file);
+  (* The history view has commits to open; the other two panes do not, and
+     named the key anyway until it was read off a running screen. *)
+  check Alcotest.bool "an overlay opens a commit" true
+    (holds "Enter (history):open" overlay);
+  List.iter
+    (fun (label, hints) ->
+       check Alcotest.bool (label ^ " has no commit to open") false
+         (holds "Enter (history)" hints))
+    [ ("the tree", tree); ("an open file", file) ]
 
 let test_code_asks_the_language_server_three_questions () =
   (* K hover, D definition, R references -- one family, one case each, and

@@ -605,10 +605,40 @@ keeper while navigating.
 the recorded context composition, `2:request` lists the exact canonical input
 items retained for the provider request, and `3:proof` explains each recorded
 component's source and evidence strength. At 110 columns and wider, the request
-and proof tabs use a `STACK │ SELECTED` layout so `j`/`k` can move the left
-list while the selected item's text or provenance remains visible on the
-right. Narrow terminals keep the same facts in one column; `Enter` opens exact
-text at full width.
+and proof tabs draw two columns with their headers pinned above independent
+windows: `j`/`k` moves the left list while the selected item's text or
+provenance stays put at the top of the right column, `h`/`l` moves which pane
+hears `j`/`k` (the caret on the pinned header names it), and with the right
+pane focused `j`/`k` scrolls the item itself. Narrow terminals keep the same
+facts in one column; `Enter` opens exact text at full width.
+
+`1:stack` is three measurements of one turn, not three views of one number,
+and the section says so at the bottom. SERIALIZED REQUEST is the request the
+dispatcher actually serialized, in bytes and in the provider's own token
+count. HISTORY REACH is how much of the Keeper's recent history that request
+carried: atoms are the indivisible units a cut falls between, so a tool call
+and the result it answers travel together or not at all, and the count says
+how many stayed behind — which is where "why does it not remember that"
+usually ends. COMPOSITION divides the turn's attributed bytes by where they
+came from (tool results, memory recall, schemas) and is a proportion table,
+not a breakdown of the request: the attributed total and the serialized bytes
+are measured at different points and the gap is not explained. A provider
+that reports usage across the whole conversation rather than per request
+gets no window percentage here, only the number it reported and a note that
+this request's own share was not. RECENT TURNS, the section at the bottom,
+is one row per dispatched turn on the fetched page, carrying the input,
+cache read, and output the provider itself counted — the per-turn answer to
+how much context goes in, newest first.
+
+`2:request` marks where each item stands in the assembly: `F` the fixed
+system prompt, `H` history the window carried forward, `N` the newest
+message added this turn (the wire is append-only, so the last message is the
+turn's own input, whether a user's text or this turn's latest tool result),
+`S` a tool schema. The header also states what came back, to the extent the
+turn record observed it: output tokens and the finish reason. An item's text
+is the retained pre-dispatch copy; message rows are read as their typed
+blocks — prose as markdown, structured payloads as pretty JSON, tool calls
+and results under labels that name the tool and the outcome.
 
 Evidence badges are claims, not decoration. `VERIFIED` means exact text was
 checked against the producer digest and byte count. `SERIALIZED` means an exact

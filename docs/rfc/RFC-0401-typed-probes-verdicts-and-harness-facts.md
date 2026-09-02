@@ -16,7 +16,9 @@ related: ["0337", "0387", "0398", "0400"]
 
 지금의 비동기 검증 경로는 그대로 둔다. `submit_for_verification` 이 Task 를
 `AwaitingVerification` 으로 옮기고(`lib/workspace/workspace_task_transitions.ml:326`),
-keeper 는 그 자리에서 풀려 다른 일을 집으며, 시스템 소유 판정 레인
+keeper 는 그 자리에서 풀려 다른 일을 집으며(claim 이 막는 "쥐고 있는 Task" 는
+`Claimed`·`InProgress` 뿐이고 `AwaitingVerification` 은 아니다,
+`lib/workspace/workspace_task_claim.ml:20-31`), 시스템 소유 판정 레인
 (`lib/completion_authority_agent.ml`)이 판정하고, 거절은
 `Completion_authority_rejected` 스티뮬러스(`lib/keeper_runtime/keeper_event_queue.mli:114`)로
 producer keeper 에게 돌아온다. 새 Task 상태는 없다. 타임아웃 게이트도 없다.

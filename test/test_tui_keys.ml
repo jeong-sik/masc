@@ -247,9 +247,16 @@ let test_repositories_footer_offers_code_and_git_changes () =
     (Masc_tui_keys.footer_hints Repositories)
 
 let test_memory_footer_offers_the_fact_browser () =
+  (* One spelling for the keeper row. [ / ] was listed beside j/k for the
+     same movement and no arm answered it. *)
   check str "the health table names the way into the facts"
-    "j/k:scroll  [ / ]:keeper  Enter:facts  r:refresh  Tab:next  q:quit"
-    (Masc_tui_keys.footer_hints Memory)
+    "j/k:move  Enter:facts  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Memory);
+  check Alcotest.bool "the dead bracket hint is gone" false
+    (List.exists
+       (fun (binding : Masc_tui_keys.binding) ->
+          String.equal binding.Masc_tui_keys.key "[ / ]")
+       (Masc_tui_keys.for_surface Memory))
 
 let test_memory_facts_footer_names_filter_and_way_back () =
   check str "the browser names movement, the category cycle, and Esc"
@@ -903,6 +910,55 @@ let test_keeper_detail_reserves_lowercase_u_for_channel_unbind () =
   Alcotest.(check bool) "lowercase u is free for Channels" false
     (List.mem "u" keys)
 
+let test_a_loop_turn_without_a_key_keeps_an_arm () =
+  (* The defect this closes: the dispatch loop turns whether or not a key was
+     read, so counting [None] as an unrelated key left every two-press arm
+     alive for exactly one iteration. Two [u] presses removed a channel
+     binding only when both bytes arrived in the same read. *)
+  check Alcotest.bool "no key is not another key" false
+    (Masc_tui_keys.cancels_two_press ~key:None ~second_press:[ "u" ])
+
+let test_the_second_press_holds_and_anything_else_cancels () =
+  List.iter
+    (fun (pressed, second_press, expected, label) ->
+       check Alcotest.bool label expected
+         (Masc_tui_keys.cancels_two_press ~key:(Some pressed) ~second_press))
+    [ "u", [ "u" ], false, "the second press holds the arm"
+    ; "j", [ "u" ], true, "a cursor move cancels it"
+    ; "U", [ "u" ], true, "a different case is a different key"
+    ; "Y", [ "y"; "Y"; "n"; "N" ], false, "either answer holds the approval"
+    ; "e", [ "y"; "Y"; "n"; "N" ], true, "an unrelated key cancels it"
+    ; "x", [], true, "an arm with no second press cancels on any key"
+    ]
+
+let test_keeper_detail_lists_the_file_changes_key () =
+  (* Both keeper surfaces list [f]; detail listed it with no dispatch arm
+     until the arm's guard widened to cover it. *)
+  List.iter
+    (fun (label, surface) ->
+       let keys =
+         List.map
+           (fun (binding : Masc_tui_keys.binding) -> binding.Masc_tui_keys.key)
+           (Masc_tui_keys.for_surface surface)
+       in
+       check Alcotest.bool (label ^ " lists f") true (List.mem "f" keys))
+    [ "Keeper list", Keepers Keeper_list
+    ; "Keeper detail", Keepers Keeper_detail
+    ]
+
+let test_harness_keeps_n_for_its_own_verdict () =
+  (* Harness answers the surface search, so the session-wide [n] search step
+     used to outrank the overrule its footer names. The footer is unchanged;
+     the dispatch order is what moved. *)
+  let keys =
+    List.map
+      (fun (binding : Masc_tui_keys.binding) -> binding.Masc_tui_keys.key)
+      (Masc_tui_keys.for_surface Harness)
+  in
+  check Alcotest.bool "overrule is Harness's own n" true (List.mem "n" keys);
+  check Alcotest.bool "and it does not also advertise the search step" false
+    (List.mem "n / N" keys)
+
 let test_detail_tab_keys_reach_the_help_sheet () =
   let sheet = Masc_tui_keys.help_sections ~current:(Keepers Keeper_detail) () in
   let detail_keys =
@@ -936,6 +992,16 @@ let () =
             test_one_spelling_per_key
         ; Alcotest.test_case "chat help names the Memory cycle" `Quick
             test_chat_help_names_memory_cycle
+        ; Alcotest.test_case "Keeper detail lists the file changes key" `Quick
+            test_keeper_detail_lists_the_file_changes_key
+        ; Alcotest.test_case "Harness keeps n for its own verdict" `Quick
+            test_harness_keeps_n_for_its_own_verdict
+        ] )
+    ; ( "two-press arms"
+      , [ Alcotest.test_case "a loop turn without a key keeps an arm" `Quick
+            test_a_loop_turn_without_a_key_keeps_an_arm
+        ; Alcotest.test_case "the second press holds, anything else cancels"
+            `Quick test_the_second_press_holds_and_anything_else_cancels
         ] )
     ; ( "projections"
       , [ Alcotest.test_case "plain listing footer shape" `Quick

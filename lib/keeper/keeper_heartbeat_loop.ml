@@ -413,21 +413,31 @@ let batch_disposition_of_cycle_outcome
       (Cycle.Checkpointed
          { checkpoint_reason =
              ( Keeper_unified_turn.Durable_stimulus_arrived
-             | Keeper_unified_turn.Repeated_assistant_text _ )
+             | Keeper_unified_turn.Repeated_assistant_text _
+             | Keeper_unified_turn.Awaiting_external_effect
+             | Keeper_unified_turn.Repeated_tool_call _
+             | Keeper_unified_turn.Operation_queued )
          ; continuation_route = _
          ; _
          }) ->
     (* The admitted batch is an attention layer, not the continuation store.
-       This checkpoint exists specifically because a newer durable source
-       arrived or the typed loop guard durably preserved the turn after the
-       admitted attention was projected. Retaining the admitted batch in
-       either case replays the same attention into that continuation.
-       Connector attention remains pending until it has an exact reply/ignore
-       settlement. *)
+       Every checkpoint reason is produced after at least one model round
+       ran with the admitted attention projected: a newer durable source
+       arrived, the loop guard durably preserved the turn, a tool call was
+       deferred to the Gate, or a chat operation took the slot. The turn
+       resumes from its checkpoint with that attention already in its
+       history, so retaining the batch replays the same attention into the
+       continuation. For a HITL resolution the cost was a full turn per wake:
+       the intake admits one resolution per turn and the resumed turn ended
+       on the same deferred call, so a spent grant at the queue head was
+       re-delivered on every cycle and the resolutions behind it never
+       reached the model (edgar.a.poe, 2026-09-02, eight turns on one
+       Execute). The ACK below still requires the HITL continuation receipt,
+       so an unconsumed grant is retained. Connector attention remains
+       pending until it has an exact reply/ignore settlement. *)
     Batch_ack_attention_only
   | Some
       ( Cycle.Failed _
-      | Cycle.Checkpointed _
       | Cycle.Input_required _
       | Cycle.Cancelled _
       | Cycle.Skipped _ )

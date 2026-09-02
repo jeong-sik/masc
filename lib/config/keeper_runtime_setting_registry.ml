@@ -27,13 +27,6 @@ type exposure =
   | Toml_and_env of string
   | Env_only
 
-type lifecycle =
-  | Active
-  | Retired of
-      { reason : string
-      ; replacement : string option
-      }
-
 type setting =
   { env_name : string
   ; exposure : exposure
@@ -44,7 +37,6 @@ type setting =
   ; consumers : string list
   ; category : string
   ; description : string
-  ; lifecycle : lifecycle
   }
 
 let int_range ?min ?max () = Integer_range { min_inclusive = min; max_inclusive = max }
@@ -57,7 +49,6 @@ let float_range ?min ?min_exclusive ?max () =
 let setting
     ?(range = Unbounded)
     ?(reload_class = Process_restart)
-    ?(lifecycle = Active)
     ~env_name
     ~exposure
     ~value_kind
@@ -75,16 +66,12 @@ let setting
   ; consumers
   ; category
   ; description
-  ; lifecycle
   }
 ;;
 
-let retired ?replacement reason = Retired { reason; replacement }
-
-(* Keep rows grouped by operator-facing category and TOML namespace.  Entries
-   whose TOML contract was removed remain here as [Retired] so boot/save
-   validation can explain the removal instead of treating a stale key as a
-   forward-compatible extension. *)
+(* Keep rows grouped by operator-facing category and TOML namespace. A row
+   leaves with the contract it described; a key that names a removed row is
+   then an unknown key to boot/save validation, like any other. *)
 let all =
   [ setting
       ~env_name:"MASC_KEEPER_BOOTSTRAP_ENABLED"
@@ -164,18 +151,6 @@ let all =
       ~category:"lifecycle"
       "User message an autonomous turn is woken with, before any keeper override"
   ; setting
-      ~range:(float_range ~min:0.0 ())
-      ~lifecycle:
-        (retired
-           "No runtime reader consumed this overlay; retaining it fabricated operator control")
-      ~env_name:"MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC"
-      ~exposure:(Toml_and_env "autonomous.fairness_cooldown_sec")
-      ~value_kind:Float
-      ~default:"(removed)"
-      ~consumers:[]
-      ~category:"lifecycle"
-      "Removed autonomous fairness cooldown overlay"
-  ; setting
       ~range:(int_range ~min:1 ())
       ~env_name:"MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
       ~exposure:(Toml_and_env "heartbeat.interval_sec")
@@ -184,18 +159,6 @@ let all =
       ~consumers:[ "Env_config_keeper.KeeperKeepalive"; "Keeper_heartbeat_loop" ]
       ~category:"heartbeat"
       "Keeper heartbeat cycle interval in seconds"
-  ; setting
-      ~range:(float_range ~min:0.0 ())
-      ~lifecycle:
-        (retired
-           "No runtime reader consumed this window; the freshness clock it was meant to bound had no reader either")
-      ~env_name:"MASC_KEEPER_MAX_SILENCE_SEC"
-      ~exposure:(Toml_and_env "heartbeat.max_silence_sec")
-      ~value_kind:Float
-      ~default:"(removed)"
-      ~consumers:[]
-      ~category:"heartbeat"
-      "Removed workspace presence proof age overlay"
   ; setting
       ~range:(int_range ~min:15 ~max:3600 ())
       ~env_name:"MASC_KEEPER_SNAPSHOT_SEC"
@@ -231,18 +194,6 @@ let all =
       ~consumers:[ "Env_config_keeper.KeeperKeepalive"; "Keeper_heartbeat_loop" ]
       ~category:"heartbeat"
       "Upper bound for rate-limit failure-route backoff in seconds"
-  ; setting
-      ~range:(int_range ~min:1 ())
-      ~lifecycle:
-        (retired
-           "No heartbeat or board consumer read this value; wake capacity is owned by the durable queue")
-      ~env_name:"MASC_KEEPER_BOARD_WAKEUP_MAX"
-      ~exposure:(Toml_and_env "heartbeat.board_wakeup_max")
-      ~value_kind:Integer
-      ~default:"(removed)"
-      ~consumers:[]
-      ~category:"heartbeat"
-      "Removed board wakeup overlay"
   ; setting
       ~range:(float_range ~min:0.0 ())
       ~env_name:"MASC_KEEPER_DURABLE_QUEUE_STALE_SEC"
@@ -317,19 +268,6 @@ let all =
       ~category:"turn"
       "Fallback sampling temperature for keeper turns"
   ; setting
-      ~range:(int_range ~min:256 ~max:262144 ())
-      ~lifecycle:
-        (retired
-           ~replacement:"models.<id>.capabilities.max-output-tokens"
-           "The fallback getter had no production caller; runtime model capabilities own this limit")
-      ~env_name:"MASC_KEEPER_UNIFIED_MAX_TOKENS"
-      ~exposure:(Toml_and_env "turn.max_output_tokens")
-      ~value_kind:Integer
-      ~default:"(removed)"
-      ~consumers:[]
-      ~category:"turn"
-      "Removed global keeper output-token fallback"
-  ; setting
       ~env_name:"MASC_KEEPER_ENABLE_THINKING"
       ~exposure:(Toml_and_env "turn.enable_thinking")
       ~value_kind:Boolean
@@ -364,30 +302,6 @@ let all =
       ~consumers:[ "Keeper_runtime_resolved"; "Keeper_agent_run provider deadline" ]
       ~category:"turn"
       "Wall-clock deadline for one provider call attempt"
-  ; setting
-      ~range:(float_range ~min:10.0 ~max:600.0 ())
-      ~lifecycle:
-        (retired
-           "The public getter had no production caller and therefore never changed CLI execution")
-      ~env_name:"MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC"
-      ~exposure:(Toml_and_env "turn.cli_subprocess_idle_sec")
-      ~value_kind:Float
-      ~default:"(removed)"
-      ~consumers:[]
-      ~category:"turn"
-      "Removed CLI subprocess idle overlay"
-  ; setting
-      ~range:(int_range ~min:1 ())
-      ~lifecycle:
-        (retired
-           "No runtime admission or turn executor consumed the mapped value")
-      ~env_name:"MASC_KEEPER_TURN_CAPACITY_LIMIT"
-      ~exposure:(Toml_and_env "turn.capacity_limit")
-      ~value_kind:Integer
-      ~default:"(removed)"
-      ~consumers:[]
-      ~category:"turn"
-      "Removed turn capacity overlay"
   ; setting
       ~range:(float_range ~min:10.0 ~max:600.0 ())
       ~env_name:"MASC_KEEPER_BODY_TIMEOUT_SEC"
@@ -654,27 +568,18 @@ let all =
   ]
 ;;
 
-let is_active = function
-  | { lifecycle = Active; _ } -> true
-  | { lifecycle = Retired _; _ } -> false
-;;
-
-let active = List.filter is_active all
-
 let toml_key_opt setting =
   match setting.exposure with
   | Toml_and_env key -> Some key
   | Env_only -> None
 ;;
 
-let active_toml =
-  List.filter (fun row -> Option.is_some (toml_key_opt row)) active
-;;
+let toml_settings = List.filter (fun row -> Option.is_some (toml_key_opt row)) all
 
-let active_toml_mappings =
+let toml_env_mappings =
   List.filter_map
     (fun row -> Option.map (fun key -> key, row.env_name) (toml_key_opt row))
-    active_toml
+    toml_settings
 ;;
 
 let find_by_toml_key key =
@@ -722,11 +627,6 @@ let reload_class_label = function
   | Process_restart -> "process_restart"
 ;;
 
-let lifecycle_label = function
-  | Active -> "active"
-  | Retired _ -> "retired"
-;;
-
 let requires_restart setting =
   match setting.reload_class with
   | Hot | Next_turn | Next_cycle -> false
@@ -762,11 +662,11 @@ let validate_registry () =
     |> List.map (Printf.sprintf "duplicate TOML identity: %s")
   in
   let consumer_errors =
-    active_toml
+    toml_settings
     |> List.filter (fun row -> row.consumers = [])
     |> List.filter_map (fun row ->
       Option.map
-        (Printf.sprintf "active TOML setting has no runtime consumer: %s")
+        (Printf.sprintf "TOML setting has no runtime consumer: %s")
         (toml_key_opt row))
   in
   match duplicate_env @ duplicate_toml @ consumer_errors with
@@ -801,19 +701,6 @@ let range_to_yojson = function
       ]
 ;;
 
-let lifecycle_to_yojson = function
-  | Active -> `Assoc [ "state", `String "active" ]
-  | Retired { reason; replacement } ->
-    `Assoc
-      [ "state", `String "retired"
-      ; "reason", `String reason
-      ; ( "replacement"
-        , match replacement with
-          | Some value -> `String value
-          | None -> `Null )
-      ]
-;;
-
 let setting_to_yojson row =
   `Assoc
     [ "key", (match toml_key_opt row with Some value -> `String value | None -> `Null)
@@ -827,16 +714,15 @@ let setting_to_yojson row =
     ; "consumers", `List (List.map (fun value -> `String value) row.consumers)
     ; "category", `String row.category
     ; "description", `String row.description
-    ; "lifecycle", lifecycle_to_yojson row.lifecycle
     ]
 ;;
 
 let schema_to_yojson () =
-  let toml_count = List.length active_toml in
-  let env_only_count = List.length active - toml_count in
+  let toml_count = List.length toml_settings in
+  let env_only_count = List.length all - toml_count in
   `Assoc
     [ "authority", `String "Keeper_runtime_setting_registry"
-    ; "active_count", `Int (List.length active)
+    ; "count", `Int (List.length all)
     ; "toml_count", `Int toml_count
     ; "env_only_count", `Int env_only_count
     ; "settings", `List (List.map setting_to_yojson all)

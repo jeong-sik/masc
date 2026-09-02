@@ -537,18 +537,25 @@ non-default states as `memory:full` and `memory:off`. Neutral system rows that
 share the journal lane have no summary projection and therefore remain whole.
 
 The folded tool row retains exact outcome counts and ends with
-`Ctrl-D: details / diffs`, so the hidden change view is discoverable from the
-row that owns it. The typed calls themselves stay attached to the message, so
+`Ctrl-D: full calls / schedule / diffs`, so full names, typed execution state,
+actual batch/concurrent scheduling, exact served input/output, and the hidden
+change view are discoverable from the row that owns it. The typed calls
+themselves stay attached to the message, so
 changing the view does not reconstruct facts from rendered glyphs. Expanded
 Tool folds also retain operational kinds (`Skill`, `Keeper`, and `Fusion`), so
 a mixed block does not collapse into an anonymous tool count. A held tool call
 uses decision vocabulary independently of execution: `approval approved`,
 `approval denied`, `approval timed out`, or `approval displaced`. Its later
 tool row still reports whether execution returned or failed.
-calls use the finished glyph for a call that
-returned, `✗` for one that returned an error, `·` for one the trace never saw
-finish, and `?` for one whose outcome the trace did not record. A finished call
-carries its server-recorded duration; an open call has none.
+Tool calls use `✓` for a returned call, `✗` for a failure, `◌` while arguments
+are still streaming, `▶` while awaiting a result, `!` when the trace never saw
+the call finish, and `?` when it recorded no outcome. A finished call carries
+its server-recorded duration; an open call has none.
+
+`ERROR` rows keep the complete producer message and wrap it through the same
+scrollable transcript layout as ordinary prose. They are never reduced with a
+cell-fit `~`; a reason longer than the visible page remains reachable with
+PgUp rather than being presented as a complete error.
 
 Full tool detail also keeps a Keeper's recorded file change inside the turn
 that made it. The pane does not fetch file-change bodies in compact mode;

@@ -6846,6 +6846,175 @@ let keeper_message_timeline_bucket at =
     : Message_layout.timeline_bucket)
 ;;
 
+type keeper_call_association =
+  | Call_log_not_loaded
+  | Call_log_loading
+  | Call_log_unavailable of string
+  | Call_execution_unrecorded
+  | Call_execution_missing
+  | Call_execution_ambiguous of int
+  | Call_execution_exact of Tui_decode.keeper_call
+
+let keeper_call_association state ~keeper_name
+    (activity : Keeper_chat_transcript.tool_activity) =
+  match activity.execution_id with
+  | None -> Call_execution_unrecorded
+  | Some execution_id -> (
+      if
+        not
+          (Option.equal String.equal state.keeper_calls_keeper
+             (Some keeper_name))
+      then Call_log_not_loaded
+      else if state.keeper_calls_loading then Call_log_loading
+      else
+      match state.keeper_calls_error, state.keeper_calls with
+      | Some detail, _ -> Call_log_unavailable detail
+      | None, None -> Call_log_not_loaded
+      | None, Some snapshot
+        when not (String.equal snapshot.Tui_decode.kcs_keeper keeper_name) ->
+          Call_log_not_loaded
+      | None, Some snapshot ->
+          let matches =
+            List.filter
+              (fun (call : Tui_decode.keeper_call) ->
+                Option.equal String.equal call.kc_execution_id
+                  (Some execution_id))
+              snapshot.kcs_entries
+          in
+          match matches with
+          | [] -> Call_execution_missing
+          | [ call ] -> Call_execution_exact call
+          | rows -> Call_execution_ambiguous (List.length rows))
+
+let tool_outcome_label : Keeper_chat_transcript.tool_outcome -> string = function
+  | Keeper_chat_transcript.Started -> "RUNNING · ARGUMENTS STREAMING"
+  | Keeper_chat_transcript.Awaiting_result -> "RUNNING · AWAITING RESULT"
+  | Keeper_chat_transcript.Returned -> "RETURNED"
+  | Keeper_chat_transcript.Failed -> "FAILED"
+  | Keeper_chat_transcript.Never_returned -> "NEVER RETURNED"
+  | Keeper_chat_transcript.Outcome_unrecorded -> "OUTCOME UNRECORDED"
+
+let keeper_call_schedule_label (schedule : Tui_decode.keeper_call_schedule) =
+  let execution =
+    match schedule.kcs_execution_mode with
+    | Tui_decode.Keeper_call_serial -> "serial"
+    | Tui_decode.Keeper_call_concurrent -> "concurrent"
+  in
+  Printf.sprintf "%s · batch %d · width %d · plan step %d" execution
+    (schedule.kcs_batch_index + 1) schedule.kcs_batch_size
+    (schedule.kcs_planned_index + 1)
+
+(* A detail is a small tree rather than another flat table. Values keep every
+   producer-served line; the first line owns the field label and continuations
+   stay visibly below it. The final field closes the tree, so adjacent tool
+   calls do not read as one call with many unrelated rows. *)
+let tool_detail_tree fields =
+  let field_count = List.length fields in
+  fields
+  |> List.mapi (fun index (label, value) ->
+       let label = Keeper_chat.terminal_safe_text label in
+       let value = Keeper_chat.terminal_safe_text ~preserve_newlines:true value in
+       let last = index = field_count - 1 in
+       let branch = if last then "  ╰─" else "  ├─" in
+       let continuation = if last then "     " else "  │  " in
+       let lines =
+         match String.split_on_char '\n' value with
+         | [] -> [ "" ]
+         | lines -> lines
+       in
+       match lines with
+       | [] -> []
+       | first :: rest ->
+           (Printf.sprintf "%s %s · %s" branch label first)
+           :: List.map (fun line -> continuation ^ line) rest)
+  |> List.concat
+
+let keeper_message_tool_activity_details state ~keeper_name
+    (activity : Keeper_chat_transcript.tool_activity) =
+  let association = keeper_call_association state ~keeper_name activity in
+  let schedule_field, disposition_field, durable_input, output_field,
+      result_field =
+    match association with
+    | Call_execution_exact call ->
+        let schedule =
+          match call.kc_schedule with
+          | Some schedule -> keeper_call_schedule_label schedule
+          | None -> "not recorded"
+        in
+        let output = Option.map (fun value -> "output", value) call.kc_output in
+        let disposition =
+          match call.kc_disposition with
+          | None -> None
+          | Some Tui_decode.Keeper_call_completed ->
+              Some ("dispatch", "COMPLETED · SYNCHRONOUS")
+          | Some Tui_decode.Keeper_call_deferred ->
+              Some ("dispatch", "DEFERRED · ASYNC CONTINUATION")
+          | Some Tui_decode.Keeper_call_failed ->
+              Some ("dispatch", "FAILED")
+        in
+        let result =
+          match call.kc_result_bytes, call.kc_truncated_to with
+          | None, None -> None
+          | result_bytes, truncated_to ->
+              let parts =
+                List.filter_map Fun.id
+                  [ Option.map (Printf.sprintf "%d bytes") result_bytes
+                  ; Option.map (Printf.sprintf "served through %d bytes")
+                      truncated_to
+                  ]
+              in
+              Some ("result", String.concat " · " parts)
+        in
+        (schedule, disposition, call.kc_input, output, result)
+    | Call_log_not_loaded ->
+        "open full calls to load durable schedule", None, activity.args, None,
+        None
+    | Call_log_loading ->
+        "loading durable schedule…", None, activity.args, None, None
+    | Call_log_unavailable detail ->
+        "unavailable · " ^ detail, None, activity.args, None, None
+    | Call_execution_unrecorded ->
+        "execution id not recorded", None, activity.args, None, None
+    | Call_execution_missing ->
+        "no durable row for this execution id", None, activity.args, None, None
+    | Call_execution_ambiguous count ->
+        Printf.sprintf "%d durable rows share this execution id" count,
+        None, activity.args, None, None
+  in
+  let provider_call_id =
+    match association with
+    | Call_execution_exact call ->
+        (match call.kc_tool_use_id with
+         | Some _ as recorded -> recorded
+         | None -> activity.call_id)
+    | Call_log_not_loaded | Call_log_loading | Call_log_unavailable _
+    | Call_execution_unrecorded | Call_execution_missing
+    | Call_execution_ambiguous _ ->
+        activity.call_id
+  in
+  let identity =
+    List.filter_map Fun.id
+      [ Option.map (fun value -> "execution=" ^ value) activity.execution_id
+      ; Option.map (fun value -> "provider-call=" ^ value) provider_call_id
+      ]
+    |> function
+    | [] -> "not recorded"
+    | parts -> String.concat " · " parts
+  in
+  let fields =
+    [ Some ("state", tool_outcome_label activity.outcome)
+    ; disposition_field
+    ; Some ("tool", activity.tool_name)
+    ; Some ("schedule", schedule_field)
+    ; Some ("input", if String.equal durable_input "" then "(empty)" else durable_input)
+    ; output_field
+    ; result_field
+    ; Some ("identity", identity)
+    ]
+    |> List.filter_map Fun.id
+  in
+  tool_detail_tree fields
+
 (* How one finished turn's tool block becomes rows: the operator's
    compact/full choice, the width the aligned badge leaves, and this keeper's
    own file changes. The committed history and the turn still streaming both
@@ -6865,11 +7034,12 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
     Keeper_chat_diff.rows
     ~mode
     ~max_line_cells:(max 24 (min 120 (chat_cols - role_label_column - 8)))
+    ~activity_details:(keeper_message_tool_activity_details state ~keeper_name)
     file_change_index projection
   in
   match mode, projection.hidden_activity_rows, rows with
   | Keeper_chat_transcript.Compact, hidden, row :: rest when hidden > 0 ->
-      (row ^ " \xc2\xb7 Ctrl-D: details / diffs") :: rest
+      (row ^ " \xc2\xb7 Ctrl-D: full calls / schedule / diffs") :: rest
   | (Keeper_chat_transcript.Compact | Keeper_chat_transcript.Full), _, _ -> rows
 
 (* Every committed row of one keeper's conversation, as the layout entries the
@@ -12542,6 +12712,16 @@ let render_keeper_calls (state : state) =
   in
   let header =
     match state.keeper_calls with
+    | Some snapshot when state.keeper_calls_loading ->
+        Printf.sprintf
+          " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls (%d)  refreshing...  %s  %s"
+          (Terminal_text.single_line keeper_name)
+          (List.length snapshot.Masc.Tui_decode.kcs_entries)
+          timestamp (connection_badge state)
+    | None when state.keeper_calls_loading ->
+        Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls  (loading...)  %s  %s"
+          (Terminal_text.single_line keeper_name)
+          timestamp (connection_badge state)
     | None ->
         Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls  (not loaded yet)  %s  %s"
           (Terminal_text.single_line keeper_name)
@@ -12691,6 +12871,9 @@ let render_keeper_calls (state : state) =
   let scroll = max 0 (min state.keeper_calls_scroll max_scroll) in
   if shown = 0 then begin
     let empty =
+      if state.keeper_calls_loading && Option.is_none state.keeper_calls then
+        "  (loading exact call records...)"
+      else
       match (state.keeper_calls, state.keeper_calls_error) with
       | _, Some _ -> page_failed_note
       | None, None -> page_unread_note

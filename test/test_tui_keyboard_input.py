@@ -2569,6 +2569,9 @@ def keeper_message_unreliable_roster_interaction(
         )
         if any(path == chat_path for path, _body in requests):
             raise AssertionError("unreliable Keeper roster allowed a message POST")
+        send_and_wait(
+            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
 
@@ -4483,6 +4486,86 @@ def keeper_chat_succeeded_response(request_body: bytes) -> RawHttpResponse:
     )
 
 
+ERROR_DETAIL_PREFIX = b"Keeper turn failed: Provider stream parse failed: json decoder"
+ERROR_DETAIL_TAIL = b"exact terminal detail survives wrapping"
+
+
+def keeper_chat_failed_response(request_body: bytes) -> RawHttpResponse:
+    request = json.loads(request_body)
+    request_id = request.get("request_id")
+    keeper_name = request.get("name")
+    run_id = f"keeper-operation-run-{request_id}"
+    thread_id = f"keeper:{keeper_name}"
+    reason = (
+        "Provider stream parse failed: json decoder rejected nested payload "
+        "at byte 8192; exact terminal detail survives wrapping"
+    )
+    events = [
+        {
+            "type": "CUSTOM",
+            "threadId": "default",
+            "timestamp": 1.0,
+            "name": "KEEPER_CHAT_OPERATION_ACCEPTED",
+            "value": {
+                "operation_id": request_id,
+                "state": "Queued",
+                "queued_count": 0,
+            },
+        },
+        {
+            "type": "RUN_STARTED",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+        },
+        {
+            "type": "RUN_ERROR",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+            "message": reason,
+        },
+    ]
+    return RawHttpResponse(
+        200,
+        "".join(f"data: {json.dumps(event)}\n\n" for event in events).encode(),
+        content_type="text/event-stream",
+    )
+
+
+def keeper_chat_error_detail_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        resize_and_wait(
+            process, master_fd, output, rows=24, columns=100, needle=b"MASC Overview"
+        )
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        send_and_wait(process, master_fd, output, b"trigger-error", b"trigger-error")
+        failed = send_and_wait(
+            process, master_fd, output, b"\r", ERROR_DETAIL_TAIL
+        )
+        frame = frame_containing(failed, ERROR_DETAIL_TAIL)
+        plain = CSI_RE.sub(b"", frame)
+        for needle in (b"ERROR", ERROR_DETAIL_PREFIX, ERROR_DETAIL_TAIL):
+            if needle not in plain:
+                raise AssertionError(
+                    f"wrapped Keeper error omitted {needle!r}: {frame!r}"
+                )
+        if ERROR_DETAIL_PREFIX + b"~" in plain:
+            raise AssertionError(f"Keeper error was cell-truncated: {frame!r}")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def chat_queue_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     # The turn has to still be running while the scenario types the lines that
     # queue behind it, so the fixture holds the answer rather than sending one.
@@ -6134,7 +6217,9 @@ def clipboard_paste_key_interaction() -> Interaction:
     return interact
 
 
-def chat_visibility_modes_interaction() -> Interaction:
+def chat_visibility_modes_interaction(
+    tool_calls_gate: GatedHttpResponse | None = None,
+) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
         master_fd: int,
@@ -6151,14 +6236,16 @@ def chat_visibility_modes_interaction() -> Interaction:
             needle=b"MASC Overview",
         )
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
-        select_keeper_row(process, master_fd, output, b"alpha")
-        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        # Keep the roster cursor on beta, then open alpha through the palette.
+        # Durable call details belong to the chat target, not that unrelated
+        # cursor; the old response guard discarded this successful GET.
+        select_keeper_row(process, master_fd, output, b"beta")
         pane_start = len(output)
-        initial = send_and_wait(
+        initial = palette_go(
             process,
             master_fd,
             output,
-            b"m",
+            b"keeper alpha",
             b"ci-red-attribution",
         )
         wait_for_output(
@@ -6183,7 +6270,7 @@ def chat_visibility_modes_interaction() -> Interaction:
             "\u25c6".encode(),
             "DELIVERED \u00b7 USED".encode(),
             b"masc_fusion",
-            b"Ctrl-D: details / diffs",
+            b"Ctrl-D: full calls / schedule / diffs",
         ):
             wait_for_output(
                 process,
@@ -6238,6 +6325,29 @@ def chat_visibility_modes_interaction() -> Interaction:
             b"\x04",
             b"reasoning:full tools:full",
         )
+        if tool_calls_gate is not None:
+            if not wait_for_fixture_event(
+                process,
+                master_fd,
+                output,
+                tool_calls_gate.requested,
+                timeout=3.0,
+            ):
+                raise AssertionError("tool-call detail GET did not reach fixture gate")
+            # A second forced open while the first GET is held must coalesce
+            # into one follow-up, not advance generation and orphan both.
+            send_and_wait(
+                process, master_fd, output, b"\x04", b"reasoning:full tools:compact"
+            )
+            send_and_wait(
+                process, master_fd, output, b"\x04", b"reasoning:full tools:full"
+            )
+            if tool_calls_gate.calls != 1:
+                raise AssertionError(
+                    "same-Keeper in-flight detail refresh was duplicated: "
+                    f"{tool_calls_gate.calls} GETs"
+                )
+            tool_calls_gate.release.set()
         wait_for_output(
             process,
             master_fd,
@@ -6246,8 +6356,30 @@ def chat_visibility_modes_interaction() -> Interaction:
             start=tools_start,
             timeout=5.0,
         )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"execution=exec-fusion-1",
+            b"provider-call=call-fusion-1",
+            start=tools_start,
+            timeout=5.0,
+        )
         tools += bytes(output[tools_start:])
-        for needle in (b"masc_fusion", b"turn=trace-1787333555531-00020#54"):
+        for needle in (
+            b"masc_fusion",
+            b"turn=trace-1787333555531-00020#54",
+            b"state",
+            b"FAILED",
+            b"DEFERRED",
+            b"ASYNC CONTINUATION",
+            b"concurrent",
+            b"batch 2",
+            b"width 3",
+            b"panel-input-exact",
+            b"panel-output-exact",
+            b"execution=exec-fusion-1",
+        ):
             if needle not in tools:
                 raise AssertionError(
                     f"full tool view did not restore {needle!r}: {tools!r}"
@@ -6256,7 +6388,7 @@ def chat_visibility_modes_interaction() -> Interaction:
             raise AssertionError(
                 f"exact Skill evidence was duplicated as a generic tool: {tools!r}"
             )
-        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"\x1b", keeper_row_selected(b"beta"))
         os.write(master_fd, b"q")
 
     return interact
@@ -6271,6 +6403,7 @@ def chat_clarity_http_fixtures() -> HttpFixtures:
     trace = history_rows[0]["blocks"][0]["trace"]
     trace[1]["name"] = "keeper_skill"
     trace[3]["name"] = "masc_fusion"
+    trace[3]["execution_id"] = "exec-fusion-1"
     history_rows[0]["skill_activations"] = {
         "schema": "masc.keeper_chat.skill_activations.v1",
         "status": "available",
@@ -6318,6 +6451,33 @@ def chat_clarity_http_fixtures() -> HttpFixtures:
         {"modes": [], "judges": []},
     )
     fixtures["/api/v1/keepers/tool-approval-mode"] = (200, {"overrides": []})
+    fixtures["/api/v1/keepers/alpha/tool-calls?limit=100"] = (
+        200,
+        {
+            "keeper": "alpha",
+            "count": 1,
+            "health": "ok",
+            "entries": [
+                {
+                    "ts": 1787348490.3,
+                    "keeper": "alpha",
+                    "tool": "masc_fusion",
+                    "input": {"prompt": "panel-input-exact"},
+                    "output": "panel-output-exact",
+                    "success": False,
+                    "duration_ms": 1200.0,
+                    "execution_id": "exec-fusion-1",
+                    "tool_use_id": "call-fusion-1",
+                    "planned_index": 4,
+                    "batch_index": 1,
+                    "batch_size": 3,
+                    "execution_mode": "concurrent",
+                    "disposition": "deferred",
+                    "result_bytes": 18,
+                }
+            ],
+        },
+    )
     return fixtures
 
 
@@ -10948,6 +11108,21 @@ def run_keyboard_regression(executable: str) -> None:
         interact=chat_visibility_modes_interaction(),
         http_fixtures=chat_visibility_fixtures,
     )
+    error_detail_fixtures = keeper_runtime_http_fixtures()
+    error_detail_fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
+    error_detail_fixtures["/api/v1/keepers/alpha/memory-journal?limit=20"] = (
+        200,
+        {"keeper": "alpha", "entries": []},
+    )
+    error_detail_fixtures["/api/v1/keepers/chat/stream"] = RequestHttpResponse(
+        keeper_chat_failed_response
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper chat errors preserve their complete detail",
+        interact=keeper_chat_error_detail_interaction(),
+        http_fixtures=error_detail_fixtures,
+    )
     run_terminal_scenario(
         executable,
         description="Keeper message origin badges",
@@ -11488,11 +11663,21 @@ def run_config_regression(executable: str) -> None:
 
 
 def run_chat_clarity_regression(executable: str) -> None:
+    fixtures = chat_clarity_http_fixtures()
+    tool_calls_path = "/api/v1/keepers/alpha/tool-calls?limit=100"
+    tool_calls_response = fixtures[tool_calls_path]
+    if not isinstance(tool_calls_response, tuple):
+        raise AssertionError("chat clarity tool-call fixture must be a JSON response")
+    tool_calls_gate = GatedHttpResponse(
+        tool_calls_response,
+        subsequent_response=tool_calls_response,
+    )
+    fixtures[tool_calls_path] = tool_calls_gate
     run_terminal_scenario(
         executable,
         description="Keeper chat mode and Tool detail clarity",
-        interact=chat_visibility_modes_interaction(),
-        http_fixtures=chat_clarity_http_fixtures(),
+        interact=chat_visibility_modes_interaction(tool_calls_gate),
+        http_fixtures=fixtures,
     )
     run_terminal_scenario(
         executable,

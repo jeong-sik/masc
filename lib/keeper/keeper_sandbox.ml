@@ -80,6 +80,18 @@ let backend_to_string = function
   | Micro_vm -> "microvm"
   | Remote_ssh -> "remote_ssh"
 
+let profile_of_backend = function
+  | Docker -> Keeper_types_profile_sandbox.Docker
+  | Micro_vm -> Keeper_types_profile_sandbox.Micro_vm
+  | Remote_ssh -> Keeper_types_profile_sandbox.Remote_ssh
+
+(* Where the tree is decides every projection below: a shared mount has a
+   guest spelling for each host path, a tree the endpoint owns has only the
+   host bookkeeping bundle on this side, and the remote lane's path
+   translation ([Keeper_remote_path]) owns the endpoint spelling. *)
+let tree_location_of_backend backend =
+  Keeper_types_profile_sandbox.tree_location_of_profile (profile_of_backend backend)
+
 let backend_of_config_agent ~(config : Workspace.config) ~(agent_name : string) =
   match
     Keeper_sandbox_config.sandbox_profile_of_agent
@@ -136,17 +148,15 @@ let host_path_of_visible_path ~config ~agent_name raw_path =
   if Filename.is_relative raw_path
   then raw_path
   else
-    match backend_of_config_agent ~config ~agent_name with
-    (* Phase 1: no remote<->host path translation exists yet (it lands
-       with the SSH runner's translation module); the only host-side
-       namespace a remote_ssh keeper has is its bookkeeping bundle, so
-       identity is the truthful interim mapping. Execution dispatch is
-       fail-closed upstream, so this cannot be used to act on host paths. *)
-    | Remote_ssh -> raw_path
-    (* Micro_vm projects like Docker: both mount the keeper's host root at a
-       guest path, so a visible path maps back the same way. They differ in
-       what runs the guest, not in where the tree appears. *)
-    | Docker | Micro_vm ->
+    match tree_location_of_backend (backend_of_config_agent ~config ~agent_name) with
+    (* The only host-side namespace such a keeper has is its bookkeeping
+       bundle, so identity is the truthful mapping; the endpoint spelling is
+       [Keeper_remote_path]'s, applied by the remote lane on the way out and
+       back. *)
+    | Endpoint_owned -> raw_path
+    (* The sandbox mounts the keeper's host root at a guest path, so a visible
+       path maps back the same way whatever runs the guest. *)
+    | Shared_mount ->
         let container_prefix = container_root agent_name in
         if String.equal raw_path container_prefix
         then host_root_abs_of_config_agent ~config ~agent_name
@@ -166,11 +176,11 @@ let host_path_of_visible_path ~config ~agent_name raw_path =
 
 let keeper_visible_root_abs_of_meta ~(config : Workspace.config)
     (meta : Keeper_meta_contract.keeper_meta) =
-  match backend_of_profile meta.sandbox_profile with
-  | Docker | Micro_vm -> container_root meta.name
-  (* Phase 1: the keeper-visible root is the host bookkeeping bundle
-     until the SSH lane's remote root translation lands (task 6+). *)
-  | Remote_ssh -> host_root_abs_of_meta ~config meta
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  | Shared_mount -> container_root meta.name
+  (* The keeper-visible root is the host bookkeeping bundle; the remote lane
+     translates it to the endpoint's root on the way out. *)
+  | Endpoint_owned -> host_root_abs_of_meta ~config meta
 
 let of_meta ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) : t =
   let backend = backend_of_profile meta.sandbox_profile in
@@ -182,9 +192,9 @@ let of_meta ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_me
   ; host_root_rel = host_root_rel_of_meta ~meta
   ; host_root_abs = host_root_abs_of_meta ~config meta
   ; container_root =
-      (match backend with
-       | Docker | Micro_vm -> Some (container_root meta.name)
-       | Remote_ssh -> None)
+      (match tree_location_of_backend backend with
+       | Shared_mount -> Some (container_root meta.name)
+       | Endpoint_owned -> None)
   ; root_arg = "."
   }
 
@@ -215,13 +225,12 @@ let visible_path_of_host (t : t) (p : Path.host Path.t)
   : (Path.visible Path.t, Path.conversion_error) result
   =
   let path = Path.unsafe_to_string p in
-  match t.backend with
-  (* Phase 1: identity — the only keeper-visible namespace that exists
-     host-side for remote_ssh is the bookkeeping bundle. True
-     remote<->logical projection arrives with the SSH lane's path
-     translation module; dispatch itself is fail-closed upstream. *)
-  | Remote_ssh -> Ok path
-  | Docker | Micro_vm ->
+  match tree_location_of_backend t.backend with
+  (* Identity: the only keeper-visible namespace that exists host-side for a
+     tree the endpoint owns is the bookkeeping bundle. The remote lane's path
+     translation owns the endpoint spelling. *)
+  | Endpoint_owned -> Ok path
+  | Shared_mount ->
     (match t.container_root with
      | None -> Error (Path.Container_root_missing { path })
      | Some container_root ->

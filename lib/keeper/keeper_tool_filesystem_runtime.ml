@@ -4,39 +4,15 @@ open Keeper_types_profile
 open Keeper_tool_shared_runtime
 open Result.Syntax
 
-(* Issue #8490: Variant SSOT for filesystem write mode. Adding a constructor
-   forces compilation in [fs_write_mode_to_string] and
-   [fs_write_mode_dispatch] AND extends [valid_fs_write_mode_strings];
-   the schema mirrors the SSOT through [Tool_shard_types] (cycle
-   avoidance per #8480/#8484 pattern). The previous code used 5 hardcoded sites:
-   parse default, validate, dispatch, label normalisation, and schema. *)
-type fs_write_mode =
+(* The write mode is defined once in [Keeper_tool_write_mode], shared with the
+   remote-lane handler; the names below keep this module's surface. *)
+type fs_write_mode = Keeper_tool_write_mode.t =
   | Overwrite
   | Append
   | Patch
-  (** RFC-0006 Phase A.4: read-replace-write for the Anthropic Code
-        [Edit] cognate. Caller supplies [old_string] + [new_string]
-        (and optional [replace_all]) instead of [content]. *)
 
-let fs_write_mode_to_string = function
-  | Overwrite -> "overwrite"
-  | Append -> "append"
-  | Patch -> "patch"
-;;
-
-(* Sound partial parser: only canonical mode strings decode to a real
-   variant. Missing mode defaults before this parser; explicit empty
-   strings are invalid input. *)
-let fs_write_mode_of_string_opt raw =
-  match String.trim (String.lowercase_ascii raw) with
-  | "overwrite" -> Some Overwrite
-  | "append" -> Some Append
-  | "patch" -> Some Patch
-  | _ -> None
-;;
-
-let all_fs_write_modes = [ Overwrite; Append; Patch ]
-let valid_fs_write_mode_strings = List.map fs_write_mode_to_string all_fs_write_modes
+let fs_write_mode_to_string = Keeper_tool_write_mode.to_string
+let valid_fs_write_mode_strings = Keeper_tool_write_mode.valid_strings
 
 (** Read max_bytes clamp. [read_file_default_max_bytes] is the
     canonical default; [Tool_shard_limits.read_file_default_max_bytes]
@@ -629,101 +605,6 @@ let handle_owned_read_file_with_outcome
                     ; "content", `String slice.window_content
                     ]
                     @ optional_fields)))))
-;;
-
-(* RFC-0006 Phase A.4: replace [old] with [new] in [text]. When
-   [replace_all=false], requires exactly one occurrence so accidental
-   multi-edits are rejected (mirrors Edit semantics). *)
-type patch_application =
-  { updated : string
-  ; occurrence_count : int
-  ; line_occurrences : Keeper_file_change_evidence.edit_occurrence list option
-  }
-
-let apply_patch ~old_string ~new_string ~replace_all text =
-  if old_string = ""
-  then Error "old_string must be non-empty for mode=patch."
-  else (
-    let count_occurrences ~needle haystack =
-      let nlen = String.length needle in
-      if nlen = 0
-      then 0
-      else (
-        let hlen = String.length haystack in
-        let rec loop i acc =
-          if i + nlen > hlen
-          then acc
-          else if String.sub haystack i nlen = needle
-          then loop (i + nlen) (acc + 1)
-          else loop (i + 1) acc
-        in
-        loop 0 0)
-    in
-    let occurrence_count = count_occurrences ~needle:old_string text in
-    if occurrence_count = 0
-    then Error "old_string not found in file. Patch did not match anything."
-    else if (not replace_all) && occurrence_count > 1
-    then
-      Error
-        (Printf.sprintf
-           "old_string occurs %d times. Pass replace_all=true to apply to all, or supply \
-            a more specific old_string."
-           occurrence_count)
-    else (
-      let buf = Buffer.create (String.length text) in
-      let nlen = String.length old_string in
-      let hlen = String.length text in
-      let record_line_occurrences =
-        occurrence_count
-        <= Keeper_file_change_evidence.max_recorded_edit_occurrences
-      in
-      let rec loop i old_line new_line evidence_rev =
-        if i + nlen > hlen
-        then (
-          Buffer.add_substring buf text i (hlen - i);
-          Option.map List.rev evidence_rev)
-        else if String.sub text i nlen = old_string
-        then (
-          let evidence_rev =
-            Option.map
-              (fun evidence_rev ->
-                 Keeper_file_change_evidence.edit_occurrence
-                   ~old_start_line:old_line
-                   ~new_start_line:new_line
-                   ~old_string
-                   ~new_string
-                 :: evidence_rev)
-              evidence_rev
-          in
-          Buffer.add_string buf new_string;
-          if replace_all
-          then
-            loop
-              (i + nlen)
-              (Keeper_file_change_evidence.advance_line
-                 ~start_line:old_line
-                 old_string)
-              (Keeper_file_change_evidence.advance_line
-                 ~start_line:new_line
-                 new_string)
-              evidence_rev
-          else (
-            Buffer.add_substring buf text (i + nlen) (hlen - i - nlen);
-            Option.map List.rev evidence_rev))
-        else (
-          let char = text.[i] in
-          Buffer.add_char buf char;
-          let line_delta = if Char.equal char '\n' then 1 else 0 in
-          loop
-            (i + 1)
-            (old_line + line_delta)
-            (new_line + line_delta)
-            evidence_rev)
-      in
-      let line_occurrences =
-        loop 0 1 1 (if record_line_occurrences then Some [] else None)
-      in
-      Ok { updated = Buffer.contents buf; occurrence_count; line_occurrences }))
 ;;
 
 (* RFC-0378 §5.1 — resolve a write's file path to its attribution.
@@ -2259,6 +2140,17 @@ let handle_file_write_with_outcome
       ~(args : Yojson.Safe.t)
       ()
   =
+  (* A tree the endpoint owns is not on this host: every capability below
+     would write the bookkeeping bundle and miss the tree. Those writes go
+     through the remote lane. *)
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  | Keeper_types_profile_sandbox.Endpoint_owned ->
+    Keeper_tool_filesystem_remote_write.handle
+      ~turn_sandbox_factory
+      ~config
+      ~meta
+      ~args
+  | Keeper_types_profile_sandbox.Shared_mount ->
   let via_field =
     match turn_sandbox_factory with
     | Some _ ->
@@ -2271,34 +2163,9 @@ let handle_file_write_with_outcome
   in
   let path = Safe_ops.json_string ~default:"" "path" args in
   let content = Safe_ops.json_string ~default:"" "content" args in
-  (* [Safe_ops.json_string] maps "key absent" and "key present but not a
-     string" onto the same default, and that default is the destructive mode.
-     {"mode": ["append"]} therefore reached Overwrite while the merely
-     misspelled {"mode": "apend"} was rejected below — a type error was handled
-     more permissively than a value error, in the destructive direction. Read
-     the member so a non-string is rejected on the same path as a bad string.
-     Absence follows that same rejection path (masc#31573): every model-facing
-     translator injects mode explicitly and Gate replay reconstructs it from
-     the recorded effect, so an absent mode only reaches this handler through
-     an internal-name call that bypassed translation — and defaulting that to
-     Overwrite turned a missing member into a whole-file write. *)
-  let mode_member =
-    match args with
-    | `Assoc members -> List.assoc_opt "mode" members
-    | _ -> None
-  in
-  let mode_raw =
-    match mode_member with
-    | None -> "(absent)"
-    | Some (`String s) -> s
-    | Some other -> Yojson.Safe.to_string other
-  in
-  let mode_opt =
-    match mode_member with
-    | None -> None
-    | Some (`String s) -> fs_write_mode_of_string_opt s
-    | Some _ -> None
-  in
+  (* Absent, non-string and unknown modes are all rejected; see
+     [Keeper_tool_write_mode.of_args] for why there is no default. *)
+  let mode_result = Keeper_tool_write_mode.of_args args in
   let after_gate ~confined ~target ~input continue =
     if confined_write_is_keeper_playground ~config ~meta confined
     then (
@@ -2734,16 +2601,12 @@ let handle_file_write_with_outcome
       ~class_:Tool_result.Policy_rejection
       (error_json "path is required. Good: path='lib/foo.ml'. Bad: path=''.")
   else (
-    match mode_opt with
-    | None ->
+    match mode_result with
+    | Error mode_raw ->
       Keeper_tool_execution.failure
         ~class_:Tool_result.Policy_rejection
-        (error_json
-           (Printf.sprintf
-              "mode must be one of [%s], got %S."
-              (String.concat ", " valid_fs_write_mode_strings)
-              mode_raw))
-    | Some Patch ->
+        (error_json (Keeper_tool_write_mode.rejection_message mode_raw))
+    | Ok Patch ->
       let old_string = Safe_ops.json_string ~default:"" "old_string" args in
       let new_string = Safe_ops.json_string ~default:"" "new_string" args in
       let replace_all = Safe_ops.json_bool ~default:false "replace_all" args in
@@ -2891,8 +2754,8 @@ let handle_file_write_with_outcome
                     current
                     write
                 =
-                let* application =
-                  apply_patch ~old_string ~new_string ~replace_all current
+                let* (application : Keeper_tool_patch.patch_application) =
+                  Keeper_tool_patch.apply_patch ~old_string ~new_string ~replace_all current
                 in
                 let* projection =
                   Keeper_alerting_path.patch_then_atomic_replace_effect
@@ -3006,11 +2869,11 @@ let handle_file_write_with_outcome
                | Error msg ->
                  Keeper_tool_execution.failure
                    (error_json ~fields:[ "path", `String target ] msg)))
-    | Some Overwrite ->
+    | Ok Overwrite ->
       handle_atomic_content_write
         ~mode:Overwrite
         ~make_effect:Keeper_alerting_path.atomic_replace_effect
-    | Some Append -> handle_append ()
+    | Ok Append -> handle_append ()
   )
 ;;
 

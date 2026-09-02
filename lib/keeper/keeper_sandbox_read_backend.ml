@@ -39,16 +39,13 @@ let container_root ~(meta : keeper_meta) =
 
 let container_path_of_host ~(config : Workspace.config) ~(meta : keeper_meta) ~host_path
     : (string, string) result =
-  match meta.sandbox_profile with
-  | Remote_ssh ->
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  | Endpoint_owned ->
     let ( let* ) = Result.bind in
-    let* endpoint =
-      Keeper_sandbox_ssh.resolve_endpoint
-        ~base_path:config.base_path ~keeper_name:meta.name
-    in
+    let* remote_root = Keeper_sandbox_remote_lane.remote_root ~config ~meta in
     Keeper_remote_path.host_to_remote ~base_path:config.base_path
-      ~remote_root:endpoint.remote_root ~keeper:meta.name host_path
-  | Docker | Micro_vm ->
+      ~remote_root ~keeper:meta.name host_path
+  | Shared_mount ->
     let host_root = host_playground_root ~config ~meta in
     let host_norm =
       Keeper_alerting_path.normalize_path_for_check host_path
@@ -125,6 +122,7 @@ let container_name_of meta =
     (int_of_float (Unix.gettimeofday () *. 1000.0))
 
 let run_remote_command_with_status
+    ?turn_sandbox_factory
     ?(ok_exit_codes = [ 0 ])
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
@@ -134,29 +132,24 @@ let run_remote_command_with_status
     ()
   =
   let ( let* ) = Result.bind in
+  let host_root = host_playground_root ~config ~meta in
   let* endpoint =
-    Keeper_sandbox_ssh.resolve_endpoint
-      ~base_path:config.base_path ~keeper_name:meta.name
-  in
-  let* ssh =
-    Keeper_sandbox_ssh.create ~base_path:config.base_path
-      ~keeper_name:meta.name ~endpoint ()
-  in
-  let* () =
-    if Env_config_sandbox.Preflight.enabled ()
-    then Keeper_sandbox_remote.check_preflight ssh
-    else Ok ()
+    Keeper_sandbox_remote_lane.endpoint ?turn_sandbox_factory ~config ~meta ~cwd:host_root ()
   in
   let* cwd =
     Keeper_remote_path.host_to_remote ~base_path:config.base_path
-      ~remote_root:endpoint.remote_root ~keeper:meta.name
-      (host_playground_root ~config ~meta)
+      ~remote_root:(Keeper_sandbox_remote.remote_root endpoint) ~keeper:meta.name
+      host_root
   in
-  let runner = Keeper_sandbox_remote.runner ~timeout_sec ssh in
+  let runner = Keeper_sandbox_remote.runner ~timeout_sec endpoint in
   let status, stdout, stderr =
     runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
       ~argv:command_argv ~env:[||] ~cwd:(Some cwd)
   in
+  let lane =
+    Keeper_sandbox_remote.lane_prefix (Keeper_sandbox_remote.transport endpoint)
+  in
+  let endpoint_name = Keeper_sandbox_remote.name endpoint in
   match status with
   | Unix.WEXITED code
     when List.exists (fun allowed -> allowed = code) ok_exit_codes ->
@@ -168,18 +161,18 @@ let run_remote_command_with_status
   | Unix.WEXITED code ->
     Error
       (Printf.sprintf
-         "remote_ssh_read_failed: endpoint=%s exit=%d stderr=%s"
-         endpoint.name code (Exec_policy.truncate_for_log stderr))
+         "%s_read_failed: endpoint=%s exit=%d stderr=%s"
+         lane endpoint_name code (Exec_policy.truncate_for_log stderr))
   | Unix.WSIGNALED signal ->
     Error
       (Printf.sprintf
-         "remote_ssh_read_signaled: endpoint=%s signal=%d stderr=%s"
-         endpoint.name signal (Exec_policy.truncate_for_log stderr))
+         "%s_read_signaled: endpoint=%s signal=%d stderr=%s"
+         lane endpoint_name signal (Exec_policy.truncate_for_log stderr))
   | Unix.WSTOPPED signal ->
     Error
       (Printf.sprintf
-         "remote_ssh_read_stopped: endpoint=%s signal=%d"
-         endpoint.name signal)
+         "%s_read_stopped: endpoint=%s signal=%d"
+         lane endpoint_name signal)
 ;;
 
 type read_dispatch =
@@ -203,31 +196,42 @@ let profile_contract_mismatch ~expected ~actual =
 (* TEL-OK: pure fail-closed route selection. The selected backend performs and
    reports the read effect in [run_command_with_status] below. *)
 let resolve_read_dispatch ~turn_sandbox_factory ~(meta : keeper_meta) ~cwd =
-  match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
-  | Runtime binding ->
-    let actual = binding_profile binding in
+  let contract_holds actual =
     if actual = meta.sandbox_profile
-    then Ok (Turn_runtime binding)
-    else
-      Error
-        (profile_contract_mismatch
-           ~expected:meta.sandbox_profile
-           ~actual)
-  | Remote_ssh_profile ->
-    if meta.sandbox_profile = Remote_ssh
-    then Ok Remote_dispatch
-    else
-      Error
-        (profile_contract_mismatch
-           ~expected:meta.sandbox_profile
-           ~actual:Remote_ssh)
-  | No_factory ->
-    (match meta.sandbox_profile with
-     | Remote_ssh -> Ok Remote_dispatch
-     | Docker -> Ok Docker_fallback
-     | Micro_vm ->
-       Error
-         "microvm_read_requires_turn_sandbox_factory: refusing to substitute Docker for an Apple Container keeper")
+    then Ok ()
+    else Error (profile_contract_mismatch ~expected:meta.sandbox_profile ~actual)
+  in
+  let resolved = Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd in
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  (* The tree is on the endpoint: whatever runtime the factory holds is the
+     way to reach it (a guest), never a place to read from directly. *)
+  | Endpoint_owned ->
+    (match resolved with
+     | Runtime binding ->
+       Result.map (fun () -> Remote_dispatch) (contract_holds (binding_profile binding))
+     | Remote_ssh_profile ->
+       Result.map (fun () -> Remote_dispatch) (contract_holds Remote_ssh)
+     | No_factory ->
+       (match meta.sandbox_profile with
+        | Remote_ssh -> Ok Remote_dispatch
+        | Micro_vm ->
+          Error
+            "microvm_read_requires_turn_sandbox_factory: the guest is known only to the turn's sandbox factory, and this call has none"
+        | Docker ->
+          Error "docker_has_no_remote_lane: a docker keeper's tree is a shared mount"))
+  | Shared_mount ->
+    (match resolved with
+     | Runtime binding ->
+       Result.map (fun () -> Turn_runtime binding) (contract_holds (binding_profile binding))
+     | Remote_ssh_profile ->
+       Error (profile_contract_mismatch ~expected:meta.sandbox_profile ~actual:Remote_ssh)
+     | No_factory ->
+       (match meta.sandbox_profile with
+        | Docker -> Ok Docker_fallback
+        | Micro_vm ->
+          Error
+            "microvm_read_requires_turn_sandbox_factory: refusing to substitute Docker for an Apple Container keeper"
+        | Remote_ssh -> Ok Remote_dispatch))
 ;;
 
 let run_command_with_status ?turn_sandbox_factory
@@ -242,7 +246,7 @@ let run_command_with_status ?turn_sandbox_factory
     match resolve_read_dispatch ~turn_sandbox_factory ~meta ~cwd with
     | Error _ as error -> error
     | Ok Remote_dispatch ->
-      run_remote_command_with_status ~ok_exit_codes ~config ~meta
+      run_remote_command_with_status ?turn_sandbox_factory ~ok_exit_codes ~config ~meta
         ~command_argv ~max_bytes ~timeout_sec ()
     | Ok (Turn_runtime { runtime; _ }) ->
       Keeper_turn_sandbox_runtime.run_command_with_status
@@ -346,7 +350,10 @@ let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
   match container_path_of_host ~config ~meta ~host_path with
   | Error _ as e -> e
   | Ok backend_path ->
-    if meta.sandbox_profile = Remote_ssh then
+    if
+      Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile
+      = Keeper_types_profile_sandbox.Endpoint_owned
+    then
       run_command ?turn_sandbox_factory ~config ~meta
         ~command_argv:[ "cat"; backend_path ]
         ~max_bytes ~timeout_sec ()

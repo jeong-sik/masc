@@ -116,10 +116,14 @@ let try_handle_with_outcome
   in
   let run_readonly_in_sandbox ?(ok_exit_codes = [ 0 ]) ~target ~command_argv
       ~max_bytes ~timeout_sec () =
-    (* Docker has a shared host mount, so its host-side existence preflight is
-       precise and cheap. Remote SSH does not: the host path is bookkeeping
+    (* A shared mount makes the host-side existence preflight precise and
+       cheap. A tree the endpoint owns does not: the host path is bookkeeping
        only, and existence is authoritative on the endpoint. *)
-    if meta.sandbox_profile <> Remote_ssh && not (Sys.file_exists target) then
+    if
+      Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile
+      = Keeper_types_profile_sandbox.Shared_mount
+      && not (Sys.file_exists target)
+    then
       Error
         (sandbox_read_error ~target
            (Printf.sprintf

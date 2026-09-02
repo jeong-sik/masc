@@ -118,6 +118,35 @@ key, absolute entries only, that replaces the default. The host writes the
 guest's config, so the value is server-authored; a vendor box keeps the
 default. The static shim is rebuilt once (`scripts/remote-ssh/build-shim.sh`).
 
+### C0. Remote file operations
+
+RFC-0395 shipped the OpenSSH lane with Execute and Read proxied and left
+Write and Edit on the host: `handle_file_write_with_outcome` writes through
+Eio capabilities on a directory it can open, and for a remote keeper that
+directory is the bookkeeping bundle, not the tree. A remote_ssh keeper's
+Write therefore lands where no command of that keeper will ever look. The
+guest lane would inherit the same hole, so it is closed before the cut.
+
+- `Keeper_types_profile_sandbox.tree_location` says where a profile's tree
+  is: `Shared_mount` (Docker, and Micro_vm until the cut) or
+  `Endpoint_owned` (Remote_ssh, and Micro_vm after the cut). Every consumer
+  that used to spell `Docker | Micro_vm` against `Remote_ssh` branches on
+  this one function instead, so the cut is one arm.
+- `Keeper_sandbox_remote_lane` finds the endpoint for a profile: the
+  runtime.toml entry for OpenSSH, the turn factory's running guest for
+  Micro_vm.
+- `Keeper_tool_filesystem_remote_write` is Write/Edit for an
+  `Endpoint_owned` tree: the same path jail, modes, patch
+  (`Keeper_tool_patch`, moved out so both handlers apply one patch) and
+  evidence as the host handler, with the bytes delivered as a `sh` payload
+  over the shim (`mktemp` beside the target, `cat > tmp`, keep the mode,
+  `mv -f`; `cat >>` for append; a chosen exit code marks a missing patch
+  source). No Gate: the jail admits only the keeper's playground, which the
+  host handler also authorizes without the Gate. No publication-recovery
+  journal: the replace is atomic on the endpoint's own filesystem.
+- Read dispatch routes an `Endpoint_owned` tree through the lane whatever
+  the factory holds, so a guest's reads take the same path as its writes.
+
 ### B. Guest provisioning
 
 On VM boot (`start_microvm_container_unlocked`):

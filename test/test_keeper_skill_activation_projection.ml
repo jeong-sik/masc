@@ -343,6 +343,29 @@ let test_corrupt_exact_trace_is_unavailable () =
   | Projection.Trace_not_recorded _ -> fail "corrupt exact trace disappeared"
 ;;
 
+(* A Keeper that does not exist is an answer, not a cold cache. The tools
+   payload used to seed a "warming" effective surface for any keeper name
+   until the shared inventory cache filled, so a keeper an admin had taken
+   down read as one the server had not looked at yet. The surface is now
+   resolved live on every request, and the first read of an unknown name
+   says keeper_not_found. *)
+let test_absent_keeper_is_not_found_not_warming () =
+  with_workspace @@ fun config ->
+  let json =
+    Server_dashboard_http_runtime_info.dashboard_tools_http_json
+      ~keeper:"never-registered"
+      config
+  in
+  let open Yojson.Safe.Util in
+  let surface = json |> member "effective_keeper_surface" in
+  check string "unavailable, not warming" "unavailable"
+    (surface |> member "status" |> to_string);
+  check string "and it says why" "keeper_not_found"
+    (surface |> member "reason" |> to_string);
+  check string "for that keeper" "never-registered"
+    (surface |> member "keeper_name" |> to_string)
+;;
+
 let () =
   run
     "keeper Skill activation projection"
@@ -351,6 +374,8 @@ let () =
             test_missing_keeper_is_no_session
         ; test_case "dashboard attachment bypasses inventory cache" `Quick
             test_dashboard_projection_is_live_outside_inventory_cache
+ ; test_case "absent keeper is not found, not warming" `Quick
+     test_absent_keeper_is_not_found_not_warming
         ; test_case "corrupt ledger is unavailable" `Quick
             test_corrupt_ledger_is_unavailable_not_empty
         ; test_case "exact trace uses typed ledger" `Quick

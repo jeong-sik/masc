@@ -11491,18 +11491,22 @@ and is loaded on demand through keeper_skill.
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
          a mouse report, or any other key means the operator stayed. *)
       if Option.is_some input && not quit_key then state.quit_armed <- false;
-      (* An armed shutdown expires on the next unrelated key. Otherwise it
+      (* An armed shutdown expires on the next unrelated input. Otherwise it
          waits indefinitely and a later press of the same key -- after the
          cursor has moved, after a refresh -- submits work the operator armed
          minutes ago for something else. Same rule for every other armed
-         action here.
+         action here, and the same one the quit confirmation above already
+         uses: deliberate input that is not the second press ends it.
 
-         One predicate rather than one restatement per field: the connector
-         unbind used to spell the rule itself and counted a loop turn with no
-         key as an unrelated key, so its arm survived a single iteration. *)
+         One predicate rather than one restatement per field. The connector
+         unbind used to spell the rule itself and read a loop turn that
+         fetched no input as an unrelated key, so its arm survived a single
+         iteration. The viewport is not part of the rule: an armed
+         destructive action must not outlive the moment it was armed in,
+         least of all across a resize the operator cannot see it through. *)
       let cancelled second_press =
-        (not compact_viewport)
-        && Masc_tui_keys.cancels_two_press ~key ~second_press
+        Masc_tui_keys.cancels_two_press
+          ~input_seen:(Option.is_some input) ~key ~second_press
       in
       (match state.view with
        | Approvals ->
@@ -13153,20 +13157,21 @@ and is loaded on demand through keeper_skill.
             | _ -> ())
        (* Stepping the last search is what [n] means on a surface that binds
           it to nothing else, so it is the tail of this arm rather than an
-          arm of its own above it. As its own arm it outranked the three
-          surfaces below: [search_last] is one string for the whole session,
-          so after any search anywhere, Harness answered [n] with a jump to
-          the next match instead of the overrule its footer names.
+          arm of its own above it. As its own arm it sat above every surface
+          that binds the key, and [search_last] is one string for the whole
+          session: a surface with row texts and its own [n] would lose that
+          key permanently after any search anywhere. Nothing is in that
+          position today -- Harness was, and its overrule moved to [x] --
+          and this shape is what keeps it that way.
 
           The match is exhaustive on purpose. A surface added later has to
           say whether [n] is its own key or the search step. *)
        | Some (("n" | "N") as direction) ->
            (match state.view with
             | Approvals -> answer_presented_approval Deny
-            | Harness -> handle_harness_overrule ()
             | Schedules -> handle_schedule_create ()
             | Overview | Acting | Keepers _ | Memory | Lanes | Board | Planning
-            | Verification | Fusion | Repositories | Code | Changes
+            | Verification | Harness | Fusion | Repositories | Code | Changes
             | Connectors | Runtime | Config | Resources | Tools | System_logs ->
                 if
                   state.search_last <> ""
@@ -13617,9 +13622,19 @@ and is loaded on demand through keeper_skill.
                   state.changes_tree_diff_path <- None
                 end
                 else
-                  (* Changes opens from the roster, so Esc goes back to the
-                     roster rather than to Overview. *)
-                  state.view <- Keepers Keeper_list
+                  (* Changes opens from a keeper surface, so Esc goes back to
+                     the one it was opened from rather than to Overview. The
+                     detail draws whoever the roster cursor names, and the
+                     roster can shrink while this surface is up: with nobody
+                     under the cursor the detail has nothing to draw, so the
+                     way back is the roster. The chat pane demotes its own
+                     return for the same reason. *)
+                  state.view <-
+                    (match state.changes_return, selected_keeper state with
+                     | Changes_return_detail, Some _ -> Keepers Keeper_detail
+                     | Changes_return_detail, None
+                     | Changes_return_list, (Some _ | None) ->
+                         Keepers Keeper_list)
             | Repositories ->
                 if state.repository_changes_open then
                   close_repository_changes state
@@ -14790,14 +14805,18 @@ and is loaded on demand through keeper_skill.
             | Acting
             | Connectors | Config | Resources | Tools -> ())
        (* Changes reads one keeper's file writes and already binds to the
-          roster cursor on entry, so it opens from the roster rather than
-          from the Tab ring. Both keeper surfaces, because both list [f] in
-          their footer and both are read from that same cursor -- detail
-          listed the key with no arm behind it, so the hint was dead
-          there. *)
-       | Some "f" | Some "F"
-         when state.view = Keepers Keeper_list
-              || state.view = Keepers Keeper_detail ->
+          roster cursor on entry, so it opens from a keeper surface rather
+          than from the Tab ring. Both of them list [f] in their footer and
+          both name the keeper with the same cursor; detail listed the key
+          with no arm behind it, so the hint was dead there.
+
+          One arm each rather than one arm with a disjunction, because each
+          also records where Esc goes back to. *)
+       | Some "f" | Some "F" when state.view = Keepers Keeper_list ->
+           state.changes_return <- Changes_return_list;
+           goto_surface state ~mailbox:async_messages Changes
+       | Some "f" | Some "F" when state.view = Keepers Keeper_detail ->
+           state.changes_return <- Changes_return_detail;
            goto_surface state ~mailbox:async_messages Changes
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
@@ -15139,6 +15158,12 @@ and is loaded on demand through keeper_skill.
            (* Reject wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)
            handle_verification_reject ()
+       | Some "x" | Some "X" when state.view = Harness ->
+           (* The negative verdict, spelled the way Verification spells its
+              own. It was [n], which this surface cannot keep: Harness
+              answers the row search, and [n] steps that search on every
+              surface that does not bind the key itself. *)
+           handle_harness_overrule ()
        | Some (("l" | "L" | "o") as log_key)
          when (match log_key, state.view with
                | ("l" | "L"), Keepers (Keeper_list | Keeper_detail)

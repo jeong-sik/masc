@@ -1624,6 +1624,14 @@ type keeper_chat_return =
   | Keeper_chat_return_detail
   | Keeper_chat_return_lanes
 
+(** Where [Esc] returns after the Changes surface was opened. [f] opens it
+    from the roster and from the detail, which name the same keeper through
+    the same cursor, and only those two: a keeper mode would also admit the
+    runtime picker and the chat pane, which are not places to land. *)
+type changes_return =
+  | Changes_return_list
+  | Changes_return_detail
+
 (** Top-level TUI surface. *)
 (* A picture currently on the terminal. Only the drawn case: a refusal has
    nothing to draw, and putting one here would take the screen away from the
@@ -2634,6 +2642,11 @@ type state = {
   mutable changes_keeper: string option;
   mutable changes: Tui_decode.file_change_snapshot option;
   mutable changes_error: string option;
+  (* Which keeper surface [f] was pressed on. Esc leaves Changes for that
+     one: the roster and the detail both name a keeper through the same
+     cursor, and returning a reader from the detail to the roster drops them
+     a level they did not ask to leave. *)
+  mutable changes_return: changes_return;
   (* Which row the list marks, and where the window on that list sits. Two
      fields rather than one: the marked row was the window's top row, so the
      rows the window already showed below it could not be marked, and Enter,
@@ -3247,6 +3260,7 @@ let create_state
   changes_keeper = None;
   changes = None;
   changes_error = None;
+  changes_return = Changes_return_list;
   changes_cursor = 0;
   changes_scroll = 0;
   changes_diff_row = None;

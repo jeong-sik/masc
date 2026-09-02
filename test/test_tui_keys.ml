@@ -115,7 +115,7 @@ let test_lanes_scroll_reserves_standalone_matrix_rows () =
 
 let test_harness_footer_links_to_overview_task () =
   check str "Harness names its task link"
-    "j/k:move  v:next Planning tab  PgUp/PgDn:page  [ / ]:previous / next  Right / Enter:verdict  Left / Esc:back  y:agree  n:overrule  Y:copy task  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  PgUp/PgDn:page  [ / ]:previous / next  Right / Enter:verdict  Left / Esc:back  y:agree  x:overrule  Y:copy task  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Harness)
 
 let test_schedules_footer_names_write_and_read_controls () =
@@ -910,19 +910,30 @@ let test_keeper_detail_reserves_lowercase_u_for_channel_unbind () =
   Alcotest.(check bool) "lowercase u is free for Channels" false
     (List.mem "u" keys)
 
-let test_a_loop_turn_without_a_key_keeps_an_arm () =
-  (* The defect this closes: the dispatch loop turns whether or not a key was
-     read, so counting [None] as an unrelated key left every two-press arm
-     alive for exactly one iteration. Two [u] presses removed a channel
-     binding only when both bytes arrived in the same read. *)
-  check Alcotest.bool "no key is not another key" false
-    (Masc_tui_keys.cancels_two_press ~key:None ~second_press:[ "u" ])
+let test_a_loop_turn_without_input_keeps_an_arm () =
+  (* The defect this closes: the dispatch loop turns on its own timeout as
+     well as on input, so reading that turn as an unrelated key left every
+     two-press arm alive for exactly one iteration. Two [u] presses removed a
+     channel binding only when both bytes arrived in the same read. *)
+  check Alcotest.bool "a turn that read nothing cancels nothing" false
+    (Masc_tui_keys.cancels_two_press ~input_seen:false ~key:None
+       ~second_press:[ "u" ]);
+  check Alcotest.bool "and the key it did not read is not the second press"
+    false
+    (Masc_tui_keys.cancels_two_press ~input_seen:false ~key:(Some "j")
+       ~second_press:[ "u" ])
 
-let test_the_second_press_holds_and_anything_else_cancels () =
+let test_input_that_is_not_the_second_press_cancels () =
+  (* [key] is [None] for a mouse report, a paste, and a graphics reply. Those
+     are input the operator produced, so they end the confirmation. *)
+  check Alcotest.bool "a mouse report or a paste cancels" true
+    (Masc_tui_keys.cancels_two_press ~input_seen:true ~key:None
+       ~second_press:[ "u" ]);
   List.iter
     (fun (pressed, second_press, expected, label) ->
        check Alcotest.bool label expected
-         (Masc_tui_keys.cancels_two_press ~key:(Some pressed) ~second_press))
+         (Masc_tui_keys.cancels_two_press ~input_seen:true
+            ~key:(Some pressed) ~second_press))
     [ "u", [ "u" ], false, "the second press holds the arm"
     ; "j", [ "u" ], true, "a cursor move cancels it"
     ; "U", [ "u" ], true, "a different case is a different key"
@@ -931,33 +942,38 @@ let test_the_second_press_holds_and_anything_else_cancels () =
     ; "x", [], true, "an arm with no second press cancels on any key"
     ]
 
-let test_keeper_detail_lists_the_file_changes_key () =
-  (* Both keeper surfaces list [f]; detail listed it with no dispatch arm
-     until the arm's guard widened to cover it. *)
+let surface_keys surface =
+  List.map
+    (fun (binding : Masc_tui_keys.binding) -> binding.Masc_tui_keys.key)
+    (Masc_tui_keys.for_surface surface)
+
+let test_a_searchable_surface_does_not_also_bind_n () =
+  (* [n] / [N] step the last row search on every surface that does not bind
+     the key itself, and [search_last] outlives the surface it was typed on.
+     A surface that both answers the row search and binds [n] therefore loses
+     that key for the rest of the session. Harness did: its overrule now
+     spells [x], the way Verification spells its own rejection.
+
+     The list is every surface [surface_row_texts] can answer with rows. *)
   List.iter
     (fun (label, surface) ->
-       let keys =
-         List.map
-           (fun (binding : Masc_tui_keys.binding) -> binding.Masc_tui_keys.key)
-           (Masc_tui_keys.for_surface surface)
-       in
-       check Alcotest.bool (label ^ " lists f") true (List.mem "f" keys))
-    [ "Keeper list", Keepers Keeper_list
-    ; "Keeper detail", Keepers Keeper_detail
-    ]
-
-let test_harness_keeps_n_for_its_own_verdict () =
-  (* Harness answers the surface search, so the session-wide [n] search step
-     used to outrank the overrule its footer names. The footer is unchanged;
-     the dispatch order is what moved. *)
-  let keys =
-    List.map
-      (fun (binding : Masc_tui_keys.binding) -> binding.Masc_tui_keys.key)
-      (Masc_tui_keys.for_surface Harness)
-  in
-  check Alcotest.bool "overrule is Harness's own n" true (List.mem "n" keys);
-  check Alcotest.bool "and it does not also advertise the search step" false
-    (List.mem "n / N" keys)
+       check Alcotest.bool (label ^ " leaves n to the search step") false
+         (List.mem "n" (surface_keys surface)))
+    [ "Keepers", Keepers Keeper_list
+    ; "Lanes", Lanes
+    ; "Verification", Verification
+    ; "Harness", Harness
+    ; "Repositories", Repositories
+    ; "Memory", Memory
+    ; "Connectors", Connectors
+    ; "Runtime", Runtime
+    ; "System logs", System_logs
+    ; "Code", Code
+    ];
+  let harness = surface_keys Harness in
+  check Alcotest.bool "Harness overrules with x" true (List.mem "x" harness);
+  check Alcotest.bool "and names the search it answers" true
+    (List.mem "n / N" harness && List.mem "/" harness)
 
 let test_detail_tab_keys_reach_the_help_sheet () =
   let sheet = Masc_tui_keys.help_sections ~current:(Keepers Keeper_detail) () in
@@ -992,16 +1008,14 @@ let () =
             test_one_spelling_per_key
         ; Alcotest.test_case "chat help names the Memory cycle" `Quick
             test_chat_help_names_memory_cycle
-        ; Alcotest.test_case "Keeper detail lists the file changes key" `Quick
-            test_keeper_detail_lists_the_file_changes_key
-        ; Alcotest.test_case "Harness keeps n for its own verdict" `Quick
-            test_harness_keeps_n_for_its_own_verdict
+        ; Alcotest.test_case "a searchable surface does not also bind n" `Quick
+            test_a_searchable_surface_does_not_also_bind_n
         ] )
     ; ( "two-press arms"
-      , [ Alcotest.test_case "a loop turn without a key keeps an arm" `Quick
-            test_a_loop_turn_without_a_key_keeps_an_arm
-        ; Alcotest.test_case "the second press holds, anything else cancels"
-            `Quick test_the_second_press_holds_and_anything_else_cancels
+      , [ Alcotest.test_case "a loop turn without input keeps an arm" `Quick
+            test_a_loop_turn_without_input_keeps_an_arm
+        ; Alcotest.test_case "input that is not the second press cancels"
+            `Quick test_input_that_is_not_the_second_press_cancels
         ] )
     ; ( "projections"
       , [ Alcotest.test_case "plain listing footer shape" `Quick

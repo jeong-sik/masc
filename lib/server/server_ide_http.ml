@@ -530,8 +530,12 @@ let add_routes router =
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/file-activity" (fun request reqd ->
-    with_public_read
-      (fun state _req reqd ->
+    (* Same data, same gate as [/api/v1/keepers/:name/file-changes]: every
+       row carries the exact text a keeper wrote (before/after strings, whole
+       file bodies), fleet-wide over the window. A public read here was a
+       second door onto content the keeper route keeps behind CanAdmin. *)
+    with_token_permission_auth ~permission:Masc_domain.CanAdmin
+      (fun state _agent_name _req reqd ->
         let uri = Uri.of_string request.target in
         match required_query_param uri "file_path", file_activity_window_hours uri with
         | Error detail, _ | _, Error detail ->

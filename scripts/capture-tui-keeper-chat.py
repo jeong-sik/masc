@@ -1201,6 +1201,16 @@ def request_identity(state: Fixture, expected_message: str) -> dict[str, str]:
     return request
 
 
+def compact_request_label(request: dict[str, str]) -> str:
+    request_id = request["request_id"]
+    return request_id if len(request_id) <= 20 else request_id[:6] + ".." + request_id[-12:]
+
+
+def show_full_metadata(page: Page) -> None:
+    press(page, "Control+F", "metadata:inline")
+    press(page, "Control+F", "metadata:full")
+
+
 def final_http(
     state: Fixture,
     posts: int,
@@ -1252,6 +1262,7 @@ def success_scenario(
             state.workspace_base_path = str(base)
             with ttyd_session(browser, base, api_port, executable) as (page, _started):
                 open_message(page)
+                show_full_metadata(page)
                 resize_terminal(page, 99, 7)
                 wait_text(page, "terminal too small")
                 wait_cursor_hidden(page)
@@ -1340,9 +1351,7 @@ def success_scenario(
                     (time.monotonic() - started) * 1000, 3
                 )
                 request = request_identity(state, SUCCESS_MESSAGE)
-                request_label = (
-                    request["request_id"][:4] + ".." + request["request_id"][-8:]
-                )
+                request_label = compact_request_label(request)
                 wait_text(page, f"(sending {request_label}")
                 measurements["enter_to_sending_ui_ms"] = round(
                     (time.monotonic() - started) * 1000, 3
@@ -1399,7 +1408,7 @@ def success_scenario(
                 assert queued_clock_match is not None
                 queued_clock = queued_clock_match.group(1)
                 current_user_row, _ = unique_screen_line(
-                    queued_text, request_label, "TURN · YOU"
+                    queued_text, request_label, "YOU"
                 )
                 require(
                     current_user_row < next_row,
@@ -1422,7 +1431,7 @@ def success_scenario(
                 shots.append(capture(page, output, prefix + "05-chat-next-separated.png",
                                   SUCCESS_MESSAGE, f"(sending {request_label}",
                                   "NEXT 1", "draft-during-send", "Enter:queue(1)",
-                                  absent_markers=("TURN · QUEUED",)))
+                                  absent_markers=("QUEUED",)))
                 # fmt: on
                 hold_started = time.monotonic()
                 page.wait_for_timeout(1_250)
@@ -1441,17 +1450,13 @@ def success_scenario(
                     "NEXT did not dispatch after the active turn settled",
                 )
                 queued_request = request_identity(state, "draft-during-send")
-                queued_request_label = (
-                    queued_request["request_id"][:4]
-                    + ".."
-                    + queued_request["request_id"][-8:]
-                )
+                queued_request_label = compact_request_label(queued_request)
                 wait_text(page, f"(sending {queued_request_label}")
                 wait_text(page, "NEXT 1", present=False)
                 queue_active_at = time.monotonic()
                 active_text = screen_text(page)
                 queued_user_row, queued_user_line = unique_screen_line(
-                    active_text, queued_request_label, "TURN · YOU"
+                    active_text, queued_request_label, "YOU"
                 )
                 composer_row_queued_active = cursor_position(page)["y"]
                 active_footer_row, _ = unique_screen_line(active_text, "Enter:queue(0)")
@@ -1505,12 +1510,12 @@ def success_scenario(
                 wait_text(page, "evidence_probe")
                 visible = screen_text(page)
                 first_user_row, _ = unique_screen_line(
-                    visible, request_label, "TURN · YOU"
+                    visible, request_label, "YOU"
                 )
                 first_tool_row, _ = unique_screen_line(visible, "✓", "evidence_probe")
                 first_keeper_row, _ = unique_screen_line(visible, request_label, KEEPER)
                 second_user_row, second_user_line = unique_screen_line(
-                    visible, queued_request_label, "TURN · YOU"
+                    visible, queued_request_label, "YOU"
                 )
                 second_keeper_row, _ = unique_screen_line(
                     visible, queued_request_label, KEEPER
@@ -1572,9 +1577,7 @@ def recovery_scenario(
                 press(page, "Enter")
                 await_event(state.post_seen, "recovery POST")
                 request = request_identity(state, "recover-v3")
-                request_label = (
-                    request["request_id"][:4] + ".." + request["request_id"][-8:]
-                )
+                request_label = compact_request_label(request)
                 wait_text(page, "outcome unverified:")
                 visible = screen_text(page)
                 require(
@@ -1738,9 +1741,7 @@ def replayable_scenario(
                 )
                 post_latency = (post_record["received_monotonic"] - started) * 1000
                 open_message(page)
-                request_label = (
-                    request["request_id"][:4] + ".." + request["request_id"][-8:]
-                )
+                request_label = compact_request_label(request)
                 wait_text(page, "Recovered a replayable request")
                 wait_text(page, f"(replaying exact request {request_label}")
                 wait_text(page, "prior outcome unverified:")
@@ -1914,14 +1915,13 @@ def steer_scenario(
             state.workspace_base_path = str(base)
             with ttyd_session(browser, base, api_port, executable) as (page, _started):
                 open_message(page)
+                show_full_metadata(page)
                 type_text(page, "original-course")
                 state.note_submission("original-course", time.time())
                 press(page, "Enter")
                 await_event(state.post_seen, "steer original POST")
                 original = request_identity(state, "original-course")
-                original_label = (
-                    original["request_id"][:4] + ".." + original["request_id"][-8:]
-                )
+                original_label = compact_request_label(original)
                 wait_text(page, f"(sending {original_label}")
 
                 type_text(page, "ordinary-next")
@@ -1981,13 +1981,11 @@ def steer_scenario(
                     "STEER did not dispatch after the interrupted turn settled",
                 )
                 corrected = request_identity(state, "corrected-course")
-                corrected_label = (
-                    corrected["request_id"][:4] + ".." + corrected["request_id"][-8:]
-                )
+                corrected_label = compact_request_label(corrected)
                 wait_text(page, f"(sending {corrected_label}")
                 wait_text(page, "STEER 1", present=False)
                 active_text = screen_text(page)
-                _, _ = unique_screen_line(active_text, corrected_label, "TURN · YOU")
+                _, _ = unique_screen_line(active_text, corrected_label, "YOU")
                 next_row, _ = unique_screen_line(active_text, "NEXT 1")
                 next_body_row, _ = unique_screen_line(active_text, "ordinary-next")
                 require(
@@ -2011,9 +2009,7 @@ def steer_scenario(
                     "ordinary NEXT did not dispatch after STEER",
                 )
                 ordinary = request_identity(state, "ordinary-next")
-                ordinary_label = (
-                    ordinary["request_id"][:4] + ".." + ordinary["request_id"][-8:]
-                )
+                ordinary_label = compact_request_label(ordinary)
                 wait_text(page, "reply-ordinary-next")
                 wait_text(page, "(sending ", present=False)
                 wait_text(page, "Enter:send")

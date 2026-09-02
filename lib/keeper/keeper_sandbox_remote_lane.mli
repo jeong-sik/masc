@@ -22,7 +22,10 @@ val endpoint :
 (** Remote_ssh: the runtime.toml endpoint, created and (when preflight is
     enabled) checked. Micro_vm: the turn factory's running guest, started if
     it is not up; without a factory the call is refused
-    ([microvm_remote_requires_turn_sandbox_factory]). Docker: refused
+    ([microvm_remote_requires_turn_sandbox_factory]) because starting the
+    guest belongs to the turn that owns it -- which a write to a stopped
+    guest needs. A caller that only needs a guest already running takes
+    {!attached_guest_endpoint}. Docker: refused
     ([docker_has_no_remote_lane]). *)
 
 val attached_guest_endpoint :

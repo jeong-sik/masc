@@ -59,25 +59,9 @@ let question_of args =
     Error (Printf.sprintf "question must be definition, hover or references, got %S" raw)
 ;;
 
-(* A language server with no index answers references with the occurrences it
-   can see, which is the ones in the file it was given -- one where the truth
-   was three, measured. That reads like an answer, so it is caught before the
-   question is asked (#30504). *)
-let reference_index_ready ~question ~language ~project_root =
-  match question with
-  | Lsp_questions.Definition | Lsp_questions.Hover -> Ok ()
-  | Lsp_questions.References ->
-    (match Lsp_reference_index.check ~language ~project_root with
-     | Lsp_reference_index.Present -> Ok ()
-     | Lsp_reference_index.Missing { build_command; searched } ->
-       Error
-         (Printf.sprintf
-            "references needs the project's reference index and none is under %s. Run: %s \
-             -- until then the answer would name only the occurrences in this one file, \
-             which is not the same as there being only one."
-            searched
-            build_command))
-;;
+(* The guard lives with the question type, so the REST route cannot answer a
+   references question this tool would refuse. *)
+let reference_index_ready = Lsp_questions.reference_index_ready
 
 (* The position arithmetic lives in [Lsp_position] — one owner for this
    tool and the REST question route, so the two surfaces cannot disagree

@@ -1105,14 +1105,22 @@ let add_routes router =
                 | Error message -> `Failed message
             end in
             let outcome =
+              (* Parsed by the module that owns the vocabulary, not spelled
+                 again here. This arm read [definition] and [hover] only,
+                 while the Keeper tool over the same client had answered
+                 [references] since #30504 -- the route was a word behind,
+                 and nothing said so. *)
               let* question =
                 match param "question" with
-                | Some "definition" -> Ok Lsp_questions.Definition
-                | Some "hover" -> Ok Lsp_questions.Hover
-                | Some other ->
-                  Error
-                    (Printf.sprintf
-                       "question must be definition or hover, got %S" other)
+                | Some raw ->
+                  (match Lsp_questions.question_of_string raw with
+                   | Some question -> Ok question
+                   | None ->
+                     Error
+                       (Printf.sprintf
+                          "question must be definition, hover or references, \
+                           got %S"
+                          raw))
                 | None -> Error "question parameter is required"
               in
               let* raw_path =
@@ -1154,6 +1162,16 @@ let add_routes router =
               in
               let* workspace_root =
                 Lsp_position.project_root_of ~language ~path ~boundary:base
+              in
+              (* Refused before it is asked, not judged after it is answered:
+                 a server with no index answers references with the
+                 occurrences in the file it was given, and a short list reads
+                 like an answer. The same guard the Keeper tool applies. *)
+              let* () =
+                Lsp_questions.reference_index_ready
+                  ~question
+                  ~language
+                  ~project_root:workspace_root
               in
               `Ask (question, language, workspace_root, path, line_index,
                     character)

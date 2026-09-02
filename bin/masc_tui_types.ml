@@ -4283,6 +4283,14 @@ let workspace_entries_count_label total =
     Printf.sprintf " (%d+, more not listed)" total
   else Printf.sprintf " (%d)" total
 
+(* The prefixes a typed palette line uses to ask the language server, paired
+   with the question each names. One list, because two readers use it: the
+   entries the palette offers are built from it, and the palette's Enter arm
+   parses a typed line with it. A question spelled in one and not the other
+   is a line the operator can type and nothing answers. *)
+let lsp_question_prefixes =
+  [ "def ", "definition"; "hover ", "hover"; "refs ", "references" ]
+
 let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
   @ [ "go Task Review", Palette_goto Verification ]
@@ -4308,13 +4316,15 @@ let palette_entries (state : state) =
         ("post " ^ p.bp_title, Palette_board_post p.bp_id))
       state.board_posts
   @ (* With a file focused on the Code surface, the cursor line's names are
-       askable: K/D pre-fill the matching prefix, and [palette_matches] ranks
-       a label that starts with the query first, so these lead the list. *)
+       askable: K/D/R pre-fill the matching prefix, and [palette_matches]
+       ranks a label that starts with the query first, so these lead the
+       list. *)
   (if state.view = Code && state.code_focus_file = Right_pane then
      List.concat_map
        (fun name ->
-         [ ("def " ^ name, Palette_lsp ("definition", name));
-           ("hover " ^ name, Palette_lsp ("hover", name)) ])
+         List.map
+           (fun (prefix, question) -> (prefix ^ name, Palette_lsp (question, name)))
+           lsp_question_prefixes)
        (code_cursor_line_symbols state)
    else [])
 

@@ -52,9 +52,9 @@ must-do: true or false
 
 ## 기다림은 턴을 끝내는 일
 
-도구 결과 끝의 `[Temporal] time=…` 줄이 현재 시각입니다. `keeper_time_now` 는
-그 시각을 한 번 묻는 도구라서, 같은 턴에서 다시 부르면 그 줄과 같은 값이
-돌아옵니다.
+현재 시각은 매 요청의 시스템 문맥에 `[Temporal] time=…` 줄로 들어 있습니다.
+`keeper_time_now` 는 그 시계를 한 번 더 읽는 도구입니다. 시계를 다시 읽어도
+나중 시각이 당겨지지 않습니다.
 
 다음 할 일이 나중 시각에 있으면 이번 턴은 여기서 끝납니다. 그 시각은
 `masc_schedule_create` 로 남깁니다. `keeper_name` 은 내 이름, `due_at_iso` 는

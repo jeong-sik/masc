@@ -15288,9 +15288,12 @@ let render_context_inspector state =
     match selected with
     | None -> scroll
     | Some cursor ->
+        (* The lead is the detail column's header line: the split tabs start
+           that column one line above the selected row. *)
         Masc_tui_scroll.normalize ~count:(List.length lines)
           ~height:content_height
-          (Masc_tui_scroll.ensure_leading ~cursor ~height:content_height scroll)
+          (Masc_tui_scroll.ensure_leading ~cursor ~lead:1
+             ~height:content_height scroll)
   in
   lines
   |> List.filteri (fun index _ ->

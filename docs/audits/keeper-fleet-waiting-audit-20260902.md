@@ -1,0 +1,286 @@
+# Keeper 10명이 어디서 앉아서 기다리는가 — 2026-09-02 실측 감사
+
+측정 시각: 2026-09-02 09:00~10:00 KST (UTC 00:00~01:00). 대상은 `<base-path>/.masc` 의
+라이브 저장소와 로그, 그리고 `origin/main` `138c84c4a6` 코드다. 이 문서는 "왜
+keeper 가 멈춰 있는가" 를 서브시스템별로 재고, 뚫을 순서를 정한다. 수치는 전부
+재현 명령과 함께 §6 에 있다.
+
+keeper 8명이 살아 있다 (analyst, code-reviewer, edgar.a.poe, kidsnote-pr-jira-checker,
+lane-smith, polisher, rondo, sangsu). taskmaster 와 lab-sangsu 는 09-01 17:43Z 이후
+기록이 없다. 2026-09-01 하루 keeper 턴은 4,002회, 이 중 실패 사이클 562회(14%)다.
+
+## 0. 순위
+
+손실은 "keeper 의 작업 줄기가 멈춘 시간" 과 "아무 산출 없이 태운 턴" 두 축으로
+쟀다. 뿌리가 코드인지 운영인지도 나눴다.
+
+| # | 병목 | 하루 손실 (실측) | 뿌리 | 뚫는 곳 | 상태 |
+|---|---|---|---|---|---|
+| 1 | 샌드박스 전멸 — Execute 가 8/8 keeper 에서 실패 | verifier Rejected 93건 중 60건이 sandbox 사유. task-551 이 15회, task-371 이 17회 claim→release 를 돌았다. code-reviewer Execute 오류 20건/7h | 운영: 127.0.0.1:2222 sshd 없음, Docker daemon 없음, `masc-keeper-sandbox:local` 이미지 없음 | ssh testbed / Docker 기동. 코드 쪽은 §2.1 "샌드박스 죽음이 world state 에 없다" | 운영자 결정 필요 |
+| 2 | `web_fetch` 가 Auto Judge 를 거친다 | 319건 판정, 319 승인, 0 거부. 요청→replay 중앙값 173초, p90 447초. 7시간에 5.78시간 대기 | 코드: `keeper_gate_readonly.ml` 관측 집합에서 빠져 있었다 | PR #32470 | Draft PR |
+| 3 | 같은 도구를 3번 부르고 yield, 다음 턴에 또 3번 | kidsnote-pr-jira-checker 259턴/일, lane-smith 136, polisher 84. 컨텍스트가 턴마다 +3.5K 토큰 | 코드: yield 사유가 다음 턴에 안 보인다. 관찰 읽기를 wake 로 바꿀 길이 없다 | RFC observe-by-waking-not-polling (Draft) | 미착수 |
+| 4 | Board 글 하나가 keeper 8명에게 판정 8번 | 24시간에 글 292개 → 후보 1,784건 (6.1배). 판정 통과 29% → 511회 wake. rondo 글이 697건, verifier·system 자동 영수증이 429건 | 코드: `Discoverable` 글은 keeper 마다 judge 를 탄다. 자동 영수증도 예외가 없다 | §2.4 | 미착수 |
+| 5 | 승인이 keeper 에게 도착하는 데 107초 | judge 54초 + 배달 107초 (p50). 배달은 keeper 의 현재 턴이 끝나야 된다 | 구조: 턴 슬롯 하나 | RFC conversation-holds-the-turn-slot (Draft) | 미착수 |
+| 6 | failover 가 더 나쁜 런타임으로 간다 | polisher 145회, analyst 64회 사이클 실패 (09-01), 전부 `ollama_cloud.…deepseek-v4-flash-0731`. 사유 `accept_rejected … response_shape=thinking_only` | 설정: `runtime.toml` 후보 순서 | 운영자 결정 | 운영자 결정 필요 |
+| 7 | 빈 자율 wake 가 상태 보고를 낳는다 | scheduled_autonomous 941턴/일. Todo 506건인데 claim 0. lane-smith 가 5분마다 "변하지 않았습니다" 댓글 313개 | 코드: `Task_backlog` 트리거가 "잡을 수 있는가" 를 모른다. 프롬프트: 할 일이 없을 때 글을 쓴다 | #27268, §2.7 | 미착수 |
+| 8 | verifier 가 멈추면 제출자도 멈춘다 | Stalled 49건 중 `dns_failure: api.z.ai` 25건. rondo task-1067 5시간 무응답 | 코드: 같은 keeper 는 awaiting 중 새 claim 거부 | §2.8 | 미착수 |
+| 9 | Memory OS 스냅샷 깨짐 | 09-01 07:34~10:10Z keeper 5명이 동시에 `invalid current Memory OS snapshot` | 미확인 | 별도 조사 | 미확인 |
+
+1번은 운영 문제지만 2~8번 대부분의 증상을 증폭한다. 샌드박스가 죽으면 backlog 가
+전부 "못 잡는 일" 이 되고, keeper 는 할 일이 없으니 글을 쓰고, 글이 판정과 wake 를
+낳는다.
+
+## 1. 샌드박스 전멸
+
+### 증상
+
+- analyst, rondo, code-reviewer 는 `sandbox_profile = "remote_ssh"`. 엔드포인트가
+  전부 `127.0.0.1:2222` 인데 리스너가 없다. `lsof -nP -iTCP:2222 -sTCP:LISTEN` 결과
+  0줄, `docker ps -a` 에 testbed 컨테이너 0개.
+- edgar.a.poe, kidsnote-pr-jira-checker, lane-smith, polisher, sangsu 는 `microvm`.
+  `microvm_image_missing: masc-keeper-sandbox:local` 과
+  `docker.sock: connect: no such file or directory` 가 Board 에 남아 있다.
+- 로그 (`masc-server-console-20260902-restart.log`): `Execute` 오류가 analyst 64건,
+  code-reviewer 41건, polisher 28건, rondo 19건. 전부 `remote_ssh_endpoint_unreachable`
+  또는 이미지 부재.
+
+### 파급
+
+- verifier_exact 영수증 299건 중 Rejected 93건, 그중 60건이 sandbox/checkout/image/daemon 을
+  사유로 적었다. 정당한 제출도 sandbox 가 없으면 Rejected 로 남는다.
+- task-551 은 code-reviewer 3회, taskmaster 7회, sangsu 2회, analyst·rondo·lane-smith
+  각 1회, 합계 15회 claim→release 를 돌았다. 원인은 모두 같다 (checkout 부재).
+  task-371 은 17번째 cycle 까지 auto-claim 이 다시 잡았다.
+- 그 결과 Todo 506건 중 실제로 잡히는 일이 없다. §7 로 이어진다.
+
+### 코드 쪽에 남는 것
+
+샌드박스가 죽었다는 사실이 world state 에 없다. keeper 는 매 턴 Execute 를 다시
+시도하고 (`keeper_sandbox_ssh.ml` 의 preflight 캐시는 같은 턴 안에서만 산다),
+taskmaster 는 매시 정각 "N차 재프로브 — 여전히 단절" 글을 13번 올렸다.
+`masc_keeper_waiting_inventory` 에도 "sandbox unreachable since T" 행이 없다.
+
+뚫는 방향: 샌드박스 preflight 실패를 typed 관측(`Sandbox_unreachable of { since; detail }`)
+으로 world observation 에 싣고, 대기 인벤토리와 프롬프트 Namespace State 에 한 줄로
+낸다. Execute 가 필요한 Task 는 그 상태에서 claimable 에서 빠진다. 이건 Gate 가
+아니라 관측이다. 해당 Task 를 못 잡는 이유가 keeper 의 추측이 아니라 저장된 사실이
+된다.
+
+## 2. web_fetch 판정 게이트 (PR #32470)
+
+`keeper_gate_readonly.ml` 은 `web_search` 만 관측 전용으로 두고 `web_fetch` 는
+"주소가 caller 선택이라 judge 가 볼 문제" 라며 뺐다. 그런데 주소 경계는
+`tool_misc_web_fetch.ml` 이 이미 결정적으로 막는다 (loopback, link-local, 사설망,
+unspecified, localhost — 처음 URL 과 모든 redirect hop). 그 검사도 judge 도 DNS 를
+풀지 않는다. judge 가 fetch 보다 더 막을 수 있는 주소가 없다.
+
+| 항목 | 값 |
+|---|---|
+| 09-01~02 `network_read` 판정 | 319건 승인, 0건 거부 |
+| 저장소 전체 (`gate/pending.json` deliveries 2,553건) | web_fetch 344, web_search 4, 전부 승인 |
+| 09-02 재기동 후 7시간 web_fetch 98건 요청→replay | p50 173초, p90 447초, max 1,131초, 합계 5.78시간 |
+| 같은 기간 tool_execute 11건 | p50 143초, 합계 1.16시간 |
+
+한 번 fetch 할 때마다 keeper 턴은 `awaiting_external_effect` 로 끊기고, 승인은
+event queue 에 실려 다음 턴 admission 을 기다린다. code-reviewer 는 6일간 164번
+이 길을 걸었다.
+
+PR #32470 은 `web_fetch` 를 관측 집합에 넣는다. Manual 모드는 그대로다.
+
+## 3. 반복 호출 yield 루프
+
+`keeper_agent_run.ml` 은 같은 도구를 같은 인자로 3번 부르면 턴을
+`yielded_after_repeated_tool_call` 로 끊는다. 끊긴 턴은 checkpoint 로 저장되고 다음
+proactive tick 에 이어진다. 그런데 `checkpoint_reason = Repeated_tool_call` 은
+`keeper_heartbeat_loop.ml` 의 batch ack 판단에만 쓰이고 다음 턴 프롬프트에는 나오지
+않는다. keeper 는 왜 끊겼는지 모른 채 같은 조회를 다시 3번 한다.
+
+| keeper | 09-01 yield 턴 | 반복한 도구 | 오늘 turn-record |
+|---|---|---|---|
+| kidsnote-pr-jira-checker | 259 / 361 | `atlassian_searchJiraIssuesUsingJql` | 18턴 중 17턴이 같은 사유. 컨텍스트 78,221 → 92,221 토큰 (5턴) |
+| lane-smith | 136 / 342 | `keeper_tasks_list` 99, `masc_board_post_get` 37 | 9턴 중 7턴 |
+| polisher | 84 / 424 | `keeper_spawn_read` 41, 반복 텍스트 43 | |
+
+kidsnote-pr-jira-checker 의 지시문은 "명령이 있든 없든 … Epic 위주로 확인해 늘
+정리해 보고" 다. 이 keeper 에게 Jira 는 wake 를 줄 수 없는 외부 시스템이라 폴링이
+곧 일이다. 문제는 한 턴에 3번 폴링하고, 그 결과가 매 턴 히스토리에 쌓여 컨텍스트
+handoff 를 앞당기는 것이다.
+
+RFC observe-by-waking-not-polling 이 "typed 조건을 등록하고 충족되면 깨운다" 로 이
+축을 닫는다. 한 주 1,086턴(5.5%) 이 같은 모양이었다. 그 RFC 가 들어오기 전에도 할 수
+있는 작은 일이 하나 있다. checkpoint 사유를 다음 턴 world state 에 한 줄로 낸다
+("직전 턴은 X 를 같은 인자로 3번 부른 뒤 끊겼다. 결과는 바뀌지 않았다"). 사유는 이미
+typed 로 있고, 렌더만 없다.
+
+## 4. Board 알림 fan-out
+
+`keeper_world_observation.ml` 의 board 수집기는 keeper 마다 돈다. 새 글이 오면
+`Board_audience.route_for_keeper` 가 `Ignore` 또는 `Judge_discoverable` 을 주고,
+`Judge_discoverable` 이면 그 keeper 몫의 후보를 만들어 `board_attention_exact` 레인
+(glm-5.3-flash → deepseek-flash) 에 판정을 맡긴다.
+
+| 24시간 (09-01 00:26Z ~ 09-02 00:26Z) | 값 |
+|---|---|
+| 새 글 | 292 |
+| 후보 (keeper 8명 합계) | 1,784 (글당 6.1) |
+| 판정 결과 | relevant 511 (29%), not_relevant 1,263 |
+| 저자별 후보 | rondo 701, verifier_exact 252, code-reviewer 191, system 185, lane-smith 134, dashboard 122 |
+| rondo 글의 판정 | relevant 156, not_relevant 541 |
+| verifier_exact + system 자동 영수증의 판정 | relevant 126, not_relevant 303 |
+
+세 가지가 보인다.
+
+1. rondo 의 이슈 트리아지 글 (09-01 03시 한 시간에 53개) 하나하나가 keeper 7명에게
+   판정 7번을 만든다. 글은 실제 진척인데 형식이 fan-out 을 부른다.
+2. verifier_exact 와 system 의 "Verify: …" 영수증은 제출자 keeper 에게는 이미 typed
+   stimulus (`Completion_authority_rejection_pending`) 로 간다. 나머지 7명에게는
+   판정 429건이 하루에 생긴다.
+3. 통과한 511건은 곧 wake 다. keeper 가 그 글을 읽고 답글을 쓰면 다시 7명에게
+   후보가 생긴다. lane-smith 의 5분 주기 "재확인" 댓글 313개, taskmaster 의 15분 안
+   동일 본문 8연발이 이 고리에서 나왔다.
+
+뚫는 방향은 판정 앞의 결정적 분기다. `post_kind = System_post | Automation_post`
+이고 `meta.type = verification_verdict` 인 글은 제출자 외 keeper 에게 후보를 만들지
+않는다 (제출자는 이미 stimulus 를 받는다). 이건 문자열 매칭이 아니라 이미 닫힌
+`post_kind` 와 `meta` 의 typed 판별이다. 하루 429건이 빠진다. rondo 형 글은
+audience 를 `Thread_participants` 로 쓰게 하는 프롬프트/도구 기본값 문제라 별도로
+본다.
+
+## 5. 승인 배달 지연
+
+| 09-02 재기동 후 승인 113건 | p50 | p90 | max |
+|---|---|---|---|
+| 요청 → 판정 (judge) | 54초 | 78초 | 166초 |
+| 판정 → keeper 배달 | 107초 | 398초 | 1,333초 |
+| 요청 → 배달 | 158초 | 447초 | 1,398초 |
+
+배달 107초는 keeper 의 "현재 턴" 이 끝나기를 기다린 시간이다. 로그 순서가 그렇다.
+`HITL_APPROVAL_RESOLVED` 직후 `hitl resolution committed signal=signaled phase=running`
+이 찍히고, keeper 가 다른 일로 시작한 턴이 끝나야 `hitl resolution delivered` 가 온다.
+code-reviewer 턴이 150~170초라 잔여 시간이 그대로 배달 지연이다.
+
+이건 RFC conversation-holds-the-turn-slot 이 다루는 "슬롯 하나" 문제의 다른 얼굴이다.
+승인 replay 는 턴 안의 도구 경계에서 끼워 넣을 수 있는 종류의 자극이다
+(`cooperative_yield_probe` 자리가 이미 있다). §2 가 들어오면 이 지연을 겪는 건수
+자체가 98 → 15 로 준다.
+
+## 6. failover 가 더 나쁜 런타임으로 간다
+
+| 09-01 사이클 실패 | 건수 | 런타임 |
+|---|---|---|
+| polisher | 145 | `ollama_cloud.ollama-cloud-deepseek-v4-flash-0731` |
+| code-reviewer | 89 | `antigravity_subscription.claude-sonnet-4-6-agy` |
+| lab-sangsu | 81 | `antigravity_subscription.gpt-oss-120b-medium` |
+| edgar.a.poe | 74 | `glm-coding.glm-5.3` |
+| analyst | 64 | `ollama_cloud.ollama-cloud-deepseek-v4-flash-0731` |
+
+polisher 의 경로는 `glm-5.3` 이 `Rate limited` → `deferred_next_runtime` 이 deepseek
+→ `accept_rejected … reason_kind=no_usable_progress response_shape=thinking_only` 다.
+analyst 는 한 턴이 817초 걸린 뒤 실패했다. 이 모델은 8월 24~25일에도 한 단어를
+228,000자 반복하는 붕괴가 86턴 관측됐다. 두 keeper 가 지금 `phase=failing`,
+`next_action=recover` 다.
+
+설정 문제다. `runtime.toml` 에서 이 모델을 keeper 후보 순서에서 빼거나 뒤로 미룬다.
+standalone 레인 (verifier, judge) 도 같은 모델을 2번 슬롯으로 쓴다.
+
+## 7. 빈 자율 wake
+
+09-01 turn 4,002회 중 `scheduled_autonomous` 941회. 매 wake 의 사유는
+`scheduled_autonomous_turn,task_backlog` 다. `Task_backlog { unclaimed = 506 }` 은
+"잡을 수 있는가" 를 모른다. Execute 가 죽어 있으면 506건 전부 못 잡는 일인데
+프롬프트에는 "Claimable tasks for this keeper: N" 과 id 10개가 매 턴 나온다.
+
+할 일이 없는 keeper 는 상태 보고를 쓴다.
+
+| keeper | 반복 게시 | 횟수 | 주기 |
+|---|---|---|---|
+| lane-smith | "HH:MM 재확인: tool errors 가 N 에서 M 로 … 변하지 않았습니다" 댓글 | 313 | 5분, 약 40시간 |
+| lane-smith | "seq N→M, errors K 유지, rotation 미확인" 글 | 75 | 5~6분 |
+| taskmaster | "N차 재프로브 — 여전히 단절 (Connection refused)" | 13 | 매시 정각 |
+| lab-sangsu | "[fleet] X status report 슬롯 확인" | 14 | 2시간 15분 동안 |
+
+Todo 506건의 저자는 codex-mcp-client 287, analyst 109, code-reviewer 35 다. 세션과
+keeper 가 만든 일이지 사람이 준 일이 아니다.
+
+#27268 이 같은 축을 "빈 wake 가 해명 문단으로 컨텍스트를 채운다" 로 적었다.
+뚫는 방향은 두 층이다. (a) `Task_backlog` 트리거에 `claimable_now : int` 를 같이
+싣고, 샌드박스 상태 (§1) 와 skill 요구를 반영해 0 이면 프롬프트에 "잡을 수 있는
+일 0건, 이유: sandbox unreachable" 로 낸다. (b) keeper 공통 프롬프트에 "새 관측이
+없으면 글을 쓰지 않는다" 를 넣는다. 지금 `config/prompts/keeper.md` 에는 그 문장이
+없다.
+
+## 8. verifier 가 멈추면 제출자도 멈춘다
+
+`workspace_task_lifecycle.resolve_claim` 은 `AwaitingVerification` 인 Task 를 어떤
+keeper 도 못 잡게 한다. 그건 맞다. 문제는 제출한 keeper 가 새 Task 를 잡는 것도
+막힌다는 rondo 의 실측이다 (task-1074 claim 06:02Z 거부, 09-01 05:38Z 글).
+verifier_exact Stalled 49건 중 25건이 `dns_failure: api.z.ai` (08-31 10:16Z ~ 09-01
+01:00Z) 였고, 그 15시간 동안 제출자들은 직렬로 멈췄다. rondo task-1067 은 5시간 넘게
+답이 없었다.
+
+verifier 는 `review_slots = 4`, 재시도 간격은 maintenance pulse 60초다. 횟수 상한이
+없어 dns 가 돌아오면 다시 돈다. 그 자체는 헌법 (no_wall_clock_death) 대로다. 뚫을
+곳은 "제출자가 awaiting 동안 다른 일을 못 잡는다" 쪽이다. 제출은 소유를 verifier 로
+넘긴 것이지 keeper 를 묶은 것이 아니다. 이 규칙이 코드 어디에 있는지는 이번에
+확인하지 못했다 (§10).
+
+## 9. Memory OS
+
+09-01 07:34Z ~ 10:10Z 사이 lane-smith, analyst, lab-sangsu, edgar, code-reviewer 가
+같은 `invalid current Memory OS snapshot` 을 보고했다. 한 keeper 의 결함이 아니다.
+code-reviewer 는 08-29 에 `keeper_memory_search` 의 `total_candidates` 가 write 마다
+줄어드는 것(27 → 10 → 7)을 실측했다. 이번 감사 범위 밖이라 원인은 보지 않았다.
+
+## 10. 확인하지 못한 것
+
+- §8 의 "같은 keeper 가 awaiting 중 새 claim 을 못 잡는다" 는 Board 증언이다.
+  `workspace_task_claim.ml` 에서 그 분기를 찾지 못했다. 다른 층 (auto-claim 의
+  `claim_next`, 또는 keeper 프롬프트) 일 수 있다.
+- `masc_keeper_list` 는 analyst·polisher 를 `status=offline, keepalive_running=false`
+  로 내는데 `masc_keeper_waiting_inventory` 는 같은 시각 `fiber_alive=true, is_live=true`
+  로 낸다. 두 read model 이 다르다. 어느 쪽이 맞는지 보지 않았다.
+- §4 의 `post_kind`/`meta` 분기가 `Board_audience.route_for_keeper` 앞에 들어갈 수
+  있는지 코드로 확인하지 않았다.
+- chat 저장소 (`keeper_chat/*.jsonl`) 의 정량 분석은 절반만 받았다. Board 와 로그로
+  대체했다.
+
+## 11. 이번 세션 조치와 다음 순서
+
+1. PR #32470 — `web_fetch` 관측 전용 (§2). Draft. CI 결과를 본다.
+2. 이 문서.
+3. 다음 (독립, main 기반): §4 자동 영수증 fan-out 제거. 하루 판정 429건.
+4. 다음 (독립): §3 checkpoint 사유의 다음 턴 렌더.
+5. 다음 (독립): §1 `Sandbox_unreachable` 관측 + §7 `claimable_now`.
+6. 운영자 결정: §1 샌드박스 기동, §6 deepseek 후보 순서.
+
+## 12. 재현 명령
+
+```bash
+# 승인 lifecycle 지연 (요청 → 판정 → 배달), 재기동 로그 기준
+L=~/me/.masc/logs/masc-server-console-20260902-restart.log
+rg -o 'HITL_APPROVAL_PENDING: id=appr_[^ ]+ .*tool=[a-z_]+|HITL_APPROVAL_RESOLVED: id=appr_[^ ]+|hitl resolution delivered approval=appr_[^ ]+' $L
+
+# 판정 결과 (승인/거부)
+rg -o 'HITL_APPROVAL_RESOLVED: id=appr_[^ ]+ keeper=[a-z.-]+ tool=[a-z_]+ decision=[a-z_]+' \
+  ~/me/.masc/logs/system_log_2026-09-01.jsonl $L | sed -E 's/.*tool=([a-z_]+) decision=([a-z_]+)/\1 \2/' | sort | uniq -c
+
+# 승인 저장소 전체의 tool/capability
+jq -r '.deliveries[] | "\(.entry.tool_name)/\(.entry.input.capability // "-")\t\(.source)"' ~/me/.masc/gate/pending.json | sort | uniq -c
+
+# 턴 종료 사유 (keeper 별, 09-01 UTC)
+for k in ~/me/.masc/keepers/*/; do f=$k/turn-records/2026-09/01.jsonl; [ -f "$f" ] && \
+  jq -r '(.finish_reason // "?") | sub(":[0-9]+"; "") | sub(":[0-9]+$"; "")' "$f" | sort | uniq -c | sort -rn | head -3; done
+
+# 턴 채널 (proactive vs reactive)
+rg -o 'keepalive turn scheduled for [a-z.-]+: channel=[a-z_]+' ~/me/.masc/logs/system_log_2026-09-01.jsonl | sort | uniq -c
+
+# 사이클 실패 (keeper, runtime)
+rg -o '"[a-z.-]+: keeper cycle FAILED runtime=[^ ]+' ~/me/.masc/logs/system_log_2026-09-01.jsonl | sort | uniq -c | sort -rn
+
+# Board 후보 fan-out 과 판정
+cat ~/me/.masc/board_attention_candidates/{analyst,code-reviewer,edgar-a-poe-*,kidsnote-pr-jira-checker,lane-smith,polisher,rondo,sangsu}.jsonl \
+  | jq -r 'select(.recorded_at >= 1788220000 and .status.kind=="consumed") | "\(.signal.author)\t\(.status.judgment.verdict.decision)"' | sort | uniq -c
+
+# 샌드박스 리스너
+lsof -nP -iTCP:2222 -sTCP:LISTEN; docker ps -a
+```

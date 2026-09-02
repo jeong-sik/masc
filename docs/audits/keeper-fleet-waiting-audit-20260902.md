@@ -365,11 +365,21 @@ jq -r 'select(type=="object") | .message' "$M/logs/system_log_$(date +%F).jsonl"
 
 빌드는 17:33 origin/main(ee8841074a). 15:12 이후 25건이 더 들어갔고 microvm 쪽 4건(#32562 계열, RFC-0400 C)이 포함된다. 9명이 autoboot 됐다(pr-updater 추가). 라이브 프롬프트 66개 = manifest 66개. `WebFetch` 는 18:07 부터 analyst 가 다시 부르기 시작했고 승인은 여전히 0건이다.
 
-1. **edgar.a.poe 가 같은 Execute 를 8번 내고 10분 30초를 기다렸다.** 재기동 직전(17:49)에 만든 승인 `appr_01a0614f` 는 auto_judge 가 17:51 에 승인했다. 그 결의가 재기동 중 17:54:12 에 다시 커밋됐는데 그 순간 edgar 는 아직 등록 전이라 `signal=deferred_unregistered` 로 끝났다(등록은 1초 뒤). 그 뒤 edgar 는 1분마다 깨어나 같은 Execute 를 냈고, Gate 는 매번 그 승인에 접어 "deferred, 호스트가 재생해 준다" 로 답했다. 턴은 `awaiting_external_effect` 로 끝나 큐 머리의 stimulus 를 ack 하지 못했고(`appr_01a06147` 의 hitl_resolved 를 7번 소비, 재생 `already_recorded` 17건), 결의는 18:04:41 에야 전달돼 그제야 샌드박스에서 돌았다(exit=0). 그 사이 8턴, 입력 약 62만 토큰. 게스트는 17:54 sweep 뒤 18:01:43 에야 만들어졌는데, 만든 것은 Execute 가 아니라 fs_edit 였다(Execute 는 Gate 에서 멈춰 샌드박스까지 가지 않았다).
-2. **analyst 는 같은 실패를 9번 반복했다.** 레인이 `ollama_cloud.deepseek-v4-flash` 하나뿐이고(`deferred_next_runtime=none`), 그 모델이 매번 thinking 73k자만 내고 `max_tokens` 로 끊긴다. `accept_rejected/no_usable_progress/thinking_only` → 실패 라우팅은 `rotate No_progress_thinking_only` 인데 돌아갈 형제 레인이 없다. #32577(max-token 연속) 의 `max_tokens_continuation` 로그는 한 줄도 없다. 9턴 707초, 출력 0, 사이클 실패 4회, 복구 wake 13회.
+1. **edgar.a.poe 가 같은 Execute 를 8번 내고 10분 30초를 기다렸다.** 재기동 직전(17:49)에 만든 승인 `appr_01a0614f` 는 auto_judge 가 17:51 에 승인했고, 그 결의 stimulus 는 재기동 전부터 edgar 의 큐에 있었다(18:04:41 전달 시점의 `head_age_sec=807`). 재기동 중 17:54:12 의 `signal=deferred_unregistered` 는 wake 신호 하나가 빠진 것일 뿐 원인이 아니다. 원인은 큐 처리 규칙 둘의 조합이다. (a) intake 는 HITL 결의를 턴당 하나만 들인다(`keeper_heartbeat_stimulus_intake.ml` "One tool bundle carries one exact cycle grant"). (b) `keeper_heartbeat_loop.ml` `batch_disposition_of_cycle_outcome` 이 `Checkpointed{Awaiting_external_effect}` 를 catch-all 로 `Batch_no_action` 처리해, 들여온 stimulus 를 ack 하지도 continuation 영수증을 쓰지도 않는다. 큐 머리에는 재기동 전에 이미 replay 가 끝난 승인 `appr_01a06147` 이 있었고, 그걸 들여온 턴이 Execute 를 Gate 에 넘기고(그 Execute 는 `appr_01a0614f` 에 접혀 "deferred") `awaiting_external_effect` 로 끝나니 ack 가 안 됐다. 다음 wake 에 같은 승인이 다시 머리로 오고 같은 턴이 반복됐다(7번 소비, 재생 `already_recorded` 17건). 18:01:44 에 fs_edit 가 성공해 턴이 `yielded_to_durable_stimulus` 로 끝나자 그제야 ack 가 났고, 그 뒤에 선 결의들이 한 턴에 하나씩 나와 18:04:41 에 `appr_01a0614f` 가 돌았다(exit=0). 그 사이 8턴, 입력 약 62만 토큰. 게스트는 17:54 sweep 뒤 18:01:43 에야 만들어졌는데, 만든 것은 Execute 가 아니라 fs_edit 였다(Execute 는 Gate 에서 멈춰 샌드박스까지 가지 않았다). 수정: #32602.
+2. **analyst 는 같은 실패를 9번 반복했다.** 레인은 `[ollama_cloud.deepseek-v4-flash; glm-coding.glm-5.3]` 둘이다(`runtime.toml` 의 keeper 배정 + `[runtime].default` 가 붙는다). `deferred_next_runtime=none` 은 레인이 하나라는 뜻이 아니라 그 실패가 회전 불가로 분류됐다는 뜻이다. 16:42 에 들어간 #32577 이 `accept_no_progress_retry_kind` 첫 arm 에 "stop_reason=MaxTokens 면 전부 `Truncated_no_progress`" 를 두었고, 이 종류는 회전 힌트가 없다. 그 PR 의 이어쓰기(`max_tokens_continuation`)가 유일한 길인데 이 레인은 reasoning_effort 방언이라 `enable_thinking=false` 가 wire 에 실리지 않고, thinking 만 있는 assistant 메시지는 provenance 검사로 checkpoint 에 들어가지 못해 이어쓰기가 시작조차 못 한다(로그에 `max_tokens_continuation` 0건). 15:23 polisher 는 #32577 이전 빌드에서 같은 실패로 glm 에 넘어갔다. 9턴 707초, 출력 0, 사이클 실패 4회, 복구 wake 13회. 수정: #32605.
 3. **official-client 레인의 토큰 집계는 누적 컨텍스트다.** lane-smith 3턴 입력 3,782만, code-reviewer 8턴 765만. CLI 가 세션 전체를 매 턴 다시 보내는 값이라 agent-core 레인 수치와 더할 수 없다.
 4. new-keeper 의 purge 가 재기동 뒤 `shutdown recovery failed … Keeper owner not found` 로 한 번 더 실패했다. 잠금 파일 4개가 `config/keepers/` 에 남아 있다.
 5. 다른 세션의 E0 캠페인 서버(pid 51095)가 같은 호스트에서 게스트 4개(4 CPU, 2GB 씩)를 띄워 두고 있다. keeper 게스트가 아니라 sweep 대상이 아니다.
+
+### 13.5 코드 수정과 남은 판단 (09-02 19:00 KST)
+
+| 항목 | 결과 |
+|---|---|
+| 13.4-1 체크포인트 턴의 ack | #32602. 다섯 checkpoint 사유 전부 `Batch_ack_attention_only`, catch-all 제거, HITL continuation 영수증 가드는 유지. 라이브 판정: 같은 approval 의 `gate replay … already_recorded` 가 2회 이상 나오지 않아야 한다. |
+| 13.4-2 max_tokens 분류 | #32605. 내용이 없는 응답(empty, thinking_only)은 stop 과 무관하게 회전 종류를 유지하고, 이어쓰기 시도는 레코드를 읽어 그대로 먼저 한다. 라이브 판정: thinking-only max_tokens 에서 `deferred_next_runtime=none` 이 나오지 않아야 한다. |
+| 13.2-1 identity_call 통행료 | 전제가 틀렸다. 81건 전부 `github/issue_write`·`add_issue_comment` 쓰기이고, 읽기는 MCP `readOnlyHint` 로 `keeper_identity_gate.ml` 에서 Gate 전에 통과한다. 판정은 67건 중 1건을 거부했고 그 1건은 직전에 읽은 본문과 모순되는 덮어쓰기였다. 대기 103초 중 98초가 판정 모델 응답이다. 슬롯별 평균 glm-5.3-flash 116초(n=65), deepseek-v4-flash 31초(n=19). `[runtime.exact_output_lanes.hitl_auto_judge].slots` 순서는 09-01 운영자 지정이라 바꾸지 않았다. |
+| 13.2-2 docker 프로필 keeper | 미착수. 생성 시점 거부(remote_ssh 의 endpoint 가드와 같은 자리)가 다음 코드 지점이다. |
+| WebFetch 로 자기 서버 API | 고칠 코드 없음. `/api/v1/keepers/<k>/file-changes` 는 대시보드 REST(CanAdmin) 에만 있고 keeper 도구가 없다. |
 
 ### 13.3 다음 측정
 

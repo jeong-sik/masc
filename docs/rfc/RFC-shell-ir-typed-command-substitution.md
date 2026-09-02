@@ -1,6 +1,6 @@
 # RFC: typed 커맨드 치환 — `$(cmd)`를 자식 IR로 읽고, 그 stdout을 argv 한 원소로 쓴다
 
-상태: 제안 (구현 전). 선행: RFC-shell-ir-lines-heredoc-dquote,
+상태: 승인 (구현 전 — PR-A 파서부터). 선행: RFC-shell-ir-lines-heredoc-dquote,
 RFC-shell-ir-simple-param-expansion, RFC-0391.
 
 ## 1. 측정
@@ -72,8 +72,9 @@ backtick은 계속 `Cmd_subst` 거절: 중첩·이스케이프 규칙이 다르�
 - **`eval`, `source`, `.` 를 bin 자리에서 이름으로 거절**한다. 새 사유
   `` `Shell_builtin of string ``. `Exec_program.of_string`은 지금 빈
   문자열만 거른다 — `$(`가 lexer에서 막혀 있어서 `eval`이 bin 자리에 도달한
-  적이 없을 뿐이다. 실행 표면이 `sh -c <rendered>`(tool_calls 레코드의
-  `context.cmd`가 증언)라 eval은 실제로 재파싱을 일으킨다. 이 거절은 `$(`
+  적이 없을 뿐이다. 실행 표면이 `<shell> -c <script>`(기본 sh; tool_calls 레코드의
+  `input.argv`가 증언 — `context.cmd`라는 필드는 없다)라 eval은 실제로
+  재파싱을 일으킨다. 이 거절은 `$(`
   개방 **이전에** 들어가야 한다.
 - 치환 결과가 경로 인자에 들어가면 param-expansion RFC §3.2 규칙 그대로
   resolve 시점에 같은 jail 검증기를 다시 통과시킨다.

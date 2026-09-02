@@ -6655,7 +6655,7 @@ def viewport_gap_interaction(
         process,
         master_fd,
         output,
-        rows=11,
+        rows=12,
         columns=100,
         needle=b"MASC Overview",
     )
@@ -6671,15 +6671,8 @@ def viewport_gap_interaction(
             f"oversized live edge did not order opening, gap, and latest row: {opened!r}"
         )
 
-    send_and_wait(process, master_fd, output, b"\x1b[5~", b"line-18")
-    complete = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=12,
-        columns=100,
-        needle=b"line-18",
-        controls=(FULL_REDRAW,),
+    complete = send_and_wait(
+        process, master_fd, output, b"\x1b[5~", b"line-18"
     )
     complete_plain = CSI_RE.sub(b"", complete)
     if marker in complete_plain or b"hidden" in complete_plain:

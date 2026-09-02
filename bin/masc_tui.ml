@@ -1007,9 +1007,18 @@ let keeper_message_page_rows state =
      composer growth is already inside [keeper_message_status_rows]. Adding
      composer_max_rows here counted it twice, and every PgUp jumped four
      rows short of the screenful the comment promises. *)
+  let status_rows = keeper_message_status_rows state in
+  (* PgUp creates the reading-back notice and PgDn removes it. Reserve that
+     possible row on both sides of the transition: using only the rows drawn
+     right now made a 46-row pane move 38 up, then only 37 down, leaving the
+     operator one row behind the live edge. One stable reserved budget also
+     leaves a single context row overlapping adjacent pages. *)
+  let page_status_rows =
+    keeper_message_support_status_rows state ~status_rows
+  in
   max 1
     (Masc_tui_message_layout.message_history_height ~terminal_rows:rows
-       ~status_rows:(keeper_message_status_rows state))
+       ~status_rows:page_status_rows)
 
 (* What this pane has of the operator's own lines for the keeper on screen,
    oldest first. The arrows walk it the way a shell walks its own history.

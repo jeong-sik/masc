@@ -32,6 +32,17 @@ val opens_keepers : message_mode:bool -> string -> bool
 (** Whether [key] is the shared Keepers jump after earlier input owners have
     declined it. Message mode never treats printable [2] as this jump. *)
 
+val cancels_two_press :
+  key:string option -> second_press:string list -> bool
+(** Whether [key] cancels a standing two-press confirmation whose second
+    press is one of [second_press].
+
+    A loop turn that read no key is not an unrelated key, so [None] never
+    cancels. The dispatch loop restated this rule once per armed field, and
+    the connector unbind's restatement read [None] as a cancel: the arm then
+    lived for one loop iteration, and two [u] presses removed a binding only
+    when both bytes arrived in the same read. *)
+
 val for_surface : Masc_tui_types.surface -> binding list
 (** The surface's own bindings, in declaration order within each group.
     Feeds both projections; a surface whose footer is not yet converted is

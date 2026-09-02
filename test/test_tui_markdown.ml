@@ -6,6 +6,7 @@ module Markdown = Masc_tui_markdown
 let tagged : Markdown.palette =
   { strong = ("<b>", "</b>")
   ; emphasis = ("<i>", "</i>")
+  ; strike = ("<s>", "</s>")
   ; code = ("<c>", "</c>")
     (* The level is in the tag so a test can say which heading it got. *)
   ; heading = (fun level -> (Printf.sprintf "<h%d>" level, Printf.sprintf "</h%d>" level))
@@ -658,6 +659,24 @@ let test_streaming_boundary_keeps_only_closed_blocks () =
     ~source_start:30 ~row_start:4
     "before\n```ocaml\nlet x = 1\n```\nafter\n"
 
+
+(* Two tildes, never one. A single [~] is a home directory and an
+   approximation sign far more often than it is a marker, and reading one as
+   an opening struck text nobody meant to strike. *)
+let test_double_tilde_strikes_and_single_tilde_does_not () =
+  let rows = Markdown.render ~palette:tagged ~width:60 "a ~~gone~~ and ~7 more" in
+  let joined = String.concat "\n" rows in
+  let holds needle =
+    let n = String.length needle and h = String.length joined in
+    let rec scan i =
+      i + n <= h
+      && (String.equal (String.sub joined i n) needle || scan (i + 1))
+    in
+    scan 0
+  in
+  Alcotest.(check bool) "the struck run is marked" true (holds "<s>gone</s>");
+  Alcotest.(check bool) "a lone tilde stays text" true (holds "~7 more")
+
 let () =
   Alcotest.run "tui-markdown"
     [ ( "inline"
@@ -759,5 +778,9 @@ let () =
             test_a_word_after_a_split_joins_the_tail
         ; Alcotest.test_case "the plain palette stays readable" `Quick
             test_plain_palette_leaves_readable_text
+        ] )
+    ; ( "strike"
+      , [ Alcotest.test_case "two tildes strike, one does not" `Quick
+            test_double_tilde_strikes_and_single_tilde_does_not
         ] )
     ]

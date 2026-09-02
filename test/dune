@@ -2929,6 +2929,11 @@
  (libraries masc_test_deps masc.runtime))
 
 (test
+ (name test_keeper_image_dimensions)
+ (modules test_keeper_image_dimensions)
+ (libraries alcotest masc))
+
+(test
  (name test_keeper_vision_ingest)
  (modules test_keeper_vision_ingest)
  (libraries alcotest masc masc.runtime masc.tool_types))

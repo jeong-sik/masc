@@ -1023,6 +1023,30 @@ let test_shim_travels_read_only_with_its_config () =
     (M.shim_config_content ~payload_path:"/home/opam/.opam/5.5/bin:/usr/bin")
 ;;
 
+(* Existence is proved by root's mkdir; use only by a write as the keeper's
+   own uid. A tree imported under another uid passes [ls] and fails every
+   Write, so the probe runs as that uid and names the owner on failure. *)
+let test_keeper_work_root_write_probe_runs_as_the_keeper () =
+  let argv =
+    M.keeper_work_root_write_probe_argv
+      ~container_name:"masc-keeper-vm-x" ~uid:502 ~gid:20 ~keeper_name:"lane-smith"
+  in
+  Alcotest.(check bool) "runs as the keeper's uid, not root" true
+    (adjacent ~flag:"--user" ~value:"502:20" argv);
+  Alcotest.(check bool) "targets the keeper root" true
+    (String.equal (List.nth argv (List.length argv - 1)) "/masc-work/lane-smith");
+  let script =
+    match List.rev argv with
+    | _root :: _name :: script :: "-c" :: "sh" :: _ -> script
+    | _ -> Alcotest.fail "probe is not a sh -c script with the root as $1"
+  in
+  List.iter
+    (fun needle ->
+       Alcotest.(check bool) (needle ^ " is in the probe") true
+         (Astring.String.is_infix ~affix:needle script))
+    [ "mktemp"; "unlink"; "stat -c"; "owner=%u:%g"; "exit 1" ]
+;;
+
 let test_keeper_work_root_is_created_as_root_with_a_mode () =
   let argv =
     M.keeper_work_root_mkdir_argv ~container_name:"masc-keeper-vm-x" ~keeper_name:"lane-smith"
@@ -1258,6 +1282,8 @@ let () =
             test_shim_travels_read_only_with_its_config
         ; Alcotest.test_case "keeper work root is created as root with a mode" `Quick
             test_keeper_work_root_is_created_as_root_with_a_mode
+        ; Alcotest.test_case "keeper work root write probe runs as the keeper" `Quick
+            test_keeper_work_root_write_probe_runs_as_the_keeper
         ; Alcotest.test_case "running guest is a remote endpoint" `Quick
             test_running_guest_is_a_remote_endpoint
         ] )

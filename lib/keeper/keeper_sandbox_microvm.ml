@@ -499,6 +499,30 @@ let keeper_work_root_mkdir_argv ~container_name ~keeper_name =
       [ "mkdir"; "-p"; "-m"; work_root_dir_mode; keeper_work_root ~keeper_name ]
 ;;
 
+(** The write that follows the mkdir, as the uid the keeper's commands run
+    under. The mkdir proves the root exists; only a write as that uid proves
+    the keeper can use it. The tree below the root can carry any ownership
+    -- one imported from elsewhere under another uid reads identically to
+    [ls] and refuses every write (2026-09-02: trees copied as 501 into a
+    guest the server enters as 502) -- so the refusal names the owner and
+    mode of the root, which is what has to change. *)
+let keeper_work_root_write_probe_script =
+  "d=\"$1\"; t=$(mktemp \"$d/.masc-probe.XXXXXX\") && unlink \"$t\" || { stat -c \
+   \"owner=%u:%g mode=%a %n\" \"$d\" >&2; exit 1; }"
+;;
+
+let keeper_work_root_write_probe_argv ~container_name ~uid ~gid ~keeper_name =
+  exec_argv
+    ~container_name
+    ~uid
+    ~gid
+    ~container_cwd:work_volume_guest_root
+    ~stdin:false
+    ~command_argv:
+      [ "sh"; "-c"; keeper_work_root_write_probe_script; "masc-probe"
+      ; keeper_work_root ~keeper_name ]
+;;
+
 (** Label value distinguishing a keeper-lifetime guest from turn
     containers. The guest outlives turns, so it carries no turn id. *)
 let keeper_vm_container_kind = "keeper-vm"

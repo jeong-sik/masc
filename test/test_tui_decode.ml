@@ -2441,6 +2441,7 @@ let test_decode_skill_activations_reuses_canonical_ledger_decoder () =
 let connector_json ?(id = "slack") ?(available = `Bool true)
     ?(connected = `Bool true) ?(status = "connected")
     ?(channel = `String "#release-deployment")
+    ?(pid = `Int 4242)
     ?(bindings =
       `List
         [ `Assoc
@@ -2468,7 +2469,7 @@ let connector_json ?(id = "slack") ?(available = `Bool true)
     ; ("updated_at", `String "2026-08-23T09:00:00Z")
     ; ("bot_token_present", `Bool true)
     ; ("app_token_present", `Bool true)
-    ; ("pid", `Int 4242)
+    ; ("pid", pid)
     ; ("configured_bindings", bindings)
     ]
 
@@ -2532,6 +2533,17 @@ let test_decode_connector_configured_but_unreachable () =
   | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
       Alcotest.(check bool) "configured" true c.Tui_decode.cn_available;
       Alcotest.(check bool) "but not reachable" false c.Tui_decode.cn_connected
+  | Ok _ -> Alcotest.fail "expected one connector"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_connector_hides_nonpositive_pid () =
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json [ connector_json ~pid:(`Int 0) () ])
+  with
+  | Ok { Tui_decode.cs_connectors = [ connector ]; _ } ->
+      Alcotest.(check (option int)) "non-process pid omitted" None
+        connector.cn_pid
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
@@ -6722,6 +6734,8 @@ let () =
           test_decode_connector_snapshot_reads_the_live_shape;
         Alcotest.test_case "configured is not reachable" `Quick
           test_decode_connector_configured_but_unreachable;
+        Alcotest.test_case "nonpositive pid is omitted" `Quick
+          test_decode_connector_hides_nonpositive_pid;
         Alcotest.test_case "absent flags are off" `Quick
           test_decode_connector_absent_flags_are_off;
         Alcotest.test_case "contradictory connection is rejected" `Quick

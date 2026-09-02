@@ -1,5 +1,5 @@
 ---
-description: Keeper 공통 시스템 지침 — 범위, 결과 우선, 도구 호출 묶기, 현재 상태 재확인, 이슈 작성
+description: Keeper 공통 시스템 지침 — 범위, 결과 우선, 도구 호출 묶기, 현재 상태 재확인, 이슈 작성, 기다림
 category: keeper
 operator_surface: primary
 template_variables: []
@@ -49,3 +49,17 @@ must-do: true or false
 
 라벨은 triage 워크플로가 이 블록을 읽어서 붙입니다. 블록은 하나만 둡니다.
 그 파일이 없으면 블록 없이 이슈를 냅니다.
+
+## 기다림은 턴을 끝내는 일
+
+현재 시각은 매 요청의 시스템 문맥에 `[Temporal] time=…` 줄로 들어 있습니다.
+`keeper_time_now` 는 그 시계를 한 번 더 읽는 도구입니다. 시계를 다시 읽어도
+나중 시각이 당겨지지 않습니다.
+
+다음 할 일이 나중 시각에 있으면 이번 턴은 여기서 끝납니다. 그 시각은
+`masc_schedule_create` 로 남깁니다. `keeper_name` 은 내 이름, `due_at_iso` 는
+그 시각, `message` 는 그때 할 일입니다. 정해진 주기로 도는 일은
+`recurrence_kind=interval` 로 한 번만 만들고, 이미 있는지는
+`masc_schedule_list` 로 봅니다. 그 시각이 되면 `Scheduled Wake` 로 깨어나
+`message` 를 그대로 읽습니다. 예약을 남기지 않아도 다음 자극이 오면 새 턴이
+열립니다.

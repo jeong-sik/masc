@@ -40,6 +40,12 @@ type live_container =
   ; owner_pid : int option
   ; started_at : float option
   ; ttl_sec : float option
+  ; cpus : int option
+  ; memory_bytes : int option
+  ; hostname : string option
+  ; ipv4_address : string option
+  ; ipv6_address : string option
+  ; gateway : string option
   }
 
 type stop_result =

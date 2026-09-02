@@ -68,14 +68,36 @@ let test_live_container_and_errors_are_visible () =
             "image": "masc/sandbox:latest",
             "status": "Up 2 minutes",
             "running": true,
-            "created_at": null,
+            "created_at": "2026-09-02T04:51:29Z",
             "keeper_name": "alpha",
             "container_kind": "managed",
             "network_label": "none",
             "owner_pid": 4242,
             "started_at": 1.0,
-            "ttl_sec": 60.0
+            "ttl_sec": 60.0,
+            "cpus": 4,
+            "memory_bytes": 2147483648,
+            "hostname": "masc-alpha",
+            "ipv4_address": "192.168.64.64/24",
+            "ipv6_address": "fd00::64/64",
+            "gateway": "192.168.64.1"
           }],
+          "resource_config": {
+            "memory": "2g",
+            "cpus": "4",
+            "work_volume_size": "256g",
+            "build_volume_size": "128g",
+            "pids_limit": null,
+            "tmpfs_size": null
+          },
+          "paths": {
+            "host_workspace": "/base/.masc/playground/alpha",
+            "guest_home": null,
+            "guest_workspace": "/home/keeper/playground/alpha",
+            "guest_config": "/home/keeper/playground/alpha/.masc/config",
+            "guest_work_volume": "/masc-work",
+            "guest_build_volume": "/masc-build"
+          },
           "container_error": "docker list partial",
           "why_no_container": null
         }
@@ -85,10 +107,23 @@ let test_live_container_and_errors_are_visible () =
   List.iter
     (fun needle ->
       Alcotest.(check bool) needle true (contains rendered needle))
-    [ "1 observed Â· 1 running"
+    [ "1 observed · 1 running"
     ; "masc-alpha"
     ; "abc123"
     ; "pid 4242"
+    ; "created 2026-09-02T04:51:29Z"
+    ; "4 CPU"
+    ; "2.0 GiB"
+    ; "192.168.64.64/24"
+    ; "192.168.64.1"
+    ; "resources"
+    ; "work 256g"
+    ; "paths"
+    ; "/base/.masc/playground/alpha"
+    ; "/home/keeper/playground/alpha"
+    ; "not observed"
+    ; "press l"
+    ; "press t"
     ; "docker list partial"
     ; "previous launch failed"
     ]

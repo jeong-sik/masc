@@ -932,6 +932,20 @@ let live_containers_of_json ~base_path ~keeper_name = function
           let labels = configuration |> member "labels" in
           let label name = labels |> member name |> json_string_opt in
           let float_label name = Option.bind (label name) float_of_string_opt in
+          let int_member name json =
+            match json |> member name with
+            | `Int value -> Some value
+            | _ -> None
+          in
+          let network =
+            match entry |> member "status" |> member "networks" with
+            | `List (network :: _) -> Some network
+            | `List [] | `Null | _ -> None
+          in
+          let network_string name =
+            Option.bind network (fun row -> row |> member name |> json_string_opt)
+          in
+          let resources = configuration |> member "resources" in
           let owner_pid =
             Option.bind
               (label Keeper_sandbox_runtime.sandbox_owner_pid_label_key)
@@ -951,6 +965,12 @@ let live_containers_of_json ~base_path ~keeper_name = function
                 ; owner_pid
                 ; started_at = float_label Keeper_sandbox_runtime.sandbox_started_at_label_key
                 ; ttl_sec = float_label Keeper_sandbox_runtime.sandbox_ttl_sec_label_key
+                ; cpus = int_member "cpus" resources
+                ; memory_bytes = int_member "memoryInBytes" resources
+                ; hostname = network_string "hostname"
+                ; ipv4_address = network_string "ipv4Address"
+                ; ipv6_address = network_string "ipv6Address"
+                ; gateway = network_string "ipv4Gateway"
                 } : Keeper_sandbox_runtime.live_container))
           with Yojson.Safe.Util.Type_error (detail, _) ->
             Error

@@ -805,8 +805,22 @@ let live_entry ~base_path ~keeper_name ~id =
           ; "creationDate", `String "2026-09-01T08:13:09Z"
           ; "image", `Assoc [ "reference", `String "masc-keeper-sandbox:local" ]
           ; "labels", `Assoc labels
+          ; ( "resources"
+            , `Assoc [ "cpus", `Int 4; "memoryInBytes", `Int 2_147_483_648 ] )
           ] )
-    ; "status", `Assoc [ "state", `String "running" ]
+    ; ( "status"
+      , `Assoc
+          [ "state", `String "running"
+          ; ( "networks"
+            , `List
+                [ `Assoc
+                    [ "hostname", `String id
+                    ; "ipv4Address", `String "192.168.64.64/24"
+                    ; "ipv4Gateway", `String "192.168.64.1"
+                    ; "ipv6Address", `String "fd00::64/64"
+                    ]
+                ] )
+          ] )
     ]
 
 let test_live_container_listing_is_scoped_to_the_keeper () =
@@ -821,7 +835,14 @@ let test_live_container_listing_is_scoped_to_the_keeper () =
     Alcotest.(check string) "Apple Container image" "masc-keeper-sandbox:local" container.image;
     Alcotest.(check (option bool)) "Apple Container running" (Some true) container.running;
     Alcotest.(check (option string)) "keeper-lifetime kind"
-      (Some M.keeper_vm_container_kind) container.container_kind
+      (Some M.keeper_vm_container_kind) container.container_kind;
+    Alcotest.(check (option int)) "actual CPU" (Some 4) container.cpus;
+    Alcotest.(check (option int)) "actual memory"
+      (Some 2_147_483_648) container.memory_bytes;
+    Alcotest.(check (option string)) "actual IPv4"
+      (Some "192.168.64.64/24") container.ipv4_address;
+    Alcotest.(check (option string)) "actual gateway"
+      (Some "192.168.64.1") container.gateway
   | Ok containers ->
     Alcotest.failf "expected exactly one scoped Apple Container VM, got %d" (List.length containers)
 

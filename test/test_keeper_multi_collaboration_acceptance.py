@@ -291,6 +291,26 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             {"keeper": "rw-x-build-a", "mode": "yolo"},
         )
 
+    def test_run_refuses_to_start_without_a_turn_settle_budget(self):
+        argv = ["acceptance", "--run", "--sandbox-profile", "microvm"]
+        with unittest.mock.patch.object(sys, "argv", argv):
+            with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                code = acceptance.main()
+        self.assertEqual(code, 2)
+        self.assertIn("--turn-settle-budget", stderr.getvalue())
+
+    def test_turn_wait_uses_the_settle_budget_not_the_http_timeout(self):
+        module_source = SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("time.monotonic() + self.timeout", module_source)
+        self.assertIn("time.monotonic() + self.turn_settle_budget_sec", module_source)
+        self.assertIn(
+            '"turn_settle_budget_sec": run.turn_settle_budget_sec', module_source
+        )
+        wrapper = (SCRIPT_PATH.parent / "keeper_multi_collaboration_acceptance.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"--turn-settle-budget" "$KEEPER_COLLAB_TURN_SETTLE_BUDGET_SEC"', wrapper)
+
     def test_run_refuses_to_start_without_a_sandbox_profile(self):
         with unittest.mock.patch.object(sys, "argv", ["acceptance", "--run"]):
             with contextlib.redirect_stderr(io.StringIO()) as stderr:

@@ -303,6 +303,38 @@ let test_phaseless_row_no_longer_decodes () =
   let state = Goal_store.read_state config in
   check int "phase-less store rejected as corrupt" 0 (List.length state.goals)
 
+let test_priorityless_row_no_longer_decodes () =
+  with_workspace @@ fun config ->
+  (* Same contract as phase (#23901): a row without an int [priority] is a
+     decode error, not a silent 3 — a silent default would dress a corrupt
+     row up as a plausible medium-priority goal. The live store was
+     measured at zero such rows (2026-09-02, 79 goals). *)
+  Workspace.write_json config (Goal_store.goals_path config)
+    (`Assoc
+      [
+        ("version", `Int 1);
+        ("updated_at", `String (iso_now ()));
+        ( "goals",
+          `List
+            [
+              `Assoc
+                [
+                  ("id", `String "no-priority");
+                  ("title", `String "Priority-less row");
+                  ("metric", `Null);
+                  ("target_value", `Null);
+                  ("due_date", `Null);
+                  ("phase", `String "Executing");
+                  ("last_review_note", `Null);
+                  ("last_review_at", `Null);
+                  ("created_at", `String (iso_now ()));
+                  ("updated_at", `String (iso_now ()));
+                ];
+            ] );
+      ]);
+  let state = Goal_store.read_state config in
+  check int "priority-less store rejected as corrupt" 0 (List.length state.goals)
+
 let test_dropped_phase_serializes_without_status () =
   with_workspace @@ fun config ->
   let goal, _kind =
@@ -457,6 +489,8 @@ let () =
             test_other_unknown_goal_field_still_fails;
           test_case "phase-less row no longer decodes" `Quick
             test_phaseless_row_no_longer_decodes;
+          test_case "priority-less row no longer decodes" `Quick
+            test_priorityless_row_no_longer_decodes;
           test_case "dropped phase serializes without status" `Quick
             test_dropped_phase_serializes_without_status;
           test_case "list_goals filters by phase" `Quick

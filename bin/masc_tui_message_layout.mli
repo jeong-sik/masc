@@ -263,6 +263,19 @@ val chat_input_prompt_prefix : string
 
 val chat_input_prompt_cells : int
 
+val message_fixed_chrome_rows : int
+(** Rows outside chat history. Shared by rendering, viewport admission, and
+    PgUp/PgDn so a page is exactly the history height that is visible. *)
+
+val message_history_height : terminal_rows:int -> status_rows:int -> int
+(** Physical transcript rows left after fixed chrome and variable status rows.
+    This is both the renderer height and the PgUp/PgDn distance. *)
+
+val chat_title_row :
+  inner_cells:int -> title:string -> mode_suffix:string -> string
+(** Fit a chat navigation title while reserving the complete projection-mode
+    suffix first. The opaque title yields width before semantic display state. *)
+
 val chat_role_label_width : pane_cells:int -> int
 (** The badge budget for a pane this wide. It does not read the labels: body
     width is taken from what the badge leaves, so measuring the loaded

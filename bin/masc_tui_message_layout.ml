@@ -493,6 +493,21 @@ let chat_input_prompt_cells = display_width chat_input_prompt_prefix
    space after it before any content starts. *)
 let chat_input_box_cells = 2
 
+(* One authority for the rows that never belong to message history: box top,
+   navigation header, operational identity header, header divider, input
+   divider, composer, box bottom, and footer. Rendering and PgUp/PgDn must
+   subtract the same number or a page skips one transcript row. *)
+let message_fixed_chrome_rows = 8
+
+let message_history_height ~terminal_rows ~status_rows =
+  max 0 (terminal_rows - message_fixed_chrome_rows - max 0 status_rows)
+
+let chat_title_row ~inner_cells ~title ~mode_suffix =
+  let inner_cells = max 0 inner_cells in
+  let mode_cells = display_width mode_suffix in
+  if mode_cells >= inner_cells then fit_width mode_suffix inner_cells
+  else fit_width title (inner_cells - mode_cells) ^ mode_suffix
+
 (* At the newest row the arrows answer the composer's history. Once PgUp has
    moved into the transcript they adjust it one row at a time, so the hint can
    name them without risking a draft replacement. *)
@@ -688,7 +703,8 @@ let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
      Three history rows are the minimum that
      can show an oversized entry's identity/opening, an omission marker, and
      its latest output instead of silently dropping one of those facts. *)
-  terminal_cols >= 13 && terminal_rows >= 11 + max 0 status_rows
+  terminal_cols >= 13
+  && message_history_height ~terminal_rows ~status_rows >= 3
 
 let take_last count values =
   let drop = max 0 (List.length values - max 0 count) in

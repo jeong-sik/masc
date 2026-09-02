@@ -7210,7 +7210,9 @@ let render_keeper_message (state : state) =
        provider id consume the rest of the header and silently lose whatever
        followed it. Two fixed rows make the hierarchy visible and let the
        opaque runtime id be the only item that yields width. *)
-    let title_row = fit_width (title ^ mode_suffix) inner_cells in
+    let title_row =
+      Message_layout.chat_title_row ~inner_cells ~title ~mode_suffix
+    in
     let context_separator = "  " in
     let context_item =
       if not target_registered then None
@@ -7269,7 +7271,9 @@ let render_keeper_message (state : state) =
        terminal's bottom edge. [message_viewport_supported] requires the same
        eight-row chrome plus three history rows, so a live-edge omission can
        still show its first row, typed gap, and latest row. *)
-    let history_height = max 0 (rows - 8 - status_rows) in
+    let history_height =
+      Message_layout.message_history_height ~terminal_rows:rows ~status_rows
+    in
     (* The same pure derivation the committed rows used, asked again for the
        live ones: one call to one function with one argument, so the badge the
        streaming turn aligns to is the badge the history aligned to. *)

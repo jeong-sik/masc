@@ -1003,12 +1003,13 @@ let consume_dispatched_message_draft state request =
    would leave rows the reader has to catch with the arrow keys anyway. *)
 let keeper_message_page_rows state =
   let rows, _cols = get_terminal_size () in
-  (* The pane's fixed chrome is 7 rows (render_keeper_message names them);
+  (* The pane's fixed chrome is shared with [render_keeper_message];
      composer growth is already inside [keeper_message_status_rows]. Adding
      composer_max_rows here counted it twice, and every PgUp jumped four
      rows short of the screenful the comment promises. *)
-  let chrome = 7 in
-  max 1 (rows - chrome - keeper_message_status_rows state)
+  max 1
+    (Masc_tui_message_layout.message_history_height ~terminal_rows:rows
+       ~status_rows:(keeper_message_status_rows state))
 
 (* What this pane has of the operator's own lines for the keeper on screen,
    oldest first. The arrows walk it the way a shell walks its own history.

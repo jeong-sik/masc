@@ -2,7 +2,7 @@
     [config/tools/*.toml] (RFC prompts-and-tool-definitions-outside-ocaml
     §2.2).
 
-    The expected values were read off [Keeper_tool_runtime_schemas.schemas]
+    The expected values were read off [Keeper_runtime_schemas_toml.schemas]
     before any file moved, so this suite passing *before* the TOML replaces a
     literal is what proves the file says the same thing. Written against the
     published list rather than a loader module, so it holds across the whole
@@ -43,14 +43,14 @@ let expected =
     ; {|keeper_analyze_image|}, {|Read a stored image artifact and return a text description or answer. Delegates to a vision model in a sub-call; the image is never added to this conversation. Returns the extracted text, or a typed error (invalid_args | eio_context_unavailable | artifact_load_failed | invalid_timeout | image_too_large | invalid_media_type | invalid_request | no_capable_runtime | empty_extraction | truncated_extraction | timeout | provider_error).|}, {|{"additionalProperties":false,"properties":{"artifact":{"description":"Handle of a stored image artifact (the content-addressed id returned when the image was stored). The raw image is read in a vision sub-call and never enters this conversation.","type":"string"},"media_type":{"description":"Optional image MIME type override (e.g. image/png, image/jpeg). Sniffed from the bytes when omitted.","enum":["image/png","image/jpeg","image/gif","image/webp"],"type":"string"},"query":{"description":"What to ask about the image, e.g. \"describe the chart\" or \"transcribe the text\".","type":"string"}},"required":["artifact","query"],"type":"object"}|}
     ];;
 
-let published = Masc.Keeper_tool_runtime_schemas.schemas
+let published = Masc.Keeper_runtime_schemas_toml.schemas
 
 let find name =
   match
     List.find_opt (fun (s : Masc_domain.tool_schema) -> String.equal s.name name) published
   with
   | Some schema -> schema
-  | None -> failwith (name ^ " is absent from Keeper_tool_runtime_schemas.schemas")
+  | None -> failwith (name ^ " is absent from Keeper_runtime_schemas_toml.schemas")
 ;;
 
 let test_descriptions_are_byte_identical () =
@@ -76,14 +76,14 @@ let test_input_schemas_match_with_keys_sorted () =
 let test_the_published_order_is_unchanged () =
   check
     (list string)
-    "Keeper_tool_runtime_schemas.schemas in order"
+    "Keeper_runtime_schemas_toml.schemas in order"
     (List.map (fun (name, _, _) -> name) expected)
     (List.map (fun (s : Masc_domain.tool_schema) -> s.name) published)
 ;;
 
 let () =
   run
-    "keeper_tool_runtime_schemas_toml_parity"
+    "keeper_runtime_schemas_toml_parity"
     [ ( "byte_identity"
       , [ test_case "descriptions" `Quick test_descriptions_are_byte_identical
         ; test_case

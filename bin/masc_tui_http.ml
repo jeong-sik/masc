@@ -785,7 +785,8 @@ let fetch_lane_run_detail ~(host : string) ~(port : int) ~(run_id : string) :
     by that turn's exact [turn_ref]. A failure on either side stays visible;
     no mutable latest-prompt value is allowed to fill another turn. *)
 let fetch_keeper_context_inspector ~(host : string) ~(port : int)
-    ~(keeper_name : string) : Masc_tui_context_inspector.reading =
+    ~(keeper_name : string) ~(turn_back : int)
+    : Masc_tui_context_inspector.reading =
   let fetch ~label ~path ~decode =
     match http_get ~host ~port ~path with
     | Error detail -> Error (label ^ " request failed: " ^ detail)
@@ -803,25 +804,90 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
       ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=50" encoded)
       ~decode:Masc_tui_context_inspector.decode_turn_records
   in
+  (* Which row the exact provider input is read for. Stepping back names the
+     row itself; the newest reading keeps the attributed fallback, because a
+     keeper mid-turn has not written the snapshot for the row it is on and
+     the newest row that did is still the honest newest answer. *)
+  let viewing_record selection =
+    if turn_back <= 0 then
+      Option.map
+        (fun (attributed : Masc_tui_context_inspector.attributed_turn) ->
+           attributed.record)
+        selection.Masc_tui_context_inspector.attributed
+    else
+      List.nth_opt selection.Masc_tui_context_inspector.rows turn_back
+  in
   let provider_input =
     match turn with
     | Error detail -> Error ("provider-input turn unavailable: " ^ detail)
-    | Ok { Masc_tui_context_inspector.attributed = None; _ } ->
-      Error "provider-input unavailable: no turn on this page recorded an exact input composition"
-    | Ok { Masc_tui_context_inspector.attributed = Some { record; _ }; _ } ->
-      let turn_ref = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
-      fetch ~label:"provider-input"
-        ~path:
-          (Printf.sprintf
-             "/api/v1/keepers/%s/provider-input?turn_ref=%s"
-             encoded
-             (percent_encode_query_value turn_ref))
-        ~decode:
-          (Masc_tui_context_inspector.decode_provider_input
-             ~expected_keeper:keeper_name
-             ~expected_turn_ref:record.Turn_record.turn_ref)
+    | Ok selection -> (
+      match viewing_record selection with
+      | None ->
+          Error "provider-input unavailable: no turn on this page recorded an exact input composition"
+      | Some record ->
+          let turn_ref = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
+          fetch ~label:"provider-input"
+            ~path:
+              (Printf.sprintf
+                 "/api/v1/keepers/%s/provider-input?turn_ref=%s"
+                 encoded
+                 (percent_encode_query_value turn_ref))
+            ~decode:
+              (Masc_tui_context_inspector.decode_provider_input
+                 ~expected_keeper:keeper_name
+                 ~expected_turn_ref:record.Turn_record.turn_ref))
   in
-  { Masc_tui_context_inspector.turn; provider_input }
+  (* The answer that came back: the newest transcript page, joined to the
+     row by the turn_ref the chat rows carry. Rows this join cannot reach
+     say so; they never borrow another turn's answer. *)
+  let response =
+    match turn with
+    | Error detail -> Error ("response unavailable: " ^ detail)
+    | Ok selection -> (
+      match viewing_record selection with
+      | None -> Error "response unavailable: no row on this page to name"
+      | Some record ->
+          let key = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
+          (match fetch_keeper_chat_history_page ~host ~port ~keeper_name
+                   ~before:(Unix.gettimeofday ()) with
+            | Error detail -> Error ("response unavailable: " ^ detail)
+            | Ok page ->
+                let parts =
+                  List.filter_map
+                    (fun (row : Masc_tui_keeper_chat_history.row) ->
+                       if
+                         not
+                           (String.equal
+                              (Option.value ~default:"" row.turn_id)
+                              key)
+                       then None
+                       else
+                         match row.kind with
+                         | Masc_tui_keeper_chat_history.Said_by_keeper
+                         | Masc_tui_keeper_chat_history.Autonomous_reply ->
+                             if row.text = "" then None
+                             else
+                               Some
+                                 (Masc_tui_context_inspector.Reply_text
+                                    row.text)
+                         | Masc_tui_keeper_chat_history.Tool_calls block ->
+                             Some
+                               (Masc_tui_context_inspector.Tool_steps
+                                  (Masc_tui_keeper_chat_history.tool_rows
+                                     block))
+                         | Masc_tui_keeper_chat_history.Reasoning lines ->
+                             Some
+                               (Masc_tui_context_inspector.Reasoning_lines
+                                  lines)
+                         | _ -> None)
+                    page.Masc_tui_keeper_chat_history.decoded.rows
+                in
+                Ok
+                  { parts
+                  ; outside_newest_page = parts = []
+                  }))
+  in
+  { Masc_tui_context_inspector.turn; provider_input; response }
 
 (** Fetch one page of chat rows older than [before].
 

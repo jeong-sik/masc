@@ -130,14 +130,18 @@ val reschedule_due_recurring :
     [Due] for a future consumer/terminal transition. *)
 
 val start_due_candidate :
+  ?started_at:float ->
   Workspace_utils.config ->
   now:float ->
   schedule_id:string ->
   (Schedule_domain.schedule_request, store_error) result
 (** Atomically transitions a due candidate to [Running] and records a
-    generic wake attempt. *)
+    generic wake attempt. [now] is the tick that found the candidate due;
+    [started_at] (default [now]) stamps the wake with the moment the attempt
+    began, so a reader can measure the attempt rather than the tick. *)
 
 val accept_running :
+  ?finished_at:float ->
   Workspace_utils.config ->
   now:float ->
   schedule_id:string ->
@@ -145,27 +149,32 @@ val accept_running :
   unit ->
   (Schedule_domain.schedule_request, store_error) result
 (** Records that a consumer durably accepted asynchronous work. Recurring
-    requests advance to their next [Scheduled] occurrence; one-shot requests
-    become [Succeeded]. The matching wake completes immediately as a
-    wake-delivery receipt; Keeper turn results live in the Keeper ledger. *)
+    requests advance to their next [Scheduled] occurrence after [now]; one-shot
+    requests become [Succeeded]. The matching wake completes immediately as a
+    wake-delivery receipt stamped [finished_at] (default [now]); Keeper turn
+    results live in the Keeper ledger. *)
 
 val fail_running :
+  ?finished_at:float ->
   Workspace_utils.config ->
   now:float ->
   schedule_id:string ->
   error:string ->
   (Schedule_domain.schedule_request, store_error) result
-(** Marks a [Running] request and its matching wake attempt [Failed]. *)
+(** Marks a [Running] request and its matching wake attempt [Failed]. The
+    wake is stamped [finished_at] (default [now]). *)
 
 val retry_running :
+  ?finished_at:float ->
   Workspace_utils.config ->
   now:float ->
   schedule_id:string ->
   reason:running_recovery_reason ->
   (Schedule_domain.schedule_request, store_error) result
-(** Finishes the current wake attempt as [Failed] while returning only the
-    matching schedule to [Due]. Its due time and payload remain unchanged, so
-    the next runner tick retries the same occurrence identity. *)
+(** Finishes the current wake attempt as [Failed] (stamped [finished_at],
+    default [now]) while returning only the matching schedule to [Due]. Its
+    due time and payload remain unchanged, so the next runner tick retries the
+    same occurrence identity. *)
 
 val recover_running_on_startup :
   Workspace_utils.config ->

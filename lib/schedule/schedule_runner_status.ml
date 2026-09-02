@@ -46,7 +46,46 @@ type snapshot =
   ; last_error : string option
   ; last_duration_sec : float option
   ; last_counts : tick_counts option
+  ; totals : tick_counts
   }
+
+let zero_counts : tick_counts =
+  { due_changed = 0
+  ; emitted = 0
+  ; rescheduled = 0
+  ; dispatch_succeeded = 0
+  ; dispatch_failed = 0
+  ; dispatch_unsupported = 0
+  ; dispatch_start_rejected = 0
+  ; wake_enqueued = 0
+  ; wake_skipped_no_keeper = 0
+  ; wake_skipped_missing_schedule = 0
+  ; wake_skipped_non_keeper_actor = 0
+  ; wake_skipped_unregistered_keeper = 0
+  ; wake_failed = 0
+  }
+;;
+
+let add_counts (left : tick_counts) (right : tick_counts) : tick_counts =
+  { due_changed = left.due_changed + right.due_changed
+  ; emitted = left.emitted + right.emitted
+  ; rescheduled = left.rescheduled + right.rescheduled
+  ; dispatch_succeeded = left.dispatch_succeeded + right.dispatch_succeeded
+  ; dispatch_failed = left.dispatch_failed + right.dispatch_failed
+  ; dispatch_unsupported = left.dispatch_unsupported + right.dispatch_unsupported
+  ; dispatch_start_rejected =
+      left.dispatch_start_rejected + right.dispatch_start_rejected
+  ; wake_enqueued = left.wake_enqueued + right.wake_enqueued
+  ; wake_skipped_no_keeper = left.wake_skipped_no_keeper + right.wake_skipped_no_keeper
+  ; wake_skipped_missing_schedule =
+      left.wake_skipped_missing_schedule + right.wake_skipped_missing_schedule
+  ; wake_skipped_non_keeper_actor =
+      left.wake_skipped_non_keeper_actor + right.wake_skipped_non_keeper_actor
+  ; wake_skipped_unregistered_keeper =
+      left.wake_skipped_unregistered_keeper + right.wake_skipped_unregistered_keeper
+  ; wake_failed = left.wake_failed + right.wake_failed
+  }
+;;
 
 let empty =
   { tick_in_flight = false
@@ -61,6 +100,7 @@ let empty =
   ; last_error = None
   ; last_duration_sec = None
   ; last_counts = None
+  ; totals = zero_counts
   }
 ;;
 
@@ -133,6 +173,7 @@ let record_tick_ok
     ; last_success_at = Some finished_at
     ; last_duration_sec = Some (duration ~started_at ~finished_at)
     ; last_counts = Some counts
+    ; totals = add_counts current.totals counts
     })
 ;;
 
@@ -162,9 +203,7 @@ let record_tick_crash ~started_at ~finished_at error =
 let snapshot () = Atomic.get state
 
 
-let option_int_counts_json = function
-  | None -> `Null
-  | Some counts ->
+let counts_json (counts : tick_counts) =
     `Assoc
       [ "due_changed", `Int counts.due_changed
       ; "emitted", `Int counts.emitted
@@ -180,6 +219,11 @@ let option_int_counts_json = function
       ; "wake_skipped_unregistered_keeper", `Int counts.wake_skipped_unregistered_keeper
       ; "wake_failed", `Int counts.wake_failed
       ]
+;;
+
+let option_int_counts_json = function
+  | None -> `Null
+  | Some counts -> counts_json counts
 ;;
 
 let option_age ~now = function
@@ -253,6 +297,7 @@ let snapshot_to_yojson ?now ?stale_after_sec snapshot =
         | Some error -> `String error )
     ; "last_duration_sec", Json_util.float_opt_to_json snapshot.last_duration_sec
     ; "last_counts", option_int_counts_json snapshot.last_counts
+    ; "totals", counts_json snapshot.totals
     ; ( "stale_after_sec"
       , match stale_after_sec with
         | None -> `Null

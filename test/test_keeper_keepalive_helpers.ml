@@ -555,6 +555,7 @@ let persist_board_signal (signal : Board_dispatch.board_signal) =
       match
         Board.audience_for_post
           ~visibility:post.visibility
+          ~post_kind:post.post_kind
           ~title:post.title
           ~content:post.body
       with

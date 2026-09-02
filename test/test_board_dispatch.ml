@@ -1880,10 +1880,51 @@ let test_malformed_target_is_read_as_prose () =
     (match
        Board.audience_for_post
          ~visibility:Board.Public
+         ~post_kind:Board.Human_post
          ~title:""
          ~content:"please inspect @!"
      with
      | Ok audience -> audience_label audience
+     | Error error -> Board.show_board_error error)
+;;
+
+(* A runtime receipt (System_post) with no address is thread activity, not a
+   discoverable conversation: its owner is woken by a typed stimulus, and
+   every other keeper would otherwise pay an attention judgment per receipt.
+   An explicit address still wins, and keeper-authored automation posts stay
+   discoverable. *)
+let test_unaddressed_system_post_is_thread_activity () =
+  let label ~post_kind ~content =
+    match
+      Board.audience_for_post ~visibility:Board.Internal ~post_kind ~title:"" ~content
+    with
+    | Ok audience -> audience_label audience
+    | Error error -> Board.show_board_error error
+  in
+  Alcotest.(check string)
+    "unaddressed system post is thread activity"
+    "thread_participants"
+    (label ~post_kind:Board.System_post ~content:"Approved task task-1 (vrf:v1)");
+  Alcotest.(check string)
+    "addressed system post keeps its targets"
+    "targets"
+    (label ~post_kind:Board.System_post ~content:"@keeper-a Approved task task-1");
+  Alcotest.(check string)
+    "unaddressed automation post is discoverable"
+    "discoverable"
+    (label ~post_kind:Board.Automation_post ~content:"status report 19:57Z");
+  Alcotest.(check string)
+    "Direct still requires targets whatever the kind"
+    "Direct Board posts require explicit targets"
+    (match
+       Board.audience_for_post
+         ~visibility:Board.Direct
+         ~post_kind:Board.System_post
+         ~title:""
+         ~content:"Approved task task-1"
+     with
+     | Ok audience -> audience_label audience
+     | Error (Board.Validation_error message) -> message
      | Error error -> Board.show_board_error error)
 ;;
 
@@ -1918,8 +1959,8 @@ let test_target_case_is_identity_level () =
      while the Keeper boundary folds them into one canonical id (pinned in
      test_keeper_lane_mentions). *)
   match
-    Board.audience_for_post ~visibility:Board.Public ~title:""
-      ~content:"@MiXeD-Agent and @mixed-agent"
+    Board.audience_for_post ~visibility:Board.Public ~post_kind:Board.Human_post
+      ~title:"" ~content:"@MiXeD-Agent and @mixed-agent"
   with
   | Ok (Board.Targets targets) ->
     Alcotest.(check (list string))
@@ -2382,6 +2423,8 @@ let () =
         (with_eio test_direct_post_requires_exact_targets);
       Alcotest.test_case "malformed target is read as prose" `Quick
         (with_eio test_malformed_target_is_read_as_prose);
+      Alcotest.test_case "unaddressed system post is thread activity" `Quick
+        (with_eio test_unaddressed_system_post_is_thread_activity);
       Alcotest.test_case "write emits typed audience" `Quick
         (with_eio test_write_boundary_emits_typed_audience);
       Alcotest.test_case "target case is identity-level" `Quick

@@ -89,12 +89,24 @@ let audience_of_address ~visibility ~unaddressed = function
   | No_explicit_address -> unaddressed ()
 ;;
 
-let audience_for_post ~visibility ~title ~content =
+(* An unaddressed post's audience depends on who wrote it. A person or a
+   keeper (Human_post, Automation_post) starts a conversation anyone may
+   discover. A System_post is a receipt the runtime writes about work that
+   already has an owner — a verification verdict, a fusion result — and the
+   owner is woken by its own typed stimulus, not by reading the Board. So a
+   receipt is thread activity: whoever joins its thread hears it, and nobody
+   is invited by discovery. Measured 2026-09-01: verifier_exact and system
+   receipts produced 429 of 1,784 per-keeper attention judgments in 24 h,
+   303 of them not_relevant. *)
+let audience_for_post ~visibility ~post_kind ~title ~content =
   explicit_address_of_text (address_text ~title ~content)
   |> audience_of_address ~visibility ~unaddressed:(fun () ->
-    match visibility with
-    | Direct -> Error (Validation_error "Direct Board posts require explicit targets")
-    | Public | Unlisted | Internal -> Ok Discoverable)
+    match visibility, post_kind with
+    | Direct, (Human_post | Automation_post | System_post) ->
+      Error (Validation_error "Direct Board posts require explicit targets")
+    | (Public | Unlisted | Internal), (Human_post | Automation_post) ->
+      Ok Discoverable
+    | (Public | Unlisted | Internal), System_post -> Ok Thread_participants)
 ;;
 
 let audience_for_comment ~content =

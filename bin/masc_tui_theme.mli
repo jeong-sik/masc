@@ -58,6 +58,17 @@ module Sgr : sig
   val bold : string
   val dim : string
   val underline : string
+  val italic : string
+  val no_italic : string
+  val strike : string
+  val no_strike : string
+  (** Weight is not the only axis a terminal has, and drawing every
+      distinction as a colour is what makes a screen loud without making it
+      legible: emphasis slants, and a reading that has been withdrawn -- a
+      dropped goal, a cancelled row -- is struck. Each closes to its own
+      off-code rather than to a full reset, so a span inside a coloured row
+      leaves that row's colour where it was. *)
+
   val no_underline : string
   (** SGR 24: close underline without resetting foreground, background, or
       weight. Conditional under NO_COLOR like the underline it closes. *)
@@ -288,6 +299,21 @@ module Syntax : sig
       indentation already carries the structure, and drawing the braces at
       full weight is what makes a document read as noise. Strings reuse
       {!string_}, which is the same reading a code fence gives them. *)
+
+  val code_comment : string
+  val code_number : string
+  val code_type : string
+  val code_span : string
+  val link : string
+  val rule : string
+  (** The rest of what a fenced block and a chat row hold: a comment, a
+      number, a type name, an inline [`span`], a link's text, and the
+      horizontal rule that divides sections.
+
+      Content, not state -- a slanted comment says it is a comment, not that
+      anything is unwell. Named here for the same reason the keyword is: a
+      renderer that picks the code itself is one the readability lift cannot
+      reach, and there were ninety-odd of those before these names existed. *)
 
   val diff_added : string
   val diff_removed : string

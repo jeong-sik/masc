@@ -883,6 +883,103 @@ let test_build_volume_create_argv_carries_a_size () =
   Alcotest.(check bool) "size is passed" true (adjacent ~flag:"-s" ~value:"64g" argv)
 ;;
 
+let test_work_volume_is_named_and_mounted_at_its_root () =
+  Alcotest.(check string)
+    "one work volume per keeper"
+    "masc-keeper-work-lane-smith"
+    (ok_exn (M.work_volume_name ~keeper_name:"lane-smith"));
+  ignore (error_exn (M.work_volume_name ~keeper_name:"has space") : string);
+  Alcotest.(check bool)
+    "mounted at the guest work root"
+    true
+    (adjacent
+       ~flag:"--volume"
+       ~value:("masc-keeper-work-lane-smith:" ^ M.work_volume_guest_root)
+       (M.work_volume_mount_args ~volume_name:"masc-keeper-work-lane-smith"));
+  Alcotest.(check string)
+    "keeper root sits on the volume"
+    "/masc-work/lane-smith"
+    (M.keeper_work_root ~keeper_name:"lane-smith")
+;;
+
+let test_shim_travels_read_only_with_its_config () =
+  Alcotest.(check bool)
+    "shim dir is a read-only mount"
+    true
+    (adjacent
+       ~flag:"--volume"
+       ~value:("/host/.masc/microvm/shim:" ^ M.shim_guest_dir ^ ":ro")
+       (M.shim_mount_args ~host_dir:"/host/.masc/microvm/shim"));
+  Alcotest.(check string) "shim path" "/opt/masc-exec-shim/masc-exec-shim" M.shim_guest_path;
+  Alcotest.(check string)
+    "config names the work root and the image's PATH"
+    "remote_root=/masc-work\npath=/home/opam/.opam/5.5/bin:/usr/bin\n"
+    (M.shim_config_content ~payload_path:"/home/opam/.opam/5.5/bin:/usr/bin")
+;;
+
+let test_keeper_work_root_is_created_as_root_with_a_mode () =
+  let argv =
+    M.keeper_work_root_mkdir_argv ~container_name:"masc-keeper-vm-x" ~keeper_name:"lane-smith"
+  in
+  Alcotest.(check bool) "runs as root" true (adjacent ~flag:"--user" ~value:"0:0" argv);
+  Alcotest.(check bool) "explicit mode" true (adjacent ~flag:"-m" ~value:"0777" argv);
+  Alcotest.(check bool) "creates the keeper root" true (contains "/masc-work/lane-smith" argv)
+;;
+
+let test_ensure_volume_codes_carry_the_kind () =
+  Alcotest.(check string) "build" "build" (M.volume_kind_label M.Build_volume);
+  Alcotest.(check string) "work" "work" (M.volume_kind_label M.Work_volume)
+;;
+
+(* The running guest as a remote endpoint: the argv the remote runner spawns
+   is [container exec] into this guest, the shim it names is the mounted one,
+   and the identity it injects is the snapshot the guest already mounts. *)
+let test_running_guest_is_a_remote_endpoint () =
+  let base = temp_dir "microvm_remote_endpoint_" in
+  let config = Masc.Workspace.default_config base in
+  let meta = microvm_meta ~name:"lane-smith" in
+  let container_name = "masc-keeper-vm-lane-smith-deadbeef" in
+  let runtime =
+    Masc.Keeper_turn_sandbox_runtime.For_testing.create_minimal
+      ~config ~meta ~state:(Running { container_name })
+  in
+  match
+    Masc.Keeper_turn_sandbox_runtime.microvm_remote_endpoint_of_running
+      runtime ~container_name
+  with
+  | Error message -> Alcotest.fail message
+  | Ok endpoint ->
+    let argv = Masc.Keeper_sandbox_remote.transport_argv endpoint in
+    Alcotest.(check bool) "execs into the guest" true
+      (adjacent ~flag:"exec" ~value:"-i" argv && contains container_name argv);
+    Alcotest.(check bool) "names the mounted shim" true (contains M.shim_guest_path argv);
+    Alcotest.(check bool) "hands the shim its config" true
+      (adjacent ~flag:"--env" ~value:("MASC_EXEC_SHIM_CONFIG=" ^ M.shim_config_guest_path) argv);
+    Alcotest.(check bool) "starts in the work root" true
+      (adjacent ~flag:"-w" ~value:M.work_volume_guest_root argv);
+    Alcotest.(check string) "keeper root is on the work volume" "/masc-work/lane-smith"
+      (Masc.Keeper_sandbox_remote.remote_keeper_root endpoint);
+    Alcotest.(check string) "endpoint is named after the guest" container_name
+      (Masc.Keeper_sandbox_remote.name endpoint);
+    (match Masc.Keeper_sandbox_remote.transport endpoint with
+     | Masc.Keeper_sandbox_remote.Container_exec { uid; gid; _ } ->
+       Alcotest.(check bool) "execs as the runtime's uid:gid" true
+         (adjacent ~flag:"--user" ~value:(Printf.sprintf "%d:%d" uid gid) argv)
+     | Masc.Keeper_sandbox_remote.Openssh _ -> Alcotest.fail "a guest is not an OpenSSH endpoint");
+    let docker =
+      Masc.Keeper_turn_sandbox_runtime.For_testing.create_minimal
+        ~config ~meta:(docker_meta ~name:"lane-smith") ~state:(Running { container_name })
+    in
+    (match
+       Masc.Keeper_turn_sandbox_runtime.microvm_remote_endpoint_of_running
+         docker ~container_name
+     with
+     | Ok _ -> Alcotest.fail "a Docker keeper must not become a guest endpoint"
+     | Error message ->
+       Alcotest.(check bool) "refusal is named" true
+         (String.starts_with ~prefix:"microvm_remote_endpoint_requires_microvm:" message))
+;;
+
 let test_build_link_target_is_flat_and_unique_per_checkout () =
   Alcotest.(check string)
     "top-level checkout"
@@ -1366,6 +1463,16 @@ let () =
             test_build_link_target_refuses_ambiguous_paths
         ; Alcotest.test_case "plan never deletes real build output" `Quick
             test_plan_build_link_never_deletes_real_build_output
+        ; Alcotest.test_case "work volume is named and mounted at its root" `Quick
+            test_work_volume_is_named_and_mounted_at_its_root
+        ; Alcotest.test_case "shim travels read-only with its config" `Quick
+            test_shim_travels_read_only_with_its_config
+        ; Alcotest.test_case "keeper work root is created as root with a mode" `Quick
+            test_keeper_work_root_is_created_as_root_with_a_mode
+        ; Alcotest.test_case "volume codes carry the kind" `Quick
+            test_ensure_volume_codes_carry_the_kind
+        ; Alcotest.test_case "running guest is a remote endpoint" `Quick
+            test_running_guest_is_a_remote_endpoint
         ] )
     ; ( "build volume provisioning"
       , [ Alcotest.test_case "volume names parse from the listing" `Quick

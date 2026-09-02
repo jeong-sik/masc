@@ -376,6 +376,59 @@ let build_volume_mount_args ~volume_name =
   [ "--volume"; volume_name ^ ":" ^ build_volume_guest_root ]
 ;;
 
+(* ── The work volume and the shim (RFC-0400) ────────────────────────── *)
+
+(** Guest mount point of the per-keeper work volume. The keeper's working
+    tree lives here, on ext4, and this path is the remote lane's
+    [remote_root] for the guest: the same role [\[exec.ssh.endpoints\]
+    .remote_root] plays for an OpenSSH endpoint. *)
+let work_volume_guest_root = "/masc-work"
+
+let work_volume_name ~keeper_name =
+  if valid_volume_segment keeper_name
+  then Ok ("masc-keeper-work-" ^ keeper_name)
+  else Error ("unsupported keeper name for a work volume: " ^ keeper_name)
+;;
+
+let work_volume_mount_args ~volume_name =
+  [ "--volume"; volume_name ^ ":" ^ work_volume_guest_root ]
+;;
+
+(** The keeper's root on the work volume: [<work root>/<keeper>], the
+    directory the shim jails every request under. *)
+let keeper_work_root ~keeper_name =
+  Filename.concat work_volume_guest_root (Playground_paths.sanitize_keeper_name keeper_name)
+;;
+
+(** Where the guest finds [masc-exec-shim] and its config: one host directory
+    mounted read-only. The guest root is read-only and [/etc] is the image's,
+    so the config travels beside the binary and the transport names it
+    through [MASC_EXEC_SHIM_CONFIG]. *)
+let shim_guest_dir = "/opt/masc-exec-shim"
+let shim_binary_name = "masc-exec-shim"
+let shim_config_name = "masc-exec-shim.conf"
+let shim_guest_path = Filename.concat shim_guest_dir shim_binary_name
+let shim_config_guest_path = Filename.concat shim_guest_dir shim_config_name
+
+let shim_mount_args ~host_dir =
+  [ "--volume"; host_dir ^ ":" ^ shim_guest_dir ^ ":ro" ]
+;;
+
+(** The config the host writes for the guest's shim: the jail root is the
+    work volume, and the payload PATH is the image's. *)
+let shim_config_content ~payload_path =
+  Printf.sprintf "remote_root=%s\npath=%s\n" work_volume_guest_root payload_path
+;;
+
+(** What the guest endpoint declares to the remote runner. No caller env
+    crosses into a guest today (typed guest dispatch refuses env), so the
+    allowlist is empty; the session ceiling mirrors the OpenSSH default, and
+    the connect budget covers a [container exec] that has to wait on a
+    guest still settling after boot. *)
+let remote_env_allowlist : string list = []
+let remote_connect_timeout_sec = 10
+let remote_max_concurrent_sessions = 8
+
 (** A checkout's build directory on the volume.
 
     The playground-relative path is flattened with [:] so the target needs no
@@ -514,11 +567,24 @@ let volume_probe ~volume_name ~timeout_sec =
     "already exists" -- so existence is settled by the probe above rather than
     by reading that message. The size is a ceiling: the image is sparse, and
     4 GiB nominal measured 84 MB on disk. *)
-let ensure_build_volume ~volume_name ~size ~timeout_sec =
+type volume_kind =
+  | Build_volume
+  | Work_volume
+
+let volume_kind_label = function
+  | Build_volume -> "build"
+  | Work_volume -> "work"
+;;
+
+let ensure_volume ~kind ~volume_name ~size ~timeout_sec =
   match volume_probe ~volume_name ~timeout_sec with
   | Volume_present -> Ok `Already_present
   | Volume_probe_failed message ->
-    Error ("microvm_build_volume_probe_failed: " ^ message)
+    Error
+      (Printf.sprintf
+         "microvm_%s_volume_probe_failed: %s"
+         (volume_kind_label kind)
+         message)
   | Volume_absent ->
     let argv = build_volume_create_argv ~volume_name ~size in
     (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
@@ -526,7 +592,8 @@ let ensure_build_volume ~volume_name ~size ~timeout_sec =
      | status, stdout, stderr ->
        Error
          (Printf.sprintf
-            "microvm_build_volume_create_failed: %s (%s; %s)"
+            "microvm_%s_volume_create_failed: %s (%s; %s)"
+            (volume_kind_label kind)
             volume_name
             (match status with
              | Unix.WEXITED code -> Printf.sprintf "exit %d" code
@@ -534,6 +601,8 @@ let ensure_build_volume ~volume_name ~size ~timeout_sec =
              | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
             (output_for_log ~stdout ~stderr)))
 ;;
+
+let ensure_build_volume = ensure_volume ~kind:Build_volume
 
 (* ── Binding a checkout's _build to the volume ─────────────────────── *)
 
@@ -733,6 +802,21 @@ let build_target_mkdir_argv ~container_name ~targets =
     ~container_cwd:build_volume_guest_root
     ~stdin:false
     ~command_argv:("mkdir" :: "-p" :: "-m" :: build_target_dir_mode :: targets)
+;;
+
+(** The keeper's root on the work volume, created the same way and for the
+    same reason: the volume root is root-owned, and the user namespace
+    refuses a later chmod, so the directory is made as root with the mode it
+    will keep. Idempotent. *)
+let keeper_work_root_mkdir_argv ~container_name ~keeper_name =
+  exec_argv
+    ~container_name
+    ~uid:0
+    ~gid:0
+    ~container_cwd:work_volume_guest_root
+    ~stdin:false
+    ~command_argv:
+      [ "mkdir"; "-p"; "-m"; build_target_dir_mode; keeper_work_root ~keeper_name ]
 ;;
 
 (** Targets that a build will write through, from the rows above.

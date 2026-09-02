@@ -616,6 +616,94 @@ let microvm_build_volume ~keeper_name ~timeout_sec =
      | Ok _ -> Ok volume_name)
 ;;
 
+(** The work volume (RFC-0400): the keeper's working tree, on ext4, where a
+    host descriptor is never pinned by a guest touching a file. Refused for
+    the same reason as the build volume. *)
+let microvm_work_volume ~keeper_name ~timeout_sec =
+  match Keeper_sandbox_microvm.work_volume_name ~keeper_name with
+  | Error message -> Error ("microvm_work_volume_unnamed: " ^ message)
+  | Ok volume_name ->
+    (match
+       Keeper_sandbox_microvm.ensure_volume
+         ~kind:Keeper_sandbox_microvm.Work_volume
+         ~volume_name
+         ~size:(Env_config_sandbox.Runtime.microvm_work_volume_size ())
+         ~timeout_sec
+     with
+     | Error _ as err -> err
+     | Ok _ -> Ok volume_name)
+;;
+
+let microvm_shim_host_dir (t : t) =
+  Config_dir_resolver.microvm_shim_dir ~base_path:t.config.base_path
+;;
+
+(** The shim the guest runs is a static Linux binary the operator installs on
+    the host ([scripts/remote-ssh/build-shim.sh --arch arm64]); the config
+    beside it is written here on every boot, so a changed payload PATH
+    reaches the guest without an operator step. A missing binary refuses the
+    boot: a guest without a shim has no remote lane, and the routing that
+    follows this change has no other channel into the guest. *)
+let prepare_microvm_shim_dir (t : t) =
+  let dir = microvm_shim_host_dir t in
+  let binary = Filename.concat dir Keeper_sandbox_microvm.shim_binary_name in
+  match Unix.access binary [ Unix.X_OK ] with
+  | exception Unix.Unix_error (code, _, _) ->
+    Error
+      (Printf.sprintf
+         "microvm_shim_missing: %s (%s); build it with scripts/remote-ssh/build-shim.sh --arch arm64 and install it there"
+         binary
+         (Unix.error_message code))
+  | () ->
+    (match
+       Fs_compat.save_file_atomic
+         (Filename.concat dir Keeper_sandbox_microvm.shim_config_name)
+         (Keeper_sandbox_microvm.shim_config_content
+            ~payload_path:(Env_config_sandbox.Runtime.microvm_payload_path ()))
+     with
+     | Ok () -> Ok dir
+     | Error message -> Error ("microvm_shim_config_unwritable: " ^ message))
+;;
+
+type microvm_guest_provisions =
+  { build_volume_name : string
+  ; work_volume_name : string
+  ; shim_host_dir : string
+  }
+
+(** Everything a guest boot mounts besides config and identity, established
+    before [container run] so a boot never starts without one of them. *)
+let microvm_guest_provisions (t : t) ~timeout_sec =
+  match microvm_build_volume ~keeper_name:t.meta.name ~timeout_sec with
+  | Error _ as err -> err
+  | Ok build_volume_name ->
+    (match microvm_work_volume ~keeper_name:t.meta.name ~timeout_sec with
+     | Error _ as err -> err
+     | Ok work_volume_name ->
+       (match prepare_microvm_shim_dir t with
+        | Error _ as err -> err
+        | Ok shim_host_dir -> Ok { build_volume_name; work_volume_name; shim_host_dir }))
+;;
+
+(** The keeper's root on the work volume, made inside the guest once it is
+    up. The volume outlives the guest, so this is a no-op after the first
+    boot; it runs as root because the volume root is root-owned. *)
+let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~container_name =
+  let argv =
+    Keeper_sandbox_microvm.keeper_work_root_mkdir_argv
+      ~container_name
+      ~keeper_name:t.meta.name
+  in
+  match run_argv_with_status ?timeout_sec argv with
+  | Unix.WEXITED 0, _ -> Ok ()
+  | _, out ->
+    Error
+      (Printf.sprintf
+         "microvm_keeper_work_root_failed: %s: %s"
+         (Keeper_sandbox_microvm.keeper_work_root ~keeper_name:t.meta.name)
+         (Keeper_sandbox_runtime.docker_failure_output_for_log out))
+;;
+
 (** Point each checkout's [_build] at the volume, and create the directories
     it points at.
 
@@ -714,13 +802,10 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
       (match
          Result.bind
            (Keeper_sandbox_microvm.image_present ~image ~timeout_sec:image_timeout)
-           (fun () ->
-             microvm_build_volume
-               ~keeper_name:t.meta.name
-               ~timeout_sec:image_timeout)
+           (fun () -> microvm_guest_provisions t ~timeout_sec:image_timeout)
        with
        | Error _ as err -> err
-       | Ok build_volume_name ->
+       | Ok provisions ->
          let dns =
            match Env_config_sandbox.Runtime.microvm_dns () with
            | "" -> None
@@ -809,7 +894,14 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                    RFC-0399: virtiofs pins one host descriptor per inode the
                    guest touches, and a host descriptor is a host vnode. *)
                 @ Keeper_sandbox_microvm.build_volume_mount_args
-                    ~volume_name:build_volume_name)
+                    ~volume_name:provisions.build_volume_name
+                (* The working tree itself (RFC-0400): the keeper's checkouts
+                   live on the work volume, and the shim the remote lane
+                   drives is mounted read-only beside its config. *)
+                @ Keeper_sandbox_microvm.work_volume_mount_args
+                    ~volume_name:provisions.work_volume_name
+                @ Keeper_sandbox_microvm.shim_mount_args
+                    ~host_dir:provisions.shim_host_dir)
              ~image
          in
          let st, out = run_argv_with_status ?timeout_sec argv in
@@ -1209,6 +1301,54 @@ let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
      refresh_microvm_build_links ?timeout_sec t ~container_name
    | _ -> ());
   started
+;;
+
+(** The guest as a remote endpoint (RFC-0400): [container exec] into the
+    running guest delivers the framed request to the shim mounted at
+    {!Keeper_sandbox_microvm.shim_guest_path}, the work volume is the remote
+    root, and the GitHub identity is the snapshot the guest already mounts.
+    Pure given a running guest, so the argv contract is testable. *)
+let microvm_remote_endpoint_of_running (t : t) ~container_name =
+  if not (is_microvm t)
+  then
+    Error
+      (Printf.sprintf
+         "microvm_remote_endpoint_requires_microvm: keeper %s runs sandbox_profile=%s"
+         t.meta.name
+         (Keeper_types_profile_sandbox.sandbox_profile_to_string t.meta.sandbox_profile))
+  else
+    let gh_config_dir =
+      Keeper_github_identity.container_config_dir
+        ~container_masc_dir:
+          (Keeper_sandbox_runtime_setup.container_masc_dir
+             ~container_root:t.container_root)
+        ~keeper_name:t.meta.name
+    in
+    Ok
+      (Keeper_sandbox_remote.of_container_exec
+         ~base_path:t.config.base_path
+         ~keeper_name:t.meta.name
+         ~remote_root:Keeper_sandbox_microvm.work_volume_guest_root
+         ~gh_config_dir
+         ~env_allowlist:Keeper_sandbox_microvm.remote_env_allowlist
+         ~connect_timeout_sec:Keeper_sandbox_microvm.remote_connect_timeout_sec
+         ~max_concurrent_sessions:Keeper_sandbox_microvm.remote_max_concurrent_sessions
+         { cli = Keeper_sandbox_microvm.command_argv ()
+         ; container_name
+         ; uid = t.uid
+         ; gid = t.gid
+         ; shim_path = Keeper_sandbox_microvm.shim_guest_path
+         ; shim_config_path = Keeper_sandbox_microvm.shim_config_guest_path
+         })
+;;
+
+let microvm_remote_endpoint ?timeout_sec (t : t) =
+  match ensure_started ?timeout_sec t with
+  | Error _ as err -> err
+  | Ok container_name ->
+    (match ensure_microvm_keeper_work_root ?timeout_sec t ~container_name with
+     | Error _ as err -> err
+     | Ok () -> microvm_remote_endpoint_of_running t ~container_name)
 ;;
 
 let retire_current_github_identity_snapshot t =

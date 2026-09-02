@@ -33,6 +33,18 @@ val prepare_github_identity_secret_files :
 val cleanup : t -> unit
 (** Best-effort teardown. Safe to call multiple times. *)
 
+val microvm_remote_endpoint_of_running :
+  t -> container_name:string -> (Keeper_sandbox_remote.t, string) result
+(** The running guest as a remote endpoint (RFC-0400): [container exec] into
+    [container_name] delivering the framed request to the mounted shim, the
+    work volume as the remote root, the mounted identity snapshot as
+    [GH_CONFIG_DIR]. Refused for a non-microvm keeper. Pure. *)
+
+val microvm_remote_endpoint :
+  ?timeout_sec:float -> t -> (Keeper_sandbox_remote.t, string) result
+(** {!microvm_remote_endpoint_of_running} after ensuring the guest is up and
+    the keeper's root exists on the work volume. *)
+
 module For_testing : sig
   val create_minimal
     :  config:Workspace.config

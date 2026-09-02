@@ -127,6 +127,35 @@ val build_volume_name : keeper_name:string -> (string, string) result
 val build_volume_create_argv : volume_name:string -> size:string -> string list
 val build_volume_mount_args : volume_name:string -> string list
 
+(** {2 The work volume and the shim (RFC-0400)}
+
+    The keeper's working tree lives on a second per-keeper volume, mounted at
+    {!work_volume_guest_root}; that path is the remote lane's [remote_root]
+    for the guest. The static [masc-exec-shim] and its config travel in one
+    host directory mounted read-only at {!shim_guest_dir}. *)
+
+val work_volume_guest_root : string
+val work_volume_name : keeper_name:string -> (string, string) result
+val work_volume_mount_args : volume_name:string -> string list
+
+val keeper_work_root : keeper_name:string -> string
+(** [<work root>/<sanitized keeper>]: what the shim jails requests under. *)
+
+val shim_guest_dir : string
+val shim_binary_name : string
+val shim_config_name : string
+val shim_guest_path : string
+val shim_config_guest_path : string
+val shim_mount_args : host_dir:string -> string list
+
+val shim_config_content : payload_path:string -> string
+(** [remote_root=<work root>] and [path=<payload_path>], the two lines the
+    guest's shim reads. *)
+
+val remote_env_allowlist : string list
+val remote_connect_timeout_sec : int
+val remote_max_concurrent_sessions : int
+
 (** Build directory for one checkout, addressed by its playground-relative
     path. Errors when a segment is empty or contains the separator, which
     would make two checkouts share one build directory. *)
@@ -170,6 +199,21 @@ val volume_probe : volume_name:string -> timeout_sec:float -> volume_probe_outco
 (** Create the volume when absent. [container volume create] is not
     idempotent, so existence is settled by the probe rather than by reading
     its "already exists" message. *)
+type volume_kind =
+  | Build_volume
+  | Work_volume
+
+val volume_kind_label : volume_kind -> string
+
+val ensure_volume
+  :  kind:volume_kind
+  -> volume_name:string
+  -> size:string
+  -> timeout_sec:float
+  -> ([ `Created | `Already_present ], string) result
+(** Error codes carry the kind: [microvm_build_volume_*] or
+    [microvm_work_volume_*]. *)
+
 val ensure_build_volume
   :  volume_name:string
   -> size:string
@@ -238,6 +282,10 @@ val build_link_targets_to_create : build_link_row list -> string list
     root with an explicit writable mode that applies only to new directories;
     existing Keeper-owned targets are untouched. *)
 val build_target_mkdir_argv : container_name:string -> targets:string list -> string list
+
+val keeper_work_root_mkdir_argv : container_name:string -> keeper_name:string -> string list
+(** Create {!keeper_work_root} inside the guest as root with an explicit
+    mode, for the same reason as {!build_target_mkdir_argv}. Idempotent. *)
 
 val keeper_vm_container_kind : string
 

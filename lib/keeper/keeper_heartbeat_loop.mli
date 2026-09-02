@@ -227,7 +227,15 @@ val run_keepalive_unified_turn :
   on_deferred_runtime_consumed:(unit -> unit) ->
   record_deferred_runtime_lane:
     (Keeper_turn_driver.deferred_runtime_lane -> unit) ->
+  previous_turn_stop:Keeper_turn_checkpoint_reason.t option ->
+  record_turn_stop:(Keeper_turn_checkpoint_reason.t option -> unit) ->
   keepalive_turn_outcome
+(** [previous_turn_stop] is why the last turn that ran in this process ended
+    before completing; the prompt renders it. [record_turn_stop] receives the
+    new value after a cycle runs — [Some reason] for a checkpoint, [None] for
+    every other outcome — and is not called when no cycle ran, so the last
+    real turn's reason survives skipped cycles. The heartbeat loop owns the
+    ref behind both, like [record_deferred_runtime_lane]. *)
 
 val refresh_work_as_heartbeat :
   ctx:'a context ->

@@ -89,6 +89,7 @@ let run_keeper_cycle_admitted
       ?on_deferred_runtime_consumed
       ?event_bus
       ?hitl_resolution
+      ?previous_turn_stop
       ~ctx
       ~meta_after_triage
       ~stop
@@ -110,6 +111,7 @@ let run_keeper_cycle_admitted
         ~observation:obs
         ~wake
         ?hitl_resolution
+        ?previous_turn_stop
         (* RFC-0315: pass the whole decision, not just its channel — the
            prompt renders the verdict reasons so the turn knows why it woke. *)
         ~turn_decision
@@ -192,6 +194,7 @@ let run_keeper_cycle
       ?on_deferred_runtime_consumed
       ?event_bus
       ?hitl_resolution
+      ?previous_turn_stop
       ~ctx
       ~meta_after_triage
       ~stop
@@ -206,6 +209,7 @@ let run_keeper_cycle
       (fun () -> Keeper_turn_dispatch_authority.validate admission_token)
     ?deferred_runtime_lane
     ?on_deferred_runtime_consumed
+    ?previous_turn_stop
     ~ctx
     ~meta_after_triage
     ~stop

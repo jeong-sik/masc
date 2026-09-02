@@ -214,7 +214,8 @@ let make_task ?(handoff_context = None) ~task_status () : Masc_domain.task =
     skills = [];
   }
 
-let user_message ?turn_decision ?current_task ?active_goal_summaries observation =
+let user_message ?turn_decision ?current_task ?active_goal_summaries
+    ?previous_turn_stop observation =
   let turn_decision =
     Option.value
       turn_decision
@@ -227,9 +228,51 @@ let user_message ?turn_decision ?current_task ?active_goal_summaries observation
   in
   let { Prompt.world_state = user; _ } =
     Prompt.build_prompt ~meta ~config:(Lazy.force prompt_config) ~turn_decision
-      ~current_task ?active_goal_summaries ~observation ()
+      ?previous_turn_stop ~current_task ?active_goal_summaries ~observation ()
   in
   user
+
+(* --- Previous turn stop: the loop guard's reason reaches the next turn --- *)
+
+let contains ~sub body = Option.is_some (Astring.String.find_sub ~sub body)
+
+(* The live shape from 2026-09-01: kidsnote-pr-jira-checker ended 259 of 361
+   turns on the same repeated Jira query and repeated it next turn. The line
+   has to name the tool and the count, because that is what the model can
+   match against its own history. *)
+let test_repeated_tool_call_stop_is_named_in_the_next_prompt () =
+  let body =
+    user_message
+      ~previous_turn_stop:
+        (Masc.Keeper_turn_checkpoint_reason.Repeated_tool_call
+           { tool_name = "atlassian_searchJiraIssuesUsingJql"; repeated_count = 3 })
+      base_observation
+  in
+  check bool "the section that carries wake reasons carries the stop" true
+    (contains ~sub:"### Autonomous Trigger" body);
+  check bool "the tool is named" true
+    (contains ~sub:"`atlassian_searchJiraIssuesUsingJql` was called 3 times" body);
+  check bool "the model is told the result did not change" true
+    (contains ~sub:"returned the same result" body)
+;;
+
+let test_repeated_text_stop_is_named_in_the_next_prompt () =
+  let body =
+    user_message
+      ~previous_turn_stop:
+        (Masc.Keeper_turn_checkpoint_reason.Repeated_assistant_text
+           { repeated_count = 3 })
+      base_observation
+  in
+  check bool "the repeated-message count is named" true
+    (contains ~sub:"wrote the same message 3 times" body)
+;;
+
+let test_no_previous_stop_renders_no_line () =
+  let body = user_message base_observation in
+  check bool "a completed or first turn says nothing about a previous stop" false
+    (contains ~sub:"- Previous turn:" body)
+;;
 
 (* --- Own Recent Actions: arguments ride on refusals --- *)
 
@@ -954,5 +997,14 @@ let () =
             test_goal_summaries_render_titles;
           test_case "the heading counts what the block lists" `Quick
             test_goal_heading_counts_what_the_block_lists;
+        ] );
+      ( "previous turn stop reaches the next prompt",
+        [
+          test_case "a repeated tool call is named with its count" `Quick
+            test_repeated_tool_call_stop_is_named_in_the_next_prompt;
+          test_case "repeated assistant text is named with its count" `Quick
+            test_repeated_text_stop_is_named_in_the_next_prompt;
+          test_case "no previous stop renders no line" `Quick
+            test_no_previous_stop_renders_no_line;
         ] );
     ]

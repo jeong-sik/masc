@@ -106,12 +106,15 @@ type continuation_route_disposition =
   | Continuation_no_terminal_effect_receipt
   | Continuation_route_not_applicable
 
-type checkpoint_reason =
+type checkpoint_reason = Keeper_turn_checkpoint_reason.t =
   | Operation_queued
   | Durable_stimulus_arrived
   | Awaiting_external_effect
-  | Repeated_tool_call
-  | Repeated_assistant_text
+  | Repeated_tool_call of
+      { tool_name : string
+      ; repeated_count : int
+      }
+  | Repeated_assistant_text of { repeated_count : int }
 
 type turn_success =
   | Turn_completed of
@@ -137,11 +140,18 @@ let turn_success_of_stop_reason ~meta ~continuation_route = function
   | Runtime_agent.Awaiting_external_effect _ ->
     Turn_checkpointed
       { meta; checkpoint_reason = Awaiting_external_effect; continuation_route }
-  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
-    Turn_checkpointed { meta; checkpoint_reason = Repeated_tool_call; continuation_route }
-  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
+  | Runtime_agent.Yielded_after_repeated_tool_call { tool_name; repeated_count; _ } ->
     Turn_checkpointed
-      { meta; checkpoint_reason = Repeated_assistant_text; continuation_route }
+      { meta
+      ; checkpoint_reason = Repeated_tool_call { tool_name; repeated_count }
+      ; continuation_route
+      }
+  | Runtime_agent.Yielded_after_repeated_assistant_text { repeated_count; _ } ->
+    Turn_checkpointed
+      { meta
+      ; checkpoint_reason = Repeated_assistant_text { repeated_count }
+      ; continuation_route
+      }
   | Runtime_agent.InputRequired _ -> Turn_input_required meta
 ;;
 
@@ -327,6 +337,7 @@ let run_keeper_cycle
       ~(observation : Keeper_world_observation.world_observation)
       ~(wake : Keeper_registry.wake_reason)
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
+      ?(previous_turn_stop : Keeper_turn_checkpoint_reason.t option)
       ?shared_context
       ?event_bus
       ?hitl_resolution
@@ -694,6 +705,7 @@ let run_keeper_cycle
                    ~config
                    ~profile_defaults
                    ~turn_decision
+                   ?previous_turn_stop
                    ~current_task
                    ~task_skill_surfaces
                    ~active_goal_summaries

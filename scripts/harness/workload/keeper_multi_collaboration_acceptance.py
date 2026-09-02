@@ -165,6 +165,25 @@ if rw26_fibonacci_leading_one_count(10) != 3:
 TRANSPORT_RETRY_INTERVAL_SEC = 10.0
 TRANSPORT_RETRY_ATTEMPTS = 30
 
+GOAL_VERIFIER_PHASE_FAILED = "goal_verifier_phase_failed"
+
+
+def goal_verifier_failure_evidence(
+    *, goal_id: str, task_id: str, error: Exception
+) -> dict[str, Any]:
+    """Typed record of an RW23 phase failure. The phase is paced by the
+    coordinator's own turns, so a wait that runs out is that mission's
+    result, not the round's (#32597: one 300 s wait erased 22 missions of
+    evidence). The bundle keeps this and the assertions read it as failed."""
+    return {
+        "failure": GOAL_VERIFIER_PHASE_FAILED,
+        "goal_id": goal_id,
+        "task_id": task_id,
+        "detail": str(error),
+        "recorded_at": utc_now(),
+    }
+
+
 def goal_verifier_convergence_timeout(request_timeout: float) -> float:
     return (2.0 * request_timeout) + (2.0 * GOAL_VERIFIER_RETRY_INTERVAL_SEC)
 
@@ -2014,6 +2033,21 @@ class MissionRun:
             ),
         )
 
+    def run_goal_verifier_guarded(self) -> None:
+        """RW23 runs to completion or leaves a typed failure record; it never
+        aborts the round. See goal_verifier_failure_evidence."""
+        try:
+            self.run_goal_verifier_refute_reenter_prove()
+        except AcceptanceError as error:
+            self.goal_verifier_evidence = goal_verifier_failure_evidence(
+                goal_id=self.verifier_goal_id,
+                task_id=self.verifier_task_id,
+                error=error,
+            )
+            self.writer.write_json(
+                "observations/goal-verifier-failure.json", self.goal_verifier_evidence
+            )
+
     def run_goal_verifier_refute_reenter_prove(self) -> None:
         self.call(
             "goal-verifier-upsert",
@@ -3346,7 +3380,12 @@ class MissionRun:
                     goal_verifier_runs_by_id.get(goal_verifier_refuted_run),
                     self.verifier_artifact,
                 ),
-                f"goal={self.verifier_goal_id} refuted_run={goal_verifier_refuted_run}",
+                f"goal={self.verifier_goal_id} refuted_run={goal_verifier_refuted_run}"
+                + (
+                    f" failure={self.goal_verifier_evidence.get('detail')}"
+                    if self.goal_verifier_evidence.get("failure") == GOAL_VERIFIER_PHASE_FAILED
+                    else ""
+                ),
             ),
             "goal_verifier_reentry_proven": (
                 isinstance(goal_verifier_proven, dict)
@@ -3416,7 +3455,7 @@ class MissionRun:
         self.run_claim_reproduction(post_id)
         self.run_debate(post_id)
         self.run_qa_coverage(post_id)
-        self.run_goal_verifier_refute_reenter_prove()
+        self.run_goal_verifier_guarded()
         self.run_continuity_chain(post_id)
         self.restart_and_recall(post_id)
         self.wait_for_async_sources()

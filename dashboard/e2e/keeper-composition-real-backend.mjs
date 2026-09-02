@@ -19,7 +19,10 @@ const keeperName = required('MASC_COMPOSITION_KEEPER_NAME')
 const expectedBasePath = required('MASC_COMPOSITION_EXPECTED_BASE_PATH')
 const artifactDir = required('MASC_COMPOSITION_BROWSER_ARTIFACT_DIR')
 const goalVerificationGoalId = required('MASC_GOAL_VERIFICATION_GOAL_ID')
-const goalVerificationRunId = required('MASC_GOAL_VERIFICATION_RUN_ID')
+// Optional on purpose: when the RW23 phase left no proven run (#32597), the
+// composition proof still runs and the goal-verification measurement records
+// that it was skipped, so one mission's failure does not erase another's proof.
+const goalVerificationRunId = process.env.MASC_GOAL_VERIFICATION_RUN_ID?.trim() || null
 const token = readFileSync(tokenFile, 'utf8').trim()
 if (!token) throw new Error('dashboard token file is empty')
 
@@ -138,6 +141,8 @@ try {
 
   route.hash = 'workspace?section=verification'
   await page.goto(route.toString())
+  let goalVerificationMeasurement
+  if (goalVerificationRunId) {
   const goalRunsResponse = await fetch(
     new URL('/api/v1/dashboard/goal-verification-runs', dashboardUrl),
     { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
@@ -178,7 +183,7 @@ try {
     path: goalVerificationScreenshotPath,
     fullPage: true,
   })
-  const goalVerificationMeasurement = {
+  goalVerificationMeasurement = {
     schema: 'masc.goal_verification_browser_evidence.v1',
     goal_id: goalVerificationGoalId,
     run_id: goalVerificationRunId,
@@ -195,6 +200,20 @@ try {
     goalVerificationMeasurementPath,
     `${JSON.stringify(goalVerificationMeasurement, null, 2)}\n`,
   )
+  } else {
+    goalVerificationMeasurement = {
+      schema: 'masc.goal_verification_browser_evidence.v1',
+      goal_id: goalVerificationGoalId,
+      run_id: null,
+      status: 'skipped',
+      reason: 'no_proven_run',
+      viewport,
+    }
+    writeFileSync(
+      goalVerificationMeasurementPath,
+      `${JSON.stringify(goalVerificationMeasurement, null, 2)}\n`,
+    )
+  }
   process.stdout.write(`${JSON.stringify({
     composition: measurement,
     persistence: persistenceMeasurement,

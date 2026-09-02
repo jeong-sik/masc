@@ -3895,6 +3895,25 @@ let scrolled_surface (state : state) (surface : surface) : scrolled option =
 let surface_row_texts (state : state) : surface -> string list option = function
   | Keepers Keeper_list ->
       Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
+  | Keepers Keeper_detail when state.context_inspector_open ->
+      (* The request tab's item labels, so the surface search (/) walks the
+         same rows j/k moves. Other tabs keep no searchable list. *)
+      if
+        state.context_inspector_tab = Masc_tui_context_inspector.Exact_input
+      then
+        match state.context_inspector_reading with
+        | Some
+            ( _
+            , { Masc_tui_context_inspector.provider_input = Ok input; _ } ) ->
+            let labels =
+              List.map
+                (fun (item : Masc_tui_context_inspector.exact_input_item) ->
+                   Masc_tui_context_inspector.exact_input_label item.kind)
+                (Masc_tui_context_inspector.exact_input_items input)
+            in
+            (match labels with [] -> None | _ -> Some labels)
+        | _ -> None
+      else None
   | Lanes ->
       (match state.lanes_mode with
        | Lanes_run_list _ | Lanes_run_detail _ -> None

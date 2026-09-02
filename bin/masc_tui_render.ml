@@ -15952,6 +15952,21 @@ let render_context_inspector state =
       Ansi.bold ^ (Theme.info ()) ^ number ^ ":" ^ label ^ Ansi.reset
     else Ansi.dim ^ number ^ ":" ^ label ^ Ansi.reset
   in
+  (* The search query, drawn where the typing lands: the Keepers strip's
+     own indicator sits on a surface this pane replaced. *)
+  let search_marker =
+    match state.search with
+    | Some query ->
+        Printf.sprintf "  %s/%sâ%s" Ansi.cyan
+          (Terminal_text.single_line query)
+          Ansi.reset
+    | None ->
+        if state.search_last = "" then ""
+        else
+          Printf.sprintf "  %s/%s (n/N)%s" Ansi.dim
+            (Terminal_text.single_line state.search_last)
+            Ansi.reset
+  in
   framed_top buf cols;
   framed_line buf cols
     (Printf.sprintf "%s Context  %s%s  %s  %s"
@@ -15959,7 +15974,8 @@ let render_context_inspector state =
        (tab_label Masc_tui_context_inspector.Composition "1" "stack")
        (tab_label Masc_tui_context_inspector.Exact_input "2" "request")
        ^ "  "
-       ^ (tab_label Masc_tui_context_inspector.Input_map "3" "proof"));
+       ^ (tab_label Masc_tui_context_inspector.Input_map "3" "proof")
+       ^ search_marker);
   framed_divider buf cols;
   let content_height = framed_content_height ~rows in
   let drawn =
@@ -16052,9 +16068,9 @@ let render_context_inspector state =
           state.context_inspector_tab, cols >= keeper_split_threshold_cols
         with
         | (Masc_tui_context_inspector.Exact_input | Masc_tui_context_inspector.Input_map), true ->
-            "1/2/3 or Tab:switch  [/] turn  j/k:select or scroll  h/l:pane  Enter:open exact  r:refresh  Esc:close"
+            "1/2/3 or Tab:switch  [/] turn  /:search  j/k:select or scroll  h/l:pane  Enter:open exact  r:refresh  Esc:close"
         | _ ->
-            "1/2/3 or Tab:switch  [/] turn  j/k:select  Enter:open exact  r:refresh  Esc:close")
+            "1/2/3 or Tab:switch  [/] turn  /:search  j/k:select  Enter:open exact  r:refresh  Esc:close")
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
   finish_surface state ~surface_key:"context-inspector" ~rows:terminal_rows

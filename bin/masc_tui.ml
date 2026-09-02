@@ -4113,6 +4113,11 @@ let search_land state index =
   in
   match state.view with
   | Keepers Keeper_list -> state.keeper_cursor <- index
+  | Keepers Keeper_detail when state.context_inspector_open ->
+      (* A landed search row is a new item: its reader starts at the top of
+         the detail, the way a j/k move does. *)
+      state.context_inspector_cursor <- index;
+      state.context_inspector_detail_scroll <- 0
   | Lanes -> state.lanes_standalone_cursor <- index
   | Verification ->
       state.verification_cursor <- index;
@@ -11645,8 +11650,11 @@ and is loaded on demand through keeper_skill.
            Render_schedule.request render_schedule Render_schedule.Force
        (* [/context] is modal: the summary and exact input text must not leak
           keys into the composer underneath. The quit confirmation and chrome
-          toggles remain global above it, matching Help and Palette. *)
-       | Some k when state.context_inspector_open ->
+          toggles remain global above it, matching Help and Palette. An
+          active surface search outranks it: typing during a search is the
+          search, and the search arm below owns those keys. *)
+       | Some k
+         when state.context_inspector_open && Option.is_none state.search ->
            let exact_input_items () =
              match state.context_inspector_reading with
              | Some
@@ -11694,6 +11702,7 @@ and is loaded on demand through keeper_skill.
                      state.context_inspector_exact <- None;
                      state.context_inspector_scroll <- 0
                  | None -> close ())
+<<<<<<< HEAD
             | "[" | "]" ->
                 (* Turn navigation: [ steps back through the page's rows, ]
                    steps forward, and the fetch re-reads the exact provider
@@ -11728,6 +11737,51 @@ and is loaded on demand through keeper_skill.
                       state.context_inspector_keeper
                   end
                 end
+            | "/" when
+                state.context_inspector_tab
+                = Masc_tui_context_inspector.Exact_input
+                && Option.is_some state.context_inspector_reading ->
+                (* The surface search's own arm sits below this modal block,
+                   so the pane starts the search itself: same state, same
+                   keys, and the block above now yields while it runs. *)
+                state.search <- Some ""
+||||||| 80d6baf62d
+=======
+            | "[" | "]" ->
+                (* Turn navigation: [ steps back through the page's rows, ]
+                   steps forward, and the fetch re-reads the exact provider
+                   input for the row they name. The keys work on every tab;
+                   a row without a snapshot says so on the request tab. *)
+                let count =
+                  match state.context_inspector_reading with
+                  | Some
+                      ( _
+                      , { Masc_tui_context_inspector.turn =
+                            Ok { Masc_tui_context_inspector.rows; _ }
+                        ; _ } ) ->
+                      List.length rows
+                  | _ -> 0
+                in
+                if count > 0 then begin
+                  let moved =
+                    if k = "[" then
+                      min (count - 1) (state.context_inspector_turn_back + 1)
+                    else max 0 (state.context_inspector_turn_back - 1)
+                  in
+                  if moved <> state.context_inspector_turn_back then begin
+                    state.context_inspector_turn_back <- moved;
+                    state.context_inspector_cursor <- 0;
+                    state.context_inspector_exact <- None;
+                    state.context_inspector_scroll <- 0;
+                    state.context_inspector_detail_scroll <- 0;
+                    Option.iter
+                      (fun keeper_name ->
+                         launch_context_inspector_load state
+                           ~mailbox:async_messages ~keeper_name)
+                      state.context_inspector_keeper
+                  end
+                end
+>>>>>>> origin/main
             | "r" ->
                 Option.iter
                   (fun keeper_name ->

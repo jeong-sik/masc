@@ -3300,14 +3300,22 @@ let fusion_run_json ?(status = "completed") ?(topology = "simple")
      ]
     @ failure_fields @ outcome_fields)
 
+(* #32490 이후 wire 는 tool_trace 를 항상 싣는다. 픽스처도 필드를 빼는 대신
+   빈 원장을 명시한다. *)
+let empty_fusion_tool_trace_json =
+  `Assoc
+    [ "status", `String "complete"
+    ; "observed_actors", `List []
+    ; "dropped_events", `Int 0
+    ; "gaps", `List []
+    ; "events", `List []
+    ]
+
 let fusion_recorded_detail_json ?(source = "fusion")
-    ?(origin_run_id = "fusion-recorded-501") ?tool_trace () =
+    ?(origin_run_id = "fusion-recorded-501")
+    ?(tool_trace = empty_fusion_tool_trace_json) () =
   let run_id = "fusion-recorded-501" in
-  let tool_trace_fields =
-    match tool_trace with
-    | Some trace -> [ "tool_trace", trace ]
-    | None -> []
-  in
+  let tool_trace_fields = [ "tool_trace", tool_trace ] in
   `Assoc
     [ "generated_at", `String "2026-08-24T09:00:00Z"
     ; "run", fusion_run_json run_id

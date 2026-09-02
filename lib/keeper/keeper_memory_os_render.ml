@@ -8,9 +8,12 @@ let basis_label fact =
   match fact.basis with
   | Observed Transcript -> "observed"
   | Observed (Board { post_id; comment_id = None }) ->
-    Printf.sprintf "observed board=%s" post_id
+    Printf.sprintf "observed board=%s" (Board_types.Post_id.to_string post_id)
   | Observed (Board { post_id; comment_id = Some comment_id }) ->
-    Printf.sprintf "observed board=%s comment=%s" post_id comment_id
+    Printf.sprintf
+      "observed board=%s comment=%s"
+      (Board_types.Post_id.to_string post_id)
+      (Board_types.Comment_id.to_string comment_id)
   | Derived _ -> "derived"
 ;;
 

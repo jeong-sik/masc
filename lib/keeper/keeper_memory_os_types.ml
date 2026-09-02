@@ -397,8 +397,8 @@ type derivation =
   }
 
 type board_ref =
-  { post_id : string
-  ; comment_id : string option
+  { post_id : Board_types.Post_id.t
+  ; comment_id : Board_types.Comment_id.t option
   }
 
 type observation =
@@ -527,32 +527,32 @@ let derivation_of_json = function
     wire_here Expected_object
 ;;
 
-(* The Board owns its id grammar; Memory OS asks it instead of spelling a
-   second one. Existence is not checked here: a reference names what was
-   cited, and a reader revalidates it the way a source-bound fact is
-   revalidated against its file. *)
+(* The Board owns its id grammar; Memory OS keeps the Board's parsed identity
+   rather than a string that passed once. Existence is not checked here: a
+   reference names what was cited. No reader revalidates it yet; RFC-0401
+   piece 2 does so at recall. *)
 let board_ref_of_ids ~post_id ~comment_id =
   match Board_types.Post_id.of_string post_id with
   | Error _ -> wire_fail [ Wire_field wire_field_post_id ] (Not_a_board_post_id post_id)
-  | Ok _ ->
+  | Ok post_id ->
     (match comment_id with
-     | None -> Ok { post_id = String.trim post_id; comment_id = None }
+     | None -> Ok { post_id; comment_id = None }
      | Some comment_id ->
        (match Board_types.Comment_id.of_string comment_id with
         | Error _ ->
           wire_fail
             [ Wire_field wire_field_comment_id ]
             (Not_a_board_comment_id comment_id)
-        | Ok _ ->
-          Ok { post_id = String.trim post_id; comment_id = Some (String.trim comment_id) }))
+        | Ok comment_id -> Ok { post_id; comment_id = Some comment_id }))
 ;;
 
 let board_ref_to_json (board : board_ref) =
   `Assoc
-    ((wire_field_post_id, `String board.post_id)
+    ((wire_field_post_id, `String (Board_types.Post_id.to_string board.post_id))
      :: (match board.comment_id with
          | None -> []
-         | Some comment_id -> [ wire_field_comment_id, `String comment_id ]))
+         | Some comment_id ->
+           [ wire_field_comment_id, `String (Board_types.Comment_id.to_string comment_id) ]))
 ;;
 
 let board_ref_of_json = function

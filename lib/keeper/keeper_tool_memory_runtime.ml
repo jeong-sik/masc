@@ -560,8 +560,9 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
     | _ -> Error Source_path_invalid
   in
   (* A Board reference is an observation source: the claim was read from a
-     post, optionally from one of its comments. Validated against the Board id
-     grammar only; whether the post still exists is a reader's question. *)
+     post, optionally from one of its comments. The ids are parsed by the
+     Board's own grammar; whether the post still exists is not checked at
+     write time and no reader checks it yet (RFC-0401 piece 2). *)
   let board_ref =
     let optional_string key =
       match Safe_ops.safe_member key args with
@@ -648,19 +649,11 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
       Memory_write_ok { body; source_path; basis }
 ;;
 
+(* The observed arms echo the stored wire shape; the derived arm reports a
+   count instead of the derivations. *)
 let memory_write_basis_receipt = function
-  | Keeper_memory_os_types.Observed Keeper_memory_os_types.Transcript ->
-    `Assoc [ "kind", `String "observed" ]
-  | Keeper_memory_os_types.Observed (Keeper_memory_os_types.Board board) ->
-    `Assoc
-      [ "kind", `String "observed"
-      ; ( "board"
-        , `Assoc
-            (("post_id", `String board.post_id)
-             :: (match board.comment_id with
-                 | None -> []
-                 | Some comment_id -> [ "comment_id", `String comment_id ])) )
-      ]
+  | Keeper_memory_os_types.Observed _ as basis ->
+    Keeper_memory_os_types.basis_to_json basis
   | Keeper_memory_os_types.Derived derivations ->
     `Assoc
       [ "kind", `String "derived"

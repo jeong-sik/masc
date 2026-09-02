@@ -1,7 +1,6 @@
 (** Tests for Tool_unified — unified tool query interface. *)
 
 module Tool_unified = Masc.Tool_unified
-module Keeper_tool_descriptor = Masc.Keeper_tool_descriptor
 module Tool_catalog = Tool_catalog
 module Tool_dispatch = Tool_dispatch
 module Tool_registry = Tool_registry

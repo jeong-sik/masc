@@ -189,7 +189,7 @@ type derivation =
     guessing from a post id that happens to appear in the claim text. The ids
     are the Board's own parsed identities, so a reference that fails the Board
     grammar cannot be built. Whether the post still exists is not checked by
-    any reader today; RFC-0401 piece 2 revalidates at recall the way a
+    any reader today; RFC-0402 piece 2 revalidates at recall the way a
     source-bound fact is revalidated against its file. *)
 type board_ref =
   { post_id : Board_types.Post_id.t

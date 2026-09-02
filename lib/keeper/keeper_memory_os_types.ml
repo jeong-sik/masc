@@ -529,7 +529,7 @@ let derivation_of_json = function
 
 (* The Board owns its id grammar; Memory OS keeps the Board's parsed identity
    rather than a string that passed once. Existence is not checked here: a
-   reference names what was cited. No reader revalidates it yet; RFC-0401
+   reference names what was cited. No reader revalidates it yet; RFC-0402
    piece 2 does so at recall. *)
 let board_ref_of_ids ~post_id ~comment_id =
   match Board_types.Post_id.of_string post_id with

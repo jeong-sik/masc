@@ -562,7 +562,7 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
   (* A Board reference is an observation source: the claim was read from a
      post, optionally from one of its comments. The ids are parsed by the
      Board's own grammar; whether the post still exists is not checked at
-     write time and no reader checks it yet (RFC-0401 piece 2). *)
+     write time and no reader checks it yet (RFC-0402 piece 2). *)
   let board_ref =
     let optional_string key =
       match Safe_ops.safe_member key args with

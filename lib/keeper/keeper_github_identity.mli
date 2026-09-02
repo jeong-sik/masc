@@ -48,9 +48,6 @@ val ensure_config_dir : config:Workspace.config -> keeper_name:string -> (string
 val overlay_config_env : config_dir:string -> string array -> string array
 val projected_config_dir : string array -> string option
 (** Read the exact [GH_CONFIG_DIR] installed by {!overlay_config_env}. *)
-val validate_local_tool_env : (string * string) list -> (unit, string) result
-(** Reject caller-authored bindings that would replace the Keeper-owned
-    GitHub identity projection. *)
 val strip_github_token_env : string array -> string array
 val projected_token_env_names : string array -> string list
 

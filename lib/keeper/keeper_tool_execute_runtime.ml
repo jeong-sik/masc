@@ -179,16 +179,9 @@ end
    [Keeper_tool_execute_input] (godfile decomp). *)
 let assoc_upsert = Keeper_tool_execute_input.assoc_upsert
 let typed_input_command_text = Keeper_tool_execute_input.typed_input_command_text
-let typed_input_has_env = Keeper_tool_execute_input.typed_input_has_env
 let typed_input_timeout_sec = Keeper_tool_execute_input.typed_input_timeout_sec
 let typed_input_timeout_budget = Keeper_tool_execute_input.typed_input_timeout_budget
 let typed_validation_error_text = Keeper_tool_execute_input.typed_validation_error_text
-
-let typed_input_env
-      ({ env; _ } : Keeper_tool_execute_typed_input.execute_input)
-  =
-  env
-;;
 
 (* Backend target helpers for typed Shell IR dispatch. *)
 let guest_sandbox_target = Keeper_sandbox_shell_ir_target.guest_target
@@ -285,71 +278,50 @@ let handle_tool_execute_typed
                    ~expected:sandbox_profile
                    ~actual:Remote_ssh)
           | Runtime binding ->
-            if typed_input_has_env input
-            then
-              Error
-                (Keeper_sandbox_shell_ir_target.target_error
-                   "typed Shell IR guest dispatch does not support env yet")
-            else
-              guest_sandbox_target
-                ~binding
-                ~meta
-                ~cwd
-                ~timeout_sec
-                ()
-              |> Result.map (fun dispatch -> `Guest dispatch)
+            guest_sandbox_target
+              ~binding
+              ~meta
+              ~cwd
+              ~timeout_sec
+              ()
+            |> Result.map (fun dispatch -> `Guest dispatch)
         in
         let dispatch_sandbox =
           match resolved_dispatch with
           | Error _ as error -> error
           | Ok `Remote_ssh ->
             (* Host identity projection is deliberately absent: the remote
-               shim synthesizes its own minimal environment and receives only
-               endpoint-allowlisted typed entries. The existing typed-env
-               secret check still applies before any transport is created. *)
+               shim synthesizes its own minimal environment. *)
             (match
-               Keeper_github_identity.validate_local_tool_env
-                 (typed_input_env input)
+               Keeper_sandbox_shell_ir_target.ssh_target
+                 ~base_path:config.base_path
+                 ~meta
+                 ~timeout_sec
+                 ()
              with
-             | Error err ->
-               Error
-                 (Keeper_sandbox_shell_ir_target.target_error
-                    ~fields:
-                      [ "requested_sandbox", `String "remote_ssh"
-                      ; "sandbox_profile", `String "remote_ssh"
-                      ]
-                    err)
-             | Ok () ->
-               (match
-                  Keeper_sandbox_shell_ir_target.ssh_target
-                    ~base_path:config.base_path
-                    ~meta
-                    ~timeout_sec
-                    ()
-                with
-                | Error error -> Error error
-                | Ok dispatch ->
-                  let endpoint_fields =
-                    match dispatch.target with
-                    | Masc_exec.Sandbox_target.Ssh { endpoint; _ } ->
-                      [ "remote_endpoint", `String endpoint.name
-                      ; "remote_host", `String endpoint.host
-                      ]
-                    | Host | Docker _ | Micro_vm _ | Delegated _ -> []
-                  in
-                  Ok
-                    { sandbox = dispatch.target
-                    ; sandbox_profile = Remote_ssh
-                    ; fields =
-                        [ "requested_sandbox", `String "remote_ssh"
-                        ; "via", `String "remote_ssh"
-                        ; "sandbox_profile", `String "remote_ssh"
-                        ]
-                        @ endpoint_fields
-                    ; base_host_env = None
-                    ; github_secret_files = (fun () -> Ok [])
-                    ; cleanup = Fun.id
-                    }))
+             | Error error -> Error error
+             | Ok dispatch ->
+               let endpoint_fields =
+                 match dispatch.target with
+                 | Masc_exec.Sandbox_target.Ssh { endpoint; _ } ->
+                   [ "remote_endpoint", `String endpoint.name
+                   ; "remote_host", `String endpoint.host
+                   ]
+                 | Host | Docker _ | Micro_vm _ | Delegated _ -> []
+               in
+               Ok
+                 { sandbox = dispatch.target
+                 ; sandbox_profile = Remote_ssh
+                 ; fields =
+                     [ "requested_sandbox", `String "remote_ssh"
+                     ; "via", `String "remote_ssh"
+                     ; "sandbox_profile", `String "remote_ssh"
+                     ]
+                     @ endpoint_fields
+                 ; base_host_env = None
+                 ; github_secret_files = (fun () -> Ok [])
+                 ; cleanup = Fun.id
+                 })
           (* The factory result is the sole route authority. Its frozen guest
              profile selects both the concrete target and the Gate label, so
              a later meta snapshot cannot split execution from observability. *)

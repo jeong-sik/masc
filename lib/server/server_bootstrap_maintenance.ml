@@ -681,6 +681,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            match
              Schedule_runner.tick
                ~consumer:Server_schedule_consumers.consumer
+               ~clock:Time_compat.now
                (Mcp_server.workspace_config state)
                ~now:started_at
            with

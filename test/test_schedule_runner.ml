@@ -60,8 +60,8 @@ let create_ok
   | Error err -> fail (service_error_to_string err)
 ;;
 
-let tick_ok ?consumer config ~now =
-  match tick ?consumer config ~now with
+let tick_ok ?consumer ?clock config ~now =
+  match tick ?consumer ?clock config ~now with
   | Ok result -> result
   | Error err -> fail (runner_error_to_string err)
 ;;
@@ -347,6 +347,100 @@ let test_tick_dispatches_recurring_candidate_to_next_due () =
      check (float 0.001) "recurring wake due" 200.0 wake.due_at)
 ;;
 
+(* The tick's [now] and the wake's stamps are two different readings. A
+   runner that stamps wakes with [now] writes a zero-length attempt for every
+   dispatch, however long the consumer took; a runner that anchored recurrence
+   on the wall clock would drift the next occurrence by the dispatch cost. *)
+let test_tick_stamps_wakes_from_clock_and_anchors_recurrence_on_now () =
+  with_workspace
+  @@ fun config ->
+  let calls = ref [] in
+  let accepted =
+    create_ok ~schedule_id:"clock-accepted"
+      ~recurrence:(Interval { interval_sec = 60 })
+      config
+  in
+  (* Each clock reading is later than the last; the tick itself stays at 201. *)
+  let readings = ref 0 in
+  let clock () =
+    incr readings;
+    300.0 +. (float_of_int !readings *. 0.5)
+  in
+  let result =
+    tick_ok config ~now:201.0 ~clock ~consumer:(accepting_consumer calls)
+  in
+  check int "one dispatch" 1 (List.length result.dispatches);
+  check int "clock read once to start and once to finish" 2 !readings;
+  (match Schedule_store.get_schedule config ~schedule_id:accepted.schedule_id with
+   | None -> fail "schedule missing after dispatch"
+   | Some stored ->
+     check (float 0.001) "next occurrence anchored on the tick, not the clock"
+       260.0 stored.due_at);
+  (match
+     Schedule_store.last_wake_for_schedule_instance
+       (Schedule_store.read_state config)
+       ~schedule_instance_id:accepted.schedule_instance_id
+       ~schedule_id:accepted.schedule_id
+   with
+   | None -> fail "missing wake record"
+   | Some wake ->
+     check (float 0.001) "wake started when the attempt began" 300.5 wake.started_at;
+     check (option (float 0.001)) "wake finished when the acceptance landed"
+       (Some 301.0) wake.finished_at);
+  (* A terminal rejection and a retryable failure stamp their failed wake the
+     same way: the clock, not the tick. *)
+  let rejected =
+    create_ok ~schedule_id:"clock-rejected" config
+  in
+  let rejecting =
+    accepting_consumer
+      ~dispatch_result:(Error (Terminal_dispatch_rejection "no"))
+      (ref [])
+  in
+  readings := 0;
+  let _ = tick_ok config ~now:201.0 ~clock ~consumer:rejecting in
+  (match
+     Schedule_store.last_wake_for_schedule_instance
+       (Schedule_store.read_state config)
+       ~schedule_instance_id:rejected.schedule_instance_id
+       ~schedule_id:rejected.schedule_id
+   with
+   | None -> fail "missing rejected wake record"
+   | Some wake ->
+     check string "rejected wake failed" "failed"
+       (Schedule_domain.wake_status_to_string wake.status);
+     check (float 0.001) "rejected wake started from the clock" 300.5 wake.started_at;
+     check (option (float 0.001)) "rejected wake finished from the clock"
+       (Some 301.0) wake.finished_at);
+  let retried =
+    create_ok ~schedule_id:"clock-retried" config
+  in
+  let retrying =
+    accepting_consumer
+      ~dispatch_result:(Error (Retryable_dispatch_failure "later"))
+      (ref [])
+  in
+  readings := 0;
+  let _ = tick_ok config ~now:201.0 ~clock ~consumer:retrying in
+  (match
+     Schedule_store.last_wake_for_schedule_instance
+       (Schedule_store.read_state config)
+       ~schedule_instance_id:retried.schedule_instance_id
+       ~schedule_id:retried.schedule_id
+   with
+   | None -> fail "missing retried wake record"
+   | Some wake ->
+     check string "retried wake failed" "failed"
+       (Schedule_domain.wake_status_to_string wake.status);
+     check (option (float 0.001)) "retried wake finished from the clock"
+       (Some 301.0) wake.finished_at);
+  (match Schedule_store.get_schedule config ~schedule_id:retried.schedule_id with
+   | None -> fail "retried schedule missing"
+   | Some stored ->
+     check string "retried schedule back to due" "due"
+       (schedule_status_to_string stored.status))
+;;
+
 let test_tick_dispatches_every_recurring_occurrence () =
   with_workspace
   @@ fun config ->
@@ -623,10 +717,30 @@ let test_runner_status_snapshot_tracks_liveness () =
   check int "wake unregistered keeper count" 1
     (json_int "wake_skipped_unregistered_keeper" wake_counts);
   check int "wake failed count" 1 (json_int "wake_failed" wake_counts);
+  (* Three successful ticks so far: totals keep what last_counts forgot. *)
+  let totals =
+    match json_field "totals" wake_degraded with
+    | Some totals -> totals
+    | None -> fail "missing totals"
+  in
+  check int "total due changed" 5 (json_int "due_changed" totals);
+  check int "total rescheduled" 4 (json_int "rescheduled" totals);
+  check int "total succeeded dispatches" 2 (json_int "dispatch_succeeded" totals);
+  check int "total failed dispatches" 1 (json_int "dispatch_failed" totals);
+  check int "total unsupported dispatches" 1 (json_int "dispatch_unsupported" totals);
+  check int "total start-rejected dispatches" 1
+    (json_int "dispatch_start_rejected" totals);
+  check int "total wake enqueued" 2 (json_int "wake_enqueued" totals);
+  check int "total wake failed" 1 (json_int "wake_failed" totals);
   Schedule_runner_status.record_tick_error ~started_at:3.0 ~finished_at:3.5 "boom";
   let degraded = render ~now:4.0 () in
   check string "degraded status" "degraded" (json_string "status" degraded);
   check int "failure count" 1 (json_int "failure_count" degraded);
+  check int "a failed tick adds nothing to totals" 2
+    (json_int "dispatch_succeeded"
+       (match json_field "totals" degraded with
+        | Some totals -> totals
+        | None -> fail "missing totals after error"));
   Schedule_runner_status.record_tick_crash ~started_at:5.0 ~finished_at:5.5 "crash";
   let stale = render ~now:20.0 () in
   check string "stale status" "stale" (json_string "status" stale);
@@ -675,6 +789,8 @@ let () =
             test_tick_reschedules_recurring_candidate_after_signal
         ; test_case "dispatches recurring candidate to next due" `Quick
             test_tick_dispatches_recurring_candidate_to_next_due
+        ; test_case "stamps wakes from the clock and anchors recurrence on now" `Quick
+            test_tick_stamps_wakes_from_clock_and_anchors_recurrence_on_now
         ; test_case "dispatches every recurring occurrence" `Quick
             test_tick_dispatches_every_recurring_occurrence
         ; test_case "marks terminal dispatch rejection failed" `Quick

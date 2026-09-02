@@ -84,6 +84,7 @@ val wake_signal_of_yojson : Yojson.Safe.t -> (wake_signal, string) result
 
 val tick :
   ?consumer:consumer ->
+  ?clock:(unit -> float) ->
   Workspace_utils.config ->
   now:float ->
   (tick_result, runner_error) result
@@ -91,4 +92,9 @@ val tick :
     observable due work. A durable consumer acceptance completes that wake
     occurrence immediately. Consumer payload rejection is terminal. A retryable
     dispatch failure finishes only its current wake attempt and leaves the
-    schedule [Due] for the next tick. *)
+    schedule [Due] for the next tick.
+
+    [now] decides what is due and anchors recurrence; [clock] stamps each
+    wake's [started_at] and [finished_at] as the attempt actually begins and
+    ends. Without [clock] both stamps copy [now], so a wake reads as
+    instantaneous whatever the dispatch cost. *)

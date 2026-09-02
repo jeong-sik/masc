@@ -43,6 +43,13 @@ type snapshot =
   ; last_error : string option
   ; last_duration_sec : float option
   ; last_counts : tick_counts option
+  ; totals : tick_counts
+      (** Sum of every successful tick's counts since this process started.
+          [last_counts] answers "what did the newest tick do"; a burst of
+          failed dispatches that a later tick retried to success is gone from
+          it and still here. Process-local like the rest of this snapshot:
+          the durable record of each attempt is the schedule store's wake
+          list. *)
   }
 
 val reset_for_test : unit -> unit

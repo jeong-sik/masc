@@ -5,8 +5,6 @@ type container =
   ; status : string
   ; running : bool option
   ; created_at : string option
-  ; container_kind : string option
-  ; network_label : string option
   ; owner_pid : int option
   ; cpus : int option
   ; memory_bytes : int option
@@ -34,6 +32,11 @@ type sandbox_paths =
   ; guest_build_volume : string option
   }
 
+type sandbox_profile =
+  | Docker
+  | Micro_vm
+  | Remote_ssh
+
 (** A checkout whose [_build] is not on the volume, and why.
 
     This is the row an operator acts on: it is still writing to the virtiofs
@@ -53,13 +56,10 @@ type build_volume =
   }
 
 type t =
-  { sandbox_profile : string option
+  { sandbox_profile : sandbox_profile option
   ; configured_network_mode : string option
-  ; effective_mode : string option
-  ; managed_container_kind : string option
   ; containers : container list option
   ; container_error : string option
-  ; why_no_container : string option
   ; build_volume : build_volume option
   ; resource_config : resource_config option
   ; paths : sandbox_paths option
@@ -90,6 +90,16 @@ let int_opt ?key ~path fields =
   | Some (`Int value) -> Ok (Some value)
   | Some _ -> Error (path ^ " must be an integer or null")
 
+let profile_opt ~sanitize fields =
+  match field "sandbox_profile" fields with
+  | None | Some `Null -> Ok None
+  | Some (`String "docker") -> Ok (Some Docker)
+  | Some (`String "microvm") -> Ok (Some Micro_vm)
+  | Some (`String "remote_ssh") -> Ok (Some Remote_ssh)
+  | Some (`String value) ->
+    Error ("sandbox_profile has unsupported value " ^ sanitize value)
+  | Some _ -> Error "sandbox_profile must be a string or null"
+
 let decode_container ~sanitize index json =
   let open Result.Syntax in
   let prefix = Printf.sprintf "sandbox_live.containers[%d]." index in
@@ -107,14 +117,6 @@ let decode_container ~sanitize index json =
   let* running = bool_opt ~key:"running" ~path:(prefix ^ "running") fields in
   let* created_at =
     string_opt ~sanitize ~key:"created_at" ~path:(prefix ^ "created_at") fields
-  in
-  let* container_kind =
-    string_opt ~sanitize ~key:"container_kind"
-      ~path:(prefix ^ "container_kind") fields
-  in
-  let* network_label =
-    string_opt ~sanitize ~key:"network_label"
-      ~path:(prefix ^ "network_label") fields
   in
   let* owner_pid =
     int_opt ~key:"owner_pid" ~path:(prefix ^ "owner_pid") fields
@@ -138,8 +140,6 @@ let decode_container ~sanitize index json =
     ; status
     ; running
     ; created_at
-    ; container_kind
-    ; network_label
     ; owner_pid
     ; cpus
     ; memory_bytes
@@ -274,24 +274,13 @@ let decode ~sanitize json =
     | Some `Null | None -> Error "keeper status has no sandbox_live observation"
     | Some _ -> Error "sandbox_live must be an object"
   in
-  let* sandbox_profile =
-    string_opt ~sanitize ~path:"sandbox_profile" live
-  in
+  let* sandbox_profile = profile_opt ~sanitize live in
   let* configured_network_mode =
     string_opt ~sanitize ~path:"configured_network_mode" live
-  in
-  let* effective_mode =
-    string_opt ~sanitize ~path:"effective_mode" live
-  in
-  let* managed_container_kind =
-    string_opt ~sanitize ~path:"managed_container_kind" live
   in
   let* containers = decode_containers ~sanitize live in
   let* container_error =
     string_opt ~sanitize ~path:"container_error" live
-  in
-  let* why_no_container =
-    string_opt ~sanitize ~path:"why_no_container" live
   in
   let* build_volume = decode_build_volume ~sanitize live in
   let* resource_config = decode_resource_config ~sanitize live in
@@ -299,11 +288,8 @@ let decode ~sanitize json =
   Ok
     { sandbox_profile
     ; configured_network_mode
-    ; effective_mode
-    ; managed_container_kind
     ; containers
     ; container_error
-    ; why_no_container
     ; build_volume
     ; resource_config
     ; paths
@@ -322,14 +308,6 @@ let status_code = function
   | `Info -> Masc_tui_theme.status Masc_tui_theme.Info
   | `Muted -> Masc_tui_theme.status Masc_tui_theme.Muted
 
-let flow_row ~tone label value =
-  Printf.sprintf "  %s %-10s %s"
-    (styled (status_code tone) "●")
-    label
-    (styled (status_code tone) value)
-
-let flow_link = "      │\n      ▼" |> String.split_on_char '\n'
-
 let wrapped_rows ~width ~label ~tone text =
   let prefix = Printf.sprintf "  %-14s " label in
   let continuation = String.make (String.length prefix) ' ' in
@@ -340,20 +318,6 @@ let wrapped_rows ~width ~label ~tone text =
     (prefix ^ styled (status_code tone) first)
     :: List.map (fun line -> continuation ^ styled (status_code tone) line) rest
 
-let container_summary = function
-  | None -> "not reported", `Muted
-  | Some [] -> "0 observed", `Info
-  | Some rows ->
-    let running =
-      List.fold_left
-        (fun count container ->
-          count + if container.running = Some true then 1 else 0)
-        0
-        rows
-    in
-    ( Printf.sprintf "%d observed · %d running" (List.length rows) running
-    , if running = List.length rows then `Ok else `Warn )
-
 let bytes_text bytes =
   let gib = 1024. *. 1024. *. 1024. in
   if Float.of_int bytes >= gib then
@@ -361,12 +325,84 @@ let bytes_text bytes =
   else
     Printf.sprintf "%.1f MiB" (Float.of_int bytes /. (1024. *. 1024.))
 
+let joined_opt parts =
+  match List.filter_map Fun.id parts with
+  | [] -> None
+  | rows -> Some (String.concat " · " rows)
+
+let profile_label = function
+  | Some Docker -> "Docker"
+  | Some Micro_vm -> "Apple Container VM"
+  | Some Remote_ssh -> "Remote SSH"
+  | None -> "not reported"
+
+let status_lines ~width reading =
+  let header = [ " " ^ styled Masc_tui_theme.Sgr.bold "status" ] in
+  match reading.container_error, reading.containers with
+  | Some detail, Some (_ :: _ as containers) ->
+    header
+    @ [ "  " ^ styled (status_code `Warn) "● DEGRADED" ]
+    @ wrapped_rows ~width ~label:"Live instances" ~tone:`Warn
+        (Printf.sprintf "%d reported with an inspection error"
+           (List.length containers))
+    @ wrapped_rows ~width ~label:"Runtime" ~tone:`Bad detail
+  | Some detail, _ ->
+    header
+    @ [ "  " ^ styled (status_code `Bad) "● INSPECTION FAILED" ]
+    @ wrapped_rows ~width ~label:"Runtime" ~tone:`Bad detail
+  | None, None ->
+    header
+    @ [ "  " ^ styled (status_code `Warn) "? UNKNOWN" ]
+    @ wrapped_rows ~width ~label:"Runtime" ~tone:`Warn
+        "Live instance inventory was not reported."
+  | None, Some containers ->
+    let running =
+      List.fold_left
+        (fun count container ->
+          count + if container.running = Some true then 1 else 0)
+        0
+        containers
+    in
+    if running > 0 then
+      header
+      @ [ "  " ^ styled (status_code `Ok) "● RUNNING" ]
+      @ wrapped_rows ~width ~label:"Live instances" ~tone:`Ok
+          (Printf.sprintf "%d running · %d total" running (List.length containers))
+    else
+      match containers with
+      | _ :: _ ->
+        header
+        @ [ "  " ^ styled (status_code `Warn) "● STOPPED" ]
+        @ wrapped_rows ~width ~label:"Live instances" ~tone:`Warn
+            (Printf.sprintf "%d present · 0 running" (List.length containers))
+      | [] ->
+        match reading.sandbox_profile with
+        | Some Micro_vm ->
+          header
+          @ [ "  " ^ styled (status_code `Info) "○ NOT STARTED" ]
+          @ wrapped_rows ~width ~label:"Next" ~tone:`Info
+              "The first sandbox command creates this Keeper's VM."
+        | Some Docker ->
+          header
+          @ [ "  " ^ styled (status_code `Info) "○ IDLE" ]
+          @ wrapped_rows ~width ~label:"Next" ~tone:`Info
+              "A container starts when a sandbox command runs."
+        | Some Remote_ssh ->
+          header
+          @ [ "  " ^ styled (status_code `Ok) "● REMOTE" ]
+          @ wrapped_rows ~width ~label:"Execution" ~tone:`Info
+              "Commands run on this Keeper's configured SSH endpoint."
+        | None ->
+          header
+          @ [ "  " ^ styled (status_code `Warn) "○ NO LIVE INSTANCE" ]
+
 let container_lines ~width containers =
   match containers with
   | None | Some [] -> []
   | Some containers ->
-    containers
-    |> List.concat_map (fun container ->
+    [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "live instance" ]
+    @ (containers
+      |> List.concat_map (fun container ->
       let tone = if container.running = Some true then `Ok else `Warn in
       let state =
         match container.running with
@@ -374,36 +410,39 @@ let container_lines ~width containers =
         | Some false -> "stopped"
         | None -> "state unknown"
       in
-      let headline =
-        Printf.sprintf "%s · %s · %s" container.name state container.status
-      in
-      let details =
-        [ Some ("id " ^ container.id)
-        ; Some ("image " ^ container.image)
-        ; Option.map (fun value -> "kind " ^ value) container.container_kind
-        ; Option.map (fun value -> "network " ^ value) container.network_label
-        ; Option.map (fun value -> "pid " ^ string_of_int value) container.owner_pid
-        ; Option.map (fun value -> "created " ^ value) container.created_at
-        ; Option.map (fun value -> Printf.sprintf "%d CPU" value) container.cpus
-        ; Option.map (fun value -> "memory " ^ bytes_text value) container.memory_bytes
-        ]
-        |> List.filter_map Fun.id
-        |> String.concat " · "
+      let compute =
+        joined_opt
+          [ Option.map (fun value -> Printf.sprintf "%d CPU" value) container.cpus
+          ; Option.map (fun value -> bytes_text value ^ " RAM") container.memory_bytes
+          ]
       in
       let network =
-        [ Option.map (fun value -> "host " ^ value) container.hostname
-        ; Option.map (fun value -> "IPv4 " ^ value) container.ipv4_address
-        ; Option.map (fun value -> "gateway " ^ value) container.gateway
-        ; Option.map (fun value -> "IPv6 " ^ value) container.ipv6_address
-        ]
-        |> List.filter_map Fun.id
-        |> String.concat " · "
+        joined_opt
+          [ Option.map (fun value -> "host " ^ value) container.hostname
+          ; Option.map (fun value -> "IPv4 " ^ value) container.ipv4_address
+          ; Option.map (fun value -> "gateway " ^ value) container.gateway
+          ; Option.map (fun value -> "IPv6 " ^ value) container.ipv6_address
+          ]
       in
-      wrapped_rows ~width ~label:"Container" ~tone headline
-      @ wrapped_rows ~width ~label:"" ~tone:`Muted details
-      @ if String.equal network "" then [] else wrapped_rows ~width ~label:"Network" ~tone:`Info network)
+      wrapped_rows ~width ~label:"State" ~tone
+        (Printf.sprintf "%s · %s · %s" container.name state container.status)
+      @ (match compute with
+         | None -> []
+         | Some compute -> wrapped_rows ~width ~label:"Compute" ~tone:`Info compute)
+      @ (match network with
+         | None -> []
+         | Some network -> wrapped_rows ~width ~label:"Network" ~tone:`Info network)
+      @ wrapped_rows ~width ~label:"Image" ~tone:`Muted container.image
+      @ (match container.created_at with
+         | None -> []
+         | Some created -> wrapped_rows ~width ~label:"Created" ~tone:`Muted created)
+      @ wrapped_rows ~width ~label:"Instance ID" ~tone:`Muted container.id
+      @ (match container.owner_pid with
+         | None -> []
+         | Some pid ->
+           wrapped_rows ~width ~label:"Owner PID" ~tone:`Muted (string_of_int pid))))
 
-let resource_lines ~width = function
+let resource_rows ~width = function
   | None -> []
   | Some resources ->
     let compute =
@@ -412,36 +451,46 @@ let resource_lines ~width = function
       ; Option.map (fun value -> Printf.sprintf "pids %d" value) resources.pids_limit
       ; Option.map (fun value -> "tmpfs " ^ value) resources.tmpfs_size
       ]
-      |> List.filter_map Fun.id
-      |> String.concat " · "
+      |> joined_opt
     in
     let storage =
       [ Option.map (fun size -> "work " ^ size) resources.work_volume_size
       ; Option.map (fun size -> "build " ^ size) resources.build_volume_size
       ]
-      |> List.filter_map Fun.id
-      |> String.concat " · "
+      |> joined_opt
     in
-    [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "resources" ]
-    @ wrapped_rows ~width ~label:"Configured" ~tone:`Info compute
-    @ if String.equal storage "" then [] else wrapped_rows ~width ~label:"Volume caps" ~tone:`Muted storage
+    (match compute with
+     | None -> []
+     | Some compute -> wrapped_rows ~width ~label:"Limits" ~tone:`Info compute)
+    @ (match storage with
+       | None -> []
+       | Some storage -> wrapped_rows ~width ~label:"Volume caps" ~tone:`Muted storage)
+
+let configured_lines ~width reading =
+  [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "configured" ]
+  @ wrapped_rows ~width ~label:"Backend" ~tone:`Info
+      (profile_label reading.sandbox_profile)
+  @ wrapped_rows ~width ~label:"Network" ~tone:`Info
+      (value reading.configured_network_mode)
+  @ resource_rows ~width reading.resource_config
 
 let path_lines ~width = function
   | None -> []
   | Some paths ->
-    [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "paths" ]
-    @ wrapped_rows ~width ~label:"Host workspace" ~tone:`Muted (value paths.host_workspace)
-    @ wrapped_rows ~width ~label:"Guest home" ~tone:`Info
-        (Option.value paths.guest_home
-           ~default:"not observed (HOME is not declared by the sandbox runtime)")
-    @ wrapped_rows ~width ~label:"Guest workspace" ~tone:`Info (value paths.guest_workspace)
-    @ wrapped_rows ~width ~label:"Guest config" ~tone:`Muted (value paths.guest_config)
+    [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "filesystem" ]
+    @ wrapped_rows ~width ~label:"Workspace" ~tone:`Info
+        (value paths.guest_workspace)
+    @ wrapped_rows ~width ~label:"HOME" ~tone:`Muted
+        (Option.value paths.guest_home ~default:"unavailable")
+    @ wrapped_rows ~width ~label:"Config" ~tone:`Muted (value paths.guest_config)
+    @ wrapped_rows ~width ~label:"Host bundle" ~tone:`Muted
+        (value paths.host_workspace)
     @ (match paths.guest_work_volume with
        | None -> []
        | Some path -> wrapped_rows ~width ~label:"Work volume" ~tone:`Muted path)
     @ (match paths.guest_build_volume with
        | None -> []
-       | Some path -> wrapped_rows ~width ~label:"Build volume" ~tone:`Muted path)
+       | Some path -> wrapped_rows ~width ~label:"Build cache" ~tone:`Muted path)
 
 (* Where this keeper's build output lands.
 
@@ -457,80 +506,40 @@ let build_volume_lines ~width = function
       match volume.unlinked with
       | [] ->
         ( `Ok
-        , Printf.sprintf "%d checkout(s) on %s" volume.linked volume.guest_root )
+        , Printf.sprintf "%d checkout(s) use the build volume" volume.linked )
       | rows ->
         ( `Warn
         , Printf.sprintf
-            "%d on %s, %d still on the share"
+            "%d use the build volume · %d still use the shared filesystem"
             volume.linked
-            volume.guest_root
             (List.length rows) )
     in
     let tone, summary = headline in
-    [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "build output" ]
-    @ wrapped_rows ~width ~label:"Volume" ~tone:`Muted (value volume.volume_name)
-    @ wrapped_rows ~width ~label:"Placed" ~tone summary
+    [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "build cache" ]
+    @ wrapped_rows ~width ~label:"Volume" ~tone:`Muted
+        (Printf.sprintf "%s at %s" (value volume.volume_name) volume.guest_root)
+    @ wrapped_rows ~width ~label:"Checkouts" ~tone summary
     @ List.concat_map
         (fun row ->
           wrapped_rows
             ~width
-            ~label:"On share"
+            ~label:"Shared fs"
             ~tone:`Warn
             (row.checkout_path ^ " — " ^ row.checkout_reason))
         volume.unlinked
 ;;
 
 let view_lines ~width reading =
-  let containers, observed_tone = container_summary reading.containers in
-  let declared =
-    Printf.sprintf "%s / network %s"
-      (value reading.sandbox_profile)
-      (value reading.configured_network_mode)
-  in
-  let effective = value reading.effective_mode in
-  let error_lines =
-    [ Option.map
-        (fun detail -> wrapped_rows ~width ~label:"Container error" ~tone:`Bad detail)
-        reading.container_error
-      (* Not the sandbox's error. [Keeper_registry] records the keeper's last
-         error whatever its source, so a Board ledger decode failure lands
-         here too. It sat under "Last error" one line below "Container
-         error", and a reader took a schema-version complaint about an
-         unrelated ledger as proof the sandbox was broken. The label names
-         whose error it is; "Container error" above stays the sandbox one. *)
-    ; Option.map
-        (fun detail ->
-           wrapped_rows ~width ~label:"Keeper last error" ~tone:`Bad detail)
-        reading.keeper_last_error
-    ]
-    |> List.filter_map Fun.id
-    |> List.concat
-  in
-  let explanation_lines =
-    match reading.why_no_container with
-    | None -> []
-    | Some reason -> wrapped_rows ~width ~label:"Why no container" ~tone:`Info reason
-  in
-  [ " " ^ styled Masc_tui_theme.Sgr.bold "sandbox flow"
-  ; flow_row ~tone:`Info "Declared" declared
-  ]
-  @ flow_link
-  @ [ flow_row ~tone:`Info "Effective" effective ]
-  @ flow_link
-  @ [ flow_row ~tone:observed_tone "Observed" containers
-    ; ""
-    ; " " ^ styled Masc_tui_theme.Sgr.bold "live evidence"
-    ]
-  @ wrapped_rows ~width ~label:"Managed kind" ~tone:`Muted
-      (value reading.managed_container_kind)
+  status_lines ~width reading
+  @ configured_lines ~width reading
   @ container_lines ~width reading.containers
-  @ resource_lines ~width reading.resource_config
   @ path_lines ~width reading.paths
   @ build_volume_lines ~width reading.build_volume
-  @ explanation_lines
-  @ error_lines
-  @ [ ""
-    ; " " ^ styled Masc_tui_theme.Sgr.bold "observability"
-    ]
-  @ wrapped_rows ~width ~label:"Keeper logs" ~tone:`Info "press l"
-  @ wrapped_rows ~width ~label:"Tool calls" ~tone:`Info "press t"
+  @ (match reading.keeper_last_error with
+     | None -> []
+     | Some detail ->
+       [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "diagnostics" ]
+       @ wrapped_rows ~width ~label:"Keeper error" ~tone:`Bad detail)
+  @ [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "related" ]
+  @ wrapped_rows ~width ~label:"Keeper activity" ~tone:`Info "l  logs"
+  @ wrapped_rows ~width ~label:"Sandbox calls" ~tone:`Info "t  tool calls"

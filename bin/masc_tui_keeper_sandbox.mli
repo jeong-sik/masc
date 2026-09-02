@@ -9,12 +9,13 @@ val decode :
     fetched string is passed through [sanitize] before it enters TUI state. *)
 
 val view_lines : width:int -> t -> string list
-(** Render declared -> effective -> observed flow plus live containers,
-    configured resources, actual CPU/memory/network facts, host and guest
-    paths, errors, explanations, and log-navigation hints. Unobserved facts
+(** Render an operator-facing status summary: whether commands can run, what
+    happens next, configured resources and filesystem locations, then live
+    CPU/memory/network facts when an instance exists. Internal projection
+    names and server explanations are deliberately absent. Unobserved facts
     remain explicit rather than being inferred. [width] is the available
-    content width, so long server explanations wrap instead of disappearing
-    at the pane edge.
+    content width, so long diagnostics wrap instead of disappearing at the
+    pane edge.
 
     For a microvm keeper this also says where its build output lands: how
     many checkouts write to the block volume, and the path of each one still

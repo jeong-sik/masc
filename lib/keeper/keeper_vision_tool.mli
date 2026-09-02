@@ -68,6 +68,14 @@ val sniff_image_media_type : string -> (string, string) result
     the boundary that read it. Shared with the TUI composer so both surfaces
     admit exactly the same formats. *)
 
+val image_dimensions : string -> (int * int) option
+(** Pixel dimensions (width, height) of the bytes whose media type
+    [sniff_image_media_type] already admitted. PNG reads its fixed-offset
+    IHDR, JPEG walks to the first SOF, GIF reads the logical screen; WebP
+    answers [None] rather than guessing across its three frame layouts.
+    [None] means "say nothing" -- callers show the note without a size
+    rather than a wrong one. *)
+
 val vision_runtime_ids : unit -> string list
 (** Ordered image-capable runtime ids: [\[runtime\].media_failover] order
     first, then declaration order. The handler tries these candidates in order

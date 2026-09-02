@@ -55,6 +55,14 @@ type attachment = {
   size : int;
   mime_type : string;
   data : string;
+  (* Pixel size, set once at the moment the bytes are swapped out for their
+     [masc://] reference: after [persisted_attachment] the bytes are gone and
+     the size is no longer derivable, so this field is the only memory of
+     them. [None] is a normal value -- WebP, documents, and rows written
+     before the field existed all read as None and the note shows without a
+     size. *)
+  width : int option;
+  height : int option;
 }
 
 type tool_call = {
@@ -308,7 +316,30 @@ let persisted_attachment_ref (att : attachment) =
   Printf.sprintf "masc://attachment/%s/%s" att.id digest
 
 let persisted_attachment (att : attachment) =
-  { att with data = persisted_attachment_ref att }
+  (* The last place the bytes exist: the reference that replaces them cannot
+     answer "how big was it", so the pixel size is read here, once, from the
+     same payload the provider request was built from. Gate connectors send
+     [data:<mime>;base64,<payload>] URIs and the TUI sends bare base64;
+     both decode here, and a payload that decodes to nothing parseable just
+     leaves the size unset. *)
+  let decoded_dimensions data =
+    let data = String.trim data in
+    let payload =
+      match String.index_opt data ',' with
+      | Some comma when String_util.starts_with_ci ~prefix:"data:" data ->
+          String.sub data (comma + 1) (String.length data - comma - 1)
+      | _ -> data
+    in
+    match Base64.decode payload with
+    | Error _ -> None
+    | Ok bytes -> Keeper_vision_tool.image_dimensions bytes
+  in
+  let width, height =
+    match decoded_dimensions att.data with
+    | Some (width, height) -> (Some width, Some height)
+    | None -> (att.width, att.height)
+  in
+  { att with data = persisted_attachment_ref att; width; height }
 
 let redact_tool_call redaction tc =
   { tc with args = Keeper_secret_redaction.redact_text redaction tc.args }
@@ -713,7 +744,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
     | None | Some [] -> []
     | Some atts ->
         let att_json = List.map (fun (att : attachment) ->
-          `Assoc [
+          `Assoc ([
             ("id", `String att.id);
             ("type", `String att.att_type);
             ("name", `String att.name);
@@ -721,6 +752,10 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
             ("mime_type", `String att.mime_type);
             ("data", `String att.data);
           ]
+          @ (match (att.width, att.height) with
+             | Some width, Some height ->
+               [ ("width", `Int width); ("height", `Int height) ]
+             | _ -> []))
         ) atts in
         [("attachments", `List att_json)]
   in
@@ -1987,8 +2022,12 @@ let parse_line ~file_path (line : string) : chat_message option =
                   | Some (`Int i) -> i | _ -> 0) in
                 let mime_type = Json_util.get_string_with_default att_json ~key:"mime_type" ~default:"" in
                 let data = Json_util.get_string_with_default att_json ~key:"data" ~default:"" in
+                let int_of key = (match Json_util.assoc_member_opt key att_json with
+                  | Some (`Int i) when i >= 0 -> Some i | _ -> None) in
                 if id = "" || data = "" then None
-                else Some { id; att_type; name; size; mime_type; data }
+                else Some
+                  { id; att_type; name; size; mime_type; data
+                  ; width = int_of "width"; height = int_of "height" }
             | _ -> None
           ) att_list in
           if atts = [] then None else Some atts
@@ -2798,8 +2837,12 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
               @ (match m.attachments with
                  | None | Some [] -> []
                  | Some atts ->
+                     (* The dashboard API carries the size the row was
+                        persisted with -- the [masc://] reference in [data]
+                        cannot be re-measured, and rows that never went
+                        through [persisted_attachment] have none to show. *)
                      let att_json = List.map (fun (att : attachment) ->
-                       `Assoc [
+                       `Assoc ([
                          ("id", `String att.id);
                          ("type", `String att.att_type);
                          ("name", `String att.name);
@@ -2807,6 +2850,10 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
                          ("mime_type", `String att.mime_type);
                          ("data", `String att.data);
                        ]
+                       @ (match (att.width, att.height) with
+                          | Some width, Some height ->
+                            [ ("width", `Int width); ("height", `Int height) ]
+                          | _ -> []))
                      ) atts in
                      [("attachments", `List att_json)])
               @ audio_fields_with_expired ~base_dir m.audio

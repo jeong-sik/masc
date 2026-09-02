@@ -217,13 +217,9 @@ let tool_surface_sha256 ~native_posture tools =
   |> Digestif.SHA256.to_hex
 ;;
 
-let valid_sha256 value =
-  String.length value = 64
-  && String.for_all
-       (function
-         | '0' .. '9' | 'a' .. 'f' -> true
-         | _ -> false)
-       value
+(* Shared with [Types_auth.is_sha256_hex] and the capability heads rather
+   than decided again here. *)
+let valid_sha256 = String_util.is_lowercase_sha256_hex
 ;;
 
 let non_empty field value =

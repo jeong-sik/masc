@@ -450,7 +450,14 @@ val validate_tool_choice_request : t -> (unit, string) result
     serialization. The canonical effort vocabulary lives in
     {!Reasoning_effort}. A categorical effort is valid only when the selected
     model or explicit capability override declares an accepted subset; an
-    absent declaration fails closed. *)
+    absent declaration fails closed.
+
+    The value checked is the one the wire will carry: on a
+    {!Capabilities.Reasoning_effort} row an explicit [enable_thinking = Some
+    false] travels as the effort [none] ({!Reasoning_effort.under_explicit_toggle}),
+    so a ladder without [none] rejects that disable with
+    [Explicit_disable_outside_ladder] instead of letting the request keep the
+    caller's effort. *)
 type reasoning_effort_request_rejection =
   | Unsupported_reasoning_effort of
       { provider_kind : provider_kind
@@ -462,6 +469,11 @@ type reasoning_effort_request_rejection =
       { provider_kind : provider_kind
       ; model_id : string
       ; effort : reasoning_effort
+      }
+  | Explicit_disable_outside_ladder of
+      { provider_kind : provider_kind
+      ; model_id : string
+      ; accepted : reasoning_effort list option
       }
 
 val reasoning_effort_request_rejection_to_message

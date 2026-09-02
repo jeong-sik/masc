@@ -1098,8 +1098,10 @@ let attention_severity_color = function
   | Attention_warning -> (Theme.warn ())
   | Attention_info -> (Theme.info ())
 
-(* Compact "how long" text two surfaces share: the Attention panel's item age
-   and the Lanes table's idle column. *)
+(* Compact "how long" text three surfaces share: the Attention panel's item
+   age, the Lanes table's idle column, and the Keeper operations preview --
+   which kept a byte-for-byte copy of this under its own name, 3,600 lines
+   below, until the two were counted. *)
 let keeper_lane_idle_text seconds =
   let seconds = max 0 seconds in
   if seconds < 60 then Printf.sprintf "%ds" seconds
@@ -4703,12 +4705,6 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
     ; (running_without_turn, "running, cannot take a turn", (Theme.warn ()))
     ]
 
-let keeper_operations_idle_text seconds =
-  let seconds = max 0 seconds in
-  if seconds < 60 then Printf.sprintf "%ds" seconds
-  else if seconds < 3600 then Printf.sprintf "%dm" (seconds / 60)
-  else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
-  else Printf.sprintf "%dd" (seconds / 86400)
 
 let keeper_operations_outcome_text = function
   | None -> "—"
@@ -4747,7 +4743,7 @@ let keeper_operations_preview (state : state) =
                       (Tui_decode.keeper_lane_turn_phase_to_string
                          lane.kl_turn_phase)
                   ; " · idle "
-                  ; keeper_operations_idle_text lane.kl_idle_seconds
+                  ; keeper_lane_idle_text lane.kl_idle_seconds
                   ; " · last "
                   ; keeper_operations_outcome_text lane.kl_last_outcome
                   ; " · "
@@ -13862,28 +13858,16 @@ let render_code (state : state) =
    end
    else if state.code_focus_file = Right_pane then content_pane buf cols
    else list_pane ~framed:false buf cols);
+  let code_pane =
+    if state.code_focus_file <> Right_pane then Masc_tui_keys.Code_tree
+    else if
+      state.code_history_open || state.code_diff_open || state.code_notes_open
+    then Masc_tui_keys.Code_overlay
+    else Masc_tui_keys.Code_file
+  in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:
-         (Printf.sprintf
-            "j/k:%s  h/l:pane  %sEnter:open  %sEsc:%s  r:refresh  Tab:next  q:quit"
-            (if state.code_focus_file = Right_pane then "scroll" else "move")
-            (if
-               state.code_focus_file = Right_pane && not state.code_history_open
-               && not state.code_diff_open && not state.code_notes_open
-             then "Shift-\xe2\x86\x90/\xe2\x86\x92:pan  "
-             else "")
-            (if state.code_notes_open then
-               "w:add  d:diff  H:history  m:notes  "
-             else if state.code_focus_file = Right_pane then
-               "d:diff  H:history  m:notes  "
-             else "")
-            (if
-               state.code_history_open || state.code_diff_open
-               || state.code_notes_open
-             then "code"
-             else if state.code_focus_file = Right_pane then "list"
-             else "up")));
+       ~hints:(Masc_tui_keys.footer_hints_code ~pane:code_pane));
   finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf
 
 let resource_display_name (resource : Masc_tui_mcp.resource) =

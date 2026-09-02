@@ -10459,8 +10459,20 @@ let main () =
                 report_action state "error"
                   "no $EDITOR set; export EDITOR to add a note here"
             | Some _ -> (
+                (* The line the cursor is on, which is the line the operator
+                   pressed [w] about. This was the literal 1, and it shows:
+                   every one of the 51 annotations this workspace has ever
+                   stored anchors at line 1, including the two written from
+                   here. Nobody declined to anchor -- the form never offered
+                   their line, and correcting it meant editing JSON in
+                   $EDITOR before writing a word.
+
+                   [code_file_cursor] is 0-based and is the same anchor a
+                   language-server question is asked at, so [w] and [K]/[D]/
+                   [R] now agree about which line the operator means. *)
                 let stem =
-                  "{\n  \"line_start\": 1,\n  \"line_end\": 1,\n  \"kind\": \"Comment\",\n  \"content\": \"\"\n}\n"
+                  Masc_tui_types.code_note_stem
+                    ~anchor:(state.code_file_cursor + 1)
                 in
                 match
                   Masc_tui_editor.roundtrip ~restore:restore_terminal
@@ -12057,8 +12069,9 @@ and is loaded on demand through keeper_skill.
             | "esc" -> close ()
             | "\r" when
                 (let q = String.trim state.palette_query in
-                 String.starts_with ~prefix:"hover " q
-                 || String.starts_with ~prefix:"def " q) ->
+                 List.exists
+                   (fun (prefix, _) -> String.starts_with ~prefix q)
+                   Masc_tui_types.lsp_question_prefixes) ->
                 (* A typed command, not an entry: the argument is the symbol
                    the language-server question is asked about, on the Code
                    pane's cursor line. *)
@@ -12071,9 +12084,17 @@ and is loaded on demand through keeper_skill.
                           (String.sub q (i + 1) (String.length q - i - 1)) )
                   | None -> (q, "")
                 in
+                (* The typed word back to the question it names, through the
+                   same table the entries were built from. *)
                 let question =
-                  if String.equal question "def" then "definition"
-                  else question
+                  match
+                    List.find_opt
+                      (fun (prefix, _) ->
+                        String.equal (String.trim prefix) question)
+                      Masc_tui_types.lsp_question_prefixes
+                  with
+                  | Some (_, canonical) -> canonical
+                  | None -> question
                 in
                 if String.equal symbol "" then begin
                   (* Bare "def " or "hover ": run the highlighted candidate
@@ -12102,7 +12123,8 @@ and is loaded on demand through keeper_skill.
                   if state.view <> Code || Option.is_none state.code_file
                   then
                     add_event state "error"
-                      "hover/def ask about the file open on the Code surface"
+                      "hover, def and refs ask about the file open on the \
+                       Code surface"
                   else
                     start_code_lsp_question state ~mailbox:async_messages
                       ~question ~symbol
@@ -12973,7 +12995,7 @@ and is loaded on demand through keeper_skill.
                          state.code_target_line <- Some (cursor + 1);
                          launch_code_file_load state
                            ~mailbox:async_messages ~path)))
-       | Some (("K" | "D") as key_name)
+       | Some (("K" | "D" | "R") as key_name)
          when state.view = Code && state.code_focus_file = Right_pane
               && Option.is_some state.code_file
               && not state.code_history_open
@@ -12985,8 +13007,10 @@ and is loaded on demand through keeper_skill.
               palette with each as an entry (typing still narrows, and a
               typed "def <name>" keeps working), and none says so. *)
            let question, prefix =
-             if String.equal key_name "K" then ("hover", "hover ")
-             else ("definition", "def ")
+             match key_name with
+             | "K" -> ("hover", "hover ")
+             | "R" -> ("references", "refs ")
+             | "D" | _ -> ("definition", "def ")
            in
            (match Masc_tui_types.code_cursor_line_symbols state with
             | [] ->

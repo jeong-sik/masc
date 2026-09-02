@@ -84,6 +84,8 @@ type attachment_note =
   { att_name : string
   ; att_mime : string
   ; att_bytes : int
+  ; att_width : int option
+  ; att_height : int option
   }
 
 type row =
@@ -361,16 +363,29 @@ let text_with_attachments ~format_bytes ~text ~notes =
   match notes with
   | [] -> text
   | notes ->
-    let line (n : attachment_note) =
-      Printf.sprintf "\xe2\x8e\x98 %s%s%s" n.att_name
+    (* The note's shape follows what the row can actually say. An image with
+       parsed dimensions reads like the reference the operator pasted from
+       -- [#1 name · 3456×2168 · 12.3 KB] -- where a size in bytes answered
+       "how big is the file", not "how big is it". Anything else keeps the
+       mime it already had; the index is the order the attachments arrive
+       in, so a reply can name [#2] and mean one file. *)
+    let line index (n : attachment_note) =
+      let dimensions =
+        match (n.att_width, n.att_height) with
+        | Some width, Some height -> Printf.sprintf " \xc2\xb7 %dx%d" width height
+        | _ -> if n.att_mime = "" then "" else " \xc2\xb7 " ^ n.att_mime
+      in
+      Printf.sprintf "\xe2\x8e\x98 #%d %s%s%s" (index + 1) n.att_name
         (if n.att_bytes > 0 then
            Printf.sprintf " \xc2\xb7 %s" (format_bytes n.att_bytes)
          else "")
-        (if n.att_mime = "" then "" else " \xc2\xb7 " ^ n.att_mime)
+        dimensions
     in
     let body = String.trim text in
     String.concat "\n"
-      (if body = "" then List.map line notes else body :: List.map line notes)
+      (if body = ""
+       then List.mapi line notes
+       else body :: List.mapi line notes)
 
 let attachment_notes_of fields =
   match List.assoc_opt "attachments" fields with
@@ -390,6 +405,8 @@ let attachment_notes_of fields =
                            ~default:""
                      ; att_bytes =
                          Option.value (int_field item "size") ~default:0
+                     ; att_width = int_field item "width"
+                     ; att_height = int_field item "height"
                      })
           | _ -> None)
         items

@@ -362,23 +362,6 @@ let test_empty_existing_identity_remains_unconfigured () =
     "github.com:\n  users:\n    logged-out-user:\n      oauth_token: \"\"\n"
 ;;
 
-let test_local_tool_env_rejects_identity_override () =
-  (match Github.validate_local_tool_env [ "KEEP", "value" ] with
-   | Ok () -> ()
-   | Error message -> Alcotest.fail message);
-  List.iter
-    (fun key ->
-       match Github.validate_local_tool_env [ key, "caller-controlled" ] with
-       | Error _ -> ()
-       | Ok () -> Alcotest.fail (key ^ " override was accepted"))
-    [ "GH_CONFIG_DIR"
-    ; "GH_TOKEN"
-    ; "GITHUB_TOKEN"
-    ; "GH_ENTERPRISE_TOKEN"
-    ; "GITHUB_ENTERPRISE_TOKEN"
-    ]
-;;
-
 let test_malformed_hosts_yaml_is_rejected () =
   with_temp_base @@ fun _base_path config ->
   let keeper_name = "malformed-hosts-yaml" in
@@ -702,10 +685,6 @@ let () =
             "empty existing identity remains unconfigured"
             `Quick
             test_empty_existing_identity_remains_unconfigured
-        ; Alcotest.test_case
-            "local tool env rejects identity override"
-            `Quick
-            test_local_tool_env_rejects_identity_override
         ; Alcotest.test_case
             "malformed hosts yaml is rejected"
             `Quick

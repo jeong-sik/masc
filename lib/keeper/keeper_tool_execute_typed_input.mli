@@ -6,7 +6,7 @@
     {2 Design constraints}
 
     - **No shell-string parsing**.  Validation is structural only:
-      argv/cwd/env/redirect shape is checked here, while external-effect
+      argv/cwd/redirect shape is checked here, while external-effect
       authorization is handled by the product-neutral Gate.
     - **Single command SSOT**.  [argv] is a non-empty process vector whose
       first token is the executable and whose remaining tokens are its
@@ -75,10 +75,6 @@ type program = {
     program unrepresentable, so emptiness is not something {!validate} has to
     check, and a single process is a program whose tail is empty. *)
 
-type conditional =
-  | And_then  (** run the next program only if the one before it exited zero *)
-  | Or_else  (** run the next program only if the one before it did not *)
-
 type script = {
   shell : string;
       (** the shell that runs [text], as one of the names
@@ -94,14 +90,10 @@ type script = {
     the corpus has 656 of them. *)
 
 type source =
-  | Staged of {
-      program : program;
-      next : (conditional * program) list;
-          (** programs to run after [program], each guarded by how the one
-              before it ended. Empty for a single program. The guard looks at
-              whatever ran last, so a run of them reads left to right, as a
-              shell reads [a && b || c]. *)
-    }
+  | Staged of { program : program }
+      (** one process or pipeline, typed, reaching no shell. Running one
+          command after another is a shell's job, so it is written as a
+          [script]. *)
   | Script of script
       (** one command line, run by a real shell inside the keeper's sandbox.
 
@@ -117,11 +109,10 @@ type source =
 type execute_input = {
   source : source;
   cwd : string option;
-  env : (string * string) list;
   timeout_sec : float option;
 }
-(** [cwd] and [env] apply to every stage of every program. [timeout_sec] is an
-    explicit optional execution boundary; absence means unbounded execution. *)
+(** [cwd] applies to every stage of the program. [timeout_sec] is an explicit
+    optional execution boundary; absence means unbounded execution. *)
 
 type validation_error =
   | Empty_argv
@@ -157,7 +148,6 @@ type validation_error =
     }
       (** A {!Fd} redirect may only duplicate a descriptor the stage owns:
           0, 1 or 2. *)
-  | Env_key_invalid of string
 
 val of_json : Yojson.Safe.t -> (execute_input, string) result
 (** Parse the typed Execute JSON boundary into a {!program}.

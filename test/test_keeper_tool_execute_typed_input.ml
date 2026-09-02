@@ -20,10 +20,10 @@ let mk_stage ?(stdin = Execute_input.Inherit_input)
   { argv; stdin; stdout; stderr }
 ;;
 
-let mk_program ?cwd ?(env = []) ?timeout_sec head tail
+let mk_program ?cwd ?timeout_sec head tail
   : Execute_input.execute_input
   =
-  { source = Staged { program = { head; tail }; next = [] }; cwd; env; timeout_sec }
+  { source = Staged { program = { head; tail } }; cwd; timeout_sec }
 ;;
 
 let mk_exec executable argv = mk_program (mk_stage (executable :: argv)) []
@@ -235,19 +235,16 @@ let test_of_json_exec () =
       (`Assoc
           [ "argv", `List [ `String "rg"; `String "pattern"; `String "lib/" ]
           ; "cwd", `String "/tmp"
-          ; "env", `Assoc [ "LC_ALL", `String "C" ]
           ])
   in
   match input with
   | { Execute_input.source =
         Staged { program = { head = { argv; _ }; tail = [] }; _ }
     ; cwd
-    ; env
     ; _
     } ->
     Alcotest.(check (list string)) "argv" [ "rg"; "pattern"; "lib/" ] argv;
-    Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
-    Alcotest.(check (list (pair string string))) "env" [ "LC_ALL", "C" ] env
+    Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd
   | { Execute_input.source = Staged { program = { tail = _ :: _; _ }; _ }; _ } ->
     Alcotest.fail "expected a single-stage program"
   | { Execute_input.source = Script _; _ } ->
@@ -344,7 +341,6 @@ let test_of_json_accepts_single_argv_ssot () =
       (`Assoc
           [ "argv", `List [ `String "git"; `String "status"; `String "--short" ]
           ; "cwd", `String "/tmp"
-          ; "env", `Assoc [ "LC_ALL", `String "C" ]
           ])
   in
   match input with
@@ -425,13 +421,12 @@ let test_of_json_keeps_empty_exec_for_validation () =
           ])
   in
   match input with
-  | { Execute_input.source = Staged { program = { head = { argv; _ }; tail = [] }; _ }; cwd; env; _ } ->
+  | { Execute_input.source = Staged { program = { head = { argv; _ }; tail = [] }; _ }; cwd; _ } ->
     Alcotest.(check (list string))
       "argv0 command remains caller-authored"
       [ ""; "gh"; "pr"; "list" ]
       argv;
-    Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
-    Alcotest.(check (list (pair string string))) "env" [] env
+    Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd
   | { Execute_input.source = Staged { program = { tail = _ :: _; _ }; _ }; _ } | { Execute_input.source = Script _; _ } ->
     Alcotest.fail "expected a single-stage program"
 ;;
@@ -453,7 +448,6 @@ let test_of_json_pipeline () =
   let stages = staged_exn input in
   Alcotest.(check int) "stage count" 2 (List.length stages);
   Alcotest.(check (option string)) "cwd" (Some "/tmp") input.Execute_input.cwd;
-  Alcotest.(check (list (pair string string))) "env" [] input.Execute_input.env;
   (match stages with
    | [ first; second ] ->
      Alcotest.(check (list string)) "first argv" [ "printf"; "hello" ] first.argv;
@@ -509,7 +503,6 @@ let test_of_json_keeps_empty_pipeline_stage_for_validation () =
   in
   let stages = staged_exn input in
   Alcotest.(check (option string)) "cwd" (Some "/tmp") input.Execute_input.cwd;
-  Alcotest.(check (list (pair string string))) "env" [] input.Execute_input.env;
   (match stages with
      | [ first; second ] ->
        Alcotest.(check (list string))
@@ -942,7 +935,7 @@ let test_repeated_first_argument_preserved () =
 
 let test_pipeline_lowers_to_shell_ir_pipeline () =
   let input =
-    mk_program ?cwd:(Some "/tmp") ~env:([ "LC_ALL", "C" ]) (mk_stage ([ "echo"; "hello world" ])) [ mk_stage ([ "tr"; "a-z"; "A-Z" ]) ]
+    mk_program ?cwd:(Some "/tmp") (mk_stage ([ "echo"; "hello world" ])) [ mk_stage ([ "tr"; "a-z"; "A-Z" ]) ]
   in
   match to_shell_ir_exn input with
   | Masc_exec.Shell_ir.Pipeline
@@ -958,11 +951,7 @@ let test_pipeline_lowers_to_shell_ir_pipeline () =
     Alcotest.(check (option string))
       "cwd copied to every stage"
       (Some "/tmp")
-      (Option.map Masc_exec.Path_scope.raw second.cwd);
-    Alcotest.(check (list (pair string string)))
-      "env copied to every stage"
-      [ "LC_ALL", "C" ]
-      (List.map (fun (key, value) -> key, shell_arg_string value) second.env)
+      (Option.map Masc_exec.Path_scope.raw second.cwd)
   | other ->
     Alcotest.failf "expected Shell_ir.Pipeline, got %a" Masc_exec.Shell_ir.pp other
 ;;
@@ -1172,16 +1161,6 @@ let test_cwd_not_absolute () =
     (typed_ok input)
 ;;
 
-let test_env_key_invalid () =
-  let input =
-    mk_program ~env:([ "FOO BAR", "value" ]) (mk_stage ([ "ls" ])) []
-  in
-  Alcotest.(check bool)
-    "Env_key_invalid: env key with space rejected"
-    false
-    (typed_ok input)
-;;
-
 let test_shell_redirection_looking_tokens_are_literal () =
   List.iter
     (fun (token, argv) ->
@@ -1254,7 +1233,6 @@ let mk_exec_with_redirects
       ?(executable = "rg")
       ?(argv = [ "pattern" ])
       ?(cwd = Some "/tmp")
-      ?(env = [])
       ?(timeout_sec = None)
       ?(stdin = Execute_input.Inherit_input)
       ?(stdout = Execute_input.Inherit_output)
@@ -1263,7 +1241,6 @@ let mk_exec_with_redirects
   =
   mk_program
     ?cwd
-    ~env
     ?timeout_sec
     (mk_stage ~stdin ~stdout ~stderr (executable :: argv))
     []
@@ -1627,82 +1604,6 @@ let test_of_json_rejects_discard_false () =
   | Error _ -> ()
 ;;
 
-(* Keepers write `a && b` as a literal argv token today, where nothing reads
-   it. This is the shape that does run. *)
-let test_of_json_parses_a_conditional_continuation () =
-  let json =
-    `Assoc
-      [ "argv", `List [ `String "test"; `String "-w"; `String "/tmp" ]
-      ; ( "then"
-        , `List
-            [ `Assoc
-                [ "on", `String "success"
-                ; "argv", `List [ `String "echo"; `String "writable" ]
-                ]
-            ] )
-      ]
-  in
-  match Execute_input.of_json json with
-  | Ok { source =
-           Staged
-             { program = { head = { argv = first; _ }; tail = [] }
-             ; next =
-                 [ ( Execute_input.And_then
-                   , { head = { argv = second; _ }; tail = [] } )
-                 ]
-             }
-       ; _
-       } ->
-    Alcotest.(check (list string)) "the first program" [ "test"; "-w"; "/tmp" ] first;
-    Alcotest.(check (list string)) "the guarded one" [ "echo"; "writable" ] second
-  | Ok _ -> Alcotest.fail "expected one program guarded on success"
-  | Error msg -> Alcotest.failf "a conditional continuation must parse: %s" msg
-;;
-
-let test_of_json_rejects_an_unknown_guard () =
-  let json =
-    `Assoc
-      [ "argv", `List [ `String "true" ]
-      ; "then", `List [ `Assoc [ "on", `String "maybe"; "argv", `List [ `String "true" ] ] ]
-      ]
-  in
-  match Execute_input.of_json json with
-  | Ok _ -> Alcotest.fail "a guard must be success or failure"
-  | Error _ -> ()
-;;
-
-let test_of_json_requires_a_guard_on_every_continuation () =
-  let json =
-    `Assoc
-      [ "argv", `List [ `String "true" ]
-      ; "then", `List [ `Assoc [ "argv", `List [ `String "true" ] ] ]
-      ]
-  in
-  match Execute_input.of_json json with
-  | Ok _ -> Alcotest.fail "a continuation without a guard must be rejected"
-  | Error _ -> ()
-;;
-
-let test_a_continuation_lowers_to_a_sequence () =
-  let json =
-    `Assoc
-      [ "argv", `List [ `String "true" ]
-      ; ( "then"
-        , `List
-            [ `Assoc [ "on", `String "failure"; "argv", `List [ `String "echo" ] ] ] )
-      ]
-  in
-  match Execute_input.of_json json with
-  | Error msg -> Alcotest.failf "must parse: %s" msg
-  | Ok input ->
-    (match Execute_input.to_shell_ir input with
-     | Ok (Masc_exec.Shell_ir.Sequence { tail = [ (Masc_exec.Shell_ir.Or_if, _) ]; _ }) ->
-       ()
-     | Ok _ -> Alcotest.fail "expected a sequence guarded on failure"
-     | Error err ->
-       Alcotest.failf "lowering failed: %a" Execute_input.pp_validation_error err)
-;;
-
 (* Measured on the live log: 60 calls ran cd as a program and 56 came back
    successful with empty output. The keeper had asked for a git log, a git
    status, a build; it got an empty answer that reads like a real one. *)
@@ -1821,7 +1722,7 @@ let test_stdin_takes_a_literal () =
           ])
   in
   match input.Execute_input.source with
-  | Execute_input.Staged { program; next = [] } ->
+  | Execute_input.Staged { program } ->
     (match program.Execute_input.head.Execute_input.stdin with
      | Execute_input.Literal_input { bytes } ->
        Alcotest.(check string) "the bytes survive the decode" "line one\nline two\n" bytes
@@ -1964,22 +1865,6 @@ let suite =
           "a_program_named_like_cd_still_runs"
           `Quick
           test_a_program_named_like_cd_still_runs
-      ; Alcotest.test_case
-          "conditional_continuation_parses"
-          `Quick
-          test_of_json_parses_a_conditional_continuation
-      ; Alcotest.test_case
-          "unknown_guard_is_rejected"
-          `Quick
-          test_of_json_rejects_an_unknown_guard
-      ; Alcotest.test_case
-          "continuation_requires_a_guard"
-          `Quick
-          test_of_json_requires_a_guard_on_every_continuation
-      ; Alcotest.test_case
-          "continuation_lowers_to_a_sequence"
-          `Quick
-          test_a_continuation_lowers_to_a_sequence
       ; Alcotest.test_case
           "fd_zero_is_not_a_duplication_target"
           `Quick
@@ -2195,7 +2080,6 @@ let suite =
           `Quick
           test_gh_multiline_body_lowers_to_literal_argv
       ; Alcotest.test_case "cwd_not_absolute" `Quick test_cwd_not_absolute
-      ; Alcotest.test_case "env_key_invalid" `Quick test_env_key_invalid
       ; Alcotest.test_case
           "shell_redirection_looking_tokens_are_literal"
           `Quick

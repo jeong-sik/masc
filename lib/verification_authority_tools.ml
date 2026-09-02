@@ -277,9 +277,13 @@ let result_of_execution (execution : Keeper_tool_execution.t) =
 ;;
 
 (* The producer's meta binds the jail. [turn_sandbox_factory] is a keeper-turn
-   construct and the judge has no turn of its own, so a producer on a Docker
-   profile resolves no sandbox and the runtime returns its own error — the judge
-   is told the tree is unreachable rather than silently inspecting the host. *)
+   construct and the judge has no turn of its own, so it passes [None] — the
+   one caller outside a turn. That names what the judge lacks, not what it may
+   read: a Docker producer's tree is a shared mount the read backend reaches
+   through its own container, and a microvm producer's guest is named by the
+   keeper and the base path, so the backend attaches to a running one. Neither
+   route lets the judge start anything or touch the host outside the
+   playground, which is the property [None] is protecting. *)
 let run t tool ~args =
   match t.producer_scope, tool with
   | Keeper_producer producer_meta, Read_file ->

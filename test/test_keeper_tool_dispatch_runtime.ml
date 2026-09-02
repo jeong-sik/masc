@@ -513,8 +513,10 @@ let test_keeper_tools_list_json_names_the_model_visible_tools () =
     (list_member_contains "properties" "argv" schema_shape);
   check bool "Execute schema properties omit retired executable" false
     (list_member_contains "properties" "executable" schema_shape);
-  check bool "Execute schema properties include pipeline" true
+  check bool "Execute schema properties omit retired pipeline" false
     (list_member_contains "properties" "pipeline" schema_shape);
+  check bool "Execute schema properties include script" true
+    (list_member_contains "properties" "script" schema_shape);
   check bool "Execute schema has no shape errors" true
     (Yojson.Safe.Util.member "schema_errors" schema_shape = `Null);
   let examples = Yojson.Safe.Util.(member "examples" execute |> to_list) in
@@ -605,7 +607,7 @@ let test_keeper_tools_list_json_names_the_model_visible_tools () =
     { (descriptor_for_internal "tool_execute") with
       KTD.input_schema =
         `Assoc
-          [ "properties", `Assoc [ "argv", `Assoc []; "pipeline", `Assoc [] ]
+          [ "properties", `Assoc [ "argv", `Assoc []; "script", `Assoc [] ]
           ; "oneOf"
           , `List
               [ `Assoc [ "required", `List [ `String "argv" ] ]

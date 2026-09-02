@@ -48,3 +48,12 @@ let of_string value =
 ;;
 
 let values_for_log = String.concat "/" (List.map to_string all)
+
+(* The categorical wire has no boolean toggle, so an explicit disable can only
+   travel as the effort [None_]. Kept here, below both the request encoder and
+   the ladder admission, so the two read one rule. *)
+let under_explicit_toggle ~enable_thinking reasoning_effort =
+  match enable_thinking with
+  | Some false -> Some None_
+  | Some true | None -> reasoning_effort
+;;

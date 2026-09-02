@@ -23,9 +23,6 @@ let golden_workspace_root = "/golden/sandbox"
 let golden_instructions =
   "Golden custom instruction line one.\nGolden custom instruction line two."
 
-let golden_active_goals =
-  [ ("goal-golden-1", "First golden goal"); ("goal-golden-2", "") ]
-
 let repo_source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
   | Some root -> root
@@ -52,7 +49,6 @@ let build_golden_prompt () =
     ~instructions:golden_instructions
     ~keeper_name:golden_keeper_name
     ~workspace_root:golden_workspace_root
-    ~active_goals:golden_active_goals
     ()
 
 (* Byte offset of the first difference, so a failure names a location instead

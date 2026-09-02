@@ -659,7 +659,9 @@ let run_keeper_cycle
                      ~held_task_skills:observation.held_task_skills
                in
                let active_goal_summaries =
-                 Keeper_unified_prompt.active_goal_summaries_of_store ~config
+                 Keeper_unified_prompt.active_goal_summaries_for_task
+                   ~config
+                   ~current_task
                in
                (* Repository freshness projection (context only, never a
                   gate): where each playground checkout stands against its

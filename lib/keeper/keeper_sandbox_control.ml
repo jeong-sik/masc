@@ -629,7 +629,7 @@ let why_no_container (meta : keeper_meta) ~preflight containers =
       Some "remote_ssh executes on its configured endpoint and does not own a local container"
     | Docker -> (
       match preflight_ok preflight with
-      | Some false -> Some "docker_preflight_failed"
+      | Some false -> Some Keeper_sandbox_runtime.docker_preflight_failed_label
       | _ -> (
           match meta.network_mode with
           | Network_inherit ->

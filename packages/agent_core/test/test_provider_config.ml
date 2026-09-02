@@ -1263,6 +1263,65 @@ let test_validate_reasoning_effort_subset_rejects_unsupported () =
     | Ok () -> Alcotest.fail "high effort should be rejected by accepted subset")
 ;;
 
+let test_validate_reasoning_effort_checks_the_explicit_disable () =
+  let manifest =
+    Yojson.Safe.from_string
+      {|{"schema_version":1,"models":[
+          {"id_prefix":"effort-off-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low"]},
+          {"id_prefix":"effort-off-ok-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["none","low"]},
+          {"id_prefix":"effort-off-undeclared-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort"},
+          {"id_prefix":"effort-off-object-model","base":"openai_chat_extended","thinking_control_format":"thinking_object","accepted_reasoning_efforts":["low"]}]}|}
+    |> Capability_manifest.of_json
+    |> Result.get_ok
+  in
+  Fun.protect ~finally:Capability_manifest.clear_global (fun () ->
+    Capability_manifest.set_global manifest;
+    let cfg model_id =
+      let declared_capabilities =
+        match Capabilities.for_model_id model_id with
+        | Some capabilities -> capabilities
+        | None -> Alcotest.failf "fixture capability %s was not declared" model_id
+      in
+      Provider_config.make
+        ~kind:OpenAI_compat
+        ~model_id
+        ~base_url:"https://api.openai.com/v1"
+        ~model_capabilities_override:declared_capabilities
+        ~enable_thinking:false
+        ~reasoning_effort:Reasoning_effort.Low
+        ()
+    in
+    let validate model_id =
+      Provider_config.validate_reasoning_effort_request_typed (cfg model_id)
+    in
+    (* The categorical wire carries the disable as effort none, so the ladder
+       is checked against none, not against the row's low. *)
+    (match validate "effort-off-model" with
+     | Error
+         (Provider_config.Explicit_disable_outside_ladder
+            { accepted = Some [ Provider_config.Low ]; _ }) -> ()
+     | Error rejection ->
+       Alcotest.failf
+         "unexpected rejection: %s"
+         (Provider_config.reasoning_effort_request_rejection_to_message rejection)
+     | Ok () -> Alcotest.fail "a ladder without none cannot carry enable_thinking=false");
+    (match validate "effort-off-undeclared-model" with
+     | Error (Provider_config.Explicit_disable_outside_ladder { accepted = None; _ }) -> ()
+     | Error rejection ->
+       Alcotest.failf
+         "unexpected rejection: %s"
+         (Provider_config.reasoning_effort_request_rejection_to_message rejection)
+     | Ok () -> Alcotest.fail "an undeclared ladder cannot carry enable_thinking=false");
+    Alcotest.(check bool)
+      "a ladder with none admits the disable"
+      true
+      (Result.is_ok (validate "effort-off-ok-model"));
+    Alcotest.(check bool)
+      "a thinking_object row keeps its own toggle and its low effort"
+      true
+      (Result.is_ok (validate "effort-off-object-model")))
+;;
+
 let test_validate_reasoning_effort_fails_closed_without_declaration () =
   let config =
     Provider_config.make
@@ -2433,6 +2492,10 @@ let () =
             "reasoning effort undeclared fails closed"
             `Quick
             test_validate_reasoning_effort_fails_closed_without_declaration
+        ; Alcotest.test_case
+            "reasoning effort checks the explicit disable"
+            `Quick
+            test_validate_reasoning_effort_checks_the_explicit_disable
         ; Alcotest.test_case
             "clear_thinking object request field"
             `Quick

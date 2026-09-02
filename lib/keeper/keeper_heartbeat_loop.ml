@@ -561,8 +561,6 @@ let run_keepalive_unified_turn
       ~(on_deferred_runtime_consumed : unit -> unit)
       ~(record_deferred_runtime_lane :
           Keeper_turn_driver.deferred_runtime_lane -> unit)
-      ~(previous_turn_stop : Keeper_turn_checkpoint_reason.t option)
-      ~(record_turn_stop : Keeper_turn_checkpoint_reason.t option -> unit)
   : keepalive_turn_outcome
   =
   if not proactive_warmup_elapsed
@@ -914,7 +912,6 @@ let run_keepalive_unified_turn
               ~on_deferred_runtime_consumed
               ?event_bus
               ?hitl_resolution
-              ?previous_turn_stop
               ~ctx
               ~meta_after_triage
               ~stop
@@ -930,18 +927,10 @@ let run_keepalive_unified_turn
             record_deferred_runtime_lane
             (Cycle.deferred_runtime_lane cycle_outcome);
           cycle_outcome_ref := Some cycle_outcome;
-          (* What the next turn is told about this one. Only a checkpoint
-             carries a reason; a completed, failed, cancelled, or skipped
-             cycle leaves nothing to explain, and clearing here keeps a stale
-             reason from outliving the turn it described. *)
-          record_turn_stop
-            (match cycle_outcome with
-             | Cycle.Checkpointed { checkpoint_reason; _ } -> Some checkpoint_reason
-             | Cycle.Completed _
-             | Cycle.Input_required _
-             | Cycle.Cancelled _
-             | Cycle.Skipped _
-             | Cycle.Failed _ -> None);
+          (* What the next turn is told about this one moved into
+             [Keeper_heartbeat_loop_cycle.run_keeper_cycle]: every lane runs
+             through that wrapper, so the stop reason crosses lanes now
+             instead of living in this loop's ref. *)
           (* The closing half of the turn-entry reactions written above. The
              stimulus's evidence otherwise ends at "a turn started", and what
              the turn did is recovered by comparing that clock against the
@@ -1253,12 +1242,9 @@ let run_heartbeat_loop
      wake does not let the GLOBAL task backlog drive a turn on every keeper at
      once. Single-fiber owned, like the other loop-local refs above. *)
   let last_wake_source = ref Keeper_keepalive_signal.Timeout in
-  (* Why the last turn that ran in this process ended before completing, or
-     [None]. Rendered into the next turn's prompt so a keeper cut by the
-     repeated-call guard is told so instead of re-reading its own identical
-     calls as unfinished work. Process-local like the refs above: after a
-     restart the checkpoint still carries the calls and this starts empty. *)
-  let previous_turn_stop : Keeper_turn_checkpoint_reason.t option ref = ref None in
+  (* Why the last turn that ran ended before completing now lives in
+     [Keeper_last_turn_stop], recorded by the cycle wrapper every lane
+     shares — see the note at [run_fresh_cycle]. *)
   let rec loop () =
     if Atomic.get stop
     then ()
@@ -1436,8 +1422,6 @@ let run_heartbeat_loop
                 ~on_deferred_runtime_consumed
                 ~record_deferred_runtime_lane:
                   (fun hint -> deferred_runtime_lane_ref := Some hint)
-                ~previous_turn_stop:!previous_turn_stop
-                ~record_turn_stop:(fun stop -> previous_turn_stop := stop)
             in
             Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
             turn_running := false;

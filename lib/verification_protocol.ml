@@ -299,10 +299,13 @@ let post_verdict_board
       ~post_kind:Board.System_post
       ~meta_json:(verification_verdict_metadata ~authority ~task_id ~verification_id ~verdict)
         (* Unlisted: a rejection reaches the producer as a typed stimulus
-           ([Completion_authority_wakeup]) and an approval as the Done
-           transition clearing its current task, so no keeper needs to
-           discover the verdict receipt. The stalled receipt below stays
-           Internal — the Board is its only path to the producer. *)
+           ([Completion_authority_wakeup]); an approval wakes nobody — the
+           task leaves the backlog as Done, and the producer's current task
+           was already cleared at submission
+           ([Keeper_current_task_reconcile] counts only Claimed and
+           InProgress as owned). So no keeper needs to discover the verdict
+           receipt. The stalled receipt below stays Internal — the Board is
+           its only path to the producer. *)
       ~visibility:Board.Unlisted
       ~hearth:"verification"
       ()

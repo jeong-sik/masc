@@ -269,8 +269,19 @@ let test_guest_target_follows_the_factory_contract () =
     in
     Masc.Keeper_sandbox_factory.cleanup factory;
     match result, meta.sandbox_profile with
-    | Ok { target = Masc_exec.Sandbox_target.Micro_vm _; _ }, Profile.Micro_vm
-    | Ok { target = Masc_exec.Sandbox_target.Docker _; _ }, Profile.Docker -> ()
+    (* A guest endpoint runs one command per shim connection, as an OpenSSH
+       endpoint does: no pipeline runner, so a pipeline is dispatched stage
+       by stage. *)
+    | Ok { target = Masc_exec.Sandbox_target.Micro_vm { pipeline_runner = None; _ }; _ }
+      , Profile.Micro_vm
+    | Ok { target = Masc_exec.Sandbox_target.Docker { pipeline_runner = Some _; _ }; _ }
+      , Profile.Docker -> ()
+    | Ok { target = Masc_exec.Sandbox_target.Micro_vm { pipeline_runner = Some _; _ }; _ }
+      , Profile.Micro_vm ->
+      Alcotest.fail "a microvm target carried a pipeline runner the shim cannot honour"
+    | Ok { target = Masc_exec.Sandbox_target.Docker { pipeline_runner = None; _ }; _ }
+      , Profile.Docker ->
+      Alcotest.fail "the Docker target lost its pipeline runner"
     | Ok _, _ -> Alcotest.fail "guest target kind differs from the keeper profile"
     | Error error, _ -> Alcotest.fail error.message
   in
@@ -314,6 +325,93 @@ let test_guest_target_refuses_a_profile_mismatch () =
   in
   assert_mismatch ~factory_meta:docker ~caller_meta:microvm;
   assert_mismatch ~factory_meta:microvm ~caller_meta:docker
+
+(* RFC-0400 C: the guest's tree is its work volume. Every docker-shaped exec
+   entrypoint refuses a microvm keeper before touching any CLI, so a runtime
+   that says it is running needs no container behind it here. *)
+let test_docker_shaped_exec_refuses_a_microvm_keeper () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir "microvm_exec_refusal_" in
+  let config = Masc.Workspace.default_config base in
+  let meta = microvm_meta ~name:"vm-exec-refusal" in
+  let runtime =
+    Masc.Keeper_turn_sandbox_runtime.For_testing.create_minimal
+      ~config ~meta
+      ~state:(Running { container_name = "masc-keeper-vm-vm-exec-refusal-deadbeef" })
+  in
+  let refused label = function
+    | Error message ->
+      Alcotest.(check bool) (label ^ " names the remote lane") true
+        (String.starts_with ~prefix:"microvm_exec_is_remote:" message)
+    | Ok _ -> Alcotest.failf "%s built a docker-shaped exec for a microvm keeper" label
+  in
+  refused "exec_argv"
+    (Masc.Keeper_turn_sandbox_runtime.exec_argv
+       ~validate_cached_container:false runtime ~cwd:base ~command_argv:[ "true" ]);
+  refused "run_bash_with_status"
+    (Masc.Keeper_turn_sandbox_runtime.run_bash_with_status
+       ~timeout_sec:1.0 runtime ~cwd:base ~cmd:"true" ());
+  refused "run_exec_pipeline_with_status"
+    (Masc.Keeper_turn_sandbox_runtime.run_exec_pipeline_with_status
+       ~timeout_sec:1.0 runtime ~cwd:base
+       ~stages:[ { Masc.Keeper_turn_sandbox_runtime.command_argv = [ "true" ]; cwd = None } ])
+;;
+
+(* spawn hands back an argv to background on the host; there is none for a
+   tree the shim reaches over one framed connection. Resolving the factory
+   does not boot anything, so this runs without the container CLI. *)
+let test_spawn_does_not_cross_the_guest_boundary () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir "microvm_spawn_refusal_" in
+  let config = Masc.Workspace.default_config base in
+  let meta = microvm_meta ~name:"vm-spawn-refusal" in
+  let factory = Masc.Keeper_sandbox_factory.create ~config ~meta () in
+  let result =
+    Masc.Keeper_tool_in_process_runtime.spawn_sandbox_argv
+      ~turn_sandbox_factory:(Some factory)
+      ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta)
+      ~command_argv:[ "sleep"; "1" ]
+  in
+  Masc.Keeper_sandbox_factory.cleanup factory;
+  match result with
+  | Error message ->
+    Alcotest.(check bool) "names the boundary" true
+      (Astring.String.is_infix ~affix:"microvm boundary" message)
+  | Ok _ -> Alcotest.fail "spawn built an argv to background for a microvm keeper"
+;;
+
+(* What the keeper is shown: its host root is the bookkeeping bundle, not a
+   guest path, and the cwd echo and execution location repeat that bundle
+   -- the remote lane owns the guest spelling. *)
+let test_echoes_name_the_host_bundle () =
+  let base = temp_dir "microvm_echo_bundle_" in
+  let config = Masc.Workspace.default_config base in
+  let meta = microvm_meta ~name:"vm-echo-bundle" in
+  let host_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  Alcotest.(check string) "host root is the bundle, not playground/microvm"
+    (Filename.concat base ".masc/playground/vm-echo-bundle/")
+    host_root;
+  let sandbox = Masc.Keeper_sandbox.of_meta ~config ~meta in
+  Alcotest.(check bool) "no container root for a tree the guest owns" true
+    (Option.is_none sandbox.container_root);
+  let response =
+    Masc.Keeper_cwd_response.of_sandbox ~sandbox ~host_cwd:host_root
+      ~container_cwd_for_docker:"/home/keeper/playground/vm-echo-bundle"
+  in
+  Alcotest.(check string) "cwd echo is the host bundle" host_root
+    (Masc.Keeper_cwd_response.keeper_visible response);
+  let location =
+    Masc.Keeper_sandbox_repo_path.execution_location_json
+      ~config ~meta ~args:(`Assoc []) ~cwd:host_root
+  in
+  (match Yojson.Safe.Util.member "cwd" location with
+   | `String cwd ->
+     Alcotest.(check bool) "execution location is not a guest path" false
+       (String.starts_with ~prefix:"/home/keeper/" cwd);
+     Alcotest.(check bool) "execution location names the bundle" true
+       (Astring.String.is_infix ~affix:".masc/playground/vm-echo-bundle" cwd)
+   | _ -> Alcotest.fail "execution location has no cwd")
+;;
 
 let test_turn_start_argv_shape () =
   let a =
@@ -1138,6 +1236,12 @@ let () =
             test_guest_target_follows_the_factory_contract
         ; Alcotest.test_case "guest target refuses a profile mismatch" `Quick
             test_guest_target_refuses_a_profile_mismatch
+        ; Alcotest.test_case "docker-shaped exec refuses a microvm keeper" `Quick
+            test_docker_shaped_exec_refuses_a_microvm_keeper
+        ; Alcotest.test_case "spawn does not cross the guest boundary" `Quick
+            test_spawn_does_not_cross_the_guest_boundary
+        ; Alcotest.test_case "echoes name the host bundle" `Quick
+            test_echoes_name_the_host_bundle
         ; Alcotest.test_case "turn start argv shape" `Quick
             test_turn_start_argv_shape
         ; Alcotest.test_case "inspect state parser" `Quick

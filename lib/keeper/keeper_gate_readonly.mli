@@ -1,14 +1,14 @@
 (** Deterministic observation-only classification for Keeper tool_execute
     gate requests. See the implementation's header comment for the authority
     argument: the judge's stated authority is the concrete effect's safety,
-    and for a shell-less observation-only argv inside a per-keeper disposable
-    guest (docker container or microvm) that question has a deterministic
-    answer. *)
+    and for a shell-less observation-only argv dispatched into a per-keeper
+    disposable guest that question has a deterministic answer. *)
 
-(** [observation_only_request ~operation ~input] is [true] exactly when the
-    gate request is a [tool_execute] whose argv is a closed-set
-    observation-only command and whose declared sandbox is a docker or
-    microvm guest, or when it is a [network_read] request whose capability
+(** [observation_only_request ~operation ~sandbox_profile ~input] is [true]
+    exactly when the gate request is a [tool_execute] whose argv is a
+    closed-set observation-only command and whose typed [sandbox_profile]
+    satisfies [Keeper_types_profile_sandbox.runs_in_disposable_guest], or
+    when it is a [network_read] request whose capability
     is in the closed
     observation set ([web_search] — server-side, provider-bound, no
     caller-chosen address; [web_fetch] — caller-chosen URL whose literal
@@ -31,8 +31,14 @@
     [false] means nothing — the request falls through to the configured
     gate mode. The execute input shape is
     [Keeper_tool_execute_runtime.execute_gate_input]; the network shape is
-    the [network_read] gate request ([capability] at the top level). *)
-val observation_only_request : operation:string -> input:Yojson.Safe.t -> bool
+    the [network_read] gate request ([capability] at the top level). The
+    sandbox labels inside the execute envelope are display/audit data and
+    are never read here. *)
+val observation_only_request
+  :  operation:string
+  -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile option
+  -> input:Yojson.Safe.t
+  -> bool
 
 val observation_network_capabilities : string list
 

@@ -492,6 +492,7 @@ let handle_tool_execute_typed
           ; causal_context = Option.map (fun current -> current ()) gate_context
           ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
           ; continuation_channel
+          ; sandbox_profile = Some dispatch_bundle.sandbox_profile
           }
         in
         let gate_decision =

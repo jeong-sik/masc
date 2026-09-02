@@ -3322,6 +3322,7 @@ let test_consumed_without_outcome_is_terminal_indeterminate () =
                ; "input", input
                ]
          ; base_path = config.base_path
+         ; sandbox_profile = None
          ; causal_context = None
          ; task_id = None
          ; continuation_channel = None
@@ -3400,6 +3401,7 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
          ; operation = "unreplayed_operation"
          ; input = `Assoc [ "message", `String exact_tail ]
          ; base_path = config.base_path
+         ; sandbox_profile = None
          ; causal_context = None
          ; task_id = None
          ; continuation_channel = None

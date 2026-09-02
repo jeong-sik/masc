@@ -19,6 +19,12 @@ type request =
   ; causal_context : causal_context option
   ; task_id : string option
   ; continuation_channel : Keeper_continuation_channel.t option
+  ; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option
+      (** The typed sandbox a [tool_execute] will dispatch into, taken from
+          the dispatch bundle at the call site — the route authority for the
+          observation-only classification ({!Keeper_gate_readonly}). [None]
+          for every non-execute operation. The sandbox labels inside [input]
+          are display/audit data; no decision reads them. *)
   }
 
 type authorization_source =

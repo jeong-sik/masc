@@ -11,6 +11,7 @@ type request =
   ; causal_context : causal_context option
   ; task_id : string option
   ; continuation_channel : Keeper_continuation_channel.t option
+  ; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option
   }
 
 type authorization_source =
@@ -1879,8 +1880,9 @@ let decide_from_selected_mode request = function
   | Ok Keeper_gate_mode.Manual -> defer request Human_requested
   | Ok Keeper_gate_mode.Auto_judge ->
     (* Observation-only requests have a deterministic safety answer —
-       read-only argv inside a disposable guest (docker or microvm),
-       server-side [web_search] reads, and
+       read-only argv dispatched into a disposable guest (the typed
+       [sandbox_profile] on the request decides that), server-side
+       [web_search] reads, and
        [web_fetch] GETs whose literal destination the fetch checks itself
        (it does not resolve DNS names);
        paying the judge (or the human queue) for them is how a bare `ls`
@@ -1890,6 +1892,7 @@ let decide_from_selected_mode request = function
     if
       Keeper_gate_readonly.observation_only_request
         ~operation:request.operation
+        ~sandbox_profile:request.sandbox_profile
         ~input:request.input
     then (
       let source = Readonly_sandbox in

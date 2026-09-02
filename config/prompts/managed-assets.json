@@ -44,6 +44,8 @@
     "keeper.observation.current_task_absent.md",
     "keeper.observation.current_task_absent_in_recovery.md",
     "keeper.observation.current_task_unobservable.md",
+    "keeper.observation.previous_turn_stop.repeated_assistant_text.md",
+    "keeper.observation.previous_turn_stop.repeated_tool_call.md",
     "keeper.observation.recovered_current_task.md",
     "keeper.observation.rejected_digest_heading.md",
     "keeper.observation.rejected_digest_row.md",

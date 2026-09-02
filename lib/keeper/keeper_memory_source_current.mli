@@ -44,8 +44,24 @@ type projection =
   ; invalidations : invalidation list
   }
 
+(** Why a source file could not be read. The first four are the caller's to
+    fix -- the path, not the store, is wrong; only [Source_io_failed] is the
+    filesystem not answering. *)
+type source_read_failure =
+  | Source_path_rejected of string
+      (** Empty, or outside the keeper's read boundary; the boundary's own reason. *)
+  | Source_missing
+  | Source_not_a_regular_file
+  | Source_too_large of
+      { actual_bytes : int
+      ; max_bytes : int
+      }
+  | Source_io_failed of string
+
+val source_read_failure_to_string : source_read_failure -> string
+
 type write_error =
-  | Source_read_failed of string
+  | Source_read_failed of source_read_failure
   | Store_write_failed of string
 
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
@@ -68,7 +84,7 @@ val read_source :
   config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> source_path:string
-  -> (string, string) result
+  -> (string, source_read_failure) result
 
 (** Upsert the single current claim for [source_path]. The exact source bytes
     are read inside this call; callers cannot supply their own digest. A

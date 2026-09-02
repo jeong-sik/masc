@@ -472,7 +472,7 @@ let keeper_context_status_json
 type memory_write_error_kind =
   | Content_empty
   | Source_path_invalid
-  | Source_read_failed
+  | Source_read_failed of Keeper_memory_source_current.source_read_failure
   | Derivation_incomplete
   | Derivation_invalid
   | Derived_source_path_unsupported
@@ -484,7 +484,7 @@ type memory_write_error_kind =
 let memory_write_error_kind_to_string = function
   | Content_empty -> "content_empty"
   | Source_path_invalid -> "source_path_invalid"
-  | Source_read_failed -> "source_read_failed"
+  | Source_read_failed _ -> "source_read_failed"
   | Derivation_incomplete -> "derivation_incomplete"
   | Derivation_invalid -> "derivation_invalid"
   | Derived_source_path_unsupported -> "derived_source_path_unsupported"
@@ -505,9 +505,16 @@ let class_of_memory_write_error_kind = function
   | Derivation_incomplete
   | Derivation_invalid
   | Derived_source_path_unsupported
-  | Unsupported_derivation ->
+  | Unsupported_derivation
+  | Source_read_failed
+      ( Keeper_memory_source_current.Source_path_rejected _
+      | Keeper_memory_source_current.Source_missing
+      | Keeper_memory_source_current.Source_not_a_regular_file
+      | Keeper_memory_source_current.Source_too_large _ ) ->
     Tool_result.Policy_rejection
-  | Source_read_failed | Persistence_failed -> Tool_result.Dependency_unavailable
+  | Source_read_failed (Keeper_memory_source_current.Source_io_failed _)
+  | Persistence_failed ->
+    Tool_result.Dependency_unavailable
   (* The store committed and then did not show what it committed: a
      producer bug, not a dependency that can answer on a later turn. *)
   | Commit_receipt_inconsistent | No_memory_write_error -> Tool_result.Runtime_failure
@@ -740,12 +747,14 @@ let keeper_memory_write_with_outcome
                ~ok:false
                ~error_kind:Commit_receipt_inconsistent
                [ "detail", `String detail ])
-        | Error (Keeper_memory_source_current.Source_read_failed detail) ->
+        | Error (Keeper_memory_source_current.Source_read_failed failure) ->
           respond
             ~effect_disposition:Tool_result.Proven_pre_effect
             ~ok:false
-            ~error_kind:Source_read_failed
-            [ "detail", `String detail ]
+            ~error_kind:(Source_read_failed failure)
+            [ "detail"
+            , `String (Keeper_memory_source_current.source_read_failure_to_string failure)
+            ]
         | Error (Keeper_memory_source_current.Store_write_failed detail) ->
           Log.Keeper.warn
             "explicit source-bound memory write failed keeper=%s: %s"

@@ -1036,6 +1036,126 @@ let test_source_parser_rejects_json_rendering_of_a_non_string () =
      = None)
 ;;
 
+(* --- The failure class names which side failed ------------------------ *)
+
+let failure_class_of (execution : Masc.Keeper_tool_execution.t) =
+  match execution.Masc.Keeper_tool_execution.disposition with
+  | Tool_result.Failed class_ -> Some class_
+  | Tool_result.Completed () | Tool_result.Deferred () -> None
+;;
+
+let check_failure_class label expected execution =
+  Alcotest.(check (option string))
+    label
+    (Some (Tool_result.tool_failure_class_to_string expected))
+    (Option.map Tool_result.tool_failure_class_to_string (failure_class_of execution))
+;;
+
+let empty_ctx () = Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:""
+
+(* A store the runtime cannot decode is a dependency that did not answer.
+   Before, [read_current_facts] raised and the dispatcher printed
+   [Failure("...invalid current Memory OS snapshot...")] back to the model,
+   which then retried the search with other arguments (79 such failures on
+   2026-09-01, 65 of them one keeper's corrupt file). *)
+let test_corrupt_snapshot_is_a_dependency_failure () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "corrupt-store" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  let snapshot_path = Filename.concat keepers_dir (meta.name ^ ".memory-current.json") in
+  let oc = open_out_bin snapshot_path in
+  output_string oc "{ this is not a snapshot";
+  close_out oc;
+  let execution =
+    Runtime.keeper_memory_search_with_outcome
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:(`Assoc [ "query", `String "anything"; "source", `String "memory" ])
+  in
+  check_failure_class "corrupt store" Tool_result.Dependency_unavailable execution;
+  let response =
+    execution.Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
+  in
+  Alcotest.(check string)
+    "the store, not the query, is named"
+    "snapshot_read_failed"
+    (string_field "error_kind" response);
+  let detail = string_field "detail" response in
+  let rec mentions_path i =
+    i + String.length snapshot_path <= String.length detail
+    && (String.equal (String.sub detail i (String.length snapshot_path)) snapshot_path
+        || mentions_path (i + 1))
+  in
+  Alcotest.(check bool) "the detail names the file" true (mentions_path 0)
+;;
+
+(* A write that cannot reach its store is the same dependency failure; the
+   claim is reported as not saved, and the class tells the model that other
+   arguments will not save it either. *)
+let test_unwritable_store_is_a_dependency_failure () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "unwritable-store" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  (* A directory where the snapshot file belongs: every open for writing
+     fails regardless of the user the test runs as. *)
+  Fs_compat.mkdir_p (Filename.concat keepers_dir (meta.name ^ ".memory-current.json"));
+  let execution =
+    Runtime.keeper_memory_write_with_outcome
+      ~config
+      ~meta
+      ~args:(make_args ~title:"" ~content:"a claim that cannot be saved")
+  in
+  check_failure_class "unwritable store" Tool_result.Dependency_unavailable execution;
+  let response =
+    execution.Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
+  in
+  Alcotest.(check string)
+    "persistence, not validation"
+    "persistence_failed"
+    (string_field "error_kind" response)
+;;
+
+(* Input the caller can correct is a policy rejection, like a schema
+   rejection; a fact that is not there is the state refusing, a workflow
+   rejection. *)
+let test_input_and_state_failures_keep_their_own_classes () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "classes" in
+  check_failure_class
+    "empty content is the caller's to fix"
+    Tool_result.Policy_rejection
+    (Runtime.keeper_memory_write_with_outcome
+       ~config
+       ~meta
+       ~args:(make_args ~title:"" ~content:""));
+  check_failure_class
+    "a malformed memory id is the caller's to fix"
+    Tool_result.Policy_rejection
+    (Runtime.keeper_memory_retract_with_outcome
+       ~config
+       ~meta
+       ~args:(make_retract_args ~memory_id:"not-an-id" ~reason:"incorrect"));
+  check_failure_class
+    "an absent fact is the state refusing"
+    Tool_result.Workflow_rejection
+    (Runtime.keeper_memory_retract_with_outcome
+       ~config
+       ~meta
+       ~args:(make_retract_args ~memory_id:(memory_id 'a') ~reason:"incorrect"))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_write"
@@ -1107,6 +1227,20 @@ let () =
             "source parser rejects a non-string rendering"
             `Quick
             test_source_parser_rejects_json_rendering_of_a_non_string
+        ] )
+    ; ( "failure class"
+      , [ Alcotest.test_case
+            "corrupt snapshot is a dependency failure"
+            `Quick
+            test_corrupt_snapshot_is_a_dependency_failure
+        ; Alcotest.test_case
+            "unwritable store is a dependency failure"
+            `Quick
+            test_unwritable_store_is_a_dependency_failure
+        ; Alcotest.test_case
+            "input and state failures keep their own classes"
+            `Quick
+            test_input_and_state_failures_keep_their_own_classes
         ] )
     ]
 ;;

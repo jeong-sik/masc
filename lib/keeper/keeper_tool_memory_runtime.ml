@@ -63,13 +63,30 @@ type fact_match =
   ; store : fact_store
   }
 
+(* The durable stores a search reads. Either failing is the store, not the
+   query: the arguments were never judged, so the failure is typed as a
+   dependency that did not answer rather than raised as an exception the
+   dispatcher would print back to the model as [Failure(...)]. *)
+type durable_search_error =
+  | Snapshot_read_failed of string
+  | Source_revalidate_failed of string
+
+let durable_search_error_kind_to_string = function
+  | Snapshot_read_failed _ -> "snapshot_read_failed"
+  | Source_revalidate_failed _ -> "source_revalidate_failed"
+;;
+
+let durable_search_error_detail = function
+  | Snapshot_read_failed detail | Source_revalidate_failed detail -> detail
+;;
+
 let read_current_facts ~keepers_dir ~keeper_id =
   match
     Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
   with
-  | Ok None -> []
-  | Ok (Some snapshot) -> snapshot.facts
-  | Error detail -> failwith detail
+  | Ok None -> Ok []
+  | Ok (Some snapshot) -> Ok snapshot.facts
+  | Error detail -> Error (Snapshot_read_failed detail)
 ;;
 
 (* Filter the keeper's current facts by an explicit query substring while
@@ -81,21 +98,21 @@ let search_durable_facts
       ~(meta : keeper_meta)
       ~(query : string)
       ~(limit : int)
-  : fact_match list * int
+  : (fact_match list * int, durable_search_error) result
   =
-  let facts = read_current_facts ~keepers_dir ~keeper_id:meta.name in
-  let source_projection =
-    match
-      Keeper_memory_source_current.revalidate
-        ~config
-        ~meta
-        ~keepers_dir
-        ~now:(Time_compat.now ())
-        ()
-    with
-    | Ok projection -> projection
-    | Error detail -> failwith detail
-  in
+  match read_current_facts ~keepers_dir ~keeper_id:meta.name with
+  | Error _ as error -> error
+  | Ok facts ->
+  match
+    Keeper_memory_source_current.revalidate
+      ~config
+      ~meta
+      ~keepers_dir
+      ~now:(Time_compat.now ())
+      ()
+  with
+  | Error detail -> Error (Source_revalidate_failed detail)
+  | Ok source_projection ->
   let source_facts = source_projection.facts in
   let total_candidates = List.length facts + List.length source_facts in
   let matched =
@@ -137,7 +154,7 @@ let search_durable_facts
       })
       source_matched
   in
-  take limit (ordinary_matches @ source_matches), total_candidates
+  Ok (take limit (ordinary_matches @ source_matches), total_candidates)
 ;;
 
 let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
@@ -272,97 +289,114 @@ let keeper_memory_search_with_outcome
         ~base_path:config.Workspace.base_path
     in
     let source_label = memory_search_source_to_string source in
-    let result =
-    match source with
-    | History ->
-      let matches = search_history ~config ~meta ~ctx_work ~query ~limit in
-      let no_match = matches = [] in
-      let match_jsons = List.map (fun msg -> `String msg) matches in
-      `Assoc
-        ([ "query", `String query
-         ; "source", `String source_label
-         ; "match_count", `Int (List.length matches)
-         ; "matches", `List match_jsons
-         ]
-         @ if no_match then [ "no_match", `Bool true ] else [])
-    | All ->
-      let fact_matches, fact_total =
-        search_durable_facts ~config ~keepers_dir ~meta ~query ~limit
-      in
-      let history_limit = max 0 (limit - List.length fact_matches) in
-      let history_matches =
-        if history_limit > 0
-        then search_history ~config ~meta ~ctx_work ~query ~limit:history_limit
-        else []
-      in
-      let total_matches = List.length fact_matches + List.length history_matches in
-      let no_match = total_matches = 0 in
-      let fact_jsons = List.map fact_match_to_json fact_matches in
-      let history_jsons =
-        List.map
-          (fun msg ->
-             `Assoc
-               [ "source", `String (memory_search_source_to_string History)
-               ; "text", `String msg
-               ])
-          history_matches
-      in
+    let durable_json ~fact_jsons ~fact_total ~total_matches ~extra_matches =
       `Assoc
         ([ "query", `String query
          ; "source", `String source_label
          ; "total_candidates", `Int fact_total
          ; "match_count", `Int total_matches
-         ; "matches", `List (fact_jsons @ history_jsons)
+         ; "matches", `List (fact_jsons @ extra_matches)
          ]
-         @ if no_match then [ "no_match", `Bool true ] else [])
-    | Memory ->
-      let matches, total_candidates =
-        search_durable_facts ~config ~keepers_dir ~meta ~query ~limit
-      in
-      let no_match = matches = [] in
-      let match_jsons = List.map fact_match_to_json matches in
-      `Assoc
-        ([ "query", `String query
-         ; "source", `String source_label
-         ; "total_candidates", `Int total_candidates
-         ; "match_count", `Int (List.length matches)
-         ; "matches", `List match_jsons
-         ]
-         @ if no_match then [ "no_match", `Bool true ] else [])
-  in
-  (* Day-1 search logging: append search event to decisions log. *)
-  let log_match_count =
+         @ if total_matches = 0 then [ "no_match", `Bool true ] else [])
+    in
+    let result =
+      match source with
+      | History ->
+        let matches = search_history ~config ~meta ~ctx_work ~query ~limit in
+        let no_match = matches = [] in
+        let match_jsons = List.map (fun msg -> `String msg) matches in
+        Ok
+          (`Assoc
+              ([ "query", `String query
+               ; "source", `String source_label
+               ; "match_count", `Int (List.length matches)
+               ; "matches", `List match_jsons
+               ]
+               @ if no_match then [ "no_match", `Bool true ] else []))
+      | All ->
+        (match search_durable_facts ~config ~keepers_dir ~meta ~query ~limit with
+         | Error _ as error -> error
+         | Ok (fact_matches, fact_total) ->
+           let history_limit = max 0 (limit - List.length fact_matches) in
+           let history_matches =
+             if history_limit > 0
+             then search_history ~config ~meta ~ctx_work ~query ~limit:history_limit
+             else []
+           in
+           let total_matches =
+             List.length fact_matches + List.length history_matches
+           in
+           let extra_matches =
+             List.map
+               (fun msg ->
+                  `Assoc
+                    [ "source", `String (memory_search_source_to_string History)
+                    ; "text", `String msg
+                    ])
+               history_matches
+           in
+           Ok
+             (durable_json
+                ~fact_jsons:(List.map fact_match_to_json fact_matches)
+                ~fact_total
+                ~total_matches
+                ~extra_matches))
+      | Memory ->
+        (match search_durable_facts ~config ~keepers_dir ~meta ~query ~limit with
+         | Error _ as error -> error
+         | Ok (matches, total_candidates) ->
+           Ok
+             (durable_json
+                ~fact_jsons:(List.map fact_match_to_json matches)
+                ~fact_total:total_candidates
+                ~total_matches:(List.length matches)
+                ~extra_matches:[]))
+    in
     match result with
-    | `Assoc fields ->
-      (match List.assoc_opt "match_count" fields with
-       | Some (`Int n) -> n
-       | _ -> 0)
-    | _ -> 0
-  in
-  (try
-     let log_entry =
-       `Assoc
-         [ "ts_unix", `Float (Time_compat.now ())
-         ; "event", `String "memory_search"
-         ; "query", `String query
-         ; "source", `String source_label
-         ; "match_count", `Int log_match_count
-         ]
-     in
-     Keeper_types_support.append_jsonl_line
-       (Keeper_types_support.keeper_decision_log_path config meta.name)
-       log_entry
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string DecisionAuditFlushFailures)
-       ~labels:[ "keeper", meta.name ]
-       ();
-     Log.Keeper.warn ~keeper_name:meta.name
-       "memory_search decision-log append failed: %s"
-       (Printexc.to_string exn));
-  Keeper_tool_execution.success (Yojson.Safe.to_string result)
+    | Error error ->
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Dependency_unavailable
+        (error_json
+           ~fields:
+             [ "error_kind", `String (durable_search_error_kind_to_string error)
+             ; "source", `String source_label
+             ; "detail", `String (durable_search_error_detail error)
+             ]
+           "keeper_memory_search could not read the durable memory store")
+    | Ok result ->
+    (* Day-1 search logging: append search event to decisions log. *)
+    let log_match_count =
+      match result with
+      | `Assoc fields ->
+        (match List.assoc_opt "match_count" fields with
+         | Some (`Int n) -> n
+         | _ -> 0)
+      | _ -> 0
+    in
+    (try
+       let log_entry =
+         `Assoc
+           [ "ts_unix", `Float (Time_compat.now ())
+           ; "event", `String "memory_search"
+           ; "query", `String query
+           ; "source", `String source_label
+           ; "match_count", `Int log_match_count
+           ]
+       in
+       Keeper_types_support.append_jsonl_line
+         (Keeper_types_support.keeper_decision_log_path config meta.name)
+         log_entry
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string DecisionAuditFlushFailures)
+         ~labels:[ "keeper", meta.name ]
+         ();
+       Log.Keeper.warn ~keeper_name:meta.name
+         "memory_search decision-log append failed: %s"
+         (Printexc.to_string exn));
+    Keeper_tool_execution.success (Yojson.Safe.to_string result)
 ;;
 
 let keeper_memory_search_json ~config ~meta ~ctx_work ~args =
@@ -380,7 +414,9 @@ let keeper_context_status_json
       ~base_path:config.Workspace.base_path
   in
   let memory_facts_total =
-    read_current_facts ~keepers_dir ~keeper_id:meta.name |> List.length
+    match read_current_facts ~keepers_dir ~keeper_id:meta.name with
+    | Ok facts -> List.length facts
+    | Error error -> failwith (durable_search_error_detail error)
   in
   let source_memory_facts_total, source_memory_invalidations_total =
     match
@@ -453,6 +489,23 @@ let memory_write_error_kind_to_string = function
   | Unsupported_derivation -> "unsupported_derivation"
   | Persistence_failed -> "persistence_failed"
   | No_memory_write_error -> ""
+;;
+
+(* What the model does next depends on which side failed. Input the caller
+   can correct is a policy rejection; a store or source file that could not
+   be read or written is a dependency the arguments never reached; the
+   "no error" kind never travels with ok=false, so reaching it here is a
+   producer bug. *)
+let class_of_memory_write_error_kind = function
+  | Content_empty
+  | Source_path_invalid
+  | Derivation_incomplete
+  | Derivation_invalid
+  | Derived_source_path_unsupported
+  | Unsupported_derivation ->
+    Tool_result.Policy_rejection
+  | Source_read_failed | Persistence_failed -> Tool_result.Dependency_unavailable
+  | No_memory_write_error -> Tool_result.Runtime_failure
 ;;
 
 type memory_write_validation =
@@ -602,6 +655,7 @@ let keeper_memory_write_with_outcome
         ~error_kind
         extras
     =
+    let class_ = class_of_memory_write_error_kind error_kind in
     let error_kind = memory_write_error_kind_to_string error_kind in
     let payload =
       Yojson.Safe.to_string
@@ -616,10 +670,7 @@ let keeper_memory_write_with_outcome
           Keeper_tool_execution.with_memory_write_receipt ~revision completed)
         memory_revision
     else
-      Keeper_tool_execution.failure
-        ~class_:Tool_result.Workflow_rejection
-        ~effect_disposition
-        payload
+      Keeper_tool_execution.failure ~class_ ~effect_disposition payload
   in
   match validate_memory_write_args args with
   | Memory_write_invalid { error_kind; extras } ->
@@ -792,6 +843,13 @@ let memory_retract_error_kind_to_string = function
   | No_memory_retract_error -> ""
 ;;
 
+let class_of_memory_retract_error_kind = function
+  | Memory_id_invalid | Reason_empty -> Tool_result.Policy_rejection
+  | Fact_not_found -> Tool_result.Workflow_rejection
+  | Retract_persistence_failed -> Tool_result.Dependency_unavailable
+  | No_memory_retract_error -> Tool_result.Runtime_failure
+;;
+
 type memory_retract_validation =
   | Memory_retract_ok of
       { memory_id : string
@@ -855,7 +913,7 @@ let keeper_memory_retract_with_outcome
         revision
     else
       Keeper_tool_execution.failure
-        ~class_:Tool_result.Workflow_rejection
+        ~class_:(class_of_memory_retract_error_kind error_kind)
         ~effect_disposition
         payload
   in

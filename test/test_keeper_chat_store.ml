@@ -546,7 +546,9 @@ let test_append_turn_redacts_projected_secrets () =
               name = "secret.txt";
               size = String.length file_secret;
               mime_type = "text/plain";
-              data = file_secret } ]
+              data = file_secret;
+              width = None;
+              height = None } ]
         ~tool_calls:
           [ { K.call_id = "toolu_1";
               execution_id = None;

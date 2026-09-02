@@ -56,15 +56,8 @@ let to_json t =
    canonical helper (lib/core/json_util.ml:149); duplicated rather
    than introducing an upward dependency.  RFC candidate: extract a
    shared sub-leaf module for json kind diagnostics. *)
-let kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
+(* One mapping, in the leaf every isolated library can reach. *)
+let kind_name = Shared_types.Json_kind.name
 
 let of_json = function
   | `Assoc fields ->

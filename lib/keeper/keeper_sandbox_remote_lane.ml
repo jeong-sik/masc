@@ -73,6 +73,18 @@ let guest_endpoint ~turn_sandbox_factory ~(meta : keeper_meta) ~cwd =
          meta.name)
 ;;
 
+(* The turn-free door to the same guest. [endpoint] above finds the guest
+   through the turn that owns its lifecycle and may start it; this one names
+   the guest directly and cannot start anything. A caller with no turn --
+   verification lookup, an operator surface -- reads through this and gets a
+   refusal only when the guest is genuinely down. *)
+let attached_guest_endpoint ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  match meta.sandbox_profile with
+  | Docker -> Error (docker_has_no_remote_lane meta)
+  | Remote_ssh -> openssh_endpoint ~config ~meta
+  | Micro_vm -> Keeper_turn_sandbox_runtime.microvm_attached_endpoint ~config ~meta ()
+;;
+
 let endpoint ?turn_sandbox_factory ~(config : Workspace.config) ~(meta : keeper_meta) ~cwd () =
   match meta.sandbox_profile with
   | Docker -> Error (docker_has_no_remote_lane meta)

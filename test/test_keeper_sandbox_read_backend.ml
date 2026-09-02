@@ -15,6 +15,9 @@ module Keeper_types = Keeper_types
 module Keeper_alerting_path = Masc.Keeper_alerting_path
 module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
+module Keeper_sandbox_remote_lane = Masc.Keeper_sandbox_remote_lane
+module Keeper_sandbox_remote = Masc.Keeper_sandbox_remote
+module Keeper_sandbox_microvm = Masc.Keeper_sandbox_microvm
 module Fd_accountant = Fd_accountant
 module Env_config_keeper = Env_config_keeper
 
@@ -399,29 +402,83 @@ let test_run_command_rejects_factory_profile_drift_in_both_directions () =
   assert_mismatch ~factory_meta:docker ~caller_meta:remote;
   assert_mismatch ~factory_meta:remote ~caller_meta:docker
 
-let test_run_command_refuses_microvm_without_a_turn_factory () =
+(* The refusal these tests used to pin claimed the guest was "known only to
+   the turn's sandbox factory". It is not: the name below is built from the
+   keeper and the base path alone, which every caller already has, and the
+   guest outlives the turn that booted it. What the old test was really
+   protecting -- that a microvm read never quietly becomes a Docker or host
+   read -- is asserted here on the route and the endpoint instead. *)
+let expected_guest_name ~config ~keeper_name =
+  Printf.sprintf
+    "masc-keeper-vm-%s-%s"
+    keeper_name
+    (String.sub
+       (Keeper_sandbox_runtime.base_path_hash
+          (config : Workspace.config).base_path)
+       0
+       8)
+
+let test_microvm_without_a_turn_factory_routes_to_the_attached_guest () =
   let base, config, docker = setup_config "read-microvm-no-factory" in
   let microvm =
     { docker with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm }
   in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
-    Keeper_sandbox_read_backend.run_command_with_status
-      ~config
+    Keeper_sandbox_read_backend.resolve_read_dispatch
+      ~turn_sandbox_factory:None
       ~meta:microvm
-      ~command_argv:[ "ls"; "/" ]
-      ~max_bytes:4096
-      ~timeout_sec:5.0
-      ()
+      ~cwd:(Keeper_sandbox.host_root_abs_of_meta ~config microvm)
   with
-  | Ok _ -> Alcotest.fail "microvm read silently fell back without a factory"
+  | Ok Keeper_sandbox_read_backend.Attached_guest -> ()
+  | Ok Keeper_sandbox_read_backend.Docker_fallback ->
+    Alcotest.fail "a microvm read fell back to Docker"
+  | Ok Keeper_sandbox_read_backend.Remote_dispatch ->
+    Alcotest.fail "a microvm read took the turn-owned lane without a turn"
+  | Ok (Keeper_sandbox_read_backend.Turn_runtime _) ->
+    Alcotest.fail "a microvm read resolved a runtime with no factory to hold it"
+  | Error message ->
+    Alcotest.failf "a running guest was reported unreachable: %s" message
+
+let test_attached_guest_endpoint_names_the_derived_guest () =
+  let base, config, docker = setup_config "read-microvm-attach" in
+  let microvm =
+    { docker with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm }
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  match
+    Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta:microvm ()
+  with
+  | Error message -> Alcotest.failf "attaching to a named guest failed: %s" message
+  | Ok endpoint ->
+    Alcotest.(check string)
+      "the guest name comes from the keeper and the base path"
+      (expected_guest_name ~config ~keeper_name:microvm.name)
+      (Keeper_sandbox_remote.name endpoint);
+    (match Keeper_sandbox_remote.transport endpoint with
+     | Keeper_sandbox_remote.Container_exec _ -> ()
+     | Keeper_sandbox_remote.Openssh _ ->
+       Alcotest.fail "a microvm attach produced an SSH endpoint");
+    Alcotest.(check string)
+      "reads land on the guest work volume, not the host playground"
+      Keeper_sandbox_microvm.work_volume_guest_root
+      (Keeper_sandbox_remote.remote_root endpoint)
+
+(* Attaching is a microvm affordance, not a way around the lane for every
+   profile: a Docker keeper's tree is a shared mount with no endpoint, and
+   asking for one still says so. *)
+let test_attached_guest_endpoint_refuses_docker () =
+  let base, config, docker = setup_config "read-attach-docker" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  match
+    Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta:docker ()
+  with
+  | Ok _ -> Alcotest.fail "a docker keeper produced a guest endpoint"
   | Error message ->
     Alcotest.(check bool)
-      "microvm needs its frozen runtime"
+      "docker has no remote lane"
       true
-      (String_util.contains_substring
-         message
-         "microvm_read_requires_turn_sandbox_factory")
+      (String_util.contains_substring message "docker_has_no_remote_lane")
 
 (* The trailer the fake shim writes, rendered by the same function the real
    shim renders it with. It was a hand-typed string carrying ["v":1] while
@@ -2209,8 +2266,12 @@ let run_tests ~clock () =
             test_run_command_remote_ssh_endpoint_error_before_image_guard;
           Alcotest.test_case "factory profile drift is rejected both ways" `Quick
             test_run_command_rejects_factory_profile_drift_in_both_directions;
-          Alcotest.test_case "microvm without a turn factory fails closed" `Quick
-            test_run_command_refuses_microvm_without_a_turn_factory;
+          Alcotest.test_case "microvm without a turn factory routes to the attached guest"
+            `Quick test_microvm_without_a_turn_factory_routes_to_the_attached_guest;
+          Alcotest.test_case "an attached endpoint names the derived guest" `Quick
+            test_attached_guest_endpoint_names_the_derived_guest;
+          Alcotest.test_case "attaching refuses a docker keeper" `Quick
+            test_attached_guest_endpoint_refuses_docker;
           Alcotest.test_case "nonzero exit errors by default" `Quick
             test_run_command_nonzero_exit_errors_by_default;
           Alcotest.test_case "configured nonzero exit is allowed" `Quick

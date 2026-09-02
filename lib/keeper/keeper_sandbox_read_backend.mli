@@ -63,6 +63,32 @@ val read_file :
     host-path preflight in {!read_file} tags the sandbox profile
     (e.g. [microvm_read_failed]) since no backend ran. Both are for
     caller log forensics. *)
+
+type read_dispatch =
+  | Turn_runtime of Keeper_sandbox_factory.runtime_binding
+      (** The turn's frozen guest runtime. *)
+  | Remote_dispatch
+      (** The lane's endpoint, which a turn may start. *)
+  | Attached_guest
+      (** A running guest named by the keeper and the base path, reached
+          without a turn and never started by the read. *)
+  | Docker_fallback
+      (** A read-only container over the shared playground mount. *)
+
+val resolve_read_dispatch :
+  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  cwd:string ->
+  (read_dispatch, string) result
+(** Which backend reaches this keeper's tree, decided from the declared
+    profile and what the caller holds. Pure: it performs no read and starts
+    nothing.
+
+    Exposed because the routing table is this module's load-bearing decision
+    and a wrong arm is invisible at the call site — a microvm read was
+    refused as unreachable for as long as the arm said so, while the guest
+    was up and named by facts the caller already had. *)
+
 val run_command_with_status :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   ?ok_exit_codes:int list ->

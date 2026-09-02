@@ -1,13 +1,15 @@
 (** Deterministic observation-only classification for Keeper tool_execute
     gate requests. See the implementation's header comment for the authority
     argument: the judge's stated authority is the concrete effect's safety,
-    and for a shell-less observation-only argv inside the docker sandbox
-    that question has a deterministic answer. *)
+    and for a shell-less observation-only argv inside a per-keeper disposable
+    guest (docker container or microvm) that question has a deterministic
+    answer. *)
 
 (** [observation_only_request ~operation ~input] is [true] exactly when the
     gate request is a [tool_execute] whose argv is a closed-set
-    observation-only command and whose declared sandbox is docker, or a
-    [network_read] request whose capability is in the closed
+    observation-only command and whose declared sandbox is a docker or
+    microvm guest, or when it is a [network_read] request whose capability
+    is in the closed
     observation set ([web_search] — server-side, provider-bound, no
     caller-chosen address; [web_fetch] — caller-chosen URL whose literal
     destination [Tool_misc_web_fetch] checks itself on the initial URL and

@@ -6,7 +6,8 @@
     (config/prompts/judge.effect.md). For one closed class that question has
     a deterministic answer: a shell-less argv (no redirection, pipe, or
     command substitution is expressible) whose command is observation-only,
-    running inside the docker sandbox. Those requests are allowed without a
+    running inside a per-keeper disposable guest (docker container or
+    microvm). Those requests are allowed without a
     judgment call and without queueing; everything else — every write-capable
     command, every unknown command, every host-sandbox request, every
     non-tool_execute operation — falls through to the configured gate mode
@@ -14,7 +15,17 @@
 
     The tables are closed on purpose: admitting a command is a reviewed code
     change, not a configuration knob. When classification is uncertain the
-    answer is always [false] — the request goes to the configured path. *)
+    answer is always [false] — the request goes to the configured path.
+
+    The sandbox predicate is a closed set too: only per-keeper disposable
+    guests qualify (docker containers, microvm guests). A microvm guest runs
+    its own Linux kernel behind the hypervisor with --cap-drop ALL,
+    --read-only and Network_none by default, and the exec shim spawns the
+    payload with [Unix.execvpe] — argv, no shell — so the premise "shell-less
+    observation-only argv inside a disposable guest" holds at least as
+    strongly as under docker. remote_ssh is transport-only (its container
+    knobs are not reproduced and the network is inherited), so it stays with
+    the judge. *)
 
 (* ── Command tables ──────────────────────────────────────────────────── *)
 
@@ -142,12 +153,17 @@ let argv_of_gate_input input =
   | _ -> None
 ;;
 
-let docker_sandbox input =
+let sandboxed_guest input =
   match input with
   | `Assoc fields ->
     (match (List.assoc_opt "sandbox_profile" fields, List.assoc_opt "sandbox_target" fields) with
      | Some (`String profile), Some (`String target) ->
-       String.equal profile "docker" && String.starts_with ~prefix:"docker" target
+       (* Profile and target are checked as a pair: the target label is the
+          route authority the sandbox factory froze at dispatch, so a stale
+          profile string alone cannot move a request onto this path. The
+          colon prefixes mirror [Keeper_tool_execute_runtime.sandbox_target_label]. *)
+       (String.equal profile "docker" && String.starts_with ~prefix:"docker:" target)
+       || (String.equal profile "microvm" && String.starts_with ~prefix:"microvm:" target)
      | _ -> false)
   | _ -> false
 ;;
@@ -187,7 +203,7 @@ let network_capability_of_gate_input input =
 
 let observation_only_request ~operation ~input =
   (String.equal operation "tool_execute"
-   && docker_sandbox input
+   && sandboxed_guest input
    && (match argv_of_gate_input input with
        | Some argv -> classify_argv argv
        | None -> false))

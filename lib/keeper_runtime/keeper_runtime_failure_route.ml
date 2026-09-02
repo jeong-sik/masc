@@ -118,6 +118,7 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
     (match Keeper_internal_error.accept_no_progress_retry_kind internal with
      | Some `Empty_no_progress -> rotate No_progress_empty
      | Some `Thinking_only_no_progress -> rotate No_progress_thinking_only
+     | Some `Truncated_no_progress -> exhaust_failure Contract_violation
      | None -> exhaust_failure Internal_opaque)
   | Keeper_internal_error.Internal_contract_rejected _
   | Keeper_internal_error.Receipt_persistence_failed _

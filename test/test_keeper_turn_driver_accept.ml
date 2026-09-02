@@ -82,7 +82,8 @@ let accept_no_progress_retry_kind_string err =
   Option.map
     (function
       | `Empty_no_progress -> "empty_no_progress"
-      | `Thinking_only_no_progress -> "thinking_only_no_progress")
+      | `Thinking_only_no_progress -> "thinking_only_no_progress"
+      | `Truncated_no_progress -> "truncated_no_progress")
     kind
 
 let direct_no_progress_retry_reason_string err =
@@ -1468,6 +1469,76 @@ let test_blank_text_non_end_turn_response_is_rejected () =
     true
     (contains ~needle:"stop_reason=max_tokens" reason)
 
+let test_max_tokens_text_is_rejected_for_checkpoint_continuation () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.max-tokens"
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      (run_result
+         ~content:[ Agent_core.Types.Text "partial partial partial" ]
+         ~stop_reason:Agent_core.Types.MaxTokens
+         ())
+  in
+  let err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "typed MaxTokens response is no usable completion"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "diagnostic retains typed stop reason"
+    true
+    (contains ~needle:"stop_reason=max_tokens" reason);
+  Alcotest.(check (option string))
+    "MaxTokens with visible text classifies as truncation"
+    (Some "truncated_no_progress")
+    (accept_no_progress_retry_kind_string err);
+  Alcotest.(check bool)
+    "truncation is handled by same-runtime continuation, not lane rotation"
+    false
+    (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
+  Alcotest.(check bool)
+    "provider helper recognizes the continuation trigger"
+    true
+    (Masc.Keeper_turn_driver_try_provider.For_testing.max_tokens_truncation_error
+       err)
+;;
+
+let test_truncation_checkpoint_drops_only_incomplete_assistant () =
+  let tool_result =
+    { Agent_core.Types.role = Agent_core.Types.Tool
+    ; content =
+        [ Agent_core.Types.ToolResult
+            { tool_use_id = "call-1"
+            ; content = "effect already recorded"
+            ; outcome = Agent_core.Types.Tool_succeeded
+            ; json = None
+            ; content_blocks = None
+            }
+        ]
+    ; name = None
+    ; tool_call_id = Some "call-1"
+    ; metadata = []
+    }
+  in
+  let incomplete = message [ Agent_core.Types.Text "partial" ] in
+  let checkpoint = checkpoint_with_messages [ tool_result; incomplete ] in
+  match
+    Masc.Keeper_turn_driver_try_provider.For_testing
+    .checkpoint_before_incomplete_response
+      checkpoint
+  with
+  | None -> Alcotest.fail "assistant-ended checkpoint should be continuable"
+  | Some prepared ->
+    Alcotest.(check bool)
+      "post-tool result is preserved and incomplete assistant is removed"
+      true
+      (prepared.messages = [ tool_result ]);
+    Alcotest.(check int)
+      "turn count remains provider-observation history"
+      checkpoint.turn_count
+      prepared.turn_count
+;;
+
 let test_custom_accept_reject_preserves_predicate_reason () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -1907,6 +1978,14 @@ let () =
             test_empty_non_end_turn_response_is_rejected;
           Alcotest.test_case "blank text non-end-turn response is rejected" `Quick
             test_blank_text_non_end_turn_response_is_rejected;
+          Alcotest.test_case
+            "MaxTokens text uses checkpoint continuation"
+            `Quick
+            test_max_tokens_text_is_rejected_for_checkpoint_continuation;
+          Alcotest.test_case
+            "truncation checkpoint preserves tools and drops partial assistant"
+            `Quick
+            test_truncation_checkpoint_drops_only_incomplete_assistant;
           Alcotest.test_case "custom predicate rejection stays distinct" `Quick
             test_custom_accept_reject_preserves_predicate_reason;
           Alcotest.test_case "media with tool result is deliverable" `Quick

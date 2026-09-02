@@ -563,6 +563,16 @@ let summary_of_masc_internal_error = function
            detail
            retry_after_suffix)
   | Accept_rejected
+      { scope
+      ; reason_kind = Some Accept_no_usable_progress
+      ; stop_reason = Some Agent_core.Types.MaxTokens
+      ; _
+      } ->
+    Some
+      (Printf.sprintf
+         "Provider output for runtime %s reached its maximum token boundary before completion."
+         (nonempty_or_unknown scope))
+  | Accept_rejected
       {
         scope;
         reason_kind;
@@ -727,6 +737,12 @@ let runtime_id_of_masc_internal_error = function
 
 let accept_no_progress_retry_kind = function
   | Accept_rejected
+      { reason_kind = Some Accept_no_usable_progress
+      ; stop_reason = Some Agent_core.Types.MaxTokens
+      ; _
+      } ->
+    Some `Truncated_no_progress
+  | Accept_rejected
       {
         reason_kind;
         response_shape;
@@ -765,6 +781,7 @@ let accept_rejection_has_no_progress_retry_hint err =
   match accept_no_progress_retry_kind err with
   | Some (`Empty_no_progress | `Thinking_only_no_progress) ->
     true
+  | Some `Truncated_no_progress -> false
   | None -> false
 
 (* The typed value rides the carrier (RFC-0371 B12 §6.1(1)); the message

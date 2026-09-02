@@ -28,10 +28,11 @@ val accept_rejection_kind_to_string : accept_rejection_kind -> string
 val accept_rejection_of_response :
   runtime_id:string -> Agent_core.Types.api_response -> accept_rejection
 
-(** [true] when a provider response carries AGENT_CORE-defined downstream-visible
-    progress for runtime accept/reject. This delegates the content-shape
-    boundary to [Agent_core.Response_shape.has_deliverable_content]; MASC should
-    not add provider/model-specific accept rules here. Responses with no
-    deliverable content are rejected before keeper response finalization,
-    instead of failing later as "no textual reply". *)
+(** [true] when a provider response is both complete and carries AGENT_CORE-defined
+    downstream-visible progress for runtime accept/reject. A typed [MaxTokens]
+    terminal is incomplete even when it contains text, so it is rejected before
+    keeper response finalization and can resume from its post-turn checkpoint.
+    Content-shape classification delegates to
+    [Agent_core.Response_shape.has_deliverable_content]; no provider/model name
+    or free-form response text participates in the decision. *)
 val response_has_text_or_tool_progress : Agent_core.Types.api_response -> bool

@@ -4,12 +4,13 @@ name: CI
 # dispatched. What changed on 2026-09-02 (owner decision) is the shape:
 # the previous 9-job lane (changes / meta / health / build / lint /
 # dashboard / structure-ratchet / shell-ir-ratchet / ci-gate) is now a
-# single job that runs `dune build @install`.
+# single job that builds the tree.
 #
-# Scope caveat: `@install` compiles the installable libraries only. It
-# does NOT compile test/ — a main breakage confined to test files (the
-# 2026-09-02 incident was 3 of 4 errors in tests) stays invisible here.
-# To include tests, change the one build line to `dune build .`.
+# Scope: `dune build .` compiles the whole tree, test/ included. It
+# replaced `@install` on 2026-09-02 because @install skips test/, and
+# that day's five main breakages put 3 of 12 sites — and two entire
+# repairs (#32454, #32517) — in test files, where @install would never
+# have looked.
 # Lint, dashboard, ratchets, and the ci-gate no longer run anywhere.
 
 on:
@@ -27,7 +28,7 @@ concurrency:
 
 jobs:
   build:
-    name: dune build @install
+    name: dune build .
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -72,10 +73,10 @@ jobs:
 
       - name: Build
         env:
-          # Public runners give four CPUs; use all four for the
-          # compile-only graph.
+          # Public runners give four CPUs; use all four. Linking the test
+          # executables, not compiling, is what this job spends its time on.
           DUNE_JOBS: "4"
         # NO continue-on-error: the build is deterministic and must hard-fail.
         run: |
           set -euo pipefail
-          dune build @install
+          dune build .

@@ -209,8 +209,8 @@ let origin_display_of_string = function
    hid it, not because the keeper stopped thinking. At rest the header is what
    it was before any of these modes existed.
 
-   Discovery lives in the footer and the help overlay, which name Ctrl-R and
-   Ctrl-D whether or not a mode is on. *)
+   Discovery lives in the footer and the help overlay, which name Ctrl-R,
+   Ctrl-D, Ctrl-N, and Ctrl-F whether or not a mode is on. *)
 let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
   let parts =
     List.filter_map Fun.id
@@ -218,13 +218,15 @@ let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
          | Memory_summary -> None
          | Memory_hidden -> Some "memory:off"
          | Memory_full -> Some "memory:full")
-      ; (* The row layout is the readable default. Compact modes trade that
-           separation for capacity, so the header names the trade while it is
-           active. *)
+      ; (* The clock-free gutter is the resting layout: the speaker mark and
+           label retain who/what, while timestamps and request ids remain one
+           keypress away. Name only the denser projection's added metadata so
+           the header explains what changed instead of describing the default
+           as though something were missing. *)
         (match origin with
-         | Masc_tui_message_layout.Origin_row -> None
-         | Masc_tui_message_layout.Origin_inline -> Some "clock:inline"
-         | Masc_tui_message_layout.Origin_bare -> Some "clock:off")
+         | Masc_tui_message_layout.Origin_bare -> None
+         | Masc_tui_message_layout.Origin_inline -> Some "metadata:inline"
+         | Masc_tui_message_layout.Origin_row -> Some "metadata:full")
       ; (match reasoning with
          | Reasoning_hidden -> None
          | (Reasoning_folded | Reasoning_full) as mode ->
@@ -243,14 +245,13 @@ let next_reasoning_visibility = function
   | Reasoning_full -> Reasoning_hidden
 ;;
 
-(* Rows first, then the same origins folded into the margin, then the same
-   margin without the clock. Each step gives the conversation more of the
-   pane, so one key held down walks from the most detail to the most
-   messages. *)
+(* Start from the resting clock-free gutter, then add a short inline clock,
+   then give the full timestamp and request id a row of their own. One key
+   walks from the densest conversation toward progressively more metadata. *)
 let next_origin_display = function
-  | Masc_tui_message_layout.Origin_row -> Masc_tui_message_layout.Origin_inline
-  | Masc_tui_message_layout.Origin_inline -> Masc_tui_message_layout.Origin_bare
-  | Masc_tui_message_layout.Origin_bare -> Masc_tui_message_layout.Origin_row
+  | Masc_tui_message_layout.Origin_bare -> Masc_tui_message_layout.Origin_inline
+  | Masc_tui_message_layout.Origin_inline -> Masc_tui_message_layout.Origin_row
+  | Masc_tui_message_layout.Origin_row -> Masc_tui_message_layout.Origin_bare
 ;;
 
 let toggle_tool_visibility = function
@@ -3292,10 +3293,10 @@ let create_state
   msg_older_loading = false;
   msg_older_error = None;
   msg_reasoning_visibility = reasoning_visibility;
-  (* Keep each origin on a row of its own by default: the speaker badge and
-     prose then form separate visual levels instead of one dense column.
-     Ctrl-F retains the compact inline and clock-free alternatives. *)
-  msg_origin_display = Masc_tui_message_layout.Origin_row;
+  (* Chat opens on the answer, not its bookkeeping. The gutter still carries
+     the typed speaker/kind; Ctrl-F adds inline, then full timestamp/request
+     metadata when the operator needs to trace a turn. *)
+  msg_origin_display = Masc_tui_message_layout.Origin_bare;
   msg_tool_visibility = tool_visibility;
   msg_spill = None;
   msg_queued = Masc_tui_keeper_chat_queue.empty;

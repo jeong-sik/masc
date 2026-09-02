@@ -671,7 +671,7 @@ let test_request_labels_keep_random_suffix () =
   let second = Chat.compact_request_id (prefix ^ "bbbbbbbbbbbb") in
   check bool "nearby UUIDv7 labels remain distinct" false
     (String.equal first second);
-  check int "compact label width" 14 (String.length first)
+  check int "compact label width" 20 (String.length first)
 
 let test_error_certainty () =
   check bool "transport is unverified" true

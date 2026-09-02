@@ -470,26 +470,23 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
        | Message_layout.User | Message_layout.Inbound | Message_layout.Keeper
        | Message_layout.Status | Message_layout.Journal | Message_layout.Error
        | Message_layout.Skill _ ->
-           (* [role_label] arrives right-aligned in a sixteen-to-twenty-four
-              cell column so the request column stays put down the pane. The
-              reverse span used to swallow that alignment, so "AUTO" -- four
-              letters -- drew an eighteen-cell inverted block with a dozen
-              cells of highlighted nothing in front of it. The padding is
-              spent outside the badge now: the column still lines up and the
-              reversed run is the name.
+           (* [role_label] arrives in a fixed fourteen-to-eighteen cell column
+              so the request column stays put down the pane. The label sits
+              beside its mark and the remaining padding follows the badge;
+              the reverse span covers only the name.
 
               "From" went with it. It was five cells that named no field and
               said nothing the badge does not: the row already reads
               [clock] [who] [request]. *)
-           let mark, alignment, name =
+           let mark, name, alignment =
              Message_layout.split_aligned_role_label ~style:row.style role_label
            in
            (* The mark keeps its colour and stays out of the badge, the way the
               inline gutter already draws it, so the two origin modes agree
               about what a speaker mark looks like. *)
            let badge =
-             Printf.sprintf "%s%s%s%s %s %s" (Chat_theme.origin row.style) mark
-               alignment Ansi.reverse name Ansi.reset
+             Printf.sprintf "%s%s%s%s%s %s %s" (Chat_theme.origin row.style)
+               mark Ansi.reverse name Ansi.reset alignment Ansi.reset
            in
            box_line buf cols
              (Printf.sprintf "%s[%s]%s  %s %s%s%s" Ansi.dim timestamp Ansi.reset
@@ -6862,54 +6859,21 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     | Message_thinking -> "THINKING"
     | Message_memory -> "JOURNAL"
   in
-  (* A persisted delivery key or turn_ref is the grouping authority. Rows
-     without one keep their old labels; grouping them by adjacency or clock
-     would silently put unrelated activity inside the same turn. *)
+  (* Turn identity stays in the typed request id. The speaker glyph already
+     distinguishes USER, Keeper, Tool, Skill, and Journal, so prefixes such as
+     [TURN ·] and [↳] repeated or obscured the same fact instead of clarifying
+     it. Adjacent rows from the exact same request still fold as continuations
+     in [Message_layout]; a row resuming after another lane names its source
+     again. *)
   let visible_messages =
     List.mapi (fun entry_index message -> (entry_index, message)) messages
   in
   let timeline_ats = List.map snd visible_timeline in
-  let grouped_messages =
-    let rec loop seen_turns previous_turn reversed = function
-      | [] -> List.rev reversed
-      | ((entry_index, message), timeline_at) :: rest ->
-          let turn_id = message.me_request_id in
-          let grouped = not (String.equal turn_id "") in
-          let starts_turn =
-            grouped
-            && not (List.exists (String.equal turn_id) seen_turns)
-          in
-          let resumes_turn =
-            grouped
-            && not starts_turn
-            && not (Option.exists (String.equal turn_id) previous_turn)
-          in
-          let base = base_role_label_of message in
-          let role_label =
-            if not grouped then base
-            else if starts_turn then "TURN · " ^ base
-            else if resumes_turn then "↳ " ^ base
-            else
-              (* A continuation carries the same name as the row above it,
-                 and a name repeated says nothing. Marking it inside the
-                 label put "who is still talking" at the same weight as
-                 "what kind of row this is"; the gutter now blanks the name
-                 and quiets the glyph instead, so a name in this column
-                 always means the speaker changed.
-
-                 Kept equal to [base] rather than emptied: [continues_previous]
-                 compares labels to decide what a continuation keeps, and two
-                 consecutive rows have to match for it to fire. *)
-              base
-          in
-          let next_seen_turns =
-            if starts_turn then turn_id :: seen_turns else seen_turns
-          in
-          let next_previous_turn = if grouped then Some turn_id else None in
-          loop next_seen_turns next_previous_turn
-            ((entry_index, message, role_label, timeline_at) :: reversed) rest
-    in
-    loop [] None [] (List.combine visible_messages timeline_ats)
+  let labeled_messages =
+    List.map2
+      (fun (entry_index, message) timeline_at ->
+        (entry_index, message, base_role_label_of message, timeline_at))
+      visible_messages timeline_ats
   in
   let projected_tool_rows =
     keeper_message_tool_rows state ~keeper_name ~chat_cols
@@ -6992,9 +6956,10 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
                  rows never reach this arm (the layout filter removed them),
                  and a neutral system row with no projection remains whole. *)
               | Memory_full | Memory_hidden -> message.me_text
-              | Memory_summary ->
-                  Option.value ~default:message.me_text
-                    message.me_memory_summary)
+              | Memory_summary -> (
+                  match message.me_memory_summary with
+                  | Some summary -> summary ^ " · Ctrl-N: journal detail"
+                  | None -> message.me_text))
           | Message_thinking | Message_user _ | Message_keeper
           | Message_autonomous
           | Message_status | Message_error ->
@@ -7059,7 +7024,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
                  };
            }
             : Message_layout.entry))
-      grouped_messages
+      labeled_messages
   in
   layout_entries
 
@@ -7364,7 +7329,8 @@ let render_keeper_message (state : state) =
                the badge's width twice, so the second call trims what the
                first had already fitted. *)
             ({ style;
-               timestamp = "live";
+               timestamp =
+                 keeper_message_clock (Keeper_chat_transcript.started_at live);
                timeline_bucket;
                role_label =
                  Message_layout.align_role_label ~column:role_label_column
@@ -7590,7 +7556,7 @@ let render_keeper_message (state : state) =
      | Some entry ->
          let request = entry.sent_request in
          box_line_styled chat_buf chat_cols ~style:(Theme.info ())
-           (Printf.sprintf "  [%s]  ▶              TURN · YOU  %s"
+           (Printf.sprintf "  [%s]  ▶  YOU  %s"
               (keeper_message_clock entry.submitted_at)
               (Keeper_chat.compact_request_id request.request_id));
          box_line_styled chat_buf chat_cols ~style:(Theme.info ())

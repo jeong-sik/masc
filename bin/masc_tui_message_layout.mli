@@ -122,9 +122,11 @@ type origin_display =
   | Origin_inline
       (** The origin folds into the body's left margin, clock included. *)
   | Origin_bare  (** The same margin without the clock. *)
-(** Where a message's origin is drawn. [Origin_row] is what the pane has
-    always done. The other two hand that row back to the conversation: eight
-    speakers taking turns spent eight rows of a forty-row pane on headings.
+(** Where a message's origin is drawn. [Origin_bare] is the chat default.
+    [Origin_inline] adds its clock; [Origin_row] adds a full timestamp and
+    request-id heading. Folding headings into the gutter hands their rows back
+    to the conversation: eight speakers taking turns otherwise spend eight
+    rows of a forty-row pane on headings.
 
     Every layout and scroll function takes this, and passing it to one but not
     another would measure the pane against a height it does not draw. *)
@@ -276,17 +278,17 @@ val speaker_mark : style -> string
 val split_aligned_role_label :
   style:style -> string -> string * string * string
 (** An {!align_role_label} result taken back apart into its mark, the
-    alignment between mark and name, and the name. The alignment is layout and
-    the name is content: a renderer that reverses the whole label paints the
-    alignment as though it were the badge. The mark is empty for a label
+    name, and its trailing column padding. The padding is layout and the name
+    is content: a renderer that reverses the whole label paints empty cells as
+    though they were the badge. The mark is empty for a label
     narrow enough that {!align_role_label} dropped it. *)
 
 val align_role_label : ?column:int -> style:style -> string -> string
-(** Right-align a role label in [column] cells, defaulting to
+(** Left-align a role label in [column] cells, defaulting to
     {!chat_role_label_column}; pass the budget {!chat_role_label_width}
     answered for the pane. A label that does not fit loses its head, not its
     tail: these read [agent · surface] and share long prefixes, so the end is
-    what tells two of them apart. *)
+    what tells two of them apart. Remaining column cells follow the name. *)
 
 val message_viewport_supported :
   terminal_rows:int -> terminal_cols:int -> status_rows:int -> bool

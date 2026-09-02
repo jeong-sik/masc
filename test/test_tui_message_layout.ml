@@ -1251,22 +1251,22 @@ let test_bare_links_are_dressed_and_bounded () =
    place in the conversation moved with it.
 
    The badge is a budget now. [codex-mcp-client] still reads whole -- that was
-   the original complaint and 24 covers it -- and a name past the budget loses
+   the original complaint and 18 covers it -- and a name past the budget loses
    its head rather than its tail, because these labels are [agent · surface]
    and share long prefixes. *)
 let test_badge_is_a_budget_not_a_measurement () =
   let width = Layout.chat_role_label_width ~pane_cells:200 in
-  check int "a wide pane spends the budget and no more" 24 width;
-  (* Whole, not merely present: the assertion is on the tail, because the
-     badge pads between the mark and the name and [String.trim] cannot reach
-     that padding. *)
+  check int "a wide pane spends the budget and no more" 18 width;
   check bool "the name the old constant cut still reads whole" true
     (String.starts_with ~prefix:(Layout.speaker_mark Layout.Keeper)
        (Layout.align_role_label ~column:width ~style:Layout.Keeper
           "codex-mcp-client")
-     && String.ends_with ~suffix:"codex-mcp-client"
-          (Layout.align_role_label ~column:width ~style:Layout.Keeper
-             "codex-mcp-client"))
+     && String.equal "codex-mcp-client"
+          (String.trim
+             (Layout.drop_cells
+                (Layout.align_role_label ~column:width ~style:Layout.Keeper
+                   "codex-mcp-client")
+                2)))
 
 let test_badge_keeps_the_tail_when_it_cannot_fit () =
   let width = Layout.chat_role_label_width ~pane_cells:200 in
@@ -1290,11 +1290,11 @@ let test_badge_keeps_the_tail_when_it_cannot_fit () =
 let test_badge_narrows_with_the_pane () =
   (* Under 64 cells a quarter is below the old constant and the floor wins,
      so a narrow terminal draws the badge it always drew. *)
-  check int "a wide pane spends the budget" 24
+  check int "a wide pane spends the budget" 18
     (Layout.chat_role_label_width ~pane_cells:400);
-  check int "40-cell pane keeps the old badge" 16
+  check int "40-cell pane keeps the compact badge" 14
     (Layout.chat_role_label_width ~pane_cells:40);
-  check int "16-cell pane keeps the old badge" 16
+  check int "16-cell pane keeps the compact badge" 14
     (Layout.chat_role_label_width ~pane_cells:16)
 
 let test_one_long_name_cannot_crowd_the_messages () =
@@ -1306,10 +1306,8 @@ let test_one_long_name_cannot_crowd_the_messages () =
     (pane - width > pane / 2)
 
 let test_a_narrow_pane_draws_what_it_always_did () =
-  (* Under 64 cells a quarter is below 16, and the floor wins -- the same
-     badge these panes have always had. *)
-  check int "40-cell pane" 16 (Layout.chat_role_label_width ~pane_cells:40);
-  check int "16-cell pane" 16 (Layout.chat_role_label_width ~pane_cells:16)
+  check int "40-cell pane" 14 (Layout.chat_role_label_width ~pane_cells:40);
+  check int "16-cell pane" 14 (Layout.chat_role_label_width ~pane_cells:16)
 
 let test_every_row_gets_the_same_badge () =
   (* Alignment is the reason the badge exists: one width for the pane, not
@@ -1628,12 +1626,11 @@ let test_skill_marks_keep_state_without_colour () =
     ; Layout.Skill_failure
     ]
 
-(* The badge is drawn in reverse video, and a right-aligned label carries its
-   alignment as leading spaces. Reversing the two together painted a dozen
-   cells of highlighted nothing in front of a four-letter name. *)
+(* The badge is drawn in reverse video, while its fixed-column padding is
+   layout rather than content. *)
 let test_alignment_padding_is_kept_apart_from_the_name () =
   let aligned = Layout.align_role_label ~column:16 ~style:Layout.Keeper "AUTO" in
-  let mark, alignment, name =
+  let mark, name, alignment =
     Layout.split_aligned_role_label ~style:Layout.Keeper aligned
   in
   check bool "the mark leads" true
@@ -1643,16 +1640,16 @@ let test_alignment_padding_is_kept_apart_from_the_name () =
      && String.for_all (fun c -> Char.equal c ' ') alignment);
   check string "the name is the label alone" "AUTO" name;
   check string "the three pieces rebuild the label" aligned
-    (mark ^ alignment ^ name);
+    (mark ^ name ^ alignment);
   (* A column too narrow for both drops the mark, and the split says so rather
      than colouring the first byte of a name as though it were one. *)
   let narrow = Layout.align_role_label ~column:2 ~style:Layout.Keeper "AUTO" in
-  let mark, alignment, name =
+  let mark, name, alignment =
     Layout.split_aligned_role_label ~style:Layout.Keeper narrow
   in
   check string "a markless label reports no mark" "" mark;
   check string "the three pieces still rebuild it" narrow
-    (mark ^ alignment ^ name)
+    (mark ^ name ^ alignment)
 
 let test_a_continuation_survives_the_renderer_cut () =
   let entries =

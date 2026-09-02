@@ -355,6 +355,15 @@ val remove_persistent_containers
 val docker_preflight : timeout_sec:float -> unit -> docker_preflight option
 
 val docker_preflight_to_yojson : docker_preflight -> Yojson.Safe.t
+
+(** Status label a failed preflight is reported under, shared by the sandbox
+    status surface and the keeper_up rejection so the two name one thing. *)
+val docker_preflight_failed_label : string
+
+(** [Some line] when the preflight is not [ok]: the failed checks' messages,
+    the failure classes, and the preflight's own next actions, on one line
+    under {!docker_preflight_failed_label}. [None] when it is [ok]. *)
+val docker_preflight_rejection : docker_preflight -> string option
 (** Lightweight image-presence check for the concrete execution path. Docker
     execution calls it immediately before [docker run] so an absent image is
     reported explicitly instead of triggering an implicit registry pull. It is

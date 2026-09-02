@@ -356,6 +356,7 @@ let keeper_memory_search_with_outcome
     | Error error ->
       Keeper_tool_execution.failure
         ~class_:Tool_result.Dependency_unavailable
+        ~effect_disposition:Tool_result.Proven_pre_effect
         (error_json
            ~fields:
              [ "error_kind", `String (durable_search_error_kind_to_string error)
@@ -477,6 +478,7 @@ type memory_write_error_kind =
   | Derived_source_path_unsupported
   | Unsupported_derivation
   | Persistence_failed
+  | Commit_receipt_inconsistent
   | No_memory_write_error
 
 let memory_write_error_kind_to_string = function
@@ -488,6 +490,7 @@ let memory_write_error_kind_to_string = function
   | Derived_source_path_unsupported -> "derived_source_path_unsupported"
   | Unsupported_derivation -> "unsupported_derivation"
   | Persistence_failed -> "persistence_failed"
+  | Commit_receipt_inconsistent -> "commit_receipt_inconsistent"
   | No_memory_write_error -> ""
 ;;
 
@@ -505,7 +508,9 @@ let class_of_memory_write_error_kind = function
   | Unsupported_derivation ->
     Tool_result.Policy_rejection
   | Source_read_failed | Persistence_failed -> Tool_result.Dependency_unavailable
-  | No_memory_write_error -> Tool_result.Runtime_failure
+  (* The store committed and then did not show what it committed: a
+     producer bug, not a dependency that can answer on a later turn. *)
+  | Commit_receipt_inconsistent | No_memory_write_error -> Tool_result.Runtime_failure
 ;;
 
 type memory_write_validation =
@@ -733,7 +738,7 @@ let keeper_memory_write_with_outcome
                detail;
              respond
                ~ok:false
-               ~error_kind:Persistence_failed
+               ~error_kind:Commit_receipt_inconsistent
                [ "detail", `String detail ])
         | Error (Keeper_memory_source_current.Source_read_failed detail) ->
           respond
@@ -790,7 +795,7 @@ let keeper_memory_write_with_outcome
           respond
             ~effect_disposition:Tool_result.Proven_post_effect
             ~ok:false
-            ~error_kind:Persistence_failed
+            ~error_kind:Commit_receipt_inconsistent
             [ "revision", `Int snapshot.revision
             ; ( "detail"
               , `String

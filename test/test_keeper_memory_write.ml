@@ -849,7 +849,7 @@ let test_invalid_write_is_proven_pre_effect () =
       ~args:(make_args ~title:"" ~content:"")
   in
   (match result.Masc.Keeper_tool_execution.disposition with
-   | Tool_result.Failed Tool_result.Workflow_rejection -> ()
+   | Tool_result.Failed Tool_result.Policy_rejection -> ()
    | Tool_result.Completed () | Tool_result.Deferred () ->
      Alcotest.fail "invalid memory write did not fail"
    | Tool_result.Failed _ ->

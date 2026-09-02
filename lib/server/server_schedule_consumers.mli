@@ -61,3 +61,21 @@ val cancel_keeper_schedules :
   (unit, Schedule_store.store_error) result
 (** Cancels only future wake schedules for [keeper_name]. Already-delivered
     wake messages and their Keeper-owned results are not schedule state. *)
+
+type keeper_wake_acceptance =
+  | Wake_required
+  | Already_pending of string
+  | Already_acked
+  | Already_failed of string
+  | Already_cancelled
+
+val accept_keeper_wake_occurrence :
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
+  base_path:string ->
+  keeper_name:string ->
+  expected_owner:string ->
+  stimulus_id:string ->
+  Keeper_event_queue.stimulus ->
+  (keeper_wake_acceptance, Schedule_runner.consumer_dispatch_error) result
+(** Accepts one scheduled wake occurrence for [keeper_name], reusing the
+    durable occurrence when the queue already holds it. *)

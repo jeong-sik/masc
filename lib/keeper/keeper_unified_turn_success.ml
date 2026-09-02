@@ -149,7 +149,7 @@ let append_metrics_snapshot
 let emit_activity_graph
       ~config
       ~updated_meta
-      ~result
+      ~(result : Keeper_agent_run.run_result)
       ~usage_resolution
       ~latency_ms
       ~turn_cost
@@ -252,6 +252,7 @@ let emit_activity_graph
 let emit_usage_metrics_and_log
       ~updated_meta
       ~result
+      ~usage_resolution
       ~latency_ms
       ~usage_trust
       ~turn_mode_label

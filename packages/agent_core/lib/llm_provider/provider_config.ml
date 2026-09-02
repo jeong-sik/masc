@@ -490,7 +490,9 @@ let reasoning_effort_request_rejection_to_message = function
   | Explicit_disable_outside_ladder { provider_kind; model_id; accepted } ->
     Printf.sprintf
       "%s model %S cannot carry enable_thinking=false: its wire has no thinking toggle \
-       other than reasoning_effort, and the off value %S is %s"
+       other than reasoning_effort, and the off value %S is %s. Declare \
+       accepted_reasoning_efforts including %S on the model's capability row, or route \
+       to a model whose wire can disable thinking"
       (string_of_provider_kind provider_kind)
       model_id
       (reasoning_effort_to_string Reasoning_effort.None_)
@@ -500,6 +502,7 @@ let reasoning_effort_request_rejection_to_message = function
            "not in its accepted set %s"
            (reasoning_effort_list_to_message accepted)
        | None -> "not declared in any accepted set")
+      (reasoning_effort_to_string Reasoning_effort.None_)
 ;;
 
 (* The effort the request will carry, once the thinking toggle is applied.

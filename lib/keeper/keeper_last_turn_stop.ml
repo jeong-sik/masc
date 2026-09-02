@@ -7,7 +7,14 @@
    turn was never told its predecessor was cut by the loop guard (0/3 notice
    delivery on direct turns, 28/32 on keepalive turns, 2026-09-02 wire
    capture). The cell is keyed by base path and keeper name because tests
-   for different roots share one process. *)
+   for different roots share one process.
+
+   Size and contention: entries are bounded by the distinct (base path,
+   keeper) pairs this process has served — one option each, replaced in
+   place, so a keeper that goes down and comes back reuses its entry. The
+   Mutex-held critical section is a single Hashtbl operation; the
+   threads-library lock is the same primitive the rest of this codebase
+   uses for module state. *)
 let cell : (string, Keeper_turn_checkpoint_reason.t option) Hashtbl.t =
   Hashtbl.create 16
 ;;

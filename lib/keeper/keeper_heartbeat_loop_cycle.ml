@@ -209,7 +209,13 @@ let run_keeper_cycle
      yield on a lane that never threaded the old ref (direct/TUI-attached
      turns) left the next turn blind to why its predecessor was cut.
      An explicit [~previous_turn_stop] still wins — tests use it to pin
-     the rendered line. *)
+     the rendered line.
+
+     The read → cycle → write sequence is not one transaction, but two
+     cycles for the same keeper cannot interleave: [run_keeper_cycle_admitted]
+     runs holding the keeper's Owner slot (RFC-0225 §1), so what lands in
+     the cell is always the outcome of the keeper's most recent completed
+     cycle — an overwrite, last writer by turn order. *)
   let previous_turn_stop =
     match previous_turn_stop with
     | Some _ as explicit -> explicit

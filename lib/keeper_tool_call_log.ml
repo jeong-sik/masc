@@ -729,8 +729,10 @@ let log_call
       in
       (* The typed class rides on the row so a failed call can be split by
          what failed (dependency, policy, runtime, workflow, operator) without
-         reading its prose; absent on completed and deferred rows. *)
-      let failure_class_field result =
+         reading its prose; absent on completed and deferred rows. The
+         disposition-only path below reads it off the unit-shaped disposition
+         the same way. *)
+      let failure_class_field (result : Tool_result.result) =
         match Tool_result.failure_class result with
         | Some class_ ->
           [ "failure_class", `String (Tool_result.tool_failure_class_to_string class_) ]
@@ -756,7 +758,12 @@ let log_call
           (match disposition with
            | Some d ->
              [ "disposition", `String (Tool_result.string_of_disposition d) ]
-             @ failure_class_field d
+             @ (match d with
+                | Tool_result.Failed class_ ->
+                  [ ( "failure_class"
+                    , `String (Tool_result.tool_failure_class_to_string class_) )
+                  ]
+                | Tool_result.Completed () | Tool_result.Deferred () -> [])
            | None -> [])
       in
       let file_change_evidence_field =

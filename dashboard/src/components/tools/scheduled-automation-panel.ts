@@ -518,9 +518,15 @@ function reactionEvidenceTone(
   if (!evidence) return 'neutral'
   if (
     evidence.projection_status === 'matched_consumed_ack' ||
+    evidence.projection_status === 'matched_turn_finished' ||
     evidence.projection_status === 'matched_turn_started'
   ) return 'ok'
+  // A cancellation is a settled outcome the operator may need to act on;
+  // two terminals on one occurrence is evidence that contradicts itself.
+  // Neither is the red of a ledger that could not be read.
   if (
+    evidence.projection_status === 'matched_terminal_cancelled' ||
+    evidence.projection_status === 'conflicting_terminal_evidence' ||
     evidence.projection_status === 'matched_stimulus' ||
     evidence.projection_status === 'not_found' ||
     evidence.projection_status === 'missing_stimulus_id'
@@ -537,11 +543,14 @@ export function wakeToTurnWait(
   const seen = evidence.stimulus_recorded_at
   const started = evidence.turn_started_recorded_at
   if (typeof seen !== 'number' || typeof started !== 'number') return null
-  const seconds = Math.max(0, started - seen)
+  const seconds = started - seen
+  // A turn recorded before its stimulus is a contradiction in the ledger,
+  // not a zero-length wait; say so rather than clamp it away.
+  if (seconds < 0) return `${(-seconds).toFixed(1)}s 역전 (turn_started 가 stimulus 보다 앞섬)`
   if (seconds < 60) return `${seconds.toFixed(1)}s`
-  const minutes = Math.floor(seconds / 60)
-  const rest = Math.round(seconds - minutes * 60)
-  return `${minutes}m ${rest}s`
+  const total = Math.round(seconds)
+  const minutes = Math.floor(total / 60)
+  return `${minutes}m ${total - minutes * 60}s`
 }
 
 function reactionEvidenceRows(

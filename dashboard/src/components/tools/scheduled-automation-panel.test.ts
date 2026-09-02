@@ -1502,6 +1502,12 @@ describe('wakeToTurnWait', () => {
     // Live 2026-09-02: 1s on an idle Keeper, 461s behind a chat conversation.
     expect(wakeToTurnWait({ stimulus_recorded_at: 1788309360.5, turn_started_recorded_at: 1788309361.7 })).toBe('1.2s')
     expect(wakeToTurnWait({ stimulus_recorded_at: 1788308088.3, turn_started_recorded_at: 1788308549.1 })).toBe('7m 41s')
+    // Rounding happens once, on the whole interval: 119.6s is 2m 0s, not 1m 60s.
+    expect(wakeToTurnWait({ stimulus_recorded_at: 100, turn_started_recorded_at: 219.6 })).toBe('2m 0s')
+  })
+
+  it('names a turn recorded before its stimulus instead of clamping it to zero', () => {
+    expect(wakeToTurnWait({ stimulus_recorded_at: 200, turn_started_recorded_at: 197.5 })).toContain('2.5s 역전')
   })
 
   it('says nothing when either side of the interval was never recorded', () => {

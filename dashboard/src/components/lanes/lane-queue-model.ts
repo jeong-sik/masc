@@ -411,13 +411,18 @@ export const DRAIN_QUEUE_AXIS = ['matched_pending', 'not_found', 'read_error', '
 
 /** Reaction-evidence axis of the drain matrix (design R_AXIS; null = 행 없음). */
 export const DRAIN_REACTION_AXIS: readonly (string | null)[] = [
-  'matched_consumed_ack', 'matched_turn_started', 'matched_stimulus', 'not_found', 'quarantined', 'read_error', null,
+  'conflicting_terminal_evidence', 'matched_terminal_cancelled', 'matched_consumed_ack', 'matched_turn_finished',
+  'matched_turn_started', 'matched_stimulus', 'not_found', 'quarantined', 'read_error', null,
 ]
 
 /** keeper_reaction_evidence statuses that prove the keeper handled the
  *  stimulus. matched_stimulus is deliberately absent — it is the producer's
  *  own dispatch record (see queue-drain-status.ts header). */
-const REACTED: ReadonlySet<string> = new Set(['matched_consumed_ack', 'matched_turn_started'])
+const REACTED: ReadonlySet<string> = new Set([
+  'matched_consumed_ack',
+  'matched_turn_finished',
+  'matched_turn_started',
+])
 
 /** Mirror of queue-drain-status.ts stateOf() on bare (queue, reaction)
  *  projection statuses, for matrix cells that have no request row behind
@@ -437,6 +442,8 @@ export function drainStateOfEvidence(
       return 'indeterminate'
     case 'not_found': {
       if (reaction != null && REACTED.has(reaction)) return 'drained'
+      if (reaction === 'matched_terminal_cancelled') return 'cancelled'
+      if (reaction === 'conflicting_terminal_evidence') return 'evidence_invalid'
       if (reaction === 'matched_stimulus' || reaction === 'not_found') return 'missed'
       if (reaction === 'read_error') return 'read_error'
       if (reaction === 'quarantined') return 'evidence_invalid'
@@ -509,7 +516,7 @@ export function drainRowOfRequest(
 
 /** Operator sort — actionable verdicts first (design DrainList order). */
 const DRAIN_SORT_ORDER: readonly QueueDrainState[] = [
-  'missed', 'read_error', 'evidence_invalid', 'pending', 'indeterminate', 'drained',
+  'missed', 'cancelled', 'read_error', 'evidence_invalid', 'pending', 'indeterminate', 'drained',
 ]
 
 export function sortedDrainRows(
@@ -522,7 +529,7 @@ export function sortedDrainRows(
 }
 
 /** Legend entries of the operator drain list (design DrainList footer). */
-export const DRAIN_LEGEND_STATES: readonly QueueDrainState[] = ['missed', 'pending', 'read_error', 'drained']
+export const DRAIN_LEGEND_STATES: readonly QueueDrainState[] = ['missed', 'cancelled', 'pending', 'read_error', 'drained']
 
 /* ── 라이프사이클 이벤트 (lc-*) ───────────────────────────────────────── */
 

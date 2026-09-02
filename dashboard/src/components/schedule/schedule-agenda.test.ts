@@ -143,7 +143,7 @@ describe('the subject on a row', () => {
     }
   })
 
-  it('falls back to the raw target, then the scheduler, when the payload names no Keeper', () => {
+  it('falls back to the scheduler when the payload names no Keeper', () => {
     const container = document.createElement('div')
     document.body.appendChild(container)
     try {
@@ -155,6 +155,7 @@ describe('the subject on a row', () => {
               status: 'scheduled',
               recurrence: { kind: 'interval', interval_sec: 300 },
               next_due_at_iso: '2026-07-07T04:00:00Z',
+              payload_keeper_name: 'lane-smith',
               payload_target: 'keeper:lane-smith',
               scheduled_by: { id: 'claude-fable-schedule-probe', kind: 'automated_actor' },
             }),
@@ -170,8 +171,10 @@ describe('the subject on a row', () => {
         />`,
         container,
       )
-      const subjects = Array.from(container.querySelectorAll('.sch-poll-by')).map(node => node.textContent)
-      expect(subjects).toEqual(['keeper:lane-smith', 'dashboard-admin'])
+      const subjects = Array.from(container.querySelectorAll('.sch-poll-by'))
+      expect(subjects.map(node => node.textContent)).toEqual(['lane-smith', 'dashboard-admin'])
+      expect(subjects[1]?.getAttribute('title')).toContain('예약자')
+      expect(subjects[1]?.getAttribute('title')).not.toContain('깨우는 keeper')
     } finally {
       render(null, container)
       container.remove()

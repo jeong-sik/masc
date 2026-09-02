@@ -199,13 +199,17 @@ function scheduledBy(request: DashboardScheduledAutomationRequest): string {
 // Who the wake reaches. The rows named the actor that scheduled the wake, so
 // a cron created through an MCP client read "codex-mcp-client" while the
 // Keeper it wakes every 45 minutes was nowhere on the row. The target is the
-// operator's question; the scheduler stays on the tooltip.
+// operator's question; the scheduler stays on the tooltip. A payload that
+// names no Keeper (an unsupported kind) has no target to show, so the row
+// falls back to the scheduler and the tooltip says that is what it is.
 function wakeTarget(request: DashboardScheduledAutomationRequest): string {
-  return request.payload_keeper_name ?? request.payload_target ?? scheduledBy(request)
+  return request.payload_keeper_name ?? scheduledBy(request)
 }
 
 function wakeTargetTitle(request: DashboardScheduledAutomationRequest): string {
-  return `깨우는 대상 · 예약자 ${scheduledBy(request)}`
+  return request.payload_keeper_name
+    ? `깨우는 keeper · 예약자 ${scheduledBy(request)}`
+    : '예약자 (payload 가 깨울 keeper 를 이름 짓지 않음)'
 }
 
 function summaryText(request: DashboardScheduledAutomationRequest): string {

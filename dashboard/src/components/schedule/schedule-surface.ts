@@ -262,7 +262,7 @@ export function ScheduleSurface() {
             `
           : null}
 
-        <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(6, 1fr)' }} aria-label="예약 요약">
+        <section class="ov-kpis" aria-label="예약 요약">
           <div class="ov-kpi">
             <div class="ov-kpi-k">예약됨</div>
             <div class=${`ov-kpi-v ${scheduledCount !== null && scheduledCount > 0 ? 'info' : ''}`}>${countLabel(scheduledCount)}</div>
@@ -294,7 +294,7 @@ export function ScheduleSurface() {
             <div
               class=${`ov-kpi-v ${wakeCounts === null ? '' : wakeCounts.failed > 0 ? 'warn' : 'ok'}`}
               title=${wakeCounts === null
-                ? 'store 의 보존된 wake 를 서버가 세어 보내지 않음'
+                ? 'wake_counts 없음 — 서버가 보내지 않았거나 형식이 맞지 않음'
                 : `보존된 wake ${wakeCounts.retained}건(예약당 최대 ${wakeCounts.retention_per_schedule}) 중 실패 ${wakeCounts.failed} · 성공 ${wakeCounts.succeeded} · 진행 ${wakeCounts.running} · 살아있는 예약 중 마지막 wake 실패 ${wakeCounts.active_with_failed_newest_wake}`}
             >${countLabel(wakeCounts === null ? null : wakeCounts.failed)}</div>
           </div>

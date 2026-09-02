@@ -885,7 +885,7 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
                 Ok
                   { parts
                   ; outside_newest_page = parts = []
-                  })
+                  }))
   in
   { Masc_tui_context_inspector.turn; provider_input; response }
 

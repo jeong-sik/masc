@@ -100,6 +100,11 @@ val extract_keeper_name_for_suffix : string -> string -> string
 (** [extract_keeper_name_for_suffix path suffix] returns the keeper name
     from a path of shape [/api/v1/keepers/<name>/<suffix>]. *)
 
+val extract_keeper_name_for_post : string -> string -> string
+(** [extract_keeper_name_for_post path suffix]: the POST dispatcher's
+    spelling of {!extract_keeper_name_for_suffix}, and the same function --
+    the path grammar does not depend on the method. *)
+
 (** [true] for [GET /api/v1/keepers/<name>/runtime-trace] paths. *)
 
 val is_keeper_paused_work_get_path : string -> bool
@@ -134,10 +139,6 @@ val latest_preview_of_messages :
 
 val is_valid_keeper_name : String.t -> bool
 (** [true] when [name] passes {!Keeper_config.validate_name}. *)
-
-val extract_keeper_name_for_post : string -> string -> string
-(** [extract_keeper_name_for_post path suffix]: variant used by the
-    POST dispatcher. *)
 
 val manifest_row_matches :
   ?turn_id:int ->

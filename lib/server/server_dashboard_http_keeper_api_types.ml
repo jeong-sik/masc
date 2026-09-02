@@ -173,6 +173,11 @@ let extract_keeper_name_for_suffix req_path suffix =
   in
   if is_valid_keeper_name raw then raw else ""
 
+(* The POST dispatcher's spelling. One grammar, so one body: the two used to
+   be byte-for-byte identical definitions, which is a rule that can drift on
+   one side and a test that can only ever agree with itself. *)
+let extract_keeper_name_for_post = extract_keeper_name_for_suffix
+
 let is_keeper_checkpoints_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_checkpoints
 
@@ -232,15 +237,6 @@ let latest_preview_of_messages (messages : Agent_core.Types.message list) =
          Agent_core.Types.text_of_message message
          |> trim_to_opt
          |> Option.map (truncate_text ~max_chars:180))
-
-let extract_keeper_name_for_post req_path suffix =
-  let plen = String.length keeper_api_prefix in
-  let slen = String.length suffix in
-  let raw =
-    String.trim
-      (String.sub req_path plen (String.length req_path - plen - slen))
-  in
-  if is_valid_keeper_name raw then raw else ""
 
 let manifest_row_matches ?turn_id keeper_name trace_id
     (row : Keeper_runtime_manifest.t) =

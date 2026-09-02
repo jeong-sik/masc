@@ -159,8 +159,10 @@ val is_valid_keeper_name : String.t -> bool
 (** [true] when [name] passes the shared keeper-name character class. *)
 
 val extract_keeper_name_for_post : string -> string -> string
-(** [extract_keeper_name_for_post suffix path]: variant used by the
-    POST dispatcher. *)
+(** [extract_keeper_name_for_post path suffix]: the POST dispatcher's
+    spelling of the suffix extractor, and the same function. The argument
+    order is [path] then [suffix]; this signature used to document it the
+    other way round. *)
 
 (** {1 Execution surface refresh} *)
 

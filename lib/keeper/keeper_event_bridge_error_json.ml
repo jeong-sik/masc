@@ -3,9 +3,13 @@ let sha256_hex value = Digestif.SHA256.(digest_string value |> to_hex)
 
 let agent_completed_usage_fields (response : Agent_core.Types.api_response) =
   match response.usage with
-  | None -> [ "usage_reported", `Bool false ]
+  | None ->
+    [ "usage_reported", `Bool false
+    ; "usage_projection", `String "raw_observation"
+    ]
   | Some usage ->
     [ "usage_reported", `Bool true
+    ; "usage_projection", `String "raw_observation"
     ; "input_tokens", `Int usage.input_tokens
     ; "output_tokens", `Int usage.output_tokens
     ; "cache_creation_input_tokens", `Int usage.cache_creation_input_tokens

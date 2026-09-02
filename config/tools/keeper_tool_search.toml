@@ -1,16 +1,22 @@
 name = "keeper_tool_search"
 description = """
-Make a tool of an attached work service callable. The services this Keeper is \
-attached to offer more tools than one request can carry, so their argument \
-schemas are left out and only their names are listed below. Pass the exact \
-names you need in "names"; each becomes callable from your next message in \
-this same turn. A name below that you have not passed here is not callable -- \
-calling it does nothing at all.
+Make a held-back tool callable. This Keeper is offered more tools than one \
+request can carry, so their argument schemas are left out and only their names \
+are listed below. Ask for a tool in one of two ways: pass the exact names you \
+need in "names", or describe the job in "query" and every held tool whose name \
+or description contains each word of the query is chosen for you. Either way \
+the chosen tools become callable from your next message in this same turn, and \
+the answer shows what each one does. A query that matches too many tools loads \
+none of them and lists the matches instead; narrow it or pass names. A name \
+below that has not been loaded is not callable -- calling it does nothing at all.
 
 Tools that can be loaded:"""
 
 [[params]]
 name = "names"
 type = "array"
-required = true
 items = { type = "string" }
+
+[[params]]
+name = "query"
+type = "string"

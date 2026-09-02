@@ -57,6 +57,39 @@ let tool_info_to_json (info : tool_info) : Yojson.Safe.t =
   ]
 
 (** Summary report for dashboard. *)
+(* Every counter here is keyed by the tool's internal name, which is the one
+   name that never appears in a request: the model and the request's tool
+   schemas carry the public name instead ("Execute", not "tool_execute"). A
+   count reported only under the internal name cannot be lined up against what
+   a turn actually carried, so each row states its public names too.
+
+   A list rather than one name, because a descriptor set can project one
+   internal tool under several public names, and picking the first would put
+   an arbitrary one of them in a column an operator is about to join on. An
+   empty list is the honest answer for a tool no model can call. *)
+let public_names_json internal_name =
+  `List
+    (List.map
+       (fun (descriptor : Keeper_tool_descriptor.t) ->
+          `String descriptor.Keeper_tool_descriptor.public_name)
+       (Keeper_tool_descriptor.public_descriptors_for_internal internal_name))
+
+let named_tool_to_json name =
+  `Assoc [ "name", `String name; "public_names", public_names_json name ]
+
+let tool_stats_to_json (stats : Tool_metrics.tool_stats) =
+  `Assoc
+    [ "name", `String stats.tool_name
+    ; "public_names", public_names_json stats.tool_name
+    ; "call_count", `Int stats.call_count
+    ; "p50_ms", `Float stats.p50_ms
+    ; "p95_ms", `Float stats.p95_ms
+    ; "p99_ms", `Float stats.p99_ms
+    ; "mean_ms", `Float stats.mean_ms
+    ; "success_count", `Int stats.success_count
+    ; "failure_count", `Int stats.failure_count
+    ]
+
 let summary_report ?(runtime_metrics = fun () -> `Null) () : Yojson.Safe.t =
   let metrics = Tool_metrics.all_stats () in
   let total =
@@ -105,23 +138,10 @@ let summary_report ?(runtime_metrics = fun () -> `Null) () : Yojson.Safe.t =
   `Assoc [
     ("total_calls", `Int total);
     ("distinct_tools_called", `Int distinct);
-    ( "top_20"
-    , `List
-        (List.map
-           (fun (stats : Tool_metrics.tool_stats) ->
-              `Assoc
-                [ "name", `String stats.tool_name
-                ; "call_count", `Int stats.call_count
-                ; "p50_ms", `Float stats.p50_ms
-                ; "p95_ms", `Float stats.p95_ms
-                ; "p99_ms", `Float stats.p99_ms
-                ; "mean_ms", `Float stats.mean_ms
-                ; "success_count", `Int stats.success_count
-                ; "failure_count", `Int stats.failure_count
-                ])
-           top_20) )
-    ;
+    ("top_20", `List (List.map tool_stats_to_json top_20));
+    ("by_tool", `List (List.map tool_stats_to_json metrics));
     ("never_called_count", `Int (List.length never_called));
+    ("never_called", `List (List.map named_tool_to_json never_called));
     ("tool_distribution", tool_dist);
     ("registered_count", `Int (Tool_dispatch.registered_count ()));
     ("runtime_metrics", runtime_metrics ());

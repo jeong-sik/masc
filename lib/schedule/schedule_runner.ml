@@ -259,8 +259,10 @@ let dispatch_result ?detail ?error occurrence_id schedule_id status =
   { occurrence_id; schedule_id; status; detail; error }
 ;;
 
-let finish_terminal_dispatch config ~now ~occurrence_id ~schedule_id error =
-  match Schedule_store.fail_running config ~now ~schedule_id ~error with
+let finish_terminal_dispatch config ~now ~clock ~occurrence_id ~schedule_id error =
+  match
+    Schedule_store.fail_running ~finished_at:(clock ()) config ~now ~schedule_id ~error
+  with
   | Ok _ -> dispatch_result ~error occurrence_id schedule_id Dispatch_failed
   | Error err ->
     let error =
@@ -272,10 +274,12 @@ let finish_terminal_dispatch config ~now ~occurrence_id ~schedule_id error =
     dispatch_result ~error occurrence_id schedule_id Dispatch_failed
 ;;
 
-let finish_retryable_dispatch config ~now ~occurrence_id ~schedule_id detail =
+let finish_retryable_dispatch config ~now ~clock ~occurrence_id ~schedule_id detail =
   let reason = Schedule_store.Retryable_dispatch_failure detail in
   let error = Schedule_store.running_recovery_reason_to_string reason in
-  match Schedule_store.retry_running config ~now ~schedule_id ~reason with
+  match
+    Schedule_store.retry_running ~finished_at:(clock ()) config ~now ~schedule_id ~reason
+  with
   | Ok _ -> dispatch_result ~error occurrence_id schedule_id Dispatch_failed
   | Error err ->
     let error =
@@ -287,7 +291,7 @@ let finish_retryable_dispatch config ~now ~occurrence_id ~schedule_id detail =
     dispatch_result ~error occurrence_id schedule_id Dispatch_failed
 ;;
 
-let safe_consumer_dispatch config ~now consumer signal request =
+let safe_consumer_dispatch config ~now ~clock consumer signal request =
   Cancel_safe.protect
     ~on_exn:(fun exn ->
       Error
@@ -302,6 +306,7 @@ let safe_consumer_dispatch config ~now consumer signal request =
          ~commit_acceptance:(fun detail ->
            match
              Schedule_store.accept_running
+               ~finished_at:(clock ())
                config
                ~now
                ~schedule_id:request.Schedule_domain.schedule_id
@@ -319,6 +324,7 @@ let safe_consumer_dispatch config ~now consumer signal request =
 let dispatch_candidate
       config
       ~now
+      ~clock
       consumer
       (signal : wake_signal)
       (request : Schedule_domain.schedule_request)
@@ -327,7 +333,14 @@ let dispatch_candidate
   let occurrence_id = signal.occurrence_id in
   match consumer.accepts request with
   | Error reason ->
-    (match Schedule_store.fail_due_candidate config ~now ~schedule_id ~error:reason with
+    (match
+       Schedule_store.fail_due_candidate
+         ~attempted_at:(clock ())
+         config
+         ~now
+         ~schedule_id
+         ~error:reason
+     with
      | Ok _ ->
        dispatch_result ~error:reason occurrence_id schedule_id Dispatch_unsupported
      | Error err ->
@@ -339,28 +352,45 @@ let dispatch_candidate
        in
        dispatch_result ~error occurrence_id schedule_id Dispatch_unsupported)
   | Ok () ->
-    (match Schedule_store.start_due_candidate config ~now ~schedule_id with
+    (match
+       Schedule_store.start_due_candidate
+         ~started_at:(clock ())
+         config
+         ~now
+         ~schedule_id
+     with
      | Error err ->
        dispatch_result ~error:(Schedule_store.store_error_to_string err) occurrence_id
          schedule_id Dispatch_start_rejected
      | Ok running_request ->
-       (match safe_consumer_dispatch config ~now consumer signal running_request with
+       (match
+          safe_consumer_dispatch config ~now ~clock consumer signal running_request
+        with
         | Error (Retryable_dispatch_failure detail) ->
-          finish_retryable_dispatch config ~now ~occurrence_id ~schedule_id detail
+          finish_retryable_dispatch config ~now ~clock ~occurrence_id ~schedule_id detail
         | Error (Terminal_dispatch_rejection detail) ->
-          finish_terminal_dispatch config ~now ~occurrence_id ~schedule_id detail
+          finish_terminal_dispatch config ~now ~clock ~occurrence_id ~schedule_id detail
         | Ok (Work_accepted { detail; acceptance_commit = Acceptance_committed }) ->
           dispatch_result ~detail occurrence_id schedule_id Dispatch_succeeded))
 ;;
 
-let dispatch_candidates config ~now consumer candidates =
+let dispatch_candidates config ~now ~clock consumer candidates =
   List.map
     (fun (request, signal) ->
-       dispatch_candidate config ~now consumer signal request)
+       dispatch_candidate config ~now ~clock consumer signal request)
     candidates
 ;;
 
-let tick ?consumer config ~now =
+let tick ?consumer ?clock config ~now =
+  (* Without a clock every wake stamp copies [now], which is the tick start:
+     the store then records a dispatch that took fourteen seconds as one
+     that took none. The production caller passes its wall clock; tests that
+     reason about a fixed [now] pass nothing and keep their determinism. *)
+  let clock =
+    match clock with
+    | Some clock -> clock
+    | None -> fun () -> now
+  in
   match Schedule_store.refresh_due config ~now with
   | Error err -> Error (Service_error (Schedule_service.Store_error err))
   | Ok (state, due_changed) ->
@@ -369,7 +399,7 @@ let tick ?consumer config ~now =
     let* emitted = append_new_signals config candidate_signals in
     (match consumer with
      | Some consumer ->
-       let dispatches = dispatch_candidates config ~now consumer candidates in
+       let dispatches = dispatch_candidates config ~now ~clock consumer candidates in
        Ok { due_changed; emitted; rescheduled = 0; dispatches }
      | None ->
        let schedule_ids =

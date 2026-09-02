@@ -694,7 +694,12 @@ let reschedule_due_recurring config ~now ~schedule_ids =
       Ok (next_state, changed)))
 ;;
 
-let start_due_candidate config ~now ~schedule_id =
+let start_due_candidate ?started_at config ~now ~schedule_id =
+  (* [now] is the runner tick that judged the candidate due; [started_at] is
+     the moment this attempt actually began. They differ by however long the
+     tick spent before reaching this schedule, and a wake stamped with the
+     tick time reports that delay as zero. *)
+  let started_at = Option.value started_at ~default:now in
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state schedule_id with
@@ -705,13 +710,16 @@ let start_due_candidate config ~now ~schedule_id =
       else
         let updated = { request with status = Running } in
         let schedules = replace_schedule state.schedules updated in
-        let wakes = make_wake_record ~now request :: state.wakes in
+        let wakes = make_wake_record ~now:started_at request :: state.wakes in
         let next_state = bump_state state ~schedules ~wakes in
         let* () = write_state config next_state in
         Ok updated)
 ;;
 
-let accept_running config ~now ~schedule_id ?detail () =
+let accept_running ?finished_at config ~now ~schedule_id ?detail () =
+  (* [now] anchors the next occurrence; [finished_at] stamps the wake. The
+     two are one value only when the caller has no clock of its own. *)
+  let finished_at = Option.value finished_at ~default:now in
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state schedule_id with
@@ -741,7 +749,7 @@ let accept_running config ~now ~schedule_id ?detail () =
             (fun wake ->
                { wake with
                  status = Wake_succeeded
-               ; finished_at = Some now
+               ; finished_at = Some finished_at
                ; detail
                ; error = None
                })
@@ -792,7 +800,8 @@ let cancel_matching config ~should_cancel =
     else Ok ())
 ;;
 
-let fail_running config ~now ~schedule_id ~error =
+let fail_running ?finished_at config ~now ~schedule_id ~error =
+  let finished_at = Option.value finished_at ~default:now in
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state schedule_id with
@@ -808,7 +817,7 @@ let fail_running config ~now ~schedule_id ~error =
             (fun wake ->
                { wake with
                  status = Wake_failed
-               ; finished_at = Some now
+               ; finished_at = Some finished_at
                ; detail = None
                ; error = Some error
                })
@@ -818,7 +827,8 @@ let fail_running config ~now ~schedule_id ~error =
         Ok updated)
 ;;
 
-let retry_running config ~now ~schedule_id ~reason =
+let retry_running ?finished_at config ~now ~schedule_id ~reason =
+  let finished_at = Option.value finished_at ~default:now in
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state schedule_id with
@@ -831,7 +841,7 @@ let retry_running config ~now ~schedule_id ~reason =
         let schedules = replace_schedule state.schedules updated in
         let* wakes =
           update_latest_running_wake state.wakes ~schedule_id
-            (fail_wake_for_recovery ~now ~reason)
+            (fail_wake_for_recovery ~now:finished_at ~reason)
         in
         let next_state = bump_state state ~schedules ~wakes in
         let* () = write_state config next_state in
@@ -890,7 +900,10 @@ let recover_running_on_startup config ~now =
       Ok (next_state, recovered))
 ;;
 
-let fail_due_candidate config ~now ~schedule_id ~error =
+let fail_due_candidate ?attempted_at config ~now ~schedule_id ~error =
+  (* The consumer refused the payload before any work began, so the attempt
+     starts and ends at the same instant: [attempted_at] (default [now]). *)
+  let attempted_at = Option.value attempted_at ~default:now in
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state schedule_id with
@@ -901,9 +914,9 @@ let fail_due_candidate config ~now ~schedule_id ~error =
       else
         let updated = { request with status = Failed } in
         let wake =
-          { (make_wake_record ~now request) with
+          { (make_wake_record ~now:attempted_at request) with
             status = Wake_failed
-          ; finished_at = Some now
+          ; finished_at = Some attempted_at
           ; error = Some error
           }
         in

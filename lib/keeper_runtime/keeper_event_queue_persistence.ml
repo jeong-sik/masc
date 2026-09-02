@@ -87,14 +87,11 @@ type transfer_projection_result = State.transfer_projection_result =
   | Transfer_already_projected
 
 
-(* v17: #29598 dropped owner_nonce from the turn-attempt-terminal operation
-   id, so a v16 snapshot written by the previous binary carries ids this
-   binary no longer generates ("turn-attempt-terminal:1:16:..." against
-   "turn-attempt-terminal:16:..."). Replay detection matches on that id, so
-   reading the old snapshot would let one source-terminal apply twice. Fresh
-   state on a new filename, per the #29553 precedent — no compat reader. *)
-let snapshot_filename = "event-queue-v17.json"
-let transition_wal_filename = "event-queue-transitions-v6.jsonl"
+(* v18 stores all displaced projected history as compact replay witnesses.
+   The transition WAL carries a full pre-state, so both files hard-cut
+   together; there is no compatibility decoder. *)
+let snapshot_filename = "event-queue-v18.json"
+let transition_wal_filename = "event-queue-transitions-v7.jsonl"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 
@@ -290,7 +287,7 @@ let bump_revision state =
   else Ok (State.with_revision (Int64.succ (State.revision state)) state)
 ;;
 
-let transition_wal_schema = "masc.keeper_event_queue.transition.v6"
+let transition_wal_schema = "masc.keeper_event_queue.transition.v7"
 
 type transition_wal_row =
   { pre_state : State.t
@@ -352,10 +349,7 @@ let transition_wal_entry_of_json owner = function
 let replay_transition_wal_bytes ~wal_only owner state bytes =
   let row_is_already_projected (entry : State.outbox_entry) state =
     State.transition_outbox state = []
-    && List.exists
-         (fun receipt ->
-            State.transition_receipt_equal receipt entry.receipt)
-         (State.projected_transition_receipts state)
+    && State.transition_receipt_is_projected entry.receipt state
   in
   let rec replay ~saw_row ~all_rows_already_projected state = function
     | [] | [ "" ] -> Ok (state, saw_row && all_rows_already_projected)

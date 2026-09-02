@@ -59,6 +59,7 @@ let assemble_cost_event_payload
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
+    ?(usage_projection = Cost_ledger.Raw_observation)
     ?(cache_creation_input_tokens : int = 0)
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
@@ -168,6 +169,7 @@ let assemble_cost_event_payload
     ; task_id
     ; model = key_model_value
     ; usage
+    ; usage_projection
     ; timestamp = Masc_domain.iso8601_of_unix_seconds now
     ; ts_unix = now
     ; source =
@@ -212,6 +214,7 @@ let cost_event_payload
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
+    ?(usage_projection = Cost_ledger.Raw_observation)
     ?(cache_creation_input_tokens : int = 0)
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
@@ -228,6 +231,7 @@ let cost_event_payload
      ~input_tokens
      ~output_tokens
      ~cost_usd
+     ~usage_projection
      ~cache_creation_input_tokens
      ~cache_read_input_tokens
      ~usage_missing
@@ -246,6 +250,7 @@ let emit_cost_event
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
+    ?(usage_projection = Cost_ledger.Raw_observation)
     ?(cache_creation_input_tokens : int = 0)
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
@@ -264,6 +269,7 @@ let emit_cost_event
       ~input_tokens
       ~output_tokens
       ~cost_usd
+      ~usage_projection
       ~cache_creation_input_tokens
       ~cache_read_input_tokens
       ~usage_missing

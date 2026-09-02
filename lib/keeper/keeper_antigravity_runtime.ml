@@ -1001,6 +1001,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
             { Runtime_agent.response
             ; checkpoint = None
             ; session_id = turn.conversation_id
+            ; session_resumed = Some turn.resumed
             ; turns = turn.num_turns
             ; trace_ref = None
             ; run_validation = None

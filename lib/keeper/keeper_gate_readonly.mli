@@ -9,7 +9,9 @@
     observation-only command and whose declared sandbox is docker, or a
     [network_read] request whose capability is in the closed
     observation set ([web_search] — server-side, provider-bound, no
-    caller-chosen address; [web_fetch] deliberately stays with the judge).
+    caller-chosen address; [web_fetch] — caller-chosen URL whose reachable
+    address set is refused by [Tool_misc_web_fetch] itself on every hop, so
+    a judge reading the same URL string has nothing left to decide).
     [true] means the request may be allowed without judgment or queueing;
     [false] means nothing — the request falls through to the configured
     gate mode. The execute input shape is

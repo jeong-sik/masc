@@ -11,6 +11,7 @@ import type {
   DashboardScheduledAutomation,
   DashboardScheduledAutomationFsm,
   DashboardScheduledAutomationRequest,
+  DashboardScheduledAutomationWakeCounts,
 } from './dashboard-tools-prompts'
 
 const SCHEDULE_LOOKUP_SCHEMA = 'masc.dashboard.scheduled_automation.lookup.v1'
@@ -203,6 +204,29 @@ function normalizeCounts(raw: unknown): Record<string, number> | null {
   return counts
 }
 
+const WAKE_COUNT_KEYS = [
+  'retained',
+  'running',
+  'succeeded',
+  'failed',
+  'active_with_failed_newest_wake',
+  'retention_per_schedule',
+] as const
+
+// Every key or nothing: a partial object would render a real zero next to a
+// missing number, and the strip cannot tell those apart once they are ints.
+function normalizeWakeCounts(raw: unknown): DashboardScheduledAutomationWakeCounts | null {
+  const record = asRecord(raw)
+  if (!record) return null
+  const counts: Partial<Record<(typeof WAKE_COUNT_KEYS)[number], number>> = {}
+  for (const key of WAKE_COUNT_KEYS) {
+    const value = record[key]
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) return null
+    counts[key] = value
+  }
+  return counts as DashboardScheduledAutomationWakeCounts
+}
+
 function normalizeScheduledAutomationPayload(raw: unknown): DashboardScheduledAutomation {
   const record = asRecord(raw) ?? {}
   const requests = Array.isArray(record.requests) ? record.requests : []
@@ -219,6 +243,7 @@ function normalizeScheduledAutomationPayload(raw: unknown): DashboardScheduledAu
     request_limit: countOrNull(record.request_limit),
     truncated: record.truncated === true,
     counts: normalizeCounts(record.counts),
+    wake_counts: normalizeWakeCounts(record.wake_counts),
     signals,
     requests,
     warnings,

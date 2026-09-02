@@ -779,7 +779,7 @@ def keeper_metadata(name: str) -> dict[str, object]:
     # keeper meta schema, and the current-schema validator rejects metas
     # carrying fields it does not know.
     metadata: dict[str, object] = {
-        "schema": "masc.keeper_meta.v1",
+        "schema": "masc.keeper_meta.v2",
         "name": name,
         "instructions": "",
         "trace_id": f"trace-{name}",
@@ -790,6 +790,8 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "last_proactive_reason": "",
         "last_proactive_preview": "",
         "message_scope_ack_id": None,
+        "usage_cursor": None,
+        "last_usage_resolution": None,
         "last_runtime_attempt": None,
         "paused": False,
         "latched_reason": None,
@@ -5320,7 +5322,7 @@ def memory_journal_fixture() -> HttpResponse:
                 {
                     "ok": True,
                     "outcome": "committed",
-                    "recorded_at": 1787348490.35,
+                    "recorded_at": 1788273295.122265,
                     "revision": 9,
                     "source": {"kind": "librarian", "trace_id": "trace-memory"},
                     "change": {
@@ -5360,7 +5362,7 @@ def memory_journal_backfill_fixture() -> HttpResponse:
         {
             "ok": True,
             "outcome": "failed",
-            "recorded_at": 1787348480.0,
+            "recorded_at": 1788273280.0,
             "trace_id": "trace-backfilled-probe",
             "kind": "backfilled_probe",
             "detail": "older Journal observation",
@@ -5373,24 +5375,37 @@ def memory_journal_backfill_fixture() -> HttpResponse:
 
 
 def memory_journal_chat_fixture() -> HttpResponse:
-    # The absolute turns deliberately disagree with the clocks. Typed turn
-    # sequence remains the ordering authority; clocks only label the rails.
+    # Both conversation rows belong to one direct turn, while the Journal
+    # observation lands between their clocks. Keeping the turn physically
+    # whole produced the live 23:35:06 -> 23:34:55 regression: causal identity
+    # may label the rows, but the shared visible axis must remain monotonic.
     return (
         200,
         [
             {
-                "id": "assistant:before-journal",
-                "role": "assistant",
+                "id": "user:before-journal",
+                "role": "user",
                 "content": "direct turn before Librarian",
-                "ts": 1787344889.0,
-                "turn_ref": "trace-before#55",
+                "ts": 1788273291.814646,
+                "delivery_key": {
+                    "kind": "operation",
+                    "operation_id": "tui-direct-regression",
+                },
+                "transcript_slot": {"kind": "accepted_user"},
+                "speaker_authority": "owner",
+                "surface": {"kind": "dashboard"},
             },
             {
                 "id": "assistant:after-journal",
                 "role": "assistant",
                 "content": "direct turn after Librarian",
-                "ts": 1787348491.0,
-                "turn_ref": "trace-after#54",
+                "ts": 1788273306.661051,
+                "turn_ref": "trace-direct#54",
+                "delivery_key": {
+                    "kind": "operation",
+                    "operation_id": "tui-direct-regression",
+                },
+                "transcript_slot": {"kind": "terminal_assistant"},
             },
         ],
     )
@@ -5443,6 +5458,57 @@ def autonomous_turn_history_interaction() -> Interaction:
 def memory_journal_timeline_interaction(
     memory: SequencedHttpResponse,
 ) -> Interaction:
+    def assert_monotonic_direct_turn(frame: bytes) -> None:
+        plain = CSI_RE.sub(b"", frame)
+        hour = time.strftime(
+            "%Y-%m-%d · %H:00", time.localtime(1788273291.814646)
+        ).encode()
+        styled_rail = re.compile(
+            rb"\x1b\[[0-9;]*m\x1b\[1m"
+            + "── ".encode()
+            + re.escape(hour)
+        )
+        if styled_rail.search(frame) is None:
+            raise AssertionError(
+                "Civil-hour rail was not drawn in semantic colour and bold "
+                f"weight for {hour!r}: {frame!r}"
+            )
+        request_clock = time.strftime(
+            "%H:%M:%S", time.localtime(1788273291.814646)
+        ).encode()
+        journal_clock = time.strftime(
+            "%H:%M:%S", time.localtime(1788273295.122265)
+        ).encode()
+        reply_clock = time.strftime(
+            "%H:%M:%S", time.localtime(1788273306.661051)
+        ).encode()
+        positions = [
+            plain.find(hour),
+            plain.find(request_clock),
+            plain.find(b"direct turn before Librarian"),
+            plain.find(journal_clock),
+            plain.find(b"Librarian committed current memory revision 9"),
+            plain.find(reply_clock),
+            plain.find(b"direct turn after Librarian"),
+        ]
+        if any(position < 0 for position in positions) or positions != sorted(positions):
+            raise AssertionError(
+                "The exact 23:34:51 request, 23:34:55 Journal, and 23:35:06 "
+                f"reply did not share one monotonic axis: {frame!r}"
+            )
+        for pattern, label in (
+            ("TURN · YOU".encode(), "direct turn start"),
+            (re.compile("↳\\s+alpha".encode()), "post-Journal continuation"),
+        ):
+            if find_needle(plain, pattern) < 0:
+                raise AssertionError(f"Missing {label} label: {frame!r}")
+        for label in ("TURN · YOU".encode(), "↳ alpha".encode()):
+            if b"\x1b[7m" + label not in frame:
+                raise AssertionError(
+                    f"Direct causal label lost its reverse-video badge {label!r}: "
+                    f"{frame!r}"
+                )
+
     def interact(
         process: subprocess.Popen[bytes],
         master_fd: int,
@@ -5489,31 +5555,7 @@ def memory_journal_timeline_interaction(
             b"Librarian committed current memory revision 9",
         )
         plain_resting = CSI_RE.sub(b"", resting)
-        earlier_hour = time.strftime(
-            "%Y-%m-%d · %H:00", time.localtime(1787344889.0)
-        ).encode()
-        later_hour = time.strftime(
-            "%Y-%m-%d · %H:00", time.localtime(1787348490.35)
-        ).encode()
-        for label in (earlier_hour, later_hour):
-            styled_rail = re.compile(
-                rb"\x1b\[[0-9;]*m\x1b\[1m"
-                + "── ".encode()
-                + re.escape(label)
-            )
-            if styled_rail.search(resting) is None:
-                raise AssertionError(
-                    "Civil-hour rail was not drawn in its semantic colour "
-                    f"and bold weight for {label!r}: {resting!r}"
-                )
-        before = plain_resting.find(b"direct turn before Librarian")
-        journal = plain_resting.find(b"Librarian committed current memory revision 9")
-        after = plain_resting.find(b"direct turn after Librarian")
-        if not (0 <= after < before < journal):
-            raise AssertionError(
-                "Typed turn sequence and the Journal producer lane lost "
-                f"structural order under adversarial clocks: {resting!r}"
-            )
+        assert_monotonic_direct_turn(resting)
         if re.search("\u25c8\\s+JOURNAL".encode(), plain_resting) is None:
             raise AssertionError(
                 f"Memory timeline did not draw its distinct Journal marker: {resting!r}"
@@ -5561,31 +5603,7 @@ def memory_journal_timeline_interaction(
             b"superseded by provider grouping",
         )
         plain_visible = CSI_RE.sub(b"", visible)
-        earlier_hour = time.strftime(
-            "%Y-%m-%d · %H:00", time.localtime(1787344889.0)
-        ).encode()
-        later_hour = time.strftime(
-            "%Y-%m-%d · %H:00", time.localtime(1787348490.35)
-        ).encode()
-        for label in (earlier_hour, later_hour):
-            styled_rail = re.compile(
-                rb"\x1b\[[0-9;]*m\x1b\[1m"
-                + "── ".encode()
-                + re.escape(label)
-            )
-            if styled_rail.search(visible) is None:
-                raise AssertionError(
-                    "Civil-hour rail was not drawn in its semantic colour "
-                    f"and bold weight for {label!r}: {visible!r}"
-                )
-        before = plain_visible.find(b"direct turn before Librarian")
-        journal = plain_visible.find(b"Librarian committed current memory revision 9")
-        after = plain_visible.find(b"direct turn after Librarian")
-        if not (0 <= after < before < journal):
-            raise AssertionError(
-                "Typed turn sequence and the Journal producer lane lost "
-                f"structural order under adversarial clocks: {visible!r}"
-            )
+        assert_monotonic_direct_turn(visible)
         if re.search("\u25c8\\s+JOURNAL".encode(), plain_visible) is None:
             raise AssertionError(
                 f"Memory timeline did not draw its distinct Journal marker: {visible!r}"

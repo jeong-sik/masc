@@ -96,6 +96,9 @@ type DashboardScheduledAutomationDeferredActivation =
       activation_reason:
         | 'autoboot_disabled'
         | 'proactive_disabled'
+        // The Keeper store answered and holds no Keeper under this name.
+        // Distinct from owner_unknown, which is a read that did not answer.
+        | 'owner_absent'
         | 'unregistered'
       activation_detail: null
     }
@@ -139,8 +142,15 @@ export type DashboardScheduledAutomationDispatchReceipt =
     }
 
 export interface DashboardScheduledAutomationKeeperReactionEvidence {
+  // Ranked by the server: cancelled and ack are terminal, finished outranks
+  // started, and a stimulus row alone is the producer's record, not a
+  // reaction. The two terminals together are a contradiction the server
+  // names rather than resolves.
   projection_status:
+    | 'conflicting_terminal_evidence'
+    | 'matched_terminal_cancelled'
     | 'matched_consumed_ack'
+    | 'matched_turn_finished'
     | 'matched_turn_started'
     | 'matched_stimulus'
     | 'not_found'
@@ -159,15 +169,21 @@ export interface DashboardScheduledAutomationKeeperReactionEvidence {
   reaction_kind?: string
   stimulus_seen?: boolean
   turn_started_seen?: boolean
+  turn_finished_seen?: boolean
   event_queue_ack_seen?: boolean
+  event_queue_cancelled_seen?: boolean
   matched_record_count?: number
   quarantined_record_count?: number
   stimulus_recorded_at?: number | null
   stimulus_recorded_at_iso?: string | null
   turn_started_recorded_at?: number | null
   turn_started_recorded_at_iso?: string | null
+  turn_finished_recorded_at?: number | null
+  turn_finished_recorded_at_iso?: string | null
   event_queue_ack_recorded_at?: number | null
   event_queue_ack_recorded_at_iso?: string | null
+  event_queue_cancelled_recorded_at?: number | null
+  event_queue_cancelled_recorded_at_iso?: string | null
   latest_recorded_at?: number | null
   latest_recorded_at_iso?: string | null
   reason?: string
@@ -280,6 +296,22 @@ export interface DashboardScheduledAutomationLiveSupportedNonTerminalEvidence {
   matched_schedule_id_limit?: number
 }
 
+/** Retained wake outcomes across the schedules the page selects. `counts`
+ *  describes definitions; these describe attempts, every retained one and not
+ *  only the newest of the rows on the page. `retention_per_schedule` is the
+ *  store's ceiling: the numbers are a window, not a history. */
+export interface DashboardScheduledAutomationWakeCounts {
+  /** Terminal attempts the store keeps (succeeded + failed); the ceiling applies to these. */
+  retained: number
+  /** Attempts mid-dispatch right now; not part of `retained`. */
+  running: number
+  succeeded: number
+  failed: number
+  /** Live definitions whose newest attempt did not land. */
+  active_with_failed_newest_wake: number
+  retention_per_schedule: number
+}
+
 /** Served by GET /api/v1/dashboard/scheduled-automation. Counts are nullable
  *  because the server reports a schedule-ledger read failure as null counts
  *  plus [schedule_store_read_error], and that distinction has to survive the
@@ -299,6 +331,8 @@ export interface DashboardScheduledAutomation {
   signal_limit?: number
   signals?: DashboardScheduledAutomationSignal[]
   counts: Record<string, number> | null
+  /** Null when the ledger read failed or the server predates the field. */
+  wake_counts?: DashboardScheduledAutomationWakeCounts | null
   payload_support?: DashboardScheduledAutomationPayloadSupport
   warnings?: string[]
   live_supported_non_terminal_evidence?: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence

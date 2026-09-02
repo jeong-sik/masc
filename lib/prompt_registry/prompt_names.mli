@@ -84,3 +84,16 @@ val keeper_context_approval_authority_state_partial : string
 val keeper_context_approval_authority_state_unavailable : string
 val keeper_context_approval_authority_footer : string
 (** Current-memory selection. *)
+
+(** {1 Tool failure — what the model does next}
+
+    One line per {!Tool_result.tool_failure_class}, appended by [Tool_bridge]
+    to every failed tool result the model reads. The class is typed at the
+    producer; only the sentence lives here, so the model never has to infer
+    the class from the failure message. *)
+
+val tool_failure_dependency_unavailable : string
+val tool_failure_policy_rejection : string
+val tool_failure_runtime_failure : string
+val tool_failure_workflow_rejection : string
+val tool_failure_operator_cancelled : string

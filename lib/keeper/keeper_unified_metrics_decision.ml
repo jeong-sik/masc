@@ -24,7 +24,8 @@ let append_decision_record
     ?degraded_retry_runtime
     ?fallback_reason
     ?turn_mode
-      ?(result : Keeper_agent_run.run_result option = None)
+    ?(result : Keeper_agent_run.run_result option = None)
+    ?(usage_resolution : Keeper_usage_resolution.t option = None)
     ?error
     ?terminal_reason
     () : unit =
@@ -268,27 +269,29 @@ let append_decision_record
                 | None -> []
               in
               let usage_fields =
-                if r.usage_reported then
+                match usage_resolution with
+                | Some ({ delta = Some delta; _ } as resolution) ->
                   [
                     ( "usage_scope"
                     , `String (Runtime_usage_scope.to_string r.usage_scope) );
-                    ("input_tokens", `Int r.usage.input_tokens);
-                    ("output_tokens", `Int r.usage.output_tokens);
-                    ("cache_creation_tokens", `Int r.usage.cache_creation_input_tokens);
-                    ("cache_read_tokens", `Int r.usage.cache_read_input_tokens);
-                    ("cost_usd", Json_util.float_opt_to_json r.usage.cost_usd);
+                    ("input_tokens", `Int delta.input_tokens);
+                    ("output_tokens", `Int delta.output_tokens);
+                    ("cache_creation_tokens", `Int delta.cache_creation_input_tokens);
+                    ("cache_read_tokens", `Int delta.cache_read_input_tokens);
+                    ("cost_usd", Json_util.float_opt_to_json delta.cost_usd);
+                    ("usage_resolution", Keeper_usage_resolution.to_json resolution);
                     ( "tokens_per_second",
                       if
-                        r.usage.output_tokens >= 0
+                        delta.output_tokens >= 0
                         && latency_ms > 0
                       then
                         `Float
-                          (float_of_int r.usage.output_tokens
+                          (float_of_int delta.output_tokens
                            /. (float_of_int latency_ms /. 1000.0))
                       else `Null );
                   ]
                   @ usage_trust_json_fields usage_trust
-                else
+                | Some resolution ->
                   [
                     ( "usage_scope"
                     , `String (Runtime_usage_scope.to_string r.usage_scope) );
@@ -298,6 +301,20 @@ let append_decision_record
                     ("cache_read_tokens", `Null);
                     ("cost_usd", `Null);
                     ("tokens_per_second", `Null);
+                    ("usage_resolution", Keeper_usage_resolution.to_json resolution);
+                  ]
+                  @ usage_trust_json_fields usage_trust
+                | None ->
+                  [
+                    ( "usage_scope"
+                    , `String (Runtime_usage_scope.to_string r.usage_scope) );
+                    ("input_tokens", `Null);
+                    ("output_tokens", `Null);
+                    ("cache_creation_tokens", `Null);
+                    ("cache_read_tokens", `Null);
+                    ("cost_usd", `Null);
+                    ("tokens_per_second", `Null);
+                    ("usage_resolution", `Null);
                   ]
                   @ usage_trust_json_fields usage_trust
               in

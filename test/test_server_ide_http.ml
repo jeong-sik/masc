@@ -74,6 +74,13 @@ let create_worker_token base_path agent_name =
     failf "create_token failed for %s: %s" agent_name (Masc_domain.masc_error_to_string e)
 ;;
 
+let create_admin_token base_path agent_name =
+  match Auth.create_token base_path ~agent_name ~role:Masc_domain.Admin with
+  | Ok (raw_token, _cred) -> raw_token
+  | Error e ->
+    failf "create_token failed for %s: %s" agent_name (Masc_domain.masc_error_to_string e)
+;;
+
 let repository_fixture ~id ~url ~local_path : Repo_manager_types.repository =
   { id
   ; name = id
@@ -554,6 +561,17 @@ let test_delete_annotation_requires_auth () =
     check int "DELETE without token returns 401/403" 401 (status_of_response response))
 ;;
 
+(* The rows carry keeper-written file text, the same content
+   [/api/v1/keepers/:name/file-changes] keeps behind CanAdmin. *)
+let test_file_activity_requires_auth () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request =
+      http_request ~meth:`GET ~path:"/api/v1/ide/file-activity?file_path=lib/a.ml" ()
+    in
+    let response = dispatch router request in
+    check int "GET file-activity without token returns 401" 401 (status_of_response response))
+;;
+
 let test_read_annotations_rejects_missing_scope () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
     let request = http_request ~meth:`GET ~path:"/api/v1/ide/annotations" () in
@@ -754,8 +772,11 @@ let test_get_memory_rejects_non_positive_limit () =
 ;;
 
 let test_get_file_activity_requires_a_file_path () =
-  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
-    let request = http_request ~meth:`GET ~path:"/api/v1/ide/file-activity" () in
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_admin_token base_path "operator" in
+    let request =
+      http_request ~meth:`GET ~path:"/api/v1/ide/file-activity" ~token:(Some token) ()
+    in
     let response = dispatch router request in
     check_status "GET file activity without file path returns 400" 400 response;
     check string "typed missing file path" "file_path is required"
@@ -763,12 +784,13 @@ let test_get_file_activity_requires_a_file_path () =
 ;;
 
 let test_get_file_activity_rejects_invalid_window () =
-  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_admin_token base_path "operator" in
     let request =
       http_request ~meth:`GET
         ~path:
           "/api/v1/ide/file-activity?repo_id=masc&file_path=bin/x.ml&window_hours=0"
-        ()
+        ~token:(Some token) ()
     in
     let response = dispatch router request in
     check_status "GET file activity invalid window returns 400" 400 response;
@@ -786,9 +808,11 @@ let test_get_file_activity_resolves_the_project_checkout_exactly () =
     (match Repo_store.save_all ~base_path [ repository ] with
      | Ok () -> ()
      | Error detail -> fail detail);
+    let token = create_admin_token base_path "operator" in
     let request =
       http_request ~meth:`GET
-        ~path:"/api/v1/ide/file-activity?file_path=bin/masc_tui.ml" ()
+        ~path:"/api/v1/ide/file-activity?file_path=bin/masc_tui.ml"
+        ~token:(Some token) ()
     in
     let response = dispatch router request in
     check_status "GET project file activity returns 200" 200 response;
@@ -859,6 +883,8 @@ let () =
             test_get_file_activity_rejects_invalid_window
         ; test_case "GET file activity resolves project checkout" `Quick
             test_get_file_activity_resolves_the_project_checkout_exactly
+        ; test_case "GET file activity without a token returns 401" `Quick
+            test_file_activity_requires_auth
         ] )
     ; ( "mutation_auth"
       , [ test_case "POST annotation rejects client keeper_id" `Quick

@@ -308,11 +308,11 @@ type msg_entry = {
   me_turn_phase: chat_turn_phase;
   me_turn_sequence: int option;
       (** Absolute Keeper turn sequence from a persisted turn_ref. This is the
-          cross-store ordering authority for complete turn groups. Request
-          identity, not this sequence, groups rows into a turn. *)
+          stable tie-breaker when causal frontiers share one display clock.
+          Request identity, not this sequence, groups rows into a turn. *)
   me_operation_seq: int;
-      (** Structural producer position within one request. Timestamps never
-          break ties or move rows; phase then this sequence is the order. *)
+      (** Structural producer position within one request. Inside that request,
+          timestamps never move rows; phase then this sequence is the order. *)
   me_text: string;
   me_memory_summary: string option;
       (** Producer-built compact text for a Memory journal row. [None] for
@@ -320,15 +320,16 @@ type msg_entry = {
           recover this boundary by splitting display text. *)
   me_submitted_at: float option;
       (** First local Enter time for an operator input. Preserved when the
-          durable transcript replaces the session copy; never set on tool or
-          output rows and never used to order them. *)
+          durable transcript replaces the session copy and used as that input
+          phase's source clock; never set on tool or output rows. *)
   me_tool_block: Masc_tui_keeper_chat_transcript.tool_block option;
   me_skill_activity: Masc_tui_keeper_chat_transcript.skill_activity option;
   me_timestamp: string;
   me_keeper_name: string;
   me_request_id: string;
-  (* Producer observation time. Used for display, pagination cursors, and
-     render-cache identity only. Causal turn ownership decides row order. *)
+  (* Producer observation time. Conversation and auxiliary rows share one
+     chronological surface. Within a request, later phases clamp to the latest
+     earlier-phase clock before the rows merge with parallel lanes. *)
   me_at: float;
 }
 
@@ -343,20 +344,57 @@ type chat_timeline_item =
   | Chat_unowned of msg_entry
   | Chat_memory of msg_entry
       (** Explicit auxiliary journal lane. Memory rows have no conversational
-          request owner and never borrow wall-clock order from chat turns. *)
+          request owner; their recorded time places them between conversation
+          rows without making them part of a turn. *)
 
 type chat_timeline = {
   ctl_items: chat_timeline_item list;
 }
 
-(* The clock a row displays and contributes to civil-hour rails. This helper
-   deliberately sits outside [compare_chat_timeline_items]: submitted/observed
-   time is presentation and pagination data, never conversation order. *)
+(* The row's source clock before causal projection. Request rows are projected
+   to a nondecreasing phase frontier by [chat_timeline_rows]. *)
 let message_display_at row =
   let valid at = Float.is_finite at && at > 0. in
   match row.me_submitted_at with
   | Some at when valid at -> Some at
   | Some _ | None -> if valid row.me_at then Some row.me_at else None
+;;
+
+let chat_projected_timeline_ats messages =
+  let first_known_by_request =
+    List.fold_left
+      (fun known (row : msg_entry) ->
+        let request_id = row.me_request_id in
+        if String.equal request_id "" || List.mem_assoc request_id known
+        then known
+        else
+          match message_display_at row with
+          | Some at -> (request_id, at) :: known
+          | None -> known)
+      [] messages
+  in
+  let rec project floors reversed = function
+    | [] -> List.rev reversed
+    | row :: rest ->
+        let request_id = row.me_request_id in
+        let raw_at = message_display_at row in
+        if String.equal request_id ""
+        then project floors (raw_at :: reversed) rest
+        else
+          let projected_at =
+            match List.assoc_opt request_id floors, raw_at with
+            | None, Some at -> Some at
+            | None, None -> List.assoc_opt request_id first_known_by_request
+            | Some None, _ -> None
+            | Some (Some floor), Some at -> Some (Float.max floor at)
+            | Some (Some floor), None -> Some floor
+          in
+          let floors =
+            (request_id, projected_at) :: List.remove_assoc request_id floors
+          in
+          project floors (projected_at :: reversed) rest
+  in
+  project [] [] messages
 ;;
 
 type msg_anchor =
@@ -377,19 +415,20 @@ let chat_turn_phase_of_role = function
   | Message_keeper | Message_autonomous | Message_error -> Turn_output
 ;;
 
+let chat_turn_phase_rank = function
+  | Turn_input -> 0
+  | Turn_progress -> 1
+  | Turn_tool -> 2
+  | Turn_output -> 3
+;;
+
 let order_chat_turn_rows rows =
-  let phase_rank = function
-    | Turn_input -> 0
-    | Turn_progress -> 1
-    | Turn_tool -> 2
-    | Turn_output -> 3
-  in
   List.stable_sort
     (fun left right ->
       let phase =
         Int.compare
-          (phase_rank left.me_turn_phase)
-          (phase_rank right.me_turn_phase)
+          (chat_turn_phase_rank left.me_turn_phase)
+          (chat_turn_phase_rank right.me_turn_phase)
       in
       if phase <> 0
       then phase
@@ -444,24 +483,62 @@ let append_chat_timeline_row items row =
     append [] items
 ;;
 
-(* Complete turns cross direct/autonomous stores through the persisted typed
-   turn sequence. Items without that authority keep producer order: inventing
-   one from a display clock would let clock skew or a late write rewrite the
-   conversation. [List.stable_sort] below is part of this contract. *)
-let compare_chat_timeline_items left right =
+type projected_chat_row =
+  { pcr_row : msg_entry
+  ; pcr_at : float option
+  ; pcr_turn_sequence : int option
+  ; pcr_lane_rank : int
+  ; pcr_request_id : string
+  }
+
+let compare_optional_turn_sequence left right =
   match left, right with
-  | Chat_turn left, Chat_turn right ->
-      (match left.ct_turn_sequence, right.ct_turn_sequence with
-       | Some left, Some right -> Int.compare left right
-       | Some _, None -> -1
-       | None, Some _ -> 1
-       | None, None -> 0)
-  | Chat_turn { ct_turn_sequence = Some _; _ },
-    (Chat_unowned _ | Chat_memory _) -> -1
-  | (Chat_unowned _ | Chat_memory _),
-    Chat_turn { ct_turn_sequence = Some _; _ } -> 1
-  | (Chat_turn _ | Chat_unowned _ | Chat_memory _),
-    (Chat_turn _ | Chat_unowned _ | Chat_memory _) -> 0
+  | Some left, Some right -> Int.compare left right
+  | Some _, None -> -1
+  | None, Some _ -> 1
+  | None, None -> 0
+;;
+
+let compare_projected_chat_row_tie left right =
+  let by_turn_sequence =
+    compare_optional_turn_sequence left.pcr_turn_sequence
+      right.pcr_turn_sequence
+  in
+  if by_turn_sequence <> 0
+  then by_turn_sequence
+  else
+    let by_lane = Int.compare left.pcr_lane_rank right.pcr_lane_rank in
+    if by_lane <> 0
+    then by_lane
+    else if String.equal left.pcr_request_id ""
+            || not
+                 (String.equal
+                    left.pcr_request_id
+                    right.pcr_request_id)
+    then 0
+    else
+      let left = left.pcr_row in
+      let right = right.pcr_row in
+      let by_phase =
+        Int.compare
+          (chat_turn_phase_rank left.me_turn_phase)
+          (chat_turn_phase_rank right.me_turn_phase)
+      in
+      if by_phase <> 0
+      then by_phase
+      else Int.compare left.me_operation_seq right.me_operation_seq
+;;
+
+let compare_projected_chat_rows left right =
+  match left.pcr_at, right.pcr_at with
+  | Some left_at, Some right_at ->
+      let by_time = Float.compare left_at right_at in
+      if by_time <> 0
+      then by_time
+      else compare_projected_chat_row_tie left right
+  | Some _, None -> -1
+  | None, Some _ -> 1
+  | None, None -> compare_projected_chat_row_tie left right
 ;;
 
 let chat_timeline ~loaded ~session ~queued_request_ids =
@@ -473,24 +550,119 @@ let chat_timeline ~loaded ~session ~queued_request_ids =
   in
   let items =
     List.fold_left append_chat_timeline_row [] (loaded @ visible_session)
-    |> List.stable_sort compare_chat_timeline_items
   in
   { ctl_items = items }
 ;;
 
 let chat_timeline_rows timeline =
+  let turn_rows turn =
+    List.combine turn.ct_rows (chat_projected_timeline_ats turn.ct_rows)
+    |> List.map (fun (row, projected_at) ->
+      { pcr_row = row
+      ; pcr_at = projected_at
+      ; pcr_turn_sequence = turn.ct_turn_sequence
+      ; pcr_lane_rank = 0
+      ; pcr_request_id = turn.ct_request_id
+      })
+  in
   let rows_of_item = function
-    | Chat_turn turn -> turn.ct_rows
-    | Chat_unowned row | Chat_memory row -> [ row ]
+    | Chat_turn turn -> turn_rows turn
+    | Chat_unowned row ->
+        [ { pcr_row = row
+          ; pcr_at = message_display_at row
+          ; pcr_turn_sequence = row.me_turn_sequence
+          ; pcr_lane_rank = 1
+          ; pcr_request_id = ""
+          }
+        ]
+    | Chat_memory row ->
+        [ { pcr_row = row
+          ; pcr_at = message_display_at row
+          ; pcr_turn_sequence = row.me_turn_sequence
+          ; pcr_lane_rank = 2
+          ; pcr_request_id = ""
+          }
+        ]
   in
   List.concat (List.map rows_of_item timeline.ctl_items)
+  |> List.stable_sort compare_projected_chat_rows
+  |> List.map (fun projected -> projected.pcr_row)
 ;;
 
-(* A live turn without a committed input is a new producer observation. Append
-   it after the projected rows already read; its display clock cannot move it
-   between older turn groups. Once its request-owned row arrives, the ordinary
-   typed turn projection supplies the exact structural slot. *)
-let chat_live_insertion_index ~timeline_at:_ messages = List.length messages
+let chat_request_timeline_at ~request_id messages =
+  let request_rows =
+    List.filter
+      (fun (message : msg_entry) ->
+        String.equal message.me_request_id request_id)
+      messages
+  in
+  match List.rev (chat_projected_timeline_ats request_rows) with
+  | [] -> None
+  | at :: _ -> at
+;;
+
+let chat_live_timeline_at ~request_id ~started_at ~request_messages
+    positioned_messages =
+  match chat_request_timeline_at ~request_id request_messages with
+  | Some _ as at -> at
+  | None ->
+      let valid at = Float.is_finite at && at > 0. in
+      let started_at = if valid started_at then Some started_at else None in
+      let has_committed_request =
+        List.exists
+          (fun (message : msg_entry) ->
+            String.equal message.me_request_id request_id)
+          request_messages
+      in
+      if not has_committed_request
+      then started_at
+      else
+        List.fold_left
+          (fun latest (_, at) ->
+            match latest, at with
+            | None, at -> at
+            | at, None -> at
+            | Some latest, Some at -> Some (Float.max latest at))
+          started_at positioned_messages
+;;
+
+(* Where a live turn with no committed row belongs in an already projected
+   message list. The visible clock is the authority, so an auxiliary row may
+   sit between committed rows from one request. A live turn has no persisted
+   sequence yet; an exact clock tie precedes unowned/Journal rows. Callers that
+   already hold committed rows for this request insert after its latest causal
+   frontier instead. *)
+let chat_live_insertion_index ~request_id ~timeline_at positioned_messages =
+  let lower_bound =
+    List.fold_left
+      (fun (index, lower_bound) ((row : msg_entry), _) ->
+        ( index + 1
+        , if String.equal row.me_request_id request_id
+          then index + 1
+          else lower_bound ))
+      (0, 0) positioned_messages
+    |> snd
+  in
+  let live_precedes ((row : msg_entry), row_at) =
+    match timeline_at, row_at with
+    | Some live_at, Some row_at ->
+        let by_time = Float.compare live_at row_at in
+        if by_time <> 0
+        then by_time < 0
+        else row.me_role = Message_memory || String.equal row.me_request_id ""
+    | Some _, None -> true
+    | None, Some _ -> false
+    | None, None ->
+        row.me_role = Message_memory || String.equal row.me_request_id ""
+  in
+  let rec find index = function
+    | [] -> index
+    | positioned :: rest ->
+        if index >= lower_bound && live_precedes positioned
+        then index
+        else find (index + 1) rest
+  in
+  find 0 positioned_messages
 ;;
 
 let msg_anchor entry =

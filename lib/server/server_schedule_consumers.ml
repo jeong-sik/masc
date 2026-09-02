@@ -158,6 +158,7 @@ type keeper_wake_activation_deferred_reason =
   | Keeper_wake_activation_proactive_disabled
   | Keeper_wake_activation_shutdown_fenced of Keeper_shutdown_types.Operation_id.t
   | Keeper_wake_activation_owner_unknown of string
+  | Keeper_wake_activation_owner_absent
   | Keeper_wake_activation_unregistered
   | Keeper_wake_activation_not_running of Keeper_state_machine.phase
 
@@ -175,6 +176,7 @@ let keeper_wake_activation_deferred_reason_fields = function
     ( "shutdown_fenced"
     , Some (Keeper_shutdown_types.Operation_id.to_string operation_id) )
   | Keeper_wake_activation_owner_unknown detail -> "owner_unknown", Some detail
+  | Keeper_wake_activation_owner_absent -> "owner_absent", None
   | Keeper_wake_activation_unregistered -> "unregistered", None
   | Keeper_wake_activation_not_running phase ->
     "not_running", Some (Keeper_state_machine.phase_to_string phase)
@@ -194,6 +196,7 @@ let keeper_wake_activation_deferred_reason_of_fields fields =
       Keeper_wake_activation_shutdown_fenced operation_id)
   | "owner_unknown", Some detail ->
     Ok (Keeper_wake_activation_owner_unknown detail)
+  | "owner_absent", None -> Ok Keeper_wake_activation_owner_absent
   | "unregistered", None -> Ok Keeper_wake_activation_unregistered
   | "not_running", Some phase ->
     (match Keeper_state_machine.phase_of_string phase with
@@ -206,6 +209,7 @@ let keeper_wake_activation_deferred_reason_of_fields fields =
     Error ("activation_detail is required for activation_reason: " ^ reason)
   | ( "autoboot_disabled"
     | "proactive_disabled"
+    | "owner_absent"
     | "unregistered" ), Some _ ->
     Error ("activation_detail must be null for activation_reason: " ^ reason)
   | reason, _ -> Error ("unsupported activation_reason: " ^ reason)
@@ -479,25 +483,7 @@ let activation_deferred_of_paused_dead = function
 ;;
 
 let activation_outcome_for_required_wake config ~base_path ~keeper_name =
-  match
-    Executor_pool_ref.submit_strict (fun () ->
-      match Keeper_meta_store.read_effective_meta config keeper_name with
-      | Ok (Some meta) -> Ok meta
-      | Ok None -> Error "durable keeper metadata missing"
-      | Error detail -> Error detail)
-  with
-  | Error (Executor_pool_ref.Work_failed failure) ->
-    Keeper_wake_activation_deferred
-      (Keeper_wake_activation_owner_unknown
-         ("durable keeper metadata read failed: "
-          ^ Executor_pool_ref.strict_submit_error_to_string
-              (Executor_pool_ref.Work_failed failure)))
-  | Error error ->
-    Keeper_wake_activation_deferred
-      (Keeper_wake_activation_owner_unknown
-         ("durable keeper metadata read unavailable: "
-          ^ Executor_pool_ref.strict_submit_error_to_string error))
-  | Ok meta_result ->
+  let classify meta_result =
     let admission =
       Keeper_owner_registry.shutdown_operation_id ~base_path ~keeper_name
     in
@@ -558,6 +544,33 @@ let activation_outcome_for_required_wake config ~base_path ~keeper_name =
           Keeper_wake_activation_deferred
             (Keeper_wake_activation_lifecycle_denied
                (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)))))
+  in
+  match
+    Executor_pool_ref.submit_strict (fun () ->
+      Keeper_meta_store.read_effective_meta config keeper_name)
+  with
+  | Error (Executor_pool_ref.Work_failed failure) ->
+    Keeper_wake_activation_deferred
+      (Keeper_wake_activation_owner_unknown
+         ("durable keeper metadata read failed: "
+          ^ Executor_pool_ref.strict_submit_error_to_string
+              (Executor_pool_ref.Work_failed failure)))
+  | Error error ->
+    Keeper_wake_activation_deferred
+      (Keeper_wake_activation_owner_unknown
+         ("durable keeper metadata read unavailable: "
+          ^ Executor_pool_ref.strict_submit_error_to_string error))
+  (* The store answered with nothing it can read under this name -- no
+     file, or a file this binary cannot decode, which boot re-materialises
+     from TOML. Either way this is not a read that failed, and the queue
+     drain cancels the stimulus as owner-absent within the minute. Measured
+     live 2026-09-02: a daily wake for a Keeper deleted days earlier still
+     reported [succeeded] with the fact buried in a detail string. The
+     receipt now says it in its own word. *)
+  | Ok (Ok None) ->
+    Keeper_wake_activation_deferred Keeper_wake_activation_owner_absent
+  | Ok (Ok (Some meta)) -> classify (Ok meta)
+  | Ok (Error detail) -> classify (Error detail)
 ;;
 
 let log_activation_outcome ~schedule_id ~keeper_name = function
@@ -616,21 +629,30 @@ and terminal_evidence_status =
   | Terminal_evidence_pending of string
   | Terminal_evidence_recorded
 
+type durable_occurrence_source =
+  | Full_source of Keeper_event_queue.stimulus
+  | Compact_schedule_source of
+      { post_id : string
+      ; urgency : Keeper_event_queue.urgency
+      ; arrived_at : float
+      ; source_ref : string
+      }
+
 type durable_occurrence_disposition =
-  { source : Keeper_event_queue.stimulus
+  { source : durable_occurrence_source
   ; source_incarnation : int64
   ; state : durable_occurrence_state
   }
 
 type resolved_occurrence_disposition =
-  | Pending_at of string * Keeper_event_queue.stimulus
+  | Pending_at of string * durable_occurrence_source
   | Transfer_projecting_at of string * string
   | Terminal_completed_at of
-      string * Keeper_event_queue.stimulus * terminal_evidence_status
+      string * durable_occurrence_source * terminal_evidence_status
   | Terminal_failed_at of
-      string * Keeper_event_queue.stimulus * string * terminal_evidence_status
+      string * durable_occurrence_source * string * terminal_evidence_status
   | Terminal_cancelled_at of
-      string * Keeper_event_queue.stimulus * string * terminal_evidence_status
+      string * durable_occurrence_source * string * terminal_evidence_status
   | Absent_at of string
 
 let terminal_evidence_status_equal left right =
@@ -675,14 +697,14 @@ let occurrence_source_and_disposition
   in
   match receipt.transition with
   | Keeper_event_queue_state.Cancel_accepted cancellation ->
-    ( cancellation.source
-    , { source = cancellation.source
+    ( cancellation.source.post_id
+    , { source = Full_source cancellation.source
       ; source_incarnation = cancellation.source_incarnation
       ; state = Cancelled (cancellation.reason, terminal_evidence)
       } )
   | Keeper_event_queue_state.Transfer_accepted transfer ->
-    ( transfer.source
-    , { source = transfer.source
+    ( transfer.source.post_id
+    , { source = Full_source transfer.source
       ; source_incarnation = transfer.source_incarnation
       ; state =
           (if projecting
@@ -699,8 +721,8 @@ let occurrence_source_and_disposition
       | Keeper_event_queue_state.Turn_completed ->
         Terminally_completed terminal_evidence
     in
-    ( terminal.source
-    , { source = terminal.source
+    ( terminal.source.post_id
+    , { source = Full_source terminal.source
       ; source_incarnation = terminal.source_incarnation
       ; state
       } )
@@ -739,7 +761,7 @@ let durable_occurrence_index state =
       let* () =
         add
           selection.source.post_id
-          { source = selection.source
+          { source = Full_source selection.source
           ; source_incarnation = selection.admitted_revision
           ; state = Pending
           }
@@ -749,11 +771,85 @@ let durable_occurrence_index state =
   let rec add_receipts ~projecting = function
     | [] -> Ok ()
     | receipt :: rest ->
-      let source, disposition =
+      let occurrence_id, disposition =
         occurrence_source_and_disposition ~projecting receipt
       in
-      let* () = add source.post_id disposition in
+      let* () = add occurrence_id disposition in
       add_receipts ~projecting rest
+  in
+  let rec add_projected = function
+    | [] -> Ok ()
+    | Keeper_event_queue_state.Current_receipt receipt :: rest ->
+      (match
+         (Keeper_event_queue_state.transition_source receipt.transition).payload
+       with
+       | Keeper_event_queue.Schedule_due _ ->
+         let occurrence_id, disposition =
+           occurrence_source_and_disposition ~projecting:false receipt
+         in
+         let* () = add occurrence_id disposition in
+         add_projected rest
+       | Keeper_event_queue.Board_signal _
+       | Keeper_event_queue.Board_attention _
+       | Keeper_event_queue.Bootstrap
+       | Keeper_event_queue.Fusion_completed _
+       | Keeper_event_queue.Connector_attention _
+       | Keeper_event_queue.Hitl_resolved _
+       | Keeper_event_queue.Ask_answered _
+       | Keeper_event_queue.Completion_authority_rejected _
+       | Keeper_event_queue.Task_cancelled _
+       | Keeper_event_queue.Workspace_message _
+       | Keeper_event_queue.Delegate_completed _
+       | Keeper_event_queue.Composition_completed _ ->
+         add_projected rest)
+    | Keeper_event_queue_state.Projected_witness witness :: rest ->
+      (match witness.source_kind with
+       | Keeper_event_queue_state.Source_schedule_due ->
+         let source =
+           Compact_schedule_source
+             { post_id = witness.post_id
+             ; urgency = witness.urgency
+             ; arrived_at = witness.source_arrived_at
+             ; source_ref = witness.source_ref
+             }
+         in
+         let state =
+           match witness.kind with
+           | Keeper_event_queue_state.Projected_cancel _ ->
+             Cancelled ("projected cancellation", Terminal_evidence_recorded)
+           | Keeper_event_queue_state.Projected_transfer { to_keeper; _ } ->
+             Transferred_to to_keeper
+           | Keeper_event_queue_state.Projected_turn_attempt_terminal ->
+             Terminally_failed
+               ("projected turn attempt terminal", Terminal_evidence_recorded)
+           | Keeper_event_queue_state.Projected_turn_completed ->
+             Terminally_completed Terminal_evidence_recorded
+           | Keeper_event_queue_state.Projected_fusion_terminal
+           | Keeper_event_queue_state.Projected_hitl_terminal ->
+             Terminally_completed Terminal_evidence_recorded
+         in
+         let* () =
+           add
+             witness.post_id
+             { source
+             ; source_incarnation = witness.source_incarnation
+             ; state
+             }
+         in
+         add_projected rest
+       | Keeper_event_queue_state.Source_board_signal
+       | Keeper_event_queue_state.Source_board_attention
+       | Keeper_event_queue_state.Source_bootstrap
+       | Keeper_event_queue_state.Source_fusion_completed
+       | Keeper_event_queue_state.Source_connector_attention
+       | Keeper_event_queue_state.Source_hitl_resolved
+       | Keeper_event_queue_state.Source_ask_answered
+       | Keeper_event_queue_state.Source_completion_authority_rejected
+       | Keeper_event_queue_state.Source_task_cancelled
+       | Keeper_event_queue_state.Source_workspace_message
+       | Keeper_event_queue_state.Source_delegate_completed
+       | Keeper_event_queue_state.Source_composition_completed ->
+         add_projected rest)
   in
   let* () =
     Keeper_event_queue_state.pending_selections state
@@ -765,8 +861,8 @@ let durable_occurrence_index state =
     |> add_receipts ~projecting:true
   in
   let* () =
-    Keeper_event_queue_state.projected_transition_receipts state
-    |> add_receipts ~projecting:false
+    Keeper_event_queue_state.projected_dispositions state
+    |> add_projected
   in
   Ok index
 ;;
@@ -866,12 +962,47 @@ let accept_keeper_wake_occurrence
       ~stimulus_id
       stimulus
   =
+  let exact_stimulus_for_source = function
+    | Full_source durable_stimulus -> Ok durable_stimulus
+    | Compact_schedule_source { post_id; urgency; arrived_at; source_ref } ->
+      let durable_stimulus =
+        { stimulus with Keeper_event_queue.arrived_at }
+      in
+      (match stimulus.Keeper_event_queue.payload with
+       | Keeper_event_queue.Schedule_due _
+         when String.equal stimulus.post_id post_id
+              && stimulus.urgency = urgency
+              && String.equal
+                   (Keeper_event_queue_state.source_snapshot_ref
+                      durable_stimulus)
+                   source_ref ->
+         Ok durable_stimulus
+       | Keeper_event_queue.Schedule_due _
+       | Keeper_event_queue.Board_signal _
+       | Keeper_event_queue.Board_attention _
+       | Keeper_event_queue.Bootstrap
+       | Keeper_event_queue.Fusion_completed _
+       | Keeper_event_queue.Connector_attention _
+       | Keeper_event_queue.Hitl_resolved _
+       | Keeper_event_queue.Ask_answered _
+       | Keeper_event_queue.Completion_authority_rejected _
+       | Keeper_event_queue.Task_cancelled _
+       | Keeper_event_queue.Workspace_message _
+       | Keeper_event_queue.Delegate_completed _
+       | Keeper_event_queue.Composition_completed _ ->
+         retryable_dispatch_failure
+           (Printf.sprintf
+              "scheduled keeper wake compact source conflicts occurrence=%s source_ref=%s"
+              stimulus_id
+              source_ref))
+  in
   let accept_terminal
         ~owner
         ~durable_stimulus
         ~evidence
         acceptance
     =
+    let* durable_stimulus = exact_stimulus_for_source durable_stimulus in
     let* () =
       match evidence with
       | Terminal_evidence_recorded -> Ok ()
@@ -914,6 +1045,7 @@ let accept_keeper_wake_occurrence
     (* A prior attempt may have committed the queue entry and then failed the
        independent reaction-ledger append. Verify the exact stimulus identity
        and repair only an absent row before reporting durable acceptance. *)
+    let* durable_stimulus = exact_stimulus_for_source durable_stimulus in
     accept_with_recorded_stimulus
       ~base_path
       ~keeper_name:owner

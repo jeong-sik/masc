@@ -281,7 +281,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-webmcp-capability-lanes | WebMCP 를 masc 능력으로 — credential 위임(C), 생태계 센서(D), 공유 화면·사람 승인(E) | Draft | - |
 | RFC-webmcp-dashboard-agent-surface | 대시보드를 WebMCP 도구 표면으로 — 읽기 전용 MCP allowlist relay 와 CDP 소비 브리지 | Draft | - |
 | RFC-webmcp-keeper-consumption | keeper 의 WebMCP 소비 — Yolo Bash 브리지 lane(지금)과 typed 도구 모듈 lane(트리거 뒤) | Active | - |
-| RFC-widen-whole-sets | 도구 검색은 묶음을 데려온다 — 회수 단위가 호출 하나면 필요한 세트가 남는다 | Draft | - |
+| RFC-widen-whole-sets | 도구 검색은 묶음을 데려온다 — 회수 단위가 호출 하나면 필요한 세트가 남는다 | Dropped | - |
 
 ### 신규 RFC
 

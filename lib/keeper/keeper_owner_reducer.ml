@@ -30,6 +30,8 @@ type turn_runtime_delta =
   ; next_trace_history : string list
   ; next_last_handoff_ts : float
   ; proactive_observation : Keeper_meta_contract.proactive_runtime observed_change
+  ; usage_cursor : Keeper_usage_resolution.cursor option observed_change
+  ; last_usage_resolution : Keeper_usage_resolution.t option observed_change
   ; message_scope_ack_id : string option observed_change
   ; updated_at : string
   }
@@ -280,6 +282,11 @@ let turn_runtime_delta_of_snapshots
       ; next_last_handoff_ts = after_rt.last_handoff_ts
       ; proactive_observation =
           observed_change before_rt.proactive_rt after_rt.proactive_rt
+      ; usage_cursor = observed_change before_rt.usage_cursor after_rt.usage_cursor
+      ; last_usage_resolution =
+          observed_change
+            before_rt.last_usage_resolution
+            after_rt.last_usage_resolution
       ; message_scope_ack_id =
           observed_change before_rt.message_scope_ack_id after_rt.message_scope_ack_id
       ; updated_at = after.updated_at
@@ -369,6 +376,11 @@ let apply_turn_runtime_delta
       ; trace_history = delta.next_trace_history
       ; last_handoff_ts = delta.next_last_handoff_ts
       ; proactive_rt
+      ; usage_cursor = apply_observed_change runtime.usage_cursor delta.usage_cursor
+      ; last_usage_resolution =
+          apply_observed_change
+            runtime.last_usage_resolution
+            delta.last_usage_resolution
       ; message_scope_ack_id =
           apply_observed_change runtime.message_scope_ack_id delta.message_scope_ack_id
       }

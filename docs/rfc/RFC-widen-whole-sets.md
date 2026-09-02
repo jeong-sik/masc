@@ -1,9 +1,9 @@
 ---
 rfc: "widen-whole-sets"
 title: "도구 검색은 묶음을 데려온다 — 회수 단위가 호출 하나면 필요한 세트가 남는다"
-status: Draft
+status: Dropped
 created: 2026-09-01
-updated: 2026-09-01
+updated: 2026-09-02
 author: claude
 supersedes: []
 superseded_by: null
@@ -87,3 +87,25 @@ composition 카탈로그 제안(작전 2)으로 이어지는 관측 데이터가
 - 외부: `.tmp/toolstudy/survey-research.md` §2 (ToolRet, COLT), §2 (Anthropic
   tool_reference 묶음 적재)
 - 백로그: issue #32369 작전 5
+
+---
+
+## 8. 측정 결과 (2026-09-02) — 전제 기각, Dropped
+
+§3.1이 요구한 PR-0 분해를 92건 전수로 수행했다(스크립트와 원본 표:
+`.tmp/toolstudy/pr0-measurements.md` §1, 본문 요약을 아래에).
+
+| 분류 | 건수 | 비중 |
+|---|---|---|
+| (a) widen 후 다른 도구를 호출하고 종료 | 32 | 35% |
+| (b) widen이 그 런의 마지막 호출, 오류 없이 정상 종료 | 60 | 65% |
+| (c) 오류로 중단 | 0 | 0% |
+
+(b)+(c) 우세로 §3.1이 정한 기각 조건에 해당한다. 다만 원인은 RFC가 상정한
+"턴 수명/실패"가 아니라 **로드-소비의 분리**다 — (c)=0이 실패 가설을 닫았고,
+(b) 런은 전부 정상 종료했으며, widen은 매 런 풀리는데 모델의 "쓰겠다" 의도만
+재생산된다(다음 런이 같은 이름을 다시 widen: (a) 75% / (b) 82%). 묶음으로 회수해도
+그 런에서 소비하지 않으면 같은 경고가 난다.
+
+대체 축(후속 RFC가 있다면): 부착의 런 간 유지 여부, 또는 widen 시점을 실제
+호출 직전으로 미루는 방향. "회수 단위"는 이 관측을 설명하지 못한다.

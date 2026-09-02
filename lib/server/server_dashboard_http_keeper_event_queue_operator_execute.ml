@@ -63,6 +63,40 @@ type prepared_transfer =
   ; applied_at : float
   }
 
+type cancellation_replay =
+  | Cancellation_current of prepared_cancellation
+  | Cancellation_projected of Keeper_event_queue_state.projected_disposition_witness
+
+type transfer_replay =
+  | Transfer_current of prepared_transfer
+  | Transfer_projected of Keeper_event_queue_state.projected_disposition_witness
+
+type audit_source =
+  { post_id : string
+  ; payload_kind : string
+  }
+
+let audit_source_of_stimulus source =
+  { post_id = source.Keeper_event_queue.post_id
+  ; payload_kind = Keeper_event_queue.payload_kind_label source.payload
+  }
+;;
+
+let audit_source_of_witness witness =
+  { post_id = witness.Keeper_event_queue_state.post_id
+  ; payload_kind =
+      Keeper_event_queue_state.projected_source_kind_to_string
+        witness.source_kind
+  }
+;;
+
+let projected_result_json witness =
+  `Assoc
+    [ "status", `String "already_applied"
+    ; "transition_id", `String witness.Keeper_event_queue_state.transition_id
+    ]
+;;
+
 let prior_cancellation_for_request
       ~queue_state
       ~source_ref
@@ -76,7 +110,7 @@ let prior_cancellation_for_request
       queue_state
   with
   | None -> Ok None
-  | Some receipt ->
+  | Some (Keeper_event_queue_state.Current_receipt receipt) ->
     (match receipt.transition with
      | Keeper_event_queue_state.Cancel_accepted cancellation
        when Int64.equal cancellation.source_incarnation source_incarnation
@@ -85,10 +119,28 @@ let prior_cancellation_for_request
                     cancellation.source)
                  source_ref
             && String.equal cancellation.reason reason ->
-       Ok (Some { cancellation; applied_at = receipt.applied_at })
+       Ok (Some (Cancellation_current { cancellation; applied_at = receipt.applied_at }))
      | Keeper_event_queue_state.Cancel_accepted _
      | Keeper_event_queue_state.Transfer_accepted _
      | Keeper_event_queue_state.Ack_source_terminal _ ->
+       Error
+         ("event queue operator operation ID conflicts with cancellation request: "
+          ^ operator_operation_id))
+  | Some (Keeper_event_queue_state.Projected_witness witness) ->
+    (match witness.kind with
+     | Keeper_event_queue_state.Projected_cancel { reason_ref }
+       when Int64.equal witness.source_incarnation source_incarnation
+            && String.equal witness.source_ref source_ref
+            && String.equal
+                 reason_ref
+                 (Keeper_event_queue_state.disposition_reason_ref reason) ->
+       Ok (Some (Cancellation_projected witness))
+     | Keeper_event_queue_state.Projected_cancel _
+     | Keeper_event_queue_state.Projected_transfer _
+     | Keeper_event_queue_state.Projected_fusion_terminal
+     | Keeper_event_queue_state.Projected_hitl_terminal
+     | Keeper_event_queue_state.Projected_turn_completed
+     | Keeper_event_queue_state.Projected_turn_attempt_terminal ->
        Error
          ("event queue operator operation ID conflicts with cancellation request: "
           ^ operator_operation_id))
@@ -131,7 +183,7 @@ let prior_transfer_for_request
       queue_state
   with
   | None -> Ok None
-  | Some receipt ->
+  | Some (Keeper_event_queue_state.Current_receipt receipt) ->
     (match receipt.transition with
      | Keeper_event_queue_state.Transfer_accepted transfer
        when Int64.equal transfer.source_incarnation source_incarnation
@@ -141,10 +193,28 @@ let prior_transfer_for_request
                  source_ref
             && String.equal transfer.from_keeper keeper_name
             && String.equal transfer.to_keeper target_keeper ->
-       Ok (Some { transfer; applied_at = receipt.applied_at })
+       Ok (Some (Transfer_current { transfer; applied_at = receipt.applied_at }))
      | Keeper_event_queue_state.Cancel_accepted _
      | Keeper_event_queue_state.Transfer_accepted _
      | Keeper_event_queue_state.Ack_source_terminal _ ->
+       Error
+         ("event queue operator operation ID conflicts with transfer request: "
+          ^ operator_operation_id))
+  | Some (Keeper_event_queue_state.Projected_witness witness) ->
+    (match witness.kind with
+     | Keeper_event_queue_state.Projected_transfer
+         { from_keeper; to_keeper; _ }
+       when Int64.equal witness.source_incarnation source_incarnation
+            && String.equal witness.source_ref source_ref
+            && String.equal from_keeper keeper_name
+            && String.equal to_keeper target_keeper ->
+       Ok (Some (Transfer_projected witness))
+     | Keeper_event_queue_state.Projected_cancel _
+     | Keeper_event_queue_state.Projected_transfer _
+     | Keeper_event_queue_state.Projected_fusion_terminal
+     | Keeper_event_queue_state.Projected_hitl_terminal
+     | Keeper_event_queue_state.Projected_turn_completed
+     | Keeper_event_queue_state.Projected_turn_attempt_terminal ->
        Error
          ("event queue operator operation ID conflicts with transfer request: "
           ^ operator_operation_id))
@@ -185,7 +255,7 @@ let execute_cancellation ~base_path ~keeper_name prepared =
     ~applied_at:prepared.applied_at
     ~cancellation
   |> Result.map (fun result ->
-    cancellation.source, transition_result_json result)
+    Some (audit_source_of_stimulus cancellation.source), transition_result_json result)
 ;;
 
 let target_projection_failure_json source_result detail =
@@ -212,7 +282,7 @@ let execute_transfer ~base_path ~keeper_name prepared =
     in
     match source_result with
     | Keeper_registry_event_queue.Transition_committed_followup_failed _ ->
-      Ok (transfer.source, transition_result_json source_result)
+      Ok (Some (audit_source_of_stimulus transfer.source), transition_result_json source_result)
     | Keeper_registry_event_queue.Transition_applied _
     | Keeper_registry_event_queue.Transition_already_applied _ ->
       (match
@@ -230,14 +300,14 @@ let execute_transfer ~base_path ~keeper_name prepared =
               ~base_path
               transfer.to_keeper :
               Keeper_registry.wakeup_outcome);
-         Ok (transfer.source, transition_result_json source_result)
+         Ok (Some (audit_source_of_stimulus transfer.source), transition_result_json source_result)
        | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
          Ok
-           ( transfer.source
+           ( Some (audit_source_of_stimulus transfer.source)
            , target_projection_failure_json source_result detail )
        | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
          Ok
-           ( transfer.source
+           ( Some (audit_source_of_stimulus transfer.source)
            , target_projection_failure_json
                source_result
                (Keeper_registry_event_queue.transfer_target_error_to_string error) )
@@ -247,7 +317,9 @@ let execute_transfer ~base_path ~keeper_name prepared =
              "target Keeper shutdown owns durable intake operation=%s"
              (Keeper_shutdown_types.Operation_id.to_string operation_id)
          in
-         Ok (transfer.source, target_projection_failure_json source_result detail))
+         Ok
+           ( Some (audit_source_of_stimulus transfer.source)
+           , target_projection_failure_json source_result detail ))
   in
   match
     Keeper_shutdown_intake_fence.run_transfer_intake_if_open
@@ -296,7 +368,7 @@ let execute_reprioritization
        keeper_name :
        Keeper_registry.wakeup_outcome);
   Ok
-    ( selection.source
+    ( Some (audit_source_of_stimulus selection.source)
     , `Assoc
         [ "status", `String "applied"
         ; "revision", `String (Int64.to_string revision)
@@ -335,7 +407,9 @@ let replay_committed_request ~base_path ~keeper_name request =
     in
     (match prepared with
      | None -> Ok None
-     | Some prepared ->
+     | Some (Cancellation_projected witness) ->
+       Ok (Some (Some (audit_source_of_witness witness), projected_result_json witness))
+     | Some (Cancellation_current prepared) ->
        execute_cancellation ~base_path ~keeper_name prepared
        |> Result.map Option.some)
   | Transfer
@@ -360,7 +434,9 @@ let replay_committed_request ~base_path ~keeper_name request =
     in
     (match prepared with
      | None -> Ok None
-     | Some prepared ->
+     | Some (Transfer_projected witness) ->
+       Ok (Some (Some (audit_source_of_witness witness), projected_result_json witness))
+     | Some (Transfer_current prepared) ->
        execute_transfer ~base_path ~keeper_name prepared
        |> Result.map Option.some)
 ;;
@@ -393,7 +469,7 @@ let run_admitted_request
     in
     let* prepared =
       match prior with
-      | Some prepared -> Ok prepared
+      | Some replay -> Ok replay
       | None ->
         fresh_cancellation_for_request
           ~queue_state
@@ -401,8 +477,13 @@ let run_admitted_request
           ~source_incarnation
           ~operator_operation_id
           ~reason
+        |> Result.map (fun prepared -> Cancellation_current prepared)
     in
-    execute_cancellation ~base_path ~keeper_name prepared
+    (match prepared with
+     | Cancellation_projected witness ->
+       Ok (Some (audit_source_of_witness witness), projected_result_json witness)
+     | Cancellation_current prepared ->
+       execute_cancellation ~base_path ~keeper_name prepared)
   | Transfer
       { source_ref
       ; source_incarnation
@@ -423,7 +504,7 @@ let run_admitted_request
       in
       let* prepared =
         match prior with
-        | Some prepared -> Ok prepared
+        | Some replay -> Ok replay
         | None ->
           let* target_meta = validate_fresh_transfer_target config target_keeper in
           fresh_transfer_for_request
@@ -434,8 +515,13 @@ let run_admitted_request
             ~operator_operation_id
             ~target_keeper
             ~target_meta
+          |> Result.map (fun prepared -> Transfer_current prepared)
       in
-      execute_transfer ~base_path ~keeper_name prepared
+      (match prepared with
+       | Transfer_projected witness ->
+         Ok (Some (audit_source_of_witness witness), projected_result_json witness)
+       | Transfer_current prepared ->
+         execute_transfer ~base_path ~keeper_name prepared)
   | Reprioritize { source_ref; source_incarnation; urgency } ->
     execute_reprioritization
       ~base_path

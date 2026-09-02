@@ -108,6 +108,80 @@ describe('selectPollingSchedules', () => {
   })
 })
 
+describe('the subject on a row', () => {
+  it('names the Keeper the wake reaches, and keeps the scheduler on the tooltip', () => {
+    // Live 2026-09-02: a cron created through an MCP client read
+    // "codex-mcp-client" on the row while edgar.a.poe, the Keeper it wakes
+    // every 45 minutes, was nowhere on it.
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    try {
+      render(
+        html`<${Agenda}
+          requests=${[
+            req({
+              schedule_id: 'sched-cron',
+              status: 'scheduled',
+              recurrence: { kind: 'cron', expression: '45 8-23 * * *' },
+              due_at: localEpochSeconds(2026, 6, 7, 15),
+              payload_keeper_name: 'edgar.a.poe',
+              payload_target: 'keeper:edgar.a.poe',
+              scheduled_by: { id: 'codex-mcp-client', kind: 'automated_actor' },
+            }),
+          ]}
+          nowMs=${NOW_MS}
+          onOpen=${() => {}}
+        />`,
+        container,
+      )
+      const subject = container.querySelector('.sch-ev-by')
+      expect(subject?.textContent).toBe('edgar.a.poe')
+      expect(subject?.getAttribute('title')).toContain('codex-mcp-client')
+    } finally {
+      render(null, container)
+      container.remove()
+    }
+  })
+
+  it('falls back to the scheduler when the payload names no Keeper', () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    try {
+      render(
+        html`<${PollingStrip}
+          requests=${[
+            req({
+              schedule_id: 'sched-poll',
+              status: 'scheduled',
+              recurrence: { kind: 'interval', interval_sec: 300 },
+              next_due_at_iso: '2026-07-07T04:00:00Z',
+              payload_keeper_name: 'lane-smith',
+              payload_target: 'keeper:lane-smith',
+              scheduled_by: { id: 'claude-fable-schedule-probe', kind: 'automated_actor' },
+            }),
+            req({
+              schedule_id: 'sched-poll-2',
+              status: 'scheduled',
+              recurrence: { kind: 'interval', interval_sec: 300 },
+              next_due_at_iso: '2026-07-07T04:00:00Z',
+              scheduled_by: { id: 'dashboard-admin', kind: 'human_operator' },
+            }),
+          ]}
+          onOpen=${() => {}}
+        />`,
+        container,
+      )
+      const subjects = Array.from(container.querySelectorAll('.sch-poll-by'))
+      expect(subjects.map(node => node.textContent)).toEqual(['lane-smith', 'dashboard-admin'])
+      expect(subjects[1]?.getAttribute('title')).toContain('예약자')
+      expect(subjects[1]?.getAttribute('title')).not.toContain('깨우는 keeper')
+    } finally {
+      render(null, container)
+      container.remove()
+    }
+  })
+})
+
 describe('buildAgenda', () => {
   it('places scheduled/oneshot rows on the correct day column and excludes interval', () => {
     const columns = buildAgenda(

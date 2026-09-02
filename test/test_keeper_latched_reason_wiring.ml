@@ -25,7 +25,7 @@ module Keeper_supervisor_types = Masc.Keeper_supervisor_types
 
 let base_json name =
   `Assoc
-    [ "schema", `String "masc.keeper_meta.v1"
+    [ "schema", `String "masc.keeper_meta.v2"
     ; "name", `String name
     ; "trace_id", `String ("trace-" ^ name)
     ]

@@ -4546,13 +4546,12 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     | Keeper_chat_history.Addressed_to_keeper _, None -> None
   in
   let timestamp =
-    match row.Keeper_chat_history.kind with
-    | Keeper_chat_history.Memory_activity _
-      when Float.equal row.Keeper_chat_history.at 0.0 ->
-        "--:--:--"
-    | _ ->
-        clock_text_of_unix
-          (Option.value ~default:row.Keeper_chat_history.at submitted_at)
+    let source_at =
+      Option.value ~default:row.Keeper_chat_history.at submitted_at
+    in
+    if Float.is_finite source_at && source_at > 0.
+    then clock_text_of_unix source_at
+    else "--:--:--"
   in
   (* A file the row carries, said on a line of its own under the words. The
      store has held these since the composer learned to stage one; the pane

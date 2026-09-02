@@ -92,3 +92,10 @@ let keeper_context_approval_authority_state_complete = "keeper.context.approval_
 let keeper_context_approval_authority_state_partial = "keeper.context.approval_authority.state.partial"
 let keeper_context_approval_authority_state_unavailable = "keeper.context.approval_authority.state.unavailable"
 let keeper_context_approval_authority_footer = "keeper.context.approval_authority.footer"
+
+(* Tool failure next-move sentences, one per Tool_result.tool_failure_class. *)
+let tool_failure_dependency_unavailable = "tool_failure.dependency_unavailable"
+let tool_failure_policy_rejection = "tool_failure.policy_rejection"
+let tool_failure_runtime_failure = "tool_failure.runtime_failure"
+let tool_failure_workflow_rejection = "tool_failure.workflow_rejection"
+let tool_failure_operator_cancelled = "tool_failure.operator_cancelled"

@@ -843,17 +843,6 @@ let run_keeper_invocation_turn_admitted_inner
                 ~message:(Printf.sprintf "Turn completed: %d tool calls" (Keeper_agent_result.tool_call_count result)) ();
               let reply_json =
                 let surface_model_used = Keeper_agent_run.runtime_lane_label in
-                let u = result.usage in
-                let cost_field = match u.cost_usd with
-                  | Some c -> `Float c
-                  | None -> `Null
-                in
-                let cache_miss_input_tokens =
-                  Keeper_hooks_agent_core.cache_miss_input_tokens
-                    ~input_tokens:u.input_tokens
-                    ~cache_creation_input_tokens:u.cache_creation_input_tokens
-                    ~cache_read_input_tokens:u.cache_read_input_tokens
-                in
                 let tool_call_evidence =
                   result.tool_calls
                   |> List.filter_map (fun detail ->
@@ -894,14 +883,11 @@ let run_keeper_invocation_turn_admitted_inner
                   ("turns", `Int result.turn_count);
                   ( "tool_call_evidence",
                     `List tool_call_evidence );
-                  ("usage", `Assoc [
-                    ("input_tokens", `Int u.input_tokens);
-                    ("output_tokens", `Int u.output_tokens);
-                    ("cache_creation_input_tokens", `Int u.cache_creation_input_tokens);
-                    ("cache_read_input_tokens", `Int u.cache_read_input_tokens);
-                    ("cache_miss_input_tokens", `Int cache_miss_input_tokens);
-                    ("cost_usd", cost_field);
-                  ]);
+                  ( "usage"
+                  , Option.fold
+                      ~none:`Null
+                      ~some:Keeper_usage_resolution.to_json
+                      updated_meta.runtime.last_usage_resolution );
                   (* RFC-0233 §7: the turn's join key, minted once from the
                      pre-turn snapshot above. The server persists it on the
                      chat row via append_turn ?turn_ref. *)

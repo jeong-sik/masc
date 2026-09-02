@@ -5,6 +5,7 @@ import type {
   DashboardScheduledAutomationRequest,
 } from '../../api'
 import {
+  countQueueDrainCancelled,
   countQueueDrainMisses,
   isCalendarVisible,
   queueDrainStatusOf,
@@ -16,6 +17,7 @@ type ReactionStatus = DashboardScheduledAutomationKeeperReactionEvidence['projec
 function req(
   queue: QueueStatus | null,
   reaction?: ReactionStatus,
+  receipt?: DashboardScheduledAutomationRequest['dispatch_receipt'],
 ): DashboardScheduledAutomationRequest {
   return {
     schedule_id: 'sched-1',
@@ -24,7 +26,28 @@ function req(
     recurrence: { kind: 'one_shot' },
     keeper_queue_evidence: queue === null ? null : { projection_status: queue },
     keeper_reaction_evidence: reaction === undefined ? null : { projection_status: reaction },
+    ...(receipt === undefined ? {} : { dispatch_receipt: receipt }),
   }
+}
+
+// A recognized receipt whose activation the consumer deferred because the
+// Keeper store holds no Keeper under the name.
+const OWNER_ABSENT_RECEIPT: DashboardScheduledAutomationRequest['dispatch_receipt'] = {
+  projection_status: 'recognized',
+  kind: 'masc.keeper_wake.enqueued',
+  queue: 'keeper_event_queue',
+  stimulus: 'schedule_due',
+  stimulus_id: 'occ-1',
+  reaction_ledger_status: 'recorded',
+  reaction_ledger_error: null,
+  keeper_name: 'taskmaster',
+  schedule_id: 'sched-1',
+  urgency: 'normal',
+  post_id: 'occ-1',
+  occurrence_status: 'awaiting_ack',
+  activation_status: 'deferred',
+  activation_reason: 'owner_absent',
+  activation_detail: null,
 }
 
 describe('queueDrainStatusOf', () => {
@@ -40,11 +63,55 @@ describe('queueDrainStatusOf', () => {
   })
 
   it('treats not_found + a recorded keeper reaction as a healthy 완료 (drained), never a miss', () => {
-    for (const reaction of ['matched_consumed_ack', 'matched_turn_started'] as const) {
+    for (const reaction of ['matched_consumed_ack', 'matched_turn_finished', 'matched_turn_started'] as const) {
       const status = queueDrainStatusOf(req('not_found', reaction))
       expect(status?.state, `reaction=${reaction}`).toBe('drained')
       expect(status?.label).toBe('완료')
     }
+  })
+
+  it('reads an accepted cancellation as 취소됨, visible on the calendar, and never as a miss or a completion', () => {
+    // Measured live 2026-09-02: a daily wake for a Keeper deleted days
+    // earlier was cancelled by the owner-absent drain 40s after every
+    // dispatch, and this classifier folded it into 확인 불가.
+    const status = queueDrainStatusOf(req('not_found', 'matched_terminal_cancelled'))
+    expect(status?.state).toBe('cancelled')
+    expect(status?.label).toBe('취소됨')
+    expect(status?.tone).toBe('warn')
+    expect(status && isCalendarVisible(status)).toBe(true)
+  })
+
+  it('names the absent Keeper when the receipt says the store had no such name', () => {
+    const status = queueDrainStatusOf(
+      req('not_found', 'matched_terminal_cancelled', OWNER_ABSENT_RECEIPT),
+    )
+    expect(status?.state).toBe('cancelled')
+    expect(status?.label).toBe('취소됨 · keeper 없음')
+  })
+
+  it('does not read a cancellation whose receipt was deferred for another reason as an absent Keeper', () => {
+    const status = queueDrainStatusOf(
+      req('not_found', 'matched_terminal_cancelled', {
+        ...OWNER_ABSENT_RECEIPT,
+        activation_reason: 'unregistered',
+      }),
+    )
+    expect(status?.label).toBe('취소됨')
+  })
+
+  it('reports ack and cancellation on one occurrence as invalid evidence, not as either outcome', () => {
+    expect(queueDrainStatusOf(req('not_found', 'conflicting_terminal_evidence'))?.state).toBe('evidence_invalid')
+  })
+
+  it('counts cancelled last executions separately from misses', () => {
+    const requests = [
+      req('not_found', 'matched_terminal_cancelled'),
+      req('not_found', 'matched_terminal_cancelled', OWNER_ABSENT_RECEIPT),
+      req('not_found', 'not_found'),
+      req('not_found', 'matched_consumed_ack'),
+    ]
+    expect(countQueueDrainCancelled(requests)).toBe(2)
+    expect(countQueueDrainMisses(requests)).toBe(1)
   })
 
   it('treats not_found + matched_stimulus as a miss: the stimulus row is only the producer dispatch record', () => {

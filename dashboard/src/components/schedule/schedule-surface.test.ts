@@ -390,6 +390,70 @@ describe('ScheduleSurface', () => {
     expect(missKpi?.querySelector('.ov-kpi-v')?.className).toContain('warn')
   })
 
+  it('counts cancelled last executions and the store\'s retained wake failures in the KPI strip', async () => {
+    const automation = sampleAutomation()
+    automation.requests = [
+      {
+        ...automation.requests[0]!,
+        schedule_id: 'sched-orphan',
+        keeper_queue_evidence: { projection_status: 'not_found' },
+        keeper_reaction_evidence: { projection_status: 'matched_terminal_cancelled' },
+      },
+      {
+        ...automation.requests[0]!,
+        schedule_id: 'sched-drained',
+        keeper_queue_evidence: { projection_status: 'not_found' },
+        keeper_reaction_evidence: { projection_status: 'matched_turn_finished' },
+      },
+    ]
+    // 27 attempts failed in one burst and were retried to success: the rows
+    // above are healthy now, and only the store-wide count still says so.
+    automation.wake_counts = {
+      retained: 61,
+      running: 0,
+      succeeded: 34,
+      failed: 27,
+      active_with_failed_newest_wake: 0,
+      retention_per_schedule: 32,
+    }
+    setAutomation(automation)
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    const cancelledKpi = container.querySelector('[data-testid="schedule-kpi-queue-cancelled"]')
+    expect(cancelledKpi?.textContent).toContain('큐 취소')
+    expect(cancelledKpi?.querySelector('.ov-kpi-v')?.textContent).toBe('1')
+    expect(cancelledKpi?.querySelector('.ov-kpi-v')?.className).toContain('warn')
+    // turn_finished is a reaction: the drained row is neither a miss nor a cancellation.
+    expect(container.querySelector('[data-testid="schedule-kpi-queue-miss"] .ov-kpi-v')?.textContent).toBe('0')
+    const failedKpi = container.querySelector('[data-testid="schedule-kpi-wake-failed"]')
+    expect(failedKpi?.textContent).toContain('wake 실패')
+    expect(failedKpi?.querySelector('.ov-kpi-v')?.textContent).toBe('27')
+    expect(failedKpi?.querySelector('.ov-kpi-v')?.getAttribute('title')).toContain('예약당 최대 32')
+  })
+
+  it('shows the wake-failure KPI as unknown when the server did not count wakes', async () => {
+    const automation = sampleAutomation()
+    automation.wake_counts = null
+    setAutomation(automation)
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    expect(container.querySelector('[data-testid="schedule-kpi-wake-failed"] .ov-kpi-v')?.textContent).toBe('—')
+  })
+
   it('surfaces projection load errors without hiding stale schedule data', async () => {
     mocks.scheduledAutomationError.value = 'schedule projection unavailable'
     setAutomation(sampleAutomation())
@@ -421,7 +485,7 @@ describe('ScheduleSurface', () => {
     expect(container.querySelector('[data-testid="schedule-projection-unavailable"]')?.textContent)
       .toContain('schedule store read failed: corrupt ledger')
     expect(Array.from(container.querySelectorAll('.ov-kpi-v')).map(node => node.textContent))
-      .toEqual(['—', '—', '—', '—'])
+      .toEqual(['—', '—', '—', '—', '—', '—'])
     expect(container.querySelector('[data-testid="schedule-viewbar"]')).toBeNull()
     expect(container.textContent).not.toContain('다가오는 7일에 예정된 예약이 없습니다')
   })

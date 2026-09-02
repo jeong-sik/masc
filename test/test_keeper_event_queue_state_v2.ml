@@ -266,6 +266,41 @@ let test_turn_attempt_terminal_receipt_preserves_exact_source () =
       staged
     |> require_ok "project turn-attempt terminal receipt"
   in
+  let later_source = stimulus "later-terminal-source" 2.5 in
+  let with_later =
+    projected
+    |> State.with_revision (Int64.succ (State.revision projected))
+    |> State.with_pending (queue [ later_source ])
+  in
+  let later_selection = select with_later in
+  let later_staged, later_receipt =
+    match
+      State.terminalize_pending_turn_completed
+        ~applied_at:2.75
+        ~selection:later_selection
+        with_later
+      |> require_ok "terminalize later source"
+    with
+    | state, State.Transition_applied receipt -> state, receipt
+    | _, State.Transition_already_applied _ ->
+      Alcotest.fail "later terminal source was replayed"
+  in
+  let projected =
+    State.mark_transition_projected
+      ~transition_id:later_receipt.transition_id
+      later_staged
+    |> require_ok "displace turn-attempt receipt into compact history"
+  in
+  (match
+     State.projected_dispositions projected
+     |> List.find_opt (function
+       | State.Projected_witness witness ->
+         String.equal witness.post_id source.post_id
+       | State.Current_receipt _ -> false)
+   with
+   | Some (State.Projected_witness _) -> ()
+   | Some (State.Current_receipt _) | None ->
+     Alcotest.fail "turn-attempt terminal did not become a compact witness");
   (match
      State.terminalize_pending_turn_attempt
        ~applied_at:3.0
@@ -372,7 +407,25 @@ let test_turn_completed_receipt_is_terminal_and_conflict_fenced () =
 ;;
 
 let test_projected_disposition_ledger_replays_older_operation () =
-  let cancelled_source = stimulus "cancelled-source" 1.0 in
+  let large_payload_marker = "PROJECTED-PAYLOAD-MUST-NOT-SURVIVE-" in
+  let cancelled_source : Queue.stimulus =
+    { post_id = "cancelled-source"
+    ; urgency = Queue.Normal
+    ; arrived_at = 1.0
+    ; payload =
+        Queue.Schedule_due
+          { occurrence_id = "cancelled-source"
+          ; schedule_instance_id = "large-schedule-instance"
+          ; schedule_id = "large-schedule"
+          ; due_at = 1.0
+          ; payload_digest = "large-schedule-digest"
+          ; title = Some "large projected payload"
+          ; message =
+              String.concat "" (List.init 8_192 (fun _ -> large_payload_marker))
+          ; result_delivery = None
+          }
+    }
+  in
   let transferred_source = stimulus "transferred-source" 2.0 in
   let initial =
     State.empty
@@ -446,8 +499,48 @@ let test_projected_disposition_ledger_replays_older_operation () =
     "both disposition witnesses survive"
     2
     (List.length (State.projected_dispositions projected_transfer));
+  let projected_json =
+    State.to_yojson projected_transfer |> Yojson.Safe.to_string
+  in
+  Alcotest.(check bool)
+    "older projected payload bytes are absent from the compact witness"
+    false
+    (Astring.String.is_infix ~affix:large_payload_marker projected_json);
+  Alcotest.(check bool)
+    "compact history size is independent of the projected payload bytes"
+    true
+    (String.length projected_json < 32_768);
+  let malformed_witness_json =
+    match Yojson.Safe.from_string projected_json with
+    | `Assoc state_fields ->
+      let projected =
+        match List.assoc "projected_dispositions" state_fields with
+        | `List [ `Assoc storage_fields ] ->
+          let malformed =
+            match List.assoc "witness" storage_fields with
+            | `Assoc witness_fields ->
+              `Assoc
+                (("transition_ref", `String "not-a-sha256")
+                 :: List.remove_assoc "transition_ref" witness_fields)
+            | _ -> Alcotest.fail "compact witness must be an object"
+          in
+          `List
+            [ `Assoc
+                (("witness", malformed)
+                 :: List.remove_assoc "witness" storage_fields)
+            ]
+        | _ -> Alcotest.fail "expected one compact projected witness"
+      in
+      `Assoc
+        (("projected_dispositions", projected)
+         :: List.remove_assoc "projected_dispositions" state_fields)
+    | _ -> Alcotest.fail "event queue state must be an object"
+  in
+  (match State.of_yojson malformed_witness_json with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "malformed compact witness was accepted");
   let reloaded =
-    State.to_yojson projected_transfer
+    Yojson.Safe.from_string projected_json
     |> State.of_yojson
     |> require_ok "reload projected disposition ledger"
   in
@@ -456,11 +549,16 @@ let test_projected_disposition_ledger_replays_older_operation () =
        cancellation.operator_operation_id
        reloaded
    with
-   | Some receipt ->
+   | Some (State.Current_receipt receipt) ->
      Alcotest.(check string)
        "older operation is directly recoverable by durable operation identity"
        cancel_receipt.transition_id
        receipt.transition_id
+   | Some (State.Projected_witness witness) ->
+     Alcotest.(check string)
+       "older compact witness is directly recoverable by durable operation identity"
+       cancel_receipt.transition_id
+       witness.transition_id
    | None ->
      Alcotest.fail "older operation disappeared from durable disposition lookup");
   (match
@@ -480,7 +578,16 @@ let test_projected_disposition_ledger_replays_older_operation () =
        (State.revision reloaded)
        (State.revision replayed)
    | _, State.Transition_applied _ ->
-     Alcotest.fail "older cancellation was applied twice")
+     Alcotest.fail "older cancellation was applied twice");
+  let conflicting = { cancellation with reason = "changed replay reason" } in
+  (match
+     State.cancel_pending_accepted
+       ~applied_at:6.0
+       ~cancellation:conflicting
+       reloaded
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "compact witness accepted a changed transition payload")
 ;;
 
 let test_current_schema_round_trip () =

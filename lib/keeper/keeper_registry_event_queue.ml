@@ -87,7 +87,12 @@ type source_ack_result =
    in the transition outbox: the next terminal ACK is deliberately rejected in
    that state. Complete the existing handoff on the owner-facing path instead
    of making the next Keeper turn wait for the maintenance sweep. *)
-let project_source_ack_receipt ~base_path ~keeper_name receipt success =
+let project_source_ack_receipt
+      ~base_path
+      ~keeper_name
+      (receipt : Keeper_event_queue_state.transition_receipt)
+      success
+  =
   match
     Keeper_reaction_ledger.project_event_queue_transition_outbox_result
       ~base_path

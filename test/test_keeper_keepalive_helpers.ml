@@ -369,8 +369,8 @@ let audience_signal ?(kind = Board_dispatch.Board_post_created) ~author content 
   }
 ;;
 
-let classified ?(visibility = Board.Internal) signal =
-  match KBA.classify ~visibility signal with
+let classified ?(visibility = Board.Internal) ?(post_kind = Board.Human_post) signal =
+  match KBA.classify ~visibility ~post_kind signal with
   | Ok audience -> audience
   | Error error -> fail (KBA.classification_error_to_string error)
 ;;
@@ -484,25 +484,25 @@ let test_closed_board_audience_routes_only_its_authority () =
      | _ -> false);
   let unsupported = audience_signal ~author:"external-author" "@@delta inspect" in
   check bool "unsupported broadcast fails closed" true
-    (match KBA.classify ~visibility:Board.Internal unsupported with
+    (match KBA.classify ~visibility:Board.Internal ~post_kind:Board.Human_post unsupported with
      | Error (KBA.Invalid_board_audience (Board.Validation_error _)) -> true
      | Error _ | Ok _ -> false);
   check bool "Direct without targets fails closed" true
-    (match KBA.classify ~visibility:Board.Direct discoverable with
+    (match KBA.classify ~visibility:Board.Direct ~post_kind:Board.Human_post discoverable with
      | Error (KBA.Invalid_board_audience (Board.Validation_error _)) -> true
      | Error _ | Ok _ -> false);
   let mixed = audience_signal ~author:"external-author" "@alpha @@delta inspect" in
   check bool "mixed direct target and unsupported selector fails closed" true
-    (match KBA.classify ~visibility:Board.Internal mixed with
+    (match KBA.classify ~visibility:Board.Internal ~post_kind:Board.Human_post mixed with
      | Error (KBA.Invalid_board_audience (Board.Validation_error _)) -> true
      | Error _ | Ok _ -> false);
   let direct_broadcast = audience_signal ~author:"external-author" "@@all inspect" in
   check bool "@@all on a Direct post fails closed" true
-    (match KBA.classify ~visibility:Board.Direct direct_broadcast with
+    (match KBA.classify ~visibility:Board.Direct ~post_kind:Board.Human_post direct_broadcast with
      | Error (KBA.Invalid_board_audience (Board.Validation_error _)) -> true
      | Error _ | Ok _ -> false);
   check bool "@@all on a non-Direct post still broadcasts" true
-    (match KBA.classify ~visibility:Board.Internal direct_broadcast with
+    (match KBA.classify ~visibility:Board.Internal ~post_kind:Board.Human_post direct_broadcast with
      | Ok KBA.Broadcast -> true
      | Error _ | Ok _ -> false)
 
@@ -555,6 +555,7 @@ let persist_board_signal (signal : Board_dispatch.board_signal) =
       match
         Board.audience_for_post
           ~visibility:post.visibility
+          ~post_kind:post.post_kind
           ~title:post.title
           ~content:post.body
       with

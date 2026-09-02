@@ -993,6 +993,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
          { Runtime_agent.response
          ; checkpoint = None
          ; session_id = turn.thread_id
+         ; session_resumed = None
          ; turns = turn_count
          ; trace_ref = None
          ; run_validation = None

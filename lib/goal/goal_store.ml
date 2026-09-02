@@ -121,8 +121,17 @@ and goal_of_yojson = function
             | Some (`String value) -> Ok value
             | _ -> Error "goal_of_yojson: updated_at missing"
           in
-          (match phase, created_at, updated_at with
-           | Ok phase, Ok created_at, Ok updated_at ->
+          let priority =
+            (* Required with the same force as phase (#23901): a missing or
+               non-int priority resurfacing as a silent 3 hides a corrupt row
+               behind a plausible value. Live stores measured zero such rows
+               (2026-09-02, 79 goals). *)
+            match Json_util.assoc_member_opt "priority" json with
+            | Some (`Int value) -> Ok (clamp_priority value)
+            | _ -> Error "goal_of_yojson: priority must be an int 1-5"
+          in
+          (match (phase, created_at, updated_at, priority) with
+           | Ok phase, Ok created_at, Ok updated_at, Ok priority ->
              Ok
                {
                     id;
@@ -130,19 +139,17 @@ and goal_of_yojson = function
                     metric = Json_util.get_string json "metric";
                     target_value = Json_util.get_string json "target_value";
                     due_date = Json_util.get_string json "due_date";
-                    priority =
-                      (match Json_util.assoc_member_opt "priority" json with
-                      | Some (`Int value) -> clamp_priority value
-                      | _ -> 3);
+                    priority;
                     phase;
                     last_review_note = Json_util.get_string json "last_review_note";
                     last_review_at = Json_util.get_string json "last_review_at";
                     created_at;
                     updated_at;
                   }
-           | Error msg, _, _ -> Error msg
-           | _, Error msg, _ -> Error msg
-           | _, _, Error msg -> Error msg)
+           | Error msg, _, _, _ -> Error msg
+           | _, Error msg, _, _ -> Error msg
+           | _, _, Error msg, _ -> Error msg
+           | _, _, _, Error msg -> Error msg)
       | None, _, _ -> Error "goal_of_yojson: invalid goal")
   | other_json ->
       Error ("goal_of_yojson: " ^ Yojson.Safe.to_string other_json)

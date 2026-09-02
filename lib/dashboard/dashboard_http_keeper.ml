@@ -827,11 +827,11 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("total_tokens", `Int m.runtime.usage.total_tokens);
               ("total_cost_usd", `Float m.runtime.usage.total_cost_usd);
               ("last_model_used", `Null);
-              ("last_usage", `Assoc [
-                ("input_tokens", `Int m.runtime.usage.last_input_tokens);
-                ("output_tokens", `Int m.runtime.usage.last_output_tokens);
-                ("total_tokens", `Int m.runtime.usage.last_total_tokens);
-              ]);
+              ( "last_usage"
+              , Option.fold
+                  ~none:`Null
+                  ~some:Keeper_usage_resolution.to_json
+                  m.runtime.last_usage_resolution );
               ("last_latency_ms", last_latency_ms_json m.runtime.usage.last_latency_ms);
               ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("proactive_enabled", `Bool m.proactive.enabled);

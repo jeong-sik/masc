@@ -17,8 +17,13 @@ type request =
       ; urgency : Keeper_event_queue.urgency
       }
 
+type audit_source =
+  { post_id : string
+  ; payload_kind : string
+  }
+
 val run :
   config:Workspace.config ->
   keeper_name:string ->
   request ->
-  (Keeper_event_queue.stimulus * Yojson.Safe.t, string) result
+  (audit_source option * Yojson.Safe.t, string) result

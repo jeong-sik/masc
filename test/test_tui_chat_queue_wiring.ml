@@ -123,7 +123,7 @@ let test_oldest_at_reports_the_cursor () =
     (Tui_types.oldest_at [])
 ;;
 
-let test_causal_timeline_keeps_turns_whole_without_timestamp_sorting () =
+let test_visible_clock_stays_monotonic_inside_one_causal_turn () =
   let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
   let loaded =
     [ chat_entry ~operation_seq:0 ~request_id:"turn-d" ~role:user ~text:"D"
@@ -148,8 +148,8 @@ let test_causal_timeline_keeps_turns_whole_without_timestamp_sorting () =
     Tui_types.chat_timeline ~loaded ~session
       ~queued_request_ids:[ "turn-next" ]
   in
-  check (list string) "causal rows, not wall-clock rows"
-    [ "D"; "approved"; "Execute"; "D answer"; "active input" ]
+  check (list string) "causal phases project onto one monotonic axis"
+    [ "D"; "active input"; "approved"; "Execute"; "D answer" ]
     (Tui_types.chat_timeline_rows timeline
      |> List.map (fun row -> row.Tui_types.me_text));
   check bool "queued input is a separate NEXT lane" true
@@ -157,6 +157,87 @@ let test_causal_timeline_keeps_turns_whole_without_timestamp_sorting () =
        (List.exists
           (fun row -> String.equal row.Tui_types.me_request_id "turn-next")
           (Tui_types.chat_timeline_rows timeline)))
+;;
+
+let test_same_request_exact_clock_normalizes_the_turn_sequence () =
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let rows =
+    Tui_types.chat_timeline
+      ~loaded:
+        [ chat_entry ~turn_sequence:54 ~turn_phase:Tui_types.Turn_output
+            ~operation_seq:1 ~request_id:"direct" ~role:Tui_types.Message_keeper
+            ~text:"persisted output" ~at:100. ()
+        ]
+      ~session:
+        [ chat_entry ~operation_seq:0 ~request_id:"direct" ~role:user
+            ~text:"session input" ~at:100. ()
+        ]
+      ~queued_request_ids:[]
+    |> Tui_types.chat_timeline_rows
+  in
+  check (list string) "request phase wins over mixed per-row sequence presence"
+    [ "session input"; "persisted output" ]
+    (List.map (fun row -> row.Tui_types.me_text) rows)
+;;
+
+let test_distinct_requests_keep_producer_order_on_exact_clock_tie () =
+  let rows =
+    Tui_types.chat_timeline
+      ~loaded:
+        [ chat_entry ~request_id:"z-request" ~role:Tui_types.Message_keeper
+            ~text:"producer first" ~at:100. ()
+        ; chat_entry ~request_id:"a-request" ~role:Tui_types.Message_keeper
+            ~text:"producer second" ~at:100. ()
+        ]
+      ~session:[]
+      ~queued_request_ids:[]
+    |> Tui_types.chat_timeline_rows
+  in
+  check (list string) "request ids never invent exact-clock order"
+    [ "producer first"; "producer second" ]
+    (List.map (fun row -> row.Tui_types.me_text) rows)
+;;
+
+(* #32434 registered this case without a body (#32453). Two distinct
+   requests on the same clock instant both carry an absolute turn sequence;
+   the sequence, not producer order, decides the tie. *)
+let test_absolute_turn_sequence_breaks_equal_clock_ties () =
+  let rows =
+    Tui_types.chat_timeline
+      ~loaded:
+        [ chat_entry ~turn_sequence:20 ~request_id:"later-turn"
+            ~role:Tui_types.Message_keeper ~text:"turn twenty" ~at:100. ()
+        ; chat_entry ~turn_sequence:10 ~request_id:"earlier-turn"
+            ~role:Tui_types.Message_keeper ~text:"turn ten" ~at:100. ()
+        ]
+      ~session:[]
+      ~queued_request_ids:[]
+    |> Tui_types.chat_timeline_rows
+  in
+  check (list string) "absolute turn sequence orders an exact-clock tie"
+    [ "turn ten"; "turn twenty" ]
+    (List.map (fun row -> row.Tui_types.me_text) rows)
+;;
+
+let test_journal_interleaves_request_and_reply_by_displayed_time () =
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let rows =
+    Tui_types.chat_timeline
+      ~loaded:
+        [ chat_entry ~operation_seq:0 ~request_id:"direct" ~role:user
+            ~text:"23:34:51 request" ~at:100. ()
+        ; chat_entry ~turn_phase:Tui_types.Turn_output ~operation_seq:1
+            ~request_id:"direct" ~role:Tui_types.Message_keeper
+            ~text:"23:35:06 reply" ~at:200. ()
+        ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
+            ~text:"23:34:55 journal" ~at:150. ()
+        ]
+      ~session:[] ~queued_request_ids:[]
+    |> Tui_types.chat_timeline_rows
+  in
+  check (list string) "parallel lane never makes the visible clock go backwards"
+    [ "23:34:51 request"; "23:34:55 journal"; "23:35:06 reply" ]
+    (List.map (fun row -> row.Tui_types.me_text) rows)
 ;;
 
 let test_scroll_anchor_follows_structure_not_clock () =
@@ -227,66 +308,7 @@ let test_scroll_anchor_survives_session_user_persistence () =
   | Some _ | None -> fail "session USER pin was lost when history persisted it"
 ;;
 
-let test_absolute_turn_sequence_joins_direct_and_autonomous_sources () =
-  let loaded =
-    [ chat_entry ~turn_sequence:12 ~request_id:"direct-12"
-        ~role:Tui_types.Message_keeper ~text:"direct later" ~at:1. () ]
-  in
-  let session =
-    [ chat_entry ~turn_sequence:10 ~request_id:"trace#10"
-        ~role:Tui_types.Message_autonomous ~text:"autonomous earlier" ~at:999. ()
-    ; chat_entry ~request_id:"" ~role:Tui_types.Message_keeper
-        ~text:"unowned broadcast" ~at:2. ()
-    ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
-        ~text:"journal lane" ~at:0. ()
-    ]
-  in
-  let timeline =
-    Tui_types.chat_timeline ~loaded ~session ~queued_request_ids:[]
-  in
-  check (list string) "absolute turn sequence, then producer-owned lanes"
-    [ "autonomous earlier"; "direct later"; "unowned broadcast"; "journal lane" ]
-    (Tui_types.chat_timeline_rows timeline
-     |> List.map (fun row -> row.Tui_types.me_text))
-;;
-
-let test_unsequenced_items_keep_producer_order_not_wall_clock_order () =
-  let loaded =
-    [ chat_entry ~request_id:"first"
-        ~role:Tui_types.Message_keeper ~text:"first producer row" ~at:999. ()
-    ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
-        ~text:"second producer row" ~at:1. ()
-    ; chat_entry ~request_id:"third"
-        ~role:Tui_types.Message_keeper ~text:"third producer row" ~at:2. ()
-    ]
-  in
-  let timeline =
-    Tui_types.chat_timeline ~loaded ~session:[] ~queued_request_ids:[]
-  in
-  check (list string) "unsequenced items retain producer order"
-    [ "first producer row"; "second producer row"; "third producer row" ]
-    (Tui_types.chat_timeline_rows timeline
-     |> List.map (fun row -> row.Tui_types.me_text))
-;;
-
-let test_wall_clock_never_overrides_typed_turn_sequence () =
-  let loaded =
-    [ chat_entry ~turn_sequence:2 ~request_id:"turn-2"
-        ~role:Tui_types.Message_keeper ~text:"turn 2 clock 1" ~at:1. ()
-    ; chat_entry ~turn_sequence:1 ~request_id:"turn-1"
-        ~role:Tui_types.Message_keeper ~text:"turn 1 clock 999" ~at:999. ()
-    ]
-  in
-  let timeline =
-    Tui_types.chat_timeline ~loaded ~session:[] ~queued_request_ids:[]
-  in
-  check (list string) "typed turn sequence wins over adversarial clocks"
-    [ "turn 1 clock 999"; "turn 2 clock 1" ]
-    (Tui_types.chat_timeline_rows timeline
-     |> List.map (fun row -> row.Tui_types.me_text))
-;;
-
-let test_running_turn_follows_typed_turn_sequence () =
+let test_running_turn_does_not_escape_the_displayed_time_axis () =
   let loaded =
     [ chat_entry ~turn_sequence:20 ~request_id:"settled-20"
         ~role:Tui_types.Message_keeper ~text:"settled at 200" ~at:200. () ]
@@ -305,22 +327,152 @@ let test_running_turn_follows_typed_turn_sequence () =
     [ "running at 100"; "settled at 200" ] rows
 ;;
 
-let test_uncommitted_live_turn_appends_in_producer_order () =
+let test_uncommitted_live_turn_inserts_on_the_visible_clock_axis () =
   let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
   let messages =
     [ chat_entry ~request_id:"skewed" ~role:user ~text:"input at 100" ~at:100.
         ()
+    ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
+        ~text:"journal at 200" ~at:200. ()
     ; chat_entry ~turn_phase:Tui_types.Turn_output ~operation_seq:1
         ~request_id:"skewed" ~role:Tui_types.Message_keeper
         ~text:"output at 300" ~at:300. ()
-    ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
-        ~text:"journal at 200" ~at:200. ()
     ]
   in
-  check int "live at 150 follows every observed producer row" 3
-    (Tui_types.chat_live_insertion_index ~timeline_at:(Some 150.) messages);
-  check int "an equal-clock live turn still follows producer order" 3
-    (Tui_types.chat_live_insertion_index ~timeline_at:(Some 200.) messages)
+  let positioned =
+    List.combine messages (Tui_types.chat_projected_timeline_ats messages)
+  in
+  check int "live at 150 precedes the later committed output" 1
+    (Tui_types.chat_live_insertion_index ~request_id:"live"
+       ~timeline_at:(Some 150.) positioned);
+  check int "an equal-clock live turn precedes the Journal lane" 1
+    (Tui_types.chat_live_insertion_index ~request_id:"live"
+       ~timeline_at:(Some 200.) positioned)
+;;
+
+let test_live_turn_uses_its_latest_committed_causal_frontier () =
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let messages =
+    [ chat_entry ~request_id:"running" ~role:user ~text:"input" ~at:100. ()
+    ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory ~text:"journal"
+        ~at:200. ()
+    ; chat_entry ~turn_phase:Tui_types.Turn_progress ~operation_seq:1
+        ~request_id:"running" ~role:Tui_types.Message_status
+        ~text:"approval settled" ~at:300. ()
+    ]
+  in
+  check (option (float 0.001)) "live bucket follows approval, not first input"
+    (Some 300.)
+    (Tui_types.chat_request_timeline_at ~request_id:"running" messages);
+  check int "live trail follows the same-clock approval frontier" 3
+    (Tui_types.chat_live_insertion_index ~request_id:"running"
+       ~timeline_at:(Some 300.)
+       (List.combine messages
+          (Tui_types.chat_projected_timeline_ats messages)))
+;;
+
+let test_live_turn_follows_an_unknown_same_request_row () =
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let rows =
+    Tui_types.chat_timeline
+      ~loaded:
+        [ chat_entry ~request_id:"other" ~role:Tui_types.Message_keeper
+            ~text:"unrelated at 300" ~at:300. ()
+        ; chat_entry ~request_id:"running" ~role:user
+            ~text:"clockless running input" ~at:0. ()
+        ]
+      ~session:[] ~queued_request_ids:[]
+    |> Tui_types.chat_timeline_rows
+  in
+  let positioned =
+    List.combine rows (Tui_types.chat_projected_timeline_ats rows)
+  in
+  check (option (float 0.001))
+    "live clock clamps to the known row before its clockless input"
+    (Some 300.)
+    (Tui_types.chat_live_timeline_at ~request_id:"running" ~started_at:100.
+       ~request_messages:rows positioned);
+  check int "live stays below its committed clockless input" 2
+    (Tui_types.chat_live_insertion_index ~request_id:"running"
+       ~timeline_at:(Some 300.) positioned)
+;;
+
+let test_hidden_phase_keeps_its_timeline_projection () =
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let rows =
+    Tui_types.chat_timeline
+      ~loaded:
+        [ chat_entry ~operation_seq:0 ~request_id:"running" ~role:user
+            ~text:"input" ~at:100. ()
+        ; chat_entry ~turn_phase:Tui_types.Turn_progress ~operation_seq:1
+            ~request_id:"running" ~role:Tui_types.Message_thinking
+            ~text:"hidden reasoning" ~at:300. ()
+        ; chat_entry ~turn_phase:Tui_types.Turn_output ~operation_seq:2
+            ~request_id:"running" ~role:Tui_types.Message_keeper ~text:"output"
+            ~at:200. ()
+        ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
+            ~text:"journal" ~at:250. ()
+        ]
+      ~session:[] ~queued_request_ids:[]
+    |> Tui_types.chat_timeline_rows
+  in
+  let visible =
+    List.combine rows (Tui_types.chat_projected_timeline_ats rows)
+    |> List.filter (fun (row, _) ->
+      row.Tui_types.me_role <> Tui_types.Message_thinking)
+  in
+  check (list string) "hidden phase leaves the visible row order intact"
+    [ "input"; "journal"; "output" ]
+    (List.map (fun (row, _) -> row.Tui_types.me_text) visible);
+  check (list (option (float 0.001)))
+    "hidden phase still clamps the later visible output clock"
+    [ Some 100.; Some 250.; Some 300. ]
+    (List.map snd visible);
+  let visible_without_journal =
+    List.filter (fun (row, _) -> row.Tui_types.me_role <> Tui_types.Message_memory)
+      visible
+  in
+  check int "an unrelated live turn compares with the projected output clock" 1
+    (Tui_types.chat_live_insertion_index ~request_id:"live"
+       ~timeline_at:(Some 200.)
+       visible_without_journal)
+;;
+
+let test_unknown_phase_clock_inherits_the_causal_frontier () =
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let rows =
+    [ chat_entry ~operation_seq:0 ~request_id:"legacy" ~role:user ~text:"input"
+        ~at:100. ()
+    ; chat_entry ~turn_phase:Tui_types.Turn_progress ~operation_seq:1
+        ~request_id:"legacy" ~role:Tui_types.Message_status
+        ~text:"unknown clock" ~at:0. ()
+    ; chat_entry ~turn_phase:Tui_types.Turn_output ~operation_seq:2
+        ~request_id:"legacy" ~role:Tui_types.Message_keeper ~text:"output"
+        ~at:200. ()
+    ]
+  in
+  check (list (option (float 0.001)))
+    "an unknown later phase keeps the latest known request clock"
+    [ Some 100.; Some 100.; Some 200. ]
+    (Tui_types.chat_projected_timeline_ats rows);
+  let leading_unknown =
+    [ chat_entry ~operation_seq:0 ~request_id:"leading" ~role:user
+        ~text:"unknown input" ~at:0. ()
+    ; chat_entry ~turn_phase:Tui_types.Turn_output ~operation_seq:1
+        ~request_id:"leading" ~role:Tui_types.Message_keeper
+        ~text:"known output" ~at:200. ()
+    ]
+  in
+  check (list (option (float 0.001)))
+    "a leading unknown borrows the first later request clock"
+    [ Some 200.; Some 200. ]
+    (Tui_types.chat_projected_timeline_ats leading_unknown);
+  check (list string) "equal projected clocks retain input before output"
+    [ "unknown input"; "known output" ]
+    (Tui_types.chat_timeline ~loaded:leading_unknown ~session:[]
+       ~queued_request_ids:[]
+     |> Tui_types.chat_timeline_rows
+     |> List.map (fun row -> row.Tui_types.me_text))
 ;;
 
 let test_producer_append_keeps_a_structural_scroll_pin () =
@@ -360,8 +512,8 @@ let test_producer_append_keeps_a_structural_scroll_pin () =
     |> Tui_types.chat_timeline_rows
   in
   check (option (list string))
-    "the identity pin survives when its whole turn moves on the time axis"
-    (Some [ "earlier turn" ])
+    "the identity pin survives when an earlier row joins its turn"
+    (Some [])
     (Tui_types.msg_entries_after_anchor moved pin
      |> Option.map (List.map (fun row -> row.Tui_types.me_text)))
 ;;
@@ -1267,18 +1419,28 @@ let () =
             test_an_empty_refresh_keeps_the_transcript
         ; test_case "oldest_at reports the cursor" `Quick
             test_oldest_at_reports_the_cursor
-        ; test_case "causal timeline ignores wall-clock order" `Quick
-            test_causal_timeline_keeps_turns_whole_without_timestamp_sorting
-        ; test_case "turn sequence joins transcript sources" `Quick
-            test_absolute_turn_sequence_joins_direct_and_autonomous_sources
-        ; test_case "unsequenced items keep producer order" `Quick
-            test_unsequenced_items_keep_producer_order_not_wall_clock_order
-        ; test_case "clock never overrides typed turn sequence" `Quick
-            test_wall_clock_never_overrides_typed_turn_sequence
-        ; test_case "running turn follows typed sequence" `Quick
-            test_running_turn_follows_typed_turn_sequence
-        ; test_case "uncommitted live appends in producer order" `Quick
-            test_uncommitted_live_turn_appends_in_producer_order
+        ; test_case "visible clock stays monotonic inside one turn" `Quick
+            test_visible_clock_stays_monotonic_inside_one_causal_turn
+        ; test_case "Journal interleaves one request by displayed time" `Quick
+            test_journal_interleaves_request_and_reply_by_displayed_time
+        ; test_case "same request normalizes exact-clock turn sequence" `Quick
+            test_same_request_exact_clock_normalizes_the_turn_sequence
+        ; test_case "distinct requests retain exact-clock producer order" `Quick
+            test_distinct_requests_keep_producer_order_on_exact_clock_tie
+        ; test_case "turn sequence breaks equal-clock ties" `Quick
+            test_absolute_turn_sequence_breaks_equal_clock_ties
+        ; test_case "running turn shares displayed time" `Quick
+            test_running_turn_does_not_escape_the_displayed_time_axis
+        ; test_case "uncommitted live shares visible clock" `Quick
+            test_uncommitted_live_turn_inserts_on_the_visible_clock_axis
+        ; test_case "live uses latest committed causal frontier" `Quick
+            test_live_turn_uses_its_latest_committed_causal_frontier
+        ; test_case "live follows clockless same-request input" `Quick
+            test_live_turn_follows_an_unknown_same_request_row
+        ; test_case "hidden phase keeps timeline projection" `Quick
+            test_hidden_phase_keeps_its_timeline_projection
+        ; test_case "unknown phase inherits causal frontier" `Quick
+            test_unknown_phase_clock_inherits_the_causal_frontier
         ; test_case "producer append keeps scroll pin" `Quick
             test_producer_append_keeps_a_structural_scroll_pin
         ; test_case "find anchor survives producer prepend" `Quick

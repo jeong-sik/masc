@@ -477,6 +477,39 @@ let footer_hints_overview ~task_focus =
          else b)
   |> hints_of_bindings
 
+(* The Code surface's footer, which the renderer used to spell by hand. It
+   named d, H, m and w and nothing else, so the three language-server keys
+   never appeared on the screen they work on -- and neither did blame or the
+   row search when those arrived. Projected here, from the table the help
+   sheet already reads, and narrowed to what the current mode answers: an
+   overlay owns the pane, so the keys that act on the code underneath are
+   dead while it is up, and the tree pane answers none of the file keys. *)
+type code_pane =
+  | Code_tree  (** the file list has focus *)
+  | Code_file  (** a file is open and nothing covers it *)
+  | Code_overlay  (** history, diff or notes is drawn over the file *)
+
+let footer_hints_code ~pane =
+  let file_keys =
+    [ "Shift-Left / Shift-Right"; "K"; "D"; "R"; "B"; "b"; "d"; "H"; "m" ]
+  in
+  let dead =
+    match pane with
+    | Code_tree -> "w" :: file_keys
+    | Code_file -> [ "w" ]
+    (* [w] writes a note and lives inside the notes view; the rest act on the
+       code an overlay is covering. [Enter] stays: in the history view it
+       opens a commit's pull request. *)
+    | Code_overlay -> file_keys
+  in
+  for_surface Code
+  |> List.filter (fun b -> not (List.mem b.key dead))
+  |> List.map (fun b ->
+       if String.equal b.key "j/k" then
+         { b with label = (match pane with Code_tree -> "move" | _ -> "scroll") }
+       else b)
+  |> hints_of_bindings
+
 let footer_hints_resources ~detail_focus =
   for_surface Resources
   |> List.map (fun binding ->

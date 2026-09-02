@@ -10156,7 +10156,7 @@ let main () =
                         (action ^ ": ok (" ^ connector ^ ")");
                       launch_connectors_load state ~mailbox:async_messages
                   | Error detail ->
-                      report_action state "error" (action ^ ": " ^ detail)))))
+                      report_action state "error" (action ^ ": " ^ detail))))))
   in
   let selected_connector () =
     Option.bind state.connectors (fun snapshot ->

@@ -3140,7 +3140,10 @@ let decode_connector json =
     ; cn_bot_token_present
     ; cn_app_token_present
     ; cn_gate_healthy
-    ; cn_pid = Option.filter (fun pid -> pid > 0) cn_pid
+    ; cn_pid =
+        (match cn_pid with
+         | Some pid when pid > 0 -> Some pid
+         | Some _ | None -> None)
     ; cn_guild_count
     ; cn_workspace_id = nonblank_option cn_workspace_id
     ; cn_channel_names_path = nonblank_option cn_channel_names_path

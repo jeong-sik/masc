@@ -46,6 +46,8 @@ type wire_reason =
   | Unknown_token of string
   | Blank_string
   | Not_a_memory_id of string
+  | Not_a_board_post_id of string
+  | Not_a_board_comment_id of string
   | Not_finite
   | Negative
   | Not_positive
@@ -179,16 +181,54 @@ type derivation =
   ; premise_ids : string list
   }
 
+(** Where an observed fact was read from. [Transcript] is the keeper's own
+    turn history, which was the only source before Board provenance existed.
+    [Board] names the post, and optionally the comment, the claim was taken
+    from, so a later turn can open the source with the Board tools and a
+    measurement can count how much Board knowledge reaches a store instead of
+    guessing from a post id that happens to appear in the claim text. The ids
+    are validated against the Board id grammar at construction and decode
+    boundaries; whether the post still exists is a reader's question, the
+    same way a source-bound fact is revalidated against its file at recall. *)
+type board_ref =
+  { post_id : string
+  ; comment_id : string option
+  }
+
+type observation =
+  | Transcript
+  | Board of board_ref
+
 (** Why a fact belongs to maintained current knowledge. [Observed] facts are
-    base facts selected from evidence. [Derived] facts stay current while at
-    least one derivation has all of its premises current. The non-empty
-    derivation and premise invariants are enforced at construction and decode
-    boundaries. *)
+    base facts selected from evidence, and carry where that evidence was read.
+    [Derived] facts stay current while at least one derivation has all of its
+    premises current. The non-empty derivation and premise invariants are
+    enforced at construction and decode boundaries. *)
 type basis =
-  | Observed
+  | Observed of observation
   | Derived of derivation list
 
+(** A Board reference whose ids satisfy the Board id grammar. The error names
+    the field that failed. *)
+val board_ref_of_ids
+  :  post_id:string
+  -> comment_id:string option
+  -> (board_ref, wire_error) result
+
+val wire_field_board : string
+val wire_field_post_id : string
+val wire_field_comment_id : string
+
+(** Optional librarian claim fields naming a Board source. *)
+val wire_field_board_post_id : string
+val wire_field_board_comment_id : string
+
 val basis_to_json : basis -> Yojson.Safe.t
+
+(** Decode a basis; the exact field set of each shape is enforced. *)
+val basis_of_json : Yojson.Safe.t -> (basis, wire_error) result
+
+val wire_field_kind : string
 
 (** Canonical lowercase token for an origin kind. Category tokens only —
     this never renders a unique identity into a prompt (masc#29558). *)

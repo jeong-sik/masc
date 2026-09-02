@@ -185,8 +185,13 @@ export type MemoryOsDerivation = {
   readonly premise_ids: string[]
 }
 
+export type MemoryOsBoardRef = {
+  readonly post_id: string
+  readonly comment_id: string | null
+}
+
 export type MemoryOsFactBasis =
-  | { readonly kind: 'observed' }
+  | { readonly kind: 'observed'; readonly board: MemoryOsBoardRef | null }
   | { readonly kind: 'derived'; readonly derivations: MemoryOsDerivation[] }
 
 // SSOT token list — must stay byte-identical to the known arms of
@@ -686,10 +691,29 @@ function decodeMemoryOsDerivation(raw: unknown): MemoryOsDerivation | null {
   return { rule_id, premise_ids }
 }
 
+// The wire mirrors Keeper_memory_os_types.basis_to_json: an observed fact
+// carries `board` only when it was read from a Board post, and the board
+// object carries `comment_id` only when it was read from a comment.
+function decodeMemoryOsBoardRef(raw: unknown): MemoryOsBoardRef | null {
+  if (!isRecord(raw)) return null
+  if (hasExactKeys(raw, ['post_id'])) {
+    const post_id = decodeExactNonEmptyString(raw.post_id)
+    return post_id === null ? null : { post_id, comment_id: null }
+  }
+  if (!hasExactKeys(raw, ['post_id', 'comment_id'])) return null
+  const post_id = decodeExactNonEmptyString(raw.post_id)
+  const comment_id = decodeExactNonEmptyString(raw.comment_id)
+  return post_id === null || comment_id === null ? null : { post_id, comment_id }
+}
+
 export function decodeMemoryOsBasis(raw: unknown): MemoryOsFactBasis | null {
   if (!isRecord(raw)) return null
   if (hasExactKeys(raw, ['kind']) && raw.kind === 'observed') {
-    return { kind: 'observed' }
+    return { kind: 'observed', board: null }
+  }
+  if (hasExactKeys(raw, ['kind', 'board']) && raw.kind === 'observed') {
+    const board = decodeMemoryOsBoardRef(raw.board)
+    return board === null ? null : { kind: 'observed', board }
   }
   if (!hasExactKeys(raw, ['kind', 'derivations']) || raw.kind !== 'derived') return null
   const derivations = decodeArray(raw.derivations, decodeMemoryOsDerivation)

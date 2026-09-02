@@ -16,6 +16,11 @@ let wire_field_reason = "reason"
 let wire_field_basis = "basis"
 let wire_field_kind = "kind"
 let wire_field_derivations = "derivations"
+let wire_field_board = "board"
+let wire_field_post_id = "post_id"
+let wire_field_comment_id = "comment_id"
+let wire_field_board_post_id = "board_post_id"
+let wire_field_board_comment_id = "board_comment_id"
 let wire_field_rule_id = "rule_id"
 let wire_field_premise_ids = "premise_ids"
 let wire_field_trace_id = "trace_id"
@@ -54,6 +59,8 @@ type wire_reason =
           does not contain this token. *)
   | Blank_string
   | Not_a_memory_id of string
+  | Not_a_board_post_id of string
+  | Not_a_board_comment_id of string
   | Not_finite
   | Negative
   | Not_positive
@@ -101,6 +108,9 @@ let wire_reason_to_string = function
   | Unknown_token token -> Printf.sprintf "this build does not know the token %S" token
   | Blank_string -> "expected a non-blank string"
   | Not_a_memory_id value -> Printf.sprintf "expected a memory identity, got %S" value
+  | Not_a_board_post_id value -> Printf.sprintf "expected a Board post id, got %S" value
+  | Not_a_board_comment_id value ->
+    Printf.sprintf "expected a Board comment id, got %S" value
   | Not_finite -> "expected a finite number"
   | Negative -> "expected a non-negative value"
   | Not_positive -> "expected a value of at least one"
@@ -236,7 +246,11 @@ let fact_wire_fields =
 ;;
 
 let wire_librarian_claim_fields =
-  [ wire_field_claim; wire_field_category ]
+  [ wire_field_claim
+  ; wire_field_category
+  ; wire_field_board_post_id
+  ; wire_field_board_comment_id
+  ]
 ;;
 
 let wire_librarian_dropped_fields =
@@ -382,8 +396,17 @@ type derivation =
   ; premise_ids : string list
   }
 
+type board_ref =
+  { post_id : string
+  ; comment_id : string option
+  }
+
+type observation =
+  | Transcript
+  | Board of board_ref
+
 type basis =
-  | Observed
+  | Observed of observation
   | Derived of derivation list
 
 (* The fact carries the exact claim, its recalled category, and observable
@@ -504,8 +527,64 @@ let derivation_of_json = function
     wire_here Expected_object
 ;;
 
+(* The Board owns its id grammar; Memory OS asks it instead of spelling a
+   second one. Existence is not checked here: a reference names what was
+   cited, and a reader revalidates it the way a source-bound fact is
+   revalidated against its file. *)
+let board_ref_of_ids ~post_id ~comment_id =
+  match Board_types.Post_id.of_string post_id with
+  | Error _ -> wire_fail [ Wire_field wire_field_post_id ] (Not_a_board_post_id post_id)
+  | Ok _ ->
+    (match comment_id with
+     | None -> Ok { post_id = String.trim post_id; comment_id = None }
+     | Some comment_id ->
+       (match Board_types.Comment_id.of_string comment_id with
+        | Error _ ->
+          wire_fail
+            [ Wire_field wire_field_comment_id ]
+            (Not_a_board_comment_id comment_id)
+        | Ok _ ->
+          Ok { post_id = String.trim post_id; comment_id = Some (String.trim comment_id) }))
+;;
+
+let board_ref_to_json (board : board_ref) =
+  `Assoc
+    ((wire_field_post_id, `String board.post_id)
+     :: (match board.comment_id with
+         | None -> []
+         | Some comment_id -> [ wire_field_comment_id, `String comment_id ]))
+;;
+
+let board_ref_of_json = function
+  | `Assoc fields ->
+    let* () =
+      match List.assoc_opt wire_field_comment_id fields with
+      | None -> exact_fields_result (wire_field_set [ wire_field_post_id ]) fields
+      | Some _ ->
+        exact_fields_result
+          (wire_field_set [ wire_field_post_id; wire_field_comment_id ])
+          fields
+    in
+    let* post_id = wire_string_field wire_field_post_id fields in
+    let* comment_id =
+      match List.assoc_opt wire_field_comment_id fields with
+      | None -> Ok None
+      | Some _ ->
+        let* comment_id = wire_string_field wire_field_comment_id fields in
+        Ok (Some comment_id)
+    in
+    board_ref_of_ids ~post_id ~comment_id
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    wire_here Expected_object
+;;
+
 let basis_to_json = function
-  | Observed -> `Assoc [ wire_field_kind, `String "observed" ]
+  | Observed Transcript -> `Assoc [ wire_field_kind, `String "observed" ]
+  | Observed (Board board) ->
+    `Assoc
+      [ wire_field_kind, `String "observed"
+      ; wire_field_board, board_ref_to_json board
+      ]
   | Derived derivations ->
     if not (valid_derivations derivations)
     then invalid_arg "derived memory basis must carry valid derivations";
@@ -545,8 +624,20 @@ let basis_of_json = function
     let* kind = wire_string_field wire_field_kind fields in
     (match kind with
      | "observed" ->
-       let+ () = exact_fields_result (wire_field_set [ wire_field_kind ]) fields in
-       Observed
+       (match List.assoc_opt wire_field_board fields with
+        | None ->
+          let+ () = exact_fields_result (wire_field_set [ wire_field_kind ]) fields in
+          Observed Transcript
+        | Some board_json ->
+          let* () =
+            exact_fields_result
+              (wire_field_set [ wire_field_kind; wire_field_board ])
+              fields
+          in
+          let+ board =
+            wire_at (Wire_field wire_field_board) (board_ref_of_json board_json)
+          in
+          Observed (Board board))
      | "derived" ->
        let* () =
          exact_fields_result

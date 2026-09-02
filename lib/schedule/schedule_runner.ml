@@ -333,7 +333,14 @@ let dispatch_candidate
   let occurrence_id = signal.occurrence_id in
   match consumer.accepts request with
   | Error reason ->
-    (match Schedule_store.fail_due_candidate config ~now ~schedule_id ~error:reason with
+    (match
+       Schedule_store.fail_due_candidate
+         ~attempted_at:(clock ())
+         config
+         ~now
+         ~schedule_id
+         ~error:reason
+     with
      | Ok _ ->
        dispatch_result ~error:reason occurrence_id schedule_id Dispatch_unsupported
      | Error err ->

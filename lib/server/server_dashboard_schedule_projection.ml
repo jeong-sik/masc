@@ -895,13 +895,15 @@ let schedule_live_supported_non_terminal_evidence_json schedules =
    only the newest attempt of twenty rows. These numbers read every retained
    wake in the store, so a burst of failures survives its own retry. The
    store's retention ceiling travels with them: 32 per schedule is a window,
-   not a history. [active_with_failed_newest_wake] is the actionable one --
-   a live definition whose latest attempt did not land. *)
+   not a history. [retained] counts the terminal attempts that ceiling
+   applies to; an attempt still mid-dispatch is [running] and not in it.
+   [active_with_failed_newest_wake] is the actionable one -- a live
+   definition whose latest attempt did not land. *)
 let schedule_wake_counts_json
       (schedules : Schedule_domain.schedule_request list)
       (state : Schedule_store.state)
   =
-  let selected = Hashtbl.create 64 in
+  let selected = Hashtbl.create 16 in
   List.iter
     (fun (request : Schedule_domain.schedule_request) ->
        Hashtbl.replace selected request.schedule_id ())
@@ -914,7 +916,7 @@ let schedule_wake_counts_json
          then (
            match wake.status with
            | Schedule_domain.Wake_running ->
-             retained + 1, running + 1, succeeded, failed
+             retained, running + 1, succeeded, failed
            | Schedule_domain.Wake_succeeded ->
              retained + 1, running, succeeded + 1, failed
            | Schedule_domain.Wake_failed ->

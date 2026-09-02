@@ -900,7 +900,10 @@ let recover_running_on_startup config ~now =
       Ok (next_state, recovered))
 ;;
 
-let fail_due_candidate config ~now ~schedule_id ~error =
+let fail_due_candidate ?attempted_at config ~now ~schedule_id ~error =
+  (* The consumer refused the payload before any work began, so the attempt
+     starts and ends at the same instant: [attempted_at] (default [now]). *)
+  let attempted_at = Option.value attempted_at ~default:now in
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state schedule_id with
@@ -911,9 +914,9 @@ let fail_due_candidate config ~now ~schedule_id ~error =
       else
         let updated = { request with status = Failed } in
         let wake =
-          { (make_wake_record ~now request) with
+          { (make_wake_record ~now:attempted_at request) with
             status = Wake_failed
-          ; finished_at = Some now
+          ; finished_at = Some attempted_at
           ; error = Some error
           }
         in

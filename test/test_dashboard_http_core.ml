@@ -1747,7 +1747,7 @@ let test_schedule_page_counts_retained_wakes () =
     Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
   in
   let counts = fleet |> member "wake_counts" in
-  check int "every retained wake is counted" 2 (counts |> member "retained" |> to_int);
+  check int "every retained terminal wake is counted" 2 (counts |> member "retained" |> to_int);
   check int "the failed attempt is counted" 1 (counts |> member "failed" |> to_int);
   check int "the accepted attempt is counted" 1 (counts |> member "succeeded" |> to_int);
   check int "nothing is mid-dispatch" 0 (counts |> member "running" |> to_int);

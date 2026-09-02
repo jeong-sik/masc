@@ -432,13 +432,35 @@ let test_tick_stamps_wakes_from_clock_and_anchors_recurrence_on_now () =
    | Some wake ->
      check string "retried wake failed" "failed"
        (Schedule_domain.wake_status_to_string wake.status);
+     check (float 0.001) "retried wake started from the clock" 300.5 wake.started_at;
      check (option (float 0.001)) "retried wake finished from the clock"
        (Some 301.0) wake.finished_at);
+  check int "retry reads the clock to start and to finish" 2 !readings;
   (match Schedule_store.get_schedule config ~schedule_id:retried.schedule_id with
    | None -> fail "retried schedule missing"
    | Some stored ->
      check string "retried schedule back to due" "due"
-       (schedule_status_to_string stored.status))
+       (schedule_status_to_string stored.status));
+  (* A payload the consumer refuses never starts: one clock reading stamps
+     both ends of the attempt, and the tick time appears on neither. *)
+  let refused =
+    create_ok ~schedule_id:"clock-refused" config
+  in
+  let refusing = accepting_consumer ~accept:(Error "unsupported kind") (ref []) in
+  readings := 0;
+  let _ = tick_ok config ~now:201.0 ~clock ~consumer:refusing in
+  check int "a refused payload reads the clock once" 1 !readings;
+  (match
+     Schedule_store.last_wake_for_schedule_instance
+       (Schedule_store.read_state config)
+       ~schedule_instance_id:refused.schedule_instance_id
+       ~schedule_id:refused.schedule_id
+   with
+   | None -> fail "missing refused wake record"
+   | Some wake ->
+     check (float 0.001) "refused wake started from the clock" 300.5 wake.started_at;
+     check (option (float 0.001)) "refused wake finished at the same instant"
+       (Some 300.5) wake.finished_at)
 ;;
 
 let test_tick_dispatches_every_recurring_occurrence () =

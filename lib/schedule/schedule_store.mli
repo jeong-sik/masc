@@ -187,14 +187,16 @@ val recover_running_on_startup :
     The recovery reason is fixed to [Interrupted_by_process_restart]. *)
 
 val fail_due_candidate :
+  ?attempted_at:float ->
   Workspace_utils.config ->
   now:float ->
   schedule_id:string ->
   error:string ->
   (Schedule_domain.schedule_request, store_error) result
 (** Atomically marks a [Due] request [Failed] and records the failed
-    wake attempt. This is used when a runner-side consumer rejects the
-    payload before work starts, so the schedule does not remain due forever. *)
+    wake attempt, started and finished at [attempted_at] (default [now]).
+    This is used when a runner-side consumer rejects the payload before work
+    starts, so the schedule does not remain due forever. *)
 
 val due_wake_candidates :
   state -> Schedule_domain.schedule_request list

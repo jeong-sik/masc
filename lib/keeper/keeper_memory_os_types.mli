@@ -187,12 +187,13 @@ type derivation =
     from, so a later turn can open the source with the Board tools and a
     measurement can count how much Board knowledge reaches a store instead of
     guessing from a post id that happens to appear in the claim text. The ids
-    are validated against the Board id grammar at construction and decode
-    boundaries; whether the post still exists is a reader's question, the
-    same way a source-bound fact is revalidated against its file at recall. *)
+    are the Board's own parsed identities, so a reference that fails the Board
+    grammar cannot be built. Whether the post still exists is not checked by
+    any reader today; RFC-0401 piece 2 revalidates at recall the way a
+    source-bound fact is revalidated against its file. *)
 type board_ref =
-  { post_id : string
-  ; comment_id : string option
+  { post_id : Board_types.Post_id.t
+  ; comment_id : Board_types.Comment_id.t option
   }
 
 type observation =

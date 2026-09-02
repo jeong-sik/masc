@@ -720,10 +720,15 @@ let maintain_supported_facts facts =
 
 (* The same claim bytes seen again: an observation outranks a derivation, and
    a Board reference outranks the transcript because it names a source the
-   transcript cannot. Two Board references keep the first; the second reading
-   is already counted as reinforcement. *)
+   transcript cannot. Two Board references keep the first unless the second
+   names a comment under the same post the first only named as a post; the
+   second reading is otherwise already counted as reinforcement. *)
 let merge_observation existing incoming =
   match existing, incoming with
+  | Board { post_id; comment_id = None }, Board { post_id = incoming_post; comment_id = Some _ }
+    when Board_types.Post_id.to_string post_id
+         = Board_types.Post_id.to_string incoming_post ->
+    incoming
   | Board _, (Board _ | Transcript) -> existing
   | Transcript, Board _ -> incoming
   | Transcript, Transcript -> Transcript

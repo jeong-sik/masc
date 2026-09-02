@@ -1155,6 +1155,7 @@ let () =
            })
       ~last_outcome:KMC.Proactive_unknown
       ~last_reason:"resumed cumulative usage"
+      ()
   in
   check
     "resumed cumulative input adds only the exact delta"

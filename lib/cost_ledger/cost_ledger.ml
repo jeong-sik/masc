@@ -118,11 +118,13 @@ let usage_projection_to_string = function
 
 let usage_projection_of_fields fields source =
   let* projection = required_string fields "usage_projection" in
-  match projection, source with
-  | "resolved_delta", _ -> Ok Resolved_delta
-  | "raw_observation", Auto_trajectory _ -> Ok Raw_observation
-  | "raw_observation", Manual_cli ->
-    invalid "usage_projection" "must be resolved_delta for manual_cli"
+  match projection with
+  | "resolved_delta" -> Ok Resolved_delta
+  | "raw_observation" ->
+    (match source with
+     | Auto_trajectory _ -> Ok Raw_observation
+     | Manual_cli ->
+       invalid "usage_projection" "must be resolved_delta for manual_cli")
   | _ -> invalid "usage_projection" "must be raw_observation or resolved_delta"
 ;;
 

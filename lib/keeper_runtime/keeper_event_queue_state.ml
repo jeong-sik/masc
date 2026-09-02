@@ -325,7 +325,7 @@ let witness_receipt_for_exact_transition witness transition =
   else Error "projected disposition transition fingerprint conflicts"
 ;;
 
-let durable_matches_receipt disposition receipt =
+let durable_matches_receipt disposition (receipt : transition_receipt) =
   match disposition with
   | Current_receipt current ->
     String.equal current.transition_id receipt.transition_id
@@ -604,7 +604,7 @@ let transition_equal left right =
   | _ -> false
 ;;
 
-let transition_receipt_equal left right =
+let transition_receipt_equal (left : transition_receipt) (right : transition_receipt) =
   String.equal left.transition_id right.transition_id
   && String.equal left.event_id right.event_id
   && Float.equal left.applied_at right.applied_at
@@ -1432,7 +1432,7 @@ let accepted_transfer_projection_of_yojson json =
     Error "target transfer projection must contain transfer_accepted"
 ;;
 
-let transition_receipt_to_yojson receipt =
+let transition_receipt_to_yojson (receipt : transition_receipt) =
   `Assoc
     [ "transition_id", `String receipt.transition_id
     ; "event_id", `String receipt.event_id

@@ -952,7 +952,9 @@ let accept_keeper_wake_occurrence
   let exact_stimulus_for_source = function
     | Full_source durable_stimulus -> Ok durable_stimulus
     | Compact_schedule_source { post_id; urgency; arrived_at; source_ref } ->
-      let durable_stimulus = { stimulus with arrived_at } in
+      let durable_stimulus =
+        { stimulus with Keeper_event_queue.arrived_at }
+      in
       (match stimulus.Keeper_event_queue.payload with
        | Keeper_event_queue.Schedule_due _
          when String.equal stimulus.post_id post_id

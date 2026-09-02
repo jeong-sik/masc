@@ -22,6 +22,8 @@ type field =
   | Last_input_tokens
   | Last_output_tokens
   | Last_total_tokens
+  | Usage_cursor
+  | Last_usage_resolution
   | Last_latency_ms
   | Proactive_count_total
   | Last_proactive_ts

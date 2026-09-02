@@ -301,9 +301,11 @@ let test_structurally_invalid_schema_is_excluded () =
    lookup. This pins it. The exceptions below reach the model through other
    constructors and keep their own text on purpose — the Board projection
    narrows the canonical schema for the Keeper surface (its description is
-   usually the longer, more specific one), and the shard/library/individual
-   tools are declared with [in_process_descriptor] rather than the cluster
-   path. Adding an inline description back onto a cluster tool fails here. *)
+   usually the longer, more specific one), [masc_library_list] reads its
+   file's [keeper_projection] the same way (#32561), and the shard and
+   individually-declared keeper tools are declared with
+   [in_process_descriptor] rather than the cluster path. Adding an inline
+   description back onto a cluster tool fails here. *)
 let descriptions_owned_elsewhere =
   [ (* Board: [masc_board_descriptor] carries the Keeper projection's own text *)
     "masc_board_comment"

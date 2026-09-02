@@ -99,7 +99,33 @@ let decode_turn_records = function
                              }
                        | None -> newest_attributed rest)
                 in
-                Ok { latest; attributed = newest_attributed newest_first })
+                (* A conversation-cumulative figure is a fact about the
+                   whole conversation, so it is not offered as this turn's
+                   input even though the record carries the number. *)
+                let per_request_tokens (record : Turn_record.t) =
+                  match record.usage.scope with
+                  | Runtime_usage_scope.Conversation_cumulative -> None
+                  | Runtime_usage_scope.Per_request
+                  | Runtime_usage_scope.Usage_scope_unavailable ->
+                      record.usage.input_tokens
+                in
+                let recent =
+                  List.map
+                    (fun (record : Turn_record.t) ->
+                      { turn = record.absolute_turn
+                      ; ts = record.ts
+                      ; input_tokens = per_request_tokens record
+                      ; cache_read = record.usage.cache_read_input_tokens
+                      ; output_tokens = record.usage.output_tokens
+                      ; scope = record.usage.scope
+                      })
+                    newest_first
+                in
+                Ok
+                  { latest
+                  ; attributed = newest_attributed newest_first
+                  ; recent
+                  })
        | Some _ -> Error "turn-records entries is not a list"
        | None -> Error "turn-records response is missing entries")
   | _ -> Error "turn-records response is not an object"

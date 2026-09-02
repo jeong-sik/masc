@@ -14902,6 +14902,42 @@ let context_composition_lines ~cols
         in
         gap @ bar @ rows @ against_wire
   in
+  (* The per-turn input the provider itself counted, newest first, one row
+     per dispatched turn the page holds. A provider that reports its usage
+     across the whole conversation gets a row that says so rather than a
+     number that looks like this turn's and is not: the operator asked what
+     goes in each turn, and only the provider's own per-request figure
+     answers it. *)
+  let recent_turns_lines =
+    let row (recent : Inspector.recent_turn) =
+      match recent.input_tokens with
+      | Some input ->
+          fact
+            (Printf.sprintf "#%-4d %s  in %-7s  cache read %-7s  out %s"
+               recent.turn
+               (Masc_domain.iso8601_of_unix_seconds recent.ts)
+               (Inspector.format_tokens input)
+               (match recent.cache_read with
+                 | Some tokens -> Inspector.format_tokens tokens
+                 | None -> "-")
+               (match recent.output_tokens with
+                 | Some tokens -> Inspector.format_tokens tokens
+                 | None -> "-"))
+      | None ->
+          Ansi.dim
+          ^ Printf.sprintf
+              "#%-4d %s  counted across the conversation, not per request"
+              recent.turn
+              (Masc_domain.iso8601_of_unix_seconds recent.ts)
+          ^ Ansi.reset
+    in
+    [ "  "
+      ^ Context_bars.band ~width ~title:"RECENT TURNS"
+          ~caption:
+            "input the provider counted, one row per dispatched turn"
+    ]
+    @ List.map row selection.Inspector.recent
+  in
   [ identity; turn; trace; "" ]
   @ [ "  "
       ^ Context_bars.band ~width ~title:"SERIALIZED REQUEST"
@@ -14921,6 +14957,7 @@ let context_composition_lines ~cols
           ~caption:"how this turn's content divides by kind"
     ]
   @ component_lines @ [ "" ]
+  @ recent_turns_lines @ [ "" ]
   @ prose
       "Three measurements of one turn, not three views of one number: none of \
        them is a breakdown of another, and they do not add up."
@@ -15051,7 +15088,7 @@ let context_exact_input_summary ~width
     @ bar @ rows
   , total )
 
-let context_exact_input_lines ~cols state
+let context_exact_input_lines ~cols state ~response
     (input : Masc_tui_context_inspector.provider_input) =
   let module Inspector = Masc_tui_context_inspector in
   let items = Inspector.exact_input_items input in
@@ -15095,7 +15132,52 @@ let context_exact_input_lines ~cols state
           ]
         else []
       in
-      let common = [ identity; wire; "" ] @ summary @ against_wire @ [ "" ] in
+      (* What came back for this exact request, to the extent the turn
+         record observed it. The response text lives in the chat store and
+         is not joined here; the counts and the finish reason are the
+         turn's own. *)
+      let response_line =
+        match response with
+        | None -> []
+        | Some record ->
+            let parts =
+              List.filter_map Fun.id
+                [ Option.map
+                    (fun tokens -> "output " ^ Inspector.format_tokens tokens)
+                    record.usage.output_tokens
+                ; Option.map
+                    (fun reason -> "finish " ^ reason)
+                    record.finish_reason
+                ]
+            in
+            match parts with
+            | [] -> []
+            | _ ->
+                [ Printf.sprintf "  Response  ·  %s" (String.concat "  ·  " parts) ]
+      in
+      let common = [ identity; wire ] @ response_line @ [ "" ] @ summary @ against_wire @ [ "" ] in
+      (* One letter per row says where the item stands in the assembly. The
+         wire is append-only, so the last message is this turn's newest
+         addition and every earlier message is history the window carried
+         forward; the prompt and the schemas are the fixed parts that ride
+         every turn. The letter states a position on the wire, not a join
+         the pane would have to invent. *)
+      let last_message_index =
+        List.fold_left
+          (fun acc (index, (item : Inspector.exact_input_item)) ->
+             match item.kind with
+             | Inspector.Message _ -> Some index
+             | _ -> acc)
+          None
+          (List.mapi (fun index item -> (index, item)) items)
+      in
+      let kind_letter index (item : Inspector.exact_input_item) =
+        match item.kind with
+        | Inspector.System_prompt -> "F"
+        | Inspector.Tool_schema _ -> "S"
+        | Inspector.Message _ ->
+            if Some index = last_message_index then "N" else "H"
+      in
       let rows width =
         List.mapi
           (fun index (item : Inspector.exact_input_item) ->
@@ -15103,12 +15185,19 @@ let context_exact_input_lines ~cols state
              let marker, style =
                if selected then ">", Theme.selection else " ", Ansi.reset
              in
-             let label_width = max 8 (width - 18) in
-             Printf.sprintf "%s %s %2d  %s  %9s%s" style marker (index + 1)
+             let label_width = max 8 (width - 20) in
+             Printf.sprintf "%s %s %2d %s  %s  %9s%s" style marker (index + 1)
+               (kind_letter index item)
                (fit_width (Inspector.exact_input_label item.kind) label_width)
                (Inspector.format_bytes item.bytes) Ansi.reset)
           items
       in
+      let legend =
+        Ansi.dim
+        ^ "     F fixed prompt · H history · N new this turn · S schema"
+        ^ Ansi.reset
+      in
+      let common = common @ [ legend; "" ] in
       if cols >= keeper_split_threshold_cols then
         let left_width = context_split_width cols in
         let cursor =
@@ -15393,7 +15482,14 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                   , None ))
        | Masc_tui_context_inspector.Exact_input ->
            (match reading.provider_input with
-            | Ok input -> context_exact_input_lines ~cols state input
+            | Ok input ->
+                let response =
+                  match reading.turn with
+                  | Ok selection ->
+                      Some selection.Masc_tui_context_inspector.latest
+                  | Error _ -> None
+                in
+                context_exact_input_lines ~cols state ~response input
             | Error detail ->
                 Plain
                   ( [ (Theme.bad ()) ^ "  Exact input unavailable: "

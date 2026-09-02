@@ -528,6 +528,22 @@ function reactionEvidenceTone(
   return 'bad'
 }
 
+export function wakeToTurnWait(
+  evidence: Pick<
+    DashboardScheduledAutomationKeeperReactionEvidence,
+    'stimulus_recorded_at' | 'turn_started_recorded_at'
+  >,
+): string | null {
+  const seen = evidence.stimulus_recorded_at
+  const started = evidence.turn_started_recorded_at
+  if (typeof seen !== 'number' || typeof started !== 'number') return null
+  const seconds = Math.max(0, started - seen)
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
+  const minutes = Math.floor(seconds / 60)
+  const rest = Math.round(seconds - minutes * 60)
+  return `${minutes}m ${rest}s`
+}
+
 function reactionEvidenceRows(
   evidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined,
 ): Array<{ label: string; value: string }> {
@@ -543,12 +559,19 @@ function reactionEvidenceRows(
     { label: 'reaction_kind', value: evidence.reaction_kind },
     { label: 'stimulus_seen', value: evidence.stimulus_seen },
     { label: 'turn_started_seen', value: evidence.turn_started_seen },
+    { label: 'turn_finished_seen', value: evidence.turn_finished_seen },
     { label: 'event_queue_ack_seen', value: evidence.event_queue_ack_seen },
+    { label: 'event_queue_cancelled_seen', value: evidence.event_queue_cancelled_seen },
     { label: 'matched_record_count', value: evidence.matched_record_count },
     { label: 'quarantined_record_count', value: evidence.quarantined_record_count },
     { label: 'stimulus_recorded_at', value: evidence.stimulus_recorded_at_iso },
     { label: 'turn_started_recorded_at', value: evidence.turn_started_recorded_at_iso },
+    // How long the wake waited in the Keeper's queue before a turn took it.
+    // Measured live: 1s on an idle Keeper, 461s behind a chat conversation.
+    { label: 'wake→turn wait', value: wakeToTurnWait(evidence) },
+    { label: 'turn_finished_recorded_at', value: evidence.turn_finished_recorded_at_iso },
     { label: 'event_queue_ack_recorded_at', value: evidence.event_queue_ack_recorded_at_iso },
+    { label: 'event_queue_cancelled_recorded_at', value: evidence.event_queue_cancelled_recorded_at_iso },
     { label: 'latest_recorded_at', value: evidence.latest_recorded_at_iso },
     { label: 'reason', value: evidence.reason },
   ]

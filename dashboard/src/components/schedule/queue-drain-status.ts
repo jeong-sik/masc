@@ -24,7 +24,11 @@
 //
 // A receipt leaves the queue only via ack (normal), cancel, or drop/reset —
 // never silently between dispatch and turn start. So:
-//   · not_found + consumed_ack/turn_started → drained (the keeper handled it)
+//   · not_found + consumed_ack/turn_finished/turn_started → drained (the
+//     keeper handled it)
+//   · not_found + terminal_cancelled → cancelled (the queue settled it
+//     without a turn; the receipt's activation reason says why when the
+//     Keeper store had no such name)
 //   · not_found + matched_stimulus (or no ledger row at all) → missed
 //     (dispatched, but no keeper ever consumed it)
 
@@ -34,6 +38,7 @@ import type { StatusChipTone } from '../common/status-chip'
 export type QueueDrainState =
   | 'pending' // in the pending queue — awaiting drain
   | 'drained' // left the queue AND the keeper reacted — healthy completion
+  | 'cancelled' // left the queue through an accepted cancellation — no turn ran
   | 'missed' // left the queue with no keeper reaction — dispatched then lost
   | 'read_error' // queue snapshot unreadable — drain state indeterminate (I/O)
   | 'evidence_invalid' // the exact occurrence row is quarantined
@@ -52,6 +57,7 @@ export interface QueueDrainStatus {
 // record, not a keeper reaction (see the header note).
 const REACTED: ReadonlySet<string> = new Set([
   'matched_consumed_ack',
+  'matched_turn_finished',
   'matched_turn_started',
 ])
 
@@ -64,7 +70,12 @@ const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'sta
   drained: {
     label: '완료',
     tone: 'neutral',
-    title: '큐에서 빠졌고 keeper 반응이 기록됨 (consumed_ack / turn_started)',
+    title: '큐에서 빠졌고 keeper 반응이 기록됨 (consumed_ack / turn_finished / turn_started)',
+  },
+  cancelled: {
+    label: '취소됨',
+    tone: 'warn',
+    title: '큐가 accepted cancellation 으로 정리함 — keeper 턴 없이 끝난 wake',
   },
   missed: {
     label: '누락 ⚠',
@@ -103,6 +114,10 @@ function stateOf(request: DashboardScheduledAutomationRequest): QueueDrainState 
     case 'not_found': {
       const reaction = request.keeper_reaction_evidence?.projection_status
       if (reaction != null && REACTED.has(reaction)) return 'drained'
+      if (reaction === 'matched_terminal_cancelled') return 'cancelled'
+      // Ack and cancellation both recorded for one occurrence: the ledger
+      // contradicts itself, which is not a drain state to report as either.
+      if (reaction === 'conflicting_terminal_evidence') return 'evidence_invalid'
       // matched_stimulus means only the producer's dispatch record exists.
       // A receipt leaves the queue only via ack/cancel/drop, so stimulus-only
       // is a dispatched wake no keeper ever consumed — a genuine miss, not a
@@ -122,6 +137,15 @@ function stateOf(request: DashboardScheduledAutomationRequest): QueueDrainState 
   }
 }
 
+// The receipt's activation reason, when the receipt was recognized. The
+// activation branch is a discriminated union on activation_status, so the
+// reason is read off the recognized shape rather than the raw record.
+function receiptActivationReason(request: DashboardScheduledAutomationRequest): string | null {
+  const receipt = request.dispatch_receipt
+  if (!receipt || receipt.projection_status !== 'recognized') return null
+  return receipt.activation_status === 'deferred' ? receipt.activation_reason : null
+}
+
 /** Combined queue-drain status for a request's last execution, or null when the
  * request has no keeper-wake queue evidence (board posts, or nothing dispatched
  * yet). */
@@ -129,7 +153,18 @@ export function queueDrainStatusOf(
   request: DashboardScheduledAutomationRequest,
 ): QueueDrainStatus | null {
   const state = stateOf(request)
-  return state === null ? null : { state, ...PRESENTATION[state] }
+  if (state === null) return null
+  // A cancelled wake for a Keeper the store does not know is the one case
+  // the operator can act on directly: the definition outlived its target.
+  if (state === 'cancelled' && receiptActivationReason(request) === 'owner_absent') {
+    return {
+      state,
+      ...PRESENTATION.cancelled,
+      label: '취소됨 · keeper 없음',
+      title: 'Keeper store 에 이 이름의 keeper 가 없어 큐가 wake 를 취소함 — 예약 정의가 대상보다 오래 살아남음',
+    }
+  }
+  return { state, ...PRESENTATION[state] }
 }
 
 // States surfaced as a chip on the calendar rows. 'drained' and 'indeterminate'
@@ -137,6 +172,7 @@ export function queueDrainStatusOf(
 // are not actionable, and a chip on every recurring row would be noise.
 const CALENDAR_VISIBLE: ReadonlySet<QueueDrainState> = new Set<QueueDrainState>([
   'pending',
+  'cancelled',
   'missed',
   'read_error',
   'evidence_invalid',
@@ -157,4 +193,16 @@ export function countQueueDrainMisses(
     if (stateOf(request) === 'missed') misses += 1
   }
   return misses
+}
+
+/** Count of requests whose last keeper-wake execution the queue cancelled
+ * without a turn. Feeds the KPI strip next to the misses. */
+export function countQueueDrainCancelled(
+  requests: readonly DashboardScheduledAutomationRequest[],
+): number {
+  let cancelled = 0
+  for (const request of requests) {
+    if (stateOf(request) === 'cancelled') cancelled += 1
+  }
+  return cancelled
 }

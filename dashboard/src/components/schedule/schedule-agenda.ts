@@ -196,6 +196,18 @@ function scheduledBy(request: DashboardScheduledAutomationRequest): string {
   return request.scheduled_by?.id ?? request.scheduled_by?.display_name ?? '—'
 }
 
+// Who the wake reaches. The rows named the actor that scheduled the wake, so
+// a cron created through an MCP client read "codex-mcp-client" while the
+// Keeper it wakes every 45 minutes was nowhere on the row. The target is the
+// operator's question; the scheduler stays on the tooltip.
+function wakeTarget(request: DashboardScheduledAutomationRequest): string {
+  return request.payload_keeper_name ?? request.payload_target ?? scheduledBy(request)
+}
+
+function wakeTargetTitle(request: DashboardScheduledAutomationRequest): string {
+  return `깨우는 대상 · 예약자 ${scheduledBy(request)}`
+}
+
 function summaryText(request: DashboardScheduledAutomationRequest): string {
   return request.payload_summary?.trim() || schedPayloadSpec(request.payload_kind).lbl
 }
@@ -284,7 +296,7 @@ function PollingCard({
       </div>
       <div class="sch-poll-title">${summaryText(request)}</div>
       <div class="sch-poll-foot">
-        <span class="mono sch-poll-by">${scheduledBy(request)}</span>
+        <span class="mono sch-poll-by" title=${wakeTargetTitle(request)}>${wakeTarget(request)}</span>
         ${drain && isCalendarVisible(drain)
           ? html`<${StatusChip}
               tone=${drain.tone}
@@ -361,7 +373,7 @@ function AgendaEventRow({
       <span class="sch-ev-body">
         <span class="sch-ev-title">${summaryText(request)}</span>
         <span class="sch-ev-meta">
-          <span class="mono sch-ev-by">${scheduledBy(request)}</span>
+          <span class="mono sch-ev-by" title=${wakeTargetTitle(request)}>${wakeTarget(request)}</span>
           ${drain && isCalendarVisible(drain)
             ? html`<${StatusChip}
                 tone=${drain.tone}

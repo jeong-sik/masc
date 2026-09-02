@@ -453,7 +453,8 @@ export type DrainTone = 'info' | 'ok' | 'bad' | 'warn' | 'dim'
  *  sentence (op, default view) and the wiring explanation (why, dev view). */
 export const DRAIN_PRESENT: Record<QueueDrainState, { label: string; tone: DrainTone; op: string; why: string }> = {
   pending: { label: '큐 대기', tone: 'info', op: '아직 실행되지 않고 차례를 기다리는 중', why: 'wake 가 keeper_event_queue pending 에 있음 — 드레인 대기 중' },
-  drained: { label: '완료', tone: 'ok', op: 'keeper 가 받아서 실행했다', why: '큐에서 빠졌고 keeper 반응이 기록됨 (consumed_ack / turn_started)' },
+  drained: { label: '완료', tone: 'ok', op: 'keeper 가 받아서 실행했다', why: '큐에서 빠졌고 keeper 반응이 기록됨 (consumed_ack / turn_finished / turn_started)' },
+  cancelled: { label: '취소됨', tone: 'warn', op: '큐가 취소해서 keeper 턴 없이 끝났다 — 대상 keeper 가 없으면 예약 정의를 지우거나 옮겨야 한다', why: '큐에서 accepted cancellation 으로 빠짐 (owner-absent drain 등) — keeper 반응 없이 종결' },
   missed: { label: '누락', tone: 'bad', op: '보냈지만 아무도 실행하지 않았다 — 다시 걸어야 한다', why: 'dispatch 기록만 남았고 keeper 반응이 없음 — 큐에서 빠졌으나 아무도 소비 안 함' },
   read_error: { label: '읽기 오류', tone: 'warn', op: '기록을 읽지 못해 실행됐는지 알 수 없다', why: '큐 스냅샷 또는 reaction ledger 읽기 실패 — 드레인 상태 확인 불가' },
   evidence_invalid: { label: '증거 격리', tone: 'warn', op: '기록이 손상돼 실행 여부를 단정할 수 없다', why: '해당 occurrence 의 reaction ledger 행이 격리되어 정확한 판정 불가' },

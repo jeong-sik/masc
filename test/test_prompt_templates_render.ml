@@ -108,6 +108,41 @@ let test_every_prompt_file_registers () =
     files
 ;;
 
+(* Boot syncs prompt assets from the binary only when the embedded file set
+   and the embedded manifest agree. A fragment committed without a manifest
+   line makes the whole sync refuse, and every fragment added since then is
+   absent from the live prompt directory and renders nothing — the symptom is
+   a shorter prompt and one boot log line. 2026-09-02: five tool_failure.*.md
+   fragments shipped unlisted and took two previous_turn_stop fragments down
+   with them. This pins the manifest to the directory in the source tree. *)
+let test_every_prompt_file_is_in_the_managed_manifest () =
+  let dir = prompt_dir () in
+  let manifest_path = Filename.concat dir "managed-assets.json" in
+  let listed =
+    match Yojson.Safe.from_file manifest_path with
+    | `Assoc fields ->
+      (match List.assoc_opt "paths" fields with
+       | Some (`List paths) ->
+         List.filter_map (function `String p -> Some p | _ -> None) paths
+       | _ -> failf "%s has no paths list" manifest_path)
+    | _ -> failf "%s is not a JSON object" manifest_path
+  in
+  let on_disk =
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun name ->
+         (not (String.equal name "managed-assets.json"))
+         && (not (String.starts_with ~prefix:"." name))
+         && not (Sys.is_directory (Filename.concat dir name)))
+  in
+  let sorted = List.sort_uniq String.compare in
+  check
+    (list string)
+    "managed-assets.json lists exactly the prompt files on disk"
+    (sorted on_disk)
+    (sorted listed)
+;;
+
 let test_no_template_uses_an_undeclared_variable () =
   load ();
   match Prompt_registry.validate_prompt_templates () with
@@ -136,6 +171,10 @@ let () =
             "every prompt file registers as a key"
             `Quick
             test_every_prompt_file_registers
+        ; test_case
+            "every prompt file is in the managed manifest"
+            `Quick
+            test_every_prompt_file_is_in_the_managed_manifest
         ] )
     ]
 ;;

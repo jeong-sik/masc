@@ -1100,6 +1100,60 @@ let viewport_gap_text ~inner_width hidden_rows =
     (List.find_opt (fun text -> display_width text <= inner_width) candidates)
     ~default:""
 
+let repeated_rows_gap_text ~inner_width repeated_rows =
+  let candidates =
+    [ Printf.sprintf "  ↻ previous row repeated %d×" repeated_rows
+    ; Printf.sprintf "  ↻ repeated %d×" repeated_rows
+    ; Printf.sprintf "↻%d×" repeated_rows
+    ; "↻"
+    ]
+  in
+  Option.value
+    (List.find_opt (fun text -> display_width text <= inner_width) candidates)
+    ~default:""
+
+let same_repeatable_body_row left right =
+  match left.kind, right.kind with
+  | Body, Body ->
+    left.style = right.style
+    && left.shade = right.shade
+    && String.equal left.text right.text
+    && String.equal left.gutter right.gutter
+  | (Metadata _ | Viewport_gap _), _
+  | Body, (Metadata _ | Viewport_gap _) ->
+    false
+;;
+
+let collapse_repeated_body_rows ~inner_width rows =
+  let gap row repeated_rows =
+    { style = Status
+    ; kind = Viewport_gap { hidden_rows = repeated_rows }
+    ; shade = Shade_none
+    ; text = repeated_rows_gap_text ~inner_width repeated_rows
+    ; gutter_label_at = 0
+    ; gutter = row.gutter
+    }
+  in
+  let emit_run reversed row count =
+    if count <= 1 then row :: reversed
+    else gap row (count - 1) :: row :: reversed
+  in
+  let rec loop reversed current count = function
+    | [] ->
+      (match current with
+       | None -> List.rev reversed
+       | Some row -> List.rev (emit_run reversed row count))
+    | row :: rest ->
+      (match current with
+       | Some current when same_repeatable_body_row current row ->
+         loop reversed current (count + 1) rest
+       | None -> loop reversed (Some row) 1 rest
+       | Some current ->
+         loop (emit_run reversed current count) (Some row) 1 rest)
+  in
+  loop [] None 0 rows
+;;
+
 (* At the live edge, keep enough of an oversized newest entry to identify it,
    see its opening when space permits, and see its latest output. The typed gap
    makes the missing middle explicit; without it, inline mode looked like one
@@ -1127,9 +1181,10 @@ let newest_entry_window ~inner_width ~height rows =
         | Metadata _, body :: rest when height >= 4 -> [ first; body ], rest
         | (Metadata _ | Body | Viewport_gap _), _ -> [ first ], rest
       in
-      let tail = take_last (height - 1 - List.length start) rest in
+      let physical_tail = take_last (height - 1 - List.length start) rest in
+      let tail = collapse_repeated_body_rows ~inner_width physical_tail in
       let hidden_rows =
-        List.length rows - List.length start - List.length tail
+        List.length rows - List.length start - List.length physical_tail
         + hidden_timeline_rows
       in
       let gap =

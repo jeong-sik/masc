@@ -789,7 +789,7 @@ let budgeted_model_input_projection
        | Some inner -> inner windowed)
 ;;
 
-let run_try_provider (ctx : try_provider_ctx) candidate =
+let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate =
   let resolved_lane =
     match ctx.tools with
     | [] -> "none"
@@ -939,8 +939,20 @@ let run_try_provider (ctx : try_provider_ctx) candidate =
       Eio.Switch.run (fun attempt_sw ->
         let run_fn () =
           Eio_guard.check_if_ready ();
-          match ctx.goal_blocks with
-          | Some blocks ->
+          match continuation_checkpoint, ctx.goal_blocks with
+          | Some checkpoint, _ ->
+              Runtime_agent.continue_from_checkpoint
+                ~sw:attempt_sw
+                ~net:ctx.net
+                ~config
+                ~checkpoint
+                ?on_event:ctx.on_event
+                ?on_yield:ctx.on_yield
+                ?on_resume:ctx.on_resume
+                ~agent_ref:attempt_agent_ref
+                ?cooperative_yield_probe:ctx.cooperative_yield_probe
+                ()
+          | None, Some blocks ->
               Runtime_agent.run_blocks
                 ~sw:attempt_sw
                 ~net:ctx.net
@@ -952,7 +964,7 @@ let run_try_provider (ctx : try_provider_ctx) candidate =
                 ~agent_ref:attempt_agent_ref
                 ?cooperative_yield_probe:ctx.cooperative_yield_probe
                 blocks
-          | None ->
+          | None, None ->
               Runtime_agent.run
                 ~sw:attempt_sw
                 ~net:ctx.net
@@ -1243,8 +1255,72 @@ let run_try_provider_with_context_overflow_shrink
   result, !checkpoint_after, !success_sample
 ;;
 
+let checkpoint_before_incomplete_response (checkpoint : Agent_core.Checkpoint.t) =
+  match List.rev checkpoint.messages with
+  | ({ Agent_core.Types.role = Agent_core.Types.Assistant; _ } :
+      Agent_core.Types.message)
+    :: earlier ->
+    Some { checkpoint with messages = List.rev earlier }
+  | ({ role =
+         ( Agent_core.Types.User
+         | Agent_core.Types.System
+         | Agent_core.Types.Tool )
+       ; _
+       } : Agent_core.Types.message)
+    :: _
+  | [] ->
+    None
+;;
+
+let max_tokens_truncation_error error =
+  match Keeper_internal_error.classify_masc_internal_error error with
+  | Some internal_error ->
+    (match Keeper_internal_error.accept_no_progress_retry_kind internal_error with
+     | Some `Truncated_no_progress -> true
+     | Some (`Empty_no_progress | `Thinking_only_no_progress) | None -> false)
+  | None -> false
+;;
+
+let thinking_was_enabled = function
+  | Some false -> false
+  | Some true | None -> true
+;;
+
+let run_try_provider_with_truncation_recovery
+      (ctx : try_provider_ctx)
+      candidate
+  =
+  let first_result, checkpoint_after, success_sample =
+    run_try_provider_with_context_overflow_shrink ctx candidate
+  in
+  match first_result, checkpoint_after with
+  | Error error, Some checkpoint
+    when max_tokens_truncation_error error
+         && thinking_was_enabled ctx.enable_thinking ->
+    (match checkpoint_before_incomplete_response checkpoint with
+     | None -> first_result, checkpoint_after, success_sample
+     | Some continuation_checkpoint ->
+       emit_runtime_manifest ctx
+         ~status:"max_tokens_continuation"
+         ~decision:
+           (`Assoc
+             [ "continuation", `String "post_tool_checkpoint"
+             ; "thinking", `String "disabled"
+             ])
+         Keeper_runtime_manifest.Provider_lane_resolved;
+       run_try_provider
+         ~continuation_checkpoint
+         { ctx with enable_thinking = Some false; preserve_thinking = Some false }
+         candidate)
+  | Error _, None | Ok _, _ | Error _, Some _ ->
+    first_result, checkpoint_after, success_sample
+;;
+
 module For_testing = struct
   let apply_accept = apply_accept
+  let checkpoint_before_incomplete_response = checkpoint_before_incomplete_response
+  let max_tokens_truncation_error = max_tokens_truncation_error
+  let thinking_was_enabled = thinking_was_enabled
   let observe_request_wire_error = observe_request_wire_error
   let memoize_message_measurement = memoize_message_measurement
   let plan_and_window_model_input = plan_and_window_model_input

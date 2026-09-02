@@ -119,6 +119,38 @@ let test_row_mode_keeps_the_heading_opening_and_latest_output () =
         (match latest.kind with Layout.Body -> true | _ -> false)
   | _ -> fail "row mode did not preserve heading, opening, gap, and latest row"
 
+let test_live_edge_collapses_repeated_wrapped_tail_rows () =
+  let repeated_line = String.concat "" (List.init 9 (fun _ -> "가")) in
+  let newest =
+    entry Layout.Keeper "keeper.one" "turn-degenerate"
+      (String.concat "\n" (List.init 12 (fun _ -> repeated_line)))
+  in
+  let visible = Layout.visible_rows ~inner_width:20 ~height:10 [ newest ] in
+  let repeated_gaps =
+    List.filter
+      (fun (row : Layout.row) ->
+         match row.kind with
+         | Layout.Viewport_gap { hidden_rows } ->
+           hidden_rows > 0
+           && String.starts_with ~prefix:"↻" (String.trim row.text)
+         | Layout.Metadata _ | Layout.Body -> false)
+      visible
+  in
+  check int "one visible repeated run is collapsed" 1 (List.length repeated_gaps);
+  check bool "live edge no longer fills with identical rows" true
+    (List.length visible < 10);
+  let scrolled =
+    Layout.scrolled_rows ~inner_width:20 ~height:10 ~from_bottom:1 [ newest ]
+  in
+  check bool "PgUp still reveals only original transcript rows" true
+    (List.for_all
+       (fun (row : Layout.row) ->
+          match row.kind with
+          | Layout.Metadata _ | Layout.Body -> true
+          | Layout.Viewport_gap _ -> false)
+       scrolled)
+;;
+
 let test_oversized_entry_small_height_policy () =
   let newest =
     entry Layout.Keeper "keeper.one" "tui-..cccccccc" (String.make 160 'x')
@@ -1820,6 +1852,8 @@ let () =
             test_inline_oversized_entry_marks_the_missing_middle
         ; test_case "row mode keeps heading, opening, and latest output" `Quick
             test_row_mode_keeps_the_heading_opening_and_latest_output
+        ; test_case "live edge collapses repeated wrapped tail rows" `Quick
+            test_live_edge_collapses_repeated_wrapped_tail_rows
         ; test_case "oversized entry has an explicit small-height policy" `Quick
             test_oversized_entry_small_height_policy
         ; test_case "scrolling shows transcript rows without synthetic gaps" `Quick

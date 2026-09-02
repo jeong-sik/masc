@@ -115,7 +115,9 @@ type row_kind =
   | Body
   | Viewport_gap of { hidden_rows : int }
       (** A synthetic row marking content omitted from an oversized newest
-          entry at the live edge. It is not part of transcript row counts. *)
+          entry at the live edge, including an explicitly collapsed run of
+          identical wrapped rows. It is not part of transcript row counts;
+          ordinary scrollback still reads the original physical rows. *)
 
 type origin_display =
   | Origin_row  (** The origin keeps a row of its own, above the body. *)

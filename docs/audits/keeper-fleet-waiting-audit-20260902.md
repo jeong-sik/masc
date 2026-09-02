@@ -378,7 +378,7 @@ jq -r 'select(type=="object") | .message' "$M/logs/system_log_$(date +%F).jsonl"
 | 13.4-1 체크포인트 턴의 ack | #32602. 다섯 checkpoint 사유 전부 `Batch_ack_attention_only`, catch-all 제거, HITL continuation 영수증 가드는 유지. 라이브 판정: 같은 approval 의 `gate replay … already_recorded` 가 2회 이상 나오지 않아야 한다. |
 | 13.4-2 max_tokens 분류 | #32605. 내용이 없는 응답(empty, thinking_only)은 stop 과 무관하게 회전 종류를 유지하고, 이어쓰기 시도는 레코드를 읽어 그대로 먼저 한다. 라이브 판정: thinking-only max_tokens 실패에서 `deferred_next_runtime=glm-coding.glm-5.3` 이 찍혀야 한다. 받아들인 비용: 이 방언에서 이어쓰기는 같은 요청을 한 번 더 보낸다(턴당 52–88초). |
 | 13.2-1 identity_call 통행료 | 전제가 틀렸다. 81건 전부 `github/issue_write`·`add_issue_comment` 쓰기이고, 읽기는 MCP `readOnlyHint` 로 `keeper_identity_gate.ml` 에서 Gate 전에 통과한다. 판정은 67건 중 1건을 거부했고 그 1건은 직전에 읽은 본문과 모순되는 덮어쓰기였다. 대기 103초 중 98초가 판정 모델 응답이다. 슬롯별 평균 glm-5.3-flash 116초(n=65), deepseek-v4-flash 31초(n=19). `[runtime.exact_output_lanes.hitl_auto_judge].slots` 순서는 09-01 운영자 지정이라 바꾸지 않았다. |
-| 13.2-2 docker 프로필 keeper | 미착수. 생성 시점 거부(remote_ssh 의 endpoint 가드와 같은 자리)가 다음 코드 지점이다. |
+| 13.2-2 docker 프로필 keeper | `masc_keeper_up` 인자 검증(`keeper_turn_up_args.ml`)이 docker 프로필에 기존 `docker_preflight`(daemon·이미지·hardening)를 돌리고 실패하면 `docker_preflight_failed:` 로 생성을 거부한다. remote_ssh 의 endpoint preflight 와 같은 자리다. microvm 은 preflight 가 없어 그대로. |
 | WebFetch 로 자기 서버 API | 고칠 코드 없음. `/api/v1/keepers/<k>/file-changes` 는 대시보드 REST(CanAdmin) 에만 있고 keeper 도구가 없다. |
 
 ### 13.3 다음 측정

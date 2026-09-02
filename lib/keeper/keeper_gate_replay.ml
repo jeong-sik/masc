@@ -1117,7 +1117,7 @@ let replay_approved_effect_with_receipt
            ~gate_grant:grant
            ~name:voice_speak_operation
            ~args
-           ()))
+           ())))
 ;;
 
 let replay_approved_effect

@@ -33,14 +33,6 @@ val cursor_up : count:int -> int -> int
 val ensure_visible : cursor:int -> height:int -> int -> int
 (** The smallest move of [scroll] that keeps [cursor] inside the window. *)
 
-val ensure_leading : cursor:int -> lead:int -> height:int -> int -> int
-(** Like {!ensure_visible}, but for a row that carries content below it. When
-    the window has to move, it anchors [lead] lines above [cursor], so the
-    row lands [lead] lines into the window and the lines under it stay in
-    view. A window too short to spend [lead] lines above the row falls back
-    to the row's last line, which is {!ensure_visible}'s placement. A row
-    already inside the window moves nothing. *)
-
 (** A surface that draws a preview under its list splits the rows it has. The
     split belongs here for the same reason the bound does: the keypress and
     the frame have to work it out the same way. A renderer that shrank its

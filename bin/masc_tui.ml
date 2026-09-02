@@ -11517,7 +11517,9 @@ and is loaded on demand through keeper_skill.
            let close () =
              state.context_inspector_open <- false;
              state.context_inspector_exact <- None;
-             state.context_inspector_scroll <- 0
+             state.context_inspector_scroll <- 0;
+             state.context_inspector_detail_scroll <- 0;
+             state.context_inspector_focus <- Left_pane
            in
            (match k with
             | "esc" ->
@@ -11537,19 +11539,25 @@ and is loaded on demand through keeper_skill.
                   Masc_tui_context_inspector.Composition;
                 state.context_inspector_exact <- None;
                 state.context_inspector_cursor <- 0;
-                state.context_inspector_scroll <- 0
+                state.context_inspector_scroll <- 0;
+                state.context_inspector_detail_scroll <- 0;
+                state.context_inspector_focus <- Left_pane
             | "2" ->
                 state.context_inspector_tab <-
                   Masc_tui_context_inspector.Exact_input;
                 state.context_inspector_exact <- None;
                 state.context_inspector_cursor <- 0;
-                state.context_inspector_scroll <- 0
+                state.context_inspector_scroll <- 0;
+                state.context_inspector_detail_scroll <- 0;
+                state.context_inspector_focus <- Left_pane
             | "3" ->
                 state.context_inspector_tab <-
                   Masc_tui_context_inspector.Input_map;
                 state.context_inspector_exact <- None;
                 state.context_inspector_cursor <- 0;
-                state.context_inspector_scroll <- 0
+                state.context_inspector_scroll <- 0;
+                state.context_inspector_detail_scroll <- 0;
+                state.context_inspector_focus <- Left_pane
             | "\t" | "left" | "right" when Option.is_none state.context_inspector_exact ->
                 state.context_inspector_tab <-
                   (match state.context_inspector_tab with
@@ -11560,7 +11568,19 @@ and is loaded on demand through keeper_skill.
                    | Masc_tui_context_inspector.Input_map ->
                        Masc_tui_context_inspector.Composition);
                 state.context_inspector_cursor <- 0;
-                state.context_inspector_scroll <- 0
+                state.context_inspector_scroll <- 0;
+                state.context_inspector_detail_scroll <- 0;
+                state.context_inspector_focus <- Left_pane
+            | "h" | "l"
+              when Option.is_none state.context_inspector_exact
+                   && terminal_columns >= keeper_split_threshold_cols
+                   && state.context_inspector_tab
+                      <> Masc_tui_context_inspector.Composition ->
+                (* The same caret the roster and the board carry: which pane
+                   hears j/k is a question the reader answers, not the
+                   layout. *)
+                state.context_inspector_focus <-
+                  (if k = "h" then Left_pane else Right_pane)
             | ("j" | "down" | "k" | "up")
               when Option.is_some state.context_inspector_exact
                    || state.context_inspector_tab
@@ -11575,6 +11595,21 @@ and is loaded on demand through keeper_skill.
                 in
                 state.context_inspector_scroll <-
                   move ~count ~height state.context_inspector_scroll
+            | "j" | "down"
+              when state.context_inspector_focus = Right_pane ->
+                let count, height =
+                  Masc_tui_render.context_inspector_detail_viewport state
+                in
+                state.context_inspector_detail_scroll <-
+                  Masc_tui_scroll.down ~count ~height
+                    state.context_inspector_detail_scroll
+            | "k" | "up" when state.context_inspector_focus = Right_pane ->
+                let count, height =
+                  Masc_tui_render.context_inspector_detail_viewport state
+                in
+                state.context_inspector_detail_scroll <-
+                  Masc_tui_scroll.up ~count ~height
+                    state.context_inspector_detail_scroll
             | "j" | "down" ->
                 let count =
                   match state.context_inspector_tab with
@@ -11586,10 +11621,14 @@ and is loaded on demand through keeper_skill.
                 in
                 let last = max 0 (count - 1) in
                 state.context_inspector_cursor <-
-                  min last (state.context_inspector_cursor + 1)
+                  min last (state.context_inspector_cursor + 1);
+                (* A new item is a new document; its reader starts at its
+                   top, not at the window the previous one was left in. *)
+                state.context_inspector_detail_scroll <- 0
             | "k" | "up" ->
                 state.context_inspector_cursor <-
-                  max 0 (state.context_inspector_cursor - 1)
+                  max 0 (state.context_inspector_cursor - 1);
+                state.context_inspector_detail_scroll <- 0
             | "\r" ->
                 if
                   state.context_inspector_tab

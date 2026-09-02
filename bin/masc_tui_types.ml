@@ -2073,6 +2073,12 @@ type state = {
   mutable context_inspector_cursor: int;
   mutable context_inspector_scroll: int;
   mutable context_inspector_exact: int option;
+  (* On the split tabs the detail column owns its own window. The list keeps
+     the cursor; this scroll and the focus below say which pane hears j/k, so
+     a long retained item is read by moving the right pane, not by chasing the
+     list row it used to be pinned beside. *)
+  mutable context_inspector_detail_scroll: int;
+  mutable context_inspector_focus: pane_focus;
   (* The roster beside a keeper surface costs the chat 30 columns for a
      list the reader may already know. Hidden is a choice they make, not a
      width the terminal forces, so it survives resizing. *)
@@ -2941,6 +2947,8 @@ let create_state
   context_inspector_cursor = 0;
   context_inspector_scroll = 0;
   context_inspector_exact = None;
+  context_inspector_detail_scroll = 0;
+  context_inspector_focus = Left_pane;
   roster_pane_hidden = false;
   roster_marquee_frame = 0;
   activity_frame = -1;

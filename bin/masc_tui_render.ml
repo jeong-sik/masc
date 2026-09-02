@@ -10,6 +10,7 @@ module Board_detail = Masc_tui_board_detail
 module Magnitude = Masc_tui_magnitude
 module Board_comment_thread = Masc_tui_board_comment_thread
 module Message_layout = Masc_tui_message_layout
+module Retained_view = Masc_tui_retained_view
 module Metrics_tail = Masc_tui_metrics_tail
 module Observation_layout = Masc_tui_observation_layout
 module Context_state = Masc_tui_context_state
@@ -14921,12 +14922,44 @@ let context_composition_lines ~cols
        them is a breakdown of another, and they do not add up."
 
 
+(* The pane body comes in two shapes. The plain one scrolls as one list and
+   carries the line its highlight sits on, if it has one. The split one is two
+   columns with independent windows: the list keeps the cursor, the detail
+   column keeps its own scroll, and neither drags the other. *)
+type context_pane_body =
+  | Plain of string list * int option
+  | Split of
+      { common : string list
+      ; left : string list
+      ; right : string list
+      }
+
 let context_exact_item_detail_lines ~width
     (item : Masc_tui_context_inspector.exact_input_item) =
   let module Inspector = Masc_tui_context_inspector in
+  (* A message's text is wire JSON; its typed blocks are where the prose
+     lives. Walking the blocks and rendering each part for what it is --
+     markdown prose, a clipped JSON payload, a structural label -- is the
+     difference between reading the item and re-reading the envelope. *)
+  let section_lines = function
+    | Retained_view.Text text ->
+        document_markdown ~width (Keeper_chat.terminal_safe_text text)
+    | Retained_view.Json payload ->
+        String.split_on_char '\n' payload
+        |> List.map (fun line ->
+               Ansi.cyan
+               ^ Message_layout.fit_width
+                   (Keeper_chat.terminal_safe_text line) width
+               ^ Ansi.reset)
+    | Retained_view.Marker label ->
+        [ Ansi.bold
+          ^ "▸ " ^ Keeper_chat.terminal_safe_text label
+          ^ Ansi.reset
+        ]
+  in
   let body =
-    Message_layout.wrap_body ~max_cells:width
-      ~sanitize:Keeper_chat.terminal_safe_text item.text
+    Retained_view.sections ~text:item.text
+    |> List.concat_map (fun group -> section_lines group @ [ "" ])
   in
   [ Ansi.bold ^ Theme.info () ^ "[ RETAINED ITEM ]" ^ Ansi.reset
   ; Ansi.bold ^ Inspector.exact_input_label item.kind ^ Ansi.reset
@@ -15023,16 +15056,17 @@ let context_exact_input_lines ~cols state
   | Some index ->
       (match List.nth_opt items index with
        | None ->
-           ( [ (Theme.bad ()) ^ "  Selected input item is no longer present"
-               ^ Ansi.reset
-             ]
-           , None )
+           Plain
+             ( [ (Theme.bad ()) ^ "  Selected input item is no longer present"
+                 ^ Ansi.reset
+               ]
+             , None )
        | Some item ->
            let detail =
              context_exact_item_detail_lines ~width item
              |> List.map (fun line -> "  " ^ line)
            in
-           (detail, None))
+           Plain (detail, None))
   | None ->
       let identity =
         Printf.sprintf "  Exact provider input  %s  %s"
@@ -15078,8 +15112,13 @@ let context_exact_input_lines ~cols state
             (max 0 state.context_inspector_cursor)
         in
         let selected = List.nth_opt items cursor in
+        (* The caret names the pane that hears j/k, the way the roster and
+           the board say it; the keys themselves stay in the footer. *)
+        let caret pane = if state.context_inspector_focus = pane then "▸ " else "" in
         let left =
-          (Ansi.bold ^ "╭─ REQUEST ITEMS" ^ Ansi.reset)
+          (Ansi.bold
+           ^ "╭─ " ^ caret Left_pane ^ "REQUEST ITEMS"
+           ^ Ansi.reset)
           :: (match rows left_width with
               | [] -> [ Ansi.dim ^ "  (no retained items)" ^ Ansi.reset ]
               | rows -> rows)
@@ -15091,22 +15130,18 @@ let context_exact_input_lines ~cols state
           | Some item ->
               context_exact_item_detail_lines ~width:right_width item
         in
+        (* The detail column starts at the top of its own window and keeps
+           its own scroll. It used to be padded down to sit beside the
+           selected row, which tied reading an item to standing on its row:
+           the longer the list grew, the less of the item the pane could
+           show. *)
         let right =
-          List.init cursor (fun _ -> "")
-          @ ((Ansi.bold ^ "╭─ SELECTED INPUT" ^ Ansi.reset)
-             :: selected_detail)
+          (Ansi.bold
+           ^ "╭─ " ^ caret Right_pane ^ "SELECTED INPUT"
+           ^ Ansi.reset)
+          :: selected_detail
         in
-        let selected_line =
-          if items = [] then None else Some (List.length common + 1 + cursor)
-        in
-        ( common
-          @ context_split_lines ~cols ~left_width ~left ~right
-          @ [ ""
-            ; Ansi.dim
-              ^ "  j/k moves the stack. Enter opens the selected exact item at full width."
-              ^ Ansi.reset
-            ]
-        , selected_line )
+        Split { common; left; right }
       else
         let header =
           common
@@ -15128,13 +15163,14 @@ let context_exact_input_lines ~cols state
               + min (List.length items - 1)
                   (max 0 state.context_inspector_cursor))
         in
-        ( header @ body
-          @ [ ""
-            ; Ansi.dim
-              ^ "  Enter opens one retained item. The request digest identifies the pre-dispatch serialized body; each row carries its own retained digest."
-              ^ Ansi.reset
-            ]
-        , selected )
+        Plain
+          ( header @ body
+            @ [ ""
+              ; Ansi.dim
+                ^ "  Enter opens one retained item. The request digest identifies the pre-dispatch serialized body; each row carries its own retained digest."
+                ^ Ansi.reset
+              ]
+          , selected )
 
 let context_input_map_detail_lines ~width
     (row : Masc_tui_context_inspector.input_map_row) =
@@ -15206,12 +15242,13 @@ let context_input_map_lines ~cols state (record : Turn_record.t)
                ~sanitize:Keeper_chat.terminal_safe_text text
              |> List.map (fun line -> "  " ^ line)
            in
-           (heading :: digest :: "" :: body, None)
+           Plain (heading :: digest :: "" :: body, None)
        | Some _ | None ->
-           ( [ (Theme.bad ())
-               ^ "  Exact text is not retained for this component" ^ Ansi.reset
-             ]
-           , None ))
+           Plain
+             ( [ (Theme.bad ())
+                 ^ "  Exact text is not retained for this component" ^ Ansi.reset
+               ]
+             , None ))
   | None ->
       let identity =
         Printf.sprintf "  Provider request map  %s#%d"
@@ -15251,8 +15288,11 @@ let context_input_map_lines ~cols state (record : Turn_record.t)
           min (max 0 (List.length rows - 1))
             (max 0 state.context_inspector_cursor)
         in
+        let caret pane = if state.context_inspector_focus = pane then "▸ " else "" in
         let left =
-          (Ansi.bold ^ "╭─ CONTEXT STACK" ^ Ansi.reset)
+          (Ansi.bold
+           ^ "╭─ " ^ caret Left_pane ^ "CONTEXT STACK"
+           ^ Ansi.reset)
           :: (match mapped left_width with
               | [] -> [ Ansi.dim ^ "  (no component attribution)" ^ Ansi.reset ]
               | mapped -> mapped)
@@ -15264,22 +15304,12 @@ let context_input_map_lines ~cols state (record : Turn_record.t)
           | Some row -> context_input_map_detail_lines ~width:right_width row
         in
         let right =
-          List.init cursor (fun _ -> "")
-          @ ((Ansi.bold ^ "╭─ SELECTED BLOCK" ^ Ansi.reset)
-             :: selected_detail)
+          (Ansi.bold
+           ^ "╭─ " ^ caret Right_pane ^ "SELECTED BLOCK"
+           ^ Ansi.reset)
+          :: selected_detail
         in
-        let common = [ identity; "  " ^ joined; "" ] in
-        let selected =
-          if rows = [] then None else Some (List.length common + 1 + cursor)
-        in
-        ( common
-          @ context_split_lines ~cols ~left_width ~left ~right
-          @ [ ""
-            ; Ansi.dim
-              ^ "  VERIFIED opens with Enter. SERIALIZED names a same-turn pre-dispatch snapshot without inventing an item join."
-              ^ Ansi.reset
-            ]
-        , selected )
+        Split { common = [ identity; "  " ^ joined; "" ]; left; right }
       else
         let header =
           [ identity
@@ -15323,60 +15353,67 @@ let context_input_map_lines ~cols state (record : Turn_record.t)
               + min (List.length rows - 1)
                   (max 0 state.context_inspector_cursor))
         in
-        ( header @ body
-          @ [ ""
-            ; Ansi.dim
-              ^ "  Enter opens VERIFIED text. Use 2:request for exact retained items."
-              ^ Ansi.reset
-            ]
-        , selected )
+        Plain
+          ( header @ body
+            @ [ ""
+              ; Ansi.dim
+                ^ "  Enter opens VERIFIED text. Use 2:request for exact retained items."
+                ^ Ansi.reset
+              ]
+          , selected )
 
-(* The pane's rows and, when a tab carries a highlight, the row it sits on.
-   The highlight is reported rather than recomputed by the caller: only this
-   module knows how many header rows a tab draws above its list, and a caller
-   that guessed would scroll to the wrong row every time the header changed. *)
-let context_inspector_content_lines ~cols state =
+(* The pane's rows, in either shape the tabs draw. A plain body carries the
+   line its highlight sits on when it has one, so the window can follow it;
+   only this module knows how many header rows a tab draws above its list,
+   and a caller that guessed would scroll to the wrong row every time the
+   header changed. *)
+let context_inspector_content_lines ~cols state : context_pane_body =
   match state.context_inspector_reading with
   | None ->
-      ( [ (if state.context_inspector_loading then
-             "  Loading provider-input evidence..."
-           else "  No context reading has been requested.")
-        ]
-      , None )
+      Plain
+        ( [ (if state.context_inspector_loading then
+                "  Loading provider-input evidence..."
+              else "  No context reading has been requested.")
+          ]
+        , None )
   | Some (_, reading) ->
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Composition ->
            (match reading.turn with
-            | Ok selection -> (context_composition_lines ~cols selection, None)
+            | Ok selection -> Plain (context_composition_lines ~cols selection, None)
             | Error detail ->
-                ( [ (Theme.bad ()) ^ "  Composition unavailable: "
-                    ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
-                  ]
-                , None ))
+                Plain
+                  ( [ (Theme.bad ()) ^ "  Composition unavailable: "
+                      ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
+                    ]
+                  , None ))
        | Masc_tui_context_inspector.Exact_input ->
            (match reading.provider_input with
             | Ok input -> context_exact_input_lines ~cols state input
             | Error detail ->
-                ( [ (Theme.bad ()) ^ "  Exact input unavailable: "
-                    ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
-                  ]
-                , None ))
+                Plain
+                  ( [ (Theme.bad ()) ^ "  Exact input unavailable: "
+                      ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
+                    ]
+                  , None ))
        | Masc_tui_context_inspector.Input_map ->
            (match reading.turn with
             | Error detail ->
-                ( [ (Theme.bad ()) ^ "  Input map unavailable: "
-                    ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
-                  ]
-                , None )
+                Plain
+                  ( [ (Theme.bad ()) ^ "  Input map unavailable: "
+                      ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
+                    ]
+                  , None )
             | Ok { Masc_tui_context_inspector.attributed = None; _ } ->
                 (* The map is a per-component table; with no attribution there
                    are no rows to draw, and inventing them from the latest
                    turn's totals would state bytes nobody measured. *)
-                ( [ (Theme.bad ())
-                    ^ "  No turn on this page recorded an exact input \
-                       composition" ^ Ansi.reset
-                  ]
-                , None )
+                Plain
+                  ( [ (Theme.bad ())
+                      ^ "  No turn on this page recorded an exact input \
+                         composition" ^ Ansi.reset
+                    ]
+                  , None )
             | Ok { Masc_tui_context_inspector.attributed = Some { record; _ }; _ }
               ->
                 let provider_input =
@@ -15386,11 +15423,38 @@ let context_inspector_content_lines ~cols state =
                 in
                 context_input_map_lines ~cols state record provider_input))
 
+(* The plain body's line count, for the keys that scroll it. *)
 let context_inspector_viewport state =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  ( List.length (fst (context_inspector_content_lines ~cols state))
-  , framed_content_height ~rows )
+  let count =
+    match context_inspector_content_lines ~cols state with
+    | Plain (lines, _) -> List.length lines
+    | Split _ -> 0
+  in
+  (count, framed_content_height ~rows)
+
+(* The rows the two columns of a split body divide, after the common summary
+   above them and the closing blank below. The key handler and the frame both
+   ask this, because keys that step past what the frame can show are the bug
+   this pane was already carrying once. *)
+let context_split_pane_height ~content_height ~common_len =
+  max 1 (content_height - common_len - 1)
+
+(* The split detail column's line count and window height, for the keys that
+   scroll it. *)
+let context_inspector_detail_viewport state =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  match context_inspector_content_lines ~cols state with
+  | Plain _ -> (0, 0)
+  | Split { common; right; _ } ->
+      ( List.length right
+      , context_split_pane_height ~content_height:(framed_content_height ~rows)
+          ~common_len:(List.length common) )
+
+let context_split_window ~height ~offset lines =
+  lines |> List.filteri (fun index _ -> index >= offset && index < offset + height)
 
 let render_context_inspector state =
   let terminal_rows, cols = get_terminal_size () in
@@ -15418,44 +15482,75 @@ let render_context_inspector state =
        ^ "  "
        ^ (tab_label Masc_tui_context_inspector.Input_map "3" "proof"));
   framed_divider buf cols;
-  let lines, selected = context_inspector_content_lines ~cols state in
   let content_height = framed_content_height ~rows in
-  let scroll =
-    Masc_tui_scroll.normalize ~count:(List.length lines)
-      ~height:content_height state.context_inspector_scroll
+  let drawn =
+    match context_inspector_content_lines ~cols state with
+    | Plain (lines, selected) ->
+        let scroll =
+          Masc_tui_scroll.normalize ~count:(List.length lines)
+            ~height:content_height state.context_inspector_scroll
+        in
+        (* The cursor names a row, the window follows it: on the single-column
+           shapes nothing lives under the row, so the smallest move that keeps
+           it drawn is the right one. *)
+        let scroll =
+          match selected with
+          | None -> scroll
+          | Some cursor ->
+              Masc_tui_scroll.normalize ~count:(List.length lines)
+                ~height:content_height
+                (Masc_tui_scroll.ensure_visible ~cursor ~height:content_height scroll)
+        in
+        let window =
+          lines
+          |> List.filteri (fun index _ ->
+               index >= scroll && index < scroll + content_height)
+        in
+        List.iter (framed_line buf cols) window;
+        List.length window
+    | Split { common; left; right } ->
+        List.iter (framed_line buf cols) common;
+        let split_height =
+          context_split_pane_height ~content_height
+            ~common_len:(List.length common)
+        in
+        let items = List.length left - 1 in
+        let cursor =
+          min (max 0 (items - 1)) (max 0 state.context_inspector_cursor)
+        in
+        (* Stateless bottom-pin for the list, as every sidebar window: the
+           detail column owns its scroll, so neither pane drags the other. *)
+        let left_offset =
+          Masc_tui_scroll.ensure_visible ~cursor:(1 + cursor)
+            ~height:split_height 0
+        in
+        let right_offset =
+          Masc_tui_scroll.normalize ~count:(List.length right)
+            ~height:split_height state.context_inspector_detail_scroll
+        in
+        let window =
+          context_split_lines ~cols ~left_width:(context_split_width cols)
+            ~left:(context_split_window ~height:split_height ~offset:left_offset left)
+            ~right:(context_split_window ~height:split_height ~offset:right_offset right)
+        in
+        List.iter (framed_line buf cols) window;
+        List.length common + List.length window
   in
-  (* On the list tabs j/k moves the highlight and nothing moved the window, so
-     a list longer than the pane walked the highlight out of sight and the keys
-     went on working against rows nobody could see. [Masc_tui_scroll] documents
-     this pairing -- the cursor names a row, the window follows it -- and this
-     surface was the one not holding up its end. It follows with
-     [ensure_leading] rather than [ensure_visible]: the split tabs start the
-     detail column on the selected row's own line, so pinning that row to the
-     window's last line held the detail -- the content the tab was opened for
-     -- behind the bottom edge where no key on these tabs scrolls. *)
-  let scroll =
-    match selected with
-    | None -> scroll
-    | Some cursor ->
-        (* The lead is the detail column's header line: the split tabs start
-           that column one line above the selected row. *)
-        Masc_tui_scroll.normalize ~count:(List.length lines)
-          ~height:content_height
-          (Masc_tui_scroll.ensure_leading ~cursor ~lead:1
-             ~height:content_height scroll)
-  in
-  lines
-  |> List.filteri (fun index _ ->
-       index >= scroll && index < scroll + content_height)
-  |> List.iter (framed_line buf cols);
-  for _ = 1 to max 0 (content_height - min content_height (List.length lines - scroll)) do
+  for _ = 1 to max 0 (content_height - drawn) do
     framed_line buf cols ""
   done;
   framed_bottom buf cols;
   let hints =
     match state.context_inspector_exact with
     | Some _ -> "j/k:scroll  Esc:list"
-    | None -> "1/2/3 or Tab:switch  j/k:select  Enter:open exact  r:refresh  Esc:close"
+    | None -> (
+        match
+          state.context_inspector_tab, cols >= keeper_split_threshold_cols
+        with
+        | (Masc_tui_context_inspector.Exact_input | Masc_tui_context_inspector.Input_map), true ->
+            "1/2/3 or Tab:switch  j/k:select or scroll  h/l:pane  Enter:open exact  r:refresh  Esc:close"
+        | _ ->
+            "1/2/3 or Tab:switch  j/k:select  Enter:open exact  r:refresh  Esc:close")
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
   finish_surface state ~surface_key:"context-inspector" ~rows:terminal_rows

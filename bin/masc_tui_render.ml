@@ -9076,12 +9076,7 @@ let fusion_tool_event_lines ~width = function
       ]
       @ fusion_tool_preview_lines ~width ~label:"Output" output
 
-let fusion_tool_trace_lines ~width = function
-  | None ->
-      [ ( Theme.warn ()
-        , "  Trace unavailable: legacy evidence has no actual Tool event ledger" )
-      ]
-  | Some trace ->
+let fusion_tool_trace_lines ~width (trace : Tui_decode.fusion_tool_trace) =
       let coverage =
         if trace.ftt_complete
         then

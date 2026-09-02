@@ -328,7 +328,7 @@ type fusion_evidence = {
   fe_question : string;
   fe_panel : fusion_panel_result list;
   fe_judge : fusion_judge;
-  fe_tool_trace : fusion_tool_trace option;
+  fe_tool_trace : fusion_tool_trace;
 }
 
 type fusion_evidence_status =
@@ -5120,12 +5120,8 @@ let decode_fusion_evidence ~run_id json =
   let* fe_panel = decode_list "panel" decode_fusion_panel_result panel_json in
   let* judge_json = required_object_field meta "judge" in
   let* fe_judge = decode_fusion_judge judge_json in
-  let* tool_trace_json = optional_object_field meta "tool_trace" in
-  let* fe_tool_trace =
-    match tool_trace_json with
-    | Some tool_trace -> Result.map Option.some (decode_fusion_tool_trace tool_trace)
-    | None -> Ok None
-  in
+  let* tool_trace_json = required_object_field meta "tool_trace" in
+  let* fe_tool_trace = decode_fusion_tool_trace tool_trace_json in
   Ok
     { fe_post_id
     ; fe_title

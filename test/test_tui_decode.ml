@@ -3585,16 +3585,15 @@ let test_decode_fusion_actual_tool_trace () =
    | Error detail -> Alcotest.fail detail
    | Ok { Tui_decode.fud_evidence = Some evidence; _ } ->
        (match evidence.fe_tool_trace with
-        | Some
-            { ftt_complete = true
-            ; ftt_observed_actors = [ _ ]
-            ; ftt_dropped_events = 0
-            ; ftt_gaps = []
-            ; ftt_events =
-                [ Tui_decode.Fusion_tool_called called
-                ; Tui_decode.Fusion_tool_completed completed
-                ]
-            } ->
+        | { ftt_complete = true
+          ; ftt_observed_actors = [ _ ]
+          ; ftt_dropped_events = 0
+          ; ftt_gaps = []
+          ; ftt_events =
+              [ Tui_decode.Fusion_tool_called called
+              ; Tui_decode.Fusion_tool_completed completed
+              ]
+          } ->
           Alcotest.(check string) "actual tool name" "masc_web_search"
             called.fte_tool_name;
           Alcotest.(check string) "exact tool input" {|{"query":"x"}|}
@@ -3605,8 +3604,7 @@ let test_decode_fusion_actual_tool_trace () =
                output.ftp_text
            | Tui_decode.Fusion_tool_failed _ ->
              Alcotest.fail "successful Tool completion decoded as failed")
-        | Some _ -> Alcotest.fail "complete Tool ledger shape changed"
-        | None -> Alcotest.fail "current Tool ledger decoded as unavailable")
+        | _ -> Alcotest.fail "complete Tool ledger shape changed")
    | Ok _ -> Alcotest.fail "recorded Fusion evidence disappeared");
   let gap =
     `Assoc
@@ -3624,7 +3622,7 @@ let test_decode_fusion_actual_tool_trace () =
   (match Tui_decode.decode_fusion_detail partial with
    | Ok
        { Tui_decode.fud_evidence =
-           Some { fe_tool_trace = Some { ftt_complete = false; ftt_gaps = [ _ ]; _ }; _ }
+           Some { fe_tool_trace = { ftt_complete = false; ftt_gaps = [ _ ]; _ }; _ }
        ; _
        } -> ()
    | Ok _ -> Alcotest.fail "partial Tool coverage lost its explicit gap"

@@ -121,3 +121,46 @@ Orca(stablyai/orca) 소스를 읽고 대조했다. 수렴 지점:
 | #32327 | batch_size=1 비율 87% → 하락 (프롬프트 개입이라 폭은 모델별로 다를 것) |
 
 미달 시 원인 분석을 이 문서의 r2로 기록한다.
+
+## r2 — 배포 후 첫 창 (2026-09-02 02:17~09:35 KST, 부분)
+
+배포 경계: 서버 재기동 2026-09-02 02:17:06 KST (`main_eio.exe`, cwd 는 repo root, 그 시점 main 은 #32322·#32326·#32327·#32412·#32424 를 모두 포함). 재기동 뒤 첫 keeper 활동은 09:00 KST 부터라 창이 짧다. 462행·59턴은 하루 창(7,515행)의 6% 라서 아래 수치는 방향만 본다. 확정은 r3(하루 창)에서 한다.
+
+측정: `MASC_BASE_PATH=<base-path> scripts/measure-tool-roundtrips.py --date 2026-09-02` (09:35 KST 실행)
+
+| 지표 | r1 (09-01 전일) | r2 (09-02 부분) |
+|---|---:|---:|
+| tool_call 행 / 턴 | 7,515 / 1,459 | 462 / 59 |
+| 낭비된 왕복 | 2,115 (28.1%) | 259 (56.1%) |
+| — fanout | 1,642 | 145 |
+| — duplicate | 292 | 97 |
+| — probing | 181 | 17 |
+| unchanged 직후 동일-인자 재호출 쌍 | 211 | 0 |
+| batch_size=1 비율 | 87.0% | 88.7% |
+| artifact_read: blob / 호출 | 477 / 1,581 | 19 / 58 |
+| artifact_read: 페이지 산수 초과 호출 | 968 | 38 |
+| artifact_read: 65536 미만 명시 조각 | 96.5% | 89.7% |
+
+수정별 판정:
+
+| 수정 | r2 결과 | 판정 |
+|---|---|---|
+| #32322 unchanged 자기모순 | 쌍 0. 그러나 이 창의 `keeper_tasks_list` 8회는 전부 `if_revision` 없음 | 미검증 — unchanged 경로가 한 번도 안 탔다 |
+| #32326 enum 허용값 렌더 | probe 쌍 5, 전부 첫 호출 실패. 실패 원인은 remote_ssh 도달 불가 5, 잘못된 post_id 3, `masc_board_vote` 인자 1 — enum 위반 0 | 미검증 — enum 경로가 안 탔다 |
+| #32327 도구 호출 묶기 | batch_size=1 88.7%, 변화 없음. batch_size 7·8·16 은 전부 한 blob 을 조각내어 병렬로 읽은 것 | 효과 없음(이 창). 조각 병렬은 이 프롬프트 탓이 아니다 — 아래 |
+| #32412 artifact_read 설명 | polisher(deepseek flash): blob 4개 전부 1회 통째 읽기(eof=true). analyst(같은 lane): blob 1개에 25회. code-reviewer(sonnet-4-6): blob 5개에 27회 | lane 이 아니라 턴/keeper 단위로 갈린다 — 아래 |
+
+초과 호출 38회의 실체 (raw trace 판독):
+
+- analyst 24회: 기본값 호출이 64,674B 를 통째로 돌려줬는데, 모델이 그것을 "nested blob" 으로 오독하고 지어낸 sha 를 읽으려다 실패한 뒤, "인라인 한계" 라는 거짓 이론으로 30000→6000→2000→512 를 탐색하고 512B 조각 7개를 병렬로 읽었다. 첫 페이지 65,537B 에는 blob 마커도 그 sha 도 없다. → [#32451](https://github.com/jeong-sik/masc/issues/32451)
+- code-reviewer 14회: 9,766B blob 을 650B × 16 병렬 조각으로 읽었다. 같은 keeper 가 04:24 KST 턴에서 984,852B WebFetch 전문 artifact 를 650B 간격 탐침으로 알파벳 스캔하던 방식(`test_bash*` 존재 여부 찾기)을 작은 blob 에도 그대로 썼다. 9-01 에도 00~08시에 시간당 100~224회, batch>1 96~100% 로 있었으니 #32327(19:45 KST 머지)보다 앞선다. 근본은 blob 안을 검색할 도구가 없다는 것. → [#32449](https://github.com/jeong-sik/masc/issues/32449)
+
+즉 r1 의 968회는 두 keeper 의 두 가지 행동이 대부분이고, 설명 문구는 polisher 처럼 "설명대로 하는" 턴에만 닿는다. r1 에서 code-reviewer 한 keeper 가 artifact_read 2,288회(76%)였다.
+
+새로 보인 것:
+
+- duplicate 97 중 89가 `keeper_time_now`. edgar.a.poe 가 할 일 없는 자율 턴에서 다음 scheduled wake 까지 5초마다 시계를 폴링한다(한 턴 306회·29분, 9-01 에도 턴당 150~327회). → [#32452](https://github.com/jeong-sik/masc/issues/32452)
+- fanout 145 중 90이 `atlassian_searchJiraIssuesUsingJql`(kidsnote-pr-jira-checker, 110회 전부 batch_size=1). 다른 keeper, 다른 원인이라 기록만 한다.
+- 실패 호출 중 post_id 가 깨진 것 2건(`p-d threshold-placeholder`, `…b043b sha256=`) — #32451 과 같은 부류(긴 id 복사 오류).
+
+r3 계획: 2026-09-03 하루 창에서 같은 명령. 판정은 keeper 별로 나눠서 본다(artifact paging 초과를 keeper 단위로 내도록 meter 보강이 먼저).

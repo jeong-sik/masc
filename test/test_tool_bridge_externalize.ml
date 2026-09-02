@@ -15,6 +15,26 @@
 module B = Masc.Tool_bridge
 module O = Tool_output
 
+(* The failure sentences the bridge appends are prompt assets under
+   config/prompts; load the real directory so these tests read what a Keeper
+   reads, not a fixture that could drift from it. *)
+let prompt_dir () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> Filename.concat root "config/prompts"
+  | None -> Filename.concat (Sys.getcwd ()) "config/prompts"
+;;
+
+let () =
+  Prompt_registry.set_markdown_dir (prompt_dir ());
+  Masc.Prompt_defaults.init ()
+;;
+
+let runtime_failure_next_move =
+  "The tool failed inside the runtime, not on your arguments. Identical \
+   arguments reproduce it unless the message says the outcome is unknown. \
+   Report it as a runtime failure in your answer."
+;;
+
 let externalize_exn ?base_path value =
   match B.maybe_externalize ?base_path value with
   | Ok output -> output
@@ -232,7 +252,10 @@ let test_to_agent_core_typed_error_inlined () =
   match B.to_agent_core_typed_result (tool_error ~tool_name:"test" "fail") with
   | Ok _ -> Alcotest.fail "expected Error"
   | Error { message; recoverable; _ } ->
-      Alcotest.(check string) "message" "fail" message;
+      Alcotest.(check string)
+        "message, then the class and what to do next"
+        ("fail\nfailure_class=runtime_failure — " ^ runtime_failure_next_move)
+        message;
       Alcotest.(check bool) "default recoverable=false" false recoverable
 
 let test_to_agent_core_typed_error_ignores_json_metadata () =
@@ -252,7 +275,10 @@ let test_to_agent_core_typed_error_ignores_json_metadata () =
   match B.to_agent_core_typed_result tr with
   | Ok _ -> Alcotest.fail "expected Error"
   | Error { message; recoverable; error_class } ->
-      Alcotest.(check string) "message" msg message;
+      Alcotest.(check string)
+        "free-form JSON stays the message; the class line follows it"
+        (msg ^ "\nfailure_class=runtime_failure — " ^ runtime_failure_next_move)
+        message;
       Alcotest.(check bool) "runtime failure stays non-recoverable" false recoverable;
       (match error_class with
        | Some Agent_core.Types.Unknown -> ()
@@ -281,6 +307,14 @@ let test_to_agent_core_typed_error_preserves_explicit_metadata () =
       "failed disposition is explicit"
       "failed"
       (payload |> member "masc.tool_disposition" |> to_string);
+    Alcotest.(check string)
+      "the typed class is a field of the envelope"
+      "runtime_failure"
+      (payload |> member "failure_class" |> to_string);
+    Alcotest.(check string)
+      "and so is what to do next"
+      runtime_failure_next_move
+      (payload |> member "next_move" |> to_string);
     Alcotest.(check string)
       "Gate metadata reaches the provider error"
       "allow"
@@ -321,6 +355,72 @@ let test_to_agent_core_dependency_failure_carries_no_replay_hint () =
     (match error_class with
      | Some Agent_core.Types.Transient -> ()
      | _ -> Alcotest.fail "expected transient diagnostic class")
+
+(* Every class has exactly one sentence, and it reaches the model as the last
+   line of the failure content. The sentences are pinned here because they are
+   the whole point: a Keeper that sees [dependency_unavailable] and reads that
+   other arguments fail the same way stops probing; one that sees
+   [policy_rejection] corrects the named field once. *)
+let expected_next_moves =
+  [ ( Tool_result.Dependency_unavailable
+    , "dependency_unavailable"
+    , "The dependency this tool needs did not answer. Your arguments were not \
+       judged, so the same call with other arguments fails the same way. Do \
+       other work or end the turn; it can answer on a later turn." )
+  ; ( Tool_result.Policy_rejection
+    , "policy_rejection"
+    , "Rejected before running. The message above names the field or \
+       permission that failed. A call with that field corrected can succeed; a \
+       missing permission does not change with different arguments." )
+  ; (Tool_result.Runtime_failure, "runtime_failure", runtime_failure_next_move)
+  ; ( Tool_result.Workflow_rejection
+    , "workflow_rejection"
+    , "The current state does not admit this action; it is a rule, not a \
+       syntax problem. Read the current state first. The same call succeeds \
+       only after the state changes." )
+  ; ( Tool_result.Operator_cancelled
+    , "operator_cancelled"
+    , "An operator stopped this call. It is not re-issued. Say where it \
+       stopped in your answer." )
+  ]
+;;
+
+let test_failure_class_reaches_the_model () =
+  List.iter
+    (fun (class_, name, sentence) ->
+       Alcotest.(check (option string))
+         (name ^ " has its sentence")
+         (Some sentence)
+         (B.failure_next_move class_);
+       let plain =
+         Tool_result.error ~failure_class:class_ ~tool_name:"t" ~start_time:0.0 "boom"
+       in
+       (match B.to_agent_core_typed_result plain with
+        | Ok _ -> Alcotest.fail "expected Error"
+        | Error { message; _ } ->
+          Alcotest.(check string)
+            (name ^ " plain content")
+            ("boom\nfailure_class=" ^ name ^ " — " ^ sentence)
+            message);
+       let with_metadata =
+         Tool_result.make_err
+           ~tool_name:"t"
+           ~class_
+           ~start_time:0.0
+           ~metadata:(`Assoc [ "k", `String "v" ])
+           "boom"
+       in
+       match B.to_agent_core_typed_result with_metadata with
+       | Ok _ -> Alcotest.fail "expected Error"
+       | Error { message; _ } ->
+         let open Yojson.Safe.Util in
+         let payload = Yojson.Safe.from_string message in
+         Alcotest.(check string) (name ^ " envelope class") name
+           (payload |> member "failure_class" |> to_string);
+         Alcotest.(check string) (name ^ " envelope next move") sentence
+           (payload |> member "next_move" |> to_string))
+    expected_next_moves
+;;
 
 let test_round_trip_through_agent_core () =
   let payload = "inline payload" in
@@ -554,6 +654,8 @@ let () =
             test_to_agent_core_typed_result_preserves_workflow_rejection;
           Alcotest.test_case "dependency failure carries no replay hint" `Quick
             test_to_agent_core_dependency_failure_carries_no_replay_hint;
+          Alcotest.test_case "failure class reaches the model" `Quick
+            test_failure_class_reaches_the_model;
           Alcotest.test_case "round-trip through AGENT_CORE" `Quick
             test_round_trip_through_agent_core;
           Alcotest.test_case "execution env preserves exact invocation" `Quick

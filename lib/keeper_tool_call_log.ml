@@ -727,6 +727,15 @@ let log_call
             , Agent_core.Tool_contract.execution_mode_to_yojson value ) ]
         | None -> []
       in
+      (* The typed class rides on the row so a failed call can be split by
+         what failed (dependency, policy, runtime, workflow, operator) without
+         reading its prose; absent on completed and deferred rows. *)
+      let failure_class_field result =
+        match Tool_result.failure_class result with
+        | Some class_ ->
+          [ "failure_class", `String (Tool_result.tool_failure_class_to_string class_) ]
+        | None -> []
+      in
       let typed_result_fields =
         match typed_result with
         | Some result ->
@@ -734,6 +743,7 @@ let log_call
             normalized_artifact_refs_in_typed_data (Tool_result.data result)
           in
           [ "disposition", `String (Tool_result.string_of_disposition result) ]
+          @ failure_class_field result
           @ (if artifact_refs = []
              then []
              else [ "artifact_refs", `List artifact_refs ])
@@ -746,6 +756,7 @@ let log_call
           (match disposition with
            | Some d ->
              [ "disposition", `String (Tool_result.string_of_disposition d) ]
+             @ failure_class_field d
            | None -> [])
       in
       let file_change_evidence_field =

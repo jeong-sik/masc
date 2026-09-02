@@ -170,6 +170,127 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             self.assertIn('"sandbox_profile": self.sandbox_profile', source)
             self.assertNotIn('"local"', source)
 
+    def test_every_keeper_up_is_followed_by_the_unattended_stance(self):
+        module_source = SCRIPT_PATH.read_text(encoding="utf-8")
+        keeper_up_calls = module_source.count('"masc_keeper_up"')
+        self.assertEqual(keeper_up_calls, 2)
+        self.assertEqual(module_source.count("self.declare_unattended("), keeper_up_calls)
+        for method, declare in (
+            (acceptance.MissionRun.create_fleet, "self.declare_unattended(role)"),
+            (
+                acceptance.MissionRun.restart_and_recall,
+                'self.declare_unattended("coordinator")',
+            ),
+        ):
+            source = inspect.getsource(method)
+            self.assertLess(source.index('"masc_keeper_up"'), source.index(declare))
+
+    def test_unattended_stance_pins_the_server_route_and_mode(self):
+        dashboard = (
+            REPO_ROOT / "lib" / "server" / "server_routes_http_routes_dashboard.ml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            f'Http.Router.post "{acceptance.TOOL_APPROVAL_MODE_ROUTE}"', dashboard
+        )
+        mode_source = (
+            REPO_ROOT / "lib" / "keeper" / "keeper_tool_approval_mode.ml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(f'| "{acceptance.TOOL_APPROVAL_MODE_UNATTENDED}" ->', mode_source)
+        self.assertEqual(
+            acceptance.default_tool_approval_mode_url("http://127.0.0.1:9418/mcp"),
+            "http://127.0.0.1:9418/api/v1/keepers/tool-approval-mode",
+        )
+
+    def test_set_tool_approval_mode_posts_the_stance_and_fails_closed(self):
+        seen = {}
+        url = "http://h/api/v1/keepers/tool-approval-mode"
+
+        class Response:
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return self.body
+
+        def fake_urlopen(request, timeout):
+            seen["method"] = request.get_method()
+            seen["auth"] = request.get_header("Authorization")
+            seen["body"] = json.loads(request.data.decode("utf-8"))
+            return Response(seen["reply"])
+
+        with unittest.mock.patch.object(acceptance.urllib.request, "urlopen", fake_urlopen):
+            seen["reply"] = b'{"keeper":"rw-x-build-a","mode":"yolo"}'
+            echo = acceptance.set_tool_approval_mode(
+                url, "tok", 5.0, keeper="rw-x-build-a", mode="yolo"
+            )
+            self.assertEqual(echo, {"keeper": "rw-x-build-a", "mode": "yolo"})
+            self.assertEqual(seen["method"], "POST")
+            self.assertEqual(seen["auth"], "Bearer tok")
+            self.assertEqual(seen["body"], {"name": "rw-x-build-a", "mode": "yolo"})
+            seen["reply"] = b'{"keeper":"rw-x-build-a","mode":"auto"}'
+            with self.assertRaisesRegex(acceptance.AcceptanceError, "echo mismatch"):
+                acceptance.set_tool_approval_mode(
+                    url, "tok", 5.0, keeper="rw-x-build-a", mode="yolo"
+                )
+
+        def forbidden(request, timeout):
+            raise acceptance.urllib.error.HTTPError(
+                request.full_url, 403, "Forbidden", {}, io.BytesIO(b"admin tier required")
+            )
+
+        with unittest.mock.patch.object(acceptance.urllib.request, "urlopen", forbidden):
+            with self.assertRaisesRegex(acceptance.AcceptanceError, "HTTP 403"):
+                acceptance.set_tool_approval_mode(
+                    url, "tok", 5.0, keeper="rw-x-build-a", mode="yolo"
+                )
+
+    def test_declare_unattended_records_the_echo_per_role(self):
+        written = {}
+
+        class Writer:
+            def write_json(self, name, payload):
+                written[name] = payload
+
+        class Stub:
+            roles = {"builder-a": "rw-x-build-a"}
+            endpoint = "http://127.0.0.1:9418/mcp"
+            token = "tok"
+            timeout = 5.0
+            writer = Writer()
+            tool_approval_modes = {}
+
+        calls = []
+
+        def fake_set(url, token, timeout, *, keeper, mode):
+            calls.append((url, token, timeout, keeper, mode))
+            return {"keeper": keeper, "mode": mode}
+
+        with unittest.mock.patch.object(acceptance, "set_tool_approval_mode", fake_set):
+            acceptance.MissionRun.declare_unattended(Stub(), "builder-a")
+        self.assertEqual(
+            calls,
+            [
+                (
+                    "http://127.0.0.1:9418/api/v1/keepers/tool-approval-mode",
+                    "tok",
+                    5.0,
+                    "rw-x-build-a",
+                    "yolo",
+                )
+            ],
+        )
+        self.assertEqual(Stub.tool_approval_modes, {"builder-a": "yolo"})
+        self.assertEqual(
+            written["observations/tool-approval-mode-builder-a.json"],
+            {"keeper": "rw-x-build-a", "mode": "yolo"},
+        )
+
     def test_run_refuses_to_start_without_a_sandbox_profile(self):
         with unittest.mock.patch.object(sys, "argv", ["acceptance", "--run"]):
             with contextlib.redirect_stderr(io.StringIO()) as stderr:

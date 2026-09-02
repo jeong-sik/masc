@@ -826,7 +826,6 @@ let metrics_common_fields ~kind ~channel =
   ; "ts_unix", `Float 1787313600.0
   ; "channel", `String channel
   ; "name", `String "keeper-main"
-  ; "agent_name", `String "codex"
   ; "trace_id", `String "trace-current"
   ]
 

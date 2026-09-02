@@ -889,6 +889,71 @@ let schedule_live_supported_non_terminal_evidence_json schedules =
     ]
 ;;
 
+(* Retained wake outcomes across the selected schedules. [counts] describes
+   definitions: a schedule that is Scheduled today says nothing about the 27
+   attempts that failed behind it the day before, and the fleet page carried
+   only the newest attempt of twenty rows. These numbers read every retained
+   wake in the store, so a burst of failures survives its own retry. The
+   store's retention ceiling travels with them: 32 per schedule is a window,
+   not a history. [active_with_failed_newest_wake] is the actionable one --
+   a live definition whose latest attempt did not land. *)
+let schedule_wake_counts_json
+      (schedules : Schedule_domain.schedule_request list)
+      (state : Schedule_store.state)
+  =
+  let selected = Hashtbl.create 64 in
+  List.iter
+    (fun (request : Schedule_domain.schedule_request) ->
+       Hashtbl.replace selected request.schedule_id ())
+    schedules;
+  let retained, running, succeeded, failed =
+    List.fold_left
+      (fun (retained, running, succeeded, failed)
+        (wake : Schedule_domain.wake_record) ->
+         if Hashtbl.mem selected wake.schedule_id
+         then (
+           match wake.status with
+           | Schedule_domain.Wake_running ->
+             retained + 1, running + 1, succeeded, failed
+           | Schedule_domain.Wake_succeeded ->
+             retained + 1, running, succeeded + 1, failed
+           | Schedule_domain.Wake_failed ->
+             retained + 1, running, succeeded, failed + 1)
+         else retained, running, succeeded, failed)
+      (0, 0, 0, 0)
+      state.wakes
+  in
+  let active_with_failed_newest_wake =
+    List.fold_left
+      (fun count (request : Schedule_domain.schedule_request) ->
+         if not (schedule_request_active request)
+         then count
+         else (
+           match
+             Schedule_store.last_wake_for_schedule_instance
+               state
+               ~schedule_instance_id:request.schedule_instance_id
+               ~schedule_id:request.schedule_id
+           with
+           | Some { Schedule_domain.status = Schedule_domain.Wake_failed; _ } ->
+             count + 1
+           | Some { status = Schedule_domain.Wake_running | Schedule_domain.Wake_succeeded; _ }
+           | None ->
+             count))
+      0
+      schedules
+  in
+  `Assoc
+    [ "retained", `Int retained
+    ; "running", `Int running
+    ; "succeeded", `Int succeeded
+    ; "failed", `Int failed
+    ; "active_with_failed_newest_wake", `Int active_with_failed_newest_wake
+    ; ( "retention_per_schedule"
+      , `Int Schedule_store.terminal_wakes_retained_per_schedule )
+    ]
+;;
+
 let schedule_request_rows_dashboard_json ~config ~now state request_rows =
   let request_rows_with_wakes =
     List.map
@@ -996,6 +1061,7 @@ let scheduled_automation_dashboard_json
          ; "request_limit", `Int schedule_projection_request_limit
          ; "truncated", `Bool false
          ; "counts", `Null
+         ; "wake_counts", `Null
          ; "payload_support", `Null
          ; "live_supported_non_terminal_evidence", `Null
          ; ( "fsm"
@@ -1043,6 +1109,7 @@ let scheduled_automation_dashboard_json
          ; "request_limit", `Int request_limit
          ; "truncated", `Bool (List.length schedules > request_limit)
          ; "counts", schedule_counts_json schedules
+         ; "wake_counts", schedule_wake_counts_json schedules state
          ; "payload_support", payload_support
          ; ( "live_supported_non_terminal_evidence"
            , schedule_live_supported_non_terminal_evidence_json schedules )

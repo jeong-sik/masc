@@ -1678,6 +1678,97 @@ let test_schedule_page_can_be_scoped_to_one_target () =
     (missing |> member "status" |> to_string);
   check int "with nothing in it" 0 (missing |> member "request_count" |> to_int)
 
+(* [counts] describes definitions and the page carries only the newest wake of
+   twenty rows, so a burst of failed attempts that a later tick retried to
+   success was readable nowhere on the fleet page. The wake counts read every
+   retained wake, scoped the same way as the rows. *)
+let test_schedule_page_counts_retained_wakes () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let actor id =
+    { Schedule_domain.id
+    ; kind = Schedule_domain.Human_operator
+    ; display_name = None
+    }
+  in
+  let insert ~schedule_id ~keeper =
+    let payload =
+      `Assoc
+        [ "kind", `String "masc.keeper_wake"
+        ; ( "body"
+          , `Assoc
+              [ "keeper_name", `String keeper
+              ; "message", `String "wake for the wake counts test"
+              ] )
+        ]
+    in
+    match
+      Schedule_domain.create_request
+        ~schedule_id
+        ~requested_by:(actor "requester")
+        ~scheduled_by:(actor "scheduler")
+        ~requested_at:100.0
+        ~due_at:200.0
+        ~payload
+        ~source:Schedule_domain.Operator_request
+        ()
+    with
+    | Ok request ->
+      (match Schedule_store.insert_request config request with
+       | Ok _ -> ()
+       | Error _ -> fail ("could not insert " ^ schedule_id))
+    | Error msg -> fail msg
+  in
+  let store_ok label = function
+    | Ok _ -> ()
+    | Error err -> fail (label ^ ": " ^ Schedule_store.store_error_to_string err)
+  in
+  insert ~schedule_id:"sched-wakes-retried" ~keeper:"alpha";
+  insert ~schedule_id:"sched-wakes-accepted" ~keeper:"beta";
+  insert ~schedule_id:"sched-wakes-never" ~keeper:"beta";
+  store_ok "refresh" (Schedule_store.refresh_due config ~now:201.0);
+  (* alpha: the attempt failed retryably, so the definition is still live
+     (Due) and its newest wake is Failed. *)
+  store_ok "start alpha"
+    (Schedule_store.start_due_candidate config ~now:201.0
+       ~schedule_id:"sched-wakes-retried");
+  store_ok "retry alpha"
+    (Schedule_store.retry_running config ~now:202.0
+       ~schedule_id:"sched-wakes-retried"
+       ~reason:(Schedule_store.Retryable_dispatch_failure "keeper store unavailable"));
+  (* beta: accepted, so the one-shot definition is Succeeded with a Succeeded wake. *)
+  store_ok "start beta"
+    (Schedule_store.start_due_candidate config ~now:201.0
+       ~schedule_id:"sched-wakes-accepted");
+  store_ok "accept beta"
+    (Schedule_store.accept_running config ~now:202.0
+       ~schedule_id:"sched-wakes-accepted" ());
+  let open Yojson.Safe.Util in
+  let fleet =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+  in
+  let counts = fleet |> member "wake_counts" in
+  check int "every retained wake is counted" 2 (counts |> member "retained" |> to_int);
+  check int "the failed attempt is counted" 1 (counts |> member "failed" |> to_int);
+  check int "the accepted attempt is counted" 1 (counts |> member "succeeded" |> to_int);
+  check int "nothing is mid-dispatch" 0 (counts |> member "running" |> to_int);
+  check int "one live definition's newest wake failed" 1
+    (counts |> member "active_with_failed_newest_wake" |> to_int);
+  check int "the ceiling travels with the numbers"
+    Schedule_store.terminal_wakes_retained_per_schedule
+    (counts |> member "retention_per_schedule" |> to_int);
+  let scoped =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~payload_target:"keeper:beta"
+      config
+  in
+  let scoped_counts = scoped |> member "wake_counts" in
+  check int "a scoped page counts only its target's wakes" 1
+    (scoped_counts |> member "retained" |> to_int);
+  check int "and none of the other target's failures" 0
+    (scoped_counts |> member "failed" |> to_int);
+  check int "beta's live definition has no failed newest wake" 0
+    (scoped_counts |> member "active_with_failed_newest_wake" |> to_int)
+
 (* The window selects which rows the scan covers, so two windows must not share
    an entry. Seeding only the 24 h key and asking for 1 h has to miss. *)
 let test_agent_activity_keys_on_its_window () =
@@ -4577,6 +4668,8 @@ let () =
             test_schedule_exact_lookup_carries_the_wake_history;
           test_case "schedule page can be scoped to one target" `Quick
             test_schedule_page_can_be_scoped_to_one_target;
+          test_case "schedule page counts retained wakes" `Quick
+            test_schedule_page_counts_retained_wakes;
           test_case "schedule exact lookup names a blank id" `Quick
             test_schedule_exact_lookup_rejects_blank_id;
           test_case "agent-activity keys on its window" `Quick

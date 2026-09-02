@@ -20,6 +20,13 @@ type keeper_wake_activation_deferred_reason =
   | Keeper_wake_activation_proactive_disabled
   | Keeper_wake_activation_shutdown_fenced of Keeper_shutdown_types.Operation_id.t
   | Keeper_wake_activation_owner_unknown of string
+      (** The owner could not be read: the metadata store or the owner
+          registry did not answer. The string is that failure. *)
+  | Keeper_wake_activation_owner_absent
+      (** The metadata store answered and holds no Keeper under this name.
+          Wire reason [owner_absent], no detail. The durable stimulus is kept
+          and the queue drain cancels it as owner-absent; nothing changes
+          until an operator registers the name. *)
   | Keeper_wake_activation_unregistered
   | Keeper_wake_activation_not_running of Keeper_state_machine.phase
 

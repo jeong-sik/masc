@@ -3340,6 +3340,16 @@
  (libraries alcotest masc_tui_context_bars))
 
 (test
+ (name test_tui_retained_view)
+ (modules test_tui_retained_view)
+ (libraries
+  alcotest
+  yojson
+  masc
+  masc.agent_core
+  masc_tui_retained_view))
+
+(test
  (name test_tui_server_lifecycle)
  (modules test_tui_server_lifecycle)
  (libraries alcotest masc_tui_server_lifecycle masc.masc_process unix))

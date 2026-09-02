@@ -379,6 +379,12 @@
  (modules masc_tui_scroll))
 
 (library
+ (name masc_tui_retained_view)
+ (wrapped false)
+ (modules masc_tui_retained_view)
+ (libraries yojson masc masc.agent_core))
+
+(library
  (name masc_tui_frame)
  (wrapped false)
  (modules masc_tui_frame))

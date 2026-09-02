@@ -1598,12 +1598,11 @@ let test_deliberation_evidence_roundtrip () =
     ; judges = []
     ; judge_usage = { input_tokens = 11; output_tokens = 7 }
     ; tool_trace =
-        Some
-          { observed_actors = [ actor ]
-          ; events = [ Tool_called called ]
-          ; dropped_events = 0
-          ; gaps = []
-          }
+        { observed_actors = [ actor ]
+        ; events = [ Tool_called called ]
+        ; dropped_events = 0
+        ; gaps = []
+        }
     }
   in
   let encoded = Fusion_types.deliberation_evidence_to_yojson evidence in
@@ -1613,17 +1612,7 @@ let test_deliberation_evidence_roundtrip () =
       "typed evidence is lossless"
       true
       (Fusion_types.equal_deliberation_evidence evidence decoded)
-  | Error detail -> Alcotest.fail detail);
-  let legacy =
-    match encoded with
-    | `Assoc fields ->
-      `Assoc (List.filter (fun (key, _) -> not (String.equal key "tool_trace")) fields)
-    | _ -> Alcotest.fail "deliberation evidence must encode as an object"
-  in
-  match Fusion_types.deliberation_evidence_of_yojson legacy with
-  | Ok { tool_trace = None; _ } -> ()
-  | Ok _ -> Alcotest.fail "legacy evidence fabricated a tool trace"
-  | Error detail -> Alcotest.failf "legacy evidence failed to decode: %s" detail
+  | Error detail -> Alcotest.fail detail)
 ;;
 
 let test_tool_trace_merge_caps_with_explicit_drops () =

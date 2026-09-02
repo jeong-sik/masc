@@ -514,7 +514,7 @@ let delivery_key_of_run_id run_id =
 ;;
 
 let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges
-      ~judge_usage ~(tool_trace : Fusion_types.tool_trace option) :
+      ~judge_usage ~(tool_trace : Fusion_types.tool_trace) :
     (unit, string) result =
   let ( let* ) = Result.bind in
   let* delivery_key = delivery_key_of_run_id run_id in
@@ -576,11 +576,7 @@ let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~j
         Printf.sprintf "Fusion deliberation (run %s) failed — %s" run_id
           (render_failure f)
     in
-    let tool_trace_fields =
-      match tool_trace with
-      | Some trace -> [ "tool_trace", tool_trace_meta trace ]
-      | None -> []
-    in
+    let tool_trace_fields = [ "tool_trace", tool_trace_meta tool_trace ] in
     let meta_json =
       Some
         (`Assoc

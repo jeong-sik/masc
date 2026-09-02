@@ -381,9 +381,9 @@ type deliberation_evidence =
   ; judge : (judge_synthesis, judge_failure) result
   ; judges : judge_outcome list
   ; judge_usage : usage
-  ; tool_trace : tool_trace option
-      (** [None] is legacy/unavailable evidence. [Some] with no events, drops,
-          or gaps proves that the instrumented actors made no tool calls. *)
+  ; tool_trace : tool_trace
+      (** An empty ledger — no events, drops, or gaps — proves that the
+          instrumented actors made no tool calls. *)
   }
 [@@deriving yojson, show, eq]
 

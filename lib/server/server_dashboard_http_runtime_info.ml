@@ -2459,13 +2459,13 @@ let light_runtime_resolution_json (config : Workspace.config) =
    cache because due/pending state is operationally time-sensitive. *)
 let dashboard_tools_cache_ttl_sec = 30.0
 
-let dashboard_tools_cache_key ~base_path ~keeper =
-  Printf.sprintf
-    "tools:%s:%s"
-    base_path
-    (Option.value ~default:"registered-catalog-only" keeper)
+(* The cache holds only what is the same for every viewer: the inventory,
+   the usage summary, the resolutions. What is about one Keeper -- its
+   effective surface, its skill activations -- is answered live per request
+   below, so the key names the workspace alone. *)
+let dashboard_tools_cache_key ~base_path = Printf.sprintf "tools:%s" base_path
 
-let dashboard_tools_warming_json ~keeper =
+let dashboard_tools_warming_json () =
   `Assoc
     [ "generated_at", `String (Masc_domain.now_iso ())
     ; "status", `String "warming"
@@ -2493,14 +2493,6 @@ let dashboard_tools_warming_json ~keeper =
           ; "stale_reason", `String "warming"
           ; "actor", `String "dashboard"
           ] )
-    ; ( "effective_keeper_surface"
-      , match keeper with
-        | None -> `Null
-        | Some keeper_name ->
-          `Assoc
-            [ "status", `String "warming"
-            ; "keeper_name", `String keeper_name
-            ] )
     ]
 ;;
 
@@ -2517,12 +2509,10 @@ let dashboard_tools_http_json ?keeper ?timing (config : Workspace.config) : Yojs
     | None -> f ()
     | Some t -> Server_timing.measure t phase f
   in
-  let cache_key =
-    dashboard_tools_cache_key ~base_path:config.base_path ~keeper
-  in
+  let cache_key = dashboard_tools_cache_key ~base_path:config.base_path in
   Dashboard_cache.seed_stale_if_missing cache_key
     ~stale_for:dashboard_tools_cache_ttl_sec
-    (dashboard_tools_warming_json ~keeper);
+    (dashboard_tools_warming_json ());
   let compute () =
     let config_resolution =
       run Projection_config_resolution (fun () ->
@@ -2543,6 +2533,23 @@ let dashboard_tools_http_json ?keeper ?timing (config : Workspace.config) : Yojs
         |> Tool_usage_log.attach_source_metadata
              ~masc_root:(Workspace.masc_root_dir config))
     in
+    `Assoc
+      [ "generated_at", `String (Masc_domain.now_iso ())
+      ; "config_resolution", config_resolution
+      ; "runtime_resolution", runtime_resolution
+      ; "tool_inventory", inventory
+      ; "tool_usage", usage
+      ]
+  in
+  let attach_live_tools_projections json =
+    let keeper_waiting_inventory =
+      run Tools_compute (fun () -> Server_keeper_waiting_inventory.dashboard_json config)
+    in
+    (* Resolved on every request, never from the cache: a Keeper whose
+       metadata does not exist answers [keeper_not_found] here, where the
+       cold-cache placeholder used to answer "warming" for it -- a keeper
+       taken down by an admin shutdown looked, to every single read, like
+       one the server had not looked at yet. *)
     let effective_keeper_surface =
       match keeper with
       | None -> `Null
@@ -2550,19 +2557,6 @@ let dashboard_tools_http_json ?keeper ?timing (config : Workspace.config) : Yojs
         run Tools_compute (fun () ->
           Keeper_effective_tool_surface.resolve ~config ~keeper_name
           |> Keeper_effective_tool_surface.to_yojson)
-    in
-    `Assoc
-      [ "generated_at", `String (Masc_domain.now_iso ())
-      ; "config_resolution", config_resolution
-      ; "runtime_resolution", runtime_resolution
-      ; "tool_inventory", inventory
-      ; "effective_keeper_surface", effective_keeper_surface
-      ; "tool_usage", usage
-      ]
-  in
-  let attach_live_tools_projections json =
-    let keeper_waiting_inventory =
-      run Tools_compute (fun () -> Server_keeper_waiting_inventory.dashboard_json config)
     in
     let skill_activations =
       match keeper with
@@ -2576,7 +2570,8 @@ let dashboard_tools_http_json ?keeper ?timing (config : Workspace.config) : Yojs
     | `Assoc fields ->
       `Assoc
         (fields
-         @ [ "keeper_waiting_inventory", keeper_waiting_inventory
+         @ [ "effective_keeper_surface", effective_keeper_surface
+           ; "keeper_waiting_inventory", keeper_waiting_inventory
            ; "skill_activations", skill_activations
            ])
     | other -> other

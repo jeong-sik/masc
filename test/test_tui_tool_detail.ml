@@ -6,24 +6,47 @@ module Tool_detail = Masc_tui_tool_detail
    long JSON line left the tree after the label and the terminal wrapped the
    rest at column zero, so every wrapped row lost its branch glyph. Serving
    the document one member per line puts those rows back inside the branch
-   that owns them. *)
+   that owns them. The payload is the shape that produced the defect -- a
+   deferred Execute envelope -- because the pretty printer lays a document out
+   by width, so a toy object proves nothing about the one that broke. *)
+let deferred_envelope =
+  {|{"message":"External effect deferred without blocking this Keeper. \
+Continue other work; the originating Keeper will wake after resolution.",\
+"operation":"tool_execute","gate":{"decision":"deferred",\
+"approval_id":"appr_01a06166-73d6-7000-a99c-64ccb25b8ea8",\
+"reason":"judge_requested"},"audit_receipts":[],\
+"context":{"typed":true,"cmd":"gh auth status"}}|}
+;;
+
 let test_json_payload_becomes_indented_rows () =
-  let payload = {|{"argv":["gh","auth","status"],"cwd":"."}|} in
-  let rendered = Tool_detail.tree [ "input", Tool_detail.structured payload ] in
-  check bool "more than one row" true (List.length rendered > 1);
-  (match rendered with
-   | [] -> fail "expected rows"
-   | first :: rest ->
-     check bool "label owns the opening brace" true
-       (String.length first > 0
-        && Option.is_some (String.index_opt first '{'));
-     List.iter
-       (fun row ->
-         check bool
-           (Printf.sprintf "continuation row is indented: %S" row)
-           true
-           (String.length row >= 5 && String.equal (String.sub row 0 5) "     "))
-       rest)
+  let rendered =
+    Tool_detail.tree [ "output", Tool_detail.structured deferred_envelope ]
+  in
+  check bool "the envelope no longer arrives as one row" true
+    (List.length rendered > 1);
+  match rendered with
+  | [] -> fail "expected rows"
+  | first :: rest ->
+    check bool "the label owns the opening brace" true
+      (Option.is_some (String.index_opt first '{'));
+    List.iter
+      (fun row ->
+        check bool
+          (Printf.sprintf "continuation row stays inside the branch: %S" row)
+          true
+          (String.length row >= 5 && String.equal (String.sub row 0 5) "     "))
+      rest
+;;
+
+(* A document short enough to read at a glance is left on one line. The
+   pretty printer decides that by width, and a row that already fits is not
+   improved by being spread over four. *)
+let test_short_json_payload_stays_on_one_line () =
+  let rendered =
+    Tool_detail.tree
+      [ "input", Tool_detail.structured {|{"argv":["gh","auth","status"]}|} ]
+  in
+  check int "one row" 1 (List.length rendered)
 ;;
 
 (* A payload that is not a JSON document is already in its best shape. Parsing
@@ -102,6 +125,8 @@ let () =
     [ ( "structured"
       , [ test_case "json payload becomes indented rows" `Quick
             test_json_payload_becomes_indented_rows
+        ; test_case "short json payload stays on one line" `Quick
+            test_short_json_payload_stays_on_one_line
         ; test_case "non-json payload is unchanged" `Quick
             test_non_json_payload_is_unchanged
         ] )

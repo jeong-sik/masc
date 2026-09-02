@@ -188,7 +188,8 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   | Llm_provider.Error.HardQuota { retry_after; _ } -> observe_retry ?retry_after Hard_quota
   | Llm_provider.Error.CapacityExhausted { retry_after; _ } ->
     observe_retry ?retry_after Capacity_backpressure
-  | Llm_provider.Error.ProviderUnavailable _ -> observe_retry Server_error
+  | Llm_provider.Error.ProviderUnavailable _
+  | Llm_provider.Error.EmptyCompletion _ -> observe_retry Server_error
   | Llm_provider.Error.ServerError { transient = true; _ } ->
     observe_retry Server_error
   | Llm_provider.Error.ServerError { transient = false; _ } ->

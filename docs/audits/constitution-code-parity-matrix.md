@@ -36,10 +36,10 @@
 
 | ID | 항목 | 근거 | 상태 |
 |---|---|---|---|
-| C1 | 연속 실패 예산 숫자 게이트 (3, 5) — crash accounting 전환 | `keeper_unified_turn_failure.ml:14,26,43,62` | PR #29141 |
-| C2 | 반복 툴 호출 threshold=3 → 턴 yield 직접 결정 | `keeper_agent_run.ml:135,165,776` | PR #29141 |
-| C3 | `"SKIP:"` 접두사 문자열 매칭으로 turn_mode 분류 (dead branch 추정) | `keeper_unified_metrics_support.ml:347` | PR #29141 |
-| C4 | provider 에러 detail 자유 텍스트 접두사 검사 잔여 (RFC-0371 §3.7 인정됨) | `keeper_error_classify.ml:172` | PR #29141 |
+| C1 | 연속 실패 예산 숫자 게이트 (3, 5) — crash accounting 전환 | `keeper_unified_turn_failure.ml` 에 threshold 없음 (2026-09-02 재확인, RFC turn-failure-visible-stop #32105) | 완료 |
+| C2 | 반복 툴 호출 threshold=3 → 턴 yield. 2026-09-02 재확인: tool 축(`:156`)에 assistant-text 축(`:169`)이 더해져 둘. 둘 다 "입력+출력 지문 동일" typed 조건 위의 count 이며 예외 주석을 달고 있다. #32472 배포 24h 뒤 `yielded_after_repeated_*` 발화 비중을 재서 제거 여부를 정한다 | `keeper_agent_run.ml:156,169,215,244` | 재측정 대기 |
+| C3 | `"SKIP:"` 접두사 문자열 매칭으로 turn_mode 분류 | `keeper_unified_metrics_support.ml` 에 `"SKIP` 리터럴 없음 (2026-09-02 재확인) | 완료 |
+| C4 | provider 에러 detail 자유 텍스트 접두사 검사 — 뿌리는 agent_core 가 typed `stop_reason` 을 문자열로 납작하게 만든 것 | `Llm_provider.Error.EmptyCompletion` variant 로 재타입, `keeper_error_classify.ml` 은 variant 매치 | PR (empty-completion-is-a-variant) |
 
 ## D. SSOT 문서 stale (RFC-0252 갱신)
 
@@ -54,6 +54,6 @@
 |---|---|---|
 | A. 문서 보충 | 10 | PR #29140 |
 | B. 코드 보충 | 7 | B1-B3 및 B7 source 구현 병합; B4 #29146 / B5 #29149 / B6 #29148. Goal verifier artifact lookup·배포·동일-run 증거는 대기 |
-| C. 코드 정리 | 4 | PR #29141 |
+| C. 코드 정리 | 4 | C1·C3 완료, C4 typed PR, C2 는 재측정 뒤 판정 |
 | D. RFC stale | 2 | PR #29142 |
 | 후속 검증 | — | Goal verifier artifact lookup surface, 실제 배포, ledger/event/browser 동일-run 증거는 living matrix의 미완료 셀로 추적 |

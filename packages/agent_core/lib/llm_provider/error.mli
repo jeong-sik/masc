@@ -37,6 +37,16 @@ type provider_error =
       { provider : string
       ; detail : string
       }
+  | EmptyCompletion of
+      { provider : string
+      ; stop_reason : Types.stop_reason
+      ; detail : string
+      }
+  (** The provider answered with an empty assistant turn and a recognized,
+      non-overflow [stop_reason] ([Retry.Empty_attributed]). The reason stays
+      typed across the boundary so MASC classifies it by variant; an
+      overflow is [ContextOverflow] on the [Api] side and an unmodeled
+      stop_reason is [InvalidRequest]. *)
   | RateLimit of
       { provider : string
       ; retry_after : float option

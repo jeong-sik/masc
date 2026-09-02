@@ -139,17 +139,16 @@ let test_provider_wire_error_is_not_rate_limit_or_request_parse () =
     (EC.is_auto_recoverable_turn_error err)
 
 (* A 0-byte empty completion with a modeled non-overflow stop_reason (AGENT_CORE
-   [Retry.Empty_attributed]) surfaces as [ProviderUnavailable] and is
-   auto-recoverable: retry/failover can make progress on a broken backend
-   model answering with an empty assistant turn. *)
+   [Retry.Empty_attributed]) surfaces as [EmptyCompletion] with the reason
+   still typed, and is auto-recoverable: retry/failover can make progress on
+   a broken backend model answering with an empty assistant turn. *)
 let test_attributed_empty_completion_is_auto_recoverable () =
   let err =
     Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderUnavailable
+      (Llm_provider.Error.EmptyCompletion
          { provider = "ollama-cloud"
-         ; detail =
-             "empty completion (stop_reason=end_turn): provider returned an \
-              empty assistant turn"
+         ; stop_reason = Llm_provider.Types.EndTurn
+         ; detail = "provider returned an empty assistant turn"
          })
   in
   Alcotest.(check bool)

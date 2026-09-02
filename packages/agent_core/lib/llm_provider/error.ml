@@ -31,6 +31,11 @@ type provider_error =
       { provider : string
       ; detail : string
       }
+  | EmptyCompletion of
+      { provider : string
+      ; stop_reason : Types.stop_reason
+      ; detail : string
+      }
   | RateLimit of
       { provider : string
       ; retry_after : float option
@@ -155,6 +160,12 @@ let to_string = function
   | UnknownVariant r -> Printf.sprintf "Unknown %s variant: %s" r.type_name r.value
   | ProviderUnavailable r ->
     Printf.sprintf "Provider '%s' unavailable: %s" r.provider r.detail
+  | EmptyCompletion r ->
+    Printf.sprintf
+      "Provider '%s' unavailable: empty completion (stop_reason=%s): %s"
+      r.provider
+      (Types.stop_reason_to_string r.stop_reason)
+      r.detail
   | RateLimit r ->
     Printf.sprintf
       "Provider '%s' rate limited: %s%s"
@@ -339,18 +350,11 @@ let of_provider_failure ?provider kind message =
                message
          }
      | Retry.Empty_attributed ->
-       (* [stop_reason] stays typed until this deliberate agent-core boundary.  The
-          public error surface remains source-compatible: callers already handle
-          a recognized non-overflow empty completion as provider unavailability,
-          and no control flow reparses this diagnostic rendering. *)
-       ProviderUnavailable
-         { provider
-         ; detail =
-             Printf.sprintf
-               "empty completion (stop_reason=%s): %s"
-               (Types.stop_reason_to_string stop_reason)
-               message
-         })
+       (* The typed [stop_reason] crosses the boundary as a field: the one
+          MASC classifier that needs to tell an empty completion from the
+          other unavailability producers matches this variant instead of a
+          rendered prefix. *)
+       EmptyCompletion { provider; stop_reason; detail = message })
   | Http_client.Context_overflow { limit } ->
     (* agent-core boundary: same agent-core-boundary flattening as the Empty_overflow arm above —
        the typed overflow value is rendered via [Retry.error_message] into
@@ -407,6 +411,7 @@ let is_retryable = function
   | ProviderReportedError _
   | UnknownVariant _
   | ProviderUnavailable _
+  | EmptyCompletion _
   | HardQuota _
   | AuthError _
   | AuthorizationError _

@@ -84,6 +84,15 @@ let provider_error_to_http_error = function
   | Llm_provider.Error.ProviderUnavailable { detail; _ } ->
     Llm_provider.Http_client.NetworkError
       { message = detail; kind = Llm_provider.Http_client.Unknown }
+  | Llm_provider.Error.EmptyCompletion { stop_reason; detail; _ } ->
+    Llm_provider.Http_client.NetworkError
+      { message =
+          Printf.sprintf
+            "empty completion (stop_reason=%s): %s"
+            (Llm_provider.Types.stop_reason_to_string stop_reason)
+            detail
+      ; kind = Llm_provider.Http_client.Unknown
+      }
 
 let core_error_to_runtime_outcome err =
   match Keeper_internal_error.classify_masc_internal_error err with

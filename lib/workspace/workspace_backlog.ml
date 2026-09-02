@@ -111,17 +111,34 @@ let read_backlog_with_source_r config =
   | None when not (Workspace_utils.path_exists config path) ->
       recover (Printf.sprintf "no backlog at %s" path)
   | None -> (
+      (* Cache the decoded backlog keyed on the file's (mtime, size). A
+         writer commits under [with_backlog_file_lock] and clears this cache
+         after its write, but the reader takes no such lock: statting only
+         after the read would register (new stat, old backlog) when a commit
+         lands between the two — an entry the writer's clear has already
+         passed, poisoning hits until the next write. Stat before the read
+         too and only register when nothing changed across it. *)
+      let stat_before = file_stat_opt path in
       match read_json_result config path with
       | Ok json ->
           let decoded = decode_backlog ~path json in
           (match decoded with
           | Ok backlog ->
-              (match file_stat_opt path with
-              | Some st ->
+              (match (stat_before, file_stat_opt path) with
+              | Some before, Some after
+                when after.Unix.st_mtime = before.Unix.st_mtime
+                     && after.Unix.st_size = before.Unix.st_size ->
                   Stdlib.Mutex.protect backlog_cache_mu (fun () ->
                       Hashtbl.replace backlog_cache path
-                        { mtime = st.Unix.st_mtime; size = st.Unix.st_size; backlog })
-              | None -> ());
+                        { mtime = after.Unix.st_mtime
+                        ; size = after.Unix.st_size
+                        ; backlog
+                        })
+              | _ ->
+                  (* The file moved under the read (or vanished before it):
+                     hand back the value but leave the cache to the next
+                     reader, which starts from a miss. *)
+                  ());
               Ok { observed_backlog = backlog; recovered_from = None }
           | Error primary_msg -> recover primary_msg)
       | Error primary_msg -> recover primary_msg)

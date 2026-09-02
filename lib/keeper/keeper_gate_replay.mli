@@ -130,28 +130,16 @@ val compose_model_message :
     cannot survive beside a consumed result. Canonical history/checkpoints keep
     only the artifact reference. *)
 
-type replayable =
-  | Replay_write
-  | Replay_execute
-  | Replay_network_read
-  | Replay_connector_post
-  | Replay_identity
-      (** A call to an identity-attached outside service
-          ({!Keeper_identity_gate}); the heaviest payload class here, and the
-          reason it must replay rather than wait for a byte-identical
-          re-emission (#25947). *)
-  | Replay_voice_speak
-      (** A spoken utterance sent to a TTS endpoint ({!Keeper_tool_voice_runtime}).
-          Its text leaves the process, so the approval reviews content, and
-          playback is not wall-clock bound — a post-approval replay still
-          lands. The microphone leaf is the mirror image: its input window
-          expires while the judge runs, so it never becomes a Gate
-          request. *)
+type replayable = Keeper_gate.replayable
+(** Which approved operations can be spent without the Keeper re-emitting the
+    call. Owned by the Gate ({!Keeper_gate.replayable_operation}) so the
+    deferred payload's on_approve promise and this engine's dispatch answer
+    to one definition — a promise the engine cannot keep starves the
+    approved effect silently (#32668). Exposed because a decode function
+    that exists but is never dispatched to is indistinguishable from a
+    working replay at the boundary. *)
 
 val replayable_of_operation : string -> replayable option
-(** Which approved operations can be spent without the Keeper re-emitting the
-    call. Exposed because a decode function that exists but is never dispatched
-    to is indistinguishable from a working replay at the boundary. *)
 
 type replay_execution =
   { outcome : outcome

@@ -3170,6 +3170,11 @@
  (libraries alcotest masc_tui_diff))
 
 (test
+ (name test_tui_tool_detail)
+ (modules test_tui_tool_detail)
+ (libraries alcotest masc_tui_tool_detail yojson))
+
+(test
  (name test_tui_keeper_chat_diff)
  (modules test_tui_keeper_chat_diff)
  (libraries

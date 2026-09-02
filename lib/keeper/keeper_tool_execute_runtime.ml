@@ -383,32 +383,6 @@ let handle_tool_execute_typed
         (* Lower the validated typed input exactly once. The resulting Shell IR
            is the neutral dispatch representation; it carries no product or
            inferred authorization semantics. *)
-        (* A Docker stage writes redirect paths as the container sees them.
-           The two roots below are what turns one of those into a path this
-           process can open, and they hold only inside the shared mount. On
-           the host the command's namespace is already this one. *)
-        let redirect_namespace =
-          match dispatch_sandbox with
-          | Masc_exec.Sandbox_target.Host ->
-            Keeper_tool_execute_typed_input.Command_filesystem
-          | Masc_exec.Sandbox_target.Ssh _
-          | Masc_exec.Sandbox_target.Micro_vm _ ->
-            (* No shared mount maps the endpoint's tree onto this host --
-               an OpenSSH host's, or a guest's work volume -- so a redirect
-               target stays in the command's namespace and dispatch refuses
-               to open it here rather than touching a same-named local
-               file. *)
-            Keeper_tool_execute_typed_input.Command_filesystem
-          | Masc_exec.Sandbox_target.Docker _ ->
-            Keeper_tool_execute_typed_input.Bound_mount
-              { visible_root = Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
-              ; host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta
-              }
-          | Masc_exec.Sandbox_target.Delegated _ ->
-            (* A delegated stage never opens a redirect file (dispatch
-               refuses), so it needs no mount binding. *)
-            Keeper_tool_execute_typed_input.Command_filesystem
-        in
         (* RFC tools-as-shell-commands: the one conversion point.  Stages
            whose program is the bare reserved word [masc] become delegated
            tool calls before dispatch.  Callers without a turn context
@@ -419,7 +393,6 @@ let handle_tool_execute_typed
           match
             Keeper_tool_execute_typed_input.to_shell_ir
               ~sandbox:dispatch_sandbox
-              ~namespace:redirect_namespace
               input
           with
           | Error e ->

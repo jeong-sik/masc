@@ -6498,8 +6498,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
               state.keeper_sandbox_view_error
           in
           let logs =
-            match state.keeper_sandbox_logs_loading with
-            | Some keeper_name when String.equal keeper_name k.k_name ->
+            match state.keeper_sandbox_logs_inflight with
+            | Some (keeper_name, _) when String.equal keeper_name k.k_name ->
               [ Ansi.dim ^ "  (loading actual container logs…)" ^ Ansi.reset ]
             | Some _ | None ->
               match state.keeper_sandbox_logs_error with

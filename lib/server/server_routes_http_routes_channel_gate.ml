@@ -497,22 +497,25 @@ let handle_gate_keeper_status_by_name ~sw ~clock state request reqd =
     label-scoped by the sandbox layer; the route never accepts a caller-owned
     container id. *)
 let handle_gate_keeper_sandbox_logs state request reqd =
+  let respond ?(status = `OK) value =
+    (* Container stdout/stderr can contain credentials. It is deliberately
+       not exposed to browser origins, even after token authentication. *)
+    Http_server_eio.Response.json_value ~status ~request value reqd
+  in
   let keeper_name =
     query_param request "name"
     |> Option.map String.trim
     |> Option.value ~default:""
   in
   if String.equal keeper_name "" then
-    respond_json_value_with_cors ~status:`Bad_request request reqd
-      (Channel_gate.error_json "name is required")
+    respond ~status:`Bad_request (Channel_gate.error_json "name is required")
   else
     let config = Mcp_server.workspace_config state in
     match Keeper_meta_store.read_meta config keeper_name with
     | Error detail ->
-      respond_json_value_with_cors ~status:`Service_unavailable request reqd
-        (Channel_gate.error_json detail)
+      respond ~status:`Service_unavailable (Channel_gate.error_json detail)
     | Ok None ->
-      respond_json_value_with_cors ~status:`Not_found request reqd
+      respond ~status:`Not_found
         (Channel_gate.error_json ("unknown keeper: " ^ keeper_name))
     | Ok (Some meta) ->
       let tail = int_query_param request "tail" ~default:200 |> max 1 |> min 500 in
@@ -520,12 +523,11 @@ let handle_gate_keeper_sandbox_logs state request reqd =
         Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()
       in
       (match
-         Keeper_sandbox_control.logs_json ~config ~meta ~timeout_sec ~tail ()
+       Keeper_sandbox_control.logs_json ~config ~meta ~timeout_sec ~tail ()
        with
-       | Ok json -> respond_json_value_with_cors ~status:`OK request reqd json
+       | Ok json -> respond json
        | Error detail ->
-         respond_json_value_with_cors ~status:`Bad_gateway request reqd
-           (Channel_gate.error_json detail))
+         respond ~status:`Bad_gateway (Channel_gate.error_json detail))
 
 (** Shared bind handler: parse body, validate keeper, dispatch to connector. *)
 let handle_bind_for_connector ~sw ~clock state request reqd ~connector_name
@@ -735,9 +737,10 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.get "/api/v1/gate/keeper-sandbox-logs" (fun request reqd ->
-       with_read_auth (fun state _req reqd ->
-         handle_gate_keeper_sandbox_logs state request reqd
-       ) request reqd)
+       with_token_permission_auth ~permission:Masc_domain.CanReadState
+         (fun state _agent_name _req reqd ->
+           handle_gate_keeper_sandbox_logs state request reqd)
+         request reqd)
 
   (* Generic connector routes — dispatch by ?name=<connector> *)
   |> Http.Router.post "/api/v1/gate/connector/bind" (fun request reqd ->

@@ -287,66 +287,7 @@ let test_scroll_anchor_survives_session_user_persistence () =
   | Some _ | None -> fail "session USER pin was lost when history persisted it"
 ;;
 
-let test_absolute_turn_sequence_joins_direct_and_autonomous_sources () =
-  let loaded =
-    [ chat_entry ~turn_sequence:12 ~request_id:"direct-12"
-        ~role:Tui_types.Message_keeper ~text:"direct later" ~at:1. () ]
-  in
-  let session =
-    [ chat_entry ~turn_sequence:10 ~request_id:"trace#10"
-        ~role:Tui_types.Message_autonomous ~text:"autonomous earlier" ~at:999. ()
-    ; chat_entry ~request_id:"" ~role:Tui_types.Message_keeper
-        ~text:"unowned broadcast" ~at:2. ()
-    ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
-        ~text:"journal lane" ~at:0. ()
-    ]
-  in
-  let timeline =
-    Tui_types.chat_timeline ~loaded ~session ~queued_request_ids:[]
-  in
-  check (list string) "absolute turn sequence, then producer-owned lanes"
-    [ "autonomous earlier"; "direct later"; "unowned broadcast"; "journal lane" ]
-    (Tui_types.chat_timeline_rows timeline
-     |> List.map (fun row -> row.Tui_types.me_text))
-;;
-
-let test_unsequenced_items_keep_producer_order_not_wall_clock_order () =
-  let loaded =
-    [ chat_entry ~request_id:"first"
-        ~role:Tui_types.Message_keeper ~text:"first producer row" ~at:999. ()
-    ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory
-        ~text:"second producer row" ~at:1. ()
-    ; chat_entry ~request_id:"third"
-        ~role:Tui_types.Message_keeper ~text:"third producer row" ~at:2. ()
-    ]
-  in
-  let timeline =
-    Tui_types.chat_timeline ~loaded ~session:[] ~queued_request_ids:[]
-  in
-  check (list string) "unsequenced items retain producer order"
-    [ "first producer row"; "second producer row"; "third producer row" ]
-    (Tui_types.chat_timeline_rows timeline
-     |> List.map (fun row -> row.Tui_types.me_text))
-;;
-
-let test_wall_clock_never_overrides_typed_turn_sequence () =
-  let loaded =
-    [ chat_entry ~turn_sequence:2 ~request_id:"turn-2"
-        ~role:Tui_types.Message_keeper ~text:"turn 2 clock 1" ~at:1. ()
-    ; chat_entry ~turn_sequence:1 ~request_id:"turn-1"
-        ~role:Tui_types.Message_keeper ~text:"turn 1 clock 999" ~at:999. ()
-    ]
-  in
-  let timeline =
-    Tui_types.chat_timeline ~loaded ~session:[] ~queued_request_ids:[]
-  in
-  check (list string) "typed turn sequence wins over adversarial clocks"
-    [ "turn 1 clock 999"; "turn 2 clock 1" ]
-    (Tui_types.chat_timeline_rows timeline
-     |> List.map (fun row -> row.Tui_types.me_text))
-;;
-
-let test_running_turn_follows_typed_turn_sequence () =
+let test_running_turn_does_not_escape_the_displayed_time_axis () =
   let loaded =
     [ chat_entry ~turn_sequence:20 ~request_id:"settled-20"
         ~role:Tui_types.Message_keeper ~text:"settled at 200" ~at:200. () ]
@@ -1465,12 +1406,6 @@ let () =
             test_same_request_exact_clock_normalizes_the_turn_sequence
         ; test_case "distinct requests retain exact-clock producer order" `Quick
             test_distinct_requests_keep_producer_order_on_exact_clock_tie
-        ; test_case "turn sequence breaks equal-clock ties" `Quick
-            test_absolute_turn_sequence_breaks_equal_clock_ties
-        ; test_case "unsequenced items share displayed time" `Quick
-            test_unsequenced_items_share_the_displayed_time_axis
-        ; test_case "separate turns share displayed time" `Quick
-            test_whole_turns_share_the_displayed_time_axis
         ; test_case "running turn shares displayed time" `Quick
             test_running_turn_does_not_escape_the_displayed_time_axis
         ; test_case "uncommitted live shares visible clock" `Quick

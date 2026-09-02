@@ -11702,7 +11702,6 @@ and is loaded on demand through keeper_skill.
                      state.context_inspector_exact <- None;
                      state.context_inspector_scroll <- 0
                  | None -> close ())
-<<<<<<< HEAD
             | "[" | "]" ->
                 (* Turn navigation: [ steps back through the page's rows, ]
                    steps forward, and the fetch re-reads the exact provider
@@ -11745,43 +11744,6 @@ and is loaded on demand through keeper_skill.
                    so the pane starts the search itself: same state, same
                    keys, and the block above now yields while it runs. *)
                 state.search <- Some ""
-||||||| 80d6baf62d
-=======
-            | "[" | "]" ->
-                (* Turn navigation: [ steps back through the page's rows, ]
-                   steps forward, and the fetch re-reads the exact provider
-                   input for the row they name. The keys work on every tab;
-                   a row without a snapshot says so on the request tab. *)
-                let count =
-                  match state.context_inspector_reading with
-                  | Some
-                      ( _
-                      , { Masc_tui_context_inspector.turn =
-                            Ok { Masc_tui_context_inspector.rows; _ }
-                        ; _ } ) ->
-                      List.length rows
-                  | _ -> 0
-                in
-                if count > 0 then begin
-                  let moved =
-                    if k = "[" then
-                      min (count - 1) (state.context_inspector_turn_back + 1)
-                    else max 0 (state.context_inspector_turn_back - 1)
-                  in
-                  if moved <> state.context_inspector_turn_back then begin
-                    state.context_inspector_turn_back <- moved;
-                    state.context_inspector_cursor <- 0;
-                    state.context_inspector_exact <- None;
-                    state.context_inspector_scroll <- 0;
-                    state.context_inspector_detail_scroll <- 0;
-                    Option.iter
-                      (fun keeper_name ->
-                         launch_context_inspector_load state
-                           ~mailbox:async_messages ~keeper_name)
-                      state.context_inspector_keeper
-                  end
-                end
->>>>>>> origin/main
             | "r" ->
                 Option.iter
                   (fun keeper_name ->

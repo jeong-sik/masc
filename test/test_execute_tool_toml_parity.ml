@@ -1,6 +1,6 @@
 (** Structural pins for the execute tool declaration in
     [config/tools/tool_execute.toml] (RFC prompts-and-tool-definitions-outside-ocaml
-    §2.2, RFC-execute-command-string).
+    §2.2, RFC-execute-command-string in PR #32618).
 
     This suite used to hold the whole decoded schema as one byte literal and
     compare it against [Tool_shard_types.typed_execute_tools]. That proved the

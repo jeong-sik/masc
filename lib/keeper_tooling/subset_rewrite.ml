@@ -101,11 +101,10 @@ let call_name = function
   | Spawn -> "spawn"
 ;;
 
-(* What the caller types. Two of these are patterns over calls the caller
-   already has, so they read as descriptions and the hyphens say so. [Spawn]
-   became one concrete tool, so it is named exactly -- "call spawn instead"
-   sent the reader looking for a tool nobody has. This library cannot see the
-   tool schemas, so a test at a layer that sees both holds the two together. *)
+(* What the caller types. [Spawn] is one concrete tool, so it is named
+   exactly -- "call spawn instead" sent the reader looking for a tool nobody
+   has. This library cannot see the tool schemas, so a test at a layer that
+   sees both holds the two together. *)
 let call_instruction = function
   | Spawn -> "keeper_spawn"
 ;;

@@ -16,7 +16,7 @@ related: ["execute-subset-dispositions", "0394", "0091"]
 what runs. Everywhere else the parser answers one question and the original
 string goes to a shell. This RFC proposes masc join them for the `script`
 field, keep the typed path for `argv` — the typed `pipeline` field is removed
-by RFC-execute-command-string — and let the profile's sandbox be the
+by RFC-execute-command-string (PR #32618) — and let the profile's sandbox be the
 containment it already is.
 
 ## 1. What this asks to reopen

@@ -402,7 +402,7 @@ type deliberation_evidence =
   ; judge : (judge_synthesis, judge_failure) result
   ; judges : judge_outcome list
   ; judge_usage : usage
-  ; tool_trace : tool_trace option
+  ; tool_trace : tool_trace
   }
 [@@deriving yojson, show, eq]
 

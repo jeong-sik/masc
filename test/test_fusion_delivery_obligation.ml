@@ -167,7 +167,7 @@ let test_startup_recovery_projects_canonical_terminal () =
           ; judge = Error (Fusion_types.Internal_error "test terminal")
           ; judges = []
           ; judge_usage = Fusion_types.zero_usage
-          ; tool_trace = None
+          ; tool_trace = Fusion_types.empty_tool_trace
           }
         in
         let on_accepted request_id =

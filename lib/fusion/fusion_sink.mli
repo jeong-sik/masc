@@ -35,8 +35,7 @@ val judge_meta : (Fusion_types.judge_synthesis, Fusion_types.judge_failure) resu
 val judge_node_meta : Fusion_types.judge_outcome -> Yojson.Safe.t
 
 (** Actual AGENT_CORE tool-call ledger plus explicit drops/coverage gaps for
-    Board evidence. An empty complete ledger proves no observed call; it is
-    distinct from a missing legacy [tool_trace]. *)
+    Board evidence. An empty complete ledger proves no observed call. *)
 val tool_trace_meta : Fusion_types.tool_trace -> Yojson.Safe.t
 
 (** judge 결론(성공/실패 모두)을 키퍼 메인 chat lane에 남기고 board에 패널/심판
@@ -75,7 +74,7 @@ val emit
   -> judge:(Fusion_types.judge_synthesis, Fusion_types.judge_failure) result
   -> judges:Fusion_types.judge_outcome list
   -> judge_usage:Fusion_types.usage
-  -> tool_trace:Fusion_types.tool_trace option
+  -> tool_trace:Fusion_types.tool_trace
   -> (unit, string) result
 
 (** RFC-0266: 심의 완료/실패 시 호출 키퍼를 typed [Fusion_completed] stimulus로 깨운다.

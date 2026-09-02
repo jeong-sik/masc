@@ -445,7 +445,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
             ; judge
             ; judges = judge_nodes
             ; judge_usage
-            ; tool_trace = Some tool_trace
+            ; tool_trace
             })
 
 let project

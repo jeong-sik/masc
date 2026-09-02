@@ -247,13 +247,11 @@ let lock_leaf leaf =
 let marker epoch =
   Printf.sprintf "%s %s\n" lock_magic epoch
 
-let is_lower_hex value =
-  String.length value = 64
-  && String.for_all
-       (function
-         | '0' .. '9' | 'a' .. 'f' -> true
-         | _ -> false)
-       value
+(* The canonical predicate, not a fourth copy of it. [masc_string_util] was
+   extracted to be dependency-free precisely so a caller could reach it
+   without taking masc_core's edges; its own dune says the private copies
+   exist because that cost used to be real, and it is not any more. *)
+let is_lower_hex = String_util.is_lowercase_sha256_hex
 
 let parse_marker value =
   let length = String.length value in

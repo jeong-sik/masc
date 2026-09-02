@@ -16,6 +16,17 @@ let docker_has_no_remote_lane (meta : keeper_meta) =
     meta.name
 ;;
 
+(* The same readiness check for both transports: the probe is cached per
+   endpoint name, so a running guest pays it once, like an OpenSSH host. *)
+let ready endpoint =
+  let* () =
+    if Env_config_sandbox.Preflight.enabled ()
+    then Keeper_sandbox_remote.check_preflight endpoint
+    else Ok ()
+  in
+  Ok endpoint
+;;
+
 let openssh_endpoint ~(config : Workspace.config) ~(meta : keeper_meta) =
   let* endpoint =
     Keeper_sandbox_ssh.resolve_endpoint
@@ -25,12 +36,12 @@ let openssh_endpoint ~(config : Workspace.config) ~(meta : keeper_meta) =
     Keeper_sandbox_ssh.create ~base_path:config.base_path
       ~keeper_name:meta.name ~endpoint ()
   in
-  let* () =
-    if Env_config_sandbox.Preflight.enabled ()
-    then Keeper_sandbox_remote.check_preflight ssh
-    else Ok ()
-  in
-  Ok ssh
+  ready ssh
+;;
+
+let microvm_endpoint ?timeout_sec runtime =
+  let* guest = Keeper_turn_sandbox_runtime.microvm_remote_endpoint ?timeout_sec runtime in
+  ready guest
 ;;
 
 let profile_contract_mismatch ~expected ~actual =
@@ -43,7 +54,7 @@ let profile_contract_mismatch ~expected ~actual =
 let guest_endpoint ~turn_sandbox_factory ~(meta : keeper_meta) ~cwd =
   match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
   | Keeper_sandbox_factory.Runtime { runtime; guest_profile = Micro_vm_guest; _ } ->
-    Keeper_turn_sandbox_runtime.microvm_remote_endpoint runtime
+    microvm_endpoint runtime
   | Keeper_sandbox_factory.Runtime { guest_profile = Docker_guest; _ } ->
     Error (profile_contract_mismatch ~expected:meta.sandbox_profile ~actual:Docker)
   | Keeper_sandbox_factory.Remote_ssh_profile ->

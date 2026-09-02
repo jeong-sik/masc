@@ -1644,6 +1644,7 @@ let test_typed_guest_target_leaves_image_preflight_to_runtime_creation () =
         ~binding
         ~meta
         ~cwd:host_root
+        ~timeout_sec:60.0
         ()
     with
     | Error error -> Alcotest.fail error.message

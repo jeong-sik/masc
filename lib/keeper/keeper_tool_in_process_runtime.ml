@@ -1773,7 +1773,15 @@ let spawn_sandbox_argv ~turn_sandbox_factory ~cwd ~command_argv =
       "spawn does not cross the remote_ssh boundary: the exec shim speaks a \
        framed protocol over one connection, so there is no argv to background. \
        Run the command with Execute."
-  | Keeper_sandbox_factory.Runtime { runtime; _ } ->
+  (* Same boundary, other transport: a microvm guest owns its tree and is
+     reached through the shim over [container exec] (RFC-0400). *)
+  | Keeper_sandbox_factory.Runtime { guest_profile = Micro_vm_guest; _ } ->
+    Error
+      "spawn does not cross the microvm boundary: the guest's tree lives on \
+       its work volume and the exec shim speaks a framed protocol over one \
+       connection, so there is no argv to background. Run the command with \
+       Execute."
+  | Keeper_sandbox_factory.Runtime { runtime; guest_profile = Docker_guest; _ } ->
     Keeper_turn_sandbox_runtime.exec_argv
       ~validate_cached_container:false
       runtime

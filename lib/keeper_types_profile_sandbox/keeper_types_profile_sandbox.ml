@@ -105,11 +105,11 @@ type tree_location =
   | Shared_mount
   | Endpoint_owned
 
-(* Micro_vm still says [Shared_mount]: its guest mounts the playground over
-   virtiofs today. RFC-0400's routing cut flips this one arm, and every
-   consumer that branches on the location moves with it. *)
+(* A microvm guest owns its tree on the work volume (RFC-0400): the host
+   never mounts the playground into it, so every consumer that branches on
+   the location reaches that tree through the remote lane. *)
 let tree_location_of_profile = function
   | Docker -> Shared_mount
-  | Micro_vm -> Shared_mount
+  | Micro_vm -> Endpoint_owned
   | Remote_ssh -> Endpoint_owned
 ;;

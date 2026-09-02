@@ -157,12 +157,13 @@ val docker_workspace_state_mount_specs :
   base_path:string -> container_root:'a -> string list
 val docker_workspace_state_mount_args :
   base_path:string -> container_root:'a -> string list
+val config_env_names : string list
+val docker_config_env :
+  base_path:string -> container_root:'a -> (string * string) list
 val docker_config_env_args :
   base_path:string -> container_root:'a -> string list
 val docker_sandbox_env_args :
   base_path:string -> container_root:'a -> string list
-val sandbox_exec_env_args :
-  microvm:bool -> base_path:string -> container_root:'a -> string list
 val docker_user_identity_mount_args :
   host_root:string -> uid:int -> gid:int -> (string list, string) result
 val rewrite_host_root_to_container_root :

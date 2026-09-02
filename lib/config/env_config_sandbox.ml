@@ -101,10 +101,6 @@ module Runtime = struct
 
   let microvm_cpus () = get_string ~default:"" "MASC_KEEPER_MICROVM_CPUS"
 
-  let microvm_build_volume_size () =
-    get_string ~default:"128g" "MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE"
-  ;;
-
   let microvm_work_volume_size () =
     get_string ~default:"256g" "MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE"
   ;;

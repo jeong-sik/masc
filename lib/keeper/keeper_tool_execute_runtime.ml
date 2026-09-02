@@ -419,14 +419,15 @@ let handle_tool_execute_typed
           match dispatch_sandbox with
           | Masc_exec.Sandbox_target.Host ->
             Keeper_tool_execute_typed_input.Command_filesystem
-          | Masc_exec.Sandbox_target.Ssh _ ->
-            (* No shared mount maps a remote path onto this host, so a
-               redirect target stays in the command's namespace and dispatch
-               refuses to open it here rather than touching a same-named
-               local file. *)
-            Keeper_tool_execute_typed_input.Command_filesystem
-          | Masc_exec.Sandbox_target.Docker _
+          | Masc_exec.Sandbox_target.Ssh _
           | Masc_exec.Sandbox_target.Micro_vm _ ->
+            (* No shared mount maps the endpoint's tree onto this host --
+               an OpenSSH host's, or a guest's work volume -- so a redirect
+               target stays in the command's namespace and dispatch refuses
+               to open it here rather than touching a same-named local
+               file. *)
+            Keeper_tool_execute_typed_input.Command_filesystem
+          | Masc_exec.Sandbox_target.Docker _ ->
             Keeper_tool_execute_typed_input.Bound_mount
               { visible_root = Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
               ; host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta

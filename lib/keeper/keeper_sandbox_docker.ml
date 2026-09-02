@@ -299,53 +299,19 @@ let docker_run_argv
       ~ttl_sec
   =
   match meta.sandbox_profile with
-  | Keeper_types_profile_sandbox.Micro_vm ->
-    (* Same preparation, different command. Everything above this point --
-       secret projection, GitHub identity, mounts, uid/gid -- is the keeper's
-       contract and does not depend on what runs the guest, so it is reused
-       rather than rebuilt. Only the two flags container rejects are dropped;
-       [Keeper_sandbox_microvm] names that trade. *)
-    Keeper_sandbox_microvm.command_argv ()
-    @ [ "run"; "--rm"; "--name"; container_name ]
-    @ [ "-i"; "--user"; Printf.sprintf "%d:%d" uid gid ]
-    @ Keeper_sandbox_runtime.docker_sandbox_env_args
-        ~base_path:config.base_path
-        ~container_root
-    @ Env_config_sandbox.Hardening.read_only_rootfs_args ()
-    @ [ "--tmpfs"; Env_config_sandbox.Hardening.tmpfs_mount (); "--cap-drop=ALL" ]
-    @ [ "--memory"
-      ; Env_config_sandbox.Hardening.memory ()
-      ; "-v"
-      ; host_root ^ ":" ^ container_root ^ ":rw"
-      ; "--workdir"
-      ; container_cwd
-      ]
-    @ Keeper_sandbox_runtime.docker_config_mount_args
-        ~base_path:config.base_path
-        ~container_root
-    @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
-        ~base_path:config.base_path
-        ~container_root
-    @ secret_args
-    (* Not the caller's [network_args]: those are Docker's spelling, and
-       inherit arrives as "--network host", which container rejects with
-       "network host not found". The profile-aware args are validated before
-       this argv is built, so this cannot be reached with an unsupported
-       mode. *)
-    @ Keeper_sandbox_microvm.network_args
-        ~dns:(Some (Env_config_sandbox.Runtime.microvm_dns ()))
-        meta.network_mode
-    @ identity_mounts
-    @ [ image; "bash"; "-l"; "-s" ]
-  (* Unreachable: [ensure_shell_image_available] refuses remote_ssh before
-     argv construction, and typed dispatch fails closed on the profile
-     further upstream. Fail closed rather than improvise a docker or
-     container argv for a remote_ssh keeper (RFC-0001). *)
-  | Keeper_types_profile_sandbox.Remote_ssh ->
+  (* Unreachable: the docker shell entrypoints refuse a microvm keeper before
+     argv construction, and [ensure_shell_image_available] refuses remote_ssh.
+     Both profiles' trees live on their endpoint, so a one-shot container
+     that bind-mounts the host root has nothing correct to mount. Fail
+     closed rather than improvise an argv (RFC-0001, RFC-0400). *)
+  | Keeper_types_profile_sandbox.Micro_vm | Keeper_types_profile_sandbox.Remote_ssh ->
     failwith
-      "remote_ssh_dispatch_unavailable: docker_run_argv called for \
-       sandbox_profile=remote_ssh; SSH runner not wired yet (Phase 1 \
-       task 6); no fallback to docker or host dispatch"
+      (Printf.sprintf
+         "%s_dispatch_unavailable: docker_run_argv called for sandbox_profile=%s, \
+          whose tree lives on its endpoint; commands reach it through the \
+          remote lane, and there is no fallback to docker or host dispatch"
+         (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile)
+         (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile))
   | Keeper_types_profile_sandbox.Docker ->
   Keeper_sandbox_runtime.docker_command_argv ()
   @ [ "run"; "--rm"; "--name"; container_name ]

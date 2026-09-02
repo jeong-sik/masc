@@ -256,8 +256,21 @@ val docker_workspace_state_mount_args
   -> container_root:string
   -> string list
 
-(** Docker [--env ...] argv fragment that points sandboxed processes at
-    the mounted config root. Returns [[]] when the host config root is absent. *)
+(** The names {!docker_config_env} sets, for a consumer that must allowlist
+    them before it sees the values (the microvm guest's shim config). *)
+val config_env_names : string list
+
+(** The env pairs that point a sandboxed process at the mounted config
+    root. [[]] when the host config root is absent, so a process is never
+    told about a mount it was not given. The Docker lane spells these as
+    {!docker_config_env_args}; the microvm remote lane injects them into
+    each shim request. *)
+val docker_config_env
+  :  base_path:string
+  -> container_root:string
+  -> (string * string) list
+
+(** {!docker_config_env} as Docker [--env ...] argv. *)
 val docker_config_env_args
   :  base_path:string
   -> container_root:string
@@ -267,19 +280,6 @@ val docker_config_env_args
     MASC config env when available. *)
 val docker_sandbox_env_args
   :  base_path:string
-  -> container_root:string
-  -> string list
-
-(** The [--env] argv a keeper's exec carries, chosen by lane. An env may
-    name only what was mounted: the microvm guest is given the config
-    mount and nothing else, so it takes {!docker_config_env_args} alone,
-    while the Docker lane takes the full {!docker_sandbox_env_args}. The
-    microvm guest cannot go without it -- the config mount lands at the
-    runtime base, outside the playground the guest works in, and nothing
-    reaches it by walking up from the working directory. *)
-val sandbox_exec_env_args
-  :  microvm:bool
-  -> base_path:string
   -> container_root:string
   -> string list
 

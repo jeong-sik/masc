@@ -128,10 +128,10 @@ Write therefore lands where no command of that keeper will ever look. The
 guest lane would inherit the same hole, so it is closed before the cut.
 
 - `Keeper_types_profile_sandbox.tree_location` says where a profile's tree
-  is: `Shared_mount` (Docker, and Micro_vm until the cut) or
-  `Endpoint_owned` (Remote_ssh, and Micro_vm after the cut). Every consumer
-  that used to spell `Docker | Micro_vm` against `Remote_ssh` branches on
-  this one function instead, so the cut is one arm.
+  is: `Shared_mount` (Docker) or `Endpoint_owned` (Remote_ssh, and Micro_vm
+  since the cut). Every consumer that used to spell `Docker | Micro_vm`
+  against `Remote_ssh` branches on this one function instead, so the cut
+  was one arm.
 - `Keeper_sandbox_remote_lane` finds the endpoint for a profile: the
   runtime.toml entry for OpenSSH, the turn factory's running guest for
   Micro_vm.
@@ -151,13 +151,14 @@ guest lane would inherit the same hole, so it is closed before the cut.
 
 On VM boot (`start_microvm_container_unlocked`):
 
-- ensure named volume `masc-keeper-work-<name>` (same probe/create shape as
-  the RFC-0399 build volume) and mount it at `/masc-work`;
+- ensure named volume `masc-keeper-work-<name>` (probe with
+  `container volume inspect`, confirm a 1 against the listing, create when
+  absent) and mount it at `/masc-work`;
 - mount the host directory holding the static shim and its config read-only
   at `/opt/masc-exec-shim`;
-- create `/masc-work/<keeper>` as root with an explicit mode, the way the
-  build-link targets are created (the volume root is root-owned and Apple's
-  user namespace refuses mode changes from guest root);
+- create `/masc-work/<keeper>` as root with an explicit mode (the volume
+  root is root-owned and Apple's user namespace refuses mode changes from
+  guest root); a guest whose root cannot be made is taken down again;
 - build the guest's `Keeper_sandbox_remote.t` with `Container_exec` and the
   identity snapshot's guest path as `GH_CONFIG_DIR`.
 
@@ -166,18 +167,39 @@ start argv. Config and identity stay read-only mounts, as today.
 
 ### C. Routing hard cut
 
-`Micro_vm` leaves the Docker arms and joins the remote arms: execute and
-read dispatch go through `Keeper_sandbox_remote.runner`; host root projection
-is the bookkeeping bundle; `Keeper_invariant.sandbox_isolation` is scoped on
-the endpoint as it is for `remote_ssh`. Eight `Docker | Micro_vm` arms move.
-The RFC-0399 `_build` link machinery and its status rows are deleted: on a
-tree that already lives on ext4 they would classify every checkout as
-`Build_real_directory` and warn each turn about a problem that no longer
-exists. The build volume is folded into the work volume.
+`Micro_vm` leaves the Docker arms and joins the remote arms.
 
-Live cutover: keepers re-clone into the volume. Two keepers hold uncommitted
-work on the share (polisher: 7 task checkouts; edgar: 2); the runbook copies
-those into the volume with `container exec` before the mount is dropped.
+- `tree_location_of_profile Micro_vm = Endpoint_owned`, so Read, Write and
+  Edit take the remote lane through what C0 wired, cwd echoes and execution
+  locations are the host bundle, and the host root is
+  `.masc/playground/<keeper>/` (the bundle, as for `remote_ssh`) rather than
+  `.masc/playground/microvm/<keeper>/`.
+- Execute: `Keeper_sandbox_shell_ir_target.guest_target` builds the
+  `Micro_vm` target over `Keeper_sandbox_remote.runner`. The endpoint is
+  acquired per stage (`Keeper_sandbox_remote_lane.microvm_endpoint`: ensure
+  the guest is up, preflight if enabled), which is what boots the guest on
+  first use, as the Docker runner starts its container. No pipeline runner,
+  as for OpenSSH. A file redirect inside the guest is refused the way it is
+  for OpenSSH: there is no mount that maps the target onto this host.
+- The guest boot argv mounts no host playground; `--workdir` is the work
+  volume. `Keeper_turn_sandbox_runtime`'s `docker exec` entrypoints refuse a
+  microvm keeper (`microvm_exec_is_remote`), and `spawn` refuses it as it
+  refuses `remote_ssh`.
+- The config env (`MASC_BASE_PATH`, `MASC_BASE_PATH_INPUT`,
+  `MASC_CONFIG_DIR`) that the Docker exec passes as `--env` travels as the
+  endpoint's injected env; the shim config written at boot allowlists those
+  names (`env_allowlist=`). One list, `config_env_names`, feeds both.
+- The RFC-0399 `_build` link machinery, its status rows, the build volume
+  and `MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE` are deleted: on a tree that
+  already lives on ext4 the links would classify every checkout as
+  `Build_real_directory` and warn each turn about a problem that no longer
+  exists.
+
+Live cutover (`docs/MICROVM-REMOTE-RUNBOOK.md`): the two keepers holding
+uncommitted work on the share (polisher: 7 task checkouts; edgar: 2) have
+it copied into `/masc-work/<keeper>/` with `container exec` while the old
+guest still mounts both, with their `_build` symlinks dropped; then the
+server restarts and boots guests without the share.
 
 ### D. Guard retirement (`~/me`)
 
@@ -207,6 +229,12 @@ measurement holds.
   (argv shape, frame contents, injected identity env, lane codes, the CLI's
   own not-found failure) and checks the OpenSSH probe stays one shell word.
   The four existing ssh suites pass unchanged.
+- Unit (C): `test_keeper_sandbox_microvm` pins that the boot argv carries no
+  host playground path and starts on the work volume, that the shim config
+  allowlists the config env, that the guest endpoint injects it, and that a
+  microvm factory binding builds a `Micro_vm` target without booting;
+  `test_keeper_fs_edit_patch` and `test_keeper_sandbox_read_backend` cover
+  the `Endpoint_owned` dispatch the flip routes a guest into.
 - Live (C): a microvm keeper runs `dune build` inside the volume; the guard
   log shows per-guest host descriptors under 100 for a day of activity and
   zero recycles; `sysctl kern.num_vnodes` no longer tracks keeper activity.

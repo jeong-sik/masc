@@ -2294,8 +2294,15 @@ type state = {
     (string * (Tui_decode.task_history_event list, string) result) option;
   mutable verification_evidence:
     (string * (Tui_decode.verification_evidence, string) result) option;
+  (* One cache is shared by the calls surface and chat full-detail mode. The
+     scope and generation are the authority: cursor position is not, because
+     palette/Answering can open a chat without moving the roster cursor. *)
   mutable keeper_calls: Tui_decode.keeper_calls_snapshot option;
   mutable keeper_calls_error: string option;
+  mutable keeper_calls_keeper: string option;
+  mutable keeper_calls_loading: bool;
+  mutable keeper_calls_refresh_pending: bool;
+  mutable keeper_calls_generation: int;
   mutable keeper_calls_scroll: int;
   mutable log_entries: log_entry list;
   mutable log_error: Metrics_tail.load_error option;
@@ -3051,6 +3058,10 @@ let create_state
   verification_evidence = None;
   keeper_calls = None;
   keeper_calls_error = None;
+  keeper_calls_keeper = None;
+  keeper_calls_loading = false;
+  keeper_calls_refresh_pending = false;
+  keeper_calls_generation = 0;
   keeper_calls_scroll = 0;
   log_entries = [];
   log_error = None;

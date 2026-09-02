@@ -161,6 +161,22 @@ type system_log_entry = {
     ([GET /api/v1/keepers/:name/tool-calls]). The row's own [keeper] is
     checked against the keeper that was asked for; a row naming another is
     rejected rather than attributed by envelope position. *)
+type keeper_call_execution_mode =
+  | Keeper_call_serial
+  | Keeper_call_concurrent
+
+type keeper_call_schedule = {
+  kcs_planned_index : int;
+  kcs_batch_index : int;
+  kcs_batch_size : int;
+  kcs_execution_mode : keeper_call_execution_mode;
+}
+
+type keeper_call_disposition =
+  | Keeper_call_completed
+  | Keeper_call_deferred
+  | Keeper_call_failed
+
 type keeper_call = {
   kc_at : float;  (** [ts], unix seconds *)
   kc_tool : string;
@@ -174,6 +190,18 @@ type keeper_call = {
   kc_turn : int option;
   kc_task_id : string option;
   kc_model : string option;
+  kc_execution_id : string option;
+      (** Canonical physical execution identity. Chat tool activity joins to
+          this field only; timestamps, names, and list positions never join. *)
+  kc_tool_use_id : string option;
+  kc_schedule : keeper_call_schedule option;
+      (** Actual Agent Core schedule, absent only when the producer carried no
+          schedule fields. Partial or unknown schedules reject the row. *)
+  kc_result_bytes : int option;
+  kc_truncated_to : int option;
+  kc_disposition : keeper_call_disposition option;
+      (** Typed execution disposition. [Deferred] means the invocation handed
+          continuation to the async path rather than returning synchronously. *)
 }
 
 type keeper_calls_snapshot = {

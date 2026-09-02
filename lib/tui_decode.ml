@@ -1586,6 +1586,22 @@ type system_log_source =
   | System_client_tool_host
   | System_source_unknown of string
 
+type keeper_call_execution_mode =
+  | Keeper_call_serial
+  | Keeper_call_concurrent
+
+type keeper_call_schedule = {
+  kcs_planned_index : int;
+  kcs_batch_index : int;
+  kcs_batch_size : int;
+  kcs_execution_mode : keeper_call_execution_mode;
+}
+
+type keeper_call_disposition =
+  | Keeper_call_completed
+  | Keeper_call_deferred
+  | Keeper_call_failed
+
 type keeper_call = {
   kc_at : float;
   kc_tool : string;
@@ -1596,6 +1612,12 @@ type keeper_call = {
   kc_turn : int option;
   kc_task_id : string option;
   kc_model : string option;
+  kc_execution_id : string option;
+  kc_tool_use_id : string option;
+  kc_schedule : keeper_call_schedule option;
+  kc_result_bytes : int option;
+  kc_truncated_to : int option;
+  kc_disposition : keeper_call_disposition option;
 }
 
 type keeper_calls_snapshot = {
@@ -4689,6 +4711,57 @@ let decode_keeper_call json =
     | `String value when String.trim value <> "" -> Some value
     | _ -> None
   in
+  let optional_nonnegative_int key =
+    match member key json with
+    | `Null -> Ok None
+    | `Int value when value >= 0 -> Ok (Some value)
+    | `Int _ -> Error ("keeper call " ^ key ^ " is negative")
+    | _ -> Error ("keeper call " ^ key ^ " is not an int")
+  in
+  let* planned_index = optional_nonnegative_int "planned_index" in
+  let* batch_index = optional_nonnegative_int "batch_index" in
+  let* batch_size = optional_nonnegative_int "batch_size" in
+  let* execution_mode = optional_string_field json "execution_mode" in
+  let nonblank = function
+    | Some value when String.trim value <> "" -> Some value
+    | Some _ | None -> None
+  in
+  let execution_mode = nonblank execution_mode in
+  let* kc_execution_id = optional_string_field json "execution_id" in
+  let* kc_tool_use_id = optional_string_field json "tool_use_id" in
+  let* kc_schedule =
+    match planned_index, batch_index, batch_size, execution_mode with
+    | None, None, None, None -> Ok None
+    | Some kcs_planned_index, Some kcs_batch_index, Some kcs_batch_size,
+      Some mode when kcs_batch_size > 0 ->
+        let* kcs_execution_mode =
+          match mode with
+          | "serial" -> Ok Keeper_call_serial
+          | "concurrent" -> Ok Keeper_call_concurrent
+          | unknown -> Error ("keeper call has unknown execution_mode " ^ unknown)
+        in
+        Ok
+          (Some
+             { kcs_planned_index
+             ; kcs_batch_index
+             ; kcs_batch_size
+             ; kcs_execution_mode
+             })
+    | Some _, Some _, Some 0, Some _ ->
+        Error "keeper call batch_size must be positive"
+    | _ -> Error "keeper call schedule is partial"
+  in
+  let* kc_result_bytes = optional_nonnegative_int "result_bytes" in
+  let* kc_truncated_to = optional_nonnegative_int "truncated_to" in
+  let* disposition = optional_string_field json "disposition" in
+  let* kc_disposition =
+    match nonblank disposition with
+    | None -> Ok None
+    | Some "completed" -> Ok (Some Keeper_call_completed)
+    | Some "deferred" -> Ok (Some Keeper_call_deferred)
+    | Some "failed" -> Ok (Some Keeper_call_failed)
+    | Some unknown -> Error ("keeper call has unknown disposition " ^ unknown)
+  in
   Ok
     ( keeper
     , { kc_at
@@ -4700,6 +4773,12 @@ let decode_keeper_call json =
       ; kc_turn
       ; kc_task_id = string_opt "task_id"
       ; kc_model = string_opt "model"
+      ; kc_execution_id = nonblank kc_execution_id
+      ; kc_tool_use_id = nonblank kc_tool_use_id
+      ; kc_schedule
+      ; kc_result_bytes
+      ; kc_truncated_to
+      ; kc_disposition
       } )
 
 let decode_keeper_calls_snapshot ~requested_keeper json =

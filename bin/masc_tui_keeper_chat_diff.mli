@@ -37,14 +37,17 @@ val associate :
 val rows :
   mode:Masc_tui_keeper_chat_transcript.tool_projection_mode ->
   max_line_cells:int ->
+  ?activity_details:(
+    Masc_tui_keeper_chat_transcript.tool_activity -> string list) ->
   index ->
   Masc_tui_keeper_chat_transcript.tool_projection ->
   string list
 (** Add bounded recorded-change previews to an already-computed tool
     projection. Compact mode returns the producer projection unchanged. Full
-    mode shows at most three previews per block and twelve source rows per
-    preview; every source row is clipped to [max_line_cells]. Remaining
-    annotations and source rows are counted explicitly.
+    mode places [activity_details] directly after the exact activity it
+    describes, then shows at most three previews per block and twelve source
+    rows per preview; every source row is clipped to [max_line_cells].
+    Remaining annotations and source rows are counted explicitly.
 
     An [Edited] record is labelled as a replacement (or replace-all template),
     not a whole-file diff. Its typed path and [+added -removed] size share one

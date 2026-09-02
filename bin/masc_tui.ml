@@ -1593,7 +1593,7 @@ type async_msg =
   | Verification_verdict_done of (string * bool, string) result
   | Harness_label_done of (string, string) result
   | Keeper_calls_loaded of
-      string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
+      int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Goal_timeline_loaded of
       string * (Masc.Tui_decode.goal_timeline, string) result
   | Task_history_loaded of
@@ -2434,26 +2434,42 @@ let launch_schedules_load state ~mailbox =
 (* The durable call log of one keeper, over HTTP. The row the answer is
    applied to is named in the message so a load that returns after the
    operator moved to another keeper is discarded, not drawn under it. *)
-let launch_keeper_calls_load state ~mailbox keeper_name =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_keeper_calls ~host ~port ~keeper_name ~limit:100
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Keeper_calls_loaded (keeper_name, result))
+let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
+  let same_scope =
+    Option.equal String.equal state.keeper_calls_keeper (Some keeper_name)
   in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
+  if state.keeper_calls_loading && same_scope then
+    if force then state.keeper_calls_refresh_pending <- true else ()
+  else begin
+    state.keeper_calls_generation <- state.keeper_calls_generation + 1;
+    let generation = state.keeper_calls_generation in
+    if not same_scope then state.keeper_calls <- None;
+    state.keeper_calls_keeper <- Some keeper_name;
+    state.keeper_calls_loading <- true;
+    state.keeper_calls_refresh_pending <- false;
+    state.keeper_calls_error <- None;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_http.fetch_keeper_calls ~host ~port ~keeper_name ~limit:100
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
       enqueue_async mailbox
-        (Keeper_calls_loaded (keeper_name, Error "Eio switch is unavailable"))
+        (Keeper_calls_loaded (generation, keeper_name, result))
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        enqueue_async mailbox
+          (Keeper_calls_loaded
+             (generation, keeper_name, Error "Eio switch is unavailable"))
+  end
 
 (* The two detail-pane histories, over HTTP. Same discipline as the call
    log: the answer names the row it is for, so a load that returns after the
@@ -3779,6 +3795,14 @@ let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
     end
   end
 
+let launch_keeper_chat_tool_details_load ?(force = false) state ~mailbox
+    ~keeper_name =
+  if state.msg_tool_visibility <> Tools_full then ()
+  else begin
+    launch_keeper_chat_file_changes_load ~force state ~mailbox ~keeper_name;
+    launch_keeper_calls_load ~force state ~mailbox keeper_name
+  end
+
 (* Changes follows the selected Keeper, but the surface is useful precisely
    when comparing more than one Keeper. Brackets move that shared selection
    and invalidate every row whose identity belonged to the previous Keeper;
@@ -4340,7 +4364,7 @@ let launch_keeper_history_load ?(load_file_changes = true) state ~mailbox
   (* Full tool detail owns the only lazy read. Compact chat remains byte- and
      network-compatible; repeated history refreshes reuse this separate cache. *)
   if load_file_changes then
-    launch_keeper_chat_file_changes_load state ~mailbox ~keeper_name
+    launch_keeper_chat_tool_details_load state ~mailbox ~keeper_name
 
 let launch_context_inspector_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
@@ -5748,7 +5772,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          | `Toggle -> toggle_tool_visibility state.msg_tool_visibility);
       (match state.msg_tool_visibility, target with
        | Tools_full, Some keeper_name ->
-           launch_keeper_chat_file_changes_load ~force:true state ~mailbox
+           launch_keeper_chat_tool_details_load ~force:true state ~mailbox
              ~keeper_name
        | Tools_compact, _ | Tools_full, None -> ());
       notice ~role:Message_status
@@ -7812,7 +7836,7 @@ let handle_composer_key state ~base_path ~mailbox key =
           ~load_tool_changes:(fun () ->
             match state.msg_target_keeper_name with
             | Some keeper_name ->
-                launch_keeper_chat_file_changes_load ~force:true state ~mailbox
+                launch_keeper_chat_tool_details_load ~force:true state ~mailbox
                   ~keeper_name
             | None -> ())
           ~drain_queue:(fun () -> ())
@@ -8189,18 +8213,42 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Some current when String.equal current task_id ->
            state.task_history <- Some (task_id, result)
        | _ -> ())
-  | Keeper_calls_loaded (keeper_name, result) -> (
-      let still_selected =
-        match List.nth_opt state.keepers state.keeper_cursor with
-        | Some keeper -> String.equal keeper.k_name keeper_name
-        | None -> false
+  | Keeper_calls_loaded (generation, keeper_name, result) -> (
+      let still_current =
+        generation = state.keeper_calls_generation
+        && Option.equal String.equal state.keeper_calls_keeper
+             (Some keeper_name)
       in
-      if still_selected then
-        match result with
-        | Ok snapshot ->
-            state.keeper_calls <- Some snapshot;
-            state.keeper_calls_error <- None
-        | Error detail -> state.keeper_calls_error <- Some detail)
+      if still_current then begin
+        let refresh_pending = state.keeper_calls_refresh_pending in
+        state.keeper_calls_loading <- false;
+        state.keeper_calls_refresh_pending <- false;
+        (match result with
+         | Ok snapshot when String.equal snapshot.kcs_keeper keeper_name ->
+             state.keeper_calls <- Some snapshot;
+             state.keeper_calls_error <- None
+         | Ok snapshot ->
+             state.keeper_calls_error <-
+               Some
+                 (Printf.sprintf
+                    "tool-call response named keeper %s, expected %s"
+                    snapshot.kcs_keeper keeper_name)
+         | Error detail -> state.keeper_calls_error <- Some detail);
+        let still_visible =
+          match state.view with
+          | Keepers Keeper_message ->
+              state.msg_tool_visibility = Tools_full
+              && Option.equal String.equal state.msg_target_keeper_name
+                   (Some keeper_name)
+          | Keepers Keeper_calls ->
+              Option.exists
+                (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+                (selected_keeper state)
+          | _ -> false
+        in
+        if refresh_pending && still_visible then
+          launch_keeper_calls_load ~force:true state ~mailbox keeper_name
+      end)
   | Keeper_config_view_loaded (keeper_name, result) -> (
       let still_selected =
         match List.nth_opt state.keepers state.keeper_cursor with
@@ -8830,7 +8878,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           launch_keeper_history_load ~load_file_changes:false state ~mailbox
             ~keeper_name:request.Keeper_chat.keeper_name;
           if state.view = Keepers Keeper_message then
-            launch_keeper_chat_file_changes_load ~force:true state ~mailbox
+            launch_keeper_chat_tool_details_load ~force:true state ~mailbox
               ~keeper_name:request.Keeper_chat.keeper_name
         end;
         load_local_workspace_if_safe state base_path;
@@ -9354,7 +9402,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                (Printf.sprintf
                   "file-change response named keeper %s, expected %s"
                   snapshot.Masc.Tui_decode.fcs_keeper keeper_name)
-         | Error detail -> store_error detail);
+        | Error detail -> store_error detail);
         if refresh_pending && state.view = Keepers Keeper_message then
           launch_keeper_chat_file_changes_load ~force:true state ~mailbox
             ~keeper_name
@@ -12700,7 +12748,7 @@ and is loaded on demand through keeper_skill.
                    ~load_tool_changes:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->
-                         launch_keeper_chat_file_changes_load ~force:true state
+                         launch_keeper_chat_tool_details_load ~force:true state
                            ~mailbox:async_messages ~keeper_name
                      | None -> ())
                    ~drain_queue:(fun () ->
@@ -13213,7 +13261,8 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_calls ->
                 (match selected_keeper state with
                  | Some keeper ->
-                     launch_keeper_calls_load state ~mailbox:async_messages
+                     launch_keeper_calls_load ~force:true state
+                       ~mailbox:async_messages
                        keeper.k_name
                  | None -> ())
             | Keepers Keeper_detail ->
@@ -13230,7 +13279,7 @@ and is loaded on demand through keeper_skill.
                  | Some keeper_name ->
                      launch_keeper_history_load ~load_file_changes:false state
                        ~mailbox:async_messages ~keeper_name;
-                     launch_keeper_chat_file_changes_load ~force:true state
+                     launch_keeper_chat_tool_details_load ~force:true state
                        ~mailbox:async_messages ~keeper_name
                  | None -> ())
             | Planning | Verification ->

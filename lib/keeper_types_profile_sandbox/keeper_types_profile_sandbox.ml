@@ -100,3 +100,16 @@ let backend_unimplemented_message profile =
      rather than dispatched to another backend"
     (sandbox_profile_to_string profile)
 ;;
+
+type tree_location =
+  | Shared_mount
+  | Endpoint_owned
+
+(* Micro_vm still says [Shared_mount]: its guest mounts the playground over
+   virtiofs today. RFC-0400's routing cut flips this one arm, and every
+   consumer that branches on the location moves with it. *)
+let tree_location_of_profile = function
+  | Docker -> Shared_mount
+  | Micro_vm -> Shared_mount
+  | Remote_ssh -> Endpoint_owned
+;;

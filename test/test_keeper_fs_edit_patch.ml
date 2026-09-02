@@ -1410,11 +1410,16 @@ let () =
             "patching a symlink creates a regular 0644 lexical entry"
             `Quick
             test_patch_symlink_result_is_regular_0644;
+          (* These three exercise the host capability write path without a
+             runtime. They used Remote_ssh as the stand-in for the removed
+             Local profile; a Remote_ssh keeper's writes now go over the
+             remote lane, so the shared-mount profile without a runtime is
+             the path they mean. *)
           Alcotest.test_case
-            "Local outside-referent endpoint semantics are operation-specific"
+            "shared-mount outside-referent endpoint semantics are operation-specific (no runtime)"
             `Quick
             (test_outside_referent_endpoint_semantics
-               ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
+               ~sandbox:Keeper_types_profile_sandbox.Docker
                ~with_runtime:false);
           Alcotest.test_case
             "Docker outside-referent endpoint semantics are operation-specific"
@@ -1427,16 +1432,16 @@ let () =
             `Quick
             test_append_inside_symlink_uses_canonical_referent_capability;
           Alcotest.test_case
-            "local symlink component swap cannot escape allowed root"
+            "shared-mount symlink component swap cannot escape allowed root (no runtime)"
             `Quick
             (test_symlink_component_swap_cannot_escape_allowed_root
-               ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
+               ~sandbox:Keeper_types_profile_sandbox.Docker
                ~with_runtime:false);
           Alcotest.test_case
-            "local sandbox root swap keeps pinned capability"
+            "shared-mount sandbox root swap keeps pinned capability (no runtime)"
             `Quick
             (test_sandbox_root_swap_after_open_keeps_pinned_capability
-               ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
+               ~sandbox:Keeper_types_profile_sandbox.Docker
                ~with_runtime:false);
           Alcotest.test_case
             "Docker runtime symlink component swap cannot escape allowed root"

@@ -11595,21 +11595,25 @@ and is loaded on demand through keeper_skill.
                 in
                 state.context_inspector_scroll <-
                   move ~count ~height state.context_inspector_scroll
-            | "j" | "down"
-              when state.context_inspector_focus = Right_pane ->
+            | ("j" | "down" | "k" | "up")
+              when state.context_inspector_focus = Right_pane
+                   && terminal_columns >= keeper_split_threshold_cols ->
+                (* The width condition mirrors the h/l arm that set the
+                   focus. A terminal narrowed under the threshold keeps the
+                   stored focus but renders no split, and without this guard
+                   j/k would reach for a detail window that does not exist --
+                   while the cursor arms below, which do work, sat
+                   shadowed. *)
                 let count, height =
                   Masc_tui_render.context_inspector_detail_viewport state
                 in
-                state.context_inspector_detail_scroll <-
-                  Masc_tui_scroll.down ~count ~height
-                    state.context_inspector_detail_scroll
-            | "k" | "up" when state.context_inspector_focus = Right_pane ->
-                let count, height =
-                  Masc_tui_render.context_inspector_detail_viewport state
+                let move =
+                  match k with
+                  | "j" | "down" -> Masc_tui_scroll.down
+                  | _ -> Masc_tui_scroll.up
                 in
                 state.context_inspector_detail_scroll <-
-                  Masc_tui_scroll.up ~count ~height
-                    state.context_inspector_detail_scroll
+                  move ~count ~height state.context_inspector_detail_scroll
             | "j" | "down" ->
                 let count =
                   match state.context_inspector_tab with

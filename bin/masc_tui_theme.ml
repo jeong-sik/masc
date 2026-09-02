@@ -155,6 +155,16 @@ module Sgr = struct
   let underline = style "\027[4m"
   let no_underline = style "\027[24m"
 
+  (* Weight is not the only axis a terminal has, and drawing every distinction
+     as a colour is what makes a screen loud without making it legible.
+     Emphasis slants, a withdrawn reading is struck. Both close to their own
+     off-code rather than to a full reset, so a span inside a coloured row
+     leaves the row's colour where it was. *)
+  let italic = style "\027[3m"
+  let no_italic = style "\027[23m"
+  let strike = style "\027[9m"
+  let no_strike = style "\027[29m"
+
   let red = style "\027[31m"
   let green = style "\027[32m"
   let yellow = style "\027[33m"
@@ -366,6 +376,17 @@ module Syntax = struct
   let json_number = Sgr.bright_yellow
   let json_literal = Sgr.bright_magenta
   let json_punctuation = Sgr.dim
+
+  (* The rest of what a fenced block and a chat row hold. Content, not state:
+     a slanted comment says it is a comment, not that anything is unwell. Named
+     here for the same reason the keyword is -- a renderer that picks the code
+     itself is one the readability lift cannot reach. *)
+  let code_comment = Sgr.italic ^ Sgr.gray
+  let code_number = Sgr.bright_magenta
+  let code_type = Sgr.bright_blue
+  let code_span = Sgr.bright_cyan
+  let link = Sgr.bright_blue
+  let rule = Sgr.gray
 
   (* Diff rows are content, like a keyword or a literal: "this line is green"
      says the file gained it, not that anything is healthy. Named here so the

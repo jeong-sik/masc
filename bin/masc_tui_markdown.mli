@@ -20,6 +20,9 @@ type span = string * string
 type palette = {
   strong : span;
   emphasis : span;
+  strike : span;
+      (** [~~struck~~]. Two tildes, never one: a single [~] is a home
+          directory or an approximation far more often than it is a marker. *)
   code : span;
   heading : int -> span;
       (** The codes for a heading of the given level, 1 for [#] through 6.
@@ -120,7 +123,7 @@ val render : palette:palette -> width:int -> string -> string list
 
 val inline_segments : string -> (string * string) list
 (** The inline parse alone, as [(text, kind)] pairs where kind is one of
-    ["plain"], ["strong"], ["emphasis"], ["code"], ["link_text"] or
+    ["plain"], ["strong"], ["emphasis"], ["strike"], ["code"], ["link_text"] or
     ["link_target"]. A Markdown link keeps its label as ["link_text"] and a
     printable [" (target)"] as ["link_target"], so the two remain distinct in
     copied and NO_COLOR text. Exposed so the marker handling can be read

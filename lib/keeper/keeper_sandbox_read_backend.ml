@@ -121,8 +121,12 @@ let container_name_of meta =
     (Unix.getpid ())
     (int_of_float (Unix.gettimeofday () *. 1000.0))
 
-let run_remote_command_with_status
-    ?turn_sandbox_factory
+(* One runner, two ways of getting the endpoint. A turn hands in the lane's
+   [endpoint], which may start the guest it owns; a caller with no turn hands
+   in [attached_guest_endpoint], which cannot. Path translation and status
+   handling are the same either way, so they live here once. *)
+let run_endpoint_command_with_status
+    ~acquire_endpoint
     ?(ok_exit_codes = [ 0 ])
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
@@ -133,9 +137,7 @@ let run_remote_command_with_status
   =
   let ( let* ) = Result.bind in
   let host_root = host_playground_root ~config ~meta in
-  let* endpoint =
-    Keeper_sandbox_remote_lane.endpoint ?turn_sandbox_factory ~config ~meta ~cwd:host_root ()
-  in
+  let* endpoint = acquire_endpoint ~cwd:host_root in
   let* cwd =
     Keeper_remote_path.host_to_remote ~base_path:config.base_path
       ~remote_root:(Keeper_sandbox_remote.remote_root endpoint) ~keeper:meta.name
@@ -178,6 +180,9 @@ let run_remote_command_with_status
 type read_dispatch =
   | Turn_runtime of Keeper_sandbox_factory.runtime_binding
   | Remote_dispatch
+  | Attached_guest
+      (** The guest reached without a turn: named by the keeper and the base
+          path, never started by this read. *)
   | Docker_fallback
 
 let binding_profile (binding : Keeper_sandbox_factory.runtime_binding) =
@@ -211,12 +216,14 @@ let resolve_read_dispatch ~turn_sandbox_factory ~(meta : keeper_meta) ~cwd =
        Result.map (fun () -> Remote_dispatch) (contract_holds (binding_profile binding))
      | Remote_ssh_profile ->
        Result.map (fun () -> Remote_dispatch) (contract_holds Remote_ssh)
+     (* Holding no factory means holding no lifecycle authority over the
+        guest, and reaching a running guest needs none: its name comes from
+        the keeper and the base path, and it outlives the turn that booted
+        it. Refusing here reported a reachable tree as unreachable. *)
      | No_factory ->
        (match meta.sandbox_profile with
         | Remote_ssh -> Ok Remote_dispatch
-        | Micro_vm ->
-          Error
-            "microvm_read_requires_turn_sandbox_factory: the guest is known only to the turn's sandbox factory, and this call has none"
+        | Micro_vm -> Ok Attached_guest
         | Docker ->
           Error "docker_has_no_remote_lane: a docker keeper's tree is a shared mount"))
   | Shared_mount ->
@@ -246,8 +253,29 @@ let run_command_with_status ?turn_sandbox_factory
     match resolve_read_dispatch ~turn_sandbox_factory ~meta ~cwd with
     | Error _ as error -> error
     | Ok Remote_dispatch ->
-      run_remote_command_with_status ?turn_sandbox_factory ~ok_exit_codes ~config ~meta
-        ~command_argv ~max_bytes ~timeout_sec ()
+      run_endpoint_command_with_status
+        ~acquire_endpoint:(fun ~cwd ->
+          Keeper_sandbox_remote_lane.endpoint ?turn_sandbox_factory ~config ~meta ~cwd ())
+        ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
+    | Ok Attached_guest ->
+      (* The guest is not probed before the call: a stopped one fails the exec
+         on its own, and probing first would spend a second subprocess on
+         every read. The probe runs here instead, only to replace an exec
+         failure with the fact behind it. *)
+      (match
+         run_endpoint_command_with_status
+           ~acquire_endpoint:(fun ~cwd:_ ->
+             Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta ())
+           ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
+       with
+       | Ok _ as ok -> ok
+       | Error message ->
+         (match
+            Keeper_turn_sandbox_runtime.microvm_guest_absence_reason
+              ~timeout_sec ~config ~meta ()
+          with
+          | Some reason -> Error reason
+          | None -> Error message))
     | Ok (Turn_runtime { runtime; _ }) ->
       Keeper_turn_sandbox_runtime.run_command_with_status
         ~ok_exit_codes runtime ~timeout_sec ~cwd ~command_argv ~max_bytes ()

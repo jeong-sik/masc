@@ -142,6 +142,7 @@ let external_gate_decision
       { keeper_name = meta.name
       ; operation
       ; input
+      ; sandbox_profile = None
       ; base_path = config.Workspace.base_path
       ; causal_context = Option.map (fun current -> current ()) gate_context
       ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
@@ -295,7 +296,7 @@ let with_external_gate_execution
       blocked.payload
 ;;
 
-let network_read_gate_operation = "network_read"
+let network_read_gate_operation = Keeper_gate.network_read_gate_operation
 
 type network_read_replay =
   | Replay_web_search of Yojson.Safe.t
@@ -1015,7 +1016,7 @@ let connector_post_gate_input ~connector ~channel_id ~content ~mention_user_ids
      @ block_fields)
 ;;
 
-let connector_post_gate_operation = "connector_post"
+let connector_post_gate_operation = Keeper_gate.connector_post_gate_operation
 
 type connector_post_replay =
   | Replay_discord_post of
@@ -1773,7 +1774,15 @@ let spawn_sandbox_argv ~turn_sandbox_factory ~cwd ~command_argv =
       "spawn does not cross the remote_ssh boundary: the exec shim speaks a \
        framed protocol over one connection, so there is no argv to background. \
        Run the command with Execute."
-  | Keeper_sandbox_factory.Runtime { runtime; _ } ->
+  (* Same boundary, other transport: a microvm guest owns its tree and is
+     reached through the shim over [container exec] (RFC-0400). *)
+  | Keeper_sandbox_factory.Runtime { guest_profile = Micro_vm_guest; _ } ->
+    Error
+      "spawn does not cross the microvm boundary: the guest's tree lives on \
+       its work volume and the exec shim speaks a framed protocol over one \
+       connection, so there is no argv to background. Run the command with \
+       Execute."
+  | Keeper_sandbox_factory.Runtime { runtime; guest_profile = Docker_guest; _ } ->
     Keeper_turn_sandbox_runtime.exec_argv
       ~validate_cached_container:false
       runtime

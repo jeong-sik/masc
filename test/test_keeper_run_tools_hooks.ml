@@ -1194,6 +1194,110 @@ let test_projection_adoption_preserves_durable_projection_fields () =
     adopted.runtime.usage.last_total_tokens
 ;;
 
+(* A skill serves its body as a tool result. When the body is large enough to
+   externalize (RFC-0363), the model reads a [masc:blob] marker whose sha256 and
+   bytes are the served body's own, so a receipt taken from the marker still
+   equals what the skill served -- which is what lets the ledger record the
+   delivery instead of leaving it SERVED ONLY forever. *)
+let served_body = String.concat "\n" (List.init 400 (fun i -> Printf.sprintf "line %d of the skill body" i))
+let served_sha = Digestif.SHA256.(digest_string served_body |> to_hex)
+
+let blob_marker_for body =
+  match
+    Tool_output.make_artifact_ref
+      ~sha256:Digestif.SHA256.(digest_string body |> to_hex)
+      ~bytes:(String.length body)
+      ~preview:"preview"
+      ~mime:"text/plain"
+  with
+  | Ok reference -> Tool_output.encode_for_agent_core (Tool_output.Stored reference)
+  | Error error -> failf "could not build a marker: %s" (Tool_output.make_error_to_string error)
+;;
+
+let tool_message results =
+  { Agent_core.Types.role = Tool
+  ; content =
+      List.map
+        (fun (tool_use_id, content) ->
+          Agent_core.Types.ToolResult
+            { tool_use_id; content; outcome = Agent_core.Types.Tool_succeeded
+            ; json = None; content_blocks = None })
+        results
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+;;
+
+let assistant text =
+  { Agent_core.Types.role = Assistant
+  ; content = [ Agent_core.Types.Text text ]
+  ; name = None; tool_call_id = None; metadata = []
+  }
+;;
+
+let receipt_bytes_sha (r : Masc.Keeper_skill_activation_ledger.tool_result_receipt) =
+  r.content_bytes, r.content_sha256
+;;
+
+let test_receipt_reads_blob_marker_identity () =
+  let marker = blob_marker_for served_body in
+  check bool "the wire content really is a marker, not the body" true
+    (Tool_output.is_marker marker && String.length marker < String.length served_body);
+  let receipts =
+    Masc.Keeper_run_tools_hooks.trailing_tool_result_receipts
+      [ tool_message [ "call_skill", marker ] ]
+  in
+  match receipts with
+  | [ receipt ] ->
+    let bytes, sha = receipt_bytes_sha receipt in
+    check int "bytes are the served body's, not the marker's" (String.length served_body) bytes;
+    check string "sha is the served body's" served_sha sha
+  | _ -> fail "expected exactly one receipt"
+;;
+
+let test_receipt_reads_plain_content () =
+  let receipts =
+    Masc.Keeper_run_tools_hooks.trailing_tool_result_receipts
+      [ tool_message [ "call_x", "a short inline result" ] ]
+  in
+  match receipts with
+  | [ receipt ] ->
+    let bytes, sha = receipt_bytes_sha receipt in
+    check int "bytes are the content's own" (String.length "a short inline result") bytes;
+    check string "sha is the content's own"
+      Digestif.SHA256.(digest_string "a short inline result" |> to_hex) sha
+  | _ -> fail "expected exactly one receipt"
+;;
+
+(* The skill result is not always the very last message: a dynamic-context
+   message, or a second batched tool message, can follow it. The previous rule
+   took receipts only when the final message was Tool, so anything appended
+   dropped the skill's receipt and the ledger never matched. *)
+let test_receipts_survive_a_trailing_non_tool_message () =
+  let marker = blob_marker_for served_body in
+  let receipts =
+    Masc.Keeper_run_tools_hooks.trailing_tool_result_receipts
+      [ assistant "earlier reply"
+      ; tool_message [ "call_a", "first" ]
+      ; tool_message [ "call_skill", marker ]
+      ]
+  in
+  let ids = List.map (fun r -> r.Masc.Keeper_skill_activation_ledger.tool_use_id) receipts in
+  check bool "the skill result is present" true (List.mem "call_skill" ids);
+  check bool "the batch sibling is present too" true (List.mem "call_a" ids);
+  check int "only the trailing tool run is taken, not the assistant line" 2 (List.length receipts)
+;;
+
+let test_no_trailing_tool_message_yields_no_receipt () =
+  let receipts =
+    Masc.Keeper_run_tools_hooks.trailing_tool_result_receipts
+      [ tool_message [ "call_a", "first" ]; assistant "model replied" ]
+  in
+  check int "a result behind the model's reply is offered at its own boundary, not here"
+    0 (List.length receipts)
+;;
+
 let () =
   run
     "keeper_run_tools_hooks"
@@ -1355,6 +1459,16 @@ let () =
             "keeps the projection's durable fields while re-applying the TOML"
             `Quick
             test_projection_adoption_preserves_durable_projection_fields
+        ] )
+    ; ( "skill delivery receipts"
+      , [ test_case "a blob marker carries the served body's sha and bytes" `Quick
+            test_receipt_reads_blob_marker_identity
+        ; test_case "a plain result is hashed as its own bytes" `Quick
+            test_receipt_reads_plain_content
+        ; test_case "a receipt is taken even when a message follows the results"
+            `Quick test_receipts_survive_a_trailing_non_tool_message
+        ; test_case "no trailing tool message yields no receipt" `Quick
+            test_no_trailing_tool_message_yields_no_receipt
         ] )
     ]
 ;;

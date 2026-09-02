@@ -66,7 +66,9 @@ val sniff_image_media_type : string -> (string, string) result
 (** Identify an image's media type from its leading bytes. [Error] names the
     admitted set rather than guessing, so an unrecognised file is rejected at
     the boundary that read it. Shared with the TUI composer so both surfaces
-    admit exactly the same formats. *)
+    admit exactly the same formats. Pixel dimensions are
+    {!Keeper_image_dimensions.image_dimensions}, kept apart so the chat store
+    can measure an attachment without this tool's dependency cone. *)
 
 val vision_runtime_ids : unit -> string list
 (** Ordered image-capable runtime ids: [\[runtime\].media_failover] order

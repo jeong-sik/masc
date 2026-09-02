@@ -1556,6 +1556,31 @@ let () =
     (Json_util.get_int single_runtime "lane_attempt_count" = Some 1)
 ;;
 
+(* #29929 gave [Terminal_effect_failed] its own operator disposition, but the
+   wire it arrives on carries the call's parameters after the kind, and
+   [wire_kind_of_string] compared the whole string. The reason decoded as
+   [Unknown], so every such receipt still landed unmapped -- 178 of them on
+   2026-09-01 alone. Read the kind, keep the parameters. *)
+let () =
+  let wire =
+    Keeper_internal_error.terminal_effect_failed_kind
+    ^ ":tool_use_id=call_a633eabea3a8,effect_disposition=effect_outcome_unknown"
+  in
+  check
+    "a terminal-effect wire carrying parameters decodes to the closed variant"
+    (match Tr.of_wire wire with
+     | Tr.Terminal_effect_failed decoded -> String.equal decoded wire
+     | _ -> false);
+  check
+    "that wire round-trips byte-identically"
+    (String.equal (Tr.to_wire (Tr.of_wire wire)) wire);
+  check
+    "the bare kind still decodes to the same variant"
+    (match Tr.of_wire Keeper_internal_error.terminal_effect_failed_kind with
+     | Tr.Terminal_effect_failed _ -> true
+     | _ -> false)
+;;
+
 let () =
   match !failures with
   | [] -> print_endline "test_keeper_terminal_reason_typed: OK"

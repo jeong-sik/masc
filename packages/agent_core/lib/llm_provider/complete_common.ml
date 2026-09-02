@@ -402,7 +402,11 @@ let validate_request_path (config : Provider_config.t) =
      explicit effort value; merely naming the dialect emits no wire control.
 
    Absence remains absence: [enable_thinking = None] never invents a policy.
-   Explicit disable on a non-reasoning model remains a satisfied no-op. *)
+   Explicit disable on a non-reasoning model remains a satisfied no-op, except
+   on a [Reasoning_effort] row: that wire has no toggle besides the effort, so
+   the disable travels as [reasoning_effort = "none"] and the effort ladder
+   ([Provider_config.validate_reasoning_effort_request_typed]) decides whether
+   the row can carry it. *)
 type thinking_control_request_rejection =
   | Enable_not_declared
   | Enable_not_encodable

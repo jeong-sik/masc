@@ -46,4 +46,18 @@ val tool_info_to_json : tool_info -> Yojson.Safe.t
     names the visible tools with no calls at all, which [never_called_count]
     previously only counted. *)
 val summary_report :
-  ?runtime_metrics:(unit -> Yojson.Safe.t) -> unit -> Yojson.Safe.t
+  ?runtime_metrics:(unit -> Yojson.Safe.t) ->
+  ?public_names:(string -> string list) ->
+  unit ->
+  Yojson.Safe.t
+(** [public_names internal] is the public names one internal tool is offered
+    under, and it arrives as an argument for the reason [runtime_metrics]
+    does: which names a Keeper's descriptor set projects is the Keeper
+    domain's fact, and a tool surface module may not reach for it (RFC-0194).
+    The server is above both and passes it.
+
+    A list rather than one name, because a descriptor set can project one
+    internal tool under several public names and picking the first would put
+    an arbitrary one of them in a column an operator is about to join on. The
+    default answers [[]], which is also what a tool no model can call
+    answers. *)

@@ -8,7 +8,7 @@ let entry = Env_config_snapshot_collector.entry
 let category = Env_config_snapshot_collector.category
 
 let keeper_registry_entries predicate =
-  Keeper_runtime_setting_registry.active
+  Keeper_runtime_setting_registry.all
   |> List.filter predicate
   |> List.map (fun (row : Keeper_runtime_setting_registry.setting) ->
     entry ~default:row.default_display row.env_name row.description)

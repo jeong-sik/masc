@@ -508,7 +508,7 @@ let parse_delta_tool_call_arguments ~position function_json =
   | Some (`String arguments) -> Ok (Some (Args_fragment arguments))
   | Some arguments ->
     (match Tool_call_input.validate_object arguments with
-     | Ok arguments ->
+     | Ok (arguments, _dropped) ->
        (* Some explicitly OpenAI-compatible servers send a complete JSON object
           rather than the wire string fragment. This is a structural wire
           variant, not a provider/model-name inference: the complete value

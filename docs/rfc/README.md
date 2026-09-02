@@ -240,6 +240,10 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0397 | Librarian wire contract states changes, not the whole roster | Draft | - |
 | 0398 | Edit addresses lines and proves freshness; the substring search goes away | Draft | - |
 | 0399 | Build output leaves the virtiofs share | Draft | - |
+| 0400 | The microVM guest owns its working tree | Draft | - |
+| 0401 | 검증자는 떠 있는 게스트에 붙는다 | Draft | - |
+| 0402 | Memory OS: an observed fact names the Board post it was read from — RFC-0251 ... | Draft | - |
+| 0403 | Keeper 별 도구 선택 — 부착 서비스는 provider 단위로만 켜고 끌 수 있다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |
@@ -270,7 +274,9 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-prompts-and-tool-definitions-outside-ocaml | 프롬프트와 도구 정의를 OCaml 밖으로 — 모델이 읽는 모든 글은 config 파일이 소유한다 | Draft | - |
 | RFC-runtime-note-field-and-dashboard-surfacing | Per-runtime note field & dashboard surfacing | Draft | - |
 | RFC-schedule-history-and-outcome | # RFC — A schedule's past and its result | Draft | - |
+| RFC-shell-ir-lines-heredoc-dquote | 셸 서브셋이 줄과 인용 heredoc과 큰따옴표 보간을 읽는다 | Draft | - |
 | RFC-shell-ir-simple-param-expansion | Shell IR가 단순 파라미터 확장($VAR)을 닫는다 — env 세팅 패턴이 마지막 걸림돌이다 | Draft | - |
+| RFC-shell-ir-typed-command-substitution | typed 커맨드 치환 — `$(cmd)`를 자식 IR로 읽고, 그 stdout을 argv 한 원소로 쓴다 | Draft | - |
 | RFC-skills-as-tools | Skill 과 Tool 은 한 카탈로그의 두 표면 — SKILL.md 가 지시·합성·비동기를 선언한다 | Active | - |
 | RFC-spawn-a-process-that-outlives-the-call | Spawn: a process that outlives the call | Draft | - |
 | RFC-tools-as-shell-commands | 도구를 셸 first-class 커맨드로 — 순차 결합의 provider 왕복을 없앤다 | Draft | - |

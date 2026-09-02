@@ -513,8 +513,10 @@ let test_keeper_tools_list_json_names_the_model_visible_tools () =
     (list_member_contains "properties" "argv" schema_shape);
   check bool "Execute schema properties omit retired executable" false
     (list_member_contains "properties" "executable" schema_shape);
-  check bool "Execute schema properties include pipeline" true
+  check bool "Execute schema properties omit retired pipeline" false
     (list_member_contains "properties" "pipeline" schema_shape);
+  check bool "Execute schema properties include script" true
+    (list_member_contains "properties" "script" schema_shape);
   check bool "Execute schema has no shape errors" true
     (Yojson.Safe.Util.member "schema_errors" schema_shape = `Null);
   let examples = Yojson.Safe.Util.(member "examples" execute |> to_list) in
@@ -605,7 +607,7 @@ let test_keeper_tools_list_json_names_the_model_visible_tools () =
     { (descriptor_for_internal "tool_execute") with
       KTD.input_schema =
         `Assoc
-          [ "properties", `Assoc [ "argv", `Assoc []; "pipeline", `Assoc [] ]
+          [ "properties", `Assoc [ "argv", `Assoc []; "script", `Assoc [] ]
           ; "oneOf"
           , `List
               [ `Assoc [ "required", `List [ `String "argv" ] ]
@@ -3320,6 +3322,7 @@ let test_consumed_without_outcome_is_terminal_indeterminate () =
                ; "input", input
                ]
          ; base_path = config.base_path
+         ; sandbox_profile = None
          ; causal_context = None
          ; task_id = None
          ; continuation_channel = None
@@ -3395,9 +3398,10 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
        in
        let request : Masc.Keeper_gate.request =
          { keeper_name = meta.name
-         ; operation = "keeper_voice_speak"
+         ; operation = "unreplayed_operation"
          ; input = `Assoc [ "message", `String exact_tail ]
          ; base_path = config.base_path
+         ; sandbox_profile = None
          ; causal_context = None
          ; task_id = None
          ; continuation_channel = None

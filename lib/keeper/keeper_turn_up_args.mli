@@ -43,8 +43,18 @@ val parse_max_context_override :
   Yojson.Safe.t -> (bool * int option, string) result
 
 (** Top-level parser: project the [keeper_up] tool args JSON to a
-    [parsed_args] record, or return a [tool_result] error envelope. *)
+    [parsed_args] record, or return a [tool_result] error envelope.
+
+    A stated profile has to be dispatchable, not just well-formed: a
+    [remote_ssh] profile runs the endpoint preflight, and a [docker] profile
+    runs [docker_preflight] (daemon, image, hardening) and is refused under
+    {!Keeper_sandbox_runtime.docker_preflight_failed_label} when it fails.
+    [docker_preflight] defaults to {!Keeper_sandbox_runtime.docker_preflight}
+    with the [Io] shell-timeout bucket; [None] from it means the preflight
+    master switch is off and admission proceeds. The test suite has no
+    daemon and passes its own probe. *)
 val parse :
+  ?docker_preflight:(timeout_sec:float -> Keeper_sandbox_runtime.docker_preflight option) ->
   _ context ->
   Yojson.Safe.t ->
   (parsed_args, tool_result) result

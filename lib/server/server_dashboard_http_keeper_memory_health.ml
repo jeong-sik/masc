@@ -188,7 +188,7 @@ let keeper_health ~keepers_dir keeper_id =
       List.fold_left
         (fun (observed, derived) fact ->
            match fact.Keeper_memory_os_types.basis with
-           | Keeper_memory_os_types.Observed -> observed + 1, derived
+           | Keeper_memory_os_types.Observed _ -> observed + 1, derived
            | Keeper_memory_os_types.Derived _ -> observed, derived + 1)
         (0, 0)
         snapshot.facts

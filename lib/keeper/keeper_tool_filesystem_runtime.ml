@@ -448,6 +448,9 @@ let default_owned_target ~ownership_root ~path =
   let entries ~root =
     match Sys.readdir root with
     | e -> Array.to_list e
+    (* An unreadable directory is an empty one for this walk; a cancelled
+       fiber is not, and a wildcard here answered [[]] for both. *)
+    | exception Eio.Cancel.Cancelled _ as error -> raise error
     | exception _ -> []
   in
   let subdirs_of ~root ~skip =
@@ -1314,7 +1317,7 @@ let replay_args_of_gate_input input =
 (* The opaque Gate operation identity for every local write this module
    performs. The Gate never parses it; consumers that must recognise the
    same effect read it from here instead of repeating the literal. *)
-let gate_operation = "filesystem_write"
+let gate_operation = Keeper_gate.filesystem_write_gate_operation
 
 let file_write_gate_input
       ~gate_effect
@@ -1358,6 +1361,7 @@ let decide_file_write
     { keeper_name = meta.name
     ; operation = gate_operation
     ; input
+    ; sandbox_profile = None
     ; base_path = config.Workspace.base_path
     ; causal_context = Option.map (fun current -> current ()) gate_context
     ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id

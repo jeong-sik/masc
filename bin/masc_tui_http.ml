@@ -432,6 +432,29 @@ let fetch_git_log ?keeper ?repo ~(host : string) ~(port : int)
           Error ("git log was not JSON: " ^ detail)
       | json -> Masc.Tui_decode.decode_git_log json)
 
+(** Who last touched each run of lines in the file ([/api/v1/git/blame]).
+    Scoped by the same keeper / repo axes the tree and the log use, so the
+    answer describes the checkout the file was read from. *)
+let fetch_git_blame ?keeper ?repo ~(host : string) ~(port : int)
+    ~(path : string) () :
+    (Masc.Tui_decode.blame_block list, string) result =
+  let route =
+    Printf.sprintf "/api/v1/git/blame?path=%s%s%s"
+      (percent_encode_query_value path)
+      (keeper_query_suffix keeper)
+      (repo_query_suffix repo)
+  in
+  match http_get ~host ~port ~path:route with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "git blame returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | exception Yojson.Json_error detail ->
+          Error ("git blame was not JSON: " ^ detail)
+      | json -> Masc.Tui_decode.decode_git_blame json)
+
 (** The notes anchored to [file_path] in [codebase]
     ([/api/v1/ide/annotations]). The slug is the server's own mint, carried
     from the repositories listing -- never re-derived here (RFC-0378). *)
@@ -781,6 +804,34 @@ let fetch_lane_run_detail ~(host : string) ~(port : int) ~(run_id : string) :
          | exception Yojson.Json_error detail ->
              Error ("lane run detail was not JSON: " ^ detail))
 
+(** Fetch one page of chat rows older than [before].
+
+    [before] absent asks for the newest window, which is what the transcript
+    fetch already returns; the pane passes a cursor, so it is required here.
+    Defined before {!fetch_keeper_context_inspector}, which reads the answer
+    to a turn through it. *)
+let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(before : float) :
+    (Masc_tui_keeper_chat_history.page, string) result =
+  let path =
+    (* %.17g rather than %h: both round-trip through float_of_string, but the
+       hex form carries a '+' in its exponent, which a query string reads as a
+       space. 17 significant digits is the shortest width that is exact for
+       every double. *)
+    Printf.sprintf "/api/v1/keepers/%s/chat/history/page?before=%.17g"
+      (percent_encode_path_segment keeper_name)
+      before
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (Printf.sprintf "chat history page returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json -> Masc_tui_keeper_chat_history.page_of_json json
+      | exception Yojson.Json_error detail ->
+          Error ("chat history page was not JSON: " ^ detail))
+
 (** Fetch one completed turn and the immutable provider-input snapshot joined
     by that turn's exact [turn_ref]. A failure on either side stays visible;
     no mutable latest-prompt value is allowed to fill another turn. *)
@@ -883,37 +934,11 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
                     page.Masc_tui_keeper_chat_history.decoded.rows
                 in
                 Ok
-                  { parts
+                  { Masc_tui_context_inspector.parts
                   ; outside_newest_page = parts = []
                   }))
   in
   { Masc_tui_context_inspector.turn; provider_input; response }
-
-(** Fetch one page of chat rows older than [before].
-
-    [before] absent asks for the newest window, which is what the transcript
-    fetch already returns; the pane passes a cursor, so it is required here. *)
-let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(before : float) :
-    (Masc_tui_keeper_chat_history.page, string) result =
-  let path =
-    (* %.17g rather than %h: both round-trip through float_of_string, but the
-       hex form carries a '+' in its exponent, which a query string reads as a
-       space. 17 significant digits is the shortest width that is exact for
-       every double. *)
-    Printf.sprintf "/api/v1/keepers/%s/chat/history/page?before=%.17g"
-      (percent_encode_path_segment keeper_name)
-      before
-  in
-  match http_get ~host ~port ~path with
-  | Error detail -> Error detail
-  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-      Error (Printf.sprintf "chat history page returned %d: %s" status body)
-  | Ok (_, body) -> (
-      match Yojson.Safe.from_string body with
-      | json -> Masc_tui_keeper_chat_history.page_of_json json
-      | exception Yojson.Json_error detail ->
-          Error ("chat history page was not JSON: " ^ detail))
 
 (** Answer a tool call the keeper is holding.
 

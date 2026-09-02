@@ -645,6 +645,10 @@ a RECENT TURNS row names the one on screen -- and every tab re-reads the
 exact provider input for the row they name; a turn that retained no
 snapshot says so on the request tab rather than showing another turn's.
 
+On the request tab, `/` searches the item labels the way the keeper
+roster searches names: typing jumps to the first match, `n`/`N` cycle,
+`Enter` settles, `Esc` clears. The query draws beside the tab row.
+
 `2:request` marks where each item stands in the assembly: `F` the fixed
 system prompt, `H` history the window carried forward, `N` the newest
 message added this turn (the wire is append-only, so the last message is the
@@ -811,6 +815,14 @@ Operator approvals scoped to the acting actor.
 `y` and `n` post to `/api/v1/operator/confirm`. Selection is held by item
 identity, so a refresh that reorders or drops items does not move the cursor
 onto a different request.
+
+`Enter` opens the selected request as a wrapped, scrollable field list before
+the operator decides it. A blocked Auto Judge request puts `state`, the exact
+producer `reason`, and the available `next` action before its approval ID,
+execution location, and input. The one-line queue summary may end in `~`; the
+detail never treats that prefix as the whole reason. `R` retries only when the
+detail says retry is offered, while `y` and `n` remain available for a human
+decision.
 
 ### Board
 

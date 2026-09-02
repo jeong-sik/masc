@@ -17,7 +17,8 @@ let create ~operation ~approval_id ~reason ~audit_receipts ?context () =
 let gate_json t =
   Keeper_gate.decision_to_yojson
     (Keeper_gate.Deferred
-       { approval_id = t.approval_id
+       { operation = t.operation
+       ; approval_id = t.approval_id
        ; reason = t.reason
        ; audit_receipts = t.audit_receipts
        })

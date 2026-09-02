@@ -194,18 +194,21 @@ let test_current_schema_unknown_keeper_key_is_rejected () =
       (issue.severity = Keeper_runtime_config.Error)
   | issues -> failf "expected one issue, got %d" (List.length issues)
 
-let test_retired_keeper_key_is_rejected () =
+(* A key whose row left the registry (turn.capacity_limit, removed with its
+   consumer) is an unknown key under an owned namespace: rejected on the
+   current schema like any other typo, with no tombstone to name it. *)
+let test_removed_keeper_key_is_unknown () =
   let report =
     Keeper_runtime_config.validate_doc
       (parse_or_fail "[turn]\ncapacity_limit = 3\n")
   in
-  check bool "retired key is invalid" false
+  check bool "removed key is invalid" false
     (Keeper_runtime_config.validation_report_is_valid report);
   match report.issues with
   | [ issue ] ->
-    check bool "classified retired" true
-      (issue.kind = Keeper_runtime_config.Retired_key);
-    check bool "retired key rejects" true
+    check bool "classified unknown" true
+      (issue.kind = Keeper_runtime_config.Unknown_key);
+    check bool "removed key rejects" true
       (issue.severity = Keeper_runtime_config.Error)
   | issues -> failf "expected one issue, got %d" (List.length issues)
 
@@ -721,8 +724,8 @@ let () =
         ; test_case "parse error returns Error" `Quick test_parse_error_returns_error
         ; test_case "current schema rejects unknown Keeper key" `Quick
             test_current_schema_unknown_keeper_key_is_rejected
-        ; test_case "retired Keeper key is rejected" `Quick
-            test_retired_keeper_key_is_rejected
+        ; test_case "removed Keeper key is unknown" `Quick
+            test_removed_keeper_key_is_unknown
         ; test_case "future schema preserves unknown key as warning" `Quick
             test_future_schema_unknown_keeper_key_is_warning
         ; test_case "unrelated namespaces remain separately owned" `Quick

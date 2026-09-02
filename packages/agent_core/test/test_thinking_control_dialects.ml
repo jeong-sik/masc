@@ -474,6 +474,69 @@ let test_openai_reasoning_request_uses_reasoning_effort () =
        check_member_absent "chat_template_kwargs" json)
 ;;
 
+let test_openai_reasoning_request_renders_explicit_disable_as_none () =
+  with_manifest
+    {|{"schema_version":1,"models":[{"id_prefix":"openai-reasoning-off-test-2kq","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["none","low","high"]}]}|}
+    (fun () ->
+       let config ~enable_thinking =
+         PC.make
+           ~kind:OpenAI_compat
+           ~model_id:"openai-reasoning-off-test-2kq"
+           ~base_url:"https://api.openai.com/v1"
+           ~model_capabilities_override:
+             (catalog_capabilities "openai-reasoning-off-test-2kq")
+           ~enable_thinking
+           ~reasoning_effort:RE.High
+           ()
+       in
+       let body enable_thinking =
+         BOR.build_request ~config:(config ~enable_thinking) ~messages:[ user_msg "hi" ] ()
+         |> json_of_body
+       in
+       (* The max_tokens continuation in keeper_turn_driver_try_provider
+          retries with enable_thinking = Some false and the row's effort
+          untouched. The retry differs from the first request only if the
+          disable lands on the wire. *)
+       check
+         string
+         "explicit disable renders none"
+         "none"
+         (body false |> member "reasoning_effort" |> to_string);
+       check
+         string
+         "explicit enable keeps the row effort"
+         "high"
+         (body true |> member "reasoning_effort" |> to_string);
+       check_member_absent "thinking" (body false);
+       check_member_absent "enable_thinking" (body false))
+;;
+
+let test_openai_reasoning_request_rejects_disable_outside_ladder () =
+  with_manifest
+    {|{"schema_version":1,"models":[{"id_prefix":"openai-reasoning-no-off-test-7pd","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low","high"]}]}|}
+    (fun () ->
+       let config =
+         PC.make
+           ~kind:OpenAI_compat
+           ~model_id:"openai-reasoning-no-off-test-7pd"
+           ~base_url:"https://api.openai.com/v1"
+           ~model_capabilities_override:
+             (catalog_capabilities "openai-reasoning-no-off-test-7pd")
+           ~enable_thinking:false
+           ~reasoning_effort:RE.High
+           ()
+       in
+       match BOR.build_request ~config ~messages:[ user_msg "hi" ] () with
+       | _ -> fail "a disable the ladder cannot carry must not build a request"
+       | exception Invalid_argument message ->
+         check
+           bool
+           "rejection names the missing off value"
+           true
+           (string_contains_sub message "enable_thinking=false"
+            && string_contains_sub message "\"none\""))
+;;
+
 let test_deepseek_openai_compat_uses_thinking_object () =
   let config =
     declared_catalog_openai_compat_config
@@ -1399,6 +1462,14 @@ let () =
               "openai reasoning request uses reasoning_effort"
               `Quick
               test_openai_reasoning_request_uses_reasoning_effort
+          ; test_case
+              "openai reasoning request renders explicit disable as none"
+              `Quick
+              test_openai_reasoning_request_renders_explicit_disable_as_none
+          ; test_case
+              "openai reasoning request rejects disable outside ladder"
+              `Quick
+              test_openai_reasoning_request_rejects_disable_outside_ladder
           ; test_case
               "deepseek uses thinking object"
               `Quick

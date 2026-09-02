@@ -222,6 +222,61 @@ let test_advanced_run_emits_lifecycle_events () =
     lifecycle_event_kinds
 ;;
 
+let test_advanced_continue_does_not_append_user_input () =
+  with_temp_trace
+  @@ fun trace_path ->
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let trace = Raw_trace.create ~path:trace_path () |> Result.get_ok in
+  let transport, call_count = sequence_transport [ text_response "continued" ] in
+  let agent =
+    make_agent
+      ~net:env#net
+      ~transport
+      ~raw_trace:trace
+      ~checkpoint_sink:(fun _ -> Ok ())
+      ~context_injector:None
+      ~on_run_complete:None
+      ~tool:(time_tool ignore)
+  in
+  let original_user = Types.user_msg "original request" in
+  Agent.set_state agent { (Agent.state agent) with messages = [ original_user ] };
+  (match
+     Agent.Advanced.continue
+       ~sw
+       ~api_strategy:Agent.Sync
+       ~on_tool_boundary:(fun _ -> Agent.Advanced.Continue)
+       agent
+   with
+   | Ok (Agent.Advanced.Completed response) ->
+     Alcotest.(check string)
+       "response"
+       "continued"
+       (Types.visible_text_of_response response)
+   | Ok (Agent.Advanced.Yielded _) ->
+     Alcotest.fail "checkpoint continuation unexpectedly yielded"
+   | Ok (Agent.Advanced.Terminal_tool_completed _) ->
+     Alcotest.fail "checkpoint continuation unexpectedly completed a terminal tool"
+   | Error error -> Alcotest.fail (Error.to_string error));
+  Alcotest.(check int) "one provider call" 1 !call_count;
+  match (Agent.state agent).messages with
+  | [ observed_user; observed_assistant ] ->
+    Alcotest.(check bool)
+      "original user message preserved exactly once"
+      true
+      (observed_user = original_user);
+    Alcotest.(check bool)
+      "continuation appended only its assistant response"
+      true
+      (messages_contain_text "continued" [ observed_assistant ])
+  | messages ->
+    Alcotest.failf
+      "checkpoint continuation should leave two messages, got %d"
+      (List.length messages)
+;;
+
 let test_yield_after_context_checkpoint () =
   with_temp_trace
   @@ fun trace_path ->
@@ -1243,6 +1298,10 @@ let () =
             "Advanced run emits lifecycle events"
             `Quick
             test_advanced_run_emits_lifecycle_events
+        ; Alcotest.test_case
+            "Advanced continuation does not append a user input"
+            `Quick
+            test_advanced_continue_does_not_append_user_input
         ] )
     ; ( "tool boundary"
       , [ Alcotest.test_case

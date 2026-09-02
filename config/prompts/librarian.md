@@ -194,7 +194,9 @@ category에서 생략합니다. 범위 결정, 대기 방침, "언급될 때만 
   "new_claims": [
     {
       "claim": "사실을 담은 한 문장.",
-      "category": "code_change|fact|preference|blocker|goal|constraint|validated_approach|lesson"
+      "category": "code_change|fact|preference|blocker|goal|constraint|validated_approach|lesson",
+      "board_post_id": "이 claim 을 읽은 Board 글의 post_id (도구 결과에 있는 p-… 값 그대로). Board 에서 읽은 지식이 아니면 null.",
+      "board_comment_id": "그 글의 댓글에서 읽었으면 comment_id, 아니면 null. board_post_id 가 null 이면 이것도 null."
     }
   ],
   "dropped": [

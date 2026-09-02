@@ -130,8 +130,8 @@ let guest ~cli : Keeper_sandbox_remote.container_exec =
 
 let make_state ~base_path ~cli =
   Keeper_sandbox_remote.of_container_exec ~base_path ~keeper_name:"keeper-a"
-    ~remote_root ~gh_config_dir ~env_allowlist:[ "LANG" ] ~connect_timeout_sec:1
-    ~max_concurrent_sessions:2 (guest ~cli)
+    ~remote_root ~gh_config_dir ~injected_env:[] ~env_allowlist:[ "LANG" ]
+    ~connect_timeout_sec:1 ~max_concurrent_sessions:2 (guest ~cli)
 ;;
 
 let contains needle haystack =

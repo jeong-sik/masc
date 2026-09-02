@@ -23,7 +23,7 @@ let keeper_setting env_name =
     List.find_opt
       (fun (setting : Keeper_runtime_setting_registry.setting) ->
         String.equal setting.env_name env_name)
-      Keeper_runtime_setting_registry.active
+      Keeper_runtime_setting_registry.all
   with
   | Some setting -> setting
   | None -> failf "missing Keeper runtime registry row for %s" env_name

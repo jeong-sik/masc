@@ -348,6 +348,39 @@ module Advanced : sig
     -> t
     -> Types.content_block list
     -> (run_outcome, Error.t) result
+
+  (** Continue an already-populated agent conversation without appending a new
+      caller-authored input. This is the typed post-checkpoint continuation
+      boundary for a host that needs to re-shape the next provider turn (for
+      example, disabling thinking after a [MaxTokens] truncation) while
+      preserving tool results already recorded in the checkpoint.
+
+      Lifecycle events, raw tracing, provider-lease callbacks, periodic
+      callbacks, and cooperative tool-boundary yields are identical to
+      {!run_blocks_detailed}. The caller must restore or otherwise populate
+      the agent state before calling this function. *)
+  val continue_detailed
+    :  sw:Eio.Switch.t
+    -> ?clock:_ Eio.Time.clock
+    -> ?on_yield:(unit -> unit)
+    -> ?on_resume:(unit -> unit)
+    -> ?execution_store:execution_store
+    -> api_strategy:api_strategy
+    -> on_tool_boundary:(tool_boundary -> boundary_decision)
+    -> t
+    -> (run_outcome, detailed_error) result
+
+  (** Exact error projection of {!continue_detailed}. *)
+  val continue
+    :  sw:Eio.Switch.t
+    -> ?clock:_ Eio.Time.clock
+    -> ?on_yield:(unit -> unit)
+    -> ?on_resume:(unit -> unit)
+    -> ?execution_store:execution_store
+    -> api_strategy:api_strategy
+    -> on_tool_boundary:(tool_boundary -> boundary_decision)
+    -> t
+    -> (run_outcome, Error.t) result
 end
 
 (** Detailed counterpart of {!run}. *)

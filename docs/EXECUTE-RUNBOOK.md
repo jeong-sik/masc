@@ -6,11 +6,11 @@ status: runbook
 
 This runbook documents the current operator surface for `Execute` and
 adjacent structured process routing. Execute is typed-only: callers provide
-one non-empty `argv` process vector, a `pipeline`, or a `script` command line
-that the bash-subset parser lowers to the same Shell IR — nothing is handed
-to a shell, and a construct outside the subset is refused by name. Raw
-`cmd` strings and the old background task lifecycle are not part of the
-callable surface.
+exactly one of a non-empty `argv` process vector, run without a shell, or a
+`script` command line handed as `-c` text to the shell named in `shell`.
+Pipes, redirections, `;`/`&&` sequencing and `FOO=1` prefixes are `script`
+syntax; there is no object form for them. Raw `cmd` strings and the old
+background task lifecycle are not part of the callable surface.
 
 ## Related Documents
 
@@ -45,33 +45,34 @@ callable surface.
 
 ## Typed Input
 
-Single process:
+Direct form, one process and no shell:
 
 ```json
 { "argv": ["rg", "pattern", "lib"], "cwd": "repos/masc" }
 ```
 
-Pipeline:
+Shell form, one line run by the sandbox shell:
 
 ```json
-{
-  "pipeline": [
-    { "argv": ["rg", "--files", "lib"] },
-    { "argv": ["head", "-20"] }
-  ],
-  "cwd": "repos/masc"
-}
+{ "script": "rg --files lib | head -20", "cwd": "repos/masc" }
 ```
 
-Shell metacharacters inside `argv` are data. Use `pipeline` for pipes
-instead of embedding `|` in a string. For read-only observation prefer
-`Grep`; for file edits use `Edit`/`Write`.
+Exactly one of `argv` and `script` is present. Shell metacharacters inside
+`argv` are data: a literal `|` token is an argument, not a pipe. Write pipes,
+redirections, `;`/`&&` and `FOO=1` prefixes in `script`. `shell` names which
+shell runs `script` (`sh`, `bash`, `zsh`, `dash`, `ksh`; default `sh`) and is
+ignored with `argv`. `cwd` is a relative path inside the path jail;
+`timeout_sec` defaults to 600.
 
 ## Output Streaming
 
-The host native pipeline, host simple typed-stdin, and Docker runner contract
-routes forward `on_output_chunk` while the process is still running. The
-concrete host routes are:
+Below the tool boundary the exec layer routes `Shell_ir`. An `Execute` call
+reaches it as one `Simple` command (`argv` verbatim, or `shell -c script`);
+the `Pipeline` and stdin-content routes are reached by callers that build
+`Shell_ir` directly, not by any typed `Execute` field. The host pipeline, host
+simple-with-stdin, and Docker runner contract routes forward
+`on_output_chunk` while the process is still running. The concrete host
+routes are:
 
 ```text
 Exec_dispatch.dispatch_pipeline
@@ -83,7 +84,7 @@ Exec_dispatch.dispatch_simple ~stdin_content
 
 Pipeline callbacks are emitted from the final stdout pipe and each stage's
 stderr pipe as chunks are read. Intermediate stdout remains process-to-process
-pipe data and is not surfaced as user output. Simple host typed-stdin callbacks
+pipe data and is not surfaced as user output. Simple host stdin-content callbacks
 are emitted from that command's stdout/stderr pipes as chunks are read.
 
 Docker Shell IR targets receive the same stdout/stderr callback contract through
@@ -108,9 +109,8 @@ scripts/dune-local.sh build lib/exec/test/test_exec_dispatch_docker_streaming.ex
 
 `Execute` remains synchronous at the callable-surface level. The public schema
 rejects legacy background flags and accepts only typed command fields:
-`argv`, `pipeline`, `script`, `env`, `cwd`, `timeout_sec`, `stdin`,
-`stdout`, and `stderr`. It does not expose `job_id`, `request_id`, `poll`, or
-`cancel` fields.
+`argv`, `script`, `shell`, `cwd`, and `timeout_sec`. It does not expose
+`job_id`, `request_id`, `poll`, or `cancel` fields.
 
 Keeper-turn async messaging is a separate surface (`keeper_msg`,
 `keeper_msg_result`, `keeper_msg_cancel`, `keeper_msg_list`) and is serialized

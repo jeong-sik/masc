@@ -196,30 +196,6 @@ let file_activity_json ~codebase ~repo_id ~file_path ~window_hours =
     ; "unattributed_malformed", `Int unattributed_malformed
     ]
 
-(* ── Observation snapshot endpoint (task-1686) ─────────────────────── *)
-
-(** GET /api/v1/ide/observations/snapshot — returns accumulated observation
-    data (tool events and annotations) from the IDE bridge observation
-    snapshot helper.
-
-    Usage: ?take=true resets accumulators after read (destructive),
-           default is non-destructive peek.
-
-    Callers: the dashboard's IDE panels, for real-time updates. *)
-let observation_snapshot_handler request reqd =
-  let uri = Uri.of_string request.Httpun.Request.target in
-  let take =
-    match Uri.get_query_param uri "take" with
-    | Some "true" -> true
-    | _ -> false
-  in
-  let json = Ide_bridge.observation_snapshot_json ~take in
-  let body = json_ok json in
-  Http.Response.json_value
-    ~request
-    ~extra_headers:[ "x-observation-mode", if take then "take" else "peek" ]
-    body
-    reqd
 ;;
 
 let keeper_id_not_accepted_error =
@@ -486,7 +462,6 @@ let build_presence_snapshot state =
 let add_routes router =
   Ide_bridge.install_agent_observation_sinks ();
   router
-  |> Http.Router.get "/api/v1/ide/observations/snapshot" observation_snapshot_handler
   |> Http.Router.get "/api/v1/agents" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->

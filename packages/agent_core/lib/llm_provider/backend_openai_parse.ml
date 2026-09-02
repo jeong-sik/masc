@@ -136,7 +136,7 @@ let parse_tool_call_function ~tool_index json =
 
 let parse_tool_call_arguments ~tool_index raw =
   match Tool_call_input.parse_object raw with
-  | Ok input -> Ok input
+  | Ok (input, _dropped) -> Ok input
   | Error Tool_call_input.Not_object ->
     Error (Printf.sprintf "malformed_tool_call_arguments:index:%d:not_object" tool_index)
   | Error (Tool_call_input.Invalid_json message) ->

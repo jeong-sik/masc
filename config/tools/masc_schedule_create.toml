@@ -1,5 +1,6 @@
 name = "masc_schedule_create"
 description = """
+Wake a Keeper at a later time; the way to wait instead of polling the clock.
 Create a durable Keeper wake request. For 'every day at 09:00 KST', use \
 recurrence_kind=daily, recurrence_hour=9, recurrence_minute=0, \
 recurrence_timezone=Asia/Seoul. For compact calendar rules, use \

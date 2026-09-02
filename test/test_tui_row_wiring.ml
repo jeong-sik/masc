@@ -57,6 +57,19 @@ let test_the_detail_pane_says_where_the_command_would_run () =
   Alcotest.(check bool) "and the directory it would run in" true
     (reads ~binding_name:"render_approvals" ~fields:[ "gp_execution_cwd" ] > 0)
 
+(* A blocked Gate row exposes a short reason under the list, where the frame
+   has to fit it to one line. Enter promises the whole ask, so that pane must
+   carry the producer's exact reason and whether this attempt can be retried;
+   otherwise the operator still decides from the prefix before [~]. *)
+let test_the_detail_pane_keeps_the_blocked_gate_reason () =
+  Alcotest.(check bool) "the whole-ask pane reads the exact reason" true
+    (reads ~binding_name:"approval_detail_pane"
+       ~fields:[ "gp_auto_judge_detail" ]
+     > 0);
+  Alcotest.(check bool) "and says whether retry is possible" true
+    (reads ~binding_name:"approval_detail_pane" ~fields:[ "gp_retry_request" ]
+     > 0)
+
 (* The title counted the pending-confirm queue, which is one of the three lists
    this screen draws. With seven Gate rows waiting and that queue empty, the
    title read "(0/0, hidden 0)" while the tab beside it read "7". The hidden
@@ -309,11 +322,37 @@ let test_a_turn_on_a_keeper_that_is_not_running_stops_moving () =
          > 0))
     [ "Tui_decode.Health_offline"; "Tui_decode.Health_zombie" ]
 
+(* These labels were committed as the UTF-8 bytes interpreted once and then
+   encoded again, so operators saw byte-decoding debris instead of the
+   arrow/dash. Pin the semantic values, not their source spelling. *)
+let test_visible_navigation_glyphs_are_not_mojibake () =
+  let count binding literals =
+    Ast_grep.count_string_literals_in_value_binding ~module_path:render
+      ~binding_name:binding ~literals
+  in
+  Alcotest.(check int) "Code teaches the real left/right arrows" 1
+    (count "render_code" [ "Shift-\xe2\x86\x90/\xe2\x86\x92:pan  " ]);
+  Alcotest.(check int) "Answering draws the real running arrow" 2
+    (count "render_answering" [ "\xe2\x96\xb6 "; "\xe2\x96\xb6 writing" ]);
+  Alcotest.(check int) "Answering draws the real em dash" 1
+    (count "render_answering"
+       [ "live preview \xe2\x80\x94 none for this row" ]);
+  Alcotest.(check int) "no double-encoded glyph literal remains" 0
+    (count "render_answering"
+       [ "\xc3\xa2\xc2\x96\xc2\xb6 "
+       ; "\xc3\xa2\xc2\x96\xc2\xb6 writing"
+       ; "live preview \xc3\xa2\xc2\x80\xc2\x94 none for this row"
+       ]
+     + count "render_code"
+         [ "Shift-\xc3\xa2\xc2\x86\xc2\x90/\xc3\xa2\xc2\x86\xc2\x92:pan  " ])
+
 let () =
   Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
       , [ Alcotest.test_case "the detail pane says where the command would run"
             `Quick test_the_detail_pane_says_where_the_command_would_run
+        ; Alcotest.test_case "the detail pane keeps a blocked Gate reason"
+            `Quick test_the_detail_pane_keeps_the_blocked_gate_reason
         ; Alcotest.test_case "the detail height is read off the line it draws"
             `Quick test_the_detail_height_is_read_off_the_line_it_draws
         ; Alcotest.test_case "the title does not count another queue" `Quick
@@ -339,5 +378,7 @@ let () =
             `Quick test_a_turn_on_a_keeper_that_is_not_running_stops_moving
         ; Alcotest.test_case "a lane that cannot admit says why" `Quick
             test_a_lane_that_cannot_admit_says_why
+        ; Alcotest.test_case "visible navigation glyphs are not mojibake"
+            `Quick test_visible_navigation_glyphs_are_not_mojibake
         ] )
     ]

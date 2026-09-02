@@ -51,5 +51,8 @@ val run_keeper_cycle
   -> wake:Keeper_registry.wake_reason
   -> unit
   -> cycle_outcome
-(** [?previous_turn_stop] is forwarded to {!Keeper_unified_turn.run_keeper_cycle}
-    unchanged; the heartbeat loop owns the value between cycles. *)
+(** [?previous_turn_stop] overrides the shared stop cell for this turn —
+    tests use it to pin the rendered line. When absent, the wrapper reads
+    {!Keeper_last_turn_stop} and, after the cycle, records the outcome there
+    ([Some checkpoint_reason] for a checkpoint, [None] for every other
+    outcome) so the next turn on any lane is told why this one stopped. *)

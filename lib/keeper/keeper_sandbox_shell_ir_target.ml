@@ -44,18 +44,90 @@ let profile_contract_mismatch ~expected ~actual =
        actual_label)
 ;;
 
-let guest_target
-      ~(binding : Keeper_sandbox_factory.runtime_binding)
-      ~(meta : keeper_meta)
-      ~cwd
-      ?timeout_sec
-      ()
-  =
+(* The Docker guest mounts the keeper's tree, so a stage runs by [docker exec]
+   with the host cwd mapped to its guest spelling. Both runners start the
+   container on first use rather than at target construction. *)
+let docker_runners ~runtime ~timeout_sec ~cwd =
   let default_cwd = cwd in
   let stage_cwd_or_default = function
     | Some stage_cwd -> stage_cwd
     | None -> default_cwd
   in
+  let runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd:stage_cwd =
+    if Array.length env > 0 then
+      (Unix.WEXITED 1, "", "typed Shell IR guest dispatch does not support env yet")
+    else
+      let cwd = stage_cwd_or_default stage_cwd in
+      match
+        Keeper_turn_sandbox_runtime.run_exec_with_status_split
+          ?stdin_content
+          ?on_stdout_chunk
+          ?on_stderr_chunk
+          ~timeout_sec
+          runtime
+          ~cwd
+          ~command_argv:argv
+       with
+       | Ok result -> result
+       | Error err -> Unix.WEXITED 1, "", err
+   in
+  let pipeline_runner ~on_stdout_chunk ~on_stderr_chunk ~stages =
+    match
+      List.find_opt
+        (fun stage -> Array.length stage.Masc_exec.Sandbox_target.env > 0)
+         stages
+     with
+     | Some _ ->
+       (Unix.WEXITED 1, "", "typed Shell IR guest dispatch does not support env yet")
+     | None ->
+       let stages =
+         List.map
+           (fun stage ->
+              { Keeper_turn_sandbox_runtime.command_argv =
+                  stage.Masc_exec.Sandbox_target.argv
+              ; cwd = stage.cwd
+              })
+           stages
+       in
+       match
+        Keeper_turn_sandbox_runtime.run_exec_pipeline_with_status
+          ?on_stdout_chunk
+          ?on_stderr_chunk
+          ~timeout_sec
+          runtime
+          ~cwd
+          ~stages
+       with
+       | Ok result -> result
+       | Error err -> Unix.WEXITED 1, "", err
+   in
+   runner, pipeline_runner
+;;
+
+(* A microvm guest owns its tree on the work volume (RFC-0400), so a stage
+   travels the remote lane: the framed request reaches the guest's shim over
+   [container exec], and the remote runner translates the host cwd into the
+   guest's spelling. The endpoint is acquired per call, which is what boots
+   the guest on first use and re-boots one that went away; a boot that fails
+   is the stage's failure, as a Docker container that will not start is. No
+   pipeline runner, as for an OpenSSH endpoint: the shim runs one command
+   per connection. *)
+let microvm_runner ~runtime ~timeout_sec =
+  fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd ->
+    match Keeper_sandbox_remote_lane.microvm_endpoint ~timeout_sec runtime with
+    | Error err -> Unix.WEXITED 1, "", err
+    | Ok endpoint ->
+      Keeper_sandbox_remote.runner ~timeout_sec endpoint
+        ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd
+;;
+
+let guest_target
+      ~(binding : Keeper_sandbox_factory.runtime_binding)
+      ~(meta : keeper_meta)
+      ~cwd
+      ~timeout_sec
+      ()
+  =
   let sandbox_profile, guest_profile =
     match binding.guest_profile with
     | Keeper_sandbox_factory.Docker_guest -> Docker, Docker_guest
@@ -70,62 +142,18 @@ let guest_target
   else
     let runtime = binding.runtime in
     let image = binding.image in
-    let runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd:stage_cwd =
-      if Array.length env > 0 then
-        (Unix.WEXITED 1, "", "typed Shell IR guest dispatch does not support env yet")
-      else
-        let cwd = stage_cwd_or_default stage_cwd in
-        match
-          Keeper_turn_sandbox_runtime.run_exec_with_status_split
-            ?stdin_content
-            ?on_stdout_chunk
-            ?on_stderr_chunk
-            ?timeout_sec
-            runtime
-            ~cwd
-            ~command_argv:argv
-         with
-         | Ok result -> result
-         | Error err -> Unix.WEXITED 1, "", err
-     in
-    let pipeline_runner ~on_stdout_chunk ~on_stderr_chunk ~stages =
-      match
-        List.find_opt
-          (fun stage -> Array.length stage.Masc_exec.Sandbox_target.env > 0)
-           stages
-       with
-       | Some _ ->
-         (Unix.WEXITED 1, "", "typed Shell IR guest dispatch does not support env yet")
-       | None ->
-         let stages =
-           List.map
-             (fun stage ->
-                { Keeper_turn_sandbox_runtime.command_argv =
-                    stage.Masc_exec.Sandbox_target.argv
-                ; cwd = stage.cwd
-                })
-             stages
-         in
-         match
-          Keeper_turn_sandbox_runtime.run_exec_pipeline_with_status
-            ?on_stdout_chunk
-            ?on_stderr_chunk
-            ?timeout_sec
-            runtime
-            ~cwd
-            ~stages
-         with
-         | Ok result -> result
-         | Error err -> Unix.WEXITED 1, "", err
-     in
-     let target =
-       match guest_profile with
-       | Docker_guest ->
-         Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ()
-       | Micro_vm_guest ->
-         Masc_exec.Sandbox_target.micro_vm ~image ~runner ~pipeline_runner ()
-     in
-     Ok { target; runtime; sandbox_profile }
+    let target =
+      match guest_profile with
+      | Docker_guest ->
+        let runner, pipeline_runner = docker_runners ~runtime ~timeout_sec ~cwd in
+        Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ()
+      | Micro_vm_guest ->
+        Masc_exec.Sandbox_target.micro_vm
+          ~image
+          ~runner:(microvm_runner ~runtime ~timeout_sec)
+          ()
+    in
+    Ok { target; runtime; sandbox_profile }
 ;;
 
 let ssh_target ~base_path ~meta ~timeout_sec ?ssh_bin () =

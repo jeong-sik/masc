@@ -143,15 +143,9 @@ let require_bool json key : (bool, string) result =
 
 (** Value-level type discrimination — returns the JSON variant name as
     a lowercase string.  Used in parse-error diagnostics across 5+ modules. *)
-let kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
+(* The mapping itself lives in [Json_kind], a yojson-only leaf, so the
+   libraries that cannot take masc_core reach the same answer. *)
+let kind_name = Shared_types.Json_kind.name
 
 (** Construction helpers *)
 

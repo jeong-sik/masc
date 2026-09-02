@@ -758,17 +758,6 @@ let parse_thinking_control_format ~(path : string) ~(token : string option) (raw
 let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   : (Runtime_schema.model_capabilities, parse_error list) result
   =
-  let retired_native_streaming_key = "supports-native-streaming" in
-  let retired_key_errors =
-    match Otoml.find_opt tbl Fun.id [ retired_native_streaming_key ] with
-    | None -> []
-    | Some _ ->
-      error
-        (path ^ "." ^ retired_native_streaming_key)
-        (Printf.sprintf
-           "%s was removed; streaming support is derived from the AGENT_CORE model catalog"
-           retired_native_streaming_key)
-  in
   let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
   let b_opt key = Otoml.find_opt tbl Otoml.get_boolean [ key ] in
   let reasoning_streaming_format_result =
@@ -816,11 +805,9 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
                \"chat-template-token\""))
     | Ok (Some raw), Ok token -> parse_thinking_control_format ~path ~token raw
   in
-  match thinking_control_format_result, reasoning_streaming_format_result, retired_key_errors with
-  | Error errors, _, retired_key_errors | _, Error errors, retired_key_errors ->
-    Error (errors @ retired_key_errors)
-  | Ok _, Ok _, _ :: _ -> Error retired_key_errors
-  | Ok thinking_control_format, Ok reasoning_streaming_format, [] ->
+  match thinking_control_format_result, reasoning_streaming_format_result with
+  | Error errors, _ | _, Error errors -> Error errors
+  | Ok thinking_control_format, Ok reasoning_streaming_format ->
     Ok
       { Runtime_schema.max_output_tokens = positive_int_opt_field "max-output-tokens"
       ; supports_tool_choice = b "supports-tool-choice"

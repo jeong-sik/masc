@@ -106,6 +106,11 @@ let request target =
 let request_with_headers target headers =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET target
 
+(* The grammar is shared by there being one body behind both spellings. The
+   two used to be byte-for-byte identical definitions, and this case asserted
+   that they agreed -- which they could not fail to do, and would have gone
+   on passing if one of them drifted. Both are still called: the POST
+   dispatcher uses its own name. *)
 let test_keeper_name_extractors_use_shared_grammar () =
   let keeper_name = "release.bot" in
   check bool "dotted keeper name is valid" true
@@ -114,9 +119,7 @@ let test_keeper_name_extractors_use_shared_grammar () =
     (fun suffix ->
        let path = "/api/v1/keepers/" ^ keeper_name ^ suffix in
        check string (suffix ^ " suffix extraction") keeper_name
-         (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path suffix);
-       check string (suffix ^ " POST extraction") keeper_name
-         (Server_dashboard_http_keeper_api.extract_keeper_name_for_post path suffix))
+         (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path suffix))
     [ Server_dashboard_http_keeper_api.keeper_suffix_github_identity
     ; Server_dashboard_http_keeper_api.keeper_suffix_github_login
     ];
@@ -160,7 +163,7 @@ let test_keeper_up_route_classifies_and_extracts () =
   check string
     "up keeper name"
     "fixture-keeper"
-    (Server_dashboard_http_keeper_api.extract_keeper_name_for_post
+    (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix
        path
        Server_dashboard_http_keeper_api.keeper_suffix_up)
 ;;

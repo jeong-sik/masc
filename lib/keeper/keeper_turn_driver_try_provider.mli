@@ -187,6 +187,7 @@ val context_overflow_shrink_sequence :
     for the same reason, one size lower. *)
 
 val run_try_provider :
+  ?continuation_checkpoint:Agent_core.Checkpoint.t ->
   try_provider_ctx ->
   Runtime_candidate.t ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
@@ -200,12 +201,30 @@ val run_try_provider_with_context_overflow_shrink :
   * Agent_core.Checkpoint.t option
   * (string * Obj.t) option
 
+val run_try_provider_with_truncation_recovery :
+  try_provider_ctx ->
+  Runtime_candidate.t ->
+  (Runtime_agent.run_result, Agent_core.Error.t) result
+  * Agent_core.Checkpoint.t option
+  * (string * Obj.t) option
+(** Run the ordinary context-overflow recovery first. When the accepted
+    boundary instead reports a typed [MaxTokens] truncation, remove only that
+    incomplete Assistant message from the post-run checkpoint and continue the
+    same candidate once with thinking disabled. No new User message is added,
+    so already-recorded tool results remain the continuation authority. *)
+
 val accept_rejected_error :
   runtime_id:string ->
   response:Agent_core.Types.api_response ->
   Agent_core.Error.t
 
 module For_testing : sig
+  val checkpoint_before_incomplete_response :
+    Agent_core.Checkpoint.t -> Agent_core.Checkpoint.t option
+
+  val max_tokens_truncation_error : Agent_core.Error.t -> bool
+  val thinking_was_enabled : bool option -> bool
+
   val apply_accept :
     runtime_id:string ->
     accept:(Agent_core.Types.api_response -> bool) ->

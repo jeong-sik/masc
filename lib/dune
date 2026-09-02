@@ -146,6 +146,7 @@
   masc_secret_patterns
   masc_types
   masc_core
+  masc_string_util
   masc_gate
   masc_pulse
   masc_compression

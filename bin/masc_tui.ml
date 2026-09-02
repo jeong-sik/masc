@@ -1623,6 +1623,10 @@ type async_msg =
       string * (Masc.Tui_decode.git_diff, string) result
   | Code_notes_loaded of
       string * (Masc.Tui_decode.ide_annotation list, string) result
+  (* The path the margin describes; stamped so a late answer cannot caption
+     another file. *)
+  | Code_blame_loaded of
+      string * (Masc.Tui_decode.blame_block list, string) result
   (* The path the note anchored to; success re-reads the listing. *)
   | Code_note_written of string * (unit, string) result
   (* (question, symbol, answer) — the note the pane shows names both. *)
@@ -2938,6 +2942,32 @@ let github_pr_url ~remote ~number =
 (* The codebase slug for the surface's scope, when it has one. Only a
    repository row carries the server-minted slug (RFC-0378: the client
    never re-derives it); the other scopes honestly have none. *)
+(* Same fiber-and-mailbox shape as the notes read below. Scoped by the same
+   keeper / repo axes the file itself was read through, so the margin
+   describes the checkout on screen rather than whichever one the server
+   would default to. *)
+let launch_code_blame_load state ~mailbox ~path =
+  let host = server_peer_host in
+  let port = state.port in
+  let keeper, repo = code_scope_axes state in
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_git_blame ?keeper ?repo ~host ~port ~path ()
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_blame_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_blame_loaded (path, Error "Eio switch is unavailable"))
+
 let launch_code_notes_load state ~mailbox ~codebase ~path =
   let host = server_peer_host in
   let port = state.port in
@@ -4113,6 +4143,11 @@ let search_land state index =
   in
   match state.view with
   | Keepers Keeper_list -> state.keeper_cursor <- index
+  | Keepers Keeper_detail when state.context_inspector_open ->
+      (* A landed search row is a new item: its reader starts at the top of
+         the detail, the way a j/k move does. *)
+      state.context_inspector_cursor <- index;
+      state.context_inspector_detail_scroll <- 0
   | Lanes -> state.lanes_standalone_cursor <- index
   | Verification ->
       state.verification_cursor <- index;
@@ -8431,8 +8466,27 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.code_notes <- None;
           state.code_notes_error <- None;
           state.code_notes_open <- false;
-          state.code_notes_scroll <- 0
+          state.code_notes_scroll <- 0;
+          state.code_blame <- None;
+          state.code_blame_error <- None
       | Error detail -> state.code_file_error <- Some detail)
+  | Code_blame_loaded (path, result) ->
+      (* Stamped by path like the notes below: an answer that arrives after
+         the operator moved on describes bytes that are no longer on screen,
+         and a margin naming the wrong authors is worse than no margin. *)
+      let still_current =
+        match state.code_file with
+        | Some (open_path, _) -> String.equal open_path path
+        | None -> false
+      in
+      if still_current then (
+        match result with
+        | Ok blocks ->
+            state.code_blame <- Some (path, blocks);
+            state.code_blame_error <- None
+        | Error detail ->
+            state.code_blame <- None;
+            state.code_blame_error <- Some detail)
   | Code_notes_loaded (path, result) ->
       let still_current =
         match state.code_file with
@@ -10405,8 +10459,20 @@ let main () =
                 report_action state "error"
                   "no $EDITOR set; export EDITOR to add a note here"
             | Some _ -> (
+                (* The line the cursor is on, which is the line the operator
+                   pressed [w] about. This was the literal 1, and it shows:
+                   every one of the 51 annotations this workspace has ever
+                   stored anchors at line 1, including the two written from
+                   here. Nobody declined to anchor -- the form never offered
+                   their line, and correcting it meant editing JSON in
+                   $EDITOR before writing a word.
+
+                   [code_file_cursor] is 0-based and is the same anchor a
+                   language-server question is asked at, so [w] and [K]/[D]/
+                   [R] now agree about which line the operator means. *)
                 let stem =
-                  "{\n  \"line_start\": 1,\n  \"line_end\": 1,\n  \"kind\": \"Comment\",\n  \"content\": \"\"\n}\n"
+                  Masc_tui_types.code_note_stem
+                    ~anchor:(state.code_file_cursor + 1)
                 in
                 match
                   Masc_tui_editor.roundtrip ~restore:restore_terminal
@@ -11486,29 +11552,47 @@ and is loaded on demand through keeper_skill.
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
          a mouse report, or any other key means the operator stayed. *)
       if Option.is_some input && not quit_key then state.quit_armed <- false;
-      (match state.view, key with
-       | _ when compact_viewport -> ()
-       | Approvals, Some ("y" | "Y" | "n" | "N") -> ()
-       | Approvals, Some _ -> state.pending_approval_action <- None
-       (* An armed shutdown expires on the next unrelated key. Otherwise it
-          waits indefinitely and a later press of the same key -- after the
-          cursor has moved, after a refresh -- submits work the operator armed
-          minutes ago for something else. Same rule for an armed goal action. *)
-       | Keepers _, Some ("s" | "S") -> ()
-       | Keepers _, Some _ -> state.keeper_action_pending <- None
-       | Board, Some ("v" | "V") -> ()
-       | Board, Some _ -> state.board_vote_armed <- None
-       | Planning, Some ("c" | "C" | "x" | "X" | "o" | "O") -> ()
-       | Planning, Some _ -> state.goal_action_armed <- None
-       | Schedules, Some ("x" | "X") -> ()
-       | Schedules, Some _ -> state.schedule_cancel_armed <- None
-       | Verification, Some ("a" | "A") -> ()
-       | Verification, Some _ -> state.verification_verdict_armed <- None
-       | _ -> ());
+      (* An armed shutdown expires on the next unrelated input. Otherwise it
+         waits indefinitely and a later press of the same key -- after the
+         cursor has moved, after a refresh -- submits work the operator armed
+         minutes ago for something else. Same rule for every other armed
+         action here, and the same one the quit confirmation above already
+         uses: deliberate input that is not the second press ends it.
+
+         One predicate rather than one restatement per field. The connector
+         unbind used to spell the rule itself and read a loop turn that
+         fetched no input as an unrelated key, so its arm survived a single
+         iteration. The viewport is not part of the rule: an armed
+         destructive action must not outlive the moment it was armed in,
+         least of all across a resize the operator cannot see it through. *)
+      let cancelled second_press =
+        Masc_tui_keys.cancels_two_press
+          ~input_seen:(Option.is_some input) ~key ~second_press
+      in
+      (match state.view with
+       | Approvals ->
+           if cancelled [ "y"; "Y"; "n"; "N" ] then
+             state.pending_approval_action <- None
+       | Keepers _ ->
+           if cancelled [ "s"; "S" ] then state.keeper_action_pending <- None
+       | Board -> if cancelled [ "v"; "V" ] then state.board_vote_armed <- None
+       | Planning ->
+           if cancelled [ "c"; "C"; "x"; "X"; "o"; "O" ] then
+             state.goal_action_armed <- None
+       | Schedules ->
+           if cancelled [ "x"; "X" ] then state.schedule_cancel_armed <- None
+       | Verification ->
+           if cancelled [ "a"; "A" ] then
+             state.verification_verdict_armed <- None
+       | Overview | Acting | Lanes | Harness | Memory | Fusion | Repositories
+       | Changes | Connectors | Runtime | Config | Resources | Tools
+       | System_logs | Code -> ());
       (* Destructive binding removal deliberately requires two consecutive
          [u] presses. Any intervening action invalidates the ownership
-         snapshot; the server also compares that owner inside the store lock. *)
-      if key <> Some "u" then state.connector_unbind_armed <- None;
+         snapshot; the server also compares that owner inside the store lock.
+         Not scoped to the Channels tab: an arm the operator left behind on
+         another surface is exactly the stale confirmation this cancels. *)
+      if cancelled [ "u" ] then state.connector_unbind_armed <- None;
       (* The composer sees the key first, and takes it only when it has one to
          take: unfocused it claims a single key, and only with somewhere to
          send. Everything it does not claim reaches the surface with its
@@ -11645,8 +11729,11 @@ and is loaded on demand through keeper_skill.
            Render_schedule.request render_schedule Render_schedule.Force
        (* [/context] is modal: the summary and exact input text must not leak
           keys into the composer underneath. The quit confirmation and chrome
-          toggles remain global above it, matching Help and Palette. *)
-       | Some k when state.context_inspector_open ->
+          toggles remain global above it, matching Help and Palette. An
+          active surface search outranks it: typing during a search is the
+          search, and the search arm below owns those keys. *)
+       | Some k
+         when state.context_inspector_open && Option.is_none state.search ->
            let exact_input_items () =
              match state.context_inspector_reading with
              | Some
@@ -11728,6 +11815,14 @@ and is loaded on demand through keeper_skill.
                       state.context_inspector_keeper
                   end
                 end
+            | "/" when
+                state.context_inspector_tab
+                = Masc_tui_context_inspector.Exact_input
+                && Option.is_some state.context_inspector_reading ->
+                (* The surface search's own arm sits below this modal block,
+                   so the pane starts the search itself: same state, same
+                   keys, and the block above now yields while it runs. *)
+                state.search <- Some ""
             | "r" ->
                 Option.iter
                   (fun keeper_name ->
@@ -11974,8 +12069,9 @@ and is loaded on demand through keeper_skill.
             | "esc" -> close ()
             | "\r" when
                 (let q = String.trim state.palette_query in
-                 String.starts_with ~prefix:"hover " q
-                 || String.starts_with ~prefix:"def " q) ->
+                 List.exists
+                   (fun (prefix, _) -> String.starts_with ~prefix q)
+                   Masc_tui_types.lsp_question_prefixes) ->
                 (* A typed command, not an entry: the argument is the symbol
                    the language-server question is asked about, on the Code
                    pane's cursor line. *)
@@ -11988,9 +12084,17 @@ and is loaded on demand through keeper_skill.
                           (String.sub q (i + 1) (String.length q - i - 1)) )
                   | None -> (q, "")
                 in
+                (* The typed word back to the question it names, through the
+                   same table the entries were built from. *)
                 let question =
-                  if String.equal question "def" then "definition"
-                  else question
+                  match
+                    List.find_opt
+                      (fun (prefix, _) ->
+                        String.equal (String.trim prefix) question)
+                      Masc_tui_types.lsp_question_prefixes
+                  with
+                  | Some (_, canonical) -> canonical
+                  | None -> question
                 in
                 if String.equal symbol "" then begin
                   (* Bare "def " or "hover ": run the highlighted candidate
@@ -12019,7 +12123,8 @@ and is loaded on demand through keeper_skill.
                   if state.view <> Code || Option.is_none state.code_file
                   then
                     add_event state "error"
-                      "hover/def ask about the file open on the Code surface"
+                      "hover, def and refs ask about the file open on the \
+                       Code surface"
                   else
                     start_code_lsp_question state ~mailbox:async_messages
                       ~question ~symbol
@@ -12660,12 +12765,6 @@ and is loaded on demand through keeper_skill.
           parent, off the Tab ring. *)
        | Some ("l" | "L") when state.view = Acting ->
            goto_surface state ~mailbox:async_messages System_logs
-       | Some (("n" | "N") as direction)
-         when state.search_last <> ""
-              && Option.is_some (surface_row_texts state state.view) ->
-           let after = Option.value (search_row_cursor state) ~default:0 in
-           search_jump state ~query:state.search_last ~after
-             ~backwards:(String.equal direction "N")
        (* In chat, printable keys normally belong to the draft. Keep [?] as
           the documented global Help key when the draft is empty; once a
           sentence has started it remains an ordinary question mark. This
@@ -12896,7 +12995,7 @@ and is loaded on demand through keeper_skill.
                          state.code_target_line <- Some (cursor + 1);
                          launch_code_file_load state
                            ~mailbox:async_messages ~path)))
-       | Some (("K" | "D") as key_name)
+       | Some (("K" | "D" | "R") as key_name)
          when state.view = Code && state.code_focus_file = Right_pane
               && Option.is_some state.code_file
               && not state.code_history_open
@@ -12908,8 +13007,10 @@ and is loaded on demand through keeper_skill.
               palette with each as an entry (typing still narrows, and a
               typed "def <name>" keeps working), and none says so. *)
            let question, prefix =
-             if String.equal key_name "K" then ("hover", "hover ")
-             else ("definition", "def ")
+             match key_name with
+             | "K" -> ("hover", "hover ")
+             | "R" -> ("references", "refs ")
+             | "D" | _ -> ("definition", "def ")
            in
            (match Masc_tui_types.code_cursor_line_symbols state with
             | [] ->
@@ -12926,6 +13027,28 @@ and is loaded on demand through keeper_skill.
            (* Adding a note lives inside the notes view: the view proves the
               scope, and the fresh listing lands where the writer looks. *)
            handle_code_note_write ()
+       | Some "b" when state.view = Code && state.code_focus_file = Right_pane
+                       && Option.is_some state.code_file ->
+           (* Who last touched each run of lines, in the margin beside the
+              code. A margin rather than a view: blame answers a question
+              about the line you are reading, and a separate screen would
+              take that line away to answer it.
+
+              Loaded is showing, so this toggles by fetching or dropping.
+              Re-fetched rather than kept on a second press: an edit or a
+              commit since the last read moves the runs, and a stale margin
+              names the wrong author with no sign that it is stale. *)
+           (match state.code_file with
+            | None -> ()
+            | Some (path, _) ->
+                if Option.is_some state.code_blame then begin
+                  state.code_blame <- None;
+                  state.code_blame_error <- None
+                end
+                else begin
+                  state.code_blame_error <- None;
+                  launch_code_blame_load state ~mailbox:async_messages ~path
+                end)
        | Some "m" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some state.code_file ->
            (* The notes anchored to the open file. Repository scope only:
@@ -13127,12 +13250,33 @@ and is loaded on demand through keeper_skill.
             | Approvals -> answer_presented_approval Confirm
             | Harness -> handle_harness_agree ()
             | _ -> ())
-       | Some "n" | Some "N" ->
+       (* Stepping the last search is what [n] means on a surface that binds
+          it to nothing else, so it is the tail of this arm rather than an
+          arm of its own above it. As its own arm it sat above every surface
+          that binds the key, and [search_last] is one string for the whole
+          session: a surface with row texts and its own [n] would lose that
+          key permanently after any search anywhere. Nothing is in that
+          position today -- Harness was, and its overrule moved to [x] --
+          and this shape is what keeps it that way.
+
+          The match is exhaustive on purpose. A surface added later has to
+          say whether [n] is its own key or the search step. *)
+       | Some (("n" | "N") as direction) ->
            (match state.view with
             | Approvals -> answer_presented_approval Deny
-            | Harness -> handle_harness_overrule ()
             | Schedules -> handle_schedule_create ()
-            | _ -> ())
+            | Overview | Acting | Keepers _ | Memory | Lanes | Board | Planning
+            | Verification | Harness | Fusion | Repositories | Code | Changes
+            | Connectors | Runtime | Config | Resources | Tools | System_logs ->
+                if
+                  state.search_last <> ""
+                  && Option.is_some (surface_row_texts state state.view)
+                then
+                  let after =
+                    Option.value (search_row_cursor state) ~default:0
+                  in
+                  search_jump state ~query:state.search_last ~after
+                    ~backwards:(String.equal direction "N"))
        | Some "home" when state.view = Tools -> state.tools_scroll <- 0
        | Some "end" when state.view = Tools ->
            state.tools_scroll <-
@@ -13573,9 +13717,19 @@ and is loaded on demand through keeper_skill.
                   state.changes_tree_diff_path <- None
                 end
                 else
-                  (* Changes opens from the roster, so Esc goes back to the
-                     roster rather than to Overview. *)
-                  state.view <- Keepers Keeper_list
+                  (* Changes opens from a keeper surface, so Esc goes back to
+                     the one it was opened from rather than to Overview. The
+                     detail draws whoever the roster cursor names, and the
+                     roster can shrink while this surface is up: with nobody
+                     under the cursor the detail has nothing to draw, so the
+                     way back is the roster. The chat pane demotes its own
+                     return for the same reason. *)
+                  state.view <-
+                    (match state.changes_return, selected_keeper state with
+                     | Changes_return_detail, Some _ -> Keepers Keeper_detail
+                     | Changes_return_detail, None
+                     | Changes_return_list, (Some _ | None) ->
+                         Keepers Keeper_list)
             | Repositories ->
                 if state.repository_changes_open then
                   close_repository_changes state
@@ -14746,9 +14900,18 @@ and is loaded on demand through keeper_skill.
             | Acting
             | Connectors | Config | Resources | Tools -> ())
        (* Changes reads one keeper's file writes and already binds to the
-          roster cursor on entry, so it opens from the roster rather than
-          from the Tab ring. *)
+          roster cursor on entry, so it opens from a keeper surface rather
+          than from the Tab ring. Both of them list [f] in their footer and
+          both name the keeper with the same cursor; detail listed the key
+          with no arm behind it, so the hint was dead there.
+
+          One arm each rather than one arm with a disjunction, because each
+          also records where Esc goes back to. *)
        | Some "f" | Some "F" when state.view = Keepers Keeper_list ->
+           state.changes_return <- Changes_return_list;
+           goto_surface state ~mailbox:async_messages Changes
+       | Some "f" | Some "F" when state.view = Keepers Keeper_detail ->
+           state.changes_return <- Changes_return_detail;
            goto_surface state ~mailbox:async_messages Changes
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
@@ -15090,6 +15253,12 @@ and is loaded on demand through keeper_skill.
            (* Reject wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)
            handle_verification_reject ()
+       | Some "x" | Some "X" when state.view = Harness ->
+           (* The negative verdict, spelled the way Verification spells its
+              own. It was [n], which this surface cannot keep: Harness
+              answers the row search, and [n] steps that search on every
+              surface that does not bind the key itself. *)
+           handle_harness_overrule ()
        | Some (("l" | "L" | "o") as log_key)
          when (match log_key, state.view with
                | ("l" | "L"), Keepers (Keeper_list | Keeper_detail)

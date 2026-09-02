@@ -381,6 +381,29 @@ let request_control_fields
       ?clear_thinking_object
       ()
   =
+  let reasoning_effort =
+    (* The categorical wire has no boolean toggle, so an explicit disable can
+       only travel as the effort [None_]. Without this substitution
+       [enable_thinking = Some false] never reached this wire: the request
+       kept the caller's effort and the model kept thinking, which is how a
+       max_tokens continuation that had "disabled" thinking repeated the
+       first generation byte for byte (masc #32610). The effort-ladder
+       admission in [Provider_config] applies the same rule, so a ladder
+       without [None_] rejects the disable before any request is built. *)
+    match dialect.toggle_wire with
+    | Reasoning_effort ->
+      Reasoning_effort.under_explicit_toggle ~enable_thinking reasoning_effort
+    | No_toggle
+    | Thinking_object _
+    | Thinking_object_adaptive
+    | Thinking_object_only
+    | Chat_template_kwargs
+    | Chat_template_token
+    | Ollama_think
+    | Enable_thinking
+    | Anthropic_thinking
+    | Gemini_thinking_config -> reasoning_effort
+  in
   match
     validate_request_control_inputs
       request_wire
@@ -890,6 +913,62 @@ let%test "request_control_fields emits qwen chat_template kwargs" =
           ]
       ; explicit_enable_receipt = Explicit_enable_not_requested
       }
+;;
+
+let%test "request_control_fields renders an explicit disable as reasoning_effort none" =
+  let dialect = of_capabilities Capabilities.openai_compat_chat_extended_capabilities in
+  request_control_fields
+    Chat_completions
+    dialect
+    ~enable_thinking:(Some false)
+    ~preserve_thinking:None
+    ~thinking_budget:None
+    ~reasoning_effort:(Some Reasoning_effort.High)
+    ()
+  = Ok
+      { fields = [ "reasoning_effort", `String "none" ]
+      ; explicit_enable_receipt = Explicit_enable_not_requested
+      }
+;;
+
+let%test "request_control_fields renders an explicit disable on the responses wire" =
+  let dialect = of_capabilities Capabilities.openai_compat_chat_extended_capabilities in
+  request_control_fields
+    Responses
+    dialect
+    ~enable_thinking:(Some false)
+    ~preserve_thinking:None
+    ~thinking_budget:None
+    ~reasoning_effort:(Some Reasoning_effort.Medium)
+    ()
+  = Ok
+      { fields = [ "reasoning", `Assoc [ "effort", `String "none" ] ]
+      ; explicit_enable_receipt = Explicit_enable_not_requested
+      }
+;;
+
+let%test "request_control_fields keeps the caller's effort unless the toggle is off" =
+  let dialect = of_capabilities Capabilities.openai_compat_chat_extended_capabilities in
+  let render enable_thinking =
+    request_control_fields
+      Chat_completions
+      dialect
+      ~enable_thinking
+      ~preserve_thinking:None
+      ~thinking_budget:None
+      ~reasoning_effort:(Some Reasoning_effort.High)
+      ()
+  in
+  render (Some true)
+  = Ok
+      { fields = [ "reasoning_effort", `String "high" ]
+      ; explicit_enable_receipt = Explicit_enable_encoded Request_control_field
+      }
+  && render None
+     = Ok
+         { fields = [ "reasoning_effort", `String "high" ]
+         ; explicit_enable_receipt = Explicit_enable_not_requested
+         }
 ;;
 
 let%test "request_control_fields emits thinking object with explicitly supported effort" =

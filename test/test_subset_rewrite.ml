@@ -4,7 +4,7 @@
     §3.1 of the parent RFC wrote this taxonomy while the subset was what ran,
     and the claim was that exactly one construct had no call to suggest. That
     inverted when [script] became a shell. The claim these tests carry now is
-    the other way round: exactly three constructs have a move, and inventing
+    the other way round: exactly one construct has a move, and inventing
     one for the rest sends a caller to rewrite code that works -- which
     happened on 2026-08-31 to a keeper told "this tool runs no shell" about a
     working [$PWD]. *)
@@ -60,13 +60,11 @@ let mentions ~needle haystack =
 ;;
 
 
-(* The three that keep a move, named here so adding a fourth is a decision
+(* The one that keeps a move, named here so adding a second is a decision
    rather than a drift. *)
-let has_a_move : Masc_exec.Parsed.reason_too_complex list =
-  [ `Heredoc; `Here_string; `Background ]
-;;
+let has_a_move : Masc_exec.Parsed.reason_too_complex list = [ `Background ]
 
-let test_only_three_constructs_have_a_move () =
+let test_only_one_construct_has_a_move () =
   List.iter
     (fun construct ->
        let expected_move = List.mem construct has_a_move in
@@ -115,17 +113,15 @@ let tag_is construct expected =
 ;;
 
 let test_each_rewrite_names_the_right_move () =
-  (* The stdin field takes the body as bytes, so it does not have to survive
-     the shell's quoting. That is a reason even when the shell would cope. *)
-  tag_is `Heredoc "move_to_field:stdin";
-  tag_is `Here_string "move_to_field:stdin";
   (* The shell running the line exits when the line does, so a backgrounded
      child is left with no handle. Spawn returns one. *)
   tag_is `Background "call_this_instead:spawn";
   (* A shell runs each of these, so there is no other call to name. *)
   List.iter
     (fun construct -> tag_is construct "unrepresentable")
-    [ `Cmd_subst
+    [ `Heredoc
+    ; `Here_string
+    ; `Cmd_subst
     ; `Param_expansion
     ; `Arith_expansion
     ; `Glob_brace
@@ -139,8 +135,8 @@ let test_each_rewrite_names_the_right_move () =
 
 (* [`Redirect] is reached by [&>], [>|], [<>] and [>&-] -- forms bash takes.
    It used to answer "this tool has no operator that joins two streams", which
-   stopped being true, and before that "use the stdin field", which was never
-   a move for an output redirect. It answers with neither now. *)
+   stopped being true. Execute has no stdin field, so naming one would send
+   the caller to a field that does not exist. It answers with neither. *)
 let test_the_redirect_advice_does_not_forbid_what_bash_takes () =
   let sentence = Rewrite.to_string (rewrite_of `Redirect) in
   List.iter
@@ -190,9 +186,9 @@ let () =
     "subset_rewrite"
     [ ( "taxonomy"
       , [ Alcotest.test_case
-            "only three constructs have a move"
+            "only one construct has a move"
             `Quick
-            test_only_three_constructs_have_a_move
+            test_only_one_construct_has_a_move
         ; Alcotest.test_case
             "no advice claims there is no shell"
             `Quick

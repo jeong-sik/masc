@@ -35,13 +35,6 @@ type program = {
   tail : exec_stage list;
 }
 
-(* A guard reads the status of whatever ran last, so a run of them is left to
-   right with no precedence of its own -- the way a shell reads [a && b || c].
-   The list is empty for a single program. *)
-type conditional =
-  | And_then
-  | Or_else
-
 (* The shell a script runs under, as a name the closed list in
    [Shell_costume] recognises. It is data rather than a constant because
    [argv:["bash";"-c";S]] normalises to this form and has to keep the shell it
@@ -58,16 +51,12 @@ type script = {
 let default_script_shell = "sh"
 
 type source =
-  | Staged of {
-      program : program;
-      next : (conditional * program) list;
-    }
+  | Staged of { program : program }
   | Script of script
 
 type execute_input = {
   source : source;
   cwd : string option;
-  env : (string * string) list;
   timeout_sec : float option;
 }
 
@@ -92,7 +81,6 @@ type validation_error =
       fd : int;
       target : int;
     }
-  | Env_key_invalid of string
 
 let json_type_name (json : Yojson.Safe.t) =
   match json with
@@ -184,28 +172,6 @@ let required_string_list ~path fields key =
       key
       (json_type_name value)
   | None -> result_errorf "%s.%s is required" path key
-;;
-
-let optional_env ~path fields =
-  match member fields "env" with
-  | None | Some `Null -> Ok []
-  | Some (`Assoc bindings) ->
-    let rec loop acc = function
-      | [] -> Ok (List.rev acc)
-      | (key, `String value) :: rest -> loop ((key, value) :: acc) rest
-      | (key, value) :: _ ->
-        result_errorf
-          "%s.env.%s must be string, got %s"
-          path
-          key
-          (json_type_name value)
-    in
-    loop [] bindings
-  | Some value ->
-    result_errorf
-      "%s.env must be object, got %s"
-      path
-      (json_type_name value)
 ;;
 
 (* A redirection is an object naming exactly one shape. This reads the object
@@ -330,9 +296,8 @@ let rec split_last first rest =
 ;;
 
 (* The fields that describe one program: which process or pipeline to run and
-   where its ends attach. [cwd], [env] and [timeout_sec] belong to the whole
-   call, so they are read once by the caller and are not repeated per
-   program. *)
+   where its ends attach. [cwd] and [timeout_sec] belong to the whole call,
+   so they are read once by the caller and are not repeated per program. *)
 let program_fields = [ "argv"; "pipeline"; "stdin"; "stdout"; "stderr" ]
 
 let program_of_fields ~path fields =
@@ -396,47 +361,6 @@ let program_of_fields ~path fields =
   | false, None -> result_errorf "%s.argv or %s.pipeline is required" path path
 ;;
 
-(* Which way the guard has to go for the next program to run. Written as the
-   status it waits for, because that is what the caller is thinking about. *)
-let conditional_of_string ~path = function
-  | "success" -> Ok And_then
-  | "failure" -> Ok Or_else
-  | other ->
-    result_errorf "%s.on must be \"success\" or \"failure\", got %S" path other
-;;
-
-let parse_next_entry ~path_prefix ~index (value : Yojson.Safe.t) =
-  let ( let* ) = Result.bind in
-  let path = Printf.sprintf "%s[%d]" path_prefix index in
-  let* fields = assoc_fields ~path value in
-  let* () = reject_unknown_fields ~path ~allowed:("on" :: program_fields) fields in
-  let* on =
-    match member fields "on" with
-    | Some (`String value) -> conditional_of_string ~path value
-    | Some value -> result_errorf "%s.on must be string, got %s" path (json_type_name value)
-    | None -> result_errorf "%s.on is required" path
-  in
-  let* program = program_of_fields ~path fields in
-  Ok (on, program)
-;;
-
-let optional_next ~path fields =
-  let ( let* ) = Result.bind in
-  match member fields "then" with
-  | None | Some `Null -> Ok []
-  | Some (`List entries) ->
-    let path_prefix = path ^ ".then" in
-    let rec loop index acc = function
-      | [] -> Ok (List.rev acc)
-      | entry :: rest ->
-        let* parsed = parse_next_entry ~path_prefix ~index entry in
-        loop (index + 1) (parsed :: acc) rest
-    in
-    loop 0 [] entries
-  | Some value ->
-    result_errorf "%s.then must be array, got %s" path (json_type_name value)
-;;
-
 (* The schema's [oneOf] and this function are the same rule stated twice: a
    call names one form. Stating it here is what makes [source] a sum rather
    than three optional fields a validator has to reconcile. *)
@@ -463,12 +387,6 @@ let source_of_fields ~path fields =
      | Some script ->
        if String.trim script = ""
        then result_errorf "%s.script is empty" path
-       else if named "then"
-       then
-         result_errorf
-           "%s.then belongs to the staged form; a script writes && and || \
-            itself"
-           path
        else
          let* shell = optional_string ~path fields "shell" in
          let shell = Option.value shell ~default:default_script_shell in
@@ -486,12 +404,11 @@ let source_of_fields ~path fields =
          else Ok (Script { shell; text = script }))
   | false, true ->
     let* program = program_of_fields ~path fields in
-    let* next = optional_next ~path fields in
-    Ok (Staged { program; next })
+    Ok (Staged { program })
   | false, false ->
     (* Nothing named a source. [program_of_fields] would say "argv or
-       pipeline is required", which is the truth for a nested [then] entry
-       but omits the third form this top level accepts. *)
+       pipeline is required", which omits the third form this top level
+       accepts. *)
     result_errorf
       "%s.argv, %s.pipeline or %s.script is required"
       path
@@ -513,16 +430,13 @@ let of_json (json : Yojson.Safe.t) =
   let* () =
     reject_unknown_fields
       ~path:"$"
-      ~allowed:
-        (program_fields
-        @ [ "then"; "cwd"; "env"; "timeout_sec"; "script"; "shell" ])
+      ~allowed:(program_fields @ [ "cwd"; "timeout_sec"; "script"; "shell" ])
       fields
   in
   let* cwd = optional_string ~path:"$" fields "cwd" in
-  let* env = optional_env ~path:"$" fields in
   let* timeout_sec = optional_positive_float ~path:"$" fields "timeout_sec" in
   let* source = source_of_fields ~path:"$" fields in
-  Ok { source; cwd; env; timeout_sec }
+  Ok { source; cwd; timeout_sec }
 ;;
 
 let check_argv argv =
@@ -541,23 +455,6 @@ let check_cwd = function
   | Some path -> Error (Cwd_not_absolute path)
 ;;
 
-let check_env env =
-  let key_ok k =
-    String.length k > 0
-    && String.for_all
-         (function
-           | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
-           | _ -> false)
-         k
-  in
-  let rec loop = function
-    | [] -> Ok ()
-    | (k, _) :: _ when not (key_ok k) -> Error (Env_key_invalid k)
-    | _ :: rest -> loop rest
-  in
-  loop env
-;;
-
 (* [cd] is the shell's own directory, not a program. Spawned, it changes the
    directory of a child that exits immediately, so whatever the caller chained
    after it never runs. It also ignores the extra arguments and exits zero, so
@@ -567,7 +464,7 @@ let check_env env =
    invocation of [cd] as a program that does anything. *)
 let directory_change_program = "cd"
 
-let check_exec ~argv ~cwd ~env =
+let check_exec ~argv ~cwd =
   let ( let* ) = Result.bind in
   match argv with
   | [] -> Error Empty_argv
@@ -576,9 +473,7 @@ let check_exec ~argv ~cwd ~env =
     Error (Directory_change_is_not_a_program { requested = String.concat " " argv })
   | _ ->
     let* () = check_argv argv in
-    let* () = check_cwd cwd in
-    let* () = check_env env in
-    Ok ()
+    check_cwd cwd
 ;;
 
 (* Naming the descriptors keeps the numbers out of the call sites that attach
@@ -625,18 +520,17 @@ let stages_of { head; tail } = head :: tail
    walk them are not skipped: [Execute_shell_ir.dispatch] runs the typed gate
    and [validate_paths] over the lowered [Shell_ir.t], which is the same value
    the staged form produces. What is checked here is what a string cannot
-   carry -- the call's own [cwd] and [env]. *)
-let validate { source; cwd; env; timeout_sec = _ } =
+   carry -- the call's own [cwd]. *)
+let validate { source; cwd; timeout_sec = _ } =
   let ( let* ) = Result.bind in
   let* () = check_cwd cwd in
-  let* () = check_env env in
   match source with
   | Script _ -> Ok ()
-  | Staged { program; next = _ } ->
+  | Staged { program } ->
     let rec each = function
       | [] -> Ok ()
       | stage :: rest ->
-        let* () = check_exec ~argv:stage.argv ~cwd:None ~env:[] in
+        let* () = check_exec ~argv:stage.argv ~cwd:None in
         let* () = check_stage_redirects stage in
         each rest
     in
@@ -654,7 +548,6 @@ let shell_bin = function
 let shell_simple
       ?(sandbox = Masc_exec.Sandbox_target.host ())
       ?cwd
-      ?(env = [])
       ?(redirects = [])
       argv
   =
@@ -665,7 +558,6 @@ let shell_simple
        ?cwd_raw:cwd
        ?cwd_base:cwd
        ~sandbox
-       ~env
        ~redirects
        bin
        arguments)
@@ -777,10 +669,10 @@ let redirects_of_stage ~namespace ~cwd { argv = _; stdin; stdout; stderr } =
 
    RFC execute-boundary-is-the-sandbox §6 adds the [Script] source. It used to
    yield nothing on the grounds that it "already crossed the gate", which was
-   true while crossing the gate decided whether it ran. It no longer does, so
-   a script that says [<<EOF] would otherwise be told nothing at all -- and
-   the advice ("that is the stdin field") is the whole of what the judge is
-   for now. *)
+   true while crossing the gate decided whether it ran. It no longer does. A
+   script that says [<<EOF] gets no advice any more: the stdin field is gone
+   from the schema and the shell runs the heredoc as written, so the finding
+   is recognition and classification only. *)
 let hidden_script_findings ~sandbox { source; _ } =
   let gate_sandbox = { Shell_gate.target = sandbox } in
   let syntax_policy =
@@ -811,27 +703,26 @@ let hidden_script_findings ~sandbox { source; _ } =
              ~sandbox:gate_sandbox
              costume )
        ])
-  | Staged { program; next } ->
-    of_program program @ List.concat_map (fun (_, p) -> of_program p) next
+  | Staged { program } -> of_program program
 ;;
 
 (* RFC execute-boundary-is-the-sandbox §4. The script goes to a real shell on
    the far side of the keeper's boundary, which is what [argv:["bash";"-c";S]]
    has always reached. [shell_simple] builds the same [Simple] that form
    builds, so the two fields produce the same child for the same text. *)
-let script_to_shell ~sandbox ~cwd ~env { shell; text } =
-  shell_simple ~sandbox ?cwd ~env [ shell; "-c"; text ]
+let script_to_shell ~sandbox ~cwd { shell; text } =
+  shell_simple ~sandbox ?cwd [ shell; "-c"; text ]
 ;;
 
 let to_shell_ir_unvalidated
       ?(sandbox = Masc_exec.Sandbox_target.host ())
       ?(namespace = Command_filesystem)
-      { source; cwd; env; timeout_sec = _ }
+      { source; cwd; timeout_sec = _ }
   =
   let ( let* ) = Result.bind in
   let lower stage =
     let* redirects = redirects_of_stage ~namespace ~cwd stage in
-    shell_simple ~sandbox ?cwd ~env ~redirects stage.argv
+    shell_simple ~sandbox ?cwd ~redirects stage.argv
   in
   let lower_program = function
     | { head; tail = [] } -> lower head
@@ -846,10 +737,6 @@ let to_shell_ir_unvalidated
         loop [] (head :: tail)
       in
       Ok (Keeper_tooling.Execute_shell_ir.pipeline simples)
-  in
-  let connector = function
-    | And_then -> Masc_exec.Shell_ir.And_if
-    | Or_else -> Masc_exec.Shell_ir.Or_if
   in
   (* RFC execute-subset-dispositions §3.7 step 4, for the representable only.
 
@@ -889,26 +776,12 @@ let to_shell_ir_unvalidated
   in
   let normalised_costume =
     match source with
-    | Staged { program = { head; tail = [] }; next = [] } -> costume_as_script head
+    | Staged { program = { head; tail = [] } } -> costume_as_script head
     | Staged _ | Script _ -> None
   in
   match normalised_costume, source with
-  | Some script, _ | None, Script script -> script_to_shell ~sandbox ~cwd ~env script
-  | None, Staged { program; next } ->
-  let* head = lower_program program in
-  match next with
-  | [] -> Ok head
-  | _ :: _ ->
-    let* tail =
-      let rec loop acc = function
-        | [] -> Ok (List.rev acc)
-        | (guard, program) :: rest ->
-          let* ir = lower_program program in
-          loop ((connector guard, ir) :: acc) rest
-      in
-      loop [] next
-    in
-    Ok (Masc_exec.Shell_ir.Sequence { head; tail })
+  | Some script, _ | None, Script script -> script_to_shell ~sandbox ~cwd script
+  | None, Staged { program } -> lower_program program
 ;;
 
 let to_shell_ir ?sandbox ?namespace input =
@@ -933,7 +806,7 @@ let pp_validation_error ppf = function
       "cd is the shell's own directory, not a program: %S would change the \
        directory of a child that exits immediately, and anything chained after \
        it would not run. Put the directory in the cwd field instead, and if you \
-       meant to run one command after another use then."
+       meant to run one command after another write them as a script."
       requested
   | Empty_argv ->
     Format.pp_print_string ppf
@@ -971,6 +844,4 @@ let pp_validation_error ppf = function
       "fd=%d cannot duplicate fd=%d; a stage owns only 0, 1 and 2"
       fd
       target
-  | Env_key_invalid k ->
-    Format.fprintf ppf "env key %S is not [A-Za-z0-9_]+" k
 ;;

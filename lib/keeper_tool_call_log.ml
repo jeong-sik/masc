@@ -755,8 +755,19 @@ let log_call
              does not know. *)
           (match disposition with
            | Some d ->
+             (* This shape carries the class itself as the [Failed] payload.
+                [failure_class_field] reads a full [result], which this path
+                does not have. *)
+             let failure_class_of_shape =
+               match d with
+               | Tool_result.Failed class_ ->
+                 [ ( "failure_class"
+                   , `String (Tool_result.tool_failure_class_to_string class_) )
+                 ]
+               | Tool_result.Completed () | Tool_result.Deferred () -> []
+             in
              [ "disposition", `String (Tool_result.string_of_disposition d) ]
-             @ failure_class_field d
+             @ failure_class_of_shape
            | None -> [])
       in
       let file_change_evidence_field =

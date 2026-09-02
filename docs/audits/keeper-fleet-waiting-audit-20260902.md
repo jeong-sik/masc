@@ -266,13 +266,21 @@ code-reviewer 는 08-29 에 `keeper_memory_search` 의 `total_candidates` 가 wr
    main 자체가 Build 에서 깨져 있어 (`test_absolute_turn_sequence_breaks_equal_clock_ties`
    미정의, #32465 이전) 테스트까지 못 갔다. 머지 후 main 내용으로 다시 dispatch 했다.
 2. PR #32477 — 주소 없는 `System_post` 는 `Thread_participants` (§4). 09-02 01:27Z main 머지.
+   적대적 리뷰가 blocker 를 잡았다. verifier 의 stalled 영수증도 `System_post` 인데 그 글이
+   producer 에게 닿는 유일한 경로라 아무에게도 안 갔다. PR #32498 이 `post_kind` 규칙을 걷고
+   `Unlisted` visibility("피드 제외, 접근 가능")를 typed 근거로 바꿨다. 검증 요청·판정 글만
+   Unlisted, stalled 는 Internal 그대로. 09-02 머지.
 3. 이 문서 (#32471) 와 §6 정정 (#32479).
-4. 다음 (독립): §3 checkpoint 사유의 다음 턴 렌더. 사유는 `Keeper_unified_turn.checkpoint_reason`
-   에 typed 로 있고 `keeper_heartbeat_loop.ml` 의 batch ack 에만 쓰인다. 다음 관측으로
-   싣는 자리는 `Keeper_context_layers.Autonomous_trigger` 렌더(`keeper_unified_prompt.ml`).
-5. 다음 (독립): §1 `Sandbox_unreachable` 관측 + §7 `claimable_now`.
-6. 다음 (독립): §4 의 남은 절반 — keeper 글의 기본 audience. rondo 트리아지 글 하루 후보 697건.
-7. 운영자 결정: §1 샌드박스 기동 (127.0.0.1:2222 sshd 컨테이너 `masc-ssh-testbed`, Docker
+4. PR #32492 — §3 checkpoint 사유의 다음 턴 렌더. `Keeper_turn_checkpoint_reason` 으로 사유를
+   빼고 heartbeat loop 가 직전 사유를 다음 턴 프롬프트의 Autonomous Trigger 층에 한 줄로 싣는다.
+   09-02 머지. 효과는 배포 뒤 같은 `finish_reason` 집계로 잰다.
+5. PR #32499 — §2 의 후속. web_fetch 주소 경계가 `2130706433`, `0x7f000001`, `127.1`,
+   `localhost.`, IPv6 zone id, userinfo 를 통과시키던 결함을 막는다. judge 를 뗀 뒤 이 경계가
+   유일한 층이라 사람 리뷰가 필요하다 (열림).
+6. 다음 (독립): §1 `Sandbox_unreachable` 관측 + §7 `claimable_now`.
+7. 다음 (독립): §4 의 남은 절반 — keeper 글의 기본 audience. rondo 트리아지 글 하루 후보 697건.
+   approval 판정에 typed wake 를 붙이는 것도 여기 (`Completion_authority_wakeup` 은 rejection 만).
+8. 운영자 결정: §1 샌드박스 기동 (127.0.0.1:2222 sshd 컨테이너 `masc-ssh-testbed`, Docker
    daemon). §6 은 재기동으로 해소됐고 standalone 레인 2번 슬롯만 남았다.
 
 ## 12. 재현 명령

@@ -59,7 +59,7 @@ let state fixture =
 ;;
 
 let run_remote ?(timeout_sec = 10.0) ?stdin ?(env = [||]) state argv =
-  Keeper_sandbox_ssh.runner ~timeout_sec state
+  Keeper_sandbox_remote.runner ~timeout_sec state
     ~on_stdout_chunk:None ~on_stderr_chunk:None
     ~stdin_content:stdin ~argv ~env ~cwd:None
 ;;
@@ -123,7 +123,7 @@ let test_exit_signal_and_fast_exit_sigpipe_regression () =
 ;;
 
 let direct_ssh_argv ssh command =
-  match List.rev (Keeper_sandbox_ssh.ssh_argv ssh) with
+  match List.rev (Keeper_sandbox_remote.transport_argv ssh) with
   | _fixed :: rest -> List.rev (command :: rest)
   | [] -> fail "empty SSH argv"
 ;;
@@ -226,9 +226,9 @@ let test_preflight_ready_and_unreachable () =
   let fixture = fixture () in
   with_eio @@ fun _clock ->
   let ready = state fixture in
-  Keeper_sandbox_ssh.For_testing.clear_preflight_cache ();
+  Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
   check (result unit string) "fixture ready" (Ok ())
-    (Keeper_sandbox_ssh.check_preflight ~force:true ready);
+    (Keeper_sandbox_remote.check_preflight ~force:true ready);
   let stopped_endpoint =
     { (endpoint fixture) with
       name = "stopped-port"
@@ -244,7 +244,7 @@ let test_preflight_ready_and_unreachable () =
     | Ok state -> state
     | Error error -> fail error
   in
-  match Keeper_sandbox_ssh.check_preflight ~force:true stopped with
+  match Keeper_sandbox_remote.check_preflight ~force:true stopped with
   | Error error ->
     check bool "unreachable is named" true
       (String.starts_with ~prefix:"remote_ssh_endpoint_unreachable:" error)

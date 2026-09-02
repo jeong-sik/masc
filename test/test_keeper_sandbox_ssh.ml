@@ -161,7 +161,7 @@ let make_runner ~base_path ~ssh_bin =
     Keeper_sandbox_ssh.create ~ssh_bin ~base_path ~keeper_name:"keeper-a"
       ~endpoint ()
   with
-  | Ok state -> state, Keeper_sandbox_ssh.runner ~timeout_sec:2.0 state
+  | Ok state -> state, Keeper_sandbox_remote.runner ~timeout_sec:2.0 state
   | Error error -> fail error
 ;;
 
@@ -214,7 +214,7 @@ let test_argv_frame_stream_and_exit () =
   check string "stderr trailer stripped" "remote-err" stderr;
   check string "stdout streamed" "remote-out" (Buffer.contents stdout_chunks);
   check string "stderr streamed without trailer" "remote-err" (Buffer.contents stderr_chunks);
-  let expected_argv = List.tl (Keeper_sandbox_ssh.ssh_argv state) in
+  let expected_argv = List.tl (Keeper_sandbox_remote.transport_argv state) in
   check (list string) "pinned ssh argv" expected_argv
     (String.split_on_char '\n' (read_file (frame_path ^ ".argv")));
   let frame = read_file frame_path in

@@ -47,7 +47,7 @@ let container_path_of_host ~(config : Workspace.config) ~(meta : keeper_meta) ~h
         ~base_path:config.base_path ~keeper_name:meta.name
     in
     Keeper_remote_path.host_to_remote ~base_path:config.base_path
-      ~endpoint ~keeper:meta.name host_path
+      ~remote_root:endpoint.remote_root ~keeper:meta.name host_path
   | Docker | Micro_vm ->
     let host_root = host_playground_root ~config ~meta in
     let host_norm =
@@ -144,14 +144,15 @@ let run_remote_command_with_status
   in
   let* () =
     if Env_config_sandbox.Preflight.enabled ()
-    then Keeper_sandbox_ssh.check_preflight ssh
+    then Keeper_sandbox_remote.check_preflight ssh
     else Ok ()
   in
   let* cwd =
     Keeper_remote_path.host_to_remote ~base_path:config.base_path
-      ~endpoint ~keeper:meta.name (host_playground_root ~config ~meta)
+      ~remote_root:endpoint.remote_root ~keeper:meta.name
+      (host_playground_root ~config ~meta)
   in
-  let runner = Keeper_sandbox_ssh.runner ~timeout_sec ssh in
+  let runner = Keeper_sandbox_remote.runner ~timeout_sec ssh in
   let status, stdout, stderr =
     runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
       ~argv:command_argv ~env:[||] ~cwd:(Some cwd)

@@ -150,7 +150,7 @@ let ssh_target ~base_path ~meta ~timeout_sec ?ssh_bin () =
      | Ok ssh ->
        let readiness =
          if Env_config_sandbox.Preflight.enabled ()
-         then Keeper_sandbox_ssh.check_preflight ssh
+         then Keeper_sandbox_remote.check_preflight ssh
          else Ok ()
        in
        (match readiness with
@@ -163,11 +163,11 @@ let ssh_target ~base_path ~meta ~timeout_sec ?ssh_bin () =
                  ]
                message)
         | Ok () ->
-          let runner = Keeper_sandbox_ssh.runner ~timeout_sec ssh in
+          let runner = Keeper_sandbox_remote.runner ~timeout_sec ssh in
           Ok
             { target =
                 Masc_exec.Sandbox_target.ssh
-                  ~endpoint:(Keeper_sandbox_ssh.sandbox_endpoint ssh)
+                  ~endpoint:(Keeper_sandbox_ssh.sandbox_endpoint ~base_path endpoint)
                   ~runner ()
             }))
 ;;

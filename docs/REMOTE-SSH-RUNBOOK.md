@@ -2,7 +2,7 @@
 
 어느 벤더의 리눅스 머신이든(Vultr / AWS / Azure / GCP / 사설 박스) masc
 remote_ssh 엔드포인트로 붙이는 절차. 서버 preflight(`perform_preflight`,
-`lib/keeper/keeper_sandbox_ssh.ml`)가 강제하는 계약을 그대로 따른다.
+`lib/keeper/keeper_sandbox_remote.ml`)가 강제하는 계약을 그대로 따른다.
 task-859에서 실측으로 확정했다.
 
 ## 계약: 원격 머신에 필요한 6가지

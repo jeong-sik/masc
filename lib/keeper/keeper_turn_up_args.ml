@@ -357,7 +357,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
                  with
                  | Error error -> Some error
                  | Ok ssh ->
-                   (match Keeper_sandbox_ssh.check_preflight ~force:true ssh with
+                   (match Keeper_sandbox_remote.check_preflight ~force:true ssh with
                     | Ok () -> None
                     | Error error -> Some error)))
          | Some (Docker | Micro_vm), Some _ ->

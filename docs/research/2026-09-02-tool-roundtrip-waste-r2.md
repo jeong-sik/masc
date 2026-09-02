@@ -40,6 +40,10 @@ r1 의 세 수정은 착지했다. `unchanged` 직후 동일-인자 재호출은
 - "스크립트 제출형 합성 RFC 필요" — `RFC-tools-as-shell-commands`(Draft) 가 그 자리에 있고 PR-1 이 #32427/#32436/#32441 로 착지 중이다. `keeper_plan_execute` 는 #31617 에서 삭제됐다.
 - "keeper_time_now 는 없던 항목" — r1 의 3분류(fanout/duplicate/probing)는 `keeper_time_now` 를 duplicate 로 세었어야 하나 r1 표에는 `keeper_tasks_list 195` 만 올랐다. r1 측정 시각(18:37, 6,738행)이 edgar 의 18:45 이후 폴링을 아직 못 본 것이다.
 
+## 병렬로 같은 루프를 본 작업
+
+이슈 #32452 와 PR #32473 (`config/prompts/keeper.autonomous.wake.txt` 에 "고를 일이 없으면 도구 없이 턴을 끝낸다") 이 같은 edgar 루프를 오늘 raw trace 로 잡았다(한 턴 306회·29분). #32472 와 파일은 겹치지 않지만 다음 하루의 `keeper_time_now` 재측정은 두 PR 의 합산 효과다.
+
 ## 같은 모양의 다른 루프 (이번 범위 밖)
 
 `atlassian_searchJiraIssuesUsingJql` 348쌍(kidsnote-pr-jira-checker)과 `masc_board_post_get`

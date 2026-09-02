@@ -6,7 +6,8 @@
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
   (:standard -w +4 -w +33 -w +37))
- (libraries unix yojson digestif digestif.c jsonl_writer fs_compat masc_core masc.masc_random_id)
+ (libraries unix yojson digestif digestif.c jsonl_writer fs_compat masc_core
+  shared_types masc.masc_random_id)
  (foreign_stubs
   (language c)
   (names store_stubs)))

@@ -191,10 +191,9 @@ let test_assembled_prompt_opens_with_system_tag () =
     ; ( "with instructions and identity"
       , KP.build_keeper_system_prompt ~instructions:"stay terse"
           ~keeper_name:"tau" ~workspace_root:"/tmp/ws" () )
-    ; ( "with active goals"
+    ; ( "with a workspace root"
       , KP.build_keeper_system_prompt ~instructions:"" ~keeper_name:"tau"
-          ~active_goals:[ ("g-1", "ship it") ]
-          () )
+          ~workspace_root:"/tmp/ws2" () )
     ]
   in
   List.iter

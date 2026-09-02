@@ -609,18 +609,7 @@ let public_descriptors =
       ~id:"agent.execute"
       ~public_name:"Execute"
       ~internal_name:"tool_execute"
-      ~description:
-        "Execute one opaque typed process invocation inside the Keeper sandbox. \
-         Provide one non-empty argv process vector, an explicit typed \
-         pipeline, or a script command line that is parsed rather than handed \
-         to a shell. Use typed stdin/stdout/stderr fields for \
-         I/O and typed env for environment variables. MASC validates the input \
-         shape, path jail, sandbox target, and external-effect Gate but never \
-         interprets program or subcommand meaning. The invoked program owns \
-         its syntax and exit result. A successful result exposes typed status, \
-         output and execution_time_ms fields to later composition nodes. Small \
-         output stays inline; oversized output is represented by canonical \
-         output/stdout/stderr artifact references."
+      ~description:Tool_shard_types.tool_execute_schema.description
       ~input_schema:execute_schema
       ~policy:
         (policy

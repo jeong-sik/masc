@@ -894,16 +894,9 @@ let find_cluster_schema_opt name =
         | None -> find_masc_schema_opt name))
 ;;
 
-let base_schema_input name =
-  match find_base_schema_opt name with
-  | Some (schema : Masc_domain.tool_schema) ->
-    Canonical_registry, schema.input_schema
-  | None -> invalid_arg ("missing base tool schema for " ^ name)
-
-(* [base_schema_input] keeps only the schema, so a descriptor whose
-   description is the TOML's own cannot be built from it -- there is nothing
-   left to read the description off. This keeps the whole record for that
-   case. *)
+(* The whole schema record: the descriptor's description is the TOML's own,
+   so the catalog is the one declaration the model reads -- never a thinner
+   OCaml literal standing in for it. *)
 let base_schema_declared name =
   match find_base_schema_opt name with
   | Some (schema : Masc_domain.tool_schema) -> Canonical_registry, schema
@@ -947,7 +940,7 @@ let surface_post_schema = shard_surface_schema "keeper_surface_post"
 let person_note_set_schema = shard_surface_schema "keeper_person_note_set"
 
 let memory_search_schema_source, memory_search_schema =
-  base_schema_input "keeper_memory_search"
+  base_schema_declared "keeper_memory_search"
 ;;
 
 let memory_retract_schema_source, memory_retract_schema =
@@ -955,11 +948,11 @@ let memory_retract_schema_source, memory_retract_schema =
 ;;
 
 let memory_write_schema_source, memory_write_schema =
-  base_schema_input "keeper_memory_write"
+  base_schema_declared "keeper_memory_write"
 ;;
 
 let ide_annotate_schema_source, ide_annotate_schema =
-  base_schema_input "keeper_ide_annotate"
+  base_schema_declared "keeper_ide_annotate"
 ;;
 
 let read_only_in_process_policy ?(polling_read = false) () =
@@ -1970,9 +1963,8 @@ let internal_descriptors : t list =
       ~input_schema_source:memory_search_schema_source
       ~id:"keeper.memory.search"
       ~name:"keeper_memory_search"
-      ~description:
-        "Search keeper memory or history; current facts use explicit substring filtering and snapshot order."
-      ~input_schema:memory_search_schema
+      ~description:memory_search_schema.description
+      ~input_schema:memory_search_schema.input_schema
       (* Serial, deliberately: the memory/all sources run
          Keeper_memory_source_current.revalidate, which persists pending
          invalidations under the source-store lock — a write during read.
@@ -1998,8 +1990,8 @@ let internal_descriptors : t list =
       ~input_schema_source:memory_write_schema_source
       ~id:"keeper.memory.write"
       ~name:"keeper_memory_write"
-      ~description:"Persist a memory entry for this keeper."
-      ~input_schema:memory_write_schema
+      ~description:memory_write_schema.description
+      ~input_schema:memory_write_schema.input_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_memory_write
       ()
@@ -2077,8 +2069,8 @@ let internal_descriptors : t list =
       ~input_schema_source:ide_annotate_schema_source
       ~id:"keeper.ide.annotate"
       ~name:"keeper_ide_annotate"
-      ~description:"Emit an IDE annotation event for the current keeper."
-      ~input_schema:ide_annotate_schema
+      ~description:ide_annotate_schema.description
+      ~input_schema:ide_annotate_schema.input_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_ide_annotate
       ()

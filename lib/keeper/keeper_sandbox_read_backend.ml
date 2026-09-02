@@ -235,9 +235,12 @@ let resolve_read_dispatch ~turn_sandbox_factory ~(meta : keeper_meta) ~cwd =
      | No_factory ->
        (match meta.sandbox_profile with
         | Docker -> Ok Docker_fallback
+        (* Unreachable while [tree_location_of_profile Micro_vm] is
+           [Endpoint_owned]; kept so a profile whose tree moves to a shared
+           mount has to state its own answer rather than inherit Docker's. *)
         | Micro_vm ->
           Error
-            "microvm_read_requires_turn_sandbox_factory: refusing to substitute Docker for an Apple Container keeper"
+            "microvm_read_refuses_docker_substitution: an Apple Container keeper's tree is not reachable through a Docker container"
         | Remote_ssh -> Ok Remote_dispatch))
 ;;
 

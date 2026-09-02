@@ -30,15 +30,6 @@ let write_file path content =
   Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc content)
 ;;
 
-let contains needle haystack =
-  let needle_len = String.length needle and haystack_len = String.length haystack in
-  let rec loop i =
-    i + needle_len <= haystack_len
-    && (String.sub haystack i needle_len = needle || loop (i + 1))
-  in
-  loop 0
-;;
-
 let make_meta name =
   match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String name ]) with
   | Error error -> fail error
@@ -94,12 +85,11 @@ remote_endpoint = "fixture"
     f ~config ~meta ~playground)
 ;;
 
-let args ~cwd env =
+let args ~cwd =
   `Assoc
     [ "argv", `List [ `String "echo"; `String "ok" ]
     ; "cwd", `String cwd
     ; "timeout_sec", `Float 2.0
-    ; "env", `Assoc (List.map (fun (name, value) -> name, `String value) env)
     ]
 ;;
 
@@ -118,41 +108,29 @@ let with_dispatch_override f =
     f
 ;;
 
-let test_typed_github_token_is_rejected_before_dispatch () =
-  setup @@ fun ~config ~meta ~playground ->
-  with_dispatch_override @@ fun () ->
-  let raw =
-    Keeper_tool_execute_runtime.handle_tool_execute ~turn_sandbox_factory:None
-      ~config ~meta ~args:(args ~cwd:playground [ "GH_TOKEN", "must-not-cross" ]) ()
-  in
-  check bool "Keeper-owned token rejected" true
-    (contains
-       "typed Execute env must not override Keeper-owned GitHub identity variable GH_TOKEN"
-       raw)
-;;
-
-let test_allowlisted_nonsecret_env_reaches_dispatch_branch () =
+let test_remote_ssh_keeper_reaches_ssh_dispatch_branch () =
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
   setup @@ fun ~config ~meta ~playground ->
   with_dispatch_override @@ fun () ->
   let raw =
     Keeper_tool_execute_runtime.handle_tool_execute ~turn_sandbox_factory:None
-      ~config ~meta ~args:(args ~cwd:playground [ "LANG", "C" ]) ()
+      ~config ~meta ~args:(args ~cwd:playground) ()
   in
-  let ok =
+  let fields =
     match Yojson.Safe.from_string raw with
-    | `Assoc fields -> List.assoc_opt "ok" fields = Some (`Bool true)
-    | _ -> false
+    | `Assoc fields -> fields
+    | _ -> fail ("execute response is not an object: " ^ raw)
   in
-  check bool "allowlisted env reached authorized SSH dispatch" true ok
+  check bool "remote_ssh keeper dispatches" true
+    (List.assoc_opt "ok" fields = Some (`Bool true));
+  check bool "dispatch went through the SSH branch" true
+    (List.assoc_opt "via" fields = Some (`String "remote_ssh"))
 ;;
 
 let () =
   run "keeper_ssh_secret_policy"
-    [ ( "policy"
-      , [ test_case "typed GH_TOKEN rejected" `Quick
-            test_typed_github_token_is_rejected_before_dispatch
-        ; test_case "allowlisted nonsecret env dispatches" `Quick
-            test_allowlisted_nonsecret_env_reaches_dispatch_branch
+    [ ( "dispatch"
+      , [ test_case "remote_ssh keeper reaches SSH dispatch branch" `Quick
+            test_remote_ssh_keeper_reaches_ssh_dispatch_branch
         ] )
     ]

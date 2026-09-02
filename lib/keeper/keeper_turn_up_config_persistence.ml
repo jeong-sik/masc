@@ -368,6 +368,16 @@ let full_fields
     | Some names -> ("skills.names", Keeper_toml_loader.Toml_string_array names) :: fields
     | None -> fields
   in
+  (* RFC-0403. Carried straight from the profile: this axis has no
+     [masc_keeper_up] argument, so the file is its only source. Leaving it out
+     of this list would delete an operator's selection the next time anything
+     called keeper_up on this Keeper, with nothing said. *)
+  let fields =
+    match parsed.profile_defaults.attached_tool_allow with
+    | Some names ->
+      ("tools.attached_allow", Keeper_toml_loader.Toml_string_array names) :: fields
+    | None -> fields
+  in
   let fields =
     match
       if parsed.native_tool_posture_present

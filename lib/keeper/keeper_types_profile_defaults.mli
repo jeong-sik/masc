@@ -25,6 +25,11 @@ type keeper_profile_defaults = {
   (** Profile-only Keeper Skill selection. [None] exposes all names; [Some []]
       exposes none. Names use exact equality against canonical Skill names. *)
   skill_names : string list option;
+  attached_tool_allow : string list option;
+      (** RFC-0403. Which of the attached services' tools this keeper takes.
+          [None] is the whole offering, which is what a keeper got before
+          this field existed; [Some []] is none of them. Attached tools
+          only -- built-in tools choose through [defer_loading]. *)
   (* Keeper runtime assignment lives in runtime.toml [[runtime.assignments]]. *)
   agent_core_env : (string * string) list;
 }

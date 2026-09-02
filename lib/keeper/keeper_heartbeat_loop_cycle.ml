@@ -204,20 +204,49 @@ let run_keeper_cycle
       ~(wake : Keeper_registry.wake_reason)
       ()
   =
-  run_keeper_cycle_admitted
-    ~before_dispatch_authority:
-      (fun () -> Keeper_turn_dispatch_authority.validate admission_token)
-    ?deferred_runtime_lane
-    ?on_deferred_runtime_consumed
-    ?previous_turn_stop
-    ~ctx
-    ~meta_after_triage
-    ~stop
-    ~obs
-    ~turn_decision
-    ~shared_context
-    ~wake
-    ?event_bus
-    ?hitl_resolution
-    ()
+  (* Every lane reaches the turn through this wrapper, so the stop state
+     lives here rather than in the keepalive loop that used to own it: a
+     yield on a lane that never threaded the old ref (direct/TUI-attached
+     turns) left the next turn blind to why its predecessor was cut.
+     An explicit [~previous_turn_stop] still wins — tests use it to pin
+     the rendered line. *)
+  let previous_turn_stop =
+    match previous_turn_stop with
+    | Some _ as explicit -> explicit
+    | None ->
+      Keeper_last_turn_stop.get
+        ~base_path:ctx.config.base_path
+        ~keeper:meta_after_triage.name
+  in
+  let outcome =
+    run_keeper_cycle_admitted
+      ~before_dispatch_authority:
+        (fun () -> Keeper_turn_dispatch_authority.validate admission_token)
+      ?deferred_runtime_lane
+      ?on_deferred_runtime_consumed
+      ?previous_turn_stop
+      ~ctx
+      ~meta_after_triage
+      ~stop
+      ~obs
+      ~turn_decision
+      ~shared_context
+      ~wake
+      ?event_bus
+      ?hitl_resolution
+      ()
+  in
+  (* Only a checkpoint carries a reason; a completed, failed, cancelled, or
+     skipped cycle leaves nothing to explain, and clearing here keeps a
+     stale reason from outliving the turn it described. Written only when a
+     cycle ran — a cadence that skipped the turn leaves the last real
+     turn's reason in place. *)
+  Keeper_last_turn_stop.set
+    ~base_path:ctx.config.base_path
+    ~keeper:meta_after_triage.name
+    (match outcome with
+     | Checkpointed { checkpoint_reason; _ } -> Some checkpoint_reason
+     | Completed _ | Input_required _ | Cancelled _ | Skipped _ | Failed _ ->
+       None);
+  outcome
 ;;

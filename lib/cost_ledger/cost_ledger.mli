@@ -17,6 +17,8 @@ type source =
   | Manual_cli
   | Auto_trajectory of inference_identity
 
+type usage_projection = Raw_observation | Resolved_delta
+
 type usage =
   | Usage_missing
   | Usage_reported of
@@ -30,6 +32,7 @@ type t =
   ; task_id : string option
   ; model : string
   ; usage : usage
+  ; usage_projection : usage_projection
   ; timestamp : string
   ; ts_unix : float
   ; source : source
@@ -39,6 +42,7 @@ type decode_error
 
 val decode_error_to_string : decode_error -> string
 val source_to_string : source -> string
+val usage_projection_to_string : usage_projection -> string
 val compare_inference_identity : inference_identity -> inference_identity -> int
 val inference_identity : t -> inference_identity option
 

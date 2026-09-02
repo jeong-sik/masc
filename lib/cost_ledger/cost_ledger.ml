@@ -8,6 +8,8 @@ type source =
   | Manual_cli
   | Auto_trajectory of inference_identity
 
+type usage_projection = Raw_observation | Resolved_delta
+
 type usage =
   | Usage_missing
   | Usage_reported of
@@ -21,6 +23,7 @@ type t =
   ; task_id : string option
   ; model : string
   ; usage : usage
+  ; usage_projection : usage_projection
   ; timestamp : string
   ; ts_unix : float
   ; source : source
@@ -108,6 +111,21 @@ let source_to_string = function
   | Auto_trajectory _ -> "auto_trajectory"
 ;;
 
+let usage_projection_to_string = function
+  | Raw_observation -> "raw_observation"
+  | Resolved_delta -> "resolved_delta"
+;;
+
+let usage_projection_of_fields fields source =
+  let* projection = required_string fields "usage_projection" in
+  match projection, source with
+  | "resolved_delta", _ -> Ok Resolved_delta
+  | "raw_observation", Auto_trajectory _ -> Ok Raw_observation
+  | "raw_observation", Manual_cli ->
+    invalid "usage_projection" "must be resolved_delta for manual_cli"
+  | _ -> invalid "usage_projection" "must be raw_observation or resolved_delta"
+;;
+
 let compare_inference_identity left right =
   let by_trace = String.compare left.trace_id right.trace_id in
   if by_trace <> 0
@@ -180,8 +198,9 @@ let of_json = function
       | None -> invalid "timestamp" "must be a valid ISO-8601 value"
     in
     let* source = source_of_fields fields in
+    let* usage_projection = usage_projection_of_fields fields source in
     let* usage = usage_of_fields fields source in
-    Ok { agent; task_id; model; usage; timestamp; ts_unix; source }
+    Ok { agent; task_id; model; usage; usage_projection; timestamp; ts_unix; source }
   | _ -> invalid "cost row" "must be a JSON object"
 ;;
 
@@ -193,6 +212,7 @@ let reserved_fields =
   ; "output_tokens"
   ; "cost_usd"
   ; "usage_missing"
+  ; "usage_projection"
   ; "timestamp"
   ; "ts_unix"
   ; "source"
@@ -230,6 +250,7 @@ let to_json ?(extra_fields = []) row =
      ; "output_tokens", output_tokens
      ; "cost_usd", cost_usd
      ; "usage_missing", `Bool usage_missing
+     ; "usage_projection", `String (usage_projection_to_string row.usage_projection)
      ; "timestamp", `String row.timestamp
      ; "source", `String (source_to_string row.source)
      ; "trace_id", trace_id

@@ -26,6 +26,47 @@ include Keeper_hooks_agent_core_types
     provider/model identity belongs to AGENT_CORE and lower-level runtime adapters.
     RFC-0132 PR-2: telemetry lane label = external boundary; redact via SSOT. *)
 let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime_lane_label
+let sse_turn_complete = "keeper_turn_complete"
+let sse_turn_observation = "keeper_turn_observation"
+
+let broadcast_resolved_turn_complete
+      ~keeper_name
+      ~turn
+      ~tool_calls_made
+      ~total_turns
+      ~(usage_resolution : Keeper_usage_resolution.t)
+  =
+  let usage_field field =
+    match usage_resolution.delta with
+    | Some usage -> `Int (field usage)
+    | None -> `Null
+  in
+  let cost_usd =
+    match usage_resolution.delta with
+    | Some { cost_usd = Some cost; _ } -> `Float cost
+    | Some { cost_usd = None; _ } | None -> `Null
+  in
+  Sse.broadcast
+    (`Assoc
+      [ key_type, `String sse_turn_complete
+      ; key_name, `String keeper_name
+      ; key_turn, `Int turn
+      ; key_model_used, `Null
+      ; ( key_input_tokens
+        , usage_field (fun usage -> usage.Keeper_usage_resolution.input_tokens) )
+      ; ( key_output_tokens
+        , usage_field (fun usage -> usage.Keeper_usage_resolution.output_tokens) )
+      ; key_cost_usd, cost_usd
+      ; key_tool_calls_made, `Int tool_calls_made
+      ; ( key_cache_read_tokens
+        , usage_field (fun usage -> usage.Keeper_usage_resolution.cache_read_input_tokens) )
+      ; key_cache_n, `Null
+      ; key_prompt_n, `Null
+      ; key_total_turns, `Int total_turns
+      ; "usage_resolution", Keeper_usage_resolution.to_json usage_resolution
+      ; key_ts_unix, `Float (Time_compat.now ())
+      ])
+;;
 
 let trajectory_duration_ms duration_ms =
   if (not (Float.is_finite duration_ms)) || Float.compare duration_ms 0.0 <= 0
@@ -158,7 +199,6 @@ let make_hooks
     ?(trajectory_acc : Trajectory.accumulator option)
     ()
   : Agent_core.Hooks.hooks =
-  let sse_turn_complete = "keeper_turn_complete" in
   (* Per-turn tool call counter for SSE enrichment.
      Incremented in post_tool_use, reset in after_turn. *)
   let tool_call_count_ref = ref 0 in
@@ -281,12 +321,6 @@ let make_hooks
             Llm_provider.Provider_config.string_of_provider_kind pk
           | _ -> runtime_lane_label
         in
-        let cache_creation_input_tokens, cache_read_input_tokens =
-          match response.usage with
-          | Some u ->
-              u.cache_creation_input_tokens, u.cache_read_input_tokens
-          | None -> 0, 0
-        in
         let reasoning_output_tokens =
           match response.telemetry with
           | Some { reasoning_tokens = Some rt; _ } when rt > 0 -> rt
@@ -297,19 +331,9 @@ let make_hooks
           | Some { ttfrc_ms = Some _; _ } -> Some true
           | _ -> None
         in
-        (* Cache-token tracking uses AGENT_CORE-reported counters only. *)
-        let cc = cache_creation_input_tokens in
-        let cr = cache_read_input_tokens in
-        if cc > 0 then
-             Otel_metric_store.inc_counter
-               Otel_metric_store.metric_provider_prefix_cache_creation_tokens
-               ~delta:(Float.of_int cc) ();
-        if cr > 0 then
-          Otel_metric_store.inc_counter
-            Otel_metric_store.metric_llm_provider_cache_read_tokens
-            ~labels:[ ("provider", provider_label); ("model", model) ]
-            ~delta:(Float.of_int cr)
-            ();
+        (* Provider usage may be conversation-cumulative. Cache counters are
+           emitted once from the Keeper usage resolution after the runtime
+           supplies its typed scope and fresh/resumed identity. *)
         (* Per-provider/model reasoning-token counter.  Available via
            [inference_telemetry.reasoning_tokens] on select providers
            (Anthropic extended thinking, DeepSeek, etc.). *)
@@ -322,8 +346,6 @@ let make_hooks
         Llm_metric_bridge.emit_usage_details
           ~provider:provider_label
           ~model_id:model
-          ~cache_creation_input_tokens
-          ~cache_read_input_tokens
           ~reasoning_output_tokens
           ?request_stream
           ~finish_reason:(stop_reason_to_label response.stop_reason)
@@ -440,7 +462,8 @@ let make_hooks
            Sse.broadcast
              (`Assoc
                [
-                 (key_type, `String sse_turn_complete);
+                 (key_type, `String sse_turn_observation);
+                 ("usage_projection", `String "raw_observation");
                  (key_name, `String meta.name);
                  (key_turn, `Int turn);
                  (key_model_used, `Null);
@@ -477,7 +500,7 @@ let make_hooks
                ~labels:[(label_keeper, meta.name); (label_callback, callback_label_after_turn_sse_broadcast)]
                ();
              Log.Keeper.warn ~keeper_name:meta.name
-               "turn=%d sse_turn_complete broadcast failed: %s"
+               "turn=%d sse_turn_observation broadcast failed: %s"
                turn (Printexc.to_string exn));
         tool_call_count_ref := 0;
         Agent_core.Hooks.Continue

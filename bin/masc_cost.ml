@@ -58,6 +58,7 @@ let log_cost ~agent ~task_id ~model ~input_tokens ~output_tokens ~cost_usd =
           ; output_tokens
           ; cost_usd
           }
+    ; usage_projection = Resolved_delta
     ; timestamp = Masc_domain.iso8601_of_unix_seconds now
     ; ts_unix = now
     ; source = Manual_cli
@@ -105,6 +106,7 @@ let read_costs period =
       note_invalid (line_label path line_number) detail
     | Dated_jsonl.Parsed json ->
       (match Cost_ledger.of_json json with
+       | Ok ({ usage_projection = Raw_observation; _ } : Cost_ledger.t) -> ()
        | Ok entry -> entries := entry :: !entries
        | Error error ->
          note_invalid

@@ -134,6 +134,8 @@ val update_metrics_from_result :
   Keeper_meta_contract.keeper_meta ->
   latency_ms:int ->
   observation:Keeper_world_observation.world_observation ->
+  usage_resolution:Keeper_usage_resolution.t ->
+  usage_cursor:Keeper_usage_resolution.cursor option ->
   ?is_autonomous_turn:bool ->
   Keeper_agent_run.run_result ->
   Keeper_meta_contract.keeper_meta
@@ -153,6 +155,7 @@ val append_metrics_snapshot :
   observation:Keeper_world_observation.world_observation ->
   result:Keeper_agent_run.run_result ->
   latency_ms:int ->
+  usage_resolution:Keeper_usage_resolution.t ->
   turn_cost:float ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   checkpoint_bytes:int ->
@@ -173,6 +176,7 @@ val append_decision_record :
   ?fallback_reason:string ->
   ?turn_mode:turn_mode ->
   ?result:Keeper_agent_run.run_result option ->
+  ?usage_resolution:Keeper_usage_resolution.t option ->
   ?error:string ->
   ?terminal_reason:Keeper_turn_terminal.t ->
   unit ->

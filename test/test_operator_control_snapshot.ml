@@ -181,7 +181,60 @@ let test_usage_does_not_create_context_snapshot () =
     Yojson.Safe.Util.(usage_json |> member "source" |> to_string);
   Alcotest.(check string) "usage JSON keeps its own observation timestamp"
     "2023-11-14T22:13:20Z"
-    Yojson.Safe.Util.(usage_json |> member "observed_at" |> to_string)
+    Yojson.Safe.Util.(usage_json |> member "observed_at" |> to_string);
+  let cumulative_sample : Keeper_usage_resolution.sample =
+    { input_tokens = 1_200
+    ; output_tokens = 30
+    ; cache_creation_input_tokens = 0
+    ; cache_read_input_tokens = 0
+    ; cost_usd = Some 0.25
+    }
+  in
+  let cumulative_resolution, _ =
+    Keeper_usage_resolution.resolve
+      ~cursor:None
+      ~basis:
+        (Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity"
+           ; conversation_id = "conversation-1"
+           ; position = Keeper_usage_resolution.Fresh
+           })
+      ~observation:(Some cumulative_sample)
+      ~observed_at:1_700_000_001.0
+  in
+  let cumulative_meta =
+    { meta with
+      runtime =
+        { meta.runtime with
+          last_usage_resolution = Some cumulative_resolution
+        }
+    }
+  in
+  let cumulative_json =
+    Keeper_context_observation_projection.last_turn_usage_json_of_meta
+      cumulative_meta
+  in
+  Alcotest.(check int)
+    "cumulative provider exposes the resolved turn delta"
+    1_200
+    Yojson.Safe.Util.(cumulative_json |> member "input_tokens" |> to_int);
+  Alcotest.(check int)
+    "public total keeps the legacy shape"
+    1_230
+    Yojson.Safe.Util.(cumulative_json |> member "total_tokens" |> to_int);
+  Alcotest.(check string)
+    "resolved usage timestamp remains ISO-8601"
+    "2023-11-14T22:13:21Z"
+    Yojson.Safe.Util.(cumulative_json |> member "observed_at" |> to_string);
+  Alcotest.(check string)
+    "typed resolution is embedded separately"
+    "conversation_counter"
+    Yojson.Safe.Util.(
+      cumulative_json
+      |> member "usage_resolution"
+      |> member "basis"
+      |> member "kind"
+      |> to_string)
 
 let init_runtime_default_for_snapshot base_dir =
   let path = Filename.concat base_dir "runtime.toml" in

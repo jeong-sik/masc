@@ -36,6 +36,8 @@ type turn_runtime_delta =
   ; next_trace_history : string list
   ; next_last_handoff_ts : float
   ; proactive_observation : Keeper_meta_contract.proactive_runtime observed_change
+  ; usage_cursor : Keeper_usage_resolution.cursor option observed_change
+  ; last_usage_resolution : Keeper_usage_resolution.t option observed_change
   ; message_scope_ack_id : string option observed_change
   ; updated_at : string
   }

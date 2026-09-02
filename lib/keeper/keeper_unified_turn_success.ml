@@ -11,7 +11,10 @@ let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime
 
 (* cost_usd is accounted independently of token-count trust (token⊥cost), so the
    turn cost no longer needs a usage-trust classification. *)
-let turn_cost result = KUM.estimate_usage_cost_usd result.Keeper_agent_run.usage
+let turn_cost (resolution : Keeper_usage_resolution.t) =
+  match resolution.delta with
+  | Some delta -> Option.value ~default:0.0 delta.cost_usd
+  | None -> 0.0
 ;;
 
 let apply_lifecycle
@@ -89,6 +92,7 @@ let append_metrics_snapshot
       ~channel
       ~result
       ~latency_ms
+      ~usage_resolution
       ~turn_cost
       ~(lifecycle : KEC.post_turn_lifecycle)
       ~terminal_outcome
@@ -134,6 +138,7 @@ let append_metrics_snapshot
          ~observation
          ~result
          ~latency_ms
+         ~usage_resolution
          ~turn_cost
          ~channel
          ~checkpoint_bytes:lifecycle.checkpoint_bytes
@@ -145,6 +150,7 @@ let emit_activity_graph
       ~config
       ~updated_meta
       ~result
+      ~usage_resolution
       ~latency_ms
       ~turn_cost
       ~usage_trust
@@ -163,11 +169,18 @@ let emit_activity_graph
         (Printexc.to_string exn))
     (fun () ->
        let activity_kind = terminal_outcome_to_activity_kind terminal_outcome in
+       let delta = usage_resolution.Keeper_usage_resolution.delta in
+       let delta_field f =
+         match delta with Some usage -> `Int (f usage) | None -> `Null
+       in
        let cache_miss_input_tokens =
-         Keeper_hooks_agent_core.cache_miss_input_tokens
-           ~input_tokens:result.Keeper_agent_run.usage.input_tokens
-           ~cache_creation_input_tokens:result.usage.cache_creation_input_tokens
-           ~cache_read_input_tokens:result.usage.cache_read_input_tokens
+         Option.map
+           (fun usage ->
+              Keeper_hooks_agent_core.cache_miss_input_tokens
+                ~input_tokens:usage.Keeper_usage_resolution.input_tokens
+                ~cache_creation_input_tokens:usage.cache_creation_input_tokens
+                ~cache_read_input_tokens:usage.cache_read_input_tokens)
+           delta
        in
        let event =
          Activity_graph.emit
@@ -179,18 +192,20 @@ let emit_activity_graph
               ([ "keeper_name", `String updated_meta.name
                ; "terminal_outcome", `String (terminal_outcome_to_label terminal_outcome)
                ; ( "input_tokens"
-                 , if result.usage_reported then `Int result.Keeper_agent_run.usage.input_tokens else `Null )
+                 , delta_field (fun usage -> usage.Keeper_usage_resolution.input_tokens) )
                ; ( "output_tokens"
-                 , if result.usage_reported then `Int result.usage.output_tokens else `Null )
+                 , delta_field (fun usage -> usage.Keeper_usage_resolution.output_tokens) )
                ; ( "cache_creation_tokens"
-                 , if result.usage_reported
-                   then `Int result.usage.cache_creation_input_tokens
-                   else `Null )
+                 , delta_field (fun usage -> usage.Keeper_usage_resolution.cache_creation_input_tokens) )
                ; ( "cache_read_tokens"
-                 , if result.usage_reported then `Int result.usage.cache_read_input_tokens else `Null )
+                 , delta_field (fun usage -> usage.Keeper_usage_resolution.cache_read_input_tokens) )
                ; ( "cache_miss_input_tokens"
-                 , if result.usage_reported then `Int cache_miss_input_tokens else `Null )
-               ; ("cost_usd", if result.usage_reported then `Float turn_cost else `Null)
+                 , Option.fold ~none:`Null ~some:(fun value -> `Int value) cache_miss_input_tokens )
+               ; ( "cost_usd"
+                 , match delta with
+                   | Some { cost_usd = Some _; _ } -> `Float turn_cost
+                   | Some { cost_usd = None; _ } | None -> `Null )
+               ; "usage_resolution", Keeper_usage_resolution.to_json usage_resolution
                ; "latency_ms", `Int latency_ms
                ; "model_used", `Null
                ; "resolved_model_id", `Null
@@ -289,39 +304,40 @@ let emit_usage_metrics_and_log
     Keeper_metrics.(to_string Turns)
     ~labels:[ "keeper", updated_meta.name; "outcome", outcome_label ]
     ();
-  if result.usage_reported
-  then (
+  (match usage_resolution.Keeper_usage_resolution.delta with
+   | Some usage ->
     (* Otel counters are monotonic. Invalid negative provider counters remain
        in JSONL/meta/log evidence and are described by [usage_trust]; they are
        not submitted as negative counter deltas. *)
-    if result.usage.input_tokens >= 0
+    if usage.input_tokens >= 0
     then
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string InputTokens)
       ~labels:[ "keeper", updated_meta.name; "model", runtime_lane_label ]
-      ~delta:(float_of_int result.usage.input_tokens)
+      ~delta:(float_of_int usage.input_tokens)
       ();
-    if result.usage.output_tokens >= 0
+    if usage.output_tokens >= 0
     then
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string OutputTokens)
       ~labels:[ "keeper", updated_meta.name; "model", runtime_lane_label ]
-      ~delta:(float_of_int result.usage.output_tokens)
+      ~delta:(float_of_int usage.output_tokens)
       ();
-    if result.usage.cache_creation_input_tokens > 0
+    if usage.cache_creation_input_tokens > 0
     then
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CacheCreationTokens)
         ~labels:[ "keeper", updated_meta.name; "model", runtime_lane_label ]
-        ~delta:(float_of_int result.usage.cache_creation_input_tokens)
+        ~delta:(float_of_int usage.cache_creation_input_tokens)
         ();
-    if result.usage.cache_read_input_tokens > 0
+    if usage.cache_read_input_tokens > 0
     then
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CacheReadTokens)
         ~labels:[ "keeper", updated_meta.name; "model", runtime_lane_label ]
-        ~delta:(float_of_int result.usage.cache_read_input_tokens)
-        ());
+        ~delta:(float_of_int usage.cache_read_input_tokens)
+        ()
+   | None -> ());
   (match usage_trust with
    | Keeper_usage_trust.Usage_untrusted reasons ->
     List.iter
@@ -357,9 +373,9 @@ let emit_usage_metrics_and_log
        runtime_lane_label
    | Keeper_usage_trust.Usage_trusted -> ());
   let logged_total_tokens =
-    if result.usage_reported
-    then result.usage.input_tokens + result.usage.output_tokens
-    else 0
+    match usage_resolution.delta with
+    | Some usage -> usage.input_tokens + usage.output_tokens
+    | None -> 0
   in
   Log.Keeper.info
     ~category:Log.Turn
@@ -371,6 +387,46 @@ let emit_usage_metrics_and_log
     latency_ms
     turn_mode_label
     outcome_str
+;;
+
+let emit_resolved_cost_event
+      ~config
+      ~meta
+      ~keeper_turn_id
+      ~result
+      ~(usage_resolution : Keeper_usage_resolution.t)
+      ~usage_trust
+  =
+  let usage, usage_missing =
+    match usage_resolution.delta with
+    | Some usage -> usage, false
+    | None ->
+      ( { Keeper_usage_resolution.input_tokens = 0
+        ; output_tokens = 0
+        ; cache_creation_input_tokens = 0
+        ; cache_read_input_tokens = 0
+        ; cost_usd = None
+        }
+      , true )
+  in
+  Keeper_hooks_agent_core.emit_cost_event
+    ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path)
+    ~agent_name:meta.Keeper_meta_contract.name
+    ~task_id:(Option.map Keeper_id.Task_id.to_string meta.current_task_id)
+    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+    ~keeper_turn_id
+    ~agent_core_turn_ordinal:result.Keeper_agent_run.final_agent_core_turn_ordinal
+    ~model:result.model_used
+    ~input_tokens:usage.input_tokens
+    ~output_tokens:usage.output_tokens
+    ~cost_usd:(Option.value ~default:0.0 usage.cost_usd)
+    ~cache_creation_input_tokens:usage.cache_creation_input_tokens
+    ~cache_read_input_tokens:usage.cache_read_input_tokens
+    ~usage_missing
+    ~usage_projection:Cost_ledger.Resolved_delta
+    ~usage_trust
+    ?telemetry:result.inference_telemetry
+    ()
 ;;
 
 type decision_outcome =
@@ -556,18 +612,30 @@ let handle
           (Printexc.to_string exn))
       f
   in
-  let turn_cost = turn_cost result in
   let lifecycle =
     apply_lifecycle
       ~config
       ~meta
       result
   in
+  let usage_resolution, usage_cursor =
+    Keeper_usage_resolution.resolve
+      ~cursor:lifecycle.KEC.updated_meta.runtime.usage_cursor
+      ~basis:result.usage_basis
+      ~observation:
+        (if result.usage_reported
+         then Some (Keeper_usage_resolution.sample_of_api_usage result.usage)
+         else None)
+      ~observed_at:(Time_compat.now ())
+  in
+  let turn_cost = turn_cost usage_resolution in
   let updated_meta =
     KUM.update_metrics_from_result
       lifecycle.KEC.updated_meta
       ~latency_ms
       ~observation
+      ~usage_resolution
+      ~usage_cursor
       ~is_autonomous_turn:(Keeper_execution_outcome.is_autonomous execution_outcome)
       result
   in
@@ -587,6 +655,7 @@ let handle
     ~channel
     ~result
     ~latency_ms
+    ~usage_resolution
     ~turn_cost
     ~lifecycle
     ~terminal_outcome
@@ -599,15 +668,17 @@ let handle
       ~usage:result.usage
   in
   let wall_tokens_per_second =
-    if result.usage_reported && result.usage.output_tokens >= 0 && latency_ms > 0
-    then Some (float_of_int result.usage.output_tokens /. (float_of_int latency_ms /. 1000.0))
-    else None
+    match usage_resolution.delta with
+    | Some delta when delta.output_tokens >= 0 && latency_ms > 0 ->
+      Some (float_of_int delta.output_tokens /. (float_of_int latency_ms /. 1000.0))
+    | Some _ | None -> None
   in
   emit_activity_graph
     ~config
     ~updated_meta
     ~result
     ~latency_ms
+    ~usage_resolution
     ~turn_cost
     ~usage_trust
     ~turn_mode_label
@@ -617,7 +688,7 @@ let handle
   run_projection KTP.Decision_record (fun () ->
     KUM.append_decision_record
       ~config
-      ~meta:updated_meta
+      ~meta
       ~turn_ctx_cell
       ~observation
       ~latency_ms
@@ -632,16 +703,33 @@ let handle
       ~turn_mode
       ~terminal_reason:(terminal_reason_of_outcome result terminal_outcome)
       ~result:(Some result)
+      ~usage_resolution:(Some usage_resolution)
       ());
+  run_projection KTP.Usage_metrics (fun () ->
+    emit_resolved_cost_event
+      ~config
+      ~meta
+      ~keeper_turn_id
+      ~result
+      ~usage_resolution
+      ~usage_trust);
   run_projection KTP.Usage_metrics (fun () ->
     emit_usage_metrics_and_log
       ~updated_meta
       ~result
+      ~usage_resolution
       ~latency_ms
       ~usage_trust
       ~turn_mode_label
       ~lifecycle
       ~terminal_outcome);
+  run_projection KTP.Usage_metrics (fun () ->
+    Keeper_hooks_agent_core.broadcast_resolved_turn_complete
+      ~keeper_name:updated_meta.name
+      ~turn:keeper_turn_id
+      ~tool_calls_made:(Keeper_agent_result.tool_call_count result)
+      ~total_turns:updated_meta.runtime.usage.total_turns
+      ~usage_resolution);
   (* Every terminal outcome has consumed a keeper turn id. *)
   let updated_meta =
     persist_terminal_turn_meta

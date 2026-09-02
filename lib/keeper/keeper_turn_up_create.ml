@@ -149,6 +149,8 @@ let create_keeper ~expected_config_revision (ctx : _ context)
             last_usage_reported_at = None;
             last_latency_ms = 0;
           };
+          usage_cursor = None;
+          last_usage_resolution = None;
           proactive_rt = {
             count_total = 0;
             last_ts = 0.0;

@@ -136,6 +136,7 @@ type run_result = {
   response : Agent_core.Types.api_response;
   checkpoint : Agent_core.Checkpoint.t option;
   session_id : string;
+  session_resumed : bool option;
   turns : int;
   trace_ref : Agent_core.Raw_trace.run_ref option;
   run_validation : Agent_core.Raw_trace.run_validation option;
@@ -1235,6 +1236,7 @@ let run_blocks
           response;
           checkpoint;
           session_id;
+          session_resumed = None;
           turns;
           trace_ref;
           run_validation;
@@ -1266,6 +1268,7 @@ let run_blocks
         { response
         ; checkpoint
         ; session_id
+        ; session_resumed = None
         ; turns = yielded.turn
         ; trace_ref
         ; run_validation
@@ -1299,6 +1302,7 @@ let run_blocks
         { response = partial_response
         ; checkpoint
         ; session_id
+        ; session_resumed = None
         ; turns
         ; trace_ref
         ; run_validation

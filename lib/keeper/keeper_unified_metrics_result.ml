@@ -14,6 +14,8 @@ include Keeper_unified_metrics_json_support
 
 let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
+    ~(usage_resolution : Keeper_usage_resolution.t)
+    ~(usage_cursor : Keeper_usage_resolution.cursor option)
     ?(is_autonomous_turn = true)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
@@ -30,34 +32,24 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   record_keeper_idle_seconds
     ~keeper_name:meta.name
     ~idle_seconds:observation.idle_seconds;
-  (* [usage_trust] is anomaly provenance only. Provider-reported counters are
-     retained verbatim in the runtime aggregate; a stale or invalidity label
-     must never rewrite an observation to zero. *)
+  (* [usage_trust] is anomaly provenance only. The raw provider observation is
+     preserved as last usage; only the single typed resolution below is
+     additive. *)
   let observed_input_tokens = result.usage.input_tokens in
   let observed_output_tokens = result.usage.output_tokens in
   let observed_total_tokens = Inference_utils.total_tokens result.usage in
-  (* Runtime usage is not necessarily a turn delta.  Official clients may
-     report the total for the whole resumed conversation; adding that value on
-     every Keeper cycle makes the aggregate grow quadratically.  Until the
-     runtime boundary supplies an exact per-request delta, only the typed
-     [Per_request] observation is additive.  The raw observation still becomes
-     the last-usage value below and remains available in Decision/TurnRecord
-     evidence with its scope. *)
-  let aggregate_input_tokens,
-      aggregate_output_tokens,
-      aggregate_total_tokens,
-      aggregate_cost =
-    match result.usage_reported, result.usage_scope with
-    | true, Runtime_usage_scope.Per_request ->
-      ( observed_input_tokens
-      , observed_output_tokens
-      , observed_total_tokens
-      , estimate_usage_cost_usd result.usage )
-    | ( false, _
-      | true,
-        ( Runtime_usage_scope.Conversation_cumulative
-        | Runtime_usage_scope.Usage_scope_unavailable ) ) ->
-      0, 0, 0, 0.0
+  (* Runtime usage is not necessarily a turn delta. The resolver combines the
+     producer's fresh/resumed conversation authority with the durable cursor;
+     every downstream aggregate consumes that same delta. *)
+  let aggregate_input_tokens, aggregate_output_tokens, aggregate_total_tokens, aggregate_cost =
+    match usage_resolution.delta with
+    | Some delta ->
+      let usage = Keeper_usage_resolution.api_usage_of_sample delta in
+      ( delta.input_tokens
+      , delta.output_tokens
+      , Inference_utils.total_tokens usage
+      , Option.value ~default:0.0 delta.cost_usd )
+    | None -> 0, 0, 0, 0.0
   in
   let has_substantive_tools = has_substantive_tool_calls tool_names in
   let has_text = String.trim result.response_text <> "" in
@@ -122,6 +114,8 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
           ~output_tokens:observed_output_tokens
           ~total_tokens:observed_total_tokens
           ~observed_at:now_ts;
+      usage_cursor;
+      last_usage_resolution = Some usage_resolution;
       (* Deterministic scheduled autonomous cycle accounting is separated from
          nondeterministic model output visibility. *)
       proactive_rt = {

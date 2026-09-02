@@ -278,6 +278,22 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
               | Some names -> Json_util.json_string_list names )
           ]
       in
+      let last_delta =
+        Option.bind
+          m.runtime.last_usage_resolution
+          (fun resolution -> resolution.Keeper_usage_resolution.delta)
+      in
+      let delta_int field =
+        Option.fold ~none:`Null ~some:(fun usage -> `Int (field usage)) last_delta
+      in
+      let delta_rate field =
+        match last_delta with
+        | Some usage ->
+          tokens_per_sec_json
+            ~tokens:(field usage)
+            ~latency_ms:m.runtime.usage.last_latency_ms
+        | None -> `Null
+      in
       let metrics =
         `Assoc [
           ("total_turns", `Int m.runtime.usage.total_turns);
@@ -286,16 +302,20 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
           ("total_tokens", `Int m.runtime.usage.total_tokens);
           ("total_cost_usd", `Float m.runtime.usage.total_cost_usd);
           ("last_model_used", `Null);
-          ("last_input_tokens", `Int m.runtime.usage.last_input_tokens);
-          ("last_output_tokens", `Int m.runtime.usage.last_output_tokens);
-          ("last_total_tokens", `Int m.runtime.usage.last_total_tokens);
+          ("last_input_tokens", delta_int (fun usage -> usage.Keeper_usage_resolution.input_tokens));
+          ("last_output_tokens", delta_int (fun usage -> usage.Keeper_usage_resolution.output_tokens));
+          ( "last_total_tokens"
+          , delta_int (fun usage -> usage.input_tokens + usage.output_tokens) );
+          ( "last_usage_resolution"
+          , Option.fold
+              ~none:`Null
+              ~some:Keeper_usage_resolution.to_json
+              m.runtime.last_usage_resolution );
           ("last_latency_ms", last_latency_ms_json m.runtime.usage.last_latency_ms);
-          ( "last_total_tokens_per_sec",
-            tokens_per_sec_json ~tokens:m.runtime.usage.last_total_tokens
-              ~latency_ms:m.runtime.usage.last_latency_ms );
-          ( "last_output_tokens_per_sec",
-            tokens_per_sec_json ~tokens:m.runtime.usage.last_output_tokens
-              ~latency_ms:m.runtime.usage.last_latency_ms );
+          ( "last_total_tokens_per_sec"
+          , delta_rate (fun usage -> usage.input_tokens + usage.output_tokens) );
+          ( "last_output_tokens_per_sec"
+          , delta_rate (fun usage -> usage.output_tokens) );
         ]
       in
       let current_phase =

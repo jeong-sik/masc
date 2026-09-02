@@ -285,6 +285,28 @@ let finalize
           (match result.runtime_observation with
            | Some observation -> observation.usage_scope
            | None -> Runtime_usage_scope.Usage_scope_unavailable)
+      ; usage_basis =
+          (match result.response.usage, result.runtime_observation with
+           | None, _ -> Keeper_usage_resolution.Unavailable
+           | Some _, Some { usage_scope = Runtime_usage_scope.Per_request; _ } ->
+             Keeper_usage_resolution.Per_request
+           | ( Some _
+             , Some
+                 { usage_scope = Runtime_usage_scope.Conversation_cumulative
+                 ; _ } ) ->
+             (match result.session_resumed with
+              | Some resumed ->
+                Keeper_usage_resolution.Conversation_counter
+                  { runtime_id = runtime_id_string
+                  ; conversation_id = result.session_id
+                  ; position =
+                      (if resumed
+                       then Keeper_usage_resolution.Resumed
+                       else Keeper_usage_resolution.Fresh)
+                  }
+              | None -> Keeper_usage_resolution.Unavailable)
+           | Some _, (None | Some { usage_scope = Runtime_usage_scope.Usage_scope_unavailable; _ }) ->
+             Keeper_usage_resolution.Unavailable)
       ; tool_calls = List.rev acc.tool_calls
       ; completion_contract_result
       ; operator_disposition = None

@@ -330,6 +330,24 @@ let decode_current_meta fields =
   let* last_input_tokens = int_field fields "last_input_tokens" in
   let* last_output_tokens = int_field fields "last_output_tokens" in
   let* last_total_tokens = int_field fields "last_total_tokens" in
+  let* usage_cursor =
+    let* json = required_field fields "usage_cursor" in
+    match json with
+    | `Null -> Ok None
+    | json ->
+      (match Keeper_usage_resolution.cursor_of_json json with
+       | Ok value -> Ok (Some value)
+       | Error detail -> invalidf "usage_cursor: %s" detail)
+  in
+  let* last_usage_resolution =
+    let* json = required_field fields "last_usage_resolution" in
+    match json with
+    | `Null -> Ok None
+    | json ->
+      (match Keeper_usage_resolution.of_json json with
+       | Ok value -> Ok (Some value)
+       | Error detail -> invalidf "last_usage_resolution: %s" detail)
+  in
   let* last_latency_ms = int_field fields "last_latency_ms" in
   let* proactive_count_total = int_field fields "proactive_count_total" in
   let* last_proactive_ts = float_field fields "last_proactive_ts" in
@@ -348,7 +366,7 @@ let decode_current_meta fields =
   (* Kept now that the reader fails open: the exact-field check cannot see a
      format whose field names stayed the same while their meaning changed, and
      rejecting costs a reset rather than a dead keeper. *)
-  if not (String.equal schema "masc.keeper_meta.v1")
+  if not (String.equal schema "masc.keeper_meta.v2")
   then invalidf "unsupported schema: %S" schema
   else if not (validate_name name)
   then invalidf "name is invalid: %S" name
@@ -387,6 +405,8 @@ let decode_current_meta fields =
     in
     let runtime : agent_runtime_state =
       { usage
+      ; usage_cursor
+      ; last_usage_resolution
       ; proactive_rt
       ; trace_id
       ; trace_history

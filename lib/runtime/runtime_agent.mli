@@ -158,6 +158,7 @@ type run_result = {
   response : Agent_core.Types.api_response;
   checkpoint : Agent_core.Checkpoint.t option;
   session_id : string;
+  session_resumed : bool option;
   turns : int;
   trace_ref : Agent_core.Raw_trace.run_ref option;
   run_validation : Agent_core.Raw_trace.run_validation option;

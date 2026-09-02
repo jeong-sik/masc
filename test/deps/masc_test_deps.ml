@@ -70,7 +70,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         else String.sub candidate 0 64
       in
       let default_value = function
-        | Schema.Schema -> `String "masc.keeper_meta.v1"
+        | Schema.Schema -> `String "masc.keeper_meta.v2"
         | Schema.Name -> `String name
         | Schema.Instructions -> `String ""
         | Schema.Trace_id -> `String trace_id
@@ -99,6 +99,8 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Last_proactive_reason
         | Schema.Last_proactive_preview -> `String ""
         | Schema.Message_scope_ack_id
+        | Schema.Usage_cursor
+        | Schema.Last_usage_resolution
         | Schema.Last_runtime_attempt
         | Schema.Latched_reason
         | Schema.Current_task_id

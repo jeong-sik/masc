@@ -32,9 +32,12 @@
     {2 Ordering}
 
     Rows are decoded in producer order. [turn_id] joins rows that belong to one
-    causal turn; [turn_sequence] orders complete turns across stores. Displayed
-    timestamps place civil-hour rails but never authorize a reorder.
-    [structural_id] keeps row identity through projection and refresh. *)
+    causal turn; [turn_sequence] breaks an exact displayed-time tie. The TUI
+    places every conversation and auxiliary row on one nondecreasing time
+    axis. Inside a request, phase order stays authoritative and later phases
+    clamp to the latest earlier-phase clock before parallel lanes interleave.
+    Request identity keeps those causal relationships explicit.
+    [structural_id] keeps row identity through that projection and refresh. *)
 
 (** The surface a row arrived on, mirrored from [Surface_ref.t] in the server.
     This library carries no [masc] dependency, so it cannot name that type;
@@ -143,15 +146,15 @@ type attachment_note =
 
 type row =
   { at : float
-      (** Producer wall clock for display and pagination only. *)
+      (** Producer wall clock for display, pagination, and placement of the
+          row itself on the shared chat timeline. *)
   ; structural_id : string option
       (** Stable producer identity plus a projection discriminator when one
           source row expands to reasoning/tool/reply rows. Journal rows derive
           it from their typed revision or exact failed-observation fields. *)
   ; turn_sequence : int option
       (** Absolute Keeper turn from persisted [turn_ref], when present. This
-          breaks a tie between whole turn groups whose displayed clocks are
-          equal. *)
+          breaks a tie between rows whose displayed clocks are equal. *)
   ; turn_id : string option
       (** Exact producer identity for grouping rows from one turn: the typed
           delivery key for direct turns, otherwise the persisted [turn_ref].

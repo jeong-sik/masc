@@ -15028,7 +15028,7 @@ let context_composition_lines ~cols ~turn_back
           ~caption:
             "input the provider counted, one row per dispatched turn"
     ]
-    @ List.concat_map row (List.mapi (fun i r -> (i, r)) selection.Inspector.recent)
+    @ List.concat (List.mapi row selection.Inspector.recent)
   in
   [ identity; turn; trace; "" ]
   @ [ "  "

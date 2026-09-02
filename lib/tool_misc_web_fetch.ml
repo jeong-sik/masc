@@ -119,19 +119,62 @@ let rec blocked_ip_reason : Ipaddr.t -> string option = function
             Some "unspecified address"
           else None)
 
+(* A host is fetchable as a canonical IP literal or as a DNS name, and
+   nothing in between. curl also accepts what inet_aton does — a decimal,
+   octal, or hex number in one to four dotted parts (2130706433,
+   0x7f000001, 127.1, 0177.0.0.1, 0) — and connects to an address the
+   literal check above never saw, because [Ipaddr.of_string] rejects those
+   spellings and this function used to read the rejection as "a hostname".
+   Such spellings are refused as written rather than reparsed: a DNS name
+   never ends in an all-digit label (RFC 1123 §2.1) and never contains a
+   [0x] label, so the refusal costs no real host. A trailing dot names the
+   same host to DNS and is stripped before the localhost check; an IPv6
+   zone identifier selects a local interface and is refused; userinfo is
+   refused because curl would send it as credentials the model chose. *)
+let all_digits label =
+  String.length label > 0
+  && String.for_all (function '0' .. '9' -> true | _ -> false) label
+
+let hex_label label =
+  String.length label > 2
+  && String.starts_with ~prefix:"0x" label
+  && String.for_all
+       (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
+       (String.sub label 2 (String.length label - 2))
+
+let non_canonical_numeric_host host =
+  let labels = String.split_on_char '.' host in
+  List.exists hex_label labels
+  || (match List.rev labels with last :: _ -> all_digits last | [] -> false)
+
+let strip_trailing_dot host =
+  let n = String.length host in
+  if n > 1 && host.[n - 1] = '.' then String.sub host 0 (n - 1) else host
+
 let blocked_destination_reason url =
-  match Uri.host (Uri.of_string (String.trim url)) with
-  | None -> Some "URL has no host"
-  | Some host ->
-      let lowered = String.lowercase_ascii host in
-      if
-        String.equal lowered "localhost"
-        || String.ends_with ~suffix:".localhost" lowered
-      then Some "localhost is not fetchable"
-      else (
-        match Ipaddr.of_string lowered with
-        | Error _ -> None (* hostname; resolution is out of scope here *)
-        | Ok ip -> blocked_ip_reason ip)
+  let uri = Uri.of_string (String.trim url) in
+  match Uri.userinfo uri with
+  | Some _ -> Some "URL userinfo is not fetchable"
+  | None -> (
+      match Uri.host uri with
+      | None -> Some "URL has no host"
+      | Some host ->
+          let lowered = strip_trailing_dot (String.lowercase_ascii host) in
+          if String.equal lowered "" || String.equal lowered "." then
+            Some "URL has no host"
+          else if String.contains lowered '%' then
+            Some "IPv6 zone identifier is not fetchable"
+          else if
+            String.equal lowered "localhost"
+            || String.ends_with ~suffix:".localhost" lowered
+          then Some "localhost is not fetchable"
+          else (
+            match Ipaddr.of_string lowered with
+            | Ok ip -> blocked_ip_reason ip
+            | Error _ ->
+                if non_canonical_numeric_host lowered then
+                  Some "numeric host is not a canonical IP literal"
+                else None (* DNS name; resolution is out of scope here *)))
 
 let ends_with ~suffix value =
   let value_length = String.length value in

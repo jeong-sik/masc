@@ -334,6 +334,18 @@ let test_destination_boundary () =
     ; "http://[fe80::1]/"
     ; "http://[fd00::2]/"
     ; "http://[::ffff:127.0.0.1]/"
+      (* The spellings curl resolves through inet_aton that Ipaddr does not
+         parse; each reached 127.0.0.1, 0.0.0.0, or a local interface when
+         the literal check read them as hostnames. *)
+    ; "http://2130706433/"
+    ; "http://0x7f000001/"
+    ; "http://127.1/"
+    ; "http://0177.0.0.1/"
+    ; "http://0/"
+    ; "http://localhost./"
+    ; "http://[fe80::1%25en0]/"
+      (* Userinfo would be sent as credentials the model chose. *)
+    ; "http://user:secret@example.com/"
     ]
   in
   List.iter

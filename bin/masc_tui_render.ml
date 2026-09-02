@@ -14936,12 +14936,24 @@ let context_composition_lines ~cols
      answers it. *)
   let recent_turns_lines =
     let row (recent : Inspector.recent_turn) =
-      match recent.input_tokens with
-      | Some input ->
+      let ts = Masc_domain.iso8601_of_unix_seconds recent.ts in
+      (* The sentence each row can honestly carry depends on why a figure is
+         absent: a conversation-cumulative provider has a number that is not
+         about this turn, while a per-request provider that reported nothing
+         simply reported nothing. One None in the data covers both, so the
+         scope -- which the record owns -- decides. *)
+      match recent.scope, recent.input_tokens with
+      | Runtime_usage_scope.Conversation_cumulative, _ ->
+          [ Ansi.dim
+            ^ Printf.sprintf
+                "#%-4d %s  counted across the conversation, not per request"
+                recent.turn ts
+            ^ Ansi.reset
+          ]
+      | _, Some input ->
           fact
             (Printf.sprintf "#%-4d %s  in %-7s  cache read %-7s  out %s"
-               recent.turn
-               (Masc_domain.iso8601_of_unix_seconds recent.ts)
+               recent.turn ts
                (Inspector.format_tokens input)
                (match recent.cache_read with
                  | Some tokens -> Inspector.format_tokens tokens
@@ -14949,12 +14961,10 @@ let context_composition_lines ~cols
                (match recent.output_tokens with
                  | Some tokens -> Inspector.format_tokens tokens
                  | None -> "-"))
-      | None ->
+      | _, None ->
           [ Ansi.dim
-            ^ Printf.sprintf
-                "#%-4d %s  counted across the conversation, not per request"
-                recent.turn
-                (Masc_domain.iso8601_of_unix_seconds recent.ts)
+            ^ Printf.sprintf "#%-4d %s  input not reported for this turn"
+                recent.turn ts
             ^ Ansi.reset
           ]
     in
@@ -15173,7 +15183,9 @@ let context_exact_input_lines ~cols state ~response
                     (fun tokens -> "output " ^ Inspector.format_tokens tokens)
                     record.usage.output_tokens
                 ; Option.map
-                    (fun reason -> "finish " ^ reason)
+                    (fun reason ->
+                       "finish "
+                       ^ Keeper_chat.terminal_safe_text reason)
                     record.finish_reason
                 ]
             in
@@ -15220,11 +15232,11 @@ let context_exact_input_lines ~cols state ~response
           items
       in
       let legend =
-        Ansi.dim
-        ^ "     F fixed prompt · H history · N new this turn · S schema"
-        ^ Ansi.reset
+        Context_bars.wrap ~width
+          "F fixed prompt · H history · N new this turn · S schema"
+        |> List.map (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset)
       in
-      let common = common @ [ legend; "" ] in
+      let common = common @ legend @ [ "" ] in
       if cols >= keeper_split_threshold_cols then
         let left_width = context_split_width cols in
         let cursor =

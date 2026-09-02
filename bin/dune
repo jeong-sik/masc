@@ -531,6 +531,12 @@
  (libraries uucp uuseg))
 
 (library
+ (name masc_tui_tool_detail)
+ (wrapped false)
+ (modules masc_tui_tool_detail)
+ (libraries masc masc_tui_message_layout yojson))
+
+(library
  (name masc_tui_keeper_chat_diff)
  (wrapped false)
  (modules masc_tui_keeper_chat_diff)
@@ -950,6 +956,7 @@
   masc_tui_render_schedule
   masc_tui_context_bars
   masc_tui_tool_tree
+  masc_tui_tool_detail
   masc_tui_terminal_write_repair
   masc_tui_editor
   masc_tui_editor_jump

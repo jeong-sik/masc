@@ -10,6 +10,7 @@ module Board_detail = Masc_tui_board_detail
 module Magnitude = Masc_tui_magnitude
 module Board_comment_thread = Masc_tui_board_comment_thread
 module Message_layout = Masc_tui_message_layout
+module Tool_detail = Masc_tui_tool_detail
 module Retained_view = Masc_tui_retained_view
 module Metrics_tail = Masc_tui_metrics_tail
 module Observation_layout = Masc_tui_observation_layout
@@ -6937,31 +6938,6 @@ let keeper_call_schedule_label (schedule : Tui_decode.keeper_call_schedule) =
     (schedule.kcs_batch_index + 1) schedule.kcs_batch_size
     (schedule.kcs_planned_index + 1)
 
-(* A detail is a small tree rather than another flat table. Values keep every
-   producer-served line; the first line owns the field label and continuations
-   stay visibly below it. The final field closes the tree, so adjacent tool
-   calls do not read as one call with many unrelated rows. *)
-let tool_detail_tree fields =
-  let field_count = List.length fields in
-  fields
-  |> List.mapi (fun index (label, value) ->
-       let label = Keeper_chat.terminal_safe_text label in
-       let value = Keeper_chat.terminal_safe_text ~preserve_newlines:true value in
-       let last = index = field_count - 1 in
-       let branch = if last then "  ╰─" else "  ├─" in
-       let continuation = if last then "     " else "  │  " in
-       let lines =
-         match String.split_on_char '\n' value with
-         | [] -> [ "" ]
-         | lines -> lines
-       in
-       match lines with
-       | [] -> []
-       | first :: rest ->
-           (Printf.sprintf "%s %s · %s" branch label first)
-           :: List.map (fun line -> continuation ^ line) rest)
-  |> List.concat
-
 let keeper_message_tool_activity_details state ~keeper_name
     (activity : Keeper_chat_transcript.tool_activity) =
   let association = keeper_call_association state ~keeper_name activity in
@@ -6974,7 +6950,11 @@ let keeper_message_tool_activity_details state ~keeper_name
           | Some schedule -> keeper_call_schedule_label schedule
           | None -> "not recorded"
         in
-        let output = Option.map (fun value -> "output", value) call.kc_output in
+        let output =
+          Option.map
+            (fun value -> "output", Tool_detail.structured value)
+            call.kc_output
+        in
         let disposition =
           match call.kc_disposition with
           | None -> None
@@ -7039,14 +7019,18 @@ let keeper_message_tool_activity_details state ~keeper_name
     ; disposition_field
     ; Some ("tool", activity.tool_name)
     ; Some ("schedule", schedule_field)
-    ; Some ("input", if String.equal durable_input "" then "(empty)" else durable_input)
+    ; Some
+        ( "input"
+        , if String.equal durable_input ""
+          then "(empty)"
+          else Tool_detail.structured durable_input )
     ; output_field
     ; result_field
     ; Some ("identity", identity)
     ]
     |> List.filter_map Fun.id
   in
-  tool_detail_tree fields
+  Tool_detail.tree fields
 
 (* How one finished turn's tool block becomes rows: the operator's
    compact/full choice, the width the aligned badge leaves, and this keeper's

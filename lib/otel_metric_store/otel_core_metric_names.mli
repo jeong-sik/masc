@@ -44,7 +44,6 @@ val metric_sse_rejects : string
     was stale and the operator surface showed nothing). *)
 val metric_mcp_auth_rejects : string
 
-val metric_provider_prefix_cache_creation_tokens : string
 val metric_tool_input_validation : string
 val metric_llm_provider_http_status : string
 val metric_llm_provider_request_latency : string
@@ -62,7 +61,6 @@ val metric_llm_provider_errors_by_reason : string
 val metric_llm_provider_retries : string
 val metric_llm_provider_input_tokens : string
 val metric_llm_provider_output_tokens : string
-val metric_llm_provider_cache_read_tokens : string
 val metric_llm_provider_reasoning_tokens : string
 val metric_llm_provider_tool_calls : string
 val metric_llm_provider_circuit_state : string

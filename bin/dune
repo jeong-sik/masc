@@ -903,6 +903,7 @@
   masc_tui_help
   masc_tui_context_state
   masc_tui_context_inspector
+  masc_tui_retained_view
   masc_tui_frame_presenter
   masc_tui_keeper_activity
   masc_tui_keeper_chat_history

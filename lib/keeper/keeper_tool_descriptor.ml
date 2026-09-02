@@ -803,14 +803,6 @@ let public_descriptors =
 
 (** Descriptor-backed workspace tools that are not public model names. *)
 
-let empty_object_schema =
-  `Assoc
-    [ "type", `String "object"
-    ; "properties", `Assoc []
-    ; "additionalProperties", `Bool false
-    ]
-;;
-
 (* The whole registry record, not just its input schema: [cluster_descriptor]
    takes the description from this same lookup. *)
 let find_schema_opt schemas name =
@@ -908,6 +900,18 @@ let keeper_tools_list_schema =
   | None -> invalid_arg "missing base tool schema for keeper_tools_list"
 ;;
 
+let time_now_schema =
+  match find_base_schema_opt "keeper_time_now" with
+  | Some schema -> schema
+  | None -> invalid_arg "missing base tool schema for keeper_time_now"
+;;
+
+let context_status_schema =
+  match find_base_schema_opt "keeper_context_status" with
+  | Some schema -> schema
+  | None -> invalid_arg "missing base tool schema for keeper_context_status"
+;;
+
 let keeper_capability_search_schema =
   match find_base_schema_opt "keeper_capability_search" with
   | Some schema -> schema
@@ -931,7 +935,7 @@ let library_read = shard_library_schema "keeper_library_read"
 
 let shard_surface_schema name =
   match find_schema_opt Tool_shard_types.surface_tools name with
-  | Some schema -> schema.Masc_domain.input_schema
+  | Some schema -> schema
   | None -> failwith (Printf.sprintf "surface shard is missing %s" name)
 ;;
 
@@ -1882,18 +1886,18 @@ let masc_local_runtime_descriptors =
 
 let internal_descriptors : t list =
   [ (* ── time / catalog (RFC-0179 PR-2 + PR-3) ────────── *)
-    (in_process_descriptor
-      ~keeper_model_projection:Internal_name
-      ~id:"keeper.time.now"
-      ~name:"keeper_time_now"
-      ~description:
-        "Return the current wall-clock time as ISO 8601 and Unix epoch \
-         seconds. No arguments."
-      ~input_schema:empty_object_schema
-      ~ordinary_execution_mode:Concurrent
-      ~policy:(read_only_in_process_policy ())
-      ~handler:Tool_time_now
-      ()
+    (in_process_descriptor_with_schema_source
+       ~capability_identity:Internal_name_identity
+       ~keeper_model_projection:Internal_name
+       ~input_schema_source:Canonical_registry
+       ~id:"keeper.time.now"
+       ~name:"keeper_time_now"
+       ~description:time_now_schema.description
+       ~input_schema:time_now_schema.input_schema
+       ~ordinary_execution_mode:Concurrent
+       ~policy:(read_only_in_process_policy ())
+       ~handler:Tool_time_now
+       ()
      |> with_composable_output (Json_output { schema = time_now_output_schema }))
   ; (in_process_descriptor_with_schema_source
        ~capability_identity:Internal_name_identity
@@ -1924,15 +1928,14 @@ let internal_descriptors : t list =
        ()
      |> with_eval_tags [ "capability_introspection" ])
     (* ── memory / context (RFC-0179 PR-3) ─────────────────────── *)
-  ; in_process_descriptor
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
       ~id:"keeper.context.status"
       ~name:"keeper_context_status"
-      ~description:
-        "Return persisted checkpoint, recent-message, memory, and sandbox \
-         state for this keeper turn. Context-window occupancy is not \
-         currently observed."
-      ~input_schema:empty_object_schema
+      ~description:context_status_schema.description
+      ~input_schema:context_status_schema.input_schema
       (* Serial, deliberately: the memory section runs
          Keeper_memory_source_current.revalidate, which persists pending
          invalidations under the source-store lock — a write during read.
@@ -2023,13 +2026,8 @@ let internal_descriptors : t list =
        ~keeper_model_projection:Internal_name
        ~id:"keeper.surface.read"
        ~name:"keeper_surface_read"
-       ~description:
-         "Read recent messages from one conversation endpoint (dashboard, \
-          discord, slack, or another connector label) with speaker identity \
-          and a derived participant roster. With mode='channel', 'messages', \
-          'members', or 'member', the Discord lane can also query its live \
-          channel and server read surface within the keeper's bound channels."
-       ~input_schema:surface_read_schema
+       ~description:surface_read_schema.description
+       ~input_schema:surface_read_schema.input_schema
        (* Concurrent: the local lane pages the chat store and person notes
           through plain file reads (the person-notes Hashtbl is
           function-local); the Discord lane issues one HTTP request per
@@ -2044,8 +2042,8 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Internal_name
       ~id:"keeper.surface.post"
       ~name:"keeper_surface_post"
-      ~description:Tool_shard_types.keeper_surface_post_description
-      ~input_schema:surface_post_schema
+      ~description:surface_post_schema.description
+      ~input_schema:surface_post_schema.input_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_surface_post
       ()
@@ -2053,12 +2051,8 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Internal_name
       ~id:"keeper.person.note_set"
       ~name:"keeper_person_note_set"
-      ~description:
-        "Remember (or clear) a note about a person met on a connected \
-         surface, keyed by their roster speaker_id. Deliberate memory: \
-         the note survives after their chat rows age out of the log \
-         window and shows up on the keeper_surface_read roster."
-      ~input_schema:person_note_set_schema
+      ~description:person_note_set_schema.description
+      ~input_schema:person_note_set_schema.input_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_person_note_set
       ()

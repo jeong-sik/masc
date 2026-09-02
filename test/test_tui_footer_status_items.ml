@@ -477,6 +477,66 @@ let contains ~needle haystack =
 
    [?] opens the sheet, and it puts the reader's own surface first, so what
    was cut is the first thing on the next screen. *)
+(* A row may lose what the reader can look up. It does not lose the way out.
+
+   Measured at 160 usable cells against the real key tables: the chat pane
+   lost [Esc] -- which is also how a running turn is interrupted -- and
+   [y / n], which answers the approval a Keeper is waiting on. Config lost
+   the [Esc] that leaves it. Dropping from the back was written for the
+   [r] / [Tab] / [q] tail, which every surface shares and the sheet holds;
+   it kept going once the row was full enough. *)
+let test_the_cut_keeps_the_way_out () =
+  let hints =
+    "j/k:roster move  Enter:send / open  Ctrl-J:newline  Ctrl-G:next keeper  \
+     Ctrl-U:clear  Ctrl-R:reasoning  Ctrl-D:tool detail  Ctrl-N:memory detail  \
+     y / n:approval  Esc:back"
+  in
+  let line =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:70 ~port:8935 ~hints ()
+  in
+  Alcotest.(check bool) "the row was cut" true
+    (contains ~needle:"\xe2\x80\xa6" line);
+  Alcotest.(check bool) "the way out survives it" true
+    (contains ~needle:"Esc:back" line);
+  Alcotest.(check bool) "so does the answer to a pending ask" true
+    (contains ~needle:"y / n:approval" line);
+  Alcotest.(check bool) "and something did give way" false
+    (contains ~needle:"Ctrl-R:reasoning" line)
+
+let test_a_compound_leave_key_is_the_same_door () =
+  (* Surfaces spell it [Left / Esc] or [Right / Esc] where an arrow does the
+     same thing. It is one key under two spellings, not two keys. *)
+  let hints =
+    "j/k:move  Right / Enter:open  d:tree diff  v:view code  o:editor  \
+     [ / ]:keeper  Left / Esc:back  r:refresh  Tab:next  q:quit"
+  in
+  let line =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:60 ~port:8935 ~hints ()
+  in
+  Alcotest.(check bool) "the row was cut" true
+    (contains ~needle:"\xe2\x80\xa6" line);
+  Alcotest.(check bool) "the compound leave survives" true
+    (contains ~needle:"Left / Esc:back" line);
+  Alcotest.(check bool) "and quit does too" true
+    (contains ~needle:"q:quit" line)
+
+let test_a_label_holding_a_colon_still_reads_its_key () =
+  (* [Enter:edit / use] is a label with a separator in it. Only the first
+     colon ends the key, or an item like this would read as an unpinned one
+     whose key is the whole string. *)
+  let hints =
+    "j/k:select / scroll  p:runtime.toml / models / params  s:resources  \
+     t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  \
+     Esc:overview  r:reload  Tab:next"
+  in
+  let line =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:70 ~port:8935 ~hints ()
+  in
+  Alcotest.(check bool) "the row was cut" true
+    (contains ~needle:"\xe2\x80\xa6" line);
+  Alcotest.(check bool) "the way out survives" true
+    (contains ~needle:"Esc:overview" line)
+
 let test_cut_hints_name_the_key_that_shows_them () =
   let hints =
     "j/k:move  right/Enter:read  s:sort  Y:copy link  v/V:vote  w:write  \
@@ -557,6 +617,12 @@ let tests =
           test_answering_outlives_the_build_fact
       ; Alcotest.test_case "cut hints name the key that shows them" `Quick
           test_cut_hints_name_the_key_that_shows_them
+      ; Alcotest.test_case "the cut keeps the way out" `Quick
+          test_the_cut_keeps_the_way_out
+      ; Alcotest.test_case "a compound leave key is the same door" `Quick
+          test_a_compound_leave_key_is_the_same_door
+      ; Alcotest.test_case "a label holding a colon still reads its key" `Quick
+          test_a_label_holding_a_colon_still_reads_its_key
       ; Alcotest.test_case "hints that fit are left alone" `Quick
           test_hints_that_fit_are_left_alone
       ] )

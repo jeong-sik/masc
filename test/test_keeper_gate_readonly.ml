@@ -207,6 +207,39 @@ let gate_request base_path argv =
   }
 ;;
 
+let network_gate_request base_path ~capability =
+  { Keeper_gate.keeper_name = "alpha"
+  ; operation = "network_read"
+  ; input =
+      `Assoc
+        [ "capability", `String capability
+        ; "input", `Assoc [ "url", `String "https://example.com/page" ]
+        ]
+  ; base_path
+  ; causal_context = None
+  ; task_id = None
+  ; continuation_channel = None
+  }
+;;
+
+(* The whole gate path, not the classifier alone: a web_fetch under
+   Auto Judge comes back allowed with the observation source, without a
+   queue entry. *)
+let test_auto_judge_allows_web_fetch_without_queueing () =
+  with_auto_judge @@ fun base_path ->
+  match
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      (network_gate_request base_path ~capability:"web_fetch")
+  with
+  | Keeper_gate.Allow { source = Readonly_sandbox; _ } -> ()
+  | Keeper_gate.Allow { source; _ } ->
+    failf "web_fetch allowed through the wrong source: %s"
+      (Keeper_gate.authorization_source_to_string source)
+  | Keeper_gate.Deferred _ -> fail "web_fetch was deferred instead of fast-pathed"
+  | Keeper_gate.Unavailable _ -> fail "web_fetch made the queue unavailable"
+;;
+
 let select_workspace config mode =
   match Keeper_gate_mode.set config ~actor:"test" mode with
   | Ok _ -> ()
@@ -288,6 +321,10 @@ let () =
             "auto_judge allows observation without queueing"
             `Quick
             test_auto_judge_allows_observation_without_queueing
+        ; test_case
+            "auto_judge allows web_fetch without queueing"
+            `Quick
+            test_auto_judge_allows_web_fetch_without_queueing
         ; test_case
             "auto_judge still defers writes to the judge"
             `Quick

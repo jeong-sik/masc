@@ -11,7 +11,17 @@
     observation set ([web_search] — server-side, provider-bound, no
     caller-chosen address; [web_fetch] — caller-chosen URL whose reachable
     address set is refused by [Tool_misc_web_fetch] itself on every hop, so
-    a judge reading the same URL string has nothing left to decide).
+    a judge reading the same URL string has nothing left to decide about
+    the address).
+
+    What this gives up, on purpose: the judge also saw the previous tool
+    call, so a GET that carried bytes a keeper had just read in its query
+    string was visible to it. This classification runs such a fetch
+    unjudged. The decision rests on the measured record — 2026-09-01..02
+    the judge approved 319 of 319 network reads and refused none — and on
+    the cost, a median 173 s per fetch. Reverting it means removing
+    [web_fetch] from [observation_network_capabilities]; nothing else
+    depends on the choice.
     [true] means the request may be allowed without judgment or queueing;
     [false] means nothing — the request falls through to the configured
     gate mode. The execute input shape is

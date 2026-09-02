@@ -289,6 +289,7 @@ let test_curl_get_argv_keeps_curl_as_executable_with_headers () =
       "https://example.com/page"
   in
   check string "argv0 remains curl" "curl" (List.hd argv);
+  check string "-q disables ~/.curlrc and must come first" "-q" (List.nth argv 1);
   check bool "header arg present" true (List.mem "-H" argv);
   check bool "redirect arg present" true (List.mem "--location" argv);
   check bool "compression arg present" true (List.mem "--compressed" argv);

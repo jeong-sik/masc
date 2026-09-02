@@ -111,8 +111,12 @@ let curl_get_argv ?(timeout_sec = default_timeout_sec) ?(headers = [])
     else []
   in
   let compression_args = if compressed then [ "--compressed" ] else [] in
+  (* [-q] must be the first argument: it stops curl from reading the server
+     user's ~/.curlrc, which could add a proxy or a netrc credential source
+     to a request the model composed. *)
   [
     "curl";
+    "-q";
     "-sS";
     "--http1.1";
     "--max-time";

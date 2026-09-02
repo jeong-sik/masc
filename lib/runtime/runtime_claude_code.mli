@@ -78,7 +78,10 @@ type rate_limit =
   ; overage_disabled_reason : string option
   }
 
-(** Usage counts from the CLI result frame. The CLI mirrors Anthropic
+(** Usage counts read from a CLI frame: the result frame carries the turn
+    total, and each assistant frame carries the usage of the API call that
+    produced it (summed, deduplicated by message id, when a host stop ends
+    the turn before the result frame). The CLI mirrors Anthropic
     Messages semantics: [input_tokens] is the exclusive wire count (tokens
     after the last cache breakpoint); absent cache fields read as 0. The
     keeper mapping builds the canonical inclusive

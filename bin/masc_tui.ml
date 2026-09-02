@@ -1250,8 +1250,8 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       if visibility = Tools_full then load_tool_changes ();
       true
     end else if c = Some 6 then begin
-      (* Ctrl-F folds the origin headings into the body's margin and then
-         drops the clock from it, handing those rows back to the messages.
+      (* Ctrl-F starts with the clock-free gutter, then adds an inline clock,
+         then gives full timestamp/request metadata a row of its own.
          Ctrl-O would have read better for an origin, but it is VDISCARD on
          this platform and [Unix.terminal_io] carries no IEXTEN field to turn
          that off, so the terminal would eat the key before the loop saw it. *)

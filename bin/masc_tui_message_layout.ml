@@ -526,11 +526,11 @@ let input_cursor_column ~terminal_cols ~input =
 
    The badge used to be 16 cells whatever the terminal was, so a
    [codex-mcp-client] read as [codex-mcp-clien…] on a 200-column screen with
-   the room to spell it. The width is the widest label actually on the pane
-   now, never below the old 16 so a narrow terminal draws what it always did,
-   and never past a quarter of the pane so one long name cannot squeeze the
-   messages everyone came to read. *)
-let chat_role_label_column = 16
+   the room to spell it. The width is a fixed pane-derived budget, never below
+   14 so the built-in activity labels remain legible, and
+   never past 18: that still holds [codex-mcp-client] beside its mark but does
+   not spend a quarter of a wide pane on empty alignment. *)
+let chat_role_label_column = 14
 
 let chat_role_label_share = 4
 
@@ -545,16 +545,17 @@ let chat_role_label_share = 4
    ("keeper-canary-10t-cdx-sol-xhigh-r2-20260820-agent · agent"), so the
    badge took a quarter of the pane and gave it back one message later.
    Fixed, the body keeps its width and only a resize re-wraps. *)
-let chat_role_label_budget = 24
+let chat_role_label_budget = 18
 
 let chat_role_label_width ~pane_cells =
   max chat_role_label_column
     (min chat_role_label_budget (pane_cells / chat_role_label_share))
 
-(* Right-align [label] in [column] cells. An overrun loses its head: these
-   read [agent · surface] and share long prefixes -- every canary starts
-   "keeper-canary-10t-cdx-sol-" -- so the tail is what tells two of them
-   apart. *)
+(* Put the mark and label next to one another, then pad the column. The former
+   right alignment made a short label look causally detached from its mark --
+   [●                polisher] -- even though those cells carried no fact.
+   An overrun still loses its head: these read [agent · surface] and share long
+   prefixes, so the tail is what tells two of them apart. *)
 let fit_name column label =
   let pieces = display_pieces label in
   let cells = pieces_width pieces in
@@ -562,7 +563,7 @@ let fit_name column label =
     let kept = cell_suffix_of_pieces label pieces (column - 1) in
     let pad = max 0 (column - 1 - pieces_width (display_pieces kept)) in
     "…" ^ String.make pad ' ' ^ kept
-  else String.make (column - cells) ' ' ^ label
+  else label ^ String.make (column - cells) ' '
 
 (* Keep both ends of [label] in [column] cells, dropping the middle.
 
@@ -646,8 +647,8 @@ let align_role_label ?(column = chat_role_label_column) ~style label =
     fit_name column label
   else mark ^ " " ^ fit_name inner label
 
-(* The inverse of {!align_role_label}: the mark, the alignment that follows it,
-   and the name. Written here because this is where the three are joined, and a
+(* The inverse of {!align_role_label}: the mark, the name, and the trailing
+   column padding. Written here because this is where the three are joined, and a
    renderer taking them apart by measuring again is how the two drift.
 
    The renderer draws the name in reverse video. Reversing the aligned label
@@ -667,15 +668,14 @@ let split_aligned_role_label ~style label =
     else label
   in
   let mark = if String.equal after_mark label then "" else prefix in
-  let limit = String.length after_mark in
   let rec walk index =
-    if index < limit && Char.equal after_mark.[index] ' ' then walk (index + 1)
+    if index > 0 && Char.equal after_mark.[index - 1] ' ' then walk (index - 1)
     else index
   in
-  let boundary = walk 0 in
+  let boundary = walk (String.length after_mark) in
   ( mark
   , String.sub after_mark 0 boundary
-  , String.sub after_mark boundary (limit - boundary) )
+  , String.sub after_mark boundary (String.length after_mark - boundary) )
 
 let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
   (* At thirteen columns the frame leaves nine content cells: two for the

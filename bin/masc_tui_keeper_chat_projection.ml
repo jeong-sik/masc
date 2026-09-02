@@ -206,8 +206,8 @@ let request_execution_digest request =
 
 let compact_request_id value =
   let length = String.length value in
-  if length <= 14 then value
-  else String.sub value 0 4 ^ ".." ^ String.sub value (length - 8) 8
+  if length <= 20 then value
+  else String.sub value 0 6 ^ ".." ^ String.sub value (length - 12) 12
 
 let terminal_safe_text ?(preserve_newlines = false) text =
   let text = Safe_ops.sanitize_text_utf8 text in

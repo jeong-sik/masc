@@ -4569,7 +4569,7 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
         plain = CSI_RE.sub(b"", frame)
         # Pending messages are visible but not represented as turns the model
         # has already received.
-        turn_user = "TURN · YOU".encode()
+        turn_user = "▶  YOU".encode()
         for expected in (
             turn_user,
             b"NEXT 1",
@@ -5442,7 +5442,7 @@ def autonomous_turn_history_interaction() -> Interaction:
             (b"2 reasoning steps, content withheld", "the withheld reasoning count"),
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
             ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
-            ("TURN \u00b7 THINKING".encode(), "the turn start"),
+            ("\u00b7 THINKING".encode(), "the thinking lane"),
             ("TOOLS\u2502".encode(), "the nested tool block"),
         ):
             if needle not in plain_pane:
@@ -5497,12 +5497,12 @@ def memory_journal_timeline_interaction(
                 f"reply did not share one monotonic axis: {frame!r}"
             )
         for pattern, label in (
-            ("TURN · YOU".encode(), "direct turn start"),
-            (re.compile("↳\\s+alpha".encode()), "post-Journal continuation"),
+            (re.compile("▶\\s+YOU".encode()), "direct turn start"),
+            (re.compile("●\\s+alpha".encode()), "post-Journal continuation"),
         ):
             if find_needle(plain, pattern) < 0:
                 raise AssertionError(f"Missing {label} label: {frame!r}")
-        for label in ("TURN · YOU".encode(), "↳ alpha".encode()):
+        for label in (b"YOU", b"alpha"):
             if b"\x1b[7m" + label not in frame:
                 raise AssertionError(
                     f"Direct causal label lost its reverse-video badge {label!r}: "
@@ -5527,6 +5527,10 @@ def memory_journal_timeline_interaction(
             b"m",
             b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
         )
+        # This scenario verifies the complete timestamp axis. Chat itself now
+        # rests in the clock-free reading layout, so opt into full metadata.
+        send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
+        send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
         # At rest the journal draws only its one-line summary: the header
         # with source, revision, and counts. The change fence under it is a
         # keypress away.
@@ -5556,6 +5560,10 @@ def memory_journal_timeline_interaction(
         )
         plain_resting = CSI_RE.sub(b"", resting)
         assert_monotonic_direct_turn(resting)
+        if b"Ctrl-N: journal detail" not in plain_resting:
+            raise AssertionError(
+                f"Journal summary did not expose its detail key: {resting!r}"
+            )
         if re.search("\u25c8\\s+JOURNAL".encode(), plain_resting) is None:
             raise AssertionError(
                 f"Memory timeline did not draw its distinct Journal marker: {resting!r}"
@@ -5748,7 +5756,7 @@ def memory_journal_timeline_interaction(
             needle=b"memory:full",
             controls=(FULL_REDRAW,),
         )
-        if b"memory:full clock:inline" not in CSI_RE.sub(b"", widened):
+        if b"memory:full" not in CSI_RE.sub(b"", widened):
             raise AssertionError(
                 "A display toggle pressed on the narrow-pane notice screen "
                 f"was swallowed by the composer gate: {widened!r}"
@@ -6188,7 +6196,7 @@ def chat_visibility_modes_interaction() -> Interaction:
         initial += bytes(output[pane_start:])
         if b"2 reasoning steps, content withheld" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
-        if "TURN · SKILL".encode() not in CSI_RE.sub(b"", initial):
+        if re.search("◆\\s+SKILL".encode(), CSI_RE.sub(b"", initial)) is None:
             raise AssertionError(
                 f"the exact Skill evidence did not start its turn: {initial!r}"
             )
@@ -6547,6 +6555,9 @@ def message_origin_badge_interaction(
     send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     pane_start = len(output)
     send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+    send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
+    pane_start = len(output)
+    send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
     wait_for_output(
         process,
         master_fd,
@@ -6593,7 +6604,14 @@ def message_origin_badge_interaction(
         if forbidden in frame:
             raise AssertionError(f"chat frame retained {description}: {frame!r}")
 
-    inline = send_and_wait(process, master_fd, output, b"\x06", b"clock:inline")
+    bare = send_and_wait(process, master_fd, output, b"\x06", b"operator-body-neutral")
+    bare_plain = CSI_RE.sub(b"", bare)
+    if b"operator-body-neutral" not in bare_plain or b"keeper-body-neutral" not in bare_plain:
+        raise AssertionError(f"clock-free inline layout lost a speaker body: {bare!r}")
+    if re.search(rb"\d\d:\d\d\s+\xe2\x96\xb6", bare_plain) is not None:
+        raise AssertionError(f"clock-free metadata layout still rendered a clock: {bare!r}")
+
+    inline = send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
     inline_plain = CSI_RE.sub(b"", inline)
     for pattern in (
         b"\xe2\x96\xb6\\s+(?:TURN \xc2\xb7 )?vincent {2}operator-body-neutral",
@@ -6603,13 +6621,6 @@ def message_origin_badge_interaction(
             raise AssertionError(
                 f"Ctrl-F header said inline but its physical rows did not: {inline!r}"
             )
-
-    bare = send_and_wait(process, master_fd, output, b"\x06", b"clock:off")
-    bare_plain = CSI_RE.sub(b"", bare)
-    if b"operator-body-neutral" not in bare_plain or b"keeper-body-neutral" not in bare_plain:
-        raise AssertionError(f"clock-free inline layout lost a speaker body: {bare!r}")
-    if re.search(rb"\d\d:\d\d\s+\xe2\x96\xb6", bare_plain) is not None:
-        raise AssertionError(f"clock:off still rendered an inline clock: {bare!r}")
 
     draft_frame = send_and_wait(
         process, master_fd, output, b"draft-neutral", b"draft-neutral"

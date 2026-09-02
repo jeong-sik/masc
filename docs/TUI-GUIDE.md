@@ -509,10 +509,12 @@ and emphasis keep their own hierarchy. Connector and agent origins remain in
 the badge label (`vincent · slack`, `taskmaster · agent`) instead of being
 inferred from row position.
 
-Chat opens in the roomier origin-row layout: the timestamp and reverse-video
-speaker badge form a heading, and prose starts on the following row. `Ctrl-F`
-cycles to the denser inline-clock layout and then the clock-free inline layout;
-the header names either compact choice as `clock:inline` or `clock:off`. When
+Chat opens in the clock-free compact layout: the speaker mark and label remain
+beside the prose while bookkeeping stays out of the reading path. `Ctrl-F`
+adds an inline clock, then a full timestamp/request-id heading; the header names
+those added projections as `metadata:inline` or `metadata:full`. A streaming
+row uses its actual start clock rather than the word `live`; the active-turn
+status below the history carries the live state and elapsed time. When
 one newest message is taller than the history pane, the live edge keeps its
 heading (or inline opening) and latest rows with an explicit
 `⋯ N hidden · PgUp` separator.
@@ -528,7 +530,8 @@ and full; `Ctrl-D` toggles compact and full tool details. `/thinking` and
 override the initial modes.
 
 Memory journal rows open in summary mode, using producer-owned compact text
-instead of reconstructing a summary from rendered prose. `Ctrl-N` or `/memory`
+instead of reconstructing a summary from rendered prose. The summary itself
+ends in `Ctrl-N: journal detail`; `Ctrl-N` or `/memory`
 cycles those rows through summary, full, and hidden; the header names the two
 non-default states as `memory:full` and `memory:off`. Neutral system rows that
 share the journal lane have no summary projection and therefore remain whole.

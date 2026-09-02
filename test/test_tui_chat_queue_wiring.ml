@@ -775,7 +775,7 @@ let test_approval_detail_scroll_accepts_the_rendered_clamp () =
    Every combination is listed rather than described, because the rule is
    about which of eight cases produce which string. *)
 let test_the_header_names_only_unusual_modes () =
-  let summary ?(origin = Masc_tui_message_layout.Origin_row) memory
+  let summary ?(origin = Masc_tui_message_layout.Origin_bare) memory
       reasoning tools =
     Tui_types.chat_visibility_summary ~memory ~reasoning ~tools ~origin
   in
@@ -792,18 +792,18 @@ let test_the_header_names_only_unusual_modes () =
   in
   check
     bool
-    "the pane starts with a separate origin row"
+    "the pane starts without timestamp rows"
     true
     (started.Tui_types.msg_origin_display
-     = Masc_tui_message_layout.Origin_row);
+     = Masc_tui_message_layout.Origin_bare);
   check string "everything at its default says nothing" ""
     (summary ~origin:started.Tui_types.msg_origin_display memory_summary
        hidden compact);
-  check string "the compact inline layout is named" "clock:inline"
+  check string "the inline metadata layout is named" "metadata:inline"
     (summary ~origin:Masc_tui_message_layout.Origin_inline memory_summary hidden
        compact);
-  check string "dropping the clock is named" "clock:off"
-    (summary ~origin:Masc_tui_message_layout.Origin_bare memory_summary hidden
+  check string "full metadata is named" "metadata:full"
+    (summary ~origin:Masc_tui_message_layout.Origin_row memory_summary hidden
        compact);
   check string "full reasoning alone" "reasoning:full"
     (summary memory_summary full compact);
@@ -861,6 +861,16 @@ let test_chat_visibility_defaults_and_cycles () =
     (Tui_types.tool_visibility_to_string default.msg_tool_visibility);
   check string "Memory journal starts as one line per pass" "summary"
     (Tui_types.memory_visibility_to_string default.msg_memory_visibility);
+  check (list string) "message metadata grows from none to inline to full"
+    [ "off"; "inline"; "row"; "off" ]
+    (let rec collect count mode =
+       if count = 0
+       then [ Tui_types.origin_display_to_string mode ]
+       else
+         Tui_types.origin_display_to_string mode
+         :: collect (count - 1) (Tui_types.next_origin_display mode)
+     in
+     collect 3 default.msg_origin_display);
   let configured =
     Tui_types.create_state
       ~reasoning_visibility:Tui_types.Reasoning_hidden
@@ -913,6 +923,7 @@ let test_chat_shortcuts_reach_visibility_state () =
     [ "next_reasoning_visibility"
     ; "toggle_tool_visibility"
     ; "next_memory_visibility"
+    ; "next_origin_display"
     ]
 ;;
 

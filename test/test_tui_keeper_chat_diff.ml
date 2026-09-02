@@ -670,6 +670,25 @@ let test_terminal_controls_are_sanitized_before_markdown () =
     (contains ~needle:"\027" (body rows))
 ;;
 
+let test_typed_activity_details_follow_their_tool_row () =
+  let activities =
+    [ activity ~execution_id:"exec-1" (); activity ~execution_id:"exec-2" () ]
+  in
+  let rows =
+    Chat_diff.rows ~mode:Transcript.Full ~max_line_cells:96
+      ~activity_details:(fun activity ->
+        [ "detail " ^ Option.value ~default:"missing" activity.execution_id ])
+      Chat_diff.empty (projection Transcript.Full activities)
+  in
+  match rows with
+  | first :: first_detail :: second :: second_detail :: [] ->
+      check bool "first tool row" true (contains ~needle:"✓ Edit" first);
+      check string "first detail follows it" "detail exec-1" first_detail;
+      check bool "second tool row" true (contains ~needle:"✓ Edit" second);
+      check string "second detail follows it" "detail exec-2" second_detail
+  | _ -> failf "tool details lost per-activity hierarchy: %s" (body rows)
+;;
+
 let () =
   run "tui_keeper_chat_diff"
     [ ( "identity"
@@ -715,6 +734,8 @@ let () =
             test_narrow_evidence_rows_keep_the_authoritative_fact
         ; test_case "compact projection is unchanged" `Quick
             test_compact_projection_is_byte_unchanged
+        ; test_case "typed details follow each tool row" `Quick
+            test_typed_activity_details_follow_their_tool_row
         ; test_case "write states unknown before" `Quick
             test_write_states_unknown_previous_content
         ; test_case "failed write is an attempt" `Quick

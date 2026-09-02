@@ -708,7 +708,7 @@ let test_tool_rows_mark_how_far_each_call_got () =
   match Transcript.tool_rows t with
   | [ open_call; running; done_call ] ->
       check bool "a call still taking arguments is marked as open" true
-        (contains ~needle:"·" open_call);
+        (contains ~needle:"◌" open_call);
       check bool "a closed call with no result yet is marked as running" true
         (contains ~needle:"▶" running);
       check bool "a call whose result landed is marked as done" true
@@ -1105,6 +1105,14 @@ let test_a_fold_names_the_tool_that_failed () =
 ;;
 
 let test_a_fold_names_calls_still_out_and_never_returned () =
+  let running =
+    summary_row Transcript.Compact
+      [ activity ~name:"read_file" ~outcome:Transcript.Started
+      ; activity ~name:"glob" ~outcome:Transcript.Returned
+      ]
+  in
+  check bool "an open call says running, not merely started" true
+    (contains_substring running "1 running");
   let awaiting =
     summary_row Transcript.Compact
       [ activity ~name:"read_file" ~outcome:Transcript.Returned

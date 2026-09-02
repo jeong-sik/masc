@@ -469,6 +469,23 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
    | _ ->
      fail
        "durable-stimulus checkpoint must advance attention-only sources before the newer source");
+  (* A turn that ended on a Gate-deferred tool call has also projected the
+     admitted batch; retaining it re-spent a turn per wake on a spent HITL
+     grant (edgar.a.poe, 2026-09-02; #32602). *)
+  (match
+     Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
+       (Some
+          (Keeper_heartbeat_loop_cycle.Checkpointed
+             { meta
+             ; checkpoint_reason = Keeper_unified_turn.Awaiting_external_effect
+             ; continuation_route =
+                 Keeper_unified_turn.Continuation_no_terminal_effect_receipt
+             }))
+   with
+   | Keeper_heartbeat_loop.Batch_ack_attention_only -> ()
+   | _ ->
+     fail
+       "awaiting-external-effect checkpoint must advance attention-only sources it already projected");
   List.iter
     (fun (outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option) ->
        match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome outcome with
@@ -487,13 +504,6 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
            ~route:(deterministic_route ~detail:"deterministic rejection")
            ~deferred_runtime_lane:None
            meta)
-    ; Some
-        (Keeper_heartbeat_loop_cycle.Checkpointed
-           { meta
-           ; checkpoint_reason = Keeper_unified_turn.Awaiting_external_effect
-           ; continuation_route =
-               Keeper_unified_turn.Continuation_no_terminal_effect_receipt
-           })
     ; Some (Keeper_heartbeat_loop_cycle.Input_required meta)
     ; Some (Keeper_heartbeat_loop_cycle.Cancelled meta)
     ; Some (Keeper_heartbeat_loop_cycle.Skipped meta)

@@ -226,3 +226,26 @@ val retract_fact
     and a missing target fail before any snapshot or journal write. *)
 
 val to_json : t -> Yojson.Safe.t
+
+(** {1 Boot-time reconcile} *)
+
+type boot_reconcile_outcome =
+  | Snapshot_absent
+  | Snapshot_readable
+  | Snapshot_quarantined of
+      { rejection : string
+      ; rejected_path : string
+      }
+
+(** Decode one keeper's current snapshot with this build's decoder and, when
+    it is refused, move the bytes to a fresh [.rejected-<now>] path and
+    journal the quarantine -- exactly what a writer would do on its next
+    commit, done once at boot under the same locks. [Error] names a snapshot
+    that was refused but could not be moved aside; it stays in place. *)
+val quarantine_undecodable_for_keepers_dir
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> keepers_dir:string
+  -> keeper_id:string
+  -> now:float
+  -> unit
+  -> (boot_reconcile_outcome, string) result

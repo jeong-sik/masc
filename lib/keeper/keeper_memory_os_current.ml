@@ -1466,3 +1466,46 @@ let read_journal_tail_projection ~keepers_dir ~keeper_id ~limit =
             :: fields)
        | json -> json)
 ;;
+
+(* Boot-time twin of the writer's quarantine above: the same decoder, the
+   same locks, the same move-aside and journal line, but run once over every
+   keeper before any keeper loop starts. A snapshot this build cannot decode
+   is therefore never discovered mid-turn by whichever read or write happens
+   to come first. *)
+type boot_reconcile_outcome =
+  | Snapshot_absent
+  | Snapshot_readable
+  | Snapshot_quarantined of
+      { rejection : string
+      ; rejected_path : string
+      }
+
+let quarantine_undecodable_for_keepers_dir ?clock ~keepers_dir ~keeper_id ~now () =
+  let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+  Keeper_memory_os_aggregate_lock.with_lock ?clock ~keepers_dir ~keeper_id (fun () ->
+    File_lock_eio.with_lock ?clock snapshot_path (fun () ->
+      match Fs_compat.load_file_opt snapshot_path with
+      | None -> Ok Snapshot_absent
+      | Some content ->
+        (match parse snapshot_path content with
+         | Ok _ -> Ok Snapshot_readable
+         | Error rejection ->
+           let rejected_path = unused_rejected_path ~snapshot_path ~now in
+           (match Fs_compat.rename snapshot_path rejected_path with
+            | () ->
+              append_snapshot_quarantine
+                ~keepers_dir
+                ~keeper_id
+                ~now
+                ~rejection
+                ~rejected_path;
+              Ok (Snapshot_quarantined { rejection; rejected_path })
+            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception exn ->
+              Error
+                (Printf.sprintf
+                   "current Memory OS snapshot could not be moved aside path=%s: %s (rejected: %s)"
+                   snapshot_path
+                   (Printexc.to_string exn)
+                   rejection)))))
+;;

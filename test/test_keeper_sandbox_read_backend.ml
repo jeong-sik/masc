@@ -464,6 +464,24 @@ let test_attached_guest_endpoint_names_the_derived_guest () =
       Keeper_sandbox_microvm.work_volume_guest_root
       (Keeper_sandbox_remote.remote_root endpoint)
 
+(* The reachable half of the same guard: attaching is reached by routing, and
+   routing must not send a Docker keeper there. Its tree is a shared mount, so
+   the read stays in a container over that mount. *)
+let test_docker_without_a_turn_factory_still_routes_to_the_container () =
+  let base, config, docker = setup_config "read-docker-no-factory" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  match
+    Keeper_sandbox_read_backend.resolve_read_dispatch
+      ~turn_sandbox_factory:None
+      ~meta:docker
+      ~cwd:(Keeper_sandbox.host_root_abs_of_meta ~config docker)
+  with
+  | Ok Keeper_sandbox_read_backend.Docker_fallback -> ()
+  | Ok Keeper_sandbox_read_backend.Attached_guest ->
+    Alcotest.fail "a docker read was routed to a guest attach"
+  | Ok _ -> Alcotest.fail "a docker read left the shared-mount route"
+  | Error message -> Alcotest.failf "a shared mount was reported unreachable: %s" message
+
 (* Attaching is a microvm affordance, not a way around the lane for every
    profile: a Docker keeper's tree is a shared mount with no endpoint, and
    asking for one still says so. *)
@@ -2272,6 +2290,8 @@ let run_tests ~clock () =
             test_attached_guest_endpoint_names_the_derived_guest;
           Alcotest.test_case "attaching refuses a docker keeper" `Quick
             test_attached_guest_endpoint_refuses_docker;
+          Alcotest.test_case "docker without a turn factory keeps the container route"
+            `Quick test_docker_without_a_turn_factory_still_routes_to_the_container;
           Alcotest.test_case "nonzero exit errors by default" `Quick
             test_run_command_nonzero_exit_errors_by_default;
           Alcotest.test_case "configured nonzero exit is allowed" `Quick

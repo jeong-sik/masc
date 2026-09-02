@@ -1133,7 +1133,7 @@ type fusion_evidence = {
   fe_question : string;
   fe_panel : fusion_panel_result list;
   fe_judge : fusion_judge;
-  fe_tool_trace : fusion_tool_trace option;
+  fe_tool_trace : fusion_tool_trace;
 }
 
 type fusion_evidence_status =

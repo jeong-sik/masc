@@ -153,11 +153,22 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         server_profiles = tuple(re.findall(r'"([^"]+)"', match.group(1)))
         self.assertEqual(acceptance.SANDBOX_PROFILES, server_profiles)
 
-    def test_fleet_uses_the_configured_profile_and_never_local(self):
-        source = inspect.getsource(acceptance.MissionRun.create_fleet)
-        self.assertIn('"sandbox_profile": self.sandbox_profile', source)
-        self.assertNotIn('"local"', source)
-        self.assertNotIn("ALLOW_LOCAL_PLAYGROUND", source)
+    def test_every_keeper_up_call_uses_the_configured_profile_and_never_local(self):
+        module_source = SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertNotIn('"sandbox_profile": "local"', module_source)
+        self.assertNotIn("ALLOW_LOCAL_PLAYGROUND", module_source)
+        keeper_up_calls = module_source.count('"masc_keeper_up"')
+        self.assertEqual(keeper_up_calls, 2)
+        self.assertEqual(
+            module_source.count('"sandbox_profile": self.sandbox_profile'), keeper_up_calls
+        )
+        for method in (
+            acceptance.MissionRun.create_fleet,
+            acceptance.MissionRun.restart_and_recall,
+        ):
+            source = inspect.getsource(method)
+            self.assertIn('"sandbox_profile": self.sandbox_profile', source)
+            self.assertNotIn('"local"', source)
 
     def test_run_refuses_to_start_without_a_sandbox_profile(self):
         with unittest.mock.patch.object(sys, "argv", ["acceptance", "--run"]):

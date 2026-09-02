@@ -2258,13 +2258,12 @@ class MissionRun:
                 "coordinator shutdown did not clear the admission fence within "
                 "90 seconds"
             )
-        # Same required field as create_fleet: masc_keeper_up refuses a keeper
-        # with no sandbox_profile. Restating it here rather than reusing the
-        # create path keeps the restart a restart; the two call sites differ in
-        # everything else (no instructions, no mention targets).
+        # The restart re-states the lane the fleet was created with; the value
+        # comes from --sandbox-profile like create_fleet's, never a literal
+        # (a second literal survived #32593 and aborted r8 run1 at this call).
         arguments: dict[str, Any] = {
             "name": self.roles["coordinator"],
-            "sandbox_profile": "local",
+            "sandbox_profile": self.sandbox_profile,
         }
         runtime_id = self.runtime_for_role("coordinator")
         if runtime_id:

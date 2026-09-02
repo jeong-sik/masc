@@ -67,22 +67,25 @@ let test_chat_help_names_memory_cycle () =
         binding.help
 
 let test_plain_listing_footer_shape () =
+  (* Connectors answers the row search, so its footer carries the two Search
+     hints between its own keys and the shared meta tail. That order is the
+     shape being pinned: groups, then declaration order inside each. *)
   let canonical =
-    "j/k:scroll  b / u:bind / unbind  Esc:keeper  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  b / u:bind / unbind  Esc:keeper  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
   in
   check str "the plain listing keeps its footer" canonical
     (Masc_tui_keys.footer_hints Connectors)
 
 let test_system_logs_footer_names_browser_controls () =
   check str "logs names filters and detail"
-    "j/k:move / scroll  PgUp/PgDn:detail page  [ / ]:previous / next  l:level floor  v:verbose  c:category  Right / Enter:detail  Left / Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:move / scroll  PgUp/PgDn:detail page  [ / ]:previous / next  l:level floor  v:verbose  c:category  Right / Enter:detail  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints System_logs)
 
 let test_lanes_footer_opens_standalone_runs () =
   check str "Lanes names its run drill-down, config source, and way back"
     (* [hints_of_bindings] stable-sorts by group: Navigate (j/k, e, p)
        precedes Act (Right/Enter, Esc) regardless of declaration order. *)
-    "j/k:move  e:lane config  p:runtime  Right / Enter:runs  Esc:runtime  r:refresh  Tab:next  q:quit"
+    "j/k:move  e:lane config  p:runtime  Right / Enter:runs  Esc:runtime  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =
@@ -243,14 +246,14 @@ let test_resources_footer_steps_through_detail () =
 
 let test_repositories_footer_offers_code_and_git_changes () =
   check str "repositories names the Code and Git changes paths"
-    "j/k:scroll  Enter:browse  d:Git changes  a:add  Left / Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  Enter:browse  d:Git changes  a:add  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Repositories)
 
 let test_memory_footer_offers_the_fact_browser () =
   (* One spelling for the keeper row. [ / ] was listed beside j/k for the
      same movement and no arm answered it. *)
   check str "the health table names the way into the facts"
-    "j/k:move  Enter:facts  r:refresh  Tab:next  q:quit"
+    "j/k:move  Enter:facts  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Memory);
   check Alcotest.bool "the dead bracket hint is gone" false
     (List.exists
@@ -260,7 +263,7 @@ let test_memory_footer_offers_the_fact_browser () =
 
 let test_memory_facts_footer_names_filter_and_way_back () =
   check str "the browser names movement, the category cycle, and Esc"
-    "j/k:move  c:category  Esc:health  /:find  r:refresh  Tab:next  q:quit"
+    "j/k:move  c:category  Esc:health  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_memory_facts
 
 let sample_memory_fact ~category ~claim : Tui_decode.memory_fact =
@@ -351,7 +354,7 @@ let test_verification_footer_carries_the_verdict_keys () =
   (* Verification is a list/detail surface: Enter explains the request before
      the two-press approve or the $EDITOR reject reason changes it. *)
   check str "verification names detail, approve, and reject"
-    "j/k:move  v:next Planning tab  [ / ]:previous / next  Right / Enter:details  Left / Esc:back  a:approve  x:reject  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  [ / ]:previous / next  Right / Enter:details  Left / Esc:back  a:approve  x:reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Verification)
 
 let test_fusion_footer_pins_the_shared_list_projection () =
@@ -947,6 +950,64 @@ let surface_keys surface =
     (fun (binding : Masc_tui_keys.binding) -> binding.Masc_tui_keys.key)
     (Masc_tui_keys.for_surface surface)
 
+(* Every surface [Masc_tui_types.surface_row_texts] can answer with rows.
+   Read off that function's arms, which is where the row search comes from:
+   the arm that opens [/] asks it, and so does the arm that steps [n] / [N].
+   Keeper detail is absent on purpose -- its rows exist only while the
+   context inspector is open on the request tab, and both that inspector and
+   the Identity tab's filter claim [/] above the surface search and declare
+   it in their own tables. *)
+let surfaces_that_answer_the_row_search =
+  [ "Keepers", Keepers Keeper_list
+  ; "Lanes", Lanes
+  ; "Verification", Verification
+  ; "Harness", Harness
+  ; "Repositories", Repositories
+  ; "Memory", Memory
+  ; "Connectors", Connectors
+  ; "Runtime", Runtime
+  ; "System logs", System_logs
+  ; "Code", Code
+  ]
+
+let test_every_searchable_surface_names_its_search () =
+  (* A key that works and is not listed is the same drift as a listed key
+     that does nothing, pointing the other way. Eight of these ten answered
+     [/] and said nothing about it. *)
+  List.iter
+    (fun (label, surface) ->
+       let keys = surface_keys surface in
+       check Alcotest.bool (label ^ " names /") true (List.mem "/" keys);
+       check Alcotest.bool (label ^ " names n / N") true
+         (List.mem "n / N" keys))
+    surfaces_that_answer_the_row_search
+
+let test_a_surface_without_rows_offers_no_row_search () =
+  (* The other direction: [/] on these reaches the same arm and finds no row
+     list, so listing it would advertise a key that does nothing. Board's
+     Search-group [f] narrows to a hearth and is not the row search. *)
+  List.iter
+    (fun (label, surface) ->
+       check Alcotest.bool (label ^ " has no row list to search") false
+         (List.mem "/" (surface_keys surface)))
+    [ "Overview", Overview
+    ; "Activity", Acting
+    ; "Keeper detail", Keepers Keeper_detail
+    ; "Keeper logs", Keepers Keeper_logs
+    ; "Keeper calls", Keepers Keeper_calls
+    ; "Chat", Keepers Keeper_message
+    ; "Runtime pick", Keepers Keeper_runtime_pick
+    ; "Board", Board
+    ; "Approvals", Approvals
+    ; "Planning", Planning
+    ; "Schedules", Schedules
+    ; "Fusion", Fusion
+    ; "Resources", Resources
+    ; "Changes", Changes
+    ; "Config", Config
+    ; "Tools", Tools
+    ]
+
 let test_a_searchable_surface_does_not_also_bind_n () =
   (* [n] / [N] step the last row search on every surface that does not bind
      the key itself, and [search_last] outlives the surface it was typed on.
@@ -954,26 +1015,15 @@ let test_a_searchable_surface_does_not_also_bind_n () =
      that key for the rest of the session. Harness did: its overrule now
      spells [x], the way Verification spells its own rejection.
 
-     The list is every surface [surface_row_texts] can answer with rows. *)
+     Read over the same list the declaration test uses, so the two cannot
+     disagree about which surfaces the row search reaches. *)
   List.iter
     (fun (label, surface) ->
        check Alcotest.bool (label ^ " leaves n to the search step") false
          (List.mem "n" (surface_keys surface)))
-    [ "Keepers", Keepers Keeper_list
-    ; "Lanes", Lanes
-    ; "Verification", Verification
-    ; "Harness", Harness
-    ; "Repositories", Repositories
-    ; "Memory", Memory
-    ; "Connectors", Connectors
-    ; "Runtime", Runtime
-    ; "System logs", System_logs
-    ; "Code", Code
-    ];
-  let harness = surface_keys Harness in
-  check Alcotest.bool "Harness overrules with x" true (List.mem "x" harness);
-  check Alcotest.bool "and names the search it answers" true
-    (List.mem "n / N" harness && List.mem "/" harness)
+    surfaces_that_answer_the_row_search;
+  check Alcotest.bool "Harness overrules with x" true
+    (List.mem "x" (surface_keys Harness))
 
 let test_detail_tab_keys_reach_the_help_sheet () =
   let sheet = Masc_tui_keys.help_sections ~current:(Keepers Keeper_detail) () in
@@ -1010,6 +1060,10 @@ let () =
             test_chat_help_names_memory_cycle
         ; Alcotest.test_case "a searchable surface does not also bind n" `Quick
             test_a_searchable_surface_does_not_also_bind_n
+        ; Alcotest.test_case "every searchable surface names its search"
+            `Quick test_every_searchable_surface_names_its_search
+        ; Alcotest.test_case "a surface without rows offers no row search"
+            `Quick test_a_surface_without_rows_offers_no_row_search
         ] )
     ; ( "two-press arms"
       , [ Alcotest.test_case "a loop turn without input keeps an arm" `Quick

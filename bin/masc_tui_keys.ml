@@ -139,6 +139,10 @@ let for_surface = function
       ; b Navigate "p" "runtime"
           ~help:"back to the Runtime surface this hangs off"
       ; b Act "Esc" "runtime" ~help:"back to the Runtime surface it hangs off"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching standalone lane; the run list \
+                 and a run's detail carry no searchable rows"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Board ->
@@ -216,6 +220,10 @@ let for_surface = function
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "a" "approve" ~help:"approve the row under the cursor (press twice)"
       ; b Act "x" "reject" ~help:"reject with a reason ($EDITOR form)"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching task id, title, or submitter; \
+                 the queue answers this, an open detail does not"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Harness ->
@@ -256,6 +264,8 @@ let for_surface = function
       [ b Navigate "j/k" "move" ~help:"move the keeper row"
       ; b Act "Enter" "facts"
           ~help:"browse what the selected keeper actually remembers"
+      ; b Search "/" "find" ~help:"jump the cursor to a matching keeper"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Repositories ->
@@ -267,6 +277,10 @@ let for_surface = function
       ; b Act "a" "add" ~help:"register a repository; opens $EDITOR"
       ; b Act "Left / Esc" "back"
           ~help:"leave Git changes, or return to Overview"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching repository, or to a changed \
+                 path while Git changes is open"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Changes ->
@@ -288,6 +302,8 @@ let for_surface = function
       [ b Navigate "j/k" "scroll"
       ; b Act "b / u" "bind / unbind" ~help:"bind / unbind a channel"
       ; b Act "Esc" "keeper" ~help:"back to the selected Keeper"
+      ; b Search "/" "find" ~help:"jump the cursor to a matching transport"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Runtime ->
@@ -299,6 +315,9 @@ let for_surface = function
           ~help:"walk the three substrate readings; the third is the \
                  standalone Lanes surface"
       ; b Act "Left / Esc" "back"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching lane id or runtime id"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Config ->
@@ -413,6 +432,10 @@ let for_surface = function
       ; b Act "Right / Enter" "detail"
           ~help:"show the full message, source, category, turn, and JSON details"
       ; b Act "Left / Esc" "back"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching module, keeper, or message, \
+                 over the rows the level and category filters leave"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
 
@@ -535,6 +558,7 @@ let footer_hints_memory_facts =
     ([ b Navigate "j/k" "move"
      ; b Act "c" "category" ~help:"cycle the category filter (All first)"
      ; b Search "/" "find" ~help:"jump the cursor to a matching fact"
+     ; b Search "n / N" "next / previous match"
      ; b Act "Esc" "health" ~help:"close the browser, back to the table"
      ]
      @ listing_meta)

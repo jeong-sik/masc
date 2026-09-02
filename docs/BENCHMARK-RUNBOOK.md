@@ -42,3 +42,34 @@ server holding `--port=8937` had to be killed to bring the workspace back.
 - Wrapper success proves only the named benchmark phase and emitted evidence.
 - Local benchmark output is not exact-head CI proof.
 - Deployment proof requires a separately identified running binary and commit.
+
+## E0 Campaign Scoreboard
+
+A round is three acceptance-runner bundles on one pinned binary. One passing
+run is evidence, never a score.
+
+1. Run `keeper_multi_collaboration_acceptance.py --run` three times with the
+   same `--expected-source-sha`; keep every `bundle.json`.
+2. Write `residuals.json` (`masc.keeper_campaign_residuals.v1`): one entry per
+   assertion that failed in any of the three runs, with `cause` from the closed
+   set `infra_rate_limit | harness | model_behavior | product` and the tracking
+   `issue` (`owner/repo#N`, or `null`). A failed assertion without an entry
+   leaves the round `counted=false` (`residual_unclassified`).
+3. `scripts/harness/workload/campaign_issue_states.sh states.json <previous residuals.json>`
+   records the GitHub state of every issue the previous round named.
+4. `scripts/harness/workload/campaign_scoreboard.py --catalog scripts/fixtures/keeper-multi-collaboration/missions.json --bundle r1/bundle.json --bundle r2/bundle.json --bundle r3/bundle.json --residuals residuals.json --previous-residuals <previous> --issue-states states.json --out docs/evidence/keeper-e0-campaign-scoreboard.json`
+
+Rules the scoreboard enforces:
+
+- `k_of_3_passed` counts a mission only when all three runs passed it.
+- Bands come from catalog `phase` values: the verification band is
+  `verification` + `delivery_proof` (RW12, RW14, RW15, RW16, RW20 today), the
+  pilot band is `claim_reproduction` (RW26).
+- A round whose previous residual issues are still `OPEN` is run and recorded
+  but not counted (`previous_issue_open`). Nothing waits on it; the next round
+  is counted once those issues close.
+- Mixed `source_sha`, duplicate `run_id`, fewer than three bundles, or a cause
+  outside the set are refused (exit 2), not scored.
+
+Goal `goal-campaign-ratchet-20260902` reads `verification_band.k_of_3_passed`
+from the scoreboard file. The first counted round is the r8 baseline.

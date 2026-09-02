@@ -21,7 +21,7 @@ lane-smith, polisher, rondo, sangsu). taskmaster 와 lab-sangsu 는 09-01 17:43Z
 | 3 | 같은 도구를 3번 부르고 yield, 다음 턴에 또 3번 | kidsnote-pr-jira-checker 259턴/일, lane-smith 136, polisher 84. 컨텍스트가 턴마다 +3.5K 토큰 | 코드: yield 사유가 다음 턴에 안 보인다. 관찰 읽기를 wake 로 바꿀 길이 없다 | RFC observe-by-waking-not-polling (Draft) | 미착수 |
 | 4 | Board 글 하나가 keeper 8명에게 판정 8번 | 24시간에 글 292개 → 후보 1,784건 (6.1배). 판정 통과 29% → 511회 wake. rondo 글이 697건, verifier·system 자동 영수증이 429건 | 코드: `Discoverable` 글은 keeper 마다 judge 를 탄다. 자동 영수증도 예외가 없다 | §2.4 | 미착수 |
 | 5 | 승인이 keeper 에게 도착하는 데 107초 | judge 54초 + 배달 107초 (p50). 배달은 keeper 의 현재 턴이 끝나야 된다 | 구조: 턴 슬롯 하나 | RFC conversation-holds-the-turn-slot (Draft) | 미착수 |
-| 6 | failover 가 더 나쁜 런타임으로 간다 | polisher 145회, analyst 64회 사이클 실패 (09-01), 전부 `ollama_cloud.…deepseek-v4-flash-0731`. 사유 `accept_rejected … response_shape=thinking_only` | 설정: `runtime.toml` 후보 순서 | 운영자 결정 | 운영자 결정 필요 |
+| 6 | analyst·polisher 가 09-01 하루를 deepseek-flash 에서 돌았다 | polisher 148회, analyst 72회 사이클 실패, 그중 폴리셔 126·애널리스트 64회가 deepseek 를 기본 런타임으로 잡은 상태 (`deferred_next_runtime=none`). 사유 `accept_rejected … response_shape=thinking_only` | 설정: keeper 런타임 바인딩. 09-02 재기동 후 둘 다 glm-5.3/minimax-m3 로 돈다 | 운영자 확인 | 재기동으로 해소, 바인딩 위치 미확인 |
 | 7 | 빈 자율 wake 가 상태 보고를 낳는다 | scheduled_autonomous 941턴/일. Todo 506건인데 claim 0. lane-smith 가 5분마다 "변하지 않았습니다" 댓글 313개 | 코드: `Task_backlog` 트리거가 "잡을 수 있는가" 를 모른다. 프롬프트: 할 일이 없을 때 글을 쓴다 | #27268, §2.7 | 미착수 |
 | 8 | verifier 가 멈추면 제출자도 멈춘다 | Stalled 49건 중 `dns_failure: api.z.ai` 25건. rondo task-1067 5시간 무응답 | 코드: 같은 keeper 는 awaiting 중 새 claim 거부 | §2.8 | 미착수 |
 | 9 | Memory OS 스냅샷 깨짐 | 09-01 07:34~10:10Z keeper 5명이 동시에 `invalid current Memory OS snapshot` | 미확인 | 별도 조사 | 미확인 |
@@ -164,7 +164,7 @@ code-reviewer 턴이 150~170초라 잔여 시간이 그대로 배달 지연이�
 (`cooperative_yield_probe` 자리가 이미 있다). §2 가 들어오면 이 지연을 겪는 건수
 자체가 98 → 15 로 준다.
 
-## 6. failover 가 더 나쁜 런타임으로 간다
+## 6. analyst·polisher 가 09-01 하루를 deepseek-flash 에서 돌았다
 
 | 09-01 사이클 실패 | 건수 | 런타임 |
 |---|---|---|
@@ -174,14 +174,27 @@ code-reviewer 턴이 150~170초라 잔여 시간이 그대로 배달 지연이�
 | edgar.a.poe | 74 | `glm-coding.glm-5.3` |
 | analyst | 64 | `ollama_cloud.ollama-cloud-deepseek-v4-flash-0731` |
 
-polisher 의 경로는 `glm-5.3` 이 `Rate limited` → `deferred_next_runtime` 이 deepseek
-→ `accept_rejected … reason_kind=no_usable_progress response_shape=thinking_only` 다.
-analyst 는 한 턴이 817초 걸린 뒤 실패했다. 이 모델은 8월 24~25일에도 한 단어를
-228,000자 반복하는 붕괴가 86턴 관측됐다. 두 keeper 가 지금 `phase=failing`,
-`next_action=recover` 다.
+처음에는 "glm-5.3 이 rate limit 에 걸려 deepseek 로 failover 한다" 로 읽었는데, 실패
+행을 `runtime` × `deferred_next_runtime` 으로 나누면 다르다.
 
-설정 문제다. `runtime.toml` 에서 이 모델을 keeper 후보 순서에서 빼거나 뒤로 미룬다.
-standalone 레인 (verifier, judge) 도 같은 모델을 2번 슬롯으로 쓴다.
+| keeper | runtime=deepseek, next=none | runtime=deepseek, next=glm-5.3 | runtime=glm-5.3, next=deepseek | runtime=glm-5.3, next=none |
+|---|---|---|---|---|
+| polisher | 126 | 22 | 7 | 8 |
+| analyst | 64 | 8 | 4 | 2 |
+
+deepseek 가 기본이고 glm-5.3 이 예비였다. 실패 사유는
+`accept_rejected … reason_kind=no_usable_progress response_shape=thinking_only`, analyst 는
+한 턴이 817초 걸린 뒤 실패했다. 이 모델은 8월 24~25일에도 한 단어를 228,000자 반복하는
+붕괴가 86턴 관측됐다.
+
+09-02 00:59Z (polisher) 와 01:25Z (analyst) 에 두 keeper 가 새 trace 로 재기동됐고, 그
+뒤 runtime-manifests 에는 `glm-coding.glm-5.3` 과 `ollama_cloud.minimax-m3` 만 남았다
+(polisher 141/34, analyst 32/3). 누가 어디서 바인딩을 바꿨는지는 확인하지 못했다 —
+keeper TOML 과 `keepers/<name>.json` 에는 런타임 필드가 없다 (§10).
+
+standalone 레인은 아직 같은 모델을 2번 슬롯으로 둔다: `runtime.toml` 의
+`verifier_exact` (323행), `hitl_auto_judge` (477행), `board_attention_exact` (655행).
+그 레인들이 1번 슬롯(glm-5.3-flash)에서 밀리면 같은 붕괴를 만난다.
 
 ## 7. 빈 자율 wake
 
@@ -236,6 +249,9 @@ code-reviewer 는 08-29 에 `keeper_memory_search` 의 `total_candidates` 가 wr
 - §8 의 "같은 keeper 가 awaiting 중 새 claim 을 못 잡는다" 는 Board 증언이다.
   `workspace_task_claim.ml` 에서 그 분기를 찾지 못했다. 다른 층 (auto-claim 의
   `claim_next`, 또는 keeper 프롬프트) 일 수 있다.
+- §6 의 keeper 런타임 바인딩이 어디서 정해지는지 찾지 못했다. `config/keepers/<name>.toml`
+  과 `keepers/<name>.json` 에는 런타임 필드가 없고, `runtime.toml` 의 `candidates` 목록은
+  route 단위다. 재기동 전후로 바뀐 것만 manifests 로 확인했다.
 - `masc_keeper_list` 는 analyst·polisher 를 `status=offline, keepalive_running=false`
   로 내는데 `masc_keeper_waiting_inventory` 는 같은 시각 `fiber_alive=true, is_live=true`
   로 낸다. 두 read model 이 다르다. 어느 쪽이 맞는지 보지 않았다.

@@ -2130,6 +2130,27 @@ type git_log_row = {
 val decode_git_log : Yojson.Safe.t -> (git_log_row list, string) result
 (** The route's [{ok; commits}] envelope, most recent first. *)
 
+(** One run of adjacent lines the same author last touched, as
+    [/api/v1/git/blame] groups them. The wire spells the author [keeper_id],
+    the shape it shares with the activity and annotation routes; here it is
+    whatever git reported, which is a person and not a Keeper. *)
+type blame_block = {
+  bb_line_start : int;
+  bb_line_end : int;
+  bb_author : string;
+  bb_at_ms : float;
+}
+
+val decode_git_blame : Yojson.Safe.t -> (blame_block list, string) result
+(** The route's bare array -- it does not carry the [{ok; data}] envelope its
+    neighbours do. *)
+
+val blame_block_at : blame_block list -> int -> (blame_block * bool) option
+(** [blame_block_at blocks line] is the block covering [line] and whether
+    [line] is where that block starts. Blocks do not overlap, so the first
+    cover is the only one; the flag is what lets a gutter name an author once
+    per run instead of once per line. *)
+
 (** One [/api/v1/ide/annotations] note: where it anchors, who left it, the
     server's kind word, and what it says. *)
 type ide_annotation = {

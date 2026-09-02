@@ -1623,6 +1623,10 @@ type async_msg =
       string * (Masc.Tui_decode.git_diff, string) result
   | Code_notes_loaded of
       string * (Masc.Tui_decode.ide_annotation list, string) result
+  (* The path the margin describes; stamped so a late answer cannot caption
+     another file. *)
+  | Code_blame_loaded of
+      string * (Masc.Tui_decode.blame_block list, string) result
   (* The path the note anchored to; success re-reads the listing. *)
   | Code_note_written of string * (unit, string) result
   (* (question, symbol, answer) — the note the pane shows names both. *)
@@ -2938,6 +2942,32 @@ let github_pr_url ~remote ~number =
 (* The codebase slug for the surface's scope, when it has one. Only a
    repository row carries the server-minted slug (RFC-0378: the client
    never re-derives it); the other scopes honestly have none. *)
+(* Same fiber-and-mailbox shape as the notes read below. Scoped by the same
+   keeper / repo axes the file itself was read through, so the margin
+   describes the checkout on screen rather than whichever one the server
+   would default to. *)
+let launch_code_blame_load state ~mailbox ~path =
+  let host = server_peer_host in
+  let port = state.port in
+  let keeper, repo = code_scope_axes state in
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_git_blame ?keeper ?repo ~host ~port ~path ()
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_blame_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_blame_loaded (path, Error "Eio switch is unavailable"))
+
 let launch_code_notes_load state ~mailbox ~codebase ~path =
   let host = server_peer_host in
   let port = state.port in
@@ -8436,8 +8466,27 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.code_notes <- None;
           state.code_notes_error <- None;
           state.code_notes_open <- false;
-          state.code_notes_scroll <- 0
+          state.code_notes_scroll <- 0;
+          state.code_blame <- None;
+          state.code_blame_error <- None
       | Error detail -> state.code_file_error <- Some detail)
+  | Code_blame_loaded (path, result) ->
+      (* Stamped by path like the notes below: an answer that arrives after
+         the operator moved on describes bytes that are no longer on screen,
+         and a margin naming the wrong authors is worse than no margin. *)
+      let still_current =
+        match state.code_file with
+        | Some (open_path, _) -> String.equal open_path path
+        | None -> false
+      in
+      if still_current then (
+        match result with
+        | Ok blocks ->
+            state.code_blame <- Some (path, blocks);
+            state.code_blame_error <- None
+        | Error detail ->
+            state.code_blame <- None;
+            state.code_blame_error <- Some detail)
   | Code_notes_loaded (path, result) ->
       let still_current =
         match state.code_file with
@@ -12954,6 +13003,28 @@ and is loaded on demand through keeper_skill.
            (* Adding a note lives inside the notes view: the view proves the
               scope, and the fresh listing lands where the writer looks. *)
            handle_code_note_write ()
+       | Some "b" when state.view = Code && state.code_focus_file = Right_pane
+                       && Option.is_some state.code_file ->
+           (* Who last touched each run of lines, in the margin beside the
+              code. A margin rather than a view: blame answers a question
+              about the line you are reading, and a separate screen would
+              take that line away to answer it.
+
+              Loaded is showing, so this toggles by fetching or dropping.
+              Re-fetched rather than kept on a second press: an edit or a
+              commit since the last read moves the runs, and a stale margin
+              names the wrong author with no sign that it is stale. *)
+           (match state.code_file with
+            | None -> ()
+            | Some (path, _) ->
+                if Option.is_some state.code_blame then begin
+                  state.code_blame <- None;
+                  state.code_blame_error <- None
+                end
+                else begin
+                  state.code_blame_error <- None;
+                  launch_code_blame_load state ~mailbox:async_messages ~path
+                end)
        | Some "m" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some state.code_file ->
            (* The notes anchored to the open file. Repository scope only:

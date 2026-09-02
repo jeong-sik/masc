@@ -235,7 +235,12 @@ let restore_snapshot_unlocked path = function
          Sys.remove path;
          Keeper_fs_durable_directory.fsync_directory (Filename.dirname path);
          Ok ()
-       with exn ->
+       with
+       (* The rollback did not fail; it was stopped. Reporting it as a
+          reconciliation the operator must perform sends them after a manifest
+          that may still be exactly where the next attempt expects it. *)
+       | Eio.Cancel.Cancelled _ as error -> raise error
+       | exn ->
          Error
            (reconciliation_required
               path

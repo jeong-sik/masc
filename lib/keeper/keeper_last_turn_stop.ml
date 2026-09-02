@@ -36,10 +36,15 @@ let set ~base_path ~keeper (stop : Keeper_turn_checkpoint_reason.t option) =
 
 let get ~base_path ~keeper : Keeper_turn_checkpoint_reason.t option =
   Mutex.lock mutex;
+  (* find_opt wraps the stored option in one more layer; both an absent key
+     and a stored None read as "nothing to explain". *)
   match Hashtbl.find_opt cell (key ~base_path keeper) with
-  | result ->
+  | Some stop ->
     Mutex.unlock mutex;
-    result
+    stop
+  | None ->
+    Mutex.unlock mutex;
+    None
   | exception e ->
     Mutex.unlock mutex;
     raise e

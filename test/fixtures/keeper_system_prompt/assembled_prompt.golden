@@ -99,8 +99,4 @@ Custom instructions:
 Golden custom instruction line one.
 Golden custom instruction line two.
 
-<available_goals>
-- goal-golden-1 First golden goal
-- goal-golden-2
-</available_goals>
 </instructions>

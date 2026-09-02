@@ -59,6 +59,13 @@ SANDBOX_PROFILES: tuple[str, ...] = ("docker", "microvm", "remote_ssh")
 # the operator of a campaign server and says so once per keeper it brings up.
 TOOL_APPROVAL_MODE_ROUTE = "/api/v1/keepers/tool-approval-mode"
 TOOL_APPROVAL_MODE_UNATTENDED = "yolo"
+# How long one operator-started turn may take to settle is a property of the
+# lane and the model, not of this file: r6 (2026-08-18, glm-5-turbo) settled
+# inside 150s; r8 (2026-09-02, glm-5.3 on microvm) ran builder turns of
+# 200-250s with no tool slower than 5s, the time going to 15-25 model calls
+# of 7-20s each. So the budget is --turn-settle-budget, sized from a measured
+# exec-time distribution per campaign (docs/BENCHMARK-RUNBOOK.md), recorded
+# under resources.turn_settle_budget_sec, and never defaulted here.
 # Mission ids are identifiers, not positions: RW19 held the persistence tier
 # projection and was removed with that feature, and past evidence files still
 # name the surviving missions by these numbers. Listing them avoids a range
@@ -1275,6 +1282,7 @@ class MissionRun:
         browser_proof_script: pathlib.Path,
         expected_base_path: str,
         sandbox_profile: str,
+        turn_settle_budget_sec: float,
     ) -> None:
         self.catalog = catalog
         self.client = client
@@ -1320,6 +1328,11 @@ class MissionRun:
                 f"sandbox_profile must be one of {list(SANDBOX_PROFILES)}, got {sandbox_profile!r}"
             )
         self.sandbox_profile = sandbox_profile
+        if not turn_settle_budget_sec > 0:
+            raise AcceptanceError(
+                f"turn_settle_budget_sec must be positive, got {turn_settle_budget_sec!r}"
+            )
+        self.turn_settle_budget_sec = turn_settle_budget_sec
         self.expected_base_path = expected_base_path
         self.secret = f"memory-{uuid.uuid4().hex[:12]}"
         self.goal_id = f"goal-{self.marker}"
@@ -1669,7 +1682,7 @@ class MissionRun:
                 raise AcceptanceError("masc_keeper_msg did not return operation_id")
             operation_id = raw_operation_id
             target = {"kind": "keeper", "name": self.roles[role]}
-            deadline = time.monotonic() + self.timeout
+            deadline = time.monotonic() + self.turn_settle_budget_sec
             last_recorded_state: str | None = None
             while time.monotonic() < deadline:
                 terminal = client.call_tool(
@@ -1708,7 +1721,8 @@ class MissionRun:
                 time.sleep(1.0)
             else:
                 raise AcceptanceError(
-                    f"Keeper operation {operation_id} did not settle within {self.timeout}s"
+                    f"Keeper operation {operation_id} did not settle within "
+                    f"{self.turn_settle_budget_sec}s (--turn-settle-budget)"
                 )
         except Exception as exception:  # Evidence must survive a failed turn.
             status = "failed"
@@ -3699,6 +3713,7 @@ def build_bundle(
             ),
             "sandbox_profile": run.sandbox_profile,
             "tool_approval_modes": run.tool_approval_modes,
+            "turn_settle_budget_sec": run.turn_settle_budget_sec,
             "goal_id": run.goal_id,
             "goal_verifier_goal_id": run.verifier_goal_id,
             "goal_verifier_task_id": run.verifier_task_id,
@@ -3971,7 +3986,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--require-heterogeneous-runtimes", action="store_true")
     parser.add_argument("--run-id")
     parser.add_argument("--output-dir")
+    # HTTP request timeout (MCP calls, health/skills reads) and the base of the
+    # browser-proof and goal-verifier budgets. Not the turn settle budget.
     parser.add_argument("--timeout", type=float, default=150.0)
+    parser.add_argument(
+        "--turn-settle-budget",
+        dest="turn_settle_budget_sec",
+        type=float,
+        help=(
+            "seconds one operator-started keeper turn may take to settle; sized "
+            "from the lane's measured exec-time distribution (runbook), required "
+            "with --run"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -4030,6 +4057,12 @@ def main() -> int:
                 "--run requires --sandbox-profile "
                 f"(one of {', '.join(SANDBOX_PROFILES)}): the campaign server's keeper lane"
             )
+        if args.run and args.turn_settle_budget_sec is None:
+            raise AcceptanceError(
+                "--run requires --turn-settle-budget <seconds>: how long one turn may "
+                "take on this lane and model, measured, not assumed (r6 glm-5-turbo "
+                "fit 150s; r8 glm-5.3 builder turns ran 200-250s)"
+            )
         client, health, preflight_result = preflight(
             catalog=catalog,
             mcp_url=args.mcp_url,
@@ -4083,6 +4116,7 @@ def main() -> int:
             browser_proof_script=pathlib.Path(args.browser_proof_script).resolve(),
             expected_base_path=args.expected_base_path,
             sandbox_profile=args.sandbox_profile,
+            turn_settle_budget_sec=args.turn_settle_budget_sec,
         )
         try:
             post_id, assertions = mission_run.run()

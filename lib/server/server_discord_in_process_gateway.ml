@@ -315,7 +315,10 @@ type directory_rest_failure =
 let classify_directory_rest_failure = function
   | Discord_rest_client.Http_status { code = 401; _ } ->
     Directory_authentication_failed
+  | Discord_rest_client.Discord_api { http_status = 401; _ } ->
+    Directory_authentication_failed
   | Discord_rest_client.Http_status { code = 403; _ }
+  | Discord_rest_client.Discord_api { http_status = 403; _ }
   | Discord_rest_client.Discord_api { code = 50001 | 50013; _ } ->
     Directory_permission_denied
   | Discord_rest_client.Network _

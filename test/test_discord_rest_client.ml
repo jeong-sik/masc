@@ -286,7 +286,7 @@ let test_parse_response_discord_error_envelope () =
   in
   match R.parse_response ~status:403 ~body () with
   | Error
-      (R.Discord_api { code = 50007; request_id = _ }) ->
+      (R.Discord_api { http_status = 403; code = 50007; request_id = _ }) ->
       ()
   | _ -> fail "expected Discord_api { 50007; ... }"
 
@@ -313,7 +313,8 @@ let test_parse_empty_response_204_returns_ok () =
 let test_parse_empty_response_discord_error_envelope () =
   let body = {|{"code":50013,"message":"Missing Permissions"}|} in
   match R.parse_empty_response ~status:403 ~body () with
-  | Error (R.Discord_api { code = 50013; request_id = _ }) ->
+  | Error
+      (R.Discord_api { http_status = 403; code = 50013; request_id = _ }) ->
       ()
   | Ok () -> fail "expected Discord_api error"
   | Error e ->

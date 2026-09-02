@@ -1133,25 +1133,47 @@ let load_connectors ~(host : string) ~(port : int) :
        | Ok snapshot ->
            let load_pages connector kind =
              let page_limit = 500 in
-             let rec loop offset pages =
+             let rec loop after_id pages =
                match
                  Masc_tui_http.fetch_connector_names ~host ~port
-                   ~connector:connector.Tui_decode.cn_id ~kind ~offset
+                   ~connector:connector.Tui_decode.cn_id ~kind ?after_id
                    ~limit:page_limit ()
                with
-               | Error detail -> Error (kind ^ ": " ^ detail)
+               | Error detail ->
+                 List.rev pages, Some (kind ^ ": " ^ detail)
                | Ok json ->
                  (match Tui_decode.decode_connector_name_page json with
-                  | Error detail -> Error (kind ^ ": " ^ detail)
+                  | Error detail ->
+                    List.rev pages, Some (kind ^ ": " ^ detail)
                   | Ok page ->
                     let count = List.length page.cnp_mappings in
-                    if page.cnp_has_more && count = 0 then
-                      Error (kind ^ ": directory pagination made no progress")
+                    if page.cnp_after_id <> after_id then
+                      ( List.rev pages
+                      , Some (kind ^ ": directory cursor response mismatch") )
+                    else if page.cnp_total < count then
+                      ( List.rev pages
+                      , Some (kind ^ ": directory page count exceeds total") )
+                    else if page.cnp_has_more && count = 0 then
+                      ( List.rev (page :: pages)
+                      , Some (kind ^ ": directory pagination made no progress") )
                     else if page.cnp_has_more then
-                      loop (offset + count) (page :: pages)
-                    else Ok (List.rev (page :: pages)))
+                      (match page.cnp_next_after_id with
+                       | None ->
+                         ( List.rev (page :: pages)
+                         , Some (kind ^ ": directory page has no next cursor") )
+                       | Some next_after
+                         when (match after_id with
+                               | Some previous ->
+                                 String.compare next_after previous <= 0
+                               | None -> false) ->
+                         ( List.rev (page :: pages)
+                         , Some
+                             (kind ^ ": directory cursor did not advance") )
+                       | Some next_after ->
+                         loop (Some next_after) (page :: pages))
+                    else List.rev (page :: pages), None)
              in
-             loop 0 []
+             loop None []
            in
            let connectors =
              List.map
@@ -1164,15 +1186,11 @@ let load_connectors ~(host : string) ~(port : int) :
                   in
                   let pages =
                     directory_results
-                    |> List.filter_map Result.to_option
+                    |> List.map fst
                     |> List.flatten
                   in
                   let read_problems =
-                    List.filter_map
-                      (function
-                        | Error detail -> Some detail
-                        | Ok _ -> None)
-                      directory_results
+                    List.filter_map snd directory_results
                   in
                   Tui_decode.connector_with_name_pages connector ~pages
                     ~error:

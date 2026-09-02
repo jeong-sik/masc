@@ -7,7 +7,7 @@
 type error =
   | Network of string
   | Http_status of { request_id : string; code : int; body_bytes : int }
-  | Discord_api of { request_id : string; code : int }
+  | Discord_api of { request_id : string; http_status : int; code : int }
   | Other of { request_id : string; reason : string; body_bytes : int }
 
 let pp_error fmt = function
@@ -15,8 +15,9 @@ let pp_error fmt = function
   | Http_status { request_id; code; body_bytes } ->
       Format.fprintf fmt "http request=%s status=%d body_bytes=%d"
         request_id code body_bytes
-  | Discord_api { request_id; code } ->
-      Format.fprintf fmt "discord request=%s code=%d" request_id code
+  | Discord_api { request_id; http_status; code } ->
+      Format.fprintf fmt "discord request=%s status=%d code=%d" request_id
+        http_status code
   | Other { request_id; reason; body_bytes } ->
       Format.fprintf fmt "other request=%s reason=%s body_bytes=%d"
         request_id reason body_bytes
@@ -198,7 +199,7 @@ let error_of_non2xx ~request_id ~status ~body =
         | None -> status
       in
       (match Gate_rest_json.string_field "message" json with
-       | Some _ -> Discord_api { request_id; code }
+       | Some _ -> Discord_api { request_id; http_status = status; code }
        | None ->
          Http_status
            { request_id; code = status; body_bytes = String.length body })

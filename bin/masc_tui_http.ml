@@ -1586,7 +1586,7 @@ let fetch_connectors ~(host : string) ~(port : int) :
   get_json ~host ~port ~path:"/api/v1/gate/connectors"
 
 let fetch_connector_names ~(host : string) ~(port : int) ~(connector : string)
-    ~(kind : string) ?(offset = 0) ?(limit = 500) ?(ids = []) () :
+    ~(kind : string) ?(offset = 0) ?after_id ?(limit = 500) ?(ids = []) () :
     (Yojson.Safe.t, string) result =
   let exact =
     match ids with
@@ -1594,12 +1594,17 @@ let fetch_connector_names ~(host : string) ~(port : int) ~(connector : string)
     | ids ->
       "&ids=" ^ percent_encode_query_value (String.concat "," ids)
   in
+  let cursor =
+    match after_id with
+    | None -> ""
+    | Some value -> "&after_id=" ^ percent_encode_query_value value
+  in
   get_json ~host ~port
     ~path:
       (Printf.sprintf
-         "/api/v1/gate/connector/names?name=%s&scope=%s&offset=%d&limit=%d%s"
+         "/api/v1/gate/connector/names?name=%s&scope=%s&offset=%d&limit=%d%s%s"
          (percent_encode_query_value connector)
-         (percent_encode_query_value kind) offset limit exact)
+         (percent_encode_query_value kind) offset limit exact cursor)
 
 (** Fetch the workspace skills catalog (/api/v1/skills): per-skill usage
     rows and execution-plan flows for the Tools screen tracking views. *)

@@ -1939,6 +1939,9 @@ type connector_name_page = {
   cnp_mapping_scope : string;
   cnp_current_workspace_id : string option;
   cnp_path : string;
+  cnp_after_id : string option;
+  cnp_next_after_id : string option;
+  cnp_total : int;
   cnp_has_more : bool;
   cnp_mappings : connector_name_mapping list;
 }
@@ -3238,6 +3241,9 @@ let decode_connector_name_page json =
     optional_string_field json "current_workspace_id"
   in
   let* cnp_path = required_string_field json "path" in
+  let* cnp_after_id = optional_string_field json "after_id" in
+  let* cnp_next_after_id = optional_string_field json "next_after_id" in
+  let* cnp_total = required_int_field json "total" in
   let* cnp_has_more = required_bool_field json "has_more" in
   let* mappings_json = required_list_field json "mappings" in
   let decode_mapping row =
@@ -3252,6 +3258,9 @@ let decode_connector_name_page json =
     ; cnp_mapping_scope
     ; cnp_current_workspace_id = nonblank_option cnp_current_workspace_id
     ; cnp_path
+    ; cnp_after_id = nonblank_option cnp_after_id
+    ; cnp_next_after_id = nonblank_option cnp_next_after_id
+    ; cnp_total
     ; cnp_has_more
     ; cnp_mappings
     }

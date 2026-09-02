@@ -15957,7 +15957,7 @@ let render_context_inspector state =
   let search_marker =
     match state.search with
     | Some query ->
-        Printf.sprintf "  %s/%sâ%s" Ansi.cyan
+        Printf.sprintf "  %s/%s▌%s" Ansi.cyan
           (Terminal_text.single_line query)
           Ansi.reset
     | None ->

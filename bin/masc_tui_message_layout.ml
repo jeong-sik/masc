@@ -1146,7 +1146,7 @@ let collapse_repeated_body_rows ~inner_width rows =
     | row :: rest ->
       (match current with
        | Some current when same_repeatable_body_row current row ->
-         loop reversed current (count + 1) rest
+         loop reversed (Some current) (count + 1) rest
        | None -> loop reversed (Some row) 1 rest
        | Some current ->
          loop (emit_run reversed current count) (Some row) 1 rest)

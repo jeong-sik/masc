@@ -48,6 +48,17 @@ SCHEMA = "masc.keeper_multi_collaboration_evidence.v1"
 # equal so the runner cannot drift from the server again (#32588: the runner
 # kept sending "local" after #32078 removed that profile, and no fleet booted).
 SANDBOX_PROFILES: tuple[str, ...] = ("docker", "microvm", "remote_ssh")
+# The tool-approval gate (lib/keeper/keeper_tool_approval_gate.ml, on the
+# keeper-stream route since 2026-08-28) asks an operator before a chat-driven
+# turn runs a tool that reaches outside masc (Write, Execute, ...). The stance
+# is per keeper and lives in server memory: "auto" asks, "yolo" runs unasked.
+# This runner drives every turn over that operator route with nobody at the
+# pane, so under "auto" each such call waits keeper_tool_approval_timeout_sec
+# (180s) and is then Timed_out; r8 run1 attempt 3 (2026-09-02, #32644) lost 23
+# of 33 turns that way, the two builders every one of theirs. The runner is
+# the operator of a campaign server and says so once per keeper it brings up.
+TOOL_APPROVAL_MODE_ROUTE = "/api/v1/keepers/tool-approval-mode"
+TOOL_APPROVAL_MODE_UNATTENDED = "yolo"
 # Mission ids are identifiers, not positions: RW19 held the persistence tier
 # projection and was removed with that feature, and past evidence files still
 # name the surviving missions by these numbers. Listing them avoids a range
@@ -925,6 +936,53 @@ def health_binary_commit(health: dict[str, Any]) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+def default_tool_approval_mode_url(mcp_url: str) -> str:
+    parsed = urllib.parse.urlsplit(mcp_url)
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, parsed.netloc, TOOL_APPROVAL_MODE_ROUTE, "", "")
+    )
+
+
+def set_tool_approval_mode(
+    url: str, token: str, timeout: float, *, keeper: str, mode: str
+) -> dict[str, Any]:
+    """POST one keeper's approval stance and return the server's echo.
+
+    The route is admin tier (lib/tool/tool_catalog.ml,
+    keeper_tool_approval_mode_route): a token below that tier fails here, at
+    fleet creation, instead of an hour later as a run of timed-out tool
+    calls. The echo has to name the same keeper and mode; a 200 that says
+    otherwise is not the stance this run declared.
+    """
+    payload = json.dumps({"name": keeper, "mode": mode}).encode()
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            value = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        raise AcceptanceError(
+            f"tool-approval-mode set failed for {keeper}: HTTP {error.code}: {detail[:500]}"
+        ) from error
+    except (urllib.error.URLError, json.JSONDecodeError) as error:
+        raise AcceptanceError(
+            f"tool-approval-mode set failed for {keeper}: {error}"
+        ) from error
+    if (
+        not isinstance(value, dict)
+        or value.get("keeper") != keeper
+        or value.get("mode") != mode
+    ):
+        raise AcceptanceError(
+            f"tool-approval-mode echo mismatch for {keeper}: "
+            f"wanted mode={mode!r}, got {value!r}"
+        )
+    return value
+
+
 def read_skills(url: str, token: str, timeout: float) -> dict[str, Any]:
     headers = {"Accept": "application/json"}
     if token:
@@ -1291,9 +1349,26 @@ class MissionRun:
         self.goal_verifier_browser_proof: dict[str, Any] = {}
         self.goal_verifier_evidence: dict[str, Any] = {}
         self.runtime_serving_evidence: dict[str, Any] = {}
+        self.tool_approval_modes: dict[str, str] = {}
 
     def runtime_for_role(self, role: str) -> str | None:
         return self.runtime_by_role.get(role, self.runtime_id)
+
+    def declare_unattended(self, role: str) -> None:
+        # Follows every masc_keeper_up. The stance is per keeper in server
+        # memory, so a keeper brought up again is a keeper whose stance is
+        # stated again. The echo is kept under observations/ and summarised
+        # in resources.tool_approval_modes.
+        keeper = self.roles[role]
+        echo = set_tool_approval_mode(
+            default_tool_approval_mode_url(self.endpoint),
+            self.token,
+            self.timeout,
+            keeper=keeper,
+            mode=TOOL_APPROVAL_MODE_UNATTENDED,
+        )
+        self.tool_approval_modes[role] = echo["mode"]
+        self.writer.write_json(f"observations/tool-approval-mode-{role}.json", echo)
 
     def call(self, label: str, tool: str, arguments: dict[str, Any]) -> ToolObservation:
         observation = self.client.call_tool(tool, arguments)
@@ -1452,6 +1527,7 @@ class MissionRun:
             if runtime_id:
                 arguments["runtime_id"] = runtime_id
             self.call(f"keeper-up-{role}", "masc_keeper_up", arguments)
+            self.declare_unattended(role)
 
     def wait_for_fleet(self, timeout: float = 90.0) -> None:
         deadline = time.monotonic() + timeout
@@ -2269,6 +2345,7 @@ class MissionRun:
         if runtime_id:
             arguments["runtime_id"] = runtime_id
         self.call("keeper-restart-coordinator", "masc_keeper_up", arguments)
+        self.declare_unattended("coordinator")
         deadline = time.monotonic() + 90.0
         while time.monotonic() < deadline:
             status = self.read_status("coordinator", "restart-poll")
@@ -3621,6 +3698,7 @@ def build_bundle(
                 roles=set(run.roles),
             ),
             "sandbox_profile": run.sandbox_profile,
+            "tool_approval_modes": run.tool_approval_modes,
             "goal_id": run.goal_id,
             "goal_verifier_goal_id": run.verifier_goal_id,
             "goal_verifier_task_id": run.verifier_task_id,

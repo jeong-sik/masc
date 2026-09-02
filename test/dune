@@ -3635,7 +3635,9 @@
   test_keeper_multi_collaboration_acceptance.py
   ../scripts/harness/workload/keeper_multi_collaboration_acceptance.py
   ../scripts/fixtures/keeper-multi-collaboration/missions.json
-  ../config/tools/masc_keeper_up.toml)
+  ../config/tools/masc_keeper_up.toml
+  ../lib/server/server_routes_http_routes_dashboard.ml
+  ../lib/keeper/keeper_tool_approval_mode.ml)
  (action
   (run python3 %{dep:test_keeper_multi_collaboration_acceptance.py})))
 

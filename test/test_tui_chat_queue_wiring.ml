@@ -198,6 +198,27 @@ let test_distinct_requests_keep_producer_order_on_exact_clock_tie () =
     (List.map (fun row -> row.Tui_types.me_text) rows)
 ;;
 
+(* #32434 registered this case without a body (#32453). Two distinct
+   requests on the same clock instant both carry an absolute turn sequence;
+   the sequence, not producer order, decides the tie. *)
+let test_absolute_turn_sequence_breaks_equal_clock_ties () =
+  let rows =
+    Tui_types.chat_timeline
+      ~loaded:
+        [ chat_entry ~turn_sequence:20 ~request_id:"later-turn"
+            ~role:Tui_types.Message_keeper ~text:"turn twenty" ~at:100. ()
+        ; chat_entry ~turn_sequence:10 ~request_id:"earlier-turn"
+            ~role:Tui_types.Message_keeper ~text:"turn ten" ~at:100. ()
+        ]
+      ~session:[]
+      ~queued_request_ids:[]
+    |> Tui_types.chat_timeline_rows
+  in
+  check (list string) "absolute turn sequence orders an exact-clock tie"
+    [ "turn ten"; "turn twenty" ]
+    (List.map (fun row -> row.Tui_types.me_text) rows)
+;;
+
 let test_journal_interleaves_request_and_reply_by_displayed_time () =
   let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
   let rows =
@@ -1406,6 +1427,8 @@ let () =
             test_same_request_exact_clock_normalizes_the_turn_sequence
         ; test_case "distinct requests retain exact-clock producer order" `Quick
             test_distinct_requests_keep_producer_order_on_exact_clock_tie
+        ; test_case "turn sequence breaks equal-clock ties" `Quick
+            test_absolute_turn_sequence_breaks_equal_clock_ties
         ; test_case "running turn shares displayed time" `Quick
             test_running_turn_does_not_escape_the_displayed_time_axis
         ; test_case "uncommitted live shares visible clock" `Quick

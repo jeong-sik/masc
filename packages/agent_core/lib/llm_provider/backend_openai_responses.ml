@@ -559,7 +559,7 @@ let function_call_required_string ~field item =
 let function_call_arguments ~call_id item =
   let* arguments = function_call_required_string ~field:"arguments" item in
   match Tool_call_input.parse_object arguments with
-  | Ok input -> Ok input
+  | Ok (input, _dropped) -> Ok input
   | Error Tool_call_input.Not_object ->
     Error
       (Printf.sprintf "malformed_responses_function_call:%s:arguments:not_object" call_id)

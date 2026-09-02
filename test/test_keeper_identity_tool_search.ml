@@ -92,8 +92,9 @@ let search ?agent_cell ?history offering =
     (placement ?agent_cell ?history offering)
 ;;
 
-let the_tool offering =
-  match search offering with
+let the_tool ?agent offering =
+  let agent_cell = Option.map (fun agent -> ref (Some agent)) agent in
+  match search ?agent_cell offering with
   | Some tool -> tool
   | None -> fail "an attached service was offered and produced no tool"
 ;;
@@ -138,6 +139,8 @@ let names_input names =
   `Assoc [ "names", `List (List.map (fun n -> `String n) names) ]
 ;;
 
+let query_input query = `Assoc [ "query", `String query ]
+
 let test_nothing_attached_offers_no_tool () =
   check bool "no tool" true (Option.is_none (search []))
 ;;
@@ -150,7 +153,7 @@ let test_the_listing_names_every_attached_tool () =
     tool.Agent_core.Tool.schema.name;
   check bool "the first is named" true (mentions "atlassian_jira_search");
   check bool "the second is named" true (mentions "atlassian_page_create");
-  check bool "its summary is carried" true (mentions "Search issues")
+  check bool "its summary is not on the wire" false (mentions "Search issues")
 ;;
 
 (* The instructions half of what the model reads is declared in
@@ -173,7 +176,12 @@ let test_the_declared_prose_reaches_the_model () =
     bool
     "and they say how to name a tool"
     true
-    (contains declared "names")
+    (contains declared "names");
+  check
+    bool
+    "and how to describe the job instead"
+    true
+    (contains declared "query")
 ;;
 
 (* The point of the listing is the bytes. A description that carried the
@@ -309,23 +317,42 @@ let test_arguments_of_the_wrong_shape_are_refused () =
   refused "a list of numbers" (`Assoc [ "names", `List [ `Int 1 ] ]);
   refused "an empty list" (names_input []);
   refused "no names at all" (`Assoc []);
-  refused "arguments that are not an object" (`String "atlassian_jira_search")
+  refused "arguments that are not an object" (`String "atlassian_jira_search");
+  refused
+    "names and a query together"
+    (`Assoc
+       [ "names", `List [ `String "atlassian_jira_search" ]
+       ; "query", `String "search"
+       ]);
+  refused "a query that is not a string" (`Assoc [ "query", `Int 1 ]);
+  refused "a blank query" (query_input "   ")
 ;;
 
-(* Summaries are cut to a budget, and a service is free to write Korean. *)
+(* Summaries are cut to a budget, and a service is free to write Korean. The
+   summary rides in the answer to a load now, so that is where it is read. *)
 let test_a_long_summary_is_cut_without_breaking_a_character () =
+  Eio_main.run
+  @@ fun env ->
+  let agent =
+    Agent_core.Agent.create
+      ~config:(Agent_core.Types.default_config ~model:"test-model")
+      ~net:env#net
+      ()
+  in
   let long = String.concat "" (List.init 40 (fun _ -> "설명")) in
-  let tool = the_tool (offered [ "jira_search", long ]) in
-  let description = tool.Agent_core.Tool.schema.description in
-  check bool "the whole description survived encoding" true (valid_utf8 description);
-  check bool "the summary was cut" false (contains description long);
-  check bool "and what is left starts where the summary does" true
-    (contains description (String.sub long 0 60))
+  let tool =
+    match search ~agent_cell:(ref (Some agent)) (offered [ "jira_search", long ]) with
+    | Some tool -> tool
+    | None -> fail "expected a listing tool"
+  in
+  match execute tool (names_input [ "atlassian_jira_search" ]) with
+  | Error e -> failf "loading failed: %s" e.Agent_core.Types.message
+  | Ok { content; _ } ->
+    check bool "the whole answer survived encoding" true (valid_utf8 content);
+    check bool "the summary was cut" false (contains content long);
+    check bool "and what is left starts where the summary does" true
+      (contains content (String.sub long 0 60))
 ;;
-
-(* Hiding the surface behind a name only pays off if the model finds what it
-   needs through it. These three cases are what "it found something" and "it
-   did not" look like from inside the turn. *)
 
 let discovery = Alcotest.testable
   (fun fmt -> function
@@ -335,6 +362,102 @@ let discovery = Alcotest.testable
       Format.fprintf fmt "Loaded_unused [%s]" (String.concat "; " names))
   ( = )
 ;;
+
+(* The listing carries names only, so a tool the model cannot recognise by
+   name is found by describing the job: the server reads the descriptions the
+   model no longer does. *)
+
+let with_agent f =
+  Eio_main.run
+  @@ fun env ->
+  let agent =
+    Agent_core.Agent.create
+      ~config:(Agent_core.Types.default_config ~model:"test-model")
+      ~net:env#net
+      ()
+  in
+  f agent
+;;
+
+let callable agent name = Agent_core.Tool_set.mem name (Agent_core.Agent.tools agent)
+
+let jira_and_confluence =
+  [ "jira_search", "Search issues in Jira"; "page_create", "Make a Confluence page" ]
+;;
+
+let test_a_query_finds_a_tool_by_a_word_of_its_description () =
+  with_agent (fun agent ->
+    let tool = the_tool ~agent (offered jira_and_confluence) in
+    match execute tool (query_input "confluence page") with
+    | Error e -> failf "the query was refused: %s" e.Agent_core.Types.message
+    | Ok { content; _ } ->
+      check bool "the answer names what it loaded" true
+        (contains content "atlassian_page_create");
+      check bool "and says what it does" true (contains content "Make a Confluence page");
+      check bool "the matching tool is callable" true (callable agent "atlassian_page_create");
+      check bool "the other one is not" false (callable agent "atlassian_jira_search"))
+;;
+
+let test_every_word_of_a_query_must_match () =
+  with_agent (fun agent ->
+    let tool = the_tool ~agent (offered jira_and_confluence) in
+    match execute tool (query_input "search page") with
+    | Ok { content; _ } -> failf "a half-matching query loaded something: %s" content
+    | Error e ->
+      check bool "the model can try other words" true e.Agent_core.Types.recoverable;
+      check bool "nothing became callable" false
+        (callable agent "atlassian_jira_search" || callable agent "atlassian_page_create"))
+;;
+
+let test_a_query_is_case_insensitive () =
+  with_agent (fun agent ->
+    let tool = the_tool ~agent (offered jira_and_confluence) in
+    match execute tool (query_input "CONFLUENCE") with
+    | Error e -> failf "the query was refused: %s" e.Agent_core.Types.message
+    | Ok _ -> check bool "matched regardless of case" true (callable agent "atlassian_page_create"))
+;;
+
+(* Past the bound the surplus schemas cost the rest of the turn more than
+   one more request does, so the answer lists and the model chooses. *)
+let test_a_query_matching_too_many_tools_lists_them_without_loading () =
+  let many =
+    List.init
+      (Keeper_identity_tool_search.query_load_at_most + 2)
+      (fun i -> Printf.sprintf "tool_%d" i, "Does a thing to a record")
+  in
+  with_agent (fun agent ->
+    match placement ~agent_cell:(ref (Some agent)) (offered many) with
+    | None -> fail "expected a listing tool"
+    | Some p ->
+      (match execute p.Keeper_identity_tool_search.tool (query_input "record") with
+       | Error e -> failf "a wide query was refused: %s" e.Agent_core.Types.message
+       | Ok { content; _ } ->
+         check bool "the answer says how many matched" true
+           (contains content (Printf.sprintf "%d tools matched" (List.length many)));
+         check bool "and lists them" true (contains content "atlassian_tool_0");
+         check bool "nothing became callable" false (callable agent "atlassian_tool_0");
+         check discovery "and the turn counts as never having loaded"
+           Keeper_identity_tool_search.Listing_unused
+           (p.Keeper_identity_tool_search.observe_turn ())))
+;;
+
+let test_a_query_load_that_is_never_called_is_recorded () =
+  with_agent (fun agent ->
+    match placement ~agent_cell:(ref (Some agent)) (offered jira_and_confluence) with
+    | None -> fail "expected a listing tool"
+    | Some p ->
+      (match execute p.Keeper_identity_tool_search.tool (query_input "jira") with
+       | Error e -> failf "the query was refused: %s" e.Agent_core.Types.message
+       | Ok _ -> ());
+      check discovery "a query load is a load"
+        (Keeper_identity_tool_search.Loaded_unused [ "atlassian_jira_search" ])
+        (p.Keeper_identity_tool_search.observe_turn ()))
+;;
+
+(* Hiding the surface behind a name only pays off if the model finds what it
+   needs through it. These three cases are what "it found something" and "it
+   did not" look like from inside the turn. *)
+
 
 let with_placement offering f =
   Eio_main.run
@@ -451,9 +574,9 @@ let test_a_carried_tool_is_not_also_named_in_the_listing () =
   in
   let description = tool.Agent_core.Tool.schema.description in
   check bool "the carried tool is not listed again" false
-    (contains description "- atlassian_jira_search:");
+    (contains description "atlassian_jira_search");
   check bool "the tool that was not carried is still listed" true
-    (contains description "- atlassian_confluence_search:")
+    (contains description "atlassian_confluence_search")
 ;;
 
 (* Omitted from the prose, not from the surface: a model that names a tool it
@@ -585,6 +708,18 @@ let () =
             test_a_turn_without_an_agent_fails_rather_than_answering_empty
         ; test_case "refuses arguments of the wrong shape" `Quick
             test_arguments_of_the_wrong_shape_are_refused
+        ] )
+    ; ( "searching"
+      , [ test_case "a query finds a tool by a word of its description" `Quick
+            test_a_query_finds_a_tool_by_a_word_of_its_description
+        ; test_case "every word of a query must match" `Quick
+            test_every_word_of_a_query_must_match
+        ; test_case "a query is case-insensitive" `Quick
+            test_a_query_is_case_insensitive
+        ; test_case "too many matches are listed, not loaded" `Quick
+            test_a_query_matching_too_many_tools_lists_them_without_loading
+        ; test_case "a query load that is never called is recorded" `Quick
+            test_a_query_load_that_is_never_called_is_recorded
         ] )
     ; ( "what the turn found"
       , [ test_case "nothing when the model never asked" `Quick

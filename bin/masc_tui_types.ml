@@ -3912,6 +3912,21 @@ let scrolled_surface (state : state) (surface : surface) : scrolled option =
   scrolled_surface_rows state surface
 ;;
 
+(* The $EDITOR form [w] opens, anchored to one line.
+
+   A form rather than a prompt because a note carries four fields, and a
+   stem rather than an empty file because the shape is the thing an operator
+   should not have to remember. [anchor] is 1-based: it is what the reader
+   sees in the gutter, not the index behind it.
+
+   The anchor was the literal 1 until it was measured -- every one of this
+   workspace's 51 stored annotations sits at line 1, which is what a form
+   that never offered a line produces. *)
+let code_note_stem ~anchor =
+  Printf.sprintf
+    "{\n  \"line_start\": %d,\n  \"line_end\": %d,\n  \"kind\": \"Comment\",\n  \"content\": \"\"\n}\n"
+    anchor anchor
+
 (* The text a "/" search reads for each row: the identifiers an operator
    would type, not the drawn bytes. [Some texts] means the surface is
    searchable and [texts] is the same decoded list the row cursor names, in

@@ -86,11 +86,17 @@ let test_replayable_approval_fallback_never_resubmits_exact_input () =
          (tool_name ^ ": fallback requires repair")
          true
          (contains ~needle:"Operator repair is required" message))
-    [ "filesystem_write"; "tool_execute"; "network_read"; "connector_post" ]
+    [ "filesystem_write"
+    ; "tool_execute"
+    ; "network_read"
+    ; "connector_post"
+    ; "identity_call"
+    ; "keeper_voice_speak"
+    ]
 ;;
 
 let test_large_nonreplayable_approval_retains_model_issued_path () =
-  let message = approved_message ~tool_name:"keeper_voice_speak" in
+  let message = approved_message ~tool_name:"unreplayed_operation" in
   check bool
     "large exact input remains available"
     true
@@ -103,6 +109,17 @@ let test_large_nonreplayable_approval_retains_model_issued_path () =
     "ordinary non-replayable approval does not invent repair"
     false
     (contains ~needle:"Operator repair is required" message)
+let test_speak_replays_while_listen_never_reaches_the_gate () =
+  check bool
+    "approved speak is spent by host replay"
+    true
+    (Option.is_some
+       (Keeper_gate_replay.replayable_of_operation "keeper_voice_speak"));
+  check bool
+    "listen is not a replayable operation"
+    true
+    (Option.is_none
+       (Keeper_gate_replay.replayable_of_operation "keeper_voice_listen"))
 ;;
 
 let () =
@@ -127,6 +144,12 @@ let () =
             "large non-replayable approval retains model-issued path"
             `Quick
             test_large_nonreplayable_approval_retains_model_issued_path
+        ] )
+    ; ( "voice leaves"
+      , [ test_case
+            "speak replays while listen never reaches the Gate"
+            `Quick
+            test_speak_replays_while_listen_never_reaches_the_gate
         ] )
     ]
 ;;

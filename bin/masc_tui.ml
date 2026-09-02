@@ -10162,14 +10162,8 @@ let main () =
     Option.bind state.connectors (fun snapshot ->
         List.nth_opt snapshot.cs_connectors state.connectors_cursor)
   in
-  let selected_keeper_bindings (connector : Tui_decode.connector) =
-    match state.view, selected_keeper state with
-    | Keepers Keeper_detail, Some keeper ->
-        List.filter
-          (fun (binding : Tui_decode.connector_binding) ->
-             String.equal binding.cb_keeper_name keeper.k_name)
-          connector.cn_bindings
-    | _, _ -> []
+  let selected_connector_binding (connector : Tui_decode.connector) =
+    List.nth_opt connector.cn_bindings state.connectors_binding_cursor
   in
   let handle_connector_bind () =
     let host = server_peer_host in
@@ -10216,17 +10210,38 @@ let main () =
         in
         (match state.view with
          | Keepers Keeper_detail ->
-             (match
-                List.nth_opt (selected_keeper_bindings selected)
-                  state.connectors_binding_cursor
-              with
+             (match selected_connector_binding selected with
               | None ->
                   report_action state "error"
-                    "unbind: select one of this Keeper's bindings with J/K"
+                    "unbind: select a binding with J/K"
               | Some binding ->
                   submit ~fixed_channel_id:binding.cb_channel_id
                     binding.cb_channel_id)
          | _ -> submit "")
+  in
+  let handle_connector_edit () =
+    match selected_connector (), selected_keeper state with
+    | None, _ -> report_action state "error" "edit: select a transport first"
+    | _, None -> report_action state "error" "edit: select a Keeper first"
+    | Some connector, Some keeper ->
+        (match selected_connector_binding connector with
+         | None -> report_action state "error" "edit: select a binding with J/K"
+         | Some binding ->
+             handle_connector_form ~fixed_channel_id:binding.cb_channel_id
+               ~action:"edit binding" ~connector:connector.cn_id
+               ~required_fields:[ "channel_id"; "keeper_name" ]
+               ~stem:
+                 (Yojson.Safe.pretty_to_string
+                    (`Assoc
+                      [ "channel_id", `String binding.cb_channel_id
+                      ; "keeper_name", `String keeper.k_name
+                      ])
+                  ^ "\n")
+               ~post:(fun ~connector ~json ->
+                 Masc_tui_http.post_connector_bind ~host:server_peer_host
+                   ~port:state.port ~connector
+                   ~body_json:(Yojson.Safe.to_string json))
+               ())
   in
   (* A new note over the open file: $EDITOR is the form, and the editor is
      the confirmation step -- a non-zero exit or an empty content leaves the
@@ -12318,8 +12333,7 @@ and is loaded on demand through keeper_skill.
            let count =
              match selected_connector () with
              | None -> 0
-             | Some connector ->
-                 List.length (selected_keeper_bindings connector)
+             | Some connector -> List.length connector.cn_bindings
            in
            state.connectors_binding_cursor <-
              (if key = Some "J" then
@@ -15119,6 +15133,10 @@ and is loaded on demand through keeper_skill.
        | Some "E"
          when state.view = Config && state.config_pane = Config_params ->
            handle_runtime_param_edit_open ~advanced:true ()
+       | Some "e" | Some "E"
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_channels ->
+           handle_connector_edit ()
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
               inside the keeper-action pipeline: the loop is inside the

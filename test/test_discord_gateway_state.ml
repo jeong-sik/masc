@@ -153,7 +153,13 @@ let test_decode_dispatch_ready () =
   let payload =
     `Assoc
       [ "v", `Int 10
-      ; "user", `Assoc [ "id", `String "1111" ]
+      ; "user",
+        `Assoc
+          [ "id", `String "1111"
+          ; "username", `String "masc-bot"
+          ; "global_name", `String "MASC Bot"
+          ]
+      ; "guilds", `List [ `Assoc [ "id", `String "2222" ] ]
       ; "session_id", `String "sess-abc"
       ; "resume_gateway_url",
         `String "wss://gateway-us-east1-d.discord.gg/"
@@ -167,6 +173,8 @@ let test_decode_dispatch_ready () =
         { session_id = "sess-abc"
         ; resume_gateway_url = "wss://gateway-us-east1-d.discord.gg/"
         ; bot_user_id = "1111"
+        ; bot_user_name = Some "MASC Bot"
+        ; guild_ids = [ "2222" ]
         }) ->
     ()
   | Ok _ -> fail "decoded wrong fields for READY"
@@ -261,6 +269,7 @@ let ready_frame ~session_id ~resume_url ~user_id : S.frame =
       `Assoc
         [ "v", `Int 10
         ; "user", `Assoc [ "id", `String user_id ]
+        ; "guilds", `List []
         ; "session_id", `String session_id
         ; "resume_gateway_url", `String resume_url
         ]

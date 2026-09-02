@@ -67,6 +67,10 @@ let read_bindings_lookup_result () =
   read_bindings_result ()
   |> Result.map_error (fun detail -> Binding_store_read_failed detail)
 
+let configured_channel_ids_result () =
+  read_bindings_lookup_result ()
+  |> Result.map (List.map (fun (binding : binding) -> binding.channel_id))
+
 (* ── Thread registry ──────────────────────────────────────────────
    Thread→parent mapping populated from THREAD_CREATE gateway events.
    Used by [resolve_keeper_for_channel_result] to resolve bindings for thread
@@ -154,8 +158,10 @@ let gateway_state_label = function
 type ready_info = Channel_gate_connector.ready_info
 
 let last_ready : ready_info option Atomic.t = Atomic.make None
+let last_bot_user_name : string option Atomic.t = Atomic.make None
+let current_guild_count = Atomic.make 0
 
-let record_ready ~bot_user_id =
+let record_ready ~bot_user_id ~bot_user_name ~guild_count =
   Atomic.set last_ready
     (Some
        {
@@ -163,7 +169,9 @@ let record_ready ~bot_user_id =
          (* NDT-OK: READY wall-clock is operator-facing telemetry only
             (status_json last_ready_at); no control flow reads it. *)
          ready_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
-       })
+       });
+  Atomic.set last_bot_user_name bot_user_name;
+  Atomic.set current_guild_count guild_count
 
 let status_json ?(audit_limit = 10) () =
   let binding_store_path = binding_store_read_path () in
@@ -237,15 +245,14 @@ let status_json ?(audit_limit = 10) () =
           (match Atomic.get last_ready with
            | Some { ready_at; _ } -> ready_at
            | None -> "") );
-      (* READY carries only the bot user id; the gateway does not parse
-         the username. *)
-      ("bot_user_name", `String "");
+      ( "bot_user_name",
+        `String (Option.value ~default:"" (Atomic.get last_bot_user_name)) );
       ( "bot_user_id",
         `String
           (match Atomic.get last_ready with
            | Some { ready_bot_user_id; _ } -> ready_bot_user_id
            | None -> "") );
-      ("guild_count", `Int 0);
+      ("guild_count", `Int (Atomic.get current_guild_count));
       ("gate_base_url", `String "in-process");
       ("gate_healthy", if connected then `Bool true else `Null);
       ("gate_health_checked_at", `String (if connected then updated_at else ""));

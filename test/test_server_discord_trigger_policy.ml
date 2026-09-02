@@ -180,6 +180,51 @@ let test_all_unset_is_default () =
   | Error e -> failf "expected default, got error: %s"
                  (G.trigger_policy_load_error_to_string e)
 
+let test_channel_directory_reads_named_channel () =
+  match
+    G.For_testing.discord_channel_directory_entry
+      (`Assoc [ "id", `String "10"; "name", `String "general" ])
+  with
+  | Ok entry ->
+    check (pair string string) "named channel projection"
+      ("10", "general") entry
+  | Error detail -> fail detail
+
+let test_message_people_directory_prefers_global_names () =
+  match
+    G.For_testing.discord_message_people_entries
+      (`List
+        [ `Assoc
+            [ "author",
+              `Assoc
+                [ "id", `String "20"
+                ; "global_name", `String "Alice"
+                ; "username", `String "alice_1"
+                ]
+            ]
+        ; `Assoc
+            [ "author",
+              `Assoc
+                [ "id", `String "20"
+                ; "global_name", `String "Old Alice"
+                ; "username", `String "alice_old"
+                ]
+            ]
+        ; `Assoc
+            [ "author",
+              `Assoc
+                [ "id", `String "21"
+                ; "global_name", `Null
+                ; "username", `String "bob_2"
+                ]
+            ]
+        ])
+  with
+  | Ok entries ->
+    check (list (pair string string)) "person projection"
+      [ "20", "Alice"; "21", "bob_2" ] entries
+  | Error detail -> fail detail
+
 let discord_message ~message_id =
   Discord_gateway_client.Message_create
     { channel_id = "C123"
@@ -323,5 +368,11 @@ let () =
     ; ( "ingress handoff"
       , [ test_case "durable accept precedes Discord delivery" `Quick
             test_durable_accept_precedes_delivery_handoff
+        ] )
+    ; ( "directory projection"
+      , [ test_case "named channels" `Quick
+            test_channel_directory_reads_named_channel
+        ; test_case "recent participant names" `Quick
+            test_message_people_directory_prefers_global_names
         ] )
     ]

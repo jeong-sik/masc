@@ -139,10 +139,15 @@ let test_record_ready_surfaces_bot_identity () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
   with_env "DISCORD_BOT_TOKEN" None (fun () ->
-    Discord_state.record_ready ~bot_user_id:"bot-42";
+    Discord_state.record_ready ~bot_user_id:"bot-42"
+      ~bot_user_name:(Some "MASC Bot") ~guild_count:2;
     let json = Discord_state.status_json () in
     check string "bot_user_id from READY" "bot-42"
       (json |> U.member "bot_user_id" |> U.to_string);
+    check string "bot_user_name from READY" "MASC Bot"
+      (json |> U.member "bot_user_name" |> U.to_string);
+    check int "guild count from READY" 2
+      (json |> U.member "guild_count" |> U.to_int);
     check bool "last_ready_at non-empty" true
       (String.length (json |> U.member "last_ready_at" |> U.to_string) > 0);
     (* Identity is observation, not liveness: gateway is still down. *)
@@ -165,7 +170,13 @@ let test_bind_persists_binding_and_audit () =
         let audit = json |> U.member "recent_audit" |> U.to_list in
         check int "one audit event" 1 (List.length audit);
         check string "audit actor" "dashboard"
-          (List.hd audit |> U.member "actor_name" |> U.to_string))
+          (List.hd audit |> U.member "actor_name" |> U.to_string);
+        (match Discord_state.configured_channel_ids_result () with
+         | Ok channel_ids ->
+           check (list string) "directory refresh scope"
+             [ "1234567890" ] channel_ids
+         | Error error ->
+           fail (Discord_state.binding_lookup_error_to_string error)))
 
 let test_unbind_removes_existing_binding () =
   with_temp_dir @@ fun dir ->

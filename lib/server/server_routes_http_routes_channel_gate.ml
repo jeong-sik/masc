@@ -466,7 +466,7 @@ let handle_gate_keeper_status_by_name ~sw ~clock state request reqd =
         (Channel_gate.error_json "name is required")
 
 (** Shared bind handler: parse body, validate keeper, dispatch to connector. *)
-let handle_bind_for_connector ~sw ~clock state request reqd
+let handle_bind_for_connector ~sw ~clock state request reqd ~connector_name
     ~(bind_fn :
        channel_id:string ->
        keeper_name:string ->
@@ -508,6 +508,13 @@ let handle_bind_for_connector ~sw ~clock state request reqd
             in
             match bind_fn ~channel_id ~keeper_name ~actor_name with
             | Ok payload ->
+                if
+                  String.equal connector_name
+                    Channel_gate_discord_state.connector_id
+                then
+                  Server_discord_in_process_gateway.request_directory_refresh
+                    ~sw ~clock
+                    ~base_dir:(Mcp_server.workspace_config state).base_path;
                 respond_json_value_with_cors ~status:`OK request reqd payload
             | Error err ->
                 respond_json_value_with_cors ~status:`Internal_server_error
@@ -573,7 +580,7 @@ let handle_gate_connector_bind ~sw ~clock state request reqd =
           (Channel_gate.error_json ("unknown connector: " ^ connector_name))
     | Some (module C) ->
         handle_bind_for_connector ~sw ~clock state request reqd
-          ~bind_fn:C.bind
+          ~connector_name ~bind_fn:C.bind
 
 (** POST /api/v1/gate/connector/unbind?name=<connector>
 

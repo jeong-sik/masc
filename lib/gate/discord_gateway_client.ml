@@ -29,6 +29,8 @@ type gateway_event = Discord_gateway_state.dispatched_event =
       { session_id : string
       ; resume_gateway_url : string
       ; bot_user_id : string
+      ; bot_user_name : string option
+      ; guild_ids : string list
       }
   | Message_create of
       { channel_id : string

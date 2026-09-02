@@ -151,7 +151,9 @@ let init_prompt_config_for_tests () =
         "could not locate repo root (config/prompts) from test cwd"
   | Some root ->
       Unix.putenv "MASC_CONFIG_DIR" (Filename.concat root "config");
-      Config_dir_resolver.reset ()
+      Config_dir_resolver.reset ();
+      Prompt_registry.set_markdown_dir
+        (Filename.concat root "config/prompts")
 
 let contains ~needle haystack =
   let n = String.length needle and h = String.length haystack in

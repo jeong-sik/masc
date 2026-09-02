@@ -766,7 +766,12 @@
   masc.skill_config masc.skill_reference masc.skill_snapshot
   ;; The fake ssh shim renders its result trailer with the same function
   ;; the real shim uses, so the wire version cannot be typed in by hand.
- exec_ssh_protocol))
+ exec_ssh_protocol)
+ (deps
+  ;; test_keeper_wake_turn_context renders the keeper.workspace prompt from
+  ;; config/prompts; declare the tree so the CI dune sandbox carries the
+  ;; prompt assets instead of relying on find_root reaching the repo root.
+  (source_tree %{workspace_root}/config/prompts)))
 
 (test
  (name test_voice_session_manager)

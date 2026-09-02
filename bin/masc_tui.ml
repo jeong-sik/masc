@@ -4348,16 +4348,19 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
   state.context_inspector_generation <- state.context_inspector_generation + 1;
   state.context_inspector_loading <- true;
   let generation = state.context_inspector_generation in
+  let turn_back = state.context_inspector_turn_back in
   let run () =
     let reading =
       try
         Masc_tui_http.fetch_keeper_context_inspector ~host ~port ~keeper_name
+          ~turn_back
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
           let error = Error (Printexc.to_string exn) in
           { Masc_tui_context_inspector.turn = error
           ; provider_input = error
+          ; response = error
           }
     in
     enqueue_async mailbox
@@ -4376,6 +4379,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
            , keeper_name
            , { Masc_tui_context_inspector.turn = error
              ; provider_input = error
+             ; response = error
              } ))
 
 let open_context_inspector state ~mailbox ~keeper_name =
@@ -4390,6 +4394,7 @@ let open_context_inspector state ~mailbox ~keeper_name =
   state.context_inspector_cursor <- 0;
   state.context_inspector_scroll <- 0;
   state.context_inspector_exact <- None;
+  state.context_inspector_turn_back <- 0;
   launch_context_inspector_load state ~mailbox ~keeper_name
 
 let switch_to_next_keeper_message state ~mailbox =
@@ -11631,7 +11636,8 @@ and is loaded on demand through keeper_skill.
              state.context_inspector_exact <- None;
              state.context_inspector_scroll <- 0;
              state.context_inspector_detail_scroll <- 0;
-             state.context_inspector_focus <- Left_pane
+             state.context_inspector_focus <- Left_pane;
+             state.context_inspector_turn_back <- 0
            in
            (match k with
             | "esc" ->
@@ -11640,6 +11646,40 @@ and is loaded on demand through keeper_skill.
                      state.context_inspector_exact <- None;
                      state.context_inspector_scroll <- 0
                  | None -> close ())
+            | "[" | "]" ->
+                (* Turn navigation: [ steps back through the page's rows, ]
+                   steps forward, and the fetch re-reads the exact provider
+                   input for the row they name. The keys work on every tab;
+                   a row without a snapshot says so on the request tab. *)
+                let count =
+                  match state.context_inspector_reading with
+                  | Some
+                      ( _
+                      , { Masc_tui_context_inspector.turn =
+                            Ok { Masc_tui_context_inspector.rows; _ }
+                        ; _ } ) ->
+                      List.length rows
+                  | _ -> 0
+                in
+                if count > 0 then begin
+                  let moved =
+                    if k = "[" then
+                      min (count - 1) (state.context_inspector_turn_back + 1)
+                    else max 0 (state.context_inspector_turn_back - 1)
+                  in
+                  if moved <> state.context_inspector_turn_back then begin
+                    state.context_inspector_turn_back <- moved;
+                    state.context_inspector_cursor <- 0;
+                    state.context_inspector_exact <- None;
+                    state.context_inspector_scroll <- 0;
+                    state.context_inspector_detail_scroll <- 0;
+                    Option.iter
+                      (fun keeper_name ->
+                         launch_context_inspector_load state
+                           ~mailbox:async_messages ~keeper_name)
+                      state.context_inspector_keeper
+                  end
+                end
             | "r" ->
                 Option.iter
                   (fun keeper_name ->

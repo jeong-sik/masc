@@ -633,12 +633,23 @@ across the conversation states that instead of figures, and a turn whose
 provider reported nothing says the input was not reported; neither gets a
 number that looks like its own and is not.
 
+`[` and `]` step back and forward through the page's turns -- the caret on
+a RECENT TURNS row names the one on screen -- and every tab re-reads the
+exact provider input for the row they name; a turn that retained no
+snapshot says so on the request tab rather than showing another turn's.
+
 `2:request` marks where each item stands in the assembly: `F` the fixed
 system prompt, `H` history the window carried forward, `N` the newest
 message added this turn (the wire is append-only, so the last message is the
 turn's own input, whether a user's text or this turn's latest tool result),
 `S` a tool schema. The header also states what came back, to the extent the
-turn record observed it: output tokens and the finish reason. An item's text
+turn record observed it: output tokens and the finish reason, and a
+RESPONSE band under the summary shows the reply itself -- the keeper's
+speech as markdown, its tool steps and reasoning dimmed -- joined from
+the newest transcript page by the turn's own key and capped at a
+screenful, with the chat pane named for the full text. A turn whose
+reply the newest page no longer reaches says so instead of borrowing
+another turn's answer. An item's text
 is the retained pre-dispatch copy; message rows are read as their typed
 blocks — prose as markdown, structured payloads as pretty JSON, tool calls
 and results under labels that name the tool and the outcome.

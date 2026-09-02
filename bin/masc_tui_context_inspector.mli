@@ -72,11 +72,35 @@ type selection =
   { latest : Turn_record.t
   ; attributed : attributed_turn option
   ; recent : recent_turn list
+  ; rows : Turn_record.t list
+        (** Every row on the page, newest first. [latest] is its head and
+            [recent] is its projection; the list itself is what turn
+            navigation steps through, so the row an operator stepped back to
+            is the same row the page decoded, not a re-derived one. *)
+  }
+
+(** What the chat transcript holds for the inspected turn -- the answer
+    that came back for the request this pane is reading. The parts are
+    display-ready rows from the transcript reader; this pane owns only
+    their placement and their cap. *)
+type response_part =
+  | Reply_text of string
+  | Tool_steps of string list
+  | Reasoning_lines of string list
+
+type response_turn =
+  { parts : response_part list
+  ; outside_newest_page : bool
+        (** [true] when the newest history page held no row for this turn.
+            The reply exists but this fetch did not reach it -- stepping far
+            enough back outruns one page, and the pane says so rather than
+            showing another turn's answer. *)
   }
 
 type reading =
   { turn : (selection, string) result
   ; provider_input : (provider_input, string) result
+  ; response : (response_turn, string) result
   }
 
 type tab =

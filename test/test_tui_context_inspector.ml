@@ -113,6 +113,10 @@ let test_newest_exact_composition_wins () =
   | Ok decoded ->
       check int "the latest row is the newest one, attributed or not" 2
         decoded.Inspector.latest.absolute_turn;
+      check int "rows keeps the whole page" 2
+        (List.length decoded.Inspector.rows);
+      check int "rows is newest first" 2
+        (List.hd decoded.Inspector.rows).absolute_turn;
       (match decoded.Inspector.attributed with
        | None -> fail "an attributed row was on the page and must be reported"
        | Some attributed ->

@@ -14704,7 +14704,7 @@ let context_split_width cols =
   let available = max 1 (framed_inner_width cols - 3) in
   min 62 (max 44 (available * 45 / 100))
 
-let context_composition_lines ~cols
+let context_composition_lines ~cols ~turn_back
     (selection : Masc_tui_context_inspector.selection) =
   let module Inspector = Masc_tui_context_inspector in
   (* The usable cells after the two-space indent every row carries. No floor
@@ -14716,7 +14716,14 @@ let context_composition_lines ~cols
      band describes the newest turn that recorded an exact composition, which
      is not always the same turn -- so the two are labelled separately rather
      than drawn as one turn's report. *)
-  let record = selection.Inspector.latest in
+  (* The row the operator stepped back to, or the newest one. Every
+     reading in this stack describes this record; the composition band
+     below keeps its own rule about which row it measured. *)
+  let record =
+    match List.nth_opt selection.Inspector.rows turn_back with
+    | Some stepped -> stepped
+    | None -> selection.Inspector.latest
+  in
   (* The sentences under a bar carry what its number means, so they are folded
      to the pane rather than cut by it. *)
   let prose text =
@@ -14862,14 +14869,30 @@ let context_composition_lines ~cols
         ]
   in
   let component_lines =
-    match selection.Inspector.attributed with
+    match
+      (if turn_back > 0 then
+         Option.map
+           (fun components ->
+              Masc_tui_context_inspector.
+                { record; components; turns_behind_latest = 0 })
+           record.Turn_record.input_components
+       else selection.Inspector.attributed)
+    with
     | None ->
-        [ (Theme.bad ())
-          ^ "  No turn on this page recorded an exact input composition"
-          ^ Ansi.reset
-        ; Ansi.dim ^ "  The readings above still describe the latest turn."
-          ^ Ansi.reset
-        ]
+        (if turn_back > 0 then
+           [ (Theme.bad ())
+             ^ Printf.sprintf
+                 "  Turn #%d recorded no exact input composition"
+                 record.Turn_record.absolute_turn
+             ^ Ansi.reset
+           ]
+         else
+           [ (Theme.bad ())
+             ^ "  No turn on this page recorded an exact input composition"
+             ^ Ansi.reset
+           ; Ansi.dim ^ "  The readings above still describe the latest turn."
+             ^ Ansi.reset
+           ])
     | Some { Inspector.record = attributed; components; turns_behind_latest } ->
         let total =
           List.fold_left
@@ -14962,24 +14985,27 @@ let context_composition_lines ~cols
      goes in each turn, and only the provider's own per-request figure
      answers it. *)
   let recent_turns_lines =
-    let row (recent : Inspector.recent_turn) =
+    let row index (recent : Inspector.recent_turn) =
       let ts = Masc_domain.iso8601_of_unix_seconds recent.ts in
       (* The sentence each row can honestly carry depends on why a figure is
          absent: a conversation-cumulative provider has a number that is not
          about this turn, while a per-request provider that reported nothing
          simply reported nothing. One None in the data covers both, so the
          scope -- which the record owns -- decides. *)
+      let marker = if index = turn_back then Ansi.bold ^ "▸" else " " in
       match recent.scope, recent.input_tokens with
       | Runtime_usage_scope.Conversation_cumulative, _ ->
-          [ Ansi.dim
+          [ marker
+            ^ Ansi.dim
             ^ Printf.sprintf
-                "#%-4d %s  counted across the conversation, not per request"
+                " #%-4d %s  counted across the conversation, not per request"
                 recent.turn ts
             ^ Ansi.reset
           ]
       | _, Some input ->
           fact
-            (Printf.sprintf "#%-4d %s  in %-7s  cache read %-7s  out %s"
+            (Printf.sprintf "%s #%-4d %s  in %-7s  cache read %-7s  out %s"
+               (if index = turn_back then "▸" else " ")
                recent.turn ts
                (Inspector.format_tokens input)
                (match recent.cache_read with
@@ -14989,8 +15015,10 @@ let context_composition_lines ~cols
                  | Some tokens -> Inspector.format_tokens tokens
                  | None -> "-"))
       | _, None ->
-          [ Ansi.dim
-            ^ Printf.sprintf "#%-4d %s  input not reported for this turn"
+          [ (if index = turn_back then Ansi.bold ^ "▸" else " ")
+            ^ Ansi.dim
+            ^ Printf.sprintf
+                " #%-4d %s  input not reported for this turn"
                 recent.turn ts
             ^ Ansi.reset
           ]
@@ -15000,7 +15028,7 @@ let context_composition_lines ~cols
           ~caption:
             "input the provider counted, one row per dispatched turn"
     ]
-    @ List.concat_map row selection.Inspector.recent
+    @ List.concat (List.mapi row selection.Inspector.recent)
   in
   [ identity; turn; trace; "" ]
   @ [ "  "
@@ -15152,7 +15180,7 @@ let context_exact_input_summary ~width
     @ bar @ rows
   , total )
 
-let context_exact_input_lines ~cols state ~response
+let context_exact_input_lines ~cols state ~response ~response_parts
     (input : Masc_tui_context_inspector.provider_input) =
   let module Inspector = Masc_tui_context_inspector in
   let items = Inspector.exact_input_items input in
@@ -15221,7 +15249,73 @@ let context_exact_input_lines ~cols state ~response
             | _ ->
                 [ Printf.sprintf "  Response  ·  %s" (String.concat "  ·  " parts) ]
       in
-      let common = [ identity; wire ] @ response_line @ [ "" ] @ summary @ against_wire @ [ "" ] in
+      (* The answer itself, to the depth one history page reaches. The cap
+         keeps a long reply from taking the item list's window; the chat
+         pane carries the full text and the note says so by counting. *)
+      let response_block =
+        match response_parts with
+        | None -> []
+        | Some
+            { Masc_tui_context_inspector.parts = []
+            ; outside_newest_page = true
+            } ->
+            [ "  "
+              ^ Context_bars.band ~width ~title:"RESPONSE"
+                  ~caption:"what came back for this request"
+            ; Ansi.dim
+              ^ "  This turn's reply is not in the newest history page"
+              ^ Ansi.reset
+            ]
+        | Some { Masc_tui_context_inspector.parts; _ } ->
+            let cap = 14 in
+            let lines =
+              List.concat_map
+                (function
+                  | Masc_tui_context_inspector.Reply_text text ->
+                      document_markdown ~width
+                        (Keeper_chat.terminal_safe_text text)
+                  | Masc_tui_context_inspector.Tool_steps rows ->
+                      List.map
+                        (fun row ->
+                           Ansi.dim
+                           ^ Keeper_chat.terminal_safe_text row
+                           ^ Ansi.reset)
+                        rows
+                  | Masc_tui_context_inspector.Reasoning_lines lines ->
+                      List.map
+                        (fun line ->
+                           Ansi.dim ^ "· "
+                           ^ Keeper_chat.terminal_safe_text line
+                           ^ Ansi.reset)
+                        lines)
+                parts
+            in
+            let rec take count = function
+              | [] -> ([], [])
+              | line :: rest when count = 0 -> ([], line :: rest)
+              | line :: rest ->
+                  let shown, hidden = take (count - 1) rest in
+                  (line :: shown, hidden)
+            in
+            let shown, hidden = take cap lines in
+            ( [ "  "
+                ^ Context_bars.band ~width ~title:"RESPONSE"
+                    ~caption:"what came back for this request"
+              ]
+              @ shown
+              @ (if hidden = [] then []
+                 else
+                   [ Ansi.dim
+                     ^ Printf.sprintf
+                         "  … %d more response lines; the chat pane carries                           the full reply"
+                         (List.length hidden)
+                     ^ Ansi.reset
+                   ]) )
+      in
+      let common =
+        [ identity; wire ] @ response_line @ [ "" ] @ summary @ against_wire
+        @ response_block @ [ "" ]
+      in
       (* One letter per row says where the item stands in the assembly. The
          wire is append-only, so the last message is this turn's newest
          addition and every earlier message is history the window carried
@@ -15539,7 +15633,11 @@ let context_inspector_content_lines ~cols state : context_pane_body =
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Composition ->
            (match reading.turn with
-            | Ok selection -> Plain (context_composition_lines ~cols selection, None)
+            | Ok selection ->
+                Plain
+                  ( context_composition_lines ~cols
+                      ~turn_back:state.context_inspector_turn_back selection
+                  , None )
             | Error detail ->
                 Plain
                   ( [ (Theme.bad ()) ^ "  Composition unavailable: "
@@ -15549,13 +15647,17 @@ let context_inspector_content_lines ~cols state : context_pane_body =
        | Masc_tui_context_inspector.Exact_input ->
            (match reading.provider_input with
             | Ok input ->
-                let response =
+                let response, response_parts =
                   match reading.turn with
                   | Ok selection ->
-                      Some selection.Masc_tui_context_inspector.latest
-                  | Error _ -> None
+                      ( Some selection.Masc_tui_context_inspector.latest
+                      , (match reading.response with
+                        | Ok parts -> Some parts
+                        | Error _ -> None) )
+                  | Error _ -> (None, None)
                 in
-                context_exact_input_lines ~cols state ~response input
+                context_exact_input_lines ~cols state ~response
+                  ~response_parts input
             | Error detail ->
                 Plain
                   ( [ (Theme.bad ()) ^ "  Exact input unavailable: "
@@ -15570,24 +15672,48 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                       ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
                     ]
                   , None )
-            | Ok { Masc_tui_context_inspector.attributed = None; _ } ->
-                (* The map is a per-component table; with no attribution there
-                   are no rows to draw, and inventing them from the latest
-                   turn's totals would state bytes nobody measured. *)
-                Plain
-                  ( [ (Theme.bad ())
-                      ^ "  No turn on this page recorded an exact input \
-                         composition" ^ Ansi.reset
-                    ]
-                  , None )
-            | Ok { Masc_tui_context_inspector.attributed = Some { record; _ }; _ }
-              ->
-                let provider_input =
-                  match reading.provider_input with
-                  | Ok input -> Some input
-                  | Error _ -> None
+            | Ok selection -> (
+                (* The newest reading keeps the attributed row -- it is the
+                   row the exact provider input was fetched for, so the join
+                   on this tab stays honest. A stepped-back turn names its
+                   own row, snapshot or not. *)
+                let viewing =
+                  if state.context_inspector_turn_back = 0 then
+                    Option.map
+                      (fun (a : Masc_tui_context_inspector.attributed_turn) ->
+                         a.record)
+                      selection.Masc_tui_context_inspector.attributed
+                  else
+                    match
+                      List.nth_opt selection.Masc_tui_context_inspector.rows
+                        state.context_inspector_turn_back
+                    with
+                    | Some record -> Some record
+                    | None ->
+                        Option.map
+                          (fun (a : Masc_tui_context_inspector.attributed_turn) ->
+                             a.record)
+                          selection.Masc_tui_context_inspector.attributed
                 in
-                context_input_map_lines ~cols state record provider_input))
+                match viewing with
+                | None ->
+                    (* The map is a per-component table; with no attribution
+                       there are no rows to draw, and inventing them from the
+                       latest turn's totals would state bytes nobody
+                       measured. *)
+                    Plain
+                      ( [ (Theme.bad ())
+                          ^ "  No turn on this page recorded an exact input \
+                             composition" ^ Ansi.reset
+                        ]
+                      , None )
+                | Some record ->
+                    let provider_input =
+                      match reading.provider_input with
+                      | Ok input -> Some input
+                      | Error _ -> None
+                    in
+                    context_input_map_lines ~cols state record provider_input)))
 
 (* The plain body's line count, for the keys that scroll it. *)
 let context_inspector_viewport state =
@@ -15743,9 +15869,9 @@ let render_context_inspector state =
           state.context_inspector_tab, cols >= keeper_split_threshold_cols
         with
         | (Masc_tui_context_inspector.Exact_input | Masc_tui_context_inspector.Input_map), true ->
-            "1/2/3 or Tab:switch  j/k:select or scroll  h/l:pane  Enter:open exact  r:refresh  Esc:close"
+            "1/2/3 or Tab:switch  [/] turn  j/k:select or scroll  h/l:pane  Enter:open exact  r:refresh  Esc:close"
         | _ ->
-            "1/2/3 or Tab:switch  j/k:select  Enter:open exact  r:refresh  Esc:close")
+            "1/2/3 or Tab:switch  [/] turn  j/k:select  Enter:open exact  r:refresh  Esc:close")
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
   finish_surface state ~surface_key:"context-inspector" ~rows:terminal_rows

@@ -15084,7 +15084,7 @@ let context_exact_input_summary ~width
     @ bar @ rows
   , total )
 
-let context_exact_input_lines ~cols state ~response
+let context_exact_input_lines ~cols state ~(response : Turn_record.t option)
     (input : Masc_tui_context_inspector.provider_input) =
   let module Inspector = Masc_tui_context_inspector in
   let items = Inspector.exact_input_items input in

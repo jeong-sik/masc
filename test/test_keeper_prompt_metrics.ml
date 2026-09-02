@@ -299,16 +299,22 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
       ~input_messages
       ~actual_input_tokens:(Some 1000)
   in
+  (* The record is named at each accessor. [prompt_metrics] is declared after
+     [prompt_segment_metrics] and #32666 gave it a [fingerprint] of its own, so
+     a bare [segment.KAPM.fingerprint] resolves against the later type and
+     stops compiling. Naming the type here also keeps [bytes] from moving the
+     same way when a later record claims that label. *)
   let segment_bytes key =
     metrics.segments
     |> List.assoc_opt key
-    |> Option.map (fun segment -> segment.KAPM.bytes)
+    |> Option.map (fun (segment : KAPM.prompt_segment_metrics) -> segment.KAPM.bytes)
     |> Option.value ~default:0
   in
   let segment_fingerprint key =
     metrics.segments
     |> List.assoc_opt key
-    |> Option.map (fun segment -> segment.KAPM.fingerprint)
+    |> Option.map (fun (segment : KAPM.prompt_segment_metrics) ->
+      segment.KAPM.fingerprint)
     |> Option.join
   in
   check bool "system prompt bucket present" true
@@ -328,7 +334,10 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
   check bool "the tool bucket carries a fingerprint" true
     (Option.is_some (segment_fingerprint Turn_record.Tool_schemas));
   check int "total bytes equal segment sum"
-    (List.fold_left (fun total (_, segment) -> total + segment.KAPM.bytes) 0
+    (List.fold_left
+       (fun total ((_, segment) : _ * KAPM.prompt_segment_metrics) ->
+         total + segment.KAPM.bytes)
+       0
        metrics.segments)
     metrics.attributed_bytes
 
@@ -477,7 +486,7 @@ let test_tool_schema_fingerprint_follows_the_order_sent () =
       ~name
       ~description:("probe " ^ name)
       ~parameters:[]
-      (fun _input -> Ok { Agent_core.Tool.content = "ok"; _meta = None })
+      (fun _input -> Ok { content = "ok"; _meta = None })
   in
   let fingerprint_of tools =
     let metrics =
@@ -489,7 +498,8 @@ let test_tool_schema_fingerprint_follows_the_order_sent () =
     in
     metrics.segments
     |> List.assoc_opt Turn_record.Tool_schemas
-    |> Option.map (fun segment -> segment.KAPM.fingerprint)
+    |> Option.map (fun (segment : KAPM.prompt_segment_metrics) ->
+      segment.KAPM.fingerprint)
     |> Option.join
   in
   let a = tool "alpha" and b = tool "beta" in

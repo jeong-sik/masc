@@ -245,8 +245,11 @@ let for_surface = function
       ]
       @ listing_meta
   | Memory ->
-      [ b Navigate "j/k" "scroll"
-      ; b Navigate "[ / ]" "keeper" ~help:"previous / next keeper row"
+      (* j/k moves the keeper row the health table draws -- the row Enter
+         reads. [ / ] was listed here for that same movement and never had a
+         handler, so the footer offered two spellings and one of them did
+         nothing. *)
+      [ b Navigate "j/k" "move" ~help:"move the keeper row"
       ; b Act "Enter" "facts"
           ~help:"browse what the selected keeper actually remembers"
       ]
@@ -450,6 +453,21 @@ let footer_hints_resources ~detail_focus =
 
 let opens_keepers ~message_mode key =
   (not message_mode) && String.equal key keepers_jump.key
+
+(* An armed two-press action expires on the next unrelated key: otherwise it
+   waits indefinitely and a later press of the same key -- after the cursor
+   has moved, after a refresh -- submits work the operator armed minutes ago
+   for something else.
+
+   A loop turn that read no key is not an unrelated key. The rule lives here
+   because it was restated once per armed field in the dispatch loop, and one
+   restatement (the connector unbind) counted [None] as a cancel. The loop
+   turns without input, so that arm survived a single iteration: the two [u]
+   presses only removed a binding when both bytes arrived in the same read. *)
+let cancels_two_press ~key ~second_press =
+  match key with
+  | None -> false
+  | Some pressed -> not (List.exists (String.equal pressed) second_press)
 
 (* The Fusion detail view: the keys table owns the key list; the renderer
    owns the live scroll numbers it appends after them. ([view] stays

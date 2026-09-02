@@ -11491,29 +11491,43 @@ and is loaded on demand through keeper_skill.
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
          a mouse report, or any other key means the operator stayed. *)
       if Option.is_some input && not quit_key then state.quit_armed <- false;
-      (match state.view, key with
-       | _ when compact_viewport -> ()
-       | Approvals, Some ("y" | "Y" | "n" | "N") -> ()
-       | Approvals, Some _ -> state.pending_approval_action <- None
-       (* An armed shutdown expires on the next unrelated key. Otherwise it
-          waits indefinitely and a later press of the same key -- after the
-          cursor has moved, after a refresh -- submits work the operator armed
-          minutes ago for something else. Same rule for an armed goal action. *)
-       | Keepers _, Some ("s" | "S") -> ()
-       | Keepers _, Some _ -> state.keeper_action_pending <- None
-       | Board, Some ("v" | "V") -> ()
-       | Board, Some _ -> state.board_vote_armed <- None
-       | Planning, Some ("c" | "C" | "x" | "X" | "o" | "O") -> ()
-       | Planning, Some _ -> state.goal_action_armed <- None
-       | Schedules, Some ("x" | "X") -> ()
-       | Schedules, Some _ -> state.schedule_cancel_armed <- None
-       | Verification, Some ("a" | "A") -> ()
-       | Verification, Some _ -> state.verification_verdict_armed <- None
-       | _ -> ());
+      (* An armed shutdown expires on the next unrelated key. Otherwise it
+         waits indefinitely and a later press of the same key -- after the
+         cursor has moved, after a refresh -- submits work the operator armed
+         minutes ago for something else. Same rule for every other armed
+         action here.
+
+         One predicate rather than one restatement per field: the connector
+         unbind used to spell the rule itself and counted a loop turn with no
+         key as an unrelated key, so its arm survived a single iteration. *)
+      let cancelled second_press =
+        (not compact_viewport)
+        && Masc_tui_keys.cancels_two_press ~key ~second_press
+      in
+      (match state.view with
+       | Approvals ->
+           if cancelled [ "y"; "Y"; "n"; "N" ] then
+             state.pending_approval_action <- None
+       | Keepers _ ->
+           if cancelled [ "s"; "S" ] then state.keeper_action_pending <- None
+       | Board -> if cancelled [ "v"; "V" ] then state.board_vote_armed <- None
+       | Planning ->
+           if cancelled [ "c"; "C"; "x"; "X"; "o"; "O" ] then
+             state.goal_action_armed <- None
+       | Schedules ->
+           if cancelled [ "x"; "X" ] then state.schedule_cancel_armed <- None
+       | Verification ->
+           if cancelled [ "a"; "A" ] then
+             state.verification_verdict_armed <- None
+       | Overview | Acting | Lanes | Harness | Memory | Fusion | Repositories
+       | Changes | Connectors | Runtime | Config | Resources | Tools
+       | System_logs | Code -> ());
       (* Destructive binding removal deliberately requires two consecutive
          [u] presses. Any intervening action invalidates the ownership
-         snapshot; the server also compares that owner inside the store lock. *)
-      if key <> Some "u" then state.connector_unbind_armed <- None;
+         snapshot; the server also compares that owner inside the store lock.
+         Not scoped to the Channels tab: an arm the operator left behind on
+         another surface is exactly the stale confirmation this cancels. *)
+      if cancelled [ "u" ] then state.connector_unbind_armed <- None;
       (* The composer sees the key first, and takes it only when it has one to
          take: unfocused it claims a single key, and only with somewhere to
          send. Everything it does not claim reaches the surface with its
@@ -12676,12 +12690,6 @@ and is loaded on demand through keeper_skill.
           parent, off the Tab ring. *)
        | Some ("l" | "L") when state.view = Acting ->
            goto_surface state ~mailbox:async_messages System_logs
-       | Some (("n" | "N") as direction)
-         when state.search_last <> ""
-              && Option.is_some (surface_row_texts state state.view) ->
-           let after = Option.value (search_row_cursor state) ~default:0 in
-           search_jump state ~query:state.search_last ~after
-             ~backwards:(String.equal direction "N")
        (* In chat, printable keys normally belong to the draft. Keep [?] as
           the documented global Help key when the draft is empty; once a
           sentence has started it remains an ordinary question mark. This
@@ -13143,12 +13151,32 @@ and is loaded on demand through keeper_skill.
             | Approvals -> answer_presented_approval Confirm
             | Harness -> handle_harness_agree ()
             | _ -> ())
-       | Some "n" | Some "N" ->
+       (* Stepping the last search is what [n] means on a surface that binds
+          it to nothing else, so it is the tail of this arm rather than an
+          arm of its own above it. As its own arm it outranked the three
+          surfaces below: [search_last] is one string for the whole session,
+          so after any search anywhere, Harness answered [n] with a jump to
+          the next match instead of the overrule its footer names.
+
+          The match is exhaustive on purpose. A surface added later has to
+          say whether [n] is its own key or the search step. *)
+       | Some (("n" | "N") as direction) ->
            (match state.view with
             | Approvals -> answer_presented_approval Deny
             | Harness -> handle_harness_overrule ()
             | Schedules -> handle_schedule_create ()
-            | _ -> ())
+            | Overview | Acting | Keepers _ | Memory | Lanes | Board | Planning
+            | Verification | Fusion | Repositories | Code | Changes
+            | Connectors | Runtime | Config | Resources | Tools | System_logs ->
+                if
+                  state.search_last <> ""
+                  && Option.is_some (surface_row_texts state state.view)
+                then
+                  let after =
+                    Option.value (search_row_cursor state) ~default:0
+                  in
+                  search_jump state ~query:state.search_last ~after
+                    ~backwards:(String.equal direction "N"))
        | Some "home" when state.view = Tools -> state.tools_scroll <- 0
        | Some "end" when state.view = Tools ->
            state.tools_scroll <-
@@ -14763,8 +14791,13 @@ and is loaded on demand through keeper_skill.
             | Connectors | Config | Resources | Tools -> ())
        (* Changes reads one keeper's file writes and already binds to the
           roster cursor on entry, so it opens from the roster rather than
-          from the Tab ring. *)
-       | Some "f" | Some "F" when state.view = Keepers Keeper_list ->
+          from the Tab ring. Both keeper surfaces, because both list [f] in
+          their footer and both are read from that same cursor -- detail
+          listed the key with no arm behind it, so the hint was dead
+          there. *)
+       | Some "f" | Some "F"
+         when state.view = Keepers Keeper_list
+              || state.view = Keepers Keeper_detail ->
            goto_surface state ~mailbox:async_messages Changes
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter

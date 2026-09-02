@@ -41,6 +41,7 @@ type selection =
   { latest : Turn_record.t
   ; attributed : attributed_turn option
   ; recent : recent_turn list
+  ; rows : Turn_record.t list
   }
 
 type reading =

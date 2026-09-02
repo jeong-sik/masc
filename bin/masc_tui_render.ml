@@ -14924,19 +14924,20 @@ let context_composition_lines ~cols
                  | Some tokens -> Inspector.format_tokens tokens
                  | None -> "-"))
       | None ->
-          Ansi.dim
-          ^ Printf.sprintf
-              "#%-4d %s  counted across the conversation, not per request"
-              recent.turn
-              (Masc_domain.iso8601_of_unix_seconds recent.ts)
-          ^ Ansi.reset
+          [ Ansi.dim
+            ^ Printf.sprintf
+                "#%-4d %s  counted across the conversation, not per request"
+                recent.turn
+                (Masc_domain.iso8601_of_unix_seconds recent.ts)
+            ^ Ansi.reset
+          ]
     in
     [ "  "
       ^ Context_bars.band ~width ~title:"RECENT TURNS"
           ~caption:
             "input the provider counted, one row per dispatched turn"
     ]
-    @ List.map row selection.Inspector.recent
+    @ List.concat_map row selection.Inspector.recent
   in
   [ identity; turn; trace; "" ]
   @ [ "  "

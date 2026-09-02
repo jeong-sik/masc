@@ -15434,24 +15434,28 @@ let context_inspector_viewport state =
   in
   (count, framed_content_height ~rows)
 
-(* The rows the two columns of a split body divide, after the common summary
-   above them and the closing blank below. The key handler and the frame both
-   ask this, because keys that step past what the frame can show are the bug
-   this pane was already carrying once. *)
+(* The rows a split body holds below the common summary: one pinned header
+   row that carries both column titles and the focus caret, then the window
+   the two columns share. The key handler and the frame both ask this,
+   because keys that step past what the frame can show are the bug this pane
+   was already carrying once. *)
 let context_split_pane_height ~content_height ~common_len =
-  max 1 (content_height - common_len - 1)
+  max 0 (content_height - common_len - 1)
 
-(* The split detail column's line count and window height, for the keys that
-   scroll it. *)
+(* The split detail column's body line count and its window height, for the
+   keys that scroll it. The pinned header row is not theirs to scroll. *)
 let context_inspector_detail_viewport state =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   match context_inspector_content_lines ~cols state with
   | Plain _ -> (0, 0)
   | Split { common; right; _ } ->
-      ( List.length right
-      , context_split_pane_height ~content_height:(framed_content_height ~rows)
-          ~common_len:(List.length common) )
+      let split_height =
+        context_split_pane_height ~content_height:(framed_content_height ~rows)
+          ~common_len:(List.length common)
+      in
+      ( List.length right - 1
+      , max 0 (split_height - 1) )
 
 let context_split_window ~height ~offset lines =
   lines |> List.filteri (fun index _ -> index >= offset && index < offset + height)
@@ -15509,32 +15513,57 @@ let render_context_inspector state =
         List.iter (framed_line buf cols) window;
         List.length window
     | Split { common; left; right } ->
-        List.iter (framed_line buf cols) common;
+        (* The summary clips to the frame rather than overflowing it: on a
+           short terminal the split gives way before the pane draws a row
+           past its last. *)
+        let common_rows =
+          common |> List.filteri (fun index _ -> index < content_height)
+        in
+        List.iter (framed_line buf cols) common_rows;
         let split_height =
           context_split_pane_height ~content_height
             ~common_len:(List.length common)
         in
-        let items = List.length left - 1 in
-        let cursor =
-          min (max 0 (items - 1)) (max 0 state.context_inspector_cursor)
+        let split_drawn =
+          if split_height <= 0 then 0
+          else begin
+            (* Both columns are header :: rows, so the heads are total. The
+               header row stays pinned above the windows -- it carries the
+               focus caret, and a caret that scrolls away stops saying which
+               pane hears j/k. *)
+            let pinned =
+              context_split_lines ~cols ~left_width:(context_split_width cols)
+                ~left:[ List.hd left ] ~right:[ List.hd right ]
+            in
+            List.iter (framed_line buf cols) pinned;
+            let body_height = split_height - 1 in
+            let items = List.length left - 1 in
+            let cursor =
+              min (max 0 (items - 1)) (max 0 state.context_inspector_cursor)
+            in
+            (* Stateless bottom-pin over the item rows; the detail column
+               owns its scroll, so neither pane drags the other. *)
+            let left_offset =
+              Masc_tui_scroll.ensure_visible ~cursor ~height:body_height 0
+            in
+            let right_offset =
+              Masc_tui_scroll.normalize ~count:(List.length right - 1)
+                ~height:body_height state.context_inspector_detail_scroll
+            in
+            let window =
+              context_split_lines ~cols ~left_width:(context_split_width cols)
+                ~left:
+                  (context_split_window ~height:body_height ~offset:left_offset
+                     (List.tl left))
+                ~right:
+                  (context_split_window ~height:body_height ~offset:right_offset
+                     (List.tl right))
+            in
+            List.iter (framed_line buf cols) window;
+            split_height
+          end
         in
-        (* Stateless bottom-pin for the list, as every sidebar window: the
-           detail column owns its scroll, so neither pane drags the other. *)
-        let left_offset =
-          Masc_tui_scroll.ensure_visible ~cursor:(1 + cursor)
-            ~height:split_height 0
-        in
-        let right_offset =
-          Masc_tui_scroll.normalize ~count:(List.length right)
-            ~height:split_height state.context_inspector_detail_scroll
-        in
-        let window =
-          context_split_lines ~cols ~left_width:(context_split_width cols)
-            ~left:(context_split_window ~height:split_height ~offset:left_offset left)
-            ~right:(context_split_window ~height:split_height ~offset:right_offset right)
-        in
-        List.iter (framed_line buf cols) window;
-        List.length common + List.length window
+        List.length common_rows + split_drawn
   in
   for _ = 1 to max 0 (content_height - drawn) do
     framed_line buf cols ""

@@ -93,14 +93,24 @@ val bound_channels :
 val bound_channels_result :
   keeper_name:string -> (string list, binding_lookup_error) result
 (** Typed bound-channel lookup. Store failures use the same error contract as
-    single-channel lookup. *)
+single-channel lookup. *)
+
+val configured_channel_ids_result :
+  unit -> (string list, binding_lookup_error) result
+(** Every configured channel snowflake, freshly read from the authoritative
+    binding store. Used to scope connector directory refresh to channels MASC
+    actually routes. *)
 
 val connected : unit -> bool
 (** Whether the in-process gateway's run loop currently reports
     [Connected]. Reads {!Discord_gateway_client.connection_state};
     no file indirection. RFC-0223 P2 presence. *)
 
-val record_ready : bot_user_id:string -> unit
+val record_ready :
+  bot_user_id:string ->
+  bot_user_name:string option ->
+  guild_count:int ->
+  unit
 (** Called by the in-process gateway's READY handler. Stores the bot
     identity and timestamp that {!status_json} reports as
     [bot_user_id] / [last_ready_at]. Atomic write — safe to call from

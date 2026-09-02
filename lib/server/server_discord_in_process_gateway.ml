@@ -209,6 +209,173 @@ let resolve_channel_name ~base_dir ~channel_id =
           (* A direct message has no name. Absent, not blank. *)
           | Some _ | None -> None))))
 
+let nonblank_string_field json field =
+  match Json_util.get_string json field with
+  | Some value when String.trim value <> "" -> Some (String.trim value)
+  | Some _ | None -> None
+
+let discord_channel_directory_entry json =
+  match
+    nonblank_string_field json "id",
+    nonblank_string_field json "name"
+  with
+  | Some id, Some name -> Ok (id, name)
+  | Some _, None | None, Some _ | None, None ->
+    Error "Discord channel response has no id/name pair"
+
+let discord_message_people_entries = function
+  | `List messages ->
+    let people = Hashtbl.create 32 in
+    List.iter
+      (fun message ->
+         match message with
+         | `Assoc fields ->
+           (match List.assoc_opt "author" fields with
+            | None -> ()
+            | Some author ->
+              (match nonblank_string_field author "id" with
+               | None -> ()
+               | Some id when Hashtbl.mem people id -> ()
+               | Some id ->
+                 let name =
+                   match nonblank_string_field author "global_name" with
+                   | Some _ as global_name -> global_name
+                   | None -> nonblank_string_field author "username"
+                 in
+                 Option.iter (fun name -> Hashtbl.add people id name) name))
+         | _ -> ())
+      messages;
+    Ok
+      (Hashtbl.to_seq people |> List.of_seq
+       |> List.sort (fun (left, _) (right, _) -> String.compare left right))
+  | _ -> Error "Discord channel messages response is not a list"
+
+let remember_directory_entries ~base_dir ~scope entries =
+  List.iter
+    (fun (id, name) ->
+       Connector_names.remember ~base_dir ~connector:State.channel ~scope ~id
+         ~name ())
+    entries
+
+(* Directory refresh is intentionally route-scoped. Enumerating every guild
+   member would persist people who never interacted with MASC and also depends
+   on Discord's privileged GUILD_MEMBERS capability. Bound channels plus one
+   API-bounded recent-message page give the operator useful names without a
+   guild-wide crawl. New inbound authors continue to refresh names live. *)
+let discord_recent_message_limit = 100
+
+let refresh_discord_directory_once ~clock ~base_dir ~token =
+  let refresh_channel channel_id =
+    match Discord_rest_client.snowflake_of_string channel_id with
+    | Error detail ->
+      Log.Server.warn "Discord directory skipped channel %s: %s" channel_id detail
+    | Ok channel_snowflake ->
+      (match
+         Discord_rest_client.get_channel ~clock ~token
+           ~channel_id:channel_snowflake ()
+       with
+       | Error error ->
+         Log.Server.warn "Discord channel directory refresh failed channel=%s: %s"
+           channel_id (Format.asprintf "%a" Discord_rest_client.pp_error error)
+       | Ok json ->
+         (match discord_channel_directory_entry json with
+          | Error detail ->
+            Log.Server.warn "Discord channel directory rejected channel=%s: %s"
+              channel_id detail
+          | Ok (returned_id, name) when String.equal returned_id channel_id ->
+            remember_directory_entries ~base_dir
+              ~scope:Connector_names.Channel [ returned_id, name ]
+          | Ok (returned_id, _) ->
+            Log.Server.warn
+              "Discord channel directory identity mismatch requested=%s returned=%s"
+              channel_id returned_id));
+      (match
+         Discord_rest_client.get_channel_messages ~clock ~token
+           ~channel_id:channel_snowflake ~limit:discord_recent_message_limit ()
+       with
+       | Error error ->
+         Log.Server.warn "Discord people directory refresh failed channel=%s: %s"
+           channel_id (Format.asprintf "%a" Discord_rest_client.pp_error error)
+       | Ok json ->
+         (match discord_message_people_entries json with
+          | Error detail ->
+            Log.Server.warn "Discord people directory rejected channel=%s: %s"
+              channel_id detail
+          | Ok entries ->
+            remember_directory_entries ~base_dir
+              ~scope:Connector_names.Person entries))
+  in
+  match State.configured_channel_ids_result () with
+  | Error error ->
+    Log.Server.warn "Discord directory binding read failed: %s"
+      (State.binding_lookup_error_to_string error)
+  | Ok channel_ids -> List.iter refresh_channel channel_ids
+
+(* READY and successful binds share one coalescing queue. A request arriving
+   during network I/O sets [pending]; the worker rereads the authoritative
+   binding store before the follow-up pass, so a just-created binding is not
+   stranded until the next reconnect. The global mutex protects only booleans
+   and is never held across I/O or a fiber yield. *)
+let discord_directory_refresh_mu = Stdlib.Mutex.create ()
+let discord_directory_refresh_running = ref false
+let discord_directory_refresh_pending = ref false
+
+let with_directory_refresh_lock f =
+  Stdlib.Mutex.lock discord_directory_refresh_mu;
+  match f () with
+  | result ->
+    Stdlib.Mutex.unlock discord_directory_refresh_mu;
+    result
+  | exception exn ->
+    Stdlib.Mutex.unlock discord_directory_refresh_mu;
+    raise exn
+
+let request_directory_refresh ~sw ~clock ~base_dir =
+  match bot_token_opt () with
+  | None -> ()
+  | Some token ->
+    let start_worker =
+      with_directory_refresh_lock (fun () ->
+        discord_directory_refresh_pending := true;
+        if !discord_directory_refresh_running then false
+        else begin
+          discord_directory_refresh_running := true;
+          true
+        end)
+    in
+    if start_worker then
+      Eio.Fiber.fork ~sw (fun () ->
+        let stop_worker () =
+          with_directory_refresh_lock (fun () ->
+            discord_directory_refresh_running := false;
+            discord_directory_refresh_pending := false)
+        in
+        let take_pending_or_stop () =
+          with_directory_refresh_lock (fun () ->
+            if !discord_directory_refresh_pending then begin
+              discord_directory_refresh_pending := false;
+              true
+            end else begin
+              discord_directory_refresh_running := false;
+              false
+            end)
+        in
+        let rec loop () =
+          if take_pending_or_stop () then begin
+            refresh_discord_directory_once ~clock ~base_dir ~token;
+            loop ()
+          end
+        in
+        match loop () with
+        | () -> ()
+        | exception Eio.Cancel.Cancelled _ as exn ->
+          stop_worker ();
+          raise exn
+        | exception exn ->
+          stop_worker ();
+          Log.Server.error "Discord directory refresh crashed: %s"
+            (Printexc.to_string exn))
+
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
       ~channel_name ~message_id ~author_id ~author_name ~content ~mentions_bot
       ~route ~urgency
@@ -478,8 +645,9 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
 let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
     (ev : Gw.gateway_event) =
   match ev with
-  | Gw.Ready { bot_user_id; _ } ->
-    State.record_ready ~bot_user_id;
+  | Gw.Ready { bot_user_id; bot_user_name; guild_ids; _ } ->
+    State.record_ready ~bot_user_id ~bot_user_name
+      ~guild_count:(List.length guild_ids);
     Log.Server.info "Discord gateway READY (bot_user_id=%s)" bot_user_id;
     None
   | Gw.Message_create
@@ -754,6 +922,8 @@ let submit_ingress ingress ~lane ~event_id run =
 
 module For_testing = struct
   let submit_triggered_event = submit_triggered_event
+  let discord_channel_directory_entry = discord_channel_directory_entry
+  let discord_message_people_entries = discord_message_people_entries
 end
 
 let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
@@ -827,6 +997,12 @@ let start ~sw ~env ~clock ~state =
           ~trigger_policy:policy
           ~on_event:(fun ev ->
             let config = Mcp_server.workspace_config state in
+            (match ev with
+             | Gw.Ready _ ->
+               request_directory_refresh ~sw ~clock ~base_dir:config.base_path
+             | Gw.Message_create _ | Gw.Reaction_add _ | Gw.Thread_tracked _
+             | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ ->
+               ());
             submit_triggered_event
               ingress
               ~dispatch_for_delivery:(dispatch_for_config config)

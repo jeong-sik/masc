@@ -6234,14 +6234,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                 let optional_int_row label value =
                   optional_row label (Option.map string_of_int value)
                 in
-                let keeper_bindings =
-                  List.filter
-                    (fun (binding : Tui_decode.connector_binding) ->
-                       String.equal binding.cb_keeper_name k.k_name)
-                    connector.cn_bindings
-                in
                 let selected_binding =
-                  List.nth_opt keeper_bindings state.connectors_binding_cursor
+                  List.nth_opt connector.cn_bindings state.connectors_binding_cursor
+                in
+                let keeper_is_present keeper_name =
+                  List.exists
+                    (fun (keeper : Tui_decode.keeper) ->
+                       String.equal keeper.k_name keeper_name)
+                    state.keepers
                 in
                 let binding_reference (binding : Tui_decode.connector_binding) =
                   match binding.cb_channel_name with
@@ -6262,27 +6262,31 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                   | Some false -> Some "UNREADABLE"
                   | None -> None
                 in
-                let rec binding_lines here_index = function
-                  | [] -> []
-                  | (binding : Tui_decode.connector_binding) :: rest ->
+                let binding_lines =
+                  List.mapi
+                    (fun index (binding : Tui_decode.connector_binding) ->
                       let here = String.equal binding.cb_keeper_name k.k_name in
-                      let selected =
-                        here && here_index = state.connectors_binding_cursor
+                      let selected = index = state.connectors_binding_cursor in
+                      let missing_keeper =
+                        not (keeper_is_present binding.cb_keeper_name)
                       in
                       let line =
                         Printf.sprintf "    %s %s → %s%s"
                           (if selected then "▸" else " ")
                           (binding_reference binding)
                           (Terminal_text.single_line binding.cb_keeper_name)
-                          (if here then "  (this Keeper)" else "")
+                          (if here then "  (this Keeper)"
+                           else if missing_keeper then "  (MISSING KEEPER)"
+                           else "")
                       in
-                      (if selected then Ansi.reverse ^ line ^ Ansi.reset else line)
-                      :: binding_lines (if here then here_index + 1 else here_index) rest
-                in
-                let binding_lines =
-                  match connector.cn_bindings with
+                      if selected then Ansi.reverse ^ line ^ Ansi.reset
+                      else if missing_keeper then
+                        (Theme.bad ()) ^ line ^ Ansi.reset
+                      else line)
+                    connector.cn_bindings
+                  |> function
                   | [] -> [ Ansi.dim ^ "    (no channel bindings)" ^ Ansi.reset ]
-                  | bindings -> binding_lines 0 bindings
+                  | lines -> lines
                 in
                 [ ""
                 ; Ansi.bold ^ "  Selected · "
@@ -6290,7 +6294,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                   ^ Ansi.reset
                 ; Printf.sprintf "  %-18s %s" "Binding target"
                     (match selected_binding with
-                     | None -> "(none for this Keeper)"
+                     | None -> "(no binding selected)"
                      | Some binding -> binding_reference binding)
                 ; Printf.sprintf "  %-18s %s · %s" "Connection"
                     (connection_label connector)
@@ -6343,7 +6347,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                            mappings)
                 @ [ ""
                   ; Ansi.dim
-                    ^ "  j/k transport · J/K this-Keeper binding · b bind · u unbind"
+                    ^ "  j/k transport · J/K binding · b bind · e reassign · u unbind"
                     ^ Ansi.reset
                   ; Ansi.dim ^ "  PgUp/PgDn scrolls this detail" ^ Ansi.reset
                   ; Ansi.dim ^ "  r reloads bindings and learned names" ^ Ansi.reset

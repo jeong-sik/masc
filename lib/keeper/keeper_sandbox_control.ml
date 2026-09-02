@@ -745,7 +745,12 @@ let sandbox_paths_json ~(config : Workspace.config) (meta : keeper_meta) =
       ; "guest_build_volume", `Null
       ]
   | Docker | Micro_vm ->
-    let guest_workspace = Keeper_sandbox.container_root meta.name in
+    let container_root = Keeper_sandbox.container_root meta.name in
+    let guest_workspace =
+      match meta.sandbox_profile with
+      | Micro_vm -> Keeper_sandbox_microvm.keeper_work_root ~keeper_name:meta.name
+      | Docker | Remote_ssh -> container_root
+    in
     `Assoc
       [ "host_workspace", `String host_workspace
       ; "guest_home", `Null
@@ -753,7 +758,7 @@ let sandbox_paths_json ~(config : Workspace.config) (meta : keeper_meta) =
       ; ( "guest_config"
         , `String
             (Keeper_sandbox_runtime.container_masc_config_dir
-               ~container_root:guest_workspace) )
+               ~container_root) )
       ; ( "guest_work_volume"
         , match meta.sandbox_profile with
           | Micro_vm -> `String Keeper_sandbox_microvm.work_volume_guest_root

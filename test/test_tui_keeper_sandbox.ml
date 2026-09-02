@@ -93,8 +93,8 @@ let test_live_container_and_errors_are_visible () =
           "paths": {
             "host_workspace": "/base/.masc/playground/alpha",
             "guest_home": null,
-            "guest_workspace": "/home/keeper/playground/alpha",
-            "guest_config": "/home/keeper/playground/alpha/.masc/config",
+            "guest_workspace": "/masc-work/alpha",
+            "guest_config": "/tmp/masc-runtime/.masc/config",
             "guest_work_volume": "/masc-work",
             "guest_build_volume": "/masc-build"
           },
@@ -120,7 +120,8 @@ let test_live_container_and_errors_are_visible () =
     ; "work 256g"
     ; "paths"
     ; "/base/.masc/playground/alpha"
-    ; "/home/keeper/playground/alpha"
+    ; "/masc-work/alpha"
+    ; "/tmp/masc-runtime/.masc/config"
     ; "not observed"
     ; "press l"
     ; "press t"

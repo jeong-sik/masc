@@ -11,15 +11,15 @@
 
     So the schemas are held back and one tool is offered instead. Its
     description carries the held tools' names and nothing else, and calling
-    it -- with exact names, or with a query matched against the held tools'
-    descriptions -- puts the chosen tools into the running agent's callable
+    it with exact names puts those tools into the running agent's callable
     set, where the next request of the same turn carries their schemas.
 
     Names only because the listing is charged to every request: with one
     summary line per tool it was 6 to 9 KB on the Keepers measured
     2026-09-02, 7 to 14% of the whole tool surface. The summaries now travel
-    in the answer to a load, once, and [query] reads the descriptions on the
-    server instead of the model reading them on every request.
+    in the answer to a load, once. Nothing here reads the descriptions: a
+    tool is chosen by its declared name and by nothing else, so editing a
+    tool's prose cannot change what a request loads.
 
     What is held back is a property of the tool, not of where it came from. An
     attached tool is held by default; a built-in is held when its own
@@ -72,24 +72,14 @@ val tool_name : string
 val names_param : string
 (** The argument that names tools exactly. *)
 
-val query_param : string
-(** The argument that describes the job instead. Every word of it must occur,
-    case-insensitively on ASCII, in a held tool's name or description for that
-    tool to match; there is no ranking. *)
-
-val query_load_at_most : int
-(** A query matching more tools than this loads none and lists the matches:
-    a loaded schema is charged to the rest of the turn, and past this many the
-    surplus costs more than one more request spent narrowing the choice. *)
-
 (** What one turn got out of the listing. *)
 type turn_discovery =
   | Listing_unused  (** The model never asked for a tool through it. *)
   | Loaded_and_used  (** It asked, and something it loaded then ran. *)
   | Loaded_unused of string list
       (** It asked, loaded these, and called none of them. Either the names
-          in the listing did not say enough to choose from, the query matched
-          the wrong tools, or what it loaded was not what it needed. *)
+          in the listing did not say enough to choose from, or the names it
+          chose were not the ones it needed. *)
 
 type placement =
   { tool : Agent_core.Tool.t  (** What the turn places. *)

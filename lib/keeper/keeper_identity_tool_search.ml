@@ -66,16 +66,6 @@ let rec note (cell : string list Atomic.t) name =
 
 let tool_name = "keeper_tool_search"
 let names_param = "names"
-let query_param = "query"
-
-(* A query that matches more than this many tools loads none of them and
-   lists the matches instead. A loaded schema is charged to every remaining
-   request of the turn -- built-ins run 0.2 to 4 KB each -- while a request
-   spent narrowing the choice carries the whole surface again, 62 to 85 KB on
-   the Keepers measured 2026-09-02. Five of the largest built-in still cost
-   less than that request; past five the surplus schemas cost more than
-   asking again would. *)
-let query_load_at_most = 5
 
 (* One line per tool, shown in the answer when the tool is loaded. A line
    longer than this is a paragraph, and the answer is charged to every
@@ -120,8 +110,7 @@ let declared = Tool_schemas_identity_tool_search.schema
    Names only. The one-line summaries rode here too until 2026-09-02, and at
    57 to 86 listed tools that was 6 to 9 KB on every request of every turn,
    7 to 14% of the whole tool surface. A summary is shown when its tool is
-   loaded, and [query] finds a tool by its description without the
-   description being on the wire. *)
+   loaded, once, in the answer. *)
 let description_of ~placed entries =
   let omitted name = List.exists (String.equal name) placed in
   match
@@ -142,24 +131,7 @@ let refusal message =
     }
 ;;
 
-type request =
-  | By_names of string list
-  | By_query of string list (* the words of the query, lowercased *)
-
-let request_to_json = function
-  | By_names names -> `Assoc [ names_param, Json_util.json_string_list names ]
-  | By_query terms -> `Assoc [ query_param, Json_util.json_string_list terms ]
-;;
-
-let terms_of query =
-  String.split_on_char ' ' query
-  |> List.concat_map (String.split_on_char '\n')
-  |> List.map String.trim
-  |> List.filter (fun term -> not (String.equal term ""))
-  |> List.map String.lowercase_ascii
-;;
-
-let names_of_items items =
+let requested_names input =
   let of_item = function
     | `String name -> Ok name
     | other ->
@@ -169,63 +141,28 @@ let names_of_items items =
            names_param
            (Yojson.Safe.to_string other))
   in
-  Agent_core.Types.result_all (List.map of_item items)
-;;
-
-let request_of_input input =
   match input with
   | `Assoc fields ->
-    (match List.assoc_opt names_param fields, List.assoc_opt query_param fields with
-     | Some _, Some _ ->
-       Error
-         (Printf.sprintf "pass \"%s\" or \"%s\", not both" names_param query_param)
-     | None, None ->
-       Error (Printf.sprintf "\"%s\" or \"%s\" is required" names_param query_param)
-     | Some (`List []), None ->
+    (match List.assoc_opt names_param fields with
+     | Some (`List []) ->
        Error (Printf.sprintf "\"%s\" was empty; name at least one tool" names_param)
-     | Some (`List items), None ->
+     | Some (`List items) ->
        Result.map
-         (fun names -> By_names (List.sort_uniq String.compare names))
-         (names_of_items items)
-     | Some other, None ->
+         (List.sort_uniq String.compare)
+         (Agent_core.Types.result_all (List.map of_item items))
+     | Some other ->
        Error
          (Printf.sprintf
             "\"%s\" must be an array of tool names; found %s"
             names_param
             (Yojson.Safe.to_string other))
-     | None, Some (`String query) ->
-       (match terms_of query with
-        | [] ->
-          Error
-            (Printf.sprintf
-               "\"%s\" was empty; say what the tool should do"
-               query_param)
-        | terms -> Ok (By_query terms))
-     | None, Some other ->
-       Error
-         (Printf.sprintf
-            "\"%s\" must be a string; found %s"
-            query_param
-            (Yojson.Safe.to_string other)))
+     | None -> Error (Printf.sprintf "\"%s\" is required" names_param))
   | other ->
     Error
       (Printf.sprintf
-         "arguments must be an object with \"%s\" or \"%s\"; found %s"
+         "arguments must be an object with \"%s\"; found %s"
          names_param
-         query_param
          (Yojson.Safe.to_string other))
-;;
-
-(* Every word of the query must occur in the tool's name or its description.
-   Lowercased on ASCII only: lowering the bytes of a multi-byte character
-   would corrupt it, and tool names are ASCII. No ranking -- a tool matches
-   or it does not, and matches are answered in listing order. *)
-let matches ~terms entry =
-  let haystack =
-    String.lowercase_ascii
-      (entry.name ^ "\n" ^ entry.callable.Agent_core.Tool.schema.description)
-  in
-  List.for_all (fun term -> String_util.contains_substring haystack term) terms
 ;;
 
 let describe entry = Printf.sprintf "- %s: %s" entry.name entry.summary
@@ -239,7 +176,7 @@ let load_found ~agent ~usage found =
   "now callable:\n" ^ String.concat "\n" (List.map describe found)
 ;;
 
-let load ~keeper_name ~agent_cell ~entries ~usage request =
+let load ~keeper_name ~agent_cell ~entries ~usage requested =
   match !agent_cell with
   | None ->
     (* The cell is filled at agent creation, so an empty one here means the
@@ -253,7 +190,7 @@ let load ~keeper_name ~agent_cell ~entries ~usage request =
       ~details:
         (`Assoc
            [ "error_kind", `String "keeper_identity_tool_search_no_agent"
-           ; "requested", request_to_json request
+           ; "requested", Json_util.json_string_list requested
            ])
       "Attached tool listing has no running agent to make tools callable";
     Error
@@ -264,49 +201,26 @@ let load ~keeper_name ~agent_cell ~entries ~usage request =
       ; error_class = Some Agent_core.Types.Deterministic
       }
   | Some agent ->
-    (match request with
-     | By_names requested ->
-       let found, unknown =
-         List.partition_map
-           (fun name ->
-              match List.find_opt (fun entry -> String.equal entry.name name) entries with
-              | Some entry -> Either.Left entry
-              | None -> Either.Right name)
-           requested
-       in
-       (match found with
-        | [] ->
-          refusal (Printf.sprintf "not in the list: %s" (String.concat ", " unknown))
+   let found, unknown =
+     List.partition_map
+       (fun name ->
+          match List.find_opt (fun entry -> String.equal entry.name name) entries with
+          | Some entry -> Either.Left entry
+          | None -> Either.Right name)
+       requested
+   in
+   (match found with
+    | [] ->
+      refusal (Printf.sprintf "not in the list: %s" (String.concat ", " unknown))
+    | _ :: _ ->
+      let loaded = load_found ~agent ~usage found in
+      let content =
+        match unknown with
+        | [] -> loaded
         | _ :: _ ->
-          let loaded = load_found ~agent ~usage found in
-          let content =
-            match unknown with
-            | [] -> loaded
-            | _ :: _ ->
-              Printf.sprintf "%s\nnot in the list: %s" loaded (String.concat ", " unknown)
-          in
-          Ok { Agent_core.Types.content; _meta = None })
-     | By_query terms ->
-       (match List.filter (matches ~terms) entries with
-        | [] ->
-          refusal
-            (Printf.sprintf
-               "nothing matched \"%s\"; try other words or pass names"
-               (String.concat " " terms))
-        | found when List.length found > query_load_at_most ->
-          (* Listed, not loaded: past the bound the surplus schemas would cost
-             the rest of the turn more than one more request does. *)
-          Ok
-            { Agent_core.Types.content =
-                Printf.sprintf
-                  "%d tools matched, more than the %d this loads at once; narrow \
-                   the query or pass names:\n%s"
-                  (List.length found)
-                  query_load_at_most
-                  (String.concat "\n" (List.map describe found))
-            ; _meta = None
-            }
-        | found -> Ok { Agent_core.Types.content = load_found ~agent ~usage found; _meta = None }))
+          Printf.sprintf "%s\nnot in the list: %s" loaded (String.concat ", " unknown)
+      in
+      Ok { Agent_core.Types.content; _meta = None })
 ;;
 
 (* Same tool, and it also says it ran. The wrapper keeps the descriptor so
@@ -412,9 +326,9 @@ let make ~keeper_name { deferred; agent_cell; history } =
           (Printf.sprintf "%s has a malformed argument schema: %s" tool_name reason)
     in
     let handler input =
-      match request_of_input input with
+      match requested_names input with
       | Error message -> refusal message
-      | Ok request -> load ~keeper_name ~agent_cell ~entries ~usage request
+      | Ok requested -> load ~keeper_name ~agent_cell ~entries ~usage requested
     in
     Some
       { tool =

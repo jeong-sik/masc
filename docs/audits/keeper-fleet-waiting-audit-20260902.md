@@ -278,29 +278,32 @@ code-reviewer 는 08-29 에 `keeper_memory_search` 의 `total_candidates` 가 wr
 ## 12. 재현 명령
 
 ```bash
+# 런타임 루트. MASC_BASE_PATH 는 서버가 쓰는 base path 와 같은 값으로 둔다.
+M="${MASC_BASE_PATH}/.masc"
+
 # 승인 lifecycle 지연 (요청 → 판정 → 배달), 재기동 로그 기준
-L=~/me/.masc/logs/masc-server-console-20260902-restart.log
-rg -o 'HITL_APPROVAL_PENDING: id=appr_[^ ]+ .*tool=[a-z_]+|HITL_APPROVAL_RESOLVED: id=appr_[^ ]+|hitl resolution delivered approval=appr_[^ ]+' $L
+L="$M/logs/masc-server-console-20260902-restart.log"
+rg -o 'HITL_APPROVAL_PENDING: id=appr_[^ ]+ .*tool=[a-z_]+|HITL_APPROVAL_RESOLVED: id=appr_[^ ]+|hitl resolution delivered approval=appr_[^ ]+' "$L"
 
 # 판정 결과 (승인/거부)
 rg -o 'HITL_APPROVAL_RESOLVED: id=appr_[^ ]+ keeper=[a-z.-]+ tool=[a-z_]+ decision=[a-z_]+' \
-  ~/me/.masc/logs/system_log_2026-09-01.jsonl $L | sed -E 's/.*tool=([a-z_]+) decision=([a-z_]+)/\1 \2/' | sort | uniq -c
+  "$M/logs/system_log_2026-09-01.jsonl" "$L" | sed -E 's/.*tool=([a-z_]+) decision=([a-z_]+)/\1 \2/' | sort | uniq -c
 
 # 승인 저장소 전체의 tool/capability
-jq -r '.deliveries[] | "\(.entry.tool_name)/\(.entry.input.capability // "-")\t\(.source)"' ~/me/.masc/gate/pending.json | sort | uniq -c
+jq -r '.deliveries[] | "\(.entry.tool_name)/\(.entry.input.capability // "-")\t\(.source)"' "$M/gate/pending.json" | sort | uniq -c
 
 # 턴 종료 사유 (keeper 별, 09-01 UTC)
-for k in ~/me/.masc/keepers/*/; do f=$k/turn-records/2026-09/01.jsonl; [ -f "$f" ] && \
+for k in "$M"/keepers/*/; do f=$k/turn-records/2026-09/01.jsonl; [ -f "$f" ] && \
   jq -r '(.finish_reason // "?") | sub(":[0-9]+"; "") | sub(":[0-9]+$"; "")' "$f" | sort | uniq -c | sort -rn | head -3; done
 
 # 턴 채널 (proactive vs reactive)
-rg -o 'keepalive turn scheduled for [a-z.-]+: channel=[a-z_]+' ~/me/.masc/logs/system_log_2026-09-01.jsonl | sort | uniq -c
+rg -o 'keepalive turn scheduled for [a-z.-]+: channel=[a-z_]+' "$M/logs/system_log_2026-09-01.jsonl" | sort | uniq -c
 
 # 사이클 실패 (keeper, runtime)
-rg -o '"[a-z.-]+: keeper cycle FAILED runtime=[^ ]+' ~/me/.masc/logs/system_log_2026-09-01.jsonl | sort | uniq -c | sort -rn
+rg -o '"[a-z.-]+: keeper cycle FAILED runtime=[^ ]+' "$M/logs/system_log_2026-09-01.jsonl" | sort | uniq -c | sort -rn
 
 # Board 후보 fan-out 과 판정
-cat ~/me/.masc/board_attention_candidates/{analyst,code-reviewer,edgar-a-poe-*,kidsnote-pr-jira-checker,lane-smith,polisher,rondo,sangsu}.jsonl \
+cat "$M"/board_attention_candidates/{analyst,code-reviewer,edgar-a-poe-*,kidsnote-pr-jira-checker,lane-smith,polisher,rondo,sangsu}.jsonl \
   | jq -r 'select(.recorded_at >= 1788220000 and .status.kind=="consumed") | "\(.signal.author)\t\(.status.judgment.verdict.decision)"' | sort | uniq -c
 
 # 샌드박스 리스너

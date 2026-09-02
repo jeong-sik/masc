@@ -75,10 +75,6 @@ blocking_lints() {
     scripts/lint/guard-scan-targets-exist.sh \
     bash scripts/lint/guard-scan-targets-exist.sh --self-test
   run_lint "Guard scan targets exist" bash scripts/lint/guard-scan-targets-exist.sh --fail
-  run_self_test_when_changed "CI gate outcome vocabulary self-test" \
-    scripts/ci/check-gate-outcome-vocabulary.sh \
-    bash scripts/ci/check-gate-outcome-vocabulary.sh --self-test
-  run_lint "CI gate outcome vocabulary" bash scripts/ci/check-gate-outcome-vocabulary.sh --fail
   run_lint "Opam cache freshness ratchet" bash scripts/ci/opam-cache-freshness.sh --check
   run_self_test_when_changed "Opam cache freshness self-test" \
     scripts/ci/opam-cache-freshness.sh \

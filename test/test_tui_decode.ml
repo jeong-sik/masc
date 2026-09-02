@@ -2438,16 +2438,38 @@ let test_decode_skill_activations_reuses_canonical_ledger_decoder () =
 
 (* Connectors. Shape is each connector's own connector_json; the fields below
    are the ones every connector emits. *)
-let connector_json ?(available = `Bool true) ?(connected = `Bool true)
-    ?(channel = `String "#release-deployment") () =
+let connector_json ?(id = "slack") ?(available = `Bool true)
+    ?(connected = `Bool true) ?(status = "connected")
+    ?(channel = `String "#release-deployment")
+    ?(bindings =
+      `List
+        [ `Assoc
+            [ ("channel_id", `String "C09TK9L4DV4")
+            ; ("keeper_name", `String "kidsnote-pr-jira-checker")
+            ]
+        ])
+    () =
   `Assoc
-    [ ("connector_id", `String "slack")
+    [ ("connector_id", `String id)
     ; ("display_name", `String "Slack")
     ; ("available", available)
     ; ("connected", connected)
-    ; ("status", `String "ready")
+    ; ("status", `String status)
     ; ("channel", channel)
     ; ("capabilities", `List [ `String "post" ])
+    ; ("error", `String "")
+    ; ("status_source", `String "in_process_gateway")
+    ; ("gateway_state", `String "connected")
+    ; ("trigger_policy", `String "mention_only")
+    ; ("gate_base_url", `Null)
+    ; ("binding_store_path", `String ".gate/runtime/slack/bindings.json")
+    ; ("binding_store_read_ok", `Bool true)
+    ; ("binding_store_error", `String "")
+    ; ("updated_at", `String "2026-08-23T09:00:00Z")
+    ; ("bot_token_present", `Bool true)
+    ; ("app_token_present", `Bool true)
+    ; ("pid", `Int 4242)
+    ; ("configured_bindings", bindings)
     ]
 
 let connector_snapshot_json ?(active = 1) connectors =
@@ -2474,7 +2496,28 @@ let test_decode_connector_snapshot_reads_the_live_shape () =
            Alcotest.(check bool) "available" true c.Tui_decode.cn_available;
            Alcotest.(check bool) "connected" true c.Tui_decode.cn_connected;
            Alcotest.(check (option string)) "channel"
-             (Some "#release-deployment") c.Tui_decode.cn_channel
+             (Some "#release-deployment") c.Tui_decode.cn_channel;
+           Alcotest.(check bool) "typed connected state" true
+             (c.Tui_decode.cn_connection = Tui_decode.Connector_connected);
+           Alcotest.(check (option string)) "trigger policy"
+             (Some "mention_only") c.Tui_decode.cn_trigger_policy;
+           Alcotest.(check (option bool)) "bot token presence" (Some true)
+             c.Tui_decode.cn_bot_token_present;
+           Alcotest.(check (option int)) "server pid" (Some 4242)
+             c.Tui_decode.cn_pid;
+           (match c.Tui_decode.cn_bindings with
+            | [ binding ] ->
+                Alcotest.(check string) "bound channel" "C09TK9L4DV4"
+                  binding.Tui_decode.cb_channel_id;
+                Alcotest.(check (option string)) "bound channel name"
+                  None binding.Tui_decode.cb_channel_name;
+                Alcotest.(check string) "bound keeper"
+                  "kidsnote-pr-jira-checker" binding.Tui_decode.cb_keeper_name
+            | bindings ->
+                Alcotest.failf "expected one binding, got %d"
+                  (List.length bindings))
+           ; Alcotest.(check int) "public response has no name mappings" 0
+               (List.length c.Tui_decode.cn_name_mappings)
        | cs -> Alcotest.failf "expected one connector, got %d" (List.length cs))
 
 let test_decode_connector_configured_but_unreachable () =
@@ -2484,7 +2527,7 @@ let test_decode_connector_configured_but_unreachable () =
   match
     Tui_decode.decode_connector_snapshot
       (connector_snapshot_json ~active:1
-         [ connector_json ~connected:(`Bool false) () ])
+         [ connector_json ~connected:(`Bool false) ~status:"disconnected" () ])
   with
   | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
       Alcotest.(check bool) "configured" true c.Tui_decode.cn_available;
@@ -2497,7 +2540,9 @@ let test_decode_connector_absent_flags_are_off () =
   match
     Tui_decode.decode_connector_snapshot
       (connector_snapshot_json ~active:0
-         [ connector_json ~available:`Null ~connected:`Null ~channel:`Null () ])
+         [ connector_json ~available:`Null ~connected:`Null ~status:"offline"
+             ~channel:`Null ()
+         ])
   with
   | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
       Alcotest.(check bool) "not available" false c.Tui_decode.cn_available;
@@ -2506,6 +2551,99 @@ let test_decode_connector_absent_flags_are_off () =
         c.Tui_decode.cn_channel
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_connector_rejects_contradictory_connection () =
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json
+         [ connector_json ~available:(`Bool false) ~connected:(`Bool true) () ])
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "connected while unavailable must be rejected"
+
+let test_decode_connector_keeps_connected_but_unavailable_distinct () =
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json
+         [ connector_json ~available:(`Bool false) ~connected:(`Bool true)
+             ~status:"offline" ()
+         ])
+  with
+  | Ok { Tui_decode.cs_connectors = [ connector ]; _ } ->
+      Alcotest.(check bool) "typed degraded connection" true
+        (connector.cn_connection = Tui_decode.Connector_connected_unavailable)
+  | Ok _ -> Alcotest.fail "expected one connector"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_connector_rejects_a_malformed_binding () =
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json
+         [ connector_json
+             ~bindings:
+               (`List
+                 [ `Assoc
+                     [ ("keeper_name", `String "kidsnote-pr-jira-checker") ]
+                 ])
+             ()
+         ])
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "a binding without channel_id must not disappear"
+
+let test_decode_connector_order_is_stable () =
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json
+         [ connector_json ~id:"slack" (); connector_json ~id:"discord" () ])
+  with
+  | Ok { Tui_decode.cs_connectors = first :: second :: []; _ } ->
+      Alcotest.(check string) "first id" "discord" first.cn_id;
+      Alcotest.(check string) "second id" "slack" second.cn_id
+  | Ok _ -> Alcotest.fail "expected two connectors"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_authenticated_name_page_enriches_connector () =
+  let page_json =
+    `Assoc
+      [ ("connector_id", `String "slack")
+      ; ("kind", `String "channel")
+      ; ("mapping_scope", `String "unscoped_historical")
+      ; ("current_workspace_id", `String "T012345")
+      ; ("path", `String ".masc/connector_names/slack-channels.jsonl")
+      ; ("offset", `Int 0)
+      ; ("limit", `Int 500)
+      ; ("total", `Int 1)
+      ; ("has_more", `Bool false)
+      ; ( "mappings"
+        , `List
+            [ `Assoc
+                [ ("id", `String "C09TK9L4DV4")
+                ; ("name", `String "kinossam-dev")
+                ]
+            ] )
+      ]
+  in
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json [ connector_json () ]),
+    Tui_decode.decode_connector_name_page page_json
+  with
+  | Ok { cs_connectors = [ connector ]; _ }, Ok page ->
+      let connector =
+        Tui_decode.connector_with_name_pages connector ~pages:[ page ] ~error:None
+      in
+      Alcotest.(check (option string)) "workspace remains separate provenance"
+        (Some "T012345") connector.cn_workspace_id;
+      Alcotest.(check (option string)) "mapping scope"
+        (Some "unscoped_historical") connector.cn_name_mapping_scope;
+      (match connector.cn_bindings with
+       | [ binding ] ->
+           Alcotest.(check (option string)) "binding gets learned name"
+             (Some "kinossam-dev") binding.cb_channel_name
+       | _ -> Alcotest.fail "expected one binding")
+  | Error err, _ | _, Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok _, Ok _ -> Alcotest.fail "expected one connector"
 
 (* Repositories. Shape is [repository_json] in the repositories route. *)
 let repository_json ?(keepers = [ "keeper.one" ]) ?(auto_sync = `Bool true) () =
@@ -6586,6 +6724,16 @@ let () =
           test_decode_connector_configured_but_unreachable;
         Alcotest.test_case "absent flags are off" `Quick
           test_decode_connector_absent_flags_are_off;
+        Alcotest.test_case "contradictory connection is rejected" `Quick
+          test_decode_connector_rejects_contradictory_connection;
+        Alcotest.test_case "connected but unusable stays distinct" `Quick
+          test_decode_connector_keeps_connected_but_unavailable_distinct;
+        Alcotest.test_case "malformed binding is rejected" `Quick
+          test_decode_connector_rejects_a_malformed_binding;
+        Alcotest.test_case "registry order is stabilized" `Quick
+          test_decode_connector_order_is_stable;
+        Alcotest.test_case "authenticated name page enriches connector" `Quick
+          test_authenticated_name_page_enriches_connector;
       ] );
     ( "decode_repositories",
       [

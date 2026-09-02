@@ -96,6 +96,18 @@ let test_people_and_channels_do_not_collide () =
   check (option string) "and the channel keeps its own" (Some "kinossam-dev")
     (Names.recall ~base_dir ~connector:"slack" ~scope:Names.Channel ~id:"X1")
 
+let test_entries_project_latest_names_in_id_order () =
+  with_temp_base @@ fun base_dir ->
+  Names.remember ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U2"
+    ~name:"Second" ();
+  Names.remember ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U1"
+    ~name:"First" ();
+  Names.remember ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U2"
+    ~name:"Renamed" ();
+  check (list (pair string string)) "latest sorted projection"
+    [ ("U1", "First"); ("U2", "Renamed") ]
+    (Names.entries ~base_dir ~connector:"slack" ~scope:Names.Person)
+
 let () =
   run "connector names"
     [ ( "recall"
@@ -111,5 +123,7 @@ let () =
             test_a_blank_is_not_an_answer
         ; test_case "people and channels do not collide" `Quick
             test_people_and_channels_do_not_collide
+        ; test_case "entries expose latest names in ID order" `Quick
+            test_entries_project_latest_names_in_id_order
         ] )
     ]

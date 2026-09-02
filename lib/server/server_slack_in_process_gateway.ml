@@ -269,6 +269,7 @@ type accepted_inbound =
 
 let accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ~channel_id
     ~thread_ts ~user_id ~user_name ~text ~ts ~mentions_bot ~is_app_mention =
+  Option.iter State.record_workspace_id team_id;
   match resolved_binding with
   | None ->
     (* No binding for this channel — drop quietly. The bot may sit in channels
@@ -730,6 +731,7 @@ let handle_ambient ?resolved_keeper_name ~base_dir ~team_id ~channel_id
     end
 
 let on_ambient ?resolved_keeper_name ?team_id ~base_dir (ev : Gw.slack_event) =
+  Option.iter State.record_workspace_id team_id;
   match ev with
   | Gw.Message_create
       { channel_id; thread_ts; user_id; user_name; text; ts; mentions_bot
@@ -831,6 +833,7 @@ let start ~sw ~env ~state =
           without it, [app_mention] events still trigger (a mention by
           construction); only plain-message mention detection on the [message]
           event degrades. *)
+       State.clear_workspace_id ();
        let bot_user_id, team_id, user_directory =
          match Env_config_slack.bot_token_opt () with
          | None ->
@@ -855,6 +858,7 @@ let start ~sw ~env ~state =
            (match Slack_rest_client.auth_test ~clock ~token:bot_token () with
             | Ok { user_id; team_id } ->
               State.record_ready ~bot_user_id:user_id;
+              Option.iter State.record_workspace_id team_id;
               Log.Server.info "RFC-0317: Slack auth.test ok (bot_user_id=%s)"
                 user_id;
               Some user_id, team_id, user_directory

@@ -577,7 +577,10 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       ; b Meta "R" "refresh"
       ]
   | Detail_channels ->
-      [ b Act "b / u" "bind / unbind"
+      [ b Navigate "j/k" "transport"
+      ; b Navigate "J/K" "binding"
+      ; b Navigate "PgUp/PgDn" "detail page"
+      ; b Act "b / u" "bind / unbind"
           ~help:"bind or unbind a channel for this Keeper"
       ]
   | Detail_info | Detail_secrets | Detail_automation | Detail_runs -> []

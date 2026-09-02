@@ -6164,21 +6164,204 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           | Some _ | None -> [ Ansi.dim ^ "  (loading\xe2\x80\xa6)" ^ Ansi.reset ])
     in
     let channel_lines =
-      match state.connectors with
-      | None -> [ Ansi.dim ^ "  (loading channel transports…)" ^ Ansi.reset ]
-      | Some snapshot ->
-          [ Ansi.dim
-            ^ "  Transport reachability. Bind and unbind actions target "
-            ^ Terminal_text.single_line k.k_name ^ "." ^ Ansi.reset
+      match state.connectors_error, state.connectors with
+      | Some detail, None ->
+          [ (Theme.bad ()) ^ "  channel transports unavailable: "
+            ^ Terminal_text.single_line detail ^ Ansi.reset
           ]
-          @ List.map
-              (fun (connector : Tui_decode.connector) ->
-                 Printf.sprintf "  %-16s %-11s %-11s %s"
-                   (Terminal_text.single_line connector.cn_display_name)
-                   (if connector.cn_available then "configured" else "unavailable")
-                   (if connector.cn_connected then "connected" else "offline")
-                   (Terminal_text.single_line connector.cn_status))
-              snapshot.cs_connectors
+      | _, None -> [ Ansi.dim ^ "  (loading channel transports…)" ^ Ansi.reset ]
+      | error, Some snapshot ->
+          let connectors = snapshot.cs_connectors in
+          let selected_index =
+            max 0 (min state.connectors_cursor (List.length connectors - 1))
+          in
+          let connection_text (connector : Tui_decode.connector) =
+            match connector.cn_connection with
+            | Tui_decode.Connector_connected -> "CONNECTED"
+            | Connector_connected_unavailable -> "CONNECTED / UNAVAILABLE"
+            | Connector_disconnected -> "DISCONNECTED"
+            | Connector_offline -> "UNAVAILABLE"
+            | Connector_stale -> "STALE"
+          in
+          let connection_label (connector : Tui_decode.connector) =
+            match connector.cn_connection with
+            | Tui_decode.Connector_connected ->
+                (Theme.ok ()) ^ "● CONNECTED" ^ Ansi.reset
+            | Connector_connected_unavailable ->
+                (Theme.warn ()) ^ "● CONNECTED / UNAVAILABLE" ^ Ansi.reset
+            | Connector_disconnected ->
+                (Theme.bad ()) ^ "● DISCONNECTED" ^ Ansi.reset
+            | Connector_offline -> Ansi.dim ^ "○ UNAVAILABLE" ^ Ansi.reset
+            | Connector_stale -> (Theme.warn ()) ^ "● STALE" ^ Ansi.reset
+          in
+          let transport_rows =
+            List.mapi
+              (fun index (connector : Tui_decode.connector) ->
+                 let here_count =
+                   List.length
+                     (List.filter
+                        (fun (binding : Tui_decode.connector_binding) ->
+                           String.equal binding.cb_keeper_name k.k_name)
+                        connector.cn_bindings)
+                 in
+                 let line =
+                   "  " ^ (if index = selected_index then "▸ " else "  ")
+                   ^ fit_width
+                       (Terminal_text.single_line connector.cn_display_name)
+                       14
+                   ^ "  " ^ fit_width (connection_text connector) 12
+                   ^ Printf.sprintf "  %d here / %d total" here_count
+                       (List.length connector.cn_bindings)
+                 in
+                 if index = selected_index then Ansi.reverse ^ line ^ Ansi.reset
+                 else line)
+              connectors
+          in
+          let selected_lines =
+            match List.nth_opt connectors selected_index with
+            | None -> [ Ansi.dim ^ "  (no channel transports registered)" ^ Ansi.reset ]
+            | Some connector ->
+                let optional_row label value =
+                  match value with
+                  | None -> []
+                  | Some value ->
+                      [ Printf.sprintf "  %-18s %s" label
+                          (Terminal_text.single_line value)
+                      ]
+                in
+                let optional_bool_row label value =
+                  optional_row label
+                    (Option.map (fun present -> if present then "yes" else "no") value)
+                in
+                let optional_int_row label value =
+                  optional_row label (Option.map string_of_int value)
+                in
+                let keeper_bindings =
+                  List.filter
+                    (fun (binding : Tui_decode.connector_binding) ->
+                       String.equal binding.cb_keeper_name k.k_name)
+                    connector.cn_bindings
+                in
+                let selected_binding =
+                  List.nth_opt keeper_bindings state.connectors_binding_cursor
+                in
+                let binding_reference (binding : Tui_decode.connector_binding) =
+                  match binding.cb_channel_name with
+                  | None -> Terminal_text.single_line binding.cb_channel_id
+                  | Some name ->
+                      Printf.sprintf "%s (%s)"
+                        (Terminal_text.single_line name)
+                        (Terminal_text.single_line binding.cb_channel_id)
+                in
+                let runtime_state =
+                  match connector.cn_gateway_state, connector.cn_poll_state with
+                  | Some value, _ | None, Some value -> Some value
+                  | None, None -> None
+                in
+                let store_state =
+                  match connector.cn_binding_store_read_ok with
+                  | Some true -> Some "readable"
+                  | Some false -> Some "UNREADABLE"
+                  | None -> None
+                in
+                let rec binding_lines here_index = function
+                  | [] -> []
+                  | (binding : Tui_decode.connector_binding) :: rest ->
+                      let here = String.equal binding.cb_keeper_name k.k_name in
+                      let selected =
+                        here && here_index = state.connectors_binding_cursor
+                      in
+                      let line =
+                        Printf.sprintf "    %s %s → %s%s"
+                          (if selected then "▸" else " ")
+                          (binding_reference binding)
+                          (Terminal_text.single_line binding.cb_keeper_name)
+                          (if here then "  (this Keeper)" else "")
+                      in
+                      (if selected then Ansi.reverse ^ line ^ Ansi.reset else line)
+                      :: binding_lines (if here then here_index + 1 else here_index) rest
+                in
+                let binding_lines =
+                  match connector.cn_bindings with
+                  | [] -> [ Ansi.dim ^ "    (no channel bindings)" ^ Ansi.reset ]
+                  | bindings -> binding_lines 0 bindings
+                in
+                [ ""
+                ; Ansi.bold ^ "  Selected · "
+                  ^ Terminal_text.single_line connector.cn_display_name
+                  ^ Ansi.reset
+                ; Printf.sprintf "  %-18s %s" "Binding target"
+                    (match selected_binding with
+                     | None -> "(none for this Keeper)"
+                     | Some binding -> binding_reference binding)
+                ; Printf.sprintf "  %-18s %s · %s" "Connection"
+                    (connection_label connector)
+                    (Terminal_text.single_line connector.cn_status)
+                ; Printf.sprintf "  %-18s %s" "MASC API"
+                    (Printf.sprintf "%s:%d"
+                       Masc_network_defaults.masc_http_loopback_peer state.port)
+                ; Printf.sprintf "  %-18s %s" "Channel type"
+                    (Terminal_text.single_line_or ~default:"-" connector.cn_channel)
+                ]
+                @ optional_row "Runtime state" runtime_state
+                @ optional_row "Status source" connector.cn_status_source
+                @ optional_row "Remote endpoint" connector.cn_endpoint
+                @ optional_row "Status file" connector.cn_status_path
+                @ optional_row "Binding store" connector.cn_binding_store_path
+                @ optional_row "Store state" store_state
+                @ optional_row "Binding source" connector.cn_binding_source
+                @ optional_row "Trigger policy" connector.cn_trigger_policy
+                @ optional_row "Reply mode" connector.cn_reply_mode
+                @ optional_row "Chat database" connector.cn_chat_db_path
+                @ optional_row "Bot user" connector.cn_bot_user_name
+                @ optional_row "Bot user id" connector.cn_bot_user_id
+                @ optional_bool_row "Bot token ready" connector.cn_bot_token_present
+                @ optional_bool_row "App token ready" connector.cn_app_token_present
+                @ optional_bool_row "Gate healthy" connector.cn_gate_healthy
+                @ optional_int_row "Server pid" connector.cn_pid
+                @ optional_int_row "Guilds" connector.cn_guild_count
+                @ optional_row "Workspace id" connector.cn_workspace_id
+                @ optional_row "Channel names" connector.cn_channel_names_path
+                @ optional_row "People names" connector.cn_people_names_path
+                @ optional_row "Mapping scope" connector.cn_name_mapping_scope
+                @ optional_row "Names read error" connector.cn_names_error
+                @ optional_row "Updated" connector.cn_updated_at
+                @ optional_row "Connection error" connector.cn_error
+                @ optional_row "Store error" connector.cn_binding_store_error
+                @ [ ""; Ansi.bold ^ "  Channel → Keeper bindings" ^ Ansi.reset ]
+                @ binding_lines
+                @ (match connector.cn_name_mappings with
+                   | [] -> []
+                   | mappings ->
+                       [ ""; Ansi.bold ^ "  Known ID ↔ names" ^ Ansi.reset ]
+                       @ List.map
+                           (fun (mapping : Tui_decode.connector_name_mapping) ->
+                              Printf.sprintf "    %-7s %s ↔ %s"
+                                (match mapping.cnm_kind with
+                                 | Tui_decode.Connector_channel_name -> "channel"
+                                 | Connector_person_name -> "person")
+                                (Terminal_text.single_line mapping.cnm_id)
+                                (Terminal_text.single_line mapping.cnm_name))
+                           mappings)
+                @ [ ""
+                  ; Ansi.dim
+                    ^ "  j/k transport · J/K this-Keeper binding · b bind · u unbind"
+                    ^ Ansi.reset
+                  ; Ansi.dim ^ "  PgUp/PgDn scrolls this detail" ^ Ansi.reset
+                  ; Ansi.dim ^ "  r reloads bindings and learned names" ^ Ansi.reset
+                  ]
+          in
+          [ Printf.sprintf "  %d transports · %d available · actions target %s"
+              snapshot.cs_total snapshot.cs_active
+              (Terminal_text.single_line k.k_name)
+          ]
+          @ (match error with
+             | None -> []
+             | Some detail ->
+                 [ (Theme.bad ()) ^ "  refresh failed: "
+                   ^ Terminal_text.single_line detail ^ Ansi.reset
+                 ])
+          @ transport_rows @ selected_lines
     in
     let automation_lines =
       (* This tab reads the Keeper's own page from the server rather than

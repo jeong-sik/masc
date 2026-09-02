@@ -374,8 +374,8 @@ let () =
             test_missing_keeper_is_no_session
         ; test_case "dashboard attachment bypasses inventory cache" `Quick
             test_dashboard_projection_is_live_outside_inventory_cache
- ; test_case "absent keeper is not found, not warming" `Quick
-     test_absent_keeper_is_not_found_not_warming
+        ; test_case "absent keeper is not found, not warming" `Quick
+            test_absent_keeper_is_not_found_not_warming
         ; test_case "corrupt ledger is unavailable" `Quick
             test_corrupt_ledger_is_unavailable_not_empty
         ; test_case "exact trace uses typed ledger" `Quick

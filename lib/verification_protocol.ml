@@ -193,7 +193,10 @@ let notify_submit_for_verification ~(config : Workspace.config)
       ~title:spec.board_title
       ~post_kind:Board.System_post
       ~meta_json
-      ~visibility:Board.Internal
+        (* Unlisted: the completion authority reads the verification store,
+           not the Board, and the operator reads the post by id. No keeper
+           needs to discover a request receipt, so none judges it. *)
+      ~visibility:Board.Unlisted
       ~hearth:"verification"
       ()
     with
@@ -295,7 +298,12 @@ let post_verdict_board
       ~content
       ~post_kind:Board.System_post
       ~meta_json:(verification_verdict_metadata ~authority ~task_id ~verification_id ~verdict)
-      ~visibility:Board.Internal
+        (* Unlisted: a rejection reaches the producer as a typed stimulus
+           ([Completion_authority_wakeup]) and an approval as the Done
+           transition clearing its current task, so no keeper needs to
+           discover the verdict receipt. The stalled receipt below stays
+           Internal — the Board is its only path to the producer. *)
+      ~visibility:Board.Unlisted
       ~hearth:"verification"
       ()
   with

@@ -1789,11 +1789,7 @@ let comment_audience content =
   Masc.Board.audience_for_comment ~content
 
 let post_audience content =
-  Masc.Board.audience_for_post
-    ~visibility:Masc.Board.Public
-    ~post_kind:Masc.Board.Human_post
-    ~title:"t"
-    ~content
+  Masc.Board.audience_for_post ~visibility:Masc.Board.Public ~title:"t" ~content
 
 let label_of = function
   | Ok audience -> Masc.Board.audience_label audience

@@ -560,7 +560,6 @@ let create_post_with_audience
       match
         Board_audience.audience_for_post
           ~visibility
-          ~post_kind:normalized_kind
           ~title:normalized_title
           ~content:normalized_body
       with

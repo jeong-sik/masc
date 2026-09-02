@@ -10,7 +10,6 @@ val direct_targets_of_text : string -> Agent_id.t list
 
 val audience_for_post
   :  visibility:visibility
-  -> post_kind:post_kind
   -> title:string
   -> content:string
   -> (audience, board_error) result
@@ -20,11 +19,10 @@ val audience_for_post
     prose, not as a failed address, so it neither becomes a target nor rejects
     the post.
 
-    An unaddressed post by a person or a keeper ([Human_post],
-    [Automation_post]) is [Discoverable]. An unaddressed [System_post] — a
-    runtime receipt such as a verification verdict or a fusion result — is
-    [Thread_participants]: its owner is woken by a typed stimulus, and other
-    keepers reach it only by joining its thread or by explicit address. *)
+    An unaddressed [Public] or [Internal] post is [Discoverable]. An
+    unaddressed [Unlisted] post is [Thread_participants]: it is not in any
+    keeper's feed, so no attention judgment is spent on it, and a keeper
+    reaches it by explicit address or by joining its thread. *)
 
 val audience_for_comment : content:string -> (audience, board_error) result
 (** An unaddressed comment belongs to [Thread_participants]. *)

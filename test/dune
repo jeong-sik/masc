@@ -360,7 +360,6 @@
   test_keeper_context_core_dedup
   test_keeper_prompt_metrics
   test_keeper_reaction_ledger
-  test_cache_metrics_wiring
   test_keeper_tool_execute_descriptor_variant
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
@@ -702,7 +701,6 @@
   test_keeper_context_core_dedup
   test_keeper_prompt_metrics
   test_keeper_reaction_ledger
-  test_cache_metrics_wiring
   test_keeper_tool_execute_descriptor_variant
   test_observability_redact
   test_keeper_tool_call_sse_io_preview

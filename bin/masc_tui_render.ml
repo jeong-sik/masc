@@ -4575,7 +4575,9 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
              else Ansi.cyan ^ "l" ^ Ansi.reset ^ " logs")
           ; Ansi.cyan ^ "t" ^ Ansi.reset ^ " calls"
           ; gate_hint
-          ; Ansi.cyan ^ "u" ^ Ansi.reset ^ " runtime"
+          ; Ansi.cyan
+            ^ (if state.view = Keepers Keeper_detail then "U" else "u")
+            ^ Ansi.reset ^ " runtime"
             (* Dimmed rather than dropped, the same way an unavailable
                lifecycle key is: chat lives in detail, and a key that vanishes
                between surfaces reads as a key that does not exist. *)
@@ -6498,8 +6500,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
               state.keeper_sandbox_view_error
           in
           let logs =
-            match state.keeper_sandbox_logs_loading with
-            | Some keeper_name when String.equal keeper_name k.k_name ->
+            match state.keeper_sandbox_logs_inflight with
+            | Some (keeper_name, _) when String.equal keeper_name k.k_name ->
               [ Ansi.dim ^ "  (loading actual container logs…)" ^ Ansi.reset ]
             | Some _ | None ->
               match state.keeper_sandbox_logs_error with
@@ -15635,7 +15637,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                 Plain
                   ( context_composition_lines ~cols
                       ~turn_back:state.context_inspector_turn_back selection
-                  , None ))
+                  , None )
             | Error detail ->
                 Plain
                   ( [ (Theme.bad ()) ^ "  Composition unavailable: "

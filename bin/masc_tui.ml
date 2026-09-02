@@ -1605,7 +1605,7 @@ type async_msg =
   | Keeper_sandbox_view_loaded of
       string * (Masc_tui_keeper_sandbox.t, string) result
   | Keeper_sandbox_logs_loaded of
-      string * (Masc_tui_keeper_sandbox.logs, string) result
+      string * int * (Masc_tui_keeper_sandbox.logs, string) result
   | Runtime_config_view_loaded of (string * string list, string) result
   | Runtime_params_loaded of
       (Tui_decode.runtime_param_row list, string) result
@@ -3253,7 +3253,9 @@ let launch_keeper_sandbox_view state ~mailbox keeper_name =
 let launch_keeper_sandbox_logs state ~mailbox keeper_name =
   let host = server_peer_host in
   let port = state.port in
-  state.keeper_sandbox_logs_loading <- Some keeper_name;
+  state.keeper_sandbox_logs_generation <- state.keeper_sandbox_logs_generation + 1;
+  let generation = state.keeper_sandbox_logs_generation in
+  state.keeper_sandbox_logs_inflight <- Some (keeper_name, generation);
   let run () =
     let result =
       try
@@ -3263,7 +3265,8 @@ let launch_keeper_sandbox_logs state ~mailbox keeper_name =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Keeper_sandbox_logs_loaded (keeper_name, result))
+    enqueue_async mailbox
+      (Keeper_sandbox_logs_loaded (keeper_name, generation, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -3273,7 +3276,7 @@ let launch_keeper_sandbox_logs state ~mailbox keeper_name =
   | None ->
     enqueue_async mailbox
       (Keeper_sandbox_logs_loaded
-         (keeper_name, Error "Eio switch is unavailable"))
+         (keeper_name, generation, Error "Eio switch is unavailable"))
 
 let launch_github_identity_view state ~mailbox keeper_name =
   let host = server_peer_host in
@@ -8227,14 +8230,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             state.keeper_sandbox_view <- Some (keeper_name, reading);
             state.keeper_sandbox_view_error <- None
         | Error detail -> state.keeper_sandbox_view_error <- Some detail)
-  | Keeper_sandbox_logs_loaded (keeper_name, result) -> (
-      let still_selected =
-        match List.nth_opt state.keepers state.keeper_cursor with
-        | Some keeper -> String.equal keeper.k_name keeper_name
-        | None -> false
+  | Keeper_sandbox_logs_loaded (keeper_name, generation, result) -> (
+      let is_current =
+        state.keeper_sandbox_logs_inflight = Some (keeper_name, generation)
       in
-      if still_selected then begin
-        state.keeper_sandbox_logs_loading <- None;
+      if is_current then begin
+        state.keeper_sandbox_logs_inflight <- None;
         match result with
         | Ok logs ->
           state.keeper_sandbox_logs <- Some (keeper_name, logs);
@@ -13190,6 +13191,9 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail when state.detail_tab = Detail_channels ->
                 state.detail_scroll <-
                   max 0 (state.detail_scroll + (direction * page))
+            | Keepers Keeper_detail ->
+                state.detail_scroll <-
+                  max 0 (state.detail_scroll + (direction * page))
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
@@ -14743,7 +14747,8 @@ and is loaded on demand through keeper_skill.
              ~keeper_name:keeper.k_name ~mode
        | Some "u" | Some "U"
          when (match state.view with
-               | Keepers Keeper_list | Keepers Keeper_detail -> true
+               | Keepers Keeper_list -> true
+               | Keepers Keeper_detail -> key = Some "U"
                | _ -> false)
               && state.keeper_cursor < List.length state.keepers ->
            (* Open the runtime picker for the keeper under the cursor. The

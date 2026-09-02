@@ -234,8 +234,6 @@ let user_message ?turn_decision ?current_task ?active_goal_summaries
 
 (* --- Previous turn stop: the loop guard's reason reaches the next turn --- *)
 
-let contains ~sub body = Option.is_some (Astring.String.find_sub ~sub body)
-
 (* The live shape from 2026-09-01: kidsnote-pr-jira-checker ended 259 of 361
    turns on the same repeated Jira query and repeated it next turn. The line
    has to name the tool and the count, because that is what the model can
@@ -249,11 +247,11 @@ let test_repeated_tool_call_stop_is_named_in_the_next_prompt () =
       base_observation
   in
   check bool "the section that carries wake reasons carries the stop" true
-    (contains ~sub:"### Autonomous Trigger" body);
+    (contains ~needle:"### Autonomous Trigger" body);
   check bool "the tool is named" true
-    (contains ~sub:"`atlassian_searchJiraIssuesUsingJql` was called 3 times" body);
+    (contains ~needle:"`atlassian_searchJiraIssuesUsingJql` was called 3 times" body);
   check bool "the model is told the result did not change" true
-    (contains ~sub:"returned the same result" body)
+    (contains ~needle:"returned the same result" body)
 ;;
 
 let test_repeated_text_stop_is_named_in_the_next_prompt () =
@@ -265,13 +263,13 @@ let test_repeated_text_stop_is_named_in_the_next_prompt () =
       base_observation
   in
   check bool "the repeated-message count is named" true
-    (contains ~sub:"wrote the same message 3 times" body)
+    (contains ~needle:"wrote the same message 3 times" body)
 ;;
 
 let test_no_previous_stop_renders_no_line () =
   let body = user_message base_observation in
   check bool "a completed or first turn says nothing about a previous stop" false
-    (contains ~sub:"- Previous turn:" body)
+    (contains ~needle:"- Previous turn:" body)
 ;;
 
 (* --- Own Recent Actions: arguments ride on refusals --- *)

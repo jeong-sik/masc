@@ -66,12 +66,13 @@ val keeper_memory_write_with_outcome
 type memory_write_error_kind =
   | Content_empty
   | Source_path_invalid
-  | Source_read_failed
+  | Source_read_failed of Keeper_memory_source_current.source_read_failure
   | Derivation_incomplete
   | Derivation_invalid
   | Derived_source_path_unsupported
   | Unsupported_derivation
   | Persistence_failed
+  | Commit_receipt_inconsistent
   | No_memory_write_error
 
 val memory_write_error_kind_to_string : memory_write_error_kind -> string

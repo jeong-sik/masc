@@ -110,8 +110,8 @@ let test_network_observation_capabilities () =
        ~operation:"network_read"
        ~input:(network_input ~capability:"web_search"));
   check bool
-    "web_fetch stays with the judge (caller-chosen address)"
-    false
+    "web_fetch reads without judgment (address boundary is the fetch's own)"
+    true
     (Readonly.observation_only_request
        ~operation:"network_read"
        ~input:(network_input ~capability:"web_fetch"));
@@ -135,8 +135,8 @@ let test_network_observation_capabilities () =
        ~input:(gate_input [ "ls" ]));
   check
     (Alcotest.list Alcotest.string)
-    "observation network set is closed at web_search"
-    [ "web_search" ]
+    "observation network set is closed at web_search and web_fetch"
+    [ "web_search"; "web_fetch" ]
     Readonly.observation_network_capabilities
 ;;
 

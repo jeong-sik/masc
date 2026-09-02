@@ -154,15 +154,27 @@ let docker_sandbox input =
 
 (* ── network_read ────────────────────────────────────────────────────── *)
 
-(* [network_read] with the [web_search] capability is observation-only in
-   the same deterministic sense as the argv table: it runs in the server
-   process, hands the query to a configured search provider, and its only
-   output is the hits payload — no filesystem, no exec, no caller-chosen
-   address. [web_fetch] is deliberately absent: it fetches an arbitrary URL
-   from the host process, so which address it touches is exactly the
-   question the configured judge weighs. Closed on purpose, like the
-   command tables above. *)
-let observation_network_capabilities = [ "web_search" ]
+(* [network_read] with a capability in this set is observation-only in the
+   same deterministic sense as the argv table: it runs in the server
+   process and its only output is the response payload — no filesystem,
+   no exec.
+
+   [web_search] hands the query to a configured search provider; there is
+   no caller-chosen address at all.
+
+   [web_fetch] takes a caller-chosen URL, and the one question that matters
+   for it — which address the host process reaches — is answered before a
+   byte leaves the process: [Tool_misc_web_fetch] refuses loopback,
+   link-local, private-network, unspecified, and localhost destinations on
+   the initial URL and on every redirect hop. That check reads the URL
+   literally, and a judge handed the same string reads it the same way;
+   neither resolves DNS. So the judge could not refuse an address the fetch
+   admits, and in practice never did: 2026-09-01..02 the Gate judged 319
+   network_read requests, approved 319, denied 0, and each fetch waited a
+   median 173 s (p90 447 s) between request and replay for the 98 measured
+   after the 09-02 restart. Closed on purpose, like the command tables
+   above. *)
+let observation_network_capabilities = [ "web_search"; "web_fetch" ]
 
 let network_capability_of_gate_input input =
   match input with

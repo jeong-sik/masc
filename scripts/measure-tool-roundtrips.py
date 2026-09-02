@@ -41,9 +41,14 @@ Artifact paging: keeper_artifact_read calls are additionally grouped by
 (keeper, sha256) to measure page arithmetic — a blob whose total_bytes fits
 one 65536-byte page should cost one call. `excess calls` counts calls beyond
 ceil(total_bytes / page) per blob; `small explicit slices` counts calls that
-lowered max_bytes below the default. Both are expected to approach zero after
-the description fix in PR #32412 deploys; if they persist over a full day,
-the wording diagnosis was wrong — re-open instead of stacking mitigations.
+lowered max_bytes below the default.
+
+Every class is also split by keeper. The first post-deploy window (r2,
+2026-09-02) showed the artifact excess was two keepers' behaviour — one
+probing large artifacts in 650-byte slices as a search substitute, one
+misreading a whole first page as a nested blob — while a third keeper on the
+same lane read every blob in one call. A tool-level number cannot tell those
+apart; the keeper tables can.
 
 Usage:
     scripts/measure-tool-roundtrips.py --date 2026-09-01
@@ -142,7 +147,8 @@ def classify_runs(turns: dict[tuple, list[dict]]):
     """
     saved = collections.Counter()
     by_tool: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
-    for calls in turns.values():
+    by_keeper: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    for (keeper, _turn_id, _trace_id), calls in turns.items():
         index = 0
         while index < len(calls):
             end = index
@@ -161,8 +167,9 @@ def classify_runs(turns: dict[tuple, list[dict]]):
                     label = "fanout"
                 saved[label] += length - 1
                 by_tool[label][tool] += length - 1
+                by_keeper[str(keeper)][tool] += length - 1
             index = end + 1
-    return saved, by_tool
+    return saved, by_tool, by_keeper
 
 
 def unchanged_recall_pairs(turns: dict[tuple, list[dict]]) -> collections.Counter:
@@ -211,15 +218,19 @@ def parse_output_object(output: object) -> dict | None:
     return None
 
 
-def artifact_paging(rows: list[dict]) -> dict[str, int]:
+def artifact_paging(rows: list[dict]) -> tuple[dict[str, int], list[tuple[str, dict[str, int]]]]:
     """Per-blob call arithmetic for keeper_artifact_read.
 
     Groups calls by (keeper, sha256). A blob whose total_bytes fits one page
     should cost one call; anything beyond ceil(total_bytes / page) is excess.
     total_bytes comes from the blob's first parseable response.
+
+    Returns the fleet summary and the same counters per keeper, ordered by
+    excess calls descending so the keepers that own the waste come first.
     """
-    per_blob: dict[tuple[object, str], dict[str, object]] = {}
+    per_blob: dict[tuple[str, str], dict[str, object]] = {}
     small_slices = 0
+    small_slices_by_keeper: collections.Counter = collections.Counter()
     for row in rows:
         if row.get("tool") != ARTIFACT_READ_TOOL:
             continue
@@ -229,38 +240,49 @@ def artifact_paging(rows: list[dict]) -> dict[str, int]:
         sha = value.get("sha256")
         if not isinstance(sha, str):
             continue
+        keeper = str(row.get("keeper"))
         max_bytes = value.get("max_bytes")
         if isinstance(max_bytes, int) and max_bytes < ARTIFACT_PAGE_BYTES:
             small_slices += 1
-        entry = per_blob.setdefault(
-            (row.get("keeper"), sha), {"calls": 0, "total_bytes": None}
-        )
+            small_slices_by_keeper[keeper] += 1
+        entry = per_blob.setdefault((keeper, sha), {"calls": 0, "total_bytes": None})
         entry["calls"] = int(entry["calls"]) + 1  # type: ignore[arg-type]
         if entry["total_bytes"] is None:
             parsed = parse_output_object(row.get("output"))
             if parsed is not None and isinstance(parsed.get("total_bytes"), int):
                 entry["total_bytes"] = parsed["total_bytes"]
 
-    calls_per_blob = [int(entry["calls"]) for entry in per_blob.values()]  # type: ignore[arg-type]
-    excess = 0
-    sized_blobs = 0
-    for entry in per_blob.values():
-        total_bytes = entry["total_bytes"]
-        if isinstance(total_bytes, int):
-            sized_blobs += 1
-            minimal = max(1, -(-total_bytes // ARTIFACT_PAGE_BYTES))
-            blob_calls = int(entry["calls"])  # type: ignore[arg-type]
-            if blob_calls > minimal:
-                excess += blob_calls - minimal
-    return {
-        "blobs": len(per_blob),
-        "calls": sum(calls_per_blob),
-        "one_call_blobs": sum(1 for count in calls_per_blob if count == 1),
-        "max_calls": max(calls_per_blob, default=0),
-        "excess_calls": excess,
-        "sized_blobs": sized_blobs,
-        "small_slices": small_slices,
-    }
+    def summarize(entries: list[dict[str, object]], small: int) -> dict[str, int]:
+        calls_per_blob = [int(entry["calls"]) for entry in entries]  # type: ignore[arg-type]
+        excess = 0
+        sized_blobs = 0
+        for entry in entries:
+            total_bytes = entry["total_bytes"]
+            if isinstance(total_bytes, int):
+                sized_blobs += 1
+                minimal = max(1, -(-total_bytes // ARTIFACT_PAGE_BYTES))
+                blob_calls = int(entry["calls"])  # type: ignore[arg-type]
+                if blob_calls > minimal:
+                    excess += blob_calls - minimal
+        return {
+            "blobs": len(entries),
+            "calls": sum(calls_per_blob),
+            "one_call_blobs": sum(1 for count in calls_per_blob if count == 1),
+            "max_calls": max(calls_per_blob, default=0),
+            "excess_calls": excess,
+            "sized_blobs": sized_blobs,
+            "small_slices": small,
+        }
+
+    entries_by_keeper: dict[str, list[dict[str, object]]] = collections.defaultdict(list)
+    for (keeper, _sha), entry in per_blob.items():
+        entries_by_keeper[keeper].append(entry)
+    by_keeper = [
+        (keeper, summarize(entries, small_slices_by_keeper[keeper]))
+        for keeper, entries in entries_by_keeper.items()
+    ]
+    by_keeper.sort(key=lambda item: (-item[1]["excess_calls"], -item[1]["calls"], item[0]))
+    return summarize(list(per_blob.values()), small_slices), by_keeper
 
 
 def batch_size_histogram(rows: list[dict]) -> collections.Counter:
@@ -272,7 +294,7 @@ def batch_size_histogram(rows: list[dict]) -> collections.Counter:
 
 def render(rows: list[dict], top: int) -> str:
     turns = group_turns(rows)
-    saved, by_tool = classify_runs(turns)
+    saved, by_tool, by_keeper = classify_runs(turns)
     unchanged = unchanged_recall_pairs(turns)
     probes, probes_first_failed = probe_pairs(turns)
     batches = batch_size_histogram(rows)
@@ -297,6 +319,18 @@ def render(rows: list[dict], top: int) -> str:
         tops = ", ".join(f"{tool} {count}" for tool, count in by_tool[label].most_common(3))
         lines.append(f"| {label} | {saved[label]} | {tops} |")
     lines.append("")
+    lines.append("### by keeper")
+    lines.append("")
+    lines.append("| keeper | avoidable round-trips | top tools |")
+    lines.append("|---|---:|---|")
+    keeper_totals = sorted(
+        ((sum(counter.values()), keeper) for keeper, counter in by_keeper.items()),
+        reverse=True,
+    )
+    for total, keeper in keeper_totals[:top]:
+        tops = ", ".join(f"{tool} {count}" for tool, count in by_keeper[keeper].most_common(3))
+        lines.append(f"| {keeper} | {total} | {tops} |")
+    lines.append("")
     lines.append("## unchanged-recall pairs (keeper_tasks_list self-contradiction)")
     lines.append("")
     if unchanged:
@@ -310,7 +344,7 @@ def render(rows: list[dict], top: int) -> str:
     lines.append(f"- pairs: {probes}")
     lines.append(f"- pairs whose first call failed: {probes_first_failed}")
     lines.append("")
-    paging = artifact_paging(rows)
+    paging, paging_by_keeper = artifact_paging(rows)
     lines.append("## artifact paging (keeper_artifact_read)")
     lines.append("")
     if paging["blobs"]:
@@ -331,6 +365,14 @@ def render(rows: list[dict], top: int) -> str:
             f"- small explicit slices (max_bytes < {ARTIFACT_PAGE_BYTES}): "
             f"{paging['small_slices']}"
         )
+        lines.append("")
+        lines.append("| keeper | blobs | calls | one-call blobs | excess calls | small slices |")
+        lines.append("|---|---:|---:|---:|---:|---:|")
+        for keeper, stats in paging_by_keeper[:top]:
+            lines.append(
+                f"| {keeper} | {stats['blobs']} | {stats['calls']} | {stats['one_call_blobs']} "
+                f"| {stats['excess_calls']} | {stats['small_slices']} |"
+            )
     else:
         lines.append("- no keeper_artifact_read calls")
     lines.append("")

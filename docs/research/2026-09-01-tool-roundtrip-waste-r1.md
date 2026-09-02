@@ -128,24 +128,36 @@ Orca(stablyai/orca) 소스를 읽고 대조했다. 수렴 지점:
 
 측정: `MASC_BASE_PATH=<base-path> scripts/measure-tool-roundtrips.py --date 2026-09-02` (09:35 KST 실행)
 
-| 지표 | r1 (09-01 전일) | r2 (09-02 부분) |
-|---|---:|---:|
-| tool_call 행 / 턴 | 7,515 / 1,459 | 462 / 59 |
-| 낭비된 왕복 | 2,115 (28.1%) | 259 (56.1%) |
-| — fanout | 1,642 | 145 |
-| — duplicate | 292 | 97 |
-| — probing | 181 | 17 |
-| unchanged 직후 동일-인자 재호출 쌍 | 211 | 0 |
-| batch_size=1 비율 | 87.0% | 88.7% |
-| artifact_read: blob / 호출 | 477 / 1,581 | 19 / 58 |
-| artifact_read: 페이지 산수 초과 호출 | 968 | 38 |
-| artifact_read: 65536 미만 명시 조각 | 96.5% | 89.7% |
+r1 표의 수치는 09-01 20:00 KST 시점(7,515행)이었다. 전일 전체는 그 두 배가 넘는다 — 저녁·밤에 9,700행이 더 쌓였다. 아래 표는 세 창을 나란히 둔다.
+
+| 지표 | 09-01 ~20:00 (r1 시점) | 09-01 전일 | 09-02 02:17~09:35 (r2) |
+|---|---:|---:|---:|
+| tool_call 행 / 턴 | 7,515 / 1,459 | 17,244 / 2,597 | 462 / 59 |
+| 낭비된 왕복 | 2,115 (28.1%) | 7,734 (44.9%) | 259 (56.1%) |
+| — fanout | 1,642 | 5,505 | 145 |
+| — duplicate | 292 | 1,787 | 97 |
+| — probing | 181 | 442 | 17 |
+| unchanged 직후 동일-인자 재호출 쌍 | 211 | 211 | 0 |
+| batch_size=1 비율 | 87.0% | 79.5% | 88.7% |
+| artifact_read: blob / 호출 | 477 / 1,581 | 908 / 3,541 | 19 / 58 |
+| artifact_read: 페이지 산수 초과 호출 | 968 | 2,418 | 38 |
+| artifact_read: 65536 미만 명시 조각 | 96.5% | 94.8% | 89.7% |
+
+전일 낭비 7,734 를 keeper 로 가르면(meter 의 `### by keeper` 표, 이 PR 에서 추가) 다섯 keeper 가 6,261 이다:
+
+| keeper | 낭비 왕복 | 거의 전부인 도구 |
+|---|---:|---|
+| code-reviewer | 2,145 | keeper_artifact_read 2,016 |
+| edgar.a.poe | 1,412 | keeper_time_now 1,367 |
+| kidsnote-pr-jira-checker | 1,385 | atlassian_searchJiraIssuesUsingJql 1,345 |
+| polisher | 732 | keeper_artifact_read 270, Read 207, keeper_spawn_read 160 |
+| analyst | 587 | keeper_artifact_read 448 |
 
 수정별 판정:
 
 | 수정 | r2 결과 | 판정 |
 |---|---|---|
-| #32322 unchanged 자기모순 | 쌍 0. 그러나 이 창의 `keeper_tasks_list` 8회는 전부 `if_revision` 없음 | 미검증 — unchanged 경로가 한 번도 안 탔다 |
+| #32322 unchanged 자기모순 | r2 창에는 `if_revision` 호출이 없다. 대신 09-01 20:21·20:45 KST 의 `unchanged` 응답 2건이 이미 새 모양(5키, row 통계 없음)이고 둘 다 재호출이 없다. 전일 쌍 211 은 20:00 시점과 같은 수 — 그 뒤 새 쌍 0 | n=2 로 확인. 20:00~20:21 사이에 재기동이 있었다 |
 | #32326 enum 허용값 렌더 | probe 쌍 5, 전부 첫 호출 실패. 실패 원인은 remote_ssh 도달 불가 5, 잘못된 post_id 3, `masc_board_vote` 인자 1 — enum 위반 0 | 미검증 — enum 경로가 안 탔다 |
 | #32327 도구 호출 묶기 | batch_size=1 88.7%, 변화 없음. batch_size 7·8·16 은 전부 한 blob 을 조각내어 병렬로 읽은 것 | 효과 없음(이 창). 조각 병렬은 이 프롬프트 탓이 아니다 — 아래 |
 | #32412 artifact_read 설명 | polisher(deepseek flash): blob 4개 전부 1회 통째 읽기(eof=true). analyst(같은 lane): blob 1개에 25회. code-reviewer(sonnet-4-6): blob 5개에 27회 | lane 이 아니라 턴/keeper 단위로 갈린다 — 아래 |
@@ -160,7 +172,7 @@ Orca(stablyai/orca) 소스를 읽고 대조했다. 수렴 지점:
 새로 보인 것:
 
 - duplicate 97 중 89가 `keeper_time_now`. edgar.a.poe 가 할 일 없는 자율 턴에서 다음 scheduled wake 까지 5초마다 시계를 폴링한다(한 턴 306회·29분, 9-01 에도 턴당 150~327회). → [#32452](https://github.com/jeong-sik/masc/issues/32452)
-- fanout 145 중 90이 `atlassian_searchJiraIssuesUsingJql`(kidsnote-pr-jira-checker, 110회 전부 batch_size=1). 다른 keeper, 다른 원인이라 기록만 한다.
+- fanout 145 중 90이 `atlassian_searchJiraIssuesUsingJql`(kidsnote-pr-jira-checker, 110회 전부 batch_size=1). 전일로는 1,345회다. 다른 keeper, 다른 원인이라 기록만 한다.
 - 실패 호출 중 post_id 가 깨진 것 2건(`p-d threshold-placeholder`, `…b043b sha256=`) — #32451 과 같은 부류(긴 id 복사 오류).
 
-r3 계획: 2026-09-03 하루 창에서 같은 명령. 판정은 keeper 별로 나눠서 본다(artifact paging 초과를 keeper 단위로 내도록 meter 보강이 먼저).
+r3 계획: 2026-09-03 하루 창에서 같은 명령. 판정은 keeper 별로 본다 — meter 가 분류와 artifact paging 둘 다 keeper 표를 내도록 이 PR 에서 보강했다(keeper 별 합이 전체와 같은지 assert 로 확인).

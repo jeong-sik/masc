@@ -327,6 +327,41 @@ rg -o '"[a-z.-]+: keeper cycle FAILED runtime=[^ ]+' "$M/logs/system_log_2026-09
 cat "$M"/board_attention_candidates/{analyst,code-reviewer,edgar-a-poe-*,kidsnote-pr-jira-checker,lane-smith,polisher,rondo,sangsu}.jsonl \
   | jq -r 'select(.recorded_at >= 1788220000 and .status.kind=="consumed") | "\(.signal.author)\t\(.status.judgment.verdict.decision)"' | sort | uniq -c
 
-# 샌드박스 리스너
-lsof -nP -iTCP:2222 -sTCP:LISTEN; docker ps -a
+# 샌드박스: 프로필을 먼저 보고, 프로필에 맞는 런타임을 본다
+rg -n sandbox_profile "$M"/config/keepers/*.toml
+container ls -a            # microvm 게스트 (Apple container CLI)
+jq -r '.message' "$M/logs/system_log_$(date +%F).jsonl" | rg 'shell_ir dispatch keeper=.* sandbox=.* status=' | tail -20
+
+# identity_call 판정 통행료: 대기 시간과 결의 주체
+jq -r 'select(.tool=="identity_call" and .event != "pending" and .event != "summary_updated") | .event + " " + (.decision_source // "-")' "$M/audit-approvals/$(date +%Y-%m)/$(date +%d).jsonl" | sort | uniq -c
+
+# claude_code 레인: host stop 을 실패로 찍는 WARN 과 usage 누락
+jq -r 'select(type=="object") | .message' "$M/logs/system_log_$(date +%F).jsonl" | rg -c 'subscription turn failed \(kind=stopped_by_host\)|usage telemetry missing'
 ```
+
+## 13. 재기동 이후 측정 (09-02 15:12–15:40 KST)
+
+서버는 15:11:57 에 #32555 빌드(15:09:53, #32521 포함)로 다시 떴다. 그 뒤 28분을 잰 것이다. 하루 측정은 아니다.
+
+### 13.1 고친 것이 라이브에서 보이는가
+
+| 항목 | 판정 | 근거 |
+|---|---|---|
+| 프롬프트 manifest (#32521) | 동작 | 라이브 `config/prompts/` 66개 = manifest 66개. `previous_turn_stop` 2개와 `tool_failure` 5개가 들어 있다. |
+| 샌드박스 microvm (RFC-0400 B) | 동작 | 게스트 5개 running. `shell_ir dispatch … sandbox=microvm status=exit=0` rondo 2, polisher 2, lane-smith 4. |
+| web_fetch 판정 통행료 (#32470, #32509) | 미증명 | 28분간 `web_fetch`/`web_search` 호출 0건. `network_read` 승인 0건은 호출이 없어서 0이다. |
+| Board 수신 규칙 (#32498, #32505) | 부분 | verifier 가 쓴 글이 0건이라 unlisted 경로는 미증명. new-keeper 의 ops 글 1건은 8명 전원에게 판정 후보로 갔다(내부 글 → 발견 가능, 설계대로). rondo 의 hearth 글은 오늘 7명에게 25건 판정을 만들었다. §11 의 개인 hearth 항목은 그대로 열려 있다. |
+| previous_turn_stop (#32492, #32501) | 미발동 | 통합 레인에서 `repeated_tool_call` 정지가 0건이라 조각이 렌더될 기회가 없었다. §6 의 kidsnote 72% 는 `ollama_cloud.minimax-m3` 레인 수치였고(어제 258/380), 재기동 후 kidsnote 는 `claude_code.claude-sonnet-5` 레인에서만 돌았다. 두 수치는 비교할 수 없다. |
+
+### 13.2 재기동 후 새로 잰 것
+
+1. **rondo 의 identity_call 판정 통행료.** 오늘 40건, 승인까지 평균 131초, 최대 748초. 33건은 auto_judge 가, 7건은 사람이 TUI 에서 결의했다. 승인 1건마다 HITL 요약 갱신이 4건(160건) 붙는다. 직전 도구는 표본 6건에서 github_issue_read 2, github_issue_write 1, keeper_artifact_read 1. 승인은 durable stimulus 로 도착해 진행 중인 턴을 끊고(`yielded_to_durable_stimulus` 10턴 중 6턴) 다음 턴이 48–64k 토큰으로 다시 들어온다. rondo 는 28분 동안 10턴, 입력 513k 토큰을 썼다. 모양은 §3 의 web_fetch 통행료와 같다. 다만 identity_call 은 사람 OAuth 신원으로 나가는 호출이라 읽기(github_issue_read)와 쓰기를 같은 값으로 볼지는 RFC 판단이 필요하다.
+2. **Docker 프로필 keeper 는 태어나서 죽을 때까지 실행 불가.** new-keeper 가 15:16:42 TUI 에서 `sandbox_profile = "docker"` 로 생성됐다. 이 기기엔 Docker daemon 이 없다. Execute 2건이 `docker_container_probe_failed` 로 실패했고 15:27:35 대시보드에서 purge 됐다. 제거 sweep 도 `docker ps` 실패 WARN 2건을 남겼다. 11분. remote_ssh 는 endpoint 가 없으면 생성 시점에 거부되는데(`keeper_meta_contract.ml` Remote_ssh 가드), docker 는 daemon 이 없어도 생성된다.
+3. **claude_code 레인은 usage 를 잃고 설계된 정지를 실패로 찍는다.** kidsnote 6턴 전부가 terminal tool(keeper_memory_write 4, keeper_surface_post 1, keeper_webmcp_list 1) 경계에서 host stop 으로 끝났다. `keeper_official_client_host.ml` 의 `host_stop_result` 가 `usage = None` 을 주므로 turn-record `output_tokens = 0`, "usage telemetry missing" 6건. 같은 정지를 `runtime_claude_code.ml:1606` 이 `subscription turn failed (kind=stopped_by_host)` WARN 으로 찍는다(오늘 19건, completed 는 4건). `Repeated_tool_call` 은 `Yielded_after_repeated_tool_call` 로 매핑되므로 previous_turn_stop 은 이 레인에서도 렌더될 수 있다.
+4. **provider 실패 4건.** polisher: deepseek `accept_rejected`, glm SSE malformed payload. rondo: glm rate limit, minimax broken pipe. 모두 `deferred_next_runtime` 으로 넘어가 다음 턴이 성공했다. 실패 턴은 turn-record 에 `finish_reason = none, output_tokens = 0` 으로 남는다(rondo 3, polisher 2).
+5. **polisher microvm playground(266MB) 의 호스트 git 5초 inspection budget 초과 5건.** 게스트 부팅과 clone 이 겹친 15:14–15:23 에만 났고, 15:40 에 같은 명령은 0.97초다.
+
+### 13.3 다음 측정
+
+- §12 의 명령을 09-03 15:12 에 한 번 더 돌려 24시간 값을 만든다. 보는 것: `network_read` 승인 0건이면서 `web_fetch` 호출이 있는지, verifier 글의 판정 후보 0건, 통합 레인 `repeated_tool_call` 정지 뒤 다음 턴 `provider-inputs` 에 조각 문장이 있는지.
+- 13.2-1 과 13.2-2 는 코드 변경이 필요하다. 시작 전 사용자 선택.

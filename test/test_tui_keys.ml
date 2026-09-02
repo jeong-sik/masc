@@ -1008,6 +1008,17 @@ let test_a_surface_without_rows_offers_no_row_search () =
     ; "Tools", Tools
     ]
 
+let test_code_asks_the_language_server_three_questions () =
+  (* K hover, D definition, R references -- one family, one case each, and
+     uppercase throughout so the surface's lowercase keys stay its own. The
+     route behind them refused [references] until it was opened; the key
+     table is where an operator finds out it is there. *)
+  let keys = surface_keys Code in
+  List.iter
+    (fun key ->
+       check Alcotest.bool ("Code asks " ^ key) true (List.mem key keys))
+    [ "K"; "D"; "R" ]
+
 let test_code_separates_blame_from_the_definition_walk () =
   (* [b] and [B] sit next to each other on one surface and mean unrelated
      things: the margin naming who last touched each run, and the walk back
@@ -1086,6 +1097,8 @@ let () =
             test_a_searchable_surface_does_not_also_bind_n
         ; Alcotest.test_case "Code separates blame from the definition walk"
             `Quick test_code_separates_blame_from_the_definition_walk
+        ; Alcotest.test_case "Code asks the language server three questions"
+            `Quick test_code_asks_the_language_server_three_questions
         ; Alcotest.test_case "every searchable surface names its search"
             `Quick test_every_searchable_surface_names_its_search
         ; Alcotest.test_case "a surface without rows offers no row search"

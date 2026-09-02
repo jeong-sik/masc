@@ -385,6 +385,10 @@ let for_surface = function
           ~help:"ask the language server what a name on the cursor line is \
                  (one name asks at once; several open the palette as \
                  choices)"
+      ; b Act "R" "references"
+          ~help:"ask the language server where a name on the cursor line is \
+                 used; needs the project's reference index, and says which \
+                 command builds it when there is none"
       ; b Act "D" "definition"
           ~help:"jump to where a name on the cursor line is defined (one \
                  name jumps at once; several open the palette as choices)"

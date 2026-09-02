@@ -18,6 +18,31 @@ let string_of_question = function
   | Hover -> "hover"
 ;;
 
+(* A language server with no index answers [References] with the occurrences
+   it can see, which is the ones in the file it was given -- one where the
+   truth was three, measured (#30504). A short list reads like an answer, so
+   the caller is refused before the question is asked.
+
+   Here rather than in each surface: the Keeper tool and the REST question
+   route already share the position arithmetic in [Lsp_position] so they
+   cannot disagree about where a name sits. They should not be able to
+   disagree about whether an answer is worth asking for either. *)
+let reference_index_ready ~question ~language ~project_root =
+  match question with
+  | Definition | Hover -> Ok ()
+  | References ->
+    (match Lsp_reference_index.check ~language ~project_root with
+     | Lsp_reference_index.Present -> Ok ()
+     | Lsp_reference_index.Missing { build_command; searched } ->
+       Error
+         (Printf.sprintf
+            "references needs the project's reference index and none is under %s. Run: %s \
+             -- until then the answer would name only the occurrences in this one file, \
+             which is not the same as there being only one."
+            searched
+            build_command))
+;;
+
 let method_of_question = function
   | References -> "textDocument/references"
   | Definition -> "textDocument/definition"

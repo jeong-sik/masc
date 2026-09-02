@@ -40,6 +40,16 @@ capture = load_module()
 
 
 class CaptureTuiKeeperChatTest(unittest.TestCase):
+    def test_request_label_matches_the_tui_twenty_cell_projection(self):
+        request = {
+            "request_id": "tui-0198f0de-1234-7abc-8def-0123456789ab",
+            "name": "alpha",
+            "message": "first",
+        }
+        label = capture.compact_request_label(request)
+        self.assertEqual(label, "tui-01..0123456789ab")
+        self.assertEqual(len(label), 20)
+
     def test_fixture_serves_current_workspace_and_keeper_roster(self):
         state = capture.Fixture("causal")
         state.workspace_base_path = "/tmp/masc-capture-contract"

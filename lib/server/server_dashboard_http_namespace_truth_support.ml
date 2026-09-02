@@ -231,10 +231,12 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
     count_where live_keepers (fun keeper ->
       Option.is_some (json_string_field_opt "keeper_last_error" keeper))
   in
-  let docker_live_count =
+  let sandbox_profile_live_count profile =
     count_where live_keepers (fun keeper ->
-      json_string_field_opt "sandbox_profile" keeper = Some "docker")
+      json_string_field_opt "sandbox_profile" keeper = Some profile)
   in
+  let docker_live_count = sandbox_profile_live_count "docker" in
+  let microvm_live_count = sandbox_profile_live_count "microvm" in
   let local_live_count =
     count_where live_keepers (fun keeper ->
       json_string_field_opt "sandbox_profile" keeper = Some "local")
@@ -341,6 +343,7 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
           [
             ("live_keepers", List.length live_keepers);
             ("docker_live", docker_live_count);
+            ("microvm_live", microvm_live_count);
             ("local_live", local_live_count);
             ("pending_approvals", pending_visible);
           ];

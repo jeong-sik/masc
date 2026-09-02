@@ -7,13 +7,13 @@ open Masc
 
 module Readonly = Keeper_gate_readonly
 
-let gate_input argv =
+let gate_input ?(profile = "docker") ?(target = "docker:masc-keeper-sandbox:local") argv =
   `Assoc
     [ "schema", `String "masc.keeper_gate.request.v1"
     ; "input", `Assoc [ "cwd", `String "/home/keeper/playground"; "argv", `List (List.map (fun s -> `String s) argv) ]
     ; "cwd", `String "/home/keeper/playground"
-    ; "sandbox_profile", `String "docker"
-    ; "sandbox_target", `String "docker:masc-keeper-sandbox:local"
+    ; "sandbox_profile", `String profile
+    ; "sandbox_target", `String target
     ]
 ;;
 
@@ -143,6 +143,36 @@ let test_network_observation_capabilities () =
 let test_gate_shape_gates () =
   check bool "tool_execute docker ls" true (executes ~operation:"tool_execute" [ "ls" ]);
   check bool
+    "tool_execute microvm ls"
+    true
+    (Readonly.observation_only_request
+       ~operation:"tool_execute"
+       ~input:(gate_input ~profile:"microvm" ~target:"microvm:masc-keeper-sandbox:local" [ "ls"; "-la" ]));
+  check bool
+    "microvm profile with a docker target never matches"
+    false
+    (Readonly.observation_only_request
+       ~operation:"tool_execute"
+       ~input:(gate_input ~profile:"microvm" ~target:"docker:masc-keeper-sandbox:local" [ "ls" ]));
+  check bool
+    "docker profile with a microvm target never matches"
+    false
+    (Readonly.observation_only_request
+       ~operation:"tool_execute"
+       ~input:(gate_input ~profile:"docker" ~target:"microvm:masc-keeper-sandbox:local" [ "ls" ]));
+  check bool
+    "remote_ssh stays with the judge (transport-only, inherited network)"
+    false
+    (Readonly.observation_only_request
+       ~operation:"tool_execute"
+       ~input:(gate_input ~profile:"remote_ssh" ~target:"ssh:testbed.local" [ "ls" ]));
+  check bool
+    "bare profile name without target prefix never matches"
+    false
+    (Readonly.observation_only_request
+       ~operation:"tool_execute"
+       ~input:(gate_input ~profile:"docker" ~target:"dockerish" [ "ls" ]));
+  check bool
     "non-tool_execute never matches"
     false
     (Readonly.observation_only_request ~operation:"slack_post" ~input:(gate_input [ "ls" ]));
@@ -196,10 +226,10 @@ let rec remove_tree path =
     else Unix.unlink path
 ;;
 
-let gate_request base_path argv =
+let gate_request ?profile ?target base_path argv =
   { Keeper_gate.keeper_name = "alpha"
   ; operation = "tool_execute"
-  ; input = gate_input argv
+  ; input = gate_input ?profile ?target argv
   ; base_path
   ; causal_context = None
   ; task_id = None
@@ -258,6 +288,28 @@ let test_auto_judge_allows_observation_without_queueing () =
        | Keeper_gate.Auto_judge_unavailable detail -> "auto_judge_unavailable: " ^ detail
        | Keeper_gate.Mode_state_invalid detail -> "mode_state_invalid: " ^ detail)
   | Keeper_gate.Unavailable _ -> fail "observation request made the queue unavailable"
+;;
+
+(* Same end-to-end allow for the profile the fleet actually runs: after the
+   2026-09-02 switch all keepers dispatch under microvm, and this path must
+   not fall through to the judge. *)
+let test_auto_judge_allows_microvm_observation_without_queueing () =
+  with_auto_judge @@ fun base_path ->
+  match
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      (gate_request
+         ~profile:"microvm"
+         ~target:"microvm:masc-keeper-sandbox:local"
+         base_path
+         [ "ls"; "-la" ])
+  with
+  | Keeper_gate.Allow { source = Readonly_sandbox; _ } -> ()
+  | Keeper_gate.Allow { source; _ } ->
+    failf "microvm observation request allowed through the wrong source: %s"
+      (Keeper_gate.authorization_source_to_string source)
+  | Keeper_gate.Deferred _ -> fail "microvm observation request was deferred instead of fast-pathed"
+  | Keeper_gate.Unavailable _ -> fail "microvm observation request made the queue unavailable"
 ;;
 
 (* The whole gate path, not the classifier alone: a web_fetch under
@@ -321,6 +373,10 @@ let () =
             "auto_judge allows observation without queueing"
             `Quick
             test_auto_judge_allows_observation_without_queueing
+        ; test_case
+            "auto_judge allows microvm observation without queueing"
+            `Quick
+            test_auto_judge_allows_microvm_observation_without_queueing
         ; test_case
             "auto_judge allows web_fetch without queueing"
             `Quick

@@ -456,6 +456,11 @@ type reasoning_effort_request_rejection =
       ; model_id : string
       ; effort : reasoning_effort
       }
+  | Explicit_disable_outside_ladder of
+      { provider_kind : provider_kind
+      ; model_id : string
+      ; accepted : reasoning_effort list option
+      }
 
 let reasoning_effort_list_to_message values =
   values |> List.map reasoning_effort_to_string |> String.concat "/"
@@ -482,19 +487,77 @@ let reasoning_effort_request_rejection_to_message = function
       (string_of_provider_kind provider_kind)
       model_id
       (reasoning_effort_to_string effort)
+  | Explicit_disable_outside_ladder { provider_kind; model_id; accepted } ->
+    Printf.sprintf
+      "%s model %S cannot carry enable_thinking=false: its wire has no thinking toggle \
+       other than reasoning_effort, and the off value %S is %s"
+      (string_of_provider_kind provider_kind)
+      model_id
+      (reasoning_effort_to_string Reasoning_effort.None_)
+      (match accepted with
+       | Some accepted ->
+         Printf.sprintf
+           "not in its accepted set %s"
+           (reasoning_effort_list_to_message accepted)
+       | None -> "not declared in any accepted set")
+;;
+
+(* The effort the request will carry, once the thinking toggle is applied.
+   [Reasoning_dialect.request_control_fields] performs the same substitution
+   when it renders the body; validating [config.reasoning_effort] alone would
+   admit a request whose wire value the ladder never saw. *)
+let wire_reasoning_effort (config : t) ~(caps : Capabilities.capabilities) =
+  match caps.Capabilities.thinking_control_format with
+  | Capabilities.Reasoning_effort ->
+    Reasoning_effort.under_explicit_toggle
+      ~enable_thinking:config.enable_thinking
+      config.reasoning_effort
+  | Capabilities.No_thinking_control
+  | Capabilities.Thinking_object
+  | Capabilities.Thinking_object_adaptive
+  | Capabilities.Thinking_object_only
+  | Capabilities.Chat_template_kwargs
+  | Capabilities.Chat_template_token _
+  | Capabilities.Ollama_think
+  | Capabilities.Enable_thinking -> config.reasoning_effort
 ;;
 
 let validate_reasoning_effort_request_typed (config : t) =
-  match config.reasoning_effort with
+  let caps = request_capabilities_for_config config in
+  match wire_reasoning_effort config ~caps with
   | None -> Ok ()
   | Some effort ->
-    let caps = request_capabilities_for_config config in
+    let explicit_disable_on_categorical_wire =
+      match caps.Capabilities.thinking_control_format, config.enable_thinking with
+      | Capabilities.Reasoning_effort, Some false -> true
+      | Capabilities.Reasoning_effort, (Some true | None)
+      | ( ( Capabilities.No_thinking_control
+          | Capabilities.Thinking_object
+          | Capabilities.Thinking_object_adaptive
+          | Capabilities.Thinking_object_only
+          | Capabilities.Chat_template_kwargs
+          | Capabilities.Chat_template_token _
+          | Capabilities.Ollama_think
+          | Capabilities.Enable_thinking )
+        , _ ) -> false
+    in
     (match caps.Capabilities.accepted_reasoning_efforts with
-     | Some accepted when not (List.mem effort accepted) ->
+     | Some accepted when List.mem effort accepted -> Ok ()
+     | Some accepted when explicit_disable_on_categorical_wire ->
+       Error
+         (Explicit_disable_outside_ladder
+            { provider_kind = config.kind
+            ; model_id = config.model_id
+            ; accepted = Some accepted
+            })
+     | Some accepted ->
        Error
          (Unsupported_reasoning_effort
             { provider_kind = config.kind; model_id = config.model_id; effort; accepted })
-     | Some _ -> Ok ()
+     | None when explicit_disable_on_categorical_wire ->
+       Error
+         (Explicit_disable_outside_ladder
+            { provider_kind = config.kind; model_id = config.model_id; accepted = None })
      | None ->
        Error
          (Undeclared_reasoning_effort_capability

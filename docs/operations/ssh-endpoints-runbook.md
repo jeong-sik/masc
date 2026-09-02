@@ -142,7 +142,8 @@ replaced through the pinned channel. A major-version mismatch blocks preflight.
 | `remote_ssh_keeper_root_missing` | `remote_root/<keeper>` is absent. | Bootstrap that keeper identity/root. |
 | `remote_ssh_disk_probe_failed` | `df -Pk` failed or returned an unknown shape. | Fix remote coreutils/permissions and rerun preflight. |
 | `remote_ssh_disk_low` | Available KiB is below the configured floor. | Free/expand disk or deliberately change the floor. |
-| `remote_github_identity_missing` | Keeper-scoped `gh auth status` failed. | Re-provision that keeper's token/config; never send a token per tool call. |
+| `remote_github_identity_missing` | Keeper-scoped `gh auth status` failed while `api.github.com` answered the endpoint. | Re-provision that keeper's token/config; never send a token per tool call. |
+| `remote_github_unreachable` | `gh auth status` failed and `api.github.com` did not answer the endpoint; the token is not proven bad. | Fix the endpoint network first (microvm: `network_mode` in the keeper TOML, DNS via the sandbox profile); re-check the token only after the API answers. |
 | `remote_ssh_env_invalid` | A typed env entry is malformed. | Correct the caller input; every entry must be `NAME=value`. |
 | `remote_ssh_env_not_allowlisted` | Typed env is not in the endpoint allowlist. | Remove it or explicitly review and add the non-secret name. |
 | `remote_ssh_path_jail_violation` | cwd/path escapes the keeper's remote root. | Correct the logical keeper path; do not weaken the jail. |

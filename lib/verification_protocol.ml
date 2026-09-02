@@ -399,6 +399,26 @@ let stalled_metadata
        ; ("timestamp", `Float (Time_compat.now ()))
        ])
 
+(* Stalled-verification board posts must fire once per stall, not once per
+   sweep re-discovery (goal-failure-storm-cost-20260828, task-1244/1245).
+   [completion_authority_agent.ml]'s backlog-read-failure retry re-walks the
+   whole backlog on [maintenance_pulse_interval_sec] and rediscovers any
+   AwaitingVerification task whose evaluator still has not produced a
+   verdict, so an unconditional post here turns one stall into a fresh board
+   post every pulse until the underlying gate clears -- observed as a
+   1-minute-interval storm on the same verification_id (board
+   p-c8cc68d1810a042e3ec97f08f95c8852, 20+ reposts over an hour). Process-
+   local, not persisted: a restart re-arms the guard, which only risks one
+   extra repost after a restart rather than the unbounded storm this closes.
+   Keyed on (verification_id, gate, detail) so a genuinely new gate/detail
+   for the same verification_id -- new information -- still posts. *)
+let notified_stalls : (string, unit) Hashtbl.t = Hashtbl.create 64
+let notified_stalls_mutex = Eio.Mutex.create ()
+
+let stall_notification_key ~verification_id ~gate ~detail =
+  String.concat "\x00" [ verification_id; gate; detail ]
+;;
+
 let notify_stalled_verification
       ~(authority : Masc_domain.completion_authority)
       ~task_id
@@ -406,23 +426,40 @@ let notify_stalled_verification
       ~gate
       ~detail
   =
-  match
-    Board_dispatch.create_post
-      ~author:(Masc_domain.completion_authority_actor authority)
-      ~content:(stalled_board_content ~task_id ~verification_id ~gate ~detail)
-      ~post_kind:Board.System_post
-      ~meta_json:
-        (stalled_metadata ~authority ~task_id ~verification_id ~gate ~detail)
-      ~visibility:Board.Internal
-      ~hearth:"verification"
-      ()
-  with
-  | Ok _ -> ()
-  | Error e ->
-    Log.Task.error
-      ~keeper_name:task_id
-      "stalled-review board post failed (task=%s vrf=%s): %s"
-      task_id verification_id (Board_types.show_board_error e)
+  let key = stall_notification_key ~verification_id ~gate ~detail in
+  let already_notified =
+    Eio.Mutex.use_rw ~protect:true notified_stalls_mutex (fun () ->
+      if Hashtbl.mem notified_stalls key
+      then true
+      else (
+        Hashtbl.replace notified_stalls key ();
+        false))
+  in
+  if already_notified
+  then ()
+  else (
+    match
+      Board_dispatch.create_post
+        ~author:(Masc_domain.completion_authority_actor authority)
+        ~content:(stalled_board_content ~task_id ~verification_id ~gate ~detail)
+        ~post_kind:Board.System_post
+        ~meta_json:
+          (stalled_metadata ~authority ~task_id ~verification_id ~gate ~detail)
+        ~visibility:Board.Internal
+        ~hearth:"verification"
+        ()
+    with
+    | Ok _ -> ()
+    | Error e ->
+      (* The post never landed, so this was not actually reported -- clear
+         the guard so a later retry can try again instead of permanently
+         silencing a stall nobody saw. *)
+      Eio.Mutex.use_rw ~protect:true notified_stalls_mutex (fun () ->
+        Hashtbl.remove notified_stalls key);
+      Log.Task.error
+        ~keeper_name:task_id
+        "stalled-review board post failed (task=%s vrf=%s): %s"
+        task_id verification_id (Board_types.show_board_error e))
 
 module For_testing = struct
   let verdict_event_json = verdict_event_json
@@ -430,4 +467,9 @@ module For_testing = struct
 
   let stalled_metadata ~authority ~task_id ~verification_id ~gate ~detail =
     stalled_metadata ~authority ~task_id ~verification_id ~gate ~detail
+
+  (* Test-only escape hatch: the dedup guard is process-local Hashtbl state,
+     so a test that calls [notify_stalled_verification] more than once for
+     unrelated scenarios needs a way back to a clean slate. *)
+  let reset_stalled_notifications () = Hashtbl.reset notified_stalls
 end

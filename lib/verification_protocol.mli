@@ -101,4 +101,6 @@ module For_testing : sig
     gate:string ->
     detail:string ->
     Yojson.Safe.t
+
+  val reset_stalled_notifications : unit -> unit
 end

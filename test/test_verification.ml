@@ -197,6 +197,51 @@ let test_stalled_metadata_preserves_typed_authority () =
     "required artifact list is empty"
     (metadata |> member "detail" |> to_string)
 
+(* task-1245: notify_stalled_verification must post once per stall, not
+   once per sweep re-discovery of the same (verification_id, gate, detail).
+   A genuinely new gate/detail for the same verification_id is new
+   information and must still post. *)
+let test_notify_stalled_verification_dedupes_repeated_stalls () =
+  let contains_substring haystack needle =
+    let nl = String.length needle and hl = String.length haystack in
+    let rec loop i =
+      i + nl <= hl
+      && (String.equal (String.sub haystack i nl) needle || loop (i + 1))
+    in
+    nl = 0 || loop 0
+  in
+  Masc.Board_dispatch.reset_for_test ();
+  VP.For_testing.reset_stalled_notifications ();
+  let authority =
+    Masc_domain.System_llm_agent
+      { agent_run_id = "agent_core-agent-run-dedup-test" }
+  in
+  let task_id = "task-dedup-test" in
+  let verification_id = "vrf-dedup-test-1" in
+  let gate = "evaluator_unavailable" in
+  let detail =
+    "requested runtime or lane not found among configured runtimes"
+  in
+  let count_matching () =
+    Masc.Board_dispatch.list_posts ~hearth:"verification" ~limit:50 ()
+    |> List.filter (fun post ->
+      contains_substring post.Masc.Board.body verification_id)
+    |> List.length
+  in
+  for _ = 1 to 3 do
+    VP.notify_stalled_verification ~authority ~task_id ~verification_id ~gate
+      ~detail
+  done;
+  Alcotest.(check int)
+    "repeated identical stall posts once" 1 (count_matching ());
+  VP.notify_stalled_verification ~authority ~task_id ~verification_id ~gate
+    ~detail:"a genuinely different failure detail arrives later";
+  Alcotest.(check int)
+    "new detail for same verification_id posts again" 2 (count_matching ());
+  VP.For_testing.reset_stalled_notifications ();
+  Masc.Board_dispatch.reset_for_test ()
+;;
+
 let test_rejected_verdict_event_preserves_wire_type () =
   let event =
     VP.For_testing.verdict_event_json
@@ -3006,6 +3051,8 @@ let () =
         test_stalled_projection_names_forward_paths;
       Alcotest.test_case "stalled metadata keeps typed authority" `Quick
         test_stalled_metadata_preserves_typed_authority;
+      Alcotest.test_case "stalled notification dedupes repeated stalls" `Quick
+        test_notify_stalled_verification_dedupes_repeated_stalls;
     ];
     "storage", [
       Alcotest.test_case "create and load" `Quick test_create_and_load;

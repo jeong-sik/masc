@@ -126,6 +126,24 @@ let microvm_attached_endpoint ?timeout_sec ~config ~meta () =
 올리고, 신원 스냅샷을 쓰고, 작업 루트를 만들고, gitconfig 를 새로 넣는다. 판정자가
 할 일이 아니다.
 
+### D1a. 프로브는 실패를 설명할 때만 돈다
+
+위 스케치는 읽기 한 번마다 `container inspect` 를 한 번 더 돈다. 턴 경로는 게스트
+상태를 runtime 의 Atomic 에 들고 있어서 이 비용이 없는데, 붙기 경로는 들고 있을
+곳이 없다. 검증 run 하나가 읽기를 열 번 하면 서브프로세스가 스무 번 뜬다.
+
+프로브가 실제로 하는 일은 판정이 아니라 **설명**이다. 게스트가 없으면
+`container exec` 가 알아서 실패한다. 그러니 순서를 뒤집는다.
+
+1. 바로 endpoint 를 만들고 명령을 보낸다 (`microvm_remote_endpoint_of_running`
+   은 게스트 상태를 안 보므로 그냥 성공한다).
+2. 실패했을 때만 프로브를 돌려, 게스트가 안 떠서인지 명령이 실패한 건지 가른다.
+   안 떠 있으면 `microvm_guest_not_running`, 아니면 지금의
+   `microvm_read_failed` 를 그대로 낸다.
+
+성공 경로에서 서브프로세스가 한 번으로 준다. 그리고 오늘 4건 난
+`microvm_read_failed` 중 게스트가 꺼져서 난 것이 있다면 그것도 제 이름을 찾는다.
+
 같은 이유로 `microvm_remote_endpoint` 가 하는 작업 루트 보정
 (`ensure_microvm_keeper_work_root`)도 안 한다. 루트가 없으면 읽기가 경로 오류로
 실패하는데, 그게 맞다. 없는 것을 만드는 건 쓰기다.

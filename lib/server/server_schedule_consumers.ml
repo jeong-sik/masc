@@ -158,6 +158,7 @@ type keeper_wake_activation_deferred_reason =
   | Keeper_wake_activation_proactive_disabled
   | Keeper_wake_activation_shutdown_fenced of Keeper_shutdown_types.Operation_id.t
   | Keeper_wake_activation_owner_unknown of string
+  | Keeper_wake_activation_owner_absent
   | Keeper_wake_activation_unregistered
   | Keeper_wake_activation_not_running of Keeper_state_machine.phase
 
@@ -175,6 +176,7 @@ let keeper_wake_activation_deferred_reason_fields = function
     ( "shutdown_fenced"
     , Some (Keeper_shutdown_types.Operation_id.to_string operation_id) )
   | Keeper_wake_activation_owner_unknown detail -> "owner_unknown", Some detail
+  | Keeper_wake_activation_owner_absent -> "owner_absent", None
   | Keeper_wake_activation_unregistered -> "unregistered", None
   | Keeper_wake_activation_not_running phase ->
     "not_running", Some (Keeper_state_machine.phase_to_string phase)
@@ -194,6 +196,7 @@ let keeper_wake_activation_deferred_reason_of_fields fields =
       Keeper_wake_activation_shutdown_fenced operation_id)
   | "owner_unknown", Some detail ->
     Ok (Keeper_wake_activation_owner_unknown detail)
+  | "owner_absent", None -> Ok Keeper_wake_activation_owner_absent
   | "unregistered", None -> Ok Keeper_wake_activation_unregistered
   | "not_running", Some phase ->
     (match Keeper_state_machine.phase_of_string phase with
@@ -206,6 +209,7 @@ let keeper_wake_activation_deferred_reason_of_fields fields =
     Error ("activation_detail is required for activation_reason: " ^ reason)
   | ( "autoboot_disabled"
     | "proactive_disabled"
+    | "owner_absent"
     | "unregistered" ), Some _ ->
     Error ("activation_detail must be null for activation_reason: " ^ reason)
   | reason, _ -> Error ("unsupported activation_reason: " ^ reason)
@@ -479,25 +483,7 @@ let activation_deferred_of_paused_dead = function
 ;;
 
 let activation_outcome_for_required_wake config ~base_path ~keeper_name =
-  match
-    Executor_pool_ref.submit_strict (fun () ->
-      match Keeper_meta_store.read_effective_meta config keeper_name with
-      | Ok (Some meta) -> Ok meta
-      | Ok None -> Error "durable keeper metadata missing"
-      | Error detail -> Error detail)
-  with
-  | Error (Executor_pool_ref.Work_failed failure) ->
-    Keeper_wake_activation_deferred
-      (Keeper_wake_activation_owner_unknown
-         ("durable keeper metadata read failed: "
-          ^ Executor_pool_ref.strict_submit_error_to_string
-              (Executor_pool_ref.Work_failed failure)))
-  | Error error ->
-    Keeper_wake_activation_deferred
-      (Keeper_wake_activation_owner_unknown
-         ("durable keeper metadata read unavailable: "
-          ^ Executor_pool_ref.strict_submit_error_to_string error))
-  | Ok meta_result ->
+  let classify meta_result =
     let admission =
       Keeper_owner_registry.shutdown_operation_id ~base_path ~keeper_name
     in
@@ -558,6 +544,32 @@ let activation_outcome_for_required_wake config ~base_path ~keeper_name =
           Keeper_wake_activation_deferred
             (Keeper_wake_activation_lifecycle_denied
                (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)))))
+  in
+  match
+    Executor_pool_ref.submit_strict (fun () ->
+      Keeper_meta_store.read_effective_meta config keeper_name)
+  with
+  | Error (Executor_pool_ref.Work_failed failure) ->
+    Keeper_wake_activation_deferred
+      (Keeper_wake_activation_owner_unknown
+         ("durable keeper metadata read failed: "
+          ^ Executor_pool_ref.strict_submit_error_to_string
+              (Executor_pool_ref.Work_failed failure)))
+  | Error error ->
+    Keeper_wake_activation_deferred
+      (Keeper_wake_activation_owner_unknown
+         ("durable keeper metadata read unavailable: "
+          ^ Executor_pool_ref.strict_submit_error_to_string error))
+  (* The store answered and holds nothing under this name. That is not a
+     read that failed: no maintenance cycle will change it, and the queue
+     drain cancels the stimulus as owner-absent within the minute. Measured
+     live 2026-09-02: a daily wake for a Keeper deleted days earlier still
+     reported [succeeded] with the fact buried in a detail string. The
+     receipt now says it in its own word. *)
+  | Ok (Ok None) ->
+    Keeper_wake_activation_deferred Keeper_wake_activation_owner_absent
+  | Ok (Ok (Some meta)) -> classify (Ok meta)
+  | Ok (Error detail) -> classify (Error detail)
 ;;
 
 let log_activation_outcome ~schedule_id ~keeper_name = function

@@ -526,6 +526,48 @@ let test_board_post_schedule_is_rejected_without_mutation () =
     (List.length (Board_dispatch.list_posts ~limit:10 ()))
 ;;
 
+(* The Keeper store answering "no such name" and the store failing to answer
+   are different facts. The receipt folded both into owner_unknown plus a
+   detail string; the first is now its own word, with nothing to parse. *)
+let test_keeper_wake_consumer_names_an_absent_owner () =
+  with_workspace
+  @@ fun config ->
+  let request = create_keeper_wake_schedule config in
+  let result = tick_ok config ~now:201.0 in
+  check int "one dispatch" 1 (List.length result.dispatches);
+  check string "the stimulus is still enqueued durably" "succeeded"
+    (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
+  match
+    Schedule_store.last_wake_for_schedule_instance
+      (Schedule_store.read_state config)
+      ~schedule_instance_id:request.schedule_instance_id
+      ~schedule_id:request.schedule_id
+  with
+  | None -> fail "missing wake record"
+  | Some wake ->
+    (match wake.detail with
+     | None -> fail "wake detail missing"
+     | Some detail ->
+       let open Yojson.Safe.Util in
+       check string "activation deferred" "deferred"
+         (detail |> member "activation_status" |> to_string);
+       check string "an absent owner is its own reason" "owner_absent"
+         (detail |> member "activation_reason" |> to_string);
+       check bool "and carries no detail string" true
+         (detail |> member "activation_detail" = `Null);
+       (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
+        | Ok
+            (Server_schedule_consumers.Keeper_wake_enqueued
+              { activation_outcome =
+                  Server_schedule_consumers.Keeper_wake_activation_deferred
+                    Server_schedule_consumers.Keeper_wake_activation_owner_absent
+              ; _
+              }) ->
+          ()
+        | Ok _ -> fail "receipt decoded to a different activation outcome"
+        | Error reason -> fail ("receipt did not decode: " ^ reason)))
+;;
+
 let test_keeper_wake_consumer_records_wake_receipt () =
   with_workspace
   @@ fun config ->
@@ -2603,6 +2645,8 @@ let () =
     [ ( "keeper_wake"
       , [ test_case "board post schedule is rejected without mutation" `Quick
             test_board_post_schedule_is_rejected_without_mutation
+        ; test_case "keeper wake names an absent owner" `Quick
+            test_keeper_wake_consumer_names_an_absent_owner
         ; test_case "keeper wake records wake receipt" `Quick
             test_keeper_wake_consumer_records_wake_receipt
         ; test_case "routed schedule carries occurrence destination to Keeper" `Quick

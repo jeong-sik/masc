@@ -27,6 +27,37 @@ type request =
           are display/audit data; no decision reads them. *)
   }
 
+(** Gate operation vocabulary — the strings the approval store keys on and
+    the host replay engine dispatches on. The Gate owns them so the
+    deferred payload's promise cannot drift from what replay actually
+    spends; producers borrow the literal from here instead of declaring
+    their own. *)
+val filesystem_write_gate_operation : string
+
+val tool_execute_gate_operation : string
+
+val network_read_gate_operation : string
+
+val connector_post_gate_operation : string
+
+val identity_call_gate_operation : string
+
+val voice_speak_gate_operation : string
+
+type replayable =
+  | Replay_write
+  | Replay_execute
+  | Replay_network_read
+  | Replay_connector_post
+  | Replay_identity
+  | Replay_voice_speak
+
+val replayable_operation : string -> replayable option
+(** Whether an approved operation is executed by the host replay engine
+    ({!Keeper_gate_replay}). The deferred payload's [on_approve] wording
+    follows this: a "host replays this exact call" promise made over an
+    unrecognized operation starves the approved effect silently. *)
+
 type authorization_source =
   | One_shot_resolution of string
   | Exact_always_rule of string
@@ -56,7 +87,8 @@ type unavailable_reason =
 type decision =
   | Allow of authorization
   | Deferred of
-      { approval_id : string
+      { operation : string
+      ; approval_id : string
       ; reason : deferred_reason
       ; audit_receipts : Keeper_approval.Audit.receipt list
       }

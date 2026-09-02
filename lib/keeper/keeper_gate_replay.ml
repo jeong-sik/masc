@@ -158,24 +158,21 @@ let outcome_to_string = function
 ;;
 
 (* Replay recognizes exactly the identity its producer submits; every other
-   approved operation stays with its own producer. The identity is read from
-   that producer so the literal has one definition. *)
-let write_operation = Keeper_tool_filesystem_runtime.gate_operation
-let execute_operation = Keeper_tool_execute_runtime.gate_operation
-let network_read_operation = Keeper_tool_in_process_runtime.network_read_gate_operation
-let connector_post_operation =
-  Keeper_tool_in_process_runtime.connector_post_gate_operation
-;;
-
-let identity_operation = Keeper_identity_gate.gate_operation
+   approved operation stays with its own producer. The vocabulary and the
+   replayable set live in the Gate itself ({!Keeper_gate}), so the deferred
+   payload's on_approve promise cannot drift from what this engine spends. *)
+let write_operation = Keeper_gate.filesystem_write_gate_operation
+let execute_operation = Keeper_gate.tool_execute_gate_operation
+let network_read_operation = Keeper_gate.network_read_gate_operation
+let connector_post_operation = Keeper_gate.connector_post_gate_operation
+let identity_operation = Keeper_gate.identity_call_gate_operation
 
 (* Speak is the one voice leaf the Gate authorizes: the spoken text leaves
    for a TTS endpoint, so its content stays judge-reviewed, and playback is
    not wall-clock bound — a post-approval replay still lands. Listen is the
    opposite: its microphone window expires while the judge runs, so it never
    enters the Gate (see keeper_tool_voice_runtime.ml). *)
-let voice_speak_operation =
-  Keeper_tool_voice_runtime.(command_to_string Speak)
+let voice_speak_operation = Keeper_gate.voice_speak_gate_operation
 ;;
 
 (* The producer owns both the argument schema and the effect encoding, so it
@@ -199,31 +196,15 @@ let connector_post_of_gate_input =
 let identity_of_gate_input = Keeper_identity_gate.replay_of_gate_input
 
 (* Which approved operations this module can spend without the Keeper
-   re-emitting the call. Separated from the replay body so the set is
-   assertable: a decode function that exists but is never dispatched to looks
-   exactly like a working replay from the outside. *)
-type replayable =
-  | Replay_write
-  | Replay_execute
-  | Replay_network_read
-  | Replay_connector_post
-  | Replay_identity
-  | Replay_voice_speak
+   re-emitting the call. The set and its operation vocabulary live in the
+   Gate ({!Keeper_gate.replayable_operation}) so the deferred payload's
+   promise and this engine's dispatch answer to one definition; separated
+   from the replay body so the set stays assertable: a decode function that
+   exists but is never dispatched to looks exactly like a working replay
+   from the outside. *)
+type replayable = Keeper_gate.replayable
 
-let replayable_of_operation operation =
-  if String.equal operation write_operation
-  then Some Replay_write
-  else if String.equal operation execute_operation
-  then Some Replay_execute
-  else if String.equal operation network_read_operation
-  then Some Replay_network_read
-  else if String.equal operation connector_post_operation
-  then Some Replay_connector_post
-  else if String.equal operation identity_operation
-  then Some Replay_identity
-  else if String.equal operation voice_speak_operation
-  then Some Replay_voice_speak
-  else None
+let replayable_of_operation = Keeper_gate.replayable_operation
 ;;
 
 type effect_outcome =

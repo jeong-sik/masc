@@ -221,9 +221,7 @@ let test_of_json_exec () =
     Alcotest.(check (list string)) "argv" [ "rg"; "pattern"; "lib/" ] argv;
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd
   | { Execute_input.source = Script _; _ } ->
-    Alcotest.fail "expected a single-stage program"
-  | { Execute_input.source = Script _; _ } ->
-    Alcotest.fail "expected the staged form"
+    Alcotest.fail "expected the argv form"
 ;;
 
 let test_of_json_timeout_is_optional_and_preserved () =
@@ -325,7 +323,7 @@ let test_of_json_accepts_single_argv_ssot () =
       [ "git"; "status"; "--short" ]
       argv
   | { Execute_input.source = Script _; _ } ->
-    Alcotest.fail "expected a single-stage program"
+    Alcotest.fail "expected the argv form"
 ;;
 
 let test_of_json_rejects_retired_executable_field () =
@@ -358,7 +356,7 @@ let test_of_json_preserves_repeated_argument () =
       [ "cat"; "cat"; "repos/masc/README.md" ]
       argv
   | { Execute_input.source = Script _; _ } ->
-    Alcotest.fail "expected a single-stage program"
+    Alcotest.fail "expected the argv form"
 ;;
 
 let test_of_json_keeps_empty_argv_for_typed_validation () =
@@ -403,7 +401,7 @@ let test_of_json_keeps_empty_exec_for_validation () =
       argv;
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd
   | { Execute_input.source = Script _; _ } ->
-    Alcotest.fail "expected a single-stage program"
+    Alcotest.fail "expected the argv form"
 ;;
 
 let test_script_goes_to_a_shell_whole () =
@@ -821,7 +819,7 @@ let test_pipe_character_in_exec_argv_is_literal () =
 let test_standalone_pipe_operator_in_exec_argv_is_literal () =
   let check_case ~name argv =
     let input =
-      mk_argv "tail" :: argv
+      mk_argv ("tail" :: argv)
     in
     match Execute_input.to_shell_ir input with
     | Ok (Masc_exec.Shell_ir.Simple simple) ->
@@ -887,7 +885,7 @@ let test_shell_redirection_looking_tokens_are_literal () =
   List.iter
     (fun (token, argv) ->
       let input =
-        mk_argv "find" :: argv
+        mk_argv ("find" :: argv)
       in
       match Execute_input.to_shell_ir input with
       | Ok (Masc_exec.Shell_ir.Simple simple) ->
@@ -924,7 +922,7 @@ let test_legitimate_metachar_still_allowed () =
   List.iter
     (fun (rationale, argv) ->
       let input =
-        mk_argv "find" :: argv
+        mk_argv ("find" :: argv)
       in
       match Execute_input.validate  input with
       | Ok () -> ()

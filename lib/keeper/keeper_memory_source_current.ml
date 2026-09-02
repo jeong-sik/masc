@@ -40,8 +40,30 @@ type projection =
   ; invalidations : invalidation list
   }
 
+type source_read_failure =
+  | Source_path_rejected of string
+  | Source_missing
+  | Source_not_a_regular_file
+  | Source_too_large of
+      { actual_bytes : int
+      ; max_bytes : int
+      }
+  | Source_io_failed of string
+
+let source_read_failure_to_string = function
+  | Source_path_rejected reason -> reason
+  | Source_missing -> "source_path does not exist"
+  | Source_not_a_regular_file -> "source_path is not a regular file"
+  | Source_too_large { actual_bytes; max_bytes } ->
+    Printf.sprintf
+      "source_path exceeds byte limit actual_bytes=%d max_bytes=%d"
+      actual_bytes
+      max_bytes
+  | Source_io_failed detail -> "source_path read failed: " ^ detail
+;;
+
 type write_error =
-  | Source_read_failed of string
+  | Source_read_failed of source_read_failure
   | Store_write_failed of string
 
 let path_for_keepers_dir ~keepers_dir ~keeper_id =
@@ -318,46 +340,38 @@ let read_for_keepers_dir ~keepers_dir ~keeper_id =
 ;;
 
 let read_source ~config ~meta ~source_path =
-  let* resolved =
+  match
     Keeper_tool_shared_runtime.resolve_keeper_read_path
       ~config
       ~meta
       ~raw_path:source_path
-  in
+  with
+  | Error reason -> Error (Source_path_rejected reason)
+  | Ok resolved ->
   try
     let stats = Unix.stat resolved in
     if stats.st_kind <> Unix.S_REG
-    then Error (Printf.sprintf "source_path is not a regular file: %s" source_path)
+    then Error Source_not_a_regular_file
     else if stats.st_size > max_source_bytes
     then
       Error
-        (Printf.sprintf
-           "source_path exceeds byte limit path=%s actual_bytes=%d max_bytes=%d"
-           source_path
-           stats.st_size
-           max_source_bytes)
+        (Source_too_large { actual_bytes = stats.st_size; max_bytes = max_source_bytes })
     else (
       let content = Fs_compat.load_file resolved in
       if String.length content > max_source_bytes
       then
         Error
-          (Printf.sprintf
-             "source_path exceeds byte limit path=%s actual_bytes=%d max_bytes=%d"
-             source_path
-             (String.length content)
-             max_source_bytes)
+          (Source_too_large
+             { actual_bytes = String.length content; max_bytes = max_source_bytes })
       else Ok content)
   with
   | Eio.Cancel.Cancelled _ as error -> raise error
-  | Sys_error message ->
-    Error (Printf.sprintf "source_path read failed path=%s: %s" source_path message)
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Error Source_missing
+  | Sys_error message -> Error (Source_io_failed message)
   | Unix.Unix_error (error, operation, _) ->
     Error
-      (Printf.sprintf
-         "source_path read failed path=%s operation=%s: %s"
-         source_path
-         operation
-         (Unix.error_message error))
+      (Source_io_failed
+         (Printf.sprintf "operation=%s: %s" operation (Unix.error_message error)))
 ;;
 
 let save_snapshot path snapshot =
@@ -402,7 +416,7 @@ let upsert_file_fact
   let source_path = String.trim source_path in
   let claim = String.trim claim in
   if not (valid_source_path source_path)
-  then Error (Source_read_failed "source_path must be non-empty")
+  then Error (Source_read_failed (Source_path_rejected "source_path must be non-empty"))
   else if not (non_empty claim)
   then Error (Store_write_failed "source-bound memory claim must be non-empty")
   else if not (finite_nonnegative now)
@@ -412,7 +426,7 @@ let upsert_file_fact
          "source-bound memory timestamp must be finite and non-negative")
   else
     match read_source ~config ~meta ~source_path with
-    | Error detail -> Error (Source_read_failed detail)
+    | Error failure -> Error (Source_read_failed failure)
     | Ok content ->
       let incoming_source = { path = source_path; sha256 = sha256 content } in
       Keeper_memory_os_aggregate_lock.with_lock
@@ -502,12 +516,12 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
                      ; reason = Source_changed
                      }
                      :: invalidations )
-                 | Error detail ->
+                 | Error failure ->
                    Log.Keeper.warn
                      "source-bound memory invalidated keeper=%s source=%S reason=source_unavailable detail=%s"
                      meta.Keeper_meta_contract.name
                      fact.source.path
-                     detail;
+                     (source_read_failure_to_string failure);
                    ( facts
                    , { source_path = fact.source.path
                      ; invalidated_at = now

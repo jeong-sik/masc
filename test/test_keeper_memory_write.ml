@@ -1156,6 +1156,31 @@ let test_input_and_state_failures_keep_their_own_classes () =
        ~args:(make_retract_args ~memory_id:(memory_id 'a') ~reason:"incorrect"))
 ;;
 
+(* A source path the caller can fix -- missing, outside the read boundary --
+   is refused before any store is touched and says so with Policy_rejection;
+   only a filesystem that does not answer is a dependency failure. *)
+let test_unreadable_source_path_is_the_callers_to_fix () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "source-path" in
+  let write source_path =
+    Runtime.keeper_memory_write_with_outcome
+      ~config
+      ~meta
+      ~args:(make_source_args ~title:"" ~content:"a claim" ~source_path)
+  in
+  let missing = write "does-not-exist.txt" in
+  check_failure_class "missing source" Tool_result.Policy_rejection missing;
+  let response =
+    missing.Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
+  in
+  Alcotest.(check string) "named as a source read failure" "source_read_failed"
+    (string_field "error_kind" response);
+  check_failure_class "outside the read boundary" Tool_result.Policy_rejection
+    (write "../../outside.txt")
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_write"
@@ -1241,6 +1266,10 @@ let () =
             "input and state failures keep their own classes"
             `Quick
             test_input_and_state_failures_keep_their_own_classes
+        ; Alcotest.test_case
+            "unreadable source path is the caller's to fix"
+            `Quick
+            test_unreadable_source_path_is_the_callers_to_fix
         ] )
     ]
 ;;

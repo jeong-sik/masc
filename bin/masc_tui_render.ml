@@ -15176,7 +15176,7 @@ let context_exact_input_lines ~cols state ~response
       let response_line =
         match response with
         | None -> []
-        | Some record ->
+        | Some (record : Turn_record.t) ->
             let parts =
               List.filter_map Fun.id
                 [ Option.map

@@ -141,6 +141,12 @@ let of_provider_error (err : Llm_provider.Error.provider_error) : provider_error
       ( Retry.Unknown_invalid_request
       , Printf.sprintf "unknown %s variant: %s" r.type_name r.value )
   | Llm_provider.Error.ProviderUnavailable r -> `Network_error r.detail
+  | Llm_provider.Error.EmptyCompletion r ->
+    `Network_error
+      (Printf.sprintf
+         "empty completion (stop_reason=%s): %s"
+         (Llm_provider.Types.stop_reason_to_string r.stop_reason)
+         r.detail)
   | Llm_provider.Error.ProviderTerminal r ->
     `Invalid_request
       (Retry.Unknown_invalid_request, Printf.sprintf "%s: %s" r.reason r.detail)

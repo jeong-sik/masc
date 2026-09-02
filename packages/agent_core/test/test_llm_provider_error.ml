@@ -677,7 +677,7 @@ let test_empty_completion_overflow_maps_to_invalid_request () =
   | _ -> fail "expected InvalidRequest for empty completion context overflow"
 ;;
 
-let test_empty_completion_other_stop_reason_stays_unavailable () =
+let test_empty_completion_other_stop_reason_keeps_its_reason () =
   let err =
     Error.of_http_error
       ~provider:"anthropic"
@@ -687,9 +687,15 @@ let test_empty_completion_other_stop_reason_stays_unavailable () =
          })
   in
   match err with
-  | Error.ProviderUnavailable { provider; detail = _ } ->
-    check string "unavailable provider" "anthropic" provider
-  | _ -> fail "expected ProviderUnavailable for non-overflow empty completion"
+  | Error.EmptyCompletion { provider; stop_reason; detail } ->
+    check string "provider" "anthropic" provider;
+    check bool "the stop_reason crosses the boundary typed" true
+      (stop_reason = Types.MaxTokens);
+    check string "the message is the detail, unprefixed" "no content blocks" detail;
+    check string "rendered for operators with the reason"
+      "Provider 'anthropic' unavailable: empty completion (stop_reason=max_tokens): no content blocks"
+      (Error.to_string err)
+  | _ -> fail "expected EmptyCompletion for non-overflow empty completion"
 ;;
 
 let () =
@@ -727,9 +733,9 @@ let () =
             `Quick
             test_empty_completion_overflow_maps_to_invalid_request
         ; test_case
-            "Empty completion non-overflow stays ProviderUnavailable"
+            "Empty completion non-overflow keeps its typed reason"
             `Quick
-            test_empty_completion_other_stop_reason_stays_unavailable
+            test_empty_completion_other_stop_reason_keeps_its_reason
         ; test_case "HTTP capacity failure" `Quick test_http_capacity_failure_mapping
         ; test_case "HTTP server error" `Quick test_http_server_error_mapping
         ; test_case "HTTP terminal" `Quick test_http_terminal_mapping

@@ -267,6 +267,7 @@ let classify_provider_error = function
   | Llm_provider.Error.ProviderReportedError _
   | Llm_provider.Error.UnknownVariant _
   | Llm_provider.Error.ProviderUnavailable _
+  | Llm_provider.Error.EmptyCompletion _
   | Llm_provider.Error.RateLimit _
   | Llm_provider.Error.HardQuota _
   | Llm_provider.Error.CapacityExhausted _

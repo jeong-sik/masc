@@ -115,6 +115,7 @@ let is_provider_rejected_parse_error (err : Agent_core.Error.t) : bool =
       | Llm_provider.Error.NotFound _ | Llm_provider.Error.CapacityExhausted _
       | Llm_provider.Error.HardQuota _
       | Llm_provider.Error.ProviderUnavailable _
+      | Llm_provider.Error.EmptyCompletion _
       | Llm_provider.Error.ProviderTerminal _
       | Llm_provider.Error.ProviderWireError _
       | Llm_provider.Error.ProviderReportedError _
@@ -144,14 +145,10 @@ let is_provider_wire_error (err : Agent_core.Error.t) : bool =
 
 (** 0-byte empty completion: the provider ended the turn with a modeled,
     non-overflow stop_reason but returned no thinking, text, or tool calls
-    (a broken backend model answering with an empty assistant turn).  AGENT_CORE
-    surfaces exactly two shapes for this condition
-    (agent_core [Retry.verdict_of_empty_completion]):
-
-    - [Provider (ProviderUnavailable {detail})] with [detail] starting
-      ["empty completion (stop_reason="] — a recognized non-overflow
-      stop_reason (e.g. [end_turn]) on an empty assistant turn, routed to
-      provider-unavailability handling upstream.
+    (a broken backend model answering with an empty assistant turn).
+    AGENT_CORE carries it as [Provider (EmptyCompletion {stop_reason; _})]
+    (agent_core [Retry.verdict_of_empty_completion], [Empty_attributed]),
+    with the typed stop_reason still on the value.
 
     Deliberately excluded:
 
@@ -164,24 +161,10 @@ let is_provider_wire_error (err : Agent_core.Error.t) : bool =
       message text is matched here — free-form provider bodies are not a
       classification source (see [is_provider_rejected_parse_error]).
     - ["Context overflow: empty completion"] — a context-overflow diagnostic,
-      already classified by [is_context_overflow] on the typed path.
-
-    Why a string prefix survives here (constitution exception, RFC-0371
-    §3.7): the typed [stop_reason] is deliberately flattened into [detail]
-    at the agent-core boundary (agent_core [Error.of_provider_failure],
-    [Empty_attributed] arm), so by the time the error reaches MASC the
-    prefix is the ONLY remaining discriminator between an empty-completion
-    [ProviderUnavailable] and the other [ProviderUnavailable] producers
-    (CLI startup failure, unknown provider failure). The marker is owned by
-    a single renderer ([error.ml]: ["empty completion (stop_reason=%s): %s"]),
-    not free-form provider prose. Re-typing requires a pinned Agent Core
-    error-variant change; that pin update — not this classifier — is where
-    the typed shape must be introduced. *)
+      already classified by [is_context_overflow] on the typed path. *)
 let is_empty_completion_error (err : Agent_core.Error.t) : bool =
   match err with
-  | Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderUnavailable { detail; _ }) ->
-      String.starts_with ~prefix:"empty completion (stop_reason=" detail
+  | Agent_core.Error.Provider (Llm_provider.Error.EmptyCompletion _) -> true
   (* [ParseError] is not an empty-completion shape: no producer renders the
      old "empty completion (no thinking" marker into a production
      [ParseError] at the pinned Agent Core (the renderer's callers are
@@ -410,7 +393,9 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
          | Agent_core.Error.Provider
              (Llm_provider.Error.ServerError { transient = true; _ }) ->
              Some Server_error
-         | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) ->
+         | Agent_core.Error.Provider
+             ( Llm_provider.Error.ProviderUnavailable _
+             | Llm_provider.Error.EmptyCompletion _ ) ->
              Some Server_error
          | Agent_core.Error.Provider
              ( Llm_provider.Error.AuthError _

@@ -336,16 +336,16 @@
       가중치나 숫자 비교로 Keeper 흐름 제어 로직을 짜지 않는다.
       암묵적 판단 기준이 아니라 선명한 기준으로 개발한다.
       진짜 중요한 이유가 있을 때만 예외.
-      [parity C1-C2: 잔여 게이트 정리 중 — keeper_unified_turn_failure.ml,
-       keeper_agent_run.ml 의 threshold 상수]
+      [parity C2: keeper_agent_run.ml 의 반복 감지 threshold 두 축 — 배포 후
+       재측정으로 판정. C1 은 완료]
     </item>
 
     <item id="string_matching">
       String / SubString / RegEx 비교로 다음 로직을 결정하지 않는다.
       "걸려라 곱타입" 하면서 휴리스틱한 단어나 상상 속 문장이 걸리길 바라는 구현은 제거한다.
       String 을 비교해야만 코드를 짤 수 있게 됐다면 바닥까지 온 것이다.
-      [parity C3-C4: 잔여 정리 중 — keeper_unified_metrics_support.ml 의 "SKIP:" 분기,
-       keeper_error_classify.ml 의 detail 텍스트 접두사 검사]
+      [parity C3-C4: 완료 — "SKIP:" 분기는 사라졌고, empty completion 은
+       Llm_provider.Error.EmptyCompletion variant 로 typed]
     </item>
 
     <item id="budget_gate">

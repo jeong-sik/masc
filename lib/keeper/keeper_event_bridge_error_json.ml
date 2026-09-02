@@ -383,6 +383,13 @@ let core_provider_error_fields error =
     ; "provider", `String provider
     ; "detail", `String detail
     ]
+  | Llm_provider.Error.EmptyCompletion { provider; stop_reason; detail } ->
+    [ "variant", `String "empty_completion"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; "stop_reason", `String (Llm_provider.Types.stop_reason_to_string stop_reason)
+    ; "detail", `String detail
+    ]
   | Llm_provider.Error.RateLimit { provider; retry_after; detail } ->
     [ "variant", `String "rate_limited"
     ; "message", `String message

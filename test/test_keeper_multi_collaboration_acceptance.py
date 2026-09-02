@@ -1,4 +1,5 @@
 import contextlib
+import email.message
 import importlib.util
 import inspect
 import io
@@ -310,6 +311,107 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn('"--turn-settle-budget" "$KEEPER_COLLAB_TURN_SETTLE_BUDGET_SEC"', wrapper)
+
+    @staticmethod
+    def _http_429(url, body=b'{"error":"Too Many Requests","message":"Rate limit exceeded"}', retry_after="0"):
+        headers = email.message.Message()
+        headers["Retry-After"] = retry_after
+        headers["X-RateLimit-Limit"] = "150"
+        headers["X-RateLimit-Remaining"] = "0"
+        return acceptance.urllib.error.HTTPError(url, 429, "Too Many Requests", headers, io.BytesIO(body))
+
+    def test_mcp_client_retries_429_and_records_each_rejection(self):
+        calls = []
+        sleeps = []
+
+        class Response:
+            headers = email.message.Message()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b'{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'
+
+        def fake_urlopen(request, timeout):
+            calls.append(request.full_url)
+            if len(calls) <= 2:
+                raise self._http_429(request.full_url)
+            return Response()
+
+        records = []
+        client = acceptance.McpClient("http://h/mcp", "tok", 5.0)
+        client.on_rate_limited = records.append
+        with unittest.mock.patch.object(acceptance.urllib.request, "urlopen", fake_urlopen):
+            with unittest.mock.patch.object(acceptance.time, "sleep", sleeps.append):
+                value = client.request("tools/call", {"name": "masc_x", "arguments": {}})
+        self.assertEqual(value["result"], {"ok": True})
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(sleeps, [0.0, 0.0])
+        self.assertEqual([r["attempt"] for r in records], [1, 2])
+        self.assertEqual(records[0]["tool"], "masc_x")
+        self.assertEqual(records[0]["status"], 429)
+        self.assertEqual(records[0]["headers"]["X-RateLimit-Remaining"], "0")
+        self.assertIn("Rate limit exceeded", records[0]["body"])
+
+    def test_mcp_client_gives_up_on_429_after_the_retry_budget(self):
+        sleeps = []
+
+        def always_429(request, timeout):
+            raise self._http_429(request.full_url, retry_after="not-a-number")
+
+        client = acceptance.McpClient("http://h/mcp", "tok", 5.0)
+        with unittest.mock.patch.object(acceptance.urllib.request, "urlopen", always_429):
+            with unittest.mock.patch.object(acceptance.time, "sleep", sleeps.append):
+                with self.assertRaisesRegex(acceptance.AcceptanceError, "MCP HTTP 429"):
+                    client.request("tools/call", {"name": "masc_x", "arguments": {}})
+        self.assertEqual(len(sleeps), acceptance.RATE_LIMIT_RETRY_ATTEMPTS)
+        self.assertEqual(set(sleeps), {acceptance.RATE_LIMIT_RETRY_FALLBACK_SEC})
+
+    def test_dashboard_get_retries_429_then_returns_the_payload(self):
+        calls = []
+        recorded = []
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b'{"entries":[1]}'
+
+        def fake_urlopen(request, timeout):
+            calls.append(request.full_url)
+            if len(calls) == 1:
+                raise self._http_429(request.full_url)
+            return Response()
+
+        class Stub:
+            endpoint = "http://127.0.0.1:9418/mcp"
+            token = "tok"
+            timeout = 5.0
+
+            def record_rate_limited(self, record):
+                recorded.append(record)
+
+        with unittest.mock.patch.object(acceptance.urllib.request, "urlopen", fake_urlopen):
+            with unittest.mock.patch.object(acceptance.time, "sleep", lambda s: None):
+                value = acceptance.MissionRun.dashboard_get(Stub(), "/api/v1/keepers/k/tool-calls")
+        self.assertEqual(value, {"entries": [1]})
+        self.assertEqual(calls, ["http://127.0.0.1:9418/api/v1/keepers/k/tool-calls"] * 2)
+        self.assertEqual([r["method"] for r in recorded], ["GET"])
+
+    def test_every_client_reports_429s_and_the_bundle_counts_them(self):
+        module_source = SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertEqual(module_source.count("client.on_rate_limited = self.record_rate_limited"), 2)
+        self.assertIn(
+            '"transport_rate_limited_count": len(run.rate_limited_responses)', module_source
+        )
 
     def test_run_refuses_to_start_without_a_sandbox_profile(self):
         with unittest.mock.patch.object(sys, "argv", ["acceptance", "--run"]):

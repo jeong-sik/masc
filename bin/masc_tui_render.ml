@@ -1686,10 +1686,43 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
       ; "args", held.Tui_decode.kta_args
       ]
     | Gate_row pending ->
+      let phase =
+        match pending.Tui_decode.gp_phase with
+        | Gate_queued -> "queued"
+        | Gate_judging -> "judging"
+        | Gate_human_required -> "human required"
+        | Gate_blocked -> "auto judge blocked"
+      in
+      let blocked_fields =
+        match pending.Tui_decode.gp_phase with
+        | Gate_blocked ->
+          [ ( "reason"
+            , Option.value
+                ~default:"(the server recorded no detail)"
+                pending.Tui_decode.gp_auto_judge_detail
+              |> Keeper_chat.terminal_safe_text ~preserve_newlines:true )
+          ; ( "next"
+            , match pending.Tui_decode.gp_retry_request with
+              | Some _ -> "R: retry Auto Judge; y/n: decide now"
+              | None ->
+                  "y/n: decide now (this exact attempt cannot be replayed)" )
+          ]
+        | Gate_queued | Gate_judging | Gate_human_required -> []
+      in
       [ "keeper", pending.Tui_decode.gp_keeper
       ; "tool", pending.Tui_decode.gp_display_tool
       ; "operation", pending.Tui_decode.gp_operation
-      ; "approval", pending.Tui_decode.gp_id
+      ; "state", phase
+      ]
+      @ blocked_fields
+      @ [
+        ( "approval", pending.Tui_decode.gp_id )
+      ; ( "sandbox"
+        , Terminal_text.single_line_or ~default:"(not recorded)"
+            pending.Tui_decode.gp_execution_sandbox )
+      ; ( "working directory"
+        , Terminal_text.single_line_or ~default:"(not recorded)"
+            pending.Tui_decode.gp_execution_cwd )
       ; "input",
         (match pending.Tui_decode.gp_input_preview with
          | Some preview -> preview
@@ -1767,7 +1800,7 @@ let render_approval_detail (state : state) (row : approval_row) =
   end;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  y:confirm  n:deny  Esc:back");
+       ~hints:"j/k:scroll  y:confirm  n:deny  R:retry if offered  Esc:back");
   finish_surface state ~clamped:(Approval_detail_scroll !scroll)
     ~surface_key:"approval-detail" ~rows:terminal_rows ~cols buf
 

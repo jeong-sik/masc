@@ -3222,6 +3222,91 @@ def keeper_ask_answer_interaction(
     return interact
 
 
+BLOCKED_GATE_REASON_PREFIX = b"Auto Judge exact attempt quarantined after provider"
+BLOCKED_GATE_REASON_TAIL = b"operator must retain this terminal explanation"
+
+
+def blocked_gate_detail_http_fixtures() -> HttpFixtures:
+    fixtures = overview_event_http_fixtures()
+    reason = (
+        "Auto Judge exact attempt quarantined after provider transport closed "
+        "while decoding the structured verdict; operator must retain this "
+        "terminal explanation"
+    )
+    fixtures["/api/v1/dashboard/gate"] = (
+        200,
+        {
+            "approval_queue": [
+                {
+                    "id": "appr-blocked-detail",
+                    "keeper_name": "alpha",
+                    "tool_name": "tool_execute",
+                    "input_preview": '{"command":"deploy"}',
+                    "input_hash": "a" * 64,
+                    "sequence": 41,
+                    "exact_attempt": {
+                        "state": "bound",
+                        "status": "quarantined",
+                        "quarantine_cause": "cancellation",
+                    },
+                    "summary_status": {"status": "failed", "reason": reason},
+                    "summary_attempt_disposition": {"code": "settled"},
+                }
+            ],
+            "approval_queue_state": {"state": "ready"},
+            "hitl": {
+                "gate_mode": {"mode": "auto_judge"},
+                "external_gate_mode": {"mode": "manual"},
+            },
+            "approval_rules": [],
+            "approval_rules_state": {"state": "ready"},
+        },
+    )
+    return fixtures
+
+
+def blocked_gate_detail_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=40,
+            columns=100,
+            needle=b"MASC Overview",
+        )
+        tab_until(process, master_fd, output, b"MASC Approvals")
+        wait_for_output(
+            process, master_fd, output, b"AUTO JUDGE BLOCKED", start=0, timeout=5.0
+        )
+        detail = send_and_wait(
+            process, master_fd, output, b"\r", BLOCKED_GATE_REASON_TAIL
+        )
+        frame = frame_containing(detail, BLOCKED_GATE_REASON_TAIL)
+        plain = CSI_RE.sub(b"", frame)
+        for needle in (
+            b"reason",
+            BLOCKED_GATE_REASON_PREFIX,
+            BLOCKED_GATE_REASON_TAIL,
+            b"this exact attempt cannot be replayed",
+        ):
+            if needle not in plain:
+                raise AssertionError(
+                    f"blocked Gate detail omitted {needle!r}: {frame!r}"
+                )
+        if BLOCKED_GATE_REASON_PREFIX + b"~" in plain:
+            raise AssertionError(f"blocked Gate reason was cell-truncated: {frame!r}")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def approval_selection_identity_interaction(
     fixtures: HttpFixtures,
     initial_items: list[dict[str, object]],
@@ -11460,6 +11545,12 @@ def run_keyboard_regression(executable: str) -> None:
     keeper_ask_fixtures[KEEPER_ASKS_PATH] = keeper_asks_response()
     keeper_ask_fixtures[KEEPER_ASK_ANSWER_PATH] = (200, {"ok": True})
     ask_requests: HttpRequests = []
+    run_terminal_scenario(
+        executable,
+        description="Blocked Gate reason remains whole in approval detail",
+        interact=blocked_gate_detail_interaction(),
+        http_fixtures=blocked_gate_detail_http_fixtures(),
+    )
     run_terminal_scenario(
         executable,
         description="Answering a Keeper's question from an approval detail",

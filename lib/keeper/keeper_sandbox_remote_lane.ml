@@ -16,8 +16,9 @@ let docker_has_no_remote_lane (meta : keeper_meta) =
     meta.name
 ;;
 
-(* The same readiness check for both transports: the probe is cached per
-   endpoint name, so a running guest pays it once, like an OpenSSH host. *)
+(* The preflight is the OpenSSH bootstrap contract: a host the operator
+   provisioned, reachable over the network, holding a GitHub identity the
+   bootstrap installed. It stays with that transport. *)
 let ready endpoint =
   let* () =
     if Env_config_sandbox.Preflight.enabled ()
@@ -39,9 +40,15 @@ let openssh_endpoint ~(config : Workspace.config) ~(meta : keeper_meta) =
   ready ssh
 ;;
 
+(* No preflight for a guest. The runtime that boots it establishes what the
+   preflight would ask of an OpenSSH host -- the image, the shim mount, the
+   work volume, the keeper's root on it, the identity snapshot -- and the
+   preflight's last step is [gh auth status], which a guest whose profile
+   closes its network ([Network_none]) or whose keeper has no GitHub login
+   cannot pass. Running it here refused every Execute, Read, Write and Edit
+   of such a keeper, on a lane the Docker container never gated on identity. *)
 let microvm_endpoint ?timeout_sec runtime =
-  let* guest = Keeper_turn_sandbox_runtime.microvm_remote_endpoint ?timeout_sec runtime in
-  ready guest
+  Keeper_turn_sandbox_runtime.microvm_remote_endpoint ?timeout_sec runtime
 ;;
 
 let profile_contract_mismatch ~expected ~actual =

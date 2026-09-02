@@ -2079,6 +2079,10 @@ type state = {
      list row it used to be pinned beside. *)
   mutable context_inspector_detail_scroll: int;
   mutable context_inspector_focus: pane_focus;
+  (* How many rows back from the newest the inspector is reading. [0] is the
+     newest; the keys that move it re-fetch the exact provider input for the
+     row they name, so every tab describes the turn the operator chose. *)
+  mutable context_inspector_turn_back: int;
   (* The roster beside a keeper surface costs the chat 30 columns for a
      list the reader may already know. Hidden is a choice they make, not a
      width the terminal forces, so it survives resizing. *)
@@ -2953,6 +2957,7 @@ let create_state
   context_inspector_exact = None;
   context_inspector_detail_scroll = 0;
   context_inspector_focus = Left_pane;
+  context_inspector_turn_back = 0;
   roster_pane_hidden = false;
   roster_marquee_frame = 0;
   activity_frame = -1;

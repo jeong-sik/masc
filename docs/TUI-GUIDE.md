@@ -633,6 +633,11 @@ across the conversation states that instead of figures, and a turn whose
 provider reported nothing says the input was not reported; neither gets a
 number that looks like its own and is not.
 
+`[` and `]` step back and forward through the page's turns -- the caret on
+a RECENT TURNS row names the one on screen -- and every tab re-reads the
+exact provider input for the row they name; a turn that retained no
+snapshot says so on the request tab rather than showing another turn's.
+
 `2:request` marks where each item stands in the assembly: `F` the fixed
 system prompt, `H` history the window carried forward, `N` the newest
 message added this turn (the wire is append-only, so the last message is the

@@ -785,7 +785,8 @@ let fetch_lane_run_detail ~(host : string) ~(port : int) ~(run_id : string) :
     by that turn's exact [turn_ref]. A failure on either side stays visible;
     no mutable latest-prompt value is allowed to fill another turn. *)
 let fetch_keeper_context_inspector ~(host : string) ~(port : int)
-    ~(keeper_name : string) : Masc_tui_context_inspector.reading =
+    ~(keeper_name : string) ~(turn_back : int)
+    : Masc_tui_context_inspector.reading =
   let fetch ~label ~path ~decode =
     match http_get ~host ~port ~path with
     | Error detail -> Error (label ^ " request failed: " ^ detail)
@@ -803,23 +804,38 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
       ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=50" encoded)
       ~decode:Masc_tui_context_inspector.decode_turn_records
   in
+  (* Which row the exact provider input is read for. Stepping back names the
+     row itself; the newest reading keeps the attributed fallback, because a
+     keeper mid-turn has not written the snapshot for the row it is on and
+     the newest row that did is still the honest newest answer. *)
   let provider_input =
     match turn with
     | Error detail -> Error ("provider-input turn unavailable: " ^ detail)
-    | Ok { Masc_tui_context_inspector.attributed = None; _ } ->
-      Error "provider-input unavailable: no turn on this page recorded an exact input composition"
-    | Ok { Masc_tui_context_inspector.attributed = Some { record; _ }; _ } ->
-      let turn_ref = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
-      fetch ~label:"provider-input"
-        ~path:
-          (Printf.sprintf
-             "/api/v1/keepers/%s/provider-input?turn_ref=%s"
-             encoded
-             (percent_encode_query_value turn_ref))
-        ~decode:
-          (Masc_tui_context_inspector.decode_provider_input
-             ~expected_keeper:keeper_name
-             ~expected_turn_ref:record.Turn_record.turn_ref)
+    | Ok selection -> (
+      let target =
+        if turn_back <= 0 then
+          Option.map
+            (fun (attributed : Masc_tui_context_inspector.attributed_turn) ->
+               attributed.record)
+            selection.Masc_tui_context_inspector.attributed
+        else
+          List.nth_opt selection.Masc_tui_context_inspector.rows turn_back
+      in
+      match target with
+      | None ->
+          Error "provider-input unavailable: no turn on this page recorded an exact input composition"
+      | Some record ->
+          let turn_ref = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
+          fetch ~label:"provider-input"
+            ~path:
+              (Printf.sprintf
+                 "/api/v1/keepers/%s/provider-input?turn_ref=%s"
+                 encoded
+                 (percent_encode_query_value turn_ref))
+            ~decode:
+              (Masc_tui_context_inspector.decode_provider_input
+                 ~expected_keeper:keeper_name
+                 ~expected_turn_ref:record.Turn_record.turn_ref))
   in
   { Masc_tui_context_inspector.turn; provider_input }
 

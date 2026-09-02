@@ -72,6 +72,11 @@ type selection =
   { latest : Turn_record.t
   ; attributed : attributed_turn option
   ; recent : recent_turn list
+  ; rows : Turn_record.t list
+        (** Every row on the page, newest first. [latest] is its head and
+            [recent] is its projection; the list itself is what turn
+            navigation steps through, so the row an operator stepped back to
+            is the same row the page decoded, not a re-derived one. *)
   }
 
 type reading =

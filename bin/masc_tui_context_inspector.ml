@@ -135,6 +135,7 @@ let decode_turn_records = function
                   { latest
                   ; attributed = newest_attributed newest_first
                   ; recent
+                  ; rows = newest_first
                   })
        | Some _ -> Error "turn-records entries is not a list"
        | None -> Error "turn-records response is missing entries")

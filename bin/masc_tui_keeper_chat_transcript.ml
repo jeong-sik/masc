@@ -276,10 +276,11 @@ let thinking_lines t =
 let finished_marker = "✓"
 
 let marker_of_outcome = function
-  | Started | Never_returned -> "·"
+  | Started -> "◌"
   | Awaiting_result -> "▶"
   | Returned -> finished_marker
   | Failed -> "\xe2\x9c\x97"
+  | Never_returned -> "!"
   | Outcome_unrecorded -> "?"
 
 let pad_to width text =
@@ -430,7 +431,7 @@ let compact_outcome_parts (activities : tool_activity list) =
         if activity.outcome = outcome then total + 1 else total)
       0 activities
   in
-  [ Started, "started"
+  [ Started, "running"
   ; Awaiting_result, "awaiting result"
   ; Returned, "returned"
   ; Failed, "failed"

@@ -220,7 +220,9 @@ let test_terminal_text_is_idempotent_and_single_line () =
   Alcotest.(check string) "sanitization is idempotent" once
     (Tui_decode.sanitize_terminal_text once)
 
-let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn () =
+let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn
+    ?execution_id ?tool_use_id ?planned_index ?batch_index ?batch_size
+    ?execution_mode ?result_bytes ?truncated_to ?disposition () =
   `Assoc
     ([ "ts", `Float 1787534998.4
      ; "keeper", `String keeper
@@ -229,7 +231,80 @@ let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn () =
      ; "success", `Bool success
      ]
     @ (match duration_ms with None -> [] | Some d -> [ "duration_ms", `Float d ])
-    @ (match turn with None -> [] | Some t -> [ "turn", `Int t ]))
+    @ (match turn with None -> [] | Some t -> [ "turn", `Int t ])
+    @ (match execution_id with None -> [] | Some v -> [ "execution_id", `String v ])
+    @ (match tool_use_id with None -> [] | Some v -> [ "tool_use_id", `String v ])
+    @ (match planned_index with None -> [] | Some v -> [ "planned_index", `Int v ])
+    @ (match batch_index with None -> [] | Some v -> [ "batch_index", `Int v ])
+    @ (match batch_size with None -> [] | Some v -> [ "batch_size", `Int v ])
+    @ (match execution_mode with None -> [] | Some v -> [ "execution_mode", `String v ])
+    @ (match result_bytes with None -> [] | Some v -> [ "result_bytes", `Int v ])
+    @ (match truncated_to with None -> [] | Some v -> [ "truncated_to", `Int v ])
+    @ (match disposition with None -> [] | Some v -> [ "disposition", `String v ]))
+
+let test_keeper_calls_decode_exact_execution_schedule () =
+  let payload =
+    `Assoc
+      [ "keeper", `String "largo"
+      ; "count", `Int 1
+      ; "health", `String "ok"
+      ; ( "entries"
+        , `List
+            [ keeper_call_row ~keeper:"largo" ~tool:"Read"
+                ~execution_id:"exec-1" ~tool_use_id:"call-1"
+                ~planned_index:1 ~batch_index:2 ~batch_size:3
+                ~execution_mode:"concurrent" ~result_bytes:4096
+                ~truncated_to:1024 ~disposition:"deferred" () ] )
+      ]
+  in
+  match Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo" payload with
+  | Error detail -> Alcotest.failf "expected schedule, got %s" detail
+  | Ok snapshot ->
+      (match snapshot.Tui_decode.kcs_entries with
+       | [ call ] ->
+           Alcotest.(check (option string)) "execution id" (Some "exec-1")
+             call.Tui_decode.kc_execution_id;
+           Alcotest.(check (option int)) "result bytes" (Some 4096)
+             call.Tui_decode.kc_result_bytes;
+           Alcotest.(check (option int)) "truncated to" (Some 1024)
+             call.Tui_decode.kc_truncated_to;
+           Alcotest.(check bool) "deferred disposition" true
+             (call.Tui_decode.kc_disposition =
+                Some Tui_decode.Keeper_call_deferred);
+           (match call.Tui_decode.kc_schedule with
+            | Some schedule ->
+                Alcotest.(check int) "planned position" 1 schedule.kcs_planned_index;
+                Alcotest.(check int) "batch" 2 schedule.kcs_batch_index;
+                Alcotest.(check int) "batch width" 3 schedule.kcs_batch_size;
+                Alcotest.(check bool) "concurrent" true
+                  (schedule.kcs_execution_mode = Tui_decode.Keeper_call_concurrent)
+            | None -> Alcotest.fail "schedule was dropped")
+       | _ -> Alcotest.fail "expected one call")
+
+let test_keeper_calls_reject_partial_or_unknown_schedule () =
+  let decode row =
+    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
+      (`Assoc
+         [ "keeper", `String "largo"
+         ; "count", `Int 1
+         ; "health", `String "ok"
+         ; "entries", `List [ row ]
+         ])
+  in
+  Alcotest.(check bool) "partial schedule rejected" true
+    (Result.is_error
+       (decode
+          (keeper_call_row ~keeper:"largo" ~tool:"Read" ~batch_index:0 ())));
+  Alcotest.(check bool) "unknown mode rejected" true
+    (Result.is_error
+       (decode
+          (keeper_call_row ~keeper:"largo" ~tool:"Read" ~planned_index:0
+             ~batch_index:0 ~batch_size:1 ~execution_mode:"maybe" ())))
+  ; Alcotest.(check bool) "unknown disposition rejected" true
+      (Result.is_error
+         (decode
+            (keeper_call_row ~keeper:"largo" ~tool:"Read"
+               ~disposition:"maybe" ())))
 
 let test_keeper_calls_reject_rows_naming_another_keeper () =
   let payload =
@@ -6955,7 +7030,11 @@ let () =
       ] );
     ( "keeper_calls",
       [
-        Alcotest.test_case "rejects rows naming another keeper" `Quick
+        Alcotest.test_case "decodes exact execution schedule" `Quick
+          test_keeper_calls_decode_exact_execution_schedule
+      ; Alcotest.test_case "rejects partial or unknown schedule" `Quick
+          test_keeper_calls_reject_partial_or_unknown_schedule
+      ; Alcotest.test_case "rejects rows naming another keeper" `Quick
           test_keeper_calls_reject_rows_naming_another_keeper
       ; Alcotest.test_case "requires the envelope" `Quick
           test_keeper_calls_require_the_envelope

@@ -325,8 +325,8 @@ let section ~max_line_cells prepared =
   | Written { preview; omitted; row_count } ->
       written_section ~max_line_cells change ~preview ~omitted ~row_count
 
-let rows ~mode ~max_line_cells indexed (projection : Transcript.tool_projection)
-    =
+let rows ~mode ~max_line_cells ?(activity_details = fun _ -> []) indexed
+    (projection : Transcript.tool_projection) =
   match mode with
   | Transcript.Compact -> projection.rows
   | Transcript.Full ->
@@ -354,8 +354,10 @@ let rows ~mode ~max_line_cells indexed (projection : Transcript.tool_projection)
                     , withheld )
                 | Ambiguous _ -> [], previews_left, withheld + 1
               in
+              let details = activity_details activity in
               weave previews_left withheld
-                (List.rev_append extra (row :: reversed))
+                (List.rev_append extra
+                   (List.rev_append details (row :: reversed)))
                 activity_rest row_rest
           | [], remaining ->
               let rows = List.rev reversed in

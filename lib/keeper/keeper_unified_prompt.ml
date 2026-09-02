@@ -1207,7 +1207,6 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
       ~meta
       ~config
       ?profile_defaults
-      ?active_goal_summaries
       ()
   in
   (* User message: structured world observation — reactive triggers + resource state only.

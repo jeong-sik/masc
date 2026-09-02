@@ -29,6 +29,11 @@ let test_plain_text_stays_text () =
     [ "T 지금은 자율 턴입니다." ]
     (shown ~text:"지금은 자율 턴입니다.")
 
+let test_malformed_json_stays_text () =
+  check sections_ty "malformed JSON is prose rather than a crashed detail pane"
+    [ "T {\"content_blocks\":[" ]
+    (shown ~text:"{\"content_blocks\":[")
+
 let test_json_without_blocks_stays_json () =
   check sections_ty "a schema row keeps its payload whole"
     [ "J {\"type\":\"object\"}" ]
@@ -107,6 +112,8 @@ let () =
             test_plain_text_stays_text
         ; Alcotest.test_case "json without blocks stays json" `Quick
             test_json_without_blocks_stays_json
+        ; Alcotest.test_case "malformed JSON stays text" `Quick
+            test_malformed_json_stays_text
         ; Alcotest.test_case "a text block reads as prose" `Quick
             test_a_text_block_reads_as_prose
         ; Alcotest.test_case "a tool use names itself and carries its input"

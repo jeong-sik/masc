@@ -38,9 +38,13 @@ let rec block_sections (block : Types.content_block) : section list =
       [ Marker (Printf.sprintf "audio %s, %d bytes" media_type (String.length data)) ]
 
 let sections ~text =
-  match Yojson.Safe.from_string text with
-  | Error _ -> [ Text text ]
-  | Ok json -> (
-    match Masc.Keeper_context_core_message_json.content_blocks_of_json json with
-    | Some blocks -> List.concat_map block_sections blocks
-    | None -> [ Json text ])
+  let parsed =
+    try Some (Yojson.Safe.from_string text) with
+    | Yojson.Json_error _ -> None
+  in
+  match parsed with
+  | None -> [ Text text ]
+  | Some json -> (
+      match Masc.Keeper_context_core_message_json.content_blocks_of_json json with
+      | Some blocks -> List.concat_map block_sections blocks
+      | None -> [ Json text ])

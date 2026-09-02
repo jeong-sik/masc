@@ -34,23 +34,29 @@ let render json =
     Masc_tui_keeper_sandbox.view_lines ~width:64 reading
     |> String.concat "\n"
 
-let test_declared_effective_observed_flow () =
+let test_idle_status_answers_what_happens_next () =
   let rendered = render observed in
   List.iter
     (fun needle ->
       Alcotest.(check bool) needle true (contains rendered needle))
-    [ "sandbox flow"
-    ; "Declared"
-    ; "docker / network inherit"
-    ; "Effective"
-    ; "oneshot_or_managed_inherit"
-    ; "Observed"
-    ; "0 observed"
-    ; "Why no"
-    ; "one-shot"
+    [ "status"
+    ; "IDLE"
+    ; "Next"
+    ; "container starts when a sandbox command runs"
+    ; "configured"
+    ; "Backend"
     ; "Docker"
-    ; "containers"
+    ; "Network"
+    ; "inherit"
+    ; "related"
     ]
+  ; List.iter
+      (fun stale_label ->
+        Alcotest.(check bool)
+          (stale_label ^ " is not rendered")
+          false
+          (contains rendered stale_label))
+      [ "sandbox flow"; "Effective"; "oneshot_or_managed_inherit"; "Why no container" ]
 
 let test_live_container_and_errors_are_visible () =
   let json =
@@ -107,34 +113,78 @@ let test_live_container_and_errors_are_visible () =
   List.iter
     (fun needle ->
       Alcotest.(check bool) needle true (contains rendered needle))
-    [ "1 observed · 1 running"
+    [ "DEGRADED"
+    ; "1 reported with an inspection error"
+    ; "live instance"
+    ; "State"
     ; "masc-alpha"
     ; "abc123"
-    ; "pid 4242"
-    ; "created 2026-09-02T04:51:29Z"
+    ; "Owner PID"
+    ; "4242"
+    ; "Created"
+    ; "2026-09-02T04:51:29Z"
+    ; "Compute"
     ; "4 CPU"
-    ; "2.0 GiB"
+    ; "2.0 GiB RAM"
+    ; "Network"
     ; "192.168.64.64/24"
     ; "192.168.64.1"
-    ; "resources"
+    ; "configured"
     ; "work 256g"
-    ; "paths"
+    ; "filesystem"
     ; "/base/.masc/playground/alpha"
     ; "/masc-work/alpha"
     ; "/tmp/masc-runtime/.masc/config"
-    ; "not observed"
-    ; "press l"
-    ; "press t"
+    ; "unavailable"
+    ; "l  logs"
+    ; "t  tool calls"
     ; "docker list partial"
     ; "previous launch failed"
     ]
+
+let test_stopped_instance_is_not_reported_as_not_started () =
+  let json =
+    Yojson.Safe.from_string
+      {|{
+        "sandbox_live": {
+          "sandbox_profile": "microvm",
+          "containers": [{
+            "id": "vm-stopped",
+            "name": "masc-alpha",
+            "image": "masc/sandbox:latest",
+            "status": "stopped",
+            "running": false
+          }],
+          "container_error": null
+        }
+      }|}
+  in
+  let rendered = render json in
+  Alcotest.(check bool) "stopped status" true (contains rendered "STOPPED");
+  Alcotest.(check bool) "not a never-started VM" false
+    (contains rendered "NOT STARTED")
+
+let test_unknown_profile_fails_closed () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"sandbox_live":{"sandbox_profile":"mystery","containers":[]}}|}
+  in
+  match
+    Masc_tui_keeper_sandbox.decode
+      ~sanitize:Masc.Tui_decode.sanitize_terminal_text
+      json
+  with
+  | Ok _ -> Alcotest.fail "an unknown sandbox profile was accepted"
+  | Error detail ->
+    Alcotest.(check bool) "profile error names the value" true
+      (contains detail "unsupported value mystery")
 
 let test_hostile_text_is_sanitized_before_state () =
   let json =
     Yojson.Safe.from_string
       {|{
         "sandbox_live": {
-          "effective_mode": "before\u001b]8;;https://bad.invalid\u0007after",
+          "configured_network_mode": "before\u001b]8;;https://bad.invalid\u0007after",
           "containers": []
         }
       }|}
@@ -196,7 +246,7 @@ let test_build_volume_reports_where_output_lands () =
         (Printf.sprintf "%S is rendered" needle)
         true
         (contains rendered needle))
-    [ "build output"; "masc-keeper-build-polisher"; "14 checkout(s)"; "/masc-build" ]
+    [ "build cache"; "masc-keeper-build-polisher"; "14 checkout(s)"; "/masc-build" ]
 ;;
 
 let test_checkouts_still_on_the_share_are_named () =
@@ -215,7 +265,11 @@ let test_checkouts_still_on_the_share_are_named () =
         (Printf.sprintf "%S is rendered" needle)
         true
         (contains rendered needle))
-    [ "still on the share"; "masc-t362"; "holds build output on the share" ]
+    [ "still use the shared filesystem"
+    ; "Shared fs"
+    ; "masc-t362"
+    ; "holds build output on the share"
+    ]
 ;;
 
 let test_docker_keeper_shows_no_build_volume_section () =
@@ -223,9 +277,9 @@ let test_docker_keeper_shows_no_build_volume_section () =
      rather than rendering an empty one. *)
   let rendered = render observed in
   Alcotest.(check bool)
-    "no build output section for docker"
+    "no build cache section for docker"
     false
-    (contains rendered "build output")
+    (contains rendered "build cache")
 ;;
 
 let test_malformed_build_volume_fails_closed () =
@@ -264,10 +318,14 @@ let test_malformed_build_volume_fails_closed () =
 let () =
   Alcotest.run "tui keeper sandbox"
     [ ( "projection"
-      , [ Alcotest.test_case "declared effective observed flow" `Quick
-            test_declared_effective_observed_flow
+      , [ Alcotest.test_case "idle status answers next action" `Quick
+            test_idle_status_answers_what_happens_next
         ; Alcotest.test_case "containers and errors" `Quick
             test_live_container_and_errors_are_visible
+        ; Alcotest.test_case "stopped instance stays distinct" `Quick
+            test_stopped_instance_is_not_reported_as_not_started
+        ; Alcotest.test_case "unknown profile fails closed" `Quick
+            test_unknown_profile_fails_closed
         ; Alcotest.test_case "terminal controls sanitized" `Quick
             test_hostile_text_is_sanitized_before_state
         ; Alcotest.test_case "missing observation fails closed" `Quick

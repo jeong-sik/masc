@@ -266,6 +266,13 @@ let handle_gate_connector_names state request reqd =
              (Channel_gate.error_json ("unknown connector: " ^ connector))
        | Some _ ->
            let offset = int_query_param request "offset" ~default:0 |> max 0 in
+           let after_id =
+             match query_param request "after_id" with
+             | Some value ->
+               let value = String.trim value in
+               if String.equal value "" then None else Some value
+             | None -> None
+           in
            let limit =
              int_query_param request "limit" ~default:100 |> max 1 |> min 500
            in
@@ -299,8 +306,20 @@ let handle_gate_connector_names state request reqd =
                        (Connector_names.recall ~base_dir ~connector ~scope ~id))
                    ids
              in
+             let entries =
+               match after_id with
+               | None -> entries
+               | Some cursor ->
+                 List.filter
+                   (fun (id, _) -> String.compare id cursor > 0)
+                   entries
+             in
              let total = List.length entries in
-             let page = entries |> List.drop offset |> List.take limit in
+             let page_offset = if Option.is_some after_id then 0 else offset in
+             let page = entries |> List.drop page_offset |> List.take limit in
+             let next_after_id =
+               List.rev page |> List.find_map (fun (id, _) -> Some id)
+             in
              let workspace_id =
                if String.equal connector Channel_gate_slack_state.connector_id
                then Channel_gate_slack_state.current_workspace_id ()
@@ -319,7 +338,13 @@ let handle_gate_connector_names state request reqd =
                  ; "offset", `Int offset
                  ; "limit", `Int limit
                  ; "total", `Int total
-                 ; "has_more", `Bool (offset + List.length page < total)
+                 ; ( "after_id"
+                   , match after_id with Some value -> `String value | None -> `Null )
+                 ; ( "next_after_id"
+                   , match next_after_id with
+                     | Some value -> `String value
+                     | None -> `Null )
+                 ; "has_more", `Bool (page_offset + List.length page < total)
                  ; ( "mappings"
                    , `List
                        (List.map

@@ -459,6 +459,9 @@ type connector_name_page = {
   cnp_mapping_scope : string;
   cnp_current_workspace_id : string option;
   cnp_path : string;
+  cnp_after_id : string option;
+  cnp_next_after_id : string option;
+  cnp_total : int;
   cnp_has_more : bool;
   cnp_mappings : connector_name_mapping list;
 }

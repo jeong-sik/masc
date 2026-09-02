@@ -6,11 +6,20 @@ name: CI
 # dashboard / structure-ratchet / shell-ir-ratchet / ci-gate) is now a
 # single job that builds the tree.
 #
-# Scope: `dune build .` compiles the whole tree, test/ included. It
-# replaced `@install` on 2026-09-02 because @install skips test/, and
-# that day's five main breakages put 3 of 12 sites — and two entire
-# repairs (#32454, #32517) — in test files, where @install would never
-# have looked.
+# Scope: `@check` type-checks the whole tree, test/ included, and links
+# nothing. It replaced `@install` on 2026-09-02 for two reasons.
+#
+# @install skips test/ entirely: that day's five main breakages put 3 of
+# 12 repaired sites — and two whole repairs (#32454, #32517) — in test
+# files it would never have compiled.
+#
+# `dune build .` would cover them but link the ~296 executables test/dune
+# declares, and linking is this repo's slow step; the @install job took
+# 10 minutes on 2026-09-02 before any of that. Every one of the five
+# breakages was a compile error — four unbound values or signature
+# mismatches, one shadowed duplicate caught as warning 32 — and @check
+# reports all of them. Nothing that day needed an executable to exist.
+#
 # Lint, dashboard, ratchets, and the ci-gate no longer run anywhere.
 
 on:
@@ -28,7 +37,7 @@ concurrency:
 
 jobs:
   build:
-    name: dune build .
+    name: dune build @check
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -73,10 +82,10 @@ jobs:
 
       - name: Build
         env:
-          # Public runners give four CPUs; use all four. Linking the test
-          # executables, not compiling, is what this job spends its time on.
+          # Public runners give four CPUs; use all four for the
+          # compile-only graph.
           DUNE_JOBS: "4"
         # NO continue-on-error: the build is deterministic and must hard-fail.
         run: |
           set -euo pipefail
-          dune build .
+          dune build @check

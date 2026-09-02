@@ -7134,7 +7134,7 @@ let render_keeper_message (state : state) =
     let chat_cols =
       Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden ~cols
     in
-    let header_base, mode_suffix =
+    let title, mode_suffix =
       (* Both features put a mode indicator here: memory arrived on main
          (#30401) while this branch was open. Neither is dropped, but only a
          mode away from its default is spelled -- see
@@ -7198,38 +7198,19 @@ let render_keeper_message (state : state) =
         screen_title
           (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat" display_keeper_name)
       in
-      let identity_separator = "  " in
       let mode_suffix =
         if String.equal modes "" then ""
         else Printf.sprintf "  %s%s%s" Ansi.dim modes Ansi.reset
       in
-      (* Modes describe an operator-selected projection, so cutting one can
-         make the pane lie about what it is hiding. Reserve them first, then
-         middle-fit only the opaque runtime id inside the identity budget. *)
-      let left_cells =
-        max 0
-          (framed_inner_width chat_cols
-          - Message_layout.display_width mode_suffix)
-      in
-      let title_cells = Message_layout.display_width title in
-      if title_cells + Message_layout.display_width identity_separator
-         >= left_cells
-      then fit_width title left_cells, mode_suffix
-      else
-        let identity_cells =
-          left_cells - title_cells
-          - Message_layout.display_width identity_separator
-        in
-        ( String.concat ""
-            [ title
-            ; identity_separator
-            ; keeper_message_identity ~max_cells:identity_cells state keeper_name
-            ]
-        , mode_suffix )
+      title, mode_suffix
     in
-    (* Context is an optional item on the existing row. It may be appended only
-       when the whole item fits the chat box's own interior; [box_line] must
-       never be left to cut a context reading into a different statement. *)
+    let inner_cells = framed_inner_width chat_cols in
+    (* Title and projection are navigation facts. Runtime/gate/context are
+       operational facts. Putting all of them on one row made an ordinary
+       provider id consume the rest of the header and silently lose whatever
+       followed it. Two fixed rows make the hierarchy visible and let the
+       opaque runtime id be the only item that yields width. *)
+    let title_row = fit_width (title ^ mode_suffix) inner_cells in
     let context_separator = "  " in
     let context_item =
       if not target_registered then None
@@ -7239,27 +7220,26 @@ let render_keeper_message (state : state) =
         with
         | Some { observation = Some observation; error = None } ->
             Observation_layout.context_header_item
-              ~max_cells:
-                (max 0
-                   (framed_inner_width chat_cols
-                   - Message_layout.display_width header_base
-                   - Message_layout.display_width context_separator
-                   - Message_layout.display_width mode_suffix))
+              ~max_cells:(min 32 (max 0 (inner_cells / 3)))
               observation
         | Some _ | None -> None
     in
-    let header =
+    let context_cells =
       match context_item with
-      | None -> header_base ^ mode_suffix
+      | None -> 0
       | Some item ->
-          String.concat ""
-            [ header_base
-            ; context_separator
-            ; Ansi.dim
-            ; item
-            ; Ansi.reset
-            ; mode_suffix
-            ]
+          Message_layout.display_width context_separator
+          + Message_layout.display_width item
+    in
+    let identity =
+      keeper_message_identity
+        ~max_cells:(max 0 (inner_cells - context_cells)) state keeper_name
+    in
+    let identity_row =
+      match context_item with
+      | None -> identity
+      | Some item ->
+          identity ^ context_separator ^ Ansi.dim ^ item ^ Ansi.reset
     in
     if
       not
@@ -7277,18 +7257,19 @@ let render_keeper_message (state : state) =
     let chat_buf = if split then Buffer.create 4096 else buf in
     (* Header *)
     box_top chat_buf chat_cols;
-    box_line chat_buf chat_cols header;
+    box_line chat_buf chat_cols title_row;
+    box_line chat_buf chat_cols identity_row;
     box_divider chat_buf chat_cols;
 
-    (* Message history. The fixed chrome is 7 rows — box top, header, its
-       divider, the input divider, the composer's first line, box bottom and
-       the footer — and every variable row (status, sending, queue, errors,
+    (* Message history. The fixed chrome is 8 rows — box top, two header rows,
+       their divider, the input divider, the composer's first line, box bottom
+       and the footer — and every variable row (status, sending, queue, errors,
        composer growth) is in [status_rows]. The old constant 10 reserved
-       three rows nothing drew, so the pane stopped three short of the
+       two rows nothing drew, so the pane stopped two short of the
        terminal's bottom edge. [message_viewport_supported] requires the same
-       seven-row chrome plus three history rows, so a live-edge omission can
+       eight-row chrome plus three history rows, so a live-edge omission can
        still show its first row, typed gap, and latest row. *)
-    let history_height = max 0 (rows - 7 - status_rows) in
+    let history_height = max 0 (rows - 8 - status_rows) in
     (* The same pure derivation the committed rows used, asked again for the
        live ones: one call to one function with one argument, so the badge the
        streaming turn aligns to is the badge the history aligned to. *)

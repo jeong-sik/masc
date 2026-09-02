@@ -527,12 +527,13 @@ let input_cursor_column ~terminal_cols ~input =
    The badge used to be 16 cells whatever the terminal was, so a
    [codex-mcp-client] read as [codex-mcp-clien…] on a 200-column screen with
    the room to spell it. The width is a fixed pane-derived budget, never below
-   14 so the built-in activity labels remain legible, and
-   never past 18: that still holds [codex-mcp-client] beside its mark but does
-   not spend a quarter of a wide pane on empty alignment. *)
-let chat_role_label_column = 14
+   10 so the built-in activity labels remain legible, and
+   never past 14: the built-in activity labels still read whole beside their
+   marks, while an opaque long speaker name yields its middle instead of
+   reserving empty cells on every body row. *)
+let chat_role_label_column = 10
 
-let chat_role_label_share = 4
+let chat_role_label_share = 10
 
 (* A budget, not a measurement of what happens to be loaded.
    Measuring the widest label on the pane tied body width to the message
@@ -545,7 +546,7 @@ let chat_role_label_share = 4
    ("keeper-canary-10t-cdx-sol-xhigh-r2-20260820-agent · agent"), so the
    badge took a quarter of the pane and gave it back one message later.
    Fixed, the body keeps its width and only a resize re-wraps. *)
-let chat_role_label_budget = 18
+let chat_role_label_budget = 14
 
 let chat_role_label_width ~pane_cells =
   max chat_role_label_column
@@ -682,10 +683,12 @@ let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
      body indent, four for the body itself, and three for a shortened source
      such as […aa]. Eleven columns left one source cell, which could draw only
      the omission marker and therefore admitted a chat pane with no identity. *)
-  (* The fixed chrome costs seven rows. Three history rows are the minimum that
+  (* The fixed chrome costs eight rows. The title and operational identity use
+     separate rows so a provider id cannot cut the title or context reading.
+     Three history rows are the minimum that
      can show an oversized entry's identity/opening, an omission marker, and
      its latest output instead of silently dropping one of those facts. *)
-  terminal_cols >= 13 && terminal_rows >= 10 + max 0 status_rows
+  terminal_cols >= 13 && terminal_rows >= 11 + max 0 status_rows
 
 let take_last count values =
   let drop = max 0 (List.length values - max 0 count) in

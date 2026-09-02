@@ -447,11 +447,13 @@ let test_input_cursor_uses_visible_terminal_cells () =
   in
   check bool "nine rows cannot show first, gap, and latest" false
     (supported 9 80 0);
-  check bool "ten rows fit three history rows" true (supported 10 80 0);
+  check bool "ten rows cannot fit two header rows and three history rows" false
+    (supported 10 80 0);
+  check bool "eleven rows fit three history rows" true (supported 11 80 0);
   check bool "status rows raise the minimum height" false
-    (supported 12 80 3);
-  check bool "status frame keeps three history rows" true
     (supported 13 80 3);
+  check bool "status frame keeps three history rows" true
+    (supported 14 80 3);
   check bool "twelve columns cannot preserve a source suffix" false
     (supported 30 12 0);
   check bool "thirteen columns preserve a source suffix" true
@@ -1250,23 +1252,20 @@ let test_bare_links_are_dressed_and_bounded () =
    times, and [msg_scroll] counts rows back from the newest, so the operator's
    place in the conversation moved with it.
 
-   The badge is a budget now. [codex-mcp-client] still reads whole -- that was
-   the original complaint and 18 covers it -- and a name past the budget loses
-   its head rather than its tail, because these labels are [agent · surface]
-   and share long prefixes. *)
+   The badge is a budget now. Built-in activity labels read whole; an opaque
+   name past the budget loses its head rather than its tail, because these
+   labels are [agent · surface] and share long prefixes. *)
 let test_badge_is_a_budget_not_a_measurement () =
   let width = Layout.chat_role_label_width ~pane_cells:200 in
-  check int "a wide pane spends the budget and no more" 18 width;
-  check bool "the name the old constant cut still reads whole" true
-    (String.starts_with ~prefix:(Layout.speaker_mark Layout.Keeper)
-       (Layout.align_role_label ~column:width ~style:Layout.Keeper
-          "codex-mcp-client")
-     && String.equal "codex-mcp-client"
-          (String.trim
-             (Layout.drop_cells
-                (Layout.align_role_label ~column:width ~style:Layout.Keeper
-                   "codex-mcp-client")
-                2)))
+  check int "a wide pane spends the budget and no more" 14 width;
+  List.iter
+    (fun label ->
+      let drawn =
+        Layout.align_role_label ~column:width ~style:Layout.Keeper label
+      in
+      check bool (label ^ " reads whole") true
+        (String.equal label (String.trim (Layout.drop_cells drawn 2))))
+    [ "JOURNAL"; "THINKING" ]
 
 let test_badge_keeps_the_tail_when_it_cannot_fit () =
   let width = Layout.chat_role_label_width ~pane_cells:200 in
@@ -1288,13 +1287,13 @@ let test_badge_keeps_the_tail_when_it_cannot_fit () =
      n >= m && String.sub drawn (n - m) m = suffix)
 
 let test_badge_narrows_with_the_pane () =
-  (* Under 64 cells a quarter is below the old constant and the floor wins,
-     so a narrow terminal draws the badge it always drew. *)
-  check int "a wide pane spends the budget" 18
+  (* The fixed floor keeps every built-in activity label; wider panes add a
+     small, bounded amount for speaker identities. *)
+  check int "a wide pane spends the budget" 14
     (Layout.chat_role_label_width ~pane_cells:400);
-  check int "40-cell pane keeps the compact badge" 14
+  check int "40-cell pane keeps the compact badge" 10
     (Layout.chat_role_label_width ~pane_cells:40);
-  check int "16-cell pane keeps the compact badge" 14
+  check int "16-cell pane keeps the compact badge" 10
     (Layout.chat_role_label_width ~pane_cells:16)
 
 let test_one_long_name_cannot_crowd_the_messages () =
@@ -1305,9 +1304,9 @@ let test_one_long_name_cannot_crowd_the_messages () =
   check bool "so the body keeps most of the width" true
     (pane - width > pane / 2)
 
-let test_a_narrow_pane_draws_what_it_always_did () =
-  check int "40-cell pane" 14 (Layout.chat_role_label_width ~pane_cells:40);
-  check int "16-cell pane" 14 (Layout.chat_role_label_width ~pane_cells:16)
+let test_a_narrow_pane_keeps_the_builtin_labels () =
+  check int "40-cell pane" 10 (Layout.chat_role_label_width ~pane_cells:40);
+  check int "16-cell pane" 10 (Layout.chat_role_label_width ~pane_cells:16)
 
 let test_every_row_gets_the_same_badge () =
   (* Alignment is the reason the badge exists: one width for the pane, not
@@ -1902,8 +1901,8 @@ let () =
             test_badge_narrows_with_the_pane
         ; test_case "one long name cannot crowd the messages" `Quick
             test_one_long_name_cannot_crowd_the_messages
-        ; test_case "a narrow pane draws what it always did" `Quick
-            test_a_narrow_pane_draws_what_it_always_did
+        ; test_case "a narrow pane keeps built-in labels" `Quick
+            test_a_narrow_pane_keeps_the_builtin_labels
         ; test_case "every row gets the same badge" `Quick
             test_every_row_gets_the_same_badge
         ; test_case "origin rows draw what they always did" `Quick

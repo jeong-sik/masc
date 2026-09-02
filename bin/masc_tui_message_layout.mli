@@ -267,8 +267,8 @@ val chat_role_label_width : pane_cells:int -> int
 (** The badge budget for a pane this wide. It does not read the labels: body
     width is taken from what the badge leaves, so measuring the loaded
     messages made every body re-wrap whenever a differently-named speaker
-    posted. Capped at a quarter of the pane so a narrow terminal still has
-    room to read. *)
+    posted. The bounded 10--14 cell result keeps the built-in activity names
+    whole without turning their alignment padding into a wide empty gutter. *)
 
 val speaker_mark : style -> string
 (** One glyph per speaker. Colour says the same thing more legibly, and

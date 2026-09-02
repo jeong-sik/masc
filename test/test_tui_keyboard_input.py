@@ -6194,6 +6194,17 @@ def chat_visibility_modes_interaction() -> Interaction:
                 timeout=5.0,
             )
         initial += bytes(output[pane_start:])
+        initial_frame = frame_containing(initial, b"ci-red-attribution")
+        plain_initial_frame = CSI_RE.sub(b"", initial_frame)
+        title_row = frame_row_of(
+            plain_initial_frame, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        )
+        identity_row = frame_row_of(plain_initial_frame, b"gate:auto_judge")
+        if identity_row != title_row + 1:
+            raise AssertionError(
+                "chat navigation and operational identity did not occupy "
+                f"adjacent dedicated rows: {initial_frame!r}"
+            )
         if b"2 reasoning steps, content withheld" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
         if re.search("◆\\s+SKILL".encode(), CSI_RE.sub(b"", initial)) is None:

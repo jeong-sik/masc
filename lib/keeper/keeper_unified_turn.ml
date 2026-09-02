@@ -509,12 +509,9 @@ let run_keeper_cycle
           ~decision:(`Assoc [ "reason", `String "runtime" ])
           Keeper_runtime_manifest.Runtime_routed
       in
-      (* Concrete runtime health/capacity is owned by AGENT_CORE/provider adapters.
-         Keeper routing no longer rewrites runtimes from provider cooldown or
-         process-queue probes. *)
-      (match None with
-       | Some meta_after_skip -> Ok (Turn_skipped meta_after_skip), turn_state
-       | None ->
+      (* Concrete runtime health/capacity is owned by AGENT_CORE/provider
+         adapters; routing here does not consult it. *)
+      (
          (* RFC-0136 PR-3: pre-dispatch validation extracted to
             [Keeper_unified_turn_pre_dispatch].  profile_defaults stays
             in scope so the retry-loop block below can also call the

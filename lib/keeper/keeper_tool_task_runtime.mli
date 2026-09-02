@@ -31,7 +31,3 @@ val handle_keeper_task_tool_with_outcome :
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t
 
-val with_evidence_total_bytes_limit : int -> (unit -> 'a) -> 'a
-(** Test seam: force the artifact total-size limit for the duration of [f]
-    without touching the process environment, since Alcotest cases share one
-    process and a leaked [putenv] would bleed across cases. *)

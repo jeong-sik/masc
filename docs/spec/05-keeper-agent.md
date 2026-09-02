@@ -438,7 +438,7 @@ Keeper work budget.
 
 **Other**: `DEBUG`(0), `SKILL_SELECTION`(agent), `BOOTSTRAP_PROACTIVE_WARMUP_SEC`(60)
 
-**Evidence budget** (task tooling, `lib/keeper/keeper_tool_task_runtime.ml`): `MASC_EVIDENCE_TOTAL_BYTES_LIMIT`(51200) — `keeper_task_done`이 `artifact:` evidence 전체 합계로 거절하는 상한(바이트). 초과 시 전환 전에 즉시 거절되며 총 바이트 수와 `note:` 대안이 안내된다. 유효하지 않은 값은 기본값으로 회귀한다(fail-open).
+**Evidence 상한** (task tooling, `lib/keeper/keeper_tool_task_runtime.ml`): `evidence_total_bytes_limit` = 51,200바이트 — `keeper_task_done`이 `artifact:` evidence 전체 합계로 거절하는 상한. 초과 시 전환 전에 즉시 거절되며 총 바이트 수와 `note:` 대안이 안내된다. 코드 상수이며 환경변수·TOML 로 바꾸지 않는다.
 
 **Context capacity**: handoff decisions are typed capacity signals. They do not classify model text or infer goals; semantic decisions remain at the model boundary.
 

@@ -102,9 +102,7 @@ module Ring : sig
   (** RFC-0079: typed entry.  Wire format keeps [level] and [source] as
       their canonical strings (see {!level_to_string} / {!source_to_string});
       the dashboard schema in [dashboard/src/api/schemas/logs.ts] mirrors
-      that wire format.  Pre-RFC-0079 fields [raw_level] /
-      [normalized_level] / [legacy_classified] are gone — they only ever
-      carried the pre-typed mirror's classifier state. *)
+      that wire format. *)
   type entry = {
     seq : int;
     ts : string;

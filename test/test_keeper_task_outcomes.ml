@@ -1034,15 +1034,14 @@ let test_done_refuses_oversized_artifact_evidence () =
                ; "evidence_refs", `List evidence
                ])
        in
-       let expected_limit = 512 in
-       let expected_total = 513 in
+       let expected_limit = 50 * 1024 in
+       let expected_total = expected_limit + 1 in
        let big_artifact =
          Filename.concat producer_root (Printf.sprintf "big-%d.txt" expected_total)
        in
        Out_channel.with_open_text big_artifact (fun oc ->
          output_string oc (String.make expected_total 'x'));
        let payload =
-         Task.with_evidence_total_bytes_limit expected_limit @@ fun () ->
          run_done
            [ `String
                (Printf.sprintf "artifact:big-%d.txt" expected_total)

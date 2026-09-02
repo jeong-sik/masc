@@ -4,8 +4,8 @@
     keeper presence and heartbeat snapshots. Uses [Keeper_registry] as
     the single source of truth for keeper state.
 
-    Launch helpers, lifecycle, backoff — extracted to
-    [Keeper_supervisor_launch] (godfile decomp). *)
+    Launch helpers, lifecycle and backoff live in
+    [Keeper_supervisor_launch]. *)
 
 open Keeper_types
 open Keeper_meta_contract

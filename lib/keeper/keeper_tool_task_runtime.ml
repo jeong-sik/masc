@@ -305,37 +305,11 @@ let evidence_artifact_total_bytes ~(config : Workspace.config)
   |> List.fold_left ( + ) 0
 ;;
 
-let evidence_total_bytes_limit_default = 50 * 1024
-let evidence_total_bytes_limit_env_key = "MASC_EVIDENCE_TOTAL_BYTES_LIMIT"
-
-(* Test seam: force the limit without touching the process environment,
-   because Alcotest cases run in one process and a leaked [putenv] would
-   bleed into every other case. *)
-let evidence_total_bytes_limit_override : int option Atomic.t = Atomic.make None
-;;
-
-let with_evidence_total_bytes_limit limit f =
-  let previous = Atomic.get evidence_total_bytes_limit_override in
-  Atomic.set evidence_total_bytes_limit_override (Some limit);
-  Fun.protect
-    ~finally:(fun () -> Atomic.set evidence_total_bytes_limit_override previous)
-    f
-;;
-
-(* Fail-open on unset/invalid: the snapshot cap still bounds what reaches the
-   reviewer, so an unparseable limit degrades to the default, not to
-   "reject work". *)
-let evidence_total_bytes_limit () =
-  match Atomic.get evidence_total_bytes_limit_override with
-  | Some limit -> limit
-  | None -> (
-    match Sys.getenv_opt evidence_total_bytes_limit_env_key with
-    | None -> evidence_total_bytes_limit_default
-    | Some raw -> (
-      match int_of_string_opt (String.trim raw) with
-      | Some limit when limit > 0 -> limit
-      | _ -> evidence_total_bytes_limit_default))
-;;
+(* What one submission may hand the reviewer as artifact bytes in total. A
+   resource boundary on the reviewer's inline window, not a behavioural
+   gate: over it, the submitter is told to hand over an excerpt and a
+   pointer instead. *)
+let evidence_total_bytes_limit = 50 * 1024
 
 let evidence_total_size_rejection ~total ~limit =
   Printf.sprintf
@@ -1045,7 +1019,7 @@ let handle_keeper_task_tool_with_outcome
          hatch while it can still fix the call — instead of the completion
          authority later staring at a truncated prefix. *)
       let total = evidence_artifact_total_bytes ~config ~meta evidence_refs in
-      let limit = evidence_total_bytes_limit () in
+      let limit = evidence_total_bytes_limit in
       if total > limit then
         Keeper_tool_execution.failure
           ~class_:Tool_result.Workflow_rejection

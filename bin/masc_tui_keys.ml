@@ -86,9 +86,12 @@ let for_surface = function
       ; b Navigate "[ / ]" "tabs" ~help:"detail tabs: Info / Settings / Secrets / GitHub"
       ; b Act "o" "logs"
           ~help:"open container logs in Sandbox; Keeper activity elsewhere"
+      ; b Act "U" "runtime" ~help:"pick a runtime lane"
       ; b Act "Left / Esc" "back"
       ]
-      @ List.filter (fun binding -> binding.key <> "l") keeper_actions
+      @ List.filter
+          (fun binding -> binding.key <> "l" && binding.key <> "u")
+          keeper_actions
   | Keepers Keeper_logs ->
       (* The shared tail was missing here while the renderer's own footer
          string carried it, so the sheet and the footer disagreed about

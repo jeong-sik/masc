@@ -4575,7 +4575,9 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
              else Ansi.cyan ^ "l" ^ Ansi.reset ^ " logs")
           ; Ansi.cyan ^ "t" ^ Ansi.reset ^ " calls"
           ; gate_hint
-          ; Ansi.cyan ^ "u" ^ Ansi.reset ^ " runtime"
+          ; Ansi.cyan
+            ^ (if state.view = Keepers Keeper_detail then "U" else "u")
+            ^ Ansi.reset ^ " runtime"
             (* Dimmed rather than dropped, the same way an unavailable
                lifecycle key is: chat lives in detail, and a key that vanishes
                between surfaces reads as a key that does not exist. *)

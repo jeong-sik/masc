@@ -14707,7 +14707,8 @@ and is loaded on demand through keeper_skill.
              ~keeper_name:keeper.k_name ~mode
        | Some "u" | Some "U"
          when (match state.view with
-               | Keepers Keeper_list | Keepers Keeper_detail -> true
+               | Keepers Keeper_list -> true
+               | Keepers Keeper_detail -> key = Some "U"
                | _ -> false)
               && state.keeper_cursor < List.length state.keepers ->
            (* Open the runtime picker for the keeper under the cursor. The

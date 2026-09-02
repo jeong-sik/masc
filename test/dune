@@ -3546,7 +3546,8 @@
  (alias runtest-test_capture_keeper_skill_tui_proof)
  (deps
   test_capture_keeper_skill_tui_proof.py
-  ../scripts/harness/workload/capture_keeper_skill_tui_proof.py)
+  ../scripts/harness/workload/capture_keeper_skill_tui_proof.py
+  ../scripts/harness/workload/proof_http.py)
  (action
   (run python3 %{dep:test_capture_keeper_skill_tui_proof.py})))
 
@@ -3594,7 +3595,10 @@
  (alias runtest-test_join_natural_keeper_skill_ledger)
  (deps
   test_join_natural_keeper_skill_ledger.py
-  ../scripts/harness/workload/join_natural_keeper_skill_ledger.py)
+  ../scripts/harness/workload/join_natural_keeper_skill_ledger.py
+  ../scripts/harness/workload/keeper_skill_use_proof.py
+  ../scripts/harness/workload/proof_http.py
+  ../scripts/harness/workload/produce_natural_keeper_skill_proof.py)
  (action
   (run python3 %{dep:test_join_natural_keeper_skill_ledger.py})))
 
@@ -3620,7 +3624,7 @@
  (deps
   test_keeper_skill_use_proof.py
   ../scripts/harness/workload/keeper_skill_use_proof.py
-  ../scripts/harness/workload/build_keeper_skill_tui.py)
+  ../scripts/harness/workload/proof_http.py)
  (action
   (run python3 %{dep:test_keeper_skill_use_proof.py})))
 
@@ -3644,7 +3648,8 @@
  (alias runtest-test_produce_natural_keeper_skill_proof)
  (deps
   test_produce_natural_keeper_skill_proof.py
-  ../scripts/harness/workload/produce_natural_keeper_skill_proof.py)
+  ../scripts/harness/workload/produce_natural_keeper_skill_proof.py
+  ../scripts/harness/workload/proof_http.py)
  (action
   (run python3 %{dep:test_produce_natural_keeper_skill_proof.py})))
 
@@ -3693,7 +3698,12 @@
  (alias runtest-test_verify_keeper_skill_proof_bundle)
  (deps
   test_verify_keeper_skill_proof_bundle.py
-  ../scripts/harness/workload/verify_keeper_skill_proof_bundle.py)
+  ../scripts/harness/workload/verify_keeper_skill_proof_bundle.py
+  ../scripts/harness/workload/join_natural_keeper_skill_ledger.py
+  ../scripts/harness/workload/keeper_skill_use_proof.py
+  ../scripts/harness/workload/capture_keeper_skill_tui_proof.py
+  ../scripts/harness/workload/proof_http.py
+  ../scripts/harness/workload/produce_natural_keeper_skill_proof.py)
  (action
   (run python3 %{dep:test_verify_keeper_skill_proof_bundle.py})))
 

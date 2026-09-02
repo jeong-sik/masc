@@ -354,19 +354,28 @@ let build_ctx_composition_metrics
           ~bucket:(Turn_record.Prompt_block block.block)
           { bytes = block.bytes; fingerprint = Some block.digest })
     prompt_blocks;
+  (* The tool array is the first segment of the provider's cache prefix, and
+     what makes it reusable is byte-for-byte sameness including order. The
+     digest is taken over the schemas as they are sent, so a reordering reads
+     as a different tool surface here even when the same tools are present:
+     two turns of one keeper whose fingerprints differ are two turns that
+     could not share a cached prefix. *)
+  let tool_schema_json =
+    List.map (fun tool -> Yojson.Safe.to_string (Agent_core.Tool.schema_to_json tool)) tools
+  in
   let tool_schema_bytes =
-    List.fold_left
-      (fun total tool ->
-        total
-        + String.length
-            (Yojson.Safe.to_string (Agent_core.Tool.schema_to_json tool)))
-      0 tools
+    List.fold_left (fun total json -> total + String.length json) 0 tool_schema_json
   in
   if tool_schema_bytes > 0
   then
     add_segment_metric totals
       ~bucket:Turn_record.Tool_schemas
-      { bytes = tool_schema_bytes; fingerprint = None };
+      { bytes = tool_schema_bytes
+      ; fingerprint =
+          Some
+            Digestif.SHA256.(
+              digest_string (String.concat "\n" tool_schema_json) |> to_hex)
+      };
   List.iter
     (fun (message : Agent_core.Types.message) ->
       List.iter

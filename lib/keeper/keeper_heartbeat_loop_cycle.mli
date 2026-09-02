@@ -41,6 +41,7 @@ val run_keeper_cycle
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> ?event_bus:Agent_core.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+  -> ?previous_turn_stop:Keeper_turn_checkpoint_reason.t
   -> ctx:_ Keeper_types_profile.context
   -> meta_after_triage:Keeper_meta_contract.keeper_meta
   -> stop:bool Atomic.t
@@ -50,3 +51,5 @@ val run_keeper_cycle
   -> wake:Keeper_registry.wake_reason
   -> unit
   -> cycle_outcome
+(** [?previous_turn_stop] is forwarded to {!Keeper_unified_turn.run_keeper_cycle}
+    unchanged; the heartbeat loop owns the value between cycles. *)

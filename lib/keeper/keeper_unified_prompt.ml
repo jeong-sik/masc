@@ -1136,10 +1136,47 @@ let backlog_statement_of_observation
     else Backlog_readable_with_rows
 ;;
 
+(* The checkpoint carries the previous turn's calls; it does not carry the
+   reason the runtime ended that turn. Without the reason, a keeper whose turn
+   was cut by the repeated-call guard reads its own three identical calls as
+   unfinished work and makes them again. Measured 2026-09-01 from
+   turn-records: kidsnote-pr-jira-checker ended 259 of 361 turns on the same
+   repeated query, lane-smith 136 of 342, polisher 84 of 424, and each next
+   turn repeated the call. The sentence names the tool and the count so the
+   model can match it against its history. *)
+let previous_turn_stop_lines (stop : Keeper_turn_checkpoint_reason.t option) :
+    string list =
+  match stop with
+  | None -> []
+  | Some (Keeper_turn_checkpoint_reason.Repeated_tool_call { tool_name; repeated_count })
+    ->
+      [ Printf.sprintf
+          "- Previous turn: the runtime ended it after `%s` was called %d times \
+           with the same input and returned the same result. That result is \
+           already in your history; another identical call returns the same \
+           bytes. If you are waiting for it to change, end this turn — the \
+           scheduler wakes you again."
+          tool_name repeated_count;
+      ]
+  | Some (Keeper_turn_checkpoint_reason.Repeated_assistant_text { repeated_count }) ->
+      [ Printf.sprintf
+          "- Previous turn: the runtime ended it after you wrote the same \
+           message %d times without a tool call in between."
+          repeated_count;
+      ]
+  | Some Keeper_turn_checkpoint_reason.Operation_queued ->
+      [ "- Previous turn: it yielded because a chat operation was queued for you." ]
+  | Some Keeper_turn_checkpoint_reason.Durable_stimulus_arrived ->
+      [ "- Previous turn: it yielded because a newer durable stimulus arrived." ]
+  | Some Keeper_turn_checkpoint_reason.Awaiting_external_effect ->
+      [ "- Previous turn: it yielded on a tool call that awaited approval; the \
+         resolution reaches you as a stimulus." ]
+
 let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
+    ?(previous_turn_stop : Keeper_turn_checkpoint_reason.t option)
     ~(current_task : Keeper_world_observation_inputs.current_task_observation)
     ?(task_skill_surfaces :
         (string * Keeper_skill_catalog.exact_surface list) list = [])
@@ -1181,9 +1218,10 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
   in
   let connector_presence_failures = observation.connected_surface_failures in
   let autonomous_trigger =
-    match turn_decision with
-    | Some decision -> autonomous_trigger_lines ~decision
-    | None -> []
+    (match turn_decision with
+     | Some decision -> autonomous_trigger_lines ~decision
+     | None -> [])
+    @ previous_turn_stop_lines previous_turn_stop
   in
   (* A row is a whole turn: the heading counts turns, and half a turn would
      have the keeper read a partial record of what it did. *)
@@ -1743,6 +1781,7 @@ let build_prompt
       ~config
       ?profile_defaults
       ~turn_decision
+      ?previous_turn_stop
       ~current_task
       ?task_skill_surfaces
       ?active_goal_summaries
@@ -1757,6 +1796,7 @@ let build_prompt
       ~config
       ?profile_defaults
       ~turn_decision:(Some turn_decision)
+      ?previous_turn_stop
       ~current_task
       ?task_skill_surfaces
       ?active_goal_summaries

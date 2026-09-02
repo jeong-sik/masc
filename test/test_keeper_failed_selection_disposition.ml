@@ -101,7 +101,8 @@ let test_nonterminal_outcomes_preserve_batch () =
   ; Some
       (Cycle.Checkpointed
          { meta
-         ; checkpoint_reason = Turn.Repeated_tool_call
+         ; checkpoint_reason =
+             Turn.Repeated_tool_call { tool_name = "keeper_tasks_list"; repeated_count = 3 }
          ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
          })
   ; Some (Cycle.Input_required meta)
@@ -140,7 +141,7 @@ let test_repeated_assistant_checkpoint_acks_admitted_attention () =
       (Some
          (Cycle.Checkpointed
             { meta
-            ; checkpoint_reason = Turn.Repeated_assistant_text
+            ; checkpoint_reason = Turn.Repeated_assistant_text { repeated_count = 3 }
             ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
             }))
   with
@@ -156,7 +157,7 @@ let test_repeated_assistant_checkpoint_records_hitl_continuation () =
   let outcome =
     Cycle.Checkpointed
       { meta
-      ; checkpoint_reason = Turn.Repeated_assistant_text
+      ; checkpoint_reason = Turn.Repeated_assistant_text { repeated_count = 3 }
       ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
       }
   in

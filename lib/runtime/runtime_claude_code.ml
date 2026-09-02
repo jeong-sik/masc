@@ -446,6 +446,51 @@ let send_control_response
             { stage; tool_effect_attempted; detail }))
 ;;
 
+(* Token counts summed over the assistant frames of one turn. Each assistant
+   frame carries the usage of the API call that produced it, and parallel
+   tool calls repeat one message id with identical usage, so ids are
+   deduplicated (code.claude.com/docs/en/agent-sdk/cost-tracking, read
+   2026-09-03). A host stop reports this sum: the result frame that would
+   carry the turn total never arrives once the host ends the turn, which is
+   why every host-stopped turn recorded output_tokens = 0 until now. *)
+type assistant_usage =
+  { seen_message_ids : (string, unit) Hashtbl.t
+  ; mutable total : turn_usage option
+  }
+
+let new_assistant_usage () = { seen_message_ids = Hashtbl.create 8; total = None }
+
+let add_turn_usage (a : turn_usage) (b : turn_usage) =
+  { input_tokens = a.input_tokens + b.input_tokens
+  ; output_tokens = a.output_tokens + b.output_tokens
+  ; cache_creation_input_tokens =
+      a.cache_creation_input_tokens + b.cache_creation_input_tokens
+  ; cache_read_input_tokens = a.cache_read_input_tokens + b.cache_read_input_tokens
+  }
+;;
+
+let observe_assistant_usage acc ~message_id usage =
+  let count usage =
+    acc.total
+    <- Some
+         (match acc.total with
+          | None -> usage
+          | Some total -> add_turn_usage total usage)
+  in
+  match usage with
+  | None -> ()
+  | Some usage ->
+    (match message_id with
+     | Some id when Hashtbl.mem acc.seen_message_ids id -> ()
+     | Some id ->
+       Hashtbl.replace acc.seen_message_ids id ();
+       count usage
+     | None ->
+       (* A frame without a message id cannot be matched to a sibling, so
+          it counts on its own. *)
+       count usage)
+;;
+
 let handle_control_request
       io
       ~control_phase
@@ -803,51 +848,6 @@ let turn_usage_of_fields fields =
          }
      | Some _, None | None, Some _ | None, None -> None)
   | Some _ -> None
-;;
-
-(* Token counts summed over the assistant frames of one turn. Each assistant
-   frame carries the usage of the API call that produced it, and parallel
-   tool calls repeat one message id with identical usage, so ids are
-   deduplicated (code.claude.com/docs/en/agent-sdk/cost-tracking, read
-   2026-09-03). A host stop reports this sum: the result frame that would
-   carry the turn total never arrives once the host ends the turn, which is
-   why every host-stopped turn recorded output_tokens = 0 until now. *)
-type assistant_usage =
-  { seen_message_ids : (string, unit) Hashtbl.t
-  ; mutable total : turn_usage option
-  }
-
-let new_assistant_usage () = { seen_message_ids = Hashtbl.create 8; total = None }
-
-let add_turn_usage (a : turn_usage) (b : turn_usage) =
-  { input_tokens = a.input_tokens + b.input_tokens
-  ; output_tokens = a.output_tokens + b.output_tokens
-  ; cache_creation_input_tokens =
-      a.cache_creation_input_tokens + b.cache_creation_input_tokens
-  ; cache_read_input_tokens = a.cache_read_input_tokens + b.cache_read_input_tokens
-  }
-;;
-
-let observe_assistant_usage acc ~message_id usage =
-  let count usage =
-    acc.total
-    <- Some
-         (match acc.total with
-          | None -> usage
-          | Some total -> add_turn_usage total usage)
-  in
-  match usage with
-  | None -> ()
-  | Some usage ->
-    (match message_id with
-     | Some id when Hashtbl.mem acc.seen_message_ids id -> ()
-     | Some id ->
-       Hashtbl.replace acc.seen_message_ids id ();
-       count usage
-     | None ->
-       (* A frame without a message id cannot be matched to a sibling, so
-          it counts on its own. *)
-       count usage)
 ;;
 
 let parse_assistant ~expected_session_id ~tools fields =
@@ -1677,7 +1677,29 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
        turn.session_id
        turn.turn_id
        turn.model
-   | Error (Stopped_by_host _ as stop) ->
+   | Error
+       (Stopped_by_host
+          { stop = Terminal_tool_boundary { outcome = Terminal_failed _; _ }; _ }
+        as failed) ->
+     (* A terminal tool that failed is a host stop the keeper settles as
+        [Terminal_effect_failed]; it stays a warning. *)
+     Log.Runtime_agent.warn
+       "Claude Code subscription turn failed (kind=%s): %s"
+       (error_kind failed)
+       (error_to_string failed)
+   | Error
+       (Stopped_by_host
+          { stop =
+              ( Repeated_tool_call _
+              | Terminal_tool_boundary
+                  { outcome =
+                      ( Terminal_completed
+                      | Durable_stimulus_deferred
+                      | External_effect_deferred )
+                  ; _
+                  } )
+          ; _
+          } as stop) ->
      (* The host ended the turn on purpose, at a terminal tool boundary or
         after a repeated tool call, and the keeper settles it as a completed
         or yielded turn. Fifty of these read as failures on 2026-09-02. *)

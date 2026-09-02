@@ -51,6 +51,12 @@ let assistant_with_usage_b =
   {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-usage-b1","message":{"id":"msg-usage-b","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"second"}],"usage":{"input_tokens":200,"output_tokens":20,"cache_read_input_tokens":5}}}|}
 ;;
 
+(* A frame the CLI emits without a message id cannot be matched to a
+   sibling, so it counts on its own. *)
+let assistant_with_usage_no_id =
+  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-usage-c1","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"third"}],"usage":{"input_tokens":1,"output_tokens":1}}}|}
+;;
+
 let result_with_partial_usage =
   {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-usage-2","result":"MASC_CLAUDE_OK","api_error_status":null,"usage":{"output_tokens":789}}|}
 ;;
@@ -922,6 +928,7 @@ let test_host_stop_carries_the_assistant_usage_sum () =
     [ Emit assistant_with_usage_a
     ; Emit assistant_with_usage_a_sibling
     ; Emit assistant_with_usage_b
+    ; Emit assistant_with_usage_no_id
     ; Emit_and_read mcp_initialize
     ; Emit mcp_initialized_notification
     ; Emit_and_read mcp_list
@@ -930,8 +937,9 @@ let test_host_stop_carries_the_assistant_usage_sum () =
     (fun path ->
       match run_fixture ~dynamic_tools:[ tool ] path with
       | Error (Runtime_claude_code.Stopped_by_host { usage = Some usage; _ }) ->
-        check int "input tokens summed, sibling counted once" 300 usage.input_tokens;
-        check int "output tokens summed" 30 usage.output_tokens;
+        check int "input tokens summed, sibling counted once, id-less counted" 301
+          usage.input_tokens;
+        check int "output tokens summed" 31 usage.output_tokens;
         check int "cache read carried" 5 usage.cache_read_input_tokens;
         check int "absent cache creation is 0" 0 usage.cache_creation_input_tokens
       | Error (Runtime_claude_code.Stopped_by_host { usage = None; _ }) ->

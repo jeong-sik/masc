@@ -270,7 +270,7 @@ let test_tasks_list_reports_truncation () =
               (Printf.sprintf "unchanged carries no %s" field)
               false
               (List.mem field (U.keys unchanged_cut)))
-         [ "matching_count"; "returned_count"; "truncated" ];
+         [ "matching_count"; "returned_count"; "truncated"; "next_cursor" ];
        (* Backlog movement beyond the page must break the revision. The new
           task sorts behind the two-row page (higher priority number), so the
           page bytes are identical — before matching_count joined the hash,
@@ -315,6 +315,100 @@ let test_tasks_list_reports_truncation () =
          "page rows are unchanged in content"
          2
          U.(grown |> member "snapshot" |> to_list |> List.length))
+;;
+
+(* Paging walks the whole backlog in a fixed order without a row repeating or
+   vanishing between pages, the last page says so by carrying no cursor, and a
+   cursor is refused -- never silently reset to page one -- when it is not one
+   this tool issued or was issued under another filter. *)
+let test_tasks_list_pages_with_cursor () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       List.iter
+         (fun (title, priority) ->
+            ignore
+              (Task.handle_keeper_task_tool
+                 ~config
+                 ~meta
+                 ~name:"keeper_task_create"
+                 ~args:
+                   (`Assoc
+                     [ "title", `String title
+                     ; "description", `String "cursor fixture"
+                     ; "priority", `Int priority
+                     ])))
+         [ "a", 3; "b", 2; "c", 3; "d", 1; "e", 2 ];
+       let list_exec ?cursor ?status limit =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_tasks_list"
+           ~args:
+             (`Assoc
+               ([ "limit", `Int limit ]
+                @ (match cursor with Some c -> [ "cursor", `String c ] | None -> [])
+                @ (match status with Some st -> [ "status", `String st ] | None -> [])))
+       in
+       let page ?cursor limit =
+         match (list_exec ?cursor limit).data with
+         | Some data -> data
+         | None -> fail "expected producer-owned snapshot"
+       in
+       let ids data =
+         U.(data |> member "snapshot" |> to_list |> List.map (fun row -> member "id" row |> to_string))
+       in
+       let cut data = U.(data |> member "truncated" |> to_bool) in
+       let next data = U.(data |> member "next_cursor" |> to_string) in
+       let page1 = page 2 in
+       check bool "page 1 is cut" true (cut page1);
+       let page2 = page ~cursor:(next page1) 2 in
+       check bool "page 2 is cut" true (cut page2);
+       let page3 = page ~cursor:(next page2) 2 in
+       check bool "the last page is not cut" false (cut page3);
+       check bool "the last page carries no cursor" false
+         (List.mem "next_cursor" (U.keys page3));
+       check int "the last page holds the remainder" 1 (List.length (ids page3));
+       let walked = ids page1 @ ids page2 @ ids page3 in
+       check int "every row exactly once" 5 (List.length (List.sort_uniq compare walked));
+       check int "matching_count is the whole backlog on every page" 5
+         U.(page2 |> member "matching_count" |> to_int);
+       check bool "a later page has its own revision" false
+         (String.equal U.(page1 |> member "revision" |> to_string)
+            U.(page2 |> member "revision" |> to_string));
+       (* The order is priority first: d (1), then b and e (2), then a and c
+          (3); within a priority created_at then id decide. *)
+       let titles =
+         U.(page1 |> member "snapshot" |> to_list |> List.map (fun row -> member "title" row |> to_string))
+       in
+       check (list string) "page 1 is the two highest priorities" [ "d"; "b" ] titles;
+       let rejected label execution expected_kind =
+         (match execution.Masc.Keeper_tool_execution.disposition with
+          | Tool_result.Failed Tool_result.Policy_rejection -> ()
+          | Tool_result.Failed other ->
+            fail (label ^ ": wrong class " ^ Tool_result.tool_failure_class_to_string other)
+          | Tool_result.Completed () | Tool_result.Deferred () ->
+            fail (label ^ ": a bad cursor must not return a page"));
+         let payload =
+           Yojson.Safe.from_string execution.Masc.Keeper_tool_execution.raw_output
+         in
+         check string (label ^ " names the field") "cursor" U.(payload |> member "field" |> to_string);
+         check string (label ^ " names the kind") expected_kind
+           U.(payload |> member "error_kind" |> to_string)
+       in
+       rejected "another filter" (list_exec ~cursor:(next page1) ~status:"todo" 2)
+         "cursor_filter_mismatch";
+       rejected "a string this tool never issued" (list_exec ~cursor:"not-a-cursor" 2)
+         "cursor_unparseable";
+       rejected "a non-string cursor"
+         (Task.handle_keeper_task_tool_with_outcome
+            ~config ~meta ~name:"keeper_tasks_list"
+            ~args:(`Assoc [ "limit", `Int 2; "cursor", `Int 7 ]))
+         "cursor_unparseable")
 ;;
 
 let test_tasks_list_returns_snapshot_and_unchanged () =
@@ -1116,6 +1210,10 @@ let () =
             "keeper_tasks_list reports a truncated page"
             `Quick
             test_tasks_list_reports_truncation
+        ; test_case
+            "keeper_tasks_list pages with a cursor"
+            `Quick
+            test_tasks_list_pages_with_cursor
         ; test_case "keeper_broadcast forwards typed cache signal" `Quick
             test_keeper_broadcast_forwards_typed_cache_signal
         ; test_case "keeper_broadcast rejects partial typed cache signal" `Quick

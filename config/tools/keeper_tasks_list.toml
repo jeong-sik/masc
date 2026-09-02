@@ -4,16 +4,20 @@ List backlog tasks. Rows carry id, title, priority, created_at, status, \
 assignee; projection=full adds description, files, contract, \
 handoff_context, execution_links. awaiting_verification means the task \
 awaits the completion-authority verdict and no Keeper can claim it; \
-never Read producer sandbox paths."""
+never Read producer sandbox paths. Rows are ordered by priority, then \
+created_at, then id. When truncated is true the response carries \
+next_cursor; pass it as cursor with the same status, include_done and \
+projection to read the rows after that page. The last page has none."""
 [help]
 short_description = "List MASC backlog tasks visible to this keeper."
 when_to_use = "Use before claiming work, checking awaiting verification items, or diagnosing current task state."
 key_constraints = [
   "include_done defaults to false.",
   "Use status to narrow the list when inspecting a specific lifecycle state.",
+  "When truncated is true, pass next_cursor as cursor with the same filter to read the rest; the last page carries no next_cursor.",
 ]
 details_markdown = "Rows: id, title, priority, created_at, status, assignee; projection=full adds the task body."
-examples = ["status='todo' include_done=false limit=20"]
+examples = ["status='todo' include_done=false limit=20", "status='todo' limit=20 cursor=<next_cursor from the previous page>"]
 
 [[params]]
 name = "status"
@@ -40,6 +44,15 @@ minimum = 1
 maximum = 100
 default = 50
 description = "Max tasks to return (default: 50)"
+
+[[params]]
+name = "cursor"
+type = "string"
+description = """
+Opaque next_cursor from a previous truncated keeper_tasks_list response. \
+Pass it with the same status, include_done and projection to read the rows \
+after that page. A cursor from a different filter, or one this tool did not \
+issue, is rejected with field=cursor."""
 
 [[params]]
 name = "if_revision"

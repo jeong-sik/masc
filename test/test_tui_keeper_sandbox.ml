@@ -136,7 +136,7 @@ let test_live_container_and_errors_are_visible () =
     ; "/masc-work/alpha"
     ; "/tmp/masc-runtime/.masc/config"
     ; "unavailable"
-    ; "l  logs"
+    ; "o  actual logs"
     ; "t  tool calls"
     ; "docker list partial"
     ; "previous launch failed"
@@ -315,6 +315,72 @@ let test_malformed_build_volume_fails_closed () =
       (contains detail "linked")
 ;;
 
+let test_actual_container_logs_are_typed_and_terminal_safe () =
+  let json =
+    Yojson.Safe.from_string
+      {|{
+        "keeper":"alpha",
+        "backend":"apple_container",
+        "state":"available",
+        "tail":200,
+        "instances":[{
+          "instance_id":"vm-1",
+          "instance_name":"masc-alpha",
+          "running":true,
+          "stdout":"ready\nserving",
+          "stderr":"warning\u001b]8;;https://bad.invalid\u0007",
+          "error":null
+        }]
+      }|}
+  in
+  let logs =
+    match
+      Masc_tui_keeper_sandbox.decode_logs
+        ~sanitize:Masc.Tui_decode.sanitize_terminal_text json
+    with
+    | Ok logs -> logs
+    | Error detail -> Alcotest.fail detail
+  in
+  let rendered =
+    Masc_tui_keeper_sandbox.logs_view_lines ~width:64 logs
+    |> String.concat "\n"
+  in
+  List.iter
+    (fun needle ->
+      Alcotest.(check bool) needle true (contains rendered needle))
+    [ "container logs"
+    ; "Apple Container"
+    ; "masc-alpha"
+    ; "vm-1"
+    ; "out  ready"
+    ; "out  serving"
+    ; "err  warning\\x1B"
+    ];
+  Alcotest.(check bool) "raw escape is absent" false (contains rendered "\027]")
+;;
+
+let test_actual_container_logs_report_no_instance () =
+  let json =
+    Yojson.Safe.from_string
+      {|{
+        "keeper":"alpha",
+        "backend":"docker",
+        "state":"no_instance",
+        "tail":200,
+        "instances":[]
+      }|}
+  in
+  match Masc_tui_keeper_sandbox.decode_logs ~sanitize:Fun.id json with
+  | Error detail -> Alcotest.fail detail
+  | Ok logs ->
+    let rendered =
+      Masc_tui_keeper_sandbox.logs_view_lines ~width:64 logs
+      |> String.concat "\n"
+    in
+    Alcotest.(check bool) "no instance is explicit" true
+      (contains rendered "run a sandbox command first")
+;;
+
 let () =
   Alcotest.run "tui keeper sandbox"
     [ ( "projection"
@@ -340,5 +406,11 @@ let () =
             test_docker_keeper_shows_no_build_volume_section
         ; Alcotest.test_case "malformed observation fails closed" `Quick
             test_malformed_build_volume_fails_closed
+        ] )
+    ; ( "actual logs"
+      , [ Alcotest.test_case "typed and terminal safe" `Quick
+            test_actual_container_logs_are_typed_and_terminal_safe
+        ; Alcotest.test_case "no instance is explicit" `Quick
+            test_actual_container_logs_report_no_instance
         ] )
     ]

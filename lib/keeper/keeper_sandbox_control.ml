@@ -846,3 +846,76 @@ let live_status_json ?(include_preflight = true)
         else
           `Assoc [ "state", `String "not_inspected"; "entries", `List [] ] );
     ]
+
+type sandbox_log_backend =
+  | Docker_logs
+  | Apple_container_logs
+
+let sandbox_log_backend_label = function
+  | Docker_logs -> "docker"
+  | Apple_container_logs -> "apple_container"
+;;
+
+let sandbox_log_argv backend ~tail ~container_id =
+  match backend with
+  | Docker_logs ->
+    Keeper_sandbox_runtime.docker_command_argv ()
+    @ [ "logs"; "--tail"; string_of_int tail; container_id ]
+  | Apple_container_logs ->
+    Keeper_sandbox_microvm.command_argv ()
+    @ [ "logs"; "-n"; string_of_int tail; container_id ]
+;;
+
+let logs_json ~(config : Workspace.config) ~(meta : keeper_meta) ~timeout_sec
+    ~tail () =
+  let tail = max 1 (min 500 tail) in
+  let discovered =
+    match meta.sandbox_profile with
+    | Docker ->
+      Result.map
+        (fun containers -> Docker_logs, containers)
+        (live_containers ~config ~meta ~timeout_sec)
+    | Micro_vm ->
+      Result.map
+        (fun containers -> Apple_container_logs, containers)
+        (live_microvm_containers ~config ~meta ~timeout_sec)
+    | Remote_ssh ->
+      Error
+        "remote SSH Keeper has no local container log stream; inspect the configured endpoint"
+  in
+  Result.map
+    (fun (backend, containers) ->
+      let rows =
+        List.map
+          (fun (container : Keeper_sandbox_runtime.live_container) ->
+            let status, stdout, stderr =
+              Process_eio.run_argv_with_status_split ~timeout_sec
+                (sandbox_log_argv backend ~tail ~container_id:container.id)
+            in
+            let error =
+              match status with
+              | Unix.WEXITED 0 -> `Null
+              | status ->
+                `String
+                  (Printf.sprintf "log command failed (%s)"
+                     (Keeper_sandbox_exec_failure.status_label status))
+            in
+            `Assoc
+              [ "instance_id", `String container.id
+              ; "instance_name", `String container.name
+              ; "running", Json_util.bool_opt_to_json container.running
+              ; "stdout", `String stdout
+              ; "stderr", `String stderr
+              ; "error", error
+              ])
+          containers
+      in
+      `Assoc
+        [ "keeper", `String meta.name
+        ; "backend", `String (sandbox_log_backend_label backend)
+        ; "state", `String (if rows = [] then "no_instance" else "available")
+        ; "tail", `Int tail
+        ; "instances", `List rows
+        ])
+    discovered
+;;

@@ -1604,6 +1604,8 @@ type async_msg =
   | Keeper_config_view_loaded of string * (string list, string) result
   | Keeper_sandbox_view_loaded of
       string * (Masc_tui_keeper_sandbox.t, string) result
+  | Keeper_sandbox_logs_loaded of
+      string * (Masc_tui_keeper_sandbox.logs, string) result
   | Runtime_config_view_loaded of (string * string list, string) result
   | Runtime_params_loaded of
       (Tui_decode.runtime_param_row list, string) result
@@ -3247,6 +3249,31 @@ let launch_keeper_sandbox_view state ~mailbox keeper_name =
       enqueue_async mailbox
         (Keeper_sandbox_view_loaded
            (keeper_name, Error "Eio switch is unavailable"))
+
+let launch_keeper_sandbox_logs state ~mailbox keeper_name =
+  let host = server_peer_host in
+  let port = state.port in
+  state.keeper_sandbox_logs_loading <- Some keeper_name;
+  let run () =
+    let result =
+      try
+        Masc_tui_loader.load_keeper_sandbox_logs ~host ~port ~keeper_name
+          ~tail:200
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_sandbox_logs_loaded (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      run ();
+      `Stop_daemon)
+  | None ->
+    enqueue_async mailbox
+      (Keeper_sandbox_logs_loaded
+         (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_github_identity_view state ~mailbox keeper_name =
   let host = server_peer_host in
@@ -6321,7 +6348,17 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
        | Detail_sandbox ->
            state.keeper_sandbox_view <- None;
            state.keeper_sandbox_view_error <- None;
-           launch_keeper_sandbox_view state ~mailbox keeper.k_name
+           launch_keeper_sandbox_view state ~mailbox keeper.k_name;
+           let logs_were_open =
+             match
+               state.keeper_sandbox_logs, state.keeper_sandbox_logs_error
+             with
+             | Some (stamp, _), _ | _, Some (stamp, _) ->
+               String.equal stamp keeper.k_name
+             | None, None -> false
+           in
+           if logs_were_open then
+             launch_keeper_sandbox_logs state ~mailbox keeper.k_name
        | Detail_instructions ->
            state.keeper_config_view <- None;
            state.keeper_config_view_error <- None;
@@ -8185,6 +8222,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             state.keeper_sandbox_view <- Some (keeper_name, reading);
             state.keeper_sandbox_view_error <- None
         | Error detail -> state.keeper_sandbox_view_error <- Some detail)
+  | Keeper_sandbox_logs_loaded (keeper_name, result) -> (
+      let still_selected =
+        match List.nth_opt state.keepers state.keeper_cursor with
+        | Some keeper -> String.equal keeper.k_name keeper_name
+        | None -> false
+      in
+      if still_selected then begin
+        state.keeper_sandbox_logs_loading <- None;
+        match result with
+        | Ok logs ->
+          state.keeper_sandbox_logs <- Some (keeper_name, logs);
+          state.keeper_sandbox_logs_error <- None
+        | Error detail ->
+          state.keeper_sandbox_logs_error <- Some (keeper_name, detail)
+      end)
   | Prompts_loaded result ->
       (match result with
        | Ok snapshot ->
@@ -12864,6 +12916,19 @@ and is loaded on demand through keeper_skill.
                 state.board_detail_wide <- not state.board_detail_wide;
                 state.board_focus <- Right_pane
             | Board_list | Board_compose -> ())
+       | Some (("o" | "O" | "l") as sandbox_log_key)
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_sandbox
+              && (not (String.equal sandbox_log_key "l")
+                  || terminal_columns < keeper_split_threshold_cols
+                  || state.keeper_detail_focus = Right_pane) ->
+           (match selected_keeper state with
+            | None -> ()
+            | Some keeper ->
+              state.keeper_sandbox_logs <- None;
+              state.keeper_sandbox_logs_error <- None;
+              launch_keeper_sandbox_logs state ~mailbox:async_messages
+                keeper.k_name)
        | Some ("h" | "l")
          when terminal_columns >= keeper_split_threshold_cols
               && (match state.view with

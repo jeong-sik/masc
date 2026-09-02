@@ -4568,7 +4568,11 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
                  hint Keeper_control.Shutdown "shutdown")
           ; Ansi.cyan ^ "e" ^ Ansi.reset ^ " settings"
           ; Ansi.cyan ^ "a" ^ Ansi.reset ^ " new"
-          ; Ansi.cyan ^ "l" ^ Ansi.reset ^ " logs"
+          ; (if state.view = Keepers Keeper_detail then
+               if state.detail_tab = Detail_sandbox then
+                 Ansi.cyan ^ "o" ^ Ansi.reset ^ " container logs"
+               else Ansi.cyan ^ "o" ^ Ansi.reset ^ " logs"
+             else Ansi.cyan ^ "l" ^ Ansi.reset ^ " logs")
           ; Ansi.cyan ^ "t" ^ Ansi.reset ^ " calls"
           ; gate_hint
           ; Ansi.cyan ^ "u" ^ Ansi.reset ^ " runtime"
@@ -6390,6 +6394,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                   ; Ansi.dim
                     ^ "  j/k transport · J/K binding · b bind · e reassign · u u remove"
                     ^ Ansi.reset
+                  ; Ansi.dim
+                    ^ "  These actions change channel routing, not the connector process."
+                    ^ Ansi.reset
                   ; Ansi.dim ^ "  PgUp/PgDn scrolls this detail" ^ Ansi.reset
                   ; Ansi.dim ^ "  r reloads bindings and learned names" ^ Ansi.reset
                   ]
@@ -6481,15 +6488,33 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       match state.detail_tab with
       | Detail_info -> info_lines
       | Detail_sandbox ->
-          stamped_or
-            (Option.map
-               (fun (stamp, reading) ->
-                 ( stamp
-                 , Masc_tui_keeper_sandbox.view_lines
-                     ~width:(max 24 (cols - 8))
-                     reading ))
-               state.keeper_sandbox_view)
-            state.keeper_sandbox_view_error
+          let width = max 24 (cols - 8) in
+          let status =
+            stamped_or
+              (Option.map
+                 (fun (stamp, reading) ->
+                   stamp, Masc_tui_keeper_sandbox.view_lines ~width reading)
+                 state.keeper_sandbox_view)
+              state.keeper_sandbox_view_error
+          in
+          let logs =
+            match state.keeper_sandbox_logs_loading with
+            | Some keeper_name when String.equal keeper_name k.k_name ->
+              [ Ansi.dim ^ "  (loading actual container logs…)" ^ Ansi.reset ]
+            | Some _ | None ->
+              match state.keeper_sandbox_logs_error with
+              | Some (stamp, detail) when String.equal stamp k.k_name ->
+                [ (Theme.bad ()) ^ "  Container logs unavailable: "
+                  ^ Terminal_text.single_line detail ^ Ansi.reset
+                ]
+              | Some _ | None ->
+                (match state.keeper_sandbox_logs with
+                 | Some (stamp, logs) when String.equal stamp k.k_name ->
+                   Masc_tui_keeper_sandbox.logs_view_lines ~width logs
+                   |> List.map (fun line -> "  " ^ line)
+                 | Some _ | None -> [])
+          in
+          status @ logs
       | Detail_instructions ->
           stamped_or state.keeper_config_view state.keeper_config_view_error
       | Detail_secrets -> secret_lines state k

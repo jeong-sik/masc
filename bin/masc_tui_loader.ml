@@ -1402,6 +1402,17 @@ let load_keeper_sandbox_view ~(host : string) ~(port : int)
       ~sanitize:Masc.Tui_decode.sanitize_terminal_text
       json
 
+let load_keeper_sandbox_logs ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(tail : int) :
+    (Masc_tui_keeper_sandbox.logs, string) result =
+  match
+    Masc_tui_http.fetch_keeper_sandbox_logs ~host ~port ~keeper_name ~tail
+  with
+  | Error err -> Error ("keeper sandbox logs load failed: " ^ err)
+  | Ok json ->
+    Masc_tui_keeper_sandbox.decode_logs
+      ~sanitize:Masc.Tui_decode.sanitize_terminal_text json
+
 let load_keeper_config_editor ~(host : string) ~(port : int)
     ~(keeper_name : string) : (Yojson.Safe.t * string, string) result =
   match

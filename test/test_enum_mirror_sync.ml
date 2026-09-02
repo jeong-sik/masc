@@ -239,13 +239,13 @@ let test_runtime_tool_owners_match () =
     "keeper_analyze_image media types match Keeper_vision_tool"
     (List.sort_uniq String.compare Masc.Keeper_vision_tool.supported_image_media_types)
     (advertised_values_for_schemas
-       Masc.Keeper_tool_runtime_schemas.schemas
+       Masc.Keeper_runtime_schemas_toml.schemas
        ~property:"media_type");
   let artifact =
     match
       List.find_opt
         (fun (s : Masc_domain.tool_schema) -> String.equal s.name "keeper_artifact_read")
-        Masc.Keeper_tool_runtime_schemas.schemas
+        Masc.Keeper_runtime_schemas_toml.schemas
     with
     | Some s -> s
     | None -> failf "keeper_artifact_read is absent"

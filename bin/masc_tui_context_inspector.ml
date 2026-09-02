@@ -28,9 +28,19 @@ type attributed_turn =
   ; turns_behind_latest : int
   }
 
+type recent_turn =
+  { turn : int
+  ; ts : float
+  ; input_tokens : int option
+  ; cache_read : int option
+  ; output_tokens : int option
+  ; scope : Runtime_usage_scope.t
+  }
+
 type selection =
   { latest : Turn_record.t
   ; attributed : attributed_turn option
+  ; recent : recent_turn list
   }
 
 type reading =

@@ -71,22 +71,30 @@ let test_recent_turns_carry_the_provider_counts () =
     record ~trace:"trace-b" ~turn:6
       ~usage_scope:Runtime_usage_scope.Conversation_cumulative ()
   in
-  let oldest = record ~trace:"trace-b" ~turn:5 () in
+  let middle = record ~trace:"trace-b" ~turn:5 () in
+  let unavailable =
+    record ~trace:"trace-b" ~turn:4
+      ~usage_scope:Runtime_usage_scope.Usage_scope_unavailable ()
+  in
   match
-    Inspector.decode_turn_records (envelope [ oldest; cumulative; newest ])
+    Inspector.decode_turn_records
+      (envelope [ unavailable; middle; cumulative; newest ])
   with
   | Error detail -> fail detail
   | Ok decoded -> (
-      check int "one row per page row" 3
+      check int "one row per page row" 4
         (List.length decoded.Inspector.recent);
       match decoded.Inspector.recent with
-      | first :: second :: _ ->
+      | first :: second :: _ :: unavailable_row :: _ ->
           check int "newest first" 7 first.Inspector.turn;
           check bool "the provider's per-request figure rides along" true
             (first.Inspector.input_tokens = Some 1000);
           check bool "a cumulative scope yields no per-request figure" true
-            (second.Inspector.input_tokens = None)
-      | _ -> fail "the page held three rows")
+            (second.Inspector.input_tokens = None);
+          check bool
+            "an unknown scope keeps whatever figure the record carried" true
+            (unavailable_row.Inspector.input_tokens = Some 1000)
+      | _ -> fail "the page held four rows")
 
 let test_newest_exact_composition_wins () =
   let observed =

@@ -628,7 +628,10 @@ gets no window percentage here, only the number it reported and a note that
 this request's own share was not. RECENT TURNS, the section at the bottom,
 is one row per dispatched turn on the fetched page, carrying the input,
 cache read, and output the provider itself counted — the per-turn answer to
-how much context goes in, newest first.
+how much context goes in, newest first. A turn whose provider counted
+across the conversation states that instead of figures, and a turn whose
+provider reported nothing says the input was not reported; neither gets a
+number that looks like its own and is not.
 
 `2:request` marks where each item stands in the assembly: `F` the fixed
 system prompt, `H` history the window carried forward, `N` the newest

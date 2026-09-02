@@ -3,9 +3,11 @@
     prompts-and-tool-definitions-outside-ocaml §2.2).
 
     Decoded once at module initialization; a missing or undecodable file
-    refuses the boot. [Tool_schemas_library] is the only consumer. *)
+    refuses the boot. Each value is the whole decoded file, so its
+    [keeper_projection] travels with its schema. [Tool_schemas_library] is the
+    only consumer. *)
 
-val list : Masc_domain.tool_schema
-val read : Masc_domain.tool_schema
-val add : Masc_domain.tool_schema
-val search : Masc_domain.tool_schema
+val list : Tool_definition_toml.loaded
+val read : Tool_definition_toml.loaded
+val add : Tool_definition_toml.loaded
+val search : Tool_definition_toml.loaded

@@ -10,3 +10,12 @@ fetch a specific document or masc_library_search to query by content."""
 # schema on every request. Deferring saves those bytes on ~254 requests
 # a day and costs at most 3 extra requests over the same week.
 defer_loading = true
+
+# The Keeper reaches the two sibling tools under their keeper_* names
+# (Transport_alias in keeper_tool_descriptor), so the sentence it reads names
+# those. The catalog row above names the MCP surface's masc_library_* names.
+[keeper_projection]
+description = """
+List all documents in the agent knowledge library with title, source, \
+author, created date, and tags. Use keeper_library_read to fetch a \
+document or keeper_library_search to query by content."""

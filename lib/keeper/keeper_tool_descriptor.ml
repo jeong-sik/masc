@@ -1806,26 +1806,31 @@ let masc_keeper_descriptor
     ()
 ;;
 
+(* A library tool reaches the Keeper under the file's [keeper_projection]
+   when the file declares one (masc_library_list names its siblings by the
+   keeper_* names a Keeper can call) and under the catalog row otherwise. *)
 let masc_library_descriptor (definition : Tool_schemas_library.definition) =
   let schema = definition.schema in
-  let keeper_model_projection, description =
+  let keeper_model_projection =
     match definition.operation with
-    | Tool_schemas_library.List_documents ->
-      ( Internal_name
-      , "List all documents in the agent knowledge library with title, source, \
-         author, created date, and tags. Use keeper_library_read to fetch a \
-         document or keeper_library_search to query by content." )
+    | Tool_schemas_library.List_documents -> Internal_name
     | Tool_schemas_library.Read_document ->
-      Transport_alias { projected_by = "keeper_library_read" }, schema.description
+      Transport_alias { projected_by = "keeper_library_read" }
     | Tool_schemas_library.Search_documents ->
-      Transport_alias { projected_by = "keeper_library_search" }, schema.description
-    | Tool_schemas_library.Add_document -> Internal_name, schema.description
+      Transport_alias { projected_by = "keeper_library_search" }
+    | Tool_schemas_library.Add_document -> Internal_name
+  in
+  let input_schema_source, description, input_schema =
+    match definition.keeper_projection with
+    | Some projection ->
+      Keeper_projection, projection.description, projection.input_schema
+    | None -> Canonical_registry, schema.description, schema.input_schema
   in
   cluster_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection
-    ~input_schema_source:Canonical_registry
-    ~input_schema:schema.input_schema
+    ~input_schema_source
+    ~input_schema
     ~id:("masc.library." ^ Tool_schemas_library.operation_id definition.operation)
     ~name:schema.name
     ~description

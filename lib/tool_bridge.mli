@@ -58,6 +58,13 @@ val maybe_externalize :
 
 (** {1 Result Conversion} *)
 
+val failure_next_move : Tool_result.tool_failure_class -> string option
+(** The one sentence the model reads after a failed tool result, keyed by the
+    typed failure class: what changes the outcome next time (arguments, state,
+    time, nothing). Read from the prompt registry
+    ([config/prompts/tool_failure.<class>.md]); [None] when that asset is
+    absent from every source, which is logged. *)
+
 val to_agent_core_typed_result :
   ?base_path:string ->
   ?model_projection:Tool_output.model_projection ->
@@ -67,7 +74,9 @@ val to_agent_core_typed_result :
 (** Convert a {!Tool_result.result} to AGENT_CORE [tool_result].  [Completed] and
     [Deferred] project one-way to AGENT_CORE [Ok]; [Deferred] carries an opaque MASC
     disposition marker in [_meta].  The adapter never parses that metadata
-    back into MASC semantics.  [Failed] maps its typed [failure_class] directly
+    back into MASC semantics.  [Failed] appends [failure_class=<class> — <next move>] to the
+    content the model reads (a [failure_class] / [next_move] pair inside the
+    JSON envelope when explicit metadata is present) and maps its typed [failure_class] directly
     to AGENT_CORE [recoverable]/[error_class]. [on_externalization_error] lets an
     owning runtime keep its terminal state consistent when storage fails. The
     provider receives only a bounded generic error and no replay instruction.

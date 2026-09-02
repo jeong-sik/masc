@@ -193,6 +193,34 @@ let externalization_tool_error ~recoverable error =
       "tool output exceeds descriptor budget"
 ;;
 
+(* The class is typed at the producer and AGENT_CORE folds it into
+   [error_class], which no provider wire serializer emits. So the only way the
+   class reaches the model is as text on the failure content, and the only
+   text the model needs is what to do next. The sentences are prompt assets
+   ([config/prompts/tool_failure.<class>.md]), not OCaml literals; the match
+   is exhaustive so a new class cannot ship without its sentence key. A key
+   with no file and no override is reported and the line carries the class
+   alone -- the model still learns the class, and the operator learns the
+   deploy is missing a prompt asset. *)
+let failure_next_move (class_ : Tool_result.tool_failure_class) : string option =
+  let key =
+    match class_ with
+    | Tool_result.Dependency_unavailable -> Prompt_names.tool_failure_dependency_unavailable
+    | Tool_result.Policy_rejection -> Prompt_names.tool_failure_policy_rejection
+    | Tool_result.Runtime_failure -> Prompt_names.tool_failure_runtime_failure
+    | Tool_result.Workflow_rejection -> Prompt_names.tool_failure_workflow_rejection
+    | Tool_result.Operator_cancelled -> Prompt_names.tool_failure_operator_cancelled
+  in
+  match Prompt_registry.resolve_prompt key with
+  | { Prompt_registry.file_exists = false; has_override = false; _ } ->
+    Log.Misc.error
+      "tool_bridge: prompt %s has no file and no override; the model sees only failure_class=%s"
+      key
+      (Tool_result.tool_failure_class_to_string class_);
+    None
+  | resolution -> Some (String.trim resolution.effective)
+;;
+
 let agent_core_error_class_of_tool_failure_class = function
   | Tool_result.Policy_rejection
   | Tool_result.Workflow_rejection
@@ -317,16 +345,26 @@ let to_agent_core_typed_result
       (fun content ->
          Ok { Agent_core.Types.content; _meta = Some metadata })
   | Tool_result.Failed { class_; message; metadata; _ } ->
+    let failure_class = Tool_result.tool_failure_class_to_string class_ in
+    let next_move = failure_next_move class_ in
     let message =
       match metadata with
-      | None -> message
+      | None ->
+        (match next_move with
+         | Some next_move ->
+           Printf.sprintf "%s\nfailure_class=%s — %s" message failure_class next_move
+         | None -> Printf.sprintf "%s\nfailure_class=%s" message failure_class)
       | Some metadata ->
         Yojson.Safe.to_string
           (`Assoc
-              [ "message", `String message
-              ; "masc.tool_disposition", `String "failed"
-              ; "masc.payload", metadata
-              ])
+              ([ "message", `String message
+               ; "masc.tool_disposition", `String "failed"
+               ; "failure_class", `String failure_class
+               ]
+               @ (match next_move with
+                  | Some next_move -> [ "next_move", `String next_move ]
+                  | None -> [])
+               @ [ "masc.payload", metadata ]))
     in
     project_result
       ?base_path

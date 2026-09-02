@@ -15178,7 +15178,7 @@ let context_exact_input_summary ~width
     @ bar @ rows
   , total )
 
-let context_exact_input_lines ~cols state ~response
+let context_exact_input_lines ~cols state ~response ~response_parts
     (input : Masc_tui_context_inspector.provider_input) =
   let module Inspector = Masc_tui_context_inspector in
   let items = Inspector.exact_input_items input in
@@ -15247,7 +15247,73 @@ let context_exact_input_lines ~cols state ~response
             | _ ->
                 [ Printf.sprintf "  Response  ·  %s" (String.concat "  ·  " parts) ]
       in
-      let common = [ identity; wire ] @ response_line @ [ "" ] @ summary @ against_wire @ [ "" ] in
+      (* The answer itself, to the depth one history page reaches. The cap
+         keeps a long reply from taking the item list's window; the chat
+         pane carries the full text and the note says so by counting. *)
+      let response_block =
+        match response_parts with
+        | None -> []
+        | Some
+            { Masc_tui_context_inspector.parts = []
+            ; outside_newest_page = true
+            } ->
+            [ "  "
+              ^ Context_bars.band ~width ~title:"RESPONSE"
+                  ~caption:"what came back for this request"
+            ; Ansi.dim
+              ^ "  This turn's reply is not in the newest history page"
+              ^ Ansi.reset
+            ]
+        | Some { Masc_tui_context_inspector.parts; _ } ->
+            let cap = 14 in
+            let lines =
+              List.concat_map
+                (function
+                  | Masc_tui_context_inspector.Reply_text text ->
+                      document_markdown ~width
+                        (Keeper_chat.terminal_safe_text text)
+                  | Masc_tui_context_inspector.Tool_steps rows ->
+                      List.map
+                        (fun row ->
+                           Ansi.dim
+                           ^ Keeper_chat.terminal_safe_text row
+                           ^ Ansi.reset)
+                        rows
+                  | Masc_tui_context_inspector.Reasoning_lines lines ->
+                      List.map
+                        (fun line ->
+                           Ansi.dim ^ "· "
+                           ^ Keeper_chat.terminal_safe_text line
+                           ^ Ansi.reset)
+                        lines)
+                parts
+            in
+            let rec take count = function
+              | [] -> ([], [])
+              | line :: rest when count = 0 -> ([], line :: rest)
+              | line :: rest ->
+                  let shown, hidden = take (count - 1) rest in
+                  (line :: shown, hidden)
+            in
+            let shown, hidden = take cap lines in
+            ( [ "  "
+                ^ Context_bars.band ~width ~title:"RESPONSE"
+                    ~caption:"what came back for this request"
+              ]
+              @ shown
+              @ (if hidden = [] then []
+                 else
+                   [ Ansi.dim
+                     ^ Printf.sprintf
+                         "  … %d more response lines; the chat pane carries                           the full reply"
+                         (List.length hidden)
+                     ^ Ansi.reset
+                   ]) )
+      in
+      let common =
+        [ identity; wire ] @ response_line @ [ "" ] @ summary @ against_wire
+        @ response_block @ [ "" ]
+      in
       (* One letter per row says where the item stands in the assembly. The
          wire is append-only, so the last message is this turn's newest
          addition and every earlier message is history the window carried
@@ -15579,13 +15645,17 @@ let context_inspector_content_lines ~cols state : context_pane_body =
        | Masc_tui_context_inspector.Exact_input ->
            (match reading.provider_input with
             | Ok input ->
-                let response =
+                let response, response_parts =
                   match reading.turn with
                   | Ok selection ->
-                      Some selection.Masc_tui_context_inspector.latest
-                  | Error _ -> None
+                      ( Some selection.Masc_tui_context_inspector.latest
+                      , (match reading.response with
+                        | Ok parts -> Some parts
+                        | Error _ -> None) )
+                  | Error _ -> (None, None)
                 in
-                context_exact_input_lines ~cols state ~response input
+                context_exact_input_lines ~cols state ~response
+                  ~response_parts input
             | Error detail ->
                 Plain
                   ( [ (Theme.bad ()) ^ "  Exact input unavailable: "

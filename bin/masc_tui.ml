@@ -4357,6 +4357,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
           let error = Error (Printexc.to_string exn) in
           { Masc_tui_context_inspector.turn = error
           ; provider_input = error
+          ; response = error
           }
     in
     enqueue_async mailbox
@@ -4375,6 +4376,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
            , keeper_name
            , { Masc_tui_context_inspector.turn = error
              ; provider_input = error
+             ; response = error
              } ))
 
 let open_context_inspector state ~mailbox ~keeper_name =

@@ -20,7 +20,7 @@ let shim_env = [ ("HOME", "/home/dev")
 (* {1 env synthesis} *)
 
 let test_minimal_base_env () =
-  let env = Exec_shim.synthesize_env ~base_env:shim_env ~allowlist:[] ~request_env:[] in
+  let env = Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:[] ~request_env:[] in
   check (option string) "PATH is the fixed minimal value"
     (Some Exec_shim.default_base_path) (List.assoc_opt "PATH" env);
   check (option string) "HOME from shim env" (Some "/home/dev") (List.assoc_opt "HOME" env);
@@ -29,20 +29,20 @@ let test_minimal_base_env () =
   check int "base env is exactly PATH/HOME/USER/TMPDIR" 4 (List.length env)
 
 let test_base_env_defaults () =
-  let env = Exec_shim.synthesize_env ~base_env:[] ~allowlist:[] ~request_env:[] in
+  let env = Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:[] ~allowlist:[] ~request_env:[] in
   check (option string) "HOME default" (Some "/tmp") (List.assoc_opt "HOME" env);
   check (option string) "USER default" (Some "masc") (List.assoc_opt "USER" env);
   check (option string) "TMPDIR default" (Some "/tmp") (List.assoc_opt "TMPDIR" env)
 
 let test_allowlist_overlay_survives () =
-  let env = Exec_shim.synthesize_env ~base_env:shim_env ~allowlist:[ "FOO" ]
+  let env = Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:[ "FOO" ]
       ~request_env:[ ("FOO", "ok"); ("BAR", "not-allowlisted") ] in
   check (option string) "allowlisted FOO kept" (Some "ok") (List.assoc_opt "FOO" env);
   check (option string) "non-allowlisted BAR dropped" None (List.assoc_opt "BAR" env)
 
 let test_runtime_identity_env_survives_empty_allowlist () =
   let env =
-    Exec_shim.synthesize_env ~base_env:shim_env ~allowlist:[]
+    Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:[]
       ~request_env:
         [ "GH_CONFIG_DIR", "/srv/masc/playground/keeper-a/.config/gh"
         ; "GIT_TERMINAL_PROMPT", "0"
@@ -58,7 +58,7 @@ let test_runtime_identity_env_survives_empty_allowlist () =
     (List.assoc_opt "LANG" env)
 
 let test_denylist_beats_allowlist () =
-  let env = Exec_shim.synthesize_env ~base_env:[]
+  let env = Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:[]
       ~allowlist:[ "PATH"; "FOO" ]
       ~request_env:[ ("PATH", "/evil/bin"); ("FOO", "ok") ] in
   check bool "wire PATH dropped" true (List.assoc_opt "PATH" env <> Some "/evil/bin");
@@ -73,7 +73,7 @@ let test_denylist_names () =
              ; ("DYLD_PRINT_LIBRARIES", "1")
              ; ("BASH_ENV", "/evil.sh")
              ; ("ENV", "/evil.sh") ] in
-  let env = Exec_shim.synthesize_env ~base_env:shim_env ~allowlist:(List.map fst wire)
+  let env = Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:(List.map fst wire)
       ~request_env:wire in
   List.iter
     (fun (k, v) ->
@@ -148,7 +148,41 @@ let test_parse_config_ok () =
   | Error e -> fail e
   | Ok c ->
     check string "remote_root" "/srv/masc/playground" c.Exec_shim.remote_root;
-    check (list string) "env_allowlist" [ "FOO"; "BAR"; "BAZ" ] c.Exec_shim.env_allowlist
+    check (list string) "env_allowlist" [ "FOO"; "BAR"; "BAZ" ] c.Exec_shim.env_allowlist;
+    check (list string) "payload path defaults to the fixed base"
+      Exec_shim.default_payload_path c.Exec_shim.payload_path
+
+let test_parse_config_path_ok () =
+  let content =
+    "remote_root=/masc-work\npath=/home/opam/.opam/5.5/bin:/usr/local/bin:/usr/bin:/bin\n"
+  in
+  match Exec_shim.parse_config content with
+  | Error e -> fail e
+  | Ok c ->
+    check (list string) "payload path from config"
+      [ "/home/opam/.opam/5.5/bin"; "/usr/local/bin"; "/usr/bin"; "/bin" ]
+      c.Exec_shim.payload_path
+
+let test_parse_config_rejects_bad_path () =
+  List.iter
+    (fun (label, content) ->
+      match Exec_shim.parse_config content with
+      | Ok _ -> fail (label ^ " must be rejected")
+      | Error e ->
+        check bool (label ^ " config error code") true
+          (String.starts_with ~prefix:"remote_ssh_shim_config_error" e))
+    [ "relative entry", "remote_root=/masc-work\npath=/usr/bin:relative/bin\n"
+    ; "empty entry", "remote_root=/masc-work\npath=/usr/bin::/bin\n"
+    ; "empty path", "remote_root=/masc-work\npath=\n"
+    ]
+
+let test_synthesize_env_takes_config_path () =
+  let env =
+    Exec_shim.synthesize_env ~path:"/home/opam/.opam/5.5/bin:/usr/bin"
+      ~base_env:shim_env ~allowlist:[] ~request_env:[ ("PATH", "/wire/bin") ]
+  in
+  check (option string) "config path replaces the fixed base"
+    (Some "/home/opam/.opam/5.5/bin:/usr/bin") (List.assoc_opt "PATH" env)
 
 let test_parse_config_requires_root () =
   match Exec_shim.parse_config "env_allowlist=FOO\n" with
@@ -374,7 +408,11 @@ let () =
     ; "config", [ test_case "ok" `Quick test_parse_config_ok
                 ; test_case "requires remote_root" `Quick test_parse_config_requires_root
                 ; test_case "rejects relative root" `Quick test_parse_config_rejects_relative_root
-                ; test_case "rejects unknown key" `Quick test_parse_config_rejects_unknown_key ]
+                ; test_case "rejects unknown key" `Quick test_parse_config_rejects_unknown_key
+                ; test_case "path entries" `Quick test_parse_config_path_ok
+                ; test_case "rejects a bad path" `Quick test_parse_config_rejects_bad_path
+                ; test_case "synthesize_env takes the config path" `Quick
+                    test_synthesize_env_takes_config_path ]
     ; "jail", [ test_case "allows root itself" `Quick test_jail_allows_root_itself
               ; test_case "allows descendant" `Quick test_jail_allows_descendant
               ; test_case "rejects escape" `Quick test_jail_rejects_escape

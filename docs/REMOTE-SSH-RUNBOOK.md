@@ -10,7 +10,7 @@ task-859에서 실측으로 확정했다.
 | # | 항목 | preflight 에러 코드 |
 |---|------|---------------------|
 | 1 | `masc-exec-shim`이 PATH에 (정적 바이너리) | `remote_ssh_probe_*` |
-| 2 | `/etc/masc-exec-shim.conf`에 `remote_root=<절대경로>` | `remote_ssh_shim_config_error` (exec 시점) |
+| 2 | `/etc/masc-exec-shim.conf`에 `remote_root=<절대경로>` (선택: `path=<절대경로:...>` 로 payload PATH 교체, 도구가 기본 `/usr/local/bin:/usr/bin:/bin` 밖에 있을 때) | `remote_ssh_shim_config_error` (exec 시점) |
 | 3 | `<remote_root>/<keeper>/` 디렉터리 (keeper마다, 자동 생성 안 됨) | `remote_ssh_keeper_root_missing` |
 | 4 | `<remote_root>/<keeper>/.config/gh`에 GitHub identity | `remote_github_identity_missing` |
 | 5 | `git` 설치 (`gh`도 — 4번 검증에 필요) | `remote_git_unavailable` |

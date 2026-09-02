@@ -58,8 +58,12 @@
     from the wire — the denylist beats both allowlists. *)
 
 val default_base_path : string
-(** [= "/usr/local/bin:/usr/bin:/bin"].  The payload's [PATH] is always
-    this fixed value; the wire can never influence it. *)
+(** [= "/usr/local/bin:/usr/bin:/bin"].  The payload's [PATH] unless the
+    endpoint's config names one ([path=], see {!config}); the wire can never
+    influence it. *)
+
+val default_payload_path : string list
+(** {!default_base_path} split on [:]. *)
 
 val denylisted_env_name : string -> bool
 (** [true] for names never accepted from the wire: [PATH], [HOME],
@@ -68,6 +72,7 @@ val denylisted_env_name : string -> bool
     wire is dropped even when it appears in the endpoint allowlist. *)
 
 val synthesize_env :
+  path:string ->
   base_env:(string * string) list ->
   allowlist:string list ->
   request_env:(string * string) list ->
@@ -75,7 +80,9 @@ val synthesize_env :
 (** [synthesize_env ~base_env ~allowlist ~request_env] is the payload's
     full environment: the minimal base env (see above; [base_env] is the
     shim's own process environment — the function itself is pure and performs
-    no process-state lookups) with each non-denylisted request entry overlaid
+    no process-state lookups; [path] is the payload [PATH], the endpoint
+    config's [payload_path] joined on [:])
+    with each non-denylisted request entry overlaid
     when its name is in [allowlist] or is one of the runner-owned
     [GH_CONFIG_DIR] and [GIT_TERMINAL_PROMPT] names.  A request entry whose
     name collides with a base key replaces the base value.  Duplicate names in
@@ -169,13 +176,21 @@ val check_request_root_jail
       shim will overlay (server-side copy of the endpoint allowlist);
       absent means no request env is accepted.
 
+    [path] is optional: a [:]-separated list of absolute directories that
+    replaces the payload [PATH] outright. It exists for endpoints whose tools
+    live outside the fixed default -- an Apple [container] guest keeps [dune]
+    under [/home/opam/.opam/5.5/bin] -- and it is the endpoint operator's
+    statement (the file is endpoint-resident), never the wire's. An empty or
+    relative entry is rejected.
+
     Unknown keys, duplicate keys, a missing/relative/empty [remote_root],
-    or an unreadable file are all rejected with
+    a malformed [path], or an unreadable file are all rejected with
     [remote_ssh_shim_config_error] and the shim refuses to execute. *)
 
 type config =
   { remote_root : string
   ; env_allowlist : string list
+  ; payload_path : string list  (** [path=] entries, or {!default_payload_path}. *)
   }
 
 val jail_for_request

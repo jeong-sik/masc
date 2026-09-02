@@ -785,9 +785,28 @@ type sandbox_log_backend =
   | Docker_logs
   | Apple_container_logs
 
+type sandbox_logs_error =
+  | Sandbox_logs_meta_read_failed of string
+  | Sandbox_logs_keeper_not_found
+  | Sandbox_logs_backend_failed of string
+
 let sandbox_log_backend_label = function
   | Docker_logs -> "docker"
   | Apple_container_logs -> "apple_container"
+;;
+
+let resolve_sandbox_log_target ~(config : Workspace.config) ~keeper_name =
+  match Keeper_meta_store.read_effective_meta config keeper_name with
+  | Error detail -> Error (Sandbox_logs_meta_read_failed detail)
+  | Ok None -> Error Sandbox_logs_keeper_not_found
+  | Ok (Some meta) ->
+    (match meta.sandbox_profile with
+     | Docker -> Ok (Docker_logs, meta.name)
+     | Micro_vm -> Ok (Apple_container_logs, meta.name)
+     | Remote_ssh ->
+       Error
+         (Sandbox_logs_backend_failed
+            "remote SSH Keeper has no local container log stream; inspect the configured endpoint"))
 ;;
 
 let sandbox_log_argv backend ~tail ~container_id =
@@ -800,25 +819,33 @@ let sandbox_log_argv backend ~tail ~container_id =
     @ [ "logs"; "-n"; string_of_int tail; container_id ]
 ;;
 
-let logs_json ~(config : Workspace.config) ~(meta : keeper_meta) ~timeout_sec
-    ~tail () =
+let logs_json ~(config : Workspace.config) ~keeper_name ~timeout_sec ~tail () =
   let tail = max 1 (min 500 tail) in
   let discovered =
-    match meta.sandbox_profile with
-    | Docker ->
-      Result.map
-        (fun containers -> Docker_logs, containers)
-        (live_containers ~config ~meta ~timeout_sec)
-    | Micro_vm ->
-      Result.map
-        (fun containers -> Apple_container_logs, containers)
-        (live_microvm_containers ~config ~meta ~timeout_sec)
-    | Remote_ssh ->
-      Error
-        "remote SSH Keeper has no local container log stream; inspect the configured endpoint"
+    match resolve_sandbox_log_target ~config ~keeper_name with
+    | Error _ as error -> error
+    | Ok (backend, effective_keeper_name) ->
+      let containers =
+        match backend with
+        | Docker_logs ->
+          Keeper_sandbox_runtime.list_containers
+            ~keeper_name:effective_keeper_name
+            ~base_path:config.Workspace.base_path
+            ~timeout_sec
+            ()
+        | Apple_container_logs ->
+          Keeper_sandbox_microvm.list_live_containers
+            ~base_path:config.Workspace.base_path
+            ~keeper_name:effective_keeper_name
+            ~timeout_sec
+      in
+      Result.map_error
+        (fun detail -> Sandbox_logs_backend_failed detail)
+        containers
+      |> Result.map (fun containers -> backend, effective_keeper_name, containers)
   in
   Result.map
-    (fun (backend, containers) ->
+    (fun (backend, effective_keeper_name, containers) ->
       let rows =
         List.map
           (fun (container : Keeper_sandbox_runtime.live_container) ->
@@ -845,7 +872,7 @@ let logs_json ~(config : Workspace.config) ~(meta : keeper_meta) ~timeout_sec
           containers
       in
       `Assoc
-        [ "keeper", `String meta.name
+        [ "keeper", `String effective_keeper_name
         ; "backend", `String (sandbox_log_backend_label backend)
         ; "state", `String (if rows = [] then "no_instance" else "available")
         ; "tail", `Int tail

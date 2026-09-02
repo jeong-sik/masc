@@ -366,12 +366,11 @@ let request_directory_refresh ~sw ~clock ~base_dir =
             loop ()
           end
         in
-        match loop () with
-        | () -> ()
-        | exception Eio.Cancel.Cancelled _ as exn ->
+        try loop () with
+        | Eio.Cancel.Cancelled _ as exn ->
           stop_worker ();
           raise exn
-        | exception exn ->
+        | exn ->
           stop_worker ();
           Log.Server.error "Discord directory refresh crashed: %s"
             (Printexc.to_string exn))

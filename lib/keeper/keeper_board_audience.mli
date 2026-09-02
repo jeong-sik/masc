@@ -19,15 +19,13 @@ type route =
 
 val classify
   :  visibility:Board.visibility
-  -> post_kind:Board.post_kind
   -> Board_dispatch.board_signal
   -> (t, classification_error) result
 (** Exact explicit address wins. Otherwise comments and reactions are scoped
     to structural thread participants, while a newly-created unaddressed post
-    is discoverable — unless it is a [System_post], a runtime receipt whose
-    owner already has a typed wake; that post is thread activity too, so
-    it never enters attention judgment on its own ([post_kind] is read from
-    the stored post; it only matters for [Board_post_created]).
+    is discoverable — unless its visibility is [Unlisted], which keeps it out
+    of every keeper's feed: that post is thread activity too and never enters
+    attention judgment on its own.
 
     Fail-closed address/visibility contract (validated through the typed
     {!Board.audience} write boundary, surfaced as [Invalid_board_audience]):

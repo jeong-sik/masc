@@ -1176,12 +1176,7 @@ let collect_board_events_with_cursor_policy
              }
            in
            let matched = board_signal_match ~meta ~signal in
-           (match
-              Board_audience.classify
-                ~visibility:p.visibility
-                ~post_kind:p.post_kind
-                signal
-            with
+           (match Board_audience.classify ~visibility:p.visibility signal with
             | Error error ->
               Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string ObservationQueryFailures)

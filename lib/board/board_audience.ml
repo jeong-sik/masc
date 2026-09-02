@@ -89,24 +89,23 @@ let audience_of_address ~visibility ~unaddressed = function
   | No_explicit_address -> unaddressed ()
 ;;
 
-(* An unaddressed post's audience depends on who wrote it. A person or a
-   keeper (Human_post, Automation_post) starts a conversation anyone may
-   discover. A System_post is a receipt the runtime writes about work that
-   already has an owner — a verification verdict, a fusion result — and the
-   owner is woken by its own typed stimulus, not by reading the Board. So a
-   receipt is thread activity: whoever joins its thread hears it, and nobody
-   is invited by discovery. Measured 2026-09-01: verifier_exact and system
-   receipts produced 429 of 1,784 per-keeper attention judgments in 24 h,
-   303 of them not_relevant. *)
-let audience_for_post ~visibility ~post_kind ~title ~content =
+(* An unaddressed post's audience follows its visibility. Public and
+   Internal posts start a conversation any keeper may discover. Unlisted
+   means "not in feeds, but accessible" (Board_types), and a keeper's feed
+   is its attention collector: an unaddressed Unlisted post is thread
+   activity, reaching a keeper only by explicit address or by joining its
+   thread, and no keeper pays an attention judgment for it. The runtime
+   writes verification requests and verdict receipts this way; a rejection
+   reaches the producer as a typed stimulus, and an approval shows as the
+   Done transition clearing the producer's current task. A stalled review
+   stays Internal because the Board is its only path to the producer. *)
+let audience_for_post ~visibility ~title ~content =
   explicit_address_of_text (address_text ~title ~content)
   |> audience_of_address ~visibility ~unaddressed:(fun () ->
-    match visibility, post_kind with
-    | Direct, (Human_post | Automation_post | System_post) ->
-      Error (Validation_error "Direct Board posts require explicit targets")
-    | (Public | Unlisted | Internal), (Human_post | Automation_post) ->
-      Ok Discoverable
-    | (Public | Unlisted | Internal), System_post -> Ok Thread_participants)
+    match visibility with
+    | Direct -> Error (Validation_error "Direct Board posts require explicit targets")
+    | Unlisted -> Ok Thread_participants
+    | Public | Internal -> Ok Discoverable)
 ;;
 
 let audience_for_comment ~content =

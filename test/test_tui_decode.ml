@@ -2470,6 +2470,14 @@ let connector_json ?(id = "slack") ?(available = `Bool true)
     ; ("bot_token_present", `Bool true)
     ; ("app_token_present", `Bool true)
     ; ("pid", pid)
+    ; ("directory_state", `String "partial")
+    ; ("directory_server_count", `Int 2)
+    ; ("directory_channel_count", `Int 12)
+    ; ("directory_person_count", `Int 34)
+    ; ("directory_authentication_failed", `List [])
+    ; ("directory_permission_denied", `List [ `String "members" ])
+    ; ("directory_errors", `List [])
+    ; ("directory_updated_at", `String "2026-09-02T05:00:00Z")
     ; ("configured_bindings", bindings)
     ]
 
@@ -2506,6 +2514,11 @@ let test_decode_connector_snapshot_reads_the_live_shape () =
              c.Tui_decode.cn_bot_token_present;
            Alcotest.(check (option int)) "server pid" (Some 4242)
              c.Tui_decode.cn_pid;
+           Alcotest.(check bool) "typed directory state" true
+             (c.Tui_decode.cn_directory_state
+              = Some Tui_decode.Connector_directory_partial);
+           Alcotest.(check (list string)) "permission limit"
+             [ "members" ] c.Tui_decode.cn_directory_permission_denied;
            (match c.Tui_decode.cn_bindings with
             | [ binding ] ->
                 Alcotest.(check string) "bound channel" "C09TK9L4DV4"

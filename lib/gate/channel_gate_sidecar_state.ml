@@ -280,7 +280,7 @@ module Make (Config : Config) = struct
       |> Result.map_error Store.mutation_error_to_string
       |> Result.map (fun () -> status_json ())
 
-  let unbind ~channel_id ~actor_name =
+  let unbind_internal ?expected_keeper_name ~channel_id ~actor_name =
     let channel_id = String.trim channel_id in
     if channel_id = "" then Error "channel_id is required"
     else
@@ -291,6 +291,12 @@ module Make (Config : Config) = struct
             original_bindings
         with
         | None -> Error "binding not found"
+        | Some (previous : binding)
+          when (match expected_keeper_name with
+                | Some expected ->
+                  not (String.equal expected previous.keeper_name)
+                | None -> false) ->
+          Error "binding changed"
         | Some previous ->
           let updated_bindings =
             List.filter
@@ -311,4 +317,10 @@ module Make (Config : Config) = struct
           Ok (updated_bindings, event, ()))
       |> Result.map_error Store.mutation_error_to_string
       |> Result.map (fun () -> status_json ())
+
+  let unbind ~channel_id ~actor_name =
+    unbind_internal ~channel_id ~actor_name
+
+  let unbind_if_keeper ~channel_id ~expected_keeper_name ~actor_name =
+    unbind_internal ~expected_keeper_name ~channel_id ~actor_name
 end

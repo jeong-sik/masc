@@ -7,6 +7,7 @@
 type scope =
   | Person
   | Channel
+  | Server
 
 val remember :
   base_dir:string ->

@@ -96,6 +96,17 @@ let test_people_and_channels_do_not_collide () =
   check (option string) "and the channel keeps its own" (Some "kinossam-dev")
     (Names.recall ~base_dir ~connector:"slack" ~scope:Names.Channel ~id:"X1")
 
+let test_servers_have_their_own_id_space () =
+  with_temp_base @@ fun base_dir ->
+  Names.remember ~base_dir ~connector:"discord" ~scope:Names.Server ~id:"X1"
+    ~name:"MASC Lab" ();
+  Names.remember ~base_dir ~connector:"discord" ~scope:Names.Channel ~id:"X1"
+    ~name:"general" ();
+  check (option string) "server name" (Some "MASC Lab")
+    (Names.recall ~base_dir ~connector:"discord" ~scope:Names.Server ~id:"X1");
+  check (option string) "channel name" (Some "general")
+    (Names.recall ~base_dir ~connector:"discord" ~scope:Names.Channel ~id:"X1")
+
 let test_entries_project_latest_names_in_id_order () =
   with_temp_base @@ fun base_dir ->
   Names.remember ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U2"
@@ -123,6 +134,8 @@ let () =
             test_a_blank_is_not_an_answer
         ; test_case "people and channels do not collide" `Quick
             test_people_and_channels_do_not_collide
+        ; test_case "servers have their own id space" `Quick
+            test_servers_have_their_own_id_space
         ; test_case "entries expose latest names in ID order" `Quick
             test_entries_project_latest_names_in_id_order
         ] )

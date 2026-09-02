@@ -580,8 +580,8 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       [ b Navigate "j/k" "transport"
       ; b Navigate "J/K" "binding"
       ; b Navigate "PgUp/PgDn" "detail page"
-      ; b Act "b / e / u" "bind / reassign / unbind"
-          ~help:"bind a channel, reassign the selected row, or unbind it"
+      ; b Act "b / e / u u" "bind / reassign / remove"
+          ~help:"bind a channel, reassign the selected row, or remove it twice-confirmed"
       ]
   | Detail_info | Detail_secrets | Detail_automation | Detail_runs -> []
 

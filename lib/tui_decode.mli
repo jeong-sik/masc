@@ -387,12 +387,19 @@ type connector_binding = {
 type connector_name_kind =
   | Connector_channel_name
   | Connector_person_name
+  | Connector_server_name
 
 type connector_name_mapping = {
   cnm_kind : connector_name_kind;
   cnm_id : string;
   cnm_name : string;
 }
+
+type connector_directory_state =
+  | Connector_directory_not_started
+  | Connector_directory_refreshing
+  | Connector_directory_complete
+  | Connector_directory_partial
 
 (** A connector the gate can deliver through, including the server-owned
     configuration and route evidence an operator needs to act on it. *)
@@ -428,7 +435,16 @@ type connector = {
   cn_gate_healthy : bool option;
   cn_pid : int option;
   cn_guild_count : int option;
+  cn_directory_state : connector_directory_state option;
+  cn_directory_server_count : int option;
+  cn_directory_channel_count : int option;
+  cn_directory_person_count : int option;
+  cn_directory_authentication_failed : string list;
+  cn_directory_permission_denied : string list;
+  cn_directory_errors : string list;
+  cn_directory_updated_at : string option;
   cn_workspace_id : string option;
+  cn_server_names_path : string option;
   cn_channel_names_path : string option;
   cn_people_names_path : string option;
   cn_name_mappings : connector_name_mapping list;

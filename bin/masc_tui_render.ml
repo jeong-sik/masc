@@ -6276,7 +6276,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                           (binding_reference binding)
                           (Terminal_text.single_line binding.cb_keeper_name)
                           (if here then "  (this Keeper)"
-                           else if missing_keeper then "  (MISSING KEEPER)"
+                           else if missing_keeper then
+                             "  (MISSING KEEPER · e reassign · u u remove)"
                            else "")
                       in
                       if selected then Ansi.reverse ^ line ^ Ansi.reset
@@ -6322,7 +6323,46 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                 @ optional_bool_row "Gate healthy" connector.cn_gate_healthy
                 @ optional_int_row "Server pid" connector.cn_pid
                 @ optional_int_row "Guilds" connector.cn_guild_count
+                @ optional_row "Directory state"
+                    (Option.map
+                       (function
+                         | Tui_decode.Connector_directory_not_started ->
+                           "not started"
+                         | Connector_directory_refreshing -> "refreshing"
+                         | Connector_directory_complete -> "complete"
+                         | Connector_directory_partial -> "partial")
+                       connector.cn_directory_state)
+                @ optional_int_row "Servers learned"
+                    connector.cn_directory_server_count
+                @ optional_int_row "Channels learned"
+                    connector.cn_directory_channel_count
+                @ optional_int_row "People learned"
+                    connector.cn_directory_person_count
+                @ (match connector.cn_directory_authentication_failed with
+                   | [] -> []
+                   | values ->
+                     [ Printf.sprintf "  %-18s %s" "Authentication"
+                         (String.concat ", "
+                            (List.map Terminal_text.single_line values))
+                     ])
+                @ (match connector.cn_directory_permission_denied with
+                   | [] -> []
+                   | values ->
+                     [ Printf.sprintf "  %-18s %s" "Permission limits"
+                         (String.concat ", "
+                            (List.map Terminal_text.single_line values))
+                     ])
+                @ (match connector.cn_directory_errors with
+                   | [] -> []
+                   | values ->
+                     [ Printf.sprintf "  %-18s %s" "Directory errors"
+                         (String.concat "; "
+                            (List.map Terminal_text.single_line values))
+                     ])
+                @ optional_row "Directory updated"
+                    connector.cn_directory_updated_at
                 @ optional_row "Workspace id" connector.cn_workspace_id
+                @ optional_row "Server names" connector.cn_server_names_path
                 @ optional_row "Channel names" connector.cn_channel_names_path
                 @ optional_row "People names" connector.cn_people_names_path
                 @ optional_row "Mapping scope" connector.cn_name_mapping_scope
@@ -6341,13 +6381,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                               Printf.sprintf "    %-7s %s ↔ %s"
                                 (match mapping.cnm_kind with
                                  | Tui_decode.Connector_channel_name -> "channel"
-                                 | Connector_person_name -> "person")
+                                 | Connector_person_name -> "person"
+                                 | Connector_server_name -> "server")
                                 (Terminal_text.single_line mapping.cnm_id)
                                 (Terminal_text.single_line mapping.cnm_name))
                            mappings)
                 @ [ ""
                   ; Ansi.dim
-                    ^ "  j/k transport · J/K binding · b bind · e reassign · u unbind"
+                    ^ "  j/k transport · J/K binding · b bind · e reassign · u u remove"
                     ^ Ansi.reset
                   ; Ansi.dim ^ "  PgUp/PgDn scrolls this detail" ^ Ansi.reset
                   ; Ansi.dim ^ "  r reloads bindings and learned names" ^ Ansi.reset

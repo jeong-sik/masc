@@ -876,7 +876,7 @@ let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   ; Detail_secrets, []
   ; Detail_github, [ "L" ]
   ; Detail_identity, [ "arrows+enter"; "T"; "A"; "/"; "R" ]
-  ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u" ]
+  ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u u" ]
   ; Detail_automation, []
   ; Detail_runs, []
   ]

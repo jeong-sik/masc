@@ -1131,72 +1131,52 @@ let load_connectors ~(host : string) ~(port : int) :
       (match Tui_decode.decode_connector_snapshot json with
        | Error _ as error -> error
        | Ok snapshot ->
-           let load_page ?(ids = []) connector kind =
-             match
-               Masc_tui_http.fetch_connector_names ~host ~port
-                 ~connector:connector.Tui_decode.cn_id ~kind ~ids ()
-             with
-             | Error detail -> Error (kind ^ ": " ^ detail)
-             | Ok json -> Tui_decode.decode_connector_name_page json
-           in
-           let rec chunks size values =
-             match values with
-             | [] -> []
-             | values ->
-               let head = List.take size values in
-               head :: chunks size (List.drop (List.length head) values)
+           let load_pages connector kind =
+             let page_limit = 500 in
+             let rec loop offset pages =
+               match
+                 Masc_tui_http.fetch_connector_names ~host ~port
+                   ~connector:connector.Tui_decode.cn_id ~kind ~offset
+                   ~limit:page_limit ()
+               with
+               | Error detail -> Error (kind ^ ": " ^ detail)
+               | Ok json ->
+                 (match Tui_decode.decode_connector_name_page json with
+                  | Error detail -> Error (kind ^ ": " ^ detail)
+                  | Ok page ->
+                    let count = List.length page.cnp_mappings in
+                    if page.cnp_has_more && count = 0 then
+                      Error (kind ^ ": directory pagination made no progress")
+                    else if page.cnp_has_more then
+                      loop (offset + count) (page :: pages)
+                    else Ok (List.rev (page :: pages)))
+             in
+             loop 0 []
            in
            let connectors =
              List.map
                (fun connector ->
                   let directory_results =
-                    [ load_page connector "channel"; load_page connector "person" ]
+                    [ load_pages connector "server"
+                    ; load_pages connector "channel"
+                    ; load_pages connector "person"
+                    ]
                   in
-                  let known_channel_ids = Hashtbl.create 32 in
-                  List.iter
-                    (function
-                      | Ok page
-                        when page.cnp_kind = Tui_decode.Connector_channel_name ->
-                          List.iter
-                            (fun mapping ->
-                               Hashtbl.replace known_channel_ids mapping.cnm_id ())
-                            page.cnp_mappings
-                      | Ok _ | Error _ -> ())
-                    directory_results;
-                  let exact_binding_results =
-                    connector.cn_bindings
-                    |> List.map (fun (binding : Tui_decode.connector_binding) ->
-                           binding.cb_channel_id)
-                    |> List.sort_uniq String.compare
-                    |> List.filter (fun id -> not (Hashtbl.mem known_channel_ids id))
-                    |> chunks 100
-                    |> List.map (fun ids ->
-                           load_page ~ids connector "channel")
+                  let pages =
+                    directory_results
+                    |> List.filter_map Result.to_option
+                    |> List.flatten
                   in
-                  let results =
-                    directory_results @ exact_binding_results
-                  in
-                  let pages = List.filter_map Result.to_option results in
                   let read_problems =
                     List.filter_map
                       (function
                         | Error detail -> Some detail
                         | Ok _ -> None)
-                      results
-                  in
-                  let truncated =
-                    List.exists
-                      (function Ok page -> page.cnp_has_more | Error _ -> false)
                       directory_results
-                  in
-                  let problems =
-                    if truncated
-                    then "name mapping directory is truncated" :: read_problems
-                    else read_problems
                   in
                   Tui_decode.connector_with_name_pages connector ~pages
                     ~error:
-                      (match problems with
+                      (match read_problems with
                        | [] -> None
                        | problems -> Some (String.concat "; " problems)))
                snapshot.cs_connectors

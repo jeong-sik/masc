@@ -9188,7 +9188,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                        else find (index + 1) rest
                  in
                  find 0 snapshot.cs_connectors);
-          state.connectors_binding_cursor <- 0
+          state.connectors_binding_cursor <- 0;
+          state.connector_unbind_armed <- None
       | Error detail -> state.connectors_error <- Some detail)
   | Runtime_surface_loaded (generation, result) ->
       let is_current = generation = state.runtime_surface_generation in
@@ -10153,6 +10154,7 @@ let main () =
               | Some _ | None -> (
                   match post ~connector ~json with
                   | Ok _ ->
+                      state.connector_unbind_armed <- None;
                       report_action state "system"
                         (action ^ ": ok (" ^ connector ^ ")");
                       launch_connectors_load state ~mailbox:async_messages
@@ -10167,6 +10169,7 @@ let main () =
     List.nth_opt connector.cn_bindings state.connectors_binding_cursor
   in
   let handle_connector_bind () =
+    state.connector_unbind_armed <- None;
     let host = server_peer_host in
     let port = state.port in
     let keeper_name =
@@ -10216,11 +10219,38 @@ let main () =
                   report_action state "error"
                     "unbind: select a binding with J/K"
               | Some binding ->
-                  submit ~fixed_channel_id:binding.cb_channel_id
-                    binding.cb_channel_id)
+                  let exact =
+                    selected.cn_id, binding.cb_channel_id, binding.cb_keeper_name
+                  in
+                  if state.connector_unbind_armed = Some exact then begin
+                    state.connector_unbind_armed <- None;
+                    match
+                      Masc_tui_http.post_connector_unbind ~host ~port
+                        ~connector:selected.cn_id
+                        ~body_json:
+                          (Yojson.Safe.to_string
+                             (`Assoc
+                               [ "channel_id", `String binding.cb_channel_id
+                               ; "keeper_name", `String binding.cb_keeper_name
+                               ]))
+                    with
+                    | Ok _ ->
+                      report_action state "system"
+                        ("unbind: removed " ^ binding.cb_channel_id);
+                      launch_connectors_load state ~mailbox:async_messages
+                    | Error detail ->
+                      report_action state "error" ("unbind: " ^ detail)
+                  end else begin
+                    state.connector_unbind_armed <- Some exact;
+                    report_action state "system"
+                      (Printf.sprintf
+                         "unbind armed: press u again to remove %s → %s"
+                         binding.cb_channel_id binding.cb_keeper_name)
+                  end)
          | _ -> submit "")
   in
   let handle_connector_edit () =
+    state.connector_unbind_armed <- None;
     match selected_connector (), selected_keeper state with
     | None, _ -> report_action state "error" "edit: select a transport first"
     | _, None -> report_action state "error" "edit: select a Keeper first"
@@ -11360,6 +11390,10 @@ and is loaded on demand through keeper_skill.
        | Verification, Some ("a" | "A") -> ()
        | Verification, Some _ -> state.verification_verdict_armed <- None
        | _ -> ());
+      (* Destructive binding removal deliberately requires two consecutive
+         [u] presses. Any intervening action invalidates the ownership
+         snapshot; the server also compares that owner inside the store lock. *)
+      if key <> Some "u" then state.connector_unbind_armed <- None;
       (* The composer sees the key first, and takes it only when it has one to
          take: unfocused it claims a single key, and only with somewhere to
          send. Everything it does not claim reaches the surface with its
@@ -12336,6 +12370,7 @@ and is loaded on demand through keeper_skill.
              | None -> 0
              | Some connector -> List.length connector.cn_bindings
            in
+           state.connector_unbind_armed <- None;
            state.connectors_binding_cursor <-
              (if key = Some "J" then
                 Masc_tui_scroll.cursor_down ~count

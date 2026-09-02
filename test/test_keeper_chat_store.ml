@@ -244,8 +244,11 @@ let test_attachment_dimensions_survive_the_reference_swap () =
                  Alcotest.failf "dashboard attachments shape: %s"
                    (Yojson.Safe.to_string
                       (Option.value other ~default:`Null)))
+            | `List rows ->
+              Alcotest.failf "dashboard row shape: %d rows" (List.length rows)
             | other ->
-              Alcotest.failf "dashboard row shape: %d rows" (List.length other))
+              Alcotest.failf "dashboard row shape: %s"
+                (Yojson.Safe.to_string other))
          | other ->
            Alcotest.failf "expected one attachment, got %d"
              (List.length (Option.value other ~default:[])))

@@ -222,24 +222,6 @@ let network_gate_request base_path ~capability =
   }
 ;;
 
-(* The whole gate path, not the classifier alone: a web_fetch under
-   Auto Judge comes back allowed with the observation source, without a
-   queue entry. *)
-let test_auto_judge_allows_web_fetch_without_queueing () =
-  with_auto_judge @@ fun base_path ->
-  match
-    Keeper_gate.decide
-      ~keeper_always_allow:false
-      (network_gate_request base_path ~capability:"web_fetch")
-  with
-  | Keeper_gate.Allow { source = Readonly_sandbox; _ } -> ()
-  | Keeper_gate.Allow { source; _ } ->
-    failf "web_fetch allowed through the wrong source: %s"
-      (Keeper_gate.authorization_source_to_string source)
-  | Keeper_gate.Deferred _ -> fail "web_fetch was deferred instead of fast-pathed"
-  | Keeper_gate.Unavailable _ -> fail "web_fetch made the queue unavailable"
-;;
-
 let select_workspace config mode =
   match Keeper_gate_mode.set config ~actor:"test" mode with
   | Ok _ -> ()
@@ -276,6 +258,24 @@ let test_auto_judge_allows_observation_without_queueing () =
        | Keeper_gate.Auto_judge_unavailable detail -> "auto_judge_unavailable: " ^ detail
        | Keeper_gate.Mode_state_invalid detail -> "mode_state_invalid: " ^ detail)
   | Keeper_gate.Unavailable _ -> fail "observation request made the queue unavailable"
+;;
+
+(* The whole gate path, not the classifier alone: a web_fetch under
+   Auto Judge comes back allowed with the observation source, without a
+   queue entry. Defined after [with_auto_judge], which it uses. *)
+let test_auto_judge_allows_web_fetch_without_queueing () =
+  with_auto_judge @@ fun base_path ->
+  match
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      (network_gate_request base_path ~capability:"web_fetch")
+  with
+  | Keeper_gate.Allow { source = Readonly_sandbox; _ } -> ()
+  | Keeper_gate.Allow { source; _ } ->
+    failf "web_fetch allowed through the wrong source: %s"
+      (Keeper_gate.authorization_source_to_string source)
+  | Keeper_gate.Deferred _ -> fail "web_fetch was deferred instead of fast-pathed"
+  | Keeper_gate.Unavailable _ -> fail "web_fetch made the queue unavailable"
 ;;
 
 let test_auto_judge_still_defers_writes_to_the_judge () =

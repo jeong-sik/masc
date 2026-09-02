@@ -13858,28 +13858,16 @@ let render_code (state : state) =
    end
    else if state.code_focus_file = Right_pane then content_pane buf cols
    else list_pane ~framed:false buf cols);
+  let code_pane =
+    if state.code_focus_file <> Right_pane then Masc_tui_keys.Code_tree
+    else if
+      state.code_history_open || state.code_diff_open || state.code_notes_open
+    then Masc_tui_keys.Code_overlay
+    else Masc_tui_keys.Code_file
+  in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:
-         (Printf.sprintf
-            "j/k:%s  h/l:pane  %sEnter:open  %sEsc:%s  r:refresh  Tab:next  q:quit"
-            (if state.code_focus_file = Right_pane then "scroll" else "move")
-            (if
-               state.code_focus_file = Right_pane && not state.code_history_open
-               && not state.code_diff_open && not state.code_notes_open
-             then "Shift-\xe2\x86\x90/\xe2\x86\x92:pan  "
-             else "")
-            (if state.code_notes_open then
-               "w:add  d:diff  H:history  m:notes  "
-             else if state.code_focus_file = Right_pane then
-               "d:diff  H:history  m:notes  "
-             else "")
-            (if
-               state.code_history_open || state.code_diff_open
-               || state.code_notes_open
-             then "code"
-             else if state.code_focus_file = Right_pane then "list"
-             else "up")));
+       ~hints:(Masc_tui_keys.footer_hints_code ~pane:code_pane));
   finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf
 
 let resource_display_name (resource : Masc_tui_mcp.resource) =

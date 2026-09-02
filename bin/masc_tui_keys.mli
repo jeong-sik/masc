@@ -63,6 +63,20 @@ val footer_hints_overview : task_focus:bool -> string
     j/k by focus and drops the keys dead in the other mode — the table
     stays the SSOT, no second key list. *)
 
+type code_pane =
+  | Code_tree  (** the file list has focus *)
+  | Code_file  (** a file is open and nothing covers it *)
+  | Code_overlay  (** history, diff or notes is drawn over the file *)
+
+val footer_hints_code : pane:code_pane -> string
+(** The Code footer, narrowed to what [pane] answers.
+
+    Separate from {!footer_hints} because this surface has three modes and a
+    key live in one is dead in another. It was a literal in the renderer
+    naming [d], [H], [m] and [w], which is why the three language-server
+    questions never appeared on the screen they work on, and why blame and
+    the row search did not either when they arrived. *)
+
 val footer_hints_resources : detail_focus:bool -> string
 (** The Resources footer, with [j/k] relabelled for the focused pane. All
     other keys still project from {!for_surface}. *)

@@ -34,13 +34,17 @@ let reference_index_ready ~question ~language ~project_root =
     (match Lsp_reference_index.check ~language ~project_root with
      | Lsp_reference_index.Present -> Ok ()
      | Lsp_reference_index.Missing { build_command; searched } ->
+       (* The command first. This sentence reaches an operator on a line
+          that truncates from the right -- measured at 200 columns, where it
+          arrived as "Run: dun~" -- so the half they can act on has to
+          survive the cut, and the explanation is what should be lost. *)
        Error
          (Printf.sprintf
-            "references needs the project's reference index and none is under %s. Run: %s \
-             -- until then the answer would name only the occurrences in this one file, \
-             which is not the same as there being only one."
-            searched
-            build_command))
+            "references needs a reference index: run %s. None found under %s \
+             -- until then the answer would name only this file's own \
+             occurrences, which is not the same as there being only one."
+            build_command
+            searched))
 ;;
 
 let method_of_question = function

@@ -623,6 +623,21 @@ let save_jsonl_snapshot_result ~where ~path content =
 let save_jsonl_snapshot ~where ~path content =
   ignore (save_jsonl_snapshot_result ~where ~path content)
 
+(* Re-mark everything dirty after a failed snapshot write, so the next flush
+   rewrites the file instead of skipping an empty queue — the missing half of
+   a log-and-continue failure (#26168). Callers hold the store lock. *)
+let remark_all_posts_dirty store =
+  store.dirty_posts <- true;
+  Hashtbl.iter (fun key _ -> Hashtbl.replace store.dirty_post_ids key ()) store.posts
+;;
+
+let remark_all_comments_dirty store =
+  store.dirty_comments <- true;
+  Hashtbl.iter
+    (fun key _ -> Hashtbl.replace store.dirty_comment_ids key ())
+    store.comments
+;;
+
 let delete_post store ~post_id : (unit, board_error) Result.t =
   match Post_id.of_string post_id with
   | Error e -> Error e
@@ -693,21 +708,34 @@ let delete_post store ~post_id : (unit, board_error) Result.t =
      | Error _ as e -> e
      | Ok (posts_jsonl, comments_jsonl, votes_jsonl, reactions_jsonl) ->
        with_persist_lock store (fun () ->
-         save_jsonl_snapshot ~where:"rewrite_posts" ~path:(persist_path ()) posts_jsonl;
-         save_jsonl_snapshot
-           ~where:"rewrite_comments"
-           ~path:(comments_path ())
-           comments_jsonl;
-         (* Same log-and-continue contract as the [save_jsonl_snapshot] calls
-            around it — [delete_post] always reports [Ok ()] once the
-            in-memory deletion (the authoritative step) has happened; a
-            rewrite I/O failure here is logged + counted inside
-            [save_vote_log_jsonl] and self-heals on the next successful
-            flush/delete rewrite. *)
-         (match save_vote_log_jsonl votes_jsonl with Ok () | Error _ -> ());
-         save_jsonl_snapshot
-           ~where:"rewrite_reactions"
-           ~path:(reactions_path ())
+         (* The in-memory deletion above is the authoritative step, but it
+            also cleared the dirty flags inside the snapshot lock. Without
+            re-marking, a failed rewrite here left nothing scheduled to
+            repeat it — the deleted post resurfaced from disk on restart,
+            the same shape #26168 fixed for [flush_dirty]. *)
+         (match
+            save_jsonl_snapshot_result ~where:"rewrite_posts" ~path:(persist_path ())
+              posts_jsonl
+          with
+          | Ok () -> ()
+          | Error _ -> with_lock store (fun () -> remark_all_posts_dirty store));
+         (match
+            save_jsonl_snapshot_result ~where:"rewrite_comments"
+              ~path:(comments_path ())
+              comments_jsonl
+          with
+          | Ok () -> ()
+          | Error _ -> with_lock store (fun () -> remark_all_comments_dirty store));
+         (* The vote log rides the posts dirty cycle, same as in [flush_dirty]. *)
+         (match save_vote_log_jsonl votes_jsonl with
+          | Ok () -> ()
+          | Error _ -> with_lock store (fun () -> remark_all_posts_dirty store));
+         (* Reactions have no dirty cycle of their own — [toggle_reaction]
+            owns their durable path with a write-ahead snapshot. A failed
+            rewrite here is logged + counted by [save_jsonl_snapshot_result]
+            and leaves orphaned reaction rows on disk; re-queueing them needs
+            a dirty home that does not exist yet. *)
+         save_jsonl_snapshot ~where:"rewrite_reactions" ~path:(reactions_path ())
            reactions_jsonl);
        Ok ())
 
@@ -785,17 +813,9 @@ let flush_dirty store =
      it dirty again -- or forever, if none came (#26168). Re-marking on
      failure puts the change back in the queue; the counter and the log line
      stay, they just are not the whole response. *)
-  let remark_posts () =
-    with_lock store (fun () ->
-      store.dirty_posts <- true;
-      Hashtbl.iter (fun key _ -> Hashtbl.replace store.dirty_post_ids key ()) store.posts)
-  in
+  let remark_posts () = with_lock store (fun () -> remark_all_posts_dirty store) in
   let remark_comments () =
-    with_lock store (fun () ->
-      store.dirty_comments <- true;
-      Hashtbl.iter
-        (fun key _ -> Hashtbl.replace store.dirty_comment_ids key ())
-        store.comments)
+    with_lock store (fun () -> remark_all_comments_dirty store)
   in
   with_persist_lock store (fun () ->
     Option.iter

@@ -13718,7 +13718,7 @@ let render_code (state : state) =
             (if
                state.code_focus_file = Right_pane && not state.code_history_open
                && not state.code_diff_open && not state.code_notes_open
-             then "Shift-â/â:pan  "
+             then "Shift-\xe2\x86\x90/\xe2\x86\x92:pan  "
              else "")
             (if state.code_notes_open then
                "w:add  d:diff  H:history  m:notes  "
@@ -16268,8 +16268,8 @@ let render_answering (state : state) =
     | Some (keeper_name, preview) ->
         let doing =
           match preview.Tui_decode.ktp_current_tool with
-          | Some tool_name -> "â¶ " ^ tool_name
-          | None -> "â¶ writing"
+          | Some tool_name -> "\xe2\x96\xb6 " ^ tool_name
+          | None -> "\xe2\x96\xb6 writing"
         in
         let tail =
           match
@@ -16283,7 +16283,7 @@ let render_answering (state : state) =
         ; Ansi.dim ^ tail ^ Ansi.reset
         ]
     | None ->
-        [ Ansi.dim ^ "live preview â none for this row" ^ Ansi.reset
+        [ Ansi.dim ^ "live preview \xe2\x80\x94 none for this row" ^ Ansi.reset
         ; ""
         ]
   in

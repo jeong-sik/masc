@@ -735,13 +735,22 @@ let runtime_id_of_masc_internal_error = function
   | Receipt_persistence_failed _
   | Gate_replay_repair_required _ -> "unknown"
 
+(* Shape decides before the stop reason. A response with nothing deliverable
+   (empty, or thinking only) has nothing to continue from, so it keeps the
+   rotation kinds whether the provider stopped at [EndTurn] or at [MaxTokens];
+   the truncation-continuation attempt still runs first on every [MaxTokens]
+   no-progress rejection ([Keeper_turn_driver_try_provider.max_tokens_truncation_error]
+   reads the record, not this kind). [`Truncated_no_progress] is the case
+   that carried partial content and has no rotation hint, so a failed or
+   unreachable continuation on it ends the lane.
+
+   Before this order, every [MaxTokens] rejection was [`Truncated_no_progress]:
+   a lane whose model spent the whole output budget on thinking got no
+   rotation and no deferral hint, and its continuation could not run on a
+   dialect that cannot switch thinking off per request. 2026-09-02 17:54-18:06
+   KST: analyst repeated a 73k-char thinking-only max_tokens turn nine times
+   (707 s, no output) while glm-coding.glm-5.3 stood second in its lane. *)
 let accept_no_progress_retry_kind = function
-  | Accept_rejected
-      { reason_kind = Some Accept_no_usable_progress
-      ; stop_reason = Some Agent_core.Types.MaxTokens
-      ; _
-      } ->
-    Some `Truncated_no_progress
   | Accept_rejected
       {
         reason_kind;
@@ -762,6 +771,12 @@ let accept_no_progress_retry_kind = function
            ~reason_kind
            ~response_shape ->
     Some `Thinking_only_no_progress
+  | Accept_rejected
+      { reason_kind = Some Accept_no_usable_progress
+      ; stop_reason = Some Agent_core.Types.MaxTokens
+      ; _
+      } ->
+    Some `Truncated_no_progress
   | Accept_rejected _
   | Runtime_exhausted _
   | Capacity_backpressure _

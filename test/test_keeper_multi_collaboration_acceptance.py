@@ -166,6 +166,35 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("--sandbox-profile", stderr.getvalue())
 
+    def test_goal_verifier_phase_failure_is_recorded_not_fatal(self):
+        written = {}
+
+        class Writer:
+            def write_json(self, name, payload):
+                written[name] = payload
+
+        class Stub:
+            verifier_goal_id = "goal-x"
+            verifier_task_id = "task-9"
+            writer = Writer()
+            goal_verifier_evidence = {}
+
+            def run_goal_verifier_refute_reenter_prove(self):
+                raise acceptance.AcceptanceError("verifier Task has no completion verdict")
+
+        stub = Stub()
+        acceptance.MissionRun.run_goal_verifier_guarded(stub)
+        self.assertEqual(stub.goal_verifier_evidence["failure"], acceptance.GOAL_VERIFIER_PHASE_FAILED)
+        self.assertEqual(stub.goal_verifier_evidence["task_id"], "task-9")
+        self.assertIn("no completion verdict", stub.goal_verifier_evidence["detail"])
+        self.assertIn("observations/goal-verifier-failure.json", written)
+
+    def test_run_sequence_guards_the_goal_verifier_phase(self):
+        run_source = inspect.getsource(acceptance.MissionRun.run)
+        self.assertIn("self.run_goal_verifier_guarded()", run_source)
+        self.assertNotIn("self.run_goal_verifier_refute_reenter_prove()", run_source)
+        self.assertIn("self.run_continuity_chain(post_id)", run_source)
+
     def test_catalog_has_exact_mission_and_assertion_counts(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)
 

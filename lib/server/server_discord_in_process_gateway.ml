@@ -280,7 +280,7 @@ let discord_member_directory_page = function
            in
             (match name with
              | Some name -> Ok (id, name)
-             | None -> Error "Discord guild member user has no name"))
+             | None -> Error "Discord guild member user has no name")))
       | _ -> Error "Discord guild member is not an object"
     in
     let rec decode acc = function

@@ -319,7 +319,7 @@ module Make (Config : Config) = struct
       |> Result.map (fun () -> status_json ())
 
   let unbind ~channel_id ~actor_name =
-    unbind_internal ~channel_id ~actor_name
+    unbind_internal ?expected_keeper_name:None ~channel_id ~actor_name
 
   let unbind_if_keeper ~channel_id ~expected_keeper_name ~actor_name =
     unbind_internal ~expected_keeper_name ~channel_id ~actor_name

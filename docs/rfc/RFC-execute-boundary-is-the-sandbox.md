@@ -3,7 +3,7 @@ rfc: "execute-boundary-is-the-sandbox"
 title: "The subset judges; the sandbox contains"
 status: Draft
 created: 2026-08-31
-updated: 2026-08-31
+updated: 2026-09-02
 author: vincent
 supersedes: []
 superseded_by: null
@@ -15,8 +15,9 @@ related: ["execute-subset-dispositions", "0394", "0091"]
 `Execute` is the only tool in the six surveyed products whose parse result is
 what runs. Everywhere else the parser answers one question and the original
 string goes to a shell. This RFC proposes masc join them for the `script`
-field, keep the typed path for `argv` and `pipeline`, and let the profile's
-sandbox be the containment it already is.
+field, keep the typed path for `argv` — the typed `pipeline` field is removed
+by RFC-execute-command-string — and let the profile's sandbox be the
+containment it already is.
 
 ## 1. What this asks to reopen
 
@@ -68,7 +69,7 @@ Three populations, and they want different things:
 |---|---|---|
 | genuine `argv` | 37,006 | `["git";"log";"--oneline"]` — never wanted a shell |
 | shell costumes | 6,815 | `["bash";"-c";S]` — wanted a shell, smuggled one |
-| no top-level argv | 1,560 | `script` / `pipeline` / `then` forms |
+| no top-level argv | 1,560 | `script`, and the since-removed `pipeline` / `then` forms |
 
 The typed path's irreplaceable value is the first row: a call that is naturally
 argv gets no shell, so word splitting and substitution are not policed, they
@@ -90,7 +91,7 @@ another. Which field it arrives in decides.
 
 | field | model |
 |---|---|
-| `argv`, `pipeline` | typed. argv spawn, no shell. **Unchanged.** |
+| `argv` | typed. argv spawn, no shell. **Unchanged.** |
 | `script` | a real shell, inside the keeper's sandbox |
 
 `script` becomes what every surveyed product's `command` parameter is: text
@@ -170,8 +171,8 @@ It stays, and it stops being load-bearing for execution:
 - **Policy.** It still produces `Path_scope` for what it can parse, and that
   classification can keep feeding telemetry and rules without deciding the
   execution model.
-- **Advice.** `Subset_rewrite` keeps telling a caller that a heredoc is the
-  `stdin` field and that `;` wants two calls. It rides back as `escaped_shell`
+- **Advice.** `Subset_rewrite` keeps telling a caller that `&` wants
+  `keeper_spawn`. It rides back as `escaped_shell`
   the same way, and now it is advice about a better form rather than the
   explanation for a refusal.
 - **Refusal, where refusal is the point.** A judge can still say no —

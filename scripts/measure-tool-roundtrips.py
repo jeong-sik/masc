@@ -223,7 +223,16 @@ def artifact_paging(rows: list[dict]) -> tuple[dict[str, int], list[tuple[str, d
 
     Groups calls by (keeper, sha256). A blob whose total_bytes fits one page
     should cost one call; anything beyond ceil(total_bytes / page) is excess.
-    total_bytes comes from the blob's first parseable response.
+    total_bytes and encoding come from the blob's first parseable response.
+
+    The page arithmetic assumes one source byte per response byte. That holds
+    for utf-8 pages; a base64 page carries fewer source bytes than its size,
+    so ceil(total_bytes / page) undercounts the calls such a blob needs and
+    would report legitimate reads as excess. Blobs whose first page names a
+    non-utf-8 encoding are therefore counted but not judged. The tool writes
+    the field on every page (keeper_artifact_read.ml, page_to_json); a blob
+    whose logged output carries total_bytes but no encoding is judged as
+    utf-8, which is the only way the arithmetic ever applied before.
 
     Returns the fleet summary and the same counters per keeper, ordered by
     excess calls descending so the keepers that own the waste come first.
@@ -245,25 +254,35 @@ def artifact_paging(rows: list[dict]) -> tuple[dict[str, int], list[tuple[str, d
         if isinstance(max_bytes, int) and max_bytes < ARTIFACT_PAGE_BYTES:
             small_slices += 1
             small_slices_by_keeper[keeper] += 1
-        entry = per_blob.setdefault((keeper, sha), {"calls": 0, "total_bytes": None})
+        entry = per_blob.setdefault(
+            (keeper, sha), {"calls": 0, "total_bytes": None, "encoding": None}
+        )
         entry["calls"] = int(entry["calls"]) + 1  # type: ignore[arg-type]
         if entry["total_bytes"] is None:
             parsed = parse_output_object(row.get("output"))
             if parsed is not None and isinstance(parsed.get("total_bytes"), int):
                 entry["total_bytes"] = parsed["total_bytes"]
+                encoding = parsed.get("encoding")
+                entry["encoding"] = encoding if isinstance(encoding, str) else None
 
     def summarize(entries: list[dict[str, object]], small: int) -> dict[str, int]:
         calls_per_blob = [int(entry["calls"]) for entry in entries]  # type: ignore[arg-type]
         excess = 0
         sized_blobs = 0
+        non_utf8_blobs = 0
         for entry in entries:
             total_bytes = entry["total_bytes"]
-            if isinstance(total_bytes, int):
-                sized_blobs += 1
-                minimal = max(1, -(-total_bytes // ARTIFACT_PAGE_BYTES))
-                blob_calls = int(entry["calls"])  # type: ignore[arg-type]
-                if blob_calls > minimal:
-                    excess += blob_calls - minimal
+            if not isinstance(total_bytes, int):
+                continue
+            encoding = entry["encoding"]
+            if encoding is not None and encoding != "utf-8":
+                non_utf8_blobs += 1
+                continue
+            sized_blobs += 1
+            minimal = max(1, -(-total_bytes // ARTIFACT_PAGE_BYTES))
+            blob_calls = int(entry["calls"])  # type: ignore[arg-type]
+            if blob_calls > minimal:
+                excess += blob_calls - minimal
         return {
             "blobs": len(entries),
             "calls": sum(calls_per_blob),
@@ -271,6 +290,7 @@ def artifact_paging(rows: list[dict]) -> tuple[dict[str, int], list[tuple[str, d
             "max_calls": max(calls_per_blob, default=0),
             "excess_calls": excess,
             "sized_blobs": sized_blobs,
+            "non_utf8_blobs": non_utf8_blobs,
             "small_slices": small,
         }
 
@@ -359,7 +379,8 @@ def render(rows: list[dict], top: int) -> str:
         )
         lines.append(
             f"- excess calls beyond page arithmetic: {paging['excess_calls']} "
-            f"(measured over {paging['sized_blobs']} blobs with a parseable total_bytes)"
+            f"(measured over {paging['sized_blobs']} utf-8 blobs with a parseable total_bytes; "
+            f"{paging['non_utf8_blobs']} non-utf-8 blobs counted, not judged)"
         )
         lines.append(
             f"- small explicit slices (max_bytes < {ARTIFACT_PAGE_BYTES}): "

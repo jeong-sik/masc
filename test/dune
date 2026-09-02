@@ -1468,6 +1468,7 @@
   test_keeper_goal_phase_projection
   test_string_util
   test_prompt_asset_sync
+  test_managed_assets_sync_from_binary
   test_system_error_class
   test_set_util
   test_board_core_payload)
@@ -1611,6 +1612,7 @@
   test_keeper_goal_phase_projection
   test_string_util
   test_prompt_asset_sync
+  test_managed_assets_sync_from_binary
   test_system_error_class
   test_set_util
   test_board_core_payload)

@@ -1,9 +1,9 @@
 # masc Roadmap
 
-> Current package version: v0.28.0
-> Latest changelog entry: v0.28.0 (2026-08-30)
+> Current package version: v0.29.0
+> Latest changelog entry: v0.29.0 (2026-09-02)
 > Latest published GitHub release: v0.27.0 (2026-08-29)
-> Updated: 2026-08-29
+> Updated: 2026-09-02
 
 This roadmap is the 6-8 week operating view for `masc`. It is a planning document, not a release promise.
 For the product scope and GitHub planning model, see [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md).

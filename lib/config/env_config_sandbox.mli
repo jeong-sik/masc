@@ -84,6 +84,17 @@ module Runtime : sig
       default allocation. *)
 
   val microvm_build_volume_size : unit -> string
+
+  val microvm_work_volume_size : unit -> string
+  (** [MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE], default [256g]. Ceiling of the
+      per-keeper work volume that holds the keeper's working tree (RFC-0400);
+      the image is sparse. *)
+
+  val microvm_payload_path : unit -> string
+  (** [MASC_KEEPER_MICROVM_PAYLOAD_PATH]. The PATH the guest's shim hands
+      every payload, written into the guest's shim config as [path=].
+      Default names the keeper image's opam switch ahead of the system
+      directories. *)
   (** Ceiling for a keeper's build volume
       ([MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE], e.g. "128g").
 

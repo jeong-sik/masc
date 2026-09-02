@@ -460,6 +460,9 @@ let locks_dir ~base_path =
 let run_ssh_dir ~base_path =
   Filename.concat (Filename.concat (masc_root ~base_path) "run") "ssh"
 
+let microvm_shim_dir ~base_path =
+  Filename.concat (Filename.concat (masc_root ~base_path) "microvm") "shim"
+
 let data_dir ~base_path =
   Filename.concat base_path "data"
 

@@ -164,6 +164,12 @@ val run_ssh_dir : base_path:string -> string
 (** [<base_path>/.masc/run/ssh/]. SSH ControlMaster sockets for the remote
     execution lane. *)
 
+val microvm_shim_dir : base_path:string -> string
+(** [<base_path>/.masc/microvm/shim/]. The static [masc-exec-shim] the
+    operator installs for Apple [container] guests, and the config the
+    runtime writes beside it; mounted read-only into every guest
+    (RFC-0400). *)
+
 val data_dir : base_path:string -> string
 (** [<base_path>/data/]. Bulk tool data (tool-events).
     Sibling of [.masc/]; callers historically wrote here without going

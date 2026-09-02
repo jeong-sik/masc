@@ -511,23 +511,21 @@ let handle_gate_keeper_sandbox_logs state request reqd =
     respond ~status:`Bad_request (Channel_gate.error_json "name is required")
   else
     let config = Mcp_server.workspace_config state in
-    match Keeper_meta_store.read_meta config keeper_name with
-    | Error detail ->
-      respond ~status:`Service_unavailable (Channel_gate.error_json detail)
-    | Ok None ->
-      respond ~status:`Not_found
-        (Channel_gate.error_json ("unknown keeper: " ^ keeper_name))
-    | Ok (Some meta) ->
-      let tail = int_query_param request "tail" ~default:200 |> max 1 |> min 500 in
-      let timeout_sec =
-        Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()
-      in
-      (match
-       Keeper_sandbox_control.logs_json ~config ~meta ~timeout_sec ~tail ()
-       with
-       | Ok json -> respond json
-       | Error detail ->
-         respond ~status:`Bad_gateway (Channel_gate.error_json detail))
+    let tail = int_query_param request "tail" ~default:200 |> max 1 |> min 500 in
+    let timeout_sec =
+      Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()
+    in
+    (match
+       Keeper_sandbox_control.logs_json ~config ~keeper_name ~timeout_sec ~tail ()
+     with
+     | Ok json -> respond json
+     | Error (Keeper_sandbox_control.Sandbox_logs_meta_read_failed detail) ->
+       respond ~status:`Service_unavailable (Channel_gate.error_json detail)
+     | Error Keeper_sandbox_control.Sandbox_logs_keeper_not_found ->
+       respond ~status:`Not_found
+         (Channel_gate.error_json ("unknown keeper: " ^ keeper_name))
+     | Error (Keeper_sandbox_control.Sandbox_logs_backend_failed detail) ->
+       respond ~status:`Bad_gateway (Channel_gate.error_json detail))
 
 (** Shared bind handler: parse body, validate keeper, dispatch to connector. *)
 let handle_bind_for_connector ~sw ~clock state request reqd ~connector_name

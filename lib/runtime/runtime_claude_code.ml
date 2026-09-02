@@ -183,7 +183,13 @@ type error =
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }
-  | Stopped_by_host of host_stop
+  | Stopped_by_host of
+      { stop : host_stop
+      ; usage : turn_usage option
+        (** Token counts summed over the assistant frames seen before the
+            host ended the turn. The result frame that would carry the turn
+            total never arrives after a host stop. *)
+      }
   | Quota_blocked of
       { api_error_status : int option
       ; rate_limit : rate_limit option
@@ -220,12 +226,12 @@ let error_to_string = function
   | Turn_failed detail -> "Claude Code turn failed: " ^ detail
   | Turn_failed_with_observation { detail; _ } ->
     "Claude Code turn failed: " ^ detail
-  | Stopped_by_host (Repeated_tool_call { tool_name; repeated_count }) ->
+  | Stopped_by_host { stop = Repeated_tool_call { tool_name; repeated_count }; _ } ->
     Printf.sprintf
       "Claude Code stopped after repeated tool call: tool=%s count=%d"
       tool_name
       repeated_count
-  | Stopped_by_host (Terminal_tool_boundary { tool_name; _ }) ->
+  | Stopped_by_host { stop = Terminal_tool_boundary { tool_name; _ }; _ } ->
     Printf.sprintf "Claude Code stopped at terminal tool boundary: tool=%s" tool_name
   | Quota_blocked
       { api_error_status; rate_limit; tool_effect_attempted; response_emitted } ->
@@ -446,6 +452,7 @@ let handle_control_request
       ~mcp_session
       ~tools
       ~tool_call_count
+      ~assistant_usage
       ~on_stream_event
       fields
   =
@@ -543,7 +550,7 @@ let handle_control_request
       in
       (match !abort_turn with
        | None -> Ok ()
-       | Some stop -> Error (Stopped_by_host stop))
+       | Some stop -> Error (Stopped_by_host { stop; usage = assistant_usage.total }))
   | unsupported ->
     let* () =
       send_control_response
@@ -602,7 +609,7 @@ let parse_control_response ~expected_request_id fields =
       protocol_error stage (Printf.sprintf "unknown response subtype %S" other)
 ;;
 
-let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~request_id
+let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id
     ~on_stream_event ~ignored =
   let* json = io.receive () in
   let* type_, fields = wire_fields json in
@@ -617,17 +624,20 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~request_id
         ~mcp_session
         ~tools
         ~tool_call_count
+        ~assistant_usage
         ~on_stream_event
         fields
     in
     await_initialize
-      io ~mcp_session ~tools ~tool_call_count ~request_id ~on_stream_event ~ignored
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id ~on_stream_event
+      ~ignored
   | ("system" | "rate_limit_event") when ignored < 32 ->
     await_initialize
       io
       ~mcp_session
       ~tools
       ~tool_call_count
+      ~assistant_usage
       ~request_id
       ~on_stream_event
       ~ignored:(ignored + 1)
@@ -755,6 +765,91 @@ let assistant_blocks ~stage ~mcp_tool_names content =
   | _ -> protocol_error stage "assistant content must be an array"
 ;;
 
+(* The keeper side of this runtime hardcoded [usage = None] while the
+   antigravity runtime fills the same slot from its CLI stream, which is why
+   official-client turns carry no input_tokens (#28023) and why a window
+   overflow is discovered from the result frame's own verdict below rather
+   than from token counts (#27427). Read leniently: a turn must not fail
+   because its usage block is absent or shaped differently than expected,
+   and an absent value after this lands means the CLI does not send one. *)
+let turn_usage_of_fields fields =
+  match List.assoc_opt "usage" fields with
+  | None | Some `Null -> None
+  | Some (`Assoc usage_fields) ->
+    let int_field name =
+      match List.assoc_opt name usage_fields with
+      | Some (`Int value) when value >= 0 -> Some value
+      | _ -> None
+    in
+    (* The CLI mirrors Anthropic Messages usage: input_tokens is the
+       exclusive count (tokens after the last cache breakpoint) and the
+       cache components arrive as their own fields. Both are carried so
+       the keeper can build the canonical inclusive api_usage
+       (Backend_anthropic.usage_of_wire_counts); an absent cache field
+       reads as 0, the same convention every Anthropic-format parse in
+       agent_core uses. Presence of a usage block still requires both
+       base counts. *)
+    (match int_field "input_tokens", int_field "output_tokens" with
+     | Some input_tokens, Some output_tokens ->
+       Some
+         { input_tokens
+         ; output_tokens
+         ; cache_creation_input_tokens =
+             (* DET-OK: absent wire field is 0 by api_usage convention *)
+             Option.value (int_field "cache_creation_input_tokens") ~default:0
+         ; cache_read_input_tokens =
+             (* DET-OK: absent wire field is 0 by api_usage convention *)
+             Option.value (int_field "cache_read_input_tokens") ~default:0
+         }
+     | Some _, None | None, Some _ | None, None -> None)
+  | Some _ -> None
+;;
+
+(* Token counts summed over the assistant frames of one turn. Each assistant
+   frame carries the usage of the API call that produced it, and parallel
+   tool calls repeat one message id with identical usage, so ids are
+   deduplicated (code.claude.com/docs/en/agent-sdk/cost-tracking, read
+   2026-09-03). A host stop reports this sum: the result frame that would
+   carry the turn total never arrives once the host ends the turn, which is
+   why every host-stopped turn recorded output_tokens = 0 until now. *)
+type assistant_usage =
+  { seen_message_ids : (string, unit) Hashtbl.t
+  ; mutable total : turn_usage option
+  }
+
+let new_assistant_usage () = { seen_message_ids = Hashtbl.create 8; total = None }
+
+let add_turn_usage (a : turn_usage) (b : turn_usage) =
+  { input_tokens = a.input_tokens + b.input_tokens
+  ; output_tokens = a.output_tokens + b.output_tokens
+  ; cache_creation_input_tokens =
+      a.cache_creation_input_tokens + b.cache_creation_input_tokens
+  ; cache_read_input_tokens = a.cache_read_input_tokens + b.cache_read_input_tokens
+  }
+;;
+
+let observe_assistant_usage acc ~message_id usage =
+  let count usage =
+    acc.total
+    <- Some
+         (match acc.total with
+          | None -> usage
+          | Some total -> add_turn_usage total usage)
+  in
+  match usage with
+  | None -> ()
+  | Some usage ->
+    (match message_id with
+     | Some id when Hashtbl.mem acc.seen_message_ids id -> ()
+     | Some id ->
+       Hashtbl.replace acc.seen_message_ids id ();
+       count usage
+     | None ->
+       (* A frame without a message id cannot be matched to a sibling, so
+          it counts on its own. *)
+       count usage)
+;;
+
 let parse_assistant ~expected_session_id ~tools fields =
   let stage = "assistant message" in
   let* session_id = required_string stage "session_id" fields in
@@ -766,13 +861,19 @@ let parse_assistant ~expected_session_id ~tools fields =
     let* message_fields = assoc_at stage message in
     let* model = required_string stage "model" message_fields in
     let* content = required_member stage "content" message_fields in
+    let message_id =
+      match List.assoc_opt "id" message_fields with
+      | Some (`String id) -> Some id
+      | Some _ | None -> None
+    in
+    let usage = turn_usage_of_fields message_fields in
     let* blocks =
       assistant_blocks
         ~stage
         ~mcp_tool_names:(List.map allowed_tool_name tools)
         content
     in
-    Ok (uuid, model, blocks)
+    Ok (uuid, model, blocks, message_id, usage)
 ;;
 
 let native_tool_result_ids ~expected_session_id fields =
@@ -838,45 +939,7 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
       | None | Some `Null -> result
       | Some value -> Some (Yojson.Safe.to_string value)
     in
-    (* The keeper side of this runtime hardcoded [usage = None] while the
-       antigravity runtime fills the same slot from its CLI stream, which is why
-       official-client turns carry no input_tokens (#28023) and why a window
-       overflow is discovered from the result frame's own verdict below rather
-       than from token counts (#27427). Read leniently: a turn must not fail
-       because its usage block is absent or shaped differently than expected,
-       and an absent value after this lands means the CLI does not send one. *)
-    let usage =
-      match List.assoc_opt "usage" fields with
-      | None | Some `Null -> None
-      | Some (`Assoc usage_fields) ->
-        let int_field name =
-          match List.assoc_opt name usage_fields with
-          | Some (`Int value) when value >= 0 -> Some value
-          | _ -> None
-        in
-        (* The CLI mirrors Anthropic Messages usage: input_tokens is the
-           exclusive count (tokens after the last cache breakpoint) and the
-           cache components arrive as their own fields. Both are carried so
-           the keeper can build the canonical inclusive api_usage
-           (Backend_anthropic.usage_of_wire_counts); an absent cache field
-           reads as 0, the same convention every Anthropic-format parse in
-           agent_core uses. Presence of a usage block still requires both
-           base counts. *)
-        (match int_field "input_tokens", int_field "output_tokens" with
-         | Some input_tokens, Some output_tokens ->
-           Some
-             { input_tokens
-             ; output_tokens
-             ; cache_creation_input_tokens =
-                 (* DET-OK: absent wire field is 0 by api_usage convention *)
-                 Option.value (int_field "cache_creation_input_tokens") ~default:0
-             ; cache_read_input_tokens =
-                 (* DET-OK: absent wire field is 0 by api_usage convention *)
-                 Option.value (int_field "cache_read_input_tokens") ~default:0
-             }
-         | Some _, None | None, Some _ | None, None -> None)
-      | Some _ -> None
-    in
+    let usage = turn_usage_of_fields fields in
     let structurally_quota_blocked =
       Option.equal Int.equal api_error_status (Some 429)
       || Option.exists
@@ -967,7 +1030,8 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
 
 let max_ignored_messages = 256
 
-let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session_id
+let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
+    ~expected_session_id
     ~subscription ~resumed ~rate_limit ~assistant_model ~assistant_texts
     ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
     ~stream_started ~response_emitted ~ignored =
@@ -982,18 +1046,23 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
         ~mcp_session
         ~tools
         ~tool_call_count
+        ~assistant_usage
         ~on_stream_event
         fields
     in
     await_terminal
-      io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started ~ignored
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~stream_started
       ~response_emitted
   | "control_response" ->
     protocol_error "turn" "received an unsolicited control response"
   | "assistant" ->
-    let* uuid, model, blocks = parse_assistant ~expected_session_id ~tools fields in
+    let* uuid, model, blocks, message_id, usage =
+      parse_assistant ~expected_session_id ~tools fields
+    in
+    observe_assistant_usage assistant_usage ~message_id usage;
     if not !stream_started
     then (
       stream_started := true;
@@ -1014,7 +1083,8 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
     let texts = List.rev !texts_rev in
     if List.exists (fun text -> String.length text > 0) texts then response_emitted := true;
     await_terminal
-      io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
       ~rate_limit ~assistant_model:(Some model)
       ~assistant_texts:(assistant_texts @ texts)
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
@@ -1022,7 +1092,8 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
   | "rate_limit_event" ->
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
     await_terminal
-      io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
       ~stream_started ~response_emitted ~ignored
@@ -1091,7 +1162,8 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
            emit_stream_event on_stream_event (Native_tool_finished observation))
       finished_ids;
     await_terminal
-      io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
       ~native_tool_attempted ~on_turn_started ~on_stream_event ~stream_started
       ~response_emitted ~ignored:(ignored + 1)
@@ -1101,7 +1173,8 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
        arrive through assistant/user messages.  Consume it as bounded stream
        activity without treating an in-flight tool as a protocol failure. *)
     await_terminal
-      io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~stream_started
       ~response_emitted ~ignored:(ignored + 1)
@@ -1264,6 +1337,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~prompt ~images ~on_session_ready ~on_turn_starting ~on_turn_started
     ~on_stream_event ~turn_admitted =
   let tool_call_count = ref 0 in
+  let assistant_usage = new_assistant_usage () in
   let mcp_session = Runtime_official_client_mcp.create_session () in
   let initialize_id = Random_id.prefixed ~prefix:"masc-init-" ~bytes:12 in
   io.send (initialize_request initialize_id);
@@ -1273,6 +1347,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
       ~mcp_session
       ~tools:dynamic_tools
       ~tool_call_count
+      ~assistant_usage
       ~request_id:initialize_id
       ~on_stream_event
       ~ignored:0
@@ -1307,6 +1382,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~mcp_session
     ~tools:dynamic_tools
     ~tool_call_count
+    ~assistant_usage
     ~expected_session_id:session_id
     ~subscription
     ~resumed:
@@ -1601,6 +1677,13 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
        turn.session_id
        turn.turn_id
        turn.model
+   | Error (Stopped_by_host _ as stop) ->
+     (* The host ended the turn on purpose, at a terminal tool boundary or
+        after a repeated tool call, and the keeper settles it as a completed
+        or yielded turn. Fifty of these read as failures on 2026-09-02. *)
+     Log.Runtime_agent.info
+       "Claude Code subscription turn stopped by host: %s"
+       (error_to_string stop)
    | Error error ->
      Log.Runtime_agent.warn
        "Claude Code subscription turn failed (kind=%s)"

@@ -1725,6 +1725,13 @@ let fetch_keeper_status_snapshot ~(host : string) ~(port : int)
       (Printf.sprintf "/api/v1/gate/keeper-status?name=%s"
          (percent_encode_query_value keeper_name))
 
+let fetch_keeper_sandbox_logs ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(tail : int) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/gate/keeper-sandbox-logs?name=%s&tail=%d"
+         (percent_encode_query_value keeper_name) tail)
+
 (** GET /api/v1/keepers/:name/github-identity — the keeper's GitHub CLI
     identity observation (config dir, projected token env, stored and
     effective auth). *)

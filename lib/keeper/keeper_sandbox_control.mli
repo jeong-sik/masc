@@ -123,3 +123,13 @@ val live_status_json :
     [include_repository_checkouts=false] skips Git checkout inspection for
     dashboard hot paths. *)
 
+val logs_json :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  timeout_sec:float ->
+  tail:int ->
+  unit ->
+  (Yojson.Safe.t, string) result
+(** Read the selected Keeper's actual Docker or Apple Container stdio logs.
+    Container discovery remains label-scoped to [config.base_path] and
+    [meta.name]. *)

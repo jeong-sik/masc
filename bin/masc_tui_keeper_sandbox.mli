@@ -23,3 +23,14 @@ val view_lines : width:int -> t -> string list
     a checkout on the share pins a host vnode per file it writes, and only a
     person can clear it, because the server refuses to delete build output it
     did not create. *)
+
+type logs
+
+val decode_logs :
+  sanitize:(string -> string) -> Yojson.Safe.t -> (logs, string) result
+(** Decode the authenticated host-runtime log response. Log payloads are split
+    into lines before each line is terminal-sanitized. *)
+
+val logs_view_lines : width:int -> logs -> string list
+(** Render actual Docker or Apple Container stdout/stderr, distinct from
+    Keeper activity and tool-call history. *)

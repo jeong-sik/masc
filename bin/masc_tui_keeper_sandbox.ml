@@ -541,5 +541,143 @@ let view_lines ~width reading =
        [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "diagnostics" ]
        @ wrapped_rows ~width ~label:"Keeper error" ~tone:`Bad detail)
   @ [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "related" ]
-  @ wrapped_rows ~width ~label:"Keeper activity" ~tone:`Info "l  logs"
+  @ wrapped_rows ~width ~label:"Container stdio" ~tone:`Info "o  actual logs"
   @ wrapped_rows ~width ~label:"Sandbox calls" ~tone:`Info "t  tool calls"
+
+type log_backend =
+  | Docker_log_backend
+  | Apple_container_log_backend
+
+type log_instance =
+  { log_instance_id : string
+  ; log_instance_name : string
+  ; log_instance_running : bool option
+  ; log_stdout : string list
+  ; log_stderr : string list
+  ; log_error : string option
+  }
+
+type logs =
+  { log_backend : log_backend
+  ; log_state : [ `Available | `No_instance ]
+  ; log_tail : int
+  ; log_instances : log_instance list
+  }
+
+let decode_logs ~sanitize json =
+  let open Result.Syntax in
+  let* fields = assoc "sandbox logs" json in
+  let required_string path name fields =
+    match field name fields with
+    | Some (`String value) -> Ok value
+    | Some _ -> Error (path ^ " must be a string")
+    | None -> Error (path ^ " is required")
+  in
+  let* backend = required_string "sandbox logs.backend" "backend" fields in
+  let* log_backend =
+    match backend with
+    | "docker" -> Ok Docker_log_backend
+    | "apple_container" -> Ok Apple_container_log_backend
+    | value -> Error ("sandbox logs.backend has unsupported value " ^ sanitize value)
+  in
+  let* state = required_string "sandbox logs.state" "state" fields in
+  let* log_state =
+    match state with
+    | "available" -> Ok `Available
+    | "no_instance" -> Ok `No_instance
+    | value -> Error ("sandbox logs.state has unsupported value " ^ sanitize value)
+  in
+  let* log_tail =
+    match field "tail" fields with
+    | Some (`Int value) when value > 0 -> Ok value
+    | Some _ -> Error "sandbox logs.tail must be a positive integer"
+    | None -> Error "sandbox logs.tail is required"
+  in
+  let decode_lines = function
+    | "" -> []
+    | value -> String.split_on_char '\n' value |> List.map sanitize
+  in
+  let decode_instance index json =
+    let prefix = Printf.sprintf "sandbox logs.instances[%d]" index in
+    let* fields = assoc prefix json in
+    let* log_instance_id = required_string (prefix ^ ".instance_id") "instance_id" fields in
+    let* log_instance_name =
+      required_string (prefix ^ ".instance_name") "instance_name" fields
+    in
+    let* log_instance_running =
+      bool_opt ~key:"running" ~path:(prefix ^ ".running") fields
+    in
+    let* stdout = required_string (prefix ^ ".stdout") "stdout" fields in
+    let* stderr = required_string (prefix ^ ".stderr") "stderr" fields in
+    let* log_error =
+      string_opt ~sanitize ~key:"error" ~path:(prefix ^ ".error") fields
+    in
+    Ok
+      { log_instance_id = sanitize log_instance_id
+      ; log_instance_name = sanitize log_instance_name
+      ; log_instance_running
+      ; log_stdout = decode_lines stdout
+      ; log_stderr = decode_lines stderr
+      ; log_error
+      }
+  in
+  let* log_instances =
+    match field "instances" fields with
+    | Some (`List rows) ->
+      rows
+      |> List.mapi decode_instance
+      |> List.fold_right
+           (fun row result ->
+             match row, result with
+             | Ok row, Ok rows -> Ok (row :: rows)
+             | Error detail, _ | _, Error detail -> Error detail)
+           (Ok [])
+    | Some _ -> Error "sandbox logs.instances must be a list"
+    | None -> Error "sandbox logs.instances is required"
+  in
+  if log_state = `No_instance && log_instances <> [] then
+    Error "sandbox logs.no_instance cannot carry instances"
+  else if log_state = `Available && log_instances = [] then
+    Error "sandbox logs.available requires an instance"
+  else Ok { log_backend; log_state; log_tail; log_instances }
+;;
+
+let logs_view_lines ~width logs =
+  let backend =
+    match logs.log_backend with
+    | Docker_log_backend -> "Docker"
+    | Apple_container_log_backend -> "Apple Container"
+  in
+  let header =
+    [ ""
+    ; " " ^ styled Masc_tui_theme.Sgr.bold "container logs"
+    ; Printf.sprintf "  %-18s %s · last %d lines per instance" "Source" backend
+        logs.log_tail
+    ]
+  in
+  match logs.log_state with
+  | `No_instance ->
+    header
+    @ wrapped_rows ~width ~label:"State" ~tone:`Muted
+        "No container instance exists yet; run a sandbox command first."
+  | `Available ->
+    header
+    @ List.concat_map
+        (fun instance ->
+          let state =
+            match instance.log_instance_running with
+            | Some true -> "running"
+            | Some false -> "stopped"
+            | None -> "state unknown"
+          in
+          [ ""
+          ; Printf.sprintf "  %s%s%s · %s · %s" Masc_tui_theme.Sgr.bold
+              instance.log_instance_name Masc_tui_theme.Sgr.reset
+              instance.log_instance_id state
+          ]
+          @ (match instance.log_error with
+             | None -> []
+             | Some detail -> wrapped_rows ~width ~label:"Error" ~tone:`Bad detail)
+          @ List.map (fun line -> "  out  " ^ line) instance.log_stdout
+          @ List.map (fun line -> "  err  " ^ line) instance.log_stderr)
+        logs.log_instances

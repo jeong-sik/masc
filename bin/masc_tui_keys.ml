@@ -84,7 +84,8 @@ let for_surface = function
   | Keepers Keeper_detail ->
       [ b Navigate "h/l" "pane" ~help:"move between roster and detail"
       ; b Navigate "[ / ]" "tabs" ~help:"detail tabs: Info / Settings / Secrets / GitHub"
-      ; b Act "o" "logs" ~help:"open this Keeper's logs"
+      ; b Act "o" "logs"
+          ~help:"open container logs in Sandbox; Keeper activity elsewhere"
       ; b Act "Left / Esc" "back"
       ]
       @ List.filter (fun binding -> binding.key <> "l") keeper_actions

@@ -491,6 +491,42 @@ let handle_gate_keeper_status_by_name ~sw ~clock state request reqd =
       respond_json_value_with_cors ~status:`Bad_request request reqd
         (Channel_gate.error_json "name is required")
 
+(** GET /api/v1/gate/keeper-sandbox-logs?name=<keeper>&tail=<n>
+
+    Authenticated host-runtime log read for the selected Keeper. Discovery is
+    label-scoped by the sandbox layer; the route never accepts a caller-owned
+    container id. *)
+let handle_gate_keeper_sandbox_logs state request reqd =
+  let keeper_name =
+    query_param request "name"
+    |> Option.map String.trim
+    |> Option.value ~default:""
+  in
+  if String.equal keeper_name "" then
+    respond_json_value_with_cors ~status:`Bad_request request reqd
+      (Channel_gate.error_json "name is required")
+  else
+    let config = Mcp_server.workspace_config state in
+    match Keeper_meta_store.read_meta config keeper_name with
+    | Error detail ->
+      respond_json_value_with_cors ~status:`Service_unavailable request reqd
+        (Channel_gate.error_json detail)
+    | Ok None ->
+      respond_json_value_with_cors ~status:`Not_found request reqd
+        (Channel_gate.error_json ("unknown keeper: " ^ keeper_name))
+    | Ok (Some meta) ->
+      let tail = int_query_param request "tail" ~default:200 |> max 1 |> min 500 in
+      let timeout_sec =
+        Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()
+      in
+      (match
+         Keeper_sandbox_control.logs_json ~config ~meta ~timeout_sec ~tail ()
+       with
+       | Ok json -> respond_json_value_with_cors ~status:`OK request reqd json
+       | Error detail ->
+         respond_json_value_with_cors ~status:`Bad_gateway request reqd
+           (Channel_gate.error_json detail))
+
 (** Shared bind handler: parse body, validate keeper, dispatch to connector. *)
 let handle_bind_for_connector ~sw ~clock state request reqd ~connector_name
     ~(bind_fn :
@@ -696,6 +732,11 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/gate/keeper-status" (fun request reqd ->
        with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
          handle_gate_keeper_status_by_name ~sw ~clock state request reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/gate/keeper-sandbox-logs" (fun request reqd ->
+       with_read_auth (fun state _req reqd ->
+         handle_gate_keeper_sandbox_logs state request reqd
        ) request reqd)
 
   (* Generic connector routes — dispatch by ?name=<connector> *)

@@ -493,13 +493,16 @@ let footer_hints_code ~pane =
   let file_keys =
     [ "Shift-Left / Shift-Right"; "K"; "D"; "R"; "B"; "b"; "d"; "H"; "m" ]
   in
+  (* Two keys belong to one pane each and were showing on all three. [w]
+     writes a note and only the notes view takes it; [Enter (history)] opens
+     a commit's pull request and only the history view has commits. Named
+     apart from [file_keys] because they are the overlay's own, not the
+     file's. *)
+  let overlay_keys = [ "w"; "Enter (history)" ] in
   let dead =
     match pane with
-    | Code_tree -> "w" :: file_keys
-    | Code_file -> [ "w" ]
-    (* [w] writes a note and lives inside the notes view; the rest act on the
-       code an overlay is covering. [Enter] stays: in the history view it
-       opens a commit's pull request. *)
+    | Code_tree -> overlay_keys @ file_keys
+    | Code_file -> overlay_keys
     | Code_overlay -> file_keys
   in
   for_surface Code

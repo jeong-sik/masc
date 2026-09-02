@@ -305,6 +305,12 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
     |> Option.map (fun segment -> segment.KAPM.bytes)
     |> Option.value ~default:0
   in
+  let segment_fingerprint key =
+    metrics.segments
+    |> List.assoc_opt key
+    |> Option.map (fun segment -> segment.KAPM.fingerprint)
+    |> Option.join
+  in
   check bool "system prompt bucket present" true
     (segment_bytes (Turn_record.Prompt_block Prompt_block_id.Keeper_instructions) > 0);
   check bool "tool schema bucket present" true
@@ -319,6 +325,8 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
     (segment_bytes Turn_record.Message_tool_result > 0);
   check (option int) "provider token observation remains separate" (Some 1000)
     metrics.actual_input_tokens;
+  check bool "the tool bucket carries a fingerprint" true
+    (Option.is_some (segment_fingerprint Turn_record.Tool_schemas));
   check int "total bytes equal segment sum"
     (List.fold_left (fun total (_, segment) -> total + segment.KAPM.bytes) 0
        metrics.segments)
@@ -459,6 +467,40 @@ let test_provider_content_messages_rejects_projection_rewrite () =
 
 (* ── Suite ────────────────────────────────────────────── *)
 
+(* The tool array is the provider's cache prefix, and a prefix is reusable
+   only byte-for-byte. The digest is taken in list order, so the same tools
+   sent in a different order are a different surface -- which is what the
+   provider sees. *)
+let test_tool_schema_fingerprint_follows_the_order_sent () =
+  let tool name =
+    Agent_core.Tool.create
+      ~name
+      ~description:("probe " ^ name)
+      ~parameters:[]
+      (fun _input -> Ok { Agent_core.Tool.content = "ok"; _meta = None })
+  in
+  let fingerprint_of tools =
+    let metrics =
+      KAPM.build_ctx_composition_metrics
+        ~prompt_blocks:[]
+        ~tools
+        ~input_messages:[]
+        ~actual_input_tokens:None
+    in
+    metrics.segments
+    |> List.assoc_opt Turn_record.Tool_schemas
+    |> Option.map (fun segment -> segment.KAPM.fingerprint)
+    |> Option.join
+  in
+  let a = tool "alpha" and b = tool "beta" in
+  check bool "the same list gives the same fingerprint" true
+    (fingerprint_of [ a; b ] = fingerprint_of [ a; b ]);
+  check bool "a reordering gives a different one" false
+    (fingerprint_of [ a; b ] = fingerprint_of [ b; a ]);
+  check bool "and it is present at all" true
+    (Option.is_some (fingerprint_of [ a; b ]))
+;;
+
 let () =
   run "keeper_prompt_metrics"
     [
@@ -488,6 +530,8 @@ let () =
         ] );
       ( "ctx_composition",
         [
+          test_case "tool schema fingerprint follows the order sent" `Quick
+            test_tool_schema_fingerprint_follows_the_order_sent;
           test_case "attributes final provider input content" `Quick
             test_ctx_composition_splits_final_provider_input_bytes;
           test_case "removes typed prompt carrier" `Quick

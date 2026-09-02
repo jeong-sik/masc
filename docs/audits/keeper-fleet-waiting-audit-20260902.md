@@ -16,7 +16,7 @@ lane-smith, polisher, rondo, sangsu). taskmaster 와 lab-sangsu 는 09-01 17:43Z
 
 | # | 병목 | 하루 손실 (실측) | 뿌리 | 뚫는 곳 | 상태 |
 |---|---|---|---|---|---|
-| 1 | 샌드박스 전멸 — Execute 가 8/8 keeper 에서 실패 | verifier Rejected 93건 중 60건이 sandbox 사유. task-551 이 15회, task-371 이 17회 claim→release 를 돌았다. code-reviewer Execute 오류 20건/7h | 운영: 127.0.0.1:2222 sshd 없음, Docker daemon 없음, `masc-keeper-sandbox:local` 이미지 없음 | ssh testbed / Docker 기동. 코드 쪽은 §2.1 "샌드박스 죽음이 world state 에 없다" | 운영자 결정 필요 |
+| 1 | 샌드박스 전멸 — Execute 가 8/8 keeper 에서 실패 | verifier Rejected 93건 중 60건이 sandbox 사유. task-551 이 15회, task-371 이 17회 claim→release 를 돌았다. code-reviewer Execute 오류 20건/7h | 09:00 측정 시점: remote_ssh 3명은 127.0.0.1:2222 리스너 없음, microvm 5명은 게스트 이미지 없음 | 10:25 KST 에 8명 전부 `microvm` 으로 전환, RFC-0400 B(#32516) 뒤 11:52 재기동부터 Execute 가 `exit=0` (§1 끝). 코드 쪽 "샌드박스 상태가 world state 에 없다" 는 남음 | 운영으로 해소. 관측 결손은 미착수 |
 | 2 | `web_fetch` 가 Auto Judge 를 거친다 | 319건 판정, 319 승인, 0 거부. 요청→replay 중앙값 173초, p90 447초. 7시간에 5.78시간 대기 | 코드: `keeper_gate_readonly.ml` 관측 집합에서 빠져 있었다 | PR #32470 | main 머지 (582921b8c1, 09-02 01:21Z) |
 | 3 | 같은 도구를 3번 부르고 yield, 다음 턴에 또 3번 | kidsnote-pr-jira-checker 259턴/일, lane-smith 136, polisher 84. 컨텍스트가 턴마다 +3.5K 토큰 | 코드: yield 사유가 다음 턴에 안 보인다. 관찰 읽기를 wake 로 바꿀 길이 없다 | RFC observe-by-waking-not-polling (Draft) | 미착수 |
 | 4 | Board 글 하나가 keeper 8명에게 판정 8번 | 24시간에 글 292개 → 후보 1,784건 (6.1배). 판정 통과 29% → 511회 wake. rondo 글이 697건, verifier·system 자동 영수증이 429건 | 코드: `Discoverable` 글은 keeper 마다 judge 를 탄다. 자동 영수증도 예외가 없다 | PR #32477 — 주소 없는 `System_post` 는 `Thread_participants` | main 머지 (529e6e0cd0, 09-02 01:27Z). rondo 형 글 697건은 남는다 |
@@ -59,6 +59,18 @@ lane-smith, polisher, rondo, sangsu). taskmaster 와 lab-sangsu 는 09-01 17:43Z
 시도하고 (`keeper_sandbox_ssh.ml` 의 preflight 캐시는 같은 턴 안에서만 산다),
 taskmaster 는 매시 정각 "N차 재프로브 — 여전히 단절" 글을 13번 올렸다.
 `masc_keeper_waiting_inventory` 에도 "sandbox unreachable since T" 행이 없다.
+
+### 09-02 11:52 이후
+
+위 증상은 09:00 측정 시점의 사실이다. 10:25 KST 에 analyst·rondo·code-reviewer 의
+`sandbox_profile` 이 `remote_ssh` 에서 `microvm` 으로 바뀌어 8명 전부 microvm 이 됐고,
+RFC-0400 B(#32516, 11:4x)가 게스트를 작업 볼륨과 exec shim 을 가진 원격 엔드포인트로
+만들었다. microvm 은 Docker 가 아니라 Apple `container`(Virtualization.framework)로 뜬다.
+11:52 재기동 로그: 부팅 sweep 이 서버가 사라진 게스트 5개를 지웠고, 그 뒤
+`shell_ir dispatch keeper=rondo sandbox=microvm status=exit=0` 2건,
+`keeper=code-reviewer … exit=0` 1건. Execute 는 살아 있다. 이 문서의 이전 판과 이 세션이
+그 뒤에도 "Docker 가 죽어서 샌드박스가 없다" 고 반복한 것은 10:25 이후 상태를 다시 재지
+않은 오류다.
 
 뚫는 방향: 샌드박스 preflight 실패를 typed 관측(`Sandbox_unreachable of { since; detail }`)
 으로 world observation 에 싣고, 대기 인벤토리와 프롬프트 Namespace State 에 한 줄로
@@ -280,8 +292,9 @@ code-reviewer 는 08-29 에 `keeper_memory_search` 의 `total_candidates` 가 wr
 6. 다음 (독립): §1 `Sandbox_unreachable` 관측 + §7 `claimable_now`.
 7. 다음 (독립): §4 의 남은 절반 — keeper 글의 기본 audience. rondo 트리아지 글 하루 후보 697건.
    approval 판정에 typed wake 를 붙이는 것도 여기 (`Completion_authority_wakeup` 은 rejection 만).
-8. 운영자 결정: §1 샌드박스 기동 (127.0.0.1:2222 sshd 컨테이너 `masc-ssh-testbed`, Docker
-   daemon). §6 은 재기동으로 해소됐고 standalone 레인 2번 슬롯만 남았다.
+8. §1 의 운영 결손은 microvm 전환(10:25)과 RFC-0400 B 로 해소됐다. §6 은 재기동으로 해소됐고
+   standalone 레인 2번 슬롯만 남았다. 남는 것은 코드 쪽 — 샌드박스가 못 뜰 때 그 사실이
+   world state 와 대기 인벤토리에 typed 로 실리는 것.
 
 ## 12. 재현 명령
 

@@ -671,7 +671,7 @@ let observed ~claim ~category ~now ~origin =
   ; last_seen = now
   ; reinforcement = 0
   ; origin
-  ; basis = Observed
+  ; basis = Observed Transcript
   }
 ;;
 

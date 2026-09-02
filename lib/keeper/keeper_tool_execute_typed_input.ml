@@ -777,10 +777,10 @@ let redirects_of_stage ~namespace ~cwd { argv = _; stdin; stdout; stderr } =
 
    RFC execute-boundary-is-the-sandbox §6 adds the [Script] source. It used to
    yield nothing on the grounds that it "already crossed the gate", which was
-   true while crossing the gate decided whether it ran. It no longer does, so
-   a script that says [<<EOF] would otherwise be told nothing at all -- and
-   the advice ("that is the stdin field") is the whole of what the judge is
-   for now. *)
+   true while crossing the gate decided whether it ran. It no longer does. A
+   script that says [<<EOF] gets no advice any more: the stdin field is gone
+   from the schema and the shell runs the heredoc as written, so the finding
+   is recognition and classification only. *)
 let hidden_script_findings ~sandbox { source; _ } =
   let gate_sandbox = { Shell_gate.target = sandbox } in
   let syntax_policy =

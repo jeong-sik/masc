@@ -60,13 +60,13 @@ require_normalized_text \
 
 require_normalized_text \
   "lib/tool_surface/tool_shard_types_schemas_execute.ml" \
-  "Accepted fields: argv, pipeline, script, env, cwd, timeout_sec, stdin, stdout, stderr." \
+  "Accepted fields: argv, script, shell, cwd, timeout_sec." \
   "typed Execute accepted-field list"
-# The sentence is in the tool's description, which now lives in the TOML the
-# model is handed rather than in an OCaml literal. Check it where it is.
+# The sentence is in the tool's description, in the TOML the model is handed.
+# Check it where it is.
 require_normalized_text \
   "config/tools/tool_execute.toml" \
-  "this tool does not expose background task lifecycle tools" \
+  "there is no background task lifecycle" \
   "typed Execute background lifecycle exclusion"
 reject_text \
   "lib/tool_surface/tool_shard_types_schemas_execute.ml" \

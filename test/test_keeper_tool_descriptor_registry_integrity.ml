@@ -1084,16 +1084,16 @@ let test_execute_descriptor_spells_out_argv_and_filesystem_basis () =
     |> Option.value ~default:""
   in
   check_contains
-    "Execute description names objective execution invariants"
-    ~sub:"path jail, sandbox target, and external-effect Gate"
+    "Execute description states argv is the sole process vector"
+    ~sub:"one non-empty argv process vector"
     descriptor.description;
   check_contains
     "Execute description treats invocation as opaque"
     ~sub:"never interprets program or subcommand meaning"
     descriptor.description;
   check_contains
-    "Execute description states argv is the sole process vector"
-    ~sub:"one non-empty argv process vector"
+    "Execute description says a call has no background lifecycle"
+    ~sub:"there is no background task lifecycle"
     descriptor.description;
   Alcotest.(check bool)
     "Execute description has no forge-specific product knowledge"

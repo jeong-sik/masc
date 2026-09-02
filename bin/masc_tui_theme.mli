@@ -119,9 +119,18 @@ module Box : sig
   val r : string
 end
 
-(** The 3-tone rule: a row is Normal, Dim, or the single accent colour.
-    Anything outside these three is a claim about state and belongs to
-    [status] instead. *)
+(** A row's own weight, for chrome that carries no reading of its own:
+    Normal, Dim, or the single accent.
+
+    These three are the vocabulary for the frame around content -- a border,
+    a marker, a label. They are not a cap on how many colours a screen may
+    hold. A colour that reports health, phase, or attention draws through
+    {!status}; a colour that says what a piece of content *is* -- a keyword,
+    a string, a number, a diff line -- draws through {!Syntax}. What every
+    one of those has in common is a name: a renderer asks for the reading and
+    the theme answers with a colour, so one remap moves every site and the
+    readability lift applies. Picking an SGR code in a renderer is what this
+    rules out, not the number of colours on the screen. *)
 type tone = Normal | Dim | Accent
 
 val tone : tone -> string
@@ -264,6 +273,21 @@ val border_focus : string
 module Syntax : sig
   val keyword : string
   val string_ : string
+
+  val json_key : string
+  val json_number : string
+  val json_literal : string
+  val json_punctuation : string
+  (** The roles a served JSON payload is drawn through: an object's key, a
+      number, [true]/[false]/[null], and the braces, brackets, colons and
+      commas.
+
+      Content, not state -- a yellow token says it is a number, not that
+      something is healthy. Keys lead because a reader scanning a nested
+      result is looking for a name; punctuation recedes because the
+      indentation already carries the structure, and drawing the braces at
+      full weight is what makes a document read as noise. Strings reuse
+      {!string_}, which is the same reading a code fence gives them. *)
 
   val diff_added : string
   val diff_removed : string

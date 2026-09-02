@@ -3,6 +3,41 @@
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Message_layout = Masc_tui_message_layout
 
+type palette = {
+  branch : string;
+  label : string;
+  separator : string;
+  key : string;
+  string_ : string;
+  number : string;
+  literal : string;
+  punctuation : string;
+  reset : string;
+}
+
+let plain =
+  { branch = ""
+  ; label = ""
+  ; separator = ""
+  ; key = ""
+  ; string_ = ""
+  ; number = ""
+  ; literal = ""
+  ; punctuation = ""
+  ; reset = ""
+  }
+
+type value =
+  | Text of string
+  | Document of string
+
+type field = { fd_label : string; fd_value : value; fd_tone : string }
+
+(* Empty in, empty out: with the plain palette every wrap is the identity, so
+   the layout tests read the same text they always did. *)
+let paint palette style text =
+  if String.equal style "" then text else style ^ text ^ palette.reset
+
 (* A string value that is itself a JSON document becomes that document.
 
    Tool results nest this way as a matter of course: a keeper writes a tool
@@ -60,35 +95,58 @@ let block_lines text =
    [\n] and [\t]. The block carries no trailing comma; the next member at the
    same indent is where it ends. This is a rendering for reading, not a
    serialisation for parsing back. *)
-let rec render ~indent ~prefix ~suffix (json : Yojson.Safe.t) : string list =
+let rec render ~palette ~indent ~prefix ~suffix (json : Yojson.Safe.t)
+  : string list
+  =
   let pad = String.make indent ' ' in
+  let punct = paint palette palette.punctuation in
   let members ~open_ ~close items render_item =
     let count = List.length items in
-    (pad ^ prefix ^ open_)
+    (pad ^ prefix ^ punct open_)
     :: List.concat
          (List.mapi
             (fun index item ->
-              render_item ~suffix:(if index = count - 1 then "" else ",") item)
+              render_item ~suffix:(if index = count - 1 then "" else punct ",") item)
             items)
-    @ [ pad ^ close ^ suffix ]
+    @ [ pad ^ punct close ^ suffix ]
   in
   match json with
-  | `Assoc [] -> [ pad ^ prefix ^ "{}" ^ suffix ]
-  | `List [] -> [ pad ^ prefix ^ "[]" ^ suffix ]
+  | `Assoc [] -> [ pad ^ prefix ^ punct "{}" ^ suffix ]
+  | `List [] -> [ pad ^ prefix ^ punct "[]" ^ suffix ]
   | `Assoc fields ->
     members ~open_:"{" ~close:"}" fields (fun ~suffix (key, value) ->
       render
+        ~palette
         ~indent:(indent + 2)
-        ~prefix:(Yojson.Safe.to_string (`String key) ^ ": ")
+        ~prefix:
+          (paint palette palette.key (Yojson.Safe.to_string (`String key))
+           ^ punct ": ")
         ~suffix
         value)
   | `List items ->
     members ~open_:"[" ~close:"]" items (fun ~suffix item ->
-      render ~indent:(indent + 2) ~prefix:"" ~suffix item)
+      render ~palette ~indent:(indent + 2) ~prefix:"" ~suffix item)
   | `String text when is_block text ->
-    (pad ^ prefix ^ "|") :: List.map (fun line -> pad ^ "  " ^ line) (block_lines text)
-  | (`String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) as scalar ->
-    [ pad ^ prefix ^ Yojson.Safe.to_string scalar ^ suffix ]
+    (* The block's own lines stay in the pane's foreground. They are the
+       command's output, not a value in a document, and colouring them would
+       claim a reading of bytes this module cannot read. *)
+    (pad ^ prefix ^ punct "|")
+    :: List.map
+         (fun line ->
+           pad ^ "  " ^ Keeper_chat.terminal_safe_text line)
+         (block_lines text)
+  | `String _ as scalar ->
+    [ pad ^ prefix
+      ^ paint palette palette.string_ (Yojson.Safe.to_string scalar)
+      ^ suffix ]
+  | (`Int _ | `Intlit _ | `Float _) as scalar ->
+    [ pad ^ prefix
+      ^ paint palette palette.number (Yojson.Safe.to_string scalar)
+      ^ suffix ]
+  | (`Bool _ | `Null) as scalar ->
+    [ pad ^ prefix
+      ^ paint palette palette.literal (Yojson.Safe.to_string scalar)
+      ^ suffix ]
 ;;
 
 (* A tool argument or result that is a whole JSON document is re-served with
@@ -98,10 +156,11 @@ let rec render ~indent ~prefix ~suffix (json : Yojson.Safe.t) : string list =
    wraps at column zero -- which is what a single-line payload did, dropping
    the branch glyph from every wrapped row. A scalar or a payload that does
    not parse is its own best rendering and passes through untouched. *)
-let structured value =
+let structured ?(palette = plain) value =
   match Yojson.Safe.from_string value with
   | (`Assoc _ | `List _) as json ->
-    String.concat "\n" (render ~indent:0 ~prefix:"" ~suffix:"" (unfold json))
+    String.concat "\n"
+      (render ~palette ~indent:0 ~prefix:"" ~suffix:"" (unfold json))
   | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> value
   | exception Yojson.Json_error _ -> value
 ;;
@@ -116,34 +175,51 @@ let structured value =
    edge. The width is per-tree, not a constant: a tree whose fields are all
    short stays narrow. Terminal cells, not bytes -- a label is operator-facing
    text and a byte count would misalign the moment one is not ASCII. *)
-let tree fields =
+let tree ?(palette = plain) fields =
   let field_count = List.length fields in
   let label_cells =
     List.fold_left
-      (fun widest (label, _) ->
-        max widest (Message_layout.display_width (Keeper_chat.terminal_safe_text label)))
+      (fun widest { fd_label; _ } ->
+        max widest
+          (Message_layout.display_width (Keeper_chat.terminal_safe_text fd_label)))
       0
       fields
   in
   fields
-  |> List.mapi (fun index (label, value) ->
-    let label = Keeper_chat.terminal_safe_text label in
-    let value = Keeper_chat.terminal_safe_text ~preserve_newlines:true value in
+  |> List.mapi (fun index { fd_label; fd_value; fd_tone } ->
+    let label = Keeper_chat.terminal_safe_text fd_label in
+    (* Sanitised before it is painted, never after: the sweep that makes a
+       value terminal-safe replaces control bytes with spaces, and an escape
+       code is control bytes. Painting a sanitised string is safe; sanitising
+       a painted one erases the colour and leaves the digits behind. *)
+    let value_lines =
+      match fd_value with
+      | Text text ->
+        String.split_on_char '\n'
+          (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
+        |> List.map (paint palette fd_tone)
+      | Document payload ->
+        String.split_on_char '\n' (structured ~palette payload)
+    in
     let padding =
       String.make (max 0 (label_cells - Message_layout.display_width label)) ' '
     in
     let last = index = field_count - 1 in
-    let branch = if last then "  ╰─" else "  ├─" in
-    let continuation = if last then "     " else "  │  " in
-    let lines =
-      match String.split_on_char '\n' value with
-      | [] -> [ "" ]
-      | lines -> lines
+    let branch =
+      paint palette palette.branch (if last then "  ╰─" else "  ├─")
     in
+    let continuation =
+      paint palette palette.branch (if last then "     " else "  │  ")
+    in
+    let lines = match value_lines with [] -> [ "" ] | lines -> lines in
     match lines with
     | [] -> []
     | first :: rest ->
-      Printf.sprintf "%s %s%s · %s" branch label padding first
+      Printf.sprintf "%s %s%s %s %s" branch
+        (paint palette palette.label label)
+        padding
+        (paint palette palette.separator "·")
+        first
       :: List.map (fun line -> continuation ^ line) rest)
   |> List.concat
 ;;

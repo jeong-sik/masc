@@ -2,6 +2,21 @@ open Alcotest
 
 module Tool_detail = Masc_tui_tool_detail
 
+(* The layout tests read through the plain palette, which is the identity for
+   every role: what they pin is where a label, a separator and a branch land,
+   and a colour in the middle of the string would be measuring the escape. *)
+let said label value =
+  { Tool_detail.fd_label = label
+  ; fd_value = Tool_detail.Text value
+  ; fd_tone = ""
+  }
+
+let served label payload =
+  { Tool_detail.fd_label = label
+  ; fd_value = Tool_detail.Document payload
+  ; fd_tone = ""
+  }
+
 (* The defect this module was extracted to close: a tool result that is one
    long JSON line left the tree after the label and the terminal wrapped the
    rest at column zero, so every wrapped row lost its branch glyph. Serving
@@ -9,7 +24,7 @@ module Tool_detail = Masc_tui_tool_detail
    that owns them. *)
 let test_json_payload_becomes_indented_rows () =
   let payload = {|{"argv":["gh","auth","status"],"cwd":"."}|} in
-  let rendered = Tool_detail.tree [ "input", Tool_detail.structured payload ] in
+  let rendered = Tool_detail.tree [ served "input" payload ] in
   check bool "more than one row" true (List.length rendered > 1);
   (match rendered with
    | [] -> fail "expected rows"
@@ -115,10 +130,10 @@ let separator_columns rendered =
 let test_labels_share_a_separator_column () =
   let rendered =
     Tool_detail.tree
-      [ "state", "RETURNED"
-      ; "tool", "Execute"
-      ; "schedule", "serial"
-      ; "identity", "execution=exec-1"
+      [ said "state" "RETURNED"
+      ; said "tool" "Execute"
+      ; said "schedule" "serial"
+      ; said "identity" "execution=exec-1"
       ]
   in
   check int "one row per field" 4 (List.length rendered);
@@ -131,8 +146,8 @@ let test_labels_share_a_separator_column () =
 (* The padding is computed per call. A tree of short labels must not inherit
    the width of a tree that happened to hold a long one. *)
 let test_padding_does_not_leak_between_trees () =
-  let wide = Tool_detail.tree [ "identity", "a"; "x", "b" ] in
-  let narrow = Tool_detail.tree [ "x", "b" ] in
+  let wide = Tool_detail.tree [ said "identity" "a"; said "x" "b" ] in
+  let narrow = Tool_detail.tree [ said "x" "b" ] in
   match separator_columns wide, separator_columns narrow with
   | wide_column :: _, narrow_column :: _ ->
     check bool "narrow tree is narrower" true (narrow_column < wide_column)
@@ -142,7 +157,7 @@ let test_padding_does_not_leak_between_trees () =
 (* The tree closes on its last field so two adjacent tool calls do not read as
    one call with many unrelated rows. *)
 let test_last_field_closes_the_tree () =
-  let rendered = Tool_detail.tree [ "state", "RETURNED"; "tool", "Execute" ] in
+  let rendered = Tool_detail.tree [ said "state" "RETURNED"; said "tool" "Execute" ] in
   match rendered with
   | [ first; second ] ->
     check bool "first branches" true
@@ -151,6 +166,77 @@ let test_last_field_closes_the_tree () =
       (String.length second > 4 && String.equal (String.sub second 2 3) "\xe2\x95\xb0")
   | _ -> fail "expected two rows"
 ;;
+
+
+(* --- the palette: which role each part of a served document is drawn in --- *)
+
+(* Markers rather than escape codes. What is being pinned is that a key is
+   drawn as a key and a number as a number, not what colour this theme
+   happens to give them -- and a marker survives being read in a diff. *)
+let marked =
+  { Tool_detail.branch = "<br>"
+  ; label = "<lab>"
+  ; separator = "<sep>"
+  ; key = "<key>"
+  ; string_ = "<str>"
+  ; number = "<num>"
+  ; literal = "<lit>"
+  ; punctuation = "<pun>"
+  ; reset = "<->"
+  }
+
+let holds needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec scan i = i + n <= h && (String.equal (String.sub haystack i n) needle || scan (i + 1)) in
+  n = 0 || scan 0
+
+let test_each_part_of_a_document_draws_in_its_own_role () =
+  let payload =
+    {|{"cwd":".","width":1,"deferred":true,"repo":null}|}
+  in
+  let rendered = Tool_detail.structured ~palette:marked payload in
+  check bool "the key is a key" true (holds {|<key>"cwd"<->|} rendered);
+  check bool "the string is a string" true (holds {|<str>"."<->|} rendered);
+  check bool "the number is a number" true (holds "<num>1<->" rendered);
+  check bool "true is a literal" true (holds "<lit>true<->" rendered);
+  check bool "null is a literal" true (holds "<lit>null<->" rendered);
+  check bool "the brace recedes" true (holds "<pun>{<->" rendered);
+  check bool "so does the colon" true (holds "<pun>: <->" rendered)
+
+let test_the_plain_palette_leaves_the_text_alone () =
+  (* Every role empty is the identity, which is what keeps the layout tests
+     above measuring text and not escapes. *)
+  let payload = {|{"cwd":"."}|} in
+  check string "plain is the default" (Tool_detail.structured payload)
+    (Tool_detail.structured ~palette:Tool_detail.plain payload)
+
+let test_a_value_is_painted_after_it_is_made_safe () =
+  (* The sweep that makes a value terminal-safe replaces control bytes with
+     spaces, and an escape code is control bytes. Painting a sanitised string
+     keeps the marker; sanitising a painted one would eat it. The value here
+     carries a real escape, which must not survive as one. *)
+  let rendered =
+    Tool_detail.tree ~palette:marked
+      [ { Tool_detail.fd_label = "state"
+        ; fd_value = Tool_detail.Text "RET\027[31mURNED"
+        ; fd_tone = "<tone>"
+        } ]
+  in
+  match rendered with
+  | [ row ] ->
+    check bool "the field's own tone is applied" true (holds "<tone>" row);
+    check bool "the value's escape did not survive" false
+      (String.contains row '\027')
+  | _ -> fail "expected one row"
+
+let test_a_block_keeps_the_pane_foreground () =
+  (* A command's output is bytes this module cannot read, so it claims no
+     role for them -- only the marker that opens the block recedes. *)
+  let payload = {|{"output":"line one\nline two"}|} in
+  let rendered = Tool_detail.structured ~palette:marked payload in
+  check bool "the block marker recedes" true (holds "<pun>|<->" rendered);
+  check bool "the block's own line is unpainted" true
+    (holds "\n  line one" rendered)
 
 let () =
   run
@@ -173,6 +259,16 @@ let () =
             test_padding_does_not_leak_between_trees
         ; test_case "last field closes the tree" `Quick
             test_last_field_closes_the_tree
+        ] )
+    ; ( "palette"
+      , [ test_case "each part of a document draws in its own role" `Quick
+            test_each_part_of_a_document_draws_in_its_own_role
+        ; test_case "the plain palette leaves the text alone" `Quick
+            test_the_plain_palette_leaves_the_text_alone
+        ; test_case "a value is painted after it is made safe" `Quick
+            test_a_value_is_painted_after_it_is_made_safe
+        ; test_case "a block keeps the pane foreground" `Quick
+            test_a_block_keeps_the_pane_foreground
         ] )
     ]
 ;;

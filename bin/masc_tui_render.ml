@@ -6941,6 +6941,36 @@ let keeper_call_association state ~keeper_name
           | [ call ] -> Call_execution_exact call
           | rows -> Call_execution_ambiguous (List.length rows))
 
+(* The tool tree's colours, out of the reader's own theme. Built per draw
+   rather than held: the palette behind [Theme.*] is resolved against the
+   terminal's answers and can change, and a cached record would keep drawing
+   the colours the last answer produced. *)
+let tool_detail_palette () : Tool_detail.palette =
+  { Tool_detail.branch = Theme.recede ()
+    (* A field's name and a document member's name are the same kind of
+       thing, so they read in the same colour; the weight is what separates
+       the tree's own labels from the names inside a payload. *)
+  ; label = Ansi.bold ^ Masc_tui_theme.tone Masc_tui_theme.Accent
+  ; separator = Theme.recede ()
+  ; key = Masc_tui_theme.Syntax.json_key
+  ; string_ = Masc_tui_theme.Syntax.string_
+  ; number = Masc_tui_theme.Syntax.json_number
+  ; literal = Masc_tui_theme.Syntax.json_literal
+  ; punctuation = Masc_tui_theme.Syntax.json_punctuation
+  ; reset = Ansi.reset
+  }
+
+(* An outcome is a reading of state, so it draws through the status names
+   rather than through the tree's own default. The two that are still moving
+   read as attention; the two that stopped badly read as failure. *)
+let tool_outcome_tone : Keeper_chat_transcript.tool_outcome -> string = function
+  | Keeper_chat_transcript.Started | Keeper_chat_transcript.Awaiting_result ->
+      Theme.info ()
+  | Keeper_chat_transcript.Returned -> Theme.ok ()
+  | Keeper_chat_transcript.Failed | Keeper_chat_transcript.Never_returned ->
+      Theme.bad ()
+  | Keeper_chat_transcript.Outcome_unrecorded -> Theme.warn ()
+
 let tool_outcome_label : Keeper_chat_transcript.tool_outcome -> string = function
   | Keeper_chat_transcript.Started -> "RUNNING · ARGUMENTS STREAMING"
   | Keeper_chat_transcript.Awaiting_result -> "RUNNING · AWAITING RESULT"
@@ -6972,19 +7002,17 @@ let keeper_message_tool_activity_details state ~keeper_name
           | None -> "not recorded"
         in
         let output =
-          Option.map
-            (fun value -> "output", Tool_detail.structured value)
-            call.kc_output
+          Option.map (fun value -> "output", value) call.kc_output
         in
         let disposition =
           match call.kc_disposition with
           | None -> None
           | Some Tui_decode.Keeper_call_completed ->
-              Some ("dispatch", "COMPLETED · SYNCHRONOUS")
+              Some ("dispatch", "COMPLETED · SYNCHRONOUS", Theme.ok ())
           | Some Tui_decode.Keeper_call_deferred ->
-              Some ("dispatch", "DEFERRED · ASYNC CONTINUATION")
+              Some ("dispatch", "DEFERRED · ASYNC CONTINUATION", Theme.info ())
           | Some Tui_decode.Keeper_call_failed ->
-              Some ("dispatch", "FAILED")
+              Some ("dispatch", "FAILED", Theme.bad ())
         in
         let result =
           match call.kc_result_bytes, call.kc_truncated_to with
@@ -7035,23 +7063,43 @@ let keeper_message_tool_activity_details state ~keeper_name
     | [] -> "not recorded"
     | parts -> String.concat " · " parts
   in
+  (* Which fields are readings of state and which are payloads, said once
+     here. The tree draws a payload through the document roles and a reading
+     through the tone this names; nothing downstream guesses from the label. *)
+  let said label value tone =
+    { Tool_detail.fd_label = label
+    ; fd_value = Tool_detail.Text value
+    ; fd_tone = tone
+    }
+  in
+  let served label value =
+    { Tool_detail.fd_label = label
+    ; fd_value = Tool_detail.Document value
+    ; fd_tone = ""
+    }
+  in
   let fields =
-    [ Some ("state", tool_outcome_label activity.outcome)
-    ; disposition_field
-    ; Some ("tool", activity.tool_name)
-    ; Some ("schedule", schedule_field)
+    [ Some
+        (said "state"
+           (tool_outcome_label activity.outcome)
+           (tool_outcome_tone activity.outcome))
+    ; Option.map
+        (fun (label, value, tone) -> said label value tone)
+        disposition_field
+      (* The tool's own name, in the colour the pane already gives a tool
+         row's origin. Not a status: naming Execute is not a verdict on it. *)
+    ; Some (said "tool" activity.tool_name (Theme.tool_origin ()))
+    ; Some (said "schedule" schedule_field "")
     ; Some
-        ( "input"
-        , if String.equal durable_input ""
-          then "(empty)"
-          else Tool_detail.structured durable_input )
-    ; output_field
-    ; result_field
-    ; Some ("identity", identity)
+        (if String.equal durable_input "" then said "input" "(empty)" ""
+         else served "input" durable_input)
+    ; Option.map (fun (label, value) -> served label value) output_field
+    ; Option.map (fun (label, value) -> said label value "") result_field
+    ; Some (said "identity" identity "")
     ]
     |> List.filter_map Fun.id
   in
-  Tool_detail.tree fields
+  Tool_detail.tree ~palette:(tool_detail_palette ()) fields
 
 (* How one finished turn's tool block becomes rows: the operator's
    compact/full choice, the width the aligned badge leaves, and this keeper's

@@ -225,6 +225,41 @@ let test_message_people_directory_prefers_global_names () =
       [ "20", "Alice"; "21", "bob_2" ] entries
   | Error detail -> fail detail
 
+let test_full_directory_pages_keep_channels_and_global_people () =
+  let channels =
+    G.For_testing.discord_channel_directory_entries
+      (`List
+        [ `Assoc [ "id", `String "30"; "name", `String "general" ]
+        ; `Assoc [ "id", `String "31"; "name", `String "ops" ]
+        ])
+  in
+  let members =
+    G.For_testing.discord_member_directory_page
+      (`List
+        [ `Assoc
+            [ "nick", `String "Guild Nick"
+            ; "user",
+              `Assoc
+                [ "id", `String "40"
+                ; "global_name", `String "Global Name"
+                ; "username", `String "account_name"
+                ]
+            ]
+        ])
+  in
+  (match channels with
+   | Ok entries ->
+     check (list (pair string string)) "all visible channels"
+       [ "30", "general"; "31", "ops" ] entries
+   | Error detail -> fail detail);
+  match members with
+  | Ok (entries, after, count) ->
+    check (list (pair string string)) "global identity, not guild nickname"
+      [ "40", "Global Name" ] entries;
+    check (option string) "member cursor" (Some "40") after;
+    check int "member count" 1 count
+  | Error detail -> fail detail
+
 let discord_message ~message_id =
   Discord_gateway_client.Message_create
     { channel_id = "C123"
@@ -374,5 +409,7 @@ let () =
             test_channel_directory_reads_named_channel
         ; test_case "recent participant names" `Quick
             test_message_people_directory_prefers_global_names
+        ; test_case "full channel and member pages" `Quick
+            test_full_directory_pages_keep_channels_and_global_people
         ] )
     ]

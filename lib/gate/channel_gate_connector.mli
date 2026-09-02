@@ -52,6 +52,14 @@ module type S = sig
     (Yojson.Safe.t, string) result
   (** Remove a channel-to-keeper binding. *)
 
+  val unbind_if_keeper :
+    channel_id:string ->
+    expected_keeper_name:string ->
+    actor_name:string ->
+    (Yojson.Safe.t, string) result
+  (** Remove only if the channel is still owned by [expected_keeper_name].
+      Returns an error without mutation when ownership changed. *)
+
   val bound_channels :
     keeper_name:string ->
     (string list, Channel_gate_binding_store.binding_store_error) result

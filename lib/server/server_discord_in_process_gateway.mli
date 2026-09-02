@@ -67,6 +67,13 @@ module For_testing : sig
   val discord_channel_directory_entry :
     Yojson.Safe.t -> (string * string, string) result
 
+  val discord_channel_directory_entries :
+    Yojson.Safe.t -> ((string * string) list, string) result
+
+  val discord_member_directory_page :
+    Yojson.Safe.t ->
+    ((string * string) list * string option * int, string) result
+
   val discord_message_people_entries :
     Yojson.Safe.t -> ((string * string) list, string) result
 

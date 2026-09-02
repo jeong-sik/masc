@@ -105,6 +105,19 @@ let build_channel_request ~token ~channel_id () =
   in
   (url, auth_headers ~token, "")
 
+let build_guild_request ~token ~guild_id () =
+  let url =
+    Printf.sprintf "%s/guilds/%s" api_base (snowflake_to_string guild_id)
+  in
+  (url, auth_headers ~token, "")
+
+let build_guild_channels_request ~token ~guild_id () =
+  let url =
+    Printf.sprintf "%s/guilds/%s/channels" api_base
+      (snowflake_to_string guild_id)
+  in
+  (url, auth_headers ~token, "")
+
 let add_query_params url params =
   Uri.of_string url
   |> fun uri -> Uri.add_query_params' uri params
@@ -383,6 +396,16 @@ let get_channel ?clock ?timeout_sec ~token ~channel_id () =
   let url, headers, _ = build_channel_request ~token ~channel_id () in
   get_json ?clock ?timeout_sec ~request_id:(next_request_id "channel") ~url
     ~headers ()
+
+let get_guild ?clock ?timeout_sec ~token ~guild_id () =
+  let url, headers, _ = build_guild_request ~token ~guild_id () in
+  get_json ?clock ?timeout_sec ~request_id:(next_request_id "guild") ~url
+    ~headers ()
+
+let get_guild_channels ?clock ?timeout_sec ~token ~guild_id () =
+  let url, headers, _ = build_guild_channels_request ~token ~guild_id () in
+  get_json ?clock ?timeout_sec ~request_id:(next_request_id "guild-channels")
+    ~url ~headers ()
 
 let get_channel_messages
       ?clock

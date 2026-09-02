@@ -2511,6 +2511,7 @@ type state = {
   mutable connectors_scroll: int;
   mutable connectors_cursor: int;
   mutable connectors_binding_cursor: int;
+  mutable connector_unbind_armed: (string * string * string) option;
   (* Two server-owned documents joined by exact runtime id: resolved owns
      lanes/provider/model identity, probe owns cached reachability. *)
   mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
@@ -3159,6 +3160,7 @@ let create_state
   connectors_scroll = 0;
   connectors_cursor = 0;
   connectors_binding_cursor = 0;
+  connector_unbind_armed = None;
   runtime_surface = None;
   runtime_surface_error = None;
   runtime_surface_scroll = 0;

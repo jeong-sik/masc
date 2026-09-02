@@ -119,6 +119,24 @@ val get_channel :
   (Yojson.Safe.t, error) result
 (** Fetch the Discord channel object for [channel_id]. *)
 
+val get_guild :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  guild_id:snowflake ->
+  unit ->
+  (Yojson.Safe.t, error) result
+(** Fetch the Discord guild object for [guild_id]. *)
+
+val get_guild_channels :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  guild_id:snowflake ->
+  unit ->
+  (Yojson.Safe.t, error) result
+(** List all guild channels visible to the bot. *)
+
 val get_channel_messages :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
@@ -237,6 +255,18 @@ val build_typing_request :
 val build_channel_request :
   token:string ->
   channel_id:snowflake ->
+  unit ->
+  string * (string * string) list * string
+
+val build_guild_request :
+  token:string ->
+  guild_id:snowflake ->
+  unit ->
+  string * (string * string) list * string
+
+val build_guild_channels_request :
+  token:string ->
+  guild_id:snowflake ->
   unit ->
   string * (string * string) list * string
 

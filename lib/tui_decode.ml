@@ -1872,12 +1872,19 @@ type connector_binding = {
 type connector_name_kind =
   | Connector_channel_name
   | Connector_person_name
+  | Connector_server_name
 
 type connector_name_mapping = {
   cnm_kind : connector_name_kind;
   cnm_id : string;
   cnm_name : string;
 }
+
+type connector_directory_state =
+  | Connector_directory_not_started
+  | Connector_directory_refreshing
+  | Connector_directory_complete
+  | Connector_directory_partial
 
 type connector = {
   cn_id : string;
@@ -1908,7 +1915,16 @@ type connector = {
   cn_gate_healthy : bool option;
   cn_pid : int option;
   cn_guild_count : int option;
+  cn_directory_state : connector_directory_state option;
+  cn_directory_server_count : int option;
+  cn_directory_channel_count : int option;
+  cn_directory_person_count : int option;
+  cn_directory_authentication_failed : string list;
+  cn_directory_permission_denied : string list;
+  cn_directory_errors : string list;
+  cn_directory_updated_at : string option;
   cn_workspace_id : string option;
+  cn_server_names_path : string option;
   cn_channel_names_path : string option;
   cn_people_names_path : string option;
   cn_name_mappings : connector_name_mapping list;
@@ -3048,6 +3064,7 @@ let decode_connector_name_mapping json =
     match raw_kind with
     | "channel" -> Ok Connector_channel_name
     | "person" -> Ok Connector_person_name
+    | "server" -> Ok Connector_server_name
     | unknown -> Error (Printf.sprintf "unknown connector name kind %S" unknown)
   in
   let* cnm_id = required_string_field json "id" in
@@ -3102,7 +3119,50 @@ let decode_connector json =
   let* cn_gate_healthy = optional_bool_field json "gate_healthy" in
   let* cn_pid = optional_int_field json "pid" in
   let* cn_guild_count = optional_int_field json "guild_count" in
+  let* raw_directory_state = optional_string_field json "directory_state" in
+  let* cn_directory_state =
+    match nonblank_option raw_directory_state with
+    | None -> Ok None
+    | Some "not_started" -> Ok (Some Connector_directory_not_started)
+    | Some "refreshing" -> Ok (Some Connector_directory_refreshing)
+    | Some "complete" -> Ok (Some Connector_directory_complete)
+    | Some "partial" -> Ok (Some Connector_directory_partial)
+    | Some unknown ->
+      Error (Printf.sprintf "unknown connector directory state %S" unknown)
+  in
+  let* cn_directory_server_count =
+    optional_int_field json "directory_server_count"
+  in
+  let* cn_directory_channel_count =
+    optional_int_field json "directory_channel_count"
+  in
+  let* cn_directory_person_count =
+    optional_int_field json "directory_person_count"
+  in
+  let decode_string_rows label rows =
+    decode_list label
+      (function
+        | `String value -> Ok value
+        | _ -> Error (label ^ " contains a non-string value"))
+      rows
+  in
+  let* authentication_rows =
+    optional_list_field json "directory_authentication_failed"
+  in
+  let* cn_directory_authentication_failed =
+    decode_string_rows "directory_authentication_failed" authentication_rows
+  in
+  let* permission_rows = optional_list_field json "directory_permission_denied" in
+  let* cn_directory_permission_denied =
+    decode_string_rows "directory_permission_denied" permission_rows
+  in
+  let* error_rows = optional_list_field json "directory_errors" in
+  let* cn_directory_errors = decode_string_rows "directory_errors" error_rows in
+  let* cn_directory_updated_at =
+    optional_string_field json "directory_updated_at"
+  in
   let* cn_workspace_id = optional_string_field json "workspace_id" in
+  let* cn_server_names_path = optional_string_field json "server_names_path" in
   let* cn_channel_names_path = optional_string_field json "channel_names_path" in
   let* cn_people_names_path = optional_string_field json "people_names_path" in
   let* name_mappings_json = optional_list_field json "name_mappings" in
@@ -3145,7 +3205,16 @@ let decode_connector json =
          | Some pid when pid > 0 -> Some pid
          | Some _ | None -> None)
     ; cn_guild_count
+    ; cn_directory_state
+    ; cn_directory_server_count
+    ; cn_directory_channel_count
+    ; cn_directory_person_count
+    ; cn_directory_authentication_failed
+    ; cn_directory_permission_denied
+    ; cn_directory_errors
+    ; cn_directory_updated_at = nonblank_option cn_directory_updated_at
     ; cn_workspace_id = nonblank_option cn_workspace_id
+    ; cn_server_names_path = nonblank_option cn_server_names_path
     ; cn_channel_names_path = nonblank_option cn_channel_names_path
     ; cn_people_names_path = nonblank_option cn_people_names_path
     ; cn_name_mappings
@@ -3161,6 +3230,7 @@ let decode_connector_name_page json =
     match raw_kind with
     | "channel" -> Ok Connector_channel_name
     | "person" -> Ok Connector_person_name
+    | "server" -> Ok Connector_server_name
     | unknown -> Error (Printf.sprintf "unknown connector name kind %S" unknown)
   in
   let* cnp_mapping_scope = required_string_field json "mapping_scope" in
@@ -3214,7 +3284,8 @@ let connector_with_name_pages connector ~pages ~error =
          match mapping.cnm_kind with
          | Connector_channel_name when String.equal mapping.cnm_id channel_id ->
              Some mapping.cnm_name
-         | Connector_channel_name | Connector_person_name -> None)
+         | Connector_channel_name | Connector_person_name
+         | Connector_server_name -> None)
       mappings
   in
   let page_path kind =
@@ -3234,6 +3305,7 @@ let connector_with_name_pages connector ~pages ~error =
            })
         connector.cn_bindings
   ; cn_name_mappings = mappings
+  ; cn_server_names_path = page_path Connector_server_name
   ; cn_channel_names_path = page_path Connector_channel_name
   ; cn_people_names_path = page_path Connector_person_name
   ; cn_workspace_id = workspace_id

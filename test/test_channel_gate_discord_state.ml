@@ -17,6 +17,8 @@ module Registry_test_connector_a = struct
     Ok (`Assoc [ "variant", `String "a" ])
   let unbind ~channel_id:_ ~actor_name:_ =
     Ok (`Assoc [ "variant", `String "a" ])
+  let unbind_if_keeper ~channel_id:_ ~expected_keeper_name:_ ~actor_name:_ =
+    Ok (`Assoc [ "variant", `String "a" ])
   let bound_channels ~keeper_name:_ = Ok []
   let connected () = false
 end
@@ -140,7 +142,11 @@ let test_record_ready_surfaces_bot_identity () =
   with_discord_paths dir (fun () ->
   with_env "DISCORD_BOT_TOKEN" None (fun () ->
     Discord_state.record_ready ~bot_user_id:"bot-42"
-      ~bot_user_name:(Some "MASC Bot") ~guild_count:2;
+      ~bot_user_name:(Some "MASC Bot") ~guild_ids:[ "guild-1"; "guild-2" ];
+    Discord_state.record_directory_refresh_finished ~server_count:2
+      ~channel_count:12 ~person_count:34
+      ~authentication_failed:[]
+      ~permission_denied:[ "members" ] ~errors:[];
     let json = Discord_state.status_json () in
     check string "bot_user_id from READY" "bot-42"
       (json |> U.member "bot_user_id" |> U.to_string);
@@ -148,6 +154,10 @@ let test_record_ready_surfaces_bot_identity () =
       (json |> U.member "bot_user_name" |> U.to_string);
     check int "guild count from READY" 2
       (json |> U.member "guild_count" |> U.to_int);
+    check string "partial directory state" "partial"
+      (json |> U.member "directory_state" |> U.to_string);
+    check int "directory people count" 34
+      (json |> U.member "directory_person_count" |> U.to_int);
     check bool "last_ready_at non-empty" true
       (String.length (json |> U.member "last_ready_at" |> U.to_string) > 0);
     (* Identity is observation, not liveness: gateway is still down. *)
@@ -195,6 +205,25 @@ let test_unbind_removes_existing_binding () =
         check int "two audit events" 2 (List.length audit);
         check string "latest audit action" "unbind"
           (List.hd audit |> U.member "action" |> U.to_string))
+
+let test_conditional_unbind_preserves_reassigned_binding () =
+  with_temp_dir @@ fun dir ->
+  with_discord_paths dir (fun () ->
+    ignore
+      (Discord_state.bind ~channel_id:"1234567890" ~keeper_name:"new-owner"
+         ~actor_name:"dashboard");
+    (match
+       Discord_state.unbind_if_keeper ~channel_id:"1234567890"
+         ~expected_keeper_name:"old-owner" ~actor_name:"dashboard"
+     with
+     | Error "binding changed" -> ()
+     | Error detail -> fail ("unexpected conditional-unbind error: " ^ detail)
+     | Ok _ -> fail "conditional unbind removed a reassigned binding");
+    match Discord_state.keeper_for_channel_result ~channel_id:"1234567890" with
+    | Ok (Some keeper_name) ->
+      check string "reassigned owner remains" "new-owner" keeper_name
+    | Ok None -> fail "conditional unbind removed the binding"
+    | Error detail -> fail (Discord_state.binding_lookup_error_to_string detail))
 
 let test_connectors_json_advertises_gate_connector_descriptor () =
   with_temp_dir @@ fun dir ->
@@ -411,6 +440,8 @@ let () =
             test_bind_persists_binding_and_audit;
           test_case "unbind removes binding" `Quick
             test_unbind_removes_existing_binding;
+          test_case "conditional unbind preserves reassigned binding" `Quick
+            test_conditional_unbind_preserves_reassigned_binding;
           test_case "binding-store failures remain explicit" `Quick
             test_binding_store_failures_are_not_empty_state;
           test_case "connectors json advertises connector descriptor" `Quick

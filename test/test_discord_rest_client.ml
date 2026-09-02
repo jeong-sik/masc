@@ -127,6 +127,17 @@ let test_build_channel_read_request_url () =
     (header_value headers "Authorization");
   check string "channel read body" "" body
 
+let test_build_guild_directory_request_urls () =
+  let guild_url, _, _ =
+    R.build_guild_request ~token:"t" ~guild_id:(sf "123") ()
+  in
+  let channels_url, _, _ =
+    R.build_guild_channels_request ~token:"t" ~guild_id:(sf "123") ()
+  in
+  check string "guild URL" "https://discord.com/api/v10/guilds/123" guild_url;
+  check string "guild channels URL"
+    "https://discord.com/api/v10/guilds/123/channels" channels_url
+
 let test_build_messages_read_request_query () =
   let url, _, body =
     R.build_channel_messages_request ~token:"t" ~channel_id:(sf "123")
@@ -550,6 +561,8 @@ let () =
             test_build_typing_request_authorization_uses_bot_scheme
         ; test_case "channel read URL and headers" `Quick
             test_build_channel_read_request_url
+        ; test_case "guild directory URLs" `Quick
+            test_build_guild_directory_request_urls
         ; test_case "messages read query" `Quick
             test_build_messages_read_request_query
         ; test_case "member search query escaping" `Quick

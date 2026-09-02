@@ -248,6 +248,7 @@ let handle_gate_connector_names state request reqd =
     match Option.map String.trim (query_param request "scope") with
     | Some "channel" -> Ok (Connector_names.Channel, "channel")
     | Some "person" -> Ok (Connector_names.Person, "person")
+    | Some "server" -> Ok (Connector_names.Server, "server")
     | Some unknown -> Error ("unknown scope: " ^ unknown)
     | None -> Error "scope is required"
   in
@@ -528,6 +529,11 @@ let handle_unbind_for_connector state request reqd
     ~(unbind_fn :
        channel_id:string ->
        actor_name:string ->
+       (Yojson.Safe.t, string) result)
+    ~(unbind_if_keeper_fn :
+       channel_id:string ->
+       expected_keeper_name:string ->
+       actor_name:string ->
        (Yojson.Safe.t, string) result) =
   Http.Request.read_body_async reqd (fun body_str ->
     try
@@ -536,6 +542,13 @@ let handle_unbind_for_connector state request reqd
         Json_util.get_string json "channel_id"
         |> Option.value ~default:""
         |> String.trim
+      in
+      let expected_keeper_name =
+        match Json_util.get_string json "keeper_name" with
+        | Some value ->
+          let value = String.trim value in
+          if String.equal value "" then None else Some value
+        | None -> None
       in
       if channel_id = "" then
         respond_json_value_with_cors ~status:`Bad_request request reqd
@@ -547,12 +560,21 @@ let handle_unbind_for_connector state request reqd
           |> Option.value ~default:"dashboard"
           |> String.trim
         in
-        match unbind_fn ~channel_id ~actor_name with
+        let result =
+          match expected_keeper_name with
+          | None -> unbind_fn ~channel_id ~actor_name
+          | Some expected_keeper_name ->
+            unbind_if_keeper_fn ~channel_id ~expected_keeper_name ~actor_name
+        in
+        match result with
         | Ok payload ->
             respond_json_value_with_cors ~status:`OK request reqd payload
         | Error "binding not found" ->
             respond_json_value_with_cors ~status:`Not_found request reqd
               (Channel_gate.error_json "binding not found")
+        | Error "binding changed" ->
+            respond_json_value_with_cors ~status:`Conflict request reqd
+              (Channel_gate.error_json "binding changed")
         | Error err ->
             respond_json_value_with_cors ~status:`Internal_server_error request reqd
               (Channel_gate.error_json err)
@@ -601,7 +623,7 @@ let handle_gate_connector_unbind _state request reqd =
           (Channel_gate.error_json ("unknown connector: " ^ connector_name))
     | Some (module C) ->
         handle_unbind_for_connector _state request reqd
-          ~unbind_fn:C.unbind
+          ~unbind_fn:C.unbind ~unbind_if_keeper_fn:C.unbind_if_keeper
 
 (** Register all gate routes on the router. *)
 let add_routes ~sw ~clock router =

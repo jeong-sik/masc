@@ -10,10 +10,12 @@ let sanitize_name name =
 type scope =
   | Person
   | Channel
+  | Server
 
 let scope_segment = function
   | Person -> "people"
   | Channel -> "channels"
+  | Server -> "servers"
 ;;
 
 let names_dir base_dir =

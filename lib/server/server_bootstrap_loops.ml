@@ -700,6 +700,21 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
   | Error _ as error -> error
   | Ok shutdown ->
   set_phase Recovering_persistence;
+  (* A store this build cannot decode is moved aside now, in one place,
+     before any keeper loop reads it: a schema hard cut finishes at the first
+     boot instead of surfacing per keeper, hours later, on whichever read or
+     write happens to come first. Nothing else runs yet, so no writer races
+     the rename. *)
+  let store_reconcile_started = preparation_stage_started () in
+  let store_reconcile =
+    Keeper_store_boot_reconcile.reconcile ~now:(Time_compat.now ()) config
+  in
+  observe_preparation_stage
+    ~stage:"store_reconcile"
+    ~started:store_reconcile_started
+    ~examined:store_reconcile.Keeper_store_boot_reconcile.examined
+    ~failures:(List.length store_reconcile.Keeper_store_boot_reconcile.failed);
+  Log.Keeper.info "%s" (Keeper_store_boot_reconcile.summary store_reconcile);
   (* RFC-0240 §2.4. Close tool cycles left open by process death before
      anything reads a checkpoint. Persistence stores the open cycle on purpose
      so recovery knows which calls were dispatched, but nothing closed it, so

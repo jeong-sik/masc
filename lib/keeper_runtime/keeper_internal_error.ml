@@ -706,9 +706,18 @@ let all_wire_kinds =
   ; Wire_gate_replay_repair_required
   ]
 
+(* A wire reason is either the bare kind or [kind:params] -- a producer
+   appends the call's parameters after a colon. Read the kind and leave the
+   parameters to the payload, so a reason that carries them decodes to its
+   typed kind instead of falling through as [Unknown]. *)
 let wire_kind_of_string wire =
+  let kind =
+    match String.index_opt wire ':' with
+    | None -> wire
+    | Some colon -> String.sub wire 0 colon
+  in
   List.find_opt
-    (fun kind -> String.equal (wire_kind_to_string kind) wire)
+    (fun candidate -> String.equal (wire_kind_to_string candidate) kind)
     all_wire_kinds
 ;;
 

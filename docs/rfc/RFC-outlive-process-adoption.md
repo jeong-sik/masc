@@ -84,7 +84,7 @@ implementation_prs: []
   자체가 경계 거부되는 프로필).
 
 **실체**: keeper는 런을 넘어 프로세스를 읽으려 시도하고 있다 — 49건은 이전
-handle을 기억에서 재구성한 오염 문자열(`allama`, `deeplist`…)까지 보인다. 이것은
+handle을 기억에서 재구성한 오염 문자열(`ollama`, `deepseek`…)까지 보인다. 이것은
 채택 갭이 아니라 **기능 부재**다. 배경 서술의 "8/24에 머지됐는데도"도 정정한다:
 #30244는 "outlive the **call**"(호출 반환 후, 런 내 생존)이고, 런 넘어 생존은
 `keeper_agent_run`의 설계와 `keeper_spawn.toml` 문서 모두에서 처음부터 없다.

@@ -871,7 +871,7 @@ let test_detail_tab_hint_projects_the_table () =
    GitHub tab, e for the settings form). *)
 let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   [ Detail_info, []
-  ; Detail_sandbox, [ "R" ]
+  ; Detail_sandbox, [ "o"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []
   ; Detail_github, [ "L" ]

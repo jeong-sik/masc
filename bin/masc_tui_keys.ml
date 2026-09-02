@@ -563,7 +563,11 @@ let here_marker = " \xc2\xb7 you are here"
 let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
   match tab with
   | Detail_github -> [ b Act "L" "login" ~help:"start the gh device-flow login" ]
-  | Detail_sandbox -> [ b Meta "R" "refresh" ]
+  | Detail_sandbox ->
+      [ b Act "o" "actual logs"
+      ; b Navigate "PgUp/PgDn" "detail page"
+      ; b Meta "R" "refresh"
+      ]
   | Detail_instructions ->
       [ b Act "e" "edit JSON in $EDITOR"
           ~help:"the settings form; only changed fields are sent"

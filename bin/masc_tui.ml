@@ -13151,6 +13151,9 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail when state.detail_tab = Detail_channels ->
                 state.detail_scroll <-
                   max 0 (state.detail_scroll + (direction * page))
+            | Keepers Keeper_detail ->
+                state.detail_scroll <-
+                  max 0 (state.detail_scroll + (direction * page))
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->

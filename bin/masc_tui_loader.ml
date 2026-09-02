@@ -1127,7 +1127,81 @@ let load_connectors ~(host : string) ~(port : int) :
     (Tui_decode.connector_snapshot, string) result =
   match fetch_connectors ~host ~port with
   | Error err -> Error ("connector load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_connector_snapshot json
+  | Ok json ->
+      (match Tui_decode.decode_connector_snapshot json with
+       | Error _ as error -> error
+       | Ok snapshot ->
+           let load_page ?(ids = []) connector kind =
+             match
+               Masc_tui_http.fetch_connector_names ~host ~port
+                 ~connector:connector.Tui_decode.cn_id ~kind ~ids ()
+             with
+             | Error detail -> Error (kind ^ ": " ^ detail)
+             | Ok json -> Tui_decode.decode_connector_name_page json
+           in
+           let rec chunks size values =
+             match values with
+             | [] -> []
+             | values ->
+               let head = List.take size values in
+               head :: chunks size (List.drop (List.length head) values)
+           in
+           let connectors =
+             List.map
+               (fun connector ->
+                  let directory_results =
+                    [ load_page connector "channel"; load_page connector "person" ]
+                  in
+                  let known_channel_ids = Hashtbl.create 32 in
+                  List.iter
+                    (function
+                      | Ok page
+                        when page.cnp_kind = Tui_decode.Connector_channel_name ->
+                          List.iter
+                            (fun mapping ->
+                               Hashtbl.replace known_channel_ids mapping.cnm_id ())
+                            page.cnp_mappings
+                      | Ok _ | Error _ -> ())
+                    directory_results;
+                  let exact_binding_results =
+                    connector.cn_bindings
+                    |> List.map (fun (binding : Tui_decode.connector_binding) ->
+                           binding.cb_channel_id)
+                    |> List.sort_uniq String.compare
+                    |> List.filter (fun id -> not (Hashtbl.mem known_channel_ids id))
+                    |> chunks 100
+                    |> List.map (fun ids ->
+                           load_page ~ids connector "channel")
+                  in
+                  let results =
+                    directory_results @ exact_binding_results
+                  in
+                  let pages = List.filter_map Result.to_option results in
+                  let read_problems =
+                    List.filter_map
+                      (function
+                        | Error detail -> Some detail
+                        | Ok _ -> None)
+                      results
+                  in
+                  let truncated =
+                    List.exists
+                      (function Ok page -> page.cnp_has_more | Error _ -> false)
+                      directory_results
+                  in
+                  let problems =
+                    if truncated
+                    then "name mapping directory is truncated" :: read_problems
+                    else read_problems
+                  in
+                  Tui_decode.connector_with_name_pages connector ~pages
+                    ~error:
+                      (match problems with
+                       | [] -> None
+                       | problems -> Some (String.concat "; " problems)))
+               snapshot.cs_connectors
+           in
+           Ok { snapshot with cs_connectors = connectors })
 
 (** Load the light Lanes projection from /api/v1/keepers/composite, together
     with the secret projection the same body carries.

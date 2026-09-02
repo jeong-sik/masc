@@ -232,6 +232,101 @@ let handle_gate_connectors _state request reqd =
   let json = Channel_gate_connector.connectors_json ~audit_limit () in
   respond_public_read_json_value ~status:`OK request reqd json
 
+(** Authenticated, paged ID-to-name directory. Connector status remains
+    public and aggregate-only; learned people/place names and their durable
+    paths stay behind read auth. Existing name rows predate workspace scoping,
+    so the response labels that provenance instead of attributing them to the
+    currently authenticated Slack workspace. *)
+let handle_gate_connector_names state request reqd =
+  let connector =
+    match Option.map String.trim (query_param request "name") with
+    | Some name when not (String.equal name "") ->
+        Some (String.lowercase_ascii name)
+    | Some _ | None -> None
+  in
+  let scope =
+    match Option.map String.trim (query_param request "scope") with
+    | Some "channel" -> Ok (Connector_names.Channel, "channel")
+    | Some "person" -> Ok (Connector_names.Person, "person")
+    | Some unknown -> Error ("unknown scope: " ^ unknown)
+    | None -> Error "scope is required"
+  in
+  match connector, scope with
+  | None, _ ->
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (Channel_gate.error_json "name is required")
+  | Some connector, Error detail ->
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (Channel_gate.error_json detail)
+  | Some connector, Ok (scope, scope_label) ->
+      (match Channel_gate_connector.find connector with
+       | None ->
+           respond_json_value_with_cors ~status:`Not_found request reqd
+             (Channel_gate.error_json ("unknown connector: " ^ connector))
+       | Some _ ->
+           let offset = int_query_param request "offset" ~default:0 |> max 0 in
+           let limit =
+             int_query_param request "limit" ~default:100 |> max 1 |> min 500
+           in
+           let base_dir = (Mcp_server.workspace_config state).base_path in
+           let exact_ids =
+             match query_param request "ids", query_param request "id" with
+             | Some raw, _ ->
+               raw
+               |> String.split_on_char ','
+               |> List.map String.trim
+               |> List.filter (fun value -> not (String.equal value ""))
+               |> List.sort_uniq String.compare
+             | None, Some raw ->
+               let id = String.trim raw in
+               if String.equal id "" then [] else [ id ]
+             | None, None -> []
+           in
+           if List.length exact_ids > 100
+           then
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (Channel_gate.error_json "ids accepts at most 100 values")
+           else
+             let entries =
+               match exact_ids with
+               | [] -> Connector_names.entries ~base_dir ~connector ~scope
+               | ids ->
+                 List.filter_map
+                   (fun id ->
+                     Option.map
+                       (fun name -> id, name)
+                       (Connector_names.recall ~base_dir ~connector ~scope ~id))
+                   ids
+             in
+             let total = List.length entries in
+             let page = entries |> List.drop offset |> List.take limit in
+             let workspace_id =
+               if String.equal connector Channel_gate_slack_state.connector_id
+               then Channel_gate_slack_state.current_workspace_id ()
+               else None
+             in
+             respond_json_value_with_cors ~status:`OK request reqd
+               (`Assoc
+                 [ "connector_id", `String connector
+                 ; "kind", `String scope_label
+                 ; "mapping_scope", `String "unscoped_historical"
+                 ; ( "current_workspace_id"
+                   , match workspace_id with
+                     | Some value -> `String value
+                     | None -> `Null )
+                 ; "path", `String (Connector_names.path ~base_dir ~connector ~scope)
+                 ; "offset", `Int offset
+                 ; "limit", `Int limit
+                 ; "total", `Int total
+                 ; "has_more", `Bool (offset + List.length page < total)
+                 ; ( "mappings"
+                   , `List
+                       (List.map
+                          (fun (id, name) ->
+                             `Assoc [ "id", `String id; "name", `String name ])
+                          page) )
+                 ]))
+
 (** GET /api/v1/gate/connector/status?name=<connector>&audit_limit=<n>
 
     Generic connector status. [name=<connector>] is the only accepted form;
@@ -522,6 +617,11 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/gate/connectors" (fun request reqd ->
        with_public_read (fun state _req reqd ->
          handle_gate_connectors state request reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/gate/connector/names" (fun request reqd ->
+       with_read_auth (fun state _req reqd ->
+         handle_gate_connector_names state request reqd
        ) request reqd)
 
   |> Http.Router.get "/api/v1/gate/connector/status" (fun request reqd ->

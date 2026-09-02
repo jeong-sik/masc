@@ -213,6 +213,11 @@ let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
       ~channel_name ~message_id ~author_id ~author_name ~content ~mentions_bot
       ~route ~urgency
   =
+  Option.iter
+    (fun name ->
+      Connector_names.remember ~base_dir ~connector:State.channel
+        ~scope:Connector_names.Person ~id:author_id ~name ())
+    author_name;
   let surface =
     discord_attention_surface ~guild_id ~channel_id ~channel_name
   in

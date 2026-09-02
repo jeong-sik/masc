@@ -696,6 +696,7 @@ let test_transport_guarded_paths_are_not_public_read () =
          nothing. *)
     ; "/api/v1/openapi.json"
     ; "/api/v1/voice/config"
+    ; "/api/v1/gate/connector/names"
     ; "/api/v1/board/curation"
     ; "/api/v1/board/hearths"
     ; "/api/v1/board/karma/ledger"

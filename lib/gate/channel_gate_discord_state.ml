@@ -222,6 +222,7 @@ let status_json ?(audit_limit = 10) () =
           (Channel_gate_connector.connector_state_label ~available ~connected
              ~stale:false) );
       ("error", `String error);
+      ("bot_token_present", `Bool token_present);
       ("status_source", `String "in_process_gateway");
       ("gateway_state", `String (gateway_state_label gateway_state));
       ("trigger_policy", trigger_policy_json ());
@@ -276,6 +277,7 @@ let connector_json ?(audit_limit = 10) () =
       ("status_source", status |> U.member "status_source");
       ("gateway_state", status |> U.member "gateway_state");
       ("error", `String (string_member status "error"));
+      ("bot_token_present", status |> U.member "bot_token_present");
       ("binding_store_path", `String (string_member status "binding_store_path"));
       ("binding_store_read_ok", status |> U.member "binding_store_read_ok");
       ("binding_store_error", status |> U.member "binding_store_error");

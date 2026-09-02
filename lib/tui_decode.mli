@@ -371,7 +371,31 @@ type tool_snapshot = {
   ts_skill_activations : skill_activation_projection option;
 }
 
-(** A connector the gate can deliver through. *)
+type connector_connection =
+  | Connector_connected
+  | Connector_connected_unavailable
+  | Connector_disconnected
+  | Connector_offline
+  | Connector_stale
+
+type connector_binding = {
+  cb_channel_id : string;
+  cb_channel_name : string option;
+  cb_keeper_name : string;
+}
+
+type connector_name_kind =
+  | Connector_channel_name
+  | Connector_person_name
+
+type connector_name_mapping = {
+  cnm_kind : connector_name_kind;
+  cnm_id : string;
+  cnm_name : string;
+}
+
+(** A connector the gate can deliver through, including the server-owned
+    configuration and route evidence an operator needs to act on it. *)
 type connector = {
   cn_id : string;
   cn_display_name : string;
@@ -381,8 +405,53 @@ type connector = {
           be configured and unreachable, and the two call for different
           actions. *)
   cn_status : string;
+  cn_connection : connector_connection;
   cn_channel : string option;
+  cn_error : string option;
+  cn_status_source : string option;
+  cn_gateway_state : string option;
+  cn_poll_state : string option;
+  cn_endpoint : string option;
+  cn_status_path : string option;
+  cn_binding_store_path : string option;
+  cn_binding_store_read_ok : bool option;
+  cn_binding_store_error : string option;
+  cn_updated_at : string option;
+  cn_binding_source : string option;
+  cn_trigger_policy : string option;
+  cn_reply_mode : string option;
+  cn_chat_db_path : string option;
+  cn_bot_user_id : string option;
+  cn_bot_user_name : string option;
+  cn_bot_token_present : bool option;
+  cn_app_token_present : bool option;
+  cn_gate_healthy : bool option;
+  cn_pid : int option;
+  cn_guild_count : int option;
+  cn_workspace_id : string option;
+  cn_channel_names_path : string option;
+  cn_people_names_path : string option;
+  cn_name_mappings : connector_name_mapping list;
+  cn_name_mapping_scope : string option;
+  cn_names_error : string option;
+  cn_bindings : connector_binding list;
 }
+
+type connector_name_page = {
+  cnp_connector_id : string;
+  cnp_kind : connector_name_kind;
+  cnp_mapping_scope : string;
+  cnp_current_workspace_id : string option;
+  cnp_path : string;
+  cnp_has_more : bool;
+  cnp_mappings : connector_name_mapping list;
+}
+
+val decode_connector_name_page :
+  Yojson.Safe.t -> (connector_name_page, string) result
+
+val connector_with_name_pages :
+  connector -> pages:connector_name_page list -> error:string option -> connector
 
 type connector_snapshot = {
   cs_connectors : connector list;

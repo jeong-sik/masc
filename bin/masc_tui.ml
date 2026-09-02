@@ -9168,8 +9168,26 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Connectors_loaded result -> (
       match result with
       | Ok snapshot ->
+          let previous_id =
+            Option.bind state.connectors (fun previous ->
+                Option.map
+                  (fun (connector : Tui_decode.connector) -> connector.cn_id)
+                  (List.nth_opt previous.cs_connectors state.connectors_cursor))
+          in
           state.connectors <- Some snapshot;
-          state.connectors_error <- None
+          state.connectors_error <- None;
+          state.connectors_cursor <-
+            (match previous_id with
+             | None -> 0
+             | Some id ->
+                 let rec find index = function
+                   | [] -> 0
+                   | (connector : Tui_decode.connector) :: rest ->
+                       if String.equal connector.cn_id id then index
+                       else find (index + 1) rest
+                 in
+                 find 0 snapshot.cs_connectors);
+          state.connectors_binding_cursor <- 0
       | Error detail -> state.connectors_error <- Some detail)
   | Runtime_surface_loaded (generation, result) ->
       let is_current = generation = state.runtime_surface_generation in
@@ -10093,10 +10111,11 @@ let main () =
      then the server's preview validation; only a preview that passes is
      written. A failed preview keeps the operator's text out of the file
      and puts the validator's words in Recent Events. *)
-  (* Connector bind/unbind: the form is three fields, and $EDITOR is the
-     form we already have. The name field picks the connector; the rest is
-     the route's body. *)
-  let handle_connector_form ~action ~stem ~post () =
+  (* Connector bind/unbind: the highlighted transport owns the route. The
+     form edits only the route body, so its visible selection and mutation
+     target cannot disagree. *)
+  let handle_connector_form ?fixed_channel_id ~action ~connector
+      ~required_fields ~stem ~post () =
     match Masc_tui_editor.editor_command () with
     | None ->
       report_action state "error"
@@ -10121,42 +10140,93 @@ let main () =
                 | _ -> None)
             | _ -> None
           in
-          match field "name" with
-          | None -> report_action state "error" (action ^ ": \"name\" is required")
-          | Some connector -> (
-            match post ~connector ~json with
-            | Ok _ ->
-              report_action state "system" (action ^ ": ok (" ^ connector ^ ")");
-              launch_connectors_load state ~mailbox:async_messages
-            | Error detail -> report_action state "error" (action ^ ": " ^ detail)))))
+          match List.find_opt (fun key -> Option.is_none (field key)) required_fields with
+          | Some key ->
+              report_action state "error"
+                (Printf.sprintf "%s: %S is required" action key)
+          | None -> (
+              match fixed_channel_id with
+              | Some expected when field "channel_id" <> Some expected ->
+                  report_action state "error"
+                    (action ^ ": channel_id must remain the selected binding")
+              | Some _ | None -> (
+                  match post ~connector ~json with
+                  | Ok _ ->
+                      report_action state "system"
+                        (action ^ ": ok (" ^ connector ^ ")");
+                      launch_connectors_load state ~mailbox:async_messages
+                  | Error detail ->
+                      report_action state "error" (action ^ ": " ^ detail)))))
+  in
+  let selected_connector () =
+    Option.bind state.connectors (fun snapshot ->
+        List.nth_opt snapshot.cs_connectors state.connectors_cursor)
+  in
+  let selected_keeper_bindings (connector : Tui_decode.connector) =
+    match state.view, selected_keeper state with
+    | Keepers Keeper_detail, Some keeper ->
+        List.filter
+          (fun (binding : Tui_decode.connector_binding) ->
+             String.equal binding.cb_keeper_name keeper.k_name)
+          connector.cn_bindings
+    | _, _ -> []
   in
   let handle_connector_bind () =
     let host = server_peer_host in
     let port = state.port in
     let keeper_name =
-      match selected_keeper state with
-      | Some keeper -> keeper.k_name
-      | None -> ""
+      match state.view, selected_keeper state with
+      | Keepers Keeper_detail, Some keeper -> keeper.k_name
+      | _, _ -> ""
     in
-    handle_connector_form ~action:"bind"
-      ~stem:
-        (Printf.sprintf
-           "{\n  \"name\": \"discord\",\n  \"channel_id\": \"\",\n  \"keeper_name\": \"%s\"\n}\n"
-           (String.escaped keeper_name))
-      ~post:(fun ~connector ~json ->
-        Masc_tui_http.post_connector_bind ~host ~port ~connector
-          ~body_json:(Yojson.Safe.to_string json))
-      ()
+    match selected_connector () with
+    | None -> report_action state "error" "bind: select a transport first"
+    | Some selected ->
+        handle_connector_form ~action:"bind" ~connector:selected.cn_id
+          ~required_fields:[ "channel_id"; "keeper_name" ]
+          ~stem:
+            (Yojson.Safe.pretty_to_string
+               (`Assoc
+                 [ "channel_id", `String ""
+                 ; "keeper_name", `String keeper_name
+                 ])
+             ^ "\n")
+          ~post:(fun ~connector ~json ->
+            Masc_tui_http.post_connector_bind ~host ~port ~connector
+              ~body_json:(Yojson.Safe.to_string json))
+          ()
   in
   let handle_connector_unbind () =
     let host = server_peer_host in
     let port = state.port in
-    handle_connector_form ~action:"unbind"
-      ~stem:"{\n  \"name\": \"discord\",\n  \"channel_id\": \"\"\n}\n"
-      ~post:(fun ~connector ~json ->
-        Masc_tui_http.post_connector_unbind ~host ~port ~connector
-          ~body_json:(Yojson.Safe.to_string json))
-      ()
+    match selected_connector () with
+    | None -> report_action state "error" "unbind: select a transport first"
+    | Some selected ->
+        let submit ?fixed_channel_id channel_id =
+          handle_connector_form ?fixed_channel_id ~action:"unbind"
+            ~connector:selected.cn_id ~required_fields:[ "channel_id" ]
+            ~stem:
+              (Yojson.Safe.pretty_to_string
+                 (`Assoc [ "channel_id", `String channel_id ])
+               ^ "\n")
+            ~post:(fun ~connector ~json ->
+              Masc_tui_http.post_connector_unbind ~host ~port ~connector
+                ~body_json:(Yojson.Safe.to_string json))
+            ()
+        in
+        (match state.view with
+         | Keepers Keeper_detail ->
+             (match
+                List.nth_opt (selected_keeper_bindings selected)
+                  state.connectors_binding_cursor
+              with
+              | None ->
+                  report_action state "error"
+                    "unbind: select one of this Keeper's bindings with J/K"
+              | Some binding ->
+                  submit ~fixed_channel_id:binding.cb_channel_id
+                    binding.cb_channel_id)
+         | _ -> submit "")
   in
   (* A new note over the open file: $EDITOR is the form, and the editor is
      the confirmation step -- a non-zero exit or an empty content leaves the
@@ -12199,6 +12269,22 @@ and is loaded on demand through keeper_skill.
        | Some (("[" | "]") as bracket) when state.view = Tools ->
            cycle_tools_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
+       | Some ("J" | "K")
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_channels ->
+           let count =
+             match selected_connector () with
+             | None -> 0
+             | Some connector ->
+                 List.length (selected_keeper_bindings connector)
+           in
+           state.connectors_binding_cursor <-
+             (if key = Some "J" then
+                Masc_tui_scroll.cursor_down ~count
+                  state.connectors_binding_cursor
+              else
+                Masc_tui_scroll.cursor_up ~count
+                  state.connectors_binding_cursor)
        | Some "L"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_github ->
@@ -12894,6 +12980,9 @@ and is loaded on demand through keeper_skill.
             | System_logs when Option.is_some state.system_logs_detail_seq ->
                 state.system_logs_detail_scroll <-
                   max 0 (state.system_logs_detail_scroll + (direction * page))
+            | Keepers Keeper_detail when state.detail_tab = Detail_channels ->
+                state.detail_scroll <-
+                  max 0 (state.detail_scroll + (direction * page))
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
@@ -13451,6 +13540,17 @@ and is loaded on demand through keeper_skill.
                 end
                 else if state.detail_tab = Detail_identity then
                   move_identity_cursor state ~delta:1
+                else if state.detail_tab = Detail_channels then begin
+                  let count =
+                    match state.connectors with
+                    | None -> 0
+                    | Some snapshot -> List.length snapshot.cs_connectors
+                  in
+                  state.connectors_cursor <-
+                    Masc_tui_scroll.cursor_down ~count state.connectors_cursor;
+                  state.connectors_binding_cursor <- 0;
+                  state.detail_scroll <- 0
+                end
                 else state.detail_scroll <- state.detail_scroll + 1
             | Keepers Keeper_logs ->
                 state.log_scroll <-
@@ -13783,6 +13883,17 @@ and is loaded on demand through keeper_skill.
                 end
                 else if state.detail_tab = Detail_identity then
                   move_identity_cursor state ~delta:(-1)
+                else if state.detail_tab = Detail_channels then begin
+                  let count =
+                    match state.connectors with
+                    | None -> 0
+                    | Some snapshot -> List.length snapshot.cs_connectors
+                  in
+                  state.connectors_cursor <-
+                    Masc_tui_scroll.cursor_up ~count state.connectors_cursor;
+                  state.connectors_binding_cursor <- 0;
+                  state.detail_scroll <- 0
+                end
                 else if state.detail_scroll > 0 then
                   state.detail_scroll <- state.detail_scroll - 1
             | Keepers Keeper_logs ->

@@ -1585,6 +1585,21 @@ let fetch_connectors ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/gate/connectors"
 
+let fetch_connector_names ~(host : string) ~(port : int) ~(connector : string)
+    ~(kind : string) ?(ids = []) () : (Yojson.Safe.t, string) result =
+  let exact =
+    match ids with
+    | [] -> ""
+    | ids ->
+      "&ids=" ^ percent_encode_query_value (String.concat "," ids)
+  in
+  get_json ~host ~port
+    ~path:
+      (Printf.sprintf
+         "/api/v1/gate/connector/names?name=%s&scope=%s&offset=0&limit=500%s"
+         (percent_encode_query_value connector)
+         (percent_encode_query_value kind) exact)
+
 (** Fetch the workspace skills catalog (/api/v1/skills): per-skill usage
     rows and execution-plan flows for the Tools screen tracking views. *)
 let fetch_skills_catalog ~(host : string) ~(port : int) :

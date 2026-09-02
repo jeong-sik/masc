@@ -111,7 +111,7 @@ let test_a_row_near_the_tail_survives_the_bound () =
   check int "the tail clamps the anchor, not the row out of the window" 7
     (Masc_tui_scroll.normalize ~count:12 ~height:5
        (Masc_tui_scroll.ensure_leading ~cursor:11 ~lead:1 ~height:5 0));
-  check int "the clamped window still holds the row" true
+  check bool "the clamped window still holds the row" true
     (let scroll =
        Masc_tui_scroll.normalize ~count:12 ~height:5
          (Masc_tui_scroll.ensure_leading ~cursor:11 ~lead:1 ~height:5 0)

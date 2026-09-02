@@ -4940,17 +4940,74 @@ let launch_keeper_request ?promoted state ~mailbox request =
         (Keeper_chat_dispatch_blocked
            (request, "Eio switch is unavailable"))
 
+(* The joined line keeps the request identity the history row already carries,
+   so the row is rewritten rather than duplicated. [append_user_history_once]
+   matches on identity AND text, so a changed text would otherwise append a
+   second row for the same queue item. *)
+let update_queued_history_text state (request : Keeper_chat.request) =
+  let text =
+    Keeper_chat.terminal_safe_text ~preserve_newlines:true request.message
+  in
+  state.msg_history <-
+    List.map
+      (fun entry ->
+        if
+          (match entry.me_role with Message_user _ -> true | _ -> false)
+          && String.equal entry.me_request_id request.Keeper_chat.request_id
+          && String.equal entry.me_keeper_name request.keeper_name
+        then { entry with me_text = text }
+        else entry)
+      state.msg_history
+
 let queue_keeper_message state request =
   let submitted_at = Unix.gettimeofday () in
-  match Chat_queue.push state.msg_queued ~submitted_at request with
-  | Error _ as error -> error
-  | Ok (queue, waiting) ->
+  let joined =
+    if not state.coalesce_queued_input
+    then None
+    else (
+      match
+        Chat_queue.join_target state.msg_queued
+          ~keeper_name:request.Keeper_chat.keeper_name
+      with
+      | None -> None
+      | Some item ->
+        let waiting_request = item.Chat_queue.request in
+        let merged =
+          { waiting_request with
+            Keeper_chat.message =
+              waiting_request.Keeper_chat.message
+              ^ "\n"
+              ^ request.Keeper_chat.message
+          ; Keeper_chat.attachments =
+              waiting_request.Keeper_chat.attachments
+              @ request.Keeper_chat.attachments
+          }
+        in
+        (match
+           Chat_queue.replace_request state.msg_queued
+             ~request_id:merged.Keeper_chat.request_id merged
+         with
+         | Error _ -> None
+         | Ok queue -> Some (queue, merged)))
+  in
+  match joined with
+  | Some (queue, merged) ->
       state.msg_queued <- queue;
-      (* Keep one request-owned session row for recall and the later active
-         turn, but causal projection withholds it from the transcript while
-         the queue owns it. NEXT renders the queue item itself. *)
-      append_user_history_once ~submitted_at state request;
-      Ok waiting
+      update_queued_history_text state merged;
+      Ok
+        (Chat_queue.length_for_keeper queue
+           ~keeper_name:merged.Keeper_chat.keeper_name)
+  | None ->
+      (match Chat_queue.push state.msg_queued ~submitted_at request with
+       | Error _ as error -> error
+       | Ok (queue, waiting) ->
+           state.msg_queued <- queue;
+           (* Keep one request-owned session row for recall and the later
+              active turn, but causal projection withholds it from the
+              transcript while the queue owns it. NEXT renders the queue item
+              itself. *)
+           append_user_history_once ~submitted_at state request;
+           Ok waiting)
 ;;
 
 let queue_keeper_steer state ~causal_parent_request_id request =
@@ -9914,6 +9971,10 @@ let main () =
      key, and a reader who never set it sees no change. *)
   state.hints_visible <-
     Option.value (Masc_tui_config.hints_visible ~base_path) ~default:true;
+  state.coalesce_queued_input <-
+    Option.value
+      (Masc_tui_config.coalesce_queued_input ~base_path)
+      ~default:true;
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in

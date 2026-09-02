@@ -123,3 +123,12 @@ val replace_request :
 (** Edit a pending request in place while preserving intent, causal parent,
     submission sequence, submitted_at, and dispatch position. The replacement
     must retain the same request_id. *)
+
+val join_target : t -> keeper_name:string -> item option
+(** The waiting next-turn line a newly typed line for this Keeper would join,
+    or [None] when there is nothing to join.
+
+    The last one in dispatch order, so a third line joins the result of the
+    first two rather than reaching past them. A steer is never returned: it
+    was created to replace one exact operation, and folding another line into
+    it would move that causal parent. *)

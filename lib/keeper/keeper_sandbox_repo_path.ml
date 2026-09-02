@@ -109,12 +109,11 @@ let host_execution_location_json
 
 let execution_location_json ~config ~meta ~args ~cwd =
   let host_location = host_execution_location_json ~config ~meta ~args ~cwd in
-  match meta.sandbox_profile with
-  (* Phase 1: no container or remote projection exists for remote_ssh
-     yet; the execution location is the host bookkeeping bundle, and
-     dispatch itself fails closed upstream. *)
-  | Keeper_types_profile_sandbox.Remote_ssh -> host_location
-  | Keeper_types_profile_sandbox.Docker | Keeper_types_profile_sandbox.Micro_vm ->
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  (* The execution location is the host bookkeeping bundle: the only
+     keeper-visible namespace this side has for a tree the endpoint owns. *)
+  | Keeper_types_profile_sandbox.Endpoint_owned -> host_location
+  | Keeper_types_profile_sandbox.Shared_mount ->
     let host_root = normalize_path (playground_root_no_create ~config ~meta) in
     let visible_root =
       Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta

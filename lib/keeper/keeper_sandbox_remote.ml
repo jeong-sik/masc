@@ -89,6 +89,10 @@ type t =
   ; env_allowlist : string list
   ; connect_timeout_sec : int
   ; gh_config_dir : string
+  ; injected_env : (string * string) list
+    (* Server-authored env beyond the two every lane injects: what the
+       endpoint's runtime was given and must be told about (a guest's
+       config mount). Never caller-supplied, so never under the allowlist. *)
   ; base_path : string
   ; keeper_name : string
   ; shared : shared_state
@@ -112,6 +116,7 @@ let of_openssh ~base_path ~keeper_name (o : openssh) =
   ; env_allowlist = o.endpoint.env_allowlist
   ; connect_timeout_sec = o.endpoint.connect_timeout_sec
   ; gh_config_dir = Filename.concat (keeper_root ~remote_root ~keeper_name) ".config/gh"
+  ; injected_env = []
   ; base_path
   ; keeper_name
   ; shared =
@@ -125,6 +130,7 @@ let of_container_exec
       ~keeper_name
       ~remote_root
       ~gh_config_dir
+      ~injected_env
       ~env_allowlist
       ~connect_timeout_sec
       ~max_concurrent_sessions
@@ -136,6 +142,7 @@ let of_container_exec
   ; env_allowlist
   ; connect_timeout_sec
   ; gh_config_dir
+  ; injected_env
   ; base_path
   ; keeper_name
   ; shared = shared_state ~base_path ~name:c.container_name ~max_concurrent_sessions
@@ -290,7 +297,8 @@ let wire_env t env =
    a frame runs identity-blind. A frame has no tty, so a git that wants to
    prompt for credentials must fail instead of hanging the call. *)
 let injected_env t =
-  [ "GH_CONFIG_DIR", t.gh_config_dir; "GIT_TERMINAL_PROMPT", "0" ]
+  let lane = [ "GH_CONFIG_DIR", t.gh_config_dir; "GIT_TERMINAL_PROMPT", "0" ] in
+  lane @ List.filter (fun (name, _) -> not (List.mem_assoc name lane)) t.injected_env
 ;;
 
 (* ── Result trailer ──────────────────────────────────────────────────── *)

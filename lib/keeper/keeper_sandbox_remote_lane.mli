@@ -1,5 +1,14 @@
 (** The remote lane's endpoint for a keeper, by profile. *)
 
+val microvm_endpoint :
+  ?timeout_sec:float ->
+  Keeper_turn_sandbox_runtime.t ->
+  (Keeper_sandbox_remote.t, string) result
+(** The turn runtime's guest as an endpoint, started if it is not up and
+    (when preflight is enabled) checked. The Execute target for a microvm
+    keeper acquires its endpoint through this on each call, so a guest that
+    went away between calls is booted again rather than reported dead. *)
+
 val endpoint :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   config:Workspace.config ->

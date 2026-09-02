@@ -2,9 +2,12 @@
 
     Lazily ensures one hardened container per keeper (adopting what a previous
     turn or server left running) and reuses it across compatible tool calls.
-    The runtime keeps the keeper playground mounted read-write while the root
-    filesystem stays read-only. Turn cleanup drops the handle without removing
-    the container; the keeper's shutdown finalization removes it. *)
+    A Docker container mounts the keeper playground read-write and takes
+    commands by [docker exec]; a microvm guest owns its tree on a work volume
+    and takes commands through the remote lane, so the exec entrypoints here
+    refuse it. The root filesystem stays read-only either way. Turn cleanup
+    drops the handle without removing the container; the keeper's shutdown
+    finalization removes it. *)
 
 type t
 
@@ -38,12 +41,14 @@ val microvm_remote_endpoint_of_running :
 (** The running guest as a remote endpoint (RFC-0400): [container exec] into
     [container_name] delivering the framed request to the mounted shim, the
     work volume as the remote root, the mounted identity snapshot as
-    [GH_CONFIG_DIR]. Refused for a non-microvm keeper. Pure. *)
+    [GH_CONFIG_DIR], and the config env naming the mounted config. Refused
+    for a non-microvm keeper. Pure. *)
 
 val microvm_remote_endpoint :
   ?timeout_sec:float -> t -> (Keeper_sandbox_remote.t, string) result
-(** {!microvm_remote_endpoint_of_running} after ensuring the guest is up and
-    the keeper's root exists on the work volume. *)
+(** {!microvm_remote_endpoint_of_running} after ensuring the guest is up. The
+    keeper's root on the work volume is made at boot, so an adopted guest is
+    already an endpoint. *)
 
 module For_testing : sig
   val create_minimal

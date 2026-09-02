@@ -472,20 +472,35 @@ let docker_workspace_state_mount_args ~base_path ~container_root =
   |> List.concat_map (fun spec -> [ "-v"; spec ])
 ;;
 
-let docker_config_env_args ~base_path ~container_root =
+(* The env that names the mounted config to a keeper's process. One shape
+   for both lanes: the Docker lane spells it as [--env] argv on every exec,
+   and the microvm remote lane injects the same pairs into each shim request
+   (the guest's shim allowlists them by name, from {!config_env_names}). *)
+let config_env ~container_base_path ~container_config_root =
+  [ "MASC_BASE_PATH", container_base_path
+  ; "MASC_BASE_PATH_INPUT", container_base_path
+  ; "MASC_CONFIG_DIR", container_config_root
+  ]
+;;
+
+let config_env_names =
+  List.map fst (config_env ~container_base_path:"" ~container_config_root:"")
+;;
+
+let docker_config_env ~base_path ~container_root =
   let host_config_root = docker_config_host_root ~base_path in
   if not (docker_config_available host_config_root)
   then []
   else
-    let container_config_root = docker_config_container_root ~container_root in
-    let container_base_path = container_masc_runtime_base ~container_root in
-    [ "--env"
-    ; "MASC_BASE_PATH=" ^ container_base_path
-    ; "--env"
-    ; "MASC_BASE_PATH_INPUT=" ^ container_base_path
-    ; "--env"
-    ; "MASC_CONFIG_DIR=" ^ container_config_root
-    ]
+    config_env
+      ~container_base_path:(container_masc_runtime_base ~container_root)
+      ~container_config_root:(docker_config_container_root ~container_root)
+;;
+
+let docker_config_env_args ~base_path ~container_root =
+  List.concat_map
+    (fun (name, value) -> [ "--env"; name ^ "=" ^ value ])
+    (docker_config_env ~base_path ~container_root)
 ;;
 
 (* The stores this container was actually given, named by warrant. A keeper that
@@ -515,18 +530,6 @@ let docker_sandbox_env_args ~base_path ~container_root =
   @ docker_git_credential_env_args ()
   @ docker_config_env_args ~base_path ~container_root
   @ docker_mounted_stores_env_args ~base_path ~container_root
-;;
-
-(* Which env a keeper's exec carries, by lane. An env may name only what
-   was mounted, and the two lanes are given different mounts: the microvm
-   guest has config alone, so it takes the config env alone. It needs that
-   one -- the config mount lands at the runtime base, outside the playground
-   the guest works in, so nothing reaches it by walking up from the working
-   directory. *)
-let sandbox_exec_env_args ~microvm ~base_path ~container_root =
-  if microvm
-  then docker_config_env_args ~base_path ~container_root
-  else docker_sandbox_env_args ~base_path ~container_root
 ;;
 
 let docker_identity_dir ~host_root = Filename.concat host_root ".docker-identity"

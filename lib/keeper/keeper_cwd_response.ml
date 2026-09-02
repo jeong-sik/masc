@@ -9,14 +9,12 @@ let docker ~host_cwd ~container_cwd =
 
 let of_sandbox ~(sandbox : Keeper_sandbox.t) ~host_cwd
     ~container_cwd_for_docker =
-  match sandbox.backend with
-  (* Phase 1: no remote<->host cwd translation exists yet; the
-     keeper-visible cwd is the host bookkeeping path, and execution
-     dispatch fails closed upstream. *)
-  | Keeper_sandbox.Remote_ssh -> local ~host_cwd
-  (* Both guest backends answer with a container-side cwd; the shape of the
-     reply does not depend on what runs the guest. *)
-  | Keeper_sandbox.Docker | Keeper_sandbox.Micro_vm ->
+  match Keeper_sandbox.tree_location_of_backend sandbox.backend with
+  (* The keeper-visible cwd is the host bookkeeping path; the remote lane
+     translates it to the endpoint's spelling on the way out and back. *)
+  | Keeper_types_profile_sandbox.Endpoint_owned -> local ~host_cwd
+  (* A shared mount has a guest-side spelling for the same directory. *)
+  | Keeper_types_profile_sandbox.Shared_mount ->
     docker ~host_cwd ~container_cwd:container_cwd_for_docker
 
 let profile_independent_cwd ~container_root ~host_cwd =

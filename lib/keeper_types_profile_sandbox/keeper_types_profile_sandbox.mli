@@ -43,7 +43,7 @@ type tree_location =
   | Endpoint_owned
 
 val tree_location_of_profile : sandbox_profile -> tree_location
-(** Docker and Micro_vm: [Shared_mount]. Remote_ssh: [Endpoint_owned]. *)
+(** Docker: [Shared_mount]. Micro_vm and Remote_ssh: [Endpoint_owned]. *)
 
 val backend_unimplemented_message : sandbox_profile -> string
 (** The refusal a caller must surface when the declared profile has no

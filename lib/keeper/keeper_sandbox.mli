@@ -77,6 +77,12 @@ end
 
 val backend_to_string : backend -> string
 
+val tree_location_of_backend : backend -> Keeper_types_profile_sandbox.tree_location
+(** Where the backend's tree lives, which decides every projection below and
+    every consumer's host-vs-remote branch: a Docker container mounts the
+    host playground ([Shared_mount]); a microvm guest and an OpenSSH host
+    own their tree ([Endpoint_owned]). *)
+
 (** {1 Path resolution} *)
 
 (** [backend_of_config_agent ~config ~agent_name] resolves the keeper's

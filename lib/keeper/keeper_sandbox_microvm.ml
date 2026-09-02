@@ -13,9 +13,11 @@
     measured before guests were adopted across turns, and stayed here after
     the number stopped being true.
 
-    This module builds the command and nothing else. Dispatch still refuses
-    [Micro_vm] until a later change routes it here, so the argv is covered by
-    tests before it can run anything. *)
+    This module builds the command and nothing else; [Keeper_turn_sandbox_runtime]
+    runs the boot and lifecycle argv, and the remote lane
+    ([Keeper_sandbox_remote]) drives the guest's shim over [container exec].
+    The guest owns its working tree on a per-keeper volume (RFC-0400): the
+    host playground is never mounted into it. *)
 
 let command_argv () = [ "container" ]
 
@@ -39,29 +41,21 @@ let command_argv () = [ "container" ]
     is stated here so a reader does not have to infer it from an absence. *)
 let unsupported_docker_flags = [ "--security-opt"; "--pids-limit" ]
 
-let run_argv
-      ~container_name
-      ~container_root
-      ~container_cwd
-      ~host_root
-      ~image
-      ~network_args
-      ~uid
-      ~gid
-      ~env_args
-      ~memory
-  =
-  command_argv ()
-  @ [ "run"; "--rm"; "--name"; container_name ]
-  @ [ "-i"; "--user"; Printf.sprintf "%d:%d" uid gid ]
-  @ env_args
-  @ [ "--cap-drop"; "ALL"; "--read-only" ]
-  @ [ "--memory"; memory ]
-  @ [ "--volume"; host_root ^ ":" ^ container_root ]
-  @ [ "--workdir"; container_cwd ]
-  @ network_args
-  @ [ image; "bash"; "-l"; "-s" ]
-;;
+(** Guest mount point of the per-keeper work volume. The keeper's working
+    tree lives here, on ext4, and this path is the remote lane's
+    [remote_root] for the guest: the same role [\[exec.ssh.endpoints\]
+    .remote_root] plays for an OpenSSH endpoint.
+
+    Why a volume and not the virtiofs share: Apple's virtiofs opens an
+    [O_PATH] descriptor on the host for every inode the guest touches and
+    closes it only on [FUSE_FORGET], so a host descriptor -- a host vnode --
+    is pinned per file. A build that writes 200,000 files pins 200,000
+    vnodes against a [kern.maxvnodes] of 263,168, and a full table turns
+    file-backed page faults into SIGBUS; that panicked the host three times
+    between 2026-08-30 and 2026-09-01. Measured on container 1.3.1 writing
+    20,000 files: ext4 volume 26 -> 26 host descriptors, virtiofs 26 ->
+    20,027. *)
+let work_volume_guest_root = "/masc-work"
 
 (** What [container] is told about the network.
 
@@ -256,16 +250,14 @@ let image_present ~image ~timeout_sec =
    Deliberately absent against the Docker turn argv, stated so a reader
    does not infer parity: seccomp / --security-opt / --pids-limit
    (container rejects them; the guest kernel is the boundary), the
-   workspace-state mounts, and the /etc/passwd identity mounts
-   ([--user uid:gid] is passed directly).
+   workspace-state mounts, the /etc/passwd identity mounts ([--user
+   uid:gid] is passed directly), and the host playground itself -- the
+   guest's tree is its work volume, which arrives in [mount_args].
 
    [mount_args] carries what the caller projects -- config, GitHub
-   identity, secret files and --env-file. These were absent because they
-   had not been wired, not because container refuses them: measured
-   2026-08-28 against masc-keeper-sandbox:local, a guest reads through
-   [-v host:container:ro] and takes [--env-file], both in Docker's own
-   spelling. A keeper that pushes to GitHub or reads a connector credential
-   needs them, and edgar.a.poe on microvm had neither. *)
+   identity, the work volume and the shim. Measured 2026-08-28 against
+   masc-keeper-sandbox:local, a guest reads through [-v host:container:ro]
+   and takes [--env-file], both in Docker's own spelling. *)
 
 let turn_start_argv
       ~container_name
@@ -274,8 +266,6 @@ let turn_start_argv
       ~gid
       ~memory
       ~cpus
-      ~host_root
-      ~container_root
       ~network_args
       ~mount_args
       ~image
@@ -289,9 +279,8 @@ let turn_start_argv
   @ (match cpus with
      | Some count -> [ "--cpus"; count ]
      | None -> [])
-  @ [ "--volume"; host_root ^ ":" ^ container_root ]
   @ mount_args
-  @ [ "--workdir"; container_root ]
+  @ [ "--workdir"; work_volume_guest_root ]
   @ network_args
   @ [ image; "tail"; "-f"; "/dev/null" ]
 ;;
@@ -314,41 +303,7 @@ let delete_force_argv ~container_name =
   command_argv () @ [ "delete"; "--force"; container_name ]
 ;;
 
-(** Build output lives on a block device, not on the virtiofs share.
-
-    {b Why.} Apple's virtiofs opens an [O_PATH] descriptor on the host for
-    every inode the guest touches and closes it only on [FUSE_FORGET], which
-    arrives when the guest kernel evicts the dentry. A host descriptor pins a
-    host vnode, so a build that writes 200,000 files pins 200,000 vnodes --
-    and [kern.maxvnodes] is 263,168 by default. When the table fills with
-    nothing reclaimable, [vnode_create] fails, file-backed page faults become
-    SIGBUS, and a SIGBUS in launchd is a kernel panic. That happened three
-    times between 2026-08-30 and 2026-09-01.
-
-    {b Measured} on macOS 26.6.1 / M3 Max with container CLI 1.3.1, writing
-    20,000 files and counting host descriptors on the VM process:
-
-    - ext4 volume ([/dev/vdX]): 26 -> 26. The host holds one [volume.img].
-    - virtiofs bind mount: 26 -> 20,027. One descriptor per inode, exactly.
-    - [_build] symlinked onto the ext4 volume: 59 -> 61.
-
-    Reclaiming without a restart was tried and does not work: writing
-    [/proc/sys/vm/drop_caches] to force [FUSE_FORGET] is denied under
-    [--cap-drop ALL]. Deleting the tree does release the descriptors
-    (20,027 -> 59), but that is the build cache the directory exists to hold.
-
-    {b Why a symlink and not [DUNE_BUILD_DIR].} An absolute value is shared by
-    every checkout in the playground, so two builds would write the same
-    directory. A relative value that escapes the workspace is refused by dune
-    ("path outside the workspace", measured on dune 3.24.1). The symlink binds
-    per checkout, needs no dune-specific knowledge, and covers every tool that
-    writes [_build].
-
-    The link is created on the host and points at a guest path, so it dangles
-    when read from macOS. That is intended: the host never builds, and the
-    host-side readers under [Playground_paths] read sources, not build
-    output. *)
-let build_volume_guest_root = "/masc-build"
+(* ── The work volume and the shim (RFC-0400) ────────────────────────── *)
 
 (** Volume names reach [container] as an argument and become a directory name
     under its state directory, so a name outside this set is refused rather
@@ -362,27 +317,9 @@ let valid_volume_segment segment =
          | _ -> false)
        segment
 
-let build_volume_name ~keeper_name =
-  if valid_volume_segment keeper_name
-  then Ok ("masc-keeper-build-" ^ keeper_name)
-  else Error ("unsupported keeper name for a build volume: " ^ keeper_name)
-;;
-
-let build_volume_create_argv ~volume_name ~size =
+let volume_create_argv ~volume_name ~size =
   command_argv () @ [ "volume"; "create"; "-s"; size; volume_name ]
 ;;
-
-let build_volume_mount_args ~volume_name =
-  [ "--volume"; volume_name ^ ":" ^ build_volume_guest_root ]
-;;
-
-(* ── The work volume and the shim (RFC-0400) ────────────────────────── *)
-
-(** Guest mount point of the per-keeper work volume. The keeper's working
-    tree lives here, on ext4, and this path is the remote lane's
-    [remote_root] for the guest: the same role [\[exec.ssh.endpoints\]
-    .remote_root] plays for an OpenSSH endpoint. *)
-let work_volume_guest_root = "/masc-work"
 
 let work_volume_name ~keeper_name =
   if valid_volume_segment keeper_name
@@ -415,9 +352,17 @@ let shim_mount_args ~host_dir =
 ;;
 
 (** The config the host writes for the guest's shim: the jail root is the
-    work volume, and the payload PATH is the image's. *)
+    work volume, the payload PATH is the image's, and the env allowlist
+    names the config env the endpoint injects with every request
+    ({!Keeper_sandbox_runtime.config_env_names}) -- the shim drops any
+    request env it was not told to accept, and the guest is given the
+    config mount, so it must be told the names that point at it. *)
 let shim_config_content ~payload_path =
-  Printf.sprintf "remote_root=%s\npath=%s\n" work_volume_guest_root payload_path
+  Printf.sprintf
+    "remote_root=%s\npath=%s\nenv_allowlist=%s\n"
+    work_volume_guest_root
+    payload_path
+    (String.concat "," Keeper_sandbox_runtime.config_env_names)
 ;;
 
 (** What the guest endpoint declares to the remote runner. No caller env
@@ -429,62 +374,7 @@ let remote_env_allowlist : string list = []
 let remote_connect_timeout_sec = 10
 let remote_max_concurrent_sessions = 8
 
-(** A checkout's build directory on the volume.
-
-    The playground-relative path is flattened with [:] so the target needs no
-    parent directories -- the guest cannot [mkdir -p] through a symlink whose
-    parent is missing, and the host cannot write into the disk image at all.
-    A path segment already containing [:] would make two checkouts share one
-    build directory, so it is refused instead. *)
-let build_link_separator = ':'
-
-let build_link_target ~playground_relative =
-  let segments = String.split_on_char '/' playground_relative in
-  let empty = List.exists (fun s -> String.equal s "") segments in
-  let collides = String.contains playground_relative build_link_separator in
-  if List.is_empty segments || empty
-  then Error ("empty path segment in playground path: " ^ playground_relative)
-  else if collides
-  then
-    Error
-      (Printf.sprintf
-         "playground path contains %c, which the build link uses as a separator: %s"
-         build_link_separator
-         playground_relative)
-  else
-    Ok
-      (Filename.concat
-         build_volume_guest_root
-         (String.concat (String.make 1 build_link_separator) segments))
-;;
-
-(** What [_build] is right now, as far as the plan cares. *)
-type build_link_state =
-  | Build_absent
-  | Build_symlink of string
-  | Build_real_directory
-
-type build_link_plan =
-  | Link_create of string
-  | Link_retarget of string
-  | Link_already_correct
-  | Link_refused_real_directory
-
-(** Deciding is separate from acting so the refusal is testable.
-
-    A real [_build] is not deleted. It holds build output this module did not
-    create, and silently discarding it to install a link would trade a vnode
-    problem for lost work; the caller reports it and leaves the checkout on
-    virtiofs. Retargeting a stale link is different -- removing a symlink
-    removes no data. *)
-let plan_build_link ~target = function
-  | Build_absent -> Link_create target
-  | Build_symlink existing when String.equal existing target -> Link_already_correct
-  | Build_symlink _ -> Link_retarget target
-  | Build_real_directory -> Link_refused_real_directory
-;;
-
-(* ── Provisioning the build volume ─────────────────────────────────── *)
+(* ── Provisioning the work volume ──────────────────────────────────── *)
 
 (** Volume ids in a [container volume list --format json] payload. *)
 let volume_names_of_json = function
@@ -513,7 +403,7 @@ type volume_probe_outcome =
     so a 1 is confirmed against the listing rather than trusted. This mirrors
     [classify_image_probe], and for the same reason: treating an ambiguous
     exit code as "absent" would make provisioning try to create a volume that
-    already holds a keeper's build cache. *)
+    already holds a keeper's working tree. *)
 let classify_volume_probe ~volume_name ~inspect ~listing =
   let described label (status, stdout, stderr) =
     Printf.sprintf
@@ -567,33 +457,19 @@ let volume_probe ~volume_name ~timeout_sec =
     "already exists" -- so existence is settled by the probe above rather than
     by reading that message. The size is a ceiling: the image is sparse, and
     4 GiB nominal measured 84 MB on disk. *)
-type volume_kind =
-  | Build_volume
-  | Work_volume
-
-let volume_kind_label = function
-  | Build_volume -> "build"
-  | Work_volume -> "work"
-;;
-
-let ensure_volume ~kind ~volume_name ~size ~timeout_sec =
+let ensure_work_volume ~volume_name ~size ~timeout_sec =
   match volume_probe ~volume_name ~timeout_sec with
   | Volume_present -> Ok `Already_present
   | Volume_probe_failed message ->
-    Error
-      (Printf.sprintf
-         "microvm_%s_volume_probe_failed: %s"
-         (volume_kind_label kind)
-         message)
+    Error (Printf.sprintf "microvm_work_volume_probe_failed: %s" message)
   | Volume_absent ->
-    let argv = build_volume_create_argv ~volume_name ~size in
+    let argv = volume_create_argv ~volume_name ~size in
     (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
      | Unix.WEXITED 0, _, _ -> Ok `Created
      | status, stdout, stderr ->
        Error
          (Printf.sprintf
-            "microvm_%s_volume_create_failed: %s (%s; %s)"
-            (volume_kind_label kind)
+            "microvm_work_volume_create_failed: %s (%s; %s)"
             volume_name
             (match status with
              | Unix.WEXITED code -> Printf.sprintf "exit %d" code
@@ -602,212 +478,16 @@ let ensure_volume ~kind ~volume_name ~size ~timeout_sec =
             (output_for_log ~stdout ~stderr)))
 ;;
 
-let ensure_build_volume = ensure_volume ~kind:Build_volume
+(** The keeper's root on the work volume, created inside the guest.
 
-(* ── Binding a checkout's _build to the volume ─────────────────────── *)
+    The host cannot create it: it lives inside the volume's ext4 image. The
+    volume root is initially owned by root, and Apple Container's user
+    namespace refuses even guest root changing a mode afterwards, so the
+    directory is made as root with the mode it will keep. [-m] applies only
+    to a newly created directory; an existing keeper-owned root is untouched.
+    Idempotent. *)
+let work_root_dir_mode = "0777"
 
-(** What [_build] is on the host right now.
-
-    Anything that is neither absent nor a symlink -- a directory, but also a
-    plain file -- reads as [Build_real_directory] so the plan refuses it. The
-    conservative reading is the safe one: the only action taken on that answer
-    is to leave the path alone. *)
-let build_link_state_of_path path =
-  match Unix.lstat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Build_absent
-  | exception Unix.Unix_error _ -> Build_real_directory
-  | { Unix.st_kind = Unix.S_LNK; _ } ->
-    (match Unix.readlink path with
-     | target -> Build_symlink target
-     | exception Unix.Unix_error _ -> Build_real_directory)
-  | _ -> Build_real_directory
-;;
-
-(** Carry out one plan.
-
-    The link points at a guest path, so on the host it dangles by
-    construction. [Unix.symlink] does not care, and the host never follows it:
-    the readers under [Playground_paths] read sources, not build output. *)
-let apply_build_link ~path plan =
-  match plan with
-  | Link_already_correct -> Ok `Unchanged
-  | Link_create target ->
-    (match Unix.symlink target path with
-     | () -> Ok `Linked
-     | exception Unix.Unix_error (err, _, _) ->
-       Error (Printf.sprintf "could not link %s: %s" path (Unix.error_message err)))
-  | Link_retarget target ->
-    (match
-       Unix.unlink path;
-       Unix.symlink target path
-     with
-     | () -> Ok `Relinked
-     | exception Unix.Unix_error (err, _, _) ->
-       Error (Printf.sprintf "could not relink %s: %s" path (Unix.error_message err)))
-  | Link_refused_real_directory ->
-    Error
-      (Printf.sprintf
-         "%s is a real directory holding build output this code did not           create; it is left on the virtiofs share rather than deleted. Next:           remove or move it by hand if the build cache is not wanted, and the           link is installed on the following turn."
-         path)
-;;
-
-(* ── Finding the checkouts that build ──────────────────────────────── *)
-
-(** How far below a keeper's playground a checkout is looked for.
-
-    Observed layouts put them at depth 1 ([polisher/masc-t362]) and depth 2
-    ([lane-smith/repos/wt-370]). Three leaves room for one more level without
-    turning this into a whole-tree walk. *)
-let build_root_scan_depth = 3
-
-(** A checkout is a directory holding [dune-project].
-
-    That is the marker for the build output this addresses: [_build] is
-    dune's name and dune's alone. Other ecosystems pin host descriptors the
-    same way through their own output directories -- [node_modules],
-    [target], [dist] -- and are {i not} handled here. The mechanism carries
-    over unchanged; only the marker and the directory name differ. Naming
-    that gap is deliberate, so a reader does not read this as covering every
-    keeper. *)
-let build_root_marker = "dune-project"
-
-let build_output_dir_name = "_build"
-
-(** Directories skipped rather than descended.
-
-    [_build] because it is the thing being moved and holds the file counts
-    that make a walk expensive -- one measured at 61,602 entries. [.git]
-    because nothing under it builds. *)
-let build_scan_skipped = [ build_output_dir_name; ".git" ]
-
-let build_roots_under ~playground_root =
-  let rec walk dir depth acc =
-    if depth > build_root_scan_depth
-    then acc
-    else (
-      let acc =
-        if Sys.file_exists (Filename.concat dir build_root_marker)
-        then dir :: acc
-        else acc
-      in
-      match Sys.readdir dir with
-      | exception Sys_error _ -> acc
-      | entries ->
-        Array.sort String.compare entries;
-        Array.fold_left
-          (fun acc entry ->
-            if List.exists (String.equal entry) build_scan_skipped
-            then acc
-            else (
-              let child = Filename.concat dir entry in
-              (* [lstat], not [stat]: a symlink is never followed, which keeps
-                 the walk from looping and from descending through the very
-                 links this module installs. *)
-              match Unix.lstat child with
-              | { Unix.st_kind = Unix.S_DIR; _ } -> walk child (depth + 1) acc
-              | _ | (exception Unix.Unix_error _) -> acc))
-          acc
-          entries)
-  in
-  match Unix.lstat playground_root with
-  | { Unix.st_kind = Unix.S_DIR; _ } -> List.rev (walk playground_root 0 [])
-  | _ | (exception Unix.Unix_error _) -> []
-;;
-
-(** The path of [dir] relative to [playground_root], or [None] when it is not
-    below it. *)
-let playground_relative ~playground_root dir =
-  let root =
-    let n = String.length playground_root in
-    if n > 1 && Char.equal playground_root.[n - 1] '/'
-    then String.sub playground_root 0 (n - 1)
-    else playground_root
-  in
-  let root_slash = root ^ "/" in
-  let n = String.length root_slash in
-  if String.length dir > n && String.equal (String.sub dir 0 n) root_slash
-  then Some (String.sub dir n (String.length dir - n))
-  else None
-;;
-
-type build_link_row =
-  { path : string
-  ; target : string option
-  ; outcome : ([ `Linked | `Relinked | `Unchanged ], string) result
-  }
-
-(** Point every checkout's [_build] at the volume, and report each one.
-
-    A row per checkout rather than a single verdict: one refusal must not hide
-    the checkouts that were linked, and the caller has to be able to say which
-    one stayed on the share. [target] carries the guest path so the caller can
-    create it -- see {!build_target_mkdir_argv} for why that is a separate
-    step. *)
-let ensure_build_links ~playground_root =
-  build_roots_under ~playground_root
-  |> List.map (fun root ->
-    let path = Filename.concat root build_output_dir_name in
-    match playground_relative ~playground_root root with
-    | None ->
-      { path
-      ; target = None
-      ; outcome = Error (Printf.sprintf "%s is not below %s" root playground_root)
-      }
-    | Some relative ->
-      (match build_link_target ~playground_relative:relative with
-       | Error message -> { path; target = None; outcome = Error message }
-       | Ok target ->
-         { path
-         ; target = Some target
-         ; outcome =
-             apply_build_link ~path (plan_build_link ~target (build_link_state_of_path path))
-         }))
-;;
-
-(** What each checkout's [_build] is, without changing any of it.
-
-    The status surface needs the same walk [ensure_build_links] does but must
-    not act: an operator opening a tab should not install links as a side
-    effect of looking. A checkout still holding a real [_build] is the row
-    that matters -- it is the one still writing to the virtiofs share, and
-    the one a person has to clear by hand. *)
-let observe_build_links ~playground_root =
-  build_roots_under ~playground_root
-  |> List.map (fun root ->
-    let path = Filename.concat root build_output_dir_name in
-    path, build_link_state_of_path path)
-;;
-
-(** Create the link targets inside the guest.
-
-    Measured, and the reason this step exists: dune does not create the
-    directory a [_build] symlink points at. It lstats [_build], sees something
-    there, and opens [_build/.lock] straight away --
-
-    {v Error: open(_build/.lock): No such file or directory v}
-
-    The host cannot create it either, because it lives inside the volume's
-    ext4 image. The volume root is initially owned by root, so creation runs
-    as root with an explicit writable mode. [-m] applies only to newly created
-    directories: existing Keeper-owned targets remain untouched, which matters
-    because Apple Container's user namespace refuses even guest root changing
-    their mode. One command covers every target and is idempotent. *)
-let build_target_dir_mode = "0777"
-
-let build_target_mkdir_argv ~container_name ~targets =
-  exec_argv
-    ~container_name
-    ~uid:0
-    ~gid:0
-    ~container_cwd:build_volume_guest_root
-    ~stdin:false
-    ~command_argv:("mkdir" :: "-p" :: "-m" :: build_target_dir_mode :: targets)
-;;
-
-(** The keeper's root on the work volume, created the same way and for the
-    same reason: the volume root is root-owned, and the user namespace
-    refuses a later chmod, so the directory is made as root with the mode it
-    will keep. Idempotent. *)
 let keeper_work_root_mkdir_argv ~container_name ~keeper_name =
   exec_argv
     ~container_name
@@ -816,20 +496,7 @@ let keeper_work_root_mkdir_argv ~container_name ~keeper_name =
     ~container_cwd:work_volume_guest_root
     ~stdin:false
     ~command_argv:
-      [ "mkdir"; "-p"; "-m"; build_target_dir_mode; keeper_work_root ~keeper_name ]
-;;
-
-(** Targets that a build will write through, from the rows above.
-
-    A refused checkout contributes nothing: it keeps its real [_build] on the
-    share, so there is no volume directory for it to need. *)
-let build_link_targets_to_create rows =
-  List.filter_map
-    (fun row ->
-      match row.outcome, row.target with
-      | Ok (`Linked | `Relinked | `Unchanged), Some target -> Some target
-      | _ -> None)
-    rows
+      [ "mkdir"; "-p"; "-m"; work_root_dir_mode; keeper_work_root ~keeper_name ]
 ;;
 
 (** Label value distinguishing a keeper-lifetime guest from turn

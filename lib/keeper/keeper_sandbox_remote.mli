@@ -39,13 +39,18 @@ val of_container_exec :
   keeper_name:string ->
   remote_root:string ->
   gh_config_dir:string ->
+  injected_env:(string * string) list ->
   env_allowlist:string list ->
   connect_timeout_sec:int ->
   max_concurrent_sessions:int ->
   container_exec ->
   t
 (** A guest endpoint. [remote_root] is the guest path of the work volume and
-    [gh_config_dir] the guest path of the mounted GitHub identity snapshot. *)
+    [gh_config_dir] the guest path of the mounted GitHub identity snapshot.
+    [injected_env] is server-authored env sent with every request beyond
+    [GH_CONFIG_DIR] and [GIT_TERMINAL_PROMPT] (the guest's config mount);
+    the guest's shim must allowlist those names in its config for them to
+    reach the payload. *)
 
 val name : t -> string
 (** Endpoint name for logs and error codes: the registry key for OpenSSH,
@@ -56,6 +61,10 @@ val remote_keeper_root : t -> string
 (** [<remote_root>/<sanitized keeper name>]. *)
 
 val transport : t -> transport
+
+val injected_env : t -> (string * string) list
+(** The server-authored env every request carries: [GH_CONFIG_DIR] and
+    [GIT_TERMINAL_PROMPT], then the endpoint's own injected pairs. *)
 
 val keeper_root : remote_root:string -> keeper_name:string -> string
 

@@ -250,7 +250,7 @@ let shell_quote value =
 ;;
 
 let replace_remote_command ssh argv_command =
-  match List.rev (Keeper_sandbox_ssh.ssh_argv ssh) with
+  match List.rev (Keeper_sandbox_remote.transport_argv ssh) with
   | _fixed :: rest -> List.rev (argv_command :: rest)
   | [] -> [ "ssh"; argv_command ]
 ;;

@@ -146,7 +146,7 @@ type config =
   ; env_allowlist : string list
   }
 
-let config_env_var = "MASC_EXEC_SHIM_CONFIG"
+let config_env_var = Exec_ssh_protocol.shim_config_env_var
 let default_config_path = "/etc/masc-exec-shim.conf"
 
 let parse_config content =

@@ -28,6 +28,8 @@ type probe =
 
 let protocol_version = 2
 
+let shim_config_env_var = "MASC_EXEC_SHIM_CONFIG"
+
 let trailer_wrapper_key = "masc_exec_result"
 
 let rs = '\x1e'

@@ -201,6 +201,13 @@ val parse_probe : string -> (probe, string) result
 (** [parse_probe] fails with [remote_ssh_transport_error] on invalid
     JSON or missing/mistyped fields. *)
 
+val shim_config_env_var : string
+(** [= "MASC_EXEC_SHIM_CONFIG"]. The one environment entry the shim reads for
+    itself: where its config file is, when not at the default
+    [/etc/masc-exec-shim.conf]. A transport that cannot write [/etc] on the
+    endpoint (an Apple [container] guest with a read-only root) sets it on the
+    shim's own process; it is never part of the payload environment. *)
+
 val probe_major_compatible : want:string -> string -> bool
 (** [probe_major_compatible ~want version] is [true] iff the numeric
     major prefix of [version] equals [want] parsed as a number:

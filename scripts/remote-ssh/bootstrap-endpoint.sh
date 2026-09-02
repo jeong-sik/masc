@@ -4,7 +4,7 @@
 # Provision any Linux box (Vultr / AWS / Azure / GCP / a bare container) as a
 # masc remote_ssh endpoint, using only ssh + scp. The script drives the exact
 # contract the server's preflight enforces (perform_preflight in
-# lib/keeper/keeper_sandbox_ssh.ml):
+# lib/keeper/keeper_sandbox_remote.ml):
 #
 #   1. masc-exec-shim on PATH        (static binary, arch picked by uname -m)
 #   2. /etc/masc-exec-shim.conf      (remote_root=<abs path>)

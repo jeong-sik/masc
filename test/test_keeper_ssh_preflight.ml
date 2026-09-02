@@ -185,15 +185,15 @@ let test_ready_ttl_and_force () =
   let base_path = temp_dir () in
   let ssh_bin, count_path = make_stub ~dir:base_path ~mode:"ok" in
   let state = make_state ~base_path ~ssh_bin in
-  Keeper_sandbox_ssh.For_testing.clear_preflight_cache ();
+  Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
   check (result unit string) "first ready" (Ok ())
-    (Keeper_sandbox_ssh.check_preflight state);
+    (Keeper_sandbox_remote.check_preflight state);
   check int "seven probes" 7 (invocation_count count_path);
   check (result unit string) "cached ready" (Ok ())
-    (Keeper_sandbox_ssh.check_preflight state);
+    (Keeper_sandbox_remote.check_preflight state);
   check int "cache avoided respawn" 7 (invocation_count count_path);
   check (result unit string) "forced ready" (Ok ())
-    (Keeper_sandbox_ssh.check_preflight ~force:true state);
+    (Keeper_sandbox_remote.check_preflight ~force:true state);
   check int "force respawned" 14 (invocation_count count_path)
 ;;
 
@@ -203,11 +203,11 @@ let test_zero_ttl_rechecks () =
   let base_path = temp_dir () in
   let ssh_bin, count_path = make_stub ~dir:base_path ~mode:"ttl-zero" in
   let state = make_state ~base_path ~ssh_bin in
-  Keeper_sandbox_ssh.For_testing.clear_preflight_cache ();
+  Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
   check (result unit string) "first ready" (Ok ())
-    (Keeper_sandbox_ssh.check_preflight state);
+    (Keeper_sandbox_remote.check_preflight state);
   check (result unit string) "second ready" (Ok ())
-    (Keeper_sandbox_ssh.check_preflight state);
+    (Keeper_sandbox_remote.check_preflight state);
   check int "zero TTL respawned every probe" 14 (invocation_count count_path)
 ;;
 
@@ -221,7 +221,7 @@ let test_named_failures () =
       let state = make_state ~base_path ~ssh_bin in
       check bool mode true
         (contains_prefix prefix
-           (Keeper_sandbox_ssh.check_preflight ~force:true state)))
+           (Keeper_sandbox_remote.check_preflight ~force:true state)))
     [ "unreachable", "remote_ssh_endpoint_unreachable:"
     ; "skew", "remote_shim_version_skew:"
     ; "rg-missing", "remote_ripgrep_unavailable:"

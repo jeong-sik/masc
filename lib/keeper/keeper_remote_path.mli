@@ -1,7 +1,9 @@
-(** Bidirectional path translation for the SSH remote execution lane.
+(** Bidirectional path translation for the remote execution lane.
 
     This module is the sole owner of the mapping between the host bookkeeping
-    playground and an endpoint's remote playground. *)
+    playground and an endpoint's remote playground. The endpoint is named by
+    its [remote_root] alone, so the OpenSSH lane and the Apple [container]
+    guest lane translate the same way. *)
 
 val normalize_remote : string -> string
 (** Lexical dot-segment cleanup for an endpoint-namespace path. Host realpath
@@ -11,7 +13,7 @@ val normalize_remote : string -> string
 
 val host_to_remote :
   base_path:string ->
-  endpoint:Exec_ssh_endpoint.t ->
+  remote_root:string ->
   keeper:string ->
   string ->
   (string, string) result
@@ -20,14 +22,14 @@ val host_to_remote :
     rejected with [remote_ssh_path_jail_violation]. *)
 
 val remote_to_logical :
-  endpoint:Exec_ssh_endpoint.t -> keeper:string -> string -> string
+  remote_root:string -> keeper:string -> string -> string
 (** Translate a path below [remote_root/<keeper>] to the keeper-relative path
     the model uses. The root itself becomes ["."]. Paths outside that root are
     returned unchanged. *)
 
 val rewrite_output :
   base_path:string ->
-  endpoint:Exec_ssh_endpoint.t ->
+  remote_root:string ->
   keeper:string ->
   string ->
   string
@@ -39,7 +41,7 @@ type stream
 
 val stream :
   base_path:string ->
-  endpoint:Exec_ssh_endpoint.t ->
+  remote_root:string ->
   keeper:string ->
   emit:(string -> unit) ->
   stream

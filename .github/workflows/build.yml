@@ -1,0 +1,36 @@
+name: Build
+
+# One check, on every pull request and every push to main: does the tree
+# compile. ci.yml is manual and long; on 2026-09-02 three merges in one
+# hour did not compile and nothing had run before they landed.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: dune build @install
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
+      - name: dune build @install
+        env:
+          DUNE_JOBS: "4"
+        run: opam exec -- dune build --root . @install

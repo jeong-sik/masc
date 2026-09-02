@@ -242,7 +242,7 @@ let test_attachment_dimensions_survive_the_reference_swap () =
                       (function `Int v -> Some v | _ -> None))
                | other ->
                  Alcotest.failf "dashboard attachments shape: %s"
-                   (Yojson.Safe.to_string (`List other)))
+                   (Yojson.Safe.to_string other))
             | other ->
               Alcotest.failf "dashboard row shape: %d rows" (List.length other))
          | other ->

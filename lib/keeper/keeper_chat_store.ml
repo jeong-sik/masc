@@ -332,7 +332,7 @@ let persisted_attachment (att : attachment) =
     in
     match Base64.decode payload with
     | Error _ -> None
-    | Ok bytes -> Keeper_vision_tool.image_dimensions bytes
+    | Ok bytes -> Keeper_image_dimensions.image_dimensions bytes
   in
   let width, height =
     match decoded_dimensions att.data with

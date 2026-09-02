@@ -66,15 +66,9 @@ val sniff_image_media_type : string -> (string, string) result
 (** Identify an image's media type from its leading bytes. [Error] names the
     admitted set rather than guessing, so an unrecognised file is rejected at
     the boundary that read it. Shared with the TUI composer so both surfaces
-    admit exactly the same formats. *)
-
-val image_dimensions : string -> (int * int) option
-(** Pixel dimensions (width, height) of the bytes whose media type
-    [sniff_image_media_type] already admitted. PNG reads its fixed-offset
-    IHDR, JPEG walks to the first SOF, GIF reads the logical screen; WebP
-    answers [None] rather than guessing across its three frame layouts.
-    [None] means "say nothing" -- callers show the note without a size
-    rather than a wrong one. *)
+    admit exactly the same formats. Pixel dimensions are
+    {!Keeper_image_dimensions.image_dimensions}, kept apart so the chat store
+    can measure an attachment without this tool's dependency cone. *)
 
 val vision_runtime_ids : unit -> string list
 (** Ordered image-capable runtime ids: [\[runtime\].media_failover] order

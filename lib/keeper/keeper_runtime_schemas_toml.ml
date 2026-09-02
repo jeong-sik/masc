@@ -7,8 +7,7 @@
     partial runtime surface, so a reader of these values never has to ask
     whether a schema loaded.
 
-    Three of the four tools [Keeper_tool_runtime_schemas] publishes stay in
-    OCaml for now. keeper_artifact_read takes its max_bytes bounds and default
+    Three of the four tools published here stay in OCaml for now. keeper_artifact_read takes its max_bytes bounds and default
     from [Keeper_artifact_read] and keeper_analyze_image takes its media-type enum from
     [Keeper_vision_tool]; a TOML literal would cut that derivation, so each
     moves once it has a test pinning the file against its owner.
@@ -34,3 +33,7 @@ let fusion = schema_of_name "masc_fusion"
 let fusion_status = schema_of_name "masc_fusion_status"
 let artifact_read = schema_of_name "keeper_artifact_read"
 let keeper_analyze_image = schema_of_name "keeper_analyze_image"
+
+(* The order a model reads these in; [Config.raw_all_tool_schemas] splices
+   this list into the catalog. *)
+let schemas = [ artifact_read; fusion; fusion_status; keeper_analyze_image ]

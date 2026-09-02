@@ -182,18 +182,59 @@ let test_new_claim_carries_board_provenance () =
       | Some fact -> fact.basis
       | None -> failf "claim %S was not materialized" claim
     in
+    let board_ref ?comment_id post_id =
+      match Memory.board_ref_of_ids ~post_id ~comment_id with
+      | Ok board -> board
+      | Error error -> failf "board ref fixture: %s" (Memory.wire_error_to_string error)
+    in
     check bool "a claim without a board field is a transcript observation" true
       (basis_of "plain" = Memory.Observed Memory.Transcript);
     check bool "a claim with board_post_id names the post" true
-      (basis_of "from the post" = Memory.Observed (Memory.Board { post_id; comment_id = None }));
+      (basis_of "from the post" = Memory.Observed (Memory.Board (board_ref post_id)));
     check bool "a claim with both ids names the comment" true
       (basis_of "from a comment"
-       = Memory.Observed (Memory.Board { post_id; comment_id = Some comment_id }))
+       = Memory.Observed (Memory.Board (board_ref ~comment_id post_id)))
 ;;
 
 let test_new_claim_with_bad_board_id_is_rejected () =
   (match parse (selection_json ~new_claims:[ board_claim ~post_id:"p-1 2" "spaced" ] ()) with
    | Ok _ -> fail "a post id with a space was accepted"
+   | Error _ -> ());
+  (* null is the schema's answer for the transcript; a number is not. *)
+  (match
+     parse
+       (selection_json
+          ~new_claims:
+            [ `Assoc
+                [ Librarian.wire_field_claim, `String "null board"
+                ; Librarian.wire_field_category, `String "lesson"
+                ; Memory.wire_field_board_post_id, `Null
+                ; Memory.wire_field_board_comment_id, `Null
+                ]
+            ]
+          ())
+   with
+   | Ok selection ->
+     check bool "null board fields mean the transcript" true
+       (List.exists
+          (fun (fact : Memory.fact) ->
+             String.equal fact.claim "null board"
+             && fact.basis = Memory.Observed Memory.Transcript)
+          selection.facts)
+   | Error error -> failf "null board fields rejected: %s" (Librarian.parse_error_to_string error));
+  (match
+     parse
+       (selection_json
+          ~new_claims:
+            [ `Assoc
+                [ Librarian.wire_field_claim, `String "numeric board"
+                ; Librarian.wire_field_category, `String "lesson"
+                ; Memory.wire_field_board_post_id, `Int 12
+                ]
+            ]
+          ())
+   with
+   | Ok _ -> fail "a numeric board_post_id was accepted"
    | Error _ -> ());
   match
     parse

@@ -178,6 +178,14 @@ let replace_current_facts ~keepers_dir ~keeper_id facts =
 let test_board_reference_validation () =
   let post_id = "p-0123456789abcdef0123456789abcdef" in
   let comment_id = "c-0123456789abcdef0123456789abcdef" in
+  let board_ref ?comment_id post_id =
+    match Masc.Keeper_memory_os_types.board_ref_of_ids ~post_id ~comment_id with
+    | Ok board -> board
+    | Error error ->
+      Alcotest.failf
+        "board ref fixture: %s"
+        (Masc.Keeper_memory_os_types.wire_error_to_string error)
+  in
   let board_args ?comment_id ?(content = "read on the board") extra =
     `Assoc
       ([ "content", `String content; "board_post_id", `String post_id ]
@@ -193,7 +201,7 @@ let test_board_reference_validation () =
        true
        (basis
         = Masc.Keeper_memory_os_types.Observed
-            (Masc.Keeper_memory_os_types.Board { post_id; comment_id = None }))
+            (Masc.Keeper_memory_os_types.Board (board_ref post_id)))
    | Runtime.Memory_write_invalid { error_kind; _ } ->
      Alcotest.failf "post reference rejected: %s" (error_label error_kind));
   (match Runtime.validate_memory_write_args (board_args ~comment_id []) with
@@ -203,7 +211,7 @@ let test_board_reference_validation () =
        true
        (basis
         = Masc.Keeper_memory_os_types.Observed
-            (Masc.Keeper_memory_os_types.Board { post_id; comment_id = Some comment_id }))
+            (Masc.Keeper_memory_os_types.Board (board_ref ~comment_id post_id)))
    | Runtime.Memory_write_invalid { error_kind; _ } ->
      Alcotest.failf "comment reference rejected: %s" (error_label error_kind));
   Runtime.validate_memory_write_args

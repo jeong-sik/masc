@@ -30,9 +30,15 @@ let fact ?(claim = "claim") () :
   }
 ;;
 
+let board_ref ?comment_id post_id =
+  match Types.board_ref_of_ids ~post_id ~comment_id with
+  | Ok board -> board
+  | Error error -> failf "board ref fixture: %s" (Types.wire_error_to_string error)
+;;
+
 let board_fact ?(claim = "board claim") ?comment_id post_id : Types.fact =
   { (fact ~claim ()) with
-    basis = Types.Observed (Types.Board { post_id; comment_id })
+    basis = Types.Observed (Types.Board (board_ref ?comment_id post_id))
   }
 ;;
 
@@ -1515,8 +1521,15 @@ let test_board_reference_outranks_transcript_on_merge () =
   check bool "board then transcript keeps the board" true
     (Current.merge_basis board transcript = board);
   let other = (board_fact "p-fedcba9876543210fedcba9876543210").basis in
-  check bool "two board references keep the first" true
+  check bool "two board references to different posts keep the first" true
     (Current.merge_basis board other = board);
+  let comment =
+    (board_fact ~comment_id:"c-0123456789abcdef0123456789abcdef" post).basis
+  in
+  check bool "a comment under the same post replaces the bare post" true
+    (Current.merge_basis board comment = comment);
+  check bool "a bare post does not replace a comment under it" true
+    (Current.merge_basis comment board = comment);
   check bool "an observation outranks a derivation" true
     (Current.merge_basis
        board

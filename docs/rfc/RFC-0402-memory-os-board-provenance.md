@@ -1,5 +1,5 @@
 ---
-rfc: "0401"
+rfc: "0402"
 title: "Memory OS: an observed fact names the Board post it was read from — RFC-0251 §3 is settled as (a)"
 status: Draft
 created: 2026-09-02

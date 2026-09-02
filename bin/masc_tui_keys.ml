@@ -400,7 +400,8 @@ let for_surface = function
       ; b Act "m" "notes"
           ~help:"the notes anchored to the open file (repository scope)"
       ; b Act "w" "add note"
-          ~help:"in the notes view: add one through the $EDITOR form \
+          ~help:"in the notes view: add one through the $EDITOR form, \
+                 anchored to the line the cursor was on when the view opened \
                  (kind: Comment / Decision / Question / Bookmark)"
       ; b Act "d" "diff"
           ~help:"on the project tree, list every working-tree change; on an \

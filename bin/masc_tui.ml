@@ -10459,8 +10459,20 @@ let main () =
                 report_action state "error"
                   "no $EDITOR set; export EDITOR to add a note here"
             | Some _ -> (
+                (* The line the cursor is on, which is the line the operator
+                   pressed [w] about. This was the literal 1, and it shows:
+                   every one of the 51 annotations this workspace has ever
+                   stored anchors at line 1, including the two written from
+                   here. Nobody declined to anchor -- the form never offered
+                   their line, and correcting it meant editing JSON in
+                   $EDITOR before writing a word.
+
+                   [code_file_cursor] is 0-based and is the same anchor a
+                   language-server question is asked at, so [w] and [K]/[D]/
+                   [R] now agree about which line the operator means. *)
                 let stem =
-                  "{\n  \"line_start\": 1,\n  \"line_end\": 1,\n  \"kind\": \"Comment\",\n  \"content\": \"\"\n}\n"
+                  Masc_tui_types.code_note_stem
+                    ~anchor:(state.code_file_cursor + 1)
                 in
                 match
                   Masc_tui_editor.roundtrip ~restore:restore_terminal

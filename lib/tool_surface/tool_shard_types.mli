@@ -38,9 +38,6 @@ val voice_tools : Masc_domain.tool_schema list
 
 val library_tools : Masc_domain.tool_schema list
 
-val keeper_surface_post_description : string
-(** Canonical description projected into Keeper model and help surfaces. *)
-
 val max_rich_blocks : int
 (** Canonical maximum number of top-level Slack Block Kit blocks per message. *)
 

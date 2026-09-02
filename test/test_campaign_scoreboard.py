@@ -136,7 +136,9 @@ class ScoreTest(unittest.TestCase):
             board["residuals"]["unclassified"],
             [{"mission_id": "M12", "assertion": "v_second", "run_id": "r2"}],
         )
-        self.assertEqual(board["verification_band"]["k_of_3_passed"], 2)
+        # An uncounted round carries no score; the raw number stays visible.
+        self.assertIsNone(board["verification_band"]["k_of_3_passed"])
+        self.assertEqual(board["verification_band"]["k_of_3_if_counted"], 2)
 
     def test_open_issue_from_previous_round_blocks_counting(self):
         bundles = [bundle_doc("r1"), bundle_doc("r2"), bundle_doc("r3")]
@@ -144,6 +146,8 @@ class ScoreTest(unittest.TestCase):
         board = parse_all(bundles, residuals_doc(), previous, {"jeong-sik/masc#28977": "OPEN"})
         self.assertFalse(board["counted"])
         self.assertEqual(board["counted_reason"], "previous_issue_open")
+        self.assertIsNone(board["verification_band"]["k_of_3_passed"])
+        self.assertEqual(board["pilot_band"]["k_of_3_passed"], None)
         self.assertEqual(
             board["previous_round_issues"], [{"issue": "jeong-sik/masc#28977", "state": "OPEN"}]
         )
@@ -179,6 +183,44 @@ class RefusalTest(unittest.TestCase):
         bundles = [bundle_doc("r1"), bundle_doc("r2"), bundle_doc("r3")]
         with self.assertRaises(sb.ScoreboardError):
             parse_all(bundles, residuals_doc(sha="b" * 40))
+
+    def test_status_label_that_disagrees_with_assertions_is_refused(self):
+        doc = bundle_doc("r1")
+        doc["missions"][1]["assertions"][1]["passed"] = False  # M12 v_second failed, label says passed
+        with self.assertRaises(sb.ScoreboardError):
+            sb.parse_bundle(doc, "r1")
+        doc = bundle_doc("r1")
+        doc["missions"][1]["status"] = "failed"  # label says failed, every assertion passed
+        with self.assertRaises(sb.ScoreboardError):
+            sb.parse_bundle(doc, "r1")
+
+    def test_bundle_missing_a_catalog_assertion_is_refused(self):
+        doc = bundle_doc("r2")
+        doc["missions"][1]["assertions"] = doc["missions"][1]["assertions"][:1]  # drop v_second
+        bundles = [bundle_doc("r1"), doc, bundle_doc("r3")]
+        with self.assertRaises(sb.ScoreboardError):
+            parse_all(bundles, residuals_doc())
+
+    def test_issue_reference_must_be_owner_repo_number(self):
+        for bad in ("#", "#12", "o/r #12", "o/r#12\n", "o/r#0", "or#12"):
+            with self.assertRaises(sb.ScoreboardError, msg=bad):
+                sb.parse_residuals(residuals_doc([entry("M12", "v_second", issue=bad)]), "r")
+        ok = sb.parse_residuals(residuals_doc([entry("M12", "v_second", issue="jeong-sik/masc#28977")]), "r")
+        self.assertEqual(ok.issues(), ("jeong-sik/masc#28977",))
+
+    def test_non_string_issue_state_is_refused(self):
+        doc = {"schema": sb.ISSUE_STATES_SCHEMA, "issues": {"o/r#1": ["OPEN"]}}
+        with self.assertRaises(sb.ScoreboardError):
+            sb.parse_issue_states(doc, "states")
+
+    def test_empty_catalog_is_refused(self):
+        with self.assertRaises(sb.ScoreboardError):
+            sb.parse_catalog({"schema": sb.CATALOG_SCHEMA, "missions": []})
+
+    def test_residual_outside_catalog_is_refused(self):
+        bundles = [bundle_doc("r1"), bundle_doc("r2"), bundle_doc("r3")]
+        with self.assertRaises(sb.ScoreboardError):
+            parse_all(bundles, residuals_doc([entry("M99", "nothing")]))
 
     def test_wrong_bundle_schema_is_refused(self):
         doc = bundle_doc("r1")

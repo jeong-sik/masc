@@ -61,15 +61,22 @@ run is evidence, never a score.
 
 Rules the scoreboard enforces:
 
-- `k_of_3_passed` counts a mission only when all three runs passed it.
+- `k_of_3_passed` counts a mission only when all three runs passed every one
+  of its assertions. Pass/fail comes from the assertions, never from the
+  mission `status` label; a bundle whose label disagrees with its assertions,
+  or that lacks a catalog assertion, is refused.
+- An uncounted round has `k_of_3_passed: null`; the number it would have
+  scored stays in `k_of_3_if_counted` so nothing is lost, but a Goal reading
+  the score sees no score.
 - Bands come from catalog `phase` values: the verification band is
   `verification` + `delivery_proof` (RW12, RW14, RW15, RW16, RW20 today), the
   pilot band is `claim_reproduction` (RW26).
 - A round whose previous residual issues are still `OPEN` is run and recorded
   but not counted (`previous_issue_open`). Nothing waits on it; the next round
   is counted once those issues close.
-- Mixed `source_sha`, duplicate `run_id`, fewer than three bundles, or a cause
-  outside the set are refused (exit 2), not scored.
+- Mixed `source_sha`, duplicate `run_id`, fewer than three bundles, a cause
+  outside the set, an issue not shaped `owner/repo#N`, or a residual naming an
+  assertion the catalog does not declare are refused (exit 2), not scored.
 
 Goal `goal-campaign-ratchet-20260902` reads `verification_band.k_of_3_passed`
 from the scoreboard file. The first counted round is the r8 baseline.

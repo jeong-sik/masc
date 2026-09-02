@@ -102,7 +102,19 @@ let stub_main () =
       write_all Unix.stderr (trailer 0)
     | "env" :: _ when String.equal mode "gh-missing" ->
       write_all Unix.stderr ("not logged in\n" ^ trailer 1)
+    | "env" :: _ when String.equal mode "gh-blinded" ->
+      write_all Unix.stderr
+        ( "X Failed to log in to github.com account fixture: The token in \
+           hosts.yml is invalid.\n"
+        ^ trailer 1 )
     | "env" :: _ -> write_all Unix.stderr (trailer 0)
+    | "curl" :: _ when String.equal mode "gh-missing" ->
+      (* gh failed for a real identity reason: the API answers. *)
+      write_all Unix.stderr (trailer 0)
+    | "curl" :: _ ->
+      (* gh failed with the endpoint off the network: DNS dies first. *)
+      write_all Unix.stderr
+        ("curl: (6) Could not resolve host: api.github.com\n" ^ trailer 6)
     | argv -> failwith ("unexpected preflight argv: " ^ String.concat " " argv));
   exit 0
 ;;
@@ -227,6 +239,7 @@ let test_named_failures () =
     ; "rg-missing", "remote_ripgrep_unavailable:"
     ; "disk-low", "remote_ssh_disk_low:"
     ; "gh-missing", "remote_github_identity_missing:"
+    ; "gh-blinded", "remote_github_unreachable:"
     ]
 ;;
 

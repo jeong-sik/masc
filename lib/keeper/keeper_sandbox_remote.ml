@@ -19,7 +19,8 @@
     ([remote_ssh_path_jail_violation], [remote_ssh_shim_config_error]) and
     the transport-neutral preflight codes ([remote_git_unavailable],
     [remote_ripgrep_unavailable], [remote_shim_version_skew],
-    [remote_github_identity_missing]) pass through unchanged. *)
+    [remote_github_identity_missing], [remote_github_unreachable]) pass
+    through unchanged. *)
 
 let ( let* ) = Result.bind
 
@@ -630,6 +631,39 @@ let run_preflight_command t ~error_code argv =
          (Exec_policy.truncate_for_log stderr))
 ;;
 
+(* A failed [gh auth status] is not an identity verdict by itself. With the
+   endpoint off the network -- microvm [network_mode = "none"], measured
+   2026-09-02 on pr-updater -- gh cannot reach api.github.com and folds that
+   transport failure into "The token ... is invalid.", so the preflight
+   reported remote_github_identity_missing for a token that was valid on the
+   host and byte-identical in the guest, and the keeper idled on a blocker
+   that did not exist. Ask the endpoint whether the API answers at all
+   before repeating gh's verdict: an unreachable API withholds it. curl
+   absent (127) keeps the old classification rather than inventing a verdict
+   this probe cannot make. No [-f]: any HTTP answer, including an error
+   status, proves the transport. *)
+type github_transport =
+  | Api_reachable
+  | Api_unreachable of string
+  | Probe_absent
+
+let github_api_probe_argv =
+  [ "curl"; "-sS"; "-o"; "/dev/null"; "--max-time"; "8"; "https://api.github.com" ]
+
+let github_transport t =
+  let run = runner ~timeout_sec:(preflight_timeout_sec t) t in
+  let status, _stdout, _stderr =
+    run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+      ~argv:github_api_probe_argv ~env:[||] ~cwd:(Some t.remote_root)
+  in
+  match status with
+  | Unix.WEXITED 0 -> Api_reachable
+  | Unix.WEXITED 127 -> Probe_absent
+  | Unix.WEXITED code -> Api_unreachable (Printf.sprintf "exit=%d" code)
+  | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+    Api_unreachable (Printf.sprintf "signal=%d" signal)
+;;
+
 let whitespace_tokens line =
   line
   |> String.split_on_char ' '
@@ -686,9 +720,21 @@ let perform_preflight t =
            "%s: endpoint %s returned unparseable df output"
            (code t "disk_probe_failed") t.name)
   in
-  let* _ =
-    run_preflight_command t ~error_code:"remote_github_identity_missing"
-      [ "env"; "GH_CONFIG_DIR=" ^ t.gh_config_dir; "gh"; "auth"; "status" ]
+  let* () =
+    match
+      run_preflight_command t ~error_code:"remote_github_identity_missing"
+        [ "env"; "GH_CONFIG_DIR=" ^ t.gh_config_dir; "gh"; "auth"; "status" ]
+    with
+    | Ok _ -> Ok ()
+    | Error identity_error ->
+      (match github_transport t with
+       | Api_reachable | Probe_absent -> Error identity_error
+       | Api_unreachable cause ->
+         Error
+           (Printf.sprintf
+              "remote_github_unreachable: endpoint %s cannot reach \
+               https://api.github.com (curl %s), identity verdict withheld -- %s"
+              t.name cause identity_error))
   in
   Ok ()
 ;;

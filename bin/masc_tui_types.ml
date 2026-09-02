@@ -2627,6 +2627,15 @@ type state = {
   mutable code_notes_error: string option;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
+  (* The file pane's blame margin: b on an open file fetches who last touched
+     each run of lines, and the gutter names the author once per run. Unlike
+     the three views above, this does not swap the pane's content -- it is a
+     margin beside the code, so it is showing exactly when it is loaded and
+     [b] again drops it. No [_open] flag: shown-with-nothing-loaded is not a
+     state this can be in. Keyed by path like the others, so opening another
+     file drops the margin rather than captioning it wrongly. *)
+  mutable code_blame: (string * Tui_decode.blame_block list) option;
+  mutable code_blame_error: string option;
   (* Whose workspace the surface reads. One field, one value: a keeper's
      playground and a project repository at the same time is not a
      representable state. *)
@@ -3255,6 +3264,8 @@ let create_state
   code_notes_error = None;
   code_notes_open = false;
   code_notes_scroll = 0;
+  code_blame = None;
+  code_blame_error = None;
   code_scope = Code_scope_project;
   code_target_line = None;
   changes_keeper = None;

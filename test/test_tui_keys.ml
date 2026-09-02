@@ -1008,6 +1008,30 @@ let test_a_surface_without_rows_offers_no_row_search () =
     ; "Tools", Tools
     ]
 
+let test_code_separates_blame_from_the_definition_walk () =
+  (* [b] and [B] sit next to each other on one surface and mean unrelated
+     things: the margin naming who last touched each run, and the walk back
+     through definition jumps. The surface already pairs [d] diff with [D]
+     definition the same way, so the hazard is the pair being read as one
+     binding -- both spellings stay listed, and separately.
+
+     This pins the declaration, not the dispatch: the ordered match lives
+     inside the event loop where no test reaches it. *)
+  let keys = surface_keys Code in
+  check Alcotest.bool "blame is listed" true (List.mem "b" keys);
+  check Alcotest.bool "the definition walk kept its own key" true
+    (List.mem "B" keys);
+  let labelled key =
+    List.find_map
+      (fun (binding : Masc_tui_keys.binding) ->
+         if String.equal binding.Masc_tui_keys.key key then
+           Some binding.Masc_tui_keys.label
+         else None)
+      (Masc_tui_keys.for_surface Code)
+  in
+  check (Alcotest.option str) "b reads as blame" (Some "blame") (labelled "b");
+  check (Alcotest.option str) "B reads as back" (Some "back") (labelled "B")
+
 let test_a_searchable_surface_does_not_also_bind_n () =
   (* [n] / [N] step the last row search on every surface that does not bind
      the key itself, and [search_last] outlives the surface it was typed on.
@@ -1060,6 +1084,8 @@ let () =
             test_chat_help_names_memory_cycle
         ; Alcotest.test_case "a searchable surface does not also bind n" `Quick
             test_a_searchable_surface_does_not_also_bind_n
+        ; Alcotest.test_case "Code separates blame from the definition walk"
+            `Quick test_code_separates_blame_from_the_definition_walk
         ; Alcotest.test_case "every searchable surface names its search"
             `Quick test_every_searchable_surface_names_its_search
         ; Alcotest.test_case "a surface without rows offers no row search"

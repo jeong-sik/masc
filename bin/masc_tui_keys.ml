@@ -390,6 +390,9 @@ let for_surface = function
                  name jumps at once; several open the palette as choices)"
       ; b Act "B" "back"
           ~help:"walk back through the definition jumps, newest first"
+      ; b Act "b" "blame"
+          ~help:"who last touched each run of lines, in the margin; b again \
+                 drops it"
       ; b Act "m" "notes"
           ~help:"the notes anchored to the open file (repository scope)"
       ; b Act "w" "add note"

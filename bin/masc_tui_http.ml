@@ -432,6 +432,29 @@ let fetch_git_log ?keeper ?repo ~(host : string) ~(port : int)
           Error ("git log was not JSON: " ^ detail)
       | json -> Masc.Tui_decode.decode_git_log json)
 
+(** Who last touched each run of lines in the file ([/api/v1/git/blame]).
+    Scoped by the same keeper / repo axes the tree and the log use, so the
+    answer describes the checkout the file was read from. *)
+let fetch_git_blame ?keeper ?repo ~(host : string) ~(port : int)
+    ~(path : string) () :
+    (Masc.Tui_decode.blame_block list, string) result =
+  let route =
+    Printf.sprintf "/api/v1/git/blame?path=%s%s%s"
+      (percent_encode_query_value path)
+      (keeper_query_suffix keeper)
+      (repo_query_suffix repo)
+  in
+  match http_get ~host ~port ~path:route with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "git blame returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | exception Yojson.Json_error detail ->
+          Error ("git blame was not JSON: " ^ detail)
+      | json -> Masc.Tui_decode.decode_git_blame json)
+
 (** The notes anchored to [file_path] in [codebase]
     ([/api/v1/ide/annotations]). The slug is the server's own mint, carried
     from the repositories listing -- never re-derived here (RFC-0378). *)

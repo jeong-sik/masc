@@ -1100,6 +1100,27 @@ let keeper_lane_idle_text seconds =
   else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
   else Printf.sprintf "%dd" (seconds / 86400)
 
+(* Blame reaches further back than the two surfaces [keeper_lane_idle_text]
+   serves. A line untouched since a repository's first year is ordinary, and
+   "3684d" is not a reading anyone converts in their head. Weeks and years
+   continue where that helper stops; the whole label fits three cells so the
+   margin stays a margin. *)
+let blame_age_text ~now_s at_ms =
+  let seconds = Float.max 0. (now_s -. (at_ms /. 1000.)) in
+  let days = int_of_float (seconds /. 86400.) in
+  if days < 1 then Printf.sprintf "%dh" (int_of_float (seconds /. 3600.))
+  else if days < 14 then Printf.sprintf "%dd" days
+  else if days < 365 then Printf.sprintf "%dw" (days / 7)
+  else Printf.sprintf "%dy" (days / 365)
+
+(* The margin's own width: a name and a relative age, which is the smallest
+   pair that answers "who, and how long ago" without a second lookup. Fixed
+   so the code below it stays aligned whether or not a run starts on the
+   row. *)
+let blame_author_cells = 9
+let blame_age_cells = 3
+let blame_margin_cells = blame_author_cells + blame_age_cells + 2
+
 let task_line (task : task) =
   let status = Masc_domain.task_status_to_string task.status in
   (* The icon and the status word share one color so the row's state reads at
@@ -13377,11 +13398,22 @@ let render_code (state : state) =
           in
           (* The note (a language-server answer, a PR link) rides the title
              in every view: the history's Enter writes one too. *)
-          (match state.code_lsp_note with
-           | Some note ->
-               base ^ "  " ^ Masc_tui_theme.tone Masc_tui_theme.Accent
-               ^ Terminal_text.single_line note ^ Ansi.reset
-           | None -> base)
+          let with_note =
+            match state.code_lsp_note with
+            | Some note ->
+                base ^ "  " ^ Masc_tui_theme.tone Masc_tui_theme.Accent
+                ^ Terminal_text.single_line note ^ Ansi.reset
+            | None -> base
+          in
+          (* A blame that did not come back has no pane of its own to say so
+             in -- the margin is beside the code, not instead of it -- so the
+             refusal rides the title the way a language-server answer does.
+             In the bad tone rather than the accent: this one is a failure. *)
+          (match state.code_blame_error with
+           | Some detail ->
+               with_note ^ "  " ^ Theme.bad () ^ "blame: "
+               ^ Terminal_text.single_line detail ^ Ansi.reset
+           | None -> with_note)
       | None -> "(Enter opens the selected file)"
     in
     box_top pane_buf pane_cols;
@@ -13683,6 +13715,44 @@ let render_code (state : state) =
            let covers line spans =
              List.exists (fun (a, b) -> line >= a && line <= b) spans
            in
+           (* Who last touched each run, when [b] has read it for this file.
+              Same rule as the two span lists above: the pane decorates what
+              is loaded and does not fetch to decorate. *)
+           let blame_blocks =
+             match state.code_blame with
+             | Some (loaded_path, blocks) when matches_open_file loaded_path ->
+                 blocks
+             | _ -> []
+           in
+           let blame_now_s = Unix.gettimeofday () in
+           (* One name per run, not one per line: the run boundary is the fact
+              worth drawing, and repeating the author down every line of a
+              block is what hides it. Continuation rows hold the same cells in
+              blanks so the code stays in one column.
+
+              No colour of its own. The theme's three tones are Normal, Dim
+              and the single accent, and a colour outside them is a claim
+              about state -- blame carries no state, only who and when. So
+              the answer (the name) draws Normal and the qualifier (the age)
+              draws Dim, and nothing here competes with the lexer's own
+              colours in the code beside it. *)
+           let blame_cell line =
+             match blame_blocks with
+             | [] -> ""
+             | _ -> (
+               match Masc.Tui_decode.blame_block_at blame_blocks line with
+               | Some (block, true) ->
+                   Printf.sprintf "%s%s %s%s%s "
+                     (Masc_tui_theme.tone Masc_tui_theme.Normal)
+                     (Message_layout.fit_width block.bb_author
+                        blame_author_cells)
+                     Ansi.dim
+                     (Message_layout.fit_width
+                        (blame_age_text ~now_s:blame_now_s block.bb_at_ms)
+                        blame_age_cells)
+                     Ansi.reset
+               | Some (_, false) | None -> String.make blame_margin_cells ' ')
+           in
            for i = 0 to content_height - 1 do
              match List.nth_opt file_rows (scroll + i) with
              | Some segments ->
@@ -13708,8 +13778,9 @@ let render_code (state : state) =
                    else " "
                  in
                  box_line pane_buf pane_cols
-                   (Printf.sprintf "%s%s%4d%s %s" mark gutter_style
-                      (row_index + 1) Ansi.reset body)
+                   (Printf.sprintf "%s%s%s%4d%s %s"
+                      (blame_cell (row_index + 1))
+                      mark gutter_style (row_index + 1) Ansi.reset body)
              | None -> box_empty pane_buf pane_cols
            done);
     box_bottom pane_buf pane_cols

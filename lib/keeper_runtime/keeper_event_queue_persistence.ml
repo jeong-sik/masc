@@ -87,7 +87,7 @@ type transfer_projection_result = State.transfer_projection_result =
   | Transfer_already_projected
 
 
-(* v18 stores projected non-schedule history as compact replay witnesses.
+(* v18 stores all displaced projected history as compact replay witnesses.
    The transition WAL carries a full pre-state, so both files hard-cut
    together; there is no compatibility decoder. *)
 let snapshot_filename = "event-queue-v18.json"

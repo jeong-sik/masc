@@ -301,7 +301,9 @@ export interface DashboardScheduledAutomationLiveSupportedNonTerminalEvidence {
  *  only the newest of the rows on the page. `retention_per_schedule` is the
  *  store's ceiling: the numbers are a window, not a history. */
 export interface DashboardScheduledAutomationWakeCounts {
+  /** Terminal attempts the store keeps (succeeded + failed); the ceiling applies to these. */
   retained: number
+  /** Attempts mid-dispatch right now; not part of `retained`. */
   running: number
   succeeded: number
   failed: number

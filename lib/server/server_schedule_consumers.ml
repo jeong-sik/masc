@@ -560,8 +560,9 @@ let activation_outcome_for_required_wake config ~base_path ~keeper_name =
       (Keeper_wake_activation_owner_unknown
          ("durable keeper metadata read unavailable: "
           ^ Executor_pool_ref.strict_submit_error_to_string error))
-  (* The store answered and holds nothing under this name. That is not a
-     read that failed: no maintenance cycle will change it, and the queue
+  (* The store answered with nothing it can read under this name -- no
+     file, or a file this binary cannot decode, which boot re-materialises
+     from TOML. Either way this is not a read that failed, and the queue
      drain cancels the stimulus as owner-absent within the minute. Measured
      live 2026-09-02: a daily wake for a Keeper deleted days earlier still
      reported [succeeded] with the fact buried in a detail string. The

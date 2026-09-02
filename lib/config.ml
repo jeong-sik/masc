@@ -4,7 +4,7 @@ module StringSet = Set_util.StringSet
 
 let raw_all_tool_schemas : Masc_domain.tool_schema list =
   Tool_shard.all_keeper_tool_schemas
-  @ Keeper_tool_runtime_schemas.schemas
+  @ Keeper_runtime_schemas_toml.schemas
   @ Tool_schemas_misc.web_schemas
   @ Tools.raw_schemas
   @ Tool_schemas_misc.schemas

@@ -3635,6 +3635,19 @@
  (deps (alias runtest-test_keeper_multi_collaboration_acceptance)))
 
 (rule
+ (alias runtest-test_campaign_scoreboard)
+ (deps
+  test_campaign_scoreboard.py
+  ../scripts/harness/workload/campaign_scoreboard.py
+  ../scripts/fixtures/keeper-multi-collaboration/missions.json)
+ (action
+  (run python3 %{dep:test_campaign_scoreboard.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_campaign_scoreboard)))
+
+(rule
  (alias runtest-test_keeper_skill_use_proof)
  (deps
   test_keeper_skill_use_proof.py

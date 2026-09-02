@@ -143,7 +143,7 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
     def test_catalog_has_exact_mission_and_assertion_counts(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)
 
-        self.assertEqual(len(catalog["missions"]), 22)
+        self.assertEqual(len(catalog["missions"]), 23)
         self.assertEqual(
             len(
                 {
@@ -152,7 +152,7 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
                     for assertion in mission["assertions"]
                 }
             ),
-            47,
+            49,
         )
         self.assertEqual(
             catalog["keeper_required_skill_identities"],
@@ -519,6 +519,9 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         # could write the failing artifact. Create the Goal only inside the
         # directed RW23 phase. Goals are now an ownerless shared open set, so
         # no removed assignment/scope compatibility call may return.
+        # Since RFC-0387 a created Goal is executing/idle at once; the runner
+        # waits for that state (no criterion_state="viable" step remains)
+        # before it creates the proof Task.
         self.assertNotIn("goal-verifier-task-create", setup_source)
         self.assertNotIn("goal-verifier-upsert", setup_source)
         self.assertNotIn("goal-verifier-assign", setup_source)
@@ -530,10 +533,10 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         self.assertNotIn("masc_goal_assign", rw23_source)
         self.assertLess(
             rw23_source.index("goal-verifier-upsert"),
-            rw23_source.index('criterion_state="viable"'),
+            rw23_source.index('completion_state="idle"'),
         )
         self.assertLess(
-            rw23_source.index('criterion_state="viable"'),
+            rw23_source.index('completion_state="idle"'),
             rw23_source.index("goal-verifier-task-create"),
         )
         self.assertLess(

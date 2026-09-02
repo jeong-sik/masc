@@ -41,12 +41,28 @@ type selection =
   { latest : Turn_record.t
   ; attributed : attributed_turn option
   ; recent : recent_turn list
+<<<<<<< HEAD
   ; rows : Turn_record.t list
+||||||| 80d6baf62d
+=======
+  ; rows : Turn_record.t list
+  }
+
+type response_part =
+  | Reply_text of string
+  | Tool_steps of string list
+  | Reasoning_lines of string list
+
+type response_turn =
+  { parts : response_part list
+  ; outside_newest_page : bool
+>>>>>>> origin/main
   }
 
 type reading =
   { turn : (selection, string) result
   ; provider_input : (provider_input, string) result
+  ; response : (response_turn, string) result
   }
 
 type tab =

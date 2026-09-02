@@ -40,4 +40,3 @@ test_server_mcp_session_persist              # persistence: save/forget/load rou
 # nowhere to enter, because a keeper can only write inside the playground and
 # playground writes skip the gate the injection point sits behind (#29858).
 test_keeper_fs_edit_patch
-test_keeper_multi_collaboration_acceptance  # rotted while unwired: catalog holds 23 missions against a pinned 22, and the RW23 source assertion names a literal that left the script (#32261)

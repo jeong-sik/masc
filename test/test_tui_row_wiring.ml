@@ -57,6 +57,19 @@ let test_the_detail_pane_says_where_the_command_would_run () =
   Alcotest.(check bool) "and the directory it would run in" true
     (reads ~binding_name:"render_approvals" ~fields:[ "gp_execution_cwd" ] > 0)
 
+(* A blocked Gate row exposes a short reason under the list, where the frame
+   has to fit it to one line. Enter promises the whole ask, so that pane must
+   carry the producer's exact reason and whether this attempt can be retried;
+   otherwise the operator still decides from the prefix before [~]. *)
+let test_the_detail_pane_keeps_the_blocked_gate_reason () =
+  Alcotest.(check bool) "the whole-ask pane reads the exact reason" true
+    (reads ~binding_name:"approval_detail_pane"
+       ~fields:[ "gp_auto_judge_detail" ]
+     > 0);
+  Alcotest.(check bool) "and says whether retry is possible" true
+    (reads ~binding_name:"approval_detail_pane" ~fields:[ "gp_retry_request" ]
+     > 0)
+
 (* The title counted the pending-confirm queue, which is one of the three lists
    this screen draws. With seven Gate rows waiting and that queue empty, the
    title read "(0/0, hidden 0)" while the tab beside it read "7". The hidden
@@ -314,6 +327,8 @@ let () =
     [ ( "approvals"
       , [ Alcotest.test_case "the detail pane says where the command would run"
             `Quick test_the_detail_pane_says_where_the_command_would_run
+        ; Alcotest.test_case "the detail pane keeps a blocked Gate reason"
+            `Quick test_the_detail_pane_keeps_the_blocked_gate_reason
         ; Alcotest.test_case "the detail height is read off the line it draws"
             `Quick test_the_detail_height_is_read_off_the_line_it_draws
         ; Alcotest.test_case "the title does not count another queue" `Quick

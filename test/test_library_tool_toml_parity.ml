@@ -65,6 +65,46 @@ let test_input_schemas_match_with_keys_sorted () =
     expected
 ;;
 
+(* What a Keeper reads when the file declares a [keeper_projection] table:
+   masc_library_list names its siblings by the keeper_* names a Keeper can
+   call (keeper_tool_descriptor projects masc_library_read/search under
+   them), the other three carry no table and reach the Keeper as their row.
+   Read off the descriptor's literal before the sentence moved into the
+   file, so this passing is what proves the file says the same thing. *)
+let expected_keeper_projections =
+  [ ( {|masc_library_list|}
+    , Some
+        {|List all documents in the agent knowledge library with title, source, author, created date, and tags. Use keeper_library_read to fetch a document or keeper_library_search to query by content.|}
+    )
+  ; {|masc_library_read|}, None
+  ; {|masc_library_add|}, None
+  ; {|masc_library_search|}, None
+  ]
+;;
+
+let test_keeper_projections_are_byte_identical () =
+  List.iter
+    (fun (name, expected) ->
+       let definition =
+         match
+           List.find_opt
+             (fun (definition : Tool_schemas_library.definition) ->
+                String.equal definition.schema.name name)
+             Tool_schemas_library.definitions
+         with
+         | Some definition -> definition
+         | None -> failwith (name ^ " is absent from Tool_schemas_library.definitions")
+       in
+       check
+         (option string)
+         (name ^ " keeper_projection description")
+         expected
+         (Option.map
+            (fun (projection : Masc_domain.tool_schema) -> projection.description)
+            definition.keeper_projection))
+    expected_keeper_projections
+;;
+
 (* The order is what a model reads the tool list in, so a reordering is a
    change to the surface even when every schema still matches. *)
 let test_the_published_order_is_unchanged () =
@@ -85,6 +125,10 @@ let () =
             `Quick
             test_input_schemas_match_with_keys_sorted
         ; test_case "published order" `Quick test_the_published_order_is_unchanged
+        ; test_case
+            "keeper projections"
+            `Quick
+            test_keeper_projections_are_byte_identical
         ] )
     ]
 ;;

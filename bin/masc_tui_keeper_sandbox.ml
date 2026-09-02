@@ -624,14 +624,15 @@ let decode_logs ~sanitize json =
   let* log_instances =
     match field "instances" fields with
     | Some (`List rows) ->
-      rows
-      |> List.mapi decode_instance
-      |> List.fold_right
-           (fun row result ->
-             match row, result with
-             | Ok row, Ok rows -> Ok (row :: rows)
-             | Error detail, _ | _, Error detail -> Error detail)
-           (Ok [])
+      (* No pipe into fold_right: [a |> List.fold_right f init] would hand [a]
+         to the function's own slot. The list goes where the signature says. *)
+      List.fold_right
+        (fun row result ->
+           match row, result with
+           | Ok row, Ok rows -> Ok (row :: rows)
+           | Error detail, _ | _, Error detail -> Error detail)
+        (List.mapi decode_instance rows)
+        (Ok [])
     | Some _ -> Error "sandbox logs.instances must be a list"
     | None -> Error "sandbox logs.instances is required"
   in

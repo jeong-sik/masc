@@ -2195,7 +2195,8 @@ type state = {
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
   mutable keeper_sandbox_logs_error: (string * string) option;
-  mutable keeper_sandbox_logs_loading: string option;
+  mutable keeper_sandbox_logs_generation: int;
+  mutable keeper_sandbox_logs_inflight: (string * int) option;
   mutable keeper_config_view: (string * string list) option;
   mutable keeper_config_view_error: string option;
   mutable github_identity_view: (string * string list) option;
@@ -3009,7 +3010,8 @@ let create_state
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;
   keeper_sandbox_logs_error = None;
-  keeper_sandbox_logs_loading = None;
+  keeper_sandbox_logs_generation = 0;
+  keeper_sandbox_logs_inflight = None;
   keeper_config_view = None;
   keeper_config_view_error = None;
   github_identity_view = None;

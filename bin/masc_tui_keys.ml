@@ -227,8 +227,12 @@ let for_surface = function
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "y" "agree" ~help:"record the machine's verdict as yours"
-      ; b Act "n" "overrule" ~help:"record the opposite verdict; $EDITOR takes the reason"
+        (* [x], not [n]: this surface answers the row search, and [n] / [N]
+           step it. Spelled the way Verification spells its own rejection. *)
+      ; b Act "x" "overrule" ~help:"record the opposite verdict; $EDITOR takes the reason"
       ; b Act "Y" "copy task" ~help:"copy a link to the task on Overview"
+      ; b Search "/" "find" ~help:"jump the cursor to a matching task id or title"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Fusion ->
@@ -454,19 +458,27 @@ let footer_hints_resources ~detail_focus =
 let opens_keepers ~message_mode key =
   (not message_mode) && String.equal key keepers_jump.key
 
-(* An armed two-press action expires on the next unrelated key: otherwise it
-   waits indefinitely and a later press of the same key -- after the cursor
-   has moved, after a refresh -- submits work the operator armed minutes ago
-   for something else.
+(* An armed two-press action expires on the next unrelated input: otherwise
+   it waits indefinitely and a later press of the same key -- after the
+   cursor has moved, after a refresh -- submits work the operator armed
+   minutes ago for something else.
 
-   A loop turn that read no key is not an unrelated key. The rule lives here
-   because it was restated once per armed field in the dispatch loop, and one
-   restatement (the connector unbind) counted [None] as a cancel. The loop
-   turns without input, so that arm survived a single iteration: the two [u]
-   presses only removed a binding when both bytes arrived in the same read. *)
-let cancels_two_press ~key ~second_press =
+   Two facts, not one. [input_seen] says the loop actually read something:
+   the loop turns on a timeout as well, and a turn that read nothing is not
+   an unrelated input. [key] says what it read, and it is [None] for a
+   mouse report, a paste, and a graphics reply -- deliberate input that is
+   not the second press, so it cancels.
+
+   The rule lives here because the dispatch loop restated it once per armed
+   field and the connector unbind's restatement read the timeout turn as an
+   unrelated key. Its arm therefore survived one iteration: the two [u]
+   presses removed a binding only when both bytes arrived in the same
+   read. *)
+let cancels_two_press ~input_seen ~key ~second_press =
+  input_seen
+  &&
   match key with
-  | None -> false
+  | None -> true
   | Some pressed -> not (List.exists (String.equal pressed) second_press)
 
 (* The Fusion detail view: the keys table owns the key list; the renderer

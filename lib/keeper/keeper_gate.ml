@@ -31,8 +31,12 @@ let connector_post_gate_operation = "connector_post"
 
 let identity_call_gate_operation = "identity_call"
 
-let voice_speak_gate_operation =
-  Keeper_tool_voice_runtime.(command_to_string Speak)
+(* Not read from Keeper_tool_voice_runtime.command_to_string: that module
+   sits above the Gate in the dependency graph (its chat/broadcast leaves
+   reach back here through the turn driver), so borrowing the literal
+   would close a cycle. The pairing with command_to_string Speak is pinned
+   by test_speak_replays_while_listen_never_reaches_the_gate. *)
+let voice_speak_gate_operation = "keeper_voice_speak"
 
 type replayable =
   | Replay_write

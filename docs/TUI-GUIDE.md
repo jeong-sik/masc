@@ -638,6 +638,10 @@ a RECENT TURNS row names the one on screen -- and every tab re-reads the
 exact provider input for the row they name; a turn that retained no
 snapshot says so on the request tab rather than showing another turn's.
 
+On the request tab, `/` searches the item labels the way the keeper
+roster searches names: typing jumps to the first match, `n`/`N` cycle,
+`Enter` settles, `Esc` clears. The query draws beside the tab row.
+
 `2:request` marks where each item stands in the assembly: `F` the fixed
 system prompt, `H` history the window carried forward, `N` the newest
 message added this turn (the wire is append-only, so the last message is the

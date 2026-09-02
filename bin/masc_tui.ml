@@ -4086,6 +4086,11 @@ let search_land state index =
   in
   match state.view with
   | Keepers Keeper_list -> state.keeper_cursor <- index
+  | Keepers Keeper_detail when state.context_inspector_open ->
+      (* A landed search row is a new item: its reader starts at the top of
+         the detail, the way a j/k move does. *)
+      state.context_inspector_cursor <- index;
+      state.context_inspector_detail_scroll <- 0
   | Lanes -> state.lanes_standalone_cursor <- index
   | Verification ->
       state.verification_cursor <- index;
@@ -11596,8 +11601,11 @@ and is loaded on demand through keeper_skill.
            Render_schedule.request render_schedule Render_schedule.Force
        (* [/context] is modal: the summary and exact input text must not leak
           keys into the composer underneath. The quit confirmation and chrome
-          toggles remain global above it, matching Help and Palette. *)
-       | Some k when state.context_inspector_open ->
+          toggles remain global above it, matching Help and Palette. An
+          active surface search outranks it: typing during a search is the
+          search, and the search arm below owns those keys. *)
+       | Some k
+         when state.context_inspector_open && Option.is_none state.search ->
            let exact_input_items () =
              match state.context_inspector_reading with
              | Some
@@ -11679,6 +11687,14 @@ and is loaded on demand through keeper_skill.
                       state.context_inspector_keeper
                   end
                 end
+            | "/" when
+                state.context_inspector_tab
+                = Masc_tui_context_inspector.Exact_input
+                && Option.is_some state.context_inspector_reading ->
+                (* The surface search's own arm sits below this modal block,
+                   so the pane starts the search itself: same state, same
+                   keys, and the block above now yields while it runs. *)
+                state.search <- Some ""
             | "r" ->
                 Option.iter
                   (fun keeper_name ->

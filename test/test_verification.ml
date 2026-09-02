@@ -202,6 +202,7 @@ let test_stalled_metadata_preserves_typed_authority () =
    A genuinely new gate/detail for the same verification_id is new
    information and must still post. *)
 let test_notify_stalled_verification_dedupes_repeated_stalls () =
+  Eio_main.run @@ fun _env ->
   let contains_substring haystack needle =
     let nl = String.length needle and hl = String.length haystack in
     let rec loop i =

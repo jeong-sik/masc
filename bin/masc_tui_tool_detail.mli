@@ -7,9 +7,19 @@
 
 val structured : string -> string
 (** [structured value] re-serves a whole JSON object or array with one member
-    per line. Anything else -- a scalar, a bare word, a payload that does not
-    parse -- is returned unchanged, because a single-line rendering is already
-    its best one. *)
+    per line, for reading rather than for parsing back:
+
+    - a string value that is itself a JSON document is unfolded into that
+      document, recursively, so a result that carries a result that carries
+      a command's output shows the innermost value as structure instead of
+      as three layers of escapes;
+    - a string that spans lines or holds tabs is drawn as a block under a
+      [|] marker, its lines raw and indented under the member that owns
+      them, tabs shown as [┊].
+
+    Anything else -- a scalar, a bare word, a payload that does not parse --
+    is returned unchanged, because a single-line rendering is already its
+    best one. *)
 
 val tree : (string * string) list -> string list
 (** [tree fields] draws [fields] as one branch per field, in order, with the

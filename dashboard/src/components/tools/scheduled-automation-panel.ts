@@ -518,14 +518,39 @@ function reactionEvidenceTone(
   if (!evidence) return 'neutral'
   if (
     evidence.projection_status === 'matched_consumed_ack' ||
+    evidence.projection_status === 'matched_turn_finished' ||
     evidence.projection_status === 'matched_turn_started'
   ) return 'ok'
+  // A cancellation is a settled outcome the operator may need to act on;
+  // two terminals on one occurrence is evidence that contradicts itself.
+  // Neither is the red of a ledger that could not be read.
   if (
+    evidence.projection_status === 'matched_terminal_cancelled' ||
+    evidence.projection_status === 'conflicting_terminal_evidence' ||
     evidence.projection_status === 'matched_stimulus' ||
     evidence.projection_status === 'not_found' ||
     evidence.projection_status === 'missing_stimulus_id'
   ) return 'warn'
   return 'bad'
+}
+
+export function wakeToTurnWait(
+  evidence: Pick<
+    DashboardScheduledAutomationKeeperReactionEvidence,
+    'stimulus_recorded_at' | 'turn_started_recorded_at'
+  >,
+): string | null {
+  const seen = evidence.stimulus_recorded_at
+  const started = evidence.turn_started_recorded_at
+  if (typeof seen !== 'number' || typeof started !== 'number') return null
+  const seconds = started - seen
+  // A turn recorded before its stimulus is a contradiction in the ledger,
+  // not a zero-length wait; say so rather than clamp it away.
+  if (seconds < 0) return `${(-seconds).toFixed(1)}s 역전 (turn_started 가 stimulus 보다 앞섬)`
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
+  const total = Math.round(seconds)
+  const minutes = Math.floor(total / 60)
+  return `${minutes}m ${total - minutes * 60}s`
 }
 
 function reactionEvidenceRows(
@@ -543,12 +568,19 @@ function reactionEvidenceRows(
     { label: 'reaction_kind', value: evidence.reaction_kind },
     { label: 'stimulus_seen', value: evidence.stimulus_seen },
     { label: 'turn_started_seen', value: evidence.turn_started_seen },
+    { label: 'turn_finished_seen', value: evidence.turn_finished_seen },
     { label: 'event_queue_ack_seen', value: evidence.event_queue_ack_seen },
+    { label: 'event_queue_cancelled_seen', value: evidence.event_queue_cancelled_seen },
     { label: 'matched_record_count', value: evidence.matched_record_count },
     { label: 'quarantined_record_count', value: evidence.quarantined_record_count },
     { label: 'stimulus_recorded_at', value: evidence.stimulus_recorded_at_iso },
     { label: 'turn_started_recorded_at', value: evidence.turn_started_recorded_at_iso },
+    // How long the wake waited in the Keeper's queue before a turn took it.
+    // Measured live: 1s on an idle Keeper, 461s behind a chat conversation.
+    { label: 'wake→turn wait', value: wakeToTurnWait(evidence) },
+    { label: 'turn_finished_recorded_at', value: evidence.turn_finished_recorded_at_iso },
     { label: 'event_queue_ack_recorded_at', value: evidence.event_queue_ack_recorded_at_iso },
+    { label: 'event_queue_cancelled_recorded_at', value: evidence.event_queue_cancelled_recorded_at_iso },
     { label: 'latest_recorded_at', value: evidence.latest_recorded_at_iso },
     { label: 'reason', value: evidence.reason },
   ]

@@ -33,7 +33,7 @@ import {
 } from '../tools/scheduled-automation-panel'
 import type { Cadence } from '../v2/schedule-constants'
 import { CadenceSummary, ScheduleCalendar, cadenceCounts, cadenceOfRequest } from './schedule-agenda'
-import { countQueueDrainMisses } from './queue-drain-status'
+import { countQueueDrainCancelled, countQueueDrainMisses } from './queue-drain-status'
 import {
   loadTools,
   toolsData,
@@ -117,6 +117,12 @@ export function ScheduleSurface() {
   // Scheduled keeper wakes that were dispatched but are in neither queue AND
   // never recorded as reacted — the drain-miss the calendar surfaces per row.
   const queueMisses = automation ? countQueueDrainMisses(requests) : null
+  // Wakes the queue cancelled without a turn — a definition whose target is
+  // gone keeps firing into this number every day.
+  const queueCancelled = automation ? countQueueDrainCancelled(requests) : null
+  // Every retained attempt in the store, not the newest of the rows on the
+  // page: a burst of failures a later tick retried is still counted here.
+  const wakeCounts = automation?.wake_counts ?? null
 
   const [view, setView] = useState<ScheduleView>('calendar')
   const [cadenceFilter, setCadenceFilter] = useState<Cadence | null>(null)
@@ -256,7 +262,7 @@ export function ScheduleSurface() {
             `
           : null}
 
-        <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(4, 1fr)' }} aria-label="예약 요약">
+        <section class="ov-kpis" aria-label="예약 요약">
           <div class="ov-kpi">
             <div class="ov-kpi-k">예약됨</div>
             <div class=${`ov-kpi-v ${scheduledCount !== null && scheduledCount > 0 ? 'info' : ''}`}>${countLabel(scheduledCount)}</div>
@@ -275,6 +281,22 @@ export function ScheduleSurface() {
               class=${`ov-kpi-v ${queueMisses === null ? '' : queueMisses > 0 ? 'warn' : 'ok'}`}
               title="dispatch됐으나 pending 큐에도 없고 keeper 반응 기록도 없는 예약 실행 수 — 실행 누락"
             >${countLabel(queueMisses)}</div>
+          </div>
+          <div class="ov-kpi" data-testid="schedule-kpi-queue-cancelled">
+            <div class="ov-kpi-k">큐 취소</div>
+            <div
+              class=${`ov-kpi-v ${queueCancelled === null ? '' : queueCancelled > 0 ? 'warn' : 'ok'}`}
+              title="마지막 wake 를 큐가 accepted cancellation 으로 정리한 예약 수 — keeper 턴 없이 끝남 (대상 keeper 부재 포함)"
+            >${countLabel(queueCancelled)}</div>
+          </div>
+          <div class="ov-kpi" data-testid="schedule-kpi-wake-failed">
+            <div class="ov-kpi-k">wake 실패</div>
+            <div
+              class=${`ov-kpi-v ${wakeCounts === null ? '' : wakeCounts.failed > 0 ? 'warn' : 'ok'}`}
+              title=${wakeCounts === null
+                ? 'wake_counts 없음 — 서버가 보내지 않았거나 형식이 맞지 않음'
+                : `보존된 wake ${wakeCounts.retained}건(예약당 최대 ${wakeCounts.retention_per_schedule}) 중 실패 ${wakeCounts.failed} · 성공 ${wakeCounts.succeeded} · 진행 ${wakeCounts.running} · 살아있는 예약 중 마지막 wake 실패 ${wakeCounts.active_with_failed_newest_wake}`}
+            >${countLabel(wakeCounts === null ? null : wakeCounts.failed)}</div>
           </div>
         </section>
 

@@ -411,13 +411,18 @@ export const DRAIN_QUEUE_AXIS = ['matched_pending', 'not_found', 'read_error', '
 
 /** Reaction-evidence axis of the drain matrix (design R_AXIS; null = 행 없음). */
 export const DRAIN_REACTION_AXIS: readonly (string | null)[] = [
-  'matched_consumed_ack', 'matched_turn_started', 'matched_stimulus', 'not_found', 'quarantined', 'read_error', null,
+  'conflicting_terminal_evidence', 'matched_terminal_cancelled', 'matched_consumed_ack', 'matched_turn_finished',
+  'matched_turn_started', 'matched_stimulus', 'not_found', 'quarantined', 'read_error', null,
 ]
 
 /** keeper_reaction_evidence statuses that prove the keeper handled the
  *  stimulus. matched_stimulus is deliberately absent — it is the producer's
  *  own dispatch record (see queue-drain-status.ts header). */
-const REACTED: ReadonlySet<string> = new Set(['matched_consumed_ack', 'matched_turn_started'])
+const REACTED: ReadonlySet<string> = new Set([
+  'matched_consumed_ack',
+  'matched_turn_finished',
+  'matched_turn_started',
+])
 
 /** Mirror of queue-drain-status.ts stateOf() on bare (queue, reaction)
  *  projection statuses, for matrix cells that have no request row behind
@@ -437,6 +442,8 @@ export function drainStateOfEvidence(
       return 'indeterminate'
     case 'not_found': {
       if (reaction != null && REACTED.has(reaction)) return 'drained'
+      if (reaction === 'matched_terminal_cancelled') return 'cancelled'
+      if (reaction === 'conflicting_terminal_evidence') return 'evidence_invalid'
       if (reaction === 'matched_stimulus' || reaction === 'not_found') return 'missed'
       if (reaction === 'read_error') return 'read_error'
       if (reaction === 'quarantined') return 'evidence_invalid'
@@ -453,7 +460,8 @@ export type DrainTone = 'info' | 'ok' | 'bad' | 'warn' | 'dim'
  *  sentence (op, default view) and the wiring explanation (why, dev view). */
 export const DRAIN_PRESENT: Record<QueueDrainState, { label: string; tone: DrainTone; op: string; why: string }> = {
   pending: { label: '큐 대기', tone: 'info', op: '아직 실행되지 않고 차례를 기다리는 중', why: 'wake 가 keeper_event_queue pending 에 있음 — 드레인 대기 중' },
-  drained: { label: '완료', tone: 'ok', op: 'keeper 가 받아서 실행했다', why: '큐에서 빠졌고 keeper 반응이 기록됨 (consumed_ack / turn_started)' },
+  drained: { label: '완료', tone: 'ok', op: 'keeper 가 받아서 실행했다', why: '큐에서 빠졌고 keeper 반응이 기록됨 (consumed_ack / turn_finished / turn_started)' },
+  cancelled: { label: '취소됨', tone: 'warn', op: '큐가 취소해서 keeper 턴 없이 끝났다 — 대상 keeper 가 없으면 예약 정의를 지우거나 옮겨야 한다', why: '큐에서 accepted cancellation 으로 빠짐 (owner-absent drain 등) — keeper 반응 없이 종결' },
   missed: { label: '누락', tone: 'bad', op: '보냈지만 아무도 실행하지 않았다 — 다시 걸어야 한다', why: 'dispatch 기록만 남았고 keeper 반응이 없음 — 큐에서 빠졌으나 아무도 소비 안 함' },
   read_error: { label: '읽기 오류', tone: 'warn', op: '기록을 읽지 못해 실행됐는지 알 수 없다', why: '큐 스냅샷 또는 reaction ledger 읽기 실패 — 드레인 상태 확인 불가' },
   evidence_invalid: { label: '증거 격리', tone: 'warn', op: '기록이 손상돼 실행 여부를 단정할 수 없다', why: '해당 occurrence 의 reaction ledger 행이 격리되어 정확한 판정 불가' },
@@ -508,7 +516,7 @@ export function drainRowOfRequest(
 
 /** Operator sort — actionable verdicts first (design DrainList order). */
 const DRAIN_SORT_ORDER: readonly QueueDrainState[] = [
-  'missed', 'read_error', 'evidence_invalid', 'pending', 'indeterminate', 'drained',
+  'missed', 'cancelled', 'read_error', 'evidence_invalid', 'pending', 'indeterminate', 'drained',
 ]
 
 export function sortedDrainRows(
@@ -521,7 +529,7 @@ export function sortedDrainRows(
 }
 
 /** Legend entries of the operator drain list (design DrainList footer). */
-export const DRAIN_LEGEND_STATES: readonly QueueDrainState[] = ['missed', 'pending', 'read_error', 'drained']
+export const DRAIN_LEGEND_STATES: readonly QueueDrainState[] = ['missed', 'cancelled', 'pending', 'read_error', 'drained']
 
 /* ── 라이프사이클 이벤트 (lc-*) ───────────────────────────────────────── */
 

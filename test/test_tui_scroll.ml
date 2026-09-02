@@ -7,6 +7,7 @@
 
 let check = Alcotest.check
 let int = Alcotest.int
+let bool = Alcotest.bool
 
 let test_the_bound_is_what_is_left_below_the_window () =
   check int "a list longer than the window" 6
@@ -68,6 +69,53 @@ let test_the_window_follows_the_cursor () =
     (Masc_tui_scroll.ensure_visible ~cursor:10 ~height:5 0);
   check int "a visible cursor moves nothing" 3
     (Masc_tui_scroll.ensure_visible ~cursor:5 ~height:5 3)
+
+
+(* The context-inspector tabs draw a detail column that begins on the
+   selected row's own line and runs downward. [ensure_visible] answers a row
+   that fell below the fold by pinning it to the window's last line, which
+   held that whole detail behind the bottom edge: the keys on those tabs move
+   the cursor, so every press re-pinned the next row to the same edge and the
+   content under it never entered the window. A row that carries content
+   below it has to lead the window instead. *)
+let test_a_row_with_content_under_it_leads_the_window () =
+  check int "a row below the fold leads from one line above it" 9
+    (Masc_tui_scroll.ensure_leading ~cursor:10 ~lead:1 ~height:5 0);
+  check int "not pinned to the last line as a bare row would be" 6
+    (Masc_tui_scroll.ensure_visible ~cursor:10 ~height:5 0);
+  check int "a row above the window leads there too" 1
+    (Masc_tui_scroll.ensure_leading ~cursor:2 ~lead:1 ~height:5 4);
+  check int "a visible row moves nothing" 3
+    (Masc_tui_scroll.ensure_leading ~cursor:5 ~lead:1 ~height:5 3);
+  check int "the first row cannot lead from below zero" 0
+    (Masc_tui_scroll.ensure_leading ~cursor:0 ~lead:1 ~height:5 4);
+  check int "no lead anchors the row on the first line" 10
+    (Masc_tui_scroll.ensure_leading ~cursor:10 ~lead:0 ~height:5 0)
+
+(* The lead spends window lines above the row. A one-line window cannot
+   spend any: there the row has to take its last -- its only -- line, which
+   is the placement [ensure_visible] gives, so a pane squeezed to a single
+   row still shows the selection instead of parking its header there. *)
+let test_a_window_too_short_for_the_lead_keeps_the_row_visible () =
+  check int "a one-line window shows the row, not the header" 10
+    (Masc_tui_scroll.ensure_leading ~cursor:10 ~lead:1 ~height:1 0);
+  check int "which is the bare-row placement" 10
+    (Masc_tui_scroll.ensure_visible ~cursor:10 ~height:1 0);
+  check int "a two-line window affords the one-line lead" 9
+    (Masc_tui_scroll.ensure_leading ~cursor:10 ~lead:1 ~height:2 0)
+
+(* The caller bounds the answer with [normalize], so a row near the tail
+   anchors as far down as the list still fills the window -- and stays inside
+   it, because the bound moves by exactly the rows the window loses. *)
+let test_a_row_near_the_tail_survives_the_bound () =
+  check int "the tail clamps the anchor, not the row out of the window" 7
+    (Masc_tui_scroll.normalize ~count:12 ~height:5
+       (Masc_tui_scroll.ensure_leading ~cursor:11 ~lead:1 ~height:5 0));
+  check bool "the clamped window still holds the row" true
+    (let scroll =
+       Masc_tui_scroll.normalize ~count:12 ~height:5
+         (Masc_tui_scroll.ensure_leading ~cursor:11 ~lead:1 ~height:5 0)
+     in scroll <= 11 && 11 < scroll + 5)
 
 
 (* Changes draws a preview under its list. The list keeps five rows and the
@@ -137,6 +185,13 @@ let () =
             test_the_cursor_stays_inside_the_list
         ; Alcotest.test_case "the window follows the cursor" `Quick
             test_the_window_follows_the_cursor
+        ; Alcotest.test_case "a row with content under it leads the window"
+            `Quick test_a_row_with_content_under_it_leads_the_window
+        ; Alcotest.test_case "a window too short for the lead keeps the row \
+                              visible"
+            `Quick test_a_window_too_short_for_the_lead_keeps_the_row_visible
+        ; Alcotest.test_case "a row near the tail survives the bound" `Quick
+            test_a_row_near_the_tail_survives_the_bound
         ] )
     ; ( "layout"
       , [ Alcotest.test_case "conditional overflow row" `Quick

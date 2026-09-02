@@ -480,6 +480,45 @@ let test_provider_content_messages_rejects_projection_rewrite () =
    only byte-for-byte. The digest is taken in list order, so the same tools
    sent in a different order are a different surface -- which is what the
    provider sees. *)
+(* The accumulator is where a fingerprint was lost: it summed bytes and wrote
+   [None] over every digest, so the tool bucket answered null on every turn the
+   fleet ran. A bucket with one contribution keeps its digest; a bucket with
+   several has no honest one to keep. *)
+let test_a_merged_bucket_has_no_fingerprint_and_a_single_one_keeps_it () =
+  let user text =
+    { Agent_core.Types.role = Agent_core.Types.User
+    ; content = [ Agent_core.Types.Text text ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  let tool name =
+    Agent_core.Tool.create
+      ~name
+      ~description:("probe " ^ name)
+      ~parameters:[]
+      (fun _input -> Ok { content = "ok"; _meta = None })
+  in
+  let metrics =
+    KAPM.build_ctx_composition_metrics
+      ~prompt_blocks:[]
+      ~tools:[ tool "alpha" ]
+      ~input_messages:[ user "one"; user "two" ]
+      ~actual_input_tokens:None
+  in
+  let fingerprint key =
+    metrics.KAPM.segments
+    |> List.assoc_opt key
+    |> Option.map (fun (segment : KAPM.prompt_segment_metrics) -> segment.KAPM.fingerprint)
+    |> Option.join
+  in
+  check bool "the tool bucket has one contribution and keeps its digest" true
+    (Option.is_some (fingerprint Turn_record.Tool_schemas));
+  check bool "the user bucket took two and keeps none" true
+    (Option.is_none (fingerprint Turn_record.Message_user))
+;;
+
 let test_tool_schema_fingerprint_follows_the_order_sent () =
   let tool name =
     Agent_core.Tool.create
@@ -542,6 +581,8 @@ let () =
         [
           test_case "tool schema fingerprint follows the order sent" `Quick
             test_tool_schema_fingerprint_follows_the_order_sent;
+          test_case "a merged bucket keeps no fingerprint" `Quick
+            test_a_merged_bucket_has_no_fingerprint_and_a_single_one_keeps_it;
           test_case "attributes final provider input content" `Quick
             test_ctx_composition_splits_final_provider_input_bytes;
           test_case "removes typed prompt carrier" `Quick

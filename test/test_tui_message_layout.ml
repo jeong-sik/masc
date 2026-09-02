@@ -461,7 +461,7 @@ let test_input_cursor_uses_visible_terminal_cells () =
   check int "the minimum terminal leaves nine framed content cells" 9
     (Frame.inner_width ~cols:13)
 
-let test_chat_history_height_is_the_page_distance () =
+let test_chat_history_height_uses_the_shared_chrome () =
   check int "46-row pane exposes 38 transcript rows" 38
     (Layout.message_history_height ~terminal_rows:46 ~status_rows:0);
   check int "three status rows reduce both viewport and page by three" 35
@@ -1846,8 +1846,8 @@ let () =
             test_input_viewport_keeps_latest_complete_scalars
         ; test_case "input cursor uses visible cells" `Quick
             test_input_cursor_uses_visible_terminal_cells
-        ; test_case "history height is the page distance" `Quick
-            test_chat_history_height_is_the_page_distance
+        ; test_case "history height uses the shared chrome" `Quick
+            test_chat_history_height_uses_the_shared_chrome
         ; test_case "chat title yields before projection modes" `Quick
             test_chat_title_yields_before_projection_modes
         ; test_case "last page start counts rows" `Quick

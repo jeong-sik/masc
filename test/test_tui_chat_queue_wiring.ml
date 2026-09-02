@@ -1104,6 +1104,16 @@ let test_the_support_threshold_reserves_the_scrollback_row () =
   check int "PgUp does not move the viewport support threshold" newest reading_back
 ;;
 
+let test_page_navigation_uses_the_reserved_scrollback_budget () =
+  let calls =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"keeper_message_page_rows"
+      ~callee:"keeper_message_support_status_rows"
+  in
+  check int "PgUp and PgDn share the support-reserved row budget" 1 calls
+;;
+
 let layout_binding = "keeper_message_layout_entries"
 
 (* Drawing and scroll-pin compensation must consume the same physical layout.
@@ -1398,6 +1408,8 @@ let () =
             test_the_budget_and_the_pane_agree_about_the_scrollback_row
         ; test_case "the support threshold reserves the scrollback row" `Quick
             test_the_support_threshold_reserves_the_scrollback_row
+        ; test_case "page navigation reserves the scrollback row" `Quick
+            test_page_navigation_uses_the_reserved_scrollback_budget
         ; test_case "the pane builds one full message layout" `Quick
             test_the_pane_builds_one_full_message_layout
         ; test_case "pending input is not mixed into the transcript" `Quick

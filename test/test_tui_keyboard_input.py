@@ -6686,6 +6686,13 @@ def viewport_gap_interaction(
         raise AssertionError(
             f"PgUp retained a synthetic gap inside transcript rows: {complete!r}"
         )
+    newest = send_and_wait(process, master_fd, output, b"\x1b[6~", b"line-23")
+    newest_plain = CSI_RE.sub(b"", newest)
+    if b"line-00" not in newest_plain or marker not in newest_plain:
+        raise AssertionError(
+            "PgDn did not return the exact oversized live-edge projection "
+            f"after one PgUp: {newest!r}"
+        )
     send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     os.write(master_fd, b"q")
 

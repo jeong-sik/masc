@@ -37,8 +37,8 @@ let syncs_without_failure ~label ~domain () =
   let result =
     Sync.sync
       ~domain
-      ~read:Masc.Embedded_config.read
-      ~files:Masc.Embedded_config.file_list
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
       ~dest_dir
       ()
   in

@@ -43,6 +43,11 @@ DEFAULT_CATALOG = (
     / "missions.json"
 )
 SCHEMA = "masc.keeper_multi_collaboration_evidence.v1"
+# The lanes a keeper may run under. Mirrors the ``sandbox_profile`` enum of
+# ``config/tools/masc_keeper_up.toml``; the acceptance test pins the two lists
+# equal so the runner cannot drift from the server again (#32588: the runner
+# kept sending "local" after #32078 removed that profile, and no fleet booted).
+SANDBOX_PROFILES: tuple[str, ...] = ("docker", "microvm", "remote_ssh")
 # Mission ids are identifiers, not positions: RW19 held the persistence tier
 # projection and was removed with that feature, and past evidence files still
 # name the surviving missions by these numbers. Listing them avoids a range
@@ -1192,6 +1197,7 @@ class MissionRun:
         token_file: pathlib.Path,
         browser_proof_script: pathlib.Path,
         expected_base_path: str,
+        sandbox_profile: str,
     ) -> None:
         self.catalog = catalog
         self.client = client
@@ -1232,6 +1238,11 @@ class MissionRun:
         self.require_heterogeneous_runtimes = require_heterogeneous_runtimes
         self.token_file = token_file
         self.browser_proof_script = browser_proof_script
+        if sandbox_profile not in SANDBOX_PROFILES:
+            raise AcceptanceError(
+                f"sandbox_profile must be one of {list(SANDBOX_PROFILES)}, got {sandbox_profile!r}"
+            )
+        self.sandbox_profile = sandbox_profile
         self.expected_base_path = expected_base_path
         self.secret = f"memory-{uuid.uuid4().hex[:12]}"
         self.goal_id = f"goal-{self.marker}"
@@ -1412,15 +1423,11 @@ class MissionRun:
                 "mention_targets": [keeper, role],
                 "proactive_enabled": False,
                 "autoboot_enabled": True,
-                # masc_keeper_up refuses a keeper with no sandbox_profile
-                # ("sandbox_profile is required (allowed: local, docker,
-                # microvm, remote_ssh)"). The campaign runs against an isolated
-                # base path and writes only inside its own playground, so the
-                # local profile is the one that matches what the missions do;
-                # it is also what MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1 admits on
-                # the campaign server. Without this the fleet never boots and
-                # the run aborts on the first keeper.
-                "sandbox_profile": "local",
+                # The lane is an operator decision per campaign server
+                # (--sandbox-profile); the runner never assumes one. The
+                # server refuses profiles outside its closed set, and the
+                # receipt records the value under resources.sandbox_profile.
+                "sandbox_profile": self.sandbox_profile,
             }
             runtime_id = self.runtime_for_role(role)
             if runtime_id:
@@ -3575,6 +3582,7 @@ def build_bundle(
                 require_heterogeneous=run.require_heterogeneous_runtimes,
                 roles=set(run.roles),
             ),
+            "sandbox_profile": run.sandbox_profile,
             "goal_id": run.goal_id,
             "goal_verifier_goal_id": run.verifier_goal_id,
             "goal_verifier_task_id": run.verifier_task_id,
@@ -3842,6 +3850,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-source-sha")
     parser.add_argument("--allow-mutation", action="store_true")
     parser.add_argument("--runtime-id")
+    parser.add_argument("--sandbox-profile", choices=SANDBOX_PROFILES)
     parser.add_argument("--runtime-by-role-json")
     parser.add_argument("--require-heterogeneous-runtimes", action="store_true")
     parser.add_argument("--run-id")
@@ -3898,6 +3907,13 @@ def main() -> int:
 
         token = read_token(args)
         health_url = args.health_url or default_health_url(args.mcp_url)
+        # Checked before any network call: a run without a lane decision
+        # should not spend a preflight to find out.
+        if args.run and not args.sandbox_profile:
+            raise AcceptanceError(
+                "--run requires --sandbox-profile "
+                f"(one of {', '.join(SANDBOX_PROFILES)}): the campaign server's keeper lane"
+            )
         client, health, preflight_result = preflight(
             catalog=catalog,
             mcp_url=args.mcp_url,
@@ -3950,6 +3966,7 @@ def main() -> int:
             token_file=pathlib.Path(args.token_file).resolve(),
             browser_proof_script=pathlib.Path(args.browser_proof_script).resolve(),
             expected_base_path=args.expected_base_path,
+            sandbox_profile=args.sandbox_profile,
         )
         try:
             post_id, assertions = mission_run.run()

@@ -1,9 +1,13 @@
+import contextlib
 import importlib.util
 import inspect
+import io
 import json
+import re
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 
@@ -139,6 +143,28 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
                 runtime_by_role={},
                 require_heterogeneous=False,
             )
+
+    def test_sandbox_profiles_pin_the_keeper_up_tool_enum(self):
+        toml_text = (REPO_ROOT / "config" / "tools" / "masc_keeper_up.toml").read_text()
+        match = re.search(
+            r'name = "sandbox_profile"\n(?:.*\n){0,3}?enum = \[([^\]]*)\]', toml_text
+        )
+        self.assertIsNotNone(match, "masc_keeper_up.toml declares no sandbox_profile enum")
+        server_profiles = tuple(re.findall(r'"([^"]+)"', match.group(1)))
+        self.assertEqual(acceptance.SANDBOX_PROFILES, server_profiles)
+
+    def test_fleet_uses_the_configured_profile_and_never_local(self):
+        source = inspect.getsource(acceptance.MissionRun.create_fleet)
+        self.assertIn('"sandbox_profile": self.sandbox_profile', source)
+        self.assertNotIn('"local"', source)
+        self.assertNotIn("ALLOW_LOCAL_PLAYGROUND", source)
+
+    def test_run_refuses_to_start_without_a_sandbox_profile(self):
+        with unittest.mock.patch.object(sys, "argv", ["acceptance", "--run"]):
+            with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                code = acceptance.main()
+        self.assertEqual(code, 2)
+        self.assertIn("--sandbox-profile", stderr.getvalue())
 
     def test_catalog_has_exact_mission_and_assertion_counts(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)

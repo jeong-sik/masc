@@ -15637,7 +15637,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                 Plain
                   ( context_composition_lines ~cols
                       ~turn_back:state.context_inspector_turn_back selection
-                  , None ))
+                  , None )
             | Error detail ->
                 Plain
                   ( [ (Theme.bad ()) ^ "  Composition unavailable: "

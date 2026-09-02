@@ -1,6 +1,6 @@
 (** See the mli for the contract. *)
 
-module Keeper_chat = Masc.Keeper_chat
+module Keeper_chat = Masc_tui_keeper_chat_projection
 module Message_layout = Masc_tui_message_layout
 
 (* A tool argument or result that is a whole JSON document is re-served with

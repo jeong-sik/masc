@@ -3626,7 +3626,8 @@
  (deps
   test_keeper_multi_collaboration_acceptance.py
   ../scripts/harness/workload/keeper_multi_collaboration_acceptance.py
-  ../scripts/fixtures/keeper-multi-collaboration/missions.json)
+  ../scripts/fixtures/keeper-multi-collaboration/missions.json
+  ../config/tools/masc_keeper_up.toml)
  (action
   (run python3 %{dep:test_keeper_multi_collaboration_acceptance.py})))
 

@@ -542,11 +542,11 @@ let test_terminal_ack_replays_after_projection_and_snapshot_reload () =
         (Filename.concat
            (Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path)
            keeper_name)
-        "event-queue-transitions-v6.jsonl"
+        "event-queue-transitions-v7.jsonl"
     in
     let residual_wal_row =
       `Assoc
-        [ "schema", `String "masc.keeper_event_queue.transition.v6"
+        [ "schema", `String "masc.keeper_event_queue.transition.v7"
         ; "base_path", `String config.Workspace.base_path
         ; "keeper_name", `String keeper_name
         ; "pre_state", State.to_yojson pre_state
@@ -679,11 +679,11 @@ let test_projected_wal_recovery_allows_next_source_ack () =
         (Filename.concat
            (Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path)
            keeper_name)
-        "event-queue-transitions-v6.jsonl"
+        "event-queue-transitions-v7.jsonl"
     in
     let residual_wal_row =
       `Assoc
-        [ "schema", `String "masc.keeper_event_queue.transition.v6"
+        [ "schema", `String "masc.keeper_event_queue.transition.v7"
         ; "base_path", `String config.Workspace.base_path
         ; "keeper_name", `String keeper_name
         ; "pre_state", State.to_yojson first_pre_state

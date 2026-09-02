@@ -29,7 +29,7 @@ let rec rm_rf path =
 let snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue-v17.json"
+    "event-queue-v18.json"
 
 let json_field name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -1654,7 +1654,7 @@ let () =
 
   (* --- A-fix (RFC: keeper-orphan-stimulus-persistence): a consumed stimulus
          is drained from the current queue state on the genuine-ack path. Here
-         the stimulus lives in event-queue-v17.json, mirroring a bootstrap enqueued
+         the stimulus lives in event-queue-v18.json, mirroring a bootstrap enqueued
          by supervisor launch; after ack, [load] must be empty. Without the
          A-fix this returns length 1 and accumulates across restarts. --- *)
   let base_path = temp_dir "keeper-event-queue-ack-drains-pending" in
@@ -2233,7 +2233,7 @@ let () =
   (match
      Keeper_event_queue_state.of_yojson
        (`Assoc
-           [ "schema", `String "keeper.event_queue.state.v15"
+           [ "schema", `String "keeper.event_queue.state.v16"
            ; "revision", `Int 1
            ; "pending", `List []
            ; "last_transition", `Null
@@ -2247,4 +2247,4 @@ let () =
      assert (
        String.equal
          message
-         "unsupported keeper event queue state schema: keeper.event_queue.state.v15"))
+         "unsupported keeper event queue state schema: keeper.event_queue.state.v16"))

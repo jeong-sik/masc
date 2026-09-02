@@ -1,15 +1,12 @@
 (** Durable per-Keeper Event Layer state.
 
-    Current writes go to [event-queue-v17.json]. The envelope inside still
-    carries the [keeper.event_queue.state.v16] schema tag because the JSON
-    shape did not change: #29598 changed what a turn-attempt-terminal
-    operation id says, not the field layout around it. The filename is the
-    fresh-state device, the schema tag names the shape. The envelope holds
+    Current writes go to [event-queue-v18.json] with the exact
+    [keeper.event_queue.state.v17] compact-witness schema. The envelope holds
     revision, pending stimuli, the latest
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
     accepted-transfer target projections. Only this schema and the
-    [event-queue-transitions-v6.jsonl] WAL are queue authority. Every WAL row
+    [event-queue-transitions-v7.jsonl] WAL are queue authority. Every WAL row
     carries the complete pre-transition state needed for snapshot-independent
     recovery. The WAL accepts at most one row and is retired after projection,
     so its retained size is bounded by one complete state. Serializing that

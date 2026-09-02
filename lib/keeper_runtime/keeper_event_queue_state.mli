@@ -51,12 +51,62 @@ type transition =
   | Transfer_accepted of accepted_transfer
   | Ack_source_terminal of accepted_source_terminal
 
+val transition_source : transition -> Keeper_event_queue.stimulus
+
 type transition_receipt =
   { transition_id : string
   ; event_id : string
   ; applied_at : float
   ; transition : transition
   }
+
+type projected_disposition_kind =
+  | Projected_cancel of { reason_ref : string }
+  | Projected_transfer of
+      { from_keeper : string
+      ; to_keeper : string
+      ; target_trace_id : Keeper_id.Trace_id.t
+      }
+  | Projected_fusion_terminal
+  | Projected_hitl_terminal
+  | Projected_turn_completed
+  | Projected_turn_attempt_terminal
+
+type projected_source_kind =
+  | Source_board_signal
+  | Source_board_attention
+  | Source_bootstrap
+  | Source_fusion_completed
+  | Source_schedule_due
+  | Source_connector_attention
+  | Source_hitl_resolved
+  | Source_ask_answered
+  | Source_completion_authority_rejected
+  | Source_task_cancelled
+  | Source_workspace_message
+  | Source_delegate_completed
+  | Source_composition_completed
+
+val projected_source_kind_to_string : projected_source_kind -> string
+
+type projected_disposition_witness =
+  { transition_id : string
+  ; event_id : string
+  ; applied_at : float
+  ; operator_operation_id : string
+  ; transition_ref : string
+  ; source_ref : string
+  ; post_id : string
+  ; urgency : Keeper_event_queue.urgency
+  ; source_arrived_at : float
+  ; source_kind : projected_source_kind
+  ; source_incarnation : int64
+  ; kind : projected_disposition_kind
+  }
+
+type durable_disposition =
+  | Current_receipt of transition_receipt
+  | Projected_witness of projected_disposition_witness
 
 type outbox_entry =
   { receipt : transition_receipt
@@ -93,6 +143,9 @@ val source_snapshot_ref : Keeper_event_queue.stimulus -> string
     exposes no raw payload bytes; [source_incarnation] separately identifies a
     later reinsertion of the same snapshot. *)
 
+val disposition_reason_ref : string -> string
+(** Domain-separated digest for exact cancellation-reason replay matching. *)
+
 val resolve_pending_selection :
   source_ref:string ->
   source_incarnation:int64 ->
@@ -102,16 +155,15 @@ val resolve_pending_selection :
     revision or queue position. *)
 
 val last_transition : t -> transition_receipt option
-val projected_dispositions : t -> transition_receipt list
-(** Newest-first projected operator dispositions, including
-    [last_transition] when it is itself an operator disposition. *)
+val projected_dispositions : t -> durable_disposition list
+(** Newest-first projected dispositions. The current receipt remains full;
+    displaced history is a compact exact-replay witness. *)
 
-val projected_transition_receipts : t -> transition_receipt list
-(** The latest projected transition plus every older operator disposition
-    witness retained for exact operation replay. *)
+val transition_receipt_is_projected : transition_receipt -> t -> bool
+(** Exact full-receipt or compact-fingerprint membership used by WAL replay. *)
 
 val prior_disposition_by_operation_id :
-  string -> t -> transition_receipt option
+  string -> t -> durable_disposition option
 (** Return the unique durable disposition for an operator operation ID from
     either the current outbox or projected history. *)
 
@@ -270,4 +322,4 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v16"] is the only accepted schema. *)
+(** ["keeper.event_queue.state.v17"] is the only accepted schema. *)

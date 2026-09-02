@@ -286,7 +286,7 @@ let bind ~channel_id ~keeper_name ~actor_name =
     |> Result.map_error Store.mutation_error_to_string
     |> Result.map (fun () -> status_json ())
 
-let unbind_internal ?expected_keeper_name ~channel_id ~actor_name =
+let unbind_internal ?expected_keeper_name ~channel_id ~actor_name () =
   let channel_id = String.trim channel_id in
   if String.equal channel_id "" then Error "channel_id is required"
   else
@@ -327,10 +327,10 @@ let unbind_internal ?expected_keeper_name ~channel_id ~actor_name =
     |> Result.map (fun () -> status_json ())
 
 let unbind ~channel_id ~actor_name =
-  unbind_internal ~channel_id ~actor_name
+  unbind_internal ~channel_id ~actor_name ()
 
 let unbind_if_keeper ~channel_id ~expected_keeper_name ~actor_name =
-  unbind_internal ~expected_keeper_name ~channel_id ~actor_name
+  unbind_internal ~expected_keeper_name ~channel_id ~actor_name ()
 
 (* ---- In-process gateway support ---- *)
 

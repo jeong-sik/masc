@@ -1203,12 +1203,11 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     () : turn_prompt_parts
   =
   let system_prompt =
-    build_system_prompt
-      ~meta
-      ~config
-      ?profile_defaults
-      ?active_goal_summaries
-      ()
+    (* No goal list here: #32665 took the summaries out of the system prompt
+       so a Keeper's stable contract stops restating a store the turn already
+       carries. The value stays in scope because this function still renders
+       it into the turn's own context below -- that is the half #32665 kept. *)
+    build_system_prompt ~meta ~config ?profile_defaults ()
   in
   (* User message: structured world observation — reactive triggers + resource state only.
      Runtime telemetry remains on decision_audit and independent observation paths.

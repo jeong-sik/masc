@@ -799,9 +799,10 @@ let test_source_bound_rewrite_renews_first_seen () =
         ()
     with
     | Ok snapshot -> List.hd snapshot.facts
-    | Error
-        ( Masc.Keeper_memory_source_current.Source_read_failed detail
-        | Masc.Keeper_memory_source_current.Store_write_failed detail ) ->
+    | Error (Masc.Keeper_memory_source_current.Source_read_failed detail) ->
+      Alcotest.fail
+        (Masc.Keeper_memory_source_current.source_read_failure_to_string detail)
+    | Error (Masc.Keeper_memory_source_current.Store_write_failed detail) ->
       Alcotest.fail detail
   in
   let first = write ~now:100.0 ~claim:"first wording" in

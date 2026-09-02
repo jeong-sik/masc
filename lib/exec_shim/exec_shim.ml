@@ -20,6 +20,7 @@ let shim_error_code = "remote_ssh_shim_error"
 (* {1 Environment synthesis} *)
 
 let default_base_path = "/usr/local/bin:/usr/bin:/bin"
+let default_payload_path = String.split_on_char ':' default_base_path
 
 let denylist_exact =
   [ "PATH"; "HOME"; "LD_PRELOAD"; "LD_LIBRARY_PATH"; "BASH_ENV"; "ENV" ]
@@ -40,13 +41,13 @@ let env_of_process () =
         Some (String.sub kv 0 i, String.sub kv (i + 1) (String.length kv - i - 1))
       | None -> None)
 
-let synthesize_env ~base_env ~allowlist ~request_env =
+let synthesize_env ~path ~base_env ~allowlist ~request_env =
   let shim_env = base_env in
   let lookup key default =
     match List.assoc_opt key shim_env with
     | Some v -> v
     | None -> default in
-  let base = [ ("PATH", default_base_path)
+  let base = [ ("PATH", path)
              ; ("HOME", lookup "HOME" "/tmp")
              ; ("USER", lookup "USER" "masc")
              ; ("TMPDIR", lookup "TMPDIR" "/tmp") ] in
@@ -144,13 +145,30 @@ let check_request_root_jail ~config_root ~request_root =
 type config =
   { remote_root : string
   ; env_allowlist : string list
+  ; payload_path : string list
   }
 
 let config_env_var = Exec_ssh_protocol.shim_config_env_var
 let default_config_path = "/etc/masc-exec-shim.conf"
 
+let config_keys = [ "remote_root"; "env_allowlist"; "path" ]
+
 let parse_config content =
   let err fmt = Printf.ksprintf (fun m -> Error (config_error_code ^ ": " ^ m)) fmt in
+  (* [path] replaces the payload PATH outright, so every entry has to stand
+     on its own: an empty entry would be the current directory to execvp,
+     and a relative one would resolve against the payload cwd -- the jail's
+     inside. Both are the kind of lookup the fixed default exists to rule
+     out. The config is endpoint-resident, so this is the endpoint operator's
+     statement, never the wire's. *)
+  let payload_path_of value =
+    match String.split_on_char ':' value with
+    | [] | [ "" ] -> err "path must name at least one directory"
+    | entries ->
+      (match List.find_opt (fun entry -> not (String.starts_with ~prefix:"/" entry)) entries with
+       | Some "" -> err "path has an empty entry: %S" value
+       | Some entry -> err "path entries must be absolute, got %S" entry
+       | None -> Ok entries) in
   let parse_line n line acc =
     let line = String.trim line in
     if line = "" || String.starts_with ~prefix:"#" line
@@ -174,8 +192,7 @@ let parse_config content =
   | Ok entries ->
     let unknown =
       List.filter_map
-        (fun (k, _) ->
-           if k = "remote_root" || k = "env_allowlist" then None else Some k)
+        (fun (k, _) -> if List.mem k config_keys then None else Some k)
         entries in
     (match unknown with
      | k :: _ -> err "unknown key %S" k
@@ -193,7 +210,13 @@ let parse_config content =
               String.split_on_char ',' v
               |> List.map String.trim
               |> List.filter (fun s -> s <> "") in
-          Ok { remote_root = root; env_allowlist }))
+          let payload_path =
+            match List.assoc_opt "path" entries with
+            | None -> Ok default_payload_path
+            | Some value -> payload_path_of value in
+          (match payload_path with
+           | Error _ as e -> e
+           | Ok payload_path -> Ok { remote_root = root; env_allowlist; payload_path })))
 
 (* Read here rather than through Env_config_core: the shim is a standalone
    binary deployed to the remote host, where masc's config layer does not
@@ -561,7 +584,9 @@ let run () =
            | argv ->
              let cwd = Unix.realpath req.Exec_ssh_protocol.cwd in
              let env =
-               synthesize_env ~base_env:(env_of_process ())
+               synthesize_env
+                 ~path:(String.concat ":" config.payload_path)
+                 ~base_env:(env_of_process ())
                  ~allowlist:config.env_allowlist
                  ~request_env:req.Exec_ssh_protocol.env in
              let (pid, stdin_w, stdout_r, stderr_r) =

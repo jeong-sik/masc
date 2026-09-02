@@ -6,6 +6,13 @@ let string_array_schema =
   `Assoc [ "type", `String "array"; "items", string_schema ]
 ;;
 
+(* A field the model must always answer, with null as the answer "none".
+   Strict structured-output modes require every property to be required, so
+   an optional value is spelled as a required nullable one. *)
+let nullable_string_schema =
+  `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+;;
+
 let array_schema item = `Assoc [ "type", `String "array"; "items", item ]
 
 let enum_schema values =
@@ -29,10 +36,16 @@ let category_tokens =
   |> List.map Keeper_memory_os_types.category_to_string
 ;;
 
+(* The claim carries where it was read: a Board post id, optionally a
+   comment id, or null for the keeper's own transcript. Both are answered on
+   every claim so strict schema modes accept the shape; the decoder treats
+   null as absent. The field list is the same closed set the parser allows. *)
 let librarian_claim_schema =
   let fields =
     [ Keeper_librarian.wire_field_claim, string_schema
     ; Keeper_librarian.wire_field_category, enum_schema category_tokens
+    ; Keeper_memory_os_types.wire_field_board_post_id, nullable_string_schema
+    ; Keeper_memory_os_types.wire_field_board_comment_id, nullable_string_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields

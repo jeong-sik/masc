@@ -2,6 +2,87 @@
 
 ## Unreleased
 
+## [0.29.0] - 2026-09-02
+
+- **Tool calls read as trees.** A call's JSON arrives as structure and the
+  labels of one tree share a column (#32606), each part of the payload draws in
+  its own colour (#32625), a result's string documents unfold into the tree and
+  multi-line strings draw as blocks (#32616), typed execution details are
+  exposed (#32571), the folded Tools line names the tool behind a failure
+  (#32370), and lane tool outcomes are badges (#32348).
+- **The chat says what went into a turn and what came back.** The context
+  stack answers what goes in each turn and the request tab says where each
+  item stands (#32540); the request tab shows the answer to that request
+  (#32563) and `/` searches it the way the roster is searched (#32564); the
+  context detail column keeps its own window (#32531) and says which turn it
+  describes (#32286); lane input and output compare side by side (#32270);
+  civil-hour rails mark the chat (#32363); exact Keeper Skill evidence shows
+  in chat (#32294).
+- **The Tab ring is shorter and the children sit under their parents.** Acting
+  became Activity and owns the server log (#32251); Resources and Tools hang
+  off Config as `s` and `t` (#32245); Code is a Workspace child and the Repos
+  stop was renamed Workspace (#32230); Connectors left the ring (#32213) and
+  channel bindings are operated from the selected Keeper's Channels tab,
+  beside Automation and Runs (#32242, #32526); the seven surfaces that answer
+  the row search say so in their footer (#32613).
+- **Keeper detail shows the sandbox.** Sandbox status, the actual container
+  logs, and where a microvm keeper's build output lands (#32535, #32542,
+  #32557, #32324); durable Keeper edits appear in file history (#32192); `b`
+  puts `git blame` in the Code margin, one author per run of lines (#32619).
+- **Memory has a fact browser.** Memory grows a fact browser over the health
+  counts (#32236) with a three-state journal detail (#32367); the server
+  exposes fact-level reads at `/keepers/:name/memory-facts` (#32217) and exact
+  fact retraction (#32250); support is derived and budget authority is removed
+  (#32239); source-bound health shows in Dashboard and TUI (#32169); an
+  undecodable Memory OS snapshot no longer wedges a keeper (#32390), a
+  rejected one says which row and field (#32371), and a corrupt store is a
+  stamped failure rather than an exception (#32480).
+- **A microvm guest owns its working tree (RFC-0399, RFC-0400).** Build output
+  moves off virtiofs (#32281, #32285, #32291); the guest boots with a work
+  volume and the exec shim and is a remote endpoint (#32516); Write and Edit
+  reach the tree the endpoint owns (#32523) and every command takes the remote
+  lane (#32574); microvm Execute routes through Apple Container (#32399); the
+  lane runs no OpenSSH preflight (#32586); a guest proves it can write its
+  keeper root before it is handed out (#32601); a created keeper reports the
+  isolation it landed on (#32607). A keeper runs under docker, microvm, or ssh,
+  or not at all: the host profile is gone (#32078, #32103).
+- **A turn explains itself to the next one.** The next turn is told why the
+  previous one stopped (#32492), a stimulus's turn records how it ended
+  (#32287), the exact provider input is exposed by turn (#32292), checkout
+  freshness is projected as a context layer (#32237), a completed turn
+  consumes its batch so a stimulus no longer re-promotes in a loop (#32282), a
+  Gate-deferred call no longer re-spends a turn per wake (#32602), and
+  max-token degeneration is recovered or handed to the next lane (#32577,
+  #32605).
+- **Tools arrive by name, with a typed failure class.** The tool listing
+  carries names only and a query finds the rest (#32475, #32484), the typed
+  failure class reaches the model with its next move (#32476),
+  `keeper_tasks_list` pages through a keyset cursor (#32488), `masc` inside a
+  shell line reaches a tool (#32427), and Execute and its siblings read their
+  descriptions from the catalog instead of OCaml literals (#32555, #32528,
+  #32525).
+- **Planning, verification, and schedules explain themselves.** Verifier lane
+  runs and their evidence are exposed (#32189), Planning names its flow and
+  actors (#32186) and the Board and Planning order (#32180), Fusion tool
+  execution evidence is inspectable (#32147), scheduled wakes trace to durable
+  reactions (#32204), the dashboard schedule page names the Keeper a wake
+  reaches and what became of it (#32466), a decision without continuation
+  evidence is not marked Ignored (#32114), and a method-not-found reconciles
+  with the live catalog (#32116).
+- **The E0 campaign has a scoreboard.** Three pinned runner bundles become one
+  round scored k-of-3 with typed residual causes (#32567); the runner takes its
+  keeper lane as `--sandbox-profile` at both keeper-up sites (#32593, #32615),
+  and an RW23 wait that runs out is the mission's failure, not the round's
+  (#32599).
+- **Colour comes from the theme.** The renderer stops picking colour codes and
+  the theme grows the words it was missing (#32627); native-pass themes list
+  first (#32202); system logs are inspectable and verbose logging toggles
+  directly (#32138, #32203).
+- **CI builds the whole tree.** The build job builds everything, not just what
+  installs (#32518), in one manual job (#32511); the main source ratchets,
+  boundary registries, and shell tool contracts are restored (#32378, #32168,
+  #32442); connectors expose a managed channel directory (#32547).
+
 ## [0.28.0] - 2026-08-30
 
 - **A bare Linux install runs in one shot.** The Linux release binaries link

@@ -81,11 +81,15 @@ let test_supplied_evidence_refs_reach_the_task_prompt () =
 let test_every_section_template_renders () =
   init ();
   let cases =
-    [ "no lookup surface", AR.No_lookup_surface,
-      "You have no tool that opens anything else"
+    (* Anchored on each fragment's own tag, not on a sentence inside it. The
+       English sentences these once pinned stopped existing when the prompts
+       were translated (#32133) and the check went silently stale: it had been
+       asserting prose no template could produce. A tag is what the section is
+       called, so it survives an edit to what the section says. *)
+    [ "no lookup surface", AR.No_lookup_surface, "<no_lookup_surface>"
     ; "one producer tree",
       AR.Lookup_tools { schemas; dispatch; root_layout = [ "repos/masc" ] },
-      "pointed at the producer's sandbox root"
+      "<live_lookup>"
     ]
   in
   List.iter

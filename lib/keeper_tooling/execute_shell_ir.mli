@@ -4,7 +4,6 @@ val simple_bin :
   ?cwd_raw:string ->
   ?cwd_base:string ->
   ?sandbox:Masc_exec.Sandbox_target.t ->
-  ?env:(string * string) list ->
   ?redirects:Masc_exec.Redirect_scope.t list ->
   Masc_exec.Exec_program.t ->
   string list ->

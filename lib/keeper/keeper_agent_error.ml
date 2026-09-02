@@ -186,7 +186,12 @@ let agent_error_terminal_reason_code = function
   | Agent_core.Error.TerminalToolEffectFailed
       { tool_use_id; effect_disposition; detail = _ } ->
     Printf.sprintf
-      "agent_error_terminal_tool_effect_failed:tool_use_id=%s,effect_disposition=%s"
+      (* One spelling for one concept. The reader matches this against
+         [Keeper_internal_error.all_wire_kinds], so naming the kind here and
+         reading it there must go through the same constant -- otherwise the
+         reason decodes as [Unknown] and the receipt lands unmapped. *)
+      "%s:tool_use_id=%s,effect_disposition=%s"
+      Keeper_internal_error.terminal_effect_failed_kind
       tool_use_id
       (terminal_effect_disposition_to_wire effect_disposition)
   | Agent_core.Error.TerminalToolDurabilityFailed

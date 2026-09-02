@@ -142,6 +142,7 @@ let external_gate_decision
       { keeper_name = meta.name
       ; operation
       ; input
+      ; sandbox_profile = None
       ; base_path = config.Workspace.base_path
       ; causal_context = Option.map (fun current -> current ()) gate_context
       ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
@@ -295,7 +296,7 @@ let with_external_gate_execution
       blocked.payload
 ;;
 
-let network_read_gate_operation = "network_read"
+let network_read_gate_operation = Keeper_gate.network_read_gate_operation
 
 type network_read_replay =
   | Replay_web_search of Yojson.Safe.t
@@ -1015,7 +1016,7 @@ let connector_post_gate_input ~connector ~channel_id ~content ~mention_user_ids
      @ block_fields)
 ;;
 
-let connector_post_gate_operation = "connector_post"
+let connector_post_gate_operation = Keeper_gate.connector_post_gate_operation
 
 type connector_post_replay =
   | Replay_discord_post of

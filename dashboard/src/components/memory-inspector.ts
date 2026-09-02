@@ -492,11 +492,17 @@ function FactRow({
   srcOverride?: string
 }) {
   const meta = factCategoryMeta(fact.category)
+  // An observed fact may name the Board post it was read from; the label
+  // says so and the title carries the ids the Board tools accept.
   const basisLabel = fact.basis.kind === 'observed'
-    ? '관측'
+    ? (fact.basis.board === null ? '관측' : '관측 · Board')
     : `파생 · 증명 ${fact.basis.derivations.length}`
   const basisTitle = fact.basis.kind === 'observed'
-    ? '직접 관측된 현재 사실'
+    ? (fact.basis.board === null
+        ? '직접 관측된 현재 사실'
+        : `Board 글에서 읽은 사실 · ${fact.basis.board.post_id}${
+            fact.basis.board.comment_id === null ? '' : ` · ${fact.basis.board.comment_id}`
+          }`)
     : fact.basis.derivations
         .map(derivation => `${derivation.rule_id}: ${derivation.premise_ids.join(', ')}`)
         .join('\n')

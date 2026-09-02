@@ -1,9 +1,13 @@
+import contextlib
 import importlib.util
 import inspect
+import io
 import json
+import re
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 
@@ -139,6 +143,209 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
                 runtime_by_role={},
                 require_heterogeneous=False,
             )
+
+    def test_sandbox_profiles_pin_the_keeper_up_tool_enum(self):
+        toml_text = (REPO_ROOT / "config" / "tools" / "masc_keeper_up.toml").read_text()
+        match = re.search(
+            r'name = "sandbox_profile"\n(?:.*\n){0,3}?enum = \[([^\]]*)\]', toml_text
+        )
+        self.assertIsNotNone(match, "masc_keeper_up.toml declares no sandbox_profile enum")
+        server_profiles = tuple(re.findall(r'"([^"]+)"', match.group(1)))
+        self.assertEqual(acceptance.SANDBOX_PROFILES, server_profiles)
+
+    def test_every_keeper_up_call_uses_the_configured_profile_and_never_local(self):
+        module_source = SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertNotIn('"sandbox_profile": "local"', module_source)
+        self.assertNotIn("ALLOW_LOCAL_PLAYGROUND", module_source)
+        keeper_up_calls = module_source.count('"masc_keeper_up"')
+        self.assertEqual(keeper_up_calls, 2)
+        self.assertEqual(
+            module_source.count('"sandbox_profile": self.sandbox_profile'), keeper_up_calls
+        )
+        for method in (
+            acceptance.MissionRun.create_fleet,
+            acceptance.MissionRun.restart_and_recall,
+        ):
+            source = inspect.getsource(method)
+            self.assertIn('"sandbox_profile": self.sandbox_profile', source)
+            self.assertNotIn('"local"', source)
+
+    def test_every_keeper_up_is_followed_by_the_unattended_stance(self):
+        module_source = SCRIPT_PATH.read_text(encoding="utf-8")
+        keeper_up_calls = module_source.count('"masc_keeper_up"')
+        self.assertEqual(keeper_up_calls, 2)
+        self.assertEqual(module_source.count("self.declare_unattended("), keeper_up_calls)
+        for method, declare in (
+            (acceptance.MissionRun.create_fleet, "self.declare_unattended(role)"),
+            (
+                acceptance.MissionRun.restart_and_recall,
+                'self.declare_unattended("coordinator")',
+            ),
+        ):
+            source = inspect.getsource(method)
+            self.assertLess(source.index('"masc_keeper_up"'), source.index(declare))
+
+    def test_unattended_stance_pins_the_server_route_and_mode(self):
+        dashboard = (
+            REPO_ROOT / "lib" / "server" / "server_routes_http_routes_dashboard.ml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            f'Http.Router.post "{acceptance.TOOL_APPROVAL_MODE_ROUTE}"', dashboard
+        )
+        mode_source = (
+            REPO_ROOT / "lib" / "keeper" / "keeper_tool_approval_mode.ml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(f'| "{acceptance.TOOL_APPROVAL_MODE_UNATTENDED}" ->', mode_source)
+        self.assertEqual(
+            acceptance.default_tool_approval_mode_url("http://127.0.0.1:9418/mcp"),
+            "http://127.0.0.1:9418/api/v1/keepers/tool-approval-mode",
+        )
+
+    def test_set_tool_approval_mode_posts_the_stance_and_fails_closed(self):
+        seen = {}
+        url = "http://h/api/v1/keepers/tool-approval-mode"
+
+        class Response:
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return self.body
+
+        def fake_urlopen(request, timeout):
+            seen["method"] = request.get_method()
+            seen["auth"] = request.get_header("Authorization")
+            seen["body"] = json.loads(request.data.decode("utf-8"))
+            return Response(seen["reply"])
+
+        with unittest.mock.patch.object(acceptance.urllib.request, "urlopen", fake_urlopen):
+            seen["reply"] = b'{"keeper":"rw-x-build-a","mode":"yolo"}'
+            echo = acceptance.set_tool_approval_mode(
+                url, "tok", 5.0, keeper="rw-x-build-a", mode="yolo"
+            )
+            self.assertEqual(echo, {"keeper": "rw-x-build-a", "mode": "yolo"})
+            self.assertEqual(seen["method"], "POST")
+            self.assertEqual(seen["auth"], "Bearer tok")
+            self.assertEqual(seen["body"], {"name": "rw-x-build-a", "mode": "yolo"})
+            seen["reply"] = b'{"keeper":"rw-x-build-a","mode":"auto"}'
+            with self.assertRaisesRegex(acceptance.AcceptanceError, "echo mismatch"):
+                acceptance.set_tool_approval_mode(
+                    url, "tok", 5.0, keeper="rw-x-build-a", mode="yolo"
+                )
+
+        def forbidden(request, timeout):
+            raise acceptance.urllib.error.HTTPError(
+                request.full_url, 403, "Forbidden", {}, io.BytesIO(b"admin tier required")
+            )
+
+        with unittest.mock.patch.object(acceptance.urllib.request, "urlopen", forbidden):
+            with self.assertRaisesRegex(acceptance.AcceptanceError, "HTTP 403"):
+                acceptance.set_tool_approval_mode(
+                    url, "tok", 5.0, keeper="rw-x-build-a", mode="yolo"
+                )
+
+    def test_declare_unattended_records_the_echo_per_role(self):
+        written = {}
+
+        class Writer:
+            def write_json(self, name, payload):
+                written[name] = payload
+
+        class Stub:
+            roles = {"builder-a": "rw-x-build-a"}
+            endpoint = "http://127.0.0.1:9418/mcp"
+            token = "tok"
+            timeout = 5.0
+            writer = Writer()
+            tool_approval_modes = {}
+
+        calls = []
+
+        def fake_set(url, token, timeout, *, keeper, mode):
+            calls.append((url, token, timeout, keeper, mode))
+            return {"keeper": keeper, "mode": mode}
+
+        with unittest.mock.patch.object(acceptance, "set_tool_approval_mode", fake_set):
+            acceptance.MissionRun.declare_unattended(Stub(), "builder-a")
+        self.assertEqual(
+            calls,
+            [
+                (
+                    "http://127.0.0.1:9418/api/v1/keepers/tool-approval-mode",
+                    "tok",
+                    5.0,
+                    "rw-x-build-a",
+                    "yolo",
+                )
+            ],
+        )
+        self.assertEqual(Stub.tool_approval_modes, {"builder-a": "yolo"})
+        self.assertEqual(
+            written["observations/tool-approval-mode-builder-a.json"],
+            {"keeper": "rw-x-build-a", "mode": "yolo"},
+        )
+
+    def test_run_refuses_to_start_without_a_turn_settle_budget(self):
+        argv = ["acceptance", "--run", "--sandbox-profile", "microvm"]
+        with unittest.mock.patch.object(sys, "argv", argv):
+            with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                code = acceptance.main()
+        self.assertEqual(code, 2)
+        self.assertIn("--turn-settle-budget", stderr.getvalue())
+
+    def test_turn_wait_uses_the_settle_budget_not_the_http_timeout(self):
+        module_source = SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("time.monotonic() + self.timeout", module_source)
+        self.assertIn("time.monotonic() + self.turn_settle_budget_sec", module_source)
+        self.assertIn(
+            '"turn_settle_budget_sec": run.turn_settle_budget_sec', module_source
+        )
+        wrapper = (SCRIPT_PATH.parent / "keeper_multi_collaboration_acceptance.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"--turn-settle-budget" "$KEEPER_COLLAB_TURN_SETTLE_BUDGET_SEC"', wrapper)
+
+    def test_run_refuses_to_start_without_a_sandbox_profile(self):
+        with unittest.mock.patch.object(sys, "argv", ["acceptance", "--run"]):
+            with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                code = acceptance.main()
+        self.assertEqual(code, 2)
+        self.assertIn("--sandbox-profile", stderr.getvalue())
+
+    def test_goal_verifier_phase_failure_is_recorded_not_fatal(self):
+        written = {}
+
+        class Writer:
+            def write_json(self, name, payload):
+                written[name] = payload
+
+        class Stub:
+            verifier_goal_id = "goal-x"
+            verifier_task_id = "task-9"
+            writer = Writer()
+            goal_verifier_evidence = {}
+
+            def run_goal_verifier_refute_reenter_prove(self):
+                raise acceptance.AcceptanceError("verifier Task has no completion verdict")
+
+        stub = Stub()
+        acceptance.MissionRun.run_goal_verifier_guarded(stub)
+        self.assertEqual(stub.goal_verifier_evidence["failure"], acceptance.GOAL_VERIFIER_PHASE_FAILED)
+        self.assertEqual(stub.goal_verifier_evidence["task_id"], "task-9")
+        self.assertIn("no completion verdict", stub.goal_verifier_evidence["detail"])
+        self.assertIn("observations/goal-verifier-failure.json", written)
+
+    def test_run_sequence_guards_the_goal_verifier_phase(self):
+        run_source = inspect.getsource(acceptance.MissionRun.run)
+        self.assertIn("self.run_goal_verifier_guarded()", run_source)
+        self.assertNotIn("self.run_goal_verifier_refute_reenter_prove()", run_source)
+        self.assertIn("self.run_continuity_chain(post_id)", run_source)
 
     def test_catalog_has_exact_mission_and_assertion_counts(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)

@@ -26,6 +26,12 @@ type attachment = {
   size : int;
   mime_type : string;
   data : string;
+  (** Pixel size, measured once when the payload is swapped for its
+      [masc://] reference -- after that swap the bytes are gone and this
+      field is the only record of them. [None] for WebP, non-images, and
+      rows written before the field existed. *)
+  width : int option;
+  height : int option;
 }
 
 (** One executed tool call within a turn. [args] holds the accumulated

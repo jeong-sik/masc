@@ -736,21 +736,6 @@ let test_voice_effect_defers_without_gating_local_reads () =
    | Error error -> fail ("failed to select manual Gate mode: " ^ error));
   ignore (install_exn ~base_path);
   let meta = make_meta "voice-gate-keeper" in
-  let listen_input =
-    `Assoc
-      [ "timeout_seconds", `Float 3.0
-      ; "language_code", `String "ko-KR"
-      ]
-  in
-  let listen =
-    Keeper_tool_in_process_runtime.handle_voice_with_outcome
-      ~config
-      ~meta
-      ~name:"keeper_voice_listen"
-      ~args:listen_input
-      ()
-  in
-  expect_deferred "microphone/STT effect defers before execution" listen;
   let pending_entries () =
     match
       Keeper_approval_queue.list_pending_entries_for_workspace
@@ -760,13 +745,35 @@ let test_voice_effect_defers_without_gating_local_reads () =
     | Error error ->
       fail (Keeper_approval_queue.storage_error_to_string error)
   in
+  let speak_input = `Assoc [ "message", `String "gate coverage probe" ] in
+  let speak =
+    Keeper_tool_in_process_runtime.handle_voice_with_outcome
+      ~config
+      ~meta
+      ~name:"keeper_voice_speak"
+      ~args:speak_input
+      ()
+  in
+  expect_deferred "TTS/playback effect defers before execution" speak;
   check int "one exact voice effect is pending" 1 (List.length (pending_entries ()));
   (match pending_entries () with
    | [ pending ] ->
      check string "request belongs to the calling Keeper" meta.name pending.keeper_name;
-     check string "opaque operation is preserved" "keeper_voice_listen" pending.tool_name;
-     check yojson "complete input is preserved" listen_input pending.input
+     check string "opaque operation is preserved" "keeper_voice_speak" pending.tool_name;
+     check yojson "complete input is preserved" speak_input pending.input
    | pending -> failf "expected one pending voice effect, got %d" (List.length pending));
+  (* The microphone window cannot survive the approval cycle, so listening
+     never becomes a Gate request: it runs directly and its outcome belongs
+     to the microphone — a failure here (CI has none) must not queue an
+     approval either. *)
+  ignore
+    (Keeper_tool_in_process_runtime.handle_voice_with_outcome
+       ~config
+       ~meta
+       ~name:"keeper_voice_listen"
+       ~args:(`Assoc [ "timeout_seconds", `Float 0.05 ])
+       ());
+  check int "listen runs without a Gate request" 1 (List.length (pending_entries ()));
   let capability_read =
     Keeper_tool_in_process_runtime.handle_voice_with_outcome
       ~config

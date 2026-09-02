@@ -294,6 +294,7 @@
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
   test_keeper_wake_turn_context
+  test_keeper_last_turn_stop
   test_keeper_unified_verification_surface
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
@@ -636,6 +637,7 @@
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
   test_keeper_wake_turn_context
+  test_keeper_last_turn_stop
   test_keeper_unified_verification_surface
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
@@ -2250,6 +2252,7 @@
 (include stanzas/test_keeper_context_isolation.inc)
 
 (include stanzas/test_keeper_turn_up_args.inc)
+(include stanzas/test_keeper_turn_up_create_response.inc)
 
 (include stanzas/test_keeper_cwd_response.inc)
 
@@ -2263,8 +2266,6 @@
 
 
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
-
-(include stanzas/test_json_schema_shared_defs.inc)
 
 (include stanzas/test_keeper_tool_plan_executor.inc)
 (include stanzas/test_keeper_tool_progress_identity.inc)
@@ -2928,6 +2929,11 @@
  (libraries masc_test_deps masc.runtime))
 
 (test
+ (name test_keeper_image_dimensions)
+ (modules test_keeper_image_dimensions)
+ (libraries alcotest masc))
+
+(test
  (name test_keeper_vision_ingest)
  (modules test_keeper_vision_ingest)
  (libraries alcotest masc masc.runtime masc.tool_types))
@@ -3168,6 +3174,11 @@
  (name test_tui_diff)
  (modules test_tui_diff)
  (libraries alcotest masc_tui_diff))
+
+(test
+ (name test_tui_tool_detail)
+ (modules test_tui_tool_detail)
+ (libraries alcotest masc_tui_tool_detail yojson))
 
 (test
  (name test_tui_keeper_chat_diff)
@@ -3626,7 +3637,10 @@
  (deps
   test_keeper_multi_collaboration_acceptance.py
   ../scripts/harness/workload/keeper_multi_collaboration_acceptance.py
-  ../scripts/fixtures/keeper-multi-collaboration/missions.json)
+  ../scripts/fixtures/keeper-multi-collaboration/missions.json
+  ../config/tools/masc_keeper_up.toml
+  ../lib/server/server_routes_http_routes_dashboard.ml
+  ../lib/keeper/keeper_tool_approval_mode.ml)
  (action
   (run python3 %{dep:test_keeper_multi_collaboration_acceptance.py})))
 

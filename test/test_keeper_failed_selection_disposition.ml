@@ -85,35 +85,69 @@ let test_every_failure_route_preserves_batch () =
 
 let test_nonterminal_outcomes_preserve_batch () =
   let meta = test_meta () in
-  [ None
-  ; Some
-      (Cycle.Checkpointed
-         { meta
-         ; checkpoint_reason = Turn.Awaiting_external_effect
-         ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
-         })
-  ; Some
-      (Cycle.Checkpointed
-         { meta
-         ; checkpoint_reason = Turn.Operation_queued
-         ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
-         })
-  ; Some
-      (Cycle.Checkpointed
-         { meta
-         ; checkpoint_reason =
-             Turn.Repeated_tool_call { tool_name = "keeper_tasks_list"; repeated_count = 3 }
-         ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
-         })
-  ; Some (Cycle.Input_required meta)
-  ; Some (Cycle.Cancelled meta)
-  ; Some (Cycle.Skipped meta)
-  ]
+  [ None; Some (Cycle.Input_required meta); Some (Cycle.Cancelled meta); Some (Cycle.Skipped meta) ]
   |> List.iter (fun outcome ->
     match Loop.batch_disposition_of_cycle_outcome outcome with
     | Loop.Batch_no_action -> ()
     | Loop.Batch_ack_completed _ | Loop.Batch_ack_attention_only ->
       fail "an unfinished turn incorrectly authorized Event Queue ACK")
+;;
+
+(* Every checkpoint reason is produced after the model ran with the admitted
+   batch projected, so each one advances already-observed attention. The
+   regression this pins: a turn that ended on a Gate-deferred tool call left
+   its admitted HITL resolution at the queue head, and with one resolution
+   admitted per turn the same spent grant cost a turn on every wake while the
+   resolutions queued behind it never reached the model (edgar.a.poe,
+   2026-09-02: eight turns on one Execute over ten minutes). *)
+let every_checkpoint_reason =
+  [ "durable stimulus arrived", Turn.Durable_stimulus_arrived
+  ; "repeated assistant text", Turn.Repeated_assistant_text { repeated_count = 3 }
+  ; "awaiting external effect", Turn.Awaiting_external_effect
+  ; ( "repeated tool call"
+    , Turn.Repeated_tool_call { tool_name = "keeper_tasks_list"; repeated_count = 3 } )
+  ; "operation queued", Turn.Operation_queued
+  ]
+;;
+
+let test_every_checkpoint_reason_acks_admitted_attention () =
+  let meta = test_meta () in
+  List.iter
+    (fun (label, checkpoint_reason) ->
+       match
+         Loop.batch_disposition_of_cycle_outcome
+           (Some
+              (Cycle.Checkpointed
+                 { meta
+                 ; checkpoint_reason
+                 ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
+                 }))
+       with
+       | Loop.Batch_ack_attention_only -> ()
+       | Loop.Batch_ack_completed _ ->
+         failf "%s: a checkpoint was treated as a completed connector disposition" label
+       | Loop.Batch_no_action ->
+         failf "%s: a checkpoint retained attention the turn already projected" label)
+    every_checkpoint_reason
+;;
+
+let test_every_checkpoint_reason_records_hitl_continuation () =
+  let meta = test_meta () in
+  List.iter
+    (fun (label, checkpoint_reason) ->
+       check
+         bool
+         (label ^ ": HITL continuation projection is required before ACK")
+         true
+         (Loop.batch_disposition_of_cycle_outcome
+            (Some
+               (Cycle.Checkpointed
+                  { meta
+                  ; checkpoint_reason
+                  ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
+                  }))
+          |> Loop.For_testing.batch_disposition_records_continuation))
+    every_checkpoint_reason
 ;;
 
 let test_durable_stimulus_checkpoint_acks_admitted_batch () =
@@ -192,6 +226,14 @@ let () =
             "repeated-assistant checkpoint projects HITL continuation"
             `Quick
             test_repeated_assistant_checkpoint_records_hitl_continuation
+        ; test_case
+            "every checkpoint reason advances admitted attention"
+            `Quick
+            test_every_checkpoint_reason_acks_admitted_attention
+        ; test_case
+            "every checkpoint reason projects HITL continuation"
+            `Quick
+            test_every_checkpoint_reason_records_hitl_continuation
         ] )
     ]
 ;;

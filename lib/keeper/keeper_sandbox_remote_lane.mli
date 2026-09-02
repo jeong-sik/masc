@@ -22,8 +22,26 @@ val endpoint :
 (** Remote_ssh: the runtime.toml endpoint, created and (when preflight is
     enabled) checked. Micro_vm: the turn factory's running guest, started if
     it is not up; without a factory the call is refused
-    ([microvm_remote_requires_turn_sandbox_factory]). Docker: refused
+    ([microvm_remote_requires_turn_sandbox_factory]) because starting the
+    guest belongs to the turn that owns it -- which a write to a stopped
+    guest needs. A caller that only needs a guest already running takes
+    {!attached_guest_endpoint}. Docker: refused
     ([docker_has_no_remote_lane]). *)
+
+val attached_guest_endpoint :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  unit ->
+  (Keeper_sandbox_remote.t, string) result
+(** The endpoint for a caller that owns no turn. Micro_vm: the guest named by
+    the keeper and the base path, reached without starting it -- so a read
+    from outside the keeper cannot spend a VM boot or write the identity
+    snapshot and work root that a boot creates. Remote_ssh: the same endpoint
+    {!endpoint} returns, since finding it never needed a turn. Docker:
+    refused, as there is no endpoint to reach.
+
+    Use {!endpoint} from inside a turn: a turn owns the guest's lifecycle and
+    is entitled to start it, which a write to a stopped guest requires. *)
 
 val remote_root :
   config:Workspace.config ->

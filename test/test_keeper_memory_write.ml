@@ -172,6 +172,75 @@ let replace_current_facts ~keepers_dir ~keeper_id facts =
   | Error detail -> Alcotest.fail detail
 ;;
 
+(* A Board reference names where an observation was read. It is an observation
+   source, so it cannot ride a derivation or a source-bound claim, and a comment
+   needs its post. The ids are checked against the Board grammar only. *)
+let test_board_reference_validation () =
+  let post_id = "p-0123456789abcdef0123456789abcdef" in
+  let comment_id = "c-0123456789abcdef0123456789abcdef" in
+  let board_ref ?comment_id post_id =
+    match Masc.Keeper_memory_os_types.board_ref_of_ids ~post_id ~comment_id with
+    | Ok board -> board
+    | Error error ->
+      Alcotest.failf
+        "board ref fixture: %s"
+        (Masc.Keeper_memory_os_types.wire_error_to_string error)
+  in
+  let board_args ?comment_id ?(content = "read on the board") extra =
+    `Assoc
+      ([ "content", `String content; "board_post_id", `String post_id ]
+       @ (match comment_id with
+          | None -> []
+          | Some comment_id -> [ "board_comment_id", `String comment_id ])
+       @ extra)
+  in
+  (match Runtime.validate_memory_write_args (board_args []) with
+   | Runtime.Memory_write_ok { basis; _ } ->
+     Alcotest.(check bool)
+       "post reference is an observation from the board"
+       true
+       (basis
+        = Masc.Keeper_memory_os_types.Observed
+            (Masc.Keeper_memory_os_types.Board (board_ref post_id)))
+   | Runtime.Memory_write_invalid { error_kind; _ } ->
+     Alcotest.failf "post reference rejected: %s" (error_label error_kind));
+  (match Runtime.validate_memory_write_args (board_args ~comment_id []) with
+   | Runtime.Memory_write_ok { basis; _ } ->
+     Alcotest.(check bool)
+       "comment reference carries the comment id"
+       true
+       (basis
+        = Masc.Keeper_memory_os_types.Observed
+            (Masc.Keeper_memory_os_types.Board (board_ref ~comment_id post_id)))
+   | Runtime.Memory_write_invalid { error_kind; _ } ->
+     Alcotest.failf "comment reference rejected: %s" (error_label error_kind));
+  Runtime.validate_memory_write_args
+    (`Assoc [ "content", `String "x"; "board_post_id", `String "p-1 2" ])
+  |> assert_invalid ~expected:"board_ref_invalid";
+  Runtime.validate_memory_write_args
+    (`Assoc [ "content", `String "x"; "board_post_id", `List [] ])
+  |> assert_invalid ~expected:"board_ref_invalid";
+  Runtime.validate_memory_write_args
+    (`Assoc [ "content", `String "x"; "board_comment_id", `String comment_id ])
+  |> assert_invalid ~expected:"board_comment_without_post";
+  Runtime.validate_memory_write_args
+    (board_args
+       [ "rule_id", `String "rule"; "premise_ids", `List [ `String (memory_id 'a') ] ])
+  |> assert_invalid ~expected:"board_ref_with_derivation_unsupported";
+  Runtime.validate_memory_write_args (board_args [ "source_path", `String "notes.md" ])
+  |> assert_invalid ~expected:"board_ref_with_source_path_unsupported";
+  Runtime.validate_memory_write_args (make_args ~title:"" ~content:"plain")
+  |> function
+  | Runtime.Memory_write_ok { basis; _ } ->
+    Alcotest.(check bool)
+      "no board field means the transcript"
+      true
+      (basis
+       = Masc.Keeper_memory_os_types.Observed Masc.Keeper_memory_os_types.Transcript)
+  | Runtime.Memory_write_invalid { error_kind; _ } ->
+    Alcotest.failf "plain write rejected: %s" (error_label error_kind)
+;;
+
 let test_validation_taxonomy () =
   Runtime.validate_memory_write_args (make_args ~title:"" ~content:"")
   |> assert_invalid ~expected:"content_empty";
@@ -1187,6 +1256,10 @@ let () =
     "keeper_memory_write"
     [ ( "validation"
       , [ Alcotest.test_case "typed validation failures" `Quick test_validation_taxonomy
+        ; Alcotest.test_case
+            "board reference validation"
+            `Quick
+            test_board_reference_validation
         ; Alcotest.test_case
             "typed retract validation failures"
             `Quick

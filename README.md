@@ -26,22 +26,25 @@ collaboration server without any of them.
 > unattended agent from every unsafe action. `main` moves fast and can be well
 > ahead of the latest published binary release.
 
-## Three ways in
+## The terminal is the front door
 
-The same workspace answers on three surfaces. Pick the one that fits what you
-are doing; they read and write the same `.masc/` state.
+`masc-tui` is the primary way in. It reads `.masc/` from disk, talks to the
+server for everything that only exists over HTTP, and can start that server
+itself. The same workspace also answers to MCP clients and to a web dashboard;
+all three read and write the same state.
 
 | Surface | Use it for | How you get it |
 |---|---|---|
+| **TUI** | Watching and steering Keepers, answering the Gate, reading tool calls as trees, browsing code, diffs, blame, and memory | `masc-tui`, installed beside `masc` or built from source |
 | **MCP** | Your own agent joins the workspace: claim a task, post to the board, record evidence | Any MCP client over `http://127.0.0.1:8935/mcp` |
-| **Dashboard** | Reading the whole workspace in a browser and taking operator actions | Served at `/dashboard/` by the same process |
-| **TUI** | Watching and steering Keepers from a terminal, including browsing code and diffs | `masc-tui`, installed beside `masc` or built from source |
+| **Dashboard** | The same state in a browser, for when a terminal is not at hand | Served at `/dashboard/` by the same process |
 
-![MASC dashboard overview](docs/screenshots/dashboard/2026-08-26/01-overview.png)
+![MASC terminal UI](docs/screenshots/tui/2026-08-26/surfaces/01-overview.png)
 
-This image was captured from a live local runtime with operational identifiers
-redacted. The [dashboard inventory](docs/screenshots/dashboard/2026-08-26/README.md)
-contains 24 screens and the exact capture metadata.
+Keeper names and the base path in this frame were replaced with stand-ins of
+the same width; the [surface inventory](docs/screenshots/tui/2026-08-26/surfaces/README.md)
+holds four more and the capture metadata. The [Terminal UI](#terminal-ui)
+section below lists every surface and the keys that reach it.
 
 ## Start here
 
@@ -111,6 +114,100 @@ unauthenticated client by default.
 A release carries the server binary, the terminal UI, and the deployment
 preflight helpers. The installer puts `masc-tui` next to `masc` and prints the
 command that starts it.
+
+## Terminal UI
+
+A release install puts `masc-tui` on `PATH` next to `masc`; from a source
+checkout it is one Dune target.
+
+```bash
+dune build --root . bin/masc_tui.exe
+./_build/default/bin/masc_tui.exe --base-path /path/to/project
+```
+
+`.masc` must sit directly below the path you pass. `--base-path` falls back to
+`MASC_BASE_PATH` and then the current directory. `dune install` or an opam
+install puts the same program on `PATH` as `masc-tui`.
+
+When no server is answering on the port, the Keepers surface offers `s` to
+start one here: it launches the sibling `masc` binary as a child process,
+waits for `/health`, and stops that server again when the TUI exits. A server
+that was already running is left alone. This is the path a fresh install takes:
+start the TUI, press `s`, and the workspace is up.
+
+### Surfaces
+
+`Tab` and `Shift-Tab` rotate through the ring below, in this order, and the
+active surface is highlighted in a strip on the top row. Child surfaces open
+from their parent with the key in parentheses, and every one of them is also
+a `go <name>` entry in the `:` palette.
+
+| Surface | Shows | Children |
+|---|---|---|
+| Overview | Workspace summary, the task backlog, and what needs attention | |
+| Activity | Every Keeper's tool calls, turn boundaries, and settlements as they land, newest first; `f` cycles the scope | `l` System Logs, the server's own log ring |
+| Keepers | The roster, plus per-Keeper chat, logs, tool calls, runtime, sandbox status and container logs, and the names of the secrets it holds | `f` Changes, one Keeper's recorded file writes; `Enter` detail, whose tabs (`[`/`]`) hold Info, the effective prompt, GitHub identity, Channels, Automation, and Runs |
+| Memory | Memory OS health per Keeper | `Enter` the fact browser over both stores, `c` cycles the category |
+| Approvals | The Gate queue, the standing always-allow rules, and the questions Keepers are waiting on | |
+| Board | Posts from people, agents, automation, and the system | |
+| Planning | Goals and plans | `v` walks Task Review, Verdicts, Schedules, and Fusion |
+| Workspace | Registered repositories; `d` shows a repository's working-tree changes | `Enter` Code, a lazy file browser over the selected checkout |
+| Runtime | Runtime lanes, ordered candidates, and provider reachability | `p` walks keeper lanes, all runtimes, and the standalone Lanes |
+| Config | `runtime.toml` as the server reads it (`e` edits it in `$EDITOR`), typed params, prompts, and themes | `s` Resources, the MCP resource catalog; `t` Tools, the registered tool catalog with its receipts and usage |
+
+Above the input row, one line on every surface names the next scheduled wake
+and whichever Keeper is stopped waiting on a person. It is absent when there is
+neither.
+
+### Keys that work everywhere
+
+| Key | Effect |
+|---|---|
+| `?` | Help: every binding, grouped by surface |
+| `:` | Command palette: `go <surface>`, `keeper <name>`, `settings` |
+| `/` | Search: the Keeper roster, the Code tree, and the request tab of a chat |
+| `r` | Force refresh |
+| `q` twice | Quit |
+
+### Talking to a Keeper
+
+The input row at the bottom sends a message to the Keeper it names. `/task
+<title>` creates a task through `masc_add_task` and hands the Keeper its id in
+the same message; `/help` lists the other slash commands, which cover switching
+the pane to another Keeper, stopping or interrupting a streaming turn, and
+staging an image to send. A Keeper that asked a question through `masc_ask` is
+answered from the same row, which is what the line above the composer is
+pointing at.
+
+A chat shows each tool call as a tree: the call's JSON arrives as structure,
+labels in one tree share a column, each part of the payload has its own colour,
+and a result's string documents unfold in place. The context inspector beside
+the chat says what went into each turn and, on its request tab, what the
+provider answered and where each item stands.
+
+### Reading code
+
+On the Code surface, `Enter` opens a file, `d` shows its working-tree diff
+against HEAD, `H` lists the commits that touched it, `b` puts `git blame` in the
+margin, `m` shows the notes anchored to it, and `K`/`D` ask the language server
+for hover text or the definition under the cursor. Changes, the Keeper's own
+file writes, opens the same viewer with `v`.
+
+### When the server is not there
+
+The header says when the TUI and the server disagree about which workspace
+they are on: `[workspace mismatch]` beside the connection badge, with both
+paths in the footer. Reads that would mix the two are refused while it is up;
+everything the server answers still draws.
+
+Without a server the Keeper roster, per-Keeper detail, and the task backlog
+still read from disk. Approvals, Board, Planning, Runtime, Memory, the logs,
+and messaging need the server, and say so rather than showing an empty list;
+a count of `0` next to `data unreliable` means the read failed.
+
+The TUI needs an interactive TTY and a terminal other than `dumb`. Full key
+tables, per-surface behavior, themes, and troubleshooting are in
+[`docs/TUI-GUIDE.md`](docs/TUI-GUIDE.md).
 
 ## MCP client setup
 
@@ -188,93 +285,24 @@ bearer creation, see [`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md). Admin-only
 dashboard operations are covered by
 [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md).
 
-## Terminal UI
-
-`masc-tui` is a terminal client for the same workspace. It reads `.masc/`
-from disk directly, and adds the surfaces that only exist over HTTP when a
-server answers on the configured port. A release install puts it on `PATH`;
-from a source checkout it is one Dune target.
-
-```bash
-dune build --root . bin/masc_tui.exe
-./_build/default/bin/masc_tui.exe --base-path /path/to/project
-```
-
-`.masc` must sit directly below the path you pass. `--base-path` falls back to
-`MASC_BASE_PATH` and then the current directory. `dune install` or an opam
-install puts the same program on `PATH` as `masc-tui`.
-
-When no server is answering on the port, the Keepers surface offers `s` to
-start one here: it launches the sibling `masc` binary as a child process,
-waits for `/health`, and stops that server again when the TUI exits. A server
-that was already running is left alone.
-
-![MASC terminal UI](docs/screenshots/tui/2026-08-26/surfaces/01-overview.png)
-
-Keeper names and the base path in this frame were replaced with stand-ins of the
-same width; the [surface inventory](docs/screenshots/tui/2026-08-26/surfaces/README.md)
-holds four more and the capture metadata.
-
-`Tab` rotates through the top-level surfaces, and the active one is
-highlighted in a strip on the top row. Child surfaces open from their parent
-(and from the `go <name>` palette entries) instead of holding Tab stops:
-
-| Surface | Shows |
-|---|---|
-| Overview | Workspace summary, the task backlog, and what needs attention |
-| Activity (`l` Logs) | Every Keeper's tool calls, turn boundaries, and settlements as they land, with the server's own log browser off the ring |
-| Keepers (`f` Changes) | The roster, plus per-Keeper chat, logs, tool calls, runtime, recent edits, and the names of the secrets it holds |
-| Runtime (`p` Lanes, `c` Connectors) | Runtime lanes, ordered candidates, provider reachability, standalone service lanes, and external channels |
-| Approvals | The Gate queue, approved or denied from the terminal, and the questions Keepers are waiting on an answer to |
-| Board | Posts from people, agents, automation, and the system |
-| Planning (`v` Task Review, Verdicts, Schedules, Fusion) | Plans and goals, completion reviews, evaluator verdicts, scheduled work, and panel/judge runs |
-| Workspace (`Enter` Code) | Registered repositories and, through a row's `Enter`, the Code file browser over the selected checkout |
-| Config (`s` Resources, `t` Tools) | `runtime.toml`, typed params, prompts, and themes, plus the MCP resource catalog and the tool tree off the ring |
-| Memory | Memory OS health with the per-Keeper fact browser |
-
-Above the input row, one line on every surface names the next scheduled wake
-and whichever Keeper is stopped waiting on a person. It is absent when there is
-neither.
-
-Three things make it more than a viewer. The input row at the bottom sends a
-message to the Keeper it names. `/task <title>` creates a task through
-`masc_add_task` and hands the Keeper its id in the same breath. And a Keeper
-that asked a question through `masc_ask` is answered from the terminal, which
-is what the line above the composer is pointing at. On the Code surface,
-`Enter` opens a file, `d` shows its working-tree diff against HEAD, `H` shows
-the commits that touched it, and `m` shows the notes anchored to it.
-
-The header says when the TUI and the server disagree about which workspace
-they are on: `[workspace mismatch]` beside the connection badge, with both
-paths in the footer. Reads that would mix the two are refused while it is up;
-everything the server answers still draws.
-
-Without a server the Keeper roster, per-Keeper detail, and the task backlog
-still read from disk. Approvals, Board, Planning, Fusion, Runtime, the logs,
-and messaging need the server, and say so rather than showing an empty list —
-a count of `0` next to `data unreliable` means the read failed.
-
-The TUI needs an interactive TTY and a terminal other than `dumb`. Full key
-tables, per-surface behavior, and troubleshooting are in
-[`docs/TUI-GUIDE.md`](docs/TUI-GUIDE.md).
-
 ## Current scope
 
 | Area | Current use | Important limit |
 |---|---|---|
 | Workspace collaboration | Share Goals, Tasks, claims, transitions, board posts, and verification evidence through MCP | Coordination data does not provide transactional protection for concurrent source edits |
 | Keepers | Run configured agents that react to workspace events and write execution records | Advanced path; behavior depends on the selected runtime and Keeper configuration |
-| Dashboard | Read workspace and runtime state and perform operator actions | Availability and write access depend on the built SPA and auth mode |
-| Terminal UI | Watch Keepers, answer the Gate queue, message a Keeper, and browse repository files and diffs | Needs an interactive TTY; the surface set changes often on `main` |
+| Terminal UI | The operator front door: watch Keepers, answer the Gate queue, message a Keeper, read tool calls and memory, browse repository files, diffs, and blame | Needs an interactive TTY; the surface set changes often on `main` |
+| Dashboard | The same workspace and runtime state in a browser, with operator actions | Availability and write access depend on the built SPA and auth mode |
 | Gate and HITL | Apply Always Allow, model judgment, or human approval to supported external effects | Authorization workflow, not a sandbox or credential boundary |
 | Runtime routing | Assign a provider/model runtime to each Keeper and define ordered runtime lanes | A valid catalog and provider credentials are still required |
 | Fusion | Run panel and judge workflows through `masc_fusion` | Presets and judge runtimes must be configured before use |
 | Connectors | Connect workspace activity to supported external channels, including Discord and Slack | Tokens and channel-to-Keeper bindings are explicit operator configuration |
-| Local or Docker execution | Select `local` or `docker` for Keeper shell work | `local` runs on the host; Docker profiles are not a complete security boundary |
+| Sandboxes | Run Keeper shell work under `docker`, `microvm` (Apple Container, the guest owns its working tree), or `remote_ssh` | A Keeper with no accepted profile does not run; none of the three is a complete security boundary |
 | IDE | Inspect the experimental in-dashboard collaboration shell | Not the supported front door for normal work |
 
-The product front door is repo workspace collaboration. Keeper supervision and
-operator controls are secondary. Remote-safe operation, cluster deployment,
+The product front door is repo workspace collaboration, and the terminal UI is
+the operator's front door onto it; the dashboard shows the same state in a
+browser. Remote-safe operation, cluster deployment,
 and production service guarantees are outside the current promise. See
 [`docs/PRODUCT-OPERATING-PLAN.md`](docs/PRODUCT-OPERATING-PLAN.md).
 
@@ -306,7 +334,7 @@ A Keeper is one authored file, `<base-path>/.masc/config/keepers/reviewer.toml`:
 [keeper]
 autoboot_enabled = true
 proactive_enabled = true
-sandbox_profile = "local"
+sandbox_profile = "docker"
 mention_targets = ["operator"]
 
 [keeper.tools]
@@ -318,7 +346,9 @@ evidence with file paths and commands.
 """
 ```
 
-Unknown Keeper TOML keys are rejected.
+Unknown Keeper TOML keys are rejected. `sandbox_profile` accepts `docker`,
+`microvm`, or `remote_ssh`; there is no host profile, and a Keeper declared
+without an accepted one is refused rather than run on the host.
 
 ### Keeper event-driven lifecycle
 
@@ -367,8 +397,16 @@ history by hand.
 
 ## Dashboard
 
-The server exposes the dashboard at `/dashboard/`. Navigation is defined in
-`dashboard/src/config/navigation.ts`.
+The same server exposes a web view at `/dashboard/`. It reads the state the
+terminal UI reads; reach for it when a browser is handier than a terminal, or
+for the screens that only exist there (the IDE shell, the Lab diagnostics).
+Navigation is defined in `dashboard/src/config/navigation.ts`.
+
+![MASC dashboard overview](docs/screenshots/dashboard/2026-08-26/01-overview.png)
+
+This image was captured from a live local runtime with operational identifiers
+redacted. The [dashboard inventory](docs/screenshots/dashboard/2026-08-26/README.md)
+contains 24 screens and the exact capture metadata.
 
 Primary sidebar screens:
 

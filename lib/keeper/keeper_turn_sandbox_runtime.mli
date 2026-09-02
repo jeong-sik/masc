@@ -50,6 +50,34 @@ val microvm_remote_endpoint :
     keeper's root on the work volume is made at boot, so an adopted guest is
     already an endpoint. *)
 
+val microvm_attached_endpoint :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  unit ->
+  (Keeper_sandbox_remote.t, string) result
+(** The keeper's guest as an endpoint, without a turn. The guest name is a
+    function of the keeper and the base path and the guest is keeper-lifetime,
+    so a caller that owns no part of the keeper's lifecycle can still reach
+    one that is up.
+
+    Never starts a guest and never probes for one: a stopped guest fails the
+    [container exec] instead, and {!microvm_guest_absence_reason} names that
+    failure afterwards. Booting for a reader would spend a VM start and write
+    the identity snapshot and work root, which belong to the keeper's turn.
+    Refused for a non-microvm keeper. *)
+
+val microvm_guest_absence_reason :
+  ?timeout_sec:float ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  unit ->
+  string option
+(** [Some reason] when this keeper's guest is not running, for a caller that
+    already holds a failure and wants the fact behind it. [None] when the
+    guest is up, when the probe could not answer, or when the keeper is not a
+    microvm -- in each of those the caller keeps its own error rather than
+    replacing it with a guess. *)
+
 module For_testing : sig
   val create_minimal
     :  config:Workspace.config

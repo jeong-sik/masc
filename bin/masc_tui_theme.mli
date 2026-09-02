@@ -58,6 +58,17 @@ module Sgr : sig
   val bold : string
   val dim : string
   val underline : string
+  val italic : string
+  val no_italic : string
+  val strike : string
+  val no_strike : string
+  (** Weight is not the only axis a terminal has, and drawing every
+      distinction as a colour is what makes a screen loud without making it
+      legible: emphasis slants, and a reading that has been withdrawn -- a
+      dropped goal, a cancelled row -- is struck. Each closes to its own
+      off-code rather than to a full reset, so a span inside a coloured row
+      leaves that row's colour where it was. *)
+
   val no_underline : string
   (** SGR 24: close underline without resetting foreground, background, or
       weight. Conditional under NO_COLOR like the underline it closes. *)
@@ -119,9 +130,18 @@ module Box : sig
   val r : string
 end
 
-(** The 3-tone rule: a row is Normal, Dim, or the single accent colour.
-    Anything outside these three is a claim about state and belongs to
-    [status] instead. *)
+(** A row's own weight, for chrome that carries no reading of its own:
+    Normal, Dim, or the single accent.
+
+    These three are the vocabulary for the frame around content -- a border,
+    a marker, a label. They are not a cap on how many colours a screen may
+    hold. A colour that reports health, phase, or attention draws through
+    {!status}; a colour that says what a piece of content *is* -- a keyword,
+    a string, a number, a diff line -- draws through {!Syntax}. What every
+    one of those has in common is a name: a renderer asks for the reading and
+    the theme answers with a colour, so one remap moves every site and the
+    readability lift applies. Picking an SGR code in a renderer is what this
+    rules out, not the number of colours on the screen. *)
 type tone = Normal | Dim | Accent
 
 val tone : tone -> string
@@ -264,6 +284,36 @@ val border_focus : string
 module Syntax : sig
   val keyword : string
   val string_ : string
+
+  val json_key : string
+  val json_number : string
+  val json_literal : string
+  val json_punctuation : string
+  (** The roles a served JSON payload is drawn through: an object's key, a
+      number, [true]/[false]/[null], and the braces, brackets, colons and
+      commas.
+
+      Content, not state -- a yellow token says it is a number, not that
+      something is healthy. Keys lead because a reader scanning a nested
+      result is looking for a name; punctuation recedes because the
+      indentation already carries the structure, and drawing the braces at
+      full weight is what makes a document read as noise. Strings reuse
+      {!string_}, which is the same reading a code fence gives them. *)
+
+  val code_comment : string
+  val code_number : string
+  val code_type : string
+  val code_span : string
+  val link : string
+  val rule : string
+  (** The rest of what a fenced block and a chat row hold: a comment, a
+      number, a type name, an inline [`span`], a link's text, and the
+      horizontal rule that divides sections.
+
+      Content, not state -- a slanted comment says it is a comment, not that
+      anything is unwell. Named here for the same reason the keyword is: a
+      renderer that picks the code itself is one the readability lift cannot
+      reach, and there were ninety-odd of those before these names existed. *)
 
   val diff_added : string
   val diff_removed : string

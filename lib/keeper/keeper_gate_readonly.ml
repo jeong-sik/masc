@@ -6,7 +6,8 @@
     (config/prompts/judge.effect.md). For one closed class that question has
     a deterministic answer: a shell-less argv (no redirection, pipe, or
     command substitution is expressible) whose command is observation-only,
-    running inside the docker sandbox. Those requests are allowed without a
+    running inside a per-keeper disposable guest (docker container or
+    microvm). Those requests are allowed without a
     judgment call and without queueing; everything else — every write-capable
     command, every unknown command, every host-sandbox request, every
     non-tool_execute operation — falls through to the configured gate mode
@@ -14,7 +15,19 @@
 
     The tables are closed on purpose: admitting a command is a reviewed code
     change, not a configuration knob. When classification is uncertain the
-    answer is always [false] — the request goes to the configured path. *)
+    answer is always [false] — the request goes to the configured path.
+
+    The sandbox question is answered by the typed [sandbox_profile] the gate
+    request carries, through
+    [Keeper_types_profile_sandbox.runs_in_disposable_guest] — never by
+    comparing wire strings. Only per-keeper disposable guests qualify. A
+    microvm guest runs its own Linux kernel behind the hypervisor with
+    --cap-drop ALL, --read-only and Network_none by default, and the exec
+    shim spawns the payload with [Unix.execvpe] — argv, no shell — so the
+    premise "shell-less observation-only argv inside a disposable guest"
+    holds at least as strongly as under docker. Remote_ssh is transport-only
+    (its container knobs are not reproduced and the network is inherited),
+    so it stays with the judge. *)
 
 (* ── Command tables ──────────────────────────────────────────────────── *)
 
@@ -123,7 +136,10 @@ let classify_argv argv =
 (* ── Gate request decoding ───────────────────────────────────────────── *)
 
 (* Mirrors [Keeper_tool_execute_runtime.execute_gate_input]: argv lives
-   under the nested [input], the sandbox fields sit at the top level. *)
+   under the nested [input]. The sandbox labels that sit at the top level of
+   the same envelope are display/audit data only — the sandbox decision
+   reads the typed [sandbox_profile] the request carries, never these
+   strings. *)
 let argv_of_gate_input input =
   match input with
   | `Assoc fields ->
@@ -140,16 +156,6 @@ let argv_of_gate_input input =
         | _ -> None)
      | _ -> None)
   | _ -> None
-;;
-
-let docker_sandbox input =
-  match input with
-  | `Assoc fields ->
-    (match (List.assoc_opt "sandbox_profile" fields, List.assoc_opt "sandbox_target" fields) with
-     | Some (`String profile), Some (`String target) ->
-       String.equal profile "docker" && String.starts_with ~prefix:"docker" target
-     | _ -> false)
-  | _ -> false
 ;;
 
 (* ── network_read ────────────────────────────────────────────────────── *)
@@ -185,9 +191,11 @@ let network_capability_of_gate_input input =
   | _ -> None
 ;;
 
-let observation_only_request ~operation ~input =
+let observation_only_request ~operation ~sandbox_profile ~input =
   (String.equal operation "tool_execute"
-   && docker_sandbox input
+   && (match sandbox_profile with
+       | Some profile -> Keeper_types_profile_sandbox.runs_in_disposable_guest profile
+       | None -> false)
    && (match argv_of_gate_input input with
        | Some argv -> classify_argv argv
        | None -> false))

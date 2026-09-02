@@ -5,7 +5,7 @@ module Provider = Keeper_oauth_provider
 
 let ( let* ) = Result.bind
 
-let gate_operation = "identity_call"
+let gate_operation = Keeper_gate.identity_call_gate_operation
 
 let gate_input ~provider_id ~remote_name ~arguments =
   `Assoc
@@ -86,6 +86,7 @@ let decide
     { keeper_name = meta.name
     ; operation = gate_operation
     ; input
+    ; sandbox_profile = None
     ; base_path = config.Workspace.base_path
     ; causal_context = Option.map (fun current -> current ()) gate_context
     ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id

@@ -687,7 +687,7 @@ let tool_input ~index ~trace text =
   then Ok (`Assoc [])
   else (
     match Tool_call_input.parse_object text with
-    | Ok input -> Ok input
+    | Ok (input, _dropped) -> Ok input
     | Error Tool_call_input.Not_object ->
       stream_parse_failed
         ~reason:(Printf.sprintf "malformed_tool_use_arguments:index:%d:not_object" index)

@@ -3,6 +3,9 @@ name = "keeper_time_now"
 # Reachable inside a keeper's shell line: `masc time now`.
 shell_command = "time now"
 description = """
-Get current server time. Returns now_iso (ISO8601) and now_unix (float). Use \
-to timestamp events, check elapsed time, or include current time in reports."""
+Read the server clock once: now_iso (ISO8601) and now_unix (float). The \
+current time already reaches you in every request's system context as a \
+[Temporal] time=... line. Reading the clock again does not bring a later \
+time closer; a later time is reached by ending the turn with a \
+masc_schedule_create wake."""
 additional_properties = false

@@ -7,13 +7,18 @@ open Masc
 
 module Readonly = Keeper_gate_readonly
 
-let gate_input argv =
+(* The wire envelope still carries sandbox labels — producers emit them for
+   display/audit. The classification must never read them: the typed
+   [sandbox_profile] on the request is the only sandbox input. The
+   [?profile]/[?target] labels exist so tests can pin that indifference by
+   emitting contradictory labels. *)
+let gate_input ?(profile = "docker") ?(target = "docker:masc-keeper-sandbox:local") argv =
   `Assoc
     [ "schema", `String "masc.keeper_gate.request.v1"
     ; "input", `Assoc [ "cwd", `String "/home/keeper/playground"; "argv", `List (List.map (fun s -> `String s) argv) ]
     ; "cwd", `String "/home/keeper/playground"
-    ; "sandbox_profile", `String "docker"
-    ; "sandbox_target", `String "docker:masc-keeper-sandbox:local"
+    ; "sandbox_profile", `String profile
+    ; "sandbox_target", `String target
     ]
 ;;
 
@@ -91,9 +96,13 @@ let test_write_shapes_stay_blocked () =
   blocked "git with no subcommand" [ "git" ]
 ;;
 
-let executes ~operation argv =
-  Readonly.observation_only_request ~operation ~input:(gate_input argv)
+let executes ~operation ~sandbox_profile argv =
+  Readonly.observation_only_request ~operation ~sandbox_profile ~input:(gate_input argv)
 ;;
+
+let docker = Some Keeper_types_profile_sandbox.Docker
+let microvm = Some Keeper_types_profile_sandbox.Micro_vm
+let remote_ssh = Some Keeper_types_profile_sandbox.Remote_ssh
 
 let network_input ~capability =
   `Assoc
@@ -108,30 +117,35 @@ let test_network_observation_capabilities () =
     true
     (Readonly.observation_only_request
        ~operation:"network_read"
+       ~sandbox_profile:None
        ~input:(network_input ~capability:"web_search"));
   check bool
     "web_fetch reads without judgment (address boundary is the fetch's own)"
     true
     (Readonly.observation_only_request
        ~operation:"network_read"
+       ~sandbox_profile:None
        ~input:(network_input ~capability:"web_fetch"));
   check bool
     "unknown capability never matches"
     false
     (Readonly.observation_only_request
        ~operation:"network_read"
+       ~sandbox_profile:None
        ~input:(network_input ~capability:"port_scan"));
   check bool
     "missing capability never matches"
     false
     (Readonly.observation_only_request
        ~operation:"network_read"
+       ~sandbox_profile:None
        ~input:(`Assoc [ "input", `Assoc [ "query", `String "x" ] ]));
   check bool
     "network arm ignores tool_execute shapes"
     false
     (Readonly.observation_only_request
        ~operation:"network_read"
+       ~sandbox_profile:None
        ~input:(gate_input [ "ls" ]));
   check
     (Alcotest.list Alcotest.string)
@@ -141,38 +155,51 @@ let test_network_observation_capabilities () =
 ;;
 
 let test_gate_shape_gates () =
-  check bool "tool_execute docker ls" true (executes ~operation:"tool_execute" [ "ls" ]);
+  check bool "tool_execute ls under Docker" true (executes ~operation:"tool_execute" ~sandbox_profile:docker [ "ls" ]);
   check bool
-    "non-tool_execute never matches"
+    "tool_execute ls under Micro_vm (the profile the fleet runs)"
+    true
+    (executes ~operation:"tool_execute" ~sandbox_profile:microvm [ "ls"; "-la" ]);
+  check bool
+    "Remote_ssh stays with the judge (transport-only, inherited network)"
     false
-    (Readonly.observation_only_request ~operation:"slack_post" ~input:(gate_input [ "ls" ]));
+    (executes ~operation:"tool_execute" ~sandbox_profile:remote_ssh [ "ls" ]);
   check bool
-    "local sandbox profile never matches"
+    "no typed profile never matches"
+    false
+    (executes ~operation:"tool_execute" ~sandbox_profile:None [ "ls" ]);
+  check bool
+    "wire labels are not consulted: typed Micro_vm with nonsense labels still passes"
+    true
+    (Readonly.observation_only_request
+       ~operation:"tool_execute"
+       ~sandbox_profile:microvm
+       ~input:(gate_input ~profile:"local" ~target:"local" [ "ls" ]));
+  check bool
+    "wire labels are not consulted: microvm labels without a typed profile never match"
     false
     (Readonly.observation_only_request
        ~operation:"tool_execute"
-       ~input:
-         (`Assoc
-            [ "schema", `String "masc.keeper_gate.request.v1"
-            ; "input", `Assoc [ "argv", `List [ `String "ls" ] ]
-            ; "sandbox_profile", `String "local"
-            ; "sandbox_target", `String "local"
-            ]));
+       ~sandbox_profile:None
+       ~input:(gate_input ~profile:"microvm" ~target:"microvm:masc-keeper-sandbox:local" [ "ls" ]));
   check bool
-    "missing sandbox fields never matches"
+    "non-tool_execute never matches"
     false
-    (Readonly.observation_only_request ~operation:"tool_execute" ~input:(`Assoc [ "input", `Assoc [] ]));
+    (Readonly.observation_only_request ~operation:"slack_post" ~sandbox_profile:docker ~input:(gate_input [ "ls" ]));
+  check bool
+    "missing argv never matches"
+    false
+    (Readonly.observation_only_request
+       ~operation:"tool_execute"
+       ~sandbox_profile:docker
+       ~input:(`Assoc [ "input", `Assoc [] ]));
   check bool
     "non-string argv entry never matches"
     false
     (Readonly.observation_only_request
        ~operation:"tool_execute"
-       ~input:
-         (`Assoc
-            [ "input", `Assoc [ "argv", `List [ `String "ls"; `Int 3 ] ]
-            ; "sandbox_profile", `String "docker"
-            ; "sandbox_target", `String "docker:masc-keeper-sandbox:local"
-            ]))
+       ~sandbox_profile:docker
+       ~input:(`Assoc [ "input", `Assoc [ "argv", `List [ `String "ls"; `Int 3 ] ] ]))
 ;;
 
 (* ── Gate-path integration: the fast-path must allow without deferring,
@@ -196,11 +223,12 @@ let rec remove_tree path =
     else Unix.unlink path
 ;;
 
-let gate_request base_path argv =
+let gate_request ?profile ?target ~sandbox_profile base_path argv =
   { Keeper_gate.keeper_name = "alpha"
   ; operation = "tool_execute"
-  ; input = gate_input argv
+  ; input = gate_input ?profile ?target argv
   ; base_path
+  ; sandbox_profile
   ; causal_context = None
   ; task_id = None
   ; continuation_channel = None
@@ -216,6 +244,7 @@ let network_gate_request base_path ~capability =
         ; "input", `Assoc [ "url", `String "https://example.com/page" ]
         ]
   ; base_path
+  ; sandbox_profile = None
   ; causal_context = None
   ; task_id = None
   ; continuation_channel = None
@@ -245,7 +274,11 @@ let with_auto_judge f =
 
 let test_auto_judge_allows_observation_without_queueing () =
   with_auto_judge @@ fun base_path ->
-  match Keeper_gate.decide ~keeper_always_allow:false (gate_request base_path [ "ls"; "-la" ]) with
+  match
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      (gate_request ~sandbox_profile:docker base_path [ "ls"; "-la" ])
+  with
   | Keeper_gate.Allow { source = Readonly_sandbox; _ } -> ()
   | Keeper_gate.Allow { source; _ } ->
     failf "observation request allowed through the wrong source: %s"
@@ -258,6 +291,49 @@ let test_auto_judge_allows_observation_without_queueing () =
        | Keeper_gate.Auto_judge_unavailable detail -> "auto_judge_unavailable: " ^ detail
        | Keeper_gate.Mode_state_invalid detail -> "mode_state_invalid: " ^ detail)
   | Keeper_gate.Unavailable _ -> fail "observation request made the queue unavailable"
+;;
+
+(* Same end-to-end allow for the profile the fleet actually runs: after the
+   2026-09-02 switch all keepers dispatch under microvm, and this path must
+   not fall through to the judge. The wire labels deliberately contradict the
+   typed profile — the decision reads only the typed field. *)
+let test_auto_judge_allows_microvm_observation_without_queueing () =
+  with_auto_judge @@ fun base_path ->
+  match
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      (gate_request
+         ~profile:"local"
+         ~target:"local"
+         ~sandbox_profile:microvm
+         base_path
+         [ "ls"; "-la" ])
+  with
+  | Keeper_gate.Allow { source = Readonly_sandbox; _ } -> ()
+  | Keeper_gate.Allow { source; _ } ->
+    failf "microvm observation request allowed through the wrong source: %s"
+      (Keeper_gate.authorization_source_to_string source)
+  | Keeper_gate.Deferred _ -> fail "microvm observation request was deferred instead of fast-pathed"
+  | Keeper_gate.Unavailable _ -> fail "microvm observation request made the queue unavailable"
+;;
+
+(* Remote_ssh is transport-only and inherits the host network, so even an
+   observation-shaped command stays with the judge end to end. *)
+let test_auto_judge_defers_remote_ssh_observation_to_the_judge () =
+  with_auto_judge @@ fun base_path ->
+  match
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      (gate_request ~sandbox_profile:remote_ssh base_path [ "ls"; "-la" ])
+  with
+  | Keeper_gate.Deferred { reason = Judge_requested; _ }
+  | Keeper_gate.Deferred { reason = Auto_judge_unavailable _; _ } -> ()
+  | Keeper_gate.Allow _ -> fail "a remote_ssh observation was allowed without judgment"
+  | Keeper_gate.Deferred { reason = Human_requested; _ } ->
+    fail "remote_ssh observation went to the human queue, not the judge lane"
+  | Keeper_gate.Deferred { reason = Mode_state_invalid detail; _ } ->
+    fail ("mode_state_invalid: " ^ detail)
+  | Keeper_gate.Unavailable _ -> fail "remote_ssh observation made the queue unavailable"
 ;;
 
 (* The whole gate path, not the classifier alone: a web_fetch under
@@ -280,7 +356,11 @@ let test_auto_judge_allows_web_fetch_without_queueing () =
 
 let test_auto_judge_still_defers_writes_to_the_judge () =
   with_auto_judge @@ fun base_path ->
-  match Keeper_gate.decide ~keeper_always_allow:false (gate_request base_path [ "rm"; "-rf"; "out" ]) with
+  match
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      (gate_request ~sandbox_profile:docker base_path [ "rm"; "-rf"; "out" ])
+  with
   (* A bare test process has no auto-judge worker installed, so the judge
      lane reports unavailable instead of queued — both mean the request was
      NOT allowed without judgment, which is the assertion. *)
@@ -298,7 +378,11 @@ let test_manual_mode_still_asks_the_human () =
   with_auto_judge @@ fun base_path ->
   let config = Workspace.default_config base_path in
   select_workspace config Keeper_gate_mode.Manual;
-  match Keeper_gate.decide ~keeper_always_allow:false (gate_request base_path [ "ls" ]) with
+  match
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      (gate_request ~sandbox_profile:docker base_path [ "ls" ])
+  with
   | Keeper_gate.Deferred { reason = Human_requested; _ } -> ()
   | Keeper_gate.Allow _ -> fail "Manual mode must still see even observation requests"
   | Keeper_gate.Deferred _ -> fail "Manual mode deferred for a non-human reason"
@@ -321,6 +405,14 @@ let () =
             "auto_judge allows observation without queueing"
             `Quick
             test_auto_judge_allows_observation_without_queueing
+        ; test_case
+            "auto_judge allows microvm observation without queueing"
+            `Quick
+            test_auto_judge_allows_microvm_observation_without_queueing
+        ; test_case
+            "auto_judge defers remote_ssh observation to the judge"
+            `Quick
+            test_auto_judge_defers_remote_ssh_observation_to_the_judge
         ; test_case
             "auto_judge allows web_fetch without queueing"
             `Quick

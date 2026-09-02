@@ -693,18 +693,41 @@ let microvm_guest_provisions (t : t) ~timeout_sec =
     up. The volume outlives the guest, so this is a no-op after the first
     boot; it runs as root because the volume root is root-owned. *)
 let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~container_name =
-  let argv =
+  let root = Keeper_sandbox_microvm.keeper_work_root ~keeper_name:t.meta.name in
+  let mkdir =
     Keeper_sandbox_microvm.keeper_work_root_mkdir_argv
       ~container_name
       ~keeper_name:t.meta.name
   in
-  match run_argv_with_status ?timeout_sec argv with
-  | Unix.WEXITED 0, _ -> Ok ()
+  match run_argv_with_status ?timeout_sec mkdir with
+  | Unix.WEXITED 0, _ ->
+    (* Existence is root's doing; use is the keeper's. The probe writes as
+       the uid every command of this keeper will run as, so a root the
+       keeper cannot write -- imported under another uid, or a mode the
+       volume kept from an earlier life -- is refused here, with its owner
+       and mode, instead of on the first Write of a turn. *)
+    let probe =
+      Keeper_sandbox_microvm.keeper_work_root_write_probe_argv
+        ~container_name
+        ~uid:t.uid
+        ~gid:t.gid
+        ~keeper_name:t.meta.name
+    in
+    (match run_argv_with_status ?timeout_sec probe with
+     | Unix.WEXITED 0, _ -> Ok ()
+     | _, out ->
+       Error
+         (Printf.sprintf
+            "microvm_keeper_work_root_not_writable: %s as %d:%d: %s"
+            root
+            t.uid
+            t.gid
+            (Keeper_sandbox_runtime.docker_failure_output_for_log out)))
   | _, out ->
     Error
       (Printf.sprintf
          "microvm_keeper_work_root_failed: %s: %s"
-         (Keeper_sandbox_microvm.keeper_work_root ~keeper_name:t.meta.name)
+         root
          (Keeper_sandbox_runtime.docker_failure_output_for_log out))
 ;;
 
@@ -884,7 +907,9 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                   mark_microvm_work_root_ready container_name;
                   adopt github_identity
                 | Error detail ->
-                  take_down_after_boot ~what:"guest has no keeper root on its work volume" ~detail)
+                  take_down_after_boot
+                    ~what:"guest cannot use its keeper root on the work volume"
+                    ~detail)
              | Error inspect_out ->
                take_down_after_boot
                  ~what:"container ran but inspect cannot see"
@@ -1317,6 +1342,45 @@ let microvm_remote_endpoint ?timeout_sec (t : t) =
     (match root with
      | Error _ as err -> err
      | Ok () -> microvm_remote_endpoint_of_running t ~container_name)
+;;
+
+(* Reading a keeper's tree needs the guest, not the turn that happens to be
+   using it. The guest name is a function of the keeper and the base path,
+   and the guest is keeper-lifetime, so a caller holding no lifecycle
+   authority can still name and reach one that is up. [create] here computes
+   paths and reads the process uid; it starts nothing, and this function
+   deliberately never calls [ensure_started]. Booting on behalf of a reader
+   would spend a VM start, write the identity snapshot and make the work
+   root -- effects that belong to the keeper's own turn.
+
+   No running-state probe either: a stopped guest fails the [container exec]
+   on its own. The probe is [microvm_guest_absence_reason], which the caller
+   runs only to name a failure it already has. *)
+let microvm_attached_endpoint ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  let t = create ~config ~meta () in
+  let container_name = microvm_container_name ~config ~keeper_name:meta.name in
+  microvm_remote_endpoint_of_running t ~container_name
+;;
+
+(* [Some reason] when the guest is not running, so a caller can replace a raw
+   exec failure with the fact behind it; [None] when the guest is up or the
+   probe itself could not answer, leaving the caller's own error in place. *)
+let microvm_guest_absence_reason ?timeout_sec ~(config : Workspace.config)
+      ~(meta : keeper_meta) () =
+  if meta.sandbox_profile <> Keeper_types_profile_sandbox.Micro_vm
+  then None
+  else
+    let container_name = microvm_container_name ~config ~keeper_name:meta.name in
+    match probe_microvm_container_state ?timeout_sec container_name with
+    | Ok Keeper_sandbox_runtime.Docker_container_running -> None
+    | Error _ -> None
+    | Ok (Keeper_sandbox_runtime.Docker_container_stopped
+         | Keeper_sandbox_runtime.Docker_container_absent) ->
+      Some
+        (Printf.sprintf
+           "microvm_guest_not_running: keeper %s's guest %s is not running; a read \
+            attaches to a running guest and never boots one"
+           meta.name container_name)
 ;;
 
 let retire_current_github_identity_snapshot t =

@@ -50,13 +50,29 @@ Docker 없이 Apple container 로 빌드할 때: 빌드 컨테이너에 `--dns` 
 # 1. 옛 게스트 이름 확인
 container list --format json | jq -r '.[].configuration.id' | grep masc-keeper-vm
 
-# 2. keeper 마다 트리 복사 (게스트 안, keeper 의 uid 로)
-container exec --user 501:20 masc-keeper-vm-<keeper>-<hash> \
+# 2. keeper 마다 트리 복사 (게스트 안). uid 는 서버 프로세스의 것 — 서버는
+#    Unix.getuid 로 게스트에 들어가므로 `id -u` 값(이 맥에서는 502)을 쓴다.
+#    다른 uid 로 복사하면 그 디렉터리에 서버가 못 쓴다(mktemp: Permission denied).
+#    옛 게스트에는 keeper root 가 없을 수 있어 root 로 먼저 만든다.
+U=$(id -u)
+container exec --user 0:0 masc-keeper-vm-<keeper>-<hash> \
+  sh -c 'mkdir -p -m 0777 /masc-work/<keeper>'
+container exec --user $U:20 masc-keeper-vm-<keeper>-<hash> \
   sh -c 'cp -a /home/keeper/playground/<keeper>/. /masc-work/<keeper>/'
 
 # 3. 옛 _build 심볼릭 링크 제거 (볼륨에 실제 _build 를 dune 이 만든다)
-container exec --user 501:20 masc-keeper-vm-<keeper>-<hash> \
+container exec --user $U:20 masc-keeper-vm-<keeper>-<hash> \
   sh -c 'find /masc-work/<keeper> -maxdepth 4 -name _build -type l -delete'
+
+# 3b. 게스트가 이미 없으면 호스트 디렉터리와 볼륨을 같이 붙인 일회용 컨테이너로
+container run --rm --user 0:0 \
+  -v ~/me/.masc/playground/microvm/<keeper>:/src:ro -v masc-keeper-work-<keeper>:/masc-work \
+  masc-keeper-sandbox:local sh -c "mkdir -p -m 0777 /masc-work/<keeper> \
+    && cp -a /src/. /masc-work/<keeper>/ && chown -R $U:20 /masc-work/<keeper>"
+
+# 3c. 옮긴 뒤 검증은 서버와 같은 uid 로 실제 쓰기를 해 본다
+container exec --user $U:20 masc-keeper-vm-<keeper>-<hash> \
+  sh -c 't=$(mktemp /masc-work/<keeper>/.probe.XXXXXX) && unlink "$t" && echo ok'
 
 # 4. 서버 재시작. 게스트는 공유 마운트 없이 다시 뜬다.
 

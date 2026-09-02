@@ -16,6 +16,7 @@ module Turn_up_config = Masc.Keeper_turn_up_config_persistence
    lives in the main [masc] library. Same pattern as test_keeper_lifecycle_registry_dispatch. *)
 module Keeper_runtime = Masc.Keeper_runtime
 module Pre_dispatch = Masc.Keeper_unified_turn_pre_dispatch
+module Sandbox_control = Masc.Keeper_sandbox_control
 
 let with_owner_inventory config f =
   Eio_main.run @@ fun env ->
@@ -305,6 +306,24 @@ sandbox_profile = "docker"
         "docker default network overlays from TOML profile"
         "none"
         (Profile.network_mode_to_string meta.network_mode)
+
+let test_sandbox_log_target_uses_effective_meta () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "microvm-logs" in
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"microvm"
+    ~instructions:"Read the effective log backend.";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  match Sandbox_control.resolve_sandbox_log_target ~config ~keeper_name:name with
+  | Error Sandbox_control.Sandbox_logs_keeper_not_found ->
+    Alcotest.fail "expected seeded keeper meta"
+  | Error (Sandbox_control.Sandbox_logs_meta_read_failed detail)
+  | Error (Sandbox_control.Sandbox_logs_backend_failed detail) ->
+    Alcotest.failf "sandbox log target resolution failed: %s" detail
+  | Ok (Sandbox_control.Docker_logs, _) ->
+    Alcotest.fail "durable meta placeholder selected Docker for a microvm Keeper"
+  | Ok (Sandbox_control.Apple_container_logs, effective_name) ->
+    Alcotest.(check string) "effective keeper name" name effective_name
 
 (* The direct-turn path holds profile defaults it loaded once and overlays with
    them, rather than re-reading the profile per use: two reads inside one turn
@@ -1362,6 +1381,9 @@ let () =
         [
           Alcotest.test_case "TOML sandbox overlay reaches effective meta"
             `Quick test_toml_overlay_reaches_effective_meta;
+          Alcotest.test_case
+            "sandbox logs use the effective TOML profile"
+            `Quick test_sandbox_log_target_uses_effective_meta;
           Alcotest.test_case
             "turn_profile_and_meta applies the declared sandbox profile"
             `Quick test_turn_profile_and_meta_applies_the_declared_profile;

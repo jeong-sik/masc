@@ -1272,13 +1272,37 @@ let checkpoint_before_incomplete_response (checkpoint : Agent_core.Checkpoint.t)
     None
 ;;
 
+(* Every no-progress rejection the provider stopped at [MaxTokens] gets the
+   continuation attempt, whatever its shape: the checkpoint is cut before the
+   incomplete response and re-run with thinking off, which is exactly the
+   remedy for a budget spent on thinking. The retry kind is read afterwards,
+   by the lane, to decide whether a failed or unreachable continuation
+   rotates (no deliverable content) or ends the lane (partial content). *)
 let max_tokens_truncation_error error =
   match Keeper_internal_error.classify_masc_internal_error error with
-  | Some internal_error ->
-    (match Keeper_internal_error.accept_no_progress_retry_kind internal_error with
-     | Some `Truncated_no_progress -> true
-     | Some (`Empty_no_progress | `Thinking_only_no_progress) | None -> false)
-  | None -> false
+  | Some
+      (Keeper_internal_error.Accept_rejected
+         { reason_kind = Some Keeper_internal_error.Accept_no_usable_progress
+         ; stop_reason = Some Agent_core.Types.MaxTokens
+         ; _
+         }) ->
+    true
+  | Some
+      ( Keeper_internal_error.Accept_rejected _
+      | Keeper_internal_error.Runtime_exhausted _
+      | Keeper_internal_error.Capacity_backpressure _
+      | Keeper_internal_error.Resumable_cli_session _
+      | Keeper_internal_error.Internal_unhandled_exception _
+      | Keeper_internal_error.Internal_bridge_exception _
+      | Keeper_internal_error.Internal_contract_rejected _
+      | Keeper_internal_error.Incomplete_tool_transcript _
+      | Keeper_internal_error.Terminal_effect_failed _
+      | Keeper_internal_error.Provider_attempt_effect_fenced _
+      | Keeper_internal_error.Tool_correction_lost _
+      | Keeper_internal_error.Receipt_persistence_failed _
+      | Keeper_internal_error.Gate_replay_repair_required _ )
+  | None ->
+    false
 ;;
 
 let thinking_was_enabled = function

@@ -42,6 +42,20 @@ type attributed_turn =
             newest row returned is itself attributed. *)
   }
 
+type recent_turn =
+  { turn : int
+        (** Absolute-turn number, as [Turn_record.absolute_turn]. *)
+  ; ts : float
+  ; input_tokens : int option
+        (** What the provider counted as this request's input. [None] when
+            the provider reported a conversation-cumulative figure instead,
+            which is a number about the whole conversation and not a fact
+            about this turn. *)
+  ; cache_read : int option
+  ; output_tokens : int option
+  ; scope : Runtime_usage_scope.t
+  }
+
 (** What one turn-records page yields.
 
     Two readings rather than one, because a keeper can keep turning while its
@@ -51,10 +65,13 @@ type attributed_turn =
     attributed row threw away the token, usage, wire and window readings the
     newest row did carry. [latest] is always the newest row on the page;
     [attributed] is the newest row that also has an exact composition, when
-    the page holds one. *)
+    the page holds one. [recent] is every row on the page, newest first,
+    with the figures a per-turn reading wants; the page is what the caller
+    asked the server for, not a curated window. *)
 type selection =
   { latest : Turn_record.t
   ; attributed : attributed_turn option
+  ; recent : recent_turn list
   }
 
 type reading =

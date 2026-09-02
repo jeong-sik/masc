@@ -140,6 +140,13 @@ type replayable =
           ({!Keeper_identity_gate}); the heaviest payload class here, and the
           reason it must replay rather than wait for a byte-identical
           re-emission (#25947). *)
+  | Replay_voice_speak
+      (** A spoken utterance sent to a TTS endpoint ({!Keeper_tool_voice_runtime}).
+          Its text leaves the process, so the approval reviews content, and
+          playback is not wall-clock bound — a post-approval replay still
+          lands. The microphone leaf is the mirror image: its input window
+          expires while the judge runs, so it never becomes a Gate
+          request. *)
 
 val replayable_of_operation : string -> replayable option
 (** Which approved operations can be spent without the Keeper re-emitting the

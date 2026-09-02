@@ -169,6 +169,15 @@ let connector_post_operation =
 
 let identity_operation = Keeper_identity_gate.gate_operation
 
+(* Speak is the one voice leaf the Gate authorizes: the spoken text leaves
+   for a TTS endpoint, so its content stays judge-reviewed, and playback is
+   not wall-clock bound — a post-approval replay still lands. Listen is the
+   opposite: its microphone window expires while the judge runs, so it never
+   enters the Gate (see keeper_tool_voice_runtime.ml). *)
+let voice_speak_operation =
+  Keeper_tool_voice_runtime.(command_to_string Speak)
+;;
+
 (* The producer owns both the argument schema and the effect encoding, so it
    owns the inversion; replay only decides whether to spend the grant. *)
 let write_args_of_gate_input =
@@ -199,6 +208,7 @@ type replayable =
   | Replay_network_read
   | Replay_connector_post
   | Replay_identity
+  | Replay_voice_speak
 
 let replayable_of_operation operation =
   if String.equal operation write_operation
@@ -211,6 +221,8 @@ let replayable_of_operation operation =
   then Some Replay_connector_post
   else if String.equal operation identity_operation
   then Some Replay_identity
+  else if String.equal operation voice_speak_operation
+  then Some Replay_voice_speak
   else None
 ;;
 
@@ -863,6 +875,7 @@ let terminal_effect_receipt_of_durable_replay request replay_outcome =
       | Some Replay_execute
       | Some Replay_network_read
       | Some Replay_identity
+      | Some Replay_voice_speak
       | None )
     , _ )
   | Some Replay_connector_post,
@@ -1089,7 +1102,22 @@ let replay_approved_effect_with_receipt
            ?continuation_channel
            ?gate_context
            ~gate_grant:grant
-           call)))
+           call)
+     | Some Replay_voice_speak ->
+       (* The approved input is the tool call verbatim — speak takes the
+          descriptor JSON itself, so replay passes it through unchanged and
+          [summarize_execution] treats any Deferred it meets (input drifted
+          from what was approved) as not-applied. *)
+       replay voice_speak_operation (fun input -> Ok input) (fun args ->
+         Keeper_tool_in_process_runtime.handle_voice_with_outcome
+           ~config
+           ~meta
+           ?continuation_channel
+           ?gate_context
+           ~gate_grant:grant
+           ~name:voice_speak_operation
+           ~args
+           ()))
 ;;
 
 let replay_approved_effect

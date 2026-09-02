@@ -3397,7 +3397,7 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
        in
        let request : Masc.Keeper_gate.request =
          { keeper_name = meta.name
-         ; operation = "keeper_voice_speak"
+         ; operation = "unreplayed_operation"
          ; input = `Assoc [ "message", `String exact_tail ]
          ; base_path = config.base_path
          ; causal_context = None

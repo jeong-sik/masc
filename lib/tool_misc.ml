@@ -1,7 +1,8 @@
 (** Tool_misc — Miscellaneous operations (facade).
 
     Dispatches config introspection and tool inventory helpers to
-    [Tool_misc_introspection].
+    [Tool_misc_introspection], and the masc_ask family to
+    [Mcp_tool_runtime_ask], whose handlers the MCP and agent-core lanes share.
 
     Retains: dashboard, verify_handoff, gc, tool_stats, tool_help.
 
@@ -134,6 +135,14 @@ let tool_inventory_json ctx ~include_hidden =
 (* Dispatch (facade)                                                *)
 (* ================================================================ *)
 
+(* The ask handlers are shared with the MCP lane and take their own narrow
+   context; the misc context already carries everything they read. *)
+let ask_context (ctx : context) arguments : Mcp_tool_runtime_ask.context =
+  { Mcp_tool_runtime_ask.config = ctx.config
+  ; agent_name = ctx.agent_name
+  ; arguments
+  }
+
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   match name with
@@ -146,6 +155,15 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | "masc_gc" -> Some (handle_gc ~tool_name:name ~start_time:start ctx args)
   | "masc_tool_help" ->
       Some (handle_tool_help ~schemas:ctx.help_schemas ~tool_name:name ~start_time:start ctx args)
+  | "masc_ask" ->
+      Mcp_tool_runtime_ask.handle_ask ~tool_name:name ~start_time:start
+        (ask_context ctx args)
+  | "masc_ask_status" ->
+      Mcp_tool_runtime_ask.handle_ask_status ~tool_name:name ~start_time:start
+        (ask_context ctx args)
+  | "masc_ask_withdraw" ->
+      Mcp_tool_runtime_ask.handle_ask_withdraw ~tool_name:name ~start_time:start
+        (ask_context ctx args)
   | "masc_web_search" ->
       Some (handle_web_search ~tool_name:name ~start_time:start ctx args)
   | "masc_web_fetch" ->
@@ -163,6 +181,9 @@ let tool_spec_read_only =
     "masc_tool_help";
     "masc_dashboard";
     "masc_keeper_waiting_inventory";
+    (* Read-back only: records nothing, matching the descriptor's
+       readonly flag and the MCP lane's runtime_tool_policy. *)
+    "masc_ask_status";
   ]
 
 let () =

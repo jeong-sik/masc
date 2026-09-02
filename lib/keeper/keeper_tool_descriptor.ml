@@ -2306,6 +2306,19 @@ let internal_descriptors : t list =
        ~readonly:true
   ; masc_misc_descriptor "gc" "masc_gc"
       ~readonly:false
+  (* The ask chain — store, operator surfaces, answer→wake — was reachable
+     only from the MCP lane: nothing in this registry named the tools, so the
+     agent-core lane never advertised them and could not dispatch a call.
+     [Internal_name] puts them on the model surface; [Tool_masc_misc_dispatch]
+     routes them to the same handlers the MCP lane uses, with the Keeper's own
+     [meta.name] as the asking identity, so the store's unregistered-keeper
+     refusal still applies. *)
+  ; masc_misc_descriptor "ask" "masc_ask"
+      ~readonly:false
+  ; masc_misc_descriptor "ask_status" "masc_ask_status"
+      ~readonly:true
+  ; masc_misc_descriptor "ask_withdraw" "masc_ask_withdraw"
+      ~readonly:false
   (* [masc_web_search] / [masc_web_fetch] are already owned by the
      MASC-owned web descriptors above. Do not add
      duplicate internal descriptors here; that would make runtime receipt

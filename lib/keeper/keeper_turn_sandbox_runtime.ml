@@ -77,6 +77,34 @@ let release_registered_microvm_identity ?expected container_name =
   | Some snapshot -> snapshot.cleanup ()
 ;;
 
+(* Guests whose keeper root on the work volume this server process has made.
+   The volume outlives the guest, so the [mkdir] is paid once per guest per
+   process, at boot. A guest whose boot could not make the root and could
+   not be taken down either is still running and still registered, so the
+   next start adopts it: it stays out of this set, and the endpoint request
+   makes the root before handing the guest out rather than handing out a
+   guest every call fails in. *)
+let microvm_work_roots_ready : string list Atomic.t = Atomic.make []
+
+let microvm_work_root_ready container_name =
+  List.exists (String.equal container_name) (Atomic.get microvm_work_roots_ready)
+;;
+
+let rec mark_microvm_work_root_ready container_name =
+  let current = Atomic.get microvm_work_roots_ready in
+  if List.exists (String.equal container_name) current
+  then ()
+  else if not (Atomic.compare_and_set microvm_work_roots_ready current (container_name :: current))
+  then mark_microvm_work_root_ready container_name
+;;
+
+let rec forget_microvm_work_root container_name =
+  let current = Atomic.get microvm_work_roots_ready in
+  let updated = List.filter (fun name -> not (String.equal name container_name)) current in
+  if not (Atomic.compare_and_set microvm_work_roots_ready current updated)
+  then forget_microvm_work_root container_name
+;;
+
 type t =
   { config : Workspace.config
   ; meta : keeper_meta
@@ -572,7 +600,9 @@ let stop_and_delete_microvm_container ?timeout_sec container_name =
      codes are only diagnostics. The postcondition is authoritative: do not
      release the mounted identity snapshot until the guest name is gone. *)
   match probe_microvm_container_state ?timeout_sec container_name with
-  | Ok Keeper_sandbox_runtime.Docker_container_absent -> Ok ()
+  | Ok Keeper_sandbox_runtime.Docker_container_absent ->
+    forget_microvm_work_root container_name;
+    Ok ()
   | Ok Keeper_sandbox_runtime.Docker_container_running
   | Ok Keeper_sandbox_runtime.Docker_container_stopped ->
     Error
@@ -850,7 +880,9 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
              with
              | Ok () ->
                (match ensure_microvm_keeper_work_root ?timeout_sec t ~container_name with
-                | Ok () -> adopt github_identity
+                | Ok () ->
+                  mark_microvm_work_root_ready container_name;
+                  adopt github_identity
                 | Error detail ->
                   take_down_after_boot ~what:"guest has no keeper root on its work volume" ~detail)
              | Error inspect_out ->
@@ -1264,12 +1296,27 @@ let microvm_remote_endpoint_of_running (t : t) ~container_name =
          })
 ;;
 
-(* The keeper's root on the volume was made at boot, so an adopted guest is
-   already an endpoint; no exec is spent per call to re-establish it. *)
+(* The keeper's root on the volume is made at boot, so a guest this process
+   booted is already an endpoint and no exec is spent per call. A guest this
+   process adopted without having made the root (a boot whose [mkdir] failed
+   and whose take-down failed too) gets it here, once. *)
 let microvm_remote_endpoint ?timeout_sec (t : t) =
   match ensure_started ?timeout_sec t with
   | Error _ as err -> err
-  | Ok container_name -> microvm_remote_endpoint_of_running t ~container_name
+  | Ok container_name ->
+    let root =
+      if microvm_work_root_ready container_name
+      then Ok ()
+      else (
+        match ensure_microvm_keeper_work_root ?timeout_sec t ~container_name with
+        | Ok () ->
+          mark_microvm_work_root_ready container_name;
+          Ok ()
+        | Error _ as err -> err)
+    in
+    (match root with
+     | Error _ as err -> err
+     | Ok () -> microvm_remote_endpoint_of_running t ~container_name)
 ;;
 
 let retire_current_github_identity_snapshot t =

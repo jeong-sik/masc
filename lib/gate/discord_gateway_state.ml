@@ -458,20 +458,22 @@ let decode_ready ~payload =
     | Some _ -> Error "READY payload: guilds is not a list"
     | None -> Error "READY payload: missing guilds"
   in
-  match session_id, resume_gateway_url, bot_user_id, guild_ids with
-  | Some session_id, Some resume_gateway_url, Some bot_user_id, Ok guild_ids ->
-      Ok
-        (Ready
-           { session_id
-           ; resume_gateway_url
-           ; bot_user_id
-           ; bot_user_name
-           ; guild_ids
-           })
-  | _, _, _, Error detail -> Error detail
-  | _ ->
-      Error
-        "READY payload: missing session_id / resume_gateway_url / user.id"
+  match guild_ids with
+  | Error detail -> Error detail
+  | Ok guild_ids ->
+    (match session_id, resume_gateway_url, bot_user_id with
+     | Some session_id, Some resume_gateway_url, Some bot_user_id ->
+       Ok
+         (Ready
+            { session_id
+            ; resume_gateway_url
+            ; bot_user_id
+            ; bot_user_name
+            ; guild_ids
+            })
+     | None, _, _ | Some _, None, _ | Some _, Some _, None ->
+       Error
+         "READY payload: missing session_id / resume_gateway_url / user.id")
 
 (* Files Discord says came with the message. Every required field must be
    there or the entry is dropped: a file with no url is not something a reader

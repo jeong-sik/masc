@@ -361,6 +361,16 @@ jq -r 'select(type=="object") | .message' "$M/logs/system_log_$(date +%F).jsonl"
 4. **provider 실패 4건.** polisher: deepseek `accept_rejected`, glm SSE malformed payload. rondo: glm rate limit, minimax broken pipe. 모두 `deferred_next_runtime` 으로 넘어가 다음 턴이 성공했다. 실패 턴은 turn-record 에 `finish_reason = none, output_tokens = 0` 으로 남는다(rondo 3, polisher 2).
 5. **polisher microvm playground(266MB) 의 호스트 git 5초 inspection budget 초과 5건.** 게스트 부팅과 clone 이 겹친 15:14–15:23 에만 났고, 15:40 에 같은 명령은 0.97초다.
 
+### 13.4 두 번째 재기동 (09-02 17:53 KST, #32594 빌드) 뒤 16분
+
+빌드는 17:33 origin/main(ee8841074a). 15:12 이후 25건이 더 들어갔고 microvm 쪽 4건(#32562 계열, RFC-0400 C)이 포함된다. 9명이 autoboot 됐다(pr-updater 추가). 라이브 프롬프트 66개 = manifest 66개. `web_fetch` 호출은 여전히 0건이다.
+
+1. **edgar.a.poe 가 같은 Execute 를 8번 내고 10분 30초를 기다렸다.** 재기동 직전(17:49)에 만든 승인 `appr_01a0614f` 는 auto_judge 가 17:51 에 승인했다. 그 결의가 재기동 중 17:54:12 에 다시 커밋됐는데 그 순간 edgar 는 아직 등록 전이라 `signal=deferred_unregistered` 로 끝났다(등록은 1초 뒤). 그 뒤 edgar 는 1분마다 깨어나 같은 Execute 를 냈고, Gate 는 매번 그 승인에 접어 "deferred, 호스트가 재생해 준다" 로 답했다. 턴은 `awaiting_external_effect` 로 끝나 큐 머리의 stimulus 를 ack 하지 못했고(`appr_01a06147` 의 hitl_resolved 를 7번 소비, 재생 `already_recorded` 17건), 결의는 18:04:41 에야 전달돼 그제야 샌드박스에서 돌았다(exit=0). 그 사이 8턴, 입력 약 62만 토큰. 게스트는 17:54 sweep 뒤 18:01:43 에야 만들어졌는데, 만든 것은 Execute 가 아니라 fs_edit 였다(Execute 는 Gate 에서 멈춰 샌드박스까지 가지 않았다).
+2. **analyst 는 같은 실패를 9번 반복했다.** 레인이 `ollama_cloud.deepseek-v4-flash` 하나뿐이고(`deferred_next_runtime=none`), 그 모델이 매번 thinking 73k자만 내고 `max_tokens` 로 끊긴다. `accept_rejected/no_usable_progress/thinking_only` → 실패 라우팅은 `rotate No_progress_thinking_only` 인데 돌아갈 형제 레인이 없다. #32577(max-token 연속) 의 `max_tokens_continuation` 로그는 한 줄도 없다. 9턴 707초, 출력 0, 사이클 실패 4회, 복구 wake 13회.
+3. **official-client 레인의 토큰 집계는 누적 컨텍스트다.** lane-smith 3턴 입력 3,782만, code-reviewer 8턴 765만. CLI 가 세션 전체를 매 턴 다시 보내는 값이라 agent-core 레인 수치와 더할 수 없다.
+4. new-keeper 의 purge 가 재기동 뒤 `shutdown recovery failed … Keeper owner not found` 로 한 번 더 실패했다. 잠금 파일 4개가 `config/keepers/` 에 남아 있다.
+5. 다른 세션의 E0 캠페인 서버(pid 51095)가 같은 호스트에서 게스트 4개(4 CPU, 2GB 씩)를 띄워 두고 있다. keeper 게스트가 아니라 sweep 대상이 아니다.
+
 ### 13.3 다음 측정
 
 - §12 의 명령을 09-03 15:12 에 한 번 더 돌려 24시간 값을 만든다. 보는 것: `network_read` 승인 0건이면서 `web_fetch` 호출이 있는지, verifier 글의 판정 후보 0건, 통합 레인 `repeated_tool_call` 정지 뒤 다음 턴 `provider-inputs` 에 조각 문장이 있는지.

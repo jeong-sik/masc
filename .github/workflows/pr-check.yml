@@ -1,0 +1,73 @@
+name: PR check
+
+# One quick compile per pull request push. The manual CI stays as it is:
+# dispatched at a work-unit boundary, one run for the whole repo. What that
+# lane cannot give a PR is a fast answer, because its concurrency group is
+# repo-global and parallel sessions' dispatches cancel each other's runs.
+#
+# Scope matches the manual job's: `dune build @check` type-checks the whole
+# tree, test/ included, and links nothing -- linking is this repo's slow
+# step, and every breakage class this session produced (unbound values,
+# signature mismatches, an mli-only type, a label that would not resolve)
+# is a compile error @check reports.
+#
+# Concurrency is per PR, so a new push cancels only that PR's older run and
+# parallel PRs leave each other alone.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: dune build @check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Free disk space
+        # Same preinstalled bulk the manual CI removes for the same reason:
+        # the opam switch plus _build does not fit beside the Android SDK,
+        # .NET, GHC, and the CodeQL bundle (issue #22954).
+        run: |
+          set -euo pipefail
+          cleanup_pids=()
+          sudo rm -rf /usr/local/lib/android & cleanup_pids+=("$!")
+          sudo rm -rf /usr/share/dotnet & cleanup_pids+=("$!")
+          sudo rm -rf /opt/ghc /usr/local/.ghcup & cleanup_pids+=("$!")
+          sudo rm -rf /opt/hostedtoolcache/CodeQL & cleanup_pids+=("$!")
+          sudo docker image prune --all --force & cleanup_pids+=("$!")
+          for cleanup_pid in "${cleanup_pids[@]}"; do
+            wait "${cleanup_pid}" || true
+          done
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+        with:
+          pin-flags: --with-bisect
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
+          os-packages: jq ripgrep
+
+      - name: Build
+        env:
+          DUNE_JOBS: "4"
+        # NO continue-on-error: the build is deterministic and must hard-fail.
+        run: |
+          set -euo pipefail
+          dune build @check

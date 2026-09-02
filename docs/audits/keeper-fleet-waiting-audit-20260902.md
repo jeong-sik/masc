@@ -17,9 +17,9 @@ lane-smith, polisher, rondo, sangsu). taskmaster 와 lab-sangsu 는 09-01 17:43Z
 | # | 병목 | 하루 손실 (실측) | 뿌리 | 뚫는 곳 | 상태 |
 |---|---|---|---|---|---|
 | 1 | 샌드박스 전멸 — Execute 가 8/8 keeper 에서 실패 | verifier Rejected 93건 중 60건이 sandbox 사유. task-551 이 15회, task-371 이 17회 claim→release 를 돌았다. code-reviewer Execute 오류 20건/7h | 운영: 127.0.0.1:2222 sshd 없음, Docker daemon 없음, `masc-keeper-sandbox:local` 이미지 없음 | ssh testbed / Docker 기동. 코드 쪽은 §2.1 "샌드박스 죽음이 world state 에 없다" | 운영자 결정 필요 |
-| 2 | `web_fetch` 가 Auto Judge 를 거친다 | 319건 판정, 319 승인, 0 거부. 요청→replay 중앙값 173초, p90 447초. 7시간에 5.78시간 대기 | 코드: `keeper_gate_readonly.ml` 관측 집합에서 빠져 있었다 | PR #32470 | Draft PR |
+| 2 | `web_fetch` 가 Auto Judge 를 거친다 | 319건 판정, 319 승인, 0 거부. 요청→replay 중앙값 173초, p90 447초. 7시간에 5.78시간 대기 | 코드: `keeper_gate_readonly.ml` 관측 집합에서 빠져 있었다 | PR #32470 | main 머지 (582921b8c1, 09-02 01:21Z) |
 | 3 | 같은 도구를 3번 부르고 yield, 다음 턴에 또 3번 | kidsnote-pr-jira-checker 259턴/일, lane-smith 136, polisher 84. 컨텍스트가 턴마다 +3.5K 토큰 | 코드: yield 사유가 다음 턴에 안 보인다. 관찰 읽기를 wake 로 바꿀 길이 없다 | RFC observe-by-waking-not-polling (Draft) | 미착수 |
-| 4 | Board 글 하나가 keeper 8명에게 판정 8번 | 24시간에 글 292개 → 후보 1,784건 (6.1배). 판정 통과 29% → 511회 wake. rondo 글이 697건, verifier·system 자동 영수증이 429건 | 코드: `Discoverable` 글은 keeper 마다 judge 를 탄다. 자동 영수증도 예외가 없다 | §2.4 | 미착수 |
+| 4 | Board 글 하나가 keeper 8명에게 판정 8번 | 24시간에 글 292개 → 후보 1,784건 (6.1배). 판정 통과 29% → 511회 wake. rondo 글이 697건, verifier·system 자동 영수증이 429건 | 코드: `Discoverable` 글은 keeper 마다 judge 를 탄다. 자동 영수증도 예외가 없다 | PR #32477 — 주소 없는 `System_post` 는 `Thread_participants` | main 머지 (529e6e0cd0, 09-02 01:27Z). rondo 형 글 697건은 남는다 |
 | 5 | 승인이 keeper 에게 도착하는 데 107초 | judge 54초 + 배달 107초 (p50). 배달은 keeper 의 현재 턴이 끝나야 된다 | 구조: 턴 슬롯 하나 | RFC conversation-holds-the-turn-slot (Draft) | 미착수 |
 | 6 | analyst·polisher 가 09-01 하루를 deepseek-flash 에서 돌았다 | polisher 148회, analyst 72회 사이클 실패, 그중 폴리셔 126·애널리스트 64회가 deepseek 를 기본 런타임으로 잡은 상태 (`deferred_next_runtime=none`). 사유 `accept_rejected … response_shape=thinking_only` | 설정: keeper 런타임 바인딩. 09-02 재기동 후 둘 다 glm-5.3/minimax-m3 로 돈다 | 운영자 확인 | 재기동으로 해소, 바인딩 위치 미확인 |
 | 7 | 빈 자율 wake 가 상태 보고를 낳는다 | scheduled_autonomous 941턴/일. Todo 506건인데 claim 0. lane-smith 가 5분마다 "변하지 않았습니다" 댓글 313개 | 코드: `Task_backlog` 트리거가 "잡을 수 있는가" 를 모른다. 프롬프트: 할 일이 없을 때 글을 쓴다 | #27268, §2.7 | 미착수 |
@@ -262,12 +262,18 @@ code-reviewer 는 08-29 에 `keeper_memory_search` 의 `total_candidates` 가 wr
 
 ## 11. 이번 세션 조치와 다음 순서
 
-1. PR #32470 — `web_fetch` 관측 전용 (§2). Draft. CI 결과를 본다.
-2. 이 문서.
-3. 다음 (독립, main 기반): §4 자동 영수증 fan-out 제거. 하루 판정 429건.
-4. 다음 (독립): §3 checkpoint 사유의 다음 턴 렌더.
+1. PR #32470 — `web_fetch` 관측 전용 (§2). 09-02 01:21Z main 머지. 머지 시점의 CI 는
+   main 자체가 Build 에서 깨져 있어 (`test_absolute_turn_sequence_breaks_equal_clock_ties`
+   미정의, #32465 이전) 테스트까지 못 갔다. 머지 후 main 내용으로 다시 dispatch 했다.
+2. PR #32477 — 주소 없는 `System_post` 는 `Thread_participants` (§4). 09-02 01:27Z main 머지.
+3. 이 문서 (#32471) 와 §6 정정 (#32479).
+4. 다음 (독립): §3 checkpoint 사유의 다음 턴 렌더. 사유는 `Keeper_unified_turn.checkpoint_reason`
+   에 typed 로 있고 `keeper_heartbeat_loop.ml` 의 batch ack 에만 쓰인다. 다음 관측으로
+   싣는 자리는 `Keeper_context_layers.Autonomous_trigger` 렌더(`keeper_unified_prompt.ml`).
 5. 다음 (독립): §1 `Sandbox_unreachable` 관측 + §7 `claimable_now`.
-6. 운영자 결정: §1 샌드박스 기동, §6 deepseek 후보 순서.
+6. 다음 (독립): §4 의 남은 절반 — keeper 글의 기본 audience. rondo 트리아지 글 하루 후보 697건.
+7. 운영자 결정: §1 샌드박스 기동 (127.0.0.1:2222 sshd 컨테이너 `masc-ssh-testbed`, Docker
+   daemon). §6 은 재기동으로 해소됐고 standalone 레인 2번 슬롯만 남았다.
 
 ## 12. 재현 명령
 

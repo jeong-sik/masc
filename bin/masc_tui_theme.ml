@@ -353,6 +353,20 @@ module Syntax = struct
   let keyword = Sgr.bright_magenta
   let string_ = Sgr.bright_green
 
+  (* A served JSON payload is content the same way a keyword is: "this word is
+     yellow" says it is a number, not that anything is healthy. One role per
+     thing a reader distinguishes, because a payload drawn in one colour is
+     the wall of text the tool tree was built to stop being.
+
+     Keys lead: a reader scanning a nested result is looking for a name, and
+     the name is what the eye should land on. Punctuation recedes -- the
+     braces and commas are the structure the indentation already shows, and
+     drawing them at full weight is what makes a document look like noise. *)
+  let json_key = Sgr.bright_cyan
+  let json_number = Sgr.bright_yellow
+  let json_literal = Sgr.bright_magenta
+  let json_punctuation = Sgr.dim
+
   (* Diff rows are content, like a keyword or a literal: "this line is green"
      says the file gained it, not that anything is healthy. Named here so the
      renderer asks for the reading rather than picking a colour, which is what

@@ -1880,7 +1880,8 @@ let decide_from_selected_mode request = function
   | Ok Keeper_gate_mode.Auto_judge ->
     (* Observation-only requests have a deterministic safety answer —
        docker-sandbox read-only argv, server-side [web_search] reads, and
-       [web_fetch] GETs whose address boundary the fetch enforces itself;
+       [web_fetch] GETs whose literal destination the fetch checks itself
+       (it does not resolve DNS names);
        paying the judge (or the human queue) for them is how a bare `ls`
        became an approval prompt and a keeper stopped searching. Manual
        mode is untouched: an operator who asked to see everything still

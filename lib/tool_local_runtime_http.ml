@@ -132,6 +132,7 @@ let curl_post_json_argv ~timeout_sec ?(headers = []) ~url ~body_json () =
   let timeout_sec = max 1 timeout_sec in
   [
     "curl";
+    "-q";
     "-sS";
     "--http1.1";
     "--max-time";

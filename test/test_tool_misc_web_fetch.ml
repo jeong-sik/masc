@@ -346,6 +346,15 @@ let test_destination_boundary () =
     ; "http://[fe80::1%25en0]/"
       (* Userinfo would be sent as credentials the model chose. *)
     ; "http://user:secret@example.com/"
+      (* Uri stops the authority at a backslash and hands the rest to the
+         path, so the examined host is example.com while curl connects to
+         127.0.0.1 (measured with curl 8.7.1). *)
+    ; "http://example.com\\@127.0.0.1:8935/"
+    ; "http://example.com\\@localhost/"
+      (* A libidn2 curl maps a fullwidth t to ASCII and reaches localhost;
+         the percent-encoded form decodes to the same non-ASCII bytes. *)
+    ; "http://localhosｔ/"
+    ; "http://localhos%EF%BD%94/"
     ]
   in
   List.iter

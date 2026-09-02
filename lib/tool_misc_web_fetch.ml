@@ -128,9 +128,25 @@ let rec blocked_ip_reason : Ipaddr.t -> string option = function
    Such spellings are refused as written rather than reparsed: a DNS name
    never ends in an all-digit label (RFC 1123 §2.1) and never contains a
    [0x] label, so the refusal costs no real host. A trailing dot names the
-   same host to DNS and is stripped before the localhost check; an IPv6
-   zone identifier selects a local interface and is refused; userinfo is
-   refused because curl would send it as credentials the model chose. *)
+   same host to DNS and is stripped before the localhost check; userinfo is
+   refused because curl would send it as credentials the model chose.
+
+   Two more shapes make the examined host differ from the host curl would
+   connect to, and are refused for that reason alone. [Uri] stops reading
+   the authority at a byte a reg-name cannot hold (backslash, caret, pipe,
+   quote, backquote, less-than) and hands the rest to the path, so
+   [http://example.com\@127.0.0.1/] has host [example.com] here and host
+   [127.0.0.1] for curl: a host followed by a path that does not start with
+   [/] is refused. And curl built with libidn2 maps a non-ASCII host through
+   UTS46 — a fullwidth [ｔ] in [localhosｔ] becomes [localhost] — so a host
+   with any byte outside [A-Za-z0-9.:-] is refused; punycode names remain
+   fetchable as written. *)
+let host_bytes_are_ascii_name host =
+  String.for_all
+    (function
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | ':' | '-' -> true
+      | _ -> false)
+    host
 let all_digits label =
   String.length label > 0
   && String.for_all (function '0' .. '9' -> true | _ -> false) label
@@ -159,11 +175,14 @@ let blocked_destination_reason url =
       match Uri.host uri with
       | None -> Some "URL has no host"
       | Some host ->
+          let path = Uri.path uri in
           let lowered = strip_trailing_dot (String.lowercase_ascii host) in
-          if String.equal lowered "" || String.equal lowered "." then
+          if not (String.equal path "" || String.starts_with ~prefix:"/" path)
+          then Some "URL authority was not fully parsed"
+          else if String.equal lowered "" || String.equal lowered "." then
             Some "URL has no host"
-          else if String.contains lowered '%' then
-            Some "IPv6 zone identifier is not fetchable"
+          else if not (host_bytes_are_ascii_name lowered) then
+            Some "host contains bytes outside [A-Za-z0-9.:-]"
           else if
             String.equal lowered "localhost"
             || String.ends_with ~suffix:".localhost" lowered

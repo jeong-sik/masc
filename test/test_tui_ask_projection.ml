@@ -249,6 +249,48 @@ let test_cursor_clamps_to_shorter_list () =
   Alcotest.(check int) "clamped" 0
     (Ask.reconcile_cursor ~current_rows:(rows [ "a1"; "a2"; "a3" ]) ~cursor:2 ~next_rows:(rows [ "x" ]))
 
+(* summarize_answer: the confirmation after an answer reads the labels the
+   operator saw, never the choice ids the wire carries. *)
+let test_summarize_names_chosen_label () =
+  let q = question "q1" in
+  let r = row ~questions:[ q ] "a1" in
+  let d =
+    Ask.toggle_choice (Ask.empty_draft ~ask_id:"a1") ~question:q
+      ~choice:(choice "yes" "Yes")
+  in
+  Alcotest.(check string) "the label, not the id" "Yes"
+    (Ask.summarize_answer d ~row:r)
+
+let test_summarize_empty_when_unanswered () =
+  let q = question "q1" in
+  let r = row ~questions:[ q ] "a1" in
+  Alcotest.(check string) "nothing answered is empty" ""
+    (Ask.summarize_answer (Ask.empty_draft ~ask_id:"a1") ~row:r)
+
+let test_summarize_quotes_written_answer () =
+  let q = question ~free_text:(Decode.Ask_free_text_allowed { aft_hint = None }) "q1" in
+  let r = row ~questions:[ q ] "a1" in
+  let d = Ask.set_text (Ask.empty_draft ~ask_id:"a1") ~slot:(slot_of q) ~text:"do it" in
+  Alcotest.(check string) "written is quoted" "\"do it\""
+    (Ask.summarize_answer d ~row:r)
+
+let test_summarize_names_skip () =
+  let q = question "q1" in
+  let r = row ~questions:[ q ] "a1" in
+  let d = Ask.skip (Ask.empty_draft ~ask_id:"a1") ~question:q in
+  Alcotest.(check string) "skip is named" "skipped"
+    (Ask.summarize_answer d ~row:r)
+
+let test_summarize_joins_questions_in_ask_order () =
+  let q1 = question "q1" in
+  let q2 = question ~choices:[ choice "a" "Alpha"; choice "b" "Beta" ] "q2" in
+  let r = row ~questions:[ q1; q2 ] "a1" in
+  let d = Ask.empty_draft ~ask_id:"a1" in
+  let d = Ask.toggle_choice d ~question:q1 ~choice:(choice "no" "No") in
+  let d = Ask.toggle_choice d ~question:q2 ~choice:(choice "b" "Beta") in
+  Alcotest.(check string) "joined with ; in ask order" "No; Beta"
+    (Ask.summarize_answer d ~row:r)
+
 let () =
   Alcotest.run "TUI ask projection"
     [
@@ -304,5 +346,17 @@ let () =
           Alcotest.test_case "follows the ask" `Quick test_cursor_follows_the_ask;
           Alcotest.test_case "falls back when gone" `Quick test_cursor_falls_back_when_ask_is_gone;
           Alcotest.test_case "clamps" `Quick test_cursor_clamps_to_shorter_list;
+        ] );
+      ( "summary",
+        [
+          Alcotest.test_case "names the chosen label" `Quick
+            test_summarize_names_chosen_label;
+          Alcotest.test_case "empty when unanswered" `Quick
+            test_summarize_empty_when_unanswered;
+          Alcotest.test_case "quotes a written answer" `Quick
+            test_summarize_quotes_written_answer;
+          Alcotest.test_case "names a skip" `Quick test_summarize_names_skip;
+          Alcotest.test_case "joins questions in ask order" `Quick
+            test_summarize_joins_questions_in_ask_order;
         ] );
     ]

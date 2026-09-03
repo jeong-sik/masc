@@ -1450,7 +1450,9 @@ type async_msg =
       * approval_observation
   (* The answer that came back, and the list re-read behind it. The store
      settles on first write, so the response says what was actually recorded
-     -- which may be someone else's answer. *)
+     -- which may be someone else's answer. The first field is the human
+     confirmation label (the Keeper and what was chosen), built at submit time
+     from the labels the operator saw rather than the ask's opaque id. *)
   | Ask_answer_done of
       string
       * (Yojson.Safe.t, string) result
@@ -7143,14 +7145,14 @@ let skip_ask_question state =
 let clear_ask_question state =
   with_ask_draft state (fun draft question -> Ask.clear draft ~question)
 
-let apply_ask_answer_completion state ask_id result asks =
+let apply_ask_answer_completion state answered_label result asks =
   state.ask_submit_inflight <- false;
   state.pending_ask_submit <- None;
   (match result with
    | Ok _ ->
        state.ask_draft <- None;
        state.ask_answer_mode <- Ask_browsing;
-       add_event state "system" (Printf.sprintf "Answered %s" ask_id)
+       add_event state "system" (Printf.sprintf "Answered %s" answered_label)
    | Error err ->
        (* The mode stays open on failure: the draft is still the operator's
           work, and a conflict means someone else answered, which the reloaded
@@ -7160,7 +7162,7 @@ let apply_ask_answer_completion state ask_id result asks =
 
 (* TEL-OK: the TUI-local submit gate emits user-visible events here; the
    ask-answer endpoint owns the durable answer telemetry. *)
-let start_ask_answer state ~keeper_name ~ask_id ~answers ~mailbox =
+let start_ask_answer state ~keeper_name ~ask_id ~answered_label ~answers ~mailbox =
   state.ask_submit_inflight <- true;
   let host = server_peer_host in
   let port = state.port in
@@ -7178,7 +7180,7 @@ let start_ask_answer state ~keeper_name ~ask_id ~answers ~mailbox =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error ("asks reload failed: " ^ Printexc.to_string exn)
     in
-    enqueue_async mailbox (Ask_answer_done (ask_id, result, asks))
+    enqueue_async mailbox (Ask_answer_done (answered_label, result, asks))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run_action
@@ -7193,7 +7195,7 @@ let start_ask_answer state ~keeper_name ~ask_id ~answers ~mailbox =
         try Masc_tui_http.fetch_keeper_asks ~host ~port () with
         | exn -> Error ("asks reload failed: " ^ Printexc.to_string exn)
       in
-      apply_ask_answer_completion state ask_id result asks
+      apply_ask_answer_completion state answered_label result asks
 
 let handle_ask_submit state ~mailbox =
   match selected_ask_row state with
@@ -7227,8 +7229,15 @@ let handle_ask_submit state ~mailbox =
                 (Printf.sprintf "Press enter again to answer %s"
                    row.Tui_decode.ar_keeper)
           | Ask.Ask_gate_submit ->
+              (* Name the Keeper and what was chosen, not the ask's opaque id,
+                 so the confirmation says which decision landed and as what. *)
+              let answered_label =
+                match Ask.summarize_answer draft ~row with
+                | "" -> row.Tui_decode.ar_keeper
+                | chosen -> Printf.sprintf "%s: %s" row.Tui_decode.ar_keeper chosen
+              in
               start_ask_answer state ~keeper_name:row.Tui_decode.ar_keeper
-                ~ask_id:row.Tui_decode.ar_id ~answers ~mailbox))
+                ~ask_id:row.Tui_decode.ar_id ~answered_label ~answers ~mailbox))
 
 (* Run one lifecycle action's steps against the server.
 
@@ -8959,8 +8968,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Approval_decision_done (approval, decision, result, approvals) ->
       apply_approval_decision_completion state approvals.ao_generation approval
         decision result approvals.ao_result
-  | Ask_answer_done (ask_id, result, asks) ->
-      apply_ask_answer_completion state ask_id result asks
+  | Ask_answer_done (answered_label, result, asks) ->
+      apply_ask_answer_completion state answered_label result asks
   | Keeper_chat_dispatch_started (request, was_replay, acknowledge) ->
       let proceed = ref false in
       Fun.protect

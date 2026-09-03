@@ -1194,6 +1194,24 @@ let forget_queued_history (state : state) (request : Keeper_chat.request) =
       state.msg_history
 ;;
 
+(* Staged images belong to the draft, so the batch and its recency marker move
+   together: staging marks the history row that was newest at that moment (or
+   [None] when the history was empty, which makes any row it later holds the
+   newer one), and clearing takes the marker with the batch. The anchor, not
+   the row's position, is what survives: transcript loads replace session rows
+   and paging rewrites the list, both of which move positions. *)
+let note_attachment_staged (state : state) =
+  state.msg_attachments_since <-
+    (match List.rev state.msg_history with
+     | newest :: _ -> Some (msg_anchor newest)
+     | [] -> None)
+;;
+
+let clear_staged_attachments (state : state) =
+  state.msg_attachments <- [];
+  state.msg_attachments_since <- None
+;;
+
 let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
     ~(load_older : before:float -> unit) ~(paste_image : unit -> unit)
@@ -1235,7 +1253,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   match key with
   | "esc" when Option.is_some state.msg_recall_replaces ->
     state.msg_recall_replaces <- None;
-    state.msg_attachments <- [];
+    clear_staged_attachments state;
     Buffer.clear state.msg_input;
     drain_queue ();
     true
@@ -1346,7 +1364,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       state.msg_spill <- None;
       if Option.is_some state.msg_recall_replaces
       then begin
-        state.msg_attachments <- [];
+        clear_staged_attachments state;
         state.msg_recall_replaces <- None;
         drain_queue ()
       end;
@@ -1382,7 +1400,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
             when String.equal editing.Chat_queue.request.request_id
                    request.request_id ->
               state.msg_recall_replaces <- None;
-              state.msg_attachments <- []
+              clear_staged_attachments state
           | Some _ | None -> ());
          forget_queued_history state request;
          add_event state "info"
@@ -1405,6 +1423,12 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
             The composer mirrors them so replacing the body retains the exact
             payload; Ctrl-U abandons only the edit and leaves the queue item. *)
          state.msg_attachments <- request.Keeper_chat.attachments;
+         (* The original staging moment is gone -- the send that queued this
+            line cleared the marker with the batch -- so the recall is what
+            Ctrl-O can weigh: the attachments are the freshest thing the
+            composer holds from this moment on. *)
+         if request.Keeper_chat.attachments <> [] then
+           note_attachment_staged state;
          Buffer.clear state.msg_input;
          Buffer.add_string state.msg_input request.Keeper_chat.message);
       true
@@ -5018,7 +5042,7 @@ let drop_inflight state request =
    send from silently re-attaching the same image to the next one. *)
 let take_pending_attachments state =
   let staged = state.msg_attachments in
-  state.msg_attachments <- [];
+  clear_staged_attachments state;
   staged
 ;;
 
@@ -5191,7 +5215,7 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
            with
            | Error detail -> add_event state "error" detail
            | Ok waiting ->
-               state.msg_attachments <- [];
+               clear_staged_attachments state;
                clear_current_message_draft state;
                add_event state "message"
                  (Printf.sprintf
@@ -5547,6 +5571,7 @@ let paste_clipboard_image state =
      | Ok attachment ->
        forget_recall state;
        state.msg_attachments <- state.msg_attachments @ [ attachment ];
+       note_attachment_staged state;
        (* A marker run into the word before it changes that word. Only a draft
           that does not already end in whitespace needs the separator. *)
        let needs_separator =
@@ -5836,6 +5861,10 @@ let open_staged_image state ~notice attachment =
    a cursor, and a cursor needs state that has to be told when the
    conversation changed underneath it.
 
+   The row's position comes back with the path: when the composer is also
+   holding a staged image, Ctrl-O weighs the two by which arrived later, and
+   the position is what the weighing compares against the staging marker.
+
    Read at the keystroke rather than kept beside the history: the scan costs
    one pass over what is loaded, once, and a kept list would have to be
    rewritten at every place a line is appended or a page is paged in. *)
@@ -5845,29 +5874,55 @@ let newest_named_image state =
     | None -> true
     | Some name -> String.equal entry.me_keeper_name name
   in
+  let length = List.length state.msg_history in
   List.rev state.msg_history
-  |> List.find_map (fun entry ->
+  |> List.find_mapi (fun from_newest entry ->
          if not (in_this_chat entry) then None
          else
            match List.rev (Masc_tui_image_ref.paths entry.me_text) with
            | [] -> None
            (* Last named in the newest line: one message can carry several,
               and the reader means the one nearest what they just read. *)
-           | last :: _ -> Some last)
+           | last :: _ -> Some (length - 1 - from_newest, last))
+
+(* Both a named path and a staged attachment: which is newer. The marker left
+   by [note_attachment_staged] anchors the row that was newest when the newest
+   attachment entered the composer, so the naming row sitting at or behind it
+   means the paste came after the name. A marker that no longer matches any
+   row -- its row was since replaced by the transcript -- orders nothing, and
+   the named path keeps the key, which is the answer it gave before the marker
+   existed. *)
+let named_vs_staged_order state ~named_index =
+  match state.msg_attachments_since with
+  | None -> Masc_tui_image_preview.Named_is_newer
+  | Some since -> (
+    match msg_index_of_anchor state.msg_history since with
+    | None -> Masc_tui_image_preview.Unordered
+    | Some staged_since_index ->
+      if named_index <= staged_since_index
+      then Masc_tui_image_preview.Staged_is_newer
+      else Masc_tui_image_preview.Named_is_newer)
 
 (* Ctrl-O. What it opens is chosen by [Masc_tui_image_preview.choose_preview]:
-   the path the conversation last named if it named one, else the newest
-   staged attachment -- a screenshot staged a keystroke ago never enters the
-   transcript, so without that door the key answered "nothing" with a picture
-   sitting in the composer. The refusal when there is neither is text for the
-   pane rather than a cleared screen: a key that did nothing and a key that
-   found nothing look the same otherwise, which is the shape of failure this
-   whole surface keeps having. *)
+   the newer of the path the conversation last named and the newest staged
+   attachment. A screenshot staged a keystroke ago never enters the
+   transcript, so when the staging is the newer act it is what the key was
+   pressed to see; when the naming message is newer, what the operator just
+   read wins. The refusal when there is neither is text for the pane rather
+   than a cleared screen: a key that did nothing and a key that found nothing
+   look the same otherwise, which is the shape of failure this whole surface
+   keeps having. *)
 let open_named_image state =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+  let named, order =
+    match newest_named_image state with
+    | Some (named_index, path) ->
+        Some path, named_vs_staged_order state ~named_index
+    | None -> None, Masc_tui_image_preview.Unordered
+  in
   match
-    Masc_tui_image_preview.choose_preview ~named:(newest_named_image state)
-      ~staged:state.msg_attachments
+    Masc_tui_image_preview.choose_preview ~named ~staged:state.msg_attachments
+      ~order
   with
   | Masc_tui_image_preview.Named_path path -> open_image state ~notice path
   | Masc_tui_image_preview.Staged attachment ->
@@ -5968,6 +6023,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
             (Masc_tui_attachment.error_to_string error)
       | Ok attachment ->
           state.msg_attachments <- state.msg_attachments @ [ attachment ];
+          note_attachment_staged state;
           notice ~role:Message_status
             (Printf.sprintf
                "attached %s (%s, %d bytes) — %d staged for the next message"
@@ -8361,6 +8417,7 @@ let attach_dropped_image state ~base_path ~mailbox attachment =
          attachment.Masc_tui_keeper_chat_projection.name)
   else begin
     state.msg_attachments <- state.msg_attachments @ [ attachment ];
+    note_attachment_staged state;
     add_event state "system"
       (Printf.sprintf "Attached %s (%s, %d bytes) — %d staged for the next message"
          attachment.Masc_tui_keeper_chat_projection.name
@@ -13443,7 +13500,7 @@ and is loaded on demand through keeper_skill.
              if switch_key then begin
                if Option.is_some state.msg_recall_replaces then begin
                  state.msg_recall_replaces <- None;
-                 state.msg_attachments <- [];
+                 clear_staged_attachments state;
                  drain_queued_message state ~base_path
                    ~mailbox:async_messages
                end;

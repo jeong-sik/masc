@@ -68,10 +68,38 @@ let test_scan_reads_only_real_references () =
     (Masc_tui_link.scan "no references here, just task-1 in prose"
      |> List.map (fun (kind, id) -> (Masc_tui_link.kind_label kind, id)))
 
+(* The encoder is [Uri.pct_encode ~component:`Generic] now, not a local loop.
+   What a masc:// segment needs is RFC 3986 exactly: every byte escaped
+   except the unreserved set. Another component would still compile, still
+   round-trip an ordinary id, and quietly stop escaping "/" or ":" -- which
+   is how one segment becomes two path elements. So this asks the whole byte
+   range through [reference], not a sample, and not the private encoder. *)
+let test_every_byte_escapes_to_rfc3986_unreserved () =
+  let unreserved = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '.' | '_' | '~' -> true
+    | _ -> false
+  in
+  let every_byte = String.init 256 Char.chr in
+  let expected =
+    let buf = Buffer.create 1024 in
+    Buffer.add_string buf "masc://board/";
+    String.iter
+      (fun byte ->
+         if unreserved byte then Buffer.add_char buf byte
+         else Buffer.add_string buf (Printf.sprintf "%%%02X" (Char.code byte)))
+      every_byte;
+    Buffer.contents buf
+  in
+  check string "every byte outside the unreserved set is escaped" expected
+    (Masc_tui_link.reference Board_post every_byte)
+;;
+
 let () =
   run "tui_link"
     [ ( "reference"
       , [ test_case "canonical paths" `Quick test_references
+        ; test_case "every byte escapes to RFC 3986 unreserved" `Quick
+            test_every_byte_escapes_to_rfc3986_unreserved
         ; test_case "OSC 52" `Quick test_osc52
         ] )
     ; ( "parse"

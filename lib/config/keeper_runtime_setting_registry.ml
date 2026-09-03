@@ -561,7 +561,7 @@ let all =
       ~env_name:"MASC_WEB_SEARCH_CACHE_TTL_SEC"
       ~exposure:(Toml_and_env "web_search.cache_ttl_sec")
       ~value_kind:Float
-      ~default:"30.0"
+      ~default:"900.0"
       ~consumers:[ "Env_config_runtime.Inference"; "Tool_misc_web_search" ]
       ~category:"web_search"
       "Web-search result cache TTL in seconds"

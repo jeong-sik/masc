@@ -27,7 +27,7 @@
     projection capability-aware: runtimes that do not also expose an artifact
     reader cannot accidentally replace exact output with an unreadable marker. *)
 
-let default_externalize_threshold_bytes = Common.max_tool_output_bytes
+let default_externalize_threshold_bytes = Common.max_tool_result_wire_bytes
 
 type projection_error_kind =
   | Artifact_storage_failure

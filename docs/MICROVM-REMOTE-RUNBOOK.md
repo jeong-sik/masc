@@ -1,6 +1,33 @@
 # MicroVM Remote Lane Runbook
 
-Apple `container` 게스트가 자기 작업 트리를 가지는 구조(RFC-0400)의 운영
+게스트가 자기 작업 트리를 가지는 구조(RFC-0400)의 운영 절차.
+
+## 어느 런타임이 게스트를 주는가 (RFC-0405)
+
+`sandbox_profile = "microvm"` 은 트리가 하이퍼바이저 뒤 게스트에 있다는 뜻이고,
+그 게스트를 **누가 주는지는 keeper TOML 이 정한다.**
+
+```toml
+sandbox_profile = "microvm"
+microvm_backend = "apple_container"   # | "microsandbox" | "nerdctl_kata"
+```
+
+| 값 | CLI | 어디서 |
+|---|---|---|
+| `apple_container` | `container` | macOS 26+ (기본값) |
+| `microsandbox` | `msb` | macOS · Linux(KVM) · Windows(WHP) |
+| `nerdctl_kata` | `nerdctl` + `--runtime io.containerd.kata.v2` | Linux (containerd) |
+
+생략하면 macOS 는 `apple_container` 를 쓰고, **그 밖의 호스트는 부팅을 거절한다**
+(`microvm_backend_unresolved`). 선언한 것과 다른 격리를 조용히 주지 않는다.
+
+이 문서의 나머지는 `apple_container` 기준이다 — `container` 자리에 그 백엔드의
+CLI 를 놓고 읽으면 된다. 아래 계약 표의 항목 1·2 는 백엔드마다 다르고, 3·4(shim
+과 작업 볼륨)는 셋 다 같다.
+
+---
+
+아래는 Apple `container` 게스트 기준의 운영
 절차. 게스트는 호스트 playground 를 마운트하지 않는다. 트리는 게스트마다
 하나씩 있는 ext4 볼륨(`/masc-work`)에 있고, 명령은 호스트가 게스트 안의
 `masc-exec-shim` 에 `container exec` 로 넣어 준다. OpenSSH 엔드포인트와 같은

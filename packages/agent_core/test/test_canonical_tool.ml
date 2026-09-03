@@ -43,7 +43,6 @@ let check_provider_kind label expected actual =
   | Some PK.OpenAI_compat, Some PK.OpenAI_compat -> ()
   | Some PK.Gemini, Some PK.Gemini -> ()
   | Some PK.Glm, Some PK.Glm -> ()
-  | Some PK.DashScope, Some PK.DashScope -> ()
   | _ -> Alcotest.failf "%s provider kind mismatch" label
 ;;
 

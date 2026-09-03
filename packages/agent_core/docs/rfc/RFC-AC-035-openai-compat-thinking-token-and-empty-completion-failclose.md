@@ -23,7 +23,7 @@
 
 `with_chat_template_thinking_token` / `thinking_requested` / `chat_template_thinking_active` / `system_prompt_with_thinking_token`를 `Backend_openai_serialize`로 승격(공유). `backend_openai_request.ml` build_request_assoc의 system-message 조립이 `system_prompt_with_thinking_token ~config ~caps`를 사용, `backend_ollama.ml`은 자체 복사본을 제거하고 공유본 호출.
 
-- **caps-gated**: `caps.thinking_control_format = Chat_template_token _` 인 row만 주입. 비-token 모델(GLM/Kimi/DashScope/plain OpenAI)은 wire byte-identical.
+- **caps-gated**: `caps.thinking_control_format = Chat_template_token _` 인 row만 주입. 비-token 모델(GLM/Kimi/plain OpenAI)은 wire byte-identical.
 - **think 조건**: `Some true`/`Some false`는 두 backend에서 동일하게 명시적이다. `None`의 기본값은 backend가 소유한다. Ollama만 `OAS_OLLAMA_THINK_DEFAULT`를 읽고, OpenAI-compatible은 다른 provider 이름의 env에 영향받지 않도록 기본 off다.
 - **reject 안 함**: 이슈가 제안한 boot-reject(option b)는 채택하지 않음. 주입이 가능해지면 reject는 정상 config를 깨뜨리고, `validate_all`이 kind-agnostic이라 Ollama에도 오발동한다. RFC-AC-023 DISABLE 가드(complete_common의 `validate_thinking_control_request`)는 직교이므로 유지.
 

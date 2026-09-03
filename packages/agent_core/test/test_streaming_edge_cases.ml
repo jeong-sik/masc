@@ -44,7 +44,7 @@ let ollama_chunk
       ()
   : S.ollama_chunk
   =
-  { oll_model = "dashscope-3:8b"
+  { oll_model = "qwen3:8b"
   ; oll_delta_content = delta_content
   ; oll_delta_thinking = delta_thinking
   ; oll_tool_calls = tool_calls

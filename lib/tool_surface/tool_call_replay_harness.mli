@@ -33,11 +33,10 @@ type response_format =
   | Openai_chat_completions
   | Anthropic_messages
   | Gemini_generate_content
-  | Dashscope_output_choices
 (** Declared response envelope for a replay row.  JSONL fixtures encode
     this as one of:
-    ["openai_chat_completions"], ["anthropic_messages"],
-    ["gemini_generate_content"], or ["dashscope_output_choices"]. *)
+    ["openai_chat_completions"], ["anthropic_messages"], or
+    ["gemini_generate_content"]. *)
 
 type snapshot = {
   id : string;
@@ -96,7 +95,7 @@ val validate_snapshot : snapshot -> (unit, string list) Result.t
        calls the runtime binding registry while loading replay rows.
     3. Response must match [snapshot.response_format]. Supported
        envelopes are OpenAI-compatible chat completions, Anthropic
-       Messages, Gemini Generate Content, and DashScope output choices.
+       Messages, and Gemini Generate Content.
        Errors trace the concrete response path, e.g.
        [response.choices[0].message.tool_calls].
     4. Response tool calls must be declared in [snapshot.tools].

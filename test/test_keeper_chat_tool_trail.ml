@@ -20,6 +20,27 @@ let test_subject_argv () =
     (Some "git fetch origin")
 ;;
 
+(* Execute takes argv or a shell line, and 376 of the fleet's Execute calls in
+   one day carried the line. Without [script] in the subject keys the row fell
+   through to the whole-object rendering, and the path inside the line then met
+   the path-tail shortener: a keeper's command read as a JSON fragment ending
+   in a directory name. *)
+let test_subject_script () =
+  check_subject
+    "a shell line renders as the line that ran"
+    ~args:{|{"script":"rg -n prompt_fingerprint lib/ | head -20","cwd":".","timeout_sec":60}|}
+    (Some "rg -n prompt_fingerprint lib/ | head -20")
+;;
+
+(* argv keeps its place: a call that carries both is not one the schema
+   accepts, and the direct form is the one that names a program. *)
+let test_subject_argv_wins_over_script () =
+  check_subject
+    "argv is read before script"
+    ~args:{|{"argv":["git","status"],"script":"git status"}|}
+    (Some "git status")
+;;
+
 let test_subject_file_path () =
   check_subject
     "a file call is named by its path"
@@ -347,6 +368,8 @@ let () =
     "keeper_chat_tool_trail"
     [ ( "subject"
       , [ Alcotest.test_case "argv" `Quick test_subject_argv
+        ; Alcotest.test_case "script" `Quick test_subject_script
+        ; Alcotest.test_case "argv before script" `Quick test_subject_argv_wins_over_script
         ; Alcotest.test_case "file_path" `Quick test_subject_file_path
         ; Alcotest.test_case "pattern before path" `Quick test_subject_pattern_before_path
         ; Alcotest.test_case "unknown keys" `Quick test_subject_absent_keys

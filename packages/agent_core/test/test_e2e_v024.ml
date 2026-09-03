@@ -1,5 +1,5 @@
 (** AGENT_CORE v0.24 End-to-End Integration Tests
-    Exercises the 5 new tracks against a live local LLM (DashScope_3.5 via llama-server).
+    Exercises the 5 new tracks against a live local LLM (Qwen3.5 via llama-server).
 
     Run: LLAMA_LIVE_TEST=1 dune exec ./test/test_e2e_v024.exe
 
@@ -12,7 +12,7 @@ open Agent_core
 open Types
 
 let base_url = "http://127.0.0.1:8085"
-let local_model = "dashscope-3.5-35b-a3b-ud-q8-xl"
+let local_model = "qwen3.5-35b-a3b-ud-q8-xl"
 
 let provider_config =
   Provider_mock.local_provider_config

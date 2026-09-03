@@ -35,6 +35,18 @@ type rejected_slot =
   ; target_ref : string
   }
 
+type rejected_slot_diagnosis =
+  | Retired_catalog_target
+      (** The id is neither an exact-output target nor a configured runtime:
+          the catalog moved on and runtime.toml did not. *)
+  | Configured_runtime_id of
+      { provider_id : string
+      ; api_name : string
+      }
+      (** The id names a runtime.toml runtime. Exact lanes resolve overlay
+          [[targets]] ids only, so the slot can never be admitted; the
+          operator wrote a keeper-turn id where a catalog target id belongs. *)
+
 type prepared_replacement
 
 type ('not_committed, 'committed) replacement_effect =
@@ -104,6 +116,15 @@ val current : unit -> (t, publication_error) result
     [Registry_not_published] before bootstrap has published one. *)
 
 val rejected_slots : t -> rejected_slot list
+
+val diagnose_rejected_slot
+  :  rejected_slot
+  -> configured_runtime:(string -> (string * string) option)
+  -> rejected_slot_diagnosis
+(** Why a slot was rejected, for the boot report. [configured_runtime] answers
+    with the runtime's [(provider_id, api_name)] when the slot id is a
+    runtime.toml runtime; the caller supplies it because this module sits
+    below [Runtime]. Pure. *)
 
 val catalog_absent_assignments :
   Agent_core.Exact_output.resolver_snapshot ->

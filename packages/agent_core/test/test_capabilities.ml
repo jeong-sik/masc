@@ -471,12 +471,11 @@ let test_lookup_kimi_k2_native_cloud_suffix () =
 ;;
 
 let test_lookup_provider_m () =
-  match Capabilities.for_model_id "dashscope-3.5-35b-a3b" with
+  match Capabilities.for_model_id "qwen3.5-35b-a3b" with
   | Some c ->
     check (option int) "context 262K" (Some 262_144) c.max_context_tokens;
     check bool "tools" true c.supports_tools;
     check bool "thinking" true c.supports_extended_thinking;
-    check bool "reasoning budget" true c.supports_reasoning_budget;
     check
       bool
       "chat_template_kwargs thinking control"
@@ -486,12 +485,12 @@ let test_lookup_provider_m () =
   | None -> fail "should match qwen3"
 ;;
 
-let test_lookup_provider_m_dashscope_gguf_name () =
-  match Capabilities.for_model_id "DashScope_3.6-35B-A3B-UD-Q4_K_XL.gguf" with
+let test_lookup_qwen_gguf_name () =
+  match Capabilities.for_model_id "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf" with
   | Some c ->
     check
       bool
-      "dashscope qwen3.6 uses chat_template_kwargs"
+      "qwen3.6 uses chat_template_kwargs"
       true
       (c.thinking_control_format = Capabilities.Chat_template_kwargs)
   | None -> fail "should match qwen3.6 model id"
@@ -1394,8 +1393,7 @@ let frontier_dialect route model_id caps =
       | Provider_config.Kimi
       | Provider_config.OpenAI_compat
       | Provider_config.Ollama
-      | Provider_config.Glm
-      | Provider_config.DashScope -> "https://example.invalid"
+      | Provider_config.Glm -> "https://example.invalid"
     in
     Provider_config.make ~kind ~model_id ~base_url ()
     |> Reasoning_dialect.for_provider_config
@@ -1938,9 +1936,9 @@ let test_explicit_manifest_prefix_precedes_catalog_fallback () =
     make_manifest
       ~base:"openai_chat"
       ~extra_fields:[ "supports_reasoning", "false" ]
-      "dashscope-3"
+      "qwen3"
   in
-  match Capabilities.for_model_id_with_manifest m "dashscope-3.5-35b-a3b-q4" with
+  match Capabilities.for_model_id_with_manifest m "qwen3.5-35b-a3b-q4" with
   | Some c ->
     check bool "manifest disables reasoning" false c.supports_reasoning;
     check bool "base openai_chat: tools" true c.supports_tools
@@ -2831,27 +2829,6 @@ reasoning_replay = "preserve_always"
              (manifest_caps = catalog_caps)))
 ;;
 
-(* ── DashScope preset ────────────────────────────────── *)
-
-let test_dashscope_capabilities () =
-  let c = Capabilities.dashscope_capabilities in
-  (* DashScope (DashScope) exposes response_format.json_schema on its OpenAI-compatible
-     endpoint; native schema output is supported. Ref: DashScope structured output
-     guide — checked 2026-05-05. *)
-  check bool "has structured output" true c.supports_structured_output;
-  check bool "has json mode" true c.supports_response_format_json;
-  check bool "has tools" true c.supports_tools;
-  check bool "has tool_choice" true c.supports_tool_choice;
-  check bool "has reasoning" true c.supports_reasoning;
-  check_thinking_control
-    "enable_thinking control"
-    Capabilities.Enable_thinking
-    c.thinking_control_format;
-  check bool "has min_p" true c.supports_min_p
-;;
-
-(* ── Kimi tool_choice preset ─────────────────────────── *)
-
 let test_kimi_tool_choice_capabilities () =
   let c = Capabilities.kimi_capabilities in
   (* Kimi's chat API documents [tools] but not [tool_choice] in any request
@@ -2894,14 +2871,13 @@ let test_openai_compat_reasoning_records_have_explicit_control () =
     [ "openai_chat_extended", Some Capabilities.openai_compat_chat_extended_capabilities
     ; "kimi", Some Capabilities.kimi_capabilities
     ; "mimo", Some Capabilities.mimo_capabilities
-    ; "dashscope", Some Capabilities.dashscope_capabilities
     ; ( "mimo-v2.5-pro"
       , Capabilities.for_provider_model_id
           ~wire:None
           ~allow_bare_fallback:false
           ~provider_label:"mimo"
           ~model_id:"mimo-v2.5-pro" )
-    ; "dashscope-3.5", Capabilities.for_model_id "dashscope-3.5-35b-a3b"
+    ; "qwen3.5", Capabilities.for_model_id "qwen3.5-35b-a3b"
     ; ( "deepseek-v4-flash"
       , Capabilities.for_provider_model_id
           ~wire:None
@@ -3011,7 +2987,6 @@ let () =
       , [ test_case "anthropic" `Quick test_anthropic_capabilities
         ; test_case "openai" `Quick test_openai_capabilities
         ; test_case "openai extended" `Quick test_openai_extended
-        ; test_case "dashscope" `Quick test_dashscope_capabilities
         ; test_case "kimi tool_choice" `Quick test_kimi_tool_choice_capabilities
         ; test_case "mimo provider" `Quick test_mimo_provider_capabilities
         ; test_case
@@ -3032,11 +3007,8 @@ let () =
             "kimi-k2 native cloud suffix vs Ollama Cloud"
             `Quick
             test_lookup_kimi_k2_native_cloud_suffix
-        ; test_case "dashscope" `Quick test_lookup_provider_m
-        ; test_case
-            "dashscope gguf name"
-            `Quick
-            test_lookup_provider_m_dashscope_gguf_name
+        ; test_case "qwen3" `Quick test_lookup_provider_m
+        ; test_case "qwen gguf name" `Quick test_lookup_qwen_gguf_name
         ; test_case
             "vllm-qwen3-mtp explicit provider"
             `Quick

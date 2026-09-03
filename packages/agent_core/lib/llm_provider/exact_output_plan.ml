@@ -149,8 +149,7 @@ let uses_anthropic_schema_prefill (config : Provider_config.t) messages =
       | Provider_config.OpenAI_compat
       | Provider_config.Ollama
       | Provider_config.Gemini
-      | Provider_config.Glm
-      | Provider_config.DashScope )
+      | Provider_config.Glm )
     , _
     , _ ) -> false
 ;;
@@ -310,8 +309,7 @@ let request_url (config : Provider_config.t) =
   | Provider_config.Kimi
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama
-  | Provider_config.Glm
-  | Provider_config.DashScope -> config.base_url ^ config.request_path
+  | Provider_config.Glm -> config.base_url ^ config.request_path
 ;;
 
 type frozen_serialization =

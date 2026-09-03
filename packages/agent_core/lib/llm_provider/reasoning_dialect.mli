@@ -24,7 +24,6 @@ type toggle_wire =
   | Chat_template_token
   | Ollama_think
   | Reasoning_effort
-  | Enable_thinking
   | Anthropic_thinking
   | Gemini_thinking_config
 
@@ -161,8 +160,6 @@ val chat_template_kwargs_preserve_field
   :  t
   -> preserve_thinking:bool option
   -> bool option
-
-val top_level_preserve_field : t -> preserve_thinking:bool option -> bool option
 
 val ignores_sampling_param
   :  t

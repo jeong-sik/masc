@@ -1,5 +1,5 @@
-let default_max_bytes = Common.max_tool_output_bytes
-let maximum_max_bytes = Common.max_tool_output_bytes
+let default_max_bytes = Common.max_tool_result_wire_bytes
+let maximum_max_bytes = Common.max_tool_result_wire_bytes
 let minimum_max_bytes = 1
 
 type request =
@@ -238,7 +238,7 @@ let page_of_slice_within_output_budget request ~total_bytes requested_bytes =
   in
   let fits page =
     page |> page_to_json |> Yojson.Safe.to_string |> String.length
-    <= Common.max_tool_output_bytes
+    <= Common.max_tool_result_wire_bytes
   in
   match candidate 0 with
   | Error _ as error -> error

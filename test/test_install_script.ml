@@ -102,6 +102,56 @@ max-request-body-bytes = 1048576
   runtime_file
 ;;
 
+(* A config whose default is a subscription runtime (CLI transport, no endpoint,
+   no API key). It sits beside an HTTP provider so the catalog is not
+   subscription-only, matching how real deployments mix the two. *)
+let write_runtime_catalog_with_subscription base_path =
+  let config_dir = Filename.concat base_path ".masc/config" in
+  let runtime_file = Filename.concat config_dir "runtime.toml" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
+  write_file
+    runtime_file
+    {|
+[runtime]
+default = "claude_code.claude-sonnet-5"
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[providers.ollama.healthcheck]
+path = "/api/tags"
+
+[providers.claude_code]
+display-name = "Claude Code Max Subscription"
+protocol = "claude-code"
+command = "claude-test-cli"
+is-non-interactive = true
+
+[models.claude-sonnet-5]
+api-name = "claude-sonnet-5"
+max-context = 200000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.gemma4-26b-a4b-qat]
+api-name = "gemma4-26b-a4b-qat"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[ollama.gemma4-26b-a4b-qat]
+wizard-default = true
+
+[claude_code.claude-sonnet-5]
+wizard-default = true
+|};
+  runtime_file
+;;
+
 let write_runtime_catalog_with_invalid_key base_path =
   let config_dir = Filename.concat base_path ".masc/config" in
   let runtime_file = Filename.concat config_dir "runtime.toml" in
@@ -927,6 +977,37 @@ let test_provider_display_name_with_pipe_round_trips () =
         "truncated provider wizard catalog record")
 ;;
 
+let test_wizard_offers_subscription_runtime () =
+  let tmpdir = Filename.temp_file "masc-install-subscription-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_subscription tmpdir);
+      (* No --api-key: a subscription signs in through its own CLI. *)
+      let output, status =
+        run_install_status [ "--dry-run"; "--provider"; "claude_code" ] tmpdir
+      in
+      check bool "subscription provider exits 0" true (status = Unix.WEXITED 0);
+      assert_contains
+        "subscription default runtime is set"
+        output
+        {|[dry-run] would set [runtime].default = "claude_code.claude-sonnet-5"|};
+      assert_contains
+        "subscription needs no API key"
+        output
+        "does not require an API key";
+      assert_not_contains
+        "subscription record is not rejected as unknown kind"
+        output
+        "unknown provider wizard catalog record kind";
+      assert_not_contains
+        "subscription record does not truncate the catalog"
+        output
+        "truncated provider wizard catalog record")
+;;
+
 let test_provider_ping_does_not_expose_key_in_curl_argv () =
   let script = install_script () in
   assert_contains
@@ -1606,6 +1687,10 @@ let () =
             "invalid provider key env name errors"
             `Quick
             test_invalid_provider_key_env_name_errors
+        ; test_case
+            "wizard offers a subscription runtime with no api key"
+            `Quick
+            test_wizard_offers_subscription_runtime
         ; test_case "wizard parses the real runtime.toml catalog" `Quick test_wizard_parses_real_runtime_toml
         ; test_case
             "real runtime.toml providers declare healthcheck paths"

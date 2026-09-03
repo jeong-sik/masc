@@ -1040,15 +1040,6 @@ let runtime_wizard_fields fields =
   in
   loop [] fields
 
-let runtime_wizard_endpoint (provider : Runtime_schema.provider) =
-  match provider.transport with
-  | Runtime_schema.Http endpoint -> Ok endpoint
-  | Runtime_schema.Cli _ ->
-      Error
-        (Printf.sprintf
-           "provider %s uses a CLI transport; install wizard requires an HTTP endpoint"
-           provider.id)
-
 let runtime_wizard_credential_key (provider : Runtime_schema.provider) =
   match provider.credentials with
   | None -> Ok ""
@@ -1111,23 +1102,41 @@ let runtime_wizard_binding_for_provider (cfg : Runtime_schema.config)
                 provider.id))
 
 let runtime_wizard_provider_record cfg (provider : Runtime_schema.provider) =
-  match
-    ( runtime_wizard_endpoint provider
-    , runtime_wizard_credential_key provider
-    , runtime_wizard_binding_for_provider cfg provider )
-  with
-  | Error msg, _, _ | _, Error msg, _ | _, _, Error msg -> Error msg
-  | Ok endpoint, Ok credential_key, Ok binding ->
-      let runtime_id = Runtime_schema.binding_key binding in
-      runtime_wizard_fields
-        [ "kind", "provider"
-        ; "id", provider.id
-        ; "display_name", provider.display_name
-        ; "credential_key", credential_key
-        ; "endpoint", endpoint
-        ; "healthcheck_path", Option.value ~default:"" provider.healthcheck_path
-        ; "runtime_id", runtime_id
-        ]
+  match provider.transport with
+  | Runtime_schema.Cli command ->
+      (* A subscription runtime is reached through its own CLI (Claude Code /
+         Codex / Antigravity), not an HTTP endpoint and not an .env key: the
+         wizard offers it as a subscription and lets that CLI own the login.
+         [command] is the binary the installer probes for with `command -v`;
+         whether that CLI is actually signed in is a later, probe-based step
+         (RFC-0408). *)
+      (match runtime_wizard_binding_for_provider cfg provider with
+       | Error _ as err -> err
+       | Ok binding ->
+           runtime_wizard_fields
+             [ "kind", "subscription"
+             ; "id", provider.id
+             ; "display_name", provider.display_name
+             ; "command", command
+             ; "runtime_id", Runtime_schema.binding_key binding
+             ])
+  | Runtime_schema.Http endpoint ->
+      (match
+         ( runtime_wizard_credential_key provider
+         , runtime_wizard_binding_for_provider cfg provider )
+       with
+       | Error msg, _ | _, Error msg -> Error msg
+       | Ok credential_key, Ok binding ->
+           let runtime_id = Runtime_schema.binding_key binding in
+           runtime_wizard_fields
+             [ "kind", "provider"
+             ; "id", provider.id
+             ; "display_name", provider.display_name
+             ; "credential_key", credential_key
+             ; "endpoint", endpoint
+             ; "healthcheck_path", Option.value ~default:"" provider.healthcheck_path
+             ; "runtime_id", runtime_id
+             ])
 
 let runtime_wizard_default_record (cfg : Runtime_schema.config) =
   match cfg.default_runtime_id with

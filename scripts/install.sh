@@ -72,12 +72,20 @@ readonly MASC_INSTALL_BINARY_DOWNLOAD_TIMEOUT_S=300
 readonly MASC_INSTALL_CURL_RETRIES=3
 
 # --- provider catalog ---------------------------------------------------------
+# The catalog is a flat list of NUL-delimited records with no record separator,
+# so every reader must know each record kind's field count. Two menu kinds
+# share these parallel arrays: a "provider" reaches an HTTP endpoint with an
+# env-var API key; a "subscription" is reached through its own CLI (Claude Code
+# / Codex / Antigravity) and needs no key and no endpoint. PROVIDER_KINDS keeps
+# them apart so the endpoint/key steps stay off the subscription path.
 PROVIDER_IDS=()
 PROVIDER_NAMES=()
 PROVIDER_KEYS=()
 PROVIDER_ENDPOINTS=()
 PROVIDER_PING_PATHS=()
 PROVIDER_DEFAULT_RUNTIME_IDS=()
+PROVIDER_KINDS=()
+PROVIDER_COMMANDS=()
 PROVIDER_INDEX_RESULT=""
 DEFAULT_PROVIDER_INDEX=0
 CATALOG_FILE=""
@@ -127,9 +135,11 @@ load_provider_catalog() {
   PROVIDER_ENDPOINTS=()
   PROVIDER_PING_PATHS=()
   PROVIDER_DEFAULT_RUNTIME_IDS=()
+  PROVIDER_KINDS=()
+  PROVIDER_COMMANDS=()
   DEFAULT_PROVIDER_INDEX=0
 
-  local kind id name key endpoint ping_path runtime_id default_provider_id="" missing_default_runtime_id=""
+  local kind id name key endpoint ping_path runtime_id command default_provider_id="" missing_default_runtime_id=""
   [ -z "$CATALOG_FILE" ] || rm -f "$CATALOG_FILE"
   CATALOG_FILE="$(mktemp)" || die "could not create provider wizard catalog temp file"
   "$DEST" runtime-wizard-catalog --base-path "$base_path" >"$CATALOG_FILE" \
@@ -153,6 +163,29 @@ load_provider_catalog() {
         PROVIDER_ENDPOINTS+=("$endpoint")
         PROVIDER_PING_PATHS+=("${ping_path:-}")
         PROVIDER_DEFAULT_RUNTIME_IDS+=("$runtime_id")
+        PROVIDER_KINDS+=("provider")
+        PROVIDER_COMMANDS+=("")
+        ;;
+      subscription)
+        # A subscription runtime signs in through its own CLI, so it carries no
+        # API key and no endpoint. It joins the same menu as a keyless entry;
+        # the empty key and endpoint keep it off the .env.local and ping paths,
+        # and $command is what the wizard probes with `command -v`.
+        read_catalog_field id
+        read_catalog_field name
+        read_catalog_field command
+        read_catalog_field runtime_id
+        [ -n "${id:-}" ] || die "provider wizard catalog has empty subscription id"
+        [ -n "${name:-}" ] || die "provider wizard catalog has empty display name for $id"
+        [ -n "${runtime_id:-}" ] || die "provider wizard catalog has empty runtime id for $id"
+        PROVIDER_IDS+=("$id")
+        PROVIDER_NAMES+=("$name")
+        PROVIDER_KEYS+=("")
+        PROVIDER_ENDPOINTS+=("")
+        PROVIDER_PING_PATHS+=("")
+        PROVIDER_DEFAULT_RUNTIME_IDS+=("$runtime_id")
+        PROVIDER_KINDS+=("subscription")
+        PROVIDER_COMMANDS+=("${command:-}")
         ;;
       default-provider)
         read_catalog_field id
@@ -183,8 +216,11 @@ load_provider_catalog() {
   fi
 
   for idx in "${!PROVIDER_IDS[@]}"; do
-    [ -n "${PROVIDER_ENDPOINTS[$idx]}" ] \
-      || die "provider ${PROVIDER_IDS[$idx]} in runtime.toml has no endpoint"
+    # A subscription has no endpoint by design; only HTTP providers must carry one.
+    if [ "${PROVIDER_KINDS[$idx]}" = "provider" ]; then
+      [ -n "${PROVIDER_ENDPOINTS[$idx]}" ] \
+        || die "provider ${PROVIDER_IDS[$idx]} in runtime.toml has no endpoint"
+    fi
     [ -n "${PROVIDER_DEFAULT_RUNTIME_IDS[$idx]}" ] \
       || die "provider ${PROVIDER_IDS[$idx]} in runtime.toml has no concrete runtime binding"
     if [ -n "${PROVIDER_KEYS[$idx]}" ] && ! [[ "${PROVIDER_KEYS[$idx]}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
@@ -249,7 +285,11 @@ prompt_provider() {
       local marker=""
       [ "$i" -eq "$DEFAULT_PROVIDER_INDEX" ] && marker=" (default)"
       printf >&2 '  %d) %s%s' "$((i + 1))" "${PROVIDER_NAMES[$i]}" "$marker"
-      [ -n "${PROVIDER_KEYS[$i]}" ] && printf >&2 ' - needs %s' "${PROVIDER_KEYS[$i]}"
+      if [ "${PROVIDER_KINDS[$i]}" = "subscription" ]; then
+        printf >&2 ' - uses %s login' "$(basename "${PROVIDER_COMMANDS[$i]:-its CLI}")"
+      elif [ -n "${PROVIDER_KEYS[$i]}" ]; then
+        printf >&2 ' - needs %s' "${PROVIDER_KEYS[$i]}"
+      fi
       printf >&2 '\n'
     done
     printf >&2 '> '
@@ -440,6 +480,22 @@ ping_provider() {
   local ping_path="${PROVIDER_PING_PATHS[$idx]}"
   local key_var
   key_var=$(provider_key_var "$idx")
+
+  # A subscription has no endpoint to reach; the meaningful check is whether its
+  # CLI is on PATH. Being signed in is a deeper, per-CLI probe left to a later
+  # step (RFC-0408) -- here we only confirm the command exists.
+  if [ "${PROVIDER_KINDS[$idx]}" = "subscription" ]; then
+    local cli_command="${PROVIDER_COMMANDS[$idx]}"
+    if [ -z "$cli_command" ]; then
+      warn "subscription $(provider_name "$idx") has no CLI command in runtime.toml; skipping check"
+      return 0
+    fi
+    if command -v "$cli_command" >/dev/null 2>&1; then
+      return 0
+    fi
+    warn "$cli_command not found on PATH; sign in to $(provider_name "$idx") before using it"
+    return 1
+  fi
 
   if [ -z "$ping_path" ]; then
     warn "provider $(provider_name "$idx") has no healthcheck.path in runtime.toml; skipping ping"

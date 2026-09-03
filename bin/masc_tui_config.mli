@@ -10,6 +10,22 @@ val theme_of_doc : Keeper_toml_loader.toml_doc -> string option
    [tui].theme -- all of which mean "no stored choice". *)
 val theme : base_path:string -> string option
 
+val text_with_theme : string -> theme:string option -> string
+(** runtime.toml text with [tui].theme set to [theme], or without the key
+    when [theme] is [None]. The [tui] table is created when absent; comments
+    and every other line are kept. Pure; the commit is {!set_theme}'s. *)
+
+val set_theme : base_path:string -> string option -> (unit, string) result
+(** Store the reader's theme pick in the runtime.toml [theme] reads, so it is
+    still there on the next start. [None] withdraws the pick. The load, the
+    edit and the write happen under Runtime's config write lock, so a
+    concurrent write to another table of the same file is not lost. [Error]
+    carries what stopped the write; the scheme is already applied to the
+    screen by then, so the caller has to say which of the two happened.
+
+    A write whose durability could not be confirmed is [Ok]: the replacement
+    is already visible, which is what "stored" means to the next start. *)
+
 val table_frame_of_doc : Keeper_toml_loader.toml_doc -> bool option
 (** Whether tables draw their outer box, [tui].table_frame. Pure, so a test
     can hand it a parsed doc without a file. *)

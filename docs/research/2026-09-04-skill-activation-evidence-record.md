@@ -54,3 +54,40 @@
 - SkillSmith 의 세 수치는 abstract 에 없을 수 있다.
 - Skill Coverage 를 masc 원장에 적용할 수 있는지는 판단만 적었고 실제로
   constraint 를 뽑아보지 않았다.
+
+## 정정 (코드 레벨 확인 후)
+
+첫 판(`success` 필드를 `keeper_skill` 하나로만 셌다)의 수치가 틀렸다.
+
+| Evidence | Timestamp | Confidence | Delta |
+|---|---|---|---|
+| `tool_calls/2026-09/03.jsonl` 을 `keeper_skill` + `keeper_compose*` 두 계열로 다시 집계 | 02:0x | High | 2건이 아니라 13건. 8,236행 / 턴 1,796. 첫 판의 0.025% 는 한 계열만 센 값 |
+| 같은 파일의 성공 여부 | 02:0x | High | `keeper_compose_work-intake` 8건 전부 `success=False`. 나머지(mission-snapshot 2, background-snapshot 1, keeper_skill 2)는 전부 성공 |
+| 실패 payload 의 키 모양 대조 | 02:1x | High | 실패는 `settled`/`cause`/`effect_disposition`, 성공은 `actions`. 전자는 `keeper_tool_composition_surface.ml:570` `failure_data` 가 Error 분기에서만 내는 모양 |
+| `result_bytes` 11,858~12,004 vs 기록된 output 3,557자 + `...(truncated)` | 02:1x | High | 절단은 telemetry 전용(`observability_redact.ml:34`). 키퍼는 온전한 결과를 받았다. 다만 `cause` 가 `settled` 뒤라 저장소로는 원인을 못 읽는다 |
+| `lib/keeper/keeper_effective_tool_surface.ml:241` 부근 `selection_reason` | 02:0x | High | `skill_names` 가 있으면 `Keeper_profile`, 없으면 `global_references` 매칭 시 `Catalog_default`. 즉 선언 없이도 조합 도구가 스키마에 들어가는 경로가 있다 |
+| `lib/keeper/keeper_types_profile_toml_normalizers.mli:71` `skill_names : string list option` | 02:0x | High | 키퍼 프로필 TOML 필드. 라이브 `config/keepers/*.toml` 에서 이 키를 쓰는 키퍼 0명 |
+| `.masc/skills/ci-red-attribution/SKILL.md` 원문 | 02:0x | High | `name` + `description` frontmatter. Anthropic 표준 모양 그대로이고 description 은 "무엇을/언제" 를 담고 있다 |
+
+읽지 못한 것: `keeper_compose_work-intake` 실패의 `cause` 값. 저장소가 그 자리에서
+잘린다. raw-traces 에서도 해당 `tool_execution_finished` 행을 특정하지 못했다.
+
+## 두 번째 정정 — 카탈로그는 닿는다
+
+앞의 두 판이 "프롬프트에 0바이트니까 도달 불가"라고 했다. 프롬프트만 보고
+도구 서술을 안 본 것이다.
+
+| Evidence | Timestamp | Confidence | Delta |
+|---|---|---|---|
+| `lib/keeper/keeper_tool_composition_surface.ml:72` `instruction_skill_description` — `skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed`, listed 는 스킬마다 `참조JSON: 설명` | 02:3x | High | `keeper_skill` 도구 서술이 카탈로그를 진다. 프롬프트가 아니다 |
+| 라이브 `/api/v1/skills` 로 같은 문자열을 재구성해 바이트 계산 | 02:3x | High | `Available:` 블록 3,685B, 스킬당 368B. 참조 JSON 만 185B |
+| `lib/keeper/keeper_skill_catalog.ml:376` `project_turn` | 02:3x | High | `names = None` 이면 task + 전역 카탈로그 전부. `Some` 이면 그 이름들만. `skill_names` 는 좁히는 필터다 |
+| `lib/keeper/keeper_capability_surface.ml:53` `valid_skill_availability` | 02:3x | High | `skill_names` 밖이면 `Outside_skill_surface` — 역시 좁히는 방향 |
+| `lib/keeper/keeper_effective_tool_surface.ml:241` `selection_reason` | 02:3x | High | 이건 관측 라벨(`Keeper_profile` / `Catalog_default`)이지 로딩 결정이 아니다. 첫 판이 이걸 로딩 경로로 읽었다 |
+
+그래서 `#31324` 에 단 "전제가 라이브와 다르다" 코멘트는 **철회**한다. 그 이슈가
+맞다 — 참조는 매 턴 실린다.
+
+읽지 못한 것: 도구 스키마가 실제 요청에 실린 원문. wire-capture 는 agent-core
+텍스트만 담아 도구 정의가 없다. 위 3,685B 는 라이브 카탈로그로 같은 코드 경로를
+재구성해 계산한 값이다.

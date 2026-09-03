@@ -5397,10 +5397,10 @@ let chat_status_text completed =
         turn_ref
   | Keeper_chat.Continuation_checkpoint ->
       Printf.sprintf "Continuation checkpoint recorded (turn %s)" turn_ref
-  | Keeper_chat.External_effect_completed ->
-      Printf.sprintf "External effect completed (turn %s)" turn_ref
+  | Keeper_chat.Terminal_effect_settled ->
+      Printf.sprintf "Reply delivered by a terminal tool (turn %s)" turn_ref
   | Keeper_chat.External_effect_pending ->
-      Printf.sprintf "External effect remains pending (turn %s)" turn_ref
+      Printf.sprintf "Waiting for Gate approval (turn %s)" turn_ref
   | Keeper_chat.No_visible_reply ->
       Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
 
@@ -6145,7 +6145,7 @@ let apply_keeper_chat_result state request result =
                  Message_keeper
              | Keeper_chat.Visible_reply
              | Keeper_chat.Continuation_checkpoint
-             | Keeper_chat.External_effect_completed
+             | Keeper_chat.Terminal_effect_settled
              | Keeper_chat.External_effect_pending
              | Keeper_chat.No_visible_reply -> Message_status
            in

@@ -4,7 +4,7 @@
     [reply] text is model output ([Visible_reply]), absent from the
     visible surface ([No_visible_reply]), a continuation boundary
     ([Continuation_checkpoint]), a completed terminal external delivery
-    ([External_effect_completed]), or a durable external-effect wait
+    ([Terminal_effect_settled]), or a durable external-effect wait
     ([External_effect_pending]). Consumers (lane persistence, stream
     terminal, direct-reply surface, dashboard) match on the decoded
     variant; control state is never synthesized into assistant prose. *)
@@ -12,7 +12,7 @@
 type t =
   | Visible_reply
   | Continuation_checkpoint
-  | External_effect_completed
+  | Terminal_effect_settled
   | External_effect_pending
   | No_visible_reply
 
@@ -21,7 +21,14 @@ val equal : t -> t -> bool
 val to_label : t -> string
 (** Closed wire labels: ["visible_reply"] / ["continuation_checkpoint"] /
     ["external_effect_completed"] / ["external_effect_pending"] /
-    ["no_visible_reply"]. *)
+    ["no_visible_reply"].
+
+    [Terminal_effect_settled] keeps the label ["external_effect_completed"]
+    it was born with. The constructor was renamed to what the outcome is —
+    a terminal tool finished delivering the reply, which has nothing to do
+    with the Gate — while the label stays where its readers already look:
+    the dashboard decoder and the cross-language parity test that reads
+    these strings out of this file. *)
 
 val of_label : string -> t option
 (** Inverse of {!to_label}; [None] on any other string. *)

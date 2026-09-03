@@ -366,9 +366,19 @@ let test_multiple_resolution_projections_keep_fifo_order () =
        let projected_ids =
          Chat_store.load_all ~base_dir:base_path ~keeper_name
          |> List.filter_map (fun (message : Chat_store.chat_message) ->
-           Option.map
-             (fun lifecycle -> lifecycle.Chat_store.approval_id)
-             message.approval_lifecycle)
+           (* Submitting also writes a request row now, so this reads the
+              resolution rows only: their order is what FIFO is about here. *)
+           Option.bind message.approval_lifecycle (fun lifecycle ->
+             match lifecycle.Chat_store.phase with
+             | Chat_store.Approval_resolved_approved
+             | Chat_store.Approval_resolved_rejected ->
+               Some lifecycle.Chat_store.approval_id
+             | Chat_store.Approval_requested
+             | Chat_store.Approval_replay_applied
+             | Chat_store.Approval_replay_applied_with_warning
+             | Chat_store.Approval_replay_failed
+             | Chat_store.Approval_replay_indeterminate
+             | Chat_store.Approval_continuation_recorded -> None))
        in
        Alcotest.(check (list string)) "chat projection preserves resolution FIFO"
          [ first; second ] projected_ids)
@@ -1434,17 +1444,26 @@ let test_resolution_is_durable_and_origin_scoped () =
          (Option.is_some resolution_result.remembered_rule);
        Alcotest.(check bool) "pending removed" false
          (Option.is_some (AQ.For_testing.get_pending_entry_unchecked ~id));
+       (* Two rows: the request is recorded when the call is parked, the
+          resolution when it is answered. *)
        (match Chat_store.load_all ~base_dir:base_path ~keeper_name with
         | [ { role = Chat_store.Role.System
+            ; approval_lifecycle = Some requested
+            ; _
+            }
+          ; { role = Chat_store.Role.System
             ; approval_lifecycle = Some lifecycle
             ; _
             } ] ->
+          Alcotest.(check bool) "the parked call was recorded first" true
+            (requested.phase = Chat_store.Approval_requested);
           Alcotest.(check string) "approved status carries approval id" id
             lifecycle.approval_id;
           Alcotest.(check bool) "approval is not yet effect-applied" true
             (lifecycle.phase = Chat_store.Approval_resolved_approved)
         | rows ->
-          Alcotest.failf "expected one durable approval status row, got %d"
+          Alcotest.failf
+            "expected a request row and an approval status row, got %d"
             (List.length rows));
        let resolution =
          match durable_resolution_opt ~base_path ~keeper_name ~approval_id:id with
@@ -4498,13 +4517,20 @@ let test_nonapproved_resolution_payload_is_delivered () =
          (Option.is_none (Gate.cycle_grant_of_resolution rejected));
        (match Chat_store.load_all ~base_dir:base_path ~keeper_name with
         | [ { role = Chat_store.Role.System
+            ; approval_lifecycle = Some requested
+            ; _
+            }
+          ; { role = Chat_store.Role.System
             ; approval_lifecycle = Some lifecycle
             ; _
             } ] ->
+          Alcotest.(check bool) "the parked call was recorded first" true
+            (requested.phase = Chat_store.Approval_requested);
           Alcotest.(check bool) "rejection status is durable" true
             (lifecycle.phase = Chat_store.Approval_resolved_rejected)
         | rows ->
-          Alcotest.failf "expected one durable rejection status row, got %d"
+          Alcotest.failf
+            "expected a request row and a rejection status row, got %d"
             (List.length rows));
        drop_resolution ~base_path ~keeper_name rejected)
 ;;
@@ -4610,7 +4636,7 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
            | Some lifecycle -> String.equal lifecycle.approval_id approval_id
            | None -> false)
        in
-       Alcotest.(check int) "resolution, stale replay, correction" 3
+       Alcotest.(check int) "request, resolution, stale replay, correction" 4
          (List.length lifecycle_rows);
        let phases =
          List.filter_map
@@ -4621,7 +4647,8 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
            lifecycle_rows
        in
        match phases with
-       | [ Chat_store.Approval_resolved_approved
+       | [ Chat_store.Approval_requested
+         ; Chat_store.Approval_resolved_approved
          ; Chat_store.Approval_replay_failed
          ; Chat_store.Approval_replay_applied
          ] -> ()

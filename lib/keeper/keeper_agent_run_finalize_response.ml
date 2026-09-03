@@ -49,7 +49,7 @@ let finalize
      already reached the reader rather than defaulting to "did not". *)
   let terminal_effect_settled =
     match turn_outcome with
-    | Keeper_turn_outcome.External_effect_completed -> true
+    | Keeper_turn_outcome.Terminal_effect_settled -> true
     | Keeper_turn_outcome.Visible_reply
     | Keeper_turn_outcome.Continuation_checkpoint
     | Keeper_turn_outcome.External_effect_pending

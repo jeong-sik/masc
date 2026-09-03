@@ -1240,7 +1240,7 @@ let canonical_reply_payload_of_body ~redact_text body =
        that outcome means the completed effect was a memory write. *)
     let completed_external_effect =
       Keeper_turn_outcome.equal turn_outcome
-        Keeper_turn_outcome.External_effect_completed
+        Keeper_turn_outcome.Terminal_effect_settled
     in
     let values_of key =
       List.filter_map
@@ -1342,7 +1342,7 @@ let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt v
        turn_outcome, String_util.trim_nonempty visible_reply, has_visible_blocks
      with
      | Keeper_turn_outcome.Continuation_checkpoint, _, _ -> None
-     | Keeper_turn_outcome.External_effect_completed, _, _ -> None
+     | Keeper_turn_outcome.Terminal_effect_settled, _, _ -> None
      | Keeper_turn_outcome.External_effect_pending, _, _ -> None
      | Keeper_turn_outcome.No_visible_reply, _, true -> None
      | Keeper_turn_outcome.Visible_reply, None, true -> None
@@ -1375,7 +1375,7 @@ let persisted_reply_blocks ~turn_outcome media_blocks =
           { kind = Keeper_chat_blocks.External_effect_pending }
       ]
   | ( Keeper_turn_outcome.Visible_reply
-    | Keeper_turn_outcome.External_effect_completed
+    | Keeper_turn_outcome.Terminal_effect_settled
     | Keeper_turn_outcome.No_visible_reply ),
     media_blocks ->
     media_blocks
@@ -1510,8 +1510,8 @@ let control_turn_delivery ~turn_outcome ~spoken =
   match (turn_outcome : Keeper_turn_outcome.t), spoken with
   | (Continuation_checkpoint | External_effect_pending), spoken ->
     `Assistant_row (Option.value spoken ~default:"")
-  | External_effect_completed, Some words -> `Assistant_row words
-  | External_effect_completed, None -> `Tool_calls_only
+  | Terminal_effect_settled, Some words -> `Assistant_row words
+  | Terminal_effect_settled, None -> `Tool_calls_only
   | (Visible_reply | No_visible_reply), spoken ->
     (* Reached by their own arms, which carry the same answer for words. *)
     `Assistant_row (Option.value spoken ~default:"")
@@ -2097,7 +2097,7 @@ let process_single_turn ~user_row_origin ~submission
                    match turn_outcome, String_util.trim_nonempty visible_reply with
                    | ( ( Keeper_turn_outcome.Continuation_checkpoint
                        | Keeper_turn_outcome.External_effect_pending
-                       | Keeper_turn_outcome.External_effect_completed ) as
+                       | Keeper_turn_outcome.Terminal_effect_settled ) as
                        control_outcome )
                    , spoken -> (
                        (* [persisted_reply_blocks] always returns [Some _] for
@@ -2503,7 +2503,7 @@ let process_single_turn ~user_row_origin ~submission
           let suppress_terminal_reply =
             match turn_outcome with
             | Keeper_turn_outcome.Continuation_checkpoint
-            | Keeper_turn_outcome.External_effect_completed
+            | Keeper_turn_outcome.Terminal_effect_settled
             | Keeper_turn_outcome.External_effect_pending
             | Keeper_turn_outcome.No_visible_reply ->
                 true
@@ -2740,7 +2740,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                               either way there is no text to send. *)
                            | Keeper_turn_outcome.Visible_reply
                            | Keeper_turn_outcome.Continuation_checkpoint
-                           | Keeper_turn_outcome.External_effect_completed
+                           | Keeper_turn_outcome.Terminal_effect_settled
                            | Keeper_turn_outcome.External_effect_pending
                            | Keeper_turn_outcome.No_visible_reply -> None)
                       | Keeper_chat_events.Run_finished _ ->
@@ -2783,7 +2783,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                            either way there is no text to hand back. *)
                         | Keeper_turn_outcome.Visible_reply
                         | Keeper_turn_outcome.Continuation_checkpoint
-                        | Keeper_turn_outcome.External_effect_completed
+                        | Keeper_turn_outcome.Terminal_effect_settled
                         | Keeper_turn_outcome.External_effect_pending
                         | Keeper_turn_outcome.No_visible_reply -> None)
                    | Keeper_chat_events.Run_finished _ ->

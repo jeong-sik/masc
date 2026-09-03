@@ -227,8 +227,9 @@ let test_runtime_text_transform () =
   in
   let has needle = contains_substring text needle in
   check bool "the operator note survives" true (has "# operator note that must survive");
-  check bool "the kept keeper is reassigned" true (has "routingtest = \"runpod_mtp.qwen\"");
-  check bool "the dropped keeper's row is gone" false (has "budgettest = ");
+  check bool "the kept keeper is reassigned, key quoted" true
+    (has "\"routingtest\" = \"runpod_mtp.qwen\"");
+  check bool "the dropped keeper's row is gone" false (has "budgettest");
   check bool "the provider tables survive" true (has "[providers.openai]");
   check bool "the lane slots are rewritten" true (has "  \"runpod_mtp.qwen\",");
   check bool "the old lane slot is gone" false (has "\"openai.gpt\", \"runpod_mtp.qwen\"");

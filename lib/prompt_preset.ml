@@ -538,36 +538,27 @@ let restore_instructions ~base_path instructions =
   |> finish
 ;;
 
-let assignments_table = "runtime.assignments"
 let lanes_table_prefix = "runtime.exact_output_lanes."
 
 (* Line-level edits of the two tables, so every other line of runtime.toml,
-   comments included, survives. Keepers assigned now but absent from the
-   preset lose their row; lanes present in the file but absent from the
-   preset are left alone. *)
+   comments included, survives. Assignment rows go through the runtime's own
+   row writer (quoted keys, so a dotted keeper name stays one key). Keepers
+   assigned now but absent from the preset lose their row; lanes present in
+   the file but absent from the preset are left alone. *)
 let runtime_text_with ~current_assignments ~assignments ~lanes content =
   let content =
     List.fold_left
-      (fun content (keeper, _) ->
-        if List.mem_assoc keeper assignments
+      (fun content (keeper_name, _) ->
+        if List.mem_assoc keeper_name assignments
         then content
-        else
-          Toml_line_editor.edit_table_scalar
-            content
-            ~path:assignments_table
-            ~key:keeper
-            ~value:None)
+        else Runtime.remove_runtime_assignment_text content ~keeper_name)
       content
       current_assignments
   in
   let content =
     List.fold_left
-      (fun content (keeper, runtime_id) ->
-        Toml_line_editor.edit_table_scalar
-          content
-          ~path:assignments_table
-          ~key:keeper
-          ~value:(Some runtime_id))
+      (fun content (keeper_name, runtime_id) ->
+        Runtime.update_runtime_assignment_text content ~keeper_name ~runtime_id)
       content
       assignments
   in

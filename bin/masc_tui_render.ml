@@ -13202,6 +13202,7 @@ let config_pane_strip (state : state) =
     ; name Config_models "models"
     ; name Config_params "params"
     ; name Config_prompts "prompts"
+    ; name Config_presets "presets"
     ; name Config_themes "themes"
     ]
   ^ Ansi.dim ^ "  p:next" ^ Ansi.reset
@@ -13630,6 +13631,106 @@ let theme_name_width ~cols =
   max 8 (min 29 (framed_inner_width cols - fixed_cells))
 ;;
 
+(* Prompt presets (#32777). A preset is one named snapshot of three
+   surfaces the operator changes together: the prompt override table, each
+   keeper's instructions, and runtime.toml's assignments and exact-output
+   lanes. The pane lists them, saves the live state under a typed name, and
+   restores one behind a two-press arm — a restore rewrites all three, and
+   the report below the list is the only place it says what it skipped and
+   whether runtime.toml committed. *)
+let render_presets (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let presets =
+    match state.presets_snapshot with
+    | None -> []
+    | Some snapshot -> snapshot.Tui_decode.pss_presets
+  in
+  let unreadable =
+    match state.presets_snapshot with
+    | None -> []
+    | Some snapshot -> snapshot.Tui_decode.pss_unreadable
+  in
+  let total = List.length presets in
+  let cursor = max 0 (min state.presets_cursor (total - 1)) in
+  let selected = List.nth_opt presets cursor in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %s%d개%s  %s  %s"
+       (screen_title " MASC 프리셋")
+       Ansi.dim total Ansi.reset
+       (config_pane_strip state)
+       (connection_badge state));
+  box_divider buf cols;
+  let error_rows = if Option.is_some state.presets_error then 1 else 0 in
+  let entry_rows = if Option.is_some state.preset_save_draft then 1 else 0 in
+  let combined_height = max 2 (rows - 9 - error_rows - entry_rows) in
+  let list_height = min 8 (max 1 (combined_height / 3)) in
+  let detail_height = max 1 (combined_height - list_height) in
+  let first = if cursor < list_height then 0 else cursor - list_height + 1 in
+  (match state.presets_error with
+   | Some detail ->
+     box_line buf cols
+       (Theme.bad () ^ "  " ^ fit_width (Terminal_text.single_line detail) (cols - 6)
+        ^ Ansi.reset)
+   | None -> ());
+  let drawn = ref 0 in
+  if total = 0 then begin
+    incr drawn;
+    box_line_styled buf cols ~style:(Theme.recede ())
+      (match state.presets_snapshot with
+       | None -> "  불러오는 중..."
+       | Some _ -> "  아직 프리셋이 없습니다 · s 로 지금 상태를 저장하세요")
+  end;
+  List.iteri
+    (fun index (manifest : Tui_decode.preset_manifest) ->
+      if index >= first && index < first + list_height then begin
+        incr drawn;
+        let armed =
+          state.preset_restore_armed = Some manifest.Tui_decode.pm_name
+        in
+        let mark = if armed then Theme.warn () ^ "r" ^ Ansi.reset else " " in
+        let label =
+          mark ^ " "
+          ^ fit_width
+              (Terminal_text.single_line (Masc_tui_preset_text.pane_row manifest))
+              (max 4 (cols - 6))
+        in
+        if index = cursor then box_line buf cols (Theme.selection ^ " " ^ label ^ Ansi.reset)
+        else box_line buf cols (" " ^ label)
+      end)
+    presets;
+  for _ = 1 to list_height - !drawn do
+    box_empty buf cols
+  done;
+  box_divider buf cols;
+  let detail =
+    Masc_tui_preset_text.detail_lines ~selected ~report:state.preset_report
+    @ List.map
+        (fun (name, reason) -> Printf.sprintf "! %s — %s" name reason)
+        unreadable
+  in
+  let max_scroll = max 0 (List.length detail - detail_height) in
+  let scroll = max 0 (min state.config_scroll max_scroll) in
+  for index = 0 to detail_height - 1 do
+    match List.nth_opt detail (scroll + index) with
+    | Some line -> box_line buf cols ("  " ^ fit_width (Terminal_text.single_line line) (max 4 (cols - 6)))
+    | None -> box_empty buf cols
+  done;
+  (match state.preset_save_draft with
+   | Some draft ->
+     box_line buf cols
+       (Theme.info () ^ "  이름: " ^ Ansi.reset
+        ^ fit_width (Terminal_text.single_line draft) (max 4 (cols - 14))
+        ^ Ansi.dim ^ "  Enter:저장  Esc:취소" ^ Ansi.reset)
+   | None -> ());
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:"j/k:선택  PgUp/PgDn:읽기  s:저장  r,r:복원  g:새로고침");
+  finish_surface state ~surface_key:"presets" ~rows:terminal_rows ~cols buf
+
 let render_themes (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -13983,6 +14084,7 @@ let render_surface (state : state) =
   | Config -> (
     match state.config_pane with
     | Config_prompts -> render_prompts state
+    | Config_presets -> render_presets state
     | Config_themes -> render_themes state
     | Config_runtime -> render_config state
     | Config_models -> render_config_models state

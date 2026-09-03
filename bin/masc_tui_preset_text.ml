@@ -71,6 +71,33 @@ let restore_lines (report : D.preset_restore_report) =
   @ [ runtime_line report.D.prr_runtime ]
 ;;
 
+(* One list row in the Config pane: the name, then the counts, then when it
+   was saved. The description is detail, not a row. *)
+let pane_row (m : D.preset_manifest) =
+  Printf.sprintf "%-28s %s  %s" m.D.pm_name (counts m) m.D.pm_created_at
+;;
+
+(* The detail below the list: what the selected preset holds, and the last
+   restore report this session saw. *)
+let detail_lines ~(selected : D.preset_manifest option)
+      ~(report : D.preset_restore_report option) =
+  let preset =
+    match selected with
+    | None -> [ "선택한 프리셋이 없습니다" ]
+    | Some m ->
+      [ Printf.sprintf "%s · %s" m.D.pm_name (counts m)
+      ; (if String.equal m.D.pm_description "" then "설명 없음" else m.D.pm_description)
+      ; "저장 시각 " ^ m.D.pm_created_at
+      ; (match m.D.pm_keepers with
+         | [] -> "지시문을 담은 keeper 없음"
+         | keepers -> "지시문 " ^ String.concat ", " keepers)
+      ]
+  in
+  match report with
+  | None -> preset
+  | Some report -> preset @ [ "" ] @ restore_lines report
+;;
+
 (* Clean means nothing was skipped and runtime.toml did not fail; the pane
    then shows the report as status rather than as an error. *)
 let restore_is_clean (report : D.preset_restore_report) =

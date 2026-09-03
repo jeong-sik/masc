@@ -2011,6 +2011,7 @@ type config_pane =
   | Config_models
   | Config_params
   | Config_prompts
+  | Config_presets
   | Config_themes
 
 (* Which section the Tools surface is showing. They used to be one scrolling
@@ -2261,6 +2262,17 @@ type state = {
   mutable prompts_librarian_input: (string * string list) option;
   mutable prompts_librarian_input_error: string option;
   mutable prompts_librarian_input_loading: bool;
+  (* Prompt presets (#32777). The pane holds the listing, the name being
+     typed for a save, the preset armed for a restore, and the last report —
+     which stays on screen because it is the only place the skipped keys and
+     the runtime.toml outcome are said. *)
+  mutable presets_snapshot: Tui_decode.presets_snapshot option;
+  mutable presets_error: string option;
+  mutable presets_cursor: int;
+  mutable preset_save_draft: string option;
+  mutable preset_restore_armed: string option;
+  mutable preset_report: Tui_decode.preset_restore_report option;
+  mutable preset_busy: bool;
   (* Rows of coloured segments, the shape the Code surface keeps, so the two
      surfaces read the same file the same way. Plain text is derived where it
      is needed rather than stored beside them: two copies of the same rows
@@ -3112,6 +3124,13 @@ let create_state
   prompts_snapshot = None;
   prompts_error = None;
   prompts_cursor = 0;
+  presets_snapshot = None;
+  presets_error = None;
+  presets_cursor = 0;
+  preset_save_draft = None;
+  preset_restore_armed = None;
+  preset_report = None;
+  preset_busy = false;
   prompts_show_fragments = false;
   prompts_show_runtime_assets = false;
   prompts_librarian_input = None;
@@ -4062,7 +4081,8 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
            (match state.runtime_config_view with
             | None -> 0
             | Some _ -> List.length state.config_models_rows + 1)
-         | Config_runtime | Config_params | Config_prompts | Config_themes ->
+         | Config_runtime | Config_params | Config_prompts | Config_presets
+         | Config_themes ->
            (match state.runtime_config_view with
             | None -> 0
             | Some (_, rows) -> List.length rows))

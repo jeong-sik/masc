@@ -7103,15 +7103,28 @@ let composable_output_probes =
     ; prepare =
         (fun ~config ~meta:_ ->
            (* A tool that reads durable state needs some, or it fails before
-              it can emit the shape under test. *)
-           ignore
-             (Workspace.add_task
-                config
-                ~created_by:"composable-output-probe"
-                ~title:"composable output probe"
-                ~priority:3
-                ~description:"");
-           `Assoc [])
+              it can emit the shape under test.
+
+              Two rows and a limit of one, not one row and no limit: this
+              producer emits [next_cursor] only when a page is cut short, so
+              an unpaged fixture never reaches that field. One row passed
+              here while production failed on every composition holding a
+              tasks node -- #32488 added the cursor to the response without
+              widening the declared schema, and this probe could not see it
+              (masc #32953). A probe that only meets the shape its fixture
+              happens to produce does not cover the shapes the producer can
+              produce. *)
+           List.iter
+             (fun title ->
+                ignore
+                  (Workspace.add_task
+                     config
+                     ~created_by:"composable-output-probe"
+                     ~title
+                     ~priority:3
+                     ~description:""))
+             [ "composable output probe"; "composable output probe (second page)" ];
+           `Assoc [ "limit", `Int 1 ])
     }
   ; probe "masc_board_stats" (`Assoc [])
   ; probe "masc_board_list" (`Assoc [])
@@ -7239,33 +7252,59 @@ let test_composable_outputs_satisfy_declared_schema () =
          ; handoff_from = None
          ; handoff_to = None
          };
-       List.iter
-         (fun { tool_name; prepare } ->
-            let input = prepare ~config ~meta in
-            let result =
-              KET.execute_keeper_tool_call_with_outcome
-                ~config
-                ~meta
-                ~publication_recovery
-                ~ctx_work
-                ~name:tool_name
-                ~input
-                ()
-            in
-            if not (String.equal "success" (outcome_label result.KTE.disposition))
-            then
-              failf
-                "%s did not complete, so its output went unobserved: %s"
-                tool_name
-                result.KTE.raw_output;
-            match result.KTE.data with
-            | Some data -> validate_probe_output ~tool_name ~data
-            | None ->
-              failf
-                "%s completed without typed data; a composition node would \
-                 have nothing to validate"
-                tool_name)
-         composable_output_probes)
+       (* Every probe runs, then the failures are reported together.
+
+          Aborting at the first one hides the rest: [Execute] leads this list
+          and needs a sandbox runtime, so on a machine with no container
+          daemon it failed first and the nine probes behind it never ran --
+          the gate reported one problem while saying nothing about the tools
+          it exists to cover. One unavailable runtime is not a reason to stop
+          asking the other producers whether they still match their declared
+          schema. *)
+       let failures =
+         List.filter_map
+           (fun { tool_name; prepare } ->
+              let input = prepare ~config ~meta in
+              let result =
+                KET.execute_keeper_tool_call_with_outcome
+                  ~config
+                  ~meta
+                  ~publication_recovery
+                  ~ctx_work
+                  ~name:tool_name
+                  ~input
+                  ()
+              in
+              if not (String.equal "success" (outcome_label result.KTE.disposition))
+              then
+                Some
+                  (Printf.sprintf
+                     "%s did not complete, so its output went unobserved: %s"
+                     tool_name
+                     result.KTE.raw_output)
+              else (
+                match result.KTE.data with
+                | Some data ->
+                  (try
+                     validate_probe_output ~tool_name ~data;
+                     None
+                   with Failure detail -> Some detail)
+                | None ->
+                  Some
+                    (Printf.sprintf
+                       "%s completed without typed data; a composition node \
+                        would have nothing to validate"
+                       tool_name)))
+           composable_output_probes
+       in
+       match failures with
+       | [] -> ()
+       | failures ->
+         failf
+           "%d of %d composable-output probes failed:\n%s"
+           (List.length failures)
+           (List.length composable_output_probes)
+           (String.concat "\n" failures))
 
 let () =
   Masc_test_deps.init_unified_tool_registry ();

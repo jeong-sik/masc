@@ -180,10 +180,10 @@ let read_file_if_exists path =
 (* ── Fragment-group slots (#32780, #32814) ─────────────────────────────
 
    A group file carries several short fragments as [### marker]
-   paragraphs. A marker is a key segment — the grammar of
-   [is_valid_prompt_key], so a markdown heading with spaces or braces
-   inside a paragraph stays prose — optionally followed by the slot's
-   variables: [### standing.current (vars: target, behind, ahead)]. A
+   paragraphs. A marker is a lower-case key segment ([is_slot_marker]),
+   so a markdown heading with spaces, braces or a capital inside a
+   paragraph stays prose — optionally followed by the slot's variables:
+   [### standing.current (vars: target, behind, ahead)]. A
    slot registers under [<group-key>.<marker>], so every consumer and
    name constant keeps its old key; the registry, not the callers, knows
    the file was merged. Prose before the first marker is the group's own
@@ -196,9 +196,18 @@ let read_file_if_exists path =
 let fragment_tbl : (string, string * string) Hashtbl.t = Hashtbl.create 16
 (** [slot key → (group key, marker)] — filled by the directory loader. *)
 
+(* A marker is a lower-case key segment: [a-z0-9._-]+. Lower-case only,
+   so a one-word prose heading such as [### Summary] stays prose; every
+   marker in the tree is lower-case already. *)
+let is_slot_marker marker =
+  marker <> ""
+  && String.for_all
+       (function 'a' .. 'z' | '0' .. '9' | '.' | '_' | '-' -> true | _ -> false)
+       marker
+
 (* Marker line shapes: "### name" or "### name (vars: a, b)", where
-   [name] obeys [is_valid_prompt_key]. [None] for every other line,
-   including a markdown heading that is prose. *)
+   [name] obeys [is_slot_marker]. [None] for every other line, including
+   a markdown heading that is prose. *)
 let parse_slot_header line =
   if String.length line > 4 && String.sub line 0 4 = "### " then (
     let rest = String.trim (String.sub line 4 (String.length line - 4)) in
@@ -213,7 +222,7 @@ let parse_slot_header line =
             (String.sub rest (open_paren + 7) (String.length rest - open_paren - 8)) )
       | _ -> (rest, None)
     in
-    if is_valid_prompt_key marker then Some (marker, vars) else None)
+    if is_slot_marker marker then Some (marker, vars) else None)
   else None
 
 type body_split = {
@@ -497,20 +506,42 @@ let load_prompts_from_directory dir =
                        under the group key when there is any; a file
                        without markers registers whole. *)
                     let split = split_body body in
-                    List.iter
-                      (fun (marker, slot_vars, _paragraph) ->
-                        let slot_key = key ^ "." ^ marker in
-                        let template_variables =
-                          match slot_vars with
-                          | None -> []
-                          | Some declared ->
-                            parse_list_value ("[" ^ declared ^ "]")
-                        in
-                        Hashtbl.replace fragment_tbl slot_key (key, marker);
-                        register_prompt_unlocked ~key:slot_key ~description
-                          ~category ~operator_surface:Types.Fragment
-                          ~required_file:true ~template_variables ())
-                      split.slots;
+                    (* [slot_paragraph] returns the first paragraph of a
+                       marker, so a repeated marker is logged and its later
+                       paragraph ignored — the registered variables and the
+                       text then come from the same paragraph. A marker with
+                       no paragraph is logged and not registered. *)
+                    let (_ : string list) =
+                      List.fold_left
+                        (fun seen (marker, slot_vars, paragraph) ->
+                          if List.mem marker seen then begin
+                            Log.Misc.error
+                              "prompt %s declares slot %s twice; the first paragraph stands and the later one is ignored"
+                              key marker;
+                            seen
+                          end
+                          else if String.equal paragraph "" then begin
+                            Log.Misc.error
+                              "prompt %s slot %s has no paragraph; it is not registered"
+                              key marker;
+                            marker :: seen
+                          end
+                          else begin
+                            let slot_key = key ^ "." ^ marker in
+                            let template_variables =
+                              match slot_vars with
+                              | None -> []
+                              | Some declared ->
+                                parse_list_value ("[" ^ declared ^ "]")
+                            in
+                            Hashtbl.replace fragment_tbl slot_key (key, marker);
+                            register_prompt_unlocked ~key:slot_key ~description
+                              ~category ~operator_surface:Types.Fragment
+                              ~required_file:true ~template_variables ();
+                            marker :: seen
+                          end)
+                        [] split.slots
+                    in
                     if split.slots = [] || split.preamble <> "" then
                       register_prompt_unlocked ~key ~description ~category
                         ~operator_surface

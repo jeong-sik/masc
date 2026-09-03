@@ -8335,20 +8335,37 @@ let render_keeper_message (state : state) =
      | Some live
        when state.msg_target_keeper_name
             = Some (Keeper_chat_transcript.keeper_name live) ->
+         (* The streaming turn is the row the eye waits on: drawn in the
+            accent rather than dimmed, behind the mark a running turn wears
+            everywhere else on the screen.
+
+            It wore a second one -- four braille frames of its own, stepped
+            from the wall clock by the whole second. The screen repaints every
+            150ms while a turn runs, so six or seven consecutive frames drew
+            the same glyph and then jumped, and the four frames chosen are not
+            adjacent in the braille rotation, so the jump did not read as
+            turning either. [activity_frame] is the counter that ticker
+            advances, and stepping from it means one repaint, one frame. *)
+         let running_mark =
+           Masc_tui_answering.running_glyph ~frame:state.activity_frame
+         in
+         (* How long it has been going. The mark says a turn is running and
+            the text says what it is doing; neither answers the question an
+            operator holds while waiting on the row, which is whether this is
+            a normal wait or a stuck one. The Answering overlay already
+            answers it for every other running turn, in the same spelling. *)
+         let running_for =
+           Masc_tui_answering.elapsed_text ~now:(Unix.gettimeofday ())
+             (Keeper_chat_transcript.started_at live)
+         in
          List.iter
            (fun (kind, text) ->
-             (* The streaming turn is the row the eye waits on: drawn in the
-                accent rather than dimmed, behind a spinner stepped from the
-                clock so consecutive frames visibly move. *)
-             let spinner =
-               let glyphs = [| "\xe2\xa0\x8b"; "\xe2\xa0\x99"; "\xe2\xa0\xb8"; "\xe2\xa0\xb4" |] in
-               glyphs.(int_of_float (Unix.gettimeofday ()) mod 4)
-             in
              (match kind with
               | Keeper_chat_transcript.Progress ->
                   box_line_styled chat_buf chat_cols ~style:(Masc_tui_theme.tone Masc_tui_theme.Accent)
-                    ("  " ^ spinner ^ " " ^ Ansi.bold ^ "ACTIVE TURN"
-                     ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ " · " ^ text)
+                    ("  " ^ running_mark ^ " " ^ Ansi.bold ^ "ACTIVE TURN"
+                     ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                     ^ " · " ^ running_for ^ " · " ^ text)
               | Keeper_chat_transcript.Attention ->
                   box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text)
               | Keeper_chat_transcript.Approval outcome ->

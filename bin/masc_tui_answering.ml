@@ -84,6 +84,31 @@ let is_running (row : Tui_decode.keeper_turn_row) =
       false
 ;;
 
+(** Whether the screen animates at all.
+
+    Motion is a claim, so the frame counter behind {!running_glyph} advances
+    only while something is genuinely working, and a screen with nothing to say
+    stops repainting entirely. Three readings say something is: a polled keeper
+    turn, a standalone lane, and the observer feed's live transcript.
+
+    The transcript is the one that was missing. The polled rows can lag that
+    feed by a cadence, and the chat pane draws the mark against the feed, so
+    the mark sat on the still glyph — "running, but this surface does not
+    repaint fast enough to animate" — while the answer was arriving on the
+    screen in front of it. *)
+let anything_running ~turns ~live_transcript ~lanes =
+  List.exists is_running turns
+  || live_transcript
+  ||
+  match lanes with
+  | None -> false
+  | Some snapshot ->
+      List.exists
+        (fun (lane : Tui_decode.standalone_lane) ->
+          lane.sl_status = Tui_decode.Standalone_running)
+        snapshot.Tui_decode.sls_lanes
+;;
+
 (** Names that were mid-turn in [previous] and are idle in [current] — the
     turns that finished between two polls. A keeper that went unavailable is
     not finished (the owner lookup failing says nothing about its turn), and

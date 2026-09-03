@@ -6088,10 +6088,37 @@ let apply_approvals_load state = function
 (* A read that fails leaves the last snapshot in place rather than blanking
    the pane: an operator mid-decision should not lose the question they were
    reading because one refresh could not reach the server. *)
+(* A new question can arrive while the operator is on another surface. The
+   bell reaches every terminal; OSC 9 adds a desktop banner on the terminals
+   that read it (iTerm2, WezTerm, kitty) and is ignored elsewhere. Neither
+   moves the cursor, so this writes out of band rather than through the frame.
+   The banner names the Keeper so it says who is waiting. *)
+let notify_new_asks (snapshot : Tui_decode.asks_snapshot) arrived_ids =
+  let keeper_of id =
+    List.find_opt
+      (fun (row : Tui_decode.ask_row) -> String.equal row.Tui_decode.ar_id id)
+      snapshot.Tui_decode.asn_rows
+    |> Option.map (fun (row : Tui_decode.ask_row) -> row.Tui_decode.ar_keeper)
+  in
+  let message =
+    match List.filter_map keeper_of arrived_ids with
+    | [ one ] -> Printf.sprintf "%s is waiting on a decision" one
+    | _ ->
+        Printf.sprintf "%d keepers are waiting on a decision"
+          (List.length arrived_ids)
+  in
+  write_to_terminal (Printf.sprintf "\x07\x1b]9;%s\x07" message)
+
 let apply_asks_load state = function
   | Ok snapshot ->
+      (* The delta against the last snapshot, so a poll that re-reads the same
+         asks stays silent and only a question that just arrived rings. *)
+      let arrived =
+        Ask.newly_opened_ask_ids ~previous:state.asks_snapshot ~current:snapshot
+      in
       state.asks_snapshot <- Some snapshot;
-      state.asks_error <- None
+      state.asks_error <- None;
+      if arrived <> [] then notify_new_asks snapshot arrived
   | Error err ->
       remember_surface_error state ~surface:"asks" ~current_error:state.asks_error
         ~set_error:(fun value -> state.asks_error <- value)

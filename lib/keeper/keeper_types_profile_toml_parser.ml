@@ -30,6 +30,7 @@ let keeper_toml_fields =
   ; "sandbox_image", Field_string
   ; "network_mode", Field_string
   ; "remote_endpoint", Field_string
+  ; "microvm_backend", Field_string
   ; "max_context_override", Field_int
   ; "telemetry_feedback_enabled", Field_bool
   ; "telemetry_feedback_window_hours", Field_int
@@ -234,6 +235,35 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                only valid with sandbox_profile = \"remote_ssh\""
         | _, None -> Ok ())
   in
+  (* [microvm_backend] names which runtime supplies the guest, so it is only
+     meaningful under sandbox_profile = "microvm". Set anywhere else it is a
+     typo rather than an override, and carrying it silently would leave the
+     operator believing a choice was made that nothing reads. An unknown
+     spelling is refused by name rather than falling back to a runtime the
+     keeper did not ask for -- the point of the key is that the isolation is
+     the declared one. *)
+  let result =
+    Result.bind result (fun () ->
+        match
+          ( Option.bind (str "sandbox_profile") sandbox_profile_of_string
+          , str "microvm_backend" )
+        with
+        | _, None -> Ok ()
+        | Some Micro_vm, Some raw ->
+            (match Keeper_microvm_backend.of_string raw with
+            | Some _ -> Ok ()
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "microvm_backend_unknown: keeper.microvm_backend = %S is not \
+                      one of: %s"
+                     raw
+                     (String.concat ", " Keeper_microvm_backend.valid_strings)))
+        | _, Some _ ->
+            Error
+              "microvm_backend_requires_microvm: keeper.microvm_backend is only \
+               valid with sandbox_profile = \"microvm\"")
+  in
   let result =
     Result.bind result (fun () ->
         match str "tools.native" with
@@ -273,6 +303,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         network_mode =
           Option.bind (str "network_mode") network_mode_of_string;
         remote_endpoint = str "remote_endpoint";
+        microvm_backend =
+          Option.bind (str "microvm_backend") Keeper_microvm_backend.of_string;
         max_context_override;
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
@@ -318,6 +350,7 @@ let merge_keeper_profile_defaults
     sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
     network_mode = prefer overlay.network_mode base.network_mode;
     remote_endpoint = prefer overlay.remote_endpoint base.remote_endpoint;
+    microvm_backend = prefer overlay.microvm_backend base.microvm_backend;
     max_context_override =
       prefer overlay.max_context_override base.max_context_override;
     telemetry_feedback_enabled =

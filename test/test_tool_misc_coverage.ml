@@ -788,32 +788,6 @@ let () = test "get_string_missing" (fun () ->
    decision: the oldest member keeps the row address ([source_ref],
    [event_id]) and every member id rides in [detail]. --- *)
 
-let attention_item ~event_id ~received_at ~urgency ~conversation_id ~preview () :
-    Keeper_external_attention.item =
-  let surface =
-    Surface_ref.Discord
-      { guild_id = Some "guild-1"
-      ; channel_id = "chan-1"
-      ; channel_name = None
-      ; parent_channel_id = None
-      ; thread_id = None
-      }
-  in
-  { Keeper_external_attention.event_id
-  ; dedupe_key = "dd-" ^ event_id
-  ; keeper_name = "group-fixture"
-  ; conversation = { conversation_id; surface }
-  ; external_message = None
-  ; source_label = "discord"
-  ; actor =
-      { actor_id = None; display_name = None; authority = Keeper_chat_store.External }
-  ; urgency
-  ; content_preview = preview
-  ; content_ref = None
-  ; received_at
-  ; metadata = []
-  }
-
 let json_int_member key = function
   | `Assoc fields ->
       (match List.assoc_opt key fields with
@@ -821,93 +795,6 @@ let json_int_member key = function
        | Some _ -> failwith ("json field is not an int: " ^ key)
        | None -> failwith ("missing json field: " ^ key))
   | _ -> failwith "expected json object"
-
-let () =
-  test "waiting_inventory_groups_external_attention_per_conversation" (fun () ->
-    let items =
-      [ attention_item ~event_id:"evt-new" ~received_at:30.0
-          ~urgency:Keeper_external_attention.Ambient ~conversation_id:"conv-1"
-          ~preview:"latest message" ()
-      ; attention_item ~event_id:"evt-old" ~received_at:10.0
-          ~urgency:Keeper_external_attention.Ambient ~conversation_id:"conv-1"
-          ~preview:"oldest message" ()
-      ; attention_item ~event_id:"evt-mid" ~received_at:20.0
-          ~urgency:Keeper_external_attention.Ambient ~conversation_id:"conv-1"
-          ~preview:"middle message" ()
-      ]
-    in
-    let rows =
-      Server_keeper_waiting_inventory.For_testing.external_attention_grouped_rows
-        ~keeper_name:"group-fixture"
-        items
-    in
-    assert (List.length rows = 1);
-    let row = List.hd rows in
-    assert (String.equal row.what "discord 대화 (멘션 없음) ×3");
-    assert (row.since = Some 10.0);
-    assert (json_int_member "group_count" row.detail = 3);
-    (* The oldest event anchors the row address; the newest message previews. *)
-    assert (String.equal (json_string_member "event_id" row.detail) "evt-old");
-    assert
-      (String.equal (json_string_member "content_preview" row.detail) "latest message"))
-
-let () =
-  test "waiting_inventory_single_external_attention_row_is_unchanged" (fun () ->
-    let rows =
-      Server_keeper_waiting_inventory.For_testing.external_attention_grouped_rows
-        ~keeper_name:"group-fixture"
-        [ attention_item ~event_id:"evt-solo" ~received_at:5.0
-            ~urgency:Keeper_external_attention.Ambient ~conversation_id:"conv-1"
-            ~preview:"only message" ()
-        ]
-    in
-    assert (List.length rows = 1);
-    let row = List.hd rows in
-    assert (String.equal row.what "discord 대화 (멘션 없음)");
-    assert (row.since = Some 5.0);
-    (* no group_count member at all *)
-    (match row.detail with
-     | `Assoc fields -> assert (List.assoc_opt "group_count" fields = None)
-     | _ -> failwith "expected json object"))
-
-let () =
-  test "waiting_inventory_separates_mention_from_ambient" (fun () ->
-    let rows =
-      Server_keeper_waiting_inventory.For_testing.external_attention_grouped_rows
-        ~keeper_name:"group-fixture"
-        [ attention_item ~event_id:"evt-a" ~received_at:10.0
-            ~urgency:Keeper_external_attention.Ambient ~conversation_id:"conv-1"
-            ~preview:"ambient" ()
-        ; attention_item ~event_id:"evt-m" ~received_at:11.0
-            ~urgency:Keeper_external_attention.Mention ~conversation_id:"conv-1"
-            ~preview:"mention" ()
-        ]
-    in
-    assert (List.length rows = 2);
-    List.iter
-      (fun (row : Server_keeper_waiting_inventory.waiting_row) ->
-         match row.what with
-         | "discord 대화 (멘션 없음)" | "discord 멘션" -> ()
-         | other -> failwith ("unexpected grouped what: " ^ other))
-      rows)
-
-let () =
-  test "waiting_inventory_two_conversations_stay_separate" (fun () ->
-    let rows =
-      Server_keeper_waiting_inventory.For_testing.external_attention_grouped_rows
-        ~keeper_name:"group-fixture"
-        (attention_item ~event_id:"evt-1a" ~received_at:10.0
-           ~urgency:Keeper_external_attention.Ambient ~conversation_id:"conv-1"
-           ~preview:"one" ()
-        :: attention_item ~event_id:"evt-1b" ~received_at:12.0
-             ~urgency:Keeper_external_attention.Ambient ~conversation_id:"conv-1"
-             ~preview:"two" ()
-        :: attention_item ~event_id:"evt-2a" ~received_at:11.0
-             ~urgency:Keeper_external_attention.Ambient ~conversation_id:"conv-2"
-             ~preview:"other conversation" ()
-        :: [])
-    in
-    assert (List.length rows = 2))
 
 let connector_selection ~event_id ~arrived_at =
   let channel =

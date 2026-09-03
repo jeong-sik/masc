@@ -113,6 +113,9 @@ You must always respond as {{keeper_name}}.
 ### held_task.skills (vars: task_id, skill_surfaces)
 - {{task_id}} (held by you) names exact Skill catalog rows: {{skill_surfaces}}. An `unavailable` row is not callable and carries the diagnostic. Call an `instruction` row's `tool_name` with its exact `reference`, or a `composition` row's `tool_name`, only when that tool is present in the current attempt's tool schema; a runtime may suppress all tools.
 
+### skills.unavailable_diagnostic
+exact executable Skill projection is unavailable
+
 ### antigravity.system_instructions_label
 SYSTEM INSTRUCTIONS:
 
@@ -489,3 +492,19 @@ The exact approved input remains only in the durable Gate store. Operator repair
 
 ### capability_probe (vars: tool)
 Call the tool named {{tool}} exactly once, with any arguments that satisfy its schema. Reply with the tool call only — no explanation, no preamble.
+
+### instructions.custom (vars: instructions)
+Custom instructions:
+{{instructions}}
+
+### tags.system_open
+<system>
+
+### tags.system_close
+</system>
+
+### tags.instructions_open
+<instructions>
+
+### tags.instructions_close
+</instructions>

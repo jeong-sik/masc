@@ -37,7 +37,10 @@ let build_keeper_system_prompt
   let custom =
     let s = String.trim instructions in
     if s = "" then ""
-    else Printf.sprintf "\nCustom instructions:\n%s\n" s
+    else
+      "\n"
+      ^ render_instruction Prompt_names.keeper_instructions_custom [ "instructions", s ]
+      ^ "\n"
   in
   let workspace_block =
     if workspace_root = "" then ""
@@ -56,21 +59,28 @@ let build_keeper_system_prompt
       String.trim (render_instruction Prompt_names.keeper_identity
         [ "keeper_name", String_util.escape_xml keeper_name ]) ^ "\n\n"
   in
-  String.concat ""
-    [
-      (* ── Shared prefix (identical across all keepers) ────────── *)
-      "<system>\n";
-      system_prompt_body ();
-      "\n</system>\n\n";
-      (* ── Keeper-specific blocks ─────────────────────────────── *)
-      identity_block;
-      workspace_block;
-      (* Operator instructions. The Goals a keeper can pick up ride the
+  (* The wrapping tags and the custom-instructions heading are slots in
+     keeper.md ([keeper.tags.*], [keeper.instructions.custom]); the newlines
+     between blocks are structure and stay here. *)
+  String.concat
+    ""
+    [ (* ── Shared prefix (identical across all keepers) ────────── *)
+      render_instruction Prompt_names.keeper_tags_system_open []
+    ; "\n"
+    ; system_prompt_body ()
+    ; "\n"
+    ; render_instruction Prompt_names.keeper_tags_system_close []
+    ; "\n\n"
+    ; (* ── Keeper-specific blocks ─────────────────────────────── *)
+      identity_block
+    ; workspace_block
+    ; (* Operator instructions. The Goals a keeper can pick up ride the
          turn's own context, where they change without rewriting the prefix
          every keeper shares. *)
-      "<instructions>";
-      custom;
-      "</instructions>";
+      render_instruction Prompt_names.keeper_tags_instructions_open []
+    ; custom
+    ; render_instruction Prompt_names.keeper_tags_instructions_close []
     ]
+;;
 
 include Keeper_text_processing

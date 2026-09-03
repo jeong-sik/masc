@@ -128,3 +128,6 @@ producer 자신의 tool을 producer의 sandbox 루트에 겨눈 채 가지고 �
 쓰면 제출자는 고칠 수 없는 것을 고치려 합니다. 조회 표면이 죽은 것은
 제출자가 만든 상태가 아닙니다.
 </live_lookup>
+
+### lookup.root_layout_empty
+(this root is empty)

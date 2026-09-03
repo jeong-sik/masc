@@ -2168,6 +2168,15 @@ let internal_descriptors : t list =
       ~readonly:false
   ; task_descriptor
       ~capability_identity:Internal_name_identity
+      "cancel"
+      "keeper_task_cancel"
+      (* The name says cancel; the handler issues the cancel action, which
+         now waits for a verdict rather than ending the task on its own. A
+         keeper that finds the premise gone asks here; one that simply cannot
+         finish uses release beside it. *)
+      ~readonly:false
+  ; task_descriptor
+      ~capability_identity:Internal_name_identity
       "release"
       "keeper_task_release"
       (* The other half of the claim refusal: a keeper holding work it cannot

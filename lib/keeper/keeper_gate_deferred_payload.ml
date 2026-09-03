@@ -6,8 +6,12 @@ type t =
   ; context : Yojson.Safe.t option
   }
 
+(* The Keeper is the only thing that can say this out loud. Approval prompts
+   deliberately never reach chat connectors -- approval is offered on the
+   operator's own surface -- so for anyone talking to this Keeper elsewhere,
+   its own sentence is the only account of why the answer is not here yet. *)
 let message =
-  "External effect deferred without blocking this Keeper. Continue other work; the originating Keeper will wake after resolution."
+  "External effect deferred; nothing has run yet. This Keeper is not blocked, so continue other work in this same turn. If someone is waiting on an answer, tell them the call is parked for approval before you move on: your reply is the only place they see it. The host replays the parked call once the approval resolves, so do not call it again."
 ;;
 
 let create ~operation ~approval_id ~reason ~audit_receipts ?context () =

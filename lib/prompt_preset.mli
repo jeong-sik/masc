@@ -17,7 +17,7 @@ type snapshot =
   ; description : string
   ; created_at : string
   ; prompt_overrides : Prompt_override_persistence.entry list
-  ; instructions : (string * string) list  (** keeper name, instructions *)
+  ; instructions : (string * string) list  (** keeper TOML file name, instructions *)
   ; assignments : (string * string) list  (** keeper name, runtime id *)
   ; lanes : lane list
   }
@@ -43,7 +43,7 @@ type part_result =
   }
 
 type runtime_result =
-  | Runtime_unchanged  (** the preset's routing already matched the file *)
+  | Runtime_unchanged  (** the parsed routing already matched; the file was not touched *)
   | Runtime_committed  (** runtime.toml committed through [Runtime.save_config_text] *)
   | Runtime_failed of string
 
@@ -75,20 +75,26 @@ val load : base_path:string -> string -> (snapshot, string) result
 val list : base_path:string -> listing
 
 val restore : base_path:string -> string -> (restore_report, string) result
-(** Saves the current state as [_autosave-<stamp>], then applies the named
-    preset surface by surface. Only the load and the autosave can fail the
-    whole call; each surface reports what it applied and what it skipped. *)
+(** Saves the current state as [_autosave-<stamp>] (a free name is picked
+    if the stamp is taken), then applies the named preset surface by surface.
+    Only the load and the autosave can fail the whole call; each surface
+    reports what it applied and what it skipped. An override whose saved
+    contract revision no longer matches the prompt's current body is skipped
+    with that reason, as the boot-time restore would refuse it. *)
 
 val runtime_text_with :
   current_assignments:(string * string) list ->
+  current_lanes:lane list ->
   assignments:(string * string) list ->
   lanes:lane list ->
   string ->
   string
 (** The runtime.toml text with [\[runtime.assignments\]] set to
     [assignments] (rows for keepers in [current_assignments] but not in
-    [assignments] are removed) and each lane's [slots] / [cli_slots]
-    rewritten. Every other line is kept. Exposed for tests. *)
+    [assignments] are removed) and the [slots] / [cli_slots] of every lane
+    whose values differ from [current_lanes] rewritten. Every other line is
+    kept, including comment lines inside the arrays of lanes left alone.
+    Exposed for tests. *)
 
 val runtime_of_text : string -> ((string * string) list * lane list, string) result
 (** [\[runtime.assignments\]] and the exact-output lanes of a runtime.toml

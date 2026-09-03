@@ -13,7 +13,8 @@ let fresh () =
 
 let rows ?(now = origin) t = Transcript.status_rows ~now t
 
-let feed t deltas = List.iter (Transcript.apply t) deltas
+let feed ?(now = origin) t deltas =
+  List.iter (Transcript.apply ~now t) deltas
 
 let test_started_at_keeps_the_dispatch_instant () =
   let transcript = fresh () in
@@ -416,6 +417,26 @@ let test_control_bytes_never_reach_the_pane () =
   check bool "no escape survives in a status row" false
     (List.exists (fun (_, text) -> has_escape text) (rows t))
 
+(* The turn age says how long the whole turn has run; it keeps moving while a
+   single tool sits still. The call age is the one that stops. *)
+let test_the_row_says_how_long_the_open_call_has_been_open () =
+  let t = fresh () in
+  feed t [ Live.Run_started ];
+  feed ~now:(origin +. 10.) t
+    [ Live.Tool_started { occurrence = occurrence "call-1"; tool_name = "Execute" } ];
+  (match rows ~now:(origin +. 55.) t with
+   | (Transcript.Progress, text) :: _ ->
+     check bool "the call age is stated" true (contains ~needle:"in this call 45s" text);
+     check bool "the turn age is still stated" true (contains ~needle:"55s" text)
+   | got -> failf "expected a progress row, got %d rows" (List.length got));
+  (* Once the call ends there is no open call to age. *)
+  feed ~now:(origin +. 56.) t
+    [ Live.Tool_ended { occurrence = occurrence "call-1" } ];
+  match rows ~now:(origin +. 60.) t with
+  | (Transcript.Progress, text) :: _ ->
+    check bool "a finished call is not aged" false (contains ~needle:"in this call" text)
+  | got -> failf "expected a progress row, got %d rows" (List.length got)
+
 let test_progress_row_carries_the_turn_age () =
   let t = fresh () in
   (* Aged before RUN_STARTED too: a request that never reaches the run is the
@@ -623,7 +644,7 @@ let test_status_rows_grow_only_with_what_they_report () =
   Transcript.note_interrupt t (Transcript.Signal_sent { turn_id = None });
   check int "an interrupt adds one row" 2
     (List.length (rows t));
-  Transcript.apply t (Live.Undecodable "invalid JSON: x");
+  Transcript.apply ~now:origin t (Live.Undecodable "invalid JSON: x");
   check int "an unreadable line adds one more" 3
     (List.length (rows t))
 
@@ -1288,6 +1309,8 @@ let () =
             test_a_registered_length_name_passes_through_whole
         ; test_case "the progress row carries the turn age" `Quick
             test_progress_row_carries_the_turn_age
+        ; test_case "the row says how long the open call has been open" `Quick
+            test_the_row_says_how_long_the_open_call_has_been_open
         ] )
     ; ( "phase"
       , [ test_case "failure and finish are distinct" `Quick

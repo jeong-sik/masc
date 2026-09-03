@@ -82,6 +82,10 @@ type tool_projection =
    outcome from these two booleans. *)
 type live_tool_call =
   { local_id : int
+  ; started_at : float
+      (** When TOOL_CALL_START arrived. A turn age says how long the turn has
+          run; only this says whether the thing it is in right now has been
+          running that whole time. *)
   ; occurrence : Live.tool_occurrence
   ; call_id : string option
   ; execution_id : string option
@@ -721,7 +725,20 @@ let approval_outcome_to_string = function
   | Displaced -> "displaced"
   | Approval_other other -> safe_line other
 
-let phase_text t =
+(* The oldest call still open. Two calls in flight are rare and the older one
+   is the one a watcher is waiting on. *)
+let oldest_open_call t =
+  t.reversed_tool_calls
+  |> List.filter (fun (call : live_tool_call) -> not call.ended)
+  |> List.fold_left
+       (fun acc (call : live_tool_call) ->
+         match acc with
+         | Some (older : live_tool_call) when older.started_at <= call.started_at -> acc
+         | Some _ | None -> Some call)
+       None
+;;
+
+let phase_text ~now t =
   match t.phase with
   | Waiting -> (
       (* The wait before RUN_STARTED is the one an operator cannot read from
@@ -755,6 +772,17 @@ let phase_text t =
       (* A checkpoint means the turn ran out of context and carried on rather
          than stopping. An operator watching a turn take a long time is owed
          the difference between that and a stall. *)
+      let work =
+        (* The turn age alone cannot tell a slow tool from a stall. This says
+           how long the call it is sitting in has been open, which is the
+           number that stops moving when something is stuck. *)
+        match oldest_open_call t with
+        | None -> work
+        | Some call -> (
+          match Masc_tui_message_layout.age_text ~now ~since:call.started_at with
+          | None -> work
+          | Some age -> Printf.sprintf "%s · in this call %s" work age)
+      in
       if t.checkpoints = 0 then work
       else
         Printf.sprintf "%s, continued past %d context checkpoint(s)" work
@@ -797,8 +825,8 @@ let elapsed_text ~now t =
 
 let progress_text ~now t =
   match elapsed_text ~now t with
-  | None -> phase_text t
-  | Some age -> Printf.sprintf "%s · %s" (phase_text t) age
+  | None -> phase_text ~now t
+  | Some age -> Printf.sprintf "%s · %s" (phase_text ~now t) age
 
 (* The question, as an Attention row. It is the one row an operator has to act
    on, so it is styled like the others that need them rather than like
@@ -968,7 +996,7 @@ let apply_tool_result t ~(occurrence : Live.tool_occurrence) ~execution_id =
             "KEEPER_TOOL_RESULT_READY occurrence conflicted during update"))
 ;;
 
-let apply t (delta : Live.delta) =
+let apply ~now t (delta : Live.delta) =
   match delta with
   | Live.Run_started -> (
       match t.phase with
@@ -1030,6 +1058,7 @@ let apply t (delta : Live.delta) =
          t.next_tool_local_id <- local_id + 1;
          t.reversed_tool_calls <-
            { local_id
+           ; started_at = now
            ; occurrence
            ; call_id = occurrence.tool_call_id
            ; execution_id = None

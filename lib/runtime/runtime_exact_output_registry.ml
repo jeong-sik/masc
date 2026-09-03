@@ -22,26 +22,33 @@ type rejected_slot =
   { lane_id : string
   ; position : int
   ; slot_id : string
-  ; target_ref : string
   }
 
 type rejected_slot_diagnosis =
-  | Retired_catalog_target
-  | Configured_runtime_id of
+  | Declared_target_binding_rejected
+  | Configured_runtime_only of
       { provider_id : string
       ; api_name : string
       }
+  | Unknown_to_both_registries
 
-(* An exact lane resolves overlay [[targets]] ids only; a runtime.toml
-   runtime id is invisible to it even when both name the same model. The
-   two registries share a naming scheme, so an operator can write the wrong
-   one and read "absent from the frozen catalog" as the catalog having moved
-   on (verifier_exact, 2026-09-02). The lookup is injected because the
-   registry sits below [Runtime]. *)
-let diagnose_rejected_slot (slot : rejected_slot) ~configured_runtime =
-  match configured_runtime slot.slot_id with
-  | Some (provider_id, api_name) -> Configured_runtime_id { provider_id; api_name }
-  | None -> Retired_catalog_target
+(* An exact lane admits overlay [[targets]] ids; a runtime.toml runtime id
+   is invisible to it even when both name the same model, and the two
+   registries share a naming scheme, so an operator can write the wrong one
+   and read "absent from the frozen catalog" as the catalog having moved on
+   (verifier_exact, 2026-09-02). A declared target whose provider binding was
+   rejected also lands here, since the resolver drops it from the admitted
+   set; that case is named first so it is not mistaken for a runtime id that
+   happens to share the string. The runtime lookup is injected because the
+   registry sits below [Runtime]; the binding verdict comes from the
+   snapshot the registry already holds. *)
+let classify_rejected_slot (slot : rejected_slot) ~declared_target_rejected ~configured_runtime =
+  if declared_target_rejected slot.slot_id
+  then Declared_target_binding_rejected
+  else (
+    match configured_runtime slot.slot_id with
+    | Some (provider_id, api_name) -> Configured_runtime_only { provider_id; api_name }
+    | None -> Unknown_to_both_registries)
 ;;
 
 type t =
@@ -142,14 +149,13 @@ let admit_lane_slots resolver_snapshot admitted_by_id
               Error
                 (Invalid_lane_slot
                    { lane_id = lane.id; position; slot_id; cause })
-            | Error (Exact_output.Target_not_in_catalog target_ref) ->
+            | Error (Exact_output.Target_not_in_catalog _) ->
               loop
                 (position + 1)
                 (String_set.add slot_id seen)
                 admitted_by_id
                 admitted_slots
-                ({ lane_id = lane.id; position; slot_id; target_ref }
-                 :: rejected_slots)
+                ({ lane_id = lane.id; position; slot_id } :: rejected_slots)
                 rest
             | Ok admitted_target ->
               loop
@@ -386,6 +392,17 @@ let abort_replacement reservation =
 ;;
 let rejected_slots registry = registry.rejected_slots
 
+let diagnose_rejected_slot registry (slot : rejected_slot) ~configured_runtime =
+  let rejected_bindings =
+    Exact_output.resolver_rejected_target_bindings registry.resolver_snapshot
+    |> List.map (fun (binding : Exact_output.rejected_target_binding) -> binding.target_ref)
+  in
+  classify_rejected_slot
+    slot
+    ~declared_target_rejected:(fun slot_id -> List.mem slot_id rejected_bindings)
+    ~configured_runtime
+;;
+
 (* Keeper assignments whose target left the frozen catalog. These do not
    reject a lane slot — the assignment just silently stops resolving and the
    keeper falls through to the default runtime — which is exactly why they
@@ -476,6 +493,7 @@ let reservation_error_to_string = function
 ;;
 
 module For_testing = struct
+  let classify_rejected_slot = classify_rejected_slot
   type nonrec reservation = reservation
   type nonrec reservation_error = reservation_error = Reservation_inactive
 

@@ -69,3 +69,30 @@ items = { type = "string" }
 name = "verify_gate_evidence"
 type = "array"
 items = { type = "string" }
+
+[agent_core_projection]
+description = "Create multiple tasks at once for planner-driven decomposition."
+additional_properties = false
+
+[[agent_core_projection.params]]
+name = "tasks"
+type = "array"
+required = true
+description = "Array of {title, description} task objects"
+min_items = 1
+
+[agent_core_projection.params.items]
+type = "object"
+additional_properties = false
+
+[[agent_core_projection.params.items.params]]
+name = "title"
+type = "string"
+required = true
+description = "Task title"
+
+[[agent_core_projection.params.items.params]]
+name = "description"
+type = "string"
+required = true
+description = "Task description"

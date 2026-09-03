@@ -177,9 +177,27 @@ let registered_surfaces () =
   | _ -> []
 ;;
 
+(* The registered template_variables of one key; [None] when unregistered. *)
+let registered_variables key =
+  match Prompt_registry.prompts_json () with
+  | `Assoc [ ("prompts", `List prompts) ] ->
+    List.find_map
+      (function
+        | `Assoc fields -> (
+          match (List.assoc_opt "key" fields, List.assoc_opt "template_variables" fields) with
+          | Some (`String k), Some (`List vars) when String.equal k key ->
+            Some
+              (List.filter_map
+                 (function `String v -> Some v | _ -> None)
+                 vars)
+          | _ -> None)
+        | _ -> None)
+      prompts
+  | _ -> None
+;;
+
 let group_fixture =
-  {|
----
+  {|---
 description: group fragments for the slot test
 category: test
 ---
@@ -225,8 +243,7 @@ let test_fragment_group_slots () =
 ;;
 
 let body_and_slots_fixture =
-  {|
----
+  {|---
 description: a main body that also carries slots
 category: test
 operator_surface: primary
@@ -258,18 +275,43 @@ let test_heading_only_body_is_prose () =
   with_prompts_dir
     [ ( "test.heading.md",
         "---\ndescription: a heading-only body\ncategory: test\n---\n\n### Skills Named by Tasks You Hold\n"
+      )
+    ; ( "test.oneword.md",
+        "---\ndescription: a one-word capitalised heading\ncategory: test\n---\nIntro.\n\n### Summary\nText.\n"
       ) ]
     (fun () ->
       let surfaces = registered_surfaces () in
       check string "the heading is the prompt's own body"
         "### Skills Named by Tasks You Hold"
-        (Prompt_registry.get_prompt "test.heading");
+        (String.trim (Prompt_registry.get_prompt "test.heading"));
       check bool "the file key is registered" true
         (List.mem_assoc "test.heading" surfaces);
       check bool "no slot key is minted from the heading" false
         (List.exists
            (fun (key, _) -> String.starts_with ~prefix:"test.heading." key)
+           surfaces);
+      check string "a capitalised one-word heading is prose"
+        "Intro.\n\n### Summary\nText."
+        (String.trim (Prompt_registry.get_prompt "test.oneword"));
+      check bool "no slot key is minted from a capitalised heading" false
+        (List.exists
+           (fun (key, _) -> String.starts_with ~prefix:"test.oneword." key)
            surfaces))
+;;
+
+let test_duplicate_and_empty_slots () =
+  let open Alcotest in
+  with_prompts_dir
+    [ ( "test.dup.md",
+        "---\ndescription: repeated and empty markers\ncategory: test\n---\n### a (vars: x)\nA {{x}}\n\n### a\nB\n\n### b\n"
+      ) ]
+    (fun () ->
+      check string "the first paragraph of a repeated marker stands" "A {{x}}"
+        (Prompt_registry.get_prompt "test.dup.a");
+      check (option (list string)) "its variables come from the same paragraph"
+        (Some [ "x" ]) (registered_variables "test.dup.a");
+      check (option (list string)) "a marker without a paragraph is not registered"
+        None (registered_variables "test.dup.b"))
 ;;
 
 let () =
@@ -282,7 +324,9 @@ let () =
         ; test_case "prose before the first marker registers under the group key"
             `Quick test_group_body_registers_under_group_key
         ; test_case "a heading-only body is prose, not a slot" `Quick
-            test_heading_only_body_is_prose ] );
+            test_heading_only_body_is_prose
+        ; test_case "a repeated marker keeps its first paragraph and an empty one is skipped"
+            `Quick test_duplicate_and_empty_slots ] );
       ( "registration",
         [
           (* Guards the count assertion below: a bulk key rename that maps two

@@ -64,6 +64,24 @@ let replace
     ()
 ;;
 
+let apply_disposition
+      ~keepers_dir
+      ?dropped_statements
+      ?(retained_memory_ids = [])
+      ?(new_claims = [])
+      ()
+  =
+  Current.apply_disposition
+    ?dropped_statements
+    ~keepers_dir
+    ~keeper_id:"keeper"
+    ~now:200.0
+    ~source:(source Current.Librarian)
+    ~retained_memory_ids
+    ~new_claims
+    ()
+;;
+
 let require_ok = function
   | Ok value -> value
   | Error message -> fail message
@@ -1537,6 +1555,68 @@ let test_board_reference_outranks_transcript_on_merge () =
      = board)
 ;;
 
+
+(* The live shape of masc #32859. A librarian pass reads the snapshot, spends a
+   provider round trip deciding what to keep, and writes. The keeper it belongs
+   to records one fact of its own in that window. Both are the same keeper's
+   work and neither contradicts the other: the librarian's disposition never
+   mentions the new fact, because the librarian never saw it.
+
+   Measured on the fleet before this test existed: 758 librarian passes ended
+   this way, 590 of them in one week, and every one threw away a completed
+   provider turn. No test contended the lock at all. *)
+let test_a_keeper_write_during_a_librarian_pass_keeps_both () =
+  with_temp_keepers (fun keepers_dir ->
+    let curated = fact ~claim:"the librarian read this one" () in
+    let base =
+      replace ~keepers_dir ~facts:[ curated ] () |> require_ok
+    in
+    (* The librarian is now thinking, holding [base.revision]. *)
+    let librarian_read_revision = base.revision in
+    (* The keeper records something of its own meanwhile. *)
+    let authored = fact ~claim:"the keeper wrote this meanwhile" () in
+    let after_keeper =
+      Current.upsert_fact
+        ~keepers_dir
+        ~keeper_id:"keeper"
+        ~now:250.0
+        ~source:(source Current.Explicit_write)
+        authored
+      |> function
+      | Ok snapshot -> snapshot
+      | Error _ -> fail "the keeper's own write must not fail"
+    in
+    check int "the keeper's write advanced the revision"
+      (librarian_read_revision + 1)
+      after_keeper.revision;
+    (* The old write demanded the revision it read. It fails closed, which is
+       correct for a whole-set write and is why the pass was lost. *)
+    (match
+       replace
+         ~keepers_dir
+         ~expected_revision:(Some librarian_read_revision)
+         ~facts:[ curated ]
+         ()
+     with
+     | Ok _ -> fail "a whole-set write must not overwrite a moved revision"
+     | Error detail ->
+       check bool "and it says why" true
+         (String_util.contains_substring detail "revision conflict"));
+    (* The decision itself carries no such demand: keep the one fact it saw,
+       and say nothing about the one it never saw. *)
+    let committed =
+      apply_disposition
+        ~keepers_dir
+        ~retained_memory_ids:[ Types.memory_id curated ]
+        ()
+      |> require_ok
+    in
+    check (list string)
+      "both the curated fact and the one written during the pass survive"
+      (List.sort compare (fact_ids [ curated; authored ]))
+      (List.sort compare (fact_ids committed.facts)))
+;;
+
 let () =
   run
     "keeper_memory_os_current"
@@ -1719,6 +1799,10 @@ let () =
             "unexpected top-level field"
             `Quick
             test_rejection_names_an_unexpected_top_level_field
+        ; test_case
+            "a keeper writing during a librarian pass"
+            `Quick
+            test_a_keeper_write_during_a_librarian_pass_keeps_both
         ] )
     ]
 ;;

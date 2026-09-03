@@ -817,19 +817,26 @@ let run_best_effort
                    messages=%d (registered input shows the full material)"
                   count);
 
+             (* The decision goes to the store, not the whole set it projects
+                to. [selection.facts] is that projection, taken against the
+                snapshot this pass read before its provider turn; writing it
+                required nothing to have changed since, and a keeper recording
+                one fact of its own in that window ended the pass (masc
+                #32859). The decision itself has no such requirement: a fact it
+                never mentions is one it never saw. *)
              let+ snapshot =
-               Keeper_memory_os_current.replace
+               Keeper_memory_os_current.apply_disposition
                ~clock
                ~dropped_statements:selection.dropped
                ~keepers_dir
                ~keeper_id
-               ~expected_revision
                ~now:(Time_compat.now ())
                ~source:
                  { kind = Keeper_memory_os_current.Librarian
                  ; trace_id = input_trace_id inp
                  }
-               ~facts:selection.facts
+               ~retained_memory_ids:selection.retained_memory_ids
+               ~new_claims:selection.new_claims
                ()
              |> Result.map_error (fun detail ->
                Memory_snapshot_write_failed { detail; selected_slot })

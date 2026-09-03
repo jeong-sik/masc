@@ -9,7 +9,11 @@
     retains only blocks the Markdown renderer marked closed. [identity] says
     which entry owns either result, while [theme_revision] and
     [palette_generation] reserve the two visual inputs whose runtime owners can
-    change independently of the source. *)
+    change independently of the source.
+
+    Identities are hashed and compared structurally: the store finds an entry
+    by its identity in one step rather than by walking what it holds, which is
+    what lets the bound be large enough for a scrolled transcript. *)
 
 type 'identity source =
   | Stable_source of {
@@ -22,8 +26,7 @@ type 'identity source =
 
 type 'identity t
 
-val create :
-  capacity:int -> equal:('identity -> 'identity -> bool) -> 'identity t
+val create : capacity:int -> 'identity t
 (** Create a cache retaining at most [capacity] completed entries and, in a
     separate bound, at most [capacity] growing entries. Within each kind, an
     identity owns one result, so a new width, source, theme revision, or palette

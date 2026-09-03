@@ -616,18 +616,8 @@ let transcript count =
 
 let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =
   let rendered = ref [] in
-  let equal_identity
-      (left_keeper, left_request, left_at, left_index)
-      (right_keeper, right_request, right_at, right_index) =
-    String.equal left_keeper right_keeper
-    && String.equal left_request right_request
-    && Float.equal left_at right_at
-    && left_index = right_index
-  in
   let cache_capacity = 2 in
-  let cache =
-    Markdown_cache.create ~capacity:cache_capacity ~equal:equal_identity
-  in
+  let cache = Markdown_cache.create ~capacity:cache_capacity in
   let markdown ~(entry : Layout.entry) ~width =
     let source =
       match entry.markdown_source with

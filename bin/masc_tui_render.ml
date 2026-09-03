@@ -270,7 +270,17 @@ let board_document_markdown ~width body =
    generation travels separately because only a user row's ambient terminal
    background changes its closing strings. *)
 let chat_markdown_theme_revision = 1
-let chat_markdown_cache_capacity = 128
+
+(* Large enough to hold what a scrolled pane walks.
+
+   A frame lays out the newest [scroll + height] rows, so reading back through
+   a long turn walks hundreds of messages and asks this cache for each. At a
+   hundred and twenty-eight the walk evicted its own earlier answers before
+   the next frame asked for them again, and every notch of the wheel rendered
+   the same messages over: the pane's worst frames were spent here. The store
+   finds an entry by its identity rather than by walking, so a bound this size
+   costs a hash per lookup and the memory of the rows themselves. *)
+let chat_markdown_cache_capacity = 1024
 
 
 type chat_markdown_identity = {
@@ -281,16 +291,8 @@ type chat_markdown_identity = {
   cmi_entry_index : int;
 }
 
-let equal_chat_markdown_identity left right =
-  left.cmi_style = right.cmi_style
-  && String.equal left.cmi_keeper_name right.cmi_keeper_name
-  && String.equal left.cmi_request_id right.cmi_request_id
-  && Option.equal Float.equal left.cmi_observed_at right.cmi_observed_at
-  && left.cmi_entry_index = right.cmi_entry_index
-
 let chat_markdown_cache =
   Markdown_cache.create ~capacity:chat_markdown_cache_capacity
-    ~equal:equal_chat_markdown_identity
 
 let chat_markdown_streaming ~context ~width body =
   Markdown.render_streaming

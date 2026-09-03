@@ -22,6 +22,14 @@ type t =
   | View_image_missing_path
   | Attach_image of string
   | Attach_image_missing_path
+  | Preset_list
+  | Preset_save of {
+      name : string;
+      description : string;
+    }
+  | Preset_save_missing_name
+  | Preset_restore of string
+  | Preset_restore_missing_name
   | Unknown of string
 
 (* One list, drawn by /help and kept beside the parser so a new command
@@ -81,6 +89,10 @@ let catalog =
   ; { word = "attach"
     ; args = "<path>"
     ; summary = "stage an image to send with the next keeper message"
+    }
+  ; { word = "preset"
+    ; args = "[save <name> [description] | restore <name>]"
+    ; summary = "list prompt presets; save the live state; restore one (autosaves first)"
     }
   ; { word = "help"; args = ""; summary = "this list" }
   ]
@@ -156,6 +168,16 @@ let parse text =
     | "image", path -> View_image path
     | "attach", "" -> Attach_image_missing_path
     | "attach", path -> Attach_image path
+    | "preset", "" -> Preset_list
+    | "preset", rest -> (
+        match split_word rest with
+        | "save", "" -> Preset_save_missing_name
+        | "save", name_and_description ->
+            let name, description = split_word name_and_description in
+            Preset_save { name; description }
+        | "restore", "" -> Preset_restore_missing_name
+        | "restore", name -> Preset_restore name
+        | verb, _ -> Unknown ("preset " ^ verb))
     | word, _ -> Unknown word
 
 type hint =

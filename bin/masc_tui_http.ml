@@ -2116,6 +2116,27 @@ let post_prompt_clear ~(host : string) ~(port : int) ~(key : string)
       (Yojson.Safe.to_string
          (`Assoc [ ("key", `String key); ("action", `String "clear") ]))
 
+(** GET /api/v1/presets — the prompt presets under <base>/.masc/presets, as
+    manifests, plus the directories whose manifest did not read. *)
+let fetch_presets ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/presets"
+
+(** POST /api/v1/presets — body {name, description}: snapshot the live
+    prompt overrides, keeper instructions and runtime routing under [name]. *)
+let post_preset_save ~(host : string) ~(port : int) ~(name : string)
+    ~(description : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port ~path:"/api/v1/presets"
+    ~body:
+      (Yojson.Safe.to_string
+         (`Assoc [ ("name", `String name); ("description", `String description) ]))
+
+(** POST /api/v1/presets/restore — body {name}: the server autosaves the live
+    state, applies the preset surface by surface, and answers a report. *)
+let post_preset_restore ~(host : string) ~(port : int) ~(name : string)
+    : (Yojson.Safe.t, string) result =
+  post_json ~host ~port ~path:"/api/v1/presets/restore"
+    ~body:(Yojson.Safe.to_string (`Assoc [ ("name", `String name) ]))
+
 (** POST /api/v1/gate/connector/bind?name= — body {channel_id, keeper_name}. *)
 let post_connector_bind ~(host : string) ~(port : int) ~(connector : string)
     ~(body_json : string) : (Yojson.Safe.t, string) result =

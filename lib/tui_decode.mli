@@ -1565,6 +1565,52 @@ val prompt_rows_for_operator : show_fragments:bool -> prompts_snapshot -> prompt
 
 val decode_prompts : Yojson.Safe.t -> (prompts_snapshot, string) result
 
+(** {2 Prompt presets} — [/api/v1/presets] (#32777). *)
+
+type preset_manifest = {
+  pm_name : string;
+  pm_description : string;
+  pm_created_at : string;
+  pm_override_count : int;
+  pm_keepers : string list;
+  pm_assignment_count : int;
+  pm_lane_count : int;
+}
+
+type presets_snapshot = {
+  pss_presets : preset_manifest list;
+  pss_unreadable : (string * string) list;
+      (** directory name, why its manifest did not read *)
+}
+
+type preset_part = {
+  pp_effect : string;  (** when the surface takes effect, as the server names it *)
+  pp_applied : string list;
+  pp_skipped : (string * string) list;  (** key, reason *)
+}
+
+type preset_runtime_status =
+  | Preset_runtime_unchanged
+  | Preset_runtime_committed
+  | Preset_runtime_failed of string
+
+type preset_restore_report = {
+  prr_restored : string;
+  prr_autosave : string;
+  prr_prompt_overrides : preset_part;
+  prr_instructions : preset_part;
+  prr_runtime : preset_runtime_status;
+}
+
+val decode_presets : Yojson.Safe.t -> (presets_snapshot, string) result
+(** GET /api/v1/presets. An [{ok:false, error}] body is the error. *)
+
+val decode_preset_saved : Yojson.Safe.t -> (preset_manifest, string) result
+(** POST /api/v1/presets — the manifest of the preset just written. *)
+
+val decode_preset_restore : Yojson.Safe.t -> (preset_restore_report, string) result
+(** POST /api/v1/presets/restore — the per-surface report. *)
+
 val decode_latest_librarian_run_id : Yojson.Safe.t -> (string, string) result
 (** Read the first Librarian row from the newest-first exact-lane summary. The
     summary has no payload; callers use this id for one lazy detail read. *)

@@ -1366,6 +1366,27 @@ let load_prompts ~(host : string) ~(port : int) :
   | Error err -> Error ("prompts load failed: " ^ err)
   | Ok json -> Tui_decode.decode_prompts json
 
+(** The prompt presets from /api/v1/presets. *)
+let load_presets ~(host : string) ~(port : int) :
+    (Tui_decode.presets_snapshot, string) result =
+  match Masc_tui_http.fetch_presets ~host ~port with
+  | Error err -> Error ("presets load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_presets json
+
+(** POST /api/v1/presets — the manifest the server wrote. *)
+let save_preset ~(host : string) ~(port : int) ~(name : string) ~(description : string)
+    : (Tui_decode.preset_manifest, string) result =
+  match Masc_tui_http.post_preset_save ~host ~port ~name ~description with
+  | Error err -> Error ("preset save failed: " ^ err)
+  | Ok json -> Tui_decode.decode_preset_saved json
+
+(** POST /api/v1/presets/restore — the per-surface report. *)
+let restore_preset ~(host : string) ~(port : int) ~(name : string)
+    : (Tui_decode.preset_restore_report, string) result =
+  match Masc_tui_http.post_preset_restore ~host ~port ~name with
+  | Error err -> Error ("preset restore failed: " ^ err)
+  | Ok json -> Tui_decode.decode_preset_restore json
+
 (* The fleet reading answers what the keeper list cannot: a keeper that never
    started has no row, so the roster shows nine keepers whether the tenth is
    absent by design or blocked. *)

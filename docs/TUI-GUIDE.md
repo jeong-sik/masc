@@ -606,6 +606,21 @@ running for one keeper does not decide what `Enter` does in another's window;
 sends going elsewhere show as `(also sending to X)`. Drafts are retained per
 keeper while navigating.
 
+#### Prompt presets
+
+`/preset` lists the prompt presets the server holds under `.masc/presets`:
+one line per preset with its counts (prompt overrides, keepers with
+instructions, runtime assignments, exact-output lanes), its description, and
+when it was saved; a directory whose manifest does not read gets a `!` line.
+`/preset save <name> [description]` snapshots the live state under that name.
+`/preset restore <name>` saves the live state first (the report names that
+autosave), then applies the preset surface by surface and reports each one:
+prompt overrides take effect at once, keeper instructions at each keeper's
+next up, and runtime routing through a runtime.toml commit. Every skipped key
+is listed with its reason, and a restore that skipped anything or whose
+commit failed is shown as an error. The three answers land in the chat pane
+of the keeper selected when the command was typed.
+
 #### Context inspector
 
 `/context` opens three readings for the selected Keeper: `1:stack` summarizes

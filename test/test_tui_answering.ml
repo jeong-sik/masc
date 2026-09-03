@@ -288,6 +288,97 @@ let test_elapsed_and_duration_agree () =
     (Masc_tui_answering.elapsed_text ~now:41989. 0.)
 ;;
 
+(* Whether the screen animates at all. Three readings can say a turn is being
+   worked, the mark is drawn against all three, and the counter behind it has
+   to advance for any of them -- a mark frozen on the still glyph while an
+   answer streams says the keeper stopped. *)
+
+let idle_lane ~lane_id : Tui_decode.standalone_lane =
+  { Tui_decode.sl_lane_id = lane_id
+  ; sl_label = lane_id
+  ; sl_purpose = None
+  ; sl_required = false
+  ; sl_status = Tui_decode.Standalone_idle
+  ; sl_configuration_state = "ready"
+  ; sl_admitted_slots = []
+  ; sl_cli_slots = []
+  ; sl_dropped_slots = []
+  ; sl_admission_error = None
+  ; sl_retained_run_count = 0
+  ; sl_running_count = 0
+  ; sl_succeeded_count = 0
+  ; sl_failed_count = 0
+  ; sl_cancelled_count = 0
+  ; sl_last_started_at = None
+  ; sl_last_terminal_at = None
+  ; sl_last_outcome = None
+  ; sl_p50_elapsed_s = None
+  ; sl_selected_slots = []
+  }
+;;
+
+let lanes_snapshot lanes : Tui_decode.standalone_lanes_snapshot =
+  { Tui_decode.sls_observed_at_unix = 0.
+  ; sls_exact_run_projection_count = 0
+  ; sls_exact_run_source_total = 0
+  ; sls_exact_run_projection_truncated = false
+  ; sls_lanes = lanes
+  }
+;;
+
+let animating ?(turns = []) ?(live_transcript = false) ?lanes () =
+  Masc_tui_answering.anything_running ~turns ~live_transcript ~lanes
+;;
+
+let test_a_quiet_screen_does_not_animate () =
+  Alcotest.(check bool) "nothing at all" false (animating ());
+  Alcotest.(check bool)
+    "an idle keeper and an idle lane" false
+    (animating
+       ~turns:[ row "delta" Tui_decode.Keeper_turn_idle ]
+       ~lanes:(lanes_snapshot [ idle_lane ~lane_id:"librarian_exact" ])
+       ());
+  Alcotest.(check bool)
+    "an unavailable keeper is not a working one" false
+    (animating
+       ~turns:[ row "delta" (Tui_decode.Keeper_turn_unavailable "no owner") ]
+       ())
+;;
+
+let test_each_source_alone_starts_the_mark () =
+  Alcotest.(check bool)
+    "a polled turn" true
+    (animating
+       ~turns:
+         [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:1. "echo" ]
+       ());
+  Alcotest.(check bool)
+    "a standalone lane" true
+    (animating
+       ~lanes:
+         (lanes_snapshot
+            [ { (idle_lane ~lane_id:"librarian_exact") with
+                Tui_decode.sl_status = Tui_decode.Standalone_running
+              }
+            ])
+       ());
+  (* The one that was missing. The observer feed opens a transcript before the
+     next poll returns the row for it, and the chat pane draws the mark
+     against the feed. *)
+  Alcotest.(check bool)
+    "a live transcript, with the polled rows still idle" true
+    (animating ~live_transcript:true
+       ~turns:[ row "delta" Tui_decode.Keeper_turn_idle ]
+       ~lanes:(lanes_snapshot [ idle_lane ~lane_id:"librarian_exact" ])
+       ())
+;;
+
+let test_lanes_that_were_never_loaded_are_not_running () =
+  Alcotest.(check bool)
+    "an absent snapshot claims nothing" false
+    (animating ~turns:[ row "delta" Tui_decode.Keeper_turn_idle ] ())
+;;
+
 let () =
   Alcotest.run "tui_answering"
     [ ( "duration"
@@ -307,6 +398,14 @@ let () =
             test_every_frame_is_one_cell
         ; Alcotest.test_case "the overlay wears the same mark" `Quick
             test_the_overlay_wears_the_same_mark
+        ] )
+    ; ( "animating at all"
+      , [ Alcotest.test_case "a quiet screen does not animate" `Quick
+            test_a_quiet_screen_does_not_animate
+        ; Alcotest.test_case "each source alone starts the mark" `Quick
+            test_each_source_alone_starts_the_mark
+        ; Alcotest.test_case "lanes that were never loaded are not running"
+            `Quick test_lanes_that_were_never_loaded_are_not_running
         ] )
     ; ( "tui-answering"
       , [ Alcotest.test_case "running rows lead with the chat target" `Quick

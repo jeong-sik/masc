@@ -16092,8 +16092,9 @@ and is loaded on demand through keeper_skill.
        | Render_schedule.Render when Option.is_some state.image_open -> ()
        | Render_schedule.Render ->
            let frame, clamped, approval =
-             Masc_tui_frame_timing.time Masc_tui_frame_timing.Build (fun () ->
-               render state)
+             Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
+               ~tag:(fun (frame, _, _) -> frame.Frame_presenter.surface_key)
+               (fun () -> render state)
            in
            (* The frame is what the operator will act on next, so the scroll it
               had to clamp is the scroll the next keypress moves from. Applied
@@ -16105,8 +16106,9 @@ and is loaded on demand through keeper_skill.
              Terminal_title.present terminal_title ~write:(output_string stdout)
                ~flush:(fun () -> flush stdout)
                (terminal_title_snapshot state);
-           Masc_tui_frame_timing.time Masc_tui_frame_timing.Present (fun () ->
-             present_frame frame approval)
+           Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Present
+             ~tag:(fun () -> frame.Frame_presenter.surface_key)
+             (fun () -> present_frame frame approval)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

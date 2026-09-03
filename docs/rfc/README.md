@@ -287,6 +287,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-spawn-a-process-that-outlives-the-call | Spawn: a process that outlives the call | Draft | - |
 | RFC-tool-results-age-out-of-context | 도구 결과는 만든 턴에서만 원문이다 — 컴팩션을 걷어낸 뒤 남은 누적을 닫는다 | Draft | - |
 | RFC-tools-as-shell-commands | 도구를 셸 first-class 커맨드로 — 순차 결합의 provider 왕복을 없앤다 | Draft | - |
+| RFC-tui-frame-budget | TUI 프레임 예산 — 모든 화면에서 build p99 8ms, 입력→화면 p99 20ms | Draft | - |
 | RFC-tui-operator-ia | TUI 정보 구조 재설계 — 18탭을 숫자 키 10개로 접고, Keeper 워크벤치를 중심 화면으로 | Draft | - |
 | RFC-tui-server-lifecycle | TUI 안에서 서버를 켠다 — opt-in 온디맨드 서버 시작으로 TUI 를 기본 진입점으로 | Draft | - |
 | RFC-turn-failure-visible-stop | 턴 실패를 숨기지 않고 상태로 보여준다 — 실패 면제와 예산 계정을 걷어낸다 | Implemented | - |

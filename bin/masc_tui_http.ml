@@ -2151,11 +2151,22 @@ let post_preset_save ~(host : string) ~(port : int) ~(name : string)
 
 (** POST /api/v1/presets/restore — body {name}: the server autosaves the live
     state, applies the preset surface by surface, and answers a report. *)
+(* A restore is a write, so a transport failure is not a refusal: the server
+   may have finished it. The two are separated here because only this layer
+   knows which one happened, and the operator's next move differs — a refusal
+   is retried, an unknown outcome is read off the preset list first. *)
 let post_preset_restore ~(host : string) ~(port : int) ~(name : string)
-    : (Yojson.Safe.t, string) result =
-  post_json_with_timeout ~timeout_sec:preset_restore_timeout_sec ~host ~port
-    ~path:"/api/v1/presets/restore"
-    ~body:(Yojson.Safe.to_string (`Assoc [ ("name", `String name) ]))
+    : (Yojson.Safe.t, [ `Refused of string | `Unknown_outcome of string ]) result =
+  match
+    http_post_with_timeout ~timeout_sec:preset_restore_timeout_sec
+      ~headers:(auth_headers ()) ~host ~port ~path:"/api/v1/presets/restore"
+      ~body:(Yojson.Safe.to_string (`Assoc [ ("name", `String name) ]))
+  with
+  | Error transport -> Error (`Unknown_outcome transport)
+  | Ok (status_code, body) -> (
+    match decode_json ~allow_empty:true ~status_code ~body with
+    | Ok json -> Ok json
+    | Error message -> Error (`Refused message))
 
 (** POST /api/v1/gate/connector/bind?name= — body {channel_id, keeper_name}. *)
 let post_connector_bind ~(host : string) ~(port : int) ~(connector : string)

@@ -6542,7 +6542,20 @@ let decode_string_list json key =
   |> Result.map List.rev
 ;;
 
+(* The server writes [schema_version] and refuses to read any value but its
+   own (prompt_preset.ml). A reader that ignores it would draw a future
+   manifest as whatever subset it recognises. *)
+let preset_manifest_schema_version = 1
+
 let decode_preset_manifest json =
+  let* schema_version = required_int_field json "schema_version" in
+  let* () =
+    if schema_version = preset_manifest_schema_version then Ok ()
+    else
+      Error
+        (Printf.sprintf "preset manifest schema_version %d, this build reads %d"
+           schema_version preset_manifest_schema_version)
+  in
   let* pm_name = required_string_field json "name" in
   let* pm_description = required_string_field json "description" in
   let* pm_created_at = required_string_field json "created_at" in

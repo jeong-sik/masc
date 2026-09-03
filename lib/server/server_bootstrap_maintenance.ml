@@ -241,6 +241,15 @@ let durable_demand_recovery_action = function
       (Keeper_activation_readiness.owner_execution_truth_to_wire retained)
 ;;
 
+(* Recovery passes that retained a non-executable owner, per keeper+reason.
+   Purely per process; see the retained arm below. Declared before
+   [recover_projected_durable_demand_owner], which reads it. *)
+let retained_owner_passes : (string, int) Hashtbl.t = Hashtbl.create 8
+
+(* One pass a minute means 1440 is about a day. The pass that lands exactly
+   on a full day warns; the rest stay quiet. Exposed for the suite. *)
+let retention_becomes_warning (count : int) = count > 0 && count mod 1440 = 0
+
 let recover_projected_durable_demand_owner
       (ctx : _ Keeper_types_profile.context)
       (projection : Keeper_event_queue_recovery.owner_projection)
@@ -414,16 +423,8 @@ let recover_projected_durable_demand_owner
                " — paused beyond a day of recovery passes; only an operator \
                 resume clears this (POST /api/v1/keepers_bulk/directive, \
                 action=resume)"
-             else ""))
+             else "")))
 ;;
-
-(* Recovery passes that retained a non-executable owner, per keeper+reason.
-   Purely per process; see the retained arm below. *)
-let retained_owner_passes : (string, int) Hashtbl.t = Hashtbl.create 8
-
-(* One pass a minute means 1440 is about a day. The pass that lands exactly
-   on a full day warns; the rest stay quiet. Exposed for the suite. *)
-let retention_becomes_warning (count : int) = count > 0 && count mod 1440 = 0
 
 let consume_owner_projection_batch
       ~commit_cursor

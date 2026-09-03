@@ -15,14 +15,23 @@ type cell = private {
   width : int;
   align : align;
   value : string;
+  style : string;
 }
 (** One column at one row: what it is called, how many cells it may occupy, how
     it sits in them, and what this row puts there. Private so a cell cannot be
     assembled without a header and a width -- the pairing is the point. *)
 
-val cell : ?align:align -> header:string -> width:int -> string -> cell
+val cell :
+  ?align:align -> ?style:string -> header:string -> width:int -> string -> cell
 (** [cell ~header ~width value] describes one column carrying [value].
-    [align] defaults to {!Left}; numbers usually want {!Right}. *)
+    [align] defaults to {!Left}; numbers usually want {!Right}.
+
+    [style] dresses this cell's reading and nothing else -- an ANSI prefix the
+    caller owns, closed after the cell. It is how one deviating reading is
+    coloured without colouring the row: a keeper that is late says so in its
+    state cell and in the reading that measures how late, while the rest of
+    the row stays the colour the caller gave the line. Column names never take
+    it; a header is not a reading. *)
 
 val used_width : gap:int -> cell list -> int
 (** Cells the row occupies, the [gap] between columns included. *)
@@ -30,7 +39,12 @@ val used_width : gap:int -> cell list -> int
 val header_row : gap:int -> cell list -> string
 (** The column names, laid out on the given cells. *)
 
-val row : gap:int -> cell list -> string
+val row : gap:int -> ?close:string -> cell list -> string
 (** One row's readings, laid out on the same cells as {!header_row}. A reading
     past its width folds in the middle; it never widens its column, so a row is
-    exactly as wide as the header above it whatever it carries. *)
+    exactly as wide as the header above it whatever it carries -- styled cells
+    included, since the escapes occupy no display cells.
+
+    [close] ends a styled cell and defaults to a plain reset. Pass the line's
+    own dress when the row sits inside one, or the cells after a coloured one
+    come out undressed. *)

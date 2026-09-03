@@ -100,6 +100,51 @@ let test_a_dropped_column_leaves_both_lines () =
   check int "and both lines shrink together" (width header)
     (width (Table.row ~gap without_size))
 
+(* A dressed cell occupies the same display cells as an undressed one: the
+   escapes have no width, so colouring one reading cannot move the column after
+   it. This is what lets a row say which of its readings deviates without the
+   layout depending on whether anything did. *)
+let test_a_styled_cell_occupies_no_extra_cells () =
+  let gap = 2 in
+  let plain = columns () in
+  let dressed =
+    [ Table.cell ~header:"KEEPER" ~width:16 "kidsnote"
+    ; Table.cell ~align:Table.Right ~style:"\027[33m" ~header:"FACTS" ~width:5
+        "139"
+    ; Table.cell ~align:Table.Right ~header:"SIZE" ~width:9 "94.4 KB"
+    ]
+  in
+  check int "a dressed row is as wide as a plain one"
+    (width (Table.row ~gap plain))
+    (width (Table.row ~gap dressed));
+  check int "and as wide as the header"
+    (width (Table.header_row ~gap dressed))
+    (width (Table.row ~gap dressed));
+  check bool "the dress reaches the reading" true
+    (contains "\027[33m" (Table.row ~gap dressed));
+  check bool "and closes after it" true
+    (contains "\027[0m" (Table.row ~gap dressed))
+
+(* The header names columns; it never wears a reading's colour. *)
+let test_the_header_ignores_cell_style () =
+  let dressed =
+    [ Table.cell ~style:"\027[31m" ~header:"KEEPER" ~width:16 "kidsnote" ]
+  in
+  check bool "no escape in the header" false
+    (contains "\027[" (Table.header_row ~gap:2 dressed))
+
+(* A row inside a dimmed or selected line closes its cells back to that line's
+   dress rather than to a bare reset, which would undress everything after. *)
+let test_close_returns_to_the_lines_own_dress () =
+  let dressed =
+    [ Table.cell ~style:"\027[33m" ~header:"KEEPER" ~width:8 "late"
+    ; Table.cell ~header:"FACTS" ~width:5 "139"
+    ]
+  in
+  let row = Table.row ~gap:2 ~close:"\027[2m" dressed in
+  check bool "the line's dress is restored" true (contains "\027[2m" row);
+  check bool "not a bare reset" false (contains "\027[0m" row)
+
 let () =
   run "tui table"
     [ ( "layout"
@@ -113,5 +158,11 @@ let () =
             test_an_overlong_reading_folds_rather_than_pushes
         ; test_case "a dropped column leaves both lines" `Quick
             test_a_dropped_column_leaves_both_lines
+        ; test_case "a styled cell occupies no extra cells" `Quick
+            test_a_styled_cell_occupies_no_extra_cells
+        ; test_case "the header ignores cell style" `Quick
+            test_the_header_ignores_cell_style
+        ; test_case "close returns to the line's own dress" `Quick
+            test_close_returns_to_the_lines_own_dress
         ] )
     ]

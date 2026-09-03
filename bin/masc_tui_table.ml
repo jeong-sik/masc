@@ -23,9 +23,17 @@ type cell = {
   width : int;
   align : align;
   value : string;
+  style : string;
 }
 
-let cell ?(align = Left) ~header ~width value = { header; width; align; value }
+let cell ?(align = Left) ?(style = "") ~header ~width value =
+  { header; width; align; value; style }
+
+(* A cell's dress closes back to the row's own, not to a bare reset: a reset
+   would strip the dimming or the selection band the caller wrapped the whole
+   row in, and the rest of the row after a coloured cell would come out
+   undressed. *)
+let default_close = "\027[0m"
 
 let used_width ~gap cells =
   List.fold_left (fun total cell -> total + cell.width) 0 cells
@@ -44,10 +52,19 @@ let pad cell text =
   | Left -> fitted ^ String.make slack ' '
   | Right -> String.make slack ' ' ^ fitted
 
-let line ~gap ~pick cells =
+let line ~gap ~pick ~dress cells =
   String.concat
     (String.make (max 0 gap) ' ')
-    (List.map (fun cell -> pad cell (pick cell)) cells)
+    (List.map (fun cell -> dress cell (pad cell (pick cell))) cells)
 
-let header_row ~gap cells = line ~gap ~pick:(fun cell -> cell.header) cells
-let row ~gap cells = line ~gap ~pick:(fun cell -> cell.value) cells
+(* Column names carry no reading, so they carry no reading's colour. The header
+   wears whatever the caller dressed the line in. *)
+let header_row ~gap cells =
+  line ~gap ~pick:(fun cell -> cell.header) ~dress:(fun _ text -> text) cells
+
+let row ~gap ?(close = default_close) cells =
+  line ~gap
+    ~pick:(fun cell -> cell.value)
+    ~dress:(fun cell text ->
+      if String.equal cell.style "" then text else cell.style ^ text ^ close)
+    cells

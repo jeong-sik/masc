@@ -177,12 +177,25 @@ val memory_columns_used_width : memory_columns -> int
 val memory_header_row : memory_columns -> string
 (** The column names, laid out on the allocation. *)
 
-val memory_row : memory_columns -> memory_row_values -> string
+val memory_row :
+  ?state_style:string ->
+  ?size_style:string ->
+  ?delta_style:string ->
+  ?close:string ->
+  memory_columns ->
+  memory_row_values ->
+  string
 (** One row, laid out on the same allocation as {!memory_header_row}. Both are
     built from one description of the columns, so a cell can never sit at a
     different offset from the header that names it -- the defect this pair
     replaces, where a name over eighteen cells or a reading over fourteen
-    pushed the rest of its row right of the header. *)
+    pushed the rest of its row right of the header.
+
+    The three styles dress the state cell, the size reading and the delta, and
+    nothing else. A keeper that deviates says so where it deviates rather than
+    turning its whole line one colour: the readings that are fine keep the
+    line's own dress. Escapes cost no display cells, so a dressed row is still
+    exactly as wide as its header. *)
 
 module Terminal_size_cache : sig
   type refresh =

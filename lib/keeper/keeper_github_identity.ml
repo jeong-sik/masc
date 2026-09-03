@@ -1046,7 +1046,7 @@ let local_lane ~config ~keeper_name ~hostname =
     Ok lane
 ;;
 
-let stream_login ~config ~keeper_name ~(lane : login_lane) ~is_closed ~send_event =
+let stream_login ~config ~keeper_name ~make_lane ~is_closed ~send_event =
   let base_path = config.Workspace.base_path in
   let send event json =
     if is_closed ()
@@ -1072,7 +1072,7 @@ let stream_login ~config ~keeper_name ~(lane : login_lane) ~is_closed ~send_even
       if not (String.equal text "")
       then send "output" (`Assoc [ "stream", `String stream; "text", `String text ])
     in
-    let run_process () =
+    let run_process (lane : login_lane) =
       let finished = Atomic.make false in
       let process_result = ref None in
       Eio.Cancel.sub (fun cancellation ->
@@ -1102,29 +1102,40 @@ let stream_login ~config ~keeper_name ~(lane : login_lane) ~is_closed ~send_even
       | None -> failwith "GitHub login process completed without a result"
     in
     (try
-       let status, _, stderr = run_process () in
-       finish_redacted_output "stdout" stdout_redaction;
-       finish_redacted_output "stderr" stderr_redaction;
-       let stderr = Keeper_secret_redaction.redact_text redaction stderr in
-       (match status with
-        | Unix.WEXITED 0 ->
-          (match lane.secure_after_login () with
-           | Error message -> send "error" (`Assoc [ "message", `String message ])
-           | Ok () ->
-             (match lane.observe_after_login () with
-              | Ok observation ->
-                send
-                  "complete"
-                  (`Assoc [ "observation", observation_to_yojson observation ])
-              | Error message ->
-                send "error" (`Assoc [ "message", `String message ])))
-        | failed ->
-          let detail = String.trim stderr in
-          let detail =
-            if String.equal detail "" then process_exit_text failed else detail
-          in
-          send "error" (`Assoc [ "message", `String detail ]));
-       Ok ()
+       (* The lane is shaped here rather than by the caller so that a lane which
+          has to reach another machine does it after the response headers are
+          out. Built before them, a slow or unreachable endpoint left the
+          operator's browser with no reply at all for as long as the shaping
+          steps took, and a failure to shape one is reported as the same [error]
+          event every other failure uses. *)
+       match make_lane () with
+       | Error message ->
+         send "error" (`Assoc [ "message", `String message ]);
+         Ok ()
+       | Ok (lane : login_lane) ->
+         let status, _, stderr = run_process lane in
+         finish_redacted_output "stdout" stdout_redaction;
+         finish_redacted_output "stderr" stderr_redaction;
+         let stderr = Keeper_secret_redaction.redact_text redaction stderr in
+         (match status with
+          | Unix.WEXITED 0 ->
+            (match lane.secure_after_login () with
+             | Error message -> send "error" (`Assoc [ "message", `String message ])
+             | Ok () ->
+               (match lane.observe_after_login () with
+                | Ok observation ->
+                  send
+                    "complete"
+                    (`Assoc [ "observation", observation_to_yojson observation ])
+                | Error message ->
+                  send "error" (`Assoc [ "message", `String message ])))
+          | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as failed ->
+            let detail = String.trim stderr in
+            let detail =
+              if String.equal detail "" then process_exit_text failed else detail
+            in
+            send "error" (`Assoc [ "message", `String detail ]));
+         Ok ()
      with
      | Eio.Cancel.Cancelled _ when is_closed () -> Ok ()
      | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1196,10 +1207,12 @@ let run_inherited ~timeout_sec ~env = function
 
 (* Inherited stdio would hand [gh] a terminal, and with one it renders an
    interactive survey prompt instead of writing the one-time code as a plain
-   line. The lane streams to this process's stdout instead, which is the same
-   shape the browser half of the flow needs on every machine. *)
+   line. The lane streams both of the child's streams to this terminal instead.
+   Measured 2026-09-03 against [login_argv] with no terminal attached: [gh]
+   writes nothing to stdout and puts the one-time code and the verification URL
+   on stderr, so the stderr callback is the one an operator reads. *)
 let run_cli_login ~(lane : login_lane) =
-  let status, _stdout, stderr =
+  let status, _stdout, _stderr =
     lane.run_login
       ~on_stdout_chunk:(fun chunk ->
         print_string chunk;
@@ -1217,9 +1230,9 @@ let run_cli_login ~(lane : login_lane) =
          prerr_endline message;
          false)
     | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+      (* The captured stderr is not repeated here: [on_stderr_chunk] already put
+         every byte of it on this terminal as it arrived. *)
       prerr_endline ("gh auth login failed: " ^ process_exit_text status);
-      let detail = String.trim stderr in
-      if not (String.equal detail "") then prerr_endline detail;
       false
   in
   let observed =

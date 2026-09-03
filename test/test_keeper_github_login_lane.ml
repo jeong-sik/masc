@@ -87,7 +87,12 @@ let stub_main () =
      | argv when List.equal String.equal argv (Keeper_github_identity.login_argv ~hostname)
        ->
        record "login";
-       write_all Unix.stdout device_code_line;
+       (* stderr, not stdout: measured 2026-09-03, [gh auth login] with no
+          terminal writes nothing to stdout and puts the one-time code there.
+          It is also the stream the result trailer shares, so this is the one
+          a lane can withhold while it waits for a trailer that has not
+          arrived. *)
+       write_all Unix.stderr device_code_line;
        (* Wait for the code to reach the caller before this process ends. A
           lane that buffered output until exit never creates the file. *)
        let deadline = Unix.gettimeofday () +. 10.0 in
@@ -112,6 +117,14 @@ let stub_main () =
        write_all Unix.stderr (trailer 0)
      | "chmod" :: mode :: _ ->
        record ("chmod-" ^ mode);
+       write_all Unix.stderr (trailer 0)
+     | "find" :: rest when List.mem "-exec" rest ->
+       record "find-chmod";
+       write_all Unix.stderr (trailer 0)
+     | "find" :: _ ->
+       (* The probe for an entry that exists but is not a regular file. This
+          endpoint has none, so it prints nothing and exits 0. *)
+       record "find-irregular";
        write_all Unix.stderr (trailer 0)
      | argv ->
        record "unexpected";
@@ -247,8 +260,12 @@ let test_profile_picks_the_lane () =
        ~meta:(meta ~sandbox:Keeper_types_profile_sandbox.Docker)
        ~hostname
    with
+   (* A lane is opaque closures, so [Ok] cannot be read as "the host one"
+      directly. It discriminates here because this base path declares no ssh
+      endpoint: had the profile routed to the remote lane, it would have failed
+      to resolve one, which is exactly what the Remote_ssh case below asserts. *)
    | Ok _ -> ()
-   | Error error -> failf "docker keeper did not get a host lane: %s" error);
+   | Error error -> failf "docker keeper built no lane: %s" error);
   (match
      Keeper_github_login_lane.for_keeper
        ~config
@@ -256,7 +273,7 @@ let test_profile_picks_the_lane () =
        ~hostname
    with
    | Ok _ -> ()
-   | Error error -> failf "micro_vm keeper did not get a host lane: %s" error);
+   | Error error -> failf "micro_vm keeper built no lane: %s" error);
   match
     Keeper_github_login_lane.for_keeper
       ~config
@@ -298,11 +315,11 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
     let streamed = Buffer.create 128 in
     let status, _stdout, _stderr =
       lane.Keeper_github_identity.run_login
-        ~on_stdout_chunk:(fun chunk ->
+        ~on_stdout_chunk:(fun _chunk -> ())
+        ~on_stderr_chunk:(fun chunk ->
           Buffer.add_string streamed chunk;
           if contains "one-time code" (Buffer.contents streamed)
           then save (observed_path ~dir) "seen")
-        ~on_stderr_chunk:(fun _chunk -> ())
     in
     check status_testable "the endpoint login exited 0" (Unix.WEXITED 0) status;
     check
@@ -332,11 +349,31 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
     (match lane.Keeper_github_identity.secure_after_login () with
      | Error error -> failf "securing the endpoint identity failed: %s" error
      | Ok () ->
+       (* Both names the host lane secures, and only regular files, so an
+          absent one is nothing to do rather than a failed login. *)
        check
          (list string)
-         "the identity file is narrowed on the endpoint"
-         [ "chmod"; "0600"; Filename.concat expected_gh_dir "hosts.yml" ]
-         (decoded_request (frame_path ~dir "chmod-0600")).argv);
+         "the identity files are narrowed on the endpoint"
+         [ "find"
+         ; expected_gh_dir
+         ; "-maxdepth"
+         ; "1"
+         ; "("
+         ; "-name"
+         ; "hosts.yml"
+         ; "-o"
+         ; "-name"
+         ; "config.yml"
+         ; ")"
+         ; "-type"
+         ; "f"
+         ; "-exec"
+         ; "chmod"
+         ; "0600"
+         ; "{}"
+         ; "+"
+         ]
+         (decoded_request (frame_path ~dir "find-chmod")).argv);
     (match lane.Keeper_github_identity.observe_after_login () with
      | Error error -> failf "observing the endpoint identity failed: %s" error
      | Ok observation ->

@@ -163,9 +163,12 @@ val login_timeout_sec : float
 val login_argv : hostname:string -> string list
 (** The [gh auth login] argv every lane runs. It names no config directory:
     the lane places [GH_CONFIG_DIR] in the environment its own machine sees.
-    It allocates no terminal and asks for none, so [gh] writes the one-time
-    code and the verification URL as plain lines on its own output instead of
-    rendering an interactive prompt. *)
+    It allocates no terminal and asks for none, so [gh] writes plain lines
+    instead of rendering an interactive prompt. Measured 2026-09-03 with no
+    terminal attached: [gh] writes nothing to stdout and puts the one-time code
+    and the verification URL on stderr, then blocks until the browser half
+    completes. A lane that delays a stderr chunk until the process exits
+    therefore delivers the code only after the wait for it has expired. *)
 
 val auth_probe_argv : hostname:string -> string list
 (** The argv whose stdout is the login name the identity resolves to on
@@ -206,20 +209,31 @@ val observation_to_yojson : observation -> Yojson.Safe.t
 val stream_login :
   config:Workspace.config ->
   keeper_name:string ->
-  lane:login_lane ->
+  make_lane:(unit -> (login_lane, string) result) ->
   is_closed:(unit -> bool) ->
   send_event:(string -> Yojson.Safe.t -> unit) ->
   (unit, string) result
-(** Run one device-flow login on [lane] and report it as redacted streaming
-    events: an [output] event per chunk, then either [complete] carrying the
-    lane's observation or [error] carrying the failure. Closing the response
-    cancels and reaps the process; a bounded timeout is also enforced. The
-    caller must validate Keeper existence, and must pick the lane, before
-    invoking it. *)
+(** Run one device-flow login on the lane [make_lane] answers with, and report
+    it as redacted streaming events: an [output] event per chunk, then either
+    [complete] carrying the lane's observation or [error] carrying the failure.
+    [make_lane] is called after the caller has opened its response, so a lane
+    that reaches another machine to shape itself does not delay the reply, and
+    a lane that cannot be shaped is reported as an [error] event. Closing the
+    response
+    cancels and reaps the process. The login runs under {!login_timeout_sec},
+    which on a lane whose machine caps concurrent sessions starts once a
+    session slot is free: a login queued behind a busy endpoint waits for the
+    slot first, and that wait carries no ceiling of its own. The caller must
+    validate Keeper existence, and must pick the lane, before invoking it. *)
 
 val run_cli_login : lane:login_lane -> int
-(** Run one login on [lane], writing each output chunk to this process's
-    stdout as it arrives, then print the lane's observation as JSON. Answers
-    0 only when the login exited 0 and the observation could be read. *)
+(** Run one login on [lane], writing the child's stdout chunks to this
+    process's stdout and its stderr chunks to this process's stderr as they
+    arrive, then print the lane's observation as JSON. The one-time code is a
+    stderr line, so it reaches the terminal through the second of those. Expects
+    to run inside an [Eio_main.run] with [Process_eio] initialized: without one
+    the host lane collects the child's output and replays it after exit, and the
+    remote lane has no runtime to open a switch on. Answers 0 only when the
+    login exited 0 and the observation could be read. *)
 val run_cli_status : config:Workspace.config -> keeper_name:string -> hostname:string -> int
 val run_cli_logout : config:Workspace.config -> keeper_name:string -> hostname:string -> int

@@ -1323,59 +1323,53 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                        ~default:"github.com"
                        (Server_utils.query_param httpun_request "hostname")
                    in
-                   (match
-                      Keeper_github_login_lane.for_keeper ~config ~meta ~hostname
-                    with
-                    | Error message ->
-                      h2_respond_json_value
-                        h2_reqd
-                        (`Assoc [ "error", `String message ])
-                        ~status:`Bad_request
-                        ~extra_headers:cors
-                    | Ok lane ->
-                      let headers =
-                        H2.Headers.of_list
-                          ([ "content-type", "text/event-stream"
-                           ; "cache-control", "no-cache"
-                           ; "x-accel-buffering", "no"
-                           ]
-                           @ cors)
-                      in
-                      let response = H2.Response.create ~headers `OK in
-                      let writer =
-                        H2.Reqd.respond_with_streaming
-                          ~flush_headers_immediately:true
-                          h2_reqd
-                          response
-                      in
-                      let send_event event json =
-                        H2.Body.Writer.write_string
-                          writer
-                          (Printf.sprintf
-                             "event: %s\ndata: %s\n\n"
-                             event
-                             (Yojson.Safe.to_string json));
-                        H2.Body.Writer.flush writer (fun _ -> ())
-                      in
-                      Fun.protect
-                        ~finally:(fun () -> H2.Body.Writer.close writer)
-                        (fun () ->
-                           match
-                             Keeper_github_identity.stream_login
-                               ~config
-                               ~keeper_name
-                               ~lane
-                               ~is_closed:(fun () ->
-                                 H2.Body.Writer.is_closed writer)
-                               ~send_event
-                           with
-                           | Ok () -> ()
-                           | Error message
-                             when not (H2.Body.Writer.is_closed writer) ->
-                             send_event
-                               "error"
-                               (`Assoc [ "message", `String message ])
-                           | Error _ -> ())))
+                   let headers =
+                     H2.Headers.of_list
+                       ([ "content-type", "text/event-stream"
+                        ; "cache-control", "no-cache"
+                        ; "x-accel-buffering", "no"
+                        ]
+                        @ cors)
+                   in
+                   let response = H2.Response.create ~headers `OK in
+                   let writer =
+                     H2.Reqd.respond_with_streaming
+                       ~flush_headers_immediately:true
+                       h2_reqd
+                       response
+                   in
+                   let send_event event json =
+                     H2.Body.Writer.write_string
+                       writer
+                       (Printf.sprintf
+                          "event: %s\ndata: %s\n\n"
+                          event
+                          (Yojson.Safe.to_string json));
+                     H2.Body.Writer.flush writer (fun _ -> ())
+                   in
+                   Fun.protect
+                     ~finally:(fun () -> H2.Body.Writer.close writer)
+                     (fun () ->
+                        match
+                          Keeper_github_identity.stream_login
+                            ~config
+                            ~keeper_name
+                            (* Shaping a Remote_ssh lane runs commands on the
+                               endpoint. Doing that before this response existed
+                               left the browser waiting on a request that had not
+                               answered at all. *)
+                            ~make_lane:(fun () ->
+                              Keeper_github_login_lane.for_keeper
+                                ~config
+                                ~meta
+                                ~hostname)
+                            ~is_closed:(fun () -> H2.Body.Writer.is_closed writer)
+                            ~send_event
+                        with
+                        | Ok () -> ()
+                        | Error message when not (H2.Body.Writer.is_closed writer) ->
+                          send_event "error" (`Assoc [ "message", `String message ])
+                        | Error _ -> ()))
 
       | `GET, "/api/v1/board/reactions/catalog" ->
           with_h2_public_read h2_reqd (fun _state ->

@@ -1,12 +1,16 @@
 (** Which machine a Keeper's GitHub device-flow login is written to.
 
-    A Docker or Micro_vm Keeper reads the host directory
-    [<base>/.masc/keepers/<name>/github-cli] through a mount, so its login
-    belongs on this host. A Remote_ssh Keeper's tree and its [gh] live on
-    another machine, and a login written here would never be seen there: every
-    turn would keep failing the endpoint's identity preflight
-    ([remote_github_identity_missing]) while the operator looks at a successful
-    login on this screen. *)
+    A Docker or Micro_vm Keeper's identity lives in the host directory
+    [<base>/.masc/keepers/<name>/github-cli] -- Docker bind-mounts it, a guest
+    carries a snapshot of it -- so its login belongs on this host. Both carry
+    that directory in at creation, so a container or guest started before its
+    Keeper had any identity picks the login up when it is next recreated, not
+    while it runs.
+
+    A Remote_ssh Keeper's tree and its [gh] live on another machine, and a login
+    written here would never be seen there: every turn would keep failing the
+    endpoint's identity preflight ([remote_github_identity_missing]) while the
+    operator looks at a successful login on this screen. *)
 
 let ( let* ) = Result.bind
 
@@ -35,10 +39,13 @@ let run_remote endpoint ~timeout_sec ~on_stdout_chunk ~on_stderr_chunk ~argv =
     ~cwd:(Some (Keeper_sandbox_remote.remote_root endpoint))
 ;;
 
-(* The argv is a fixed shape built here -- mkdir, chmod, gh -- and carries
+(* The argv is a fixed shape built here -- mkdir, chmod, find, gh -- and carries
    paths rather than credentials, so naming it in the failure is what lets an
-   operator act on an exit code. *)
-let step endpoint ~argv =
+   operator act on an exit code. The remote stderr is another matter: it is text
+   from another machine that reaches the operator through the SSE [error] event,
+   so it goes through the same redaction every other identity failure does, and
+   redaction runs before truncation so a cut cannot leave half a secret. *)
+let step ~redaction endpoint ~argv =
   match
     run_remote
       endpoint
@@ -54,18 +61,57 @@ let step endpoint ~argv =
          "remote_ssh_github_login_step_failed: endpoint %s ran [%s]: %s"
          (Keeper_sandbox_remote.name endpoint)
          (String.concat " " argv)
-         (Exec_policy.truncate_for_log (String.trim stderr)))
+         (Exec_policy.truncate_for_log
+            (Keeper_secret_redaction.redact_text redaction (String.trim stderr))))
+;;
+
+(* The host lane secures exactly these two names, skips one that is absent and
+   refuses one that is not a regular file. The endpoint has to agree on all
+   three counts: [gh] writes [config.yml] as well as [hosts.yml], and a chmod
+   aimed at one fixed path would fail a login that had in fact succeeded. *)
+let config_name_predicate =
+  [ "("; "-name"; "hosts.yml"; "-o"; "-name"; "config.yml"; ")" ]
+;;
+
+let find_config_files gh_dir tail =
+  ([ "find"; gh_dir; "-maxdepth"; "1" ] @ config_name_predicate) @ tail
+;;
+
+let secure_config_files ~redaction endpoint ~gh_dir =
+  let* (_ : string) = step ~redaction endpoint ~argv:[ "chmod"; "0700"; gh_dir ] in
+  let* irregular =
+    step ~redaction endpoint ~argv:(find_config_files gh_dir [ "!"; "-type"; "f" ])
+  in
+  if String.trim irregular <> ""
+  then
+    Error
+      (Printf.sprintf
+         "remote_ssh_github_login_credential_not_a_regular_file: endpoint %s: %s"
+         (Keeper_sandbox_remote.name endpoint)
+         (String.trim irregular))
+  else
+    let* (_ : string) =
+      step
+        ~redaction
+        endpoint
+        ~argv:
+          (find_config_files
+             gh_dir
+             [ "-type"; "f"; "-exec"; "chmod"; "0600"; "{}"; "+" ])
+    in
+    Ok ()
 ;;
 
 let remote_lane ~(config : Workspace.config) ~keeper_name ~hostname =
   let base_path = config.Workspace.base_path in
+  let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
   let* endpoint = resolve ~config ~keeper_name in
   let gh_dir = Keeper_sandbox_remote.gh_config_dir endpoint in
   (* The endpoint may never have held this Keeper. A root the ssh user cannot
      write is the bootstrap's job, and this step names it rather than letting
      gh fail later with a directory message. *)
-  let* (_ : string) = step endpoint ~argv:[ "mkdir"; "-p"; gh_dir ] in
-  let* (_ : string) = step endpoint ~argv:[ "chmod"; "0700"; gh_dir ] in
+  let* (_ : string) = step ~redaction endpoint ~argv:[ "mkdir"; "-p"; gh_dir ] in
+  let* (_ : string) = step ~redaction endpoint ~argv:[ "chmod"; "0700"; gh_dir ] in
   let lane : Keeper_github_identity.login_lane =
     { run_login =
         (fun ~on_stdout_chunk ~on_stderr_chunk ->
@@ -75,13 +121,7 @@ let remote_lane ~(config : Workspace.config) ~keeper_name ~hostname =
             ~on_stdout_chunk:(Some on_stdout_chunk)
             ~on_stderr_chunk:(Some on_stderr_chunk)
             ~argv:(Keeper_github_identity.login_argv ~hostname))
-    ; secure_after_login =
-        (fun () ->
-          let* (_ : string) = step endpoint ~argv:[ "chmod"; "0700"; gh_dir ] in
-          let* (_ : string) =
-            step endpoint ~argv:[ "chmod"; "0600"; Filename.concat gh_dir "hosts.yml" ]
-          in
-          Ok ())
+    ; secure_after_login = (fun () -> secure_config_files ~redaction endpoint ~gh_dir)
     ; observe_after_login =
         (fun () ->
           let run =

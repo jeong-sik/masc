@@ -29,6 +29,12 @@ val draft_for : draft option -> row:Masc.Tui_decode.ask_row -> draft
 val response_for :
   draft -> question:Masc.Tui_decode.ask_question -> draft_response option
 
+val summarize_answer : draft -> row:Masc.Tui_decode.ask_row -> string
+(** A human line for what the draft answers, in the labels the operator saw
+    (never choice ids): chosen labels joined per question, a written answer
+    quoted, a skipped question named. Empty when nothing is answered yet, so a
+    caller can fall back to the Keeper name alone. *)
+
 val toggle_choice :
   draft ->
   question:Masc.Tui_decode.ask_question ->

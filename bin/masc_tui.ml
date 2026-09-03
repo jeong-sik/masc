@@ -1199,6 +1199,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(load_older : before:float -> unit) ~(paste_image : unit -> unit)
     ~(open_named_image : unit -> unit) ~(inspect_context : unit -> unit)
     ~(load_tool_changes : unit -> unit) ~(drain_queue : unit -> unit)
+    ~(start_voice : unit -> unit) ~(toggle_voice_continuous : unit -> unit)
     (key : string) : bool =
   (* y and n answer a held call, and only while one is held -- otherwise they
      are letters someone is typing. The prompt on screen is what makes them
@@ -1251,6 +1252,16 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       forget_recall state;
       submit_message text
     end;
+    true
+  (* The same two keys the composer row binds, because this surface has its own
+     editor and never reaches that row: [handle_composer_key] is skipped
+     outright while the view is Keeper_message. An operator who learned ^Y on
+     one surface would otherwise find it dead on the one they type into most. *)
+  | k when String.equal k Composer.listen_key ->
+    start_voice ();
+    true
+  | k when String.equal k Composer.continuous_key ->
+    toggle_voice_continuous ();
     true
   | "\n" | "shift-enter" ->
     (* Ctrl-J, Shift+Enter with enhanced keys, or Return on a terminal that
@@ -8361,6 +8372,10 @@ let handle_composer_key state ~base_path ~mailbox key =
                   ~keeper_name
             | None -> ())
           ~drain_queue:(fun () -> ())
+          (* This call site replays one key to reach the paste handlers; a
+             capture is not something a replay should start. *)
+          ~start_voice:(fun () -> ())
+          ~toggle_voice_continuous:(fun () -> ())
           key
       in
       true
@@ -13545,6 +13560,28 @@ and is loaded on demand through keeper_skill.
                    ~drain_queue:(fun () ->
                      drain_queued_message state ~base_path
                        ~mailbox:async_messages)
+                   ~start_voice:(fun () ->
+                     match state.msg_target_keeper_name with
+                     | Some keeper when state.voice_capture = None ->
+                         launch_voice_capture state ~mailbox:async_messages ~keeper
+                     | Some _ | None -> ())
+                   ~toggle_voice_continuous:(fun () ->
+                     match state.voice_continuous, state.msg_target_keeper_name with
+                     | Some _, _ ->
+                         state.voice_continuous <- None;
+                         state.voice_floor <- None;
+                         state.last_action <-
+                           Some ("voice: continuous off", Unix.gettimeofday ())
+                     | None, Some keeper ->
+                         state.voice_continuous <- Some keeper;
+                         state.voice_floor <-
+                           Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper;
+                         state.last_action <-
+                           Some ("voice: continuous on", Unix.gettimeofday ());
+                         if state.voice_capture = None
+                         then
+                           launch_voice_capture state ~mailbox:async_messages ~keeper
+                     | None, None -> ())
                    k
                in
                ()

@@ -64,7 +64,6 @@ let terminal_outcome_of_result result =
   | Runtime_agent.InputRequired _ -> Terminal_input_required
   | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Awaiting_external_effect _
   | Runtime_agent.Yielded_after_repeated_tool_call _
   | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
     Terminal_checkpoint
@@ -266,8 +265,6 @@ let emit_usage_metrics_and_log
       Printf.sprintf "yielded_to_operation_queued(%d)" turns_used
     | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
       Printf.sprintf "yielded_to_durable_stimulus(%d)" turns_used
-    | Runtime_agent.Awaiting_external_effect { turns_used } ->
-      Printf.sprintf "awaiting_external_effect(%d)" turns_used
     | Runtime_agent.Yielded_after_repeated_tool_call
         { turns_used; tool_name; repeated_count } ->
       Printf.sprintf
@@ -293,7 +290,6 @@ let emit_usage_metrics_and_log
        | Runtime_agent.Yielded_to_operation_queued _ -> "yielded_to_operation_queued"
        | Runtime_agent.Yielded_to_durable_stimulus _ ->
          "yielded_to_durable_stimulus"
-       | Runtime_agent.Awaiting_external_effect _ -> "awaiting_external_effect"
        | Runtime_agent.Yielded_after_repeated_tool_call _ ->
          "yielded_after_repeated_tool_call"
        | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
@@ -455,7 +451,6 @@ let terminal_reason_of_outcome result = function
     (match result.Keeper_agent_run.stop_reason with
      | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
-     | Runtime_agent.Awaiting_external_effect _
      | Runtime_agent.Yielded_after_repeated_tool_call _
      | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ ->
@@ -517,11 +512,6 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
     Log.Keeper.info ~keeper_name:updated_meta.name
       "yielded autonomous run for a pending durable stimulus after %d turn(s), \
        checkpoint saved — will resume next cycle"
-      turns_used;
-    reset_failure_state ()
-  | Runtime_agent.Awaiting_external_effect { turns_used } ->
-    Log.Keeper.info ~keeper_name:updated_meta.name
-      "external effect awaits Gate resolution after %d turn(s), checkpoint saved"
       turns_used;
     reset_failure_state ()
   | Runtime_agent.Yielded_after_repeated_tool_call

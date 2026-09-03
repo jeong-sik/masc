@@ -103,7 +103,6 @@ let test_nonterminal_outcomes_preserve_batch () =
 let every_checkpoint_reason =
   [ "durable stimulus arrived", Turn.Durable_stimulus_arrived
   ; "repeated assistant text", Turn.Repeated_assistant_text { repeated_count = 3 }
-  ; "awaiting external effect", Turn.Awaiting_external_effect
   ; ( "repeated tool call"
     , Turn.Repeated_tool_call { tool_name = "keeper_tasks_list"; repeated_count = 3 } )
   ; "operation queued", Turn.Operation_queued

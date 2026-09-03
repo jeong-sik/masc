@@ -191,8 +191,6 @@ let stop_reason_to_string = function
     Printf.sprintf "yielded_to_operation_queued:%d" turns_used
   | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
     Printf.sprintf "yielded_to_durable_stimulus:%d" turns_used
-  | Runtime_agent.Awaiting_external_effect { turns_used } ->
-    Printf.sprintf "awaiting_external_effect:%d" turns_used
   | Runtime_agent.Yielded_after_repeated_tool_call
       { turns_used; tool_name; repeated_count } ->
     Printf.sprintf
@@ -220,7 +218,6 @@ let receipt_terminal_reason_code_of_stop_reason = function
     Keeper_turn_disposition.to_wire Keeper_turn_disposition.Success
   | ( Runtime_agent.Yielded_to_operation_queued _
     | Runtime_agent.Yielded_to_durable_stimulus _
-    | Runtime_agent.Awaiting_external_effect _
     | Runtime_agent.Yielded_after_repeated_tool_call _
     | Runtime_agent.Yielded_after_repeated_assistant_text _ ) as stop_reason ->
     stop_reason_to_string stop_reason

@@ -467,7 +467,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         continue ()
     | Status_block { kind } ->
         (match kind with
-         | Keeper_chat_blocks.External_effect_pending ->
+         | Keeper_chat_blocks.Awaiting_gate_approval ->
              (* The turn's partial text is deliberately replaced by the
                 pending-approval status; the external-effect flow then owns
                 the message. *)

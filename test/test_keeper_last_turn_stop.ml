@@ -26,7 +26,6 @@ let test_records_and_clears () =
    | Some (Stop.Repeated_tool_call _) -> fail "the stop came back with another tool or count"
    | Some Stop.Operation_queued
    | Some Stop.Durable_stimulus_arrived
-   | Some Stop.Awaiting_external_effect
    | Some (Stop.Repeated_assistant_text _) -> fail "a different stop came back"
    | None -> fail "the recorded stop came back None");
   Cell.set ~base_path:"/t/root-a" ~keeper:"analyst" None;

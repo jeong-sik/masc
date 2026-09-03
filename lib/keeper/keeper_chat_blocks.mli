@@ -102,7 +102,7 @@ type fusion_block = {
 
 type status_kind =
   | Continuation_checkpoint
-  | External_effect_pending
+  | Awaiting_gate_approval
 
 type status_block = { kind : status_kind }
 

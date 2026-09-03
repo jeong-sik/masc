@@ -84,7 +84,6 @@ const QUEUE_SOURCE_GLYPH: Record<DashboardKeeperWaitingSource, string> = {
   chat_operation_queued: '▤',
   chat_operation_running: '▤',
   hitl_pending: '⚿',
-  external_attention: '@',
   fusion_running: '▶',
   schedule_waiting: '○',
   owner_shutdown: '■',

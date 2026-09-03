@@ -489,7 +489,7 @@ let test_input_cursor_uses_visible_terminal_cells () =
   in
   check int "a long speaker name does not re-wrap the pane"
     (wrapped "omega")
-    (wrapped "keeper-canary-10t-cdx-sol-xhigh-r2-20260820-agent Â· agent");
+    (wrapped "keeper-canary-10t-cdx-sol-xhigh-r2-20260820-agent · agent");
   let supported rows cols status_rows =
     Layout.message_viewport_supported ~terminal_rows:rows ~terminal_cols:cols
       ~status_rows

@@ -1,0 +1,7 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_paste_naming)
+ (public_name masc.keeper_paste_naming)
+ (wrapped false)
+ (modules keeper_paste_naming))

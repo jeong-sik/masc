@@ -101,7 +101,12 @@ type authored_slot =
 
 (* The past offenders, pinned against the slot of their own file. An empty
    descriptor list would let the walk above pass for nothing; these cannot. *)
-let pinned = [ "tool_execute", Top_level; "keeper_time_now", Top_level; "masc_library_list", Projection ]
+let pinned =
+  [ "tool_execute", Top_level
+  ; "keeper_time_now", Top_level
+  ; "masc_library_list", Projection
+  ]
+;;
 
 let test_past_offenders_read_their_own_file () =
   List.iter

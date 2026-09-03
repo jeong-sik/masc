@@ -844,6 +844,7 @@ let test_submitted_task_heading_does_not_claim_a_hold () =
            { assignee = "wake-context-keeper"
            ; started_at = "2026-07-07T01:00:00Z"
            ; submitted_at = "2026-07-07T02:00:00Z"
+           ; intent = Complete_task
            ; verification_id = "vrf-task-42"
            })
       ()

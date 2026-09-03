@@ -24,6 +24,7 @@ let awaiting =
     assignee = "k1";
     started_at = now_iso;
     submitted_at = now_iso;
+    intent = Complete_task;
     verification_id = "req-1";
   }
 let done_ = T.Done {

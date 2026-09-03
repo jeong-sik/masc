@@ -45,6 +45,7 @@ let test_emits_for_awaiting_verification () =
            { assignee = "dead-keeper"
            ; started_at = "2023-12-31T23:59:00Z"
            ; submitted_at = "2024-01-01T00:00:00Z"
+           ; intent = Complete_task
            ; verification_id = "v-1"
            })
   in
@@ -104,6 +105,7 @@ let test_class_labels_match_task_status_to_string () =
            { assignee = "x"
            ; started_at = "2024-01-01T00:00:00Z"
            ; submitted_at = "t"
+           ; intent = Complete_task
            ; verification_id = "v"
            })
     ]
@@ -133,6 +135,7 @@ let test_classifier_is_membership_ssot () =
           { assignee = "x"
           ; started_at = "2024-01-01T00:00:00Z"
           ; submitted_at = "t"
+          ; intent = Complete_task
           ; verification_id = "v"
           }));
   Alcotest.(check (option string)) "todo -> None" None
@@ -151,6 +154,7 @@ let test_classifier_is_membership_ssot () =
           { assignee = "x"
           ; started_at = "2024-01-01T00:00:00Z"
           ; submitted_at = "t"
+          ; intent = Complete_task
           ; verification_id = "v"
           }
       ; MD.Done { assignee = "x"; completed_at = "t"; notes = None }

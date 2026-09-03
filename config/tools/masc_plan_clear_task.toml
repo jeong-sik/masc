@@ -1,9 +1,8 @@
 name = "masc_plan_clear_task"
 description = """
-Clear your current task assignment without completing it (does not change \
-task status). Use when switching to a different task, abandoning work, or \
-resetting session state. Use masc_transition to change task status \
-separately."""
+Clear your current task assignment without completing it.
+
+The task's own status does not change. Use when switching to a different task, abandoning work, or resetting session state. Use masc_transition to change task status separately."""
 additional_properties = false
 
 

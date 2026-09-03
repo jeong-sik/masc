@@ -1,5 +1,8 @@
 name = "keeper_code_query"
-description = "Ask the language server about a name in a file: where it is defined, or what its type and documentation are. The answer comes from the compiler's view of the code, so a same-named binding in an unrelated module is not confused with this one, and a name inside a comment or a string is not an occurrence. Find the line with Grep first, then ask about that line. Every answer is as fresh as the last build of the project: this reads what the compiler recorded, not the file on disk."
+description = """
+Ask the language server about a name in a file.
+
+It answers where the name is defined, or what its type and documentation are. The answer comes from the compiler's view of the code, so a same-named binding in an unrelated module is not confused with this one, and a name inside a comment or a string is not an occurrence. Find the line with Grep first, then ask about that line. Every answer is as fresh as the last build of the project: this reads what the compiler recorded, not the file on disk."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name.

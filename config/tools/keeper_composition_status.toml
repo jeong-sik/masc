@@ -1,5 +1,8 @@
 name = "keeper_composition_status"
-description = "Read the exact durable status and structured result of one async Keeper composition request."
+description = """
+Read the status and structured result of one async Keeper composition.
+
+Both are exact and durable, addressed by the request's own id."""
 additional_properties = false
 
 

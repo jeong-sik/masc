@@ -1,9 +1,8 @@
 name = "masc_config"
 description = """
-Return the effective runtime configuration with source attribution (env var \
-or default) for each setting. Sensitive values (tokens, passwords) are \
-masked. Use to inspect or verify the server config without restarting. Pass \
-category to filter results to a single section."""
+Return the effective runtime configuration.
+
+Each setting carries its source attribution: env var or default. Sensitive values (tokens, passwords) are masked. Use to inspect or verify the server config without restarting. Pass category to filter results to a single section."""
 additional_properties = false
 
 

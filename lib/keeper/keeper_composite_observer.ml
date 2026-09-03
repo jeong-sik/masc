@@ -235,10 +235,8 @@ let run_state_of_entry (entry : Keeper_registry.registry_entry) ~last_skip
   | Keeper_state_machine.Restarting ->
     Suspended entry.phase
 
-(* [wake_kind] + [stimulus_kinds] pair shared by [run_state_to_json]'s
-   [In_turn] arm; also exposed via .mli for the Bonsai [keepers/summary]
-   converter, which has its own typed wire record and cannot consume
-   [run_state_to_json]'s [Yojson.Safe.t] directly. *)
+(* [wake_kind] + [stimulus_kinds] pair for [run_state_to_json]'s
+   [In_turn] arm. *)
 let wake_reason_kind_and_stimuli (wake : Keeper_registry.wake_reason) : string * string list =
   match wake with
   | Keeper_registry.Proactive_tick -> "proactive_tick", []

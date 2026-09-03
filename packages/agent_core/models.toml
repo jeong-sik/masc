@@ -2109,48 +2109,6 @@ supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true
 
-# DashScope / Alibaba Models
-[[models]]
-id_prefix = "dashscope-3"
-base = "dashscope"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = true
-supports_parallel_tool_calls = true
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "chat_template_kwargs"
-preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
-supports_native_streaming = true
-supports_top_k = true
-supports_min_p = true
-input_per_million = 0.0
-output_per_million = 0.0
-
-# NOTE: the former `provider_h_3` (DashScope) qwen3 entry was a dead cipher-era
-# duplicate — brand wire ids ("qwen3*") never matched its `provider_h_3` prefix
-# (Agent Core contract §369), so they resolved to the openai_chat `qwen3` entry below.
-# Removed here to avoid a duplicate `qwen3` id_prefix; the DashScope route stays
-# represented by `dashscope_3`. Proper model×transport split: Agent Core contract.
-[[models]]
-id_prefix = "dashscope_3"
-base = "dashscope"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = true
-supports_parallel_tool_calls = true
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "chat_template_kwargs"
-preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
-supports_native_streaming = true
-supports_top_k = true
-supports_min_p = true
-input_per_million = 0.0
-output_per_million = 0.0
-
 # Qwen Models
 [[models]]
 id_prefix = "qwen3"
@@ -2372,14 +2330,6 @@ base_url = "https://api.groq.com/openai/v1"
 request_path = "/chat/completions"
 api_key_env = "GROQ_API_KEY"
 capabilities_base = "openai_chat"
-
-[[providers]]
-id = "dashscope"
-kind = "dashscope"
-base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-request_path = "/chat/completions"
-api_key_env = "DASHSCOPE_API_KEY"
-capabilities_base = "dashscope"
 
 [[providers]]
 id = "siliconflow"

@@ -97,8 +97,7 @@ let count_anthropic_staged
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama
   | Provider_config.Gemini
-  | Provider_config.Glm
-  | Provider_config.DashScope ->
+  | Provider_config.Glm ->
     Error
       (Count_failed
          ( Input_token_count.Unsupported { protocol; model_id = config.model_id }
@@ -151,8 +150,7 @@ let supports_completion_request_measurement (config : Provider_config.t) =
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama
   | Provider_config.Gemini
-  | Provider_config.Glm
-  | Provider_config.DashScope -> false
+  | Provider_config.Glm -> false
 ;;
 
 let measure_completion_request_staged

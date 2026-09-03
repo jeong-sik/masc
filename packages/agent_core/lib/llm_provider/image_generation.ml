@@ -56,7 +56,7 @@ let protocol_of_config (config : Provider_config.t) =
   | Provider_config.Glm -> Ok Zai_image
   | Provider_config.OpenAI_compat -> Ok Openai_image
   | Provider_config.Gemini -> Ok Gemini_interaction
-  | Anthropic | Kimi | Ollama | DashScope ->
+  | Anthropic | Kimi | Ollama ->
     reject
       (Printf.sprintf
          "image generation has no wire implementation for provider kind %s"

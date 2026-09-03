@@ -97,6 +97,17 @@ val delivery_target_wire_key : string
     delivery target. Shared by the producer ({!Keeper_turn}) and the stream
     decoder so the wire name cannot drift. *)
 
+val resolve_bound_channel_reference :
+  names:(string * string) list -> bound:string list -> string -> string option
+(** Resolve a channel reference — a bound channel id, or the channel's name
+    with an optional ["#"] prefix — to a bound channel id, against the
+    (id, name) pairs the caller supplies (the connector_names projection a
+    gateway fills on a channel's first inbound event). Resolution never
+    leaves the bound set, and a name matching more than one bound channel
+    resolves to none of them. Returns [None] for anything unresolved; the
+    caller then passes the reference through unchanged so
+    {!resolve_target} answers with its binding error as before. *)
+
 val resolve_target :
   surface:string ->
   channel_id:string option ->

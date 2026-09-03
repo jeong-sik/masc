@@ -2,6 +2,12 @@ name = "keeper_spawn_stop"
 description = "Signal a spawned process to end. Stopping one that has already ended is not an error, so there is no need to check first."
 additional_properties = false
 
+
+# Held back from the request until the model asks for it by name.
+# 2026-09-01..03: 4 turns needed it across 6317 provider requests, and its
+# 341 B schema rode every one of those requests. Loading it on demand costs
+# one extra request on those 4 turns and saves the 341 B on the rest.
+defer_loading = true
 [[params]]
 name = "handle"
 type = "string"

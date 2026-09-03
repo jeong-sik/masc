@@ -53,8 +53,9 @@ val strip_registered_suffix : available:string list -> string -> string option
 
 (** What survives into the conversation history for one provider turn.
     [admitted] keeps every non-tool block untouched and rewrites each routable
-    tool call to the registered name dispatch will use; [rejected] counts the
-    calls dropped because no registered tool answers their name.
+    tool call to the registered name dispatch will use; [rejected_names] holds
+    the wire name of every call dropped because no registered tool answers it,
+    in arrival order, one entry per dropped call.
     [tool_source_map] preserves the exact pre-admission ToolUse ordinal for
     every surviving tool schedule entry and the complete pre-admission ToolUse
     inventory, so consumers never reconstruct either fact from a provider-owned
@@ -64,14 +65,28 @@ val strip_registered_suffix : available:string list -> string -> string option
     model on every later request as a well-formed example of calling that
     tool, and the model reproduces it (masc#29337: 115 identical calls over
     2h17m, unchanged across a provider switch). The raw wire name is still
-    recorded in the raw trace. *)
+    recorded in the raw trace.
+
+    Dropping the block is not the same as saying nothing. The names are kept
+    so the turn can tell the model which call it refused: the model cannot
+    read its own dropped block back out of the transcript, so a refusal that
+    withholds the name leaves it nothing to correct. Live 2026-09-02: one
+    conversation carried six such notes, every one of them for a single
+    unnamed call. *)
 type tool_use_admission =
   { admitted : Types.content_block list
-  ; rejected : int
+  ; rejected_names : string list
   ; tool_source_map : Hooks.admitted_tool_source_map
   }
 
 val admit_tool_use_names : tool_index -> Types.content_block list -> tool_use_admission
+
+val describe_rejected_names : string list -> string
+(** Render [rejected_names] for the sentence the model reads: distinct names in
+    arrival order, quoted, each clipped on a UTF-8 boundary, and the list
+    itself clipped with a count of what it left out. Bounded on both axes
+    because the sentence lands in a User message, which the transcript replays
+    on every later request. *)
 
 type tool_failure_kind = Types.tool_failure_kind =
   | Validation_error

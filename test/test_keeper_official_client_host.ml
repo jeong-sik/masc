@@ -331,6 +331,7 @@ let test_repeated_tool_host_stop_is_a_checkpoint_yield () =
         ~turn_id:"turn-2"
         ~turns_used:2
         ~latency_ms:(Some 1234)
+        ~usage:None
         (Repeated_tool_call { tool_name = "masc_probe"; repeated_count = 3 })
     with
     | Ok result -> result
@@ -527,6 +528,52 @@ let test_terminal_generic_deferral_keeps_durable_stimulus_stop () =
       fail "generic deferral did not retain its durable-stimulus terminal stop")
 ;;
 
+(* kidsnote, 2026-09-02: six host-stopped turns recorded output_tokens = 0
+   and "usage telemetry missing" because this projection hardcoded
+   [usage = None]. The adapter now hands over what it measured, and the
+   observation scope has to say so, or the turn record keeps reporting the
+   usage as unavailable next to a non-zero count. *)
+let test_host_stop_carries_measured_usage_into_the_response () =
+  let usage =
+    Agent_core.Llm_provider.Backend_anthropic.usage_of_wire_counts
+      ~input_tokens:300
+      ~output_tokens:30
+      ~cache_creation_input_tokens:0
+      ~cache_read_input_tokens:5
+  in
+  let project usage =
+    match
+      Host.host_stop_result
+        ~runtime_id:"official-client-runtime"
+        ~model:"official-client-model"
+        ~session_id:"session-usage"
+        ~turn_id:"turn-usage"
+        ~turns_used:1
+        ~latency_ms:(Some 900)
+        ~usage
+        (Terminal_tool_boundary { tool_name = "terminal"; outcome = Terminal_completed })
+    with
+    | Ok result -> result
+    | Error error -> fail (Agent_core.Error.to_string error)
+  in
+  let measured = project (Some usage) in
+  check bool "measured usage reaches the response" true
+    (measured.response.usage = Some usage);
+  (match measured.runtime_observation with
+   | None -> fail "host stop carried no runtime observation"
+   | Some observation ->
+     check bool "measured usage is scoped per request" true
+       (observation.Runtime_observation.usage_scope = Runtime_usage_scope.Per_request));
+  let unmeasured = project None in
+  check bool "no measurement stays absent" true (Option.is_none unmeasured.response.usage);
+  (match unmeasured.runtime_observation with
+   | None -> fail "host stop carried no runtime observation"
+   | Some observation ->
+     check bool "no measurement keeps the scope unavailable" true
+       (observation.Runtime_observation.usage_scope
+        = Runtime_usage_scope.Usage_scope_unavailable))
+;;
+
 let test_terminal_host_stop_preserves_completed_deferred_and_failed () =
   let project outcome =
     Host.host_stop_result
@@ -536,6 +583,7 @@ let test_terminal_host_stop_preserves_completed_deferred_and_failed () =
       ~turn_id:"turn-terminal"
       ~turns_used:4
       ~latency_ms:(Some 250)
+      ~usage:None
       (Terminal_tool_boundary { tool_name = "terminal"; outcome })
   in
   (match project Terminal_completed with
@@ -604,6 +652,7 @@ let test_terminal_host_stop_runs_completion_hooks_in_order () =
       ~turn_id:"turn-terminal"
       ~turns_used:4
       ~latency_ms:None
+      ~usage:None
       (Terminal_tool_boundary
          { tool_name = "terminal"; outcome = Terminal_completed })
   in
@@ -1592,6 +1641,10 @@ let () =
             "repeated host stop is a checkpoint yield"
             `Quick
             test_repeated_tool_host_stop_is_a_checkpoint_yield
+        ; test_case
+            "host stop carries measured usage into the response"
+            `Quick
+            test_host_stop_carries_measured_usage_into_the_response
         ; test_case
             "terminal post-effect failure aborts official-client turn"
             `Quick

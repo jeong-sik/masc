@@ -51,6 +51,8 @@ let test_valid_values_load_and_map_to_agent_core_variants () =
       ; "no-thinking-control", No_thinking_control
       ; "thinking_object", Thinking_object
       ; "thinking-object", Thinking_object
+      ; "thinking_object_adaptive", Thinking_object_adaptive
+      ; "thinking-object-adaptive", Thinking_object_adaptive
       ; "thinking_object_only", Thinking_object_only
       ; "thinking-object-only", Thinking_object_only
       ; "chat_template_kwargs", Chat_template_kwargs
@@ -59,8 +61,6 @@ let test_valid_values_load_and_map_to_agent_core_variants () =
       ; "ollama-think", Ollama_think
       ; "reasoning_effort", Reasoning_effort
       ; "reasoning-effort", Reasoning_effort
-      ; "enable_thinking", Enable_thinking
-      ; "enable-thinking", Enable_thinking
       ]
   in
   List.iter

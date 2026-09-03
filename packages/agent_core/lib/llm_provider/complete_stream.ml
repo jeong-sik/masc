@@ -122,7 +122,7 @@ let accumulate_openai_payload acc state payload =
 ;;
 
 let%test
-    "clean stream finalizes Ok: OpenAI-compat finish_reason (covers GLM/Kimi/DashScope)"
+    "clean stream finalizes Ok: OpenAI-compat finish_reason (covers GLM/Kimi)"
   =
   let acc = Complete_stream_acc.create_stream_acc () in
   let st = Streaming.create_openai_stream_state ~provider:"openai" ~model:"m" () in
@@ -352,7 +352,7 @@ let complete_stream_http
       let url =
         match config.kind with
         | Provider_config.Gemini -> gemini_url ~config ~stream:true
-        | Anthropic | Kimi | OpenAI_compat | Ollama | Glm | DashScope ->
+        | Anthropic | Kimi | OpenAI_compat | Ollama | Glm ->
           config.base_url ^ config.request_path
       in
       (match admitted_body with
@@ -959,7 +959,7 @@ let complete_stream_http
               | None -> resp.usage
             in
             { resp with usage }
-          | Anthropic | Kimi | OpenAI_compat | Gemini | Glm | DashScope -> resp
+          | Anthropic | Kimi | OpenAI_compat | Gemini | Glm -> resp
         in
         (* Wire timings (Ollama done line, llama-server final SSE chunk)
          populate the otherwise-None telemetry slot before patch_telemetry

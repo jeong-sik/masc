@@ -645,20 +645,6 @@ let test_unknown_workspace_op_is_unsupported_before_docker () =
     (Some "future_repo_op")
     (parse_string_field raw "op")
 
-let tool_execute_typed_pipeline_args ~cwd =
-  `Assoc
-    [
-      ( "pipeline",
-        `List
-          [
-            `Assoc
-              [("argv", `List [ `String "printf"; `String "typed" ])];
-            `Assoc
-              [("argv", `List [ `String "wc"; `String "-c" ])];
-          ] );
-      ("cwd", `String cwd);
-      ("timeout_sec", `Float 5.0);
-    ]
 
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)
@@ -671,29 +657,11 @@ let tool_execute_typed_exec_args ?(argv = []) ~cwd program =
       ("timeout_sec", `Float 5.0);
     ]
 
-let tool_execute_typed_pipeline_args_of ~cwd stages =
-  `Assoc
-    [
-      ( "pipeline",
-        `List
-          (List.map
-             (fun (program, argv) ->
-               `Assoc
-                 [("argv", json_string_list (program :: argv))])
-             stages) );
-      ("cwd", `String cwd);
-      ("timeout_sec", `Float 5.0);
-    ]
 
-let tool_execute_typed_single_stage_pipeline_args ~cwd =
+let tool_execute_script_args ~cwd script =
   `Assoc
     [
-      ( "pipeline",
-        `List
-          [
-            `Assoc
-              [("argv", `List [ `String "printf"; `String "typed" ])];
-          ] );
+      ("script", `String script);
       ("cwd", `String cwd);
       ("timeout_sec", `Float 5.0);
     ]
@@ -706,17 +674,6 @@ let tool_execute_typed_env_wrapper_args ~cwd =
       ("timeout_sec", `Float 5.0);
     ]
 
-let check_typed_pipeline_response raw =
-  (match parse_bool_field raw "ok" with
-   | Some true -> ()
-   | Some false -> Alcotest.failf "typed pipeline succeeds: got false in %s" raw
-   | None -> Alcotest.failf "typed pipeline succeeds: missing ok in %s" raw);
-  Alcotest.(check (option bool)) "typed response" (Some true)
-    (parse_bool_field raw "typed");
-  Alcotest.(check int) "typed pipeline exit status" 0
-    (parse_status_exit_code raw);
-  Alcotest.(check bool) "pipeline output propagated" true
-    (response_mentions raw "output" "5")
 
 let check_typed_validation_error needle raw =
   (match parse_bool_field raw "ok" with
@@ -744,25 +701,6 @@ let test_execute_typed_env_wrapper_target_allowed () =
     (parse_bool_field raw "typed");
   Alcotest.(check int) "env wrapper exit status" 0 (parse_status_exit_code raw)
 
-(* A one-stage pipeline is a single process, not a malformed pipeline: the
-   pipeline form and the argv form describe the same program now, so this
-   runs instead of being refused for having too few stages. *)
-let test_execute_typed_single_stage_pipeline_runs () =
-  setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
-  @@ fun ~config ~meta ~playground ->
-  let raw =
-    Keeper_tool_execute_runtime.handle_tool_execute
-      ~turn_sandbox_factory:None
-      ~config
-      ~meta
-      ~args:(tool_execute_typed_single_stage_pipeline_args ~cwd:playground)
-      ()
-  in
-  Alcotest.(check (option bool))
-    "single-stage pipeline runs"
-    (Some true)
-    (parse_bool_field raw "ok");
-  Alcotest.(check int) "exit status" 0 (parse_status_exit_code raw)
 
 let test_execute_typed_repeated_executable_arg_is_preserved () =
   setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
@@ -789,24 +727,6 @@ let test_execute_typed_repeated_executable_arg_is_preserved () =
     true
     (response_mentions raw "output" "echo hello")
 
-let test_execute_typed_pipeline_requires_docker_factory () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
-  setup ~sandbox:Keeper_types_profile_sandbox.Docker
-  @@ fun ~config ~meta ~playground ->
-  let raw =
-    Keeper_tool_execute_runtime.handle_tool_execute
-      ~turn_sandbox_factory:None
-      ~config
-      ~meta
-      ~args:(tool_execute_typed_pipeline_args ~cwd:playground)
-      ()
-  in
-  Alcotest.(check (option bool)) "Docker request did not run on Host" None
-    (parse_bool_field raw "ok");
-  Alcotest.(check bool) "missing factory is explicit" true
-    (response_mentions raw "error" "requires a turn sandbox factory");
-  Alcotest.(check (option string)) "no local fallback" None
-    (parse_string_field raw "sandbox_fallback")
 
 let test_execute_rejects_factory_profile_drift_in_every_direction () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -840,41 +760,7 @@ let test_execute_rejects_factory_profile_drift_in_every_direction () =
   assert_mismatch ~factory_meta:docker ~caller_meta:remote;
   assert_mismatch ~factory_meta:remote ~caller_meta:docker
 
-let test_execute_typed_pipeline_uses_local_shell_ir_dispatch () =
-  setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
-  @@ fun ~config ~meta ~playground ->
-  Keeper_tool_execute_runtime.handle_tool_execute
-    ~turn_sandbox_factory:None
-    ~config
-    ~meta
-    ~args:(tool_execute_typed_pipeline_args ~cwd:playground)
-    ()
-  |> check_typed_pipeline_response
 
-let test_execute_typed_pipeline_uses_turn_sandbox_docker_runner () =
-  let image = "masc-keeper-sandbox:local" in
-  if not (docker_image_available image)
-  then Alcotest.skip ()
-  else
-    with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" image
-    @@ fun () ->
-    setup ~sandbox:Keeper_types_profile_sandbox.Docker
-    @@ fun ~config ~meta ~playground ->
-    let factory = Keeper_sandbox_factory.create ~config ~meta () in
-    Fun.protect
-      ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
-    @@ fun () ->
-    let raw =
-      Keeper_tool_execute_runtime.handle_tool_execute
-        ~turn_sandbox_factory:(Some factory)
-        ~config
-        ~meta
-        ~args:(tool_execute_typed_pipeline_args ~cwd:playground)
-        ()
-    in
-    check_typed_pipeline_response raw;
-    Alcotest.(check (option string)) "no local fallback when docker works" None
-      (parse_string_field raw "sandbox_fallback")
 
 let test_execute_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
@@ -1479,7 +1365,7 @@ let test_execute_missing_image_without_factory_fails_closed () =
       ~turn_sandbox_factory:None
       ~config
       ~meta
-      ~args:(tool_execute_typed_pipeline_args ~cwd:playground)
+      ~args:(tool_execute_script_args ~cwd:playground "ls lib/ | head -20")
       ()
   in
   Alcotest.(check (option bool)) "Docker request did not run on Host" None
@@ -1513,7 +1399,7 @@ let test_execute_outside_playground_rejects_before_image_preflight () =
       ~turn_sandbox_factory:(Some factory)
       ~config
       ~meta
-      ~args:(tool_execute_typed_pipeline_args ~cwd)
+      ~args:(tool_execute_script_args ~cwd "ls lib/ | head -20")
       ()
   in
   Alcotest.(check (option bool)) "legacy ok omitted" None
@@ -2037,8 +1923,7 @@ let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
   let raw =
     Keeper_tool_execute_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~config ~meta
       ~args:
-        (tool_execute_typed_pipeline_args_of ~cwd:playground
-           [ "ls", [ "lib/" ]; "head", [ "-20" ] ])
+        (tool_execute_script_args ~cwd:playground "ls lib/ | head -20")
       ()
   in
   Alcotest.(check (option bool)) "safe pipeline is allowed" (Some true)
@@ -2132,28 +2017,6 @@ let test_execute_repo_checks_routes_through_docker () =
   Alcotest.(check bool) "docker container was invoked" true
     (docker_log_has_container_execution log)
 
-let test_execute_search_pipeline_exposes_structured_recovery_plan () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
-  with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
-  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
-  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
-  let raw =
-    Keeper_tool_execute_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~config ~meta
-      ~args:
-        (tool_execute_typed_pipeline_args_of ~cwd:playground
-           [ "rg", [ "TODO"; "repos" ]; "head", [ "-20" ] ])
-      ()
-  in
-  Alcotest.(check (option bool)) "typed pipeline is allowed" (Some true)
-    (parse_bool_field raw "ok");
-  Alcotest.(check (option string))
-    "typed pipeline routes through docker"
-    (Some "docker")
-    (parse_string_field raw "via");
-  Alcotest.(check bool) "docker was invoked" true
-    (Sys.file_exists log_path)
 
 let test_execute_rewrites_host_path_command_for_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -2352,9 +2215,6 @@ let () =
             "docker Execute routes repo checks through docker"
             `Quick test_execute_repo_checks_routes_through_docker;
           Alcotest.test_case
-            "docker Execute shape block exposes structured recovery plan"
-            `Quick test_execute_search_pipeline_exposes_structured_recovery_plan;
-          Alcotest.test_case
             "docker Execute rewrites host paths before exec"
             `Quick test_execute_rewrites_host_path_command_for_docker;
           Alcotest.test_case
@@ -2402,26 +2262,14 @@ let () =
             "guard yields to an explicit opt-in"
             `Quick test_guard_yields_to_an_explicit_opt_in;
           Alcotest.test_case
-            "tool_execute typed pipeline uses local shell ir dispatch"
-            `Quick test_execute_typed_pipeline_uses_local_shell_ir_dispatch;
-          Alcotest.test_case
             "tool_execute typed env wrapper target executes"
             `Quick test_execute_typed_env_wrapper_target_allowed;
-          Alcotest.test_case
-            "tool_execute typed single-stage pipeline runs"
-            `Quick test_execute_typed_single_stage_pipeline_runs;
           Alcotest.test_case
             "tool_execute typed repeated executable arg is preserved"
             `Quick test_execute_typed_repeated_executable_arg_is_preserved;
           Alcotest.test_case
-            "tool_execute typed pipeline requires docker factory"
-            `Quick test_execute_typed_pipeline_requires_docker_factory;
-          Alcotest.test_case
             "tool_execute rejects factory profile drift in every direction"
             `Quick test_execute_rejects_factory_profile_drift_in_every_direction;
-          Alcotest.test_case
-            "tool_execute typed pipeline uses turn sandbox docker runner"
-            `Quick test_execute_typed_pipeline_uses_turn_sandbox_docker_runner;
           Alcotest.test_case
             "docker shell skips missing SSH_AUTH_SOCK"
             `Quick test_docker_shell_skips_missing_ssh_auth_sock;

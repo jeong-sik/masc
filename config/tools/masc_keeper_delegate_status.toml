@@ -6,6 +6,12 @@ arrives on its own queue when the turn ends. Use this to see where an \
 operation stands before then."""
 additional_properties = false
 
+
+# Held back from the request until the model asks for it by name.
+# 2026-09-01..03: 12 turns needed it across 6317 provider requests, and its
+# 617 B schema rode every one of those requests. Loading it on demand costs
+# one extra request on those 12 turns and saves the 617 B on the rest.
+defer_loading = true
 [[params]]
 name = "target"
 type = "object"

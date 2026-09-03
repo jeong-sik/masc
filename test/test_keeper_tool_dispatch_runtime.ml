@@ -2455,6 +2455,63 @@ let test_model_visible_web_fetch_dispatches_to_misc_runtime () =
                Yojson.Safe.Util.(member "text" json |> to_string)
                "Body content & proof.")))
 
+(* The agent-core lane builds its bundle from the descriptor registry, and the
+   ask tools had none: a Keeper running in-process could not see masc_ask, and
+   a call under that name died as unknown_tool. The descriptor projects the
+   name; this proves the rest of the lane -- dispatch, the store's registered-
+   Keeper guard, and the durable row -- carries it. *)
+let test_model_visible_masc_ask_records_the_question () =
+  with_exec_fixture "keeper_tool_dispatch_masc_ask"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~publication_recovery
+          ~ctx_work
+          ~name:"masc_ask"
+          ~input:
+            (`Assoc
+              [ ( "questions"
+                , `List
+                    [ `Assoc
+                        [ "question_id", `String "q1"
+                        ; "header", `String "deploy"
+                        ; "prompt", `String "Roll forward or roll back?"
+                        ; "mode", `String "single"
+                        ; ( "choices"
+                          , `List
+                              [ `Assoc
+                                  [ "choice_id", `String "c1"
+                                  ; "label", `String "roll forward"
+                                  ]
+                              ; `Assoc
+                                  [ "choice_id", `String "c2"
+                                  ; "label", `String "roll back"
+                                  ]
+                              ] )
+                        ]
+                    ] )
+              ; "context", `String "the release window closes tonight"
+              ])
+          ()
+      in
+      check string "masc_ask outcome" "success" (outcome_label result.disposition);
+      let json = parse_json result.raw_output in
+      check string "recorded under the asking keeper" meta.name
+        Yojson.Safe.Util.(member "keeper_name" json |> to_string);
+      check int "the reply says one question is open" 1
+        Yojson.Safe.Util.(member "open_count" json |> to_int);
+      match
+        Masc.Keeper_ask_store.rows ~base_path:config.base_path ~keeper_name:meta.name
+      with
+      | [ _, (ask, resolution) ] ->
+        check string "the store row names the keeper" meta.name
+          ask.Masc.Keeper_ask.keeper_name;
+        check bool "the row is still open" true
+          (resolution = Masc.Keeper_ask.Open)
+      | _ -> fail "expected exactly one recorded ask")
+
 let test_public_masc_web_fetch_rejects_localhost_after_gate () =
   with_exec_fixture
     ~always_allow:true
@@ -7189,6 +7246,8 @@ let () =
         test_model_visible_web_search_dispatches_to_misc_runtime;
       test_case "model-visible WebFetch reaches misc runtime" `Quick
         test_model_visible_web_fetch_dispatches_to_misc_runtime;
+      test_case "model-visible masc_ask records the question" `Quick
+        test_model_visible_masc_ask_records_the_question;
       test_case "public WebFetch rejects localhost after Gate" `Quick
         test_public_masc_web_fetch_rejects_localhost_after_gate;
       test_case "Manual Gate defers web tools before network" `Quick

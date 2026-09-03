@@ -1498,7 +1498,6 @@ let thinking_control_format_wire : Runtime_schema.thinking_control_format -> str
   | Runtime_schema.Chat_template_token _ -> "chat-template-token"
   | Runtime_schema.Ollama_think -> "ollama-think"
   | Runtime_schema.Reasoning_effort -> "reasoning-effort"
-  | Runtime_schema.Enable_thinking -> "enable-thinking"
 ;;
 
 let preserve_thinking_control_format_wire
@@ -1508,7 +1507,6 @@ let preserve_thinking_control_format_wire
   | Thinking_object_keep_all -> "thinking-object-keep-all"
   | Thinking_object_clear_thinking -> "thinking-object-clear-thinking"
   | Chat_template_kwargs_preserve_thinking -> "chat-template-kwargs-preserve-thinking"
-  | Top_level_preserve_thinking -> "top-level-preserve-thinking"
   | Always_preserved_thinking -> "always-preserved-thinking"
 ;;
 

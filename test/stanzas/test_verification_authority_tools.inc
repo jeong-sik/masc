@@ -9,4 +9,10 @@
    MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
    true
    (run %{test})))
- (libraries masc_test_deps))
+ (libraries
+  masc_test_deps
+  ;; The producer runs on the remote_ssh profile: the fixture endpoint row is
+  ;; rendered by the same encoder the strict decoder mirrors, and the fake
+  ;; shim's result trailer by the same function the real shim uses, so a wire
+  ;; change updates these fixtures or fails to compile.
+  exec_ssh_protocol))

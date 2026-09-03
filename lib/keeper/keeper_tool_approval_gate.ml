@@ -63,8 +63,10 @@ let create ~registry ~late_approvals ~publish ~clock ~keeper_name ~timeout_sec =
          One use consumes it, so the call after this one is asked about as
          usual. *)
       match
-        Late.take late_approvals ~keeper_name ~tool_name:request.tool_name
-          ~args:request.input
+        (* The registry's wait runs on this same clock, so ages in the store
+           are measured against the same clock family. *)
+        Late.take late_approvals ~now:(Eio.Time.now clock) ~keeper_name
+          ~tool_name:request.tool_name ~args:request.input ()
       with
       | Some remembered ->
           ( (match remembered with
@@ -91,8 +93,9 @@ let create ~registry ~late_approvals ~publish ~clock ~keeper_name ~timeout_sec =
               (* The turn ends here, but the ask's description is kept so an
                  operator's late answer is not discarded: it will settle the
                  identical retried call once. *)
-              Late.note_timed_out late_approvals ~keeper_name ~tool_call_id
-                ~tool_name:request.tool_name ~args:request.input;
+              Late.note_timed_out late_approvals ~now:(Eio.Time.now clock)
+                ~keeper_name ~tool_call_id
+                ~tool_name:request.tool_name ~args:request.input ();
               (Agent_core.Hooks.Timed_out, "timed_out")
           (* Two waits claimed one call id, so neither answer can be trusted to be
              about this call. Denying is the conservative reading: the call the

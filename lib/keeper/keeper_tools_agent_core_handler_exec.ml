@@ -192,7 +192,7 @@ let execute_with_observers_with_authority
       let detail =
         raw_result
         |> Observability_redact.redact_preview
-             ~max_len:Common.max_tool_output_bytes
+             ~max_len:Common.max_tool_result_wire_bytes
         |> Safe_ops.sanitize_text_utf8
       in
       let ts = Time_compat.now () in

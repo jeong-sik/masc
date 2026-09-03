@@ -1031,6 +1031,10 @@ let replay_approved_effect_with_receipt
            ?continuation_channel
            ?gate_context
            ~gate_grant:grant
+           (* The host replays; there is no turn here, so no descriptor can be
+              looked up and no tool dispatched. The line is refused rather
+              than run as a host program of that name (#32730). *)
+           ~shell_ir_rewrite:Keeper_shell_tool_command.refuse_reserved_command
            ~args
            ())
      | Some Replay_network_read ->

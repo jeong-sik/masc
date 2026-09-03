@@ -57,5 +57,44 @@ let () =
         | Ok (`Assoc []) -> ()
         | Ok _ | Error _ -> assert false)))
 
+(* The surface a lane with no turn has (#32730). The host replays an approved
+   effect with no descriptor lookup and no dispatch, so it cannot route a
+   [masc] line. Before this it passed no surface at all and the runtime's
+   absent case ran the line: routing lives in the IR's sandbox field, so an
+   unrouted line is not refused, it execs a host program named [masc]. *)
+let () =
+  let module K = Masc.Keeper_shell_tool_command in
+  let simple name args =
+    match Masc_exec.Exec_program.of_string name with
+    | Error (`Unknown detail) -> failwith ("test fixture: " ^ detail)
+    | Ok program ->
+      Masc_exec.Shell_ir.Simple
+        { bin = program
+        ; args =
+            List.map
+              (fun a -> Masc_exec.Shell_ir.Lit (a, Masc_exec.Shell_ir.default_meta))
+              args
+        ; env = []
+        ; cwd = None
+        ; redirects = []
+        ; sandbox = Masc_exec.Sandbox_target.host ()
+        }
+  in
+  (match K.refuse_reserved_command (simple "masc" [ "board"; "list" ]) with
+   | Error _ -> ()
+   | Ok _ -> assert false);
+  (* A pipeline hides one just as well. *)
+  (match
+     K.refuse_reserved_command
+       (Masc_exec.Shell_ir.Pipeline
+          [ simple "ls" []; simple "masc" [ "board"; "list" ] ])
+   with
+   | Error _ -> ()
+   | Ok _ -> assert false);
+  (* Everything else is the lane's ordinary work and passes through. *)
+  (match K.refuse_reserved_command (simple "ls" [ "-la" ]) with
+   | Ok _ -> ()
+   | Error _ -> assert false)
+
 let () =
   print_endline "[test_keeper_shell_tool_command] all tests passed"

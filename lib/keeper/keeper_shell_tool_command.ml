@@ -181,6 +181,22 @@ let rec contains_masc (ir : Shell_ir.t) =
     contains_masc head
     || List.exists (fun (_, part) -> contains_masc part) tail
 
+(* The whole surface a lane without a turn has. Routing needs a descriptor
+   lookup and a dispatch, and a replayed effect has neither -- but the line it
+   replays can still name the reserved word, and running that as a host
+   program is not the approved effect. Refusing is the only honest answer, and
+   it has to be an answer rather than a missing argument (#32730). *)
+let refuse_reserved_command (ir : Shell_ir.t) =
+  if contains_masc ir
+  then
+    Error
+      (Printf.sprintf
+         "%s names a tool, and this lane cannot reach one: it has no turn to \
+          look the tool up in. Call the tool directly."
+         reserved_command)
+  else Ok ir
+;;
+
 let rec rewrite ~(lookup : string -> Keeper_tool_descriptor.t option)
       ~(dispatch : dispatch) (ir : Shell_ir.t)
   : (Shell_ir.t, string) result =

@@ -30,7 +30,7 @@ Tool 결과는 생성 시점에 64 KB 를 넘을 때만 blob 으로 나간다. �
 | 인라인 크기 p10 / p50 / p90 / p99 / max | 751 / **2,862** / 8,264 / 10,761 / 67,351 B |
 | **현행 임계(65,536 B) 초과 개수** | **1** |
 
-`Tool_bridge.maybe_externalize` 의 기본 임계는 `Common.max_tool_output_bytes` = 65,536 (`lib/core/common.ml:102`). 중앙값 tool 결과는 그 1/23 이다. **쓰기 시점 externalization 은 이 분포에서 사실상 발화하지 않는다.**
+`Tool_bridge.maybe_externalize` 의 기본 임계는 `Common.max_tool_output_bytes` = 65,536. 중앙값 tool 결과는 그 1/23 이다. **쓰기 시점 externalization 은 이 분포에서 사실상 발화하지 않는다.**
 
 > **2026-09-03 갱신 — 위 문단의 전제가 더는 성립하지 않는다.** #32748 이 발행 임계를 `Common.max_tool_result_wire_bytes` = 16,384 으로 내렸다. 공식 클라이언트 CLI 가 그보다 큰 결과를 자기 세션 디렉터리 파일로 흘리는데 Keeper 는 그 경로를 열 수 없어서다. 옛 상수 `max_tool_output_bytes` 는 제거됐다.
 >

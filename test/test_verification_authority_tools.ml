@@ -42,8 +42,91 @@ let ensure_producer config name =
   | Error err -> Alcotest.failf "write keeper meta failed: %s" err
 ;;
 
-(* A workspace holding one producer keeper, and the surface bound to it. *)
-let with_surface ?(sandbox_profile = "docker") f =
+let with_env key value f =
+  let prior = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prior with
+      | Some v -> Unix.putenv key v
+      | None -> Unix.putenv key "")
+    f
+;;
+
+(* The endpoint name the remote_ssh fixture registers and the producer's TOML
+   points at. One literal, two writers. *)
+let ssh_fixture_endpoint = "fixture"
+
+(* The shim answers a framed request on stdin with the body on stdout and a
+   result trailer on stderr. The trailer is rendered by the function the real
+   shim renders it with, so a wire change updates this fixture or fails to
+   compile -- the same contract test_keeper_sandbox_read_backend keeps. *)
+let ssh_fixture_body = "remote-file-content"
+
+let fake_ssh_script =
+  Printf.sprintf
+    {|#!/bin/sh
+cat >/dev/null 2>/dev/null &
+printf '%%s' '%s'
+printf '%%s' '%s' >&2
+exit 0
+|}
+    ssh_fixture_body
+    (Exec_ssh_protocol.render_trailer
+       { v = Exec_ssh_protocol.protocol_version
+       ; exit = Some 0
+       ; signal = None
+       ; timed_out = false
+       ; shim_error = None
+       })
+;;
+
+let write_runtime_toml ~base_path =
+  let path = Filename.concat base_path ".masc/config/runtime.toml" in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Out_channel.with_open_text path (fun channel ->
+    output_string
+      channel
+      (Exec_ssh_endpoint.to_toml
+         Exec_ssh_endpoint.
+           { name = ssh_fixture_endpoint
+           ; host = "fixture.invalid"
+           ; user = "masc"
+           ; port = default_port
+           ; identity_file = default_identity_file ~name:ssh_fixture_endpoint
+           ; known_hosts_file = default_known_hosts_file ~name:ssh_fixture_endpoint
+           ; remote_root = "/srv/masc/playground"
+           ; connect_timeout_sec = 1
+           ; max_concurrent_sessions = 2
+           ; env_allowlist = []
+           ; capabilities = []
+           }))
+;;
+
+let with_fake_ssh f =
+  let dir = temp_dir () in
+  let ssh_path = Filename.concat dir "ssh" in
+  Out_channel.with_open_text ssh_path (fun channel ->
+    output_string channel fake_ssh_script);
+  Unix.chmod ssh_path 0o755;
+  Masc.Keeper_sandbox_ssh.For_testing.set_ssh_bin_override (Some ssh_path);
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_sandbox_ssh.For_testing.set_ssh_bin_override None;
+      rm_rf dir)
+    f
+;;
+
+(* A workspace holding one producer keeper, and the surface bound to it.
+
+   [remote_ssh] is the default because it is the one hardened profile a test
+   can stand up on any host: the endpoint is a runtime.toml row and the
+   transport is a shim this file installs. Docker needs a daemon and the
+   masc-keeper-sandbox image, which the release evidence job does not build,
+   so a read routed through it fails there for a reason that is not about the
+   verifier. Micro_vm needs Apple's container CLI, so it cannot run on Linux
+   at all. Tests that are about the Docker route ask for it by name. *)
+let with_surface ?(sandbox_profile = "remote_ssh") f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -53,6 +136,7 @@ let with_surface ?(sandbox_profile = "docker") f =
   Eio.Switch.on_release sw (fun () -> rm_rf dir);
   let config = Workspace_core.default_config dir in
   ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  let remote = String.equal sandbox_profile "remote_ssh" in
   let profile_path =
     Keeper_sandbox_config.keeper_toml_path
       ~base_path:config.base_path
@@ -63,11 +147,34 @@ let with_surface ?(sandbox_profile = "docker") f =
     Printf.fprintf
       channel
       "[keeper]\ninstructions = \"verification test producer\"\nsandbox_profile = %S\n"
-      sandbox_profile);
+      sandbox_profile;
+    if remote
+    then Printf.fprintf channel "remote_endpoint = %S\n" ssh_fixture_endpoint);
+  if remote then write_runtime_toml ~base_path:config.base_path;
   ensure_producer config producer;
-  match VAT.create ~config ~producer with
-  | Error reason -> Alcotest.failf "surface creation failed: %s" reason
-  | Ok surface -> f config surface
+  let run () =
+    match VAT.create ~config ~producer with
+    | Error reason -> Alcotest.failf "surface creation failed: %s" reason
+    | Ok surface -> f config surface
+  in
+  if remote
+  then (
+    (* The SSH runner spawns through [Process_eio], which answers "initialized
+       Eio runtime required" until it holds this run's process manager. The
+       Docker route reaches its backend without it, which is why only this
+       branch pays for it. *)
+    let clock = Eio.Stdenv.clock env in
+    Eio_context.set_clock clock;
+    Eio_context.set_switch sw;
+    Process_eio.init
+      ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
+      ~proc_mgr:(Eio.Stdenv.process_mgr env)
+      ~clock;
+    (* The bootstrap preflight ends in [gh auth status], which a fixture
+       endpoint cannot answer; the read path under test never needed it. *)
+    with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" (fun () ->
+      with_fake_ssh run))
+  else run ()
 ;;
 
 let require_layout = function
@@ -159,10 +266,15 @@ let test_read_translates_the_advertised_argument_and_refuses_a_malformed_one () 
          required
          detail
      | Ok output ->
+       (* The producer's tree is on the endpoint, so the bytes come back from
+          the shim, not from the host copy written above. This asserts the
+          argument reached the backend and a read resolved; that the host path
+          is translated to the endpoint's is pinned separately, by
+          test_keeper_sandbox_read_backend. *)
        Alcotest.(check bool)
-         (Printf.sprintf "%S returns the file's contents" required)
+         (Printf.sprintf "%S returns what the endpoint served" required)
          true
-         (Astring.String.is_infix ~affix:contents output));
+         (Astring.String.is_infix ~affix:ssh_fixture_body output));
     match VAT.dispatch surface ~name:"tool_read_file" ~args:(`Assoc []) with
     | Ok output ->
       Alcotest.failf

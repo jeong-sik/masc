@@ -57,21 +57,6 @@ let category_of_string = function
 
 let ( let* ) = Result.bind
 
-let starts_with ~prefix value =
-  let prefix_length = String.length prefix in
-  String.length value >= prefix_length
-  && String.equal (String.sub value 0 prefix_length) prefix
-;;
-
-let ends_with ~suffix value =
-  let suffix_length = String.length suffix in
-  let value_length = String.length value in
-  value_length >= suffix_length
-  && String.equal
-       (String.sub value (value_length - suffix_length) suffix_length)
-       suffix
-;;
-
 let normalize_resolved_callee value =
   let value =
     value |> String.to_seq |> Seq.filter (fun character -> character <> '!')
@@ -103,7 +88,7 @@ let category_for_resolved_callee raw =
   | "Stdlib.Result.to_option" | "Result.to_option" -> Some Failure_erasure
   | callee when String.equal callee "Parse_outcome.to_option" ->
     Some Failure_erasure
-  | callee when ends_with ~suffix:".Parse_outcome.to_option" callee ->
+  | callee when String.ends_with ~suffix:".Parse_outcome.to_option" callee ->
     Some Failure_erasure
   | _ -> None
 ;;
@@ -202,31 +187,31 @@ let contains_path_segment path wanted =
 let effectful_resolved_callee raw =
   let callee = normalize_resolved_callee raw in
   String_set.mem callee effectful_exact
-  || (starts_with ~prefix:"Stdlib.Sys." callee
+  || (String.starts_with ~prefix:"Stdlib.Sys." callee
       && not (String.equal callee "Stdlib.Sys.opaque_identity"))
-  || (starts_with ~prefix:"Unix." callee
+  || (String.starts_with ~prefix:"Unix." callee
       && not (String.equal callee "Unix.gmtime"))
-  || starts_with ~prefix:"Eio." callee
-  || starts_with ~prefix:"Eio_main." callee
-  || starts_with ~prefix:"Stdlib.Atomic." callee
-  || starts_with ~prefix:"Stdlib.Domain." callee
-  || starts_with ~prefix:"Stdlib.In_channel." callee
-  || starts_with ~prefix:"Stdlib.Mutex." callee
-  || starts_with ~prefix:"Stdlib.Out_channel." callee
-  || starts_with ~prefix:"Stdlib.Random." callee
-  || starts_with ~prefix:"Stdlib.Thread." callee
-  || starts_with ~prefix:"Atomic." callee
-  || starts_with ~prefix:"Domain." callee
-  || starts_with ~prefix:"Fs_compat." callee
-  || starts_with ~prefix:"In_channel." callee
-  || starts_with ~prefix:"Mutex." callee
-  || starts_with ~prefix:"Out_channel." callee
-  || starts_with ~prefix:"Random." callee
-  || starts_with ~prefix:"Thread." callee
-  || starts_with ~prefix:"Time_compat.now" callee
-  || starts_with ~prefix:"Mtime_clock." callee
-  || starts_with ~prefix:"Ptime_clock." callee
-  || starts_with ~prefix:"Mirage_crypto_rng." callee
+  || String.starts_with ~prefix:"Eio." callee
+  || String.starts_with ~prefix:"Eio_main." callee
+  || String.starts_with ~prefix:"Stdlib.Atomic." callee
+  || String.starts_with ~prefix:"Stdlib.Domain." callee
+  || String.starts_with ~prefix:"Stdlib.In_channel." callee
+  || String.starts_with ~prefix:"Stdlib.Mutex." callee
+  || String.starts_with ~prefix:"Stdlib.Out_channel." callee
+  || String.starts_with ~prefix:"Stdlib.Random." callee
+  || String.starts_with ~prefix:"Stdlib.Thread." callee
+  || String.starts_with ~prefix:"Atomic." callee
+  || String.starts_with ~prefix:"Domain." callee
+  || String.starts_with ~prefix:"Fs_compat." callee
+  || String.starts_with ~prefix:"In_channel." callee
+  || String.starts_with ~prefix:"Mutex." callee
+  || String.starts_with ~prefix:"Out_channel." callee
+  || String.starts_with ~prefix:"Random." callee
+  || String.starts_with ~prefix:"Thread." callee
+  || String.starts_with ~prefix:"Time_compat.now" callee
+  || String.starts_with ~prefix:"Mtime_clock." callee
+  || String.starts_with ~prefix:"Ptime_clock." callee
+  || String.starts_with ~prefix:"Mirage_crypto_rng." callee
   || contains_path_segment callee "Log"
   || contains_path_segment callee "Logs"
 ;;
@@ -391,7 +376,7 @@ let rec files_with_suffix ~suffix directory acc =
 ;;
 
 let normalize_relative_path path =
-  let path = if starts_with ~prefix:"./" path then String.sub path 2 (String.length path - 2) else path in
+  let path = if String.starts_with ~prefix:"./" path then String.sub path 2 (String.length path - 2) else path in
   let components = String.split_on_char '/' path in
   if path = ""
      || not (Filename.is_relative path)
@@ -402,7 +387,7 @@ let normalize_relative_path path =
 
 let strip_root_prefix ~root path =
   let prefix = root ^ Filename.dir_sep in
-  if starts_with ~prefix path
+  if String.starts_with ~prefix path
   then Some (String.sub path (String.length prefix) (String.length path - String.length prefix))
   else None
 ;;
@@ -440,7 +425,7 @@ let source_path_of_structure ~root ~fallback (structure : structure) =
 
 let path_under_roots ~source_roots path =
   List.exists
-    (fun root -> String.equal path root || starts_with ~prefix:(root ^ "/") path)
+    (fun root -> String.equal path root || String.starts_with ~prefix:(root ^ "/") path)
     source_roots
 ;;
 

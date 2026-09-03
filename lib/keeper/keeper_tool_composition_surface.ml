@@ -1306,7 +1306,7 @@ let make_instruction_skill_tool
               in
               let record_and_return ~content ~wire_content metadata =
                 let wire_bytes = String.length wire_content in
-                if wire_bytes > Common.max_tool_output_bytes
+                if wire_bytes > Common.max_tool_result_wire_bytes
                 then
                   Tool_result.make_err
                     ~tool_name:name
@@ -1318,13 +1318,13 @@ let make_instruction_skill_tool
                            , `Assoc
                                [ "kind", `String "provider_inline_too_large"
                                ; "observed_bytes", `Int wire_bytes
-                               ; "max_bytes", `Int Common.max_tool_output_bytes
+                               ; "max_bytes", `Int Common.max_tool_result_wire_bytes
                                ] )
                          ])
                     (Printf.sprintf
                        "Skill content does not fit the provider inline tool-result boundary: observed_bytes=%d max_bytes=%d"
                        wire_bytes
-                       Common.max_tool_output_bytes)
+                       Common.max_tool_result_wire_bytes)
                 else
                   match record_activation with
                   | Some record ->

@@ -87,14 +87,13 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper_types/keeper_types.ml`�
 
 - **Identity**: `name`, `agent_name`, `trace_id`, `trace_history`
 - **Lineage**: `generation`, `trace_id`, `trace_history`, `last_handoff_ts`
-- **Goal/Task links**: `active_goal_ids`, `current_task_id`, typed goal/task transitions
+- **Goal/Task links**: `current_task_id`, typed goal/task transitions
 - **Model**: `runtime_id`, `last_model_used`, derived `active_model`
 - **Capability boundary**: the flat Tool catalog plus the sandbox path
   boundary; external effects pass through the Gate.
-- **Scope**: `mention_targets`, `bound_workspace_ids`
-- **Proactive**: `proactive_enabled`, `proactive_idle_sec`, `proactive_cooldown_sec`
+- **Scope**: `mention_targets`
+- **Proactive**: `proactive_enabled`
 - **Metrics**: `total_turns`, `total_tokens`, `total_cost_usd`, `last_turn_ts` 등
-- **Team/Autonomy**: `active_goal_ids`
 
 직렬화: `meta_to_json` / `meta_of_json`로 JSON 왕복. `validate_name`이 역직렬화 시점에 이름/trace_id를 검증한다.
 
@@ -143,7 +142,7 @@ type session_context = {
 ### 3.4 Workspace Boundary
 
 Legacy workspace-targeting typed aliases were removed during single-workspace flattening.
-JSON/MCP 경계에는 `mention_targets`, `bound_workspace_ids` 같은 workspace collaboration 값만 남고, 별도 scope enum은 더 이상 유지하지 않는다.
+JSON/MCP 경계에는 `mention_targets` 같은 workspace collaboration 값만 남고, 별도 scope enum은 더 이상 유지하지 않는다.
 `policy_mode`, `policy_shell_mode`, `trigger_mode`, `initiative_*`는 제거되었다.
 
 ### 3.5 fiber_health

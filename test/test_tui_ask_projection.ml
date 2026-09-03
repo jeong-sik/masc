@@ -322,6 +322,20 @@ let test_newly_opened_ignores_answered () =
   Alcotest.(check (list string)) "a1 closing is not an arrival, a2 is" [ "a2" ]
     (Ask.newly_opened_ask_ids ~previous:(Some before) ~current:after)
 
+let test_ring_when_arrival_and_not_watching () =
+  Alcotest.(check bool) "arrival off the asks surface rings" true
+    (Ask.should_ring_for_new_ask ~new_ids:[ "a1" ]
+       ~operator_is_watching_asks:false)
+
+let test_silent_when_watching_asks () =
+  Alcotest.(check bool) "on the asks surface it stays silent" false
+    (Ask.should_ring_for_new_ask ~new_ids:[ "a1" ]
+       ~operator_is_watching_asks:true)
+
+let test_silent_when_nothing_arrived () =
+  Alcotest.(check bool) "no arrival, no ring, even off the surface" false
+    (Ask.should_ring_for_new_ask ~new_ids:[] ~operator_is_watching_asks:false)
+
 let () =
   Alcotest.run "TUI ask projection"
     [
@@ -400,5 +414,11 @@ let () =
             test_newly_opened_silent_on_reread;
           Alcotest.test_case "ignores a closing ask" `Quick
             test_newly_opened_ignores_answered;
+          Alcotest.test_case "rings off the asks surface" `Quick
+            test_ring_when_arrival_and_not_watching;
+          Alcotest.test_case "silent on the asks surface" `Quick
+            test_silent_when_watching_asks;
+          Alcotest.test_case "silent with no arrival" `Quick
+            test_silent_when_nothing_arrived;
         ] );
     ]

@@ -11939,7 +11939,7 @@ and is loaded on demand through keeper_skill.
        | Config ->
            (* A restore rewrites three surfaces; its arm must not outlive the
               keypress that set it. *)
-           if cancelled [ "r"; "R" ] then state.preset_restore_armed <- None
+           if cancelled [ "u"; "U" ] then state.preset_restore_armed <- None
        | Overview | Acting | Lanes | Harness | Memory | Fusion | Repositories
        | Changes | Connectors | Runtime | Resources | Tools
        | System_logs | Code -> ());
@@ -13670,6 +13670,15 @@ and is loaded on demand through keeper_skill.
            (match state.view with
             | Approvals -> answer_presented_approval Deny
             | Schedules -> handle_schedule_create ()
+            (* The presets pane says [n] is its own key: a new preset from
+               the live state, named in the line the pane opens. *)
+            | Config when state.config_pane = Config_presets ->
+                if state.preset_busy then
+                  report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
+                else begin
+                  state.preset_restore_armed <- None;
+                  state.preset_save_draft <- Some ""
+                end
             | Overview | Acting | Keepers _ | Memory | Lanes | Board | Planning
             | Verification | Harness | Fusion | Repositories | Code | Changes
             | Connectors | Runtime | Config | Resources | Tools | System_logs ->
@@ -13826,21 +13835,14 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers _ | Approvals | Planning
             | Memory | Repositories | Changes | Connectors
             | Runtime | Config | Tools | Resources | System_logs -> ())
-       | Some "s" | Some "S"
-         when state.view = Config && state.config_pane = Config_presets ->
-           if state.preset_busy then
-             report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
-           else begin
-             state.preset_restore_armed <- None;
-             state.preset_save_draft <- Some ""
-           end
-       | Some "g" | Some "G"
-         when state.view = Config && state.config_pane = Config_presets ->
-           launch_presets_load state ~mailbox:async_messages
-       | Some "r" | Some "R"
+       (* On Config, s and t hop to Resources and Tools and r is the global
+          refresh, so the pane takes u, twice, for the destructive restore.
+          Its save key is n, answered inside the [n] dispatch below, which
+          the surface list there requires. *)
+       | Some "u" | Some "U"
          when state.view = Config && state.config_pane = Config_presets ->
            (match selected_preset_for_state state with
-            | None -> report_action state "error" "복원할 프리셋을 고르세요"
+            | None -> report_action state "error" "되돌릴 프리셋을 고르세요"
             | Some manifest ->
               let name = manifest.Tui_decode.pm_name in
               if state.preset_busy then
@@ -13856,7 +13858,7 @@ and is loaded on demand through keeper_skill.
               else begin
                 state.preset_restore_armed <- Some name;
                 report_action state "system"
-                  (Printf.sprintf "r 을 한 번 더 누르면 %s 로 되돌립니다" name)
+                  (Printf.sprintf "u 를 한 번 더 누르면 %s 로 되돌립니다" name)
               end)
        | Some "r" | Some "R" ->
            state.pending_approval_action <- None;

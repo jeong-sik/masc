@@ -612,9 +612,11 @@ Config 탭의 `presets` 패널(`p` 로 순환)이 이 기능의 자리다. 목�
 이름과 개수(프롬프트 오버라이드, 지시문을 담은 keeper, 런타임 배정, exact 레인),
 저장 시각을 보여주고, 아래 상세에는 설명과 keeper 목록이, 그 아래에는 이번
 세션의 마지막 복원 보고서가 남는다. manifest 가 읽히지 않는 디렉터리는 `!` 줄로
-따로 보인다. 키는 `j`/`k` 선택, `s` 저장(이름을 입력하고 Enter, Esc 취소),
-`r` 두 번 복원, `g` 새로고침이다. 복원은 세 표면을 덮어쓰므로 `r` 한 번은
-무장만 하고, 다른 키를 누르면 풀린다.
+따로 보인다. 키는 `j`/`k` 선택, `n` 저장(이름을 입력하고 Enter, Esc 취소),
+`u` 두 번 되돌리기, `r` 새로고침이다. Config 에서 `s` 와 `t` 는 이미 Resources 와
+Tools 로 가는 키라 쓰지 않는다. 되돌리기는 세 표면을 덮어쓰므로 `u` 한 번은
+무장만 하고, 다른 키를 누르면 풀린다. 이름을 입력하는 동안에는 패널이 모든
+인쇄 가능 키를 가져가므로 이름에 `n` 이나 `u` 가 들어가도 키가 발화하지 않는다.
 
 채팅 창에서도 같은 일을 할 수 있다. `/preset` lists the prompt presets the server holds under `.masc/presets`:
 one line per preset with its counts (prompt overrides, keepers with

@@ -13728,7 +13728,7 @@ let render_presets (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:선택  PgUp/PgDn:읽기  s:저장  r,r:복원  g:새로고침");
+       ~hints:"j/k:선택  PgUp/PgDn:읽기  n:저장  u,u:되돌리기  r:새로고침");
   finish_surface state ~surface_key:"presets" ~rows:terminal_rows ~cols buf
 
 let render_themes (state : state) =

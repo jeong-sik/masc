@@ -97,11 +97,6 @@ let test_request_path_ollama () =
   check_string "ollama path" "/api/chat" cfg.request_path
 ;;
 
-let test_request_path_dashscope () =
-  let cfg = Provider_config.make ~kind:DashScope ~model_id:"m" ~base_url:"" () in
-  check_string "dashscope path" "/chat/completions" cfg.request_path
-;;
-
 let test_request_path_override () =
   let cfg =
     Provider_config.make
@@ -141,8 +136,7 @@ let expected_auth_headers_for_kind = function
   | Provider_config.Gemini -> [ "x-goog-api-key", "provider-key" ]
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama
-  | Provider_config.Glm
-  | Provider_config.DashScope -> [ "Authorization", "Bearer provider-key" ]
+  | Provider_config.Glm -> [ "Authorization", "Bearer provider-key" ]
 ;;
 
 let test_auth_headers_for_kind_and_key_wire_headers () =
@@ -469,21 +463,6 @@ let test_validate_output_schema_glm_rejected () =
     (Result.is_error (Provider_config.validate_output_schema_request cfg))
 ;;
 
-let test_validate_output_schema_dashscope_accepted () =
-  let cfg =
-    Provider_config.make
-      ~kind:DashScope
-      ~model_id:"dashscope-max"
-      ~base_url:"https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
-      ()
-  in
-  check_bool
-    "dashscope accepted"
-    true
-    (Result.is_ok (Provider_config.validate_output_schema_request cfg))
-;;
-
 let test_validate_output_schema_kimi_rejected () =
   let cfg =
     Provider_config.make
@@ -547,7 +526,7 @@ let test_validate_output_schema_supported_non_openai () =
          (Provider_config.string_of_provider_kind kind ^ " accepts schema")
          true
          (Result.is_ok (Provider_config.validate_output_schema_request cfg)))
-    [ Anthropic; Gemini; DashScope ];
+    [ Anthropic; Gemini ];
   let ollama_cfg =
     Provider_config.make
       ~kind:Ollama
@@ -2100,7 +2079,7 @@ let test_all_is_exhaustive () =
   List.iter
     (fun k ->
        match (k : Provider_config.provider_kind) with
-       | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | DashScope | Glm -> ())
+       | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> ())
     xs
 ;;
 
@@ -2246,7 +2225,6 @@ let () =
         ; Alcotest.test_case "gemini" `Quick test_request_path_gemini
         ; Alcotest.test_case "glm" `Quick test_request_path_glm
         ; Alcotest.test_case "ollama" `Quick test_request_path_ollama
-        ; Alcotest.test_case "dashscope" `Quick test_request_path_dashscope
         ; Alcotest.test_case "override" `Quick test_request_path_override
         ] )
     ; ( "auth_headers"
@@ -2345,10 +2323,6 @@ let () =
             "kimi rejected"
             `Quick
             test_validate_output_schema_kimi_rejected
-        ; Alcotest.test_case
-            "dashscope accepted"
-            `Quick
-            test_validate_output_schema_dashscope_accepted
         ; Alcotest.test_case
             "unrequested schema bypasses restrictions"
             `Quick

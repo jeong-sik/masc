@@ -659,7 +659,6 @@ let base_label_values =
   ; "ollama"
   ; "gemini"
   ; "glm"
-  ; "dashscope"
   ; (* provider-kind aliases *)
     "claude"
   ; "openai"

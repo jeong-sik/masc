@@ -548,7 +548,7 @@ let test_events_empty_content_ignored () =
 
 let test_parse_reasoning_chunk () =
   let data =
-    {|{"id":"c-r","model":"dashscope","choices":[{"index":0,"delta":{"reasoning_content":"Let me think"},"finish_reason":null}]}|}
+    {|{"id":"c-r","model":"qwen","choices":[{"index":0,"delta":{"reasoning_content":"Let me think"},"finish_reason":null}]}|}
   in
   match S.parse_openai_sse_chunk data with
   | S.Openai_chunk chunk ->
@@ -564,7 +564,7 @@ let test_parse_reasoning_chunk () =
 let test_parse_ollama_reasoning_fallback () =
   (* Ollama returns "reasoning" instead of "reasoning_content" *)
   let data =
-    {|{"id":"c-ollama","model":"dashscope-3.5:35b","choices":[{"index":0,"delta":{"reasoning":"Ollama thinking"},"finish_reason":null}]}|}
+    {|{"id":"c-ollama","model":"qwen3.5:35b","choices":[{"index":0,"delta":{"reasoning":"Ollama thinking"},"finish_reason":null}]}|}
   in
   match S.parse_openai_sse_chunk data with
   | S.Openai_chunk chunk ->
@@ -580,7 +580,7 @@ let test_parse_ollama_reasoning_fallback () =
 let test_parse_reasoning_content_preferred () =
   (* reasoning_content wins over reasoning when both present and non-blank *)
   let data =
-    {|{"id":"c-both","model":"dashscope","choices":[{"index":0,"delta":{"reasoning_content":"preferred","reasoning":"fallback"},"finish_reason":null}]}|}
+    {|{"id":"c-both","model":"qwen","choices":[{"index":0,"delta":{"reasoning_content":"preferred","reasoning":"fallback"},"finish_reason":null}]}|}
   in
   match S.parse_openai_sse_chunk data with
   | S.Openai_chunk chunk ->
@@ -595,7 +595,7 @@ let test_parse_reasoning_content_preferred () =
 let test_parse_blank_reasoning_content_falls_back () =
   (* blank reasoning_content should fall back to reasoning *)
   let data =
-    {|{"id":"c-blank","model":"dashscope","choices":[{"index":0,"delta":{"reasoning_content":"  ","reasoning":"actual thinking"},"finish_reason":null}]}|}
+    {|{"id":"c-blank","model":"qwen","choices":[{"index":0,"delta":{"reasoning_content":"  ","reasoning":"actual thinking"},"finish_reason":null}]}|}
   in
   match S.parse_openai_sse_chunk data with
   | S.Openai_chunk chunk ->

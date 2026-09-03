@@ -125,7 +125,6 @@ are rejected when the manifest is parsed.
 | Label | Description |
 |-------|-------------|
 | `anthropic`, `claude` | Claude (1M ctx, extended thinking, caching) |
-| `dashscope` | DashScope |
 | `gemini` | Gemini (1M ctx, audio/video, code execution) |
 | `glm`, `zhipu`, `glm-coding` | GLM / ZhipuAI |
 | `kimi` | Kimi (262K ctx, reasoning) |

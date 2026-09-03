@@ -15,7 +15,6 @@ type t =
   | Ollama
   | Gemini
   | Glm
-  | DashScope
 
 (** All variants in declaration order. Maintained exhaustively alongside
     {!t}; adding a new variant without extending this list is a bug that

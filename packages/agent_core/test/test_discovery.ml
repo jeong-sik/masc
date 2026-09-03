@@ -176,7 +176,7 @@ let test_parse_models_json () =
     Yojson.Safe.from_string
       {|{
     "data": [
-      {"id": "dashscope-3.5-35b", "owned_by": "llama-server"},
+      {"id": "qwen3.5-35b", "owned_by": "llama-server"},
       {"id": "llama-3.1-8b", "owned_by": "llama-server"}
     ]
   }|}
@@ -184,7 +184,7 @@ let test_parse_models_json () =
   match Discovery_parse.parse_models json with
   | Ok models ->
     Alcotest.(check int) "model count" 2 (List.length models);
-    Alcotest.(check string) "first model id" "dashscope-3.5-35b" (List.hd models).id
+    Alcotest.(check string) "first model id" "qwen3.5-35b" (List.hd models).id
   | Error detail -> Alcotest.failf "valid model inventory rejected: %s" detail
 ;;
 
@@ -208,8 +208,8 @@ let test_endpoint_status_to_json_healthy () =
     { url = "http://127.0.0.1:8085"
     ; protocol = Discovery.Openai_compatible
     ; healthy = true
-    ; models = [ { id = "dashscope-3.5-35b"; owned_by = "llama-server" } ]
-    ; props = Some { total_slots = 4; ctx_size = 32768; model = "dashscope-3.5-35b" }
+    ; models = [ { id = "qwen3.5-35b"; owned_by = "llama-server" } ]
+    ; props = Some { total_slots = 4; ctx_size = 32768; model = "qwen3.5-35b" }
     ; slots = Some { total = 4; busy = 1; idle = 3 }
     ; capabilities = Capabilities.openai_compat_chat_extended_capabilities
     ; failures = []
@@ -398,7 +398,7 @@ let test_refresh_and_sync_mock_server_updates_indexes () =
           {|
           {
             "data": [
-              {"id":"dashscope-3.5-35b","owned_by":"llama-server"},
+              {"id":"qwen3.5-35b","owned_by":"llama-server"},
               {"id":"llama-3.1-8b","owned_by":"llama-server"}
             ]
           }
@@ -413,7 +413,7 @@ let test_refresh_and_sync_mock_server_updates_indexes () =
             "total_slots": 4,
             "default_generation_settings": {
               "n_ctx": 65536,
-              "model": "dashscope-3.5-35b"
+              "model": "qwen3.5-35b"
             }
           }
           |}
@@ -460,19 +460,19 @@ let test_refresh_and_sync_mock_server_updates_indexes () =
       Alcotest.(check (option string))
         "model endpoint"
         (Some endpoint)
-        (Discovery.endpoint_for_model "dashscope-3.5-35b");
+        (Discovery.endpoint_for_model "qwen3.5-35b");
       Alcotest.(check (option string))
         "first model"
-        (Some "dashscope-3.5-35b")
+        (Some "qwen3.5-35b")
         (Discovery.first_discovered_model_id ());
       Alcotest.(check (option string))
         "first model for endpoint"
-        (Some "dashscope-3.5-35b")
+        (Some "qwen3.5-35b")
         (Discovery.first_discovered_model_id_for_url endpoint);
       Alcotest.(check (option (pair string int)))
         "context for model"
         (Some (endpoint, 65536))
-        (Discovery.context_for_model "dashscope-3.5-35b");
+        (Discovery.context_for_model "qwen3.5-35b");
       (match status.slots with
        | Some slots ->
          Alcotest.(check int) "slot total" 4 slots.total;

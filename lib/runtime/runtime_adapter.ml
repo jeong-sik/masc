@@ -221,8 +221,7 @@ let messages_api_compatible_provider_kind = function
   | Llm_provider.Provider_config.OpenAI_compat
   | Llm_provider.Provider_config.Ollama
   | Llm_provider.Provider_config.Gemini
-  | Llm_provider.Provider_config.Glm
-  | Llm_provider.Provider_config.DashScope -> false
+  | Llm_provider.Provider_config.Glm -> false
 ;;
 
 let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.provider)

@@ -92,7 +92,7 @@ let reset_for_testing () =
    A subprocess can emit arbitrarily many bytes, and before this the drainers
    copied all of them into an unbounded buffer: a single `rg` over a tree of
    single-line multi-MB JSON retained 590MB in one call.
-   [Common.max_tool_output_bytes] did not stop it — that constant is the
+   [Common.max_tool_result_wire_bytes] does not stop it — that constant is the
    inline-vs-blob threshold, not a ceiling on what the runtime accepts.
 
    Retention is capped head+tail; the drainer still reads to EOF so the exit

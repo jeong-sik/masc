@@ -363,10 +363,12 @@ let folded_thinking_summary body =
 let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
 let page_failed_note = "  (load failed; nothing here is a reading)"
 
-let tool_projection_mode (state : state) =
-  match state.msg_tool_visibility with
+let tool_projection_mode_of = function
   | Tools_compact -> Keeper_chat_transcript.Compact
   | Tools_full -> Keeper_chat_transcript.Full
+
+let tool_projection_mode (state : state) =
+  tool_projection_mode_of state.msg_tool_visibility
 
 let render_chat_row ~theme buf cols (row : Message_layout.row) =
   match row.kind with
@@ -7036,19 +7038,51 @@ type keeper_call_association =
   | Call_execution_ambiguous of int
   | Call_execution_exact of Tui_decode.keeper_call
 
-let keeper_call_association state ~keeper_name
+(* Everything one keeper's chat entries are built from.
+
+   The entries were rebuilt on every frame -- on a keypress that only moved
+   the scroll, on the two-second tick, on any message arriving for any
+   keeper -- because nothing said what they depended on. This record says it,
+   and the builder below takes only this: a field that is not here cannot
+   reach the entries, and a field that is here is compared before the last
+   frame's entries are reused.
+
+   Structural equality decides that comparison, so no field can be left out
+   of it by hand. The lists are the ones the row projection already holds
+   across frames, and equality stops at the first physically equal value, so
+   comparing a transcript that did not change costs a pointer test rather
+   than its length.
+
+   Data only: a closure in here would make that comparison raise. *)
+type chat_entry_inputs = {
+  cei_keeper_name : string;
+  cei_timeline_serial : int;
+  cei_chat_cols : int;
+  cei_reasoning_visibility : reasoning_visibility;
+  cei_memory_visibility : memory_visibility;
+  cei_tool_visibility : tool_visibility;
+  cei_file_changes_keeper : string option;
+  cei_file_change_index : Keeper_chat_diff.index;
+  cei_calls_keeper : string option;
+  cei_calls_loading : bool;
+  cei_calls_error : string option;
+  cei_calls : Tui_decode.keeper_calls_snapshot option;
+}
+
+let keeper_call_association (inputs : chat_entry_inputs)
     (activity : Keeper_chat_transcript.tool_activity) =
+  let keeper_name = inputs.cei_keeper_name in
   match activity.execution_id with
   | None -> Call_execution_unrecorded
   | Some execution_id -> (
       if
         not
-          (Option.equal String.equal state.keeper_calls_keeper
+          (Option.equal String.equal inputs.cei_calls_keeper
              (Some keeper_name))
       then Call_log_not_loaded
-      else if state.keeper_calls_loading then Call_log_loading
+      else if inputs.cei_calls_loading then Call_log_loading
       else
-      match state.keeper_calls_error, state.keeper_calls with
+      match inputs.cei_calls_error, inputs.cei_calls with
       | Some detail, _ -> Call_log_unavailable detail
       | None, None -> Call_log_not_loaded
       | None, Some snapshot
@@ -7115,9 +7149,9 @@ let keeper_call_schedule_label (schedule : Tui_decode.keeper_call_schedule) =
     (schedule.kcs_batch_index + 1) schedule.kcs_batch_size
     (schedule.kcs_planned_index + 1)
 
-let keeper_message_tool_activity_details state ~keeper_name
+let keeper_message_tool_activity_details (inputs : chat_entry_inputs)
     (activity : Keeper_chat_transcript.tool_activity) =
-  let association = keeper_call_association state ~keeper_name activity in
+  let association = keeper_call_association inputs activity in
   let schedule_field, disposition_field, durable_input, output_field,
       result_field =
     match association with
@@ -7232,21 +7266,24 @@ let keeper_message_tool_activity_details state ~keeper_name
    own file changes. The committed history and the turn still streaming both
    ask this, so a diff folded into the history and the same diff arriving live
    cannot be projected two ways. *)
-let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection =
+let keeper_message_tool_rows (inputs : chat_entry_inputs) projection =
+  let chat_cols = inputs.cei_chat_cols in
   let role_label_column =
     Message_layout.chat_role_label_width ~pane_cells:chat_cols
   in
   let file_change_index =
-    if Option.equal String.equal state.msg_file_changes_keeper (Some keeper_name)
-    then state.msg_file_change_index
+    if
+      Option.equal String.equal inputs.cei_file_changes_keeper
+        (Some inputs.cei_keeper_name)
+    then inputs.cei_file_change_index
     else Keeper_chat_diff.empty
   in
-  let mode = tool_projection_mode state in
+  let mode = tool_projection_mode_of inputs.cei_tool_visibility in
   let rows =
     Keeper_chat_diff.rows
     ~mode
     ~max_line_cells:(max 24 (min 120 (chat_cols - role_label_column - 8)))
-    ~activity_details:(keeper_message_tool_activity_details state ~keeper_name)
+    ~activity_details:(keeper_message_tool_activity_details inputs)
     file_change_index projection
   in
   match mode, projection.hidden_activity_rows, rows with
@@ -7294,55 +7331,62 @@ let chat_rows_with_timeline_ats messages =
       chat_timeline_ats_memo := Some (messages, combined);
       combined
 
-(* The visibility-filtered timeline of one row list, computed once per list
-   and visibility pair.
+(* The rows this pane shows, with their moments, kept across frames.
 
-   The chat frame asks for this twice on the same inputs: once to place the
-   live turn and once through [keeper_message_layout_entries]. The filter
-   walks every committed row on every key, and its answer depends only on the
-   row list -- replaced, not mutated, when the conversation changes -- and the
-   two visibility readings, so those three are the key. Same scoping as
-   [chat_timeline_ats_memo] above: a frame with different rows or a toggled
-   visibility replaces the slot, and nothing is kept stale. *)
-type visible_timeline_memo = {
-  vtm_messages : msg_entry list;
-  vtm_memory : memory_visibility;
-  vtm_reasoning : reasoning_visibility;
-  vtm_timeline : (msg_entry * float option) list;
+   Two filters over the projected rows produce a new list on every call even
+   when they drop nothing. Holding the last answer for the same rows and the
+   same two toggles is what lets the entries built from it be kept as well.
+
+   The serial names the list. Comparing two of these lists to decide whether
+   the entries can be reused would walk the whole transcript on exactly the
+   frames that changed it, since a row appended at the end leaves every
+   earlier row equal; an integer that changes when the list is rebuilt
+   answers the same question in one comparison. Rows and serial travel
+   together in one value so a caller cannot pair one with the other's. *)
+type visible_timeline = {
+  vt_serial : int;
+  vt_rows : (Masc_tui_types.msg_entry * float option) list;
 }
 
-let visible_timeline_memo : visible_timeline_memo option ref = ref None
+let visible_timeline_serial = ref 0
 
-let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
+let visible_timeline_memo :
+    (Masc_tui_types.msg_entry list
+    * memory_visibility
+    * reasoning_visibility
+    * visible_timeline)
+    option
+    ref =
+  ref None
+
+let keeper_message_visible_timeline_value ?messages (state : state) ~keeper_name =
   let messages =
     match messages with
     | Some messages -> messages
     | None -> chat_rows_for state keeper_name
   in
+  let memory = state.msg_memory_visibility in
+  let reasoning = state.msg_reasoning_visibility in
   match !visible_timeline_memo with
-  | Some memo
-    when memo.vtm_messages == messages
-         && memo.vtm_memory = state.msg_memory_visibility
-         && memo.vtm_reasoning = state.msg_reasoning_visibility ->
-      memo.vtm_timeline
+  | Some (key, held_memory, held_reasoning, timeline)
+    when key == messages && held_memory = memory && held_reasoning = reasoning ->
+      timeline
   | Some _ | None ->
-      let timeline =
+      let rows =
         chat_rows_with_timeline_ats messages
         |> List.filter (fun (message, _) ->
-          state.msg_memory_visibility <> Memory_hidden
-          || message.me_role <> Message_memory)
+          memory <> Memory_hidden || message.me_role <> Message_memory)
         |> List.filter (fun (message, _) ->
-          message.me_role <> Message_thinking
-          || state.msg_reasoning_visibility <> Reasoning_hidden)
+          message.me_role <> Message_thinking || reasoning <> Reasoning_hidden)
       in
-      visible_timeline_memo :=
-        Some
-          { vtm_messages = messages;
-            vtm_memory = state.msg_memory_visibility;
-            vtm_reasoning = state.msg_reasoning_visibility;
-            vtm_timeline = timeline;
-          };
+      incr visible_timeline_serial;
+      let timeline = { vt_serial = !visible_timeline_serial; vt_rows = rows } in
+      visible_timeline_memo := Some (messages, memory, reasoning, timeline);
       timeline
+;;
+
+let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
+  (keeper_message_visible_timeline_value ?messages state ~keeper_name).vt_rows
 ;;
 
 let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
@@ -7350,11 +7394,26 @@ let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
   |> List.map fst
 ;;
 
-let compute_keeper_message_layout_entries (state : state) ~keeper_name
-    ~chat_cols ~messages =
-  let visible_timeline =
-    keeper_message_visible_timeline ~messages state ~keeper_name
-  in
+let chat_entry_inputs_of (state : state) ~keeper_name ~chat_cols
+    ~(visible_timeline : visible_timeline) =
+  { cei_keeper_name = keeper_name;
+    cei_timeline_serial = visible_timeline.vt_serial;
+    cei_chat_cols = chat_cols;
+    cei_reasoning_visibility = state.msg_reasoning_visibility;
+    cei_memory_visibility = state.msg_memory_visibility;
+    cei_tool_visibility = state.msg_tool_visibility;
+    cei_file_changes_keeper = state.msg_file_changes_keeper;
+    cei_file_change_index = state.msg_file_change_index;
+    cei_calls_keeper = state.keeper_calls_keeper;
+    cei_calls_loading = state.keeper_calls_loading;
+    cei_calls_error = state.keeper_calls_error;
+    cei_calls = state.keeper_calls;
+  }
+
+let build_chat_layout_entries (inputs : chat_entry_inputs)
+    ~(visible_timeline : visible_timeline) =
+  let chat_cols = inputs.cei_chat_cols in
+  let visible_timeline = visible_timeline.vt_rows in
   let messages = List.map fst visible_timeline in
   (* Derived once for the width and again per row, so the badge the pane
      measures is the badge it draws. *)
@@ -7413,7 +7472,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
       timeline_ats
   in
   let projected_tool_rows =
-    keeper_message_tool_rows state ~keeper_name ~chat_cols
+    keeper_message_tool_rows inputs
   in
   let role_label_column =
     Message_layout.chat_role_label_width ~pane_cells:chat_cols
@@ -7435,7 +7494,8 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
               | Some block ->
                   Some
                     (Keeper_chat_transcript.project_tool_block
-                       (tool_projection_mode state) block))
+                       (tool_projection_mode_of inputs.cei_tool_visibility)
+                       block))
           | Message_user _ | Message_keeper | Message_autonomous
           | Message_status | Message_memory | Message_error
           | Message_skill _ | Message_thinking ->
@@ -7467,7 +7527,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
         let body =
           match message.me_role with
           | Message_thinking
-            when state.msg_reasoning_visibility = Reasoning_folded ->
+            when inputs.cei_reasoning_visibility = Reasoning_folded ->
               folded_thinking_summary message.me_text
           | Message_skill _ -> (
               match message.me_skill_activity with
@@ -7495,7 +7555,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
               | Some projection ->
                   String.concat "\n" (projected_tool_rows projection))
           | Message_memory -> (
-              match state.msg_memory_visibility with
+              match inputs.cei_memory_visibility with
               (* Summary uses the producer's typed compact projection. Hidden
                  rows never reach this arm (the layout filter removed them),
                  and a neutral system row with no projection remains whole. *)
@@ -7572,103 +7632,27 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
   in
   layout_entries
 
-(* One conversation's layout entries, computed once per change of their
-   inputs.
+(* The entries of the last frame, beside the inputs they were built from.
 
-   Building them walks every visible message -- the safe text, the aligned
-   badge, the link scan of the whole body, and a tool projection whose
-   durable-call association filters the call snapshot per row -- and the chat
-   frame asked for it on every key, so typing one character into the composer
-   rebuilt the transcript's entire layout. The answer depends on:
-
-   - the row list, replaced rather than mutated when the conversation
-     changes, so its physical identity is the key (the same contract
-     [chat_rows_for] and [chat_timeline_ats_memo] already rely on);
-   - the keeper, the pane width, and the memory/reasoning/tool visibility
-     readings, compared by value;
-   - this keeper's file-change index and durable-call snapshot readings,
-     replaced wholesale when a load lands, so physical identity says whether
-     they moved;
-   - the terminal palette generation, because the tool detail rows bake the
-     resolved colours into their text and a palette that arrived after
-     start-up must not keep drawing the previous answer's escapes.
-
-   Scroll is not an input: it selects the visible slice after the entries
-   exist, so moving through history keeps this answer. Module state rather
-   than a field on [state], like [chat_rows_memo]: a derived reading is not
-   authority, and the input layer would otherwise have to invalidate it at
-   every mutation site. *)
-type layout_entries_memo = {
-  lem_keeper_name : string;
-  lem_messages : msg_entry list;
-  lem_chat_cols : int;
-  lem_memory : memory_visibility;
-  lem_reasoning : reasoning_visibility;
-  lem_tools : tool_visibility;
-  lem_file_changes_keeper : string option;
-  lem_file_change_index : Keeper_chat_diff.index;
-  lem_calls_keeper : string option;
-  lem_calls_loading : bool;
-  lem_calls_error : string option;
-  lem_calls : keeper_calls_snapshot option;
-  lem_palette_generation : int;
-  lem_entries : Message_layout.entry list;
-}
-
-let layout_entries_memo : layout_entries_memo option ref = ref None
+   A frame that scrolls, ticks, or receives a message for another keeper
+   arrives here with the same inputs as the frame before it, and building
+   561 entries again is what that frame used to spend itself on. One slot is
+   enough: a pane draws one conversation, and moving to another is the case
+   that has to rebuild anyway. *)
+let chat_layout_entries_memo : (chat_entry_inputs * Message_layout.entry list) option ref =
+  ref None
 
 let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     ~chat_cols =
-  let messages =
-    match messages with
-    | Some messages -> messages
-    | None -> chat_rows_for state keeper_name
+  let visible_timeline =
+    keeper_message_visible_timeline_value ?messages state ~keeper_name
   in
-  let palette_generation =
-    Masc_tui_terminal_palette.snapshot_generation
-      (Masc_tui_terminal_palette.snapshot ())
-  in
-  match !layout_entries_memo with
-  | Some memo
-    when String.equal memo.lem_keeper_name keeper_name
-         && memo.lem_messages == messages
-         && memo.lem_chat_cols = chat_cols
-         && memo.lem_memory = state.msg_memory_visibility
-         && memo.lem_reasoning = state.msg_reasoning_visibility
-         && memo.lem_tools = state.msg_tool_visibility
-         && Option.equal String.equal memo.lem_file_changes_keeper
-              state.msg_file_changes_keeper
-         && memo.lem_file_change_index == state.msg_file_change_index
-         && Option.equal String.equal memo.lem_calls_keeper
-              state.keeper_calls_keeper
-         && Bool.equal memo.lem_calls_loading state.keeper_calls_loading
-         && Option.equal String.equal memo.lem_calls_error
-              state.keeper_calls_error
-         && memo.lem_calls == state.keeper_calls
-         && memo.lem_palette_generation = palette_generation ->
-      memo.lem_entries
+  let inputs = chat_entry_inputs_of state ~keeper_name ~chat_cols ~visible_timeline in
+  match !chat_layout_entries_memo with
+  | Some (held, entries) when held = inputs -> entries
   | Some _ | None ->
-      let entries =
-        compute_keeper_message_layout_entries state ~keeper_name ~chat_cols
-          ~messages
-      in
-      layout_entries_memo :=
-        Some
-          { lem_keeper_name = keeper_name;
-            lem_messages = messages;
-            lem_chat_cols = chat_cols;
-            lem_memory = state.msg_memory_visibility;
-            lem_reasoning = state.msg_reasoning_visibility;
-            lem_tools = state.msg_tool_visibility;
-            lem_file_changes_keeper = state.msg_file_changes_keeper;
-            lem_file_change_index = state.msg_file_change_index;
-            lem_calls_keeper = state.keeper_calls_keeper;
-            lem_calls_loading = state.keeper_calls_loading;
-            lem_calls_error = state.keeper_calls_error;
-            lem_calls = state.keeper_calls;
-            lem_palette_generation = palette_generation;
-            lem_entries = entries;
-          };
+      let entries = build_chat_layout_entries inputs ~visible_timeline in
+      chat_layout_entries_memo := Some (inputs, entries);
       entries
 
 (* Where the pane has to scroll to put a message holding [query] on screen, and
@@ -7918,13 +7902,19 @@ let render_keeper_message (state : state) =
     let role_label_column =
       Message_layout.chat_role_label_width ~pane_cells:chat_cols
     in
-    let projected_tool_rows =
-      keeper_message_tool_rows state ~keeper_name ~chat_cols
-    in
     let promoted = promoted_inflight_for_keeper state keeper_name in
     let committed_timeline_messages = chat_rows_for state keeper_name in
-    let committed_visible_timeline =
-      keeper_message_visible_timeline state ~keeper_name
+    let committed_visible_timeline_value =
+      keeper_message_visible_timeline_value state ~keeper_name
+    in
+    let committed_visible_timeline = committed_visible_timeline_value.vt_rows in
+    (* The live turn's tool rows come out of the same inputs the committed
+       entries were built from, so a streaming block and a settled one read
+       the same way. *)
+    let projected_tool_rows =
+      keeper_message_tool_rows
+        (chat_entry_inputs_of state ~keeper_name ~chat_cols
+           ~visible_timeline:committed_visible_timeline_value)
     in
     let committed_messages = List.map fst committed_visible_timeline in
     let committed_layout_entries =

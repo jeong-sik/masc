@@ -191,41 +191,58 @@ let consume stream count =
     String.sub stream.pending count (String.length stream.pending - count)
 ;;
 
-let rec flush_stream ~finish stream =
-  if stream.pending = ""
-  then ()
-  else
-    let remote_len = String.length stream.remote in
-    let pending_len = String.length stream.pending in
-    let starts_remote =
-      pending_len >= remote_len
-      && String.sub stream.pending 0 remote_len = stream.remote
-    in
-    let before_boundary =
-      match stream.previous with
-      | None -> true
-      | Some c -> not (path_component_char c)
-    in
-    let after_boundary =
-      if pending_len > remote_len
-      then not (path_component_char stream.pending.[remote_len])
-      else finish && pending_len = remote_len
-    in
-    if starts_remote && before_boundary && after_boundary
+(* Bytes that need no rewriting accumulate into one run and leave as one [emit],
+   rather than one [emit] per byte. The emitted sequence is unchanged when
+   concatenated; what changes is how many pieces it arrives in, and each piece
+   downstream is an SSE frame, so a short line used to become as many frames as
+   it had characters. *)
+let flush_stream ~finish stream =
+  let literal = Buffer.create 256 in
+  let emit_literal () =
+    if Buffer.length literal > 0
     then (
-      stream.previous <- Some stream.remote.[remote_len - 1];
-      consume stream remote_len;
-      stream.emit stream.host;
-      flush_stream ~finish stream)
-    else if (not finish) && pending_len <= remote_len
-            && prefix_of ~prefix:stream.remote stream.pending
+      stream.emit (Buffer.contents literal);
+      Buffer.clear literal)
+  in
+  let rec loop () =
+    if stream.pending = ""
     then ()
-    else (
-      let c = stream.pending.[0] in
-      stream.previous <- Some c;
-      consume stream 1;
-      stream.emit (String.make 1 c);
-      flush_stream ~finish stream)
+    else
+      let remote_len = String.length stream.remote in
+      let pending_len = String.length stream.pending in
+      let starts_remote =
+        pending_len >= remote_len
+        && String.sub stream.pending 0 remote_len = stream.remote
+      in
+      let before_boundary =
+        match stream.previous with
+        | None -> true
+        | Some c -> not (path_component_char c)
+      in
+      let after_boundary =
+        if pending_len > remote_len
+        then not (path_component_char stream.pending.[remote_len])
+        else finish && pending_len = remote_len
+      in
+      if starts_remote && before_boundary && after_boundary
+      then (
+        emit_literal ();
+        stream.previous <- Some stream.remote.[remote_len - 1];
+        consume stream remote_len;
+        stream.emit stream.host;
+        loop ())
+      else if (not finish) && pending_len <= remote_len
+              && prefix_of ~prefix:stream.remote stream.pending
+      then ()
+      else (
+        let c = stream.pending.[0] in
+        stream.previous <- Some c;
+        consume stream 1;
+        Buffer.add_char literal c;
+        loop ())
+  in
+  loop ();
+  emit_literal ()
 ;;
 
 let rewrite_stream_chunk stream chunk =

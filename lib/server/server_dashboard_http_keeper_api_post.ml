@@ -56,32 +56,31 @@ let handle_keeper_github_login_post state req reqd =
         | Some hostname -> hostname
         | None -> "github.com"
       in
-      (match Keeper_github_login_lane.for_keeper ~config ~meta ~hostname with
-       | Error message -> respond_error reqd message
-       | Ok lane ->
-         let headers =
-           github_login_stream_headers (Server_auth.get_origin req)
-         in
-         let response = Httpun.Response.create ~headers `OK in
-         let writer = Httpun.Reqd.respond_with_streaming reqd response in
-         Fun.protect
-           ~finally:(fun () -> Httpun.Body.Writer.close writer)
-           (fun () ->
-              match
-                Keeper_github_identity.stream_login
-                  ~config
-                  ~keeper_name:name
-                  ~lane
-                  ~is_closed:(fun () -> Httpun.Body.Writer.is_closed writer)
-                  ~send_event:(github_login_stream_send writer)
-              with
-              | Ok () -> ()
-              | Error message when not (Httpun.Body.Writer.is_closed writer) ->
-                github_login_stream_send
-                  writer
-                  "error"
-                  (`Assoc [ "message", `String message ])
-              | Error _ -> ()))
+      let headers = github_login_stream_headers (Server_auth.get_origin req) in
+      let response = Httpun.Response.create ~headers `OK in
+      let writer = Httpun.Reqd.respond_with_streaming reqd response in
+      Fun.protect
+        ~finally:(fun () -> Httpun.Body.Writer.close writer)
+        (fun () ->
+           match
+             Keeper_github_identity.stream_login
+               ~config
+               ~keeper_name:name
+               (* Shaping a Remote_ssh lane runs commands on the endpoint. Doing
+                  that before this response existed left the browser waiting on
+                  a request that had not answered at all. *)
+               ~make_lane:(fun () ->
+                 Keeper_github_login_lane.for_keeper ~config ~meta ~hostname)
+               ~is_closed:(fun () -> Httpun.Body.Writer.is_closed writer)
+               ~send_event:(github_login_stream_send writer)
+           with
+           | Ok () -> ()
+           | Error message when not (Httpun.Body.Writer.is_closed writer) ->
+             github_login_stream_send
+               writer
+               "error"
+               (`Assoc [ "message", `String message ])
+           | Error _ -> ())
 ;;
 
 let declared_provider_id json =

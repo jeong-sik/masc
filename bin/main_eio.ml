@@ -1289,6 +1289,19 @@ let keeper_github_cmd =
       "login"
       "Log a Keeper into GitHub CLI."
       (fun ~config ~(meta : Keeper_meta_contract.keeper_meta) ~hostname ->
+        (* This subcommand runs under [Cmd.eval'], outside the [Eio_main.run]
+           that only the server's [start] enters, and both lanes need a runtime.
+           The remote lane opens an Eio switch per remote command, which without
+           a runtime raises [Effect.Unhandled]. The host lane runs, but an
+           uninitialized [Process_eio] takes the fallback that collects the
+           child's output and replays it after exit, so a device flow would show
+           its one-time code only once the wait for that code had expired. *)
+        Eio_main.run
+        @@ fun env ->
+        Process_eio.init
+          ~cwd_default:(Eio.Stdenv.cwd env)
+          ~proc_mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env);
         match Keeper_github_login_lane.for_keeper ~config ~meta ~hostname with
         | Error message ->
           prerr_endline message;

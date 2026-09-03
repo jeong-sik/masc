@@ -83,7 +83,7 @@ val clock_refs :
   ?started_at:string ->
   ?finished_at:string ->
   ?elapsed_ms:int ->
-    ?tool_batch_id:string ->
+  ?tool_batch_id:string ->
   ?checkpoint_id:string ->
   ?event_bus_correlation_id:string ->
   ?event_bus_run_id:string ->

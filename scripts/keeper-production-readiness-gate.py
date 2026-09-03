@@ -64,7 +64,7 @@ class Thresholds:
     min_timestamp_coverage_pct: float = 100.0
     max_missing_artifacts: int = 0
     max_order_violations: int = 0
-    max_dangling_runtime_dispatches: int = 0
+    max_unclosed_dispatch_turns: int = 0
     max_evidence_span_sec: float = 600.0
 
 
@@ -86,7 +86,7 @@ class ReadinessMetrics:
     parseable_timestamp_rows: int = 0
     missing_artifacts: int = 0
     order_violations: int = 0
-    dangling_runtime_dispatches: int = 0
+    unclosed_dispatch_turns: int = 0
     max_evidence_span_sec: float = 0.0
 
 
@@ -462,14 +462,21 @@ def evaluate(
         # runtime_completed or runtime_failed. This replaces the retired
         # provider_attempt_started / provider_attempt_finished pair, which no
         # producer has written since #19536.
-        started_count = len(event_rows(rows, "runtime_routed"))
-        finished_count = len(event_rows(rows, "runtime_completed")) + len(
-            event_rows(rows, "runtime_failed")
+        #
+        # The two events do not pair one-to-one. runtime_routed is appended per
+        # candidate the router considers, so a live turn carries 1-6 of them
+        # (median 2) against a single closure; comparing the counts reports
+        # 31,825 "dangling" dispatches over a store where 23,140 of 23,293
+        # dispatching turns closed cleanly. So this asks whether the turn
+        # closed at all, and counts turns, not rows.
+        dispatch_opened = bool(event_rows(rows, "runtime_routed"))
+        dispatch_closed = bool(
+            event_rows(rows, "runtime_completed") or event_rows(rows, "runtime_failed")
         )
-        if provider and started_count > 0 and finished_count >= started_count:
+        if provider and dispatch_opened and dispatch_closed:
             metrics.provider_closed_turns += 1
-        if provider and finished_count < started_count:
-            metrics.dangling_runtime_dispatches += started_count - finished_count
+        if provider and dispatch_opened and not dispatch_closed:
+            metrics.unclosed_dispatch_turns += 1
 
         if matching_receipt_rows(base_path, rows):
             metrics.receipt_ok_turns += 1
@@ -598,9 +605,9 @@ def evaluate(
         failures.append(
             f"order_violations {metrics.order_violations} > {thresholds.max_order_violations}"
         )
-    if metrics.dangling_runtime_dispatches > thresholds.max_dangling_runtime_dispatches:
+    if metrics.unclosed_dispatch_turns > thresholds.max_unclosed_dispatch_turns:
         failures.append(
-            f"dangling_runtime_dispatches {metrics.dangling_runtime_dispatches} > {thresholds.max_dangling_runtime_dispatches}"
+            f"unclosed_dispatch_turns {metrics.unclosed_dispatch_turns} > {thresholds.max_unclosed_dispatch_turns}"
         )
     if metrics.max_evidence_span_sec > thresholds.max_evidence_span_sec:
         failures.append(
@@ -847,7 +854,7 @@ def thresholds_from_args(args: argparse.Namespace) -> Thresholds:
         min_timestamp_coverage_pct=args.min_timestamp_coverage_pct,
         max_missing_artifacts=args.max_missing_artifacts,
         max_order_violations=args.max_order_violations,
-        max_dangling_runtime_dispatches=args.max_dangling_runtime_dispatches,
+        max_unclosed_dispatch_turns=args.max_unclosed_dispatch_turns,
         max_evidence_span_sec=args.max_evidence_span_sec,
     )
 
@@ -892,7 +899,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-timestamp-coverage-pct", type=float, default=100.0)
     parser.add_argument("--max-missing-artifacts", type=int, default=0)
     parser.add_argument("--max-order-violations", type=int, default=0)
-    parser.add_argument("--max-dangling-runtime-dispatches", type=int, default=0)
+    parser.add_argument("--max-unclosed-dispatch-turns", type=int, default=0)
     parser.add_argument("--max-evidence-span-sec", type=float, default=600.0)
     return parser
 

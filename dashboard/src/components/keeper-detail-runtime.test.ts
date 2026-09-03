@@ -441,7 +441,7 @@ describe('RuntimeLensSection', () => {
             group_id: 'corr-1',
             edge_count: 1,
             edge_ids: ['edge-runtime-routed'],
-            lanes: ['provider'],
+            lanes: ['masc_policy_runtime'],
             events: ['runtime_routed'],
             statuses: ['attempt'],
             first_observed_at: '2026-05-13T00:00:03Z',

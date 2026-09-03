@@ -108,9 +108,6 @@ const EV_KO: Readonly<Record<string, string>> = {
   SYS: '시스템',
 }
 
-/** Provider terminal statuses that mean the model call path completed. Other
- * values (`exhausted`, `not_observed`, ...) render as-is, never dressed up. */
-
 function msTxt(ms: number | null): string {
   if (ms == null) return '미기록'
   if (ms < 1000) return `${ms}ms`
@@ -211,21 +208,27 @@ function EvidenceStrip({
           dispatched === 0
             ? '관측 없음'
             : `완료 ${ev.runtimeCompletedCount} · 실패 ${ev.runtimeFailedCount}`,
-          dispatched === 0 ? 'dim' : ev.runtimeFailedCount > 0 ? 'bad' : 'ok',
+          dispatched === 0 ? 'dim' : ev.runtimeCompletedCount > 0 ? 'ok' : 'bad',
         ],
         ['event bus 상관', ev.eventBusCorrelatedCount, 'dim'],
         ['memory', `주입 ${ev.memoryInjectedCount} · flush ${ev.memoryFlushedCount}`, 'dim'],
       ]
     : [
         ['상태', isHealthy(ev.health) ? '정상' : '오래된 기록', isHealthy(ev.health) ? 'ok' : 'warn'],
+        // 후보를 순서대로 부르다가 먼저 응답한 곳에서 멈추므로, 한 번
+        // 실패하고 다음 후보에서 성공한 턴은 실패와 완료를 함께 남긴다.
+        // 실패 수를 먼저 보면 그런 턴이 전부 실패로 보여서, 완료가 있으면
+        // 성공으로 읽고 실패 횟수는 괄호로만 적는다.
         [
           '모델 호출',
           dispatched === 0
             ? '관측 없음'
-            : ev.runtimeFailedCount > 0
-              ? `실패 ${ev.runtimeFailedCount}건`
-              : '성공',
-          dispatched === 0 ? 'dim' : ev.runtimeFailedCount > 0 ? 'bad' : 'ok',
+            : ev.runtimeCompletedCount > 0
+              ? ev.runtimeFailedCount > 0
+                ? `성공 (재시도 ${ev.runtimeFailedCount}건)`
+                : '성공'
+              : `실패 ${ev.runtimeFailedCount}건`,
+          dispatched === 0 ? 'dim' : ev.runtimeCompletedCount > 0 ? 'ok' : 'bad',
         ],
         ['기억', `불러옴 ${ev.memoryInjectedCount} · 저장 ${ev.memoryFlushedCount}`, 'dim'],
       ]

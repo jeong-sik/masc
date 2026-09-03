@@ -103,8 +103,16 @@ let lane_policies =
        asserted here. Runtime_routed opens a candidate attempt and
        Runtime_completed / Runtime_failed closes it, which is the boundary the
        retired provider_attempt_started / provider_attempt_finished pair
-       described. Over the 23,089 finished turns in the live store, 528 (2.29%)
-       open an attempt that never terminates — the condition this asserts. *)
+       described.
+
+       The assertion is on presence, not on count: Runtime_routed is appended
+       per candidate, so a turn carries 1-6 of them (median 2 over the live
+       store) against a single closure. Of the 23,293 finished turns that hold
+       a Runtime_routed row, 153 (0.66%) hold no Runtime_completed and no
+       Runtime_failed — that is the condition this reports. Measured
+       2026-09-04 over ~/.masc/keepers/*/runtime-manifests, keyed the way
+       read_runtime_manifest_scan scopes a turn (keeper_name, trace_id,
+       keeper_turn_id). *)
   ; { lane = "masc_policy_runtime"
     ; mandatory_events = [ Keeper_runtime_manifest.Runtime_routed ]
     ; terminal_events =

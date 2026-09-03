@@ -108,6 +108,24 @@ let runtime_lens_gaps ~terminal_event_present ~config_drift scan =
   in
   let gaps =
     gaps
+    (* Only receipt_path is asserted on the terminal row. The other two links
+       cannot carry a judgement there:
+
+       - checkpoint_path is never written on a Turn_finished row. Both
+         producers (keeper_agent_run_receipt.ml:250 and
+         keeper_turn_helpers.ml:306) call [make] without ?checkpoint_path, so
+         the field is null on 0 of 23,378 live rows and the gap would fire on
+         every finished turn. Whether the turn saved a checkpoint at all is
+         already asserted by the agent_core_agent lane policy, which names
+         Checkpoint_saved as both mandatory and terminal.
+       - tool_call_log_path is None exactly when the turn made no tool calls
+         (keeper_agent_run_receipt.ml:232). That is the ordinary shape of a
+         text-only turn — 9,305 of 23,378 live rows — not a gap.
+
+       receipt_path is written unconditionally: [make] takes ~receipt_path as
+       a required argument, and it is present on 23,378 of 23,378 live
+       Turn_finished rows. The arm therefore holds today and reports a
+       producer that stops writing it. *)
     |> (fun gaps ->
          match scan.terminal_row with
          | Some row when row.Keeper_runtime_manifest.links.receipt_path = None ->
@@ -115,26 +133,6 @@ let runtime_lens_gaps ~terminal_event_present ~config_drift scan =
            ; severity = "warn"
            ; lane = "keeper"
            ; detail = Some "terminal event has no receipt_path link"
-           }
-           :: gaps
-         | _ -> gaps)
-    |> (fun gaps ->
-         match scan.terminal_row with
-         | Some row when row.Keeper_runtime_manifest.links.checkpoint_path = None ->
-           { code = "checkpoint_missing"
-           ; severity = "warn"
-           ; lane = "agent_core_agent"
-           ; detail = Some "terminal event has no checkpoint_path link"
-           }
-           :: gaps
-         | _ -> gaps)
-    |> (fun gaps ->
-         match scan.terminal_row with
-         | Some row when row.Keeper_runtime_manifest.links.tool_call_log_path = None ->
-           { code = "artifact_link_missing"
-           ; severity = "warn"
-           ; lane = "tool_runtime"
-           ; detail = Some "terminal event has no tool_call_log_path link"
            }
            :: gaps
          | _ -> gaps)

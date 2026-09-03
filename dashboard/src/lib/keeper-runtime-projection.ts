@@ -357,14 +357,16 @@ function terminalEventLabel(trace: KeeperRuntimeTraceResponse | null): KeeperRun
   // (clock_edges_window_truncated fires on any keeper with more manifest rows
   // than the request window) is not a warning, and counting it as one meant a
   // healthy keeper could never read anything but warn.
-  const worstSeverity = gaps.some(gap => gap.severity === 'bad')
+  const worstSeverity: KeeperRuntimeProjectionTone | null = gaps.some(
+    gap => gap.severity === 'bad',
+  )
     ? 'bad'
     : gaps.some(gap => gap.severity === 'warn')
       ? 'warn'
       : null
   const terminalTone: KeeperRuntimeProjectionTone =
     worstSeverity != null
-      ? 'warn'
+      ? worstSeverity
       : !clock.terminal_event_present
         ? 'warn'
         : terminal === 'turn_finished'

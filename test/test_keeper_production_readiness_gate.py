@@ -211,10 +211,12 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
             rows = [
                 row
                 for row in rows
+                # Keep runtime_routed. The gate asks whether an opened
+                # dispatch closed, so dropping the opener too would leave
+                # nothing for it to judge.
                 if not (
                     row.get("keeper_turn_id") == 1
-                    and row.get("event")
-                    in {"runtime_routed", "runtime_completed", "runtime_failed"}
+                    and row.get("event") in {"runtime_completed", "runtime_failed"}
                 )
             ]
             manifest.write_text(
@@ -225,9 +227,9 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
             summary = self.evaluate(root, keeper, trace)
 
             self.assertEqual(summary.status, "FAIL")
-            self.assertLess(summary.derived["provider_closure_pct"], 100.0)
+            self.assertLess(summary.derived["runtime_closure_pct"], 100.0)
             self.assertTrue(
-                any("provider_closure_pct" in failure for failure in summary.failures)
+                any("runtime_closure_pct" in failure for failure in summary.failures)
             )
 
     def test_missing_timestamp_fails_coverage_gate(self):
@@ -297,10 +299,10 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
 
             self.assertEqual(summary.status, "PASS", summary.failures)
             self.assertEqual(summary.metrics["terminal_turns"], 24)
-            self.assertEqual(summary.derived["provider_closure_pct"], 100.0)
+            self.assertEqual(summary.derived["runtime_closure_pct"], 100.0)
             self.assertEqual(summary.derived["tool_log_coverage_pct"], 100.0)
 
-    def test_slow_provider_fixture_fails_dangling_attempt_gate(self):
+    def test_slow_provider_fixture_fails_unclosed_dispatch_gate(self):
         with tempfile.TemporaryDirectory() as tmp_name:
             root = Path(tmp_name)
             gate.write_fixture_turn(
@@ -328,10 +330,10 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
             )
 
             self.assertEqual(summary.status, "FAIL")
-            self.assertEqual(summary.metrics["dangling_runtime_dispatches"], 1)
-            self.assertLess(summary.derived["provider_closure_pct"], 100.0)
+            self.assertEqual(summary.metrics["unclosed_dispatch_turns"], 1)
+            self.assertLess(summary.derived["runtime_closure_pct"], 100.0)
             self.assertTrue(
-                any("provider_closure_pct" in failure for failure in summary.failures)
+                any("runtime_closure_pct" in failure for failure in summary.failures)
             )
 
     def test_slow_tool_log_sink_fixture_fails_tool_log_gate(self):

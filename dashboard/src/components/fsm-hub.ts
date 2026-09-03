@@ -166,13 +166,20 @@ function runtimeTraceClass(trace: KeeperRuntimeTraceResponse): string {
   }
 }
 
+// A turn routes to candidates in order and stops at the first that returns, so
+// runtime_failed and runtime_completed both appear on a turn that failed over
+// and then succeeded — 357 of the 23,298 finished turns in the live store.
+// Reading runtime_failed first painted every one of those as a failure; the
+// row this replaced read the last attempt's terminal_status, which is the
+// outcome. So a completed dispatch is the outcome, and the failures before it
+// are reported in the label rather than in the tone.
 function runtimeDispatchClass(trace: KeeperRuntimeTraceResponse): string {
   const turn = trace.turn_identity
-  if (turn.runtime_failed_count > 0) {
-    return 'border-[var(--bad-30)] text-[var(--bad-light)] bg-[var(--bad-6)]'
-  }
   if (turn.runtime_completed_count > 0) {
     return 'border-[var(--ok-20)] text-[var(--color-status-ok)] bg-[var(--ok-10)]'
+  }
+  if (turn.runtime_failed_count > 0) {
+    return 'border-[var(--bad-30)] text-[var(--bad-light)] bg-[var(--bad-6)]'
   }
   return 'border-[var(--color-border-default)] text-[var(--color-fg-muted)] bg-[var(--color-bg-surface)]'
 }
@@ -183,8 +190,12 @@ function runtimeDispatchLabel(trace: KeeperRuntimeTraceResponse): string {
   const turn = trace.turn_identity
   const closed = turn.runtime_completed_count + turn.runtime_failed_count
   if (closed === 0) return 'dispatch not observed'
-  if (turn.runtime_failed_count > 0) return `dispatch failed ${turn.runtime_failed_count}`
-  return `dispatch ok ${turn.runtime_completed_count}`
+  if (turn.runtime_completed_count > 0) {
+    return turn.runtime_failed_count > 0
+      ? `dispatch ok ${turn.runtime_completed_count} after ${turn.runtime_failed_count} failed`
+      : `dispatch ok ${turn.runtime_completed_count}`
+  }
+  return `dispatch failed ${turn.runtime_failed_count}`
 }
 
 function runtimeTraceTurnLabel(trace: KeeperRuntimeTraceResponse): string {

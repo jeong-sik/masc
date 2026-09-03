@@ -713,11 +713,11 @@ describe('keeper runtime trace', () => {
           },
         },
         swimlanes: {
-          provider: {
-            lane: 'provider',
-            label: 'Provider',
+          masc_policy_runtime: {
+            lane: 'masc_policy_runtime',
+            label: 'MASC Runtime',
             event_count: 2,
-            terminal_status: 'timeout',
+            terminal_status: 'resolved',
             completeness: 'complete',
             gap_codes: [],
             events: [{ event: 'runtime_completed', count: 1 }],

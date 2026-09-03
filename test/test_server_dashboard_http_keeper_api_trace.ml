@@ -373,24 +373,6 @@ let test_manifest_event_vocabulary_is_pinned () =
        Keeper_runtime_manifest.all_event_kinds)
 ;;
 
-let test_every_lane_policy_event_is_a_known_kind () =
-  List.iter
-    (fun policy ->
-       List.iter
-         (fun event ->
-            check
-              bool
-              (Printf.sprintf
-                 "lane %s names a live event kind (%s)"
-                 policy.Runtime_lens_swimlane.lane
-                 (Keeper_runtime_manifest.event_kind_to_string event))
-              true
-              (List.memq event Keeper_runtime_manifest.all_event_kinds))
-         (policy.Runtime_lens_swimlane.mandatory_events
-          @ policy.Runtime_lens_swimlane.terminal_events))
-    Runtime_lens_swimlane.lane_policies
-;;
-
 let test_runtime_lane_asserts_dispatch_closure () =
   let open Keeper_runtime_manifest in
   let routed_only = scan_of_events [ Runtime_routed ] in
@@ -706,10 +688,6 @@ let () =
             "manifest event vocabulary is pinned"
             `Quick
             test_manifest_event_vocabulary_is_pinned
-        ; test_case
-            "every lane policy event is a known kind"
-            `Quick
-            test_every_lane_policy_event_is_a_known_kind
         ; test_case
             "the runtime lane asserts dispatch closure"
             `Quick

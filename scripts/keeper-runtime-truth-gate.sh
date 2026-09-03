@@ -207,16 +207,16 @@ require_event "turn_finished"
 if [[ "$MODE" = "provider" ]]; then
   require_event "provider_lane_resolved"
   require_event "runtime_routed"
-  require_event "runtime_completed"
 
-  attempt_started_count="$(printf '%s\n' "$turn_rows" | jq -s '
-    [ .[] | select(.event == "runtime_routed") ] | length
-  ')"
-  attempt_finished_count="$(printf '%s\n' "$turn_rows" | jq -s '
-    [ .[] | select(.event == "runtime_completed") ] | length
-  ')"
-  [[ "$attempt_finished_count" -ge "$attempt_started_count" ]] \
-    || fail "provider attempts are not terminal: started=$attempt_started_count finished=$attempt_finished_count"
+  # runtime_routed is appended per candidate the router considers, so a turn
+  # carries several of them against one closure; comparing the counts reports
+  # a dangling dispatch on almost every real turn. What the retired
+  # provider_attempt_started / provider_attempt_finished pair asserted was
+  # that the dispatch closed at all, so this asks for presence. A turn closes
+  # with runtime_completed or with runtime_failed; a failure is a closure.
+  if ! has_event "runtime_completed" && ! has_event "runtime_failed"; then
+    fail "runtime dispatch never closed: runtime_routed present, runtime_completed and runtime_failed both absent"
+  fi
 
   if ! has_event "checkpoint_saved"; then
     [[ "$turn_finished_status" = "error" ]] \

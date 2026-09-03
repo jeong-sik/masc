@@ -97,6 +97,24 @@ let test_the_overview_row_counts_every_approval_list () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"render_overview" ~callee:"approval_items")
 
+(* The briefing answers with two lists that carry the same incidents, and the
+   loader folds them into one. It also read a third key, "attention_items",
+   that the briefing has never sent -- so that read was always the empty list,
+   and nothing about the screen would change if the briefing started sending
+   it. A read nobody can make produce anything is not a fallback.
+
+   The count that rode the summary row is gone with it: it stood three lines
+   above an Attention panel drawing those same incidents one per row. The
+   panel's own title carries it now, and only says a number when some did not
+   fit. *)
+let test_the_summary_row_does_not_count_the_panel_below_it () =
+  Alcotest.(check int) "the surface names no incident count of its own" 0
+    (Ast_grep.count_string_literals ~module_path:render ~needle:"Incidents");
+  Alcotest.(check int) "the loader stops reading a key nobody sends" 0
+    (Ast_grep.count_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"load_overview"
+       ~literals:[ "attention_items" ])
+
 (* [operation=] is the right-hand side of the line directly above whenever the
    two agree, which is every operation but an identity call. The detail line
    compares them rather than printing it unconditionally, because at eighty
@@ -373,6 +391,8 @@ let () =
             test_the_title_does_not_count_another_queue
         ; Alcotest.test_case "the Overview row counts every approval list"
             `Quick test_the_overview_row_counts_every_approval_list
+        ; Alcotest.test_case "the summary row does not count the panel below"
+            `Quick test_the_summary_row_does_not_count_the_panel_below_it
         ; Alcotest.test_case "the operation is compared before repeating"
             `Quick
             test_the_detail_pane_compares_before_repeating_the_operation

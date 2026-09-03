@@ -115,6 +115,32 @@ let test_the_summary_row_does_not_count_the_panel_below_it () =
        ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"load_overview"
        ~literals:[ "attention_items" ])
 
+(* The briefing has always carried a liveness word per Keeper, written through
+   the control plane's own printer. The Overview row read only how many rows
+   there were, so a fleet with two Keepers that had stopped doing anything and
+   one an operator had paused read the same as nine running ones.
+
+   Two facts here. The row reads the counts, and the counts come from
+   [Keeper_status_runtime]'s strict reader rather than from comparing the word
+   against text -- the producer writes through that module's printer, and a
+   second spelling of the same vocabulary is how the two ends drift apart. A
+   word this build does not know is counted apart, never folded into the
+   nearest state. *)
+let loader = "bin/masc_tui_loader.ml"
+
+let test_the_fleet_row_reads_the_control_planes_own_word () =
+  Alcotest.(check int) "the liveness word is parsed, not matched as text" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:loader
+       ~binding_name:"keeper_liveness_of_briefs"
+       ~callee:"Keeper_status_runtime.control_plane_status_of_string_opt");
+  Alcotest.(check int) "no second spelling of that vocabulary" 0
+    (Ast_grep.count_string_literals_in_value_binding ~module_path:loader
+       ~binding_name:"keeper_liveness_of_briefs"
+       ~literals:
+         [ "active"; "inactive"; "offline"; "idle"; "paused" ]);
+  Alcotest.(check bool) "and the summary row reads the counts" true
+    (reads ~binding_name:"render_overview" ~fields:[ "ov_keeper_liveness" ] > 0)
+
 (* [operation=] is the right-hand side of the line directly above whenever the
    two agree, which is every operation but an identity call. The detail line
    compares them rather than printing it unconditionally, because at eighty
@@ -393,6 +419,8 @@ let () =
             `Quick test_the_overview_row_counts_every_approval_list
         ; Alcotest.test_case "the summary row does not count the panel below"
             `Quick test_the_summary_row_does_not_count_the_panel_below_it
+        ; Alcotest.test_case "the fleet row reads the control plane's word"
+            `Quick test_the_fleet_row_reads_the_control_planes_own_word
         ; Alcotest.test_case "the operation is compared before repeating"
             `Quick
             test_the_detail_pane_compares_before_repeating_the_operation

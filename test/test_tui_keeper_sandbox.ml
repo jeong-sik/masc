@@ -268,6 +268,45 @@ let test_actual_container_logs_report_no_instance () =
       (contains rendered "run a sandbox command first")
 ;;
 
+(* A Keeper with no local stream is not a Keeper whose container has not
+   started yet. The pane has to say which one it is looking at. *)
+let test_actual_container_logs_report_no_local_stream () =
+  let json =
+    Yojson.Safe.from_string
+      {|{
+        "keeper":"rondo",
+        "backend":null,
+        "state":"no_local_stream",
+        "reason":"This Keeper runs on its configured SSH endpoint, so no container log stream exists on this host; read the logs on the endpoint.",
+        "tail":200,
+        "instances":[]
+      }|}
+  in
+  match Masc_tui_keeper_sandbox.decode_logs ~sanitize:Fun.id json with
+  | Error detail -> Alcotest.fail detail
+  | Ok logs ->
+    let rendered =
+      Masc_tui_keeper_sandbox.logs_view_lines ~width:64 logs
+      |> String.concat "\n"
+    in
+    Alcotest.(check bool) "operator learns where the logs are" true
+      (contains rendered "read the logs on the endpoint");
+    Alcotest.(check bool) "no empty-instance wording" false
+      (contains rendered "run a sandbox command first")
+;;
+
+let test_no_local_stream_rejects_a_backend () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"keeper":"rondo","backend":"docker","state":"no_local_stream",
+         "reason":"anything","tail":200,"instances":[]}|}
+  in
+  match Masc_tui_keeper_sandbox.decode_logs ~sanitize:Fun.id json with
+  | Ok _ -> Alcotest.fail "a no_local_stream payload named a backend"
+  | Error detail ->
+    Alcotest.(check bool) "actionable error" true (contains detail "backend")
+;;
+
 let () =
   Alcotest.run "tui keeper sandbox"
     [ ( "projection"
@@ -289,5 +328,9 @@ let () =
             test_actual_container_logs_are_typed_and_terminal_safe
         ; Alcotest.test_case "no instance is explicit" `Quick
             test_actual_container_logs_report_no_instance
+        ; Alcotest.test_case "no local stream names the endpoint" `Quick
+            test_actual_container_logs_report_no_local_stream
+        ; Alcotest.test_case "no local stream refuses a backend" `Quick
+            test_no_local_stream_rejects_a_backend
         ] )
     ]

@@ -320,10 +320,46 @@ let test_sandbox_log_target_uses_effective_meta () =
   | Error (Sandbox_control.Sandbox_logs_meta_read_failed detail)
   | Error (Sandbox_control.Sandbox_logs_backend_failed detail) ->
     Alcotest.failf "sandbox log target resolution failed: %s" detail
-  | Ok (Sandbox_control.Docker_logs, _) ->
+  | Ok (Sandbox_control.Local_backend Sandbox_control.Docker_logs, _) ->
     Alcotest.fail "durable meta placeholder selected Docker for a microvm Keeper"
-  | Ok (Sandbox_control.Apple_container_logs, effective_name) ->
+  | Ok (Sandbox_control.No_local_stream reason, _) ->
+    Alcotest.failf "microvm Keeper reported no local stream: %s" reason
+  | Ok
+      ( Sandbox_control.Local_backend Sandbox_control.Apple_container_logs,
+        effective_name ) ->
     Alcotest.(check string) "effective keeper name" name effective_name
+
+(* A remote_ssh Keeper owns no container here. That is the profile working as
+   declared, so resolution answers a source rather than an error: the route
+   that reads it must be able to say 200. *)
+let test_sandbox_log_target_reports_no_local_stream_for_remote_ssh () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "remote-logs" in
+  (* [write_keeper_toml] writes no [remote_endpoint], and config load rejects a
+     remote_ssh keeper without one, so the TOML is written out here. *)
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+sandbox_profile = "remote_ssh"
+remote_endpoint = "test-endpoint"
+instructions = "Run on the endpoint."
+|};
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  match Sandbox_control.resolve_sandbox_log_target ~config ~keeper_name:name with
+  | Error Sandbox_control.Sandbox_logs_keeper_not_found ->
+    Alcotest.fail "expected seeded keeper meta"
+  | Error (Sandbox_control.Sandbox_logs_meta_read_failed detail)
+  | Error (Sandbox_control.Sandbox_logs_backend_failed detail) ->
+    Alcotest.failf "remote_ssh log target resolution failed: %s" detail
+  | Ok (Sandbox_control.Local_backend _, _) ->
+    Alcotest.fail "remote_ssh selected a local container backend"
+  | Ok (Sandbox_control.No_local_stream reason, effective_name) ->
+    Alcotest.(check string) "effective keeper name" name effective_name;
+    Alcotest.(check string) "operator is told where the logs are"
+      "This Keeper runs on its configured SSH endpoint, so no container log \
+       stream exists on this host; read the logs on the endpoint."
+      reason
 
 (* The direct-turn path holds profile defaults it loaded once and overlays with
    them, rather than re-reading the profile per use: two reads inside one turn
@@ -1384,6 +1420,9 @@ let () =
           Alcotest.test_case
             "sandbox logs use the effective TOML profile"
             `Quick test_sandbox_log_target_uses_effective_meta;
+          Alcotest.test_case
+            "remote_ssh sandbox logs answer no local stream"
+            `Quick test_sandbox_log_target_reports_no_local_stream_for_remote_ssh;
           Alcotest.test_case
             "turn_profile_and_meta applies the declared sandbox profile"
             `Quick test_turn_profile_and_meta_applies_the_declared_profile;

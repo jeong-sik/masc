@@ -9,7 +9,6 @@ import {
   DRAIN_QUEUE_AXIS,
   DRAIN_REACTION_AXIS,
   LANE_QUEUE_WINDOW_S,
-  boundedCount,
   drainRowOfRequest,
   drainStateOfEvidence,
   laneAgoText,
@@ -149,11 +148,6 @@ describe('laneSecText / laneAgoText / laneUntilText', () => {
 })
 
 describe('waiting inventory derivations', () => {
-  it('marks server-truncated counts as lower bounds', () => {
-    expect(boundedCount(64, true)).toBe('≥64')
-    expect(boundedCount(3, false)).toBe('3')
-  })
-
   it('sorts waiting rows oldest first, missing timestamps last', () => {
     const rows = [
       waitingRow({ waiting_on: 'b', since: NOW - 60 }),
@@ -188,14 +182,13 @@ describe('waiting inventory derivations', () => {
       state: 'waiting',
       waiting_on: [],
       waiting_count: 5,
-      truncated_sources: { external_attention: true },
-      sources: { external_attention: 3, hitl_pending: 1, future_source: 1 },
+      sources: { event_queue_pending: 3, hitl_pending: 1, future_source: 1 },
     } as unknown as DashboardKeeperWaitingKeeper
     const { byStage, unknown } = laneStageBreakdown(entry)
-    expect(byStage.external.map(i => i.source)).toEqual(['external_attention'])
-    expect(byStage.external[0]?.count).toBe('≥3')
+    expect(byStage.queue.map(i => i.source)).toEqual(['event_queue_pending'])
+    expect(byStage.queue[0]?.count).toBe('3')
     expect(byStage.operator.map(i => i.source)).toEqual(['hitl_pending'])
-    expect(byStage.queue).toHaveLength(0)
+    expect(byStage.external).toHaveLength(0)
     expect(unknown.map(i => i.source)).toEqual(['future_source'])
   })
 })

@@ -4245,9 +4245,7 @@ type palette_action =
 (* Prefix match: the lowercased label starts with the query. An empty query
    is a prefix of everything. *)
 let palette_starts_with ~needle haystack =
-  let h = String.lowercase_ascii haystack in
-  let n = String.length needle in
-  String.length h >= n && String.equal (String.sub h 0 n) needle
+  String.starts_with ~prefix:needle (String.lowercase_ascii haystack)
 
 let palette_contains ~needle haystack =
   let h = String.lowercase_ascii haystack in

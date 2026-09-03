@@ -32,20 +32,26 @@ type rejected_slot =
   { lane_id : string
   ; position : int
   ; slot_id : string
-  ; target_ref : string
   }
 
 type rejected_slot_diagnosis =
-  | Retired_catalog_target
-      (** The id is neither an exact-output target nor a configured runtime:
-          the catalog moved on and runtime.toml did not. *)
-  | Configured_runtime_id of
+  | Declared_target_binding_rejected
+      (** The overlay declares a target with this id, but its provider
+          binding was rejected at resolver load; the binding report names
+          the cause and the slot itself needs no change. *)
+  | Configured_runtime_only of
       { provider_id : string
       ; api_name : string
       }
-      (** The id names a runtime.toml runtime. Exact lanes resolve overlay
-          [[targets]] ids only, so the slot can never be admitted; the
-          operator wrote a keeper-turn id where a catalog target id belongs. *)
+      (** The id names a runtime.toml runtime and no overlay target shares
+          it. What to do depends on how the lane dispatches: a lane that
+          dispatches by configured runtime id (verifier_exact) needs a
+          same-id overlay target added; a lane that dispatches by admitted
+          target needs the target id in the slot instead. *)
+  | Unknown_to_both_registries
+      (** Neither a declared exact target nor an enabled configured runtime:
+          the catalog moved on, the runtime is disabled, or the id is
+          mistyped. *)
 
 type prepared_replacement
 
@@ -118,13 +124,16 @@ val current : unit -> (t, publication_error) result
 val rejected_slots : t -> rejected_slot list
 
 val diagnose_rejected_slot
-  :  rejected_slot
+  :  t
+  -> rejected_slot
   -> configured_runtime:(string -> (string * string) option)
   -> rejected_slot_diagnosis
-(** Why a slot was rejected, for the boot report. [configured_runtime] answers
-    with the runtime's [(provider_id, api_name)] when the slot id is a
-    runtime.toml runtime; the caller supplies it because this module sits
-    below [Runtime]. Pure. *)
+(** Why a slot was rejected, for the boot report. A target the overlay
+    declares but whose binding the resolver rejected is named first, read
+    from the snapshot this registry holds; otherwise [configured_runtime]
+    decides, answering with the runtime's [(provider_id, api_name)] when the
+    id is an enabled runtime.toml runtime. The caller supplies that lookup
+    because this module sits below [Runtime]. *)
 
 val catalog_absent_assignments :
   Agent_core.Exact_output.resolver_snapshot ->
@@ -146,6 +155,15 @@ val publication_error_to_string : publication_error -> string
 val lane_resolution_error_to_string : lane_resolution_error -> string
 
 module For_testing : sig
+  val classify_rejected_slot
+    :  rejected_slot
+    -> declared_target_rejected:(string -> bool)
+    -> configured_runtime:(string -> (string * string) option)
+    -> rejected_slot_diagnosis
+  (** The pure classification behind {!diagnose_rejected_slot}, with both
+      lookups injected so the precedence can be pinned without a snapshot
+      that carries a rejected binding. *)
+
   type reservation
   type reservation_error = Reservation_inactive
 

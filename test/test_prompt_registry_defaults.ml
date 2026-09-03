@@ -187,7 +187,7 @@ Diverged; no numbers.
           rendered
       | Error message -> fail ("render failed: " ^ message));
       check string "group key is not registered" ""
-        (Prompt_registry.get_prompt "test.group"))
+        (Prompt_registry.get_prompt "test.group")) )
 ;;
 
   run "Prompt_registry_defaults"

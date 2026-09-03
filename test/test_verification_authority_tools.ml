@@ -397,14 +397,16 @@ let test_prompt_states_the_root_and_not_a_repository () =
       "the prompt shows the checkout prefix the evaluator would otherwise guess"
       true
       (Astring.String.is_infix ~affix:"repos/masc" text);
+    (* Anchored on the fragment's tag, not on a sentence inside it (#32663):
+       the English sentences this once pinned stopped existing when the
+       prompts were translated (#32133), and the check had been asserting
+       prose no template could produce. What the section says -- a missing
+       path answers about the path, not about the work -- is reviewed in
+       config/prompts/verification.lookup.producer_tree.md. *)
     Alcotest.(check bool)
-      "the prompt no longer calls the root the producer's tree"
-      false
-      (Astring.String.is_infix ~affix:"pointed at the producer's tree" text);
-    Alcotest.(check bool)
-      "a missing path is framed as an answer about the path, not about the work"
+      "the live lookup section reaches the prompt"
       true
-      (Astring.String.is_infix ~affix:"not the question of whether the work exists" text))
+      (Astring.String.is_infix ~affix:"<live_lookup>" text))
 ;;
 
 let test_prompt_states_the_available_surface () =
@@ -434,9 +436,13 @@ let test_prompt_states_the_available_surface () =
            })
     in
     Alcotest.(check bool)
-      "toolless prompt says the snapshot is the only proof"
+      "toolless prompt carries the no-lookup section"
       true
-      (Astring.String.is_infix ~affix:"You have no tool that opens anything else" without);
+      (Astring.String.is_infix ~affix:"<no_lookup_surface>" without);
+    Alcotest.(check bool)
+      "toolless prompt carries no live lookup section"
+      false
+      (Astring.String.is_infix ~affix:"<live_lookup>" without);
     Alcotest.(check bool)
       "toolless prompt does not advertise a tool"
       false
@@ -446,15 +452,16 @@ let test_prompt_states_the_available_surface () =
       true
       (Astring.String.is_infix ~affix:"tool_search_files" with_tools);
     Alcotest.(check bool)
-      "tool prompt does not deny having tools"
+      "tool prompt carries no no-lookup section"
       false
-      (Astring.String.is_infix
-         ~affix:"You have no tool that opens anything else"
-         with_tools);
+      (Astring.String.is_infix ~affix:"<no_lookup_surface>" with_tools);
+    (* The read-only boundary is a sentence inside the live-lookup fragment
+       (config/prompts/verification.lookup.producer_tree.md); the prompt is
+       checked for carrying that fragment, and the sentence is reviewed there. *)
     Alcotest.(check bool)
-      "tool prompt states the read-only boundary"
+      "tool prompt carries the live lookup section"
       true
-      (Astring.String.is_infix ~affix:"verifier surface is read-only" with_tools))
+      (Astring.String.is_infix ~affix:"<live_lookup>" with_tools))
 ;;
 
 

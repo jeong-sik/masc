@@ -181,7 +181,14 @@ type error =
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }
-  | Stopped_by_host of host_stop
+  | Stopped_by_host of
+      { stop : host_stop
+      ; usage : turn_usage option
+        (** Token counts summed over the assistant frames seen before the
+            host ended the turn, deduplicated by message id. The result
+            frame that would carry the turn total never arrives after a
+            host stop, so this sum is what the keeper records. *)
+      }
   | Quota_blocked of
       { api_error_status : int option
       ; rate_limit : rate_limit option

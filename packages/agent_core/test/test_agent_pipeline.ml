@@ -614,7 +614,16 @@ let test_agent_run_context_like_http_400_is_unknown_invalid_request_without_retr
    providers, which only the transcript can explain.
 
    The measurement that matters is therefore not the reject message but the
-   NEXT REQUEST BODY: if the name is absent there, the loop has nothing to copy.
+   NEXT REQUEST BODY -- and specifically which role carries the name. What the
+   model copies is its own prior turn: an assistant [tool_call] is a worked
+   example. A user turn that quotes the name to refuse it is the opposite, and
+   withholding the name there is what left the model nothing to correct. Live
+   2026-09-02: one conversation carried six nameless refusals, each for a
+   single call, because the model could not tell which of its calls was
+   dropped -- the block is gone from its own history by then.
+
+   So the assertion is per role: absent from every assistant turn, present in
+   the user refusal.
 *)
 
 (* Kept local and dependency-free: the assertions below run against raw request
@@ -634,13 +643,32 @@ let execute_tool =
     Ok { Types.content = "ran"; _meta = None })
 ;;
 
+(* Role matters to the assertions below, so the body is read as messages
+   rather than scanned as one string. *)
+let request_messages body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields ->
+    (match List.assoc_opt "messages" fields with
+     | Some (`List messages) ->
+       List.filter_map
+         (function
+           | `Assoc message_fields as message ->
+             (match List.assoc_opt "role" message_fields with
+              | Some (`String role) -> Some (role, Yojson.Safe.to_string message)
+              | _ -> None)
+           | _ -> None)
+         messages
+     | _ -> failf "request body carries no messages array")
+  | _ -> failf "request body is not a JSON object"
+;;
+
 let second_request_body bodies =
   match List.rev bodies with
   | _ :: second :: _ -> second
   | bodies -> failf "expected at least two requests, got %d" (List.length bodies)
 ;;
 
-let test_unroutable_tool_name_never_reaches_the_next_request () =
+let test_unroutable_tool_name_is_refused_not_replayed () =
   Eio_main.run
   @@ fun env ->
   try
@@ -665,16 +693,24 @@ let test_unroutable_tool_name_never_reaches_the_next_request () =
           not a keeper that should stop taking turns. *)
        failf "run must survive an unroutable call: %s" (Error.to_string error));
     let body = second_request_body !bodies in
+    let carried_by role =
+      List.exists
+        (fun (message_role, text) ->
+           String.equal message_role role
+           && string_contains ~needle:unroutable_tool_name text)
+        (request_messages body)
+    in
     check
       bool
-      "next request does not replay the unroutable name"
+      "no assistant turn replays the unroutable name as a call"
       false
-      (string_contains ~needle:unroutable_tool_name body);
+      (carried_by "assistant");
     check
       bool
       "model is told the call was dropped"
       true
       (string_contains ~needle:"named no registered tool" body);
+    check bool "the refusal names the call it dropped" true (carried_by "user");
     Eio.Switch.fail sw Exit
   with
   | Exit -> ()
@@ -743,9 +779,9 @@ let () =
         ] )
     ; ( "tool name admission"
       , [ test_case
-            "unroutable name never reaches the next request"
+            "unroutable name is refused, not replayed"
             `Quick
-            test_unroutable_tool_name_never_reaches_the_next_request
+            test_unroutable_tool_name_is_refused_not_replayed
         ; test_case
             "recovered name is replayed as the registered name"
             `Quick

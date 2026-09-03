@@ -40,6 +40,10 @@ let keeper_toml_fields =
        [tools.nativ] and leave the runtime on its default posture without a
        word, which is what naming them here prevents. *)
   ; "tools.native", Field_string
+    (* RFC-0403. Sits in the same [keeper.tools] table as [tools.native] and
+       is declared for the same reason: an unlisted sibling fails the load
+       rather than being read as no selection at all. *)
+  ; "tools.attached_allow", Field_string_array
   ; "skills.names", Field_string_array
   ]
 
@@ -147,6 +151,13 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let skill_names =
     if has "skills.names"
     then Some (strs "skills.names" |> dedupe_keep_order)
+    else None
+  in
+  (* Same absent-versus-empty rule as [skills.names]: an absent array is
+     every attached tool, an explicit [] is none of them. *)
+  let attached_tool_allow =
+    if has "tools.attached_allow"
+    then Some (strs "tools.attached_allow" |> dedupe_keep_order)
     else None
   in
   let result =
@@ -269,6 +280,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         native_tool_posture =
           Option.bind (str "tools.native") Runtime_native_tools.of_string;
         skill_names;
+        attached_tool_allow;
         agent_core_env;
       })
       max_context_override_result)
@@ -317,6 +329,8 @@ let merge_keeper_profile_defaults
     native_tool_posture =
       prefer overlay.native_tool_posture base.native_tool_posture;
     skill_names = prefer overlay.skill_names base.skill_names;
+    attached_tool_allow =
+      prefer overlay.attached_tool_allow base.attached_tool_allow;
     agent_core_env =
       (let overlay_keys = List.map fst overlay.agent_core_env in
        let surviving_base =

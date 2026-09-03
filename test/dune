@@ -4186,6 +4186,7 @@
 
 (include stanzas/test_mcp_client.inc)
 
+(include stanzas/test_keeper_identity_tool_allow.inc)
 (include stanzas/test_keeper_identity_tools.inc)
 
 (include stanzas/test_keeper_identity_gate.inc)

@@ -50,6 +50,14 @@ type verdict =
   | Reject of string
 
 val verdict_constructor_name : verdict -> string
+
+(** The verdict vocabulary the [report_review_verdict] tool schema must
+    advertise, owned by the {!verdict} variant. The TOML declaration in
+    [config/tools/report_review_verdict.toml] carries it as a literal; the
+    mirror test in [test_anti_rationalization_empty_reject] pins the two
+    together (RFC prompts-and-tool-definitions-outside-ocaml §2.2). *)
+val valid_verdict_strings : string list
+
 type gate =
   | Structured_tool
   | Invalid_verdict

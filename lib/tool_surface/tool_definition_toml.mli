@@ -53,9 +53,19 @@ type loading =
 
 val loading_to_string : loading -> string
 
+(** One decoded tool definition. [schema] is the canonical schema published
+    to MCP clients; [keeper_projection], when the file declares a
+    [keeper_projection] table, is the deliberately narrower shape handed to
+    keeper models (same tool name, own description and params);
+    [agent_core_projection], when the file declares an
+    [agent_core_projection] table with the same grammar, is the deliberately
+    narrower shape [Agent_core_tool_contract] hands to agent-core models;
+    [help], when the file declares a [\[help\]] table, is the authored usage
+    knowledge. *)
 type loaded =
   { schema : Masc_domain.tool_schema
   ; keeper_projection : Masc_domain.tool_schema option
+  ; agent_core_projection : Masc_domain.tool_schema option
   ; help : help option
   ; loading : loading
     (** From the file's [defer_loading] key; [Always_loaded] when absent. *)
@@ -64,11 +74,6 @@ type loaded =
         sub-command path this tool answers to inside a keeper's shell line
         (RFC tools-as-shell-commands); absent means no shell form. *)
   }
-(** One decoded tool definition. [schema] is the canonical schema published
-    to MCP clients; [keeper_projection], when the file declares a
-    [keeper_projection] table, is the deliberately narrower shape handed to
-    keeper models (same tool name, own description and params); [help], when
-    the file declares a [\[help\]] table, is the authored usage knowledge. *)
 
 val load
   :  name:string
@@ -82,7 +87,8 @@ val load
 
     Accepted top-level keys: [name], [description] (non-empty),
     [additional_properties] (bool), [[params]], [keeper_projection]
-    (a table of [description] / [additional_properties] / [[params]]), and
+    (a table of [description] / [additional_properties] / [[params]]),
+    [agent_core_projection] (the same table grammar), and
     [help] (a table of [short_description] / [when_to_use] /
     [details_markdown] strings and [key_constraints] / [doc_refs] /
     [prompt_hints] / [examples] / [alternatives] string lists, at least one

@@ -214,6 +214,61 @@ let test_evidence_text_is_not_classified_before_llm_review () =
        [ " tbd "; ""; " n/a "; "   " ])
 ;;
 
+(* RFC prompts-and-tool-definitions-outside-ocaml §2.2: the schema handed to
+   the reviewer is read from [config/tools/report_review_verdict.toml], whose
+   verdict enum is a literal. The variant owns the vocabulary; this mirror
+   (the [test_agent_card_action_mirror] idiom) catches drift between the
+   literal and [valid_verdict_strings]. *)
+let test_verdict_enum_mirrors_valid_verdict_strings () =
+  let received = ref None in
+  with_reviewer
+    (fun ~base_path:_
+      ?sw:_
+      ~evaluator_runtime:_
+      ~prompt:_
+      ~report_tool_schema
+      ~lookup:_
+      ~on_tool_result:_
+      ~on_runtime_attempt_error:_
+      () ->
+       received := Some report_tool_schema;
+       Ok None)
+    (fun () ->
+       ignore (review ());
+       match !received with
+       | None -> Alcotest.fail "reviewer callback was not called"
+       | Some schema ->
+         Alcotest.(check string) "tool name" "report_review_verdict" schema.name;
+         let verdict_property =
+           match schema.input_schema with
+           | `Assoc fields ->
+             (match List.assoc_opt "properties" fields with
+              | Some (`Assoc properties) ->
+                (match List.assoc_opt "verdict" properties with
+                 | Some verdict -> verdict
+                 | None -> Alcotest.fail "properties.verdict missing")
+              | _ -> Alcotest.fail "input_schema.properties missing")
+           | _ -> Alcotest.fail "input_schema is not an object"
+         in
+         (match verdict_property with
+          | `Assoc fields ->
+            (match List.assoc_opt "enum" fields with
+             | Some (`List items) ->
+               let enum_strings =
+                 List.filter_map
+                   (function
+                     | `String s -> Some s
+                     | _ -> None)
+                   items
+               in
+               Alcotest.(check (list string))
+                 "verdict enum mirrors valid_verdict_strings"
+                 AR.valid_verdict_strings
+                 enum_strings
+             | _ -> Alcotest.fail "properties.verdict.enum missing")
+          | _ -> Alcotest.fail "properties.verdict is not an object"))
+;;
+
 let () =
   configure_prompt_registry ();
   Alcotest.run
@@ -259,5 +314,9 @@ let () =
             "evidence meaning stays with reviewer"
             `Quick
             test_evidence_text_is_not_classified_before_llm_review
+        ; Alcotest.test_case
+            "verdict enum mirrors valid_verdict_strings"
+            `Quick
+            test_verdict_enum_mirrors_valid_verdict_strings
         ] )
     ]

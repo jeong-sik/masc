@@ -119,7 +119,6 @@
       "wire_or_artifact": "MCP tools/list and /api/v1/openapi.json",
       "schema_source": [
         "lib/keeper/keeper_schema.mli",
-        "lib/tool_surface/tool_schema_dsl.mli",
         "docs/spec/09-server-transport.md"
       ],
       "validator": "Tool inventory and OpenAPI smoke tests",

@@ -361,11 +361,8 @@ export interface KeeperMetricPoint {
   context_tokens: number | null
   context_max: number | null
   latency_ms: number | null
-  generation: number
   channel: string
-  is_handoff: boolean
   cost_usd: number
-  handoff_new_generation: number | null
   prompt_fingerprint: string | null
   prompt_metrics: PromptTelemetry | null
   ctx_composition: CtxCompositionTelemetry | null
@@ -1074,9 +1071,6 @@ export interface MetricsWindow {
   window_turns?: number
   window_series_max_lines?: number
 
-  // -- Handoff --
-  handoff_count?: number
-
   // -- Intervention --
   intervention_share?: number
   intervention_per_turn?: number
@@ -1087,7 +1081,6 @@ export interface MetricsWindow {
   // -- Top-N lists --
   top_work_kinds?: MetricsWindowTopItem[]
   top_tools?: MetricsWindowTopItem[]
-  generation_equipment?: MetricsWindowTopItem[]
 
   // Catch-all for future fields
   [key: string]: unknown

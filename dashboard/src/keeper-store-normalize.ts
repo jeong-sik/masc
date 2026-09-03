@@ -326,9 +326,6 @@ export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
   if (!series || series.length === 0) {
     return 'idle'
   }
-  const latest = series[series.length - 1]
-  if (!latest) return 'idle'
-  if (latest.is_handoff) return 'handoff-imminent'
   return 'active'
 }
 
@@ -462,11 +459,6 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
       if (!isRecord(item)) return null
       const ts = asNumber(item.ts_unix)
       if (ts == null) return null
-      const handoffObj = isRecord(item.handoff) ? item.handoff : null
-      const handoffPerformed =
-        item.handoff_performed === true && handoffObj?.performed === true
-      const handoffNewGeneration =
-        handoffObj ? (asNumber(handoffObj.to_generation) ?? null) : null
       const rawPrompt = isRecord(item.prompt) ? item.prompt : null
       const rawUsage = isRecord(item.usage) ? item.usage : null
       const promptSegments: NonNullable<PromptTelemetry['segments']> =
@@ -530,11 +522,8 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         context_tokens: null,
         context_max: null,
         latency_ms: latencyMs,
-        generation: asNumber(item.generation) ?? 0,
         channel: typeof item.channel === 'string' ? item.channel : 'turn',
-        is_handoff: handoffPerformed,
         cost_usd: asNumber(item.cost_usd) ?? Number.NaN,
-        handoff_new_generation: handoffNewGeneration,
         prompt_fingerprint: promptFingerprint,
         prompt_metrics,
         ctx_composition,
@@ -553,7 +542,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
 
 // Top-N list keys that contain arrays of { tool/kind/model/..., count } objects
 const TOP_LIST_KEYS = new Set([
-  'top_tools', 'top_work_kinds', 'generation_equipment',
+  'top_tools', 'top_work_kinds',
 ])
 
 function normalizeMetricsWindow(raw: unknown): Keeper['metrics_window'] | undefined {

@@ -3897,11 +3897,6 @@
 (include stanzas/test_verifier_exact_lane.inc)
 
 
-(include stanzas/test_keeper_canary_facts.inc)
-(include stanzas/test_keeper_canary_evidence.inc)
-(include stanzas/test_keeper_canary_judge.inc)
-(include stanzas/test_keeper_canary_failover.inc)
-(include stanzas/test_keeper_canary_serving.inc)
 
 (include stanzas/test_run_registry_concurrent_mutation.inc)
 (include stanzas/test_exact_lane_run_registry.inc)

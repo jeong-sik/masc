@@ -6,10 +6,21 @@
     restores the full artifact into model history. *)
 
 val default_max_bytes : int
-(** The canonical MASC tool-output budget. The returned source slice may be
-    smaller when JSON escaping or base64 expansion would exceed that budget. *)
+(** How many source bytes one page carries when the caller does not ask. The
+    returned slice may be smaller when JSON escaping or base64 expansion would
+    exceed the budget.
+
+    Equal to {!maximum_max_bytes}: paging exists for artifacts larger than one
+    page, so the useful default is the largest page. *)
 
 val maximum_max_bytes : int
+(** The largest page a caller may ask for: {!Common.max_tool_result_wire_bytes},
+    the narrower of the two lane ceilings.
+
+    A page returned above it would be spilled to a file the Keeper cannot open,
+    which is the failure this bound exists to prevent. It does not follow the
+    executing lane the way a tool result does — the schema is advertised before
+    the turn resolves a runtime, so a bound that varied could not be declared. *)
 val minimum_max_bytes : int
 val minimum_offset : int
 

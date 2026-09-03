@@ -252,10 +252,10 @@ function keeperScope(keeper: Keeper): string | null {
 
 /** The keeper's sandbox location — the design's roster identity sub-line
  *  (rails.jsx renders `k.basepath` here). The live field is `sandbox_target`
- *  (keeper-detail-alert-strip.ts:252 uses the same field); for a `local`
- *  profile it is the worktree root path, for `docker` the container target.
+ *  (keeper-detail-alert-strip.ts uses the same field); for `docker` it is the
+ *  container target, for `remote_ssh` the endpoint's target.
  *  Unlike the alert strip, this deliberately does NOT fall back to
- *  `sandbox_profile`: a bare 'local'/'docker' literal is not a useful roster
+ *  `sandbox_profile`: a bare 'docker'/'microvm' literal is not a useful roster
  *  identity, so RosterRow falls through to the scope proxy (skill/runtime) instead. */
 function keeperBasepath(keeper: Keeper): string {
   return keeper.sandbox_target?.trim() ?? ''
@@ -328,12 +328,9 @@ function RosterRow({
         <div class="kw-kp-name">${keeper.koreanName ?? keeper.name}</div>
         <div class="kw-kp-sub">
           <span class="kw-kp-state"><${StatusDot} tone=${tone} pulse=${beat} />${phaseLabel}</span>
-          ${keeper.sandbox_profile === 'local'
-            // Design roster sub-line marker (rails.jsx `.kp-sandbox`): the ⬡
-            // glyph flags a dedicated worktree folder. No kw-* counterpart —
-            // the vendored kit owns this class outright.
-            ? html`<span class="kp-sandbox" title="이 keeper 전용 작업 폴더 — git worktree 로 갈라 놔서 다른 keeper 와 파일이 섞이지 않습니다 (OS·컨테이너 샌드박스는 아님)">⬡</span>`
-            : null}
+          <!-- The design's kp-sandbox worktree glyph was gated on a 'local'
+               profile. The runtime's set is docker / microvm / remote_ssh
+               (keeper_sandbox_config.ml), so it never rendered for any row. -->
           ${handle ? html`<span aria-hidden="true">·</span><span class="kw-kp-handle kp-handle" title=${handleTitle}>${handle}</span>` : null}
         </div>
       </div>

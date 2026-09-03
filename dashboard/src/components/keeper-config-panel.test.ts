@@ -2,13 +2,14 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KeeperConfig, KeeperHookSlot } from '../types'
+import { SANDBOX_PROFILE_COVERAGE, SANDBOX_PROFILE_OPTIONS, toSandboxProfile } from '../types'
 import { ApiRequestError } from '../api/core'
 import {
   buildRuntimePayload,
   buildRuntimePayloadResult,
   configDurabilityWarningMessage,
   coerceNetworkMode,
-  coerceSandboxProfile,
+  InlineSelectRow,
   filterHookSlots,
   hookSlotDetails,
   initRuntimeDraftFromConfig,
@@ -256,21 +257,48 @@ describe('hookSlotDetails', () => {
 
 describe('sandbox coerce helpers', () => {
   // The runtime's set is closed to these three (keeper_sandbox_config.ml).
-  it('coerceSandboxProfile maps every profile the runtime accepts', () => {
-    expect(coerceSandboxProfile('docker')).toBe('docker')
-    expect(coerceSandboxProfile('microvm')).toBe('microvm')
-    expect(coerceSandboxProfile('remote_ssh')).toBe('remote_ssh')
+  it('toSandboxProfile maps every profile the runtime accepts', () => {
+    expect(toSandboxProfile('docker')).toBe('docker')
+    expect(toSandboxProfile('microvm')).toBe('microvm')
+    expect(toSandboxProfile('remote_ssh')).toBe('remote_ssh')
+  })
+
+  // sandbox_profile_of_string trims and lowercases before matching, so the
+  // dashboard reads the same strings the runtime would accept.
+  it('toSandboxProfile trims and lowercases the way the runtime does', () => {
+    expect(toSandboxProfile('  Docker ')).toBe('docker')
+    expect(toSandboxProfile('REMOTE_SSH')).toBe('remote_ssh')
   })
 
   // The fallback used to answer an unreadable value with 'local', the loosest
   // profile -- and 'local' is not a profile the runtime parses at all, so the
   // panel offered a state no keeper could reach. Nothing is substituted now:
   // null blocks the save and the operator picks a real profile.
-  it('coerceSandboxProfile returns null for anything outside the runtime set', () => {
-    expect(coerceSandboxProfile('local')).toBeNull()
-    expect(coerceSandboxProfile('something_else')).toBeNull()
-    expect(coerceSandboxProfile(undefined)).toBeNull()
-    expect(coerceSandboxProfile('')).toBeNull()
+  it('toSandboxProfile returns null for anything outside the runtime set', () => {
+    expect(toSandboxProfile('local')).toBeNull()
+    expect(toSandboxProfile('something_else')).toBeNull()
+    expect(toSandboxProfile(undefined)).toBeNull()
+    expect(toSandboxProfile(null)).toBeNull()
+    expect(toSandboxProfile('')).toBeNull()
+  })
+
+  // Object.prototype keys are not members. Without the hasOwnProperty guard a
+  // keeper reporting 'constructor' would read as a profile.
+  it('toSandboxProfile does not admit prototype keys', () => {
+    expect(toSandboxProfile('constructor')).toBeNull()
+    expect(toSandboxProfile('toString')).toBeNull()
+  })
+
+  // The coverage record is the single driver of both the parser and the select.
+  // `satisfies Record<SandboxProfile, true>` on it rejects a missing member and
+  // an extra key alike, so drift is a typecheck failure rather than a select
+  // that is quietly one option short. This asserts the shape that check guards.
+  it('drives the parser and the option list from one coverage record', () => {
+    expect(Object.keys(SANDBOX_PROFILE_COVERAGE)).toEqual(['docker', 'microvm', 'remote_ssh'])
+    expect(SANDBOX_PROFILE_OPTIONS).toEqual(Object.keys(SANDBOX_PROFILE_COVERAGE))
+    for (const profile of SANDBOX_PROFILE_OPTIONS) {
+      expect(toSandboxProfile(profile)).toBe(profile)
+    }
   })
 
   it('coerceNetworkMode maps none, falls back to inherit otherwise', () => {
@@ -280,6 +308,61 @@ describe('sandbox coerce helpers', () => {
     expect(coerceNetworkMode(undefined)).toBe('inherit')
   })
 
+})
+
+describe('InlineSelectRow', () => {
+  let host: HTMLDivElement
+
+  beforeEach(() => {
+    host = document.createElement('div')
+    document.body.appendChild(host)
+  })
+
+  afterEach(() => {
+    render(null, host)
+    host.remove()
+  })
+
+  // A <select> with no option matching its value selects index 0. That turned
+  // "the profile could not be read" into "docker", and 'docker' was then
+  // unpickable: it was already selected, so clicking it fired no change event,
+  // the draft stayed null and the save stayed blocked.
+  it('does not display an unlisted value as the first option', () => {
+    render(
+      html`<${InlineSelectRow}
+        label="sandbox_profile"
+        value=""
+        options=${SANDBOX_PROFILE_OPTIONS}
+        placeholder="(읽지 못함)"
+        onChange=${() => {}}
+      />`,
+      host,
+    )
+    const select = host.querySelector('select') as HTMLSelectElement
+    expect(select.value).toBe('')
+    expect(select.selectedIndex).toBe(0)
+    const first = select.options[0] as HTMLOptionElement | undefined
+    expect(first?.value).toBe('')
+    expect(first?.disabled).toBe(true)
+    expect(first?.textContent).toBe('(읽지 못함)')
+    expect([...select.options].map(o => o.value)).toEqual(['', ...SANDBOX_PROFILE_OPTIONS])
+  })
+
+  it('renders no placeholder when the value is one of the options', () => {
+    render(
+      html`<${InlineSelectRow}
+        label="sandbox_profile"
+        value="microvm"
+        options=${SANDBOX_PROFILE_OPTIONS}
+        placeholder="(읽지 못함)"
+        onChange=${() => {}}
+      />`,
+      host,
+    )
+    const select = host.querySelector('select') as HTMLSelectElement
+    expect(select.value).toBe('microvm')
+    expect([...select.options].map(o => o.value)).toEqual([...SANDBOX_PROFILE_OPTIONS])
+  })
 })
 
 describe('keeperRuntimeConfigCanWrite', () => {
@@ -684,7 +767,61 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(draft.sandbox_profile).toBeNull()
     const result = buildRuntimePayloadResult(draft, c)
     expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.control).toBe('sandbox_profile')
     expect(() => buildRuntimePayload(draft, c)).toThrow(RangeError)
+  })
+
+  // Each failure names the control the operator has to change. Before this the
+  // three messages shared one channel and all of them rendered under the
+  // 컨텍스트 오버라이드 numeric input.
+  it('names the failing control for every producer', () => {
+    const c = makeKeeperConfigForSandbox({ sandbox_profile: 'docker' })
+    const cases: Array<[Partial<RuntimeDraft>, string]> = [
+      [{ max_context_override: 'abc' }, 'max_context_override'],
+      [{ sandbox_profile: null }, 'sandbox_profile'],
+      [{ sandbox_profile: 'remote_ssh', remote_endpoint: '' }, 'remote_endpoint'],
+      [{ sandbox_profile: 'docker', remote_endpoint: 'builder' }, 'remote_endpoint'],
+    ]
+    for (const [overrides, control] of cases) {
+      const result = buildRuntimePayloadResult(draftFrom(c, overrides), c)
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.control).toBe(control)
+    }
+  })
+
+  // The runtime falls back to profile_defaults.remote_endpoint when the update
+  // omits the key, so a docker keeper carrying a stale endpoint has every save
+  // refused with remote_endpoint_requires_remote_ssh -- including one that only
+  // flips autoboot. The panel refuses locally and says which field to clear.
+  it('refuses a non-remote_ssh profile that still carries an endpoint', () => {
+    const c = makeKeeperConfigForSandbox({
+      sandbox_profile: 'docker',
+      remote_endpoint: 'builder',
+    })
+    const result = buildRuntimePayloadResult(draftFrom(c, { autoboot_enabled: false }), c)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.control).toBe('remote_endpoint')
+      expect(result.error).toContain('remote_ssh')
+      // The autoboot edit is still expressible: the footer and the dirty
+      // markers read this payload, and only the save path branches on `ok`.
+      expect(result.payload.autoboot_enabled).toBe(false)
+    }
+  })
+
+  // Clearing the endpoint is the way out, and it is a saveable edit on its own.
+  it('lets a docker keeper save once the stale endpoint is cleared', () => {
+    const c = makeKeeperConfigForSandbox({
+      sandbox_profile: 'docker',
+      remote_endpoint: 'builder',
+    })
+    const payload = buildRuntimePayload(
+      draftFrom(c, { autoboot_enabled: false, remote_endpoint: '' }),
+      c,
+    )
+    expect(payload.remote_endpoint).toBeNull()
+    expect(payload.autoboot_enabled).toBe(false)
+    expect(payload.sandbox_profile).toBeUndefined()
   })
 
   it('emits sandbox_profile and remote_endpoint together when moving to remote_ssh', () => {
@@ -2204,5 +2341,88 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
 
     const link = container.querySelector('[data-testid="kcf-prompt-global-edit-link"]')
     expect(link?.classList.contains('set-link')).toBe(true)
+  })
+
+  async function openAccessTab(config: KeeperConfig): Promise<void> {
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(config)
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+    selectKcfTab(container, '권한·샌드박스')
+    await flush()
+    await flush()
+  }
+
+  function sandboxSelect(): HTMLSelectElement {
+    const select = Array.from(container.querySelectorAll('select')).find(
+      element => element.getAttribute('aria-label') === 'sandbox_profile',
+    )
+    if (!select) throw new Error('sandbox_profile select not rendered')
+    return select as HTMLSelectElement
+  }
+
+  // The select had no option for '', so the browser selected index 0 and a
+  // keeper whose profile could not be read was displayed as running under
+  // docker -- the substitution #32894 removed from the parser, reappearing in
+  // the DOM. Worse, 'docker' was then unpickable, because selecting the option
+  // already shown fires no change event.
+  it('shows an unreadable sandbox_profile as unread, not as docker', async () => {
+    await openAccessTab(makeKeeperConfig({ sandbox_profile: 'some_future_profile' }))
+
+    const select = sandboxSelect()
+    expect(select.value).toBe('')
+    expect(select.value).not.toBe('docker')
+    const placeholder = select.options[0] as HTMLOptionElement | undefined
+    expect(placeholder?.disabled).toBe(true)
+    expect(placeholder?.textContent).toBe('(읽지 못함)')
+    expect([...select.options].map(option => option.value)).toEqual([
+      '',
+      ...SANDBOX_PROFILE_OPTIONS,
+    ])
+  })
+
+  // The message used to be handed to the 컨텍스트 오버라이드 numeric input's
+  // error slot, on a different tab, and the save-footer copy was gated on that
+  // input being dirty -- so with no other edit it appeared nowhere.
+  it('renders the unreadable-profile error under the sandbox control with nothing else dirty', async () => {
+    await openAccessTab(makeKeeperConfig({ sandbox_profile: 'some_future_profile' }))
+
+    const errors = Array.from(container.querySelectorAll('.kcf-inline-error')).map(
+      node => node.textContent ?? '',
+    )
+    expect(errors.some(text => text.includes('샌드박스 프로필을 읽지 못했습니다'))).toBe(true)
+  })
+
+  // The second producer #32894 added. It has to land on the endpoint row, not
+  // on the numeric input that shares the old single error channel.
+  it('renders the blank-endpoint error under the endpoint control', async () => {
+    await openAccessTab(makeKeeperConfig({ sandbox_profile: 'remote_ssh', remote_endpoint: null }))
+
+    const rows = Array.from(container.querySelectorAll('.kcf-inline-row'))
+    const endpointRow = rows.find(row => row.textContent?.includes('remote_endpoint'))
+    expect(endpointRow).toBeTruthy()
+    const error = endpointRow?.nextElementSibling
+    expect(error?.classList.contains('kcf-inline-error')).toBe(true)
+    expect(error?.textContent).toContain('remote_ssh 는 remote_endpoint 가 있어야 합니다')
+
+    // The numeric input on the 실행 tab keeps its own slot empty.
+    selectKcfTab(container, '실행')
+    await flush()
+    expect(container.textContent).not.toContain('remote_ssh 는 remote_endpoint 가 있어야 합니다')
+  })
+
+  // The row was gated on the draft profile being remote_ssh, so a docker keeper
+  // whose TOML still carries an endpoint could not see -- let alone clear --
+  // the field the runtime's refusal names.
+  it('shows the endpoint row for a docker keeper that still carries one', async () => {
+    await openAccessTab(makeKeeperConfig({ sandbox_profile: 'docker', remote_endpoint: 'builder' }))
+
+    const input = Array.from(container.querySelectorAll('input')).find(
+      element => element.getAttribute('aria-label') === 'remote_endpoint'
+        || element.previousElementSibling?.textContent?.includes('remote_endpoint'),
+    )
+    expect(container.textContent).toContain('remote_endpoint')
+    expect(input?.value ?? '').toBe('builder')
+    expect(container.textContent).toContain('remote_endpoint 는 remote_ssh 에서만 쓸 수 있습니다')
   })
 })

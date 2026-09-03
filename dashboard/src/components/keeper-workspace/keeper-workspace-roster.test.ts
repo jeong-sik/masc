@@ -604,22 +604,19 @@ describe('KeeperWorkspaceRoster', () => {
     expect(handle?.getAttribute('title')).toBe('/workspace/keepers/keeper-miso')
   })
 
-  // Design roster sub-line marker (rails.jsx `.kp-sandbox`): the ⬡ glyph flags a
-  // keeper with a dedicated worktree folder. Live source: sandbox_profile —
-  // 'local' is the git-worktree profile the glyph's title describes.
-  it('renders the design ⬡ sandbox glyph only for local-worktree keepers', () => {
+  // The design's ⬡ sandbox glyph (rails.jsx `.kp-sandbox`) was gated on a
+  // 'local' profile, which the runtime cannot emit — its set is docker /
+  // microvm / remote_ssh (keeper_sandbox_config.ml). The glyph is gone rather
+  // than left as a branch no row reaches.
+  it('renders no sandbox glyph for any profile the runtime emits', () => {
     keepers.value = [
-      mk({ name: 'miso', status: 'running', sandbox_profile: 'local', sandbox_target: '/workspace/keepers/keeper-miso' }),
+      mk({ name: 'miso', status: 'running', sandbox_profile: 'docker', sandbox_target: '/workspace/keepers/keeper-miso' }),
+      mk({ name: 'mv', status: 'running', sandbox_profile: 'microvm' }),
+      mk({ name: 'rs', status: 'running', sandbox_profile: 'remote_ssh' }),
       mk({ name: 'plain', status: 'running' }),
     ]
     render(html`<${KeeperWorkspaceRoster} activeName="miso" />`, host)
-    const rows = Array.from(host.querySelectorAll('.kw-kp-row')) as HTMLElement[]
-    const miso = rows.find(r => r.textContent?.includes('miso')) as HTMLElement
-    const plain = rows.find(r => r.textContent?.includes('plain')) as HTMLElement
-    const glyph = miso.querySelector('.kp-sandbox') as HTMLElement
-    expect(glyph?.textContent).toBe('⬡')
-    expect(glyph?.getAttribute('title')).toContain('git worktree')
-    expect(plain.querySelector('.kp-sandbox')).toBeNull()
+    expect(host.querySelectorAll('.kp-sandbox').length).toBe(0)
   })
 
   it('falls back to the runtime scope proxy when a keeper has no sandbox_target', () => {

@@ -1164,6 +1164,52 @@ export type KeeperContextMetricsUnavailable =
       reported_reason: string | null
     }
 
+/** The sandbox profile a keeper runs under.
+ *
+ *  Mirrors the runtime's closed set (`lib/config/keeper_sandbox_config.ml`:
+ *  `Docker | Micro_vm | Remote_ssh` rendered as `docker` / `microvm` /
+ *  `remote_ssh`). The runtime parses anything outside the set to `None`, so a
+ *  value this union does not name is unknown here too — never a default.
+ *
+ *  SSOT contract: a member added to this union must also be added to
+ *  {@link SANDBOX_PROFILE_COVERAGE}, which is the single driver of
+ *  {@link toSandboxProfile} and {@link SANDBOX_PROFILE_OPTIONS}. Omitting it
+ *  fails to typecheck. The OCaml half cannot be checked from here; the file
+ *  named above is the only link, and adding a variant there means editing this
+ *  union by hand. */
+export type SandboxProfile = 'docker' | 'microvm' | 'remote_ssh'
+
+/** Every {@link SandboxProfile} member, once, in the order the operator sees
+ *  them in a select. `satisfies Record<SandboxProfile, true>` rejects both
+ *  directions of drift: a missing key is an unsatisfied constraint, an extra
+ *  key is an excess property. */
+export const SANDBOX_PROFILE_COVERAGE = {
+  docker: true,
+  microvm: true,
+  remote_ssh: true,
+} as const satisfies Record<SandboxProfile, true>
+
+/** The profile list in declaration order, derived from
+ *  {@link SANDBOX_PROFILE_COVERAGE} so a new member reaches every select
+ *  without a second edit. The assertion holds because the coverage record's
+ *  keys are constrained to `SandboxProfile` above. */
+export const SANDBOX_PROFILE_OPTIONS: readonly SandboxProfile[] = Object.keys(
+  SANDBOX_PROFILE_COVERAGE,
+) as SandboxProfile[]
+
+/** Reads a server-supplied string as a {@link SandboxProfile}, applying the
+ *  same trim and lowercase the runtime applies in
+ *  `keeper_sandbox_config.sandbox_profile_of_string`. Returns `null` for
+ *  anything outside the set, including `undefined`, `''` and profiles the
+ *  runtime once had: an unreadable profile stays unreadable rather than
+ *  collapsing onto a member. */
+export function toSandboxProfile(raw: string | null | undefined): SandboxProfile | null {
+  if (raw === null || raw === undefined) return null
+  const normalized = raw.trim().toLowerCase()
+  if (!Object.prototype.hasOwnProperty.call(SANDBOX_PROFILE_COVERAGE, normalized)) return null
+  return normalized as SandboxProfile
+}
+
 export interface Keeper {
   name: string
   keeper_id?: string | null
@@ -1208,7 +1254,10 @@ export interface Keeper {
   attention_reason?: string | null
   next_human_action?: string | null
   config_error?: KeeperProfileConfigError | null
-  sandbox_profile?: 'local' | 'docker' | 'microvm' | null
+  // Normalized at the store boundary by `normalizeKeeperSandboxProfile`, so
+  // this is already the runtime's closed set — null means the row carried no
+  // readable profile, not that some profile is missing from the union.
+  sandbox_profile?: SandboxProfile | null
   sandbox_target?: string | null
   keeper_last_error?: string | null
   blocked_task_count?: number | null
@@ -1529,7 +1578,13 @@ export interface KeeperConfig {
   config_transaction_warnings?: KeeperManifestWarning[]
   autoboot_enabled: boolean
   max_context_override: number | null
-  sandbox_profile?: 'docker' | 'microvm' | 'remote_ssh' | string
+  // The server's string, unnormalized. It is not a `SandboxProfile`: when the
+  // response omits the field `normalizeKeeperConfig` writes the placeholder
+  // '(unknown sandbox_profile)' here, and a future runtime member arrives
+  // before this bundle knows it. `'docker' | 'microvm' | 'remote_ssh' | string`
+  // collapsed to `string` anyway, so the literals only looked like a contract.
+  // The contract is `toSandboxProfile`, which every reader goes through.
+  sandbox_profile?: string
   network_mode?: 'none' | 'inherit' | string
   remote_endpoint?: string | null
   keeper_last_error?: string | null

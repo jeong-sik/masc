@@ -67,6 +67,7 @@ let fusion_judge_output = "fusion.judge.output"
 let mcp_full = "mcp.full"
 let mcp_managed_agent = "mcp.managed_agent"
 let mcp_operator_remote = "mcp.operator_remote"
+let mcp_tool_help = "mcp.tool_help"
 let keeper_workspace = "keeper.workspace"
 let keeper_identity = "keeper.identity"
 let keeper_canary_judge_system = "keeper.canary.judge.system"
@@ -107,3 +108,33 @@ let tool_failure_policy_rejection = "tool_failure.policy_rejection"
 let tool_failure_runtime_failure = "tool_failure.runtime_failure"
 let tool_failure_workflow_rejection = "tool_failure.workflow_rejection"
 let tool_failure_operator_cancelled = "tool_failure.operator_cancelled"
+
+(* Gate replay delivery wording — one key per replay evidence state and one
+   per resolution path, following the keeper.observation.* precedent. The
+   model-facing instruction lives in the template; the execution path only
+   picks the key and supplies the evidence data. *)
+let keeper_gate_replay_evidence_applied = "keeper.gate_replay.evidence.applied"
+
+let keeper_gate_replay_evidence_applied_with_warning =
+  "keeper.gate_replay.evidence.applied_with_warning"
+;;
+
+let keeper_gate_replay_evidence_failed = "keeper.gate_replay.evidence.failed"
+
+let keeper_gate_replay_evidence_indeterminate =
+  "keeper.gate_replay.evidence.indeterminate"
+;;
+
+let keeper_gate_replay_repair_required = "keeper.gate_replay.repair_required"
+
+let keeper_gate_replay_resolution_without_replay_outcome =
+  "keeper.gate_replay.resolution_without_replay_outcome"
+;;
+
+let keeper_gate_replay_resolution_exact_input =
+  "keeper.gate_replay.resolution_exact_input"
+;;
+
+(* HITL context-summary canonical output contract — the schema is data the
+   caller supplies; the contract sentence lives in the template. *)
+let keeper_hitl_summary_output_contract = "keeper.hitl_summary.output_contract"

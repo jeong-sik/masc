@@ -33,6 +33,17 @@ declare -a CHUNK_FILES=()
 CHANGED_PATH_COUNT=0
 CHUNK_FILE_COUNT=0
 
+# The reviewer system prompt lives beside this script so the instruction text
+# is editable without touching the request assembly below (and so its
+# backticks stop being shell-quoting hazards).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SYSTEM_PROMPT_FILE="$SCRIPT_DIR/local-review-system-prompt.txt"
+if [ ! -f "$SYSTEM_PROMPT_FILE" ]; then
+  echo "missing reviewer system prompt: $SYSTEM_PROMPT_FILE" >&2
+  exit 1
+fi
+SYSTEM_PROMPT="$(cat "$SYSTEM_PROMPT_FILE")"
+
 usage() {
   cat <<'EOF'
 Usage: scripts/review/local-review.sh [options]
@@ -382,7 +393,7 @@ run_reviewer() {
   request_json="$(
     jq -n \
       --arg model "$MODEL" \
-      --arg system_prompt "You are a strict fresh-context code reviewer. Review the patch for bugs, regressions, stale compatibility assumptions, structural contract violations, and missing tests. Return only \`No findings.\` or a flat list of findings with file paths and concise reasoning." \
+      --arg system_prompt "$SYSTEM_PROMPT" \
       --arg user_prompt "$prompt" \
       --argjson max_tokens "$MAX_TOKENS" \
       --argjson temperature "$TEMPERATURE" \

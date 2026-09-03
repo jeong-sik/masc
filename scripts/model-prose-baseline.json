@@ -63,8 +63,8 @@
       "count": 7
     },
     "lib/keeper/keeper_gate_replay.ml": {
-      "bytes": 2564,
-      "count": 48
+      "bytes": 1431,
+      "count": 32
     },
     "lib/keeper/keeper_prompt.ml": {
       "bytes": 693,

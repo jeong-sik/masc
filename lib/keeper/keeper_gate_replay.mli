@@ -130,21 +130,16 @@ val compose_model_message :
     cannot survive beside a consumed result. Canonical history/checkpoints keep
     only the artifact reference. *)
 
-type replayable =
-  | Replay_write
-  | Replay_execute
-  | Replay_network_read
-  | Replay_connector_post
-  | Replay_identity
-      (** A call to an identity-attached outside service
-          ({!Keeper_identity_gate}); the heaviest payload class here, and the
-          reason it must replay rather than wait for a byte-identical
-          re-emission (#25947). *)
+type replayable = Keeper_gate.replayable
+(** Which approved operations can be spent without the Keeper re-emitting the
+    call. Owned by the Gate ({!Keeper_gate.replayable_operation}) so the
+    deferred payload's on_approve promise and this engine's dispatch answer
+    to one definition — a promise the engine cannot keep starves the
+    approved effect silently (#32668). Exposed because a decode function
+    that exists but is never dispatched to is indistinguishable from a
+    working replay at the boundary. *)
 
 val replayable_of_operation : string -> replayable option
-(** Which approved operations can be spent without the Keeper re-emitting the
-    call. Exposed because a decode function that exists but is never dispatched
-    to is indistinguishable from a working replay at the boundary. *)
 
 type replay_execution =
   { outcome : outcome

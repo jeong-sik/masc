@@ -816,6 +816,14 @@ Operator approvals scoped to the acting actor.
 identity, so a refresh that reorders or drops items does not move the cursor
 onto a different request.
 
+`Enter` opens the selected request as a wrapped, scrollable field list before
+the operator decides it. A blocked Auto Judge request puts `state`, the exact
+producer `reason`, and the available `next` action before its approval ID,
+execution location, and input. The one-line queue summary may end in `~`; the
+detail never treats that prefix as the whole reason. `R` retries only when the
+detail says retry is offered, while `y` and `n` remain available for a human
+decision.
+
 ### Board
 
 Posts with their vote and comment counts. Right or `Enter` opens the body;

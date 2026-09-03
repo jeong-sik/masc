@@ -1380,7 +1380,8 @@ let bytes_only n = Printf.sprintf "%dB" n
 
 let test_a_captionless_file_has_no_blank_line_above_it () =
   let notes =
-    [ { History.att_name = "shot.png"; att_mime = "image/png"; att_bytes = 12 } ]
+    [ { History.att_name = "shot.png"; att_mime = "image/png"; att_bytes = 12
+    ; att_width = None; att_height = None } ]
   in
   let body =
     History.text_with_attachments ~format_bytes:bytes_only ~text:"" ~notes
@@ -1397,7 +1398,8 @@ let test_a_captionless_file_has_no_blank_line_above_it () =
 (* Whitespace is not a caption either. *)
 let test_a_blank_caption_is_treated_as_none () =
   let notes =
-    [ { History.att_name = "shot.png"; att_mime = ""; att_bytes = 0 } ]
+    [ { History.att_name = "shot.png"; att_mime = ""; att_bytes = 0
+    ; att_width = None; att_height = None } ]
   in
   let body =
     History.text_with_attachments ~format_bytes:bytes_only ~text:"   \n  " ~notes
@@ -1408,8 +1410,10 @@ let test_a_blank_caption_is_treated_as_none () =
 
 let test_a_caption_stays_above_its_files () =
   let notes =
-    [ { History.att_name = "a.png"; att_mime = ""; att_bytes = 0 }
-    ; { History.att_name = "b.png"; att_mime = ""; att_bytes = 0 }
+    [ { History.att_name = "a.png"; att_mime = ""; att_bytes = 0
+    ; att_width = None; att_height = None }
+    ; { History.att_name = "b.png"; att_mime = ""; att_bytes = 0
+    ; att_width = None; att_height = None }
     ]
   in
   let body =
@@ -1427,6 +1431,70 @@ let test_a_row_with_no_files_is_untouched () =
   Alcotest.(check string) "unchanged" "just words"
     (History.text_with_attachments ~format_bytes:bytes_only ~text:"just words"
        ~notes:[])
+;;
+
+(* An image that was measured reads as its pixels, in the order it arrived:
+   the bytes answered "how big is the file" and the reader was asking "how
+   big is it". A file that was not measured keeps the mime it always had,
+   and the number is what a reply can name to mean one file. *)
+let test_a_measured_image_names_its_pixels_and_index () =
+  let notes =
+    [ { History.att_name = "shot.png"; att_mime = "image/png"
+      ; att_bytes = 2129
+      ; att_width = Some 3456; att_height = Some 2168 }
+    ; { History.att_name = "notes.md"; att_mime = "text/markdown"
+      ; att_bytes = 40
+      ; att_width = None; att_height = None }
+    ]
+  in
+  let body =
+    History.text_with_attachments ~format_bytes:bytes_only ~text:"look"
+       ~notes
+  in
+  match String.split_on_char '\n' body with
+  | [ caption; first; second ] ->
+    Alcotest.(check string) "caption first" "look" caption;
+    Alcotest.(check string) "measured image" "\xe2\x8e\x98 #1 shot.png \xc2\xb7 2129B \xc2\xb7 3456\xc3\x972168" first;
+    Alcotest.(check string) "unmeasured file keeps its mime"
+      "\xe2\x8e\x98 #2 notes.md \xc2\xb7 40B \xc2\xb7 text/markdown" second
+  | other ->
+    Alcotest.failf "expected three lines, got %d" (List.length other)
+;;
+
+(* The store writes width/height beside the payload; the decoder has to read
+   them back or every measured row would render as unmeasured. *)
+let sized_attachment_row =
+  {json|[{
+    "id": "msg-1",
+    "role": "user",
+    "content": "what is in this",
+    "ts": 1787650428.0,
+    "attachments": [
+      { "id": "att-1"
+      , "type": "image"
+      , "name": "shot.png"
+      , "size": 2129
+      , "mime_type": "image/png"
+      , "data": "masc://attachment/att-1/abc"
+      , "width": 3456
+      , "height": 2168
+      }
+    ]
+  }]|json}
+
+let test_a_sized_row_decodes_its_pixels () =
+  match History.rows_of_json (Yojson.Safe.from_string sized_attachment_row) with
+  | Error msg -> Alcotest.failf "sized row did not decode: %s" msg
+  | Ok decoded ->
+    (match decoded.History.rows with
+     | [ row ] ->
+       (match row.History.attachments with
+        | [ att ] ->
+          Alcotest.(check (option int)) "width" (Some 3456) att.History.att_width;
+          Alcotest.(check (option int)) "height" (Some 2168) att.History.att_height
+        | other ->
+          Alcotest.failf "expected one attachment, got %d" (List.length other))
+     | other -> Alcotest.failf "expected one row, got %d" (List.length other))
 ;;
 
 let () =
@@ -1514,6 +1582,10 @@ let () =
             test_a_caption_stays_above_its_files
         ; test_case "a row with no files is untouched" `Quick
             test_a_row_with_no_files_is_untouched
+        ; test_case "a measured image names its pixels and index" `Quick
+            test_a_measured_image_names_its_pixels_and_index
+        ; test_case "a sized row decodes its pixels" `Quick
+            test_a_sized_row_decodes_its_pixels
         ; test_case "a live row keeps its file" `Quick
             test_live_row_keeps_its_file
         ; test_case "a row names the file it carries" `Quick

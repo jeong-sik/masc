@@ -69,8 +69,20 @@ let guest_endpoint ~turn_sandbox_factory ~(meta : keeper_meta) ~cwd =
   | Keeper_sandbox_factory.No_factory ->
     Error
       (Printf.sprintf
-         "microvm_remote_requires_turn_sandbox_factory: keeper %s's guest is known only to the turn's sandbox factory, and this call has none"
+         "microvm_remote_requires_turn_sandbox_factory: keeper %s's guest may have to be started to serve this call, and only the turn that owns its lifecycle may start it. A read that only needs a running guest takes attached_guest_endpoint instead"
          meta.name)
+;;
+
+(* The turn-free door to the same guest. [endpoint] above finds the guest
+   through the turn that owns its lifecycle and may start it; this one names
+   the guest directly and cannot start anything. A caller with no turn --
+   verification lookup, an operator surface -- reads through this and gets a
+   refusal only when the guest is genuinely down. *)
+let attached_guest_endpoint ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  match meta.sandbox_profile with
+  | Docker -> Error (docker_has_no_remote_lane meta)
+  | Remote_ssh -> openssh_endpoint ~config ~meta
+  | Micro_vm -> Keeper_turn_sandbox_runtime.microvm_attached_endpoint ~config ~meta ()
 ;;
 
 let endpoint ?turn_sandbox_factory ~(config : Workspace.config) ~(meta : keeper_meta) ~cwd () =

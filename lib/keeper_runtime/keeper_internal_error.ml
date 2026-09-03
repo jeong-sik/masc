@@ -251,12 +251,16 @@ type masc_internal_error =
       reason_kind : accept_rejection_kind option;
       response_shape : accept_response_shape option;
       (* RFC-0271 §4.5: typed provider stop_reason for the rejected response.
-         [MaxTokens] on an empty/thinking_only shape marks a truncation (the
-         shared output budget was exhausted, most often by thinking) and must be
-         distinguished from a clean [EndTurn] no-progress terminal — AGENT_CORE gates
-         its own [ended_without_deliverable_content] on [EndTurn] for exactly
-         this reason. Groundwork only in this slice: threaded and serialized,
-         not yet consumed by classification (§4.5 slices 2-3). *)
+         [MaxTokens] marks an exhausted output budget and must be
+         distinguished from a clean [EndTurn] no-progress terminal — AGENT_CORE
+         gates its own [ended_without_deliverable_content] on [EndTurn] for
+         exactly this reason. Consumed by [accept_no_progress_retry_kind]: it
+         offers the thinking-off continuation to every [MaxTokens] no-progress
+         rejection, while the retry kind follows the shape first (empty and
+         thinking-only keep their rotation kinds) and is [`Truncated_no_progress]
+         only for the remaining [MaxTokens] shapes. [summary_of_masc_internal_error]
+         reports the budget boundary for every [MaxTokens] rejection; that is a
+         statement about what happened, not about the retry kind. *)
       stop_reason : Agent_core.Types.stop_reason option;
       reason : string;
     }
@@ -706,9 +710,18 @@ let all_wire_kinds =
   ; Wire_gate_replay_repair_required
   ]
 
+(* A wire reason is either the bare kind or [kind:params] -- a producer
+   appends the call's parameters after a colon. Read the kind and leave the
+   parameters to the payload, so a reason that carries them decodes to its
+   typed kind instead of falling through as [Unknown]. *)
 let wire_kind_of_string wire =
+  let kind =
+    match String.index_opt wire ':' with
+    | None -> wire
+    | Some colon -> String.sub wire 0 colon
+  in
   List.find_opt
-    (fun kind -> String.equal (wire_kind_to_string kind) wire)
+    (fun candidate -> String.equal (wire_kind_to_string candidate) kind)
     all_wire_kinds
 ;;
 
@@ -735,13 +748,27 @@ let runtime_id_of_masc_internal_error = function
   | Receipt_persistence_failed _
   | Gate_replay_repair_required _ -> "unknown"
 
+(* The two shapes that already have rotation kinds decide before the stop
+   reason: an empty or thinking-only response keeps [`Empty_no_progress] /
+   [`Thinking_only_no_progress] whether the provider stopped at [EndTurn] or at
+   [MaxTokens]. The truncation-continuation attempt is unaffected: it runs
+   first on every [MaxTokens] no-progress rejection, because
+   [Keeper_turn_driver_try_provider.max_tokens_truncation_error] reads the
+   record, not this kind. [`Truncated_no_progress] is every other [MaxTokens]
+   shape; it has no rotation hint, so a failed continuation on it ends the
+   lane.
+
+   Before this order, every [MaxTokens] rejection was [`Truncated_no_progress].
+   On a lane whose dialect drops [enable_thinking = false] from the wire
+   (Chat_completions with the reasoning_effort dialect), the continuation is
+   the same request again: 2026-09-02 17:39-18:06 KST analyst ran nine
+   thinking-only max_tokens turns (first generation 68-116 s, continuation
+   52-88 s more, same result), each classified [`Truncated_no_progress], each
+   ending with [deferred_next_runtime=none] while glm-coding.glm-5.3 stood
+   second in its lane. With the shape kinds restored the failed continuation
+   defers the next cycle to that sibling. The identical second generation
+   itself is the dialect's silent drop, tracked separately. *)
 let accept_no_progress_retry_kind = function
-  | Accept_rejected
-      { reason_kind = Some Accept_no_usable_progress
-      ; stop_reason = Some Agent_core.Types.MaxTokens
-      ; _
-      } ->
-    Some `Truncated_no_progress
   | Accept_rejected
       {
         reason_kind;
@@ -762,6 +789,12 @@ let accept_no_progress_retry_kind = function
            ~reason_kind
            ~response_shape ->
     Some `Thinking_only_no_progress
+  | Accept_rejected
+      { reason_kind = Some Accept_no_usable_progress
+      ; stop_reason = Some Agent_core.Types.MaxTokens
+      ; _
+      } ->
+    Some `Truncated_no_progress
   | Accept_rejected _
   | Runtime_exhausted _
   | Capacity_backpressure _

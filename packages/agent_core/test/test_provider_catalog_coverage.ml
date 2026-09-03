@@ -536,7 +536,7 @@ let test_auth_and_thinking_canonical_matrix () =
             "base_url": "https://provider.test/v1",
             "request_path": "/v1/chat/completions",
             "auth": {"type": "api_key_env", "env": "ENABLE_KEY"},
-            "capabilities": {"thinking_control_format": "enable_thinking"}
+            "capabilities": {"thinking_control_format": "chat_template_kwargs"}
           },
           {
             "id": "template-token",
@@ -602,9 +602,9 @@ let test_auth_and_thinking_canonical_matrix () =
   check bool "enable env" true (enable.auth = Provider_catalog.Api_key_env "ENABLE_KEY");
   check
     bool
-    "enable thinking"
+    "enable chat_template_kwargs"
     true
-    (enable.capabilities.thinking_control_format = Capabilities.Enable_thinking);
+    (enable.capabilities.thinking_control_format = Capabilities.Chat_template_kwargs);
   let template_token = require_lookup catalog "template-token" in
   check
     bool

@@ -536,7 +536,7 @@ describe('MemoryInspector pure projections', () => {
       category: { tag: 'fact' },
       first_seen: 1,
       current: true,
-      basis: { kind: 'observed' },
+      basis: { kind: 'observed', board: null },
     })
     const first = mkFact(memoryId('d'), 'first')
     const second = mkFact(memoryId('e'), 'second')
@@ -554,7 +554,7 @@ describe('MemoryInspector pure projections', () => {
       category: { tag },
       first_seen: 1,
       current,
-      basis: { kind: 'observed' },
+      basis: { kind: 'observed', board: null },
     })
     const retained = typed(memoryId('a'), 'constraint', true)
     const added = typed(memoryId('b'), 'fact', true)

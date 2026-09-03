@@ -76,3 +76,23 @@ let hints_visible ~base_path =
   match doc_of_path (runtime_toml_path ~base_path) with
   | None -> None
   | Some doc -> hints_visible_of_doc doc
+
+(* Whether a line typed while an earlier one is still waiting joins that line
+   instead of queueing behind it, [tui].coalesce_queued_input. Absent reads as
+   "yes".
+
+   A queued line has not been sent yet -- dispatch takes it out of the queue --
+   so joining two of them changes what one turn receives, not what a turn in
+   flight sees. The reader who types a thought, then its correction, then the
+   part they forgot, means one message; queueing them separately spends a turn
+   on each and lets the Keeper answer the first before the rest arrive.
+
+   Off keeps every line its own turn, which is what a reader wants when the
+   lines really are separate errands. *)
+let coalesce_queued_input_of_doc doc =
+  Keeper_toml_loader.toml_bool_opt doc "tui.coalesce_queued_input"
+
+let coalesce_queued_input ~base_path =
+  match doc_of_path (runtime_toml_path ~base_path) with
+  | None -> None
+  | Some doc -> coalesce_queued_input_of_doc doc

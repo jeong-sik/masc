@@ -173,6 +173,18 @@ val keeper_work_root_mkdir_argv : container_name:string -> keeper_name:string ->
     chmod, so creation runs as root with an explicit writable mode that
     applies only to a new directory. Idempotent. *)
 
+val keeper_work_root_write_probe_argv
+  :  container_name:string
+  -> uid:int
+  -> gid:int
+  -> keeper_name:string
+  -> string list
+(** Create and remove a temporary file in {!keeper_work_root} as [uid:gid],
+    the identity the keeper's commands run under. Exit 0 proves the keeper
+    can write its root; any other exit carries the root's owner and mode on
+    stderr. A root that exists but belongs to another uid -- a tree imported
+    from elsewhere -- fails here rather than on the keeper's first Write. *)
+
 val keeper_vm_container_kind : string
 
 val inspect_argv : container_name:string -> string list

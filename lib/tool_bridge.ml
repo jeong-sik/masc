@@ -428,12 +428,6 @@ let agent_core_tool_of_masc_with_execution_env
       ?on_externalization_error
       (handler execution_env json_args)
   in
-  (* The schema goes out named: a shape the tool spells more than once is
-     stored under [$defs] and referenced. This is the copy the model reads, and
-     [tool_schema_of_input_schema] carries it to the provider verbatim. The
-     descriptor keeps its expanded schema, which is what arguments are still
-     validated against. *)
-  let input_schema = Json_schema_shared_defs.collapse input_schema in
   match Agent_core.Types.tool_schema_of_input_schema ~name ~description ~input_schema () with
   | Ok schema -> Agent_core.Base.Tool.of_schema ?descriptor schema agent_core_handler
   | Error detail ->

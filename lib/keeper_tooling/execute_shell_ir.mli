@@ -4,16 +4,10 @@ val simple_bin :
   ?cwd_raw:string ->
   ?cwd_base:string ->
   ?sandbox:Masc_exec.Sandbox_target.t ->
-  ?env:(string * string) list ->
-  ?redirects:Masc_exec.Redirect_scope.t list ->
   Masc_exec.Exec_program.t ->
   string list ->
   Masc_exec.Shell_ir.t
-(** Build a simple Shell IR command from an opaque executable name.
-    [redirects] defaults to [[]] when omitted. *)
-
-val pipeline : Masc_exec.Shell_ir.t list -> Masc_exec.Shell_ir.t
-(** Build an explicit Shell IR pipeline from already-lowered stages. *)
+(** Build a simple Shell IR command from an opaque executable name. *)
 
 (** Why a structured command was refused.  Every arm carries what was refused,
     not just that something was.

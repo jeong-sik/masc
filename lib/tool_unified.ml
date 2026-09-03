@@ -67,20 +67,28 @@ let tool_info_to_json (info : tool_info) : Yojson.Safe.t =
    internal tool under several public names, and picking the first would put
    an arbitrary one of them in a column an operator is about to join on. An
    empty list is the honest answer for a tool no model can call. *)
-let public_names_json internal_name =
-  `List
-    (List.map
-       (fun (descriptor : Keeper_tool_descriptor.t) ->
-          `String descriptor.Keeper_tool_descriptor.public_name)
-       (Keeper_tool_descriptor.public_descriptors_for_internal internal_name))
+(* Which public names a tool is offered under is a fact the Keeper domain
+   owns, and this module is a tool surface: RFC-0194 has the dependency
+   pointing the other way. It arrives as an argument, the way
+   [runtime_metrics] already does -- the caller is the server, which is above
+   both domains and may name either.
 
-let named_tool_to_json name =
-  `Assoc [ "name", `String name; "public_names", public_names_json name ]
+   [None] is the honest answer where a caller has no descriptor set to ask,
+   and it is what the empty default gives: a tool no model can call has no
+   public names, and so does a report built without the lookup. *)
+let public_names_json ~public_names internal_name =
+  `List (List.map (fun name -> `String name) (public_names internal_name))
 
-let tool_stats_to_json (stats : Tool_metrics.tool_stats) =
+let named_tool_to_json ~public_names name =
+  `Assoc
+    [ "name", `String name
+    ; "public_names", public_names_json ~public_names name
+    ]
+
+let tool_stats_to_json ~public_names (stats : Tool_metrics.tool_stats) =
   `Assoc
     [ "name", `String stats.tool_name
-    ; "public_names", public_names_json stats.tool_name
+    ; "public_names", public_names_json ~public_names stats.tool_name
     ; "call_count", `Int stats.call_count
     ; "p50_ms", `Float stats.p50_ms
     ; "p95_ms", `Float stats.p95_ms
@@ -90,7 +98,12 @@ let tool_stats_to_json (stats : Tool_metrics.tool_stats) =
     ; "failure_count", `Int stats.failure_count
     ]
 
-let summary_report ?(runtime_metrics = fun () -> `Null) () : Yojson.Safe.t =
+let summary_report
+      ?(runtime_metrics = fun () -> `Null)
+      ?(public_names = fun _ -> [])
+      ()
+  : Yojson.Safe.t
+  =
   let metrics = Tool_metrics.all_stats () in
   let total =
     List.fold_left
@@ -138,10 +151,10 @@ let summary_report ?(runtime_metrics = fun () -> `Null) () : Yojson.Safe.t =
   `Assoc [
     ("total_calls", `Int total);
     ("distinct_tools_called", `Int distinct);
-    ("top_20", `List (List.map tool_stats_to_json top_20));
-    ("by_tool", `List (List.map tool_stats_to_json metrics));
+    ("top_20", `List (List.map (tool_stats_to_json ~public_names) top_20));
+    ("by_tool", `List (List.map (tool_stats_to_json ~public_names) metrics));
     ("never_called_count", `Int (List.length never_called));
-    ("never_called", `List (List.map named_tool_to_json never_called));
+    ("never_called", `List (List.map (named_tool_to_json ~public_names) never_called));
     ("tool_distribution", tool_dist);
     ("registered_count", `Int (Tool_dispatch.registered_count ()));
     ("runtime_metrics", runtime_metrics ());

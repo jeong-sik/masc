@@ -131,7 +131,6 @@ let response_format_of_config (config : Provider_config.t) =
 
 let capabilities_of_config (config : Provider_config.t) =
   match config.kind with
-  | Provider_config.DashScope -> Capabilities.dashscope_capabilities
   | Provider_config.Anthropic
   | Provider_config.Kimi
   | Provider_config.OpenAI_compat
@@ -147,8 +146,7 @@ let capabilities_of_config (config : Provider_config.t) =
         | Provider_config.Glm -> Capabilities.glm_capabilities
         | Provider_config.Gemini -> Capabilities.gemini_capabilities
         | Provider_config.Anthropic -> Capabilities.anthropic_capabilities
-        | Provider_config.OpenAI_compat -> Capabilities.openai_compat_chat_capabilities
-        | Provider_config.DashScope -> Capabilities.dashscope_capabilities))
+        | Provider_config.OpenAI_compat -> Capabilities.openai_compat_chat_capabilities))
 ;;
 
 (* Resolve the output-token budget for optional request envelopes (#2517).

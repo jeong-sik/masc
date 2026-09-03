@@ -344,6 +344,39 @@ let test_lane_resolution_preserves_frozen_order_and_drops_rejected_slots () =
       slots
 ;;
 
+(* verifier_exact, 2026-09-02: an operator put the keeper-turn runtime id
+   ollama_cloud.ollama-cloud-deepseek-v4-flash-0731 in the lane, and the boot
+   report said the catalog had moved on. The diagnosis has to say which of
+   the two registries the id belongs to. *)
+let test_rejected_slot_diagnosis_names_a_runtime_id () =
+  let slot : Runtime_exact_output_registry.rejected_slot =
+    { lane_id = "verifier_exact"
+    ; position = 2
+    ; slot_id = "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
+    ; target_ref = "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
+    }
+  in
+  let as_runtime id =
+    if String.equal id slot.slot_id then Some ("ollama_cloud", "deepseek-v4-flash:0731") else None
+  in
+  (match
+     Runtime_exact_output_registry.diagnose_rejected_slot slot ~configured_runtime:as_runtime
+   with
+   | Runtime_exact_output_registry.Configured_runtime_id { provider_id; api_name } ->
+     Alcotest.(check string) "provider" "ollama_cloud" provider_id;
+     Alcotest.(check string) "api-name" "deepseek-v4-flash:0731" api_name
+   | Runtime_exact_output_registry.Retired_catalog_target ->
+     Alcotest.fail "a slot that is a configured runtime id must be diagnosed as one");
+  match
+    Runtime_exact_output_registry.diagnose_rejected_slot
+      slot
+      ~configured_runtime:(fun _ -> None)
+  with
+  | Runtime_exact_output_registry.Retired_catalog_target -> ()
+  | Runtime_exact_output_registry.Configured_runtime_id _ ->
+    Alcotest.fail "an id no registry knows is a retired catalog target"
+;;
+
 let () =
   configure_prompt_registry ();
   Alcotest.run
@@ -391,6 +424,10 @@ let () =
             "resolution preserves frozen order and drops rejected slots"
             `Quick
             test_lane_resolution_preserves_frozen_order_and_drops_rejected_slots
+        ; Alcotest.test_case
+            "rejected slot diagnosis names a runtime id"
+            `Quick
+            test_rejected_slot_diagnosis_names_a_runtime_id
         ] )
     ]
 ;;

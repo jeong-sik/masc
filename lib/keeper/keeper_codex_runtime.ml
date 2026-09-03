@@ -823,6 +823,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name
             ~turns_used:turn_count
             ~latency_ms:
               (Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
+              (* This adapter does not sum per-frame usage before a host
+                 stop yet; the Codex app-server stream's counts are read only from
+                 its terminal frame. *)
+            ~usage:None
             stop
         in
         let* () =

@@ -445,7 +445,7 @@ let%test "build_request omits keep_alive when caller omits it" =
   let config =
     Provider_config.make
       ~kind:Ollama
-      ~model_id:"dashscope-3.5:35b-a3b-nvfp4"
+      ~model_id:"qwen3.5:35b-a3b-nvfp4"
       ~base_url:"http://127.0.0.1:11434"
       ()
   in
@@ -467,7 +467,7 @@ let%test "build_request preserves explicit keep_alive duration" =
   let config =
     Provider_config.make
       ~kind:Ollama
-      ~model_id:"dashscope-3.5:35b-a3b-nvfp4"
+      ~model_id:"qwen3.5:35b-a3b-nvfp4"
       ~base_url:"http://127.0.0.1:11434"
       ~keep_alive:"5m"
       ()
@@ -491,7 +491,7 @@ let%test "build_request serializes explicit keep_alive integer as JSON integer" 
   let config =
     Provider_config.make
       ~kind:Ollama
-      ~model_id:"dashscope-3.5:35b-a3b-nvfp4"
+      ~model_id:"qwen3.5:35b-a3b-nvfp4"
       ~base_url:"http://127.0.0.1:11434"
       ~keep_alive:"-1"
       ()
@@ -515,7 +515,7 @@ let%test "build_request config.num_ctx injected into options" =
   let config =
     Provider_config.make
       ~kind:Ollama
-      ~model_id:"dashscope-3:8b"
+      ~model_id:"qwen3:8b"
       ~base_url:"http://127.0.0.1:11434"
       ~num_ctx:8192
       ()
@@ -615,7 +615,7 @@ let%test "build_request omits num_ctx when None" =
   let config =
     Provider_config.make
       ~kind:Ollama
-      ~model_id:"dashscope-3:8b"
+      ~model_id:"qwen3:8b"
       ~base_url:"http://127.0.0.1:11434"
       ()
   in
@@ -638,7 +638,7 @@ let%test "build_request emits only an explicit supported seed" =
   let config =
     Provider_config.make
       ~kind:Ollama
-      ~model_id:"dashscope-3:8b"
+      ~model_id:"qwen3:8b"
       ~base_url:"http://127.0.0.1:11434"
       ~seed:42
       ~model_capabilities_override:
@@ -655,7 +655,7 @@ let%test "build_request omits seed when caller omits it" =
   let config =
     Provider_config.make
       ~kind:Ollama
-      ~model_id:"dashscope-3:8b"
+      ~model_id:"qwen3:8b"
       ~base_url:"http://127.0.0.1:11434"
       ()
   in
@@ -668,7 +668,7 @@ let%test "build_request rejects non-positive explicit num_ctx" =
   let config =
     Provider_config.make
       ~kind:Ollama
-      ~model_id:"dashscope-3:8b"
+      ~model_id:"qwen3:8b"
       ~base_url:"http://127.0.0.1:11434"
       ~num_ctx:0
       ()
@@ -681,7 +681,7 @@ let%test "build_request rejects non-positive explicit num_ctx" =
 
 let%test "parse_ollama_response populates timings from eval_count/eval_duration" =
   let json =
-    {|{"model":"dashscope-3.5:35b-a3b-nvfp4","done":true,"done_reason":"stop",
+    {|{"model":"qwen3.5:35b-a3b-nvfp4","done":true,"done_reason":"stop",
        "message":{"role":"assistant","content":"hi"},
        "prompt_eval_count":100,"prompt_eval_duration":200000000,
        "eval_count":120,"eval_duration":2000000000}|}
@@ -705,7 +705,7 @@ let%test "parse_ollama_response populates timings from eval_count/eval_duration"
 
 let%test "parse_ollama_response maps prompt/eval counts to usage" =
   let json =
-    {|{"model":"dashscope-3.5:35b-a3b-nvfp4","done":true,"done_reason":"stop",
+    {|{"model":"qwen3.5:35b-a3b-nvfp4","done":true,"done_reason":"stop",
        "message":{"role":"assistant","content":"hi"},
        "prompt_eval_count":17,"eval_count":23}|}
   in
@@ -723,7 +723,7 @@ let%test "parse_ollama_response maps prompt/eval counts to usage" =
 
 let%test "parse_ollama_response guards zero eval_duration" =
   let json =
-    {|{"model":"dashscope-3.5:35b-a3b-nvfp4","done":true,"done_reason":"stop",
+    {|{"model":"qwen3.5:35b-a3b-nvfp4","done":true,"done_reason":"stop",
        "message":{"role":"assistant","content":"hi"},
        "eval_count":10,"eval_duration":0}|}
   in
@@ -740,7 +740,7 @@ let%test "parse_ollama_response guards zero eval_duration" =
 
 let%test "parse_ollama_response returns timings=None when no timing fields present" =
   let json =
-    {|{"model":"dashscope-3.5:35b-a3b-nvfp4","done":true,"done_reason":"stop",
+    {|{"model":"qwen3.5:35b-a3b-nvfp4","done":true,"done_reason":"stop",
        "message":{"role":"assistant","content":"hi"}}|}
   in
   match parse_ollama_response json with
@@ -755,7 +755,7 @@ let%test "build_request sets think=true when enable_thinking=true" =
   let config =
     Provider_config.make
       ~kind:Ollama
-      ~model_id:"dashscope-3:8b"
+      ~model_id:"qwen3:8b"
       ~base_url:"http://127.0.0.1:11434"
       ~enable_thinking:true
       ()
@@ -770,7 +770,7 @@ let%test "build_request sets think=false when enable_thinking=false" =
   let config =
     Provider_config.make
       ~kind:Ollama
-      ~model_id:"dashscope-3:8b"
+      ~model_id:"qwen3:8b"
       ~base_url:"http://127.0.0.1:11434"
       ~enable_thinking:false
       ()
@@ -785,7 +785,7 @@ let%test "build_request omits think when caller omits it" =
   let config =
     Provider_config.make
       ~kind:Ollama
-      ~model_id:"dashscope-3:8b"
+      ~model_id:"qwen3:8b"
       ~base_url:"http://127.0.0.1:11434"
       ()
   in
@@ -798,7 +798,7 @@ let%test "build_request maps max_tokens to num_predict in options" =
   let config =
     Provider_config.make
       ~kind:Ollama
-      ~model_id:"dashscope-3:8b"
+      ~model_id:"qwen3:8b"
       ~base_url:"http://127.0.0.1:11434"
       ~max_tokens:2048
       ()
@@ -821,7 +821,7 @@ let%test
   let config =
     Provider_config.make
       ~kind:Ollama
-      ~model_id:"dashscope-3:8b"
+      ~model_id:"qwen3:8b"
       ~base_url:"http://127.0.0.1:11434"
       ~top_k:40
       ()
@@ -834,7 +834,7 @@ let%test
 
 let%test "parse_ollama_response maps done_reason=tool_calls to StopToolUse" =
   let json =
-    {|{"model":"dashscope-3:8b","done":true,"done_reason":"tool_calls",
+    {|{"model":"qwen3:8b","done":true,"done_reason":"tool_calls",
        "message":{"role":"assistant","content":"",
          "tool_calls":[{"function":{"name":"get_weather","arguments":"{\"city\":\"Seoul\"}"}}]}}|}
   in
@@ -851,7 +851,7 @@ let%test "parse_ollama_response maps done_reason=tool_calls to StopToolUse" =
 let%test "parse_ollama_response rejects tool_calls without tool blocks" =
   match
     parse_ollama_response
-      {|{"model":"dashscope-3:8b","done":true,"done_reason":"tool_calls","message":{"role":"assistant","content":""}}|}
+      {|{"model":"qwen3:8b","done":true,"done_reason":"tool_calls","message":{"role":"assistant","content":""}}|}
   with
   | Ok response -> response.stop_reason = Types.UnmatchedToolCalls
   | Error _ -> false
@@ -859,7 +859,7 @@ let%test "parse_ollama_response rejects tool_calls without tool blocks" =
 
 let%test "parse_ollama_response trusts complete tool blocks over stop label" =
   let json =
-    {|{"model":"dashscope-3:8b","done":true,"done_reason":"stop",
+    {|{"model":"qwen3:8b","done":true,"done_reason":"stop",
        "message":{"role":"assistant","content":"",
          "tool_calls":[{"function":{"name":"get_weather","arguments":"{\"city\":\"Seoul\"}"}}]}}|}
   in
@@ -870,7 +870,7 @@ let%test "parse_ollama_response trusts complete tool blocks over stop label" =
 
 let%test "parse_ollama_response keeps unknown reason non-executable" =
   let json =
-    {|{"model":"dashscope-3:8b","done":true,"done_reason":"provider_terminal",
+    {|{"model":"qwen3:8b","done":true,"done_reason":"provider_terminal",
        "message":{"role":"assistant","content":"",
          "tool_calls":[{"function":{"name":"get_weather","arguments":"{\"city\":\"Seoul\"}"}}]}}|}
   in
@@ -882,7 +882,7 @@ let%test "parse_ollama_response keeps unknown reason non-executable" =
 let%test "parse_ollama_response maps overflow done_reason to ContextWindowExceeded" =
   match
     parse_ollama_response
-      {|{"model":"dashscope-3:8b","done":true,"done_reason":"model_context_window_exceeded","message":{"role":"assistant","content":""}}|}
+      {|{"model":"qwen3:8b","done":true,"done_reason":"model_context_window_exceeded","message":{"role":"assistant","content":""}}|}
   with
   | Ok response -> response.stop_reason = Types.ContextWindowExceeded
   | Error _ -> false
@@ -896,7 +896,7 @@ let%test "parse_ollama_response returns Error on error field" =
 ;;
 
 let%test "parse_ollama_response rejects a missing message" =
-  match parse_ollama_response {|{"model":"dashscope-3:8b","done":true}|} with
+  match parse_ollama_response {|{"model":"qwen3:8b","done":true}|} with
   | Error "malformed_ollama_response:missing_message" -> true
   | Error _ | Ok _ -> false
 ;;
@@ -904,7 +904,7 @@ let%test "parse_ollama_response rejects a missing message" =
 let%test "parse_ollama_response rejects a missing done reason" =
   match
     parse_ollama_response
-      {|{"model":"dashscope-3:8b","done":true,"message":{"role":"assistant","content":"ok"}}|}
+      {|{"model":"qwen3:8b","done":true,"message":{"role":"assistant","content":"ok"}}|}
   with
   | Error "malformed_ollama_response:missing_done_reason" -> true
   | Error _ | Ok _ -> false
@@ -924,7 +924,7 @@ let%test "parse_ollama_response rejects malformed message content" =
 
 let%test "parse_ollama_response extracts thinking block from message" =
   let json =
-    {|{"model":"dashscope-3:8b","done":true,"done_reason":"stop",
+    {|{"model":"qwen3:8b","done":true,"done_reason":"stop",
        "message":{"role":"assistant","content":"The answer is 42.",
          "thinking":"Let me reason about this step by step."}}|}
   in

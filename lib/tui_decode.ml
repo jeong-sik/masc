@@ -906,7 +906,6 @@ let decode_log_entry json =
   let* _ts_unix = require_float_field json "ts_unix" in
   let* raw_channel = require_string_field json "channel" in
   let* _name = require_string_field json "name" in
-  let* _agent_name = require_string_field json "agent_name" in
   let* _trace_id = require_string_field json "trace_id" in
   match kind with
   | Keeper_metrics_record.Heartbeat ->
@@ -5786,22 +5785,7 @@ let execute_gate_command envelope =
   | `Assoc _ as args -> (
     match stage_command args with
     | Some command -> Some command
-    | None -> (
-      match script_command args with
-      | Some command -> Some command
-      | None -> (
-      (* A staged call carries no top-level argv; the tool takes one shape or
-         the other, never both. Stages read the way they run. *)
-      match member "pipeline" args with
-      | `List (_ :: _ as stages) ->
-        List.fold_right
-          (fun stage acc ->
-            match stage_command stage, acc with
-            | Some command, Some rest -> Some (command :: rest)
-            | _, _ -> None)
-          stages (Some [])
-        |> Option.map (String.concat " | ")
-      | _ -> None)))
+    | None -> script_command args)
   | _ -> None
 
 (* Where the command would run. The same envelope carries it, and it decides
@@ -7518,6 +7502,54 @@ let decode_git_log json =
   else
     let* rows_json = required_list_field json "commits" in
     decode_list "commits" decode_git_log_row rows_json
+
+(* ── git blame: runs of adjacent lines one author last touched ─────── *)
+
+(** One run of adjacent lines the same author last touched.
+
+    The route ([GET /api/v1/git/blame]) groups [git blame --porcelain]'s
+    per-line output into these before answering, so a file settled by two
+    commits arrives as two blocks rather than as one row per line. The wire
+    spells the author [keeper_id], the shape it shares with the activity and
+    annotation routes; here it is whatever git reported as the author, which
+    is a person's name and not a Keeper. *)
+type blame_block = {
+  bb_line_start : int;
+  bb_line_end : int;
+  bb_author : string;
+  bb_at_ms : float;
+}
+
+let decode_blame_block json =
+  let* bb_line_start = required_int_field json "line_start" in
+  let* bb_line_end = required_int_field json "line_end" in
+  let* bb_author = required_string_field json "keeper_id" in
+  let* bb_at_ms = timestamp_ms_field json in
+  Ok { bb_line_start; bb_line_end; bb_author; bb_at_ms }
+
+(* This route answers with a bare array rather than the [{ok; data}] envelope
+   its neighbours use. Decoded as what it is: reshaping it here would hide
+   which of the two shapes the server actually sends. *)
+let decode_git_blame json =
+  match json with
+  | `List items -> decode_list "blame" decode_blame_block items
+  | bad -> field_type_error "blame" "a list of blocks" bad
+
+(** The block covering [line], and whether [line] is where that block starts.
+
+    Blocks arrive sorted and do not overlap, so the first cover is the only
+    one. The second half is what lets the gutter print an author once per run
+    instead of once per line -- the run boundary is the fact worth drawing,
+    and repeating the name down every line of a block hides it. *)
+let blame_block_at blocks line =
+  let rec find = function
+    | [] -> None
+    | block :: rest ->
+        if line >= block.bb_line_start && line <= block.bb_line_end then
+          Some (block, line = block.bb_line_start)
+        else find rest
+  in
+  find blocks
 
 (* ── IDE annotations: notes anchored to lines of a codebase ────────── *)
 

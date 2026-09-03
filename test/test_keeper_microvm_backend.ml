@@ -144,6 +144,67 @@ let test_the_host_default_is_apple_or_nothing () =
       (Backend.to_string other)
 ;;
 
+(* ── the resolve, which is what dispatch reads ──────────────────────── *)
+
+(* Durable meta carries a placeholder, and the TOML is the authority. These
+   pin the three answers effective_meta_of_profile_defaults can give for the
+   Micro_vm profile, because a wrong one hands a keeper a runtime its own file
+   never named. *)
+let profile_defaults ?backend ?(profile = Masc.Keeper_types_profile.Micro_vm) () =
+  { Masc.Keeper_types_profile.empty_keeper_profile_defaults with
+    manifest_path = Some ".masc/config/keepers/probe.toml"
+  ; sandbox_profile = Some profile
+  ; microvm_backend = backend
+  }
+;;
+
+(* Durable meta as the decoder leaves it: the backend is a placeholder there,
+   which is the state this resolve has to answer from. *)
+let placeholder_meta () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "probe"; "trace_id", `String "trace-probe" ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail err
+;;
+
+let resolve defaults =
+  Masc.Keeper_meta_contract.effective_meta_of_profile_defaults
+    defaults
+    (placeholder_meta ())
+;;
+
+let test_a_declared_backend_wins () =
+  match resolve (profile_defaults ~backend:Backend.Microsandbox ()) with
+  | Error detail -> Alcotest.failf "a declared backend was refused: %s" detail
+  | Ok meta ->
+    (match meta.microvm_backend with
+     | Some Backend.Microsandbox -> ()
+     | Some other ->
+       Alcotest.failf "declared microsandbox, resolved %s" (Backend.to_string other)
+     | None -> fail "a declared backend did not reach the meta")
+;;
+
+(* Off Micro_vm the field stays empty: the TOML load already refuses the key
+   there, and a second place for the answer to live is a second place for it
+   to disagree. *)
+let test_a_non_microvm_profile_carries_no_backend () =
+  List.iter
+    (fun profile ->
+      match resolve (profile_defaults ~profile ()) with
+      | Error _ -> ()
+      | Ok meta ->
+        (match meta.microvm_backend with
+         | None -> ()
+         | Some backend ->
+           Alcotest.failf
+             "a %s keeper carried microvm_backend = %s"
+             (Masc.Keeper_types_profile.sandbox_profile_to_string profile)
+             (Backend.to_string backend)))
+    [ Masc.Keeper_types_profile.Docker ]
+;;
+
 let () =
   Alcotest.run
     "keeper_microvm_backend"
@@ -170,6 +231,12 @@ let () =
             test_an_unrecognised_shape_is_an_error_not_a_no
         ; Alcotest.test_case "the host default is Apple or nothing" `Quick
             test_the_host_default_is_apple_or_nothing
+        ] )
+    ; ( "resolve"
+      , [ Alcotest.test_case "a declared backend wins" `Quick
+            test_a_declared_backend_wins
+        ; Alcotest.test_case "a non-microvm profile carries no backend" `Quick
+            test_a_non_microvm_profile_carries_no_backend
         ] )
     ]
 ;;

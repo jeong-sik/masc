@@ -104,6 +104,17 @@ val max_tool_result_wire_bytes : int
     that is {!max_process_capture_head_bytes} + {!max_process_capture_tail_bytes}.
     Conflating the two is what let a single [Execute] call retain 590MB. *)
 
+val max_agent_core_inline_result_bytes : int
+(** How much of one tool result MASC carries inline when it owns the wire.
+
+    An agent-core lane has no CLI between the model and the result, so nothing
+    spills and the reason {!max_tool_result_wire_bytes} is low does not apply.
+    Bounding context growth is the only job left, so this is a separate number
+    rather than the same one scaled.
+
+    Applying the lower ceiling here turned a result the model could have read
+    into a blob it had to fetch back, inside the same turn that produced it. *)
+
 val max_process_capture_head_bytes : int
 (** Bytes retained from the {e start} of one captured subprocess stream.
     Backed by a growable buffer, so this budget costs nothing until output

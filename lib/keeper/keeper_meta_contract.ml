@@ -261,6 +261,7 @@ type keeper_meta =
     sandbox_profile : Keeper_types_profile.sandbox_profile
   ; sandbox_image : string option
   ; network_mode : Keeper_types_profile.network_mode
+  ; microvm_backend : Keeper_microvm_backend.t option
   ; mention_targets : string list
   ; proactive : proactive_policy
   ; (* -- Lifecycle -- *)
@@ -367,6 +368,22 @@ let effective_meta_of_profile_defaults
             \"remote_ssh\" requires remote_endpoint = \"<name>\" in the keeper \
             TOML (registry: [exec.ssh.endpoints.<name>] in runtime config)"
            meta.name)
+  (* RFC-0405. Micro_vm says the tree sits on a guest behind a hypervisor; a
+     runtime has to supply one. macOS has an assumed answer, other hosts do
+     not, and a keeper whose TOML names none there would otherwise boot into
+     a dispatch that can only error. Refusing names both ways out — declare a
+     backend, or use a profile this host can serve — rather than handing the
+     keeper an isolation weaker than the one it asked for. *)
+  | Ok Micro_vm
+    when Option.is_none defaults.microvm_backend
+         && Option.is_none (Keeper_microvm_backend.default_for_host ()) ->
+      Error
+        (Printf.sprintf
+           "keeper %s rejected: microvm_backend_unresolved: sandbox_profile \
+            \"microvm\" has no runtime on this host. Set microvm_backend to \
+            one of: %s, or declare a sandbox_profile this host can serve"
+           meta.name
+           (String.concat ", " Keeper_microvm_backend.valid_strings))
   | Ok sandbox_profile ->
       let default_network_mode =
         if has_profile_source then default_network_mode_for_profile sandbox_profile
@@ -398,6 +415,21 @@ let effective_meta_of_profile_defaults
           sandbox_image =
             apply_profile_default_opt defaults.sandbox_image meta.sandbox_image;
           network_mode;
+          (* RFC-0405. Which runtime serves a Micro_vm guest is TOML-owned, so
+             it is resolved here rather than read off durable meta, where the
+             decoder leaves [None]. A keeper that declared no backend takes
+             the host's, and where the host has none the boot below refuses
+             rather than choosing one for it. Off the Micro_vm profile the
+             field stays [None]: the TOML load already refuses the key there,
+             and carrying a value no dispatch reads would be a second place
+             for the answer to live. *)
+          microvm_backend =
+            (match sandbox_profile with
+             | Micro_vm ->
+               (match defaults.microvm_backend with
+                | Some _ as declared -> declared
+                | None -> Keeper_microvm_backend.default_for_host ())
+             | Docker | Remote_ssh -> None);
           (* RFC vision-delegation §2.4: TOML profile overrides the carried
              value; absent -> keep [meta]'s (defaults to Inherit). *)
           telemetry_feedback_enabled =

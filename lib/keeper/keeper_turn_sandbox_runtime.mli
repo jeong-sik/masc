@@ -191,6 +191,7 @@ val teardown_keeper_sandbox_by_name :
   config:Workspace.config ->
   keeper_name:string ->
   backend:Keeper_sandbox.backend ->
+  ?microvm_backend:Keeper_microvm_backend.t ->
   unit ->
   (unit, string) result
 (** {!teardown_keeper_sandbox} for callers that hold the keeper's name and

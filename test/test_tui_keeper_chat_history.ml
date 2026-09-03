@@ -667,7 +667,7 @@ let test_an_autonomous_turn_draws_what_it_did () =
   match decoded.History.rows with
   | [ thinking; tools ] ->
       check string "the withheld reasoning is counted, not drawn blank"
-        "thinking[(2 reasoning steps, content withheld)]"
+        "thinking[2 reasoning steps · text not recorded]"
         (kind_to_string thinking.History.kind);
       (match tools.History.kind with
        | History.Tool_calls block ->

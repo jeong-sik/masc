@@ -9537,12 +9537,17 @@ let render_fusion_list (state : state) =
       16 runs
     |> min 26
   in
+  (* The run id takes what the named columns leave, once the keeper column has
+     been sized to the names it actually holds. *)
+  let run_width =
+    Render_schedule.fusion_run_width ~keeper_width
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
+  in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  %-8s %-7s %-18s %-*s %-10s %s" "TIME" "AGE" "STATE"
-       keeper_width "KEEPER" "PRESET" "RUN");
+    ("  " ^ Render_schedule.fusion_header_row ~keeper_width ~run_width);
   box_divider buf cols;
   (match state.fusion_error with
    | None -> ()
@@ -9586,15 +9591,15 @@ let render_fusion_list (state : state) =
             | Fusion_completed | Fusion_failed _ -> status
           in
           let line =
-            (* [fit_width] pads, so the cell is already the column's width. *)
-            Printf.sprintf "%-8s %-7s %s%-18s%s %s %-10s %s"
-              (fusion_run_clock run)
-              (fit_width (fusion_run_age ~now:now_epoch run) 7)
-              (fusion_run_status_color run.fur_status)
-              (fit_width state_text 18) Ansi.reset
-              (fit_width (Terminal_text.single_line run.fur_keeper) keeper_width)
-              (fit_width (Terminal_text.single_line run.fur_preset) 10)
-              (fit_width (Terminal_text.single_line run.fur_run_id) 14)
+            Render_schedule.fusion_row ~keeper_width ~run_width
+              ~state_style:(fusion_run_status_color run.fur_status)
+              { Render_schedule.frow_time = fusion_run_clock run
+              ; frow_age = fusion_run_age ~now:now_epoch run
+              ; frow_state = state_text
+              ; frow_keeper = Terminal_text.single_line run.fur_keeper
+              ; frow_preset = Terminal_text.single_line run.fur_preset
+              ; frow_run = Terminal_text.single_line run.fur_run_id
+              }
           in
           if row_index = state.fusion_cursor then
             box_line buf cols (Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line)

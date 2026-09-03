@@ -342,6 +342,38 @@ val change_row :
     beside it -- the column that says what the turn actually did -- off the
     frame. *)
 
+(** {1 Fusion run columns} *)
+
+val fusion_time_width : int
+val fusion_age_width : int
+val fusion_state_width : int
+val fusion_preset_width : int
+val fusion_minimum_run_width : int
+val fusion_cell_gap : int
+
+type fusion_row_values = {
+  frow_time : string;
+  frow_age : string;
+  frow_state : string;
+  frow_keeper : string;
+  frow_preset : string;
+  frow_run : string;
+}
+
+val fusion_run_width : inner_width:int -> keeper_width:int -> int
+val fusion_header_row : keeper_width:int -> run_width:int -> string
+
+val fusion_row :
+  state_style:string ->
+  keeper_width:int ->
+  run_width:int ->
+  fusion_row_values ->
+  string
+(** One run, on the same columns as {!fusion_header_row}. The keeper cell is
+    sized by the caller to the names it holds; the run id takes what is left,
+    where it used to be unbounded in the header and cut at fourteen in the
+    row. *)
+
 module Terminal_size_cache : sig
   type refresh =
     | Changed of (int * int)

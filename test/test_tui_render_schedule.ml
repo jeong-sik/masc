@@ -1031,6 +1031,63 @@ let test_change_columns_hold_their_offsets () =
             ~summary_width change_overflowing))
   done
 
+(* Fusion run columns. The run id was unbounded where it was named and cut at
+   fourteen where it was filled. *)
+
+let fusion_probe =
+  { Schedule.frow_time = "A"
+  ; frow_age = "B"
+  ; frow_state = "C"
+  ; frow_keeper = "D"
+  ; frow_preset = "E"
+  ; frow_run = "F"
+  }
+
+let fusion_overflowing =
+  { Schedule.frow_time = "11:08:43.512"
+  ; frow_age = "1234.5s"
+  ; frow_state = "cancelled-by-the-operator"
+  ; frow_keeper = "kidsnote-pr-jira-checker"
+  ; frow_preset = "antigravity-high"
+  ; frow_run = "run-1788427841647-00000-abcdef"
+  }
+
+let test_fusion_columns_hold_their_offsets () =
+  let keeper_width = 16 in
+  for inner_width = 80 to 240 do
+    let run_width = Schedule.fusion_run_width ~inner_width ~keeper_width in
+    let width text = Masc_tui_message_layout.display_width text in
+    let header = Schedule.fusion_header_row ~keeper_width ~run_width in
+    let row =
+      Schedule.fusion_row ~state_style:"" ~keeper_width ~run_width fusion_probe
+    in
+    check_left_cell "TIME" "A" ~header ~row ~inner_width;
+    check_right_cell "AGE" "B" ~header ~row ~inner_width;
+    check_left_cell "STATE" "C" ~header ~row ~inner_width;
+    check_left_cell "KEEPER" "D" ~header ~row ~inner_width;
+    check_left_cell "PRESET" "E" ~header ~row ~inner_width;
+    check_left_cell "RUN" "F" ~header ~row ~inner_width;
+    check int
+      (Printf.sprintf "inner %d: a dressed overflowing run" inner_width)
+      (width header)
+      (width
+         (Schedule.fusion_row ~state_style:"\027[31m" ~keeper_width ~run_width
+            fusion_overflowing))
+  done
+
+(* The keeper cell is sized to the names on screen, so a wider one has to come
+   out of the run id rather than out of the frame. *)
+let test_fusion_keeper_growth_comes_out_of_the_run_id () =
+  let inner_width = 140 in
+  let narrow = Schedule.fusion_run_width ~inner_width ~keeper_width:16 in
+  let wide = Schedule.fusion_run_width ~inner_width ~keeper_width:26 in
+  check int "ten cells move from the run id to the keeper" (narrow - 10) wide;
+  check int "and the row is the same width either way"
+    (Masc_tui_message_layout.display_width
+       (Schedule.fusion_header_row ~keeper_width:16 ~run_width:narrow))
+    (Masc_tui_message_layout.display_width
+       (Schedule.fusion_header_row ~keeper_width:26 ~run_width:wide))
+
 (* The strip named five stops while the Planning walk had three: Schedules and
    Fusion had become tabs of the selected Keeper and nothing took their names
    off this row. A reader pressing 4 or 5 arrived nowhere. *)
@@ -1192,6 +1249,10 @@ let () =
             test_lane_columns_hold_their_offsets
         ; test_case "change columns hold their offsets" `Quick
             test_change_columns_hold_their_offsets
+        ; test_case "fusion columns hold their offsets" `Quick
+            test_fusion_columns_hold_their_offsets
+        ; test_case "fusion keeper growth comes out of the run id" `Quick
+            test_fusion_keeper_growth_comes_out_of_the_run_id
         ; test_case "planning strip names only its own stops" `Quick
             test_planning_strip_names_only_its_own_stops
         ; test_case "planning window rides the active stop" `Quick

@@ -785,6 +785,64 @@ let change_row ~op_style ~result_style ~summary_width values =
   Table.row ~gap:change_cell_gap
     (change_cells ~op_style ~result_style ~summary_width values)
 
+(* Fusion run columns.
+
+   Six widths in the header and the same six in the row, the row's wrapped
+   around the status colour. The run id was unbounded in the header and cut at
+   fourteen in the row, so the column had no end where it was named and an
+   invisible one where it was filled. *)
+
+let fusion_time_width = 8
+let fusion_age_width = 7
+let fusion_state_width = 18
+let fusion_preset_width = 10
+let fusion_minimum_run_width = 12
+let fusion_cell_gap = 1
+
+type fusion_row_values = {
+  frow_time : string;
+  frow_age : string;
+  frow_state : string;
+  frow_keeper : string;
+  frow_preset : string;
+  frow_run : string;
+}
+
+let fusion_no_values =
+  { frow_time = ""
+  ; frow_age = ""
+  ; frow_state = ""
+  ; frow_keeper = ""
+  ; frow_preset = ""
+  ; frow_run = ""
+  }
+
+let fusion_cells ?(state_style = "") ~keeper_width ~run_width values =
+  [ Table.cell ~header:"TIME" ~width:fusion_time_width values.frow_time
+  ; Table.cell ~align:Table.Right ~header:"AGE" ~width:fusion_age_width
+      values.frow_age
+  ; Table.cell ~style:state_style ~header:"STATE" ~width:fusion_state_width
+      values.frow_state
+  ; Table.cell ~header:"KEEPER" ~width:keeper_width values.frow_keeper
+  ; Table.cell ~header:"PRESET" ~width:fusion_preset_width values.frow_preset
+  ; Table.cell ~header:"RUN" ~width:run_width values.frow_run
+  ]
+
+let fusion_run_width ~inner_width ~keeper_width =
+  let named =
+    Table.used_width ~gap:fusion_cell_gap
+      (fusion_cells ~keeper_width ~run_width:0 fusion_no_values)
+  in
+  max fusion_minimum_run_width (inner_width - named)
+
+let fusion_header_row ~keeper_width ~run_width =
+  Table.header_row ~gap:fusion_cell_gap
+    (fusion_cells ~keeper_width ~run_width fusion_no_values)
+
+let fusion_row ~state_style ~keeper_width ~run_width values =
+  Table.row ~gap:fusion_cell_gap
+    (fusion_cells ~state_style ~keeper_width ~run_width values)
+
 module Terminal_size_cache = struct
   type refresh =
     | Changed of (int * int)

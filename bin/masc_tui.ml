@@ -9612,12 +9612,29 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Some _ | None -> ());
       append_chat_history state request Message_status detail
   | Keeper_chat_approval_answered (request, tool_call_id, allow, result) ->
+      (* The operator answered a question that named a tool; echoing the call
+         id back tells them nothing they can act on and nothing they can
+         match to what they read. The live transcript still holds the call, so
+         the answer is said in the same words the question used. *)
+      let call_label =
+        let by_id =
+          match state.msg_live with
+          | None -> None
+          | Some live ->
+            Keeper_chat_transcript.tool_calls live
+            |> List.find_opt (fun (activity : Keeper_chat_transcript.tool_activity) ->
+                 Option.equal String.equal activity.call_id (Some tool_call_id))
+            |> Option.map (fun (activity : Keeper_chat_transcript.tool_activity) ->
+                 activity.tool_name)
+        in
+        match by_id with
+        | Some name when String.trim name <> "" -> Keeper_chat.terminal_safe_text name
+        | Some _ | None -> Keeper_chat.compact_request_id tool_call_id
+      in
       let text =
         match result with
         | Ok { Masc_tui_http.settled = true; _ } ->
-            Printf.sprintf "%s %s"
-              (if allow then "allowed" else "denied")
-              (Keeper_chat.compact_request_id tool_call_id)
+            Printf.sprintf "%s %s" (if allow then "allowed" else "denied") call_label
         | Ok { Masc_tui_http.settled = false; remembered = true } ->
             (* The wait was gone, but the server kept the answer for the
                identical retried call -- said so plainly, or an operator reads
@@ -9625,16 +9642,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             Printf.sprintf
               "too late for %s, but the answer is remembered -- the next \
                identical call is %s without asking"
-              (Keeper_chat.compact_request_id tool_call_id)
+              call_label
               (if allow then "allowed" else "denied")
         | Ok { Masc_tui_http.settled = false; remembered = false } ->
             (* The wait was gone and nothing this keeper asked matches: it
                was answered already, or never held. Said plainly rather than
                shown as taken, so an operator is not told a call was allowed
                when nothing was listening. *)
-            Printf.sprintf
-              "too late for %s; the call was no longer waiting"
-              (Keeper_chat.compact_request_id tool_call_id)
+            Printf.sprintf "too late for %s; the call was no longer waiting"
+              call_label
         | Error detail -> "could not answer the held call: " ^ detail
       in
       append_chat_history state request

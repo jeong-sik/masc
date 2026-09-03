@@ -38,11 +38,11 @@ let test_error_path_routes_through_the_redactor () =
    sanitizer has to run after the truncation, not before it — and running it
    before would also mean scanning the whole unbounded payload. *)
 let test_bound_holds_for_an_oversized_payload () =
-  let raw = String.make (Common.max_tool_output_bytes * 4) 'x' in
+  let raw = String.make (Common.max_tool_result_wire_bytes * 4) 'x' in
   let bounded =
     raw
     |> Masc.Observability_redact.redact_preview
-         ~max_len:Common.max_tool_output_bytes
+         ~max_len:Common.max_tool_result_wire_bytes
     |> Safe_ops.sanitize_text_utf8
   in
   check bool
@@ -54,29 +54,29 @@ let test_bound_holds_for_an_oversized_payload () =
   check bool
     "and the result stays within a small constant of the budget"
     true
-    (String.length bounded <= Common.max_tool_output_bytes + 64)
+    (String.length bounded <= Common.max_tool_result_wire_bytes + 64)
 ;;
 
 (* Korean text is three bytes per character, so a cut at max_len very likely
    splits one. The result must still be valid UTF-8 for the JSON log writer. *)
 let test_bound_survives_multibyte_text () =
   let unit = "가나다라마바사아자차" in
-  let repeats = (Common.max_tool_output_bytes / String.length unit) + 8 in
+  let repeats = (Common.max_tool_result_wire_bytes / String.length unit) + 8 in
   let raw = String.concat "" (List.init repeats (fun _ -> unit)) in
   let bounded =
     raw
     |> Masc.Observability_redact.redact_preview
-         ~max_len:Common.max_tool_output_bytes
+         ~max_len:Common.max_tool_result_wire_bytes
     |> Safe_ops.sanitize_text_utf8
   in
   check bool
     "multibyte payload is bounded"
     true
-    (String.length bounded <= Common.max_tool_output_bytes + 64);
+    (String.length bounded <= Common.max_tool_result_wire_bytes + 64);
   check bool
     "and the bound is not vacuous — the input really was larger"
     true
-    (String.length raw > Common.max_tool_output_bytes)
+    (String.length raw > Common.max_tool_result_wire_bytes)
 ;;
 
 let () =

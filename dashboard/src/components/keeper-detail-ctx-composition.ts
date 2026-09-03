@@ -58,14 +58,34 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
   }
 
   const points = observed.filter((p: KeeperMetricPoint) => attributedCtx(p) != null)
-  if (points.length === 0) return null
 
   const latestTotalBytes = attribution.attributed_bytes
   const latestActual = latestComposition.actual_input_tokens
   const latestEntries = Object.entries(attribution.segments)
     .filter(([, segment]) => (segment?.bytes ?? 0) > 0)
     .sort(([, left], [, right]) => (right.bytes ?? 0) - (left.bytes ?? 0))
-  if (latestEntries.length === 0 || latestTotalBytes <= 0) return null
+  // A turn that was measured and attributed nothing says so. Returning null
+  // here drew the same blank as "no data at all", which is the distinction the
+  // `attributed` / `not_measured` constructors exist to carry: the OCaml side
+  // deliberately omits the byte count on the unmeasured branch so a reader
+  // cannot confuse the two, and this was the last consumer that did.
+  if (latestEntries.length === 0 || latestTotalBytes <= 0) {
+    return html`
+      <div class="mb-5 v2-monitoring-panel">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">CTX Composition</span>
+          <${MutedSpan}>${observed.length} snapshots</${MutedSpan}>
+        </div>
+        <${DetailCard}>
+          <${Eyebrow}>attributed content bytes</${Eyebrow}>
+          <span class="text-sm font-medium text-[var(--color-fg-secondary)]">마지막 턴은 측정됐고, 귀속된 입력 바이트가 없어요</span>
+          <span class="text-3xs font-mono text-[var(--color-fg-disabled)]">
+            ${attribution.runtime_profile} · 0 bytes
+          </span>
+        <//>
+      </div>
+    `
+  }
   const visibleCtxEntries = filterCtxCompositionEntries(latestEntries, ctxCompositionSearch.value)
 
   const allKeys = Array.from(
@@ -85,14 +105,19 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
   const pad = SPARKLINE_PAD
   const innerW = W - (2 * pad)
   const innerH = H - (2 * pad)
-  const barStep = innerW / Math.max(points.length, 1)
+  // Stepped over every observed turn, not only the attributed ones. Deriving
+  // the step from the filtered list packed the bars together, so two adjacent
+  // bars were not necessarily adjacent turns and nothing marked the gap --
+  // which breaks the one reading this chart is for, comparing a segment
+  // against the turn before it. An unmeasured turn now leaves its slot empty.
+  const barStep = innerW / Math.max(observed.length, 1)
   const barWidth = Math.max(3, Math.min(8, barStep - 1))
 
   return html`
     <div class="mb-5 v2-monitoring-panel">
       <div class="flex items-center gap-2 mb-2">
         <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">CTX Composition</span>
-        <${MutedSpan}>${points.length} snapshots</${MutedSpan}>
+        <${MutedSpan}>${observed.length} snapshots</${MutedSpan}>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-4 gap-3 v2-monitoring-row">
         <${DetailCard} class="md:col-span-2">
@@ -133,10 +158,12 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
         <${DetailCard} class="md:col-span-2">
           <${DetailRow}>
             <${Eyebrow}>stacked history</${Eyebrow}>
-            <${MutedSpan}>${points.length} turns</${MutedSpan}>
+            <${MutedSpan}>
+              ${observed.length} turns · ${observed.length - points.length} 미측정
+            </${MutedSpan}>
           </${DetailRow}>
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="컨텍스트 구성 스택 히스토리" style="background:var(--bg-deepest);">
-            ${points.map((point: KeeperMetricPoint, index: number) => {
+            ${observed.map((point: KeeperMetricPoint, index: number) => {
               const comp = attributedCtx(point)
               if (!comp || comp.attributed_bytes <= 0) return null
               const x = pad + (index * barStep) + Math.max(0, (barStep - barWidth) / 2)

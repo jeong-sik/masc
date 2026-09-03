@@ -136,7 +136,7 @@ val run_named :
   ?on_request_attribution:
     (runtime_id:string ->
      tools:Agent_core.Tool.t list ->
-     transmitted_messages:Agent_core.Types.message list ->
+     transmitted:Keeper_official_client_host.transmitted_model_input ->
      unit) ->
   ?on_official_client_result_handoff:
     (runtime_id:string ->
@@ -176,15 +176,20 @@ val run_named :
     selection or the final error; verifier callers use it to aggregate
     retryability across a bare runtime and its terminal default fallback.
 
-    [on_request_attribution] reports the history list an official-client lane
-    handed to its client, together with the tool list that lane sent. It fires
-    once per attempt on the Codex, Antigravity and Claude Code lanes, which
-    assemble the wire inside the client and therefore never reach
+    [on_request_attribution] reports what an official-client lane could
+    observe of its own model input, together with the tool list that lane
+    sent. It fires once per attempt on the Codex, Antigravity and Claude Code
+    lanes, which assemble the wire inside the client and therefore never reach
     [on_request_wire_observation]. The Agent Core lane does not use it: its
     own serializer produced the bytes, so it reports through
-    [on_request_wire_observation] instead. [tools] is the lane's own list, not
-    the one passed to [run_named]: the Claude Code lane sends [[]] to a target
-    that declares no tool support. *)
+    [on_request_wire_observation] instead.
+
+    [transmitted] carries the history only when the lane started the
+    conversation. On a resume it says the client's session holds the input, so
+    the caller records a gap rather than attributing a local list the client
+    never re-sent. [tools] is the lane's own list, not the one passed to
+    [run_named]: the Claude Code lane sends [[]] to a target that declares no
+    tool support. *)
 
 type attempt_inference_policy =
   { attempt_enable_thinking : bool option

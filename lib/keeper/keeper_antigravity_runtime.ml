@@ -467,23 +467,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ?on_model_input_window_observation
         model_input_projection
     in
-    (* Reported after the window, because on this lane the window is the last
-       authority over what ships: the source projection runs first here, so a
-       reading taken at the source counts history the tail window then cut.
-       The wrapper is applied to whatever the admission contract produced,
-       including the pass-through it returns for a runtime that declares no
-       cap -- a lane that reports nothing is the shape masc#32995 was. *)
-    let model_input_projection : Agent_core.Agent.model_input_projection option =
-      Some
-        (fun messages ->
-           let* transmitted =
-             match model_input_projection with
-             | None -> Ok messages
-             | Some project -> project messages
-           in
-           on_transmitted_model_input transmitted;
-           Ok transmitted)
-    in
     let* prepared =
       Host.prepare_turn
         ~configured_reasoning_effort:
@@ -511,6 +494,23 @@ let run_without_lifecycle ~runtime_id ~keeper_name
              ~field:"reasoning_effort"
              "Antigravity effort must be declared by its runtime provider")
     in
+    (* Reported from [prepared.messages], which is post-carrier-append and
+       post-window: the admission contract runs inside [Host.prepare_turn], so
+       this list is the last shape masc holds before rendering.
+
+       The mode decides whether it is reportable at all. A [Start] renders the
+       whole list into the prompt, so its bytes are attributable. A [Resume]
+       renders only the turn-local carrier and the goal
+       ([prompt_for_turn] above): the accumulated history stays in the
+       conversation the CLI owns and never leaves this process, so there is
+       nothing here to measure. Reporting the local list on a resume attributed
+       history that was not sent, and -- because carrier removal is what
+       [provider_content_of_transmitted] does -- deleted the one message that
+       was. That is masc#32995 with its sign flipped. *)
+    on_transmitted_model_input
+      (if is_resume
+       then Host.Held_by_client_session
+       else Host.Whole_input_transmitted prepared.messages);
     let* prompt = prompt_for_turn ~is_resume ~goal prepared in
     (* Recording the half this process controls, mirroring the Codex and
        Claude Code composition lines: an oversized prompt was invisible until

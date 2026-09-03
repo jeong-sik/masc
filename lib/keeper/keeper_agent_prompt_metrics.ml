@@ -94,22 +94,30 @@ let provenance_failure_summary failure =
   | Some detail -> reason ^ " " ^ detail
 ;;
 
-(* Why a turn carries no byte attribution. Two constructors, because the two
-   are fixed differently: the first says no request reached a provider on this
-   attempt, the second says a request went out and the messages it carried
-   could not be resolved back to provider content. *)
+(* Why a turn carries no byte attribution. Three constructors, because the
+   three are fixed differently: the first says no request reached a provider
+   on this attempt, the second says a request went out and the messages it
+   carried could not be resolved back to provider content, the third says the
+   request went out on a lane that had nothing to resolve because the
+   conversation lives in the client's session rather than in this process. *)
 type attribution_gap =
   | Dispatch_not_reached
   | Input_provenance_unresolved of provenance_failure
+  | Client_session_holds_input
 
 let attribution_gap_reason = function
   | Dispatch_not_reached -> "dispatch_not_reached"
   | Input_provenance_unresolved failure -> provenance_failure_reason failure
+  | Client_session_holds_input -> "client_session_holds_input"
 ;;
 
 let attribution_gap_detail = function
   | Dispatch_not_reached -> None
   | Input_provenance_unresolved failure -> provenance_failure_detail failure
+  | Client_session_holds_input ->
+    Some
+      "resumed official-client session; only this turn's new material was \
+       transmitted from here"
 ;;
 
 (* The total is not a field. A stored sum can disagree with the segments it

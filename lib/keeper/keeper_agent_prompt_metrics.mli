@@ -70,19 +70,19 @@ val provenance_failure_summary : provenance_failure -> string
     that settled the turn. [Input_provenance_unresolved] says a request did go
     out and the messages it carried could not be resolved back to provider
     content; the carried {!provenance_failure} names which check refused.
+    [Client_session_holds_input] says the request went out on an
+    official-client lane that resumed a conversation the client owns
+    server-side: masc transmitted only this turn's new material, so the input
+    the model actually read is not observable from this process at all.
 
-    The two are separated because they are fixed differently, and because a
+    The three are separated because they are fixed differently, and because a
     fleet reading one number cannot tell a turn that never dispatched from a
-    turn whose input the reader failed to classify. *)
+    turn whose input the reader failed to classify, nor either of those from a
+    turn whose input was never this process's to measure. *)
 type attribution_gap =
   | Dispatch_not_reached
   | Input_provenance_unresolved of provenance_failure
-
-val attribution_gap_reason : attribution_gap -> string
-(** Stable snake_case identifier for logs and durable records.
-    [Dispatch_not_reached] returns ["dispatch_not_reached"];
-    [Input_provenance_unresolved f] returns {!provenance_failure_reason} of
-    [f]. *)
+  | Client_session_holds_input
 
 (** Byte attribution of one turn's model input.
 

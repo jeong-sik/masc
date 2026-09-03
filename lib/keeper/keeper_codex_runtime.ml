@@ -459,7 +459,8 @@ let native_posture_note = function
 
 let run_without_lifecycle ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
-    ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
+    ~system_prompt ~tools ~initial_messages ~model_input_projection
+    ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion
     ~on_official_client_result_handoff ~on_native_action
@@ -563,6 +564,17 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~model_input_projection
         ~hooks:(Some hooks)
     in
+    (* Reported from [prepared.messages], the post-window list, gated on the
+       same [thread_mode] that decides whether [thread/inject_items] runs at
+       all. Only a [Start] injects the history into the new thread; a [Resume]
+       sends the prompt and leaves the conversation in the thread the
+       app-server owns, so on that branch there is nothing here to attribute.
+       The composition line further down states the same split. *)
+    on_transmitted_model_input
+      (match thread_mode with
+       | Runtime_codex_app_server.Start ->
+         Host.Whole_input_transmitted prepared.messages
+       | Runtime_codex_app_server.Resume _ -> Host.Held_by_client_session);
     (* Snap the operator-declared effort into the catalog's accepted set so a
        per-model cap (e.g. [Max] unsupported on a model that tops out at
        [XHigh]) does not fail the turn. The same value feeds the raw_trace
@@ -1166,23 +1178,20 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
           ~system_prompt
           ~tools
           ~initial_messages
-          (* Reported after the capacity projection, which is the last thing
-             masc applies before handing the list to the client. A lane that
-             reports nothing wrote every Codex turn's input attribution as
-             zero (masc#32995). *)
           ~model_input_projection:
             (Some
-               (fun messages ->
-                  Result.map
-                    (fun transmitted ->
-                       on_transmitted_model_input transmitted;
-                       transmitted)
-                    (model_input_projection_for_capacity
-                       ~capacity_bytes
-                       ~observed_next_shrink_capacity_bytes
-                       ?on_model_input_window_observation
-                       model_input_projection
-                       messages)))
+               (model_input_projection_for_capacity
+                  ~capacity_bytes
+                  ~observed_next_shrink_capacity_bytes
+                  ?on_model_input_window_observation
+                  model_input_projection))
+          (* Reported inside the attempt rather than from the projection. The
+             projection cannot see [thread_mode], and that is what decides
+             whether its result is injected into the thread or dropped. A lane
+             that reports nothing wrote every Codex turn's input attribution
+             as zero (masc#32995); a lane that reports the projection on a
+             resume attributes history the thread already holds. *)
+          ~on_transmitted_model_input
           ~hooks
           ~context_injector
           ~context

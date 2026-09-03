@@ -655,6 +655,47 @@ let test_transmitted_carrier_removal_ignores_a_prefix_cut () =
      | Error failure -> KAPM.provenance_failure_reason failure)
 ;;
 
+(* The second half of masc#32995. Reporting the local window on a resumed
+   official-client turn attributes history the client never re-sent -- and on
+   Antigravity, where the only thing a resume does transmit is the carrier
+   [provider_content_of_transmitted] removes, it attributes the history that
+   stayed home and drops the message that left. A resume is not a measurement,
+   and this gap says so without borrowing either of the other two reasons. *)
+let test_client_session_gap_is_its_own_reason () =
+  let gap_json gap =
+    KAPM.ctx_composition_to_json
+      { KAPM.actual_input_tokens = Some 4_211; attribution = KAPM.Not_measured gap }
+    |> Yojson.Safe.Util.member "attribution"
+  in
+  let held = gap_json KAPM.Client_session_holds_input in
+  check string "the reason names the session, not a failed check"
+    "client_session_holds_input"
+    (held |> Yojson.Safe.Util.member "reason" |> Yojson.Safe.Util.to_string);
+  check bool "no byte total is emitted" true
+    (Yojson.Safe.Util.member "attributed_bytes" held = `Null);
+  check bool "and no segment map is emitted" true
+    (Yojson.Safe.Util.member "segments" held = `Null);
+  check (option int) "the accessor refuses to invent one" None
+    (KAPM.attributed_bytes (KAPM.Not_measured KAPM.Client_session_holds_input));
+  check bool "a resumed turn does not read as a turn that never dispatched"
+    false
+    (Yojson.Safe.to_string held
+     = Yojson.Safe.to_string (gap_json KAPM.Dispatch_not_reached));
+  check bool "nor as an input the reader failed to classify" false
+    (Yojson.Safe.to_string held
+     = Yojson.Safe.to_string
+         (gap_json
+            (KAPM.Input_provenance_unresolved
+               KAPM.Prompt_context_carrier_repeated)));
+  check bool "the provider token count survives the gap" true
+    (Yojson.Safe.Util.member "actual_input_tokens"
+       (KAPM.ctx_composition_to_json
+          { KAPM.actual_input_tokens = Some 4_211
+          ; attribution = KAPM.Not_measured KAPM.Client_session_holds_input
+          })
+     = `Int 4_211)
+;;
+
 let () =
   run "keeper_prompt_metrics"
     [
@@ -709,5 +750,7 @@ let () =
             test_provenance_failure_reaches_the_record;
           test_case "transmitted carrier removal ignores a prefix cut" `Quick
             test_transmitted_carrier_removal_ignores_a_prefix_cut;
+          test_case "a resumed client session is its own reason" `Quick
+            test_client_session_gap_is_its_own_reason;
         ] );
     ]

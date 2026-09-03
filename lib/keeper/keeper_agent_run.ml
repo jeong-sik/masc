@@ -81,13 +81,13 @@ type request_attribution =
   ; prompt_blocks : Turn_record.prompt_block list
   ; provider_content :
       ( Agent_core.Types.message list
-      , Keeper_agent_prompt_metrics.provenance_failure )
+      , Keeper_agent_prompt_metrics.attribution_gap )
       result
     (** The transmitted messages with the typed prompt-context carrier
-        removed, or the typed reason that removal refused. A [result] rather
-        than an [option]: "the projection never ran" and "it ran and its
-        output could not be classified" are different facts and the record
-        says which. *)
+        removed, or the typed reason there are none to report. A [result]
+        rather than an [option]: "the projection never ran", "it ran and its
+        output could not be classified", and "this lane resumed a session it
+        does not hold" are different facts and the record says which. *)
   ; tools : Agent_core.Tool.t list
     (** The surface this request carried. On the Agent Core lane this comes
         from {!Keeper_agent_tool_surface.on_the_wire} rather than the list the
@@ -977,20 +977,38 @@ let run_turn
     in
     (* Attribution recorded by an official-client lane, which windows the
        provider-bound history inside the runtime and hands the result to a
-       client that assembles the wire itself. The list reported here is the
-       one masc handed over -- the same quantity the [Durable_shape] window
-       observation counts as [transmitted_atoms]. *)
-    let record_transmitted_model_input ~runtime_id ~tools ~transmitted_messages =
+       client that assembles the wire itself.
+
+       Only a lane that started the conversation reports a list: on those
+       turns the whole window is rendered into the request, so its bytes are
+       the ones the model read. A resumed lane reports no list at all, because
+       the client re-sends only the new turn and the accumulated history never
+       leaves this process -- attributing the local window there would have
+       counted bytes that were not sent, and on Antigravity would additionally
+       have dropped the carrier that was. The gap is recorded as
+       [Client_session_holds_input] rather than as a zero or an absent
+       attribution, so a reader can tell it from a turn that never
+       dispatched. *)
+    let record_transmitted_model_input ~runtime_id ~tools ~transmitted =
       let prompt_context_present =
         Option.is_some acc.Keeper_run_tools.extra_system_context_size
+      in
+      let provider_content =
+        match transmitted with
+        | Keeper_official_client_host.Held_by_client_session ->
+          Error Keeper_agent_prompt_metrics.Client_session_holds_input
+        | Keeper_official_client_host.Whole_input_transmitted messages ->
+          Result.map_error
+            (fun failure ->
+               Keeper_agent_prompt_metrics.Input_provenance_unresolved failure)
+            (Keeper_agent_prompt_metrics.provider_content_of_transmitted
+               ~prompt_context_present
+               ~messages)
       in
       let attribution : request_attribution =
         { runtime_profile = runtime_id
         ; prompt_blocks = acc.prompt_blocks
-        ; provider_content =
-            Keeper_agent_prompt_metrics.provider_content_of_transmitted
-              ~prompt_context_present
-              ~messages:transmitted_messages
+        ; provider_content
         ; tools
         }
       in
@@ -1214,9 +1232,21 @@ let run_turn
                               Without this clear, a failed attempt's evidence
                               survives into the record of the runtime that
                               finally answered, and the metrics row credits
-                              one lane's bytes to another. *)
+                              one lane's bytes to another.
+
+                              All four cells, not just the two the record is
+                              built from: the Agent Core wire handler reads
+                              the provider-content and projected-message cells
+                              to assemble its attribution, so leaving them set
+                              makes the clear true of the record and false of
+                              the inputs it is assembled from. That the Agent
+                              Core lane happens to overwrite both on every
+                              request is a property of that lane, not of this
+                              invariant. *)
                            request_attribution_ref := None;
                            request_wire_evidence_ref := None;
+                           current_request_provider_content_ref := None;
+                           current_request_projected_messages_ref := None;
                            s.Keeper_run_tools.on_runtime_attempt attempt)
                       ~on_runtime_attempt_error:
                         (fun ~runtime_id:_ ~attempt _error ->
@@ -1241,11 +1271,11 @@ let run_turn
                            model_input_window_ref :=
                              Some (measurement, observation))
                       ~on_request_attribution:
-                        (fun ~runtime_id ~tools ~transmitted_messages ->
+                        (fun ~runtime_id ~tools ~transmitted ->
                            record_transmitted_model_input
                              ~runtime_id
                              ~tools
-                             ~transmitted_messages)
+                             ~transmitted)
                       ~on_request_wire_observation:
                         (fun
                           ~runtime_id
@@ -1273,6 +1303,13 @@ let run_turn
                            (match !current_request_provider_content_ref with
                             | None -> ()
                             | Some provider_content ->
+                              let provider_content =
+                                Result.map_error
+                                  (fun failure ->
+                                     Keeper_agent_prompt_metrics
+                                     .Input_provenance_unresolved failure)
+                                  provider_content
+                              in
                               let attribution : request_attribution =
                                 { runtime_profile = runtime_id
                                 ; prompt_blocks = acc.prompt_blocks
@@ -1384,10 +1421,8 @@ let run_turn
                          Keeper_agent_prompt_metrics.Dispatch_not_reached
                      | Some (attribution : request_attribution) ->
                        (match attribution.provider_content with
-                        | Error failure ->
-                          Keeper_agent_prompt_metrics.(
-                            Not_measured
-                              (Input_provenance_unresolved failure))
+                        | Error gap ->
+                          Keeper_agent_prompt_metrics.Not_measured gap
                         | Ok input_messages ->
                           Keeper_agent_prompt_metrics.Attributed
                             { runtime_profile = attribution.runtime_profile

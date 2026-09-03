@@ -122,4 +122,82 @@ describe('CTX composition panel and the not-measured turn', () => {
     expect(container.textContent).toContain('attributed content bytes')
     expect(container.textContent).toContain('640 bytes')
   })
+
+  // The OCaml record omits the byte count on the unmeasured branch precisely
+  // so a reader cannot confuse "measured, nothing to attribute" with "never
+  // measured". Returning null here drew the same blank for both and put the
+  // distinction back.
+  it('says a turn was measured even when it attributed no bytes', () => {
+    const container = document.createElement('div')
+    const keeper = {
+      name: 'zero-keeper',
+      status: 'active',
+      metrics_series: [
+        metricPoint({
+          ctx_composition: {
+            actual_input_tokens: 512,
+            attribution: {
+              status: 'attributed',
+              runtime_profile: 'codex_app_server.gpt-5-codex',
+              attributed_bytes: 0,
+              segments: {},
+            },
+          },
+        }),
+      ],
+    } as Keeper
+
+    render(html`<${CtxCompositionPanel} keeper=${keeper} />`, container)
+
+    expect(container.textContent).toContain('귀속된 입력 바이트가 없어요')
+    expect(container.textContent).toContain('codex_app_server.gpt-5-codex')
+    expect(container.textContent).not.toContain('측정되지 않았어요')
+  })
+
+  // The panel's own justification is reading a segment against the turn
+  // before it. Packing the bars over only the attributed turns made two
+  // adjacent bars mean two turns that were not adjacent.
+  it('keeps a bar per observed turn so the gaps stay visible', () => {
+    const container = document.createElement('div')
+    const attributed = (ts: number, bytes: number) =>
+      metricPoint({
+        ts,
+        ctx_composition: {
+          actual_input_tokens: 100,
+          attribution: {
+            status: 'attributed',
+            runtime_profile: 'glm-coding.glm-5',
+            attributed_bytes: bytes,
+            segments: { tool_schemas: { bytes, fingerprint: null } },
+          },
+        },
+      })
+    const keeper = {
+      name: 'gapped-keeper',
+      status: 'active',
+      metrics_series: [
+        attributed(1, 400),
+        metricPoint({
+          ts: 2,
+          ctx_composition: {
+            actual_input_tokens: 100,
+            attribution: {
+              status: 'not_measured',
+              reason: 'client_session_holds_input',
+              detail: null,
+            },
+          },
+        }),
+        attributed(3, 800),
+      ],
+    } as Keeper
+
+    render(html`<${CtxCompositionPanel} keeper=${keeper} />`, container)
+
+    // Three observed turns, two of them drawn: the unmeasured turn holds its
+    // slot rather than closing it.
+    expect(container.textContent).toContain('3 turns')
+    expect(container.textContent).toContain('1 미측정')
+    expect(container.querySelectorAll('svg rect')).toHaveLength(2)
+  })
 })

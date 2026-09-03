@@ -921,13 +921,10 @@ let run_named
       match runtime.Runtime.execution with
       | Runtime_execution.Codex_app_server config ->
         let run_codex ~initial_messages () =
-          let on_transmitted_model_input transmitted_messages =
+          let on_transmitted_model_input transmitted =
             Option.iter
               (fun observe ->
-                 observe
-                   ~runtime_id:attempt_runtime_id
-                   ~tools
-                   ~transmitted_messages)
+                 observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
               on_request_attribution
           in
           Keeper_codex_runtime.run
@@ -1050,13 +1047,10 @@ let run_named
         , codex_attempt.effect_disposition )
       | Runtime_execution.Antigravity_cli config ->
         let run_antigravity ~initial_messages () =
-          let on_transmitted_model_input transmitted_messages =
+          let on_transmitted_model_input transmitted =
             Option.iter
               (fun observe ->
-                 observe
-                   ~runtime_id:attempt_runtime_id
-                   ~tools
-                   ~transmitted_messages)
+                 observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
               on_request_attribution
           in
           Keeper_antigravity_runtime.run
@@ -1158,13 +1152,10 @@ let run_named
       | Runtime_execution.Claude_code config ->
         let run_claude ~initial_messages () =
           let tools = if runtime.model.tools_support then tools else [] in
-          let on_transmitted_model_input transmitted_messages =
+          let on_transmitted_model_input transmitted =
             Option.iter
               (fun observe ->
-                 observe
-                   ~runtime_id:attempt_runtime_id
-                   ~tools
-                   ~transmitted_messages)
+                 observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
               on_request_attribution
           in
           Keeper_claude_code_runtime.run

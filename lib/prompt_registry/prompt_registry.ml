@@ -254,11 +254,11 @@ let prompt_source_path key =
 (* The file value for a key: the whole body, or one slot paragraph. *)
 let file_value_of_key key =
   match Hashtbl.find_opt fragment_tbl key with
-  | Some (group_key, marker) ->
-    prompt_markdown_path group_key
-    |> Option.bind read_file_if_exists
-    |> Option.bind (fun body -> slot_paragraph body marker)
-  | None -> prompt_markdown_path key |> Option.bind read_file_if_exists
+  | Some (group_key, marker) -> (
+    match Option.bind (prompt_markdown_path group_key) read_file_if_exists with
+    | Some body -> slot_paragraph body marker
+    | None -> None)
+  | None -> Option.bind (prompt_markdown_path key) read_file_if_exists
 
 (** {1 Registration and Lookup} *)
 

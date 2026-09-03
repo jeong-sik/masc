@@ -41,6 +41,24 @@ let init_runtime_default_for_tests () =
   | Error detail -> failf "Runtime.init_default failed: %s" detail
 ;;
 
+(* Keeper boot renders the declared instructions through the
+   [keeper.instructions.custom] slot, which #32961 moved out of inline OCaml
+   into the keeper.md group file. The slot resolves only after the markdown
+   directory has been scanned (the scan fills the slot table); production runs
+   the scan in [Prompt_defaults.bootstrap_runtime], this suite never boots a
+   server. Without the scan the boot fails with "Prompt
+   'keeper.instructions.custom' is missing" (actor.038). *)
+let load_repo_prompts_for_tests () =
+  let repo_root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> root
+    | None -> Sys.getcwd ()
+  in
+  let prompt_dir = Filename.concat repo_root "config/prompts" in
+  Prompt_registry.set_markdown_dir prompt_dir;
+  Prompt_registry.load_prompts_from_directory prompt_dir
+;;
+
 let make_meta name =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -2709,6 +2727,7 @@ let test_root_inventory_isolates_invalid_owner_snapshots () =
    process restarted. *)
 let test_root_inventory_reads_undecodable_meta_as_absent_and_boot_rematerializes () =
   init_runtime_default_for_tests ();
+  load_repo_prompts_for_tests ();
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in

@@ -148,9 +148,11 @@ val build_prompt :
       rendered wake reason matches the decision that fired the turn.
     - [current_task] renders the held task or its explicit missing/unavailable
       state. [No_current_task] omits the layer.
-    - [?active_goal_summaries]: renders goal titles next to ids in the Active
-      Goals layer, with a proof-pending annotation on [Verifying] goals
-      (RFC-0387 stage 2). Omitted or empty: bare ids.
+    - [?active_goal_summaries]: the Active Goals layer, with a proof-pending
+      annotation on [Verifying] goals (RFC-0387 stage 2). These are the goals
+      linked to this turn's task ({!active_goal_summaries_for_task}). Omitted
+      or empty, the layer is absent -- a Keeper holding no task sees no goals,
+      and reaches the rest through [masc_goal_list].
     - [?repository_freshness]: rows for the Repository Checkouts layer,
       measured by {!Keeper_sandbox_control.checkout_freshness_rows}. Omitted
       or empty, the layer is absent. *)

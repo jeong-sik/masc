@@ -334,6 +334,46 @@ type msg_entry = {
   me_at: float;
 }
 
+(* A run of journal rows says one thing: where the memory ended up. Each row
+   in summary mode still wraps to about two lines, so three commits in a row
+   took six lines of a pane whose whole point is the conversation. The newest
+   row carries the current revision, so it is the one kept; the ones before it
+   are counted, and Ctrl-N still opens all of them.
+
+   Full mode is not folded: it exists to show every commit. *)
+let fold_memory_summary_runs ~visibility entries =
+  match visibility with
+  | Memory_hidden | Memory_full -> entries
+  | Memory_summary ->
+    let annotate folded (entry, extra) =
+      if folded = 0 then (entry, extra)
+      else
+        ( { entry with
+            me_memory_summary =
+              Option.map
+                (fun summary -> Printf.sprintf "%s · +%d earlier" summary folded)
+                entry.me_memory_summary
+          }
+        , extra )
+    in
+    let rec go acc run = function
+      | [] -> (
+        match run with
+        | [] -> List.rev acc
+        | newest :: older -> List.rev (annotate (List.length older) newest :: acc))
+      | ((entry, _) as row) :: rest -> (
+        match entry.me_role with
+        | Message_memory -> go acc (row :: run) rest
+        | Message_user _ | Message_keeper | Message_autonomous | Message_status
+        | Message_error | Message_tool | Message_skill _ | Message_thinking -> (
+          match run with
+          | [] -> go (row :: acc) [] rest
+          | newest :: older ->
+            go (row :: annotate (List.length older) newest :: acc) [] rest))
+    in
+    go [] [] entries
+;;
+
 type chat_turn = {
   ct_request_id: string;
   ct_turn_sequence: int option;

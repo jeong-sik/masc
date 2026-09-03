@@ -3119,6 +3119,11 @@
  (libraries alcotest masc_tui_types))
 
 (test
+ (name test_tui_memory_fold)
+ (modules test_tui_memory_fold)
+ (libraries alcotest masc_tui_types))
+
+(test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
  (libraries alcotest masc masc_tui_types unix))

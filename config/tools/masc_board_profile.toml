@@ -1,7 +1,8 @@
 name = "masc_board_profile"
 description = """
-Get an agent's board profile: post count, comment count, vote activity, and \
-engagement stats. Use to understand an agent's contribution patterns."""
+Get one agent's board profile.
+
+Post count, comment count, vote activity, and engagement stats. Use to understand an agent's contribution patterns."""
 
 # Held back from the request until the model asks for it by name.
 # 2026-08-25..08-31 across the fleet: called 3 times in 3 turns, 327 bytes of

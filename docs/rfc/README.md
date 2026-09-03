@@ -245,7 +245,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0402 | Memory OS: an observed fact names the Board post it was read from — RFC-0251 ... | Draft | - |
 | 0403 | Keeper 별 도구 선택 — 부착 서비스는 provider 단위로만 켜고 끌 수 있다 | Draft | - |
 | 0404 | 관측 script 는 readonly argv 테이블을 탄다 — 메타문자 없는 단일 명령 문자열은 argv 와 동치로 판별한다 | Draft | - |
-| 0405 | microVM 백엔드를 하나 더 고를 수 있게 한다 | Draft | - |
+| 0405 | 판정자의 읽기 경로 — 지금은 제출 스냅샷과 스필이 정본이고, sandbox 읽기는 트리를 소유한 레인이 생긴 뒤에 돌아온다 (`RFC-0405-judge-reads-the-snapshot-not-the-tree.md`)<br>microVM 백엔드를 하나 더 고를 수 있게 한다 (`RFC-0405-microvm-backends.md`) | Draft<br>Draft | - |
 | 0406 | 검증자는 떠 있는 게스트에 붙는다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-artifact-read-repeat-signal | 동일 페이지 재독출은 거부 문장으로 답한다 — post-tool 라운드는 맥락이 없으니 도구 출력이 탈출을 알려야 한다 | Draft | - |
@@ -285,6 +285,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-shell-ir-typed-command-substitution | typed 커맨드 치환 — `$(cmd)`를 자식 IR로 읽고, 그 stdout을 argv 한 원소로 쓴다 | Draft | - |
 | RFC-skills-as-tools | Skill 과 Tool 은 한 카탈로그의 두 표면 — SKILL.md 가 지시·합성·비동기를 선언한다 | Active | - |
 | RFC-spawn-a-process-that-outlives-the-call | Spawn: a process that outlives the call | Draft | - |
+| RFC-tool-results-age-out-of-context | 도구 결과는 만든 턴에서만 원문이다 — 컴팩션을 걷어낸 뒤 남은 누적을 닫는다 | Draft | - |
 | RFC-tools-as-shell-commands | 도구를 셸 first-class 커맨드로 — 순차 결합의 provider 왕복을 없앤다 | Draft | - |
 | RFC-tui-operator-ia | TUI 정보 구조 재설계 — 18탭을 숫자 키 10개로 접고, Keeper 워크벤치를 중심 화면으로 | Draft | - |
 | RFC-tui-server-lifecycle | TUI 안에서 서버를 켠다 — opt-in 온디맨드 서버 시작으로 TUI 를 기본 진입점으로 | Draft | - |

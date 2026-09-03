@@ -13,6 +13,28 @@ let dashboard_label = "dashboard"
 let discord_label = "discord"
 let slack_label = "slack"
 
+(* A channel reference from the model is either a bound channel id itself or
+   the channel's name, optionally "#" prefixed. Names resolve against the
+   (id, name) projection the caller supplies — the connector_names store,
+   which a gateway fills automatically when a channel's first inbound event
+   arrives. Resolution is deliberately confined to bound channels: a name
+   that matches some other channel's id in the store does not post there.
+   [None] leaves the reference untouched so [resolve_target] answers with
+   its binding error, as it always did for an unknown id. *)
+let resolve_bound_channel_reference ~names ~bound requested =
+  let requested = String.trim requested in
+  if List.exists (String.equal requested) bound then Some requested
+  else
+    let bare =
+      if String.length requested > 1 && requested.[0] = '#'
+      then String.sub requested 1 (String.length requested - 1)
+      else requested
+    in
+    (match List.find_opt (fun (_, name) -> String.equal name bare) names with
+     | Some (id, _) when List.exists (String.equal id) bound -> Some id
+     | _ -> None)
+;;
+
 let max_user_mentions = 100
 
 (* Slack chat.postMessage rejects more than 50 top-level blocks per message

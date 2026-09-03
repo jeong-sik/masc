@@ -805,6 +805,46 @@ let test_terminal_commit_error_cannot_become_delivery_success () =
   | Error observed -> check string "operation commit preserves typed Error" persist_error observed
   | Ok _ -> fail "operation commit was downgraded to delivery success"
 
+let spoken_row name ~turn_outcome ~spoken expected =
+  match Stream.For_testing.control_turn_delivery ~turn_outcome ~spoken with
+  | `Assistant_row observed -> check string name expected observed
+  | `Tool_calls_only -> fail (name ^ ": the keeper's words were dropped")
+
+(* The defect this pins: all three of these outcomes wrote [content = ""]
+   whether or not the turn had spoken, so an operator who asked a direct
+   question received an empty assistant row while the raw trace still held the
+   reply (masc #32727, #32660). *)
+let test_control_turn_keeps_spoken_words () =
+  let words = "I read the file; the clone failed on DNS." in
+  spoken_row "continuation checkpoint keeps the words"
+    ~turn_outcome:Masc.Keeper_turn_outcome.Continuation_checkpoint
+    ~spoken:(Some words) words;
+  spoken_row "pending external effect keeps the words"
+    ~turn_outcome:Masc.Keeper_turn_outcome.External_effect_pending
+    ~spoken:(Some words) words;
+  spoken_row "completed external effect keeps the words"
+    ~turn_outcome:Masc.Keeper_turn_outcome.External_effect_completed
+    ~spoken:(Some words) words
+
+let test_wordless_control_turn_delivery () =
+  (* A wordless checkpoint still writes its row: the typed status block is the
+     row's content. A wordless completed effect writes no row at all, because
+     its tool-call record is the whole of what the turn did. *)
+  spoken_row "wordless checkpoint still writes a row"
+    ~turn_outcome:Masc.Keeper_turn_outcome.Continuation_checkpoint
+    ~spoken:None "";
+  spoken_row "wordless pending effect still writes a row"
+    ~turn_outcome:Masc.Keeper_turn_outcome.External_effect_pending
+    ~spoken:None "";
+  match
+    Stream.For_testing.control_turn_delivery
+      ~turn_outcome:Masc.Keeper_turn_outcome.External_effect_completed
+      ~spoken:None
+  with
+  | `Tool_calls_only -> ()
+  | `Assistant_row _ ->
+    fail "a wordless completed effect must not manufacture an assistant row"
+
 let test_media_only_queued_reply_uses_delivery_path () =
   match
     Stream.For_testing.empty_reply_delivery_plan
@@ -1005,6 +1045,10 @@ let () =
             test_queued_delivery_requires_exact_turn_ref;
           test_case "terminal commit error cannot become delivery success" `Quick
             test_terminal_commit_error_cannot_become_delivery_success;
+          test_case "control turn keeps the keeper's words" `Quick
+            test_control_turn_keeps_spoken_words;
+          test_case "wordless control turn delivery" `Quick
+            test_wordless_control_turn_delivery;
           test_case "media-only queued reply uses delivery path" `Quick
             test_media_only_queued_reply_uses_delivery_path;
           test_case "media continuation uses assistant delivery path" `Quick

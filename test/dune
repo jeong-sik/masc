@@ -340,6 +340,8 @@
   test_keeper_library_tool_toml_parity
   test_library_tool_toml_parity
   test_execute_tool_toml_parity
+  test_agent_timeline_tool_toml_parity
+  test_agent_core_projection_toml_parity
   test_descriptor_description_from_catalog
   test_keeper_schema_toml_parity
   test_keeper_runtime_schemas_toml_parity
@@ -684,6 +686,8 @@
   test_keeper_library_tool_toml_parity
   test_library_tool_toml_parity
   test_execute_tool_toml_parity
+  test_agent_timeline_tool_toml_parity
+  test_agent_core_projection_toml_parity
   test_descriptor_description_from_catalog
   test_keeper_schema_toml_parity
   test_keeper_runtime_schemas_toml_parity
@@ -2113,6 +2117,7 @@
 
 (include stanzas/test_keeper_chat_discord.inc)
 (include stanzas/test_keeper_chat_tool_trail.inc)
+(include stanzas/test_keeper_late_approval.inc)
 
 (test
  (name test_keeper_chat_slack)

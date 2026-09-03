@@ -17,7 +17,7 @@ Machine-readable catalog: `docs/schema-surfaces/operator-output-surfaces.v1.json
 | `masc.keeper_execution_receipt.jsonl.v1` | Terminal keeper execution receipt JSONL | `lib/keeper/keeper_execution_receipt.mli` | Receipt invariant tests |
 | `masc.keeper_tool_call_log.jsonl.v1` | Keeper tool-call I/O JSONL | `lib/keeper_tool_call_log.mli` | Tool-call log tests |
 | `masc.runtime_contract_projection.v1` | Runtime contract JSON projection | `lib/keeper/keeper_runtime_contract.mli` | Tool-call/runtime contract tests |
-| `masc.mcp_openapi_tool_schema.v1` | MCP tool schemas and generated OpenAPI | `lib/keeper/keeper_schema.mli`, `lib/tool_schema_dsl.mli` | Tool matrix and OpenAPI smoke tests |
+| `masc.mcp_openapi_tool_schema.v1` | MCP tool schemas and generated OpenAPI | `lib/keeper/keeper_schema.mli` | Tool matrix and OpenAPI smoke tests |
 | `masc.agent_core_bridge_events.v1` | agent core custom events bridged into MASC | `lib/keeper/keeper_event_bridge.mli`, event inventory doc | agent core integration tests |
 
 ## Boundary Rules

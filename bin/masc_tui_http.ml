@@ -940,14 +940,21 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
   in
   { Masc_tui_context_inspector.turn; provider_input; response }
 
-(** Answer a tool call the keeper is holding.
+(** What the server did with one answer to a held tool call.
 
     [settled] reports whether a wait was actually released. False means the
-    call had already timed out or been answered, so the pane says that rather
-    than showing the answer as taken. *)
+    call had already timed out or been answered. [remembered] reports whether
+    the server kept the answer for the identical retried call: a late answer
+    that still descends from a question the operator was shown is not wasted,
+    and the pane should say so rather than only "too late". *)
+type tool_approval_answer =
+  { settled : bool
+  ; remembered : bool
+  }
+
 let post_keeper_tool_approval ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(tool_call_id : string) ~(allow : bool) :
-    (bool, string) result =
+    (tool_approval_answer, string) result =
   let body =
     Yojson.Safe.to_string
       (`Assoc
@@ -961,9 +968,13 @@ let post_keeper_tool_approval ~(host : string) ~(port : int)
   | Ok json -> (
       match json with
       | `Assoc fields -> (
-          match List.assoc_opt "settled" fields with
-          | Some (`Bool settled) -> Ok settled
-          | Some _ | None -> Error "approval response has no settled flag")
+          match
+            ( List.assoc_opt "settled" fields
+            , List.assoc_opt "remembered" fields )
+          with
+          | Some (`Bool settled), Some (`Bool remembered) ->
+              Ok { settled; remembered }
+          | _ -> Error "approval response has no settled/remembered flags")
       | _ -> Error "approval response was not a JSON object")
 
 let post_keeper_turn_interrupt ~(host : string) ~(port : int)

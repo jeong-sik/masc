@@ -1,5 +1,6 @@
 module Policy = Keeper_tool_approval_policy
 module Registry = Keeper_tool_approval_registry
+module Late = Keeper_late_approval
 module Mode = Keeper_tool_approval_mode
 
 type t =
@@ -8,7 +9,7 @@ type t =
   ; composition_plan_index : Keeper_tool_composition_plan_index.t
   }
 
-let create ~registry ~publish ~clock ~keeper_name ~timeout_sec =
+let create ~registry ~late_approvals ~publish ~clock ~keeper_name ~timeout_sec =
   let composition_plan_index = Keeper_tool_composition_plan_index.create () in
   let pre_tool_use (event : Agent_core.Hooks.hook_event) =
     match event with
@@ -55,24 +56,48 @@ let create ~registry ~publish ~clock ~keeper_name ~timeout_sec =
          ; question = request.prompt.question
          ; because = request.prompt.because
          });
-    let outcome =
-      Registry.await registry ~clock ~keeper_name ~tool_call_id
-        ~tool_name:request.tool_name
-        ~args:(Yojson.Safe.to_string request.input)
-        ~question:request.prompt.question ~because:request.prompt.because
-        ~timeout_sec
-    in
     let decision, label =
-      match outcome with
-      | Registry.Answered Registry.Approve ->
-          (Agent_core.Hooks.Approved, Registry.decision_to_string Registry.Approve)
-      | Registry.Answered Registry.Deny ->
-          (Agent_core.Hooks.Denied, Registry.decision_to_string Registry.Deny)
-      | Registry.Timed_out -> (Agent_core.Hooks.Timed_out, "timed_out")
-      (* Two waits claimed one call id, so neither answer can be trusted to be
-         about this call. Denying is the conservative reading: the call the
-         operator saw is not provably the call about to run. *)
-      | Registry.Displaced -> (Agent_core.Hooks.Denied, "displaced")
+      (* A remembered late answer settles this call before anyone is asked:
+         it is the answer to this exact call (same keeper, tool, and
+         canonical-args fingerprint), given after the first wait timed out.
+         One use consumes it, so the call after this one is asked about as
+         usual. *)
+      match
+        Late.take late_approvals ~keeper_name ~tool_name:request.tool_name
+          ~args:request.input
+      with
+      | Some remembered ->
+          ( (match remembered with
+             | Registry.Approve -> Agent_core.Hooks.Approved
+             | Registry.Deny -> Agent_core.Hooks.Denied)
+          , (* Set apart from a live answer on the stream, so a reader can
+               tell "the operator just answered" from "the operator already
+               answered this call". *)
+            "remembered_" ^ Registry.decision_to_string remembered )
+      | None -> (
+          let outcome =
+            Registry.await registry ~clock ~keeper_name ~tool_call_id
+              ~tool_name:request.tool_name
+              ~args:(Yojson.Safe.to_string request.input)
+              ~question:request.prompt.question ~because:request.prompt.because
+              ~timeout_sec
+          in
+          match outcome with
+          | Registry.Answered Registry.Approve ->
+              (Agent_core.Hooks.Approved, Registry.decision_to_string Registry.Approve)
+          | Registry.Answered Registry.Deny ->
+              (Agent_core.Hooks.Denied, Registry.decision_to_string Registry.Deny)
+          | Registry.Timed_out ->
+              (* The turn ends here, but the ask's description is kept so an
+                 operator's late answer is not discarded: it will settle the
+                 identical retried call once. *)
+              Late.note_timed_out late_approvals ~keeper_name ~tool_call_id
+                ~tool_name:request.tool_name ~args:request.input;
+              (Agent_core.Hooks.Timed_out, "timed_out")
+          (* Two waits claimed one call id, so neither answer can be trusted to be
+             about this call. Denying is the conservative reading: the call the
+             operator saw is not provably the call about to run. *)
+          | Registry.Displaced -> (Agent_core.Hooks.Denied, "displaced"))
     in
     (* Sent on every path, including the ones where nobody answered, so a pane
        showing the prompt stops showing it. *)

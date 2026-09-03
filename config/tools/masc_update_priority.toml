@@ -1,4 +1,5 @@
 name = "masc_update_priority"
+title = "Update Task Priority"
 description = """
 Change the priority of a task. Priority 1 is highest (most urgent), 5 is \
 lowest. Use this to reprioritize work based on new information or urgency \

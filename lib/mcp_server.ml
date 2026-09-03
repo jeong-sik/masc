@@ -127,12 +127,13 @@ let server_info =
     | `Assoc fields -> fields
     | _ -> []
   in
+  (* The description prose lives in config/mcp/resources.toml ([server]
+     table), decoded once at module init by [Mcp_surface_toml]; it is
+     client-facing in every initialize result. *)
   `Assoc
     (identity
     @ [
-      ( "description",
-        `String
-          "Multi-agent MCP server exposing MASC workspace state, tools, prompts, and resources." );
+      ("description", `String Mcp_surface_toml.server_description);
       ("websiteUrl", `String "https://github.com/yousleepwhen/masc");
       ("icons", `List (List.map icon_to_json server_icons));
     ])
@@ -232,110 +233,26 @@ let make_resource_template ?title ?annotations ~uri_template ~name ~description
     annotations;
   }
 
-let resources : mcp_resource list = [
-  make_resource ~uri:"masc://status" ~name:"MASC Status"
-    ~title:"Project Status"
-    ~description:"Current project status snapshot (same as masc_status)"
-    ~mime_type:"text/markdown" ();
-  make_resource ~uri:"masc://status.json" ~name:"MASC Status (JSON)"
-    ~title:"Project Status (JSON)"
-    ~description:"Current project status snapshot as JSON (for data collection)"
-    ~mime_type:"application/json" ();
-  make_resource ~uri:"masc://tasks" ~name:"Quest Board"
-    ~title:"Task Board"
-    ~description:"Task board snapshot (defaults to active tasks; same as masc_tasks)"
-    ~mime_type:"text/markdown" ();
-  make_resource ~uri:"masc://tasks.json" ~name:"Quest Board (JSON)"
-    ~title:"Task Board (JSON)"
-    ~description:"Task board snapshot as JSON (backlog.json; all statuses)"
-    ~mime_type:"application/json" ();
-  make_resource ~uri:"masc://who" ~name:"Active Agents"
-    ~title:"Online Agents"
-    ~description:"In-memory agent/session status"
-    ~mime_type:"text/markdown" ();
-  make_resource ~uri:"masc://who.json" ~name:"Active Agents (JSON)"
-    ~title:"Online Agents (JSON)"
-    ~description:"In-memory agent/session status as JSON"
-    ~mime_type:"application/json" ();
-  make_resource ~uri:"masc://agents" ~name:"Agents (Metadata)"
-    ~title:"Agent Registry"
-    ~description:"Agent registry snapshot (capabilities, tasks, last_seen)"
-    ~mime_type:"text/markdown" ();
-  make_resource ~uri:"masc://agents.json" ~name:"Agents (Metadata, JSON)"
-    ~title:"Agent Registry (JSON)"
-    ~description:"Agent registry snapshot as JSON"
-    ~mime_type:"application/json" ();
-  make_resource ~uri:"masc://messages?since_seq=0&limit=10"
-    ~name:"Recent Messages"
-    ~title:"Recent Messages"
-    ~description:"Recent messages snapshot (same as masc_messages)"
-    ~mime_type:"text/markdown" ();
-  make_resource ~uri:"masc://messages.json?since_seq=0&limit=10"
-    ~name:"Recent Messages (JSON)"
-    ~title:"Recent Messages (JSON)"
-    ~description:"Recent messages snapshot as JSON (for data collection)"
-    ~mime_type:"application/json" ();
-  make_resource ~uri:"masc://events?limit=50" ~name:"Recent Events"
-    ~title:"Event Log"
-    ~description:"Recent event log snapshot (task/agent transitions)"
-    ~mime_type:"text/markdown" ();
-  make_resource ~uri:"masc://events.json?limit=50"
-    ~name:"Recent Events (JSON)"
-    ~title:"Event Log (JSON)"
-    ~description:"Recent event log snapshot as JSON"
-    ~mime_type:"application/json" ();
-  (* Library - curated knowledge from direct research *)
-  make_resource ~uri:"masc://library" ~name:"Library Index"
-    ~title:"Research Library"
-    ~description:"List of curated library documents (direct research only)"
-    ~mime_type:"text/markdown" ();
-  make_resource ~uri:"masc://library.json" ~name:"Library Index (JSON)"
-    ~title:"Research Library (JSON)"
-    ~description:"List of curated library documents as JSON with full metadata"
-    ~mime_type:"application/json" ();
-  make_resource ~uri:"masc://tool-help-index" ~name:"Tool Help Index"
-    ~title:"Tool Help Index"
-    ~description:"Canonical help index for MCP-exposed MASC tools"
-    ~mime_type:"text/markdown" ();
-]
+(* The catalogue prose lives in config/mcp/resources.toml, decoded once at
+   module init by [Mcp_surface_toml] (RFC
+   prompts-and-tool-definitions-outside-ocaml §3 item 8). The list values
+   below keep their previous type and evaluation timing, so
+   [handle_list_resources_eio] reads them unchanged. Every entry declares its
+   title explicitly in the file. *)
+let resource_of_entry (entry : Mcp_surface_toml.resource_entry) =
+  make_resource ~uri:entry.uri ~name:entry.name ~title:entry.title
+    ~description:entry.description ~mime_type:entry.mime_type ()
 
-let resource_templates : mcp_resource_template list = [
-  make_resource_template ~uri_template:"masc://messages{?since_seq,limit}"
-    ~name:"Messages (range)"
-    ~title:"Messages by Range"
-    ~description:"Read messages with optional since_seq and limit"
-    ~mime_type:"text/markdown" ();
-  make_resource_template ~uri_template:"masc://messages.json{?since_seq,limit}"
-    ~name:"Messages (range, JSON)"
-    ~title:"Messages by Range (JSON)"
-    ~description:"Read messages as JSON with optional since_seq and limit"
-    ~mime_type:"application/json" ();
-  make_resource_template ~uri_template:"masc://events{?limit}"
-    ~name:"Events (range)"
-    ~title:"Events by Range"
-    ~description:"Read recent event log entries with optional limit"
-    ~mime_type:"text/markdown" ();
-  make_resource_template ~uri_template:"masc://events.json{?limit}"
-    ~name:"Events (range, JSON)"
-    ~title:"Events by Range (JSON)"
-    ~description:"Read recent event log entries as JSON with optional limit"
-    ~mime_type:"application/json" ();
-  make_resource_template ~uri_template:"masc://library/{topic}"
-    ~name:"Library Document"
-    ~title:"Library Document"
-    ~description:"Read a specific library document by topic name"
-    ~mime_type:"text/markdown" ();
-  make_resource_template ~uri_template:"masc://library/{topic}.json"
-    ~name:"Library Document (JSON)"
-    ~title:"Library Document (JSON)"
-    ~description:"Read a specific library document as JSON with metadata"
-    ~mime_type:"application/json" ();
-  make_resource_template ~uri_template:"masc://tool-help/{tool_name}"
-    ~name:"Tool Help"
-    ~title:"Tool Help"
-    ~description:"Read canonical help for a specific MCP tool"
-    ~mime_type:"text/markdown" ();
-]
+let resources : mcp_resource list =
+  List.map resource_of_entry Mcp_surface_toml.resources
+
+let resource_template_of_entry (entry : Mcp_surface_toml.template_entry) =
+  make_resource_template ~uri_template:entry.uri_template ~name:entry.name
+    ~title:entry.title ~description:entry.description
+    ~mime_type:entry.mime_type ()
+
+let resource_templates : mcp_resource_template list =
+  List.map resource_template_of_entry Mcp_surface_toml.resource_templates
 
 (** Parse a masc:// resource URI into (resource_id, Uri.t) *)
 let parse_masc_resource_uri uri_str =

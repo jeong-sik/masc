@@ -15,10 +15,10 @@
     fields are part of the contract.  Cursor values themselves are
     opaque base64 strings produced by {!page_items_with_cursor}.
 
-    Internal: [StringSet] / [StringMap],
+    Internal: [StringSet],
     [managed_agent_passthrough_tool_names] (consumed by
     {!tool_schemas_for_profile} only), [label_words_from_identifier]
-    + the [custom_tool_titles] / [custom_title_table] data tables
+    + the [declared_title_table] read of each tool file's [title] key
     (consumed by {!tool_title_of_name}), the parsing helpers
     [strict_assoc_params] / [cursor_param] / [bool_param] /
     [take_list] / [validate_optional_meta], and the raw cursor codec

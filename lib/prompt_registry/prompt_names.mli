@@ -61,10 +61,20 @@ val fusion_judge_output : string
 val mcp_full : string
 val mcp_managed_agent : string
 val mcp_operator_remote : string
-val mcp_tool_help : string
-(** Grounded explanation template for one MCP tool. Variables:
-    [focus_section], [tool_name], [short_description], [when_to_use],
-    [key_constraints], [details_markdown], [docs_section]. *)
+
+(** MCP [tool_help] prompt body pieces, rendered at [prompts/get] time.
+    One slot per assembly piece in [config/prompts/mcp.tool_help.md];
+    variables per slot: [focus_row] — [focus]; [tool_section] — [name],
+    [short_description], [when_to_use]; [constraint_row] / [doc_ref_row] —
+    [item]; [details_section] — [details_markdown]. *)
+
+val mcp_tool_help_intro : string
+val mcp_tool_help_focus_row : string
+val mcp_tool_help_tool_section : string
+val mcp_tool_help_constraint_row : string
+val mcp_tool_help_details_section : string
+val mcp_tool_help_docs_heading : string
+val mcp_tool_help_doc_ref_row : string
 val keeper_workspace : string
 val keeper_identity : string
 val keeper_capability_probe : string

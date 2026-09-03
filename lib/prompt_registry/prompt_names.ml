@@ -67,7 +67,17 @@ let fusion_judge_output = "fusion.judge.output"
 let mcp_full = "mcp.full"
 let mcp_managed_agent = "mcp.managed_agent"
 let mcp_operator_remote = "mcp.operator_remote"
-let mcp_tool_help = "mcp.tool_help"
+
+(* MCP tool_help prompt body — one slot per assembly piece in
+   config/prompts/mcp.tool_help.md, rendered by Mcp_prompt_surface when a
+   client calls prompts/get. *)
+let mcp_tool_help_intro = "mcp.tool_help.intro"
+let mcp_tool_help_focus_row = "mcp.tool_help.focus_row"
+let mcp_tool_help_tool_section = "mcp.tool_help.tool_section"
+let mcp_tool_help_constraint_row = "mcp.tool_help.constraint_row"
+let mcp_tool_help_details_section = "mcp.tool_help.details_section"
+let mcp_tool_help_docs_heading = "mcp.tool_help.docs_heading"
+let mcp_tool_help_doc_ref_row = "mcp.tool_help.doc_ref_row"
 let keeper_workspace = "keeper.workspace"
 let keeper_identity = "keeper.identity"
 let keeper_capability_probe = "keeper.capability_probe"

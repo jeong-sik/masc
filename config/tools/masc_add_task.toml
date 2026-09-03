@@ -1,4 +1,5 @@
 name = "masc_add_task"
+title = "Add Task"
 description = """
 Add a new task to the backlog for agents to claim. Task contracts provide \
 completion/evidence context to the judge; they do not select a completion \

@@ -1,4 +1,5 @@
 name = "masc_check"
+title = "Check Preconditions"
 description = """
 Assert task preconditions on your agent state (task claimed, current task \
 set, etc). Call when you want to confirm prerequisites before starting work; \

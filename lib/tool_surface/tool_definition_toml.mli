@@ -64,6 +64,10 @@ val loading_to_string : loading -> string
     knowledge. *)
 type loaded =
   { schema : Masc_domain.tool_schema
+  ; title : string option
+    (** From the file's [title] key; [None] when absent. The human-readable
+        name MCP clients show for the tool — [None] leaves the consumer its
+        mechanical fallback. *)
   ; keeper_projection : Masc_domain.tool_schema option
   ; agent_core_projection : Masc_domain.tool_schema option
   ; help : help option
@@ -91,7 +95,8 @@ val load
     renamed file cannot silently redefine a different tool.
 
     Accepted top-level keys: [name], [description] (non-empty),
-    [additional_properties] (bool), [[params]], [keeper_projection]
+    [title] (non-empty when present), [additional_properties] (bool),
+    [[params]], [keeper_projection]
     (a table of [description] / [additional_properties] / [[params]]),
     [agent_core_projection] (the same table grammar), [defer_loading]
     (bool), [operator_remote_description] (non-empty string), and

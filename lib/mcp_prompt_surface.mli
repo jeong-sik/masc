@@ -10,9 +10,11 @@
     catalogue ({!prompt_defs}), the per-prompt JSON projection
     ({!prompt_json}), and the {!get_json} entry point that the
     JSON-RPC dispatcher invokes for [prompts/get].  All internal
-    helpers ([lookup], [assoc_string], [message_json], [tool_help_text]) stay private — they are stable contract-internal
-    pieces but exposing them would invite duplicate-rendering paths
-    that drift from the canonical {!get_json}. *)
+    helpers ([lookup], [assoc_string], [message_json],
+    [prompt_def_of_entry], [slot_text], [tool_help_text]) stay private —
+    they are stable contract-internal pieces but exposing them would
+    invite duplicate-rendering paths that drift from the canonical
+    {!get_json}. *)
 
 (** {1 Prompt argument schema} *)
 
@@ -50,15 +52,17 @@ type prompt_def = {
     derived from a neighbouring field and were dropped for that reason. *)
 
 val prompt_defs : prompt_def list
-(** The canonical, ordered prompt catalogue.  Currently contains a
-    single entry, [tool_help] (compose a grounded explanation for a
-    specific MASC MCP tool).  Adding a new prompt requires:
-    1. extending this list,
+(** The canonical, ordered prompt catalogue, decoded at module init from
+    [config/mcp/prompts.toml] by {!Mcp_surface_toml} (icons stay here — they
+    are generated SVG data, not prose).  Currently contains a single entry,
+    [tool_help] (compose a grounded explanation for a specific MASC MCP
+    tool).  Adding a new prompt requires:
+    1. declaring it in [config/mcp/prompts.toml],
     2. extending the [match] in {!get_json} with a new arm,
     3. updating the operator runbook for the new prompt name.
 
-    The list is the SSOT — both {!Mcp_sdk_adapter_masc} and
-    {!Mcp_server_eio_protocol} consume it to build their respective
+    The file is the SSOT — both {!Mcp_sdk_adapter_masc} and
+    {!Mcp_server_eio_protocol} consume this list to build their respective
     paginated [prompts/list] responses (sorted by name, paginated
     independently per transport). *)
 

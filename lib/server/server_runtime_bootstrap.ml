@@ -1278,6 +1278,18 @@ let validate_embedded_tool_definitions () =
   | Ok () -> ()
   | Error message -> failwith (Printf.sprintf "embedded tool definition: %s" message)
 
+(* Same contract for the MCP surface TOMLs (config/mcp/*.toml): they are the
+   resources/templates/prompts catalogue prose and the server description,
+   read once at boot. *)
+let validate_embedded_mcp_surface () =
+  match
+    Mcp_surface_toml.validate_embedded
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+  with
+  | Ok () -> ()
+  | Error message -> failwith (Printf.sprintf "embedded mcp surface: %s" message)
+
 let bootstrap_prompt_assets () =
   sync_managed_assets_from_binary
     ~label:"prompt"
@@ -1298,7 +1310,13 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
     ~domain:Managed_asset_sync.Tools
     ~dest_dir:(Config_dir_resolver.tools_dir ())
     ();
+  sync_managed_assets_from_binary
+    ~label:"mcp"
+    ~domain:Managed_asset_sync.Mcp
+    ~dest_dir:(Config_dir_resolver.mcp_dir ())
+    ();
   validate_embedded_tool_definitions ();
+  validate_embedded_mcp_surface ();
   (* Load the registry and replay operator overrides. The resolved directory is
      not inspected afterwards: three checks used to stand here and none of them
      gated. One compared a value against the call that produced it. One

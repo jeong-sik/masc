@@ -115,6 +115,7 @@ let test_container_path_translation_under_sandbox () =
       in
       let raw =
         Keeper_tool_execute_runtime.handle_tool_execute
+          ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
           ~turn_sandbox_factory:None
           ~config
           ~meta:local_meta
@@ -198,6 +199,7 @@ let test_typed_execute_response_cwd_uses_container_path () =
         response_cwd;
       let error_raw =
         Keeper_tool_execute_runtime.handle_tool_execute
+          ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
           ~turn_sandbox_factory:(Some factory)
           ~config
           ~meta
@@ -227,6 +229,7 @@ let test_typed_execute_response_cwd_uses_container_path () =
       let missing_relative = "missing-relative" in
       let missing_raw =
         Keeper_tool_execute_runtime.handle_tool_execute
+          ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
           ~turn_sandbox_factory:(Some factory)
           ~config
           ~meta
@@ -276,6 +279,7 @@ let test_typed_execute_response_cwd_uses_container_path () =
       close_out oc;
       let not_directory_raw =
         Keeper_tool_execute_runtime.handle_tool_execute
+          ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
           ~turn_sandbox_factory:(Some factory)
           ~config
           ~meta

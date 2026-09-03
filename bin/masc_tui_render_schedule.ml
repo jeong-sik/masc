@@ -660,6 +660,131 @@ let system_log_row ~styles ~level_style ~message_width values =
   Table.row ~gap:system_log_cell_gap
     (system_log_cells ~styles ~level_style ~message_width values)
 
+(* Lane run columns.
+
+   The header and the rows carried the same six widths in two format strings,
+   the row's with the status colour spliced between two of them. The run id was
+   the tail of the header and a twelve-cell fit in the row, so the column the
+   header opened had no end and the reading in it had one nobody could see. *)
+
+let lane_started_width = 17
+let lane_subject_width = 16
+let lane_status_width = 11
+let lane_elapsed_width = 8
+let lane_slot_width = 16
+
+(* A run id truncated below this identifies nothing; the screen is better off
+   dropping the frame's last cells than showing half of one. *)
+let lane_minimum_run_id_width = 12
+let lane_cell_gap = 1
+
+type lane_run_row_values = {
+  lrow_started : string;
+  lrow_subject : string;
+  lrow_status : string;
+  lrow_elapsed : string;
+  lrow_slot : string;
+  lrow_run_id : string;
+}
+
+let lane_run_no_values =
+  { lrow_started = ""
+  ; lrow_subject = ""
+  ; lrow_status = ""
+  ; lrow_elapsed = ""
+  ; lrow_slot = ""
+  ; lrow_run_id = ""
+  }
+
+(* The identity column is named by the caller: this table lists runs of one
+   keeper under one heading and runs of many under another. *)
+let lane_run_cells ~identity_header ?(status_style = "") ~run_id_width values =
+  [ Table.cell ~header:"STARTED" ~width:lane_started_width values.lrow_started
+  ; Table.cell ~header:identity_header ~width:lane_subject_width
+      values.lrow_subject
+  ; Table.cell ~style:status_style ~header:"STATUS" ~width:lane_status_width
+      values.lrow_status
+  ; Table.cell ~align:Table.Right ~header:"ELAPSED" ~width:lane_elapsed_width
+      values.lrow_elapsed
+  ; Table.cell ~header:"SLOT" ~width:lane_slot_width values.lrow_slot
+  ; Table.cell ~header:"RUN ID" ~width:run_id_width values.lrow_run_id
+  ]
+
+let lane_run_id_width ~inner_width =
+  let named =
+    Table.used_width ~gap:lane_cell_gap
+      (lane_run_cells ~identity_header:"" ~run_id_width:0 lane_run_no_values)
+  in
+  max lane_minimum_run_id_width (inner_width - named)
+
+let lane_run_header_row ~identity_header ~run_id_width =
+  Table.header_row ~gap:lane_cell_gap
+    (lane_run_cells ~identity_header ~run_id_width lane_run_no_values)
+
+let lane_run_row ~identity_header ~status_style ~run_id_width values =
+  Table.row ~gap:lane_cell_gap
+    (lane_run_cells ~identity_header ~status_style ~run_id_width values)
+
+(* File change columns.
+
+   Six widths in the header's format string and the same six in the row's, the
+   row's split around two colours. The file cell was padded but never fitted,
+   so a path longer than its budget pushed the summary beside it off the frame
+   -- the one column an operator reads to know what the turn did. *)
+
+let change_turn_width = 6
+let change_task_width = 10
+let change_op_width = 5
+let change_result_width = 8
+let change_file_width = 38
+let change_minimum_summary_width = 12
+let change_cell_gap = 1
+
+type change_row_values = {
+  crow_turn : string;
+  crow_task : string;
+  crow_op : string;
+  crow_result : string;
+  crow_file : string;
+  crow_summary : string;
+}
+
+let change_no_values =
+  { crow_turn = ""
+  ; crow_task = ""
+  ; crow_op = ""
+  ; crow_result = ""
+  ; crow_file = ""
+  ; crow_summary = ""
+  }
+
+let change_cells ?(op_style = "") ?(result_style = "") ~summary_width values =
+  [ Table.cell ~align:Table.Right ~header:"TURN" ~width:change_turn_width
+      values.crow_turn
+  ; Table.cell ~header:"TASK" ~width:change_task_width values.crow_task
+  ; Table.cell ~style:op_style ~header:"OP" ~width:change_op_width
+      values.crow_op
+  ; Table.cell ~style:result_style ~header:"RESULT" ~width:change_result_width
+      values.crow_result
+  ; Table.cell ~header:"FILE" ~width:change_file_width values.crow_file
+  ; Table.cell ~header:"WHAT" ~width:summary_width values.crow_summary
+  ]
+
+let change_summary_width ~inner_width =
+  let named =
+    Table.used_width ~gap:change_cell_gap
+      (change_cells ~summary_width:0 change_no_values)
+  in
+  max change_minimum_summary_width (inner_width - named)
+
+let change_header_row ~summary_width =
+  Table.header_row ~gap:change_cell_gap
+    (change_cells ~summary_width change_no_values)
+
+let change_row ~op_style ~result_style ~summary_width values =
+  Table.row ~gap:change_cell_gap
+    (change_cells ~op_style ~result_style ~summary_width values)
+
 module Terminal_size_cache = struct
   type refresh =
     | Changed of (int * int)

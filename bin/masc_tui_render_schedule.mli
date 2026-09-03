@@ -274,6 +274,74 @@ val system_log_row :
     widths used to live in two format strings, the row's threaded between five
     escape sequences where nothing could compare them with the header's. *)
 
+(** {1 Lane run columns} *)
+
+val lane_started_width : int
+val lane_subject_width : int
+val lane_status_width : int
+val lane_elapsed_width : int
+val lane_slot_width : int
+val lane_minimum_run_id_width : int
+val lane_cell_gap : int
+
+type lane_run_row_values = {
+  lrow_started : string;
+  lrow_subject : string;
+  lrow_status : string;
+  lrow_elapsed : string;
+  lrow_slot : string;
+  lrow_run_id : string;
+}
+
+val lane_run_id_width : inner_width:int -> int
+(** Cells the run id may occupy: the remainder, never below
+    {!lane_minimum_run_id_width}. *)
+
+val lane_run_header_row : identity_header:string -> run_id_width:int -> string
+
+val lane_run_row :
+  identity_header:string ->
+  status_style:string ->
+  run_id_width:int ->
+  lane_run_row_values ->
+  string
+(** One run, on the same columns as {!lane_run_header_row}. [identity_header]
+    names the second column, which reads differently for one keeper's runs and
+    for a fleet's. *)
+
+(** {1 File change columns} *)
+
+val change_turn_width : int
+val change_task_width : int
+val change_op_width : int
+val change_result_width : int
+val change_file_width : int
+val change_minimum_summary_width : int
+val change_cell_gap : int
+
+type change_row_values = {
+  crow_turn : string;
+  crow_task : string;
+  crow_op : string;
+  crow_result : string;
+  crow_file : string;
+  crow_summary : string;
+}
+
+val change_summary_width : inner_width:int -> int
+val change_header_row : summary_width:int -> string
+
+val change_row :
+  op_style:string ->
+  result_style:string ->
+  summary_width:int ->
+  change_row_values ->
+  string
+(** One change, on the same columns as {!change_header_row}. The file cell is
+    fitted now: it was padded and never cut, so a long path pushed the summary
+    beside it -- the column that says what the turn actually did -- off the
+    frame. *)
+
 module Terminal_size_cache : sig
   type refresh =
     | Changed of (int * int)

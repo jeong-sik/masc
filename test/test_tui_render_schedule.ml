@@ -940,6 +940,97 @@ let test_system_log_header_and_row_share_their_offsets () =
     check_left_cell "MESSAGE" "G" ~header ~row ~inner_width
   done
 
+(* Lane run and file change columns.
+
+   Both wrote their widths twice, and both spliced colours into the row's copy
+   so the two could not be compared by reading either. *)
+
+let lane_probe =
+  { Schedule.lrow_started = "A"
+  ; lrow_subject = "B"
+  ; lrow_status = "C"
+  ; lrow_elapsed = "D"
+  ; lrow_slot = "E"
+  ; lrow_run_id = "F"
+  }
+
+let lane_overflowing =
+  { Schedule.lrow_started = "2026-09-03 11:08:43.512"
+  ; lrow_subject = "kidsnote-pr-jira-checker"
+  ; lrow_elapsed = "1234.5s"
+  ; lrow_status = "cancelled-by-operator"
+  ; lrow_slot = "antigravity_subscription.gemini-3-8-flash-high"
+  ; lrow_run_id = "run-1788427841647-00000-abcdef"
+  }
+
+let change_probe =
+  { Schedule.crow_turn = "A"
+  ; crow_task = "B"
+  ; crow_op = "C"
+  ; crow_result = "D"
+  ; crow_file = "E"
+  ; crow_summary = "F"
+  }
+
+let change_overflowing =
+  { Schedule.crow_turn = "1234567"
+  ; crow_task = "task-1279-and-more"
+  ; crow_op = "delete"
+  ; crow_result = "attempted"
+  ; crow_file = "bin/masc_tui_render_schedule.mli and a much longer path than fits"
+  ; crow_summary = String.concat "" (List.init 20 (fun _ -> "summary "))
+  }
+
+let test_lane_columns_hold_their_offsets () =
+  for inner_width = 80 to 240 do
+    let run_id_width = Schedule.lane_run_id_width ~inner_width in
+    let identity_header = "ACTOR" in
+    let width text = Masc_tui_message_layout.display_width text in
+    let header =
+      Schedule.lane_run_header_row ~identity_header ~run_id_width
+    in
+    let row =
+      Schedule.lane_run_row ~identity_header ~status_style:"" ~run_id_width
+        lane_probe
+    in
+    check_left_cell "STARTED" "A" ~header ~row ~inner_width;
+    check_left_cell identity_header "B" ~header ~row ~inner_width;
+    check_left_cell "STATUS" "C" ~header ~row ~inner_width;
+    check_left_cell "SLOT" "E" ~header ~row ~inner_width;
+    check_left_cell "RUN ID" "F" ~header ~row ~inner_width;
+    check int
+      (Printf.sprintf "inner %d: a dressed overflowing run" inner_width)
+      (width header)
+      (width
+         (Schedule.lane_run_row ~identity_header ~status_style:"\027[31m"
+            ~run_id_width lane_overflowing))
+  done
+
+let test_change_columns_hold_their_offsets () =
+  for inner_width = 80 to 240 do
+    let summary_width = Schedule.change_summary_width ~inner_width in
+    let width text = Masc_tui_message_layout.display_width text in
+    let header = Schedule.change_header_row ~summary_width in
+    let row =
+      Schedule.change_row ~op_style:"" ~result_style:"" ~summary_width
+        change_probe
+    in
+    check_right_cell "TURN" "A" ~header ~row ~inner_width;
+    check_left_cell "TASK" "B" ~header ~row ~inner_width;
+    check_left_cell "OP" "C" ~header ~row ~inner_width;
+    check_left_cell "RESULT" "D" ~header ~row ~inner_width;
+    check_left_cell "FILE" "E" ~header ~row ~inner_width;
+    check_left_cell "WHAT" "F" ~header ~row ~inner_width;
+    (* The file cell was padded and never fitted, so this row used to be wider
+       than its header by the length of the path. *)
+    check int
+      (Printf.sprintf "inner %d: a long path no longer widens the row" inner_width)
+      (width header)
+      (width
+         (Schedule.change_row ~op_style:"\027[33m" ~result_style:"\027[31m"
+            ~summary_width change_overflowing))
+  done
+
 (* The strip named five stops while the Planning walk had three: Schedules and
    Fusion had become tabs of the selected Keeper and nothing took their names
    off this row. A reader pressing 4 or 5 arrived nowhere. *)
@@ -1097,6 +1188,10 @@ let () =
             test_system_log_message_takes_the_remainder
         ; test_case "system log header and row share their offsets" `Quick
             test_system_log_header_and_row_share_their_offsets
+        ; test_case "lane columns hold their offsets" `Quick
+            test_lane_columns_hold_their_offsets
+        ; test_case "change columns hold their offsets" `Quick
+            test_change_columns_hold_their_offsets
         ; test_case "planning strip names only its own stops" `Quick
             test_planning_strip_names_only_its_own_stops
         ; test_case "planning window rides the active stop" `Quick

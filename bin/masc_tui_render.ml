@@ -5417,9 +5417,16 @@ let render_lane_run_list (state : state) ~lane_id =
     if String.equal lane_id Runtime.verifier_exact_lane_id then "SUBJECT"
     else "ACTOR"
   in
+  (* The run id takes what the named columns leave; it used to run off the
+     header with no end while the row cut it at twelve. *)
+  let run_id_width =
+    Render_schedule.lane_run_id_width
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
+  in
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  %-17s %-16s %-11s %-8s %-16s %s" "STARTED"
-       identity_heading "STATUS" "ELAPSED" "SLOT" "RUN ID");
+    ("  "
+    ^ Render_schedule.lane_run_header_row ~identity_header:identity_heading
+        ~run_id_width);
   box_divider buf cols;
   (match state.lane_runs_error with
    | None -> ()
@@ -5460,17 +5467,22 @@ let render_lane_run_list (state : state) ~lane_id =
             | Some seconds -> Printf.sprintf "%.1fs" seconds
           in
           let line =
-            Printf.sprintf "  %-17s %-16s %s%-11s%s %-8s %-16s %s"
-              (lane_run_clock run.lrs_started_at)
-              (fit_width (Terminal_text.single_line (lane_run_subject run)) 16)
-              (lane_run_status_style run.lrs_status)
-              (fit_width (Tui_decode.lane_run_status_label run.lrs_status) 11)
-              Ansi.reset elapsed
-              (fit_width
-                 (Terminal_text.single_line_or ~default:"—"
-                    run.lrs_selected_slot)
-                 16)
-              (fit_width (Terminal_text.single_line run.lrs_run_id) 12)
+            "  "
+            ^ Render_schedule.lane_run_row ~identity_header:identity_heading
+                ~status_style:(lane_run_status_style run.lrs_status)
+                ~run_id_width
+                { Render_schedule.lrow_started =
+                    lane_run_clock run.lrs_started_at
+                ; lrow_subject =
+                    Terminal_text.single_line (lane_run_subject run)
+                ; lrow_status =
+                    Tui_decode.lane_run_status_label run.lrs_status
+                ; lrow_elapsed = elapsed
+                ; lrow_slot =
+                    Terminal_text.single_line_or ~default:"—"
+                      run.lrs_selected_slot
+                ; lrow_run_id = Terminal_text.single_line run.lrs_run_id
+                }
           in
           if index + scroll = state.lane_runs_cursor then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
@@ -10910,9 +10922,13 @@ let render_changes_list (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  (* What the turn did takes the cells the named columns leave. *)
+  let summary_width =
+    Render_schedule.change_summary_width
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
+  in
   let col_hdr =
-    Printf.sprintf "  %-6s %-10s %-5s %-8s %-38s %s"
-      "Turn" "Task" "Op" "Result" "File" "What"
+    "  " ^ Render_schedule.change_header_row ~summary_width
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -10995,15 +11011,22 @@ let render_changes_list (state : state) =
           let kind_style, kind = change_kind_badge change in
           let result_style, result = change_result_badge change in
           let line =
-            Printf.sprintf "  %-6s %-10s %s%-5s%s %s%-8s%s %-38s %s"
-              (Option.fold ~none:"-" ~some:string_of_int
-                 change.Masc.Tui_decode.fc_turn)
-              (Terminal_text.single_line
-                 (Option.value ~default:"-" change.Masc.Tui_decode.fc_task_id))
-              kind_style kind Ansi.reset
-              result_style result Ansi.reset
-              (Terminal_text.single_line (change_row_address change))
-              (change_row_summary change)
+            "  "
+            ^ Render_schedule.change_row ~op_style:kind_style ~result_style
+                ~summary_width
+                { Render_schedule.crow_turn =
+                    Option.fold ~none:"-" ~some:string_of_int
+                      change.Masc.Tui_decode.fc_turn
+                ; crow_task =
+                    Terminal_text.single_line
+                      (Option.value ~default:"-"
+                         change.Masc.Tui_decode.fc_task_id)
+                ; crow_op = kind
+                ; crow_result = result
+                ; crow_file =
+                    Terminal_text.single_line (change_row_address change)
+                ; crow_summary = change_row_summary change
+                }
           in
           (* A call that failed still changed what the keeper tried to do, and
              it is the row an operator is looking for. Dim marks it as an

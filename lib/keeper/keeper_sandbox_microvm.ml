@@ -321,6 +321,8 @@ let delete_force_argv_for backend ~container_name =
     command_argv_for backend @ [ "delete"; "--force"; container_name ]
   | Backend.Microsandbox ->
     command_argv_for backend @ [ "remove"; "--force"; container_name ]
+  | Backend.Nerdctl_kata ->
+    command_argv_for backend @ [ "rm"; "--force"; container_name ]
 ;;
 
 let stop_argv ~container_name = stop_argv_for Backend.Apple_container ~container_name
@@ -578,6 +580,21 @@ let running_of_microsandbox_inspect_json raw =
   | exception Yojson.Json_error _ -> Error "msb inspect: unparseable JSON"
 ;;
 
+(* [nerdctl inspect --format "{{json .State.Running}}"] answers the bare
+   literal, the same template masc already sends Docker. Anything else is an
+   [Error]: a template that stopped resolving prints an empty line, and read
+   as "not running" that takes a live guest down. *)
+let running_of_nerdctl_state_json raw =
+  match String.trim raw with
+  | "true" -> Ok true
+  | "false" -> Ok false
+  | other ->
+    Error
+      (Printf.sprintf
+         "nerdctl inspect: expected the State.Running literal, got %S"
+         other)
+;;
+
 let running_of_apple_inspect_json raw =
   match Yojson.Safe.from_string raw with
   | `List (`Assoc fields :: _) ->
@@ -596,6 +613,7 @@ let running_of_inspect_json_for backend raw =
   match (backend : Backend.t) with
   | Backend.Apple_container -> running_of_apple_inspect_json raw
   | Backend.Microsandbox -> running_of_microsandbox_inspect_json raw
+  | Backend.Nerdctl_kata -> running_of_nerdctl_state_json raw
 ;;
 
 let running_of_inspect_json raw = running_of_apple_inspect_json raw
@@ -608,6 +626,12 @@ let inspect_argv_for backend ~container_name =
   | Backend.Apple_container -> command_argv_for backend @ [ "inspect"; container_name ]
   | Backend.Microsandbox ->
     command_argv_for backend @ [ "inspect"; container_name; "--format"; "json" ]
+  (* [nerdctl inspect] defaults to --mode dockercompat, so the Go template
+     Docker already answers works here unchanged. Asking for the one field
+     rather than the whole document keeps the parse to a literal. *)
+  | Backend.Nerdctl_kata ->
+    command_argv_for backend
+    @ [ "inspect"; "--format"; "{{json .State.Running}}"; container_name ]
 ;;
 
 let inspect_argv ~container_name =

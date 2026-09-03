@@ -108,13 +108,6 @@ module For_testing : sig
     string option
   (** The durable attention producer used by both the triggered and ambient
       lanes; exposed for durable round-trip tests. *)
-
-  val mark_attention_resolved :
-    base_dir:string ->
-    keeper_name:string ->
-    event_id:string ->
-    reason:string ->
-    unit
 end
 
 val start :

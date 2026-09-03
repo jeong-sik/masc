@@ -526,7 +526,7 @@ let test_adapter_external_effect_status_is_terminal_success () =
           { run_id = "run-status"; thread_id = "thread-status" }
       ; Masc.Keeper_chat_events.Text_delta "assistant preface that must not survive"
       ; Masc.Keeper_chat_events.Status_block
-          { kind = Masc.Keeper_chat_blocks.External_effect_pending }
+          { kind = Masc.Keeper_chat_blocks.Awaiting_gate_approval }
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-status" }
       ]
       ~send_plain:(fun ~content:_ -> fail "status uses Slack blocks")

@@ -3,17 +3,28 @@
     The keeper reply payload declares at the write boundary whether its
     [reply] text is model output ([Visible_reply]), absent from the
     visible surface ([No_visible_reply]), a continuation boundary
-    ([Continuation_checkpoint]), a completed terminal external delivery
-    ([Terminal_effect_settled]), or a durable external-effect wait
-    ([External_effect_pending]). Consumers (lane persistence, stream
-    terminal, direct-reply surface, dashboard) match on the decoded
-    variant; control state is never synthesized into assistant prose. *)
+    ([Continuation_checkpoint]), or a completed terminal external
+    delivery ([Terminal_effect_settled]). Consumers (lane persistence,
+    stream terminal, direct-reply surface, dashboard) match on the
+    decoded variant; control state is never synthesized into assistant
+    prose.
+
+    [Awaiting_gate_approval] is the fifth variant and no turn produces
+    it. A Gate deferral used to end the turn and that ending was this
+    outcome; the deferral now parks the call and lets the turn keep
+    running, so a parked call is said on an approval lifecycle row
+    ({!Keeper_chat_store.Approval_requested}) instead. The variant stays
+    because chat lanes written before that change carry its label on
+    disk and the store is append-only. {!of_label} is the only way back
+    in, and both of its callers reject an unknown label rather than
+    skipping the row, so dropping the variant would turn those rows into
+    decode failures rather than retiring them. *)
 
 type t =
   | Visible_reply
   | Continuation_checkpoint
   | Terminal_effect_settled
-  | External_effect_pending
+  | Awaiting_gate_approval
   | No_visible_reply
 
 val equal : t -> t -> bool
@@ -23,12 +34,15 @@ val to_label : t -> string
     ["external_effect_completed"] / ["external_effect_pending"] /
     ["no_visible_reply"].
 
-    [Terminal_effect_settled] keeps the label ["external_effect_completed"]
-    it was born with. The constructor was renamed to what the outcome is —
-    a terminal tool finished delivering the reply, which has nothing to do
-    with the Gate — while the label stays where its readers already look:
-    the dashboard decoder and the cross-language parity test that reads
-    these strings out of this file. *)
+    Two constructors were renamed to what their outcome is while their
+    labels stayed where readers already look — the dashboard decoder, the
+    cross-language parity test that reads these strings out of this file,
+    and the chat lanes that hold them on disk.
+    [Terminal_effect_settled] keeps ["external_effect_completed"]: a
+    terminal tool finished delivering the reply, which has nothing to do
+    with the Gate. [Awaiting_gate_approval] keeps
+    ["external_effect_pending"]: what the turn was waiting for was an
+    operator's answer at the Gate. *)
 
 val of_label : string -> t option
 (** Inverse of {!to_label}; [None] on any other string. *)
@@ -54,10 +68,9 @@ val of_result_surface : response_text:string -> Runtime_agent.stop_reason -> t
     [Visible_reply].  This keeps hidden read-only/tool-only runtime turns
     from being reported as user-visible replies while preserving the
     explicit continuation checkpoint outcome for control-yield stops.
-    [Awaiting_external_effect] is [External_effect_pending] regardless of
-    response text; the dashboard renders that typed state outside the assistant
-    speech surface. A runtime execution-limit observation does not create a
-    MASC lifecycle gate. *)
+    No stop reason maps to [Awaiting_gate_approval]; see the header for
+    why that variant is still decodable. A runtime execution-limit
+    observation does not create a MASC lifecycle gate. *)
 
 type decode_error =
   | Payload_missing

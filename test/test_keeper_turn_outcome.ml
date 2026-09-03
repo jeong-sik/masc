@@ -26,7 +26,7 @@ let all =
   [ TO.Visible_reply
   ; TO.Continuation_checkpoint
   ; TO.Terminal_effect_settled
-  ; TO.External_effect_pending
+  ; TO.Awaiting_gate_approval
   ; TO.No_visible_reply
   ]
 
@@ -37,6 +37,39 @@ let test_label_round_trip () =
         (Some t)
         (TO.of_label (TO.to_label t)))
     all
+
+(* The label below is on disk in chat lanes written before a Gate deferral
+   stopped ending the turn, and the store is append-only, so nothing retires
+   those rows. Its constructor was renamed and no turn produces it any more;
+   what still has to hold is that the string decodes, because both readers
+   reject an unknown label rather than skipping the row.
+
+   The round-trip test above cannot carry this. It asks whether [to_label]
+   and [of_label] agree with each other, which stays true when a rename moves
+   both together and takes the disk rows out from under them. This asks for
+   the string itself. *)
+let test_parked_call_label_still_decodes () =
+  check (option outcome) "the outcome a pre-change lane holds"
+    (Some TO.Awaiting_gate_approval)
+    (TO.of_label "external_effect_pending");
+  check string "and it goes back out unchanged" "external_effect_pending"
+    (TO.to_label TO.Awaiting_gate_approval);
+  let row =
+    `List
+      [ `Assoc
+          [ ("t", `String "status")
+          ; ("kind", `String "external_effect_pending")
+          ]
+      ]
+  in
+  match Masc.Keeper_chat_blocks.blocks_of_yojson row with
+  | Some
+      [ Masc.Keeper_chat_blocks.Status
+          { kind = Masc.Keeper_chat_blocks.Awaiting_gate_approval }
+      ] ->
+    ()
+  | Some _ | None ->
+    fail "a status block from a pre-change lane no longer decodes"
 
 let test_unknown_label_is_none () =
   List.iter
@@ -62,9 +95,6 @@ let test_of_stop_reason () =
   check outcome "durable stimulus yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 }));
-  check outcome "external effect wait -> typed pending" TO.External_effect_pending
-    (TO.of_stop_reason
-       (Runtime_agent.Awaiting_external_effect { turns_used = 2 }));
   check outcome "repeated tool yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_after_repeated_tool_call
@@ -87,14 +117,6 @@ let test_of_result_surface () =
   check outcome "completed with empty text -> no visible reply"
     TO.No_visible_reply
     (TO.of_result_surface ~response_text:"   " Runtime_agent.Completed)
-
-let test_external_effect_wait_is_typed_status () =
-  let stop_reason = Runtime_agent.Awaiting_external_effect { turns_used = 2 } in
-  check bool "external effect prose is suppressed" true
-    (Response_text.stop_reason_suppresses_visible_response stop_reason);
-  check outcome "external effect remains typed with blank text"
-    TO.External_effect_pending
-    (TO.of_result_surface ~response_text:"" stop_reason)
 
 let test_external_effect_completed_has_no_direct_reply_error () =
   let payload_json =
@@ -277,11 +299,10 @@ let test_canonical_payload_carries_memory_revision () =
   | Ok _ -> fail "a duplicated memory revision must reject the payload"
 
 let test_external_effect_status_survives_server_projection () =
-  let turn_outcome =
-    TO.of_result_surface
-      ~response_text:""
-      (Runtime_agent.Awaiting_external_effect { turns_used = 2 })
-  in
+  (* No stop reason maps here any more -- a Gate deferral parks the call and
+     the turn keeps running.  The outcome is still written by lanes recorded
+     before that change, so the server projection has to carry it. *)
+  let turn_outcome = TO.Awaiting_gate_approval in
   let turn_ref = Ids.Turn_ref.make ~trace_id:"gate-ack" ~absolute_turn:2 in
   let body =
     `Assoc
@@ -299,7 +320,7 @@ let test_external_effect_status_survives_server_projection () =
       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
          error)
   | Ok canonical ->
-    check outcome "server preserves typed Gate wait" TO.External_effect_pending
+    check outcome "server preserves typed Gate wait" TO.Awaiting_gate_approval
       canonical.turn_outcome;
     check string "server keeps control status out of reply text" "" canonical.visible_reply;
     check (option string) "server accepts typed control status without prose"
@@ -321,12 +342,12 @@ let test_external_effect_status_survives_server_projection () =
 let test_external_effect_status_becomes_persisted_chat_block () =
   match
     Stream.For_testing.persisted_reply_blocks
-      ~turn_outcome:TO.External_effect_pending
+      ~turn_outcome:TO.Awaiting_gate_approval
       None
   with
   | Some
       [ Masc.Keeper_chat_blocks.Status
-          { kind = Masc.Keeper_chat_blocks.External_effect_pending }
+          { kind = Masc.Keeper_chat_blocks.Awaiting_gate_approval }
       ] ->
     ()
   | Some _ -> fail "typed Gate wait persisted the wrong block shape"
@@ -353,7 +374,6 @@ let test_terminal_effect_defer_kinds_remain_distinct () =
       check string label expected
         (match actual with
          | Runtime_agent.Durable_stimulus_waiting -> "durable_stimulus_waiting"
-         | Runtime_agent.External_effect_deferred -> "external_effect_deferred"
          | Runtime_agent.Operation_queued -> "operation_queued"
          | Runtime_agent.Repeated_tool_call _ -> "repeated_tool_call"
          | Runtime_agent.Repeated_assistant_text _ -> "repeated_assistant_text"
@@ -555,7 +575,6 @@ let test_autonomous_yield_boundary_contract () =
   (match F.runtime_yield_reason chat with
     | Runtime_agent.Operation_queued -> ()
     | Runtime_agent.Durable_stimulus_waiting
-    | Runtime_agent.External_effect_deferred
     | Runtime_agent.Repeated_tool_call _
    | Runtime_agent.Repeated_assistant_text _
    | Runtime_agent.Terminal_tool_completed ->
@@ -563,7 +582,6 @@ let test_autonomous_yield_boundary_contract () =
   (match F.runtime_yield_reason durable_stimulus with
     | Runtime_agent.Durable_stimulus_waiting -> ()
     | Runtime_agent.Operation_queued
-    | Runtime_agent.External_effect_deferred
    | Runtime_agent.Repeated_tool_call _
    | Runtime_agent.Repeated_assistant_text _
    | Runtime_agent.Terminal_tool_completed ->
@@ -584,7 +602,6 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Completed
      | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
-     | Runtime_agent.Awaiting_external_effect _
      | Runtime_agent.Yielded_after_repeated_tool_call _
      | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ ->
@@ -601,7 +618,6 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Completed
      | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
-     | Runtime_agent.Awaiting_external_effect _
      | Runtime_agent.Yielded_after_repeated_tool_call _
      | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ ->
@@ -615,7 +631,6 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Completed -> true
      | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
-     | Runtime_agent.Awaiting_external_effect _
      | Runtime_agent.Yielded_after_repeated_tool_call _
      | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ -> false)
@@ -826,7 +841,7 @@ let test_control_turn_keeps_spoken_words () =
     ~turn_outcome:Masc.Keeper_turn_outcome.Continuation_checkpoint
     ~spoken:(Some words) words;
   spoken_row "pending external effect keeps the words"
-    ~turn_outcome:Masc.Keeper_turn_outcome.External_effect_pending
+    ~turn_outcome:Masc.Keeper_turn_outcome.Awaiting_gate_approval
     ~spoken:(Some words) words;
   spoken_row "completed external effect keeps the words"
     ~turn_outcome:Masc.Keeper_turn_outcome.Terminal_effect_settled
@@ -840,7 +855,7 @@ let test_wordless_control_turn_delivery () =
     ~turn_outcome:Masc.Keeper_turn_outcome.Continuation_checkpoint
     ~spoken:None "";
   spoken_row "wordless pending effect still writes a row"
-    ~turn_outcome:Masc.Keeper_turn_outcome.External_effect_pending
+    ~turn_outcome:Masc.Keeper_turn_outcome.Awaiting_gate_approval
     ~spoken:None "";
   match
     Stream.For_testing.control_turn_delivery
@@ -960,10 +975,10 @@ let test_direct_reply_visible_text () =
 let test_connector_projection_keeps_external_wait_typed () =
   match
     Masc.Keeper_chat_blocks.connector_projection
-      ~turn_outcome:TO.External_effect_pending
+      ~turn_outcome:TO.Awaiting_gate_approval
       ~reply:(Some "assistant preface that must not survive")
   with
-  | Connector_status { kind = External_effect_pending } -> ()
+  | Connector_status { kind = Awaiting_gate_approval } -> ()
   | Connector_status { kind = Continuation_checkpoint }
   | Connector_text _ | Connector_no_visible_reply ->
     fail "external-effect wait must remain a typed connector status"
@@ -975,7 +990,7 @@ let test_connector_projection_keeps_continuation_typed () =
       ~reply:(Some "assistant preface that must not survive")
   with
   | Connector_status { kind = Continuation_checkpoint } -> ()
-  | Connector_status { kind = External_effect_pending }
+  | Connector_status { kind = Awaiting_gate_approval }
   | Connector_text _ | Connector_no_visible_reply ->
     fail "continuation checkpoint must remain a typed connector status"
 
@@ -997,7 +1012,7 @@ let test_direct_reply_projection_keeps_external_wait_typed () =
          ; ("turn_outcome", `String "external_effect_pending")
          ])
   with
-  | Ok (Connector_status { kind = External_effect_pending }) -> ()
+  | Ok (Connector_status { kind = Awaiting_gate_approval }) -> ()
   | Ok (Connector_status { kind = Continuation_checkpoint })
   | Ok (Connector_text _ | Connector_no_visible_reply) ->
     fail "direct reply collapsed external-effect wait into silence"
@@ -1011,13 +1026,13 @@ let () =
         [
           test_case "label round trip" `Quick test_label_round_trip;
           test_case "unknown label is None" `Quick test_unknown_label_is_none;
+          test_case "the parked-call label still decodes" `Quick
+            test_parked_call_label_still_decodes;
         ] );
       ( "mapping",
         [
           test_case "of_stop_reason" `Quick test_of_stop_reason;
           test_case "of_result_surface" `Quick test_of_result_surface;
-          test_case "external effect wait is typed status" `Quick
-            test_external_effect_wait_is_typed_status;
           test_case "completed external effect has no direct reply error" `Quick
             test_external_effect_completed_has_no_direct_reply_error;
           test_case "external effect status survives server projection" `Quick

@@ -1347,7 +1347,7 @@ let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt v
      with
      | Keeper_turn_outcome.Continuation_checkpoint, _, _ -> None
      | Keeper_turn_outcome.Terminal_effect_settled, _, _ -> None
-     | Keeper_turn_outcome.External_effect_pending, _, _ -> None
+     | Keeper_turn_outcome.Awaiting_gate_approval, _, _ -> None
      | Keeper_turn_outcome.No_visible_reply, _, true -> None
      | Keeper_turn_outcome.Visible_reply, None, true -> None
      | Keeper_turn_outcome.No_visible_reply, _, false ->
@@ -1368,15 +1368,15 @@ let persisted_reply_blocks ~turn_outcome media_blocks =
       [ Keeper_chat_blocks.Status
           { kind = Keeper_chat_blocks.Continuation_checkpoint }
       ]
-  | Keeper_turn_outcome.External_effect_pending, Some media_blocks ->
+  | Keeper_turn_outcome.Awaiting_gate_approval, Some media_blocks ->
     Some
       (Keeper_chat_blocks.Status
-         { kind = Keeper_chat_blocks.External_effect_pending }
+         { kind = Keeper_chat_blocks.Awaiting_gate_approval }
        :: media_blocks)
-  | Keeper_turn_outcome.External_effect_pending, None ->
+  | Keeper_turn_outcome.Awaiting_gate_approval, None ->
     Some
       [ Keeper_chat_blocks.Status
-          { kind = Keeper_chat_blocks.External_effect_pending }
+          { kind = Keeper_chat_blocks.Awaiting_gate_approval }
       ]
   | ( Keeper_turn_outcome.Visible_reply
     | Keeper_turn_outcome.Terminal_effect_settled
@@ -1512,7 +1512,7 @@ let empty_reply_delivery_plan ~has_visible_blocks ~has_tool_calls =
    typed tool-call record is the whole of what that turn did. *)
 let control_turn_delivery ~turn_outcome ~spoken =
   match (turn_outcome : Keeper_turn_outcome.t), spoken with
-  | (Continuation_checkpoint | External_effect_pending), spoken ->
+  | (Continuation_checkpoint | Awaiting_gate_approval), spoken ->
     `Assistant_row (Option.value spoken ~default:"")
   | Terminal_effect_settled, Some words -> `Assistant_row words
   | Terminal_effect_settled, None -> `Tool_calls_only
@@ -2100,7 +2100,7 @@ let process_single_turn ~user_row_origin ~submission
                  let delivery_result =
                    match turn_outcome, String_util.trim_nonempty visible_reply with
                    | ( ( Keeper_turn_outcome.Continuation_checkpoint
-                       | Keeper_turn_outcome.External_effect_pending
+                       | Keeper_turn_outcome.Awaiting_gate_approval
                        | Keeper_turn_outcome.Terminal_effect_settled ) as
                        control_outcome )
                    , spoken -> (
@@ -2508,7 +2508,7 @@ let process_single_turn ~user_row_origin ~submission
             match turn_outcome with
             | Keeper_turn_outcome.Continuation_checkpoint
             | Keeper_turn_outcome.Terminal_effect_settled
-            | Keeper_turn_outcome.External_effect_pending
+            | Keeper_turn_outcome.Awaiting_gate_approval
             | Keeper_turn_outcome.No_visible_reply ->
                 true
             | Keeper_turn_outcome.Visible_reply -> false
@@ -2535,11 +2535,11 @@ let process_single_turn ~user_row_origin ~submission
            | None -> ());
           if
             Keeper_turn_outcome.equal turn_outcome
-              Keeper_turn_outcome.External_effect_pending
+              Keeper_turn_outcome.Awaiting_gate_approval
           then
             Keeper_chat_events.publish events
               (Status_block
-                 { kind = Keeper_chat_blocks.External_effect_pending });
+                 { kind = Keeper_chat_blocks.Awaiting_gate_approval });
           if
             Keeper_turn_outcome.equal turn_outcome
               Keeper_turn_outcome.Continuation_checkpoint
@@ -2745,7 +2745,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                            | Keeper_turn_outcome.Visible_reply
                            | Keeper_turn_outcome.Continuation_checkpoint
                            | Keeper_turn_outcome.Terminal_effect_settled
-                           | Keeper_turn_outcome.External_effect_pending
+                           | Keeper_turn_outcome.Awaiting_gate_approval
                            | Keeper_turn_outcome.No_visible_reply -> None)
                       | Keeper_chat_events.Run_finished _ ->
                         settle_delivery
@@ -2788,7 +2788,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                         | Keeper_turn_outcome.Visible_reply
                         | Keeper_turn_outcome.Continuation_checkpoint
                         | Keeper_turn_outcome.Terminal_effect_settled
-                        | Keeper_turn_outcome.External_effect_pending
+                        | Keeper_turn_outcome.Awaiting_gate_approval
                         | Keeper_turn_outcome.No_visible_reply -> None)
                    | Keeper_chat_events.Run_finished _ ->
                      commit

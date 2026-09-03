@@ -347,7 +347,6 @@ let batch_disposition_of_cycle_outcome
          { checkpoint_reason =
              ( Keeper_unified_turn.Durable_stimulus_arrived
              | Keeper_unified_turn.Repeated_assistant_text _
-             | Keeper_unified_turn.Awaiting_external_effect
              | Keeper_unified_turn.Repeated_tool_call _
              | Keeper_unified_turn.Operation_queued )
          ; continuation_route = _

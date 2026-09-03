@@ -36,7 +36,7 @@ type turn_outcome = Masc.Keeper_turn_outcome.t =
   | Visible_reply
   | Continuation_checkpoint
   | Terminal_effect_settled
-  | External_effect_pending
+  | Awaiting_gate_approval
   | No_visible_reply
 
 type completed_turn = {

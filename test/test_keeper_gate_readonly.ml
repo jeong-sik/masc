@@ -22,6 +22,16 @@ let gate_input ?(profile = "docker") ?(target = "docker:masc-keeper-sandbox:loca
     ]
 ;;
 
+let script_gate_input ?(profile = "docker") ?(target = "docker:masc-keeper-sandbox:local") script =
+  `Assoc
+    [ "schema", `String "masc.keeper_gate.request.v1"
+    ; "input", `Assoc [ "cwd", `String "/home/keeper/playground"; "script", `String script ]
+    ; "cwd", `String "/home/keeper/playground"
+    ; "sandbox_profile", `String profile
+    ; "sandbox_target", `String target
+    ]
+;;
+
 let passes label argv = check bool label true (Readonly.classify_argv argv)
 let blocked label argv = check bool label false (Readonly.classify_argv argv)
 
@@ -120,105 +130,6 @@ let script_gate_request ?profile ?target ~sandbox_profile base_path script =
   }
 ;;
 
-(* ── script→argv equivalence (RFC-0404) ─────────────────────────────── *)
-
-let equivalent label script argv =
-  check (list string) label argv (Option.get (Readonly.script_argv_equivalent script))
-;;
-
-let not_equivalent label script =
-  check bool (label ^ " is not equivalent") true
-    (Option.is_none (Readonly.script_argv_equivalent script))
-;;
-
-let test_script_equivalence_unit () =
-  equivalent "bare ls" "ls" [ "ls" ];
-  equivalent "ls with flags" "ls -la /tmp" [ "ls"; "-la"; "/tmp" ];
-  equivalent "git status through -C" "git -C repos/masc status"
-    [ "git"; "-C"; "repos/masc"; "status" ];
-  equivalent "repeated spaces collapse to the same argv" "uname  -a" [ "uname"; "-a" ];
-  (* A tab is not quoting but the shell splits on it, so a tab can split a
-     guarded flag out of a token we classified whole — "sed -e\t-i" reads
-     as one harmless token here and as ["-e"; "-i"] in-place edit in the
-     shell. Every tab moves the line to the judge. *)
-  not_equivalent "tab field-splits past the sed in-place guard" "sed -e\t-i s/a/b/ f";
-  not_equivalent "tab field-splits past the rg preprocessor guard" "rg --pre\trm x";
-  not_equivalent "tab field-splits past the sort output guard" "sort -o\tout f";
-  not_equivalent "tab field-splits past the uniq operand guard" "uniq -c\ta b";
-  not_equivalent "bare tab" "ls\t-la";
-  not_equivalent "bracket glob" "ls [a-z]*";
-  not_equivalent "newline carries a second command" "ls\nrm -rf /";
-  not_equivalent "carriage return" "ls -la\r";
-  not_equivalent "command separator" "ls; rm -rf /";
-  not_equivalent "pipe" "cat a | wc -l";
-  not_equivalent "logical and" "git log && git diff";
-  not_equivalent "redirect out" "cat f > out";
-  not_equivalent "redirect in" "wc -l < f";
-  not_equivalent "command substitution" "echo $(whoami)";
-  not_equivalent "variable expansion" "echo $HOME";
-  not_equivalent "backtick" "echo `whoami`";
-  not_equivalent "single quote" "grep 'x y' f";
-  not_equivalent "double quote" "echo \"hello world\"";
-  not_equivalent "glob" "ls *.ml";
-  not_equivalent "brace expansion" "cat {a,b}";
-  not_equivalent "subshell parens" "(ls)";
-  not_equivalent "comment" "ls -la # listing";
-  not_equivalent "tilde expansion" "cat ~/notes";
-  not_equivalent "whitespace only" "   ";
-  not_equivalent "empty" ""
-;;
-
-let test_observation_scripts_pass_the_table () =
-  check bool
-    "observation script under Docker reads without judgment"
-    true
-    (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "ls -la /home/keeper");
-  check bool
-    "git status script under microvm reads without judgment"
-    true
-    (executes_script ~operation:"tool_execute" ~sandbox_profile:microvm "git -C repos/masc status");
-  check bool
-    "same script under remote_ssh still faces the judge"
-    false
-    (executes_script ~operation:"tool_execute" ~sandbox_profile:remote_ssh "ls -la");
-  check bool
-    "compound script still faces the judge"
-    false
-    (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "uname -a && id && pwd");
-  check bool
-    "command outside the table still faces the judge"
-    false
-    (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "curl https://example.com");
-  check bool
-    "quoted observation still faces the judge"
-    false
-    (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "grep 'pattern' notes.txt");
-  check bool
-    "empty script never matches"
-    false
-    (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "  ")
-;;
-
-let test_auto_judge_allows_script_observation_without_queueing () =
-  with_auto_judge @@ fun base_path ->
-  match
-    Keeper_gate.decide
-      ~keeper_always_allow:false
-      (script_gate_request ~sandbox_profile:docker base_path "ls -la /home/keeper/playground")
-  with
-  | Keeper_gate.Allow { source = Readonly_sandbox; _ } -> ()
-  | Keeper_gate.Allow { source; _ } ->
-    failf "script observation allowed through the wrong source: %s"
-      (Keeper_gate.authorization_source_to_string source)
-  | Keeper_gate.Deferred { reason; _ } ->
-    failf "script observation was deferred instead of fast-pathed: %s"
-      (match reason with
-       | Keeper_gate.Human_requested -> "human_requested"
-       | Keeper_gate.Judge_requested -> "judge_requested"
-       | Keeper_gate.Auto_judge_unavailable detail -> "auto_judge_unavailable: " ^ detail
-       | Keeper_gate.Mode_state_invalid detail -> "mode_state_invalid: " ^ detail)
-  | Keeper_gate.Unavailable _ -> fail "script observation made the queue unavailable"
-;;
 
 let docker = Some Keeper_types_profile_sandbox.Docker
 let microvm = Some Keeper_types_profile_sandbox.Micro_vm
@@ -355,15 +266,6 @@ let gate_request ?profile ?target ~sandbox_profile base_path argv =
   }
 ;;
 
-let script_gate_input ?(profile = "docker") ?(target = "docker:masc-keeper-sandbox:local") script =
-  `Assoc
-    [ "schema", `String "masc.keeper_gate.request.v1"
-    ; "input", `Assoc [ "cwd", `String "/home/keeper/playground"; "script", `String script ]
-    ; "cwd", `String "/home/keeper/playground"
-    ; "sandbox_profile", `String profile
-    ; "sandbox_target", `String target
-    ]
-;;
 
 let network_gate_request base_path ~capability =
   { Keeper_gate.keeper_name = "alpha"
@@ -400,6 +302,106 @@ let with_auto_judge f =
   let config = Workspace.default_config base_path in
   select_workspace config Keeper_gate_mode.Auto_judge;
   f base_path
+;;
+
+(* ── script→argv equivalence (RFC-0404) ─────────────────────────────── *)
+
+let equivalent label script argv =
+  check (list string) label argv (Option.get (Readonly.script_argv_equivalent script))
+;;
+
+let not_equivalent label script =
+  check bool (label ^ " is not equivalent") true
+    (Option.is_none (Readonly.script_argv_equivalent script))
+;;
+
+let test_script_equivalence_unit () =
+  equivalent "bare ls" "ls" [ "ls" ];
+  equivalent "ls with flags" "ls -la /tmp" [ "ls"; "-la"; "/tmp" ];
+  equivalent "git status through -C" "git -C repos/masc status"
+    [ "git"; "-C"; "repos/masc"; "status" ];
+  equivalent "repeated spaces collapse to the same argv" "uname  -a" [ "uname"; "-a" ];
+  (* A tab is not quoting but the shell splits on it, so a tab can split a
+     guarded flag out of a token we classified whole — "sed -e\t-i" reads
+     as one harmless token here and as ["-e"; "-i"] in-place edit in the
+     shell. Every tab moves the line to the judge. *)
+  not_equivalent "tab field-splits past the sed in-place guard" "sed -e\t-i s/a/b/ f";
+  not_equivalent "tab field-splits past the rg preprocessor guard" "rg --pre\trm x";
+  not_equivalent "tab field-splits past the sort output guard" "sort -o\tout f";
+  not_equivalent "tab field-splits past the uniq operand guard" "uniq -c\ta b";
+  not_equivalent "bare tab" "ls\t-la";
+  not_equivalent "bracket glob" "ls [a-z]*";
+  not_equivalent "newline carries a second command" "ls\nrm -rf /";
+  not_equivalent "carriage return" "ls -la\r";
+  not_equivalent "command separator" "ls; rm -rf /";
+  not_equivalent "pipe" "cat a | wc -l";
+  not_equivalent "logical and" "git log && git diff";
+  not_equivalent "redirect out" "cat f > out";
+  not_equivalent "redirect in" "wc -l < f";
+  not_equivalent "command substitution" "echo $(whoami)";
+  not_equivalent "variable expansion" "echo $HOME";
+  not_equivalent "backtick" "echo `whoami`";
+  not_equivalent "single quote" "grep 'x y' f";
+  not_equivalent "double quote" "echo \"hello world\"";
+  not_equivalent "glob" "ls *.ml";
+  not_equivalent "brace expansion" "cat {a,b}";
+  not_equivalent "subshell parens" "(ls)";
+  not_equivalent "comment" "ls -la # listing";
+  not_equivalent "tilde expansion" "cat ~/notes";
+  not_equivalent "whitespace only" "   ";
+  not_equivalent "empty" ""
+;;
+
+let test_observation_scripts_pass_the_table () =
+  check bool
+    "observation script under Docker reads without judgment"
+    true
+    (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "ls -la /home/keeper");
+  check bool
+    "git status script under microvm reads without judgment"
+    true
+    (executes_script ~operation:"tool_execute" ~sandbox_profile:microvm "git -C repos/masc status");
+  check bool
+    "same script under remote_ssh still faces the judge"
+    false
+    (executes_script ~operation:"tool_execute" ~sandbox_profile:remote_ssh "ls -la");
+  check bool
+    "compound script still faces the judge"
+    false
+    (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "uname -a && id && pwd");
+  check bool
+    "command outside the table still faces the judge"
+    false
+    (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "curl https://example.com");
+  check bool
+    "quoted observation still faces the judge"
+    false
+    (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "grep 'pattern' notes.txt");
+  check bool
+    "empty script never matches"
+    false
+    (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "  ")
+;;
+
+let test_auto_judge_allows_script_observation_without_queueing () =
+  with_auto_judge @@ fun base_path ->
+  match
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      (script_gate_request ~sandbox_profile:docker base_path "ls -la /home/keeper/playground")
+  with
+  | Keeper_gate.Allow { source = Readonly_sandbox; _ } -> ()
+  | Keeper_gate.Allow { source; _ } ->
+    failf "script observation allowed through the wrong source: %s"
+      (Keeper_gate.authorization_source_to_string source)
+  | Keeper_gate.Deferred { reason; _ } ->
+    failf "script observation was deferred instead of fast-pathed: %s"
+      (match reason with
+       | Keeper_gate.Human_requested -> "human_requested"
+       | Keeper_gate.Judge_requested -> "judge_requested"
+       | Keeper_gate.Auto_judge_unavailable detail -> "auto_judge_unavailable: " ^ detail
+       | Keeper_gate.Mode_state_invalid detail -> "mode_state_invalid: " ^ detail)
+  | Keeper_gate.Unavailable _ -> fail "script observation made the queue unavailable"
 ;;
 
 let test_auto_judge_allows_observation_without_queueing () =

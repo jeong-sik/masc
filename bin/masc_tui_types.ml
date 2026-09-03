@@ -4337,6 +4337,29 @@ let code_note_stem ~anchor =
    searchable and [texts] is the same decoded list the row cursor names, in
    the same order -- a match index is a cursor position. [None] keeps "/"
    closed on that surface. *)
+(* One list under one cursor: the calls keepers are holding first (they run
+   out in [kta_timeout_sec]; the operator actions keep), then the operator
+   actions. The two kinds answer through different routes, so the row is a
+   sum the key handler matches on rather than a shape it infers. *)
+type approval_row =
+  | Keeper_tool_row of Tui_decode.keeper_tool_approval
+  | Gate_row of Tui_decode.gate_pending
+      (** A durable Gate approval — an external-service write among them.
+          It keeps: nobody watching loses nothing. Answered through the
+          dashboard resolve route. *)
+  | Operator_row of Masc_tui_operator_projection.approval_item
+
+let operator_approval_items (state : state) =
+  match state.approval_snapshot with
+  | Some snapshot -> snapshot.aps_items
+  | None -> []
+
+let approval_items (state : state) =
+  List.map (fun held -> Keeper_tool_row held) state.keeper_tool_approvals
+  @ List.map (fun pending -> Gate_row pending) state.gate_pending
+  @ List.map (fun item -> Operator_row item) (operator_approval_items state)
+
+
 let surface_row_texts (state : state) : surface -> string list option = function
   | Keepers Keeper_list ->
       Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
@@ -4481,7 +4504,48 @@ let surface_row_texts (state : state) : surface -> string list option = function
              (fun (n : Tui_decode.workspace_tree_node) -> n.Tui_decode.wt_label)
              state.code_entries)
   (* Cursorless or otherwise-navigated surfaces: no row list to search. *)
-  | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
+  (* The list, and only while the list is the pane: reading a post or
+     writing one draws something else, and "/" there would move a cursor
+     nobody can see. The text is what identifies a row -- its id, who wrote
+     it, its title -- which is what a reader has in mind when they reach for
+     the key. *)
+  | Board ->
+      (match state.board_mode with
+       | Board_read _ | Board_compose -> None
+       | Board_list ->
+           (match state.board_posts with
+            | [] -> None
+            | posts ->
+                Some
+                  (List.map
+                     (fun (post : board_post) ->
+                       post.bp_id ^ " " ^ post.bp_author ^ " " ^ post.bp_title)
+                     posts)))
+  (* The goals the filter and sort left on screen, in the order they are
+     drawn: the cursor counts positions in that list, not in the snapshot. *)
+  | Planning ->
+      (match state.planning_mode with
+       | Planning_detail _ -> None
+       | Planning_list ->
+           Option.bind state.planning (fun snapshot ->
+               match
+                 planning_visible_goals ~filter:state.planning_filter
+                   ~sort:state.planning_sort snapshot.pl_goals
+               with
+               | [] -> None
+               | goals ->
+                   Some
+                     (List.map
+                        (fun (goal : planning_goal) ->
+                          goal.pg_id ^ " " ^ goal.pg_title)
+                        goals)))
+  (* Approvals is absent on purpose. Its rows would search well, but [n] on
+     that surface is deny, unarmed and immediate: offering "/" there invites
+     the reflex that follows it, and on this surface that reflex refuses an
+     approval instead of stepping to the next match. Verification met the
+     same collision and moved its rejection to [x]; until Approvals makes
+     that call, the safe answer is no row search. *)
+  | Overview | Acting | Keepers _ | Approvals | Schedules
   | Fusion | Resources | Changes | Config | Tools ->
       None
 
@@ -4583,28 +4647,6 @@ let keeper_message_status_rows (state : state) =
    rendered history still uses the exact rows it currently draws. *)
 let keeper_message_support_status_rows state ~status_rows =
   status_rows + if keeper_message_reading_back state then 0 else 1
-
-(* One list under one cursor: the calls keepers are holding first (they run
-   out in [kta_timeout_sec]; the operator actions keep), then the operator
-   actions. The two kinds answer through different routes, so the row is a
-   sum the key handler matches on rather than a shape it infers. *)
-type approval_row =
-  | Keeper_tool_row of Tui_decode.keeper_tool_approval
-  | Gate_row of Tui_decode.gate_pending
-      (** A durable Gate approval — an external-service write among them.
-          It keeps: nobody watching loses nothing. Answered through the
-          dashboard resolve route. *)
-  | Operator_row of Masc_tui_operator_projection.approval_item
-
-let operator_approval_items (state : state) =
-  match state.approval_snapshot with
-  | Some snapshot -> snapshot.aps_items
-  | None -> []
-
-let approval_items (state : state) =
-  List.map (fun held -> Keeper_tool_row held) state.keeper_tool_approvals
-  @ List.map (fun pending -> Gate_row pending) state.gate_pending
-  @ List.map (fun item -> Operator_row item) (operator_approval_items state)
 
 
 (* Command-palette jump targets. Surfaces come from the same ring the strip

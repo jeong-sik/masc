@@ -94,6 +94,12 @@ streaming = true
 
 [runtime.exact_output_lanes.librarian_exact]
 slots = ["openai.gpt", "runpod_mtp.qwen"]
+
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = [
+  # judge note inside the array
+  "openai.gpt",
+]
 |}
 ;;
 
@@ -154,7 +160,7 @@ let test_capture_save_load_round_trip () =
       [ "routingtest", "openai.gpt"; "budgettest", "openai.gpt" ]
       snapshot.Preset.assignments;
     check (list string) "the exact-output lanes are captured"
-      [ "librarian_exact" ]
+      [ "librarian_exact"; "hitl_auto_judge" ]
       (List.map (fun (l : Preset.lane) -> l.Preset.id) snapshot.Preset.lanes);
     or_fail (Preset.save ~base_path snapshot);
     let loaded = or_fail (Preset.load ~base_path "morning") in
@@ -164,7 +170,7 @@ let test_capture_save_load_round_trip () =
     check (list (pair string string)) "assignments survive" snapshot.Preset.assignments
       loaded.Preset.assignments;
     check (list string) "lane slots survive"
-      [ "openai.gpt"; "runpod_mtp.qwen" ]
+      [ "openai.gpt"; "runpod_mtp.qwen"; "openai.gpt" ]
       (List.concat_map (fun (l : Preset.lane) -> l.Preset.slots) loaded.Preset.lanes);
     check string "the override value survives" "Overridden body."
       (List.hd loaded.Preset.prompt_overrides).Override.value;
@@ -262,11 +268,20 @@ let test_runtime_text_transform () =
   let text =
     Preset.runtime_text_with
       ~current_assignments:[ "routingtest", "openai.gpt"; "budgettest", "openai.gpt" ]
+      ~current_lanes:
+        [ { Preset.id = "librarian_exact"; slots = [ "openai.gpt"; "runpod_mtp.qwen" ]; cli_slots = [] }
+        ; { Preset.id = "hitl_auto_judge"; slots = [ "openai.gpt" ]; cli_slots = [] }
+        ]
       ~assignments:[ "routingtest", "runpod_mtp.qwen" ]
-      ~lanes:[ { Preset.id = "librarian_exact"; slots = [ "runpod_mtp.qwen" ]; cli_slots = [] } ]
+      ~lanes:
+        [ { Preset.id = "librarian_exact"; slots = [ "runpod_mtp.qwen" ]; cli_slots = [] }
+        ; { Preset.id = "hitl_auto_judge"; slots = [ "openai.gpt" ]; cli_slots = [] }
+        ]
       runtime_fixture
   in
   let has needle = contains_substring text needle in
+  check bool "a lane whose slots already match keeps its inner comment" true
+    (has "  # judge note inside the array");
   check bool "the operator note survives" true (has "# operator note that must survive");
   check bool "the kept keeper is reassigned, key quoted" true
     (has "\"routingtest\" = \"runpod_mtp.qwen\"");
@@ -279,7 +294,8 @@ let test_runtime_text_transform () =
      check (list (pair string string)) "the result parses to the preset's assignments"
        [ "routingtest", "runpod_mtp.qwen" ] assignments;
      check (list string) "the result parses to the preset's lane slots"
-       [ "runpod_mtp.qwen" ] (List.concat_map (fun (l : Preset.lane) -> l.Preset.slots) lanes)
+       [ "runpod_mtp.qwen"; "openai.gpt" ]
+       (List.concat_map (fun (l : Preset.lane) -> l.Preset.slots) lanes)
    | Error message -> fail ("transformed runtime.toml does not parse: " ^ message))
 ;;
 

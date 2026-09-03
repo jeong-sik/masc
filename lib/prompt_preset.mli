@@ -84,14 +84,17 @@ val restore : base_path:string -> string -> (restore_report, string) result
 
 val runtime_text_with :
   current_assignments:(string * string) list ->
+  current_lanes:lane list ->
   assignments:(string * string) list ->
   lanes:lane list ->
   string ->
   string
 (** The runtime.toml text with [\[runtime.assignments\]] set to
     [assignments] (rows for keepers in [current_assignments] but not in
-    [assignments] are removed) and each lane's [slots] / [cli_slots]
-    rewritten. Every other line is kept. Exposed for tests. *)
+    [assignments] are removed) and the [slots] / [cli_slots] of every lane
+    whose values differ from [current_lanes] rewritten. Every other line is
+    kept, including comment lines inside the arrays of lanes left alone.
+    Exposed for tests. *)
 
 val runtime_of_text : string -> ((string * string) list * lane list, string) result
 (** [\[runtime.assignments\]] and the exact-output lanes of a runtime.toml

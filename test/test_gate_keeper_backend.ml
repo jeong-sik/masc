@@ -336,6 +336,121 @@ let test_parse_keeper_chat_stream_request_rejects_unknown_user_block_type () =
         {|unsupported user_blocks type "tool_result": expected text, image, document, or audio|}
         err
 
+(* #32845: attachments are a byte store; only user_blocks media blocks
+   referencing an attachment_id reach AGENT_CORE. An attachment nothing
+   references must be rejected instead of silently dropped. *)
+let test_parse_keeper_chat_stream_request_rejects_orphan_attachment () =
+  let body =
+    {|{"request_id":"kmsg-orphan","name":"luna","message":"look at this","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,abc123"}]}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok _ -> fail "expected an unreferenced attachment to be rejected"
+  | Error err ->
+      check string "validation message"
+        {|attachments not referenced by user_blocks: "att-img"; every attachment must be referenced by a user_blocks media block such as {"type":"image","attachment_id":"att-img"}|}
+        err
+
+let test_parse_keeper_chat_stream_request_rejects_orphan_attachment_with_empty_user_blocks
+    () =
+  let body =
+    {|{"request_id":"kmsg-orphan-empty","name":"luna","message":"look at this","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,abc123"}],"user_blocks":[{"type":"text","text":"look at this"}]}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok _ -> fail "expected an attachment not referenced by user_blocks to be rejected"
+  | Error err ->
+      check bool "orphan id is named" true (string_contains err {|"att-img"|})
+
+let test_parse_keeper_chat_stream_request_names_every_orphan_attachment () =
+  let body =
+    {|{"request_id":"kmsg-orphans","name":"luna","message":"hello","attachments":[{"id":"att-one","type":"image","name":"one.png","size":1,"mime_type":"image/png","data":"abc"},{"id":"att-two","type":"image","name":"two.png","size":1,"mime_type":"image/png","data":"def"}],"user_blocks":[{"type":"image","attachment_id":"att-two","name":"two.png","mime_type":"image/png","size":1}]}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok _ -> fail "expected the unreferenced attachment to be rejected"
+  | Error err ->
+      check bool "orphan id is named" true (string_contains err {|"att-one"|});
+      check bool "referenced id is not named" false
+        (string_contains err "att-two")
+
+let test_parse_keeper_chat_stream_request_accepts_duplicate_attachment_reference () =
+  let body =
+    {|{"request_id":"kmsg-dup-ref","name":"luna","message":"compare these","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,abc123"}],"user_blocks":[{"type":"image","attachment_id":"att-img","name":"screen.png","mime_type":"image/png","size":1024},{"type":"image","attachment_id":"att-img","name":"screen.png","mime_type":"image/png","size":1024}]}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok payload ->
+      check int "attachment preserved" 1 (List.length payload.attachments);
+      check int "both references kept" 2 (List.length payload.user_blocks)
+  | Error err -> fail ("expected a duplicate reference to parse: " ^ err)
+
+let test_parse_keeper_chat_stream_request_accepts_request_without_attachments () =
+  let body =
+    {|{"request_id":"kmsg-plain","name":"luna","message":"hello"}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok payload ->
+      check int "no attachments" 0 (List.length payload.attachments);
+      check int "no user blocks" 0 (List.length payload.user_blocks)
+  | Error err -> fail ("expected a plain request to parse: " ^ err)
+
+let test_keeper_chat_operation_input_rejects_orphan_attachment () =
+  let attachments =
+    [
+      {
+        K.id = "att-img";
+        att_type = "image";
+        name = "screen.png";
+        size = 1024;
+        mime_type = "image/png";
+        data = "data:image/png;base64,abc123";
+        width = None;
+        height = None;
+      };
+    ]
+  in
+  let input =
+    Keeper_chat_operation_payload.input_to_json ~message:"look at this"
+      ~user_blocks:[] ~turn_instructions:None ~surface_context:None ~attachments
+  in
+  match Keeper_chat_operation_payload.input_of_json input with
+  | Ok _ -> fail "expected an orphan attachment in a stored input to be rejected"
+  | Error err ->
+      check bool "orphan id is named" true (string_contains err {|"att-img"|})
+
+let test_keeper_chat_operation_input_accepts_referenced_attachment () =
+  let attachments =
+    [
+      {
+        K.id = "att-img";
+        att_type = "image";
+        name = "screen.png";
+        size = 1024;
+        mime_type = "image/png";
+        data = "data:image/png;base64,abc123";
+        width = None;
+        height = None;
+      };
+    ]
+  in
+  let user_blocks =
+    [
+      Keeper_multimodal_input.User_image
+        {
+          Keeper_multimodal_input.attachment_id = "att-img";
+          name = "screen.png";
+          mime_type = "image/png";
+          size = Some 1024;
+        };
+    ]
+  in
+  let input =
+    Keeper_chat_operation_payload.input_to_json ~message:"describe this"
+      ~user_blocks ~turn_instructions:None ~surface_context:None ~attachments
+  in
+  match Keeper_chat_operation_payload.input_of_json input with
+  | Ok decoded ->
+      check int "attachment preserved" 1 (List.length decoded.attachments);
+      check int "user block preserved" 1 (List.length decoded.user_blocks)
+  | Error err -> fail ("expected a referenced attachment to decode: " ^ err)
+
 let test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks () =
   let attachments =
     [
@@ -3442,6 +3557,21 @@ let () =
             test_parse_keeper_chat_stream_request_accepts_attachment_only_user_blocks;
           test_case "stream request rejects unknown user block type" `Quick
             test_parse_keeper_chat_stream_request_rejects_unknown_user_block_type;
+          test_case "stream request rejects orphan attachment" `Quick
+            test_parse_keeper_chat_stream_request_rejects_orphan_attachment;
+          test_case "stream request rejects orphan attachment with empty user blocks"
+            `Quick
+            test_parse_keeper_chat_stream_request_rejects_orphan_attachment_with_empty_user_blocks;
+          test_case "stream request names every orphan attachment" `Quick
+            test_parse_keeper_chat_stream_request_names_every_orphan_attachment;
+          test_case "stream request accepts duplicate attachment reference" `Quick
+            test_parse_keeper_chat_stream_request_accepts_duplicate_attachment_reference;
+          test_case "stream request accepts request without attachments" `Quick
+            test_parse_keeper_chat_stream_request_accepts_request_without_attachments;
+          test_case "chat operation input rejects orphan attachment" `Quick
+            test_keeper_chat_operation_input_rejects_orphan_attachment;
+          test_case "chat operation input accepts referenced attachment" `Quick
+            test_keeper_chat_operation_input_accepts_referenced_attachment;
           test_case "multimodal input converts user blocks to AGENT_CORE blocks" `Quick
             test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks;
           test_case "multimodal parse maps each kind to its constructor" `Quick

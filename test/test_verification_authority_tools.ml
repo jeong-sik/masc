@@ -200,6 +200,21 @@ let producer_playground (config : Workspace_core.config) producer_name =
   path
 ;;
 
+(* A workspace agent declares no sandbox profile, so its root is the
+   playground itself -- the same arm [VAT.create] takes for a producer with no
+   keeper meta. Writing here and then reading through the surface is what
+   proves the two agree on the root; a path this file invented on its own
+   would pass while the product looked somewhere else. *)
+let workspace_producer_playground (config : Workspace_core.config) producer_name =
+  let path =
+    Filename.concat
+      (Workspace_verification_store.project_root_of_base_path config.base_path)
+      (Playground_paths.bundle_root producer_name)
+  in
+  Fs_compat.mkdir_p path;
+  path
+;;
+
 (* The judge and producer share the descriptor-owned model surface. *)
 let test_schemas_are_the_descriptor_schemas () =
   with_surface (fun _config surface ->
@@ -364,7 +379,7 @@ let test_workspace_producer_gets_owned_read_surface () =
   let config = Workspace_core.default_config dir in
   ignore (Workspace_core.init config ~agent_name:(Some "test"));
   let producer_name = "workspace-producer" in
-  let playground = producer_playground config producer_name in
+  let playground = workspace_producer_playground config producer_name in
   let path = Filename.concat playground "evidence.txt" in
   Out_channel.with_open_text path (fun channel ->
     output_string channel "first line\nsecond line\n");

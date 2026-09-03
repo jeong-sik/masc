@@ -590,7 +590,14 @@ let handle_tool_execute_typed
              multi-stage call whose second stage is still [bash -c] has not
              left its shell behind because its first stage did.  Reading only
              the [Simple] arm and calling the other two lowered said the
-             opposite. *)
+             opposite.
+
+             Since #32662 no multi-stage call reaches here: [Argv] and
+             [Script] both lower to one [Simple]. The stage traversal is
+             {!Keeper_tooling.Shell_costume.ir_keeps_a_shell}'s answer for
+             the whole [Shell_ir.t] type, and only its own tests still take
+             it. Kept because the predicate is about the type, not about
+             which caller happens to be the last one standing. *)
           let lowered = not (Keeper_tooling.Shell_costume.ir_keeps_a_shell ir) in
           let costume_findings =
             Keeper_tool_execute_typed_input.hidden_script_findings

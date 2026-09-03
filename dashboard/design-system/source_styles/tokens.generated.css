@@ -354,7 +354,6 @@
   --shadow-panel: 0 2px 12px rgba(0, 0, 0, 0.6);
   --shadow-glow: 0 0 20px var(--accent-glow);
   --shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border-highlight);
-  --shadow-ring: inset 0 0 0 1px rgba(196, 162, 101, 0.25);  /* bonsai-only 1px ring (distinct from --shadow-inset) */
   --shadow-cmd-palette: 0 12px 40px rgb(0 0 0 / .6);  /* command palette modal — more diffuse than --shadow-3 (40px blur vs 32px) */
   --shadow-drawer-left: -8px 0 24px rgb(0 0 0 / .4);  /* right-anchored drawer — directional shadow casting toward main content */
   --focus-ring: 0 0 0 1px var(--brass-1), 0 0 0 3px rgb(var(--brass-glow) / .25);
@@ -549,7 +548,7 @@
   --accent-viscera: #c94a3a;
   --accent-bile: #6a7a3a;
   --accent-mold: #3a5a48;
-  --accent-brass: #968228;  /* bonsai brass differs from --brass-1 */
+  --accent-brass: #968228;  /* differs from --brass-1 */
   --accent-brass-dim: #6a5620;
   --accent-bone: #d8c8a0;
   --accent-ink: #3a2a5a;

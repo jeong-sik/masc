@@ -20,12 +20,25 @@
 # `Json_util.kind_name` call) is small enough that the inline copy
 # is "convenient" for an agent producing isolated files.
 #
-# Allowlisted files fall into two categories:
-#   1. SSOT definition itself (lib/core/json_util.ml).
-#   2. Sub-libraries whose `dune` declares yojson-only dependencies
-#      (RFC-0056 leaf-isolation pattern).  Adding `masc_core` here
-#      would break the isolation invariant; the 9-line cost per
-#      file is the smaller trade-off.
+# The second category is gone. It read: sub-libraries whose `dune`
+# declares yojson-only dependencies cannot reach Json_util without
+# taking masc_core, so a copy each is the smaller trade-off. The
+# premise was right and the conclusion was not — the answer to a
+# library that cannot take masc_core is a dependency it can take.
+# `lib/shared_types/json_kind.ml` is that library, proposed in the
+# body of PR #16915 and in the comment on the copy that renamed
+# itself to slip this lint; it exists now, and every one of those
+# files reaches it.
+#
+# One entry of that category was also simply wrong: shared_audit's
+# dune has listed masc_core all along, so Json_util was always
+# reachable from it.
+#
+# What is left:
+#   1. The mapping itself (lib/shared_types/json_kind.ml).
+#   2. lib/json_field/json_field.ml, which is not a copy: it reports
+#      OCaml variant names, its .mli documents them, and its tests
+#      pin them.
 
 set -euo pipefail
 
@@ -35,18 +48,9 @@ cd "$(git rev-parse --show-toplevel)"
 # isolation), so reaching Json_util would mean adding masc_core and
 # breaking that invariant. Verified per dune, not assumed.
 ALLOWLIST=(
-  # SSOT definition — the canonical helper itself.
-  "lib/core/json_util.ml"
-
-  # masc_multimodal — (libraries shared_types unix yojson fs_compat
-  # digestif eio masc_random_id); no masc_core.
-  "lib/multimodal/payload.ml"
-  "lib/multimodal/artifact.ml"
-
-  # masc_ide and shared_audit — same leaf shape, same constraint. Both
-  # were invisible to this lint until it matched by shape.
-  "lib/ide/ide_annotation_types.ml"
-  "lib/shared_audit/envelope.ml"
+  # The mapping itself — a yojson-only leaf, so the libraries that keep
+  # RFC-0056 isolation reach it without taking masc_core.
+  "lib/shared_types/json_kind.ml"
 
   # json_field reports OCaml variant names rather than JSON type names
   # on purpose: its .mli documents got = "intlit" / "list" / "assoc"
@@ -104,7 +108,9 @@ if [[ $count -gt 0 ]]; then
   echo ""
   echo "Migration guide:"
   echo "  1. Delete the 9-line inline definition."
-  echo "  2. Replace each callsite: json_kind_name X  ->  Json_util.kind_name X"
+  echo "  2. Replace each callsite: json_kind_name X  ->  Json_kind.name X"
+  echo "     (or Json_util.kind_name X, which is the same mapping, where"
+  echo "      the library already takes masc_core)"
   echo "  3. If the file's library lacks masc_core, either:"
   echo "     - Add masc_core to its dune (lib/<sub>/dune) if isolation allows; or"
   echo "     - Add the file to the ALLOWLIST in this script with a one-line"

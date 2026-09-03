@@ -7,7 +7,16 @@
    arguments and hands them to Keeper_ask, which decides whether they make a
    question anyone could answer. *)
 
-open Mcp_tool_runtime_types
+(* The handlers read three things: who is asking, where the store lives, and
+   the raw arguments. The MCP server context also carries the session registry,
+   the server state, and a switch none of them touch, and the agent-core lane
+   has none of those to give -- so the handlers take the narrow record and each
+   lane adapts its own context at the call site. *)
+type context = {
+  config : Workspace.config;
+  agent_name : string;
+  arguments : Yojson.Safe.t;
+}
 
 let field key = function
   | `Assoc fields -> List.assoc_opt key fields

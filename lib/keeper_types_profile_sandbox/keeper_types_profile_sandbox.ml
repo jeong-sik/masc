@@ -94,6 +94,15 @@ let default_network_mode_for_profile = function
   | Remote_ssh -> Network_inherit
 ;;
 
+(* The observation-only gate fast path ({!Keeper_gate_readonly}) keys on this
+   predicate, so a new profile fails to compile here until a human decides
+   whether it is a disposable guest. *)
+let runs_in_disposable_guest = function
+  | Docker -> true
+  | Micro_vm -> true
+  | Remote_ssh -> false
+;;
+
 let backend_unimplemented_message profile =
   Printf.sprintf
     "sandbox_profile=%s has no runtime in this build; the call is refused \

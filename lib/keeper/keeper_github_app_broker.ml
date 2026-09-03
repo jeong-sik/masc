@@ -181,6 +181,10 @@ let stored_expiry ~config ~keeper_name =
   then None
   else (
     match Fs_compat.load_file path with
+    (* A file this cannot read has no timestamp to report. A cancelled read
+       has none either, but saying so as [None] tells the caller the file was
+       looked at and found wanting. *)
+    | exception (Eio.Cancel.Cancelled _ as error) -> raise error
     | exception _ -> None
     | content -> float_of_string_opt (String.trim content))
 ;;

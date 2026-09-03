@@ -1,4 +1,4 @@
-(** Live integration test: agent-sdk → llama-server (DashScope_3.5)
+(** Live integration test: agent-sdk → llama-server (Qwen3.5)
 
     Requires: llama-server running on 127.0.0.1:8085
     Run: LLAMA_LIVE_TEST=1 dune exec ./test/test_local_llm.exe
@@ -8,7 +8,7 @@ open Agent_core
 open Types
 
 let base_url = "http://127.0.0.1:8085"
-let local_model = "dashscope-3.5-35b-a3b-ud-q8-xl"
+let local_model = "qwen3.5-35b-a3b-ud-q8-xl"
 
 let provider_config =
   Llm_provider.Provider_config.make

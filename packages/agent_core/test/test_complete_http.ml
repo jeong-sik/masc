@@ -56,7 +56,7 @@ let openai_responses_tool_call_response () =
 ;;
 
 let ollama_tool_call_response () =
-  {|{"model":"dashscope-3:8b","done":true,"done_reason":"tool_calls",
+  {|{"model":"qwen3:8b","done":true,"done_reason":"tool_calls",
      "message":{"role":"assistant","content":"",
        "tool_calls":[
          {"function":{"index":0,"name":"get_temperature","arguments":{"city":"New York"}}},
@@ -1083,7 +1083,7 @@ let test_complete_tool_call_metrics () =
     let config =
       Provider_config.make
         ~kind:Provider_config.Ollama
-        ~model_id:"dashscope-3:8b"
+        ~model_id:"qwen3:8b"
         ~base_url:url
         ~request_path:"/api/chat"
         ~temperature:0.0
@@ -1104,7 +1104,7 @@ let test_complete_tool_call_metrics () =
       (match !tool_calls with
        | [ (provider, model_id, count) ] ->
          check string "provider" "ollama" provider;
-         check string "model" "dashscope-3:8b" model_id;
+         check string "model" "qwen3:8b" model_id;
          check int "tool call count" 2 count
        | _ -> fail "expected one tool-call metric");
       Eio.Switch.fail sw Exit

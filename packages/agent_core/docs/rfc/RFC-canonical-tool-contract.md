@@ -210,7 +210,7 @@ val tool_result_of_block : Types.content_block -> provider_tool_result option
 | **Ollama** | `backend_ollama.ml` | native-first, agent_core allocation fallback | tool-call 필터 후 위치 | `reasoning` 필드 |
 | **Streaming (전부)** | `streaming.ml` | native-first, agent_core allocation fallback | tool-call 필터 후 위치 | stream state에 누적된 thinking delta |
 
-> D5 표기 주의: `OpenAI_compat`은 **family(계열)이지 vendor가 아니다.** `Provider_kind.t = Anthropic \| Kimi \| OpenAI_compat \| Ollama \| Gemini \| Glm \| DashScope`이며 별도의 `OpenAI` variant는 없다(`provider_kind.mli` 확인). OpenAI와 일부 compat host가 이 variant를 공유하고, `Glm`/`Kimi`/`DashScope`는 별도다.
+> D5 표기 주의: `OpenAI_compat`은 **family(계열)이지 vendor가 아니다.** `Provider_kind.t = Anthropic \| Kimi \| OpenAI_compat \| Ollama \| Gemini \| Glm`이며 별도의 `OpenAI` variant는 없다(`provider_kind.mli` 확인). OpenAI와 일부 compat host가 이 variant를 공유하고, `Glm`/`Kimi`는 별도다.
 
 **구현/forward mapping:**
 - **OpenAI Responses API**: `Streaming.responses_sse_to_events`가 `function_call.call_id`를 tool identity로 보존하고, `output_index`를 구조적 route로 사용한다. `item_id`는 call identity가 아니다. id-less item이면 block start 전에 agent_core id를 발급한다.

@@ -149,7 +149,7 @@ let search_durable_facts
       { identity = Source_sha256 fact.source.sha256
       ; claim = fact.claim
       ; category = "fact"
-      ; basis = Keeper_memory_os_types.Observed
+      ; basis = Keeper_memory_os_types.Observed Keeper_memory_os_types.Transcript
       ; store = Source_bound_current
       })
       source_matched
@@ -476,6 +476,10 @@ type memory_write_error_kind =
   | Derivation_incomplete
   | Derivation_invalid
   | Derived_source_path_unsupported
+  | Board_ref_invalid
+  | Board_comment_without_post
+  | Board_ref_with_derivation_unsupported
+  | Board_ref_with_source_path_unsupported
   | Unsupported_derivation
   | Persistence_failed
   | Commit_receipt_inconsistent
@@ -488,6 +492,10 @@ let memory_write_error_kind_to_string = function
   | Derivation_incomplete -> "derivation_incomplete"
   | Derivation_invalid -> "derivation_invalid"
   | Derived_source_path_unsupported -> "derived_source_path_unsupported"
+  | Board_ref_invalid -> "board_ref_invalid"
+  | Board_comment_without_post -> "board_comment_without_post"
+  | Board_ref_with_derivation_unsupported -> "board_ref_with_derivation_unsupported"
+  | Board_ref_with_source_path_unsupported -> "board_ref_with_source_path_unsupported"
   | Unsupported_derivation -> "unsupported_derivation"
   | Persistence_failed -> "persistence_failed"
   | Commit_receipt_inconsistent -> "commit_receipt_inconsistent"
@@ -505,6 +513,10 @@ let class_of_memory_write_error_kind = function
   | Derivation_incomplete
   | Derivation_invalid
   | Derived_source_path_unsupported
+  | Board_ref_invalid
+  | Board_comment_without_post
+  | Board_ref_with_derivation_unsupported
+  | Board_ref_with_source_path_unsupported
   | Unsupported_derivation
   | Source_read_failed
       ( Keeper_memory_source_current.Source_path_rejected _
@@ -547,9 +559,36 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
       else Ok (Some path)
     | _ -> Error Source_path_invalid
   in
+  (* A Board reference is an observation source: the claim was read from a
+     post, optionally from one of its comments. The ids are parsed by the
+     Board's own grammar; whether the post still exists is not checked at
+     write time and no reader checks it yet (RFC-0402 piece 2). *)
+  let board_ref =
+    let optional_string key =
+      match Safe_ops.safe_member key args with
+      | `Null -> Ok None
+      | `String raw ->
+        let value = String.trim raw in
+        if String.equal value "" then Error Board_ref_invalid else Ok (Some value)
+      | _ -> Error Board_ref_invalid
+    in
+    match optional_string "board_post_id", optional_string "board_comment_id" with
+    | Error error, _ | _, Error error -> Error error
+    | Ok None, Ok None -> Ok None
+    | Ok None, Ok (Some _) -> Error Board_comment_without_post
+    | Ok (Some post_id), Ok comment_id ->
+      (match Keeper_memory_os_types.board_ref_of_ids ~post_id ~comment_id with
+       | Ok board -> Ok (Some board)
+       | Error _ -> Error Board_ref_invalid)
+  in
   let derivation =
     match Safe_ops.safe_member "rule_id" args, Safe_ops.safe_member "premise_ids" args with
-    | `Null, `Null -> Ok Keeper_memory_os_types.Observed
+    | `Null, `Null ->
+      (match board_ref with
+       | Ok (Some board) ->
+         Ok (Keeper_memory_os_types.Observed (Keeper_memory_os_types.Board board))
+       | Ok None | Error _ ->
+         Ok (Keeper_memory_os_types.Observed Keeper_memory_os_types.Transcript))
     | `String raw_rule_id, `List premise_values ->
       let rule_id = String.trim raw_rule_id in
       let rec premise_ids seen acc = function
@@ -577,18 +616,30 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
     | (`Null, _) | (_, `Null) -> Error Derivation_incomplete
     | _ -> Error Derivation_invalid
   in
-  match source_path, derivation with
-  | Error error_kind, _ | _, Error error_kind ->
+  match source_path, derivation, board_ref with
+  | Error error_kind, _, _ | _, Error error_kind, _ | _, _, Error error_kind ->
     Memory_write_invalid { error_kind; extras = [] }
-  | Ok source_path, Ok basis ->
+  | Ok source_path, Ok basis, Ok board_ref ->
     if
       Option.is_some source_path
       && (match basis with
-          | Keeper_memory_os_types.Observed -> false
+          | Keeper_memory_os_types.Observed _ -> false
           | Keeper_memory_os_types.Derived _ -> true)
     then
       Memory_write_invalid
         { error_kind = Derived_source_path_unsupported; extras = [] }
+    else if
+      Option.is_some board_ref
+      && (match basis with
+          | Keeper_memory_os_types.Observed _ -> false
+          | Keeper_memory_os_types.Derived _ -> true)
+    then
+      Memory_write_invalid
+        { error_kind = Board_ref_with_derivation_unsupported; extras = [] }
+    else if Option.is_some board_ref && Option.is_some source_path
+    then
+      Memory_write_invalid
+        { error_kind = Board_ref_with_source_path_unsupported; extras = [] }
     else if content = ""
     then Memory_write_invalid { error_kind = Content_empty; extras = [] }
     else
@@ -598,8 +649,11 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
       Memory_write_ok { body; source_path; basis }
 ;;
 
+(* The observed arms echo the stored wire shape; the derived arm reports a
+   count instead of the derivations. *)
 let memory_write_basis_receipt = function
-  | Keeper_memory_os_types.Observed -> `Assoc [ "kind", `String "observed" ]
+  | Keeper_memory_os_types.Observed _ as basis ->
+    Keeper_memory_os_types.basis_to_json basis
   | Keeper_memory_os_types.Derived derivations ->
     `Assoc
       [ "kind", `String "derived"

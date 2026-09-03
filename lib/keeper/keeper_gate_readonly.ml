@@ -6,7 +6,8 @@
     (config/prompts/judge.effect.md). For one closed class that question has
     a deterministic answer: a shell-less argv (no redirection, pipe, or
     command substitution is expressible) whose command is observation-only,
-    running inside the docker sandbox. Those requests are allowed without a
+    running inside a per-keeper disposable guest (docker container or
+    microvm). Those requests are allowed without a
     judgment call and without queueing; everything else — every write-capable
     command, every unknown command, every host-sandbox request, every
     non-tool_execute operation — falls through to the configured gate mode
@@ -14,7 +15,19 @@
 
     The tables are closed on purpose: admitting a command is a reviewed code
     change, not a configuration knob. When classification is uncertain the
-    answer is always [false] — the request goes to the configured path. *)
+    answer is always [false] — the request goes to the configured path.
+
+    The sandbox question is answered by the typed [sandbox_profile] the gate
+    request carries, through
+    [Keeper_types_profile_sandbox.runs_in_disposable_guest] — never by
+    comparing wire strings. Only per-keeper disposable guests qualify. A
+    microvm guest runs its own Linux kernel behind the hypervisor with
+    --cap-drop ALL, --read-only and Network_none by default, and the exec
+    shim spawns the payload with [Unix.execvpe] — argv, no shell — so the
+    premise "shell-less observation-only argv inside a disposable guest"
+    holds at least as strongly as under docker. Remote_ssh is transport-only
+    (its container knobs are not reproduced and the network is inherited),
+    so it stays with the judge. *)
 
 (* ── Command tables ──────────────────────────────────────────────────── *)
 
@@ -122,8 +135,53 @@ let classify_argv argv =
 
 (* ── Gate request decoding ───────────────────────────────────────────── *)
 
+(* ── Script→argv equivalence (RFC-0404) ─────────────────────────────── *)
+
+(* Characters a shell could act on. A script line carrying none of them has
+   no quoting, expansion, redirection, or composition, so its whitespace
+   split is exactly the argv the shell would hand the command — and since
+   the tool still executes the script through a shell, that identity is
+   what makes classifying the split as safe as classifying a real array.
+   Anything else — quotes, a pipe, command substitution, a second line —
+   stays with the judge.
+
+   A tab is on the list even though it quotes nothing: the shell's field
+   splitting treats it as a word boundary, so a tab can split one token of
+   ours into two of the shell's — and the flag guards below examine whole
+   tokens. "sed -e\t-i s/a/b/ f" classifies as ["-e\t-i"] (not in-place,
+   observation) while the shell executes ["-e"; "-i"] (in-place write). A
+   tab anywhere moves the whole line to the judge; the same reasoning
+   closes the bracket of a character class glob, which also reshapes argv
+   when a matching file exists. Blocking the characters — rather than
+   splitting on them ourselves — is also the only choice that holds under
+   an inherited non-default IFS in the executing environment: we cannot
+   know which separators that shell would use, so the line keeps its
+   judgment instead. *)
+let shell_primitive_chars =
+  [ ';'; '|'; '&'; '>'; '<'; '$'; '`'; '\\'
+  ; '('; ')'; '{'; '}'; '*'; '?'; '~'; '#'
+  ; '\''; '"'; '\t'; '['
+  ]
+;;
+
+(* [Some argv] only when the script line is provably equivalent to that
+   argv: single line, no shell primitive anywhere, at least one token. The
+   argv table above then decides; it does not decide here. *)
+let script_argv_equivalent (script : string) : string list option =
+  if String.contains script '\n'
+     || String.contains script '\r'
+     || List.exists (fun c -> String.contains script c) shell_primitive_chars
+  then None
+  else
+    let argv = List.filter (fun t -> t <> "") (String.split_on_char ' ' script) in
+    if argv = [] then None else Some argv
+;;
+
 (* Mirrors [Keeper_tool_execute_runtime.execute_gate_input]: argv lives
-   under the nested [input], the sandbox fields sit at the top level. *)
+   under the nested [input]. The sandbox labels that sit at the top level of
+   the same envelope are display/audit data only — the sandbox decision
+   reads the typed [sandbox_profile] the request carries, never these
+   strings. *)
 let argv_of_gate_input input =
   match input with
   | `Assoc fields ->
@@ -137,19 +195,16 @@ let argv_of_gate_input input =
               items
           in
           if List.length strings = List.length items then Some strings else None
-        | _ -> None)
+        | _ ->
+          (* Keepers also observe through one-line shell scripts. A line
+             with no shell primitive splits into exactly the argv above, so
+             it answers to the same table; a script the equivalence cannot
+             see whole returns [None] and the request keeps its judgment. *)
+          (match List.assoc_opt "script" inner with
+           | Some (`String script) -> script_argv_equivalent script
+           | _ -> None))
      | _ -> None)
   | _ -> None
-;;
-
-let docker_sandbox input =
-  match input with
-  | `Assoc fields ->
-    (match (List.assoc_opt "sandbox_profile" fields, List.assoc_opt "sandbox_target" fields) with
-     | Some (`String profile), Some (`String target) ->
-       String.equal profile "docker" && String.starts_with ~prefix:"docker" target
-     | _ -> false)
-  | _ -> false
 ;;
 
 (* ── network_read ────────────────────────────────────────────────────── *)
@@ -185,9 +240,11 @@ let network_capability_of_gate_input input =
   | _ -> None
 ;;
 
-let observation_only_request ~operation ~input =
+let observation_only_request ~operation ~sandbox_profile ~input =
   (String.equal operation "tool_execute"
-   && docker_sandbox input
+   && (match sandbox_profile with
+       | Some profile -> Keeper_types_profile_sandbox.runs_in_disposable_guest profile
+       | None -> false)
    && (match argv_of_gate_input input with
        | Some argv -> classify_argv argv
        | None -> false))

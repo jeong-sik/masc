@@ -294,6 +294,7 @@
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
   test_keeper_wake_turn_context
+  test_keeper_last_turn_stop
   test_keeper_unified_verification_surface
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
@@ -636,6 +637,7 @@
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
   test_keeper_wake_turn_context
+  test_keeper_last_turn_stop
   test_keeper_unified_verification_surface
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
@@ -2265,8 +2267,6 @@
 
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
 
-(include stanzas/test_json_schema_shared_defs.inc)
-
 (include stanzas/test_keeper_tool_plan_executor.inc)
 (include stanzas/test_keeper_tool_progress_identity.inc)
 
@@ -2927,6 +2927,11 @@
  (name test_keeper_vision_tool)
  (modules test_keeper_vision_tool)
  (libraries masc_test_deps masc.runtime))
+
+(test
+ (name test_keeper_image_dimensions)
+ (modules test_keeper_image_dimensions)
+ (libraries alcotest masc))
 
 (test
  (name test_keeper_vision_ingest)
@@ -3633,7 +3638,9 @@
   test_keeper_multi_collaboration_acceptance.py
   ../scripts/harness/workload/keeper_multi_collaboration_acceptance.py
   ../scripts/fixtures/keeper-multi-collaboration/missions.json
-  ../config/tools/masc_keeper_up.toml)
+  ../config/tools/masc_keeper_up.toml
+  ../lib/server/server_routes_http_routes_dashboard.ml
+  ../lib/keeper/keeper_tool_approval_mode.ml)
  (action
   (run python3 %{dep:test_keeper_multi_collaboration_acceptance.py})))
 
@@ -4179,6 +4186,8 @@
 
 (include stanzas/test_mcp_client.inc)
 
+(include stanzas/test_keeper_identity_tool_allow.inc)
+(include stanzas/test_tool_name_prefix_boundary.inc)
 (include stanzas/test_keeper_identity_tools.inc)
 
 (include stanzas/test_keeper_identity_gate.inc)

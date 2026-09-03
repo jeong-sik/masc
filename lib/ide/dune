@@ -18,6 +18,7 @@
   unix
   eio
   yojson
+  shared_types
   uuidm
   fs_compat
   masc.dated_jsonl

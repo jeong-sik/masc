@@ -249,3 +249,12 @@ val quarantine_undecodable_for_keepers_dir
   -> now:float
   -> unit
   -> (boot_reconcile_outcome, string) result
+
+(** How the basis of a claim seen again combines with the stored one: an
+    observation outranks a derivation, a Board reference outranks the
+    transcript, and two Board references keep the first. Pure; exposed so the
+    rule is pinned by a test. *)
+val merge_basis
+  :  Keeper_memory_os_types.basis
+  -> Keeper_memory_os_types.basis
+  -> Keeper_memory_os_types.basis

@@ -41,7 +41,7 @@ let test_incomplete_cache_pricing_remains_declared () =
   Alcotest.(check bool)
     "base price remains observable without inventing cache multipliers"
     true
-    (match Llm_provider.Pricing.pricing_for_model_opt "dashscope-3.5-35b-a3b" with
+    (match Llm_provider.Pricing.pricing_for_model_opt "qwen3.5-35b-a3b" with
      | Some
          { input_per_million = 0.0
          ; output_per_million = 0.0

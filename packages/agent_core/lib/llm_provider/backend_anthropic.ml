@@ -277,8 +277,7 @@ let build_request_payload
        | Provider_config.OpenAI_compat
        | Provider_config.Ollama
        | Provider_config.Gemini
-       | Provider_config.Glm
-       | Provider_config.DashScope -> Capabilities.default_capabilities)
+       | Provider_config.Glm -> Capabilities.default_capabilities)
   in
   (match request_mode, config.seed with
    | Completion _, Some _ ->
@@ -315,8 +314,7 @@ let build_request_payload
     | Provider_config.OpenAI_compat
     | Provider_config.Ollama
     | Provider_config.Gemini
-    | Provider_config.Glm
-    | Provider_config.DashScope ->
+    | Provider_config.Glm ->
       invalid_arg
         (Printf.sprintf
            "Backend_anthropic.build_request: unsupported provider kind %s"
@@ -349,8 +347,7 @@ let build_request_payload
     | Provider_config.OpenAI_compat
     | Provider_config.Ollama
     | Provider_config.Gemini
-    | Provider_config.Glm
-    | Provider_config.DashScope ->
+    | Provider_config.Glm ->
       invalid_arg
         (Printf.sprintf
            "Backend_anthropic.build_request: unsupported provider kind %s"
@@ -558,8 +555,7 @@ let nonexact_anthropic_thinking_control (config : Provider_config.t) =
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama
   | Provider_config.Gemini
-  | Provider_config.Glm
-  | Provider_config.DashScope -> None
+  | Provider_config.Glm -> None
 ;;
 
 let validate_nonexact_thinking_controls (config : Provider_config.t) =
@@ -579,8 +575,7 @@ let validate_nonexact_thinking_controls (config : Provider_config.t) =
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama
   | Provider_config.Gemini
-  | Provider_config.Glm
-  | Provider_config.DashScope -> Ok ()
+  | Provider_config.Glm -> Ok ()
 ;;
 
 let build_request_artifact ?stream ~config ~messages ?tools () =
@@ -612,8 +607,7 @@ let build_count_tokens_request ~config ~messages ?tools () =
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama
   | Provider_config.Gemini
-  | Provider_config.Glm
-  | Provider_config.DashScope ->
+  | Provider_config.Glm ->
     invalid_arg
       ("Backend_anthropic.build_count_tokens_request: Anthropic-compatible Messages "
        ^ "provider required")

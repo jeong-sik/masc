@@ -60,7 +60,7 @@ let sandbox_target_label = function
 
 (* The Gate operation name this runtime submits under. Shared with the replay
    path so the two cannot drift apart into an unsupported-replay repair. *)
-let gate_operation = "tool_execute"
+let gate_operation = Keeper_gate.tool_execute_gate_operation
 
 let execute_gate_input ~input ~cwd ~sandbox_profile ~sandbox_target =
   `Assoc
@@ -179,16 +179,9 @@ end
    [Keeper_tool_execute_input] (godfile decomp). *)
 let assoc_upsert = Keeper_tool_execute_input.assoc_upsert
 let typed_input_command_text = Keeper_tool_execute_input.typed_input_command_text
-let typed_input_has_env = Keeper_tool_execute_input.typed_input_has_env
 let typed_input_timeout_sec = Keeper_tool_execute_input.typed_input_timeout_sec
 let typed_input_timeout_budget = Keeper_tool_execute_input.typed_input_timeout_budget
 let typed_validation_error_text = Keeper_tool_execute_input.typed_validation_error_text
-
-let typed_input_env
-      ({ env; _ } : Keeper_tool_execute_typed_input.execute_input)
-  =
-  env
-;;
 
 (* Backend target helpers for typed Shell IR dispatch. *)
 let guest_sandbox_target = Keeper_sandbox_shell_ir_target.guest_target
@@ -285,71 +278,50 @@ let handle_tool_execute_typed
                    ~expected:sandbox_profile
                    ~actual:Remote_ssh)
           | Runtime binding ->
-            if typed_input_has_env input
-            then
-              Error
-                (Keeper_sandbox_shell_ir_target.target_error
-                   "typed Shell IR guest dispatch does not support env yet")
-            else
-              guest_sandbox_target
-                ~binding
-                ~meta
-                ~cwd
-                ~timeout_sec
-                ()
-              |> Result.map (fun dispatch -> `Guest dispatch)
+            guest_sandbox_target
+              ~binding
+              ~meta
+              ~cwd
+              ~timeout_sec
+              ()
+            |> Result.map (fun dispatch -> `Guest dispatch)
         in
         let dispatch_sandbox =
           match resolved_dispatch with
           | Error _ as error -> error
           | Ok `Remote_ssh ->
             (* Host identity projection is deliberately absent: the remote
-               shim synthesizes its own minimal environment and receives only
-               endpoint-allowlisted typed entries. The existing typed-env
-               secret check still applies before any transport is created. *)
+               shim synthesizes its own minimal environment. *)
             (match
-               Keeper_github_identity.validate_local_tool_env
-                 (typed_input_env input)
+               Keeper_sandbox_shell_ir_target.ssh_target
+                 ~base_path:config.base_path
+                 ~meta
+                 ~timeout_sec
+                 ()
              with
-             | Error err ->
-               Error
-                 (Keeper_sandbox_shell_ir_target.target_error
-                    ~fields:
-                      [ "requested_sandbox", `String "remote_ssh"
-                      ; "sandbox_profile", `String "remote_ssh"
-                      ]
-                    err)
-             | Ok () ->
-               (match
-                  Keeper_sandbox_shell_ir_target.ssh_target
-                    ~base_path:config.base_path
-                    ~meta
-                    ~timeout_sec
-                    ()
-                with
-                | Error error -> Error error
-                | Ok dispatch ->
-                  let endpoint_fields =
-                    match dispatch.target with
-                    | Masc_exec.Sandbox_target.Ssh { endpoint; _ } ->
-                      [ "remote_endpoint", `String endpoint.name
-                      ; "remote_host", `String endpoint.host
-                      ]
-                    | Host | Docker _ | Micro_vm _ | Delegated _ -> []
-                  in
-                  Ok
-                    { sandbox = dispatch.target
-                    ; sandbox_profile = Remote_ssh
-                    ; fields =
-                        [ "requested_sandbox", `String "remote_ssh"
-                        ; "via", `String "remote_ssh"
-                        ; "sandbox_profile", `String "remote_ssh"
-                        ]
-                        @ endpoint_fields
-                    ; base_host_env = None
-                    ; github_secret_files = (fun () -> Ok [])
-                    ; cleanup = Fun.id
-                    }))
+             | Error error -> Error error
+             | Ok dispatch ->
+               let endpoint_fields =
+                 match dispatch.target with
+                 | Masc_exec.Sandbox_target.Ssh { endpoint; _ } ->
+                   [ "remote_endpoint", `String endpoint.name
+                   ; "remote_host", `String endpoint.host
+                   ]
+                 | Host | Docker _ | Micro_vm _ | Delegated _ -> []
+               in
+               Ok
+                 { sandbox = dispatch.target
+                 ; sandbox_profile = Remote_ssh
+                 ; fields =
+                     [ "requested_sandbox", `String "remote_ssh"
+                     ; "via", `String "remote_ssh"
+                     ; "sandbox_profile", `String "remote_ssh"
+                     ]
+                     @ endpoint_fields
+                 ; base_host_env = None
+                 ; github_secret_files = (fun () -> Ok [])
+                 ; cleanup = Fun.id
+                 })
           (* The factory result is the sole route authority. Its frozen guest
              profile selects both the concrete target and the Gate label, so
              a later meta snapshot cannot split execution from observability. *)
@@ -411,32 +383,6 @@ let handle_tool_execute_typed
         (* Lower the validated typed input exactly once. The resulting Shell IR
            is the neutral dispatch representation; it carries no product or
            inferred authorization semantics. *)
-        (* A Docker stage writes redirect paths as the container sees them.
-           The two roots below are what turns one of those into a path this
-           process can open, and they hold only inside the shared mount. On
-           the host the command's namespace is already this one. *)
-        let redirect_namespace =
-          match dispatch_sandbox with
-          | Masc_exec.Sandbox_target.Host ->
-            Keeper_tool_execute_typed_input.Command_filesystem
-          | Masc_exec.Sandbox_target.Ssh _
-          | Masc_exec.Sandbox_target.Micro_vm _ ->
-            (* No shared mount maps the endpoint's tree onto this host --
-               an OpenSSH host's, or a guest's work volume -- so a redirect
-               target stays in the command's namespace and dispatch refuses
-               to open it here rather than touching a same-named local
-               file. *)
-            Keeper_tool_execute_typed_input.Command_filesystem
-          | Masc_exec.Sandbox_target.Docker _ ->
-            Keeper_tool_execute_typed_input.Bound_mount
-              { visible_root = Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
-              ; host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta
-              }
-          | Masc_exec.Sandbox_target.Delegated _ ->
-            (* A delegated stage never opens a redirect file (dispatch
-               refuses), so it needs no mount binding. *)
-            Keeper_tool_execute_typed_input.Command_filesystem
-        in
         (* RFC tools-as-shell-commands: the one conversion point.  Stages
            whose program is the bare reserved word [masc] become delegated
            tool calls before dispatch.  Callers without a turn context
@@ -447,7 +393,6 @@ let handle_tool_execute_typed
           match
             Keeper_tool_execute_typed_input.to_shell_ir
               ~sandbox:dispatch_sandbox
-              ~namespace:redirect_namespace
               input
           with
           | Error e ->
@@ -520,6 +465,7 @@ let handle_tool_execute_typed
           ; causal_context = Option.map (fun current -> current ()) gate_context
           ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
           ; continuation_channel
+          ; sandbox_profile = Some dispatch_bundle.sandbox_profile
           }
         in
         let gate_decision =

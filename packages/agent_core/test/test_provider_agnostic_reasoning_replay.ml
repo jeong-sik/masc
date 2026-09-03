@@ -986,14 +986,6 @@ let test_provider_replay_policy_matrix_pinned () =
        ~model_id:"gpt-5.4"
        ~base_url:"https://api.openai.com"
        ());
-  check
-    "dashscope"
-    Reasoning_replay_contract.No_replay
-    (cfg
-       ~kind:Provider_config.DashScope
-       ~model_id:"qwen-max"
-       ~base_url:"https://dashscope.aliyuncs.com"
-       ());
   List.iter
     (fun model_id ->
        let base_url = "https://api.z.ai" in

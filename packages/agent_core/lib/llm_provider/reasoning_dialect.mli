@@ -24,7 +24,6 @@ type toggle_wire =
   | Chat_template_token
   | Ollama_think
   | Reasoning_effort
-  | Enable_thinking
   | Anthropic_thinking
   | Gemini_thinking_config
 
@@ -162,8 +161,6 @@ val chat_template_kwargs_preserve_field
   -> preserve_thinking:bool option
   -> bool option
 
-val top_level_preserve_field : t -> preserve_thinking:bool option -> bool option
-
 val ignores_sampling_param
   :  t
   -> enable_thinking:bool option
@@ -180,7 +177,12 @@ val ignores_sampling_param
     {!Capabilities.preserve_thinking_control_format} is
     [Thinking_object_clear_thinking]: those rows have no ordinary thinking
     control yet still accept a provider [thinking] object. The caller resolves
-    it from that typed capability, never from a provider identity. *)
+    it from that typed capability, never from a provider identity.
+
+    On the categorical wire ([toggle_wire = Reasoning_effort]) an explicit
+    [enable_thinking = Some false] is rendered as [reasoning_effort = "none"]
+    in place of the caller's effort ({!Reasoning_effort.under_explicit_toggle});
+    that wire has no other off switch. *)
 val request_control_fields
   :  openai_request_wire
   -> t

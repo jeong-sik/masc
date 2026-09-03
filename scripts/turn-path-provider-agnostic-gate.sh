@@ -43,7 +43,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # default that names them. If either ever appears in turn-path *logic*, the
 # typed-capability rule still applies, but this gate will not be what catches
 # it.
-VENDOR_PATTERN='glm|deepseek|kimi|anthropic|openai|gemini|ollama|minimax|mimo|qwen|dashscope|zai'
+VENDOR_PATTERN='glm|deepseek|kimi|anthropic|openai|gemini|ollama|minimax|mimo|qwen|zai'
 
 # Turn-path surface. Globs, not a fixed file list, so a new file that joins the
 # turn path is covered the moment it is named like its siblings.

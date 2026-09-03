@@ -855,7 +855,8 @@ let test_deferred_payload_states_the_replay_contract () =
   let payload =
     Masc.Keeper_gate.decision_to_yojson
       (Masc.Keeper_gate.Deferred
-         { approval_id = "appr_test"
+         { operation = Masc.Keeper_gate.network_read_gate_operation
+         ; approval_id = "appr_test"
          ; reason = Masc.Keeper_gate.Judge_requested
          ; audit_receipts = []
          })
@@ -878,6 +879,36 @@ let test_deferred_payload_states_the_replay_contract () =
     "on_approve tells the model not to resubmit"
     true
     (Astring.String.is_infix ~affix:"Do not resubmit" on_approve)
+;;
+
+(* The mirror case: over an operation the replay engine does not recognize,
+   the same wording promises a replay that never comes and starves the
+   approved effect (#32668). The wording must instead hand the model the
+   one-shot authorization it will actually receive. *)
+let test_deferred_payload_promises_only_what_replay_spends () =
+  let payload =
+    Masc.Keeper_gate.decision_to_yojson
+      (Masc.Keeper_gate.Deferred
+         { operation = "unreplayed_operation"
+         ; approval_id = "appr_unreplayed"
+         ; reason = Masc.Keeper_gate.Judge_requested
+         ; audit_receipts = []
+         })
+  in
+  let open Yojson.Safe.Util in
+  let on_approve =
+    match payload |> member "on_approve" with
+    | `String text -> text
+    | _ -> Alcotest.fail "deferred payload has no on_approve string"
+  in
+  Alcotest.(check bool)
+    "unrecognized operation is not promised a host replay"
+    false
+    (Astring.String.is_infix ~affix:"host replays this exact call" on_approve);
+  Alcotest.(check bool)
+    "unrecognized operation is told how to spend the approval"
+    true
+    (Astring.String.is_infix ~affix:"one-shot authorization" on_approve)
 ;;
 
 let () =
@@ -985,6 +1016,10 @@ let () =
             "deferred payload states the replay contract"
             `Quick
             test_deferred_payload_states_the_replay_contract
+        ; Alcotest.test_case
+            "deferred payload promises only what replay spends"
+            `Quick
+            test_deferred_payload_promises_only_what_replay_spends
         ] )
     ]
 ;;

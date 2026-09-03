@@ -1,22 +1,19 @@
 /**
  * MASC Cockpit Design System — Codegen Driver
  *
- * Reads source.ts, emits six artifacts:
+ * Reads source.ts, emits four artifacts:
  *   1. dashboard/design-system/source_styles/tokens.generated.css
  *   2. dashboard/src/styles/tokens.generated.css      (Tailwind v4 @theme)
  *   3. dashboard/src/styles/tokens.generated.ts       (Preact typed)
- *   4. dashboard_bonsai/src/tokens.ml + tokens.mli    (OCaml polyvar)
- *   5. dashboard/design-system/tokens/build/tokens.json (DTCG 2025.10)
- *   6. dashboard_bonsai/static/colors_and_type.generated.css (Bonsai naming)
+ *   4. dashboard/design-system/tokens/build/tokens.json (DTCG 2025.10)
  *
  * Run:  pnpm tokens:build  (from dashboard/)
  *
  * source.ts is the SSOT for the design-system preview surface; the
  * legacy hand-written tokens.css / semantic.css / colors_and_type.css
  * have been deleted (Wave 2 preview swap). The Tailwind v4 entry
- * (dashboard/src/styles/tokens.generated.css) and the Bonsai outputs
- * are still consumed alongside their hand-written counterparts and
- * follow on a later wave.
+ * (dashboard/src/styles/tokens.generated.css) is still consumed
+ * alongside its hand-written counterparts and follows on a later wave.
  */
 
 import { writeFileSync, mkdirSync } from "node:fs";
@@ -35,10 +32,7 @@ const OUT = {
   previewCss: resolve(REPO, "dashboard/design-system/source_styles/tokens.generated.css"),
   tailwindCss: resolve(REPO, "dashboard/src/styles/tokens.generated.css"),
   preactTs: resolve(REPO, "dashboard/src/styles/tokens.generated.ts"),
-  bonsaiMl: resolve(REPO, "dashboard_bonsai/src/tokens.ml"),
-  bonsaiMli: resolve(REPO, "dashboard_bonsai/src/tokens.mli"),
   dtcgJson: resolve(REPO, "dashboard/design-system/tokens/build/tokens.json"),
-  bonsaiCss: resolve(REPO, "dashboard_bonsai/static/colors_and_type.generated.css"),
 } as const;
 
 const HEADER_TEXT =
@@ -46,7 +40,6 @@ const HEADER_TEXT =
 
 const cssHeader = `/* ${HEADER_TEXT} */\n\n`;
 const tsHeader = `// ${HEADER_TEXT}\n\n`;
-const mlHeader = `(* ${HEADER_TEXT} *)\n\n`;
 
 function ensureDir(path: string): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -203,148 +196,7 @@ function buildPreactTs(): string {
   return `${tsHeader}export const TOKENS = {\n${entries.join(",\n")},\n} as const;\n\nexport type TokenName = keyof typeof TOKENS;\nexport type TokenVar = typeof TOKENS[TokenName]["name"];\n\n/** \`var(--token-name)\` for the given token. */\nexport const tokenVar = (k: TokenName): string => \`var(\${TOKENS[k].name})\`;\n`;
 }
 
-// 4. OCaml polyvar — tokens.ml + tokens.mli
-//    Pattern: `type semantic = [\`Color_bg_page | ...]` plus `var_of`
-//    returning the `var(--name)` string.
-//    polyvar tag rules: identifier-like, must start with [A-Z]; we
-//    transform `bg-0` -> `Bg_0` and `color-bg-page` -> `Color_bg_page`.
-function tokenToPolyvarTag(name: string): string {
-  return name
-    .replace(/[^a-zA-Z0-9]/g, "_")
-    .replace(/^([a-z])/, (_, c: string) => c.toUpperCase())
-    .replace(/^([0-9])/, "_$1"); // start with letter; if name starts with digit, prepend _
-}
-
-function buildBonsaiMli(): string {
-  const all: TokenBase[] = [...source.raw, ...source.semantic];
-  const seen = new Set<string>();
-  const dedup = all.filter((tk) => {
-    if (seen.has(tk.name)) return false;
-    seen.add(tk.name);
-    return true;
-  });
-  const constructors = dedup.map((tk) => `  | \`${tokenToPolyvarTag(tk.name)}`);
-  return `${mlHeader}(** MASC Cockpit design tokens — strongly-typed accessors for ppx_css.
-
-    Use [var_of] to obtain a CSS [var(--...)] reference:
-    {[
-      let style = [%css {|
-        background: %{Tokens.var_of \`Color_bg_page};
-        color:      %{Tokens.var_of \`Color_fg_primary};
-      |}]
-    ]}
-*)
-
-type semantic =
-  [
-${constructors.join("\n")}
-  ]
-
-(** Returns ["var(--name)"] for the given token. *)
-val var_of : semantic -> string
-
-(** Raw CSS variable name without the leading [--]. *)
-val name_of : semantic -> string
-`;
-}
-
-function buildBonsaiMl(): string {
-  const all: TokenBase[] = [...source.raw, ...source.semantic];
-  const seen = new Set<string>();
-  const dedup = all.filter((tk) => {
-    if (seen.has(tk.name)) return false;
-    seen.add(tk.name);
-    return true;
-  });
-  const constructors = dedup.map((tk) => `  | \`${tokenToPolyvarTag(tk.name)}`);
-  const arms = dedup.map((tk) => `  | \`${tokenToPolyvarTag(tk.name)} -> ${JSON.stringify(tk.name)}`);
-  return `${mlHeader}type semantic =
-  [
-${constructors.join("\n")}
-  ]
-
-let name_of = function
-${arms.join("\n")}
-
-let var_of t = "var(--" ^ name_of t ^ ")"
-`;
-}
-
-// 6. Bonsai-side colors_and_type.generated.css — uses Bonsai naming
-//    (--bg-deep / --accent-brass / --space-1 / --status-ok). Two themes
-//    only per user decision: dark-fantasy (canonical, on :root) + paper
-//    (light, on [data-theme="paper"]). cyberpunk / terminal / parchment
-//    are intentionally archived (Wave 2 Friend-2C will move them to
-//    static/themes/archive/).
-//
-//    Layout per :root block:
-//      1. Bonsai theme-invariant raw (radius, space, scrollbar)
-//      2. Bonsai-distinct font stacks (per SPEC §6 divergence)
-//      3. Bonsai theme-invariant role defaults (shadow-card, etc.)
-//      4. dark-fantasy theme tokens (bg-deep / text-* / accent-* / status-* / t-*)
-//      5. Bonsai semantic aliases (color-bg-page → var(--bg-deep), …)
-//
-//    The [data-theme="paper"] block contains the paper raw palette
-//    (paper-N / ink-N / forest / brass / brick / *-fill) followed by
-//    the Bonsai-name overrides (--bg-deep: var(--paper) etc.).
-function buildBonsaiColorsAndTypeCss(): string {
-  const rawByName = new Map(source.raw.map((tk) => [tk.name, tk] as const));
-  const semanticByName = new Map(source.semantic.map((tk) => [tk.name, tk] as const));
-
-  const lookupOrThrow = (
-    name: string, where: Map<string, TokenBase>, label: string,
-  ): TokenBase => {
-    const tk = where.get(name);
-    if (!tk) throw new Error(`bonsai codegen: ${label} token --${name} not found in source.ts`);
-    return tk;
-  };
-
-  const invariantRaw = source.bonsai.invariantRawNames.map(
-    (n) => lookupOrThrow(n, rawByName, "raw"),
-  );
-  const invariantRole = source.bonsai.invariantRoleNames.map(
-    (n) => lookupOrThrow(n, semanticByName, "role"),
-  );
-
-  const darkFantasy = source.themes.find((th) => th.id === "dark-fantasy");
-  const paper = source.themes.find((th) => th.id === "paper");
-  if (!darkFantasy) throw new Error("bonsai codegen: dark-fantasy theme missing");
-  if (!paper) throw new Error("bonsai codegen: paper theme missing");
-
-  const renderSection = (label: string, toks: ReadonlyArray<TokenBase>): string => {
-    if (toks.length === 0) return "";
-    const body = toks.map(renderTokenLine).join("\n");
-    return `  /* ── ${label} ── */\n${body}\n`;
-  };
-
-  // :root + [data-theme="dark-fantasy"] — canonical block
-  const rootSelector = `:root,\n[data-theme="dark-fantasy"]`;
-  const rootBody = [
-    "  color-scheme: dark;",
-    renderSection("Theme-invariant raw (radius, space, scrollbar)", invariantRaw),
-    renderSection("Font stacks (bonsai divergence — JetBrains Mono / Cinzel)",
-      [...source.bonsai.fontOverrides]),
-    renderSection("Theme-invariant role defaults (shadows)", invariantRole),
-    renderSection("Dark Fantasy raw (visceral · decay-forward)", [...darkFantasy.tokens]),
-    renderSection("Bonsai semantic aliases (SPEC v0.1 §3.1-3.5)",
-      [...source.bonsai.aliases]),
-  ].filter((s) => s.length > 0).join("\n");
-  const rootBlock = `${rootSelector} {\n${rootBody}}\n`;
-
-  // [data-theme="paper"] — light theme
-  const paperOverrides = source.bonsai.themeOverrides.paper ?? [];
-  const paperBody = [
-    "  color-scheme: light;",
-    renderSection("Paper / Ink raw palette", [...paper.tokens]),
-    renderSection("Bonsai-name overrides (paper colorway)",
-      [...paperOverrides]),
-  ].filter((s) => s.length > 0).join("\n");
-  const paperBlock = `[data-theme="paper"] {\n${paperBody}}\n`;
-
-  return `${cssHeader}${rootBlock}\n${paperBlock}`;
-}
-
-// 5. DTCG 2025.10 — design-tokens-format JSON
+// 4. DTCG 2025.10 — design-tokens-format JSON
 //    spec: design-tokens.github.io/community-group/format
 function dtcgKindToType(kind: TokenBase["kind"]): string {
   switch (kind) {
@@ -419,10 +271,7 @@ function main(): void {
   writeFile(OUT.previewCss, buildPreviewCss());
   writeFile(OUT.tailwindCss, buildTailwindCss());
   writeFile(OUT.preactTs, buildPreactTs());
-  writeFile(OUT.bonsaiMli, buildBonsaiMli());
-  writeFile(OUT.bonsaiMl, buildBonsaiMl());
   writeFile(OUT.dtcgJson, buildDtcgJson());
-  writeFile(OUT.bonsaiCss, buildBonsaiColorsAndTypeCss());
   console.log("done");
 }
 

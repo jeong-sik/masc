@@ -33,3 +33,13 @@ val hints_visible_of_doc : Keeper_toml_loader.toml_doc -> bool option
 val hints_visible : base_path:string -> bool option
 (** [tui].hints_visible: whether footers spell their key hints. [None]
     where the file, the table or the key is absent -- reads as "yes". *)
+
+val coalesce_queued_input_of_doc : Keeper_toml_loader.toml_doc -> bool option
+val coalesce_queued_input : base_path:string -> bool option
+(** [tui].coalesce_queued_input: whether a new line joins the line already
+    waiting for the same Keeper instead of queueing behind it. [None] where
+    the file, the table or the key is absent -- reads as "yes".
+
+    Only a next-turn line waiting for that same Keeper is joined. A steer
+    keeps its own entry: it was created to replace one exact operation, and
+    folding another line into it would move that causal parent. *)

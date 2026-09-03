@@ -28,6 +28,9 @@ fi
 if [[ -n "${KEEPER_COLLAB_SANDBOX_PROFILE:-}" ]]; then
   args+=("--sandbox-profile" "$KEEPER_COLLAB_SANDBOX_PROFILE")
 fi
+if [[ -n "${KEEPER_COLLAB_TURN_SETTLE_BUDGET_SEC:-}" ]]; then
+  args+=("--turn-settle-budget" "$KEEPER_COLLAB_TURN_SETTLE_BUDGET_SEC")
+fi
 if [[ -n "${KEEPER_COLLAB_RUN_ID:-}" ]]; then
   args+=("--run-id" "$KEEPER_COLLAB_RUN_ID")
 fi

@@ -7,7 +7,10 @@ stores, not memory prose. The runtime records explicit typed provenance and \
 returns validation or persistence failures directly. When source_path is set, \
 the claim is recalled only while the exact source bytes still match. To record \
 a conclusion rather than an observation, provide both rule_id and premise_ids; \
-the conclusion remains current only while one complete support set remains current."""
+the conclusion remains current only while one complete support set remains current. \
+When the claim was read from a Board post, pass board_post_id (and board_comment_id \
+for a comment) so the record names its source; a Board reference cannot be combined \
+with source_path or with a derivation."""
 additional_properties = false
 
 [[params]]
@@ -40,6 +43,16 @@ items = { type = "string" }
 min_items = 1
 unique_items = true
 description = "Exact memory_id values supporting a derived conclusion. Must be paired with rule_id."
+
+[[params]]
+name = "board_post_id"
+type = "string"
+description = "The Board post the claim was read from (the post_id the Board tools return). Only for observations, not for derivations or source_path claims."
+
+[[params]]
+name = "board_comment_id"
+type = "string"
+description = "The comment under board_post_id the claim was read from. Requires board_post_id."
 
 [help]
 short_description = "Persist a durable keeper memory claim."

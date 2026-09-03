@@ -423,6 +423,43 @@ let test_a_missing_listing_is_still_caught () =
        ~actual_names:[ "atlassian_jira_search" ])
 ;;
 
+(* The order the agent_core lane sends its tools in is the order the provider
+   caches, and a prefix is reusable only byte-for-byte. The bundle states that
+   order: the always-loaded tools first, then the listing, then the attached
+   tools this conversation has already run. A set comparison does not see a
+   reordering, and a reordering costs the whole prefix. *)
+let test_the_agent_core_order_is_stated_by_the_bundle () =
+  let jira = "atlassian_jira_search" in
+  with_bundle (fun bundle ->
+    let sent = tool_names bundle.Keeper_tools_agent_core.agent_core_tools in
+    check
+      bool
+      "with nothing carried, the listing is last"
+      true
+      (match List.rev sent with
+       | last :: _ -> String.equal last Keeper_identity_tool_search.tool_name
+       | [] -> false);
+    check
+      bool
+      "no tool is sent twice"
+      true
+      (List.length (List.sort_uniq String.compare sent) = List.length sent));
+  with_bundle ~history:[ called jira ] (fun bundle ->
+    let sent = tool_names bundle.Keeper_tools_agent_core.agent_core_tools in
+    check
+      (list string)
+      "a carried tool follows the listing"
+      [ Keeper_identity_tool_search.tool_name; jira ]
+      (let rec from_listing = function
+         | [] -> []
+         | name :: rest
+           when String.equal name Keeper_identity_tool_search.tool_name ->
+           name :: rest
+         | _ :: rest -> from_listing rest
+       in
+       from_listing sent))
+;;
+
 let () =
   run
     "attached tools lane scope"
@@ -459,6 +496,10 @@ let () =
             "still expects a listing the surface lost"
             `Quick
             test_a_missing_listing_is_still_caught
+        ; test_case
+            "states the agent_core tool order"
+            `Quick
+            test_the_agent_core_order_is_stated_by_the_bundle
         ; test_case
             "does not explain an unknown actual tool"
             `Quick

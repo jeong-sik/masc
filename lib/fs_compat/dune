@@ -23,7 +23,8 @@
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
   (:standard -w +4 -w +33 -w +37))
- (libraries eio eio.unix unix yojson uuidm digestif optint cstruct)
+ (libraries eio eio.unix unix yojson uuidm digestif optint cstruct
+  masc_string_util)
  (foreign_stubs
   (language c)
   (names capability_exact_read_stubs)))

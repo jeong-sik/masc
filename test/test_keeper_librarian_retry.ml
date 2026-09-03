@@ -146,6 +146,112 @@ let test_new_claim_is_materialized_after_retained_facts () =
       (List.map (fun (fact : Memory.fact) -> fact.claim) selection.facts)
 ;;
 
+(* The librarian may name the Board post a claim was read from. The name is
+   typed into the fact's basis; a claim without it is a transcript
+   observation, and a name the Board's own grammar rejects fails the claim
+   like any other malformed field. *)
+let board_claim ?comment_id ~post_id claim =
+  `Assoc
+    ([ Librarian.wire_field_claim, `String claim
+     ; Librarian.wire_field_category, `String "lesson"
+     ; Memory.wire_field_board_post_id, `String post_id
+     ]
+     @ (match comment_id with
+        | None -> []
+        | Some comment_id -> [ Memory.wire_field_board_comment_id, `String comment_id ]))
+;;
+
+let test_new_claim_carries_board_provenance () =
+  let post_id = "p-0123456789abcdef0123456789abcdef" in
+  let comment_id = "c-0123456789abcdef0123456789abcdef" in
+  match
+    parse
+      (selection_json
+         ~new_claims:
+           [ new_claim ~claim:"plain" ()
+           ; board_claim ~post_id "from the post"
+           ; board_claim ~post_id ~comment_id "from a comment"
+           ]
+         ())
+  with
+  | Error error ->
+    failf "selection rejected: %s" (Librarian.parse_error_to_string error)
+  | Ok selection ->
+    let basis_of claim =
+      match List.find_opt (fun (fact : Memory.fact) -> String.equal fact.claim claim) selection.facts with
+      | Some fact -> fact.basis
+      | None -> failf "claim %S was not materialized" claim
+    in
+    let board_ref ?comment_id post_id =
+      match Memory.board_ref_of_ids ~post_id ~comment_id with
+      | Ok board -> board
+      | Error error -> failf "board ref fixture: %s" (Memory.wire_error_to_string error)
+    in
+    check bool "a claim without a board field is a transcript observation" true
+      (basis_of "plain" = Memory.Observed Memory.Transcript);
+    check bool "a claim with board_post_id names the post" true
+      (basis_of "from the post" = Memory.Observed (Memory.Board (board_ref post_id)));
+    check bool "a claim with both ids names the comment" true
+      (basis_of "from a comment"
+       = Memory.Observed (Memory.Board (board_ref ~comment_id post_id)))
+;;
+
+let test_new_claim_with_bad_board_id_is_rejected () =
+  (match parse (selection_json ~new_claims:[ board_claim ~post_id:"p-1 2" "spaced" ] ()) with
+   | Ok _ -> fail "a post id with a space was accepted"
+   | Error _ -> ());
+  (* null is the schema's answer for the transcript; a number is not. *)
+  (match
+     parse
+       (selection_json
+          ~new_claims:
+            [ `Assoc
+                [ Librarian.wire_field_claim, `String "null board"
+                ; Librarian.wire_field_category, `String "lesson"
+                ; Memory.wire_field_board_post_id, `Null
+                ; Memory.wire_field_board_comment_id, `Null
+                ]
+            ]
+          ())
+   with
+   | Ok selection ->
+     check bool "null board fields mean the transcript" true
+       (List.exists
+          (fun (fact : Memory.fact) ->
+             String.equal fact.claim "null board"
+             && fact.basis = Memory.Observed Memory.Transcript)
+          selection.facts)
+   | Error error -> failf "null board fields rejected: %s" (Librarian.parse_error_to_string error));
+  (match
+     parse
+       (selection_json
+          ~new_claims:
+            [ `Assoc
+                [ Librarian.wire_field_claim, `String "numeric board"
+                ; Librarian.wire_field_category, `String "lesson"
+                ; Memory.wire_field_board_post_id, `Int 12
+                ]
+            ]
+          ())
+   with
+   | Ok _ -> fail "a numeric board_post_id was accepted"
+   | Error _ -> ());
+  match
+    parse
+      (selection_json
+         ~new_claims:
+           [ `Assoc
+               [ Librarian.wire_field_claim, `String "comment only"
+               ; Librarian.wire_field_category, `String "lesson"
+               ; Memory.wire_field_board_comment_id, `String "c-0123456789abcdef0123456789abcdef"
+               ]
+           ]
+         ())
+  with
+  | Ok _ -> fail "a comment id without its post was accepted"
+  | Error _ -> ()
+;;
+
 let test_large_selection_is_accepted_without_budget_control () =
   let json =
     selection_json
@@ -928,6 +1034,10 @@ let () =
             test_omission_deletes_and_retention_preserves_exact_fact
         ; test_case "new claim materialized" `Quick
             test_new_claim_is_materialized_after_retained_facts
+        ; test_case "new claim names the board post it was read from" `Quick
+            test_new_claim_carries_board_provenance
+        ; test_case "a board id the Board would not accept rejects the claim" `Quick
+            test_new_claim_with_bad_board_id_is_rejected
         ; test_case
             "large selection has no budget control"
             `Quick

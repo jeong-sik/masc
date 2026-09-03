@@ -11,8 +11,7 @@
   ; into the source tree, the server drops it, and the build stops with
   ; "File unavailable: logs/masc-runtime-health-proof.<pid>.v2". Nothing in
   ; the tree builds from logs/ and git does not track it.
-  logs
-  dashboard_bonsai))
+  logs))
 
 ; Warning 32 (unused value declaration) is set here, once, for the whole
 ; tree. It used to be decided per library: of 121 stanzas under lib/, 84

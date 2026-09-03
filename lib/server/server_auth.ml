@@ -965,12 +965,12 @@ let is_public_read_path path =
   || String.starts_with ~prefix:"/static/" path
   || String.starts_with ~prefix:"/graphiql/" path
   (* Tier F2 dashboard reads — multimodal artifact gallery + detail
-     panel. The Bonsai dashboard issues these via [Brr_io.Fetch.url]
-     with no credentials, mirroring the rest of the dashboard's
-     read-only surface. Routes themselves are wrapped in
-     [with_public_read] in [server_routes_http_routes_multimodal];
-     this whitelist entry is what makes that wrapper actually
-     public when [http_auth_strict_enabled] is on. *)
+     panel. The Bonsai dashboard was their only in-tree consumer; since
+     its removal nothing in the tree issues these requests, but the
+     routes stay public-read: they are wrapped in [with_public_read] in
+     [server_routes_http_routes_multimodal], and this whitelist entry is
+     what makes that wrapper actually public when
+     [http_auth_strict_enabled] is on. *)
   || String.starts_with ~prefix:"/api/v1/multimodal/list" path
   || String.starts_with ~prefix:"/api/v1/multimodal/get/" path
   || String.starts_with ~prefix:"/api/v1/multimodal/provenance/" path

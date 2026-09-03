@@ -55,15 +55,8 @@ type provenance = {
 let provenance_empty ~created_by ~created_at =
   { origin_artifact_ids = []; created_by; created_at }
 
-let kind_name_of_json : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
+(* Same leaf [Payload] reaches, for the same reason. *)
+let kind_name_of_json = Shared_types.Json_kind.name
 
 let provenance_to_json p =
   `Assoc

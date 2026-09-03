@@ -72,22 +72,18 @@ let create ~config ~producer =
     match producer_scope with
     | Keeper_producer producer_meta ->
       Ok (Keeper_sandbox.host_root_abs_of_meta ~config producer_meta)
+    (* A workspace agent is not a Keeper and declares no sandbox profile, so
+       the Keeper resolver is the wrong question to ask about it: since #32078
+       made the profile mandatory, [host_root_abs_of_agent] raises for every
+       producer that has no keeper TOML -- which is every producer that
+       reaches this arm. The playground root is what this producer has, and
+       [bundle_root] is the same path the resolver returned for it before the
+       profile became mandatory. *)
     | Workspace_producer ->
       let project_root =
         Workspace_verification_store.project_root_of_base_path config.base_path
       in
-      (try
-         Ok
-           (Keeper_sandbox_config.host_root_abs_of_agent
-              ~base_path:project_root
-              ~agent_name:producer)
-       with
-       | Keeper_sandbox_config.Invalid_keeper_sandbox_config detail ->
-         Error
-           (Printf.sprintf
-              "producer %s sandbox configuration invalid: %s"
-              producer
-              detail))
+      Ok (Filename.concat project_root (Playground_paths.bundle_root producer))
   in
   let ownership_root =
     Env_config_core.strip_trailing_slashes ownership_root
@@ -277,9 +273,13 @@ let result_of_execution (execution : Keeper_tool_execution.t) =
 ;;
 
 (* The producer's meta binds the jail. [turn_sandbox_factory] is a keeper-turn
-   construct and the judge has no turn of its own, so a producer on a Docker
-   profile resolves no sandbox and the runtime returns its own error — the judge
-   is told the tree is unreachable rather than silently inspecting the host. *)
+   construct and the judge has no turn of its own, so it passes [None] — the
+   one caller outside a turn. That names what the judge lacks, not what it may
+   read: a Docker producer's tree is a shared mount the read backend reaches
+   through its own container, and a microvm producer's guest is named by the
+   keeper and the base path, so the backend attaches to a running one. Neither
+   route lets the judge start anything or touch the host outside the
+   playground, which is the property [None] is protecting. *)
 let run t tool ~args =
   match t.producer_scope, tool with
   | Keeper_producer producer_meta, Read_file ->

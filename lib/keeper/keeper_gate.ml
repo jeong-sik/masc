@@ -11,7 +11,56 @@ type request =
   ; causal_context : causal_context option
   ; task_id : string option
   ; continuation_channel : Keeper_continuation_channel.t option
+  ; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option
   }
+
+(* Gate operation vocabulary — the strings the approval store keys on and
+   the host replay engine dispatches on. The Gate owns them so that
+   [replayable_operation], which decides what the deferred payload may
+   promise the model, cannot drift from the literal a producer submits:
+   a deferred "the host replays this exact call" spoken over an operation
+   the replay engine does not recognize starves the approved effect
+   silently (2026-09-02 keeper_voice_speak incident, #32668). *)
+let filesystem_write_gate_operation = "filesystem_write"
+
+let tool_execute_gate_operation = "tool_execute"
+
+let network_read_gate_operation = "network_read"
+
+let connector_post_gate_operation = "connector_post"
+
+let identity_call_gate_operation = "identity_call"
+
+(* Not read from Keeper_tool_voice_runtime.command_to_string: that module
+   sits above the Gate in the dependency graph (its chat/broadcast leaves
+   reach back here through the turn driver), so borrowing the literal
+   would close a cycle. The pairing with command_to_string Speak is pinned
+   by test_speak_replays_while_listen_never_reaches_the_gate. *)
+let voice_speak_gate_operation = "keeper_voice_speak"
+
+type replayable =
+  | Replay_write
+  | Replay_execute
+  | Replay_network_read
+  | Replay_connector_post
+  | Replay_identity
+  | Replay_voice_speak
+
+let replayable_operation operation =
+  if String.equal operation filesystem_write_gate_operation
+  then Some Replay_write
+  else if String.equal operation tool_execute_gate_operation
+  then Some Replay_execute
+  else if String.equal operation network_read_gate_operation
+  then Some Replay_network_read
+  else if String.equal operation connector_post_gate_operation
+  then Some Replay_connector_post
+  else if String.equal operation identity_call_gate_operation
+  then Some Replay_identity
+  else if String.equal operation voice_speak_gate_operation
+  then Some Replay_voice_speak
+  else None
+;;
 
 type authorization_source =
   | One_shot_resolution of string
@@ -39,7 +88,8 @@ type unavailable_reason =
 type decision =
   | Allow of authorization
   | Deferred of
-      { approval_id : string
+      { operation : string
+      ; approval_id : string
       ; reason : deferred_reason
       ; audit_receipts : Keeper_approval.Audit.receipt list
       }
@@ -326,7 +376,7 @@ let decision_to_yojson = function
        ; "audit_receipts", audit_receipts_to_yojson authorization.audit_receipts
        ]
        @ source_fields authorization.source)
-  | Deferred { approval_id; reason; audit_receipts } ->
+  | Deferred { operation; approval_id; reason; audit_receipts } ->
     let detail =
       match reason with
       | Mode_state_invalid detail -> [ "mode_read_error", `String detail ]
@@ -334,19 +384,32 @@ let decision_to_yojson = function
         [ "auto_judge_error", `String detail ]
       | Human_requested | Judge_requested -> []
     in
+    (* RFC-0356 host replay, stated where the model reads it: without
+       this line the payload reads as a plain block and the model
+       resubmits the same call while the approval is in flight —
+       measured as three duplicate approvals in #28866. The promise is
+       made only for operations [replayable_operation] recognizes: over
+       an unrecognized one it starves the approved effect silently
+       (#32668), so those are told the truth — the one-shot
+       authorization arrives on the next turn and the exact call spends
+       it. *)
+    let on_approve =
+      match replayable_operation operation with
+      | Some _ ->
+        "The host replays this exact call and delivers its output to you \
+         automatically. Do not resubmit it; a resubmission folds onto this \
+         same approval."
+      | None ->
+        "The resolution reaches your next turn. If approved, a one-shot \
+         authorization for this exact operation and input is delivered \
+         there; re-issue the exact call to spend it. A different call while \
+         this one is pending opens a new request."
+    in
     `Assoc
       ([ "decision", `String "deferred"
        ; "approval_id", `String approval_id
        ; "reason", `String (deferred_reason_to_string reason)
-       (* RFC-0356 host replay, stated where the model reads it: without
-          this line the payload reads as a plain block and the model
-          resubmits the same call while the approval is in flight —
-          measured as three duplicate approvals in #28866. *)
-       ; ( "on_approve"
-         , `String
-             "The host replays this exact call and delivers its output to \
-              you automatically. Do not resubmit it; a resubmission folds \
-              onto this same approval." )
+       ; "on_approve", `String on_approve
        ; "audit_receipts", audit_receipts_to_yojson audit_receipts
        ]
        @ detail)
@@ -1814,7 +1877,7 @@ let defer request reason =
               Keeper_approval_queue_rules_types.Summary_pre_worker_mode_state_invalid
             detail
         with
-        | Ok () -> Deferred { approval_id; reason; audit_receipts }
+        | Ok () -> Deferred { operation = request.operation; approval_id; reason; audit_receipts }
         | Error error -> Unavailable (Queue_storage_unavailable error))
      | Auto_judge_unavailable detail ->
        (match
@@ -1823,10 +1886,10 @@ let defer request reason =
               Keeper_approval_queue_rules_types.Summary_pre_worker_auto_judge_unavailable
             detail
         with
-        | Ok () -> Deferred { approval_id; reason; audit_receipts }
+        | Ok () -> Deferred { operation = request.operation; approval_id; reason; audit_receipts }
         | Error error -> Unavailable (Queue_storage_unavailable error))
      | Human_requested | Judge_requested ->
-       Deferred { approval_id; reason; audit_receipts })
+       Deferred { operation = request.operation; approval_id; reason; audit_receipts })
 ;;
 
 let observe_exact_rule_store_degraded (request : request) error =
@@ -1879,7 +1942,9 @@ let decide_from_selected_mode request = function
   | Ok Keeper_gate_mode.Manual -> defer request Human_requested
   | Ok Keeper_gate_mode.Auto_judge ->
     (* Observation-only requests have a deterministic safety answer —
-       docker-sandbox read-only argv, server-side [web_search] reads, and
+       read-only argv dispatched into a disposable guest (the typed
+       [sandbox_profile] on the request decides that), server-side
+       [web_search] reads, and
        [web_fetch] GETs whose literal destination the fetch checks itself
        (it does not resolve DNS names);
        paying the judge (or the human queue) for them is how a bare `ls`
@@ -1889,6 +1954,7 @@ let decide_from_selected_mode request = function
     if
       Keeper_gate_readonly.observation_only_request
         ~operation:request.operation
+        ~sandbox_profile:request.sandbox_profile
         ~input:request.input
     then (
       let source = Readonly_sandbox in

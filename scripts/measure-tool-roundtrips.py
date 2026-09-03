@@ -66,9 +66,13 @@ import sys
 
 DEFAULT_BASE = pathlib.Path(os.environ.get("MASC_BASE_PATH", pathlib.Path.home() / "me"))
 
-# Mirrors Common.max_tool_output_bytes, the artifact_read page bound (both the
-# max_bytes default/maximum and the response-envelope budget).
-ARTIFACT_PAGE_BYTES = 65_536
+# Mirrors Common.max_tool_result_wire_bytes, the artifact_read page bound (both
+# the max_bytes default/maximum and the response-envelope budget). It was
+# written as 65_536 against the constant that used to carry that role; reading
+# a page at that size produced a page the harness spills, which is why the
+# bound moved. Roundtrip counts computed before this line was updated divide
+# by a page four times too large and undercount.
+ARTIFACT_PAGE_BYTES = 16_384
 
 ARTIFACT_READ_TOOL = "keeper_artifact_read"
 

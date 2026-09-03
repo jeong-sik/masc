@@ -117,11 +117,6 @@ let auth_dir_from_base_path ~base_path =
 let agents_dir_from_base_path ~base_path =
   Filename.concat (auth_dir_from_base_path ~base_path) "agents"
 
-(** Maximum output bytes for tool responses. SSOT for the 64KB cap.
-    Inline-vs-blob threshold only; see [max_process_capture_*_bytes] for the
-    separate ceiling on what the runtime accepts from a subprocess. *)
-let max_tool_output_bytes = 65_536
-
 (** How large one tool result may be on the wire before the harness carrying
     it writes it to a file of its own.
 
@@ -136,13 +131,13 @@ let max_tool_output_bytes = 65_536
     the harness cuts somewhere between. This sits below the low end with
     room, which is what keeps a MASC result on the model's side of that line.
 
-    Below [max_tool_output_bytes] on purpose. That constant decided both when
-    a result is stored as a blob and how much of a blob one read returns, so
-    a read of an externalized result came back at exactly the size that gets
-    spilled — the mechanism defeated itself, and six of the eighteen measured
-    rejections were reads of MASC's own artifacts. Storing and reading are
-    now bounded by the same wire ceiling, and a result larger than it arrives
-    as pages the model can ask for. *)
+    This is the only ceiling on a tool result. A separate 64KB constant used
+    to decide both when a result is stored as a blob and how much of a blob
+    one read returns, so a read of an externalized result came back at
+    exactly the size that gets spilled — the mechanism defeated itself, and
+    six of the eighteen measured rejections were reads of MASC's own
+    artifacts. Storing and reading are bounded by this one value, and a
+    result larger than it arrives as pages the model can ask for. *)
 let max_tool_result_wire_bytes = 16_384
 
 (** Acceptance ceiling for one captured subprocess stream, split head/tail.
@@ -160,9 +155,6 @@ let max_tool_result_wire_bytes = 16_384
 let max_process_capture_head_bytes = 8 * 1024 * 1024
 
 let max_process_capture_tail_bytes = 256 * 1024
-
-(** BUG-016: Truncate large tool responses to prevent MCP transport overload.
-    Default max: 64KB. Appends truncation metadata when trimmed. *)
 
 (* One spelling of "this string is going into a path component". It lived in
    [Workspace_utils_ops], which sits above [masc_auth], so the auth layer built

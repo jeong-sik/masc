@@ -1793,6 +1793,15 @@ let test_the_two_link_readers_agree () =
     ; ("two in a row", "https://a.test/one https://a.test/two")
     ; ("closed by punctuation", "the evidence (https://a.test/x).")
     ; ("at the very end", "read https://a.test/z")
+      (* The scheme test reads bytes where they are now, so the cases that
+         run off the end of the text, or share a first letter without
+         sharing the scheme, have to answer as they always did. *)
+    ; ("a truncated scheme at the end", "cut off here http")
+    ; ("almost the scheme", "https:/a.test/x and http:/b.test/y")
+    ; ("a word that starts the same way", "https and http and httpx://a.test/q")
+    ; ("upper case is a different scheme", "HTTPS://a.test/x")
+    ; ("the text is one character", "h")
+    ; ("nothing at all", "")
     ]
 
 (* The margin is paid for out of the body, not out of the frame. A row that

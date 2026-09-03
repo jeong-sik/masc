@@ -9599,7 +9599,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Some entry
          when Keeper_chat.same_request_identity entry.sent_request request ->
            entry.phase <- Turn_streaming;
-           List.iter (Keeper_chat_transcript.apply entry.live) deltas
+           let now = Unix.gettimeofday () in
+           List.iter (Keeper_chat_transcript.apply ~now entry.live) deltas
        | Some _ | None -> ())
   | Keeper_chat_stream_unavailable (request, detail) ->
       (match

@@ -201,7 +201,9 @@ val started_at : t -> float
 (** The dispatch instant supplied to {!create}. Exposed as typed timeline
     input so a live turn keeps its original civil-hour rail while it grows. *)
 
-val apply : t -> Masc_tui_keeper_chat_live.delta -> unit
+val apply : now:float -> t -> Masc_tui_keeper_chat_live.delta -> unit
+(** [now] stamps a tool call as it opens, so the progress row can say how long
+    the call in flight has been open rather than only how long the turn has. *)
 (** Fold one delta in. Tool deltas join only by their server-owned stream
     occurrence. Provider ids are optional correlation data; an unknown
     occurrence is reported unreadable rather than attached by position. *)

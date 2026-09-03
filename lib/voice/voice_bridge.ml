@@ -288,9 +288,11 @@ let single_voice_mcp_call ~net:_ ~uri ~headers_list ~body_str =
     (* RFC-0106: re-raise Eio.Cancel.Cancelled when the surrounding fiber
        was cancelled. Masc_http_client.post_sync delegates to a piaf pool
        whose [Pool.do_request] catches all exceptions including Cancelled
-       and reports them as an Error string; without this check the retry
-       loop in [call_voice_mcp_endpoint] would sleep and re-attempt
-       instead of unwinding cancellation immediately. *)
+       and reports them as an Error string. [call_voice_mcp_endpoint] runs a
+       single attempt -- the retry loop this once named is gone -- so what a
+       swallowed Cancelled now reaches is the caller's endpoint failover:
+       [try_endpoints] would read it as this endpoint failing and speak
+       through the next one instead of unwinding. *)
     Eio.Fiber.check ();
     Error (Connection_failed e)
 ;;

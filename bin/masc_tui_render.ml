@@ -52,6 +52,15 @@ let frame_lines buf =
   | "" :: reversed -> List.rev reversed
   | reversed -> List.rev reversed
 
+(* What a boxed listing draws under its rows: the scroll line -- a row whether
+   or not there is anything to report, so a list that overflows does not push
+   the help line off the bottom -- then the frame's bottom, then the footer.
+
+   Named once because three surfaces were tallying their whole chrome by hand,
+   and being one row over the budget is not a visible mistake: [finish_surface]
+   drops the last rows, and the last row is the footer. *)
+let listing_rows_below_the_body = 3
+
 (* Two already-drawn panes, side by side, one terminal row per line.
 
    The left pane's own width pads the rows it ran out of. Without that a
@@ -11187,7 +11196,11 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   in
   List.iter (fun note -> box_line_styled buf cols ~style:(Theme.recede ()) note) notes;
   box_divider buf cols;
-  let chrome_rows = 7 + List.length notes - 1 in
+  (* Counted, not tallied. The tally read "7 + notes - 1" against four fixed
+     rows plus the notes, which left the surface one row over its budget --
+     and the row [finish_surface] then dropped was the footer, so the diff was
+     the one screen that did not say how to leave it. *)
+  let chrome_rows = List.length (frame_lines buf) + listing_rows_below_the_body in
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.changes_diff_scroll max_scroll) in
@@ -12358,13 +12371,9 @@ let render_keeper_calls (state : state) =
     | Some snapshot -> snapshot.Masc.Tui_decode.kcs_entries
   in
   let shown = List.length entries in
-  let extra_rows =
-    (if Option.is_some state.keeper_calls_error then 2 else 0)
-    + (match state.keeper_calls with
-       | Some snapshot when snapshot.Masc.Tui_decode.kcs_mismatched > 0 -> 2
-       | Some _ | None -> 0)
-  in
-  let chrome_rows = 8 + extra_rows in
+  (* The error row and the mismatch row are drawn above; counting the buffer
+     asks what was drawn rather than restating the two conditions. *)
+  let chrome_rows = List.length (frame_lines buf) + listing_rows_below_the_body in
   let content_height = max 1 (rows - chrome_rows) in
   (* The scroll unit is one rendered row, not one call. A canonical proposal
      identity plus its input and output cannot fit a two-row short viewport;
@@ -12631,9 +12640,7 @@ let render_acting (state : state) =
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
-  (* The page indicator has a row of its own whether or not it is drawn, so a
-     list that overflows does not push the help line off the bottom. *)
-  let chrome_rows = 11 in
+  let chrome_rows = List.length (frame_lines buf) + listing_rows_below_the_body in
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.acting_scroll max_scroll) in

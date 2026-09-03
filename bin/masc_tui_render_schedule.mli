@@ -132,6 +132,58 @@ val keeper_columns_used_width : keeper_columns -> int
     [inner_width] it was allocated for, and equals it once that width admits
     the minimum row. *)
 
+(** {1 Memory fleet columns} *)
+
+val memory_state_width : int
+val memory_revision_width : int
+val memory_facts_width : int
+val memory_size_width : int
+val memory_source_width : int
+val memory_delta_width : int
+val memory_cell_gap : int
+
+type memory_columns = {
+  mcol_show_revision : bool;
+  mcol_show_source : bool;
+  mcol_name : int;
+}
+(** Plain-text cell budgets for one Memory row, in cells. *)
+
+type memory_row_values = {
+  mrow_state : string;
+  mrow_name : string;
+  mrow_revision : string;
+  mrow_facts : string;
+  mrow_size : string;
+  mrow_source : string;
+  mrow_delta : string;
+}
+(** One row's readings, already rendered as text. Each field is its own cell:
+    the revision, the fact count and the byte size are three units and do not
+    share one. *)
+
+val allocate_memory_columns : inner_width:int -> memory_columns
+(** Divide the box's inner width across the Memory columns. The source-bound
+    cell drops first and the revision second; the keeper's name and its state
+    never drop. Slack above the minimum goes to the name, up to the widest
+    name worth reading whole. *)
+
+val memory_columns_used_width : memory_columns -> int
+(** Total cells the allocation occupies, gaps included. Never exceeds the
+    [inner_width] it was allocated for. Unlike the roster it can fall short of
+    it: every Memory cell has a widest known reading, so surplus width stays
+    margin instead of padding one cell out to the frame. *)
+
+val memory_header_row : memory_columns -> string
+(** The column names, laid out on the allocation. *)
+
+val memory_row : memory_columns -> memory_row_values -> string
+(** One row, laid out on the same allocation as {!memory_header_row}. Both are
+    built from one description of the columns, so a cell can never sit at a
+    different offset from the header that names it -- the defect this pair
+    replaces, where a name over eighteen cells or a reading over fourteen
+    pushed the rest of its row right of the header. *)
+
 module Terminal_size_cache : sig
   type refresh =
     | Changed of (int * int)

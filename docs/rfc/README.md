@@ -248,6 +248,8 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0405 | microVM 백엔드를 하나 더 고를 수 있게 한다 | Draft | - |
 | 0406 | 검증자는 떠 있는 게스트에 붙는다 | Draft | - |
 | 0407 | 판정자의 읽기 경로 — 지금은 제출 스냅샷과 스필이 정본이고, sandbox 읽기는 트리를 소유한 레인이 생긴 뒤에 돌아온다 | Draft | - |
+| 0408 | 설치 마법사 — 이미 된 것은 감지하고 묻지 않는다 (모델 소스 × 실행 샌드박스) | Draft | - |
+| 0409 | vendor 하네스를 타는 runtime — 도구를 싣지 않는 변종을 한 줄로 고른다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |

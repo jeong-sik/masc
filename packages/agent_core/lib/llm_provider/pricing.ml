@@ -181,6 +181,7 @@ let[@warning "-32"] test_catalog_entry
   ; thinking_control_format = None
   ; anthropic_thinking_control = None
   ; preserve_thinking_control_format = None
+  ; content_inline_reasoning = None
   ; reasoning_output_format = None
   ; reasoning_streaming_format = None
   ; reasoning_replay = None

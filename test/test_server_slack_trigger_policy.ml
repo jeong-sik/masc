@@ -361,9 +361,11 @@ let test_a_name_seen_once_is_remembered () =
       submit ~user_name:(Some "Vincent") ~ts:"1710000000.000001";
       submit ~user_name:None ~ts:"1710000000.000002";
       let names =
-        Keeper_external_attention.pending_for_keeper
+        Keeper_external_attention.load_events
           ~base_path:(Env_config_core.base_path ())
-          ~keeper_name:"luna" ~limit:10 ()
+          ~keeper_name:"luna"
+        |> List.filter_map (function
+             | Keeper_external_attention.Recorded item -> Some item)
         |> List.map (fun item ->
              item.Keeper_external_attention.actor
                .Keeper_external_attention.display_name)
@@ -404,9 +406,11 @@ let test_a_missing_author_name_is_not_replaced_by_the_id () =
         ~base_dir:(Env_config_core.base_path ())
         (slack_message ~user_name:None ~ts:"1710000000.999999" ());
       match
-        Keeper_external_attention.pending_for_keeper
+        Keeper_external_attention.load_events
           ~base_path:(Env_config_core.base_path ())
-          ~keeper_name:"luna" ~limit:10 ()
+          ~keeper_name:"luna"
+        |> List.filter_map (function
+             | Keeper_external_attention.Recorded item -> Some item)
       with
       | [] -> fail "no attention recorded for a bound channel"
       | item :: _ ->

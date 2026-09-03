@@ -17,6 +17,23 @@
     answer at every call site, so swallowing the error would make a
     [defer_loading] nobody honours and nobody reports.
 
+    What a declaration buys, and where it stops. Two limits are easy to state
+    wrongly in a tool file, so they live here once rather than in each of
+    them.
+
+    It reaches the Agent Core lane only. The codex, antigravity and
+    claude_code runtimes are handed the whole tools array and never read this
+    key, so on those requests a deferred schema rides exactly as before.
+
+    And it holds until the conversation calls the tool. After the first call
+    [Keeper_identity_tool_search]'s [already_used] puts the schema back for
+    the turns that follow, which is what stops the model asking for the same
+    tool every turn. So the bytes a declaration saves are the tools a
+    conversation has not used yet, not the tools it does not use much.
+    Measured on 2026-09-03 (#32711): of nineteen tools moved behind the
+    listing, fifteen left one Keeper's live array and four stayed, all four
+    already called in that conversation.
+
     There is deliberately no "which tools defer" listing here. Such a list
     reads as a roster the moment something takes it as input rather than as a
     report, and a roster of tools loaded together is the group axis again.

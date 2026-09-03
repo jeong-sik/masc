@@ -595,6 +595,14 @@ let dashboard_config_string_list_fields =
     "mention_targets";
   ]
 
+(* Accepts a string or an explicit null, so it cannot join
+   [dashboard_config_string_fields] -- that list's check demands a string and
+   would refuse the clear. Null is how an operator detaches the endpoint when
+   moving off remote_ssh; omitting the field instead carries the keeper TOML's
+   value forward into a profile that refuses it
+   ([remote_endpoint_requires_remote_ssh]). *)
+let remote_endpoint_field = "remote_endpoint"
+
 (* Control field (not persisted): explicit acknowledgement that reducing
    [max_context_override] may make the existing conversation exceed the next
    request budget. Stripped before the config is parsed/applied. *)
@@ -608,6 +616,7 @@ let dashboard_config_patch_allowed_fields =
   ; "max_context_override"
   ; confirm_context_shrink_field
   ; expected_config_revision_field
+  ; remote_endpoint_field
   ]
   @
   dashboard_config_string_fields
@@ -759,6 +768,17 @@ let validate_dashboard_config_field key value =
   else if key = expected_config_revision_field then
     Keeper_turn_up_config_persistence.config_revision_of_yojson value
     |> Result.map ignore
+  else if key = remote_endpoint_field then
+    (* Shape only. Whether the name is declared under [exec.ssh.endpoints], and
+       whether the profile admits an endpoint at all, are decided by
+       [Keeper_turn_up_args.parse] on the apply path. *)
+    (match value with
+     | `String raw ->
+         if String.trim raw = "" then
+           Error "remote_endpoint must not be blank (send null to clear it)"
+         else Ok ()
+     | `Null -> Ok ()
+     | other -> dashboard_field_type_error key "a string or null" other)
   else if List.mem key dashboard_config_string_fields then
     match value with
     | `String _ -> Ok ()

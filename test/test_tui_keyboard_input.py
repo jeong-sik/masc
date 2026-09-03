@@ -4217,6 +4217,93 @@ def bracketed_paste_interaction(requests: HttpRequests) -> Interaction:
     return interact
 
 
+def word_delete_interaction(requests: HttpRequests) -> Interaction:
+    """Ctrl-W and Alt+Backspace delete the word behind the composer cursor.
+
+    A chat draft answers two readline muscle memories: Ctrl-W rubs out the
+    last word, and Alt+Backspace -- ESC DEL on the wire -- does the same.
+    Without a binding Ctrl-W fell through to a no-op, and ESC DEL was
+    swallowed as a bare Esc: the draft stayed whole and the chat closed
+    under the typist's thumb."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(
+            process, master_fd, output, BRACKETED_PASTE_ON, start=0, timeout=5.0
+        )
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(
+            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"m",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
+
+        # Ctrl-W takes the last word and keeps the separator before it: the
+        # draft reads "hello ", and the caret ends one cell past it. The
+        # composer row is all a draft edit repaints, so the caret's column is
+        # where "kept the separator" can be told from "ate it": 13 is the
+        # prompt plus "hello ", 12 is what "hello" would give.
+        send_and_wait(process, master_fd, output, b"hello world", b"hello world")
+        frame = send_and_wait(process, master_fd, output, b"\x17", b"hello")
+        plain = CSI_RE.sub(b"", frame)
+        if b"hello world" in plain:
+            raise AssertionError(f"Ctrl-W left the whole draft: {plain!r}")
+        if b"hello" not in plain:
+            raise AssertionError(f"Ctrl-W took more than the word: {plain!r}")
+        cursor = CURSOR_RE.search(frame)
+        if cursor is None or cursor.group(2) != b"13":
+            raise AssertionError(
+                f"Ctrl-W did not stop after the kept separator: {frame!r}"
+            )
+
+        # Alt+Backspace arrives as ESC DEL: delete-word-back like Ctrl-W, not
+        # Esc. A draft edit does not repaint the breadcrumb, so the proof the
+        # chat stayed open is that the next letters still land in the
+        # composer -- on the detail surface they would bind to keys instead.
+        os.write(master_fd, b"\x1b\x7f")
+        frame = send_and_wait(process, master_fd, output, b"still here", b"still here")
+        plain = CSI_RE.sub(b"", frame)
+        if b"hello" in plain:
+            raise AssertionError(f"Alt+Backspace left the draft: {plain!r}")
+
+        # Nothing was sent while the draft was being edited.
+        posted = [path for path, _ in requests if path.endswith("/chat/stream")]
+        if posted:
+            raise AssertionError(f"an edit dispatched something: {posted!r}")
+
+        # Enter still sends what survived the editing.
+        os.write(master_fd, b"\r")
+        body = wait_for_http_request(
+            process,
+            master_fd,
+            output,
+            requests,
+            path="/api/v1/keepers/chat/stream",
+        )
+        message = json.loads(body).get("message")
+        if message != "still here":
+            raise AssertionError(f"the keeper was sent {message!r}")
+        # Chat opened from detail, so Esc goes back there first.
+        send_and_wait(
+            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 GRAPHICS_QUERY_ID = 31
 GRAPHICS_SUPPORTED_REPLY = b"\x1b_Gi=%d;OK\x1b\\" % GRAPHICS_QUERY_ID
 IMAGE_NAME = "shot.png"
@@ -11115,6 +11202,19 @@ def run_keyboard_regression(executable: str) -> None:
             )
         },
         http_requests=paste_requests,
+    )
+    word_requests: HttpRequests = []
+    run_terminal_scenario(
+        executable,
+        description="Ctrl-W and Alt+Backspace delete a word in the composer",
+        interact=word_delete_interaction(word_requests),
+        http_fixtures={
+            "/api/v1/keepers/chat/stream": (
+                503,
+                {"error": "stop after the word-delete request capture"},
+            )
+        },
+        http_requests=word_requests,
     )
     chat_queue_fixtures, chat_queue_gate = chat_queue_http_fixtures()
     run_terminal_scenario(

@@ -164,6 +164,11 @@ val drop_last_utf8_scalar : string -> string
 (** Remove one complete scalar from valid UTF-8 text. Empty or invalid text is
     preserved rather than truncated into a different malformed value. *)
 
+val drop_last_utf8_word : string -> string
+(** Remove trailing blanks and the word run before them -- Ctrl-W and
+    Alt+Backspace in a chat draft. The separator before the word stays, so two
+    presses walk two words. Empty or invalid text is preserved. *)
+
 val display_width : string -> int
 (** Approximate xterm Unicode-11 display cells while preserving extended
     grapheme clusters as indivisible layout pieces. Renderer-owned ANSI CSI,

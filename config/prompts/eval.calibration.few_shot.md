@@ -8,7 +8,7 @@ Here are examples of correct verdicts for calibration:
 
 {{examples}}
 
-### example (vars: index, task_title, notes_excerpt, correct_verdict)
+### example (vars: index, task_title, notes_excerpt, correct_verdict) [primary]
 Example {{index}}:
   Task: {{task_title}}
   Notes: {{notes_excerpt}}

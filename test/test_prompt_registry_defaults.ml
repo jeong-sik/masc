@@ -266,8 +266,46 @@ let test_group_body_registers_under_group_key () =
       let surfaces = registered_surfaces () in
       check (option string) "the group body keeps the frontmatter surface"
         (Some "primary") (List.assoc_opt "test.body" surfaces);
-      check (option string) "a slot takes its group's surface" (Some "primary")
+      (* A slot is a fragment of what its group assembles unless its marker
+         says otherwise; [test_a_slot_declares_its_own_surface] covers the
+         marked case. *)
+      check (option string) "an unmarked slot is a fragment" (Some "fragment")
         (List.assoc_opt "test.body.identity" surfaces))
+;;
+
+let slot_surface_fixture =
+  {|---
+description: a group whose slots do not share one surface
+category: test
+operator_surface: primary
+---
+The body an operator tunes.
+
+### identity (vars: name) [primary]
+You are {{name}}.
+
+### row (vars: id)
+- {{id}}
+|}
+;;
+
+(* Folding files by reader put operator-facing prompts and assembly fragments
+   in one file, so the surface has to be per slot. A slot is a fragment unless
+   its marker says otherwise. *)
+let test_a_slot_declares_its_own_surface () =
+  let open Alcotest in
+  with_prompts_dir [ ("test.surface.md", slot_surface_fixture) ] (fun () ->
+      let surfaces = registered_surfaces () in
+      check (option string) "the group body keeps the file surface" (Some "primary")
+        (List.assoc_opt "test.surface" surfaces);
+      check (option string) "a marked slot is operator-facing" (Some "primary")
+        (List.assoc_opt "test.surface.identity" surfaces);
+      check (option string) "an unmarked slot is a fragment" (Some "fragment")
+        (List.assoc_opt "test.surface.row" surfaces);
+      check string "the marker suffix is not part of the value" "You are {{name}}."
+        (Prompt_registry.get_prompt "test.surface.identity");
+      check (option (list string)) "variables still parse beside the suffix"
+        (Some [ "name" ]) (registered_variables "test.surface.identity"))
 ;;
 
 let test_heading_only_body_is_prose () =
@@ -325,6 +363,8 @@ let () =
             `Quick test_group_body_registers_under_group_key
         ; test_case "a heading-only body is prose, not a slot" `Quick
             test_heading_only_body_is_prose
+        ; test_case "a slot declares its own operator surface" `Quick
+            test_a_slot_declares_its_own_surface
         ; test_case "a repeated marker keeps its first paragraph and an empty one is skipped"
             `Quick test_duplicate_and_empty_slots ] );
       ( "registration",

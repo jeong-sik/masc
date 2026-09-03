@@ -172,6 +172,27 @@ def scenario_keepers(s: Session) -> list[Phase]:
     return [s.burst("keepers j", b"j", 60, 0.025), s.burst("keepers k", b"k", 60, 0.025)]
 
 
+# The surface ring, in the order Tab walks it. Ten stops, and every one of
+# them is a screen an operator scrolls.
+SURFACE_RING = [
+    "Overview", "Activity", "Keepers", "Memory", "Approvals",
+    "Board", "Planning", "Workspace", "Runtime", "Config",
+]
+
+
+def scenario_surfaces(s: Session, settle: float) -> list[Phase]:
+    """Walk the ring, scrolling each stop, so every surface reports its own
+    frame cost. The frame histogram is tagged by surface, so one run answers
+    for all of them."""
+    phases: list[Phase] = []
+    for name in SURFACE_RING:
+        s.send(b"\t")
+        time.sleep(settle)
+        phases.append(s.burst(f"{name} j", b"j", 40, 0.03))
+        phases.append(s.burst(f"{name} k", b"k", 40, 0.03))
+    return phases
+
+
 def scenario_chat(s: Session, chat_wait: float) -> list[Phase]:
     s.send(b"2")
     time.sleep(2.0)
@@ -242,7 +263,11 @@ def main() -> int:
     parser.add_argument("--base-path", default=os.environ.get("MASC_BASE_PATH", os.path.expanduser("~/me/.masc")))
     parser.add_argument("--rows", type=int, default=80)
     parser.add_argument("--cols", type=int, default=240)
-    parser.add_argument("--scenario", choices=["overview", "keepers", "chat", "all"], default="all")
+    parser.add_argument(
+        "--scenario",
+        choices=["overview", "keepers", "chat", "surfaces", "all"],
+        default="all",
+    )
     parser.add_argument("--boot-wait", type=float, default=7.0, help="seconds for first paint and loads")
     parser.add_argument("--chat-wait", type=float, default=6.0, help="seconds for the chat history to load")
     parser.add_argument("--timing-file", default=None, help="where the TUI appends its frame histogram")
@@ -261,6 +286,8 @@ def main() -> int:
         phases += scenario_overview(session)
     if args.scenario in ("keepers", "all"):
         phases += scenario_keepers(session)
+    if args.scenario in ("surfaces", "all"):
+        phases += scenario_surfaces(session, settle=1.5)
     if args.scenario in ("chat", "all"):
         phases += scenario_chat(session, args.chat_wait)
     code = session.quit()

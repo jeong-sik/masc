@@ -87,6 +87,7 @@ let install_always_allow_gate ~base =
 
 let run_execute ~config ~meta ~argv ~cwd =
   Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
+    ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
     ~turn_sandbox_factory:None
     ~config
     ~meta

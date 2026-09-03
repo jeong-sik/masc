@@ -352,6 +352,7 @@
   test_schedule_tool_toml_parity
   test_surface_tool_toml_parity
   test_keeper_artifact_read_request
+  test_tool_result_wire_ceiling
   test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
@@ -695,6 +696,7 @@
   test_schedule_tool_toml_parity
   test_surface_tool_toml_parity
   test_keeper_artifact_read_request
+  test_tool_result_wire_ceiling
   test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
@@ -771,6 +773,17 @@
   ;; The fake ssh shim renders its result trailer with the same function
   ;; the real shim uses, so the wire version cannot be typed in by hand.
  exec_ssh_protocol))
+
+(test
+ (name test_connector_attention_delivery_wiring)
+ (modules test_connector_attention_delivery_wiring)
+ ; Read through Ast_grep, so the sources are deps: without them the test runs
+ ; against whatever the build directory happens to hold.
+ (deps
+  %{workspace_root}/lib/server/server_connector_attention_delivery.ml
+  %{workspace_root}/lib/server/server_discord_in_process_gateway.ml
+  %{workspace_root}/lib/server/server_slack_in_process_gateway.ml)
+ (libraries alcotest ast_grep))
 
 (test
  (name test_voice_session_manager)
@@ -2060,6 +2073,7 @@
 
 (include stanzas/test_channel_gate_discord_state_in_process.inc)
 (include stanzas/test_discord_directory_failure.inc)
+(include stanzas/test_bootstrap_retention_warning.inc)
 
 (include stanzas/test_gate_surface.inc)
 
@@ -2894,7 +2908,9 @@
 (test
  (name test_keeper_shell_tool_command)
  (modules test_keeper_shell_tool_command)
- (libraries alcotest masc))
+ ; masc.masc_exec: the refusal case builds a Shell IR by hand, which is the
+ ; shape a replayed effect hands the runtime.
+ (libraries alcotest masc masc.masc_exec))
 
 (test
  (name test_keeper_tool_read_window)

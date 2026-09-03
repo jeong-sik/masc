@@ -1220,19 +1220,40 @@ let render_overview (state : state) =
     | Some o, None ->
         let health_color = workspace_health_color o.ov_workspace_health in
         let health_label = workspace_health_label o.ov_workspace_health in
+        (* The tab strip's badge counts held keeper tool calls, pending gate
+           rows, and confirm-queue entries together, and so does the Approvals
+           screen's own header. This row counted only the third of those, so a
+           runtime holding one keeper tool call drew "Approvals: 0" beside a
+           tab reading "Approvals·1" -- one name over two populations.
+           All three now walk [approval_items].
+
+           A list that failed to load contributes nothing to that walk, which
+           would let the row understate the queue in silence. The "+?" tail
+           says the number is a floor, not a reading. *)
         let approval_count =
-          match state.approval_snapshot, state.approvals_error with
-          | Some snapshot, None -> string_of_int snapshot.aps_visible_count
-          | None, _ | Some _, Some _ -> "?"
+          let on_screen = List.length (Masc_tui_types.approval_items state) in
+          let source_unread =
+            Option.is_none state.approval_snapshot
+            || Option.is_some state.approvals_error
+            || Option.is_some state.keeper_tool_approvals_error
+            || Option.is_some state.gate_queue_unavailable
+          in
+          if source_unread then Printf.sprintf "%d+?" on_screen
+          else string_of_int on_screen
         in
         (* Keepers and MCP clients are counted apart: a row reading
            "Agents: 2" over a runtime with ten keepers named the wrong
-           population. *)
+           population.
+
+           The incident count used to ride here too, over an Attention panel
+           three lines below drawing those same incidents one per row. A
+           number above the list it counts is not a summary of anything the
+           reader cannot already see; where the panel cannot fit them all,
+           the panel's own title says so. *)
         Printf.sprintf
-          "  Health: %s%s%s  Keepers: %d  MCP agents: %d  Approvals: %s  \
-           Incidents: %d"
+          "  Health: %s%s%s  Keepers: %d  MCP agents: %d  Approvals: %s"
           health_color health_label Ansi.reset o.ov_keepers o.ov_mcp_agents
-          approval_count o.ov_incident_count
+          approval_count
   in
   box_line buf cols summary_line;
 
@@ -1311,7 +1332,19 @@ let render_overview (state : state) =
      to the right panel. *)
   let panel_width = (cols - 3) / 2 in
   let right_panel_width = cols - 3 - panel_width in
-  let attention_title = " Attention " in
+  (* The count used to ride the summary row three lines above, over the very
+     rows it counted. It belongs to the panel, and it earns its place only
+     where it says something the rows cannot: that some did not fit. The
+     Events panel beside it states its window the same way. *)
+  let attention_count = List.length attention_items in
+  let attention_title =
+    if attention_count = 0 then " Attention "
+    else if attention_count <= row_budget.attention_rows then
+      Printf.sprintf " Attention %d " attention_count
+    else
+      Printf.sprintf " Attention %d/%d " row_budget.attention_rows
+        attention_count
+  in
   (* A burst of identical lines (manual refreshes, a broadcast fan-out) folds
      into one row with a ×N tail; the window scrolls over folded rows. *)
   let collapsed_events =

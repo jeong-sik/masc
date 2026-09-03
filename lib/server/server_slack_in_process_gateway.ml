@@ -661,71 +661,21 @@ let handle_ambient ?resolved_keeper_name ~base_dir ~team_id ~channel_id
          lane cycle. *)
       (match attention_event_id with
        | Some event_id ->
-         let stimulus =
-           { Keeper_event_queue.post_id = event_id
-           ; urgency = Keeper_event_queue.Low
-           ; arrived_at = Unix.gettimeofday ()
-             (* NDT-OK: stimulus receipt time, used only for ordering/age *)
-           ; payload =
-               (* RFC-0320: carry the originating Slack channel+author so a
-                  woken keeper replies into the same thread, not its own state. *)
-               Keeper_event_queue.Connector_attention
-                 { event_id
-                 ; channel =
-                     (match
-                        Keeper_continuation_channel.slack ~team_id ~channel_id
-                          ~thread_ts ~user_id
-                      with
-                      | Ok channel -> channel
-                      | Error message -> invalid_arg message)
-                 }
-           }
+         let channel =
+           (* RFC-0320: carry the originating Slack channel+author so a woken
+              keeper replies into the same thread, not its own state. *)
+           match
+             Keeper_continuation_channel.slack ~team_id ~channel_id ~thread_ts
+               ~user_id
+           with
+           | Ok channel -> channel
+           | Error message -> invalid_arg message
          in
-         (match
-            Keeper_registry_event_queue.enqueue_stimulus_durable_result
-              ~base_path:base_dir
-              keeper_name
-              stimulus
-          with
-          | Keeper_registry_event_queue.Stimulus_storage_error detail ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string KeepaliveSignalFailures)
-              ~labels:
-                [ ("keeper", keeper_name)
-                ; ("phase", "connector_attention_delivery")
-                ]
-              ();
-            Log.Server.error
-              "connector attention durable delivery failed (keeper=%s event=%s): %s"
-              keeper_name
-              event_id
-              detail
-          | Keeper_registry_event_queue.Stimulus_enqueued
-          | Keeper_registry_event_queue.Stimulus_already_present ->
-            (match
-               Keeper_registry.wakeup_running
-                 ~intent:Keeper_registry.Reactive_signal
-                 ~base_path:base_dir
-                 keeper_name
-             with
-             | Keeper_registry.Signaled -> ()
-             | Keeper_registry.Deferred_unregistered ->
-               Log.Server.info
-                 "connector attention durably queued; wake deferred for unregistered Keeper (keeper=%s event=%s)"
-                 keeper_name
-                 event_id
-             | Keeper_registry.Deferred_not_running phase ->
-               Log.Server.info
-                 "connector attention durably queued; wake deferred by Keeper phase (keeper=%s event=%s phase=%s)"
-                 keeper_name
-                 event_id
-                 (Keeper_state_machine.phase_to_string phase)
-             | Keeper_registry.Deferred_lifecycle denial ->
-               Log.Server.info
-                 "connector attention durably queued; wake deferred by lifecycle (keeper=%s event=%s reason=%s)"
-                 keeper_name
-                 event_id
-                 (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)))
+         Server_connector_attention_delivery.deliver
+           ~base_path:base_dir
+           ~keeper_name
+           ~event_id
+           ~channel
        | None -> ());
       Slack_observability.record_ambient Slack_observability.Ambient_recorded
     end

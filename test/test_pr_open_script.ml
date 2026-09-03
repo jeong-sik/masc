@@ -77,6 +77,10 @@ let env_array overrides =
     table []
   |> Array.of_list
 
+let rec waitpid_retrying pid =
+  try Unix.waitpid [] pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_retrying pid
+
 let run_process ?(env = []) ~cwd prog argv =
   let out = Filename.temp_file "pr-open-out" ".txt" in
   let err = Filename.temp_file "pr-open-err" ".txt" in
@@ -94,7 +98,7 @@ let run_process ?(env = []) ~cwd prog argv =
         Unix.create_process_env prog argv (env_array env) Unix.stdin out_fd
           err_fd)
   in
-  let _, status = Unix.waitpid [] pid in
+  let _, status = waitpid_retrying pid in
   let code =
     match status with
     | Unix.WEXITED code -> code

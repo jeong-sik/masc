@@ -355,6 +355,7 @@
   test_surface_tool_toml_parity
   test_keeper_artifact_read_request
   test_tool_result_wire_ceiling
+  test_setting_registry_default_parity
   test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
@@ -701,6 +702,7 @@
   test_surface_tool_toml_parity
   test_keeper_artifact_read_request
   test_tool_result_wire_ceiling
+  test_setting_registry_default_parity
   test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
@@ -773,7 +775,7 @@
  (libraries
  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
-  masc.skill_config masc.skill_reference masc.skill_snapshot
+  masc.skill_config masc.skill_reference masc.skill_snapshot masc.config
   ;; The fake ssh shim renders its result trailer with the same function
   ;; the real shim uses, so the wire version cannot be typed in by hand.
  exec_ssh_protocol))
@@ -813,7 +815,7 @@
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
-  masc.skill_config masc.skill_reference masc.skill_snapshot))
+  masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
 
 ; Extracted from the big (tests ...) group above: the keeper fixture TOMLs
 ; seed sandbox_profile = "local" (incidental — the suite measures mention
@@ -825,7 +827,7 @@
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
-  masc.skill_config masc.skill_reference masc.skill_snapshot))
+  masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
 
 ; Extracted from the big (tests ...) group above: the declarative keeper
 ; fixture TOMLs seed sandbox_profile = "local" (incidental — the suite
@@ -837,7 +839,7 @@
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
-  masc.skill_config masc.skill_reference masc.skill_snapshot))
+  masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
 
 ; Extracted from the big (tests ...) group above: the connector route
 ; fixtures boot keepers whose sandbox_profile resolves to Local (incidental —
@@ -850,7 +852,7 @@
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
-  masc.skill_config masc.skill_reference masc.skill_snapshot))
+  masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
 
 ; Repository catalog tests depend only on the focused repo_manager library.
 ; The iMessage connector's platform-independent core. Needs sqlite3 directly

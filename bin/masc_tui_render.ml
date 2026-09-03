@@ -6920,12 +6920,11 @@ let render_keeper_logs (state : state) =
     box_line buf cols header;
     box_divider buf cols;
 
-    (* Column header *)
-    let col_hdr =
-      Printf.sprintf "  %-8s %-4s %-8s %5s %13s %9s %9s  %-10s" "Time"
-        "Kind" "Channel" "Msgs" "In/Out" "Lat" "Cost" "Work"
-    in
-    box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
+    (* The names come from the same description as the readings, in the module
+       that owns the widths. Written here, they were eight numbers away from
+       the eight they named. *)
+    box_line_styled buf cols ~style:(Theme.recede ())
+      Observation_layout.plain_log_header;
     box_divider buf cols;
 
     (match state.log_error with

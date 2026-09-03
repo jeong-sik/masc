@@ -32,6 +32,14 @@ val log_channel_label : Tui_decode.log_channel -> string
 val usage_label : input:int option -> output:int option -> string
 val latency_label : int option -> string
 val cost_label : float option -> string
+val plain_log_header : string
+(** The metrics tail's column names. Drawn from the same description as
+    {!plain_log_row}, which is what holds the two at one set of offsets: the
+    widths lived here and the names lived in the renderer, and only care kept
+    them agreeing. *)
+
 val plain_log_row : time:string -> Tui_decode.log_entry -> string
+(** One observed turn. The tools that ran follow the last named column,
+    unbounded, so nothing after it can be pushed. *)
 val context_summary : Tui_decode.context_observation -> context_summary
 val context_header_item : max_cells:int -> Tui_decode.context_observation -> string option

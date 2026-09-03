@@ -52,7 +52,11 @@ let test_log_rows_keep_stable_columns () =
   in
   let turn_row = Layout.plain_log_row ~time:"12:00:00" turn in
   let heartbeat_row = Layout.plain_log_row ~time:"12:00:00" heartbeat in
-  check int "fits the 80-column box interior" 76 (String.length turn_row);
+  (* One cell narrower than it was: the two spaces the row kept between the
+     cost and the work kind were hand-written into both format strings, and
+     the shared contract spaces every column alike. The counts still read as a
+     block -- they are the four that are right-aligned. *)
+  check int "fits the 80-column box interior" 75 (String.length turn_row);
   check int "missing values keep row width" (String.length turn_row)
     (String.length heartbeat_row);
   check string "kind column" "turn" (String.sub turn_row 11 4);
@@ -62,7 +66,29 @@ let test_log_rows_keep_stable_columns () =
   check string "latency column" "      0ms" (String.sub turn_row 45 9);
   check string "cost column" "   $0.000" (String.sub turn_row 55 9);
   check string "heartbeat channel offset" "hb      "
-    (String.sub heartbeat_row 16 8)
+    (String.sub heartbeat_row 16 8);
+  (* The names and the readings come from one description now. The widths used
+     to live in this module and the names in the renderer, so this is the
+     property that says they cannot drift apart again. *)
+  let header = Layout.plain_log_header in
+  check int "the header is as wide as the rows" (String.length turn_row)
+    (String.length header);
+  List.iter
+    (fun (label, offset) ->
+      check string
+        (Printf.sprintf "%s stands over its column" label)
+        label
+        (String.sub header offset (String.length label)))
+    [ "TIME", 2; "KIND", 11; "CHANNEL", 16; "WORK", 65 ];
+  (* A right-aligned name ends where its readings end. *)
+  List.iter
+    (fun (label, offset, width) ->
+      check string
+        (Printf.sprintf "%s ends with its column" label)
+        label
+        (String.sub header (offset + width - String.length label)
+           (String.length label)))
+    [ "MSGS", 25, 5; "IN/OUT", 31, 13; "LAT", 45, 9; "COST", 55, 9 ]
 
 let observed ?ratio ?(tokens = 100) ?maximum () =
   Decode.Context_observed

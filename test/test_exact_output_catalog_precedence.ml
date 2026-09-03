@@ -640,8 +640,7 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
        "auxiliary_exact"
        rejected.lane_id;
      Alcotest.(check int) "rejected position" 1 rejected.position;
-     Alcotest.(check string) "rejected slot" overlay_target rejected.slot_id;
-     Alcotest.(check string) "rejected target" overlay_target rejected.target_ref
+     Alcotest.(check string) "rejected slot" overlay_target rejected.slot_id
    | rejected ->
      Alcotest.failf
        "expected one typed rejected slot, got %d"

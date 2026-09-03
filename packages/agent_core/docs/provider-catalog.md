@@ -217,6 +217,7 @@ Accepted `preserve_thinking_control_format` values are:
 - `thinking_object_keep_all` (`thinking.keep = "all"`)
 - `chat_template_kwargs_preserve_thinking`
 - `always_preserved` (historical reasoning must be replayed; no request field)
+- `thinking_object_clear_thinking` (`thinking.clear_thinking` carries the toggle and gates replay)
 
 Accepted `reasoning_output_format` values are:
 

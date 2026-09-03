@@ -161,7 +161,6 @@ val chat_template_kwargs_preserve_field
   -> preserve_thinking:bool option
   -> bool option
 
-
 val ignores_sampling_param
   :  t
   -> enable_thinking:bool option

@@ -182,7 +182,7 @@ function providerPayload(overrides: Record<string, unknown> = {}) {
           connect_timeout_s: 30,
         },
         parameter_policy: {
-          reasoning_toggle_wire: 'enable_thinking',
+          reasoning_toggle_wire: 'chat_template_kwargs',
           reasoning_replay_policy: 'preserve',
           requires_reasoning_replay_on_tool_call: true,
           ignored_sampling_params: ['min_p'],

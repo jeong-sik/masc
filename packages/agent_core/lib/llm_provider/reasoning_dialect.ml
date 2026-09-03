@@ -324,9 +324,11 @@ let validate_request_control_inputs
       ~reasoning_effort
   =
   let thinking_budget_result =
-    match thinking_budget, request_wire, dialect.toggle_wire with
-    | None, _, _ -> Ok ()
-    | Some _, _, _ -> Error Thinking_budget_unsupported
+    (* No OpenAI-compatible wire carries a numeric budget; Anthropic and
+       Gemini budgets travel on their own serializers. *)
+    match thinking_budget with
+    | None -> Ok ()
+    | Some _ -> Error Thinking_budget_unsupported
   in
   match thinking_budget_result with
   | Error _ as error -> error

@@ -716,6 +716,8 @@ let parse_thinking_control_format ~(path : string) ~(token : string option) (raw
     reject_orphan_token Runtime_schema.No_thinking_control
   | "thinking-object" | "thinking_object" ->
     reject_orphan_token Runtime_schema.Thinking_object
+  | "thinking-object-adaptive" | "thinking_object_adaptive" ->
+    reject_orphan_token Runtime_schema.Thinking_object_adaptive
   | "thinking-object-only" | "thinking_object_only" ->
     reject_orphan_token Runtime_schema.Thinking_object_only
   | "chat-template-kwargs" | "chat_template_kwargs" ->
@@ -749,7 +751,7 @@ let parse_thinking_control_format ~(path : string) ~(token : string option) (raw
          (path ^ ".thinking-control-format")
          (Printf.sprintf
             "unknown thinking-control-format %S — expected one of \
-             none|thinking-object|thinking-object-only|chat-template-kwargs|chat-template-token|ollama-think|reasoning-effort"
+             none|thinking-object|thinking-object-adaptive|thinking-object-only|chat-template-kwargs|chat-template-token|ollama-think|reasoning-effort"
             other))
 ;;
 

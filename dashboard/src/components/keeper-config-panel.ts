@@ -1338,12 +1338,40 @@ function SetToggle({ on, onChange, ariaLabel }: { on: boolean; onChange: (v: boo
   `
 }
 
-function ConfigRow({ label, value }: { label: string; value: string }) {
+function ConfigRow({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string
+  value: string
+  tone?: 'neutral' | 'warn'
+}) {
+  const valueClass =
+    tone === 'warn'
+      ? 'text-sm font-semibold text-[var(--color-status-warn)]'
+      : 'text-sm font-semibold text-text-strong'
   return html`
     <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 v2-monitoring-row">
       <span class="text-sm font-medium text-text-muted">${label}</span>
-      <span class="text-sm font-semibold text-text-strong">${value}</span>
+      <span class=${valueClass}>${value}</span>
     </div>
+  `
+}
+
+/* What a Keeper without a network actually looks like from the inside, because
+   the tools do not say it. `gh` cannot reach github.com to check a token, so it
+   reports the token as invalid; a Keeper reads that literally and tells its
+   owner to re-authenticate, which changes nothing. Seen on
+   kidsnote-pr-jira-checker, 2026-09-03: a valid token, the right hosts.yml
+   mounted into the guest, and three rounds of re-authentication. */
+function NoNetworkCallout() {
+  return html`
+    <${Callout}
+      title="이 Keeper 는 네트워크가 없습니다"
+      body="게스트에서 나가는 연결이 전부 막힙니다. gh, curl, git 은 실패하고, gh 는 그 실패를 '토큰이 invalid' 로 보고합니다 — 자격증명이 멀쩡해도 그렇게 보입니다. 인증을 다시 하기 전에 이 값을 먼저 보세요. inherit 으로 바꾸면 sandbox 를 다시 만들어야 반영됩니다."
+      tone="warn"
+    />
   `
 }
 
@@ -1484,19 +1512,25 @@ export function InlineSelectRow({
   options,
   onChange,
   dirty = false,
+  tone = 'neutral',
 }: {
   label: string
   value: string
   options: readonly string[]
   onChange: (v: string) => void
   dirty?: boolean
+  tone?: 'neutral' | 'warn'
 }) {
+  const controlClass =
+    tone === 'warn'
+      ? 'kcf-inline-control text-sm bg-[var(--warn-10)] border border-[var(--warn-20)] rounded-[var(--r-1)] px-3 py-1.5 text-[var(--color-status-warn)] font-semibold'
+      : 'kcf-inline-control text-sm bg-card/60 border border-card-border rounded-[var(--r-1)] px-3 py-1.5 text-text-strong'
   return html`
     <div class="kcf-inline-row flex items-center justify-between py-2.5 px-4 rounded-[var(--r-4)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 gap-3 v2-monitoring-row">
       <span class="text-sm font-medium text-text-muted">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
       <select
         aria-label=${label}
-        class="kcf-inline-control text-sm bg-card/60 border border-card-border rounded-[var(--r-1)] px-3 py-1.5 text-text-strong"
+        class=${controlClass}
         value=${value}
         onChange=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}
       >
@@ -2223,7 +2257,9 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           : ['inherit'] as const}
         onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
         dirty=${dirtyFlags.network_mode}
+        tone=${rd.network_mode === 'none' ? 'warn' : 'neutral'}
       />
+      ${rd.network_mode === 'none' ? html`<${NoNetworkCallout} />` : null}
       <div class="kcf-paths">
         <span class="kcf-path-eff mono">sandbox: ${(c.sandbox_roots ?? []).join(', ')}</span>
       </div>
@@ -2239,7 +2275,12 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ` : null}
     ` : html`
       <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'local'} />
-      <${ConfigRow} label="network_mode" value=${c.network_mode ?? 'inherit'} />
+      <${ConfigRow}
+        label="network_mode"
+        value=${c.network_mode ?? 'inherit'}
+        tone=${(c.network_mode ?? 'inherit') === 'none' ? 'warn' : 'neutral'}
+      />
+      ${(c.network_mode ?? 'inherit') === 'none' ? html`<${NoNetworkCallout} />` : null}
 
       <${ConfigRow} label="sandbox_roots" value=${(c.sandbox_roots ?? []).join(', ')} />
     `}

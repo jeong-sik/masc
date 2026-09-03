@@ -1222,23 +1222,31 @@ let render_overview (state : state) =
         let health_label = workspace_health_label o.ov_workspace_health in
         (* The tab strip's badge counts held keeper tool calls, pending gate
            rows, and confirm-queue entries together, and so does the Approvals
-           screen's own header. This row counted only the third of those, so a
-           runtime holding one keeper tool call drew "Approvals: 0" beside a
-           tab reading "Approvals·1" -- one name over two populations.
-           All three now walk [approval_items].
+           screen's own header. This row counted only the third of those, off
+           the confirm queue's own visible count, so a runtime holding one
+           keeper tool call drew "Approvals: 0" beside a tab reading
+           "Approvals·1" -- one name over two populations. All three now walk
+           [approval_items].
 
-           A list that failed to load contributes nothing to that walk, which
-           would let the row understate the queue in silence. The "+?" tail
-           says the number is a floor, not a reading. *)
+           The "?" tail marks a count no source will stand behind, and it does
+           not say which way the number is wrong, because the failures do not
+           agree on that. A dropped confirm queue empties its list, leaving the
+           count short. A failed held-calls or gate poll replaces nothing --
+           the previous rows stay on screen, which the Approvals header calls
+           "held calls stale" -- so that count can just as easily be long,
+           describing rows the server no longer holds. Which list failed is a
+           question that header answers; at this width the row says only that
+           one did. *)
         let approval_count =
           let on_screen = List.length (Masc_tui_types.approval_items state) in
           let source_unread =
             Option.is_none state.approval_snapshot
             || Option.is_some state.approvals_error
             || Option.is_some state.keeper_tool_approvals_error
+            || Option.is_some state.gate_error
             || Option.is_some state.gate_queue_unavailable
           in
-          if source_unread then Printf.sprintf "%d+?" on_screen
+          if source_unread then Printf.sprintf "%d?" on_screen
           else string_of_int on_screen
         in
         (* Keepers and MCP clients are counted apart: a row reading
@@ -1250,10 +1258,37 @@ let render_overview (state : state) =
            number above the list it counts is not a summary of anything the
            reader cannot already see; where the panel cannot fit them all,
            the panel's own title says so. *)
+        (* Nine Keepers with two that had stopped doing anything and one an
+           operator had paused read exactly like nine running ones. The
+           briefing has carried the control plane's word for each of them all
+           along; only the number reached this row.
+
+           The states that are not "active" are the ones an operator acts on,
+           so those are the ones named. A fleet where every Keeper is active
+           says only its number -- an always-on breakdown would be texture,
+           the way an always-on tab badge would be. *)
+        let keeper_note =
+          let l = o.ov_keeper_liveness in
+          let parts =
+            List.filter_map
+              (fun (count, label) ->
+                if count = 0 then None
+                else Some (Printf.sprintf "%d %s" count label))
+              [ (l.klc_paused, "paused")
+              ; (l.klc_offline, "offline")
+              ; (l.klc_inactive, "inactive")
+              ; (l.klc_idle, "idle")
+              ; (l.klc_unreadable, "unreadable")
+              ]
+          in
+          match parts with
+          | [] -> ""
+          | _ :: _ -> Printf.sprintf " (%s)" (String.concat ", " parts)
+        in
         Printf.sprintf
-          "  Health: %s%s%s  Keepers: %d  MCP agents: %d  Approvals: %s"
-          health_color health_label Ansi.reset o.ov_keepers o.ov_mcp_agents
-          approval_count
+          "  Health: %s%s%s  Keepers: %d%s  MCP agents: %d  Approvals: %s"
+          health_color health_label Ansi.reset o.ov_keepers keeper_note
+          o.ov_mcp_agents approval_count
   in
   box_line buf cols summary_line;
 

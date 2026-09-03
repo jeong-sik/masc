@@ -1942,9 +1942,9 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Internal_name
       ~input_schema_source:Canonical_registry
       ~id:"keeper.artifact.read"
-      ~name:Keeper_tool_runtime_schemas.artifact_read.name
-      ~description:Keeper_tool_runtime_schemas.artifact_read.description
-      ~input_schema:Keeper_tool_runtime_schemas.artifact_read.input_schema
+      ~name:Keeper_runtime_schemas_toml.artifact_read.name
+      ~description:Keeper_runtime_schemas_toml.artifact_read.description
+      ~input_schema:Keeper_runtime_schemas_toml.artifact_read.input_schema
       (* Concurrent: content-addressed blob reads; the validated-file
          cache in Tool_blob_store is an Atomic CAS over an immutable map. *)
       ~ordinary_execution_mode:Concurrent
@@ -2067,9 +2067,9 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Internal_name
       ~input_schema_source:Canonical_registry
       ~id:"masc.fusion.deliberate"
-      ~name:Keeper_tool_runtime_schemas.fusion.name
-      ~description:Keeper_tool_runtime_schemas.fusion.description
-      ~input_schema:Keeper_tool_runtime_schemas.fusion.input_schema
+      ~name:Keeper_runtime_schemas_toml.fusion.name
+      ~description:Keeper_runtime_schemas_toml.fusion.description
+      ~input_schema:Keeper_runtime_schemas_toml.fusion.input_schema
       (* The explicit [Internal_name] projection makes Fusion available. *)
       ~policy:(write_in_process_policy ())
       ~handler:Tool_masc_fusion_dispatch
@@ -2080,9 +2080,9 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Internal_name
       ~input_schema_source:Canonical_registry
       ~id:"masc.fusion.status"
-      ~name:Keeper_tool_runtime_schemas.fusion_status.name
-      ~description:Keeper_tool_runtime_schemas.fusion_status.description
-      ~input_schema:Keeper_tool_runtime_schemas.fusion_status.input_schema
+      ~name:Keeper_runtime_schemas_toml.fusion_status.name
+      ~description:Keeper_runtime_schemas_toml.fusion_status.description
+      ~input_schema:Keeper_runtime_schemas_toml.fusion_status.input_schema
       (* [Internal_name] is the model exposure authority. *)
       (* Concurrent: projects an [Atomic.get] snapshot of the fusion run
          registry (Run_registry_core); mutation goes through its own
@@ -2101,9 +2101,9 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Operator_only
       ~input_schema_source:Canonical_registry
       ~id:"keeper.vision.analyze_image"
-      ~name:Keeper_tool_runtime_schemas.keeper_analyze_image.name
-      ~description:Keeper_tool_runtime_schemas.keeper_analyze_image.description
-      ~input_schema:Keeper_tool_runtime_schemas.keeper_analyze_image.input_schema
+      ~name:Keeper_runtime_schemas_toml.keeper_analyze_image.name
+      ~description:Keeper_runtime_schemas_toml.keeper_analyze_image.description
+      ~input_schema:Keeper_runtime_schemas_toml.keeper_analyze_image.input_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_analyze_image
       ()
@@ -2304,6 +2304,19 @@ let internal_descriptors : t list =
        "tool_help" "masc_tool_help"
        ~readonly:true
   ; masc_misc_descriptor "gc" "masc_gc"
+      ~readonly:false
+  (* The ask chain — store, operator surfaces, answer→wake — was reachable
+     only from the MCP lane: nothing in this registry named the tools, so the
+     agent-core lane never advertised them and could not dispatch a call.
+     [Internal_name] puts them on the model surface; [Tool_masc_misc_dispatch]
+     routes them to the same handlers the MCP lane uses, with the Keeper's own
+     [meta.name] as the asking identity, so the store's unregistered-keeper
+     refusal still applies. *)
+  ; masc_misc_descriptor "ask" "masc_ask"
+      ~readonly:false
+  ; masc_misc_descriptor "ask_status" "masc_ask_status"
+      ~readonly:true
+  ; masc_misc_descriptor "ask_withdraw" "masc_ask_withdraw"
       ~readonly:false
   (* [masc_web_search] / [masc_web_fetch] are already owned by the
      MASC-owned web descriptors above. Do not add

@@ -34,13 +34,6 @@ type exposure =
   | Toml_and_env of string
   | Env_only
 
-type lifecycle =
-  | Active
-  | Retired of
-      { reason : string
-      ; replacement : string option
-      }
-
 type setting =
   { env_name : string
   ; exposure : exposure
@@ -51,15 +44,16 @@ type setting =
   ; consumers : string list
   ; category : string
   ; description : string
-  ; lifecycle : lifecycle
   }
 
 val all : setting list
-(** Complete registry, including explicitly environment-only and retired rows. *)
+(** Complete registry, including explicitly environment-only rows. *)
 
-val active : setting list
-val active_toml : setting list
-val active_toml_mappings : (string * string) list
+val toml_settings : setting list
+(** The rows that own a TOML key. *)
+
+val toml_env_mappings : (string * string) list
+(** TOML key to environment name, one pair per row of [toml_settings]. *)
 
 val toml_key_opt : setting -> string option
 val find_by_toml_key : string -> setting option
@@ -67,7 +61,6 @@ val find_by_toml_key : string -> setting option
 val value_kind_label : value_kind -> string
 val value_range_label : value_range -> string
 val reload_class_label : reload_class -> string
-val lifecycle_label : lifecycle -> string
 
 val requires_restart : setting -> bool
 (** [true] for settings whose next effect boundary requires a fiber or process
@@ -75,7 +68,7 @@ val requires_restart : setting -> bool
 
 val validate_registry : unit -> (unit, string list) result
 (** Rejects duplicate environment/TOML identities, malformed exposure, and
-    active TOML settings without a concrete consumer. *)
+    TOML settings without a concrete consumer. *)
 
 val schema_to_yojson : unit -> Yojson.Safe.t
 (** Machine-readable catalog used by operator surfaces and generated docs. *)

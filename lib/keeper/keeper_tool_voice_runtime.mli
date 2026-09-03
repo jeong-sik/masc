@@ -21,8 +21,9 @@ val command_to_string : voice_command -> string
 val command_of_string : string -> voice_command option
 
 (** Caller-owned authorization boundary around one concrete voice effect. The
-    voice runtime invokes it only at the TTS/playback or microphone/STT leaf;
-    local capability and session reads do not become Gate requests. *)
+    voice runtime invokes it only at the TTS/playback leaf; the microphone
+    window is wall-clock bound, so listening stays ungated, and local
+    capability and session reads do not become Gate requests either. *)
 type external_effect_authorizer =
   operation:string ->
   input:Yojson.Safe.t ->

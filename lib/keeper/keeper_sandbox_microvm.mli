@@ -1,8 +1,10 @@
 (** Apple [container] argv for the [Micro_vm] sandbox profile.
 
     Command construction only: nothing here starts a VM. Dispatch does --
-    [Keeper_turn_sandbox_runtime] runs these argv for a keeper whose profile
-    is [Micro_vm], and has since #31340. See the implementation for the
+    [Keeper_turn_sandbox_runtime] boots and adopts the guest, and the remote
+    lane ([Keeper_sandbox_remote]) drives its shim over [container exec].
+    The guest owns its working tree on a per-keeper volume (RFC-0400); the
+    host playground is never mounted into it. See the implementation for the
     measured cost of the backend and for the two Docker hardening flags
     [container run] does not accept. *)
 
@@ -19,19 +21,6 @@ val network_args :
     nameserver passed in: the guest's resolver points at the gateway and the
     gateway refuses DNS from inside, so without one the guest routes fine and
     resolves nothing. *)
-
-val run_argv :
-  container_name:string ->
-  container_root:string ->
-  container_cwd:string ->
-  host_root:string ->
-  image:string ->
-  network_args:string list ->
-  uid:int ->
-  gid:int ->
-  env_args:string list ->
-  memory:string ->
-  string list
 
 val image_present : image:string -> timeout_sec:float -> (unit, string) result
 (** Gate the run on the image already being in container's store. container
@@ -70,12 +59,13 @@ val image_probe : image:string -> timeout_sec:float -> image_probe_outcome
 (** Run the structured probe and retain its typed outcome before the public
     sandbox boundary renders an operator-facing error. *)
 
-(** Turn-container argv. Same lifecycle as the Docker turn lane: detached
+(** Guest boot argv. Same lifecycle as the Docker persistent lane: detached
     guest holding [tail -f /dev/null], commands by [exec], removed on
-    [stop] via [--rm]. The playground is mounted here; everything else the
-    guest may see arrives through [mount_args], which the caller builds --
-    config, GitHub identity, secret files and [--env-file]. Workspace-state
-    mounts and the /etc/passwd identity mounts remain absent.
+    [stop] via [--rm]. Nothing of the host playground is mounted; everything
+    the guest may see arrives through [mount_args], which the caller builds
+    -- config, GitHub identity, the work volume and the shim. The working
+    directory is {!work_volume_guest_root}. Workspace-state mounts and the
+    /etc/passwd identity mounts remain absent.
 
     [mount_args] is passed in Docker's own spelling: measured 2026-08-28,
     container accepts [-v host:container:ro] and [--env-file] unchanged. *)
@@ -87,8 +77,6 @@ val turn_start_argv :
   gid:int ->
   memory:string ->
   cpus:string option ->
-  host_root:string ->
-  container_root:string ->
   network_args:string list ->
   mount_args:string list ->
   image:string ->
@@ -110,32 +98,25 @@ val delete_force_argv : container_name:string -> string list
 (** For a guest that survived as stopped (e.g. the host rebooted out from
     under [--rm]); running guests are taken down with {!stop_argv}. *)
 
-(** Guest mount point of the per-keeper build volume.
-
-    Build output must not sit on the virtiofs share: virtiofs pins one host
-    file descriptor -- and therefore one host vnode -- per inode the guest
-    touches, and [kern.maxvnodes] is 263,168. Measured writing 20,000 files
-    on container 1.3.1: ext4 volume 26 -> 26 host descriptors, virtiofs
-    26 -> 20,027, [_build] symlinked onto the volume 59 -> 61. See the
-    implementation for the panic this prevents. *)
-val build_volume_guest_root : string
-
-(** [masc-keeper-build-<keeper_name>], or an error when the name carries
-    anything outside [A-Za-z0-9._-]. *)
-val build_volume_name : keeper_name:string -> (string, string) result
-
-val build_volume_create_argv : volume_name:string -> size:string -> string list
-val build_volume_mount_args : volume_name:string -> string list
-
 (** {2 The work volume and the shim (RFC-0400)}
 
-    The keeper's working tree lives on a second per-keeper volume, mounted at
+    The keeper's working tree lives on a per-keeper ext4 volume mounted at
     {!work_volume_guest_root}; that path is the remote lane's [remote_root]
-    for the guest. The static [masc-exec-shim] and its config travel in one
-    host directory mounted read-only at {!shim_guest_dir}. *)
+    for the guest. A tree on the virtiofs share pins one host file
+    descriptor -- one host vnode -- per inode the guest touches against a
+    [kern.maxvnodes] of 263,168; measured writing 20,000 files on container
+    1.3.1: ext4 volume 26 -> 26 host descriptors, virtiofs 26 -> 20,027.
+    See the implementation for the panics this prevents. The static
+    [masc-exec-shim] and its config travel in one host directory mounted
+    read-only at {!shim_guest_dir}. *)
 
 val work_volume_guest_root : string
+
+(** [masc-keeper-work-<keeper_name>], or an error when the name carries
+    anything outside [A-Za-z0-9._-]. *)
 val work_volume_name : keeper_name:string -> (string, string) result
+
+val volume_create_argv : volume_name:string -> size:string -> string list
 val work_volume_mount_args : volume_name:string -> string list
 
 val keeper_work_root : keeper_name:string -> string
@@ -149,32 +130,12 @@ val shim_config_guest_path : string
 val shim_mount_args : host_dir:string -> string list
 
 val shim_config_content : payload_path:string -> string
-(** [remote_root=<work root>] and [path=<payload_path>], the two lines the
-    guest's shim reads. *)
+(** [remote_root=<work root>], [path=<payload_path>] and
+    [env_allowlist=<config env names>]: the lines the guest's shim reads. *)
 
 val remote_env_allowlist : string list
 val remote_connect_timeout_sec : int
 val remote_max_concurrent_sessions : int
-
-(** Build directory for one checkout, addressed by its playground-relative
-    path. Errors when a segment is empty or contains the separator, which
-    would make two checkouts share one build directory. *)
-val build_link_target : playground_relative:string -> (string, string) result
-
-type build_link_state =
-  | Build_absent
-  | Build_symlink of string
-  | Build_real_directory
-
-type build_link_plan =
-  | Link_create of string
-  | Link_retarget of string
-  | Link_already_correct
-  | Link_refused_real_directory
-
-(** A real [_build] directory is refused, not deleted: it holds output this
-    module did not create. A stale symlink is retargeted, which loses no data. *)
-val plan_build_link : target:string -> build_link_state -> build_link_plan
 
 (** Volume ids in a [container volume list --format json] payload. *)
 val volume_names_of_json : Yojson.Safe.t -> (string list, string) result
@@ -187,7 +148,7 @@ type volume_probe_outcome =
 (** [container volume inspect] exits 1 for "no such volume" and also for a
     stopped container system, so a 1 is confirmed against the listing instead
     of being read as absence -- creating over an existing volume would land on
-    a keeper's build cache. Pure, so the ambiguity is testable. *)
+    a keeper's working tree. Pure, so the ambiguity is testable. *)
 val classify_volume_probe
   :  volume_name:string
   -> inspect:Unix.process_status * string * string
@@ -196,96 +157,33 @@ val classify_volume_probe
 
 val volume_probe : volume_name:string -> timeout_sec:float -> volume_probe_outcome
 
-(** Create the volume when absent. [container volume create] is not
+(** Create the work volume when absent. [container volume create] is not
     idempotent, so existence is settled by the probe rather than by reading
-    its "already exists" message. *)
-type volume_kind =
-  | Build_volume
-  | Work_volume
-
-val volume_kind_label : volume_kind -> string
-
-val ensure_volume
-  :  kind:volume_kind
-  -> volume_name:string
-  -> size:string
-  -> timeout_sec:float
-  -> ([ `Created | `Already_present ], string) result
-(** Error codes carry the kind: [microvm_build_volume_*] or
-    [microvm_work_volume_*]. *)
-
-val ensure_build_volume
+    its "already exists" message. Error codes are [microvm_work_volume_*]. *)
+val ensure_work_volume
   :  volume_name:string
   -> size:string
   -> timeout_sec:float
   -> ([ `Created | `Already_present ], string) result
 
-(** Anything that is neither absent nor a symlink reads as
-    [Build_real_directory], so the plan refuses it. The conservative answer is
-    the safe one: the only action on it is to leave the path alone. *)
-val build_link_state_of_path : string -> build_link_state
-
-(** The link points at a guest path and so dangles on the host by
-    construction. Refusing a real directory is an error, not a silent skip,
-    because the caller should say which checkout stayed on virtiofs. *)
-val apply_build_link
-  :  path:string
-  -> build_link_plan
-  -> ([ `Linked | `Relinked | `Unchanged ], string) result
-
-(** A checkout is a directory holding [dune-project], searched to
-    {!build_root_scan_depth} below a keeper's playground.
-
-    [_build] is dune's name and dune's alone. Other ecosystems pin host
-    descriptors the same way through [node_modules], [target] or [dist] and
-    are not handled here; the mechanism carries over unchanged, only the
-    marker and directory name differ. The gap is named so this is not read as
-    covering every keeper. *)
-val build_roots_under : playground_root:string -> string list
-
-(** Path relative to the playground root, or [None] when not below it. *)
-val playground_relative : playground_root:string -> string -> string option
-
-type build_link_row =
-  { path : string
-  ; target : string option
-  ; outcome : ([ `Linked | `Relinked | `Unchanged ], string) result
-  }
-
-(** Point every checkout's [_build] at the volume.
-
-    One row per checkout, not one verdict: a refusal must not hide the
-    checkouts that were linked, and the caller has to be able to say which one
-    stayed on the virtiofs share. *)
-val ensure_build_links : playground_root:string -> build_link_row list
-
-(** What each checkout's [_build] is, without changing any of it.
-
-    The status surface needs [ensure_build_links]'s walk without its effects:
-    opening a tab must not install links. A checkout still holding a real
-    [_build] is the row that matters -- still writing to the virtiofs share,
-    and only a person can clear it. *)
-val observe_build_links : playground_root:string -> (string * build_link_state) list
-
-(** Targets a build will write through. A refused checkout contributes
-    nothing -- it keeps its real [_build] on the share. *)
-val build_link_targets_to_create : build_link_row list -> string list
-
-(** Create those targets inside the guest, in one exec.
-
-    Measured, and the reason this is a separate step: dune does not create the
-    directory a [_build] symlink points at. It lstats [_build], sees something,
-    and opens [_build/.lock] straight away --
-    [Error: open(_build/.lock): No such file or directory]. The host cannot
-    create it either, since it lives inside the volume's ext4 image.
-    The named volume root is initially root-owned. Creation therefore runs as
-    root with an explicit writable mode that applies only to new directories;
-    existing Keeper-owned targets are untouched. *)
-val build_target_mkdir_argv : container_name:string -> targets:string list -> string list
-
 val keeper_work_root_mkdir_argv : container_name:string -> keeper_name:string -> string list
-(** Create {!keeper_work_root} inside the guest as root with an explicit
-    mode, for the same reason as {!build_target_mkdir_argv}. Idempotent. *)
+(** Create {!keeper_work_root} inside the guest, in one exec. The host
+    cannot: the directory lives inside the volume's ext4 image. The volume
+    root is initially root-owned and the user namespace refuses a later
+    chmod, so creation runs as root with an explicit writable mode that
+    applies only to a new directory. Idempotent. *)
+
+val keeper_work_root_write_probe_argv
+  :  container_name:string
+  -> uid:int
+  -> gid:int
+  -> keeper_name:string
+  -> string list
+(** Create and remove a temporary file in {!keeper_work_root} as [uid:gid],
+    the identity the keeper's commands run under. Exit 0 proves the keeper
+    can write its root; any other exit carries the root's owner and mode on
+    stderr. A root that exists but belongs to another uid -- a tree imported
+    from elsewhere -- fails here rather than on the keeper's first Write. *)
 
 val keeper_vm_container_kind : string
 

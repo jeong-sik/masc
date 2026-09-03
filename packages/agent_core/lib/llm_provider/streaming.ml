@@ -409,7 +409,7 @@ let chunk_has_non_empty_delta (c : openai_chunk) : bool =
   || c.delta_tool_calls <> []
 ;;
 
-(* OpenAI-compatible / GLM / DashScope / Kimi streams terminate with this
+(* OpenAI-compatible / GLM / Kimi streams terminate with this
    literal SSE payload (the bare token after [data: ]), not a JSON object. SSOT
    for the sentinel shared by the chunk parser, the terminal-event helper, and
    the Responses-API trailer. *)
@@ -508,7 +508,7 @@ let parse_delta_tool_call_arguments ~position function_json =
   | Some (`String arguments) -> Ok (Some (Args_fragment arguments))
   | Some arguments ->
     (match Tool_call_input.validate_object arguments with
-     | Ok arguments ->
+     | Ok (arguments, _dropped) ->
        (* Some explicitly OpenAI-compatible servers send a complete JSON object
           rather than the wire string fragment. This is a structural wire
           variant, not a provider/model-name inference: the complete value
@@ -3255,12 +3255,12 @@ let ollama_chunk_to_events (state : openai_stream_state) (chunk : ollama_chunk)
 
 let%test "parse_ollama_ndjson_chunk: content delta line" =
   let line =
-    {|{"model":"dashscope-3:8b","message":{"role":"assistant","content":"hi"},"done":false}|}
+    {|{"model":"qwen3:8b","message":{"role":"assistant","content":"hi"},"done":false}|}
   in
   match parse_ollama_ndjson_chunk line with
   | Ollama_parse_failed _ | Ollama_provider_error _ -> false
   | Ollama_chunk c ->
-    c.oll_model = "dashscope-3:8b"
+    c.oll_model = "qwen3:8b"
     && c.oll_delta_content = Some "hi"
     && c.oll_delta_thinking = None
     && c.oll_tool_calls = []
@@ -3271,7 +3271,7 @@ let%test "parse_ollama_ndjson_chunk: content delta line" =
 
 let%test "parse_ollama_ndjson_chunk: done line carries timings + usage" =
   let line =
-    {|{"model":"dashscope-3:8b","message":{"role":"assistant","content":""},
+    {|{"model":"qwen3:8b","message":{"role":"assistant","content":""},
        "done_reason":"stop","done":true,
        "prompt_eval_count":15,"prompt_eval_duration":300000000,
        "eval_count":50,"eval_duration":1000000000}|}
@@ -3301,7 +3301,7 @@ let%test "parse_ollama_ndjson_chunk: done line carries timings + usage" =
 
 let%test "parse_ollama_ndjson_chunk: zero eval_duration → per_second None" =
   let line =
-    {|{"model":"dashscope-3:8b","message":{"role":"assistant","content":""},
+    {|{"model":"qwen3:8b","message":{"role":"assistant","content":""},
        "done":true,"eval_count":10,"eval_duration":0}|}
   in
   match parse_ollama_ndjson_chunk line with
@@ -3314,7 +3314,7 @@ let%test "parse_ollama_ndjson_chunk: zero eval_duration → per_second None" =
 
 let%test "parse_ollama_ndjson_chunk: tool_calls fully formed in done line" =
   let line =
-    {|{"model":"dashscope-3:8b","message":{"role":"assistant","content":"",
+    {|{"model":"qwen3:8b","message":{"role":"assistant","content":"",
        "tool_calls":[{"function":{"name":"foo","arguments":{"x":1}}}]},
        "done":true,"done_reason":"tool_calls"}|}
   in
@@ -3361,7 +3361,7 @@ let%test "parse_ollama_ndjson_chunk: missing provider message does not copy raw"
 
 let%test "parse_ollama_ndjson_chunk: done with zero token counts keeps chunk" =
   let line =
-    {|{"model":"dashscope-3:8b","message":{"role":"assistant","content":""},
+    {|{"model":"qwen3:8b","message":{"role":"assistant","content":""},
        "done_reason":"stop","done":true,
        "prompt_eval_count":0,"eval_count":0}|}
   in
@@ -3375,7 +3375,7 @@ let%test "parse_ollama_ndjson_chunk: done with zero token counts keeps chunk" =
 let%test "ollama_chunk_to_events: content delta emits Start+Delta" =
   let state = create_openai_stream_state () in
   let chunk =
-    { oll_model = "dashscope-3:8b"
+    { oll_model = "qwen3:8b"
     ; oll_delta_content = Some "hello"
     ; oll_delta_thinking = None
     ; oll_tool_calls = []
@@ -3398,7 +3398,7 @@ let%test "ollama_chunk_to_events: content delta emits Start+Delta" =
 let%test "ollama_chunk_to_events: subsequent content delta reuses block" =
   let state = create_openai_stream_state () in
   let mk text =
-    { oll_model = "dashscope-3:8b"
+    { oll_model = "qwen3:8b"
     ; oll_delta_content = Some text
     ; oll_delta_thinking = None
     ; oll_tool_calls = []
@@ -3421,7 +3421,7 @@ let%test "ollama_chunk_to_events: subsequent content delta reuses block" =
 let%test "ollama_chunk_to_events: done with stop_reason emits MessageDelta" =
   let state = create_openai_stream_state () in
   let chunk =
-    { oll_model = "dashscope-3:8b"
+    { oll_model = "qwen3:8b"
     ; oll_delta_content = None
     ; oll_delta_thinking = None
     ; oll_tool_calls = []
@@ -3450,7 +3450,7 @@ let%test "ollama_chunk_to_events: done with stop_reason emits MessageDelta" =
 let%test "ollama_chunk_to_events: overflow reason stays typed" =
   let state = create_openai_stream_state () in
   let chunk : ollama_chunk =
-    { oll_model = "dashscope-3:8b"
+    { oll_model = "qwen3:8b"
     ; oll_delta_content = None
     ; oll_delta_thinking = None
     ; oll_tool_calls = []
@@ -3470,7 +3470,7 @@ let%test "ollama_chunk_to_events: overflow reason stays typed" =
 let%test "ollama_chunk_to_events: done with zero usage → usage=None" =
   let state = create_openai_stream_state () in
   let chunk =
-    { oll_model = "dashscope-3:8b"
+    { oll_model = "qwen3:8b"
     ; oll_delta_content = None
     ; oll_delta_thinking = None
     ; oll_tool_calls = []
@@ -3491,7 +3491,7 @@ let%test "ollama_chunk_to_events: done with zero usage → usage=None" =
 let%test "ollama_chunk_to_events: tool_calls emit Start+InputJsonSnapshot" =
   let state = create_openai_stream_state () in
   let chunk =
-    { oll_model = "dashscope-3:8b"
+    { oll_model = "qwen3:8b"
     ; oll_delta_content = None
     ; oll_delta_thinking = None
     ; oll_tool_calls =
@@ -3527,7 +3527,7 @@ let%test "ollama_chunk_to_events: tool_calls emit Start+InputJsonSnapshot" =
 let%test "ollama_chunk_to_events: thinking delta emits thinking block first" =
   let state = create_openai_stream_state () in
   let chunk =
-    { oll_model = "dashscope-3:8b"
+    { oll_model = "qwen3:8b"
     ; oll_delta_content = None
     ; oll_delta_thinking = Some "considering"
     ; oll_tool_calls = []

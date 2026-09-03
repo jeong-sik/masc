@@ -41,7 +41,7 @@ const journalFact = (claim: string, category: 'fact' | 'blocker', firstSeen: num
   lastSeen: firstSeen,
   reinforcement: 0,
   origin: { kind: 'injected' as const, traceId: 'trace-1' },
-  basis: { kind: 'observed' as const },
+  basis: { kind: 'observed' as const, board: null },
 })
 
 afterEach(() => {

@@ -121,31 +121,58 @@ let project_model_input ~base_path ~gate_replay_evidence messages =
     Keeper_gate_replay.project_model_input ~base_path evidence messages
 ;;
 
+(* One tool result's identity as the skill ledger matches it. The wire content
+   the model reads is not always the served body: RFC-0363 externalizes a large
+   body to a blob and leaves a [\[masc:blob sha256=… bytes=…\]] marker in its
+   place. The marker carries the served body's own sha256 and byte count, so a
+   receipt taken from the marker still equals what the skill served, and a body
+   the model reached only by dereferencing the blob is credited as delivered.
+   A non-marker content is hashed as-is; a marker-shaped content that fails to
+   parse is hashed as-is too, so a corrupt marker is never read as a delivery
+   of some other body. *)
+let receipt_of_tool_result ~tool_use_id ~content =
+  let content_bytes, content_sha256 =
+    match Tool_output.decode_from_agent_core content with
+    | Tool_output.Decoded reference ->
+      reference.Tool_output.bytes, reference.Tool_output.sha256
+    | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+      String.length content, Digestif.SHA256.(digest_string content |> to_hex)
+  in
+  Keeper_skill_activation_ledger.{ tool_use_id; content_bytes; content_sha256 }
+;;
+
+let receipts_of_tool_message content =
+  List.filter_map
+    (function
+      | Agent_core.Types.ToolResult { tool_use_id; content; _ } ->
+        Some (receipt_of_tool_result ~tool_use_id ~content)
+      | Text _
+      | Thinking _
+      | ReasoningDetails _
+      | RedactedThinking _
+      | ToolUse _
+      | Image _
+      | Document _
+      | Audio _ -> None)
+    content
+;;
+
+(* The tool results the model response boundary answers. A turn's tool results
+   are the last messages before the model's reply, but not always the single
+   final one: a keeper that runs several tools in a batch, or appends a
+   dynamic-context message after the results, leaves the skill's result one or
+   more messages back. Take every trailing Tool message, stopping at the first
+   non-Tool, rather than only the very last message -- the previous rule
+   dropped the receipt whenever anything followed the results, and the skill
+   ledger then never matched. Non-trailing history is not scanned: a result
+   older than this turn was already offered at its own boundary. *)
 let trailing_tool_result_receipts messages =
-  match List.rev messages with
-  | { Agent_core.Types.role = Tool; content; _ } :: _ ->
-    List.filter_map
-      (function
-        | Agent_core.Types.ToolResult { tool_use_id; content; _ } ->
-          Some
-            Keeper_skill_activation_ledger.
-              { tool_use_id
-              ; content_bytes = String.length content
-              ; content_sha256 =
-                  Digestif.SHA256.(digest_string content |> to_hex)
-              }
-        | Text _
-        | Thinking _
-        | ReasoningDetails _
-        | RedactedThinking _
-        | ToolUse _
-        | Image _
-        | Document _
-        | Audio _ -> None)
-      content
-  | { role = (User | System | Assistant); _ } :: _
-  | [] ->
-    []
+  let rec take acc = function
+    | { Agent_core.Types.role = Tool; content; _ } :: rest ->
+      take (List.rev_append (receipts_of_tool_message content) acc) rest
+    | ({ role = (User | System | Assistant); _ } :: _) | [] -> List.rev acc
+  in
+  take [] (List.rev messages)
 ;;
 
 module Skill_delivery_state = struct
@@ -459,15 +486,7 @@ let assemble_hooks
         Agent_core.Tool_contract.Invocation.tool_use_id invocation
       in
       let agent_core_turn = Agent_core.Tool_contract.Invocation.turn invocation in
-      let tool_results =
-        [ Keeper_skill_activation_ledger.
-            { tool_use_id
-            ; content_bytes = String.length content
-            ; content_sha256 =
-                Digestif.SHA256.(digest_string content |> to_hex)
-            }
-        ]
-      in
+      let tool_results = [ receipt_of_tool_result ~tool_use_id ~content ] in
       observe_skill_delivery
         ~runtime_id
         ~boundary:

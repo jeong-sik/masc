@@ -1,13 +1,15 @@
 (** Deterministic observation-only classification for Keeper tool_execute
     gate requests. See the implementation's header comment for the authority
     argument: the judge's stated authority is the concrete effect's safety,
-    and for a shell-less observation-only argv inside the docker sandbox
-    that question has a deterministic answer. *)
+    and for a shell-less observation-only argv dispatched into a per-keeper
+    disposable guest that question has a deterministic answer. *)
 
-(** [observation_only_request ~operation ~input] is [true] exactly when the
-    gate request is a [tool_execute] whose argv is a closed-set
-    observation-only command and whose declared sandbox is docker, or a
-    [network_read] request whose capability is in the closed
+(** [observation_only_request ~operation ~sandbox_profile ~input] is [true]
+    exactly when the gate request is a [tool_execute] whose argv is a
+    closed-set observation-only command and whose typed [sandbox_profile]
+    satisfies [Keeper_types_profile_sandbox.runs_in_disposable_guest], or
+    when it is a [network_read] request whose capability
+    is in the closed
     observation set ([web_search] — server-side, provider-bound, no
     caller-chosen address; [web_fetch] — caller-chosen URL whose literal
     destination [Tool_misc_web_fetch] checks itself on the initial URL and
@@ -29,10 +31,30 @@
     [false] means nothing — the request falls through to the configured
     gate mode. The execute input shape is
     [Keeper_tool_execute_runtime.execute_gate_input]; the network shape is
-    the [network_read] gate request ([capability] at the top level). *)
-val observation_only_request : operation:string -> input:Yojson.Safe.t -> bool
+    the [network_read] gate request ([capability] at the top level). The
+    sandbox labels inside the execute envelope are display/audit data and
+    are never read here.
+
+    An execute request may carry its command as [argv] or as a one-line
+    [script]. A script line with no shell primitive character anywhere and
+    a non-empty token list splits into exactly the argv the shell would
+    produce, so the same closed table judges it (RFC-0404); quotes, pipes,
+    substitution, or a second line return [false] and keep the judge. *)
+val observation_only_request
+  :  operation:string
+  -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile option
+  -> input:Yojson.Safe.t
+  -> bool
 
 val observation_network_capabilities : string list
+
+val script_argv_equivalent : string -> string list option
+(** [Some argv] exactly when the script line is provably that argv: single
+    line, no shell primitive character anywhere, at least one non-empty
+    token. The split is the identity — a shell handed this line produces
+    the same argv — so the observation table may judge the result with the
+    authority it has over real arrays. Anything else is [None] and the
+    request keeps its judgment (RFC-0404). *)
 
 (** Exposed for tests: the argv classifier alone. *)
 val classify_argv : string list -> bool

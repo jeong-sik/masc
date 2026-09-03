@@ -52,7 +52,7 @@ duplicate_toml="$({
 [ -z "$duplicate_toml" ] || fail "duplicate TOML identities: $duplicate_toml"
 
 grep -q \
-  'let key_to_env = Keeper_runtime_setting_registry.active_toml_mappings' \
+  'let key_to_env = Keeper_runtime_setting_registry.toml_env_mappings' \
   "$RUNTIME_CONFIG" \
   || fail "Keeper_runtime_config does not project mappings from the registry"
 

@@ -94,6 +94,15 @@ let default_network_mode_for_profile = function
   | Remote_ssh -> Network_inherit
 ;;
 
+(* The observation-only gate fast path ({!Keeper_gate_readonly}) keys on this
+   predicate, so a new profile fails to compile here until a human decides
+   whether it is a disposable guest. *)
+let runs_in_disposable_guest = function
+  | Docker -> true
+  | Micro_vm -> true
+  | Remote_ssh -> false
+;;
+
 let backend_unimplemented_message profile =
   Printf.sprintf
     "sandbox_profile=%s has no runtime in this build; the call is refused \
@@ -105,11 +114,11 @@ type tree_location =
   | Shared_mount
   | Endpoint_owned
 
-(* Micro_vm still says [Shared_mount]: its guest mounts the playground over
-   virtiofs today. RFC-0400's routing cut flips this one arm, and every
-   consumer that branches on the location moves with it. *)
+(* A microvm guest owns its tree on the work volume (RFC-0400): the host
+   never mounts the playground into it, so every consumer that branches on
+   the location reaches that tree through the remote lane. *)
 let tree_location_of_profile = function
   | Docker -> Shared_mount
-  | Micro_vm -> Shared_mount
+  | Micro_vm -> Endpoint_owned
   | Remote_ssh -> Endpoint_owned
 ;;

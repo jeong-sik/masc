@@ -161,6 +161,22 @@ type system_log_entry = {
     ([GET /api/v1/keepers/:name/tool-calls]). The row's own [keeper] is
     checked against the keeper that was asked for; a row naming another is
     rejected rather than attributed by envelope position. *)
+type keeper_call_execution_mode =
+  | Keeper_call_serial
+  | Keeper_call_concurrent
+
+type keeper_call_schedule = {
+  kcs_planned_index : int;
+  kcs_batch_index : int;
+  kcs_batch_size : int;
+  kcs_execution_mode : keeper_call_execution_mode;
+}
+
+type keeper_call_disposition =
+  | Keeper_call_completed
+  | Keeper_call_deferred
+  | Keeper_call_failed
+
 type keeper_call = {
   kc_at : float;  (** [ts], unix seconds *)
   kc_tool : string;
@@ -174,6 +190,18 @@ type keeper_call = {
   kc_turn : int option;
   kc_task_id : string option;
   kc_model : string option;
+  kc_execution_id : string option;
+      (** Canonical physical execution identity. Chat tool activity joins to
+          this field only; timestamps, names, and list positions never join. *)
+  kc_tool_use_id : string option;
+  kc_schedule : keeper_call_schedule option;
+      (** Actual Agent Core schedule, absent only when the producer carried no
+          schedule fields. Partial or unknown schedules reject the row. *)
+  kc_result_bytes : int option;
+  kc_truncated_to : int option;
+  kc_disposition : keeper_call_disposition option;
+      (** Typed execution disposition. [Deferred] means the invocation handed
+          continuation to the async path rather than returning synchronously. *)
 }
 
 type keeper_calls_snapshot = {
@@ -2101,6 +2129,27 @@ type git_log_row = {
 
 val decode_git_log : Yojson.Safe.t -> (git_log_row list, string) result
 (** The route's [{ok; commits}] envelope, most recent first. *)
+
+(** One run of adjacent lines the same author last touched, as
+    [/api/v1/git/blame] groups them. The wire spells the author [keeper_id],
+    the shape it shares with the activity and annotation routes; here it is
+    whatever git reported, which is a person and not a Keeper. *)
+type blame_block = {
+  bb_line_start : int;
+  bb_line_end : int;
+  bb_author : string;
+  bb_at_ms : float;
+}
+
+val decode_git_blame : Yojson.Safe.t -> (blame_block list, string) result
+(** The route's bare array -- it does not carry the [{ok; data}] envelope its
+    neighbours do. *)
+
+val blame_block_at : blame_block list -> int -> (blame_block * bool) option
+(** [blame_block_at blocks line] is the block covering [line] and whether
+    [line] is where that block starts. Blocks do not overlap, so the first
+    cover is the only one; the flag is what lets a gutter name an author once
+    per run instead of once per line. *)
 
 (** One [/api/v1/ide/annotations] note: where it anchors, who left it, the
     server's kind word, and what it says. *)

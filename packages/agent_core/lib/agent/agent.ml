@@ -954,6 +954,92 @@ module Advanced = struct
       user_blocks
     |> project_detailed_error
   ;;
+
+  let continue_loop_detailed
+        ~sw
+        ?clock
+        ~api_strategy
+        ?on_yield
+        ?on_resume
+        ?execution_store
+        ~on_tool_boundary
+        agent
+    =
+    with_raw_trace_run_classified_result
+      ~of_core_error:detailed_error_of_core_error
+      ~error_to_string:(fun detailed -> Error.to_string detailed.error)
+      ~classify_success:classify_trace_success
+      agent
+      ""
+    @@ fun raw_trace_run ->
+    let run ~sw =
+      run_loop_turns_detailed
+        ~sw
+        ?clock
+        ~api_strategy
+        ?on_yield
+        ?on_resume
+        ?raw_trace_run
+        ~on_tool_boundary
+        agent
+    in
+    run_with_execution_scope ~sw ?execution_store agent run
+  ;;
+
+  let continue_detailed
+        ~sw
+        ?clock
+        ?on_yield
+        ?on_resume
+        ?execution_store
+        ~api_strategy
+        ~on_tool_boundary
+        agent
+    =
+    with_classified_run_lifecycle_events
+      agent
+      ~classify_success:(function
+        | Completed response -> Agent_lifecycle_events.Completed response
+        | Yielded { turn; _ } -> Agent_lifecycle_events.Yielded { turn }
+        | Terminal_tool_completed { receipt; _ } ->
+          Agent_lifecycle_events.Completed receipt.response)
+    @@ fun () ->
+    match Agent_lifecycle_events.validate_run_callbacks ~on_yield ~on_resume with
+    | Error error -> Error (detailed_error_of_core_error error)
+    | Ok () ->
+      with_periodic_callbacks ~sw ?clock agent (fun ~sw ->
+        continue_loop_detailed
+          ~sw
+          ?clock
+          ~api_strategy
+          ?on_yield
+          ?on_resume
+          ?execution_store
+          ~on_tool_boundary
+          agent)
+  ;;
+
+  let continue
+        ~sw
+        ?clock
+        ?on_yield
+        ?on_resume
+        ?execution_store
+        ~api_strategy
+        ~on_tool_boundary
+        agent
+    =
+    continue_detailed
+      ~sw
+      ?clock
+      ?on_yield
+      ?on_resume
+      ?execution_store
+      ~api_strategy
+      ~on_tool_boundary
+      agent
+    |> project_detailed_error
+  ;;
 end
 
 let run_turn_stream_detailed ~sw ?clock ~on_event ?on_telemetry ?execution_store agent =

@@ -182,6 +182,79 @@ let test_append_turn_roundtrip () =
       Alcotest.(check (option string)) "assistant has no tool id"
         None asst.tool_call_id)
 
+(* An attachment is measured once, at the moment its payload is swapped for
+   the [masc://] reference: after the swap the bytes are gone and the size is
+   no longer derivable. The loaded row carries the pixel size, the payload
+   itself reads as the reference, and the dashboard projection keeps the
+   size the row was persisted with. *)
+let test_attachment_dimensions_survive_the_reference_swap () =
+  let base_dir = temp_base_path "keeper-chat-store-att" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-att" in
+      (* A 2x1 PNG header: signature, IHDR length, type, width, height, then
+         tail bytes the store never reads. The header is real; the rest does
+         not need to be a decodable image. *)
+      let png =
+        String.concat ""
+          [ "\x89PNG\r\n\x1a\n"; "\x00\x00\x00\x0d"; "IHDR"
+          ; "\x00\x00\x00\x02"; "\x00\x00\x00\x01"; "\x08\x06\x00\x00\x00" ]
+      in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"look"
+        ~user_attachments:
+          [ { K.id = "att-1"; att_type = "image"; name = "dot.png"
+            ; size = String.length png; mime_type = "image/png"
+            ; data = Base64.encode_string png
+            ; width = None; height = None } ]
+        ~tool_calls:[]
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~assistant_content:"done"
+        ();
+      match K.load ~base_dir ~keeper_name with
+      | user :: _ ->
+        (match (user : K.chat_message).attachments with
+         | Some [ att ] ->
+           Alcotest.(check (option int)) "width measured at the swap"
+             (Some 2) att.K.width;
+           Alcotest.(check (option int)) "height measured at the swap"
+             (Some 1) att.K.height;
+           Alcotest.(check bool) "payload reads as the reference" true
+             (String.starts_with
+                ~prefix:(Printf.sprintf "masc://attachment/%s/" att.K.id)
+                att.K.data);
+           (* The dashboard row exposes the same size without re-measuring:
+              the reference cannot be decoded again. *)
+           (match K.to_json_array [ user ] with
+            | `List [ `Assoc fields ] ->
+              (match List.assoc_opt "attachments" fields with
+               | Some (`List [ `Assoc att_fields ]) ->
+                 Alcotest.(check (option int)) "dashboard width"
+                   (Some 2)
+                   (Option.bind
+                      (List.assoc_opt "width" att_fields)
+                      (function `Int v -> Some v | _ -> None));
+                 Alcotest.(check (option int)) "dashboard height"
+                   (Some 1)
+                   (Option.bind
+                      (List.assoc_opt "height" att_fields)
+                      (function `Int v -> Some v | _ -> None))
+               | other ->
+                 Alcotest.failf "dashboard attachments shape: %s"
+                   (Yojson.Safe.to_string
+                      (Option.value other ~default:`Null)))
+            | `List rows ->
+              Alcotest.failf "dashboard row shape: %d rows" (List.length rows)
+            | other ->
+              Alcotest.failf "dashboard row shape: %s"
+                (Yojson.Safe.to_string other))
+         | other ->
+           Alcotest.failf "expected one attachment, got %d"
+             (List.length (Option.value other ~default:[])))
+      | other ->
+        Alcotest.failf "expected a user row, got %d rows" (List.length other))
+
 let test_tool_only_continuations_do_not_fabricate_assistant_rows () =
   let base_dir = temp_base_path "keeper-chat-tool-only" in
   Fun.protect
@@ -473,7 +546,9 @@ let test_append_turn_redacts_projected_secrets () =
               name = "secret.txt";
               size = String.length file_secret;
               mime_type = "text/plain";
-              data = file_secret } ]
+              data = file_secret;
+              width = None;
+              height = None } ]
         ~tool_calls:
           [ { K.call_id = "toolu_1";
               execution_id = None;
@@ -3186,6 +3261,8 @@ let () =
         [
           Alcotest.test_case "append_turn roundtrip" `Quick
             test_append_turn_roundtrip;
+          Alcotest.test_case "attachment dimensions survive the reference swap"
+            `Quick test_attachment_dimensions_survive_the_reference_swap;
           Alcotest.test_case "provider and canonical ids stay separate" `Quick
             test_tool_identities_persist_and_project_separately;
           Alcotest.test_case "tool-only continuations omit assistant rows" `Quick

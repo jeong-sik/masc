@@ -30,7 +30,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 
 SCRIPT_PATH = pathlib.Path(__file__).resolve()
@@ -43,6 +43,29 @@ DEFAULT_CATALOG = (
     / "missions.json"
 )
 SCHEMA = "masc.keeper_multi_collaboration_evidence.v1"
+# The lanes a keeper may run under. Mirrors the ``sandbox_profile`` enum of
+# ``config/tools/masc_keeper_up.toml``; the acceptance test pins the two lists
+# equal so the runner cannot drift from the server again (#32588: the runner
+# kept sending "local" after #32078 removed that profile, and no fleet booted).
+SANDBOX_PROFILES: tuple[str, ...] = ("docker", "microvm", "remote_ssh")
+# The tool-approval gate (lib/keeper/keeper_tool_approval_gate.ml, on the
+# keeper-stream route since 2026-08-28) asks an operator before a chat-driven
+# turn runs a tool that reaches outside masc (Write, Execute, ...). The stance
+# is per keeper and lives in server memory: "auto" asks, "yolo" runs unasked.
+# This runner drives every turn over that operator route with nobody at the
+# pane, so under "auto" each such call waits keeper_tool_approval_timeout_sec
+# (180s) and is then Timed_out; r8 run1 attempt 3 (2026-09-02, #32644) lost 23
+# of 33 turns that way, the two builders every one of theirs. The runner is
+# the operator of a campaign server and says so once per keeper it brings up.
+TOOL_APPROVAL_MODE_ROUTE = "/api/v1/keepers/tool-approval-mode"
+TOOL_APPROVAL_MODE_UNATTENDED = "yolo"
+# How long one operator-started turn may take to settle is a property of the
+# lane and the model, not of this file: r6 (2026-08-18, glm-5-turbo) settled
+# inside 150s; r8 (2026-09-02, glm-5.3 on microvm) ran builder turns of
+# 200-250s with no tool slower than 5s, the time going to 15-25 model calls
+# of 7-20s each. So the budget is --turn-settle-budget, sized from a measured
+# exec-time distribution per campaign (docs/BENCHMARK-RUNBOOK.md), recorded
+# under resources.turn_settle_budget_sec, and never defaulted here.
 # Mission ids are identifiers, not positions: RW19 held the persistence tier
 # projection and was removed with that feature, and past evidence files still
 # name the surviving missions by these numbers. Listing them avoids a range
@@ -159,6 +182,70 @@ if rw26_fibonacci_leading_one_count(10) != 3:
 # same boot window seen after the socket returns.
 TRANSPORT_RETRY_INTERVAL_SEC = 10.0
 TRANSPORT_RETRY_ATTEMPTS = 30
+# HTTP 429 is the server saying "later", not "never": the per-IP bucket
+# (bin/main_eio.ml, 100 req/s, burst 150) refills within a second and the
+# per-agent bucket within a few. The client obeys Retry-After when the
+# response carries one and otherwise waits a second, hands every rejected
+# response (status, rate-limit headers, body, tool) to its owner as
+# evidence, and gives up after RATE_LIMIT_RETRY_ATTEMPTS. r8 run1
+# (2026-09-02, #32671) died on the first 429 of a 33-turn run, with the
+# bucket's drain unattributed because the rejection leaves no server log.
+RATE_LIMIT_RETRY_ATTEMPTS = 30
+RATE_LIMIT_RETRY_FALLBACK_SEC = 1.0
+
+
+def retry_after_seconds(error: urllib.error.HTTPError) -> float:
+    raw = error.headers.get("Retry-After")
+    if raw is None:
+        return RATE_LIMIT_RETRY_FALLBACK_SEC
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return RATE_LIMIT_RETRY_FALLBACK_SEC
+
+
+def rate_limited_record(
+    *,
+    url: str,
+    method: str,
+    tool: str | None,
+    attempt: int,
+    error: urllib.error.HTTPError,
+    detail: str,
+) -> dict[str, Any]:
+    return {
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "url": url,
+        "method": method,
+        "tool": tool,
+        "attempt": attempt,
+        "status": error.code,
+        "headers": {
+            key: value
+            for key, value in error.headers.items()
+            if key.lower().startswith(("x-ratelimit", "retry-after"))
+        },
+        "body": detail[:500],
+    }
+
+GOAL_VERIFIER_PHASE_FAILED = "goal_verifier_phase_failed"
+
+
+def goal_verifier_failure_evidence(
+    *, goal_id: str, task_id: str, error: Exception
+) -> dict[str, Any]:
+    """Typed record of an RW23 phase failure. The phase is paced by the
+    coordinator's own turns, so a wait that runs out is that mission's
+    result, not the round's (#32597: one 300 s wait erased 22 missions of
+    evidence). The bundle keeps this and the assertions read it as failed."""
+    return {
+        "failure": GOAL_VERIFIER_PHASE_FAILED,
+        "goal_id": goal_id,
+        "task_id": task_id,
+        "detail": str(error),
+        "recorded_at": utc_now(),
+    }
+
 
 def goal_verifier_convergence_timeout(request_timeout: float) -> float:
     return (2.0 * request_timeout) + (2.0 * GOAL_VERIFIER_RETRY_INTERVAL_SEC)
@@ -342,6 +429,8 @@ class McpClient:
         self.session_id: str | None = None
         self.protocol_version = "2025-11-25"
         self._request_id = 0
+        # Owner-supplied sink for every HTTP 429 this client retried.
+        self.on_rate_limited: Callable[[dict[str, Any]], None] | None = None
 
     def _next_id(self) -> int:
         self._request_id += 1
@@ -380,6 +469,7 @@ class McpClient:
         *,
         _retry_on_stale_session: bool = True,
         _transport_retries: int = TRANSPORT_RETRY_ATTEMPTS,
+        _rate_limit_retries: int = RATE_LIMIT_RETRY_ATTEMPTS,
     ) -> dict[str, Any]:
         request_id = self._next_id()
         payload = json.dumps(
@@ -414,6 +504,25 @@ class McpClient:
                     self.protocol_version = protocol_version
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", errors="replace")
+            if error.code == 429 and _rate_limit_retries > 0:
+                record = rate_limited_record(
+                    url=self.endpoint,
+                    method=method,
+                    tool=params.get("name") if isinstance(params, dict) else None,
+                    attempt=RATE_LIMIT_RETRY_ATTEMPTS - _rate_limit_retries + 1,
+                    error=error,
+                    detail=detail,
+                )
+                if self.on_rate_limited is not None:
+                    self.on_rate_limited(record)
+                time.sleep(retry_after_seconds(error))
+                return self.request(
+                    method,
+                    params,
+                    _retry_on_stale_session=_retry_on_stale_session,
+                    _transport_retries=_transport_retries,
+                    _rate_limit_retries=_rate_limit_retries - 1,
+                )
             if (
                 _retry_on_stale_session
                 and error.code == 404
@@ -434,7 +543,10 @@ class McpClient:
                 self.session_id = None
                 self.initialize()
                 return self.request(
-                    method, params, _retry_on_stale_session=False
+                    method,
+                    params,
+                    _retry_on_stale_session=False,
+                    _rate_limit_retries=_rate_limit_retries,
                 )
             raise AcceptanceError(f"MCP HTTP {error.code}: {detail[:1000]}") from error
         except urllib.error.URLError as error:
@@ -446,6 +558,7 @@ class McpClient:
                     params,
                     _retry_on_stale_session=_retry_on_stale_session,
                     _transport_retries=_transport_retries - 1,
+                    _rate_limit_retries=_rate_limit_retries,
                 )
             raise AcceptanceError(f"MCP transport failed: {error}") from error
         value = self._decode_response(body, request_id)
@@ -461,6 +574,7 @@ class McpClient:
                     params,
                     _retry_on_stale_session=_retry_on_stale_session,
                     _transport_retries=_transport_retries - 1,
+                    _rate_limit_retries=_rate_limit_retries,
                 )
             raise AcceptanceError(
                 f"MCP {method} JSON-RPC error: {json.dumps(error_value, ensure_ascii=False)}"
@@ -901,6 +1015,53 @@ def health_binary_commit(health: dict[str, Any]) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+def default_tool_approval_mode_url(mcp_url: str) -> str:
+    parsed = urllib.parse.urlsplit(mcp_url)
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, parsed.netloc, TOOL_APPROVAL_MODE_ROUTE, "", "")
+    )
+
+
+def set_tool_approval_mode(
+    url: str, token: str, timeout: float, *, keeper: str, mode: str
+) -> dict[str, Any]:
+    """POST one keeper's approval stance and return the server's echo.
+
+    The route is admin tier (lib/tool/tool_catalog.ml,
+    keeper_tool_approval_mode_route): a token below that tier fails here, at
+    fleet creation, instead of an hour later as a run of timed-out tool
+    calls. The echo has to name the same keeper and mode; a 200 that says
+    otherwise is not the stance this run declared.
+    """
+    payload = json.dumps({"name": keeper, "mode": mode}).encode()
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            value = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        raise AcceptanceError(
+            f"tool-approval-mode set failed for {keeper}: HTTP {error.code}: {detail[:500]}"
+        ) from error
+    except (urllib.error.URLError, json.JSONDecodeError) as error:
+        raise AcceptanceError(
+            f"tool-approval-mode set failed for {keeper}: {error}"
+        ) from error
+    if (
+        not isinstance(value, dict)
+        or value.get("keeper") != keeper
+        or value.get("mode") != mode
+    ):
+        raise AcceptanceError(
+            f"tool-approval-mode echo mismatch for {keeper}: "
+            f"wanted mode={mode!r}, got {value!r}"
+        )
+    return value
+
+
 def read_skills(url: str, token: str, timeout: float) -> dict[str, Any]:
     headers = {"Accept": "application/json"}
     if token:
@@ -1192,10 +1353,14 @@ class MissionRun:
         token_file: pathlib.Path,
         browser_proof_script: pathlib.Path,
         expected_base_path: str,
+        sandbox_profile: str,
+        turn_settle_budget_sec: float,
     ) -> None:
         self.catalog = catalog
         self.client = client
         self.writer = writer
+        self.rate_limited_responses: list[dict[str, Any]] = []
+        client.on_rate_limited = self.record_rate_limited
         self.endpoint = endpoint
         self.token = token
         self.timeout = timeout
@@ -1232,6 +1397,16 @@ class MissionRun:
         self.require_heterogeneous_runtimes = require_heterogeneous_runtimes
         self.token_file = token_file
         self.browser_proof_script = browser_proof_script
+        if sandbox_profile not in SANDBOX_PROFILES:
+            raise AcceptanceError(
+                f"sandbox_profile must be one of {list(SANDBOX_PROFILES)}, got {sandbox_profile!r}"
+            )
+        self.sandbox_profile = sandbox_profile
+        if not turn_settle_budget_sec > 0:
+            raise AcceptanceError(
+                f"turn_settle_budget_sec must be positive, got {turn_settle_budget_sec!r}"
+            )
+        self.turn_settle_budget_sec = turn_settle_budget_sec
         self.expected_base_path = expected_base_path
         self.secret = f"memory-{uuid.uuid4().hex[:12]}"
         self.goal_id = f"goal-{self.marker}"
@@ -1261,9 +1436,26 @@ class MissionRun:
         self.goal_verifier_browser_proof: dict[str, Any] = {}
         self.goal_verifier_evidence: dict[str, Any] = {}
         self.runtime_serving_evidence: dict[str, Any] = {}
+        self.tool_approval_modes: dict[str, str] = {}
 
     def runtime_for_role(self, role: str) -> str | None:
         return self.runtime_by_role.get(role, self.runtime_id)
+
+    def declare_unattended(self, role: str) -> None:
+        # Follows every masc_keeper_up. The stance is per keeper in server
+        # memory, so a keeper brought up again is a keeper whose stance is
+        # stated again. The echo is kept under observations/ and summarised
+        # in resources.tool_approval_modes.
+        keeper = self.roles[role]
+        echo = set_tool_approval_mode(
+            default_tool_approval_mode_url(self.endpoint),
+            self.token,
+            self.timeout,
+            keeper=keeper,
+            mode=TOOL_APPROVAL_MODE_UNATTENDED,
+        )
+        self.tool_approval_modes[role] = echo["mode"]
+        self.writer.write_json(f"observations/tool-approval-mode-{role}.json", echo)
 
     def call(self, label: str, tool: str, arguments: dict[str, Any]) -> ToolObservation:
         observation = self.client.call_tool(tool, arguments)
@@ -1272,8 +1464,15 @@ class MissionRun:
 
     def new_client(self) -> McpClient:
         client = McpClient(self.endpoint, self.token, self.timeout)
+        client.on_rate_limited = self.record_rate_limited
         client.initialize()
         return client
+
+    def record_rate_limited(self, record: dict[str, Any]) -> None:
+        # Every 429 the run survived stays visible: the full list under
+        # observations/, the count under resources.transport_rate_limited_count.
+        self.rate_limited_responses.append(record)
+        self.writer.write_json("observations/transport-429.json", self.rate_limited_responses)
 
     def dashboard_get(self, path: str) -> dict[str, Any]:
         parsed = urllib.parse.urlparse(self.endpoint)
@@ -1284,11 +1483,29 @@ class MissionRun:
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         request = urllib.request.Request(url, headers=headers, method="GET")
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                value = json.loads(response.read().decode("utf-8"))
-        except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError) as error:
-            raise AcceptanceError(f"Dashboard GET {path} failed: {error}") from error
+        for attempt in range(1, RATE_LIMIT_RETRY_ATTEMPTS + 2):
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    value = json.loads(response.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as error:
+                if error.code == 429 and attempt <= RATE_LIMIT_RETRY_ATTEMPTS:
+                    detail = error.read().decode("utf-8", errors="replace")
+                    self.record_rate_limited(
+                        rate_limited_record(
+                            url=url,
+                            method="GET",
+                            tool=None,
+                            attempt=attempt,
+                            error=error,
+                            detail=detail,
+                        )
+                    )
+                    time.sleep(retry_after_seconds(error))
+                    continue
+                raise AcceptanceError(f"Dashboard GET {path} failed: {error}") from error
+            except (urllib.error.URLError, json.JSONDecodeError) as error:
+                raise AcceptanceError(f"Dashboard GET {path} failed: {error}") from error
         if not isinstance(value, dict):
             raise AcceptanceError(f"Dashboard GET {path} returned a non-object payload")
         return value
@@ -1412,20 +1629,17 @@ class MissionRun:
                 "mention_targets": [keeper, role],
                 "proactive_enabled": False,
                 "autoboot_enabled": True,
-                # masc_keeper_up refuses a keeper with no sandbox_profile
-                # ("sandbox_profile is required (allowed: local, docker,
-                # microvm, remote_ssh)"). The campaign runs against an isolated
-                # base path and writes only inside its own playground, so the
-                # local profile is the one that matches what the missions do;
-                # it is also what MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1 admits on
-                # the campaign server. Without this the fleet never boots and
-                # the run aborts on the first keeper.
-                "sandbox_profile": "local",
+                # The lane is an operator decision per campaign server
+                # (--sandbox-profile); the runner never assumes one. The
+                # server refuses profiles outside its closed set, and the
+                # receipt records the value under resources.sandbox_profile.
+                "sandbox_profile": self.sandbox_profile,
             }
             runtime_id = self.runtime_for_role(role)
             if runtime_id:
                 arguments["runtime_id"] = runtime_id
             self.call(f"keeper-up-{role}", "masc_keeper_up", arguments)
+            self.declare_unattended(role)
 
     def wait_for_fleet(self, timeout: float = 90.0) -> None:
         deadline = time.monotonic() + timeout
@@ -1567,7 +1781,7 @@ class MissionRun:
                 raise AcceptanceError("masc_keeper_msg did not return operation_id")
             operation_id = raw_operation_id
             target = {"kind": "keeper", "name": self.roles[role]}
-            deadline = time.monotonic() + self.timeout
+            deadline = time.monotonic() + self.turn_settle_budget_sec
             last_recorded_state: str | None = None
             while time.monotonic() < deadline:
                 terminal = client.call_tool(
@@ -1606,7 +1820,8 @@ class MissionRun:
                 time.sleep(1.0)
             else:
                 raise AcceptanceError(
-                    f"Keeper operation {operation_id} did not settle within {self.timeout}s"
+                    f"Keeper operation {operation_id} did not settle within "
+                    f"{self.turn_settle_budget_sec}s (--turn-settle-budget)"
                 )
         except Exception as exception:  # Evidence must survive a failed turn.
             status = "failed"
@@ -2007,6 +2222,21 @@ class MissionRun:
             ),
         )
 
+    def run_goal_verifier_guarded(self) -> None:
+        """RW23 runs to completion or leaves a typed failure record; it never
+        aborts the round. See goal_verifier_failure_evidence."""
+        try:
+            self.run_goal_verifier_refute_reenter_prove()
+        except AcceptanceError as error:
+            self.goal_verifier_evidence = goal_verifier_failure_evidence(
+                goal_id=self.verifier_goal_id,
+                task_id=self.verifier_task_id,
+                error=error,
+            )
+            self.writer.write_json(
+                "observations/goal-verifier-failure.json", self.goal_verifier_evidence
+            )
+
     def run_goal_verifier_refute_reenter_prove(self) -> None:
         self.call(
             "goal-verifier-upsert",
@@ -2217,18 +2447,18 @@ class MissionRun:
                 "coordinator shutdown did not clear the admission fence within "
                 "90 seconds"
             )
-        # Same required field as create_fleet: masc_keeper_up refuses a keeper
-        # with no sandbox_profile. Restating it here rather than reusing the
-        # create path keeps the restart a restart; the two call sites differ in
-        # everything else (no instructions, no mention targets).
+        # The restart re-states the lane the fleet was created with; the value
+        # comes from --sandbox-profile like create_fleet's, never a literal
+        # (a second literal survived #32593 and aborted r8 run1 at this call).
         arguments: dict[str, Any] = {
             "name": self.roles["coordinator"],
-            "sandbox_profile": "local",
+            "sandbox_profile": self.sandbox_profile,
         }
         runtime_id = self.runtime_for_role("coordinator")
         if runtime_id:
             arguments["runtime_id"] = runtime_id
         self.call("keeper-restart-coordinator", "masc_keeper_up", arguments)
+        self.declare_unattended("coordinator")
         deadline = time.monotonic() + 90.0
         while time.monotonic() < deadline:
             status = self.read_status("coordinator", "restart-poll")
@@ -3339,7 +3569,12 @@ class MissionRun:
                     goal_verifier_runs_by_id.get(goal_verifier_refuted_run),
                     self.verifier_artifact,
                 ),
-                f"goal={self.verifier_goal_id} refuted_run={goal_verifier_refuted_run}",
+                f"goal={self.verifier_goal_id} refuted_run={goal_verifier_refuted_run}"
+                + (
+                    f" failure={self.goal_verifier_evidence.get('detail')}"
+                    if self.goal_verifier_evidence.get("failure") == GOAL_VERIFIER_PHASE_FAILED
+                    else ""
+                ),
             ),
             "goal_verifier_reentry_proven": (
                 isinstance(goal_verifier_proven, dict)
@@ -3409,7 +3644,7 @@ class MissionRun:
         self.run_claim_reproduction(post_id)
         self.run_debate(post_id)
         self.run_qa_coverage(post_id)
-        self.run_goal_verifier_refute_reenter_prove()
+        self.run_goal_verifier_guarded()
         self.run_continuity_chain(post_id)
         self.restart_and_recall(post_id)
         self.wait_for_async_sources()
@@ -3575,6 +3810,10 @@ def build_bundle(
                 require_heterogeneous=run.require_heterogeneous_runtimes,
                 roles=set(run.roles),
             ),
+            "sandbox_profile": run.sandbox_profile,
+            "tool_approval_modes": run.tool_approval_modes,
+            "turn_settle_budget_sec": run.turn_settle_budget_sec,
+            "transport_rate_limited_count": len(run.rate_limited_responses),
             "goal_id": run.goal_id,
             "goal_verifier_goal_id": run.verifier_goal_id,
             "goal_verifier_task_id": run.verifier_task_id,
@@ -3842,11 +4081,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-source-sha")
     parser.add_argument("--allow-mutation", action="store_true")
     parser.add_argument("--runtime-id")
+    parser.add_argument("--sandbox-profile", choices=SANDBOX_PROFILES)
     parser.add_argument("--runtime-by-role-json")
     parser.add_argument("--require-heterogeneous-runtimes", action="store_true")
     parser.add_argument("--run-id")
     parser.add_argument("--output-dir")
+    # HTTP request timeout (MCP calls, health/skills reads) and the base of the
+    # browser-proof and goal-verifier budgets. Not the turn settle budget.
     parser.add_argument("--timeout", type=float, default=150.0)
+    parser.add_argument(
+        "--turn-settle-budget",
+        dest="turn_settle_budget_sec",
+        type=float,
+        help=(
+            "seconds one operator-started keeper turn may take to settle; sized "
+            "from the lane's measured exec-time distribution (runbook), required "
+            "with --run"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -3898,6 +4150,19 @@ def main() -> int:
 
         token = read_token(args)
         health_url = args.health_url or default_health_url(args.mcp_url)
+        # Checked before any network call: a run without a lane decision
+        # should not spend a preflight to find out.
+        if args.run and not args.sandbox_profile:
+            raise AcceptanceError(
+                "--run requires --sandbox-profile "
+                f"(one of {', '.join(SANDBOX_PROFILES)}): the campaign server's keeper lane"
+            )
+        if args.run and args.turn_settle_budget_sec is None:
+            raise AcceptanceError(
+                "--run requires --turn-settle-budget <seconds>: how long one turn may "
+                "take on this lane and model, measured, not assumed (r6 glm-5-turbo "
+                "fit 150s; r8 glm-5.3 builder turns ran 200-250s)"
+            )
         client, health, preflight_result = preflight(
             catalog=catalog,
             mcp_url=args.mcp_url,
@@ -3950,6 +4215,8 @@ def main() -> int:
             token_file=pathlib.Path(args.token_file).resolve(),
             browser_proof_script=pathlib.Path(args.browser_proof_script).resolve(),
             expected_base_path=args.expected_base_path,
+            sandbox_profile=args.sandbox_profile,
+            turn_settle_budget_sec=args.turn_settle_budget_sec,
         )
         try:
             post_id, assertions = mission_run.run()

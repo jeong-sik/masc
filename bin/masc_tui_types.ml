@@ -1624,6 +1624,14 @@ type keeper_chat_return =
   | Keeper_chat_return_detail
   | Keeper_chat_return_lanes
 
+(** Where [Esc] returns after the Changes surface was opened. [f] opens it
+    from the roster and from the detail, which name the same keeper through
+    the same cursor, and only those two: a keeper mode would also admit the
+    runtime picker and the chat pane, which are not places to land. *)
+type changes_return =
+  | Changes_return_list
+  | Changes_return_detail
+
 (** Top-level TUI surface. *)
 (* A picture currently on the terminal. Only the drawn case: a refusal has
    nothing to draw, and putting one here would take the screen away from the
@@ -2048,6 +2056,11 @@ type state = {
      [h] on the help sheet for the session). Off leaves "?:help" as the one
      remaining hint -- the door back for the reader who knows the keys. *)
   mutable hints_visible: bool;
+  (* Whether a line typed while an earlier one still waits joins that line
+     instead of queueing behind it ([tui].coalesce_queued_input at boot). A
+     queued line has not been sent, so joining two changes what one turn
+     receives rather than what a turn in flight sees. *)
+  mutable coalesce_queued_input: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
   (* Cursor over the overlay's actionable rows (running / just finished);
@@ -2079,6 +2092,10 @@ type state = {
      list row it used to be pinned beside. *)
   mutable context_inspector_detail_scroll: int;
   mutable context_inspector_focus: pane_focus;
+  (* How many rows back from the newest the inspector is reading. [0] is the
+     newest; the keys that move it re-fetch the exact provider input for the
+     row they name, so every tab describes the turn the operator chose. *)
+  mutable context_inspector_turn_back: int;
   (* The roster beside a keeper surface costs the chat 30 columns for a
      list the reader may already know. Hidden is a choice they make, not a
      width the terminal forces, so it survives resizing. *)
@@ -2191,7 +2208,8 @@ type state = {
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
   mutable keeper_sandbox_logs_error: (string * string) option;
-  mutable keeper_sandbox_logs_loading: string option;
+  mutable keeper_sandbox_logs_generation: int;
+  mutable keeper_sandbox_logs_inflight: (string * int) option;
   mutable keeper_config_view: (string * string list) option;
   mutable keeper_config_view_error: string option;
   mutable github_identity_view: (string * string list) option;
@@ -2293,8 +2311,15 @@ type state = {
     (string * (Tui_decode.task_history_event list, string) result) option;
   mutable verification_evidence:
     (string * (Tui_decode.verification_evidence, string) result) option;
+  (* One cache is shared by the calls surface and chat full-detail mode. The
+     scope and generation are the authority: cursor position is not, because
+     palette/Answering can open a chat without moving the roster cursor. *)
   mutable keeper_calls: Tui_decode.keeper_calls_snapshot option;
   mutable keeper_calls_error: string option;
+  mutable keeper_calls_keeper: string option;
+  mutable keeper_calls_loading: bool;
+  mutable keeper_calls_refresh_pending: bool;
+  mutable keeper_calls_generation: int;
   mutable keeper_calls_scroll: int;
   mutable log_entries: log_entry list;
   mutable log_error: Metrics_tail.load_error option;
@@ -2607,6 +2632,15 @@ type state = {
   mutable code_notes_error: string option;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
+  (* The file pane's blame margin: b on an open file fetches who last touched
+     each run of lines, and the gutter names the author once per run. Unlike
+     the three views above, this does not swap the pane's content -- it is a
+     margin beside the code, so it is showing exactly when it is loaded and
+     [b] again drops it. No [_open] flag: shown-with-nothing-loaded is not a
+     state this can be in. Keyed by path like the others, so opening another
+     file drops the margin rather than captioning it wrongly. *)
+  mutable code_blame: (string * Tui_decode.blame_block list) option;
+  mutable code_blame_error: string option;
   (* Whose workspace the surface reads. One field, one value: a keeper's
      playground and a project repository at the same time is not a
      representable state. *)
@@ -2622,6 +2656,11 @@ type state = {
   mutable changes_keeper: string option;
   mutable changes: Tui_decode.file_change_snapshot option;
   mutable changes_error: string option;
+  (* Which keeper surface [f] was pressed on. Esc leaves Changes for that
+     one: the roster and the detail both name a keeper through the same
+     cursor, and returning a reader from the detail to the roster drops them
+     a level they did not ask to leave. *)
+  mutable changes_return: changes_return;
   (* Which row the list marks, and where the window on that list sits. Two
      fields rather than one: the marked row was the window's top row, so the
      rows the window already showed below it could not be marked, and Enter,
@@ -2938,6 +2977,7 @@ let create_state
   agenda_open = false;
   agenda_scroll = 0;
   hints_visible = true;
+  coalesce_queued_input = true;
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;
@@ -2953,6 +2993,7 @@ let create_state
   context_inspector_exact = None;
   context_inspector_detail_scroll = 0;
   context_inspector_focus = Left_pane;
+  context_inspector_turn_back = 0;
   roster_pane_hidden = false;
   roster_marquee_frame = 0;
   activity_frame = -1;
@@ -3004,7 +3045,8 @@ let create_state
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;
   keeper_sandbox_logs_error = None;
-  keeper_sandbox_logs_loading = None;
+  keeper_sandbox_logs_generation = 0;
+  keeper_sandbox_logs_inflight = None;
   keeper_config_view = None;
   keeper_config_view_error = None;
   github_identity_view = None;
@@ -3049,6 +3091,10 @@ let create_state
   verification_evidence = None;
   keeper_calls = None;
   keeper_calls_error = None;
+  keeper_calls_keeper = None;
+  keeper_calls_loading = false;
+  keeper_calls_refresh_pending = false;
+  keeper_calls_generation = 0;
   keeper_calls_scroll = 0;
   log_entries = [];
   log_error = None;
@@ -3224,11 +3270,14 @@ let create_state
   code_notes_error = None;
   code_notes_open = false;
   code_notes_scroll = 0;
+  code_blame = None;
+  code_blame_error = None;
   code_scope = Code_scope_project;
   code_target_line = None;
   changes_keeper = None;
   changes = None;
   changes_error = None;
+  changes_return = Changes_return_list;
   changes_cursor = 0;
   changes_scroll = 0;
   changes_diff_row = None;
@@ -3410,12 +3459,32 @@ let oldest_at (entries : msg_entry list) =
    Rows the operator paged back to are older than anything the fresh window
    carries, so they are kept. Replacing the list with the fresh window alone
    threw them away on every tick, which is why paging back never got past
-   whatever the first load happened to reach (#31089). *)
+   whatever the first load happened to reach (#31089).
+
+   The window does not own the middle either. The tail is bounded (100
+   user/assistant rows, 400 lines absolute), and a keeper flooding approval
+   rows evicts conversation rows the operator was reading: the old rule
+   dropped every held row at or after the fresh window's oldest on the
+   assumption the window carried it, so the middle of a conversation vanished
+   on exactly the tick that pushed it out of the window (#32660). A held row
+   survives unless the fresh window actually carries its identity; the
+   carried copy replaces it. *)
 let merge_paged_history ~(paged : msg_entry list) ~(fresh : msg_entry list) =
-  match oldest_at fresh with
-  | None -> paged
-  | Some at ->
-    List.filter (fun (entry : msg_entry) -> entry.me_at < at) paged @ fresh
+  let carried =
+    List.fold_left
+      (fun acc (entry : msg_entry) -> entry.me_identity :: acc)
+      [] fresh
+  in
+  let held =
+    List.filter
+      (fun (entry : msg_entry) ->
+         not (List.exists (fun identity -> identity = entry.me_identity) carried))
+      paged
+  in
+  List.sort
+    (fun (left : msg_entry) (right : msg_entry) ->
+       Float.compare left.me_at right.me_at)
+    (held @ fresh)
 
 let set_msg_scroll (state : state) rows =
   let rows = max 0 rows in
@@ -3869,6 +3938,21 @@ let scrolled_surface (state : state) (surface : surface) : scrolled option =
   scrolled_surface_rows state surface
 ;;
 
+(* The $EDITOR form [w] opens, anchored to one line.
+
+   A form rather than a prompt because a note carries four fields, and a
+   stem rather than an empty file because the shape is the thing an operator
+   should not have to remember. [anchor] is 1-based: it is what the reader
+   sees in the gutter, not the index behind it.
+
+   The anchor was the literal 1 until it was measured -- every one of this
+   workspace's 51 stored annotations sits at line 1, which is what a form
+   that never offered a line produces. *)
+let code_note_stem ~anchor =
+  Printf.sprintf
+    "{\n  \"line_start\": %d,\n  \"line_end\": %d,\n  \"kind\": \"Comment\",\n  \"content\": \"\"\n}\n"
+    anchor anchor
+
 (* The text a "/" search reads for each row: the identifiers an operator
    would type, not the drawn bytes. [Some texts] means the surface is
    searchable and [texts] is the same decoded list the row cursor names, in
@@ -3877,6 +3961,25 @@ let scrolled_surface (state : state) (surface : surface) : scrolled option =
 let surface_row_texts (state : state) : surface -> string list option = function
   | Keepers Keeper_list ->
       Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
+  | Keepers Keeper_detail when state.context_inspector_open ->
+      (* The request tab's item labels, so the surface search (/) walks the
+         same rows j/k moves. Other tabs keep no searchable list. *)
+      if
+        state.context_inspector_tab = Masc_tui_context_inspector.Exact_input
+      then
+        match state.context_inspector_reading with
+        | Some
+            ( _
+            , { Masc_tui_context_inspector.provider_input = Ok input; _ } ) ->
+            let labels =
+              List.map
+                (fun (item : Masc_tui_context_inspector.exact_input_item) ->
+                   Masc_tui_context_inspector.exact_input_label item.kind)
+                (Masc_tui_context_inspector.exact_input_items input)
+            in
+            (match labels with [] -> None | _ -> Some labels)
+        | _ -> None
+      else None
   | Lanes ->
       (match state.lanes_mode with
        | Lanes_run_list _ | Lanes_run_detail _ -> None
@@ -4221,6 +4324,14 @@ let workspace_entries_count_label total =
     Printf.sprintf " (%d+, more not listed)" total
   else Printf.sprintf " (%d)" total
 
+(* The prefixes a typed palette line uses to ask the language server, paired
+   with the question each names. One list, because two readers use it: the
+   entries the palette offers are built from it, and the palette's Enter arm
+   parses a typed line with it. A question spelled in one and not the other
+   is a line the operator can type and nothing answers. *)
+let lsp_question_prefixes =
+  [ "def ", "definition"; "hover ", "hover"; "refs ", "references" ]
+
 let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
   @ [ "go Task Review", Palette_goto Verification ]
@@ -4246,13 +4357,15 @@ let palette_entries (state : state) =
         ("post " ^ p.bp_title, Palette_board_post p.bp_id))
       state.board_posts
   @ (* With a file focused on the Code surface, the cursor line's names are
-       askable: K/D pre-fill the matching prefix, and [palette_matches] ranks
-       a label that starts with the query first, so these lead the list. *)
+       askable: K/D/R pre-fill the matching prefix, and [palette_matches]
+       ranks a label that starts with the query first, so these lead the
+       list. *)
   (if state.view = Code && state.code_focus_file = Right_pane then
      List.concat_map
        (fun name ->
-         [ ("def " ^ name, Palette_lsp ("definition", name));
-           ("hover " ^ name, Palette_lsp ("hover", name)) ])
+         List.map
+           (fun (prefix, question) -> (prefix ^ name, Palette_lsp (question, name)))
+           lsp_question_prefixes)
        (code_cursor_line_symbols state)
    else [])
 

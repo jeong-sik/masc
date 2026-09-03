@@ -226,13 +226,11 @@ let auth_config_int fields name ~default =
          name
          (Json_util.kind_name value))
 
-let is_sha256_hex value =
-  String.length value = 64
-  && String.for_all
-       (function
-         | '0' .. '9' | 'a' .. 'f' -> true
-         | _ -> false)
-       value
+(* One predicate for "is this a sha256 digest in lowercase hex", shared with
+   the capability heads and the official-client session store. Four copies
+   decided it before this line; a fix to any one of them reached none of the
+   others, and this one guards a workspace secret hash. *)
+let is_sha256_hex = String_util.is_lowercase_sha256_hex
 ;;
 
 let validate_workspace_secret_hash = function

@@ -276,10 +276,11 @@ let thinking_lines t =
 let finished_marker = "✓"
 
 let marker_of_outcome = function
-  | Started | Never_returned -> "·"
+  | Started -> "◌"
   | Awaiting_result -> "▶"
   | Returned -> finished_marker
   | Failed -> "\xe2\x9c\x97"
+  | Never_returned -> "!"
   | Outcome_unrecorded -> "?"
 
 let pad_to width text =
@@ -430,7 +431,7 @@ let compact_outcome_parts (activities : tool_activity list) =
         if activity.outcome = outcome then total + 1 else total)
       0 activities
   in
-  [ Started, "started"
+  [ Started, "running"
   ; Awaiting_result, "awaiting result"
   ; Returned, "returned"
   ; Failed, "failed"
@@ -983,12 +984,17 @@ let apply t (delta : Live.delta) =
   | Live.Runtime_attempt_started ->
       Buffer.clear t.text_buffer;
       Buffer.clear t.thinking_buffer;
+      (* The event's contract is to discard UNFINISHED text/thinking from the
+         prior attempt, not everything it said. A stretch is finished the
+         moment a node of another kind opens after it -- [trail_text] and
+         [trail_thinking] only append to the head -- so the head is the only
+         node that can still be growing. Filtering every text node out also
+         took speech the reader had already read, leaving the tool nodes
+         standing alone with the turn's words missing between them. *)
       t.reversed_trail <-
-        List.filter
-          (function
-            | Node_tool _ -> true
-            | Node_text _ | Node_thinking _ -> false)
-          t.reversed_trail;
+        (match t.reversed_trail with
+         | (Node_text _ | Node_thinking _) :: finished -> finished
+         | (Node_tool _ :: _ | []) as finished -> finished);
       t.awaiting <- None;
       (match t.phase with
        | Waiting | Working -> t.phase <- Working

@@ -179,47 +179,6 @@ let add_routes ?sw ?clock ~port router =
      export via OTLP push (Otel_metrics observable). *)
   |> Http.Router.get "/ag-ui/events" handle_ag_ui_events
   |> Http.Router.get "/events/presence" handle_presence_events
-  (* Dashboard Bonsai island — static JS bundle and SPA shell.
-     Must precede /dashboard/assets/ and /dashboard/ catchalls below. *)
-  |> Http.Router.prefix_get "/dashboard/b/assets/"
-       (fun request reqd ->
-         with_public_read (fun _state req reqd ->
-           let req_path = Http.Request.path req in
-           let prefix_len = String.length "/dashboard/b/assets/" in
-           let filename = String.sub req_path prefix_len (String.length req_path - prefix_len) in
-           if Web_dashboard.is_safe_asset_relative_path filename then
-             serve_bonsai_static filename req reqd
-           else
-             Http.Response.not_found reqd
-         ) request reqd)
-  (* Bonsai API — must precede the /dashboard/b/ SPA catchall. *)
-  |> Http.Router.get "/dashboard/b/api/keepers/summary"
-       (fun request reqd ->
-         with_public_read (fun _state req reqd ->
-           bonsai_api_keepers_summary req reqd
-         ) request reqd)
-  |> Http.Router.get "/dashboard/b" (fun request reqd ->
-       with_canonical_loopback_host ~port
-         (fun request reqd ->
-           with_public_read (fun _state req reqd ->
-             serve_bonsai_index req reqd
-           ) request reqd)
-         request reqd)
-  |> Http.Router.get "/dashboard/b/" (fun request reqd ->
-       with_canonical_loopback_host ~port
-         (fun request reqd ->
-           with_public_read (fun _state req reqd ->
-             serve_bonsai_index req reqd
-           ) request reqd)
-         request reqd)
-  |> Http.Router.prefix_get "/dashboard/b/"
-       (fun request reqd ->
-         with_canonical_loopback_host ~port
-           (fun request reqd ->
-             with_public_read (fun _state req reqd ->
-               serve_bonsai_index req reqd
-             ) request reqd)
-           request reqd)
   |> Http.Router.get "/favicon.ico" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          serve_favicon req reqd

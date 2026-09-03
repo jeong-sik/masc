@@ -537,18 +537,25 @@ non-default states as `memory:full` and `memory:off`. Neutral system rows that
 share the journal lane have no summary projection and therefore remain whole.
 
 The folded tool row retains exact outcome counts and ends with
-`Ctrl-D: details / diffs`, so the hidden change view is discoverable from the
-row that owns it. The typed calls themselves stay attached to the message, so
+`Ctrl-D: full calls / schedule / diffs`, so full names, typed execution state,
+actual batch/concurrent scheduling, exact served input/output, and the hidden
+change view are discoverable from the row that owns it. The typed calls
+themselves stay attached to the message, so
 changing the view does not reconstruct facts from rendered glyphs. Expanded
 Tool folds also retain operational kinds (`Skill`, `Keeper`, and `Fusion`), so
 a mixed block does not collapse into an anonymous tool count. A held tool call
 uses decision vocabulary independently of execution: `approval approved`,
 `approval denied`, `approval timed out`, or `approval displaced`. Its later
 tool row still reports whether execution returned or failed.
-calls use the finished glyph for a call that
-returned, `✗` for one that returned an error, `·` for one the trace never saw
-finish, and `?` for one whose outcome the trace did not record. A finished call
-carries its server-recorded duration; an open call has none.
+Tool calls use `✓` for a returned call, `✗` for a failure, `◌` while arguments
+are still streaming, `▶` while awaiting a result, `!` when the trace never saw
+the call finish, and `?` when it recorded no outcome. A finished call carries
+its server-recorded duration; an open call has none.
+
+`ERROR` rows keep the complete producer message and wrap it through the same
+scrollable transcript layout as ordinary prose. They are never reduced with a
+cell-fit `~`; a reason longer than the visible page remains reachable with
+PgUp rather than being presented as a complete error.
 
 Full tool detail also keeps a Keeper's recorded file change inside the turn
 that made it. The pane does not fetch file-change bodies in compact mode;
@@ -633,12 +640,27 @@ across the conversation states that instead of figures, and a turn whose
 provider reported nothing says the input was not reported; neither gets a
 number that looks like its own and is not.
 
+`[` and `]` step back and forward through the page's turns -- the caret on
+a RECENT TURNS row names the one on screen -- and every tab re-reads the
+exact provider input for the row they name; a turn that retained no
+snapshot says so on the request tab rather than showing another turn's.
+
+On the request tab, `/` searches the item labels the way the keeper
+roster searches names: typing jumps to the first match, `n`/`N` cycle,
+`Enter` settles, `Esc` clears. The query draws beside the tab row.
+
 `2:request` marks where each item stands in the assembly: `F` the fixed
 system prompt, `H` history the window carried forward, `N` the newest
 message added this turn (the wire is append-only, so the last message is the
 turn's own input, whether a user's text or this turn's latest tool result),
 `S` a tool schema. The header also states what came back, to the extent the
-turn record observed it: output tokens and the finish reason. An item's text
+turn record observed it: output tokens and the finish reason, and a
+RESPONSE band under the summary shows the reply itself -- the keeper's
+speech as markdown, its tool steps and reasoning dimmed -- joined from
+the newest transcript page by the turn's own key and capped at a
+screenful, with the chat pane named for the full text. A turn whose
+reply the newest page no longer reaches says so instead of borrowing
+another turn's answer. An item's text
 is the retained pre-dispatch copy; message rows are read as their typed
 blocks — prose as markdown, structured payloads as pretty JSON, tool calls
 and results under labels that name the tool and the outcome.
@@ -793,6 +815,14 @@ Operator approvals scoped to the acting actor.
 `y` and `n` post to `/api/v1/operator/confirm`. Selection is held by item
 identity, so a refresh that reorders or drops items does not move the cursor
 onto a different request.
+
+`Enter` opens the selected request as a wrapped, scrollable field list before
+the operator decides it. A blocked Auto Judge request puts `state`, the exact
+producer `reason`, and the available `next` action before its approval ID,
+execution location, and input. The one-line queue summary may end in `~`; the
+detail never treats that prefix as the whole reason. `R` retries only when the
+detail says retry is offered, while `y` and `n` remain available for a human
+decision.
 
 ### Board
 

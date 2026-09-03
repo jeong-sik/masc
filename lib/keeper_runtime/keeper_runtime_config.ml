@@ -4,7 +4,7 @@
 (* Generated projection of the typed setting authority. A TOML setting cannot
    reach the boot-overlay path unless the registry also declares its type,
    range, default, restart boundary, and concrete runtime consumer. *)
-let key_to_env = Keeper_runtime_setting_registry.active_toml_mappings
+let key_to_env = Keeper_runtime_setting_registry.toml_env_mappings
 
 let env_is_set env_lookup env_name =
   Option.is_some (env_lookup env_name)
@@ -113,7 +113,6 @@ type validation_severity =
 type validation_issue_kind =
   | Invalid_schema_version
   | Unknown_key
-  | Retired_key
   | Type_mismatch
   | Out_of_range
 
@@ -309,26 +308,10 @@ let validate_doc doc =
          then issues
          else
            match Keeper_runtime_setting_registry.find_by_toml_key key with
-           | Some
-               ({ lifecycle = Keeper_runtime_setting_registry.Active; _ } as row) ->
+           | Some row ->
              (match validate_setting_value key row value with
               | Some issue -> issue :: issues
               | None -> issues)
-           | Some
-               { lifecycle = Keeper_runtime_setting_registry.Retired { reason; replacement }
-               ; _
-               } ->
-             let replacement =
-               match replacement with
-               | Some value -> Printf.sprintf "; use %s" value
-               | None -> ""
-             in
-             validation_issue
-               ~key
-               ~kind:Retired_key
-               ~severity:Error
-               (reason ^ replacement)
-             :: issues
            | None ->
              validation_issue
                ~key
@@ -361,7 +344,6 @@ let validation_severity_label = function
 let validation_issue_kind_label = function
   | Invalid_schema_version -> "invalid_schema_version"
   | Unknown_key -> "unknown_key"
-  | Retired_key -> "retired_key"
   | Type_mismatch -> "type_mismatch"
   | Out_of_range -> "out_of_range"
 ;;
@@ -639,16 +621,16 @@ let settings_projection_to_yojson doc =
       ; "consumers", `List (List.map (fun value -> `String value) row.consumers)
       ]
   in
-  `List (List.map project Keeper_runtime_setting_registry.active)
+  `List (List.map project Keeper_runtime_setting_registry.all)
 ;;
 
 let overlay_application_to_yojson doc =
   let configured =
-    Keeper_runtime_setting_registry.active_toml
+    Keeper_runtime_setting_registry.toml_settings
     |> List.filter (fun row -> Option.is_some (configured_value doc row))
   in
   let application_rows =
-    Keeper_runtime_setting_registry.active_toml
+    Keeper_runtime_setting_registry.toml_settings
     |> List.filter (fun row ->
       Option.is_some (configured_value doc row)
       || String.equal (effective_source row.env_name) "toml")
@@ -662,7 +644,7 @@ let overlay_application_to_yojson doc =
            | None ->
              invalid_arg
                (Printf.sprintf
-                  "active_toml row %s has no TOML key"
+                  "toml_settings row %s has no TOML key"
                   row.env_name)
          in
          key, application_status doc row)

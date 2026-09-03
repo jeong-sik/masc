@@ -626,7 +626,7 @@ let assert_schema_shape_has_execute_alternatives ~label result =
              | `List names ->
                List.exists
                  (function
-                   | `String name -> name = "argv" || name = "pipeline"
+                   | `String name -> name = "argv" || name = "script"
                    | _ -> false)
                  names
              | _ -> false)
@@ -1061,8 +1061,10 @@ let test_tool_execute_schema_exposes_typed_boundary () =
     true
     (Option.is_none (param_by_name "executable" params));
   check_param_type "argv" "array" params;
-  check_param_type "pipeline" "array" params;
-  check_param_type "env" "object" params;
+  check_param_type "script" "string" params;
+  check_param_type "shell" "string" params;
+  check_param_type "cwd" "string" params;
+  check_param_type "timeout_sec" "number" params;
   Alcotest.(check bool)
     "stages alias rejected by schema" true
     (Option.is_none (param_by_name "stages" params));
@@ -1261,7 +1263,6 @@ let test_validate_args_tool_execute_accepts_typed_exec () =
     `Assoc
       [ "argv", `List [ `String "rg"; `String "--files"; `String "lib" ]
       ; "cwd", `String "/tmp"
-      ; "env", `Assoc [ "NO_COLOR", `String "1" ]
       ]
   in
   match
@@ -1277,6 +1278,38 @@ let test_validate_args_tool_execute_accepts_typed_exec () =
     Alcotest.failf
       "expected typed tool_execute exec to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
+
+(* env is not a field: a FOO=1 prefix is written in script. The rejection
+   names the accepted fields so the model can rewrite the call from the
+   message alone. *)
+let test_validate_args_tool_execute_rejects_env_field () =
+  let args =
+    `Assoc
+      [ "argv", `List [ `String "rg"; `String "--files"; `String "lib" ]
+      ; "env", `Assoc [ "NO_COLOR", `String "1" ]
+      ]
+  in
+  match
+    Tool_input_validation.validate_args
+      ~schema:tool_execute_schema
+      ~name:"tool_execute"
+      ~args
+      ()
+  with
+  | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    Alcotest.(check bool)
+      "env is an unsupported field"
+      true
+      (string_contains msg "unsupported field(s): env");
+    Alcotest.(check bool)
+      "rejection lists the accepted fields"
+      true
+      (string_contains msg "accepted: argv, script, shell, cwd, timeout_sec")
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected tool_execute env to be rejected, got %s"
+      (Yojson.Safe.to_string forwarded)
 
 let test_validate_args_tool_execute_rejects_json_string_argv () =
   let args =
@@ -1302,33 +1335,6 @@ let test_validate_args_tool_execute_rejects_json_string_argv () =
     Alcotest.failf
       "expected json-string argv to be rejected, got %s"
       (Yojson.Safe.to_string forwarded)
-
-let test_validate_args_tool_execute_accepts_typed_pipeline () =
-  let args =
-    `Assoc
-      [ ( "pipeline"
-        , `List
-            [ `Assoc
-                [ "argv", `List [ `String "rg"; `String "--files"; `String "lib" ] ]
-            ; `Assoc
-                [ "argv", `List [ `String "head"; `String "-20" ] ]
-            ] )
-      ; "cwd", `String "/tmp"
-      ]
-  in
-  match
-    Tool_input_validation.validate_args
-      ~schema:tool_execute_schema
-      ~name:"tool_execute"
-      ~args
-      ()
-  with
-  | Ok forwarded ->
-    Alcotest.(check bool) "pipeline preserved" true (Yojson.Safe.equal args forwarded)
-  | Error result ->
-    Alcotest.failf
-      "expected typed tool_execute pipeline to pass validation, got %s"
-      (Yojson.Safe.to_string (Tool_result.data result))
 
 let test_validate_args_masc_transition_rejects_json_string_handoff_context () =
   let args =
@@ -1406,16 +1412,8 @@ let test_validate_args_tool_execute_rejects_args_object_envelope () =
       "expected tool_execute args object envelope to be rejected, got %s"
       (Yojson.Safe.to_string forwarded)
 
-let test_validate_args_execute_rejects_pipeline_envelope () =
-  let inner =
-    `Assoc
-      [ ( "pipeline"
-        , `List
-            [ `Assoc [ "argv", `List [ `String "printf"; `String "x" ] ]
-            ; `Assoc [ "argv", `List [ `String "cat" ] ]
-            ] )
-      ]
-  in
+let test_validate_args_execute_rejects_script_envelope () =
+  let inner = `Assoc [ "script", `String "printf x | cat" ] in
   let args = `Assoc [ "args", inner ] in
   match
     Tool_input_validation.validate_args
@@ -1427,12 +1425,12 @@ let test_validate_args_execute_rejects_pipeline_envelope () =
   | Error result ->
     let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool)
-      "pipeline args envelope is unsupported"
+      "script args envelope is unsupported"
       true
       (string_contains msg "unsupported field(s): args")
   | Ok forwarded ->
     Alcotest.failf
-      "expected Execute pipeline args envelope to be rejected, got %s"
+      "expected Execute script args envelope to be rejected, got %s"
       (Yojson.Safe.to_string forwarded)
 
 let test_validate_args_execute_rejects_args_array_envelope () =
@@ -1516,27 +1514,6 @@ let readonly_exec_input program arguments =
   | Error msg ->
     Alcotest.failf "expected typed Execute parse to pass, got %s" msg
 
-let readonly_pipeline_input stages =
-  match
-    Keeper_tool_execute_typed_input.of_json
-      (`Assoc
-        [ ( "pipeline"
-          , `List
-              (List.map
-                 (fun (program, arguments) ->
-                    `Assoc
-                      [ ( "argv"
-                        , `List
-                            (List.map
-                               (fun arg -> `String arg)
-                               (program :: arguments)) ) ])
-                 stages) )
-        ; "cwd", `String "/tmp"
-        ])
-  with
-  | Ok input -> input
-  | Error msg ->
-    Alcotest.failf "expected typed Execute pipeline parse to pass, got %s" msg
 
 let test_tool_execute_write_validation_stays_structural () =
   match
@@ -1549,27 +1526,15 @@ let test_tool_execute_write_validation_stays_structural () =
       "write-capable structural validation should not reject program: %s"
       (Keeper_tool_execute_input.typed_validation_error_text e)
 
-let tool_execute_exec_stage args =
+let tool_execute_argv_form args =
   match Keeper_tool_execute_typed_input.of_json args with
-  | Ok
-      { source =
-          Staged
-            { program = { head = { argv = program :: arguments; _ }; tail = [] }
-            ; _
-            }
-      ; _
-      } ->
-    program, arguments
-  | Ok { source = Staged { program = { head = { argv = []; _ }; _ }; _ }; _ } ->
-    Alcotest.fail "expected non-empty argv"
-  | Ok { source = Staged { program = { tail = _ :: _; _ }; _ }; _ } ->
-    Alcotest.fail "expected a single-stage program"
-  | Ok { source = Script _; _ } ->
-    Alcotest.fail "expected the staged form"
+  | Ok { source = Argv (program :: arguments); _ } -> program, arguments
+  | Ok { source = Argv []; _ } -> Alcotest.fail "expected non-empty argv"
+  | Ok { source = Script _; _ } -> Alcotest.fail "expected the argv form"
   | Error msg ->
     Alcotest.failf "expected typed tool_execute parse to pass, got %s" msg
 
-let tool_execute_exec_argv args = snd (tool_execute_exec_stage args)
+let tool_execute_exec_argv args = snd (tool_execute_argv_form args)
 
 let test_tool_execute_find_expression_not_rewritten () =
   let argv =
@@ -1604,7 +1569,7 @@ let test_tool_execute_find_global_option_not_rewritten () =
 
 let test_tool_execute_empty_program_not_promoted () =
   let program, argv =
-    tool_execute_exec_stage
+    tool_execute_argv_form
       (`Assoc
         [ "argv"
         , `List [ `String ""; `String "find"; `String "-type"; `String "f" ]
@@ -1616,39 +1581,6 @@ let test_tool_execute_empty_program_not_promoted () =
     [ "find"; "-type"; "f" ]
     argv
 
-let test_tool_execute_pipeline_find_expression_not_rewritten () =
-  match
-    Keeper_tool_execute_typed_input.of_json
-      (`Assoc
-        [ ( "pipeline"
-          , `List
-              [ `Assoc
-                  [ "argv", `List [ `String "find"; `String "-type"; `String "f" ] ]
-              ; `Assoc [ "argv", `List [ `String "head"; `String "-5" ] ]
-              ] )
-        ])
-  with
-  | Ok
-      { source =
-          Keeper_tool_execute_typed_input.Staged
-            { program =
-                { head = { Keeper_tool_execute_typed_input.argv; _ }
-                ; tail = _ :: _
-                }
-            ; _
-            }
-      ; _
-      } ->
-    Alcotest.(check (list string))
-      "pipeline find stage remains caller-authored"
-      [ "find"; "-type"; "f" ]
-      argv
-  | Ok { source = Keeper_tool_execute_typed_input.Staged { program = { tail = []; _ }; _ }; _ } ->
-    Alcotest.fail "expected a multi-stage program"
-  | Ok { source = Keeper_tool_execute_typed_input.Script _; _ } ->
-    Alcotest.fail "expected the staged form"
-  | Error msg ->
-    Alcotest.failf "expected typed tool_execute pipeline parse to pass, got %s" msg
 
 let test_validate_args_tool_execute_rejects_bad_argv_type () =
   let args =
@@ -2113,35 +2045,8 @@ let test_keeper_tool_schemas_pin_required_fields () =
     (List.mem "hearth" (schema_required_fields keeper_model_board_post_schema))
 
 (* ================================================================ *)
-(* Test: oneOf with empty/null values (regression guard)             *)
+(* Test: retired execute field names                                 *)
 (* ================================================================ *)
-
-(** Shape-validation boundary: [not: {required: ["pipeline"]}] must treat the
-    [pipeline] key as present even when its value is an empty array. Otherwise
-    validation forwards a payload that the typed Execute parser rejects as an
-    [argv] + [pipeline] mutually-exclusive pair. *)
-let test_validate_args_tool_execute_exec_with_empty_pipeline () =
-  let args =
-    `Assoc
-      [ "argv", `List [ `String "pwd" ]
-      ; "pipeline", `List []
-      ]
-  in
-  match
-    Tool_input_validation.validate_args
-      ~schema:tool_execute_schema
-      ~name:"tool_execute"
-      ~args
-      ()
-  with
-  | Error result ->
-    let msg = Yojson.Safe.to_string (Tool_result.data result) in
-    Alcotest.(check bool) "mentions exact-one-of" true
-      (string_contains msg "exactly one of")
-  | Ok forwarded ->
-    Alcotest.failf
-      "expected tool_execute with argv + empty pipeline to fail, got %s"
-      (Yojson.Safe.to_string forwarded)
 
 (** stages is not a tool_execute input field. Sending stages in args triggers
     additionalProperties rejection since the schema declares
@@ -2165,33 +2070,6 @@ let test_validate_args_tool_execute_stages_rejected_by_schema () =
     Alcotest.(check bool) "mentions stages" true (string_contains msg "stages")
   | Ok _ ->
     Alcotest.fail "expected rejection: stages is no longer a schema-advertised field"
-
-let test_validate_args_tool_execute_pipeline_rejects_null_argv () =
-  let args =
-    `Assoc
-      [ "argv", `Null
-      ; "pipeline", `List
-          [ `Assoc [ "argv", `List [ `String "echo" ] ] ]
-      ]
-  in
-  match
-    Tool_input_validation.validate_args
-      ~schema:tool_execute_schema
-      ~name:"tool_execute"
-      ~args
-      ()
-  with
-  | Error result ->
-    let msg = Yojson.Safe.to_string (Tool_result.data result) in
-    Alcotest.(check bool) "mentions exact-one-of" true
-      (string_contains msg "exactly one of");
-    assert_schema_shape_has_execute_alternatives
-      ~label:"pipeline with null argv"
-      result
-  | Ok forwarded ->
-    Alcotest.failf
-      "expected tool_execute pipeline with null argv to fail, got %s"
-      (Yojson.Safe.to_string forwarded)
 
 (* ================================================================ *)
 (* Test: oneOf with const discriminator                              *)
@@ -2522,18 +2400,18 @@ let () =
         test_validate_args_tool_execute_rejects_async_lifecycle_fields;
       Alcotest.test_case "tool_execute accepts typed exec" `Quick
         test_validate_args_tool_execute_accepts_typed_exec;
+      Alcotest.test_case "tool_execute rejects env field" `Quick
+        test_validate_args_tool_execute_rejects_env_field;
       Alcotest.test_case "tool_execute rejects json-string argv" `Quick
         test_validate_args_tool_execute_rejects_json_string_argv;
-      Alcotest.test_case "tool_execute accepts typed pipeline" `Quick
-        test_validate_args_tool_execute_accepts_typed_pipeline;
       Alcotest.test_case "masc_transition rejects json-string handoff" `Quick
         test_validate_args_masc_transition_rejects_json_string_handoff_context;
       Alcotest.test_case "Execute rejects args object envelope" `Quick
         test_validate_args_execute_rejects_args_object_envelope;
       Alcotest.test_case "tool_execute rejects args object envelope" `Quick
         test_validate_args_tool_execute_rejects_args_object_envelope;
-      Alcotest.test_case "Execute rejects pipeline args envelope" `Quick
-        test_validate_args_execute_rejects_pipeline_envelope;
+      Alcotest.test_case "Execute rejects script args envelope" `Quick
+        test_validate_args_execute_rejects_script_envelope;
       Alcotest.test_case "Execute rejects args array envelope" `Quick
         test_validate_args_execute_rejects_args_array_envelope;
       Alcotest.test_case "Execute rejects mixed args envelope" `Quick
@@ -2546,18 +2424,10 @@ let () =
         test_tool_execute_find_expression_not_rewritten;
       Alcotest.test_case "tool_execute find global option not rewritten" `Quick
         test_tool_execute_find_global_option_not_rewritten;
-      Alcotest.test_case "tool_execute empty program not promoted" `Quick
-        test_tool_execute_empty_program_not_promoted;
-      Alcotest.test_case "tool_execute pipeline find not rewritten" `Quick
-        test_tool_execute_pipeline_find_expression_not_rewritten;
       Alcotest.test_case "tool_execute rejects bad typed argv" `Quick
         test_validate_args_tool_execute_rejects_bad_argv_type;
-      Alcotest.test_case "tool_execute exec + empty pipeline" `Quick
-        test_validate_args_tool_execute_exec_with_empty_pipeline;
       Alcotest.test_case "tool_execute stages rejected by schema" `Quick
         test_validate_args_tool_execute_stages_rejected_by_schema;
-      Alcotest.test_case "tool_execute pipeline + null argv" `Quick
-        test_validate_args_tool_execute_pipeline_rejects_null_argv;
       Alcotest.test_case "direct validation uses explicit schema" `Quick
         test_validate_args_uses_explicit_schema_without_registry;
       Alcotest.test_case "direct masc_board_post accepts sources array" `Quick

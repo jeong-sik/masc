@@ -453,6 +453,37 @@ let test_disposition_wire_decoder_is_strict () =
   | Ok _ -> Alcotest.fail "legacy success label must not be migrated"
 ;;
 
+(* A tool that binds the same key twice in its payload used to succeed and
+   then fail the turn: the checkpoint encoder refuses the repeat once the
+   result is already in the transcript (#31701). The producers resolve it now,
+   the same way the inbound argument boundary does. *)
+let test_repeated_result_keys_resolve_to_the_first_binding () =
+  let repeated = `Assoc [ "cwd", `String "first"; "cwd", `String "second" ] in
+  let completed = Keeper_tool_execution.success_data repeated in
+  Alcotest.(check bool)
+    "a completed result keeps one binding, the first"
+    true
+    (match completed.Keeper_tool_execution.data with
+     | Some (`Assoc [ ("cwd", `String "first") ]) -> true
+     | Some _ | None -> false);
+  Alcotest.(check string)
+    "the rendered output carries no repeat either"
+    {|{"cwd":"first"}|}
+    completed.Keeper_tool_execution.raw_output;
+  let failed =
+    Keeper_tool_execution.failure_data
+      ~class_:Tool_result.Runtime_failure
+      ~message:"boom"
+      repeated
+  in
+  Alcotest.(check bool)
+    "a failed result resolves it too"
+    true
+    (match failed.Keeper_tool_execution.data with
+     | Some (`Assoc [ ("cwd", `String "first") ]) -> true
+     | Some _ | None -> false)
+;;
+
 let test_gate_causal_context_preserves_deferred () =
   let context =
     Masc.Keeper_gate_causal_context.create
@@ -633,6 +664,12 @@ let () =
             "done schema uses result and evidence refs"
             `Quick
             test_keeper_done_schema_uses_result_and_evidence_refs
+        ] )
+    ; ( "repeated result keys"
+      , [ Alcotest.test_case
+            "resolve to the first binding at the producer"
+            `Quick
+            test_repeated_result_keys_resolve_to_the_first_binding
         ] )
     ]
 ;;

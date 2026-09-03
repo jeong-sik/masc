@@ -77,9 +77,16 @@ slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash-0731"]
 # Verifier/completion-authority judgement lane (RFC-0361 D7(a)). Judgement
 # calls resolve only this lane and fail over in declared slot order, the same
 # frozen-order contract as the other exact-output lanes. Same glm-5.3 primary
-# and deepseek-0731 healthy fallback as the lanes above.
+# as the lanes above, but the fallback differs: the completion-authority
+# evaluator walks slots through Runtime.resolve_assignment
+# (keeper_turn_driver), which knows configured runtimes and lanes only — the
+# exact-output catalog id ollama_cloud.deepseek-v4-flash-0731 resolves to
+# nothing there ("not found among configured runtimes", measured repeatedly
+# 2026-08-29 and 2026-09-02 whenever the glm head flapped), so this lane
+# names the configured runtime id instead. No [runtime.lanes] entry shadows
+# that id, so resolution lands on the runtime itself.
 [runtime.exact_output_lanes.verifier_exact]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash-0731"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"]
 
 # SSH remote execution endpoint registry (Phase 1 SSH lane, spec §4.2 in
 # docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md).

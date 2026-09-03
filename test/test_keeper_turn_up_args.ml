@@ -79,6 +79,13 @@ let with_test_context f =
    leaving it out. That the argument is required at all is pinned once, by
    [test_parse_requires_a_sandbox_profile], instead of being restated in each
    case. *)
+(* This suite runs on hosts without a Docker daemon, and the profile the
+   fixture states is [docker], so [parse] would otherwise shell out to
+   [docker info] on every case. [None] is what the real probe answers when
+   the preflight master switch is off. The cases that pin the probe itself
+   pass their own. *)
+let no_daemon_in_this_suite ~timeout_sec:_ = None
+
 let parse_stating_a_profile ctx json =
   let json =
     match json with
@@ -86,7 +93,7 @@ let parse_stating_a_profile ctx json =
       `Assoc (fields @ [ "sandbox_profile", `String "docker" ])
     | other -> other
   in
-  Keeper_turn_up_args.parse ctx json
+  Keeper_turn_up_args.parse ~docker_preflight:no_daemon_in_this_suite ctx json
 ;;
 let test_remote_endpoint_validation () =
   with_test_context @@ fun ctx ->
@@ -1283,12 +1290,114 @@ let test_the_creation_stem_is_a_declaration_parse_accepts () =
     | exception Yojson.Json_error message ->
       failf "the stem must be JSON: %s" message
   in
-  match Keeper_turn_up_args.parse ctx json with
+  match
+    Keeper_turn_up_args.parse ~docker_preflight:no_daemon_in_this_suite ctx json
+  with
   | Ok _ -> ()
   | Error result ->
     failf
       "the stem the form offers must be a declaration parse accepts: %s"
       (Keeper_types_profile.tool_result_body result)
+;;
+
+let preflight_fixture ~ok : Keeper_sandbox_runtime.docker_preflight =
+  { ok
+  ; image = "masc-keeper-sandbox:local"
+  ; docker_runtime_ok = ok
+  ; docker_runtime_error =
+      (if ok
+       then None
+       else
+         Some
+           "docker info failed while validating sandbox runtime: failed to connect to \
+            the docker API at unix:///fixture/docker.sock")
+  ; hardening_ok = true
+  ; hardening_error = None
+  ; image_present = true
+  ; image_error = None
+  ; failure_classes = (if ok then [] else [ "docker_runtime_error" ])
+  ; next_actions =
+      (if ok
+       then []
+       else [ "Ensure Docker is installed and the daemon is reachable from this shell." ])
+  }
+;;
+
+let docker_args ~profile =
+  `Assoc [ "name", `String "preflight-fixture"; "sandbox_profile", `String profile ]
+;;
+
+(* new-keeper, 2026-09-02: admitted from the TUI in 33 ms on a host with no
+   daemon, then every Execute failed on docker_container_probe_failed until
+   it was purged eleven minutes later. The refusal belongs at admission. *)
+let test_docker_profile_is_refused_when_its_preflight_fails () =
+  with_test_context
+  @@ fun ctx ->
+  let probes = ref 0 in
+  let docker_preflight ~timeout_sec:_ =
+    incr probes;
+    Some (preflight_fixture ~ok:false)
+  in
+  match Keeper_turn_up_args.parse ~docker_preflight ctx (docker_args ~profile:"docker") with
+  | Ok _ -> fail "a docker keeper whose daemon the preflight cannot reach was admitted"
+  | Error result ->
+    let body = Keeper_types_profile.tool_result_body result in
+    check bool "named under the shared label" true
+      (String.starts_with
+         ~prefix:(Keeper_sandbox_runtime.docker_preflight_failed_label ^ ":")
+         body);
+    check bool "carries the probe error" true
+      (contains "failed to connect to the docker API" body);
+    check bool "carries the next action" true
+      (contains "Ensure Docker is installed" body);
+    check int "probed once" 1 !probes
+;;
+
+let test_docker_profile_is_admitted_when_its_preflight_passes () =
+  with_test_context
+  @@ fun ctx ->
+  let probes = ref 0 in
+  let docker_preflight ~timeout_sec:_ =
+    incr probes;
+    Some (preflight_fixture ~ok:true)
+  in
+  (match Keeper_turn_up_args.parse ~docker_preflight ctx (docker_args ~profile:"docker") with
+   | Ok _ -> ()
+   | Error result ->
+     failf
+       "a docker keeper with a passing preflight was refused: %s"
+       (Keeper_types_profile.tool_result_body result));
+  check int "probed once" 1 !probes
+;;
+
+(* The master switch off ([None]) admits without a verdict, and no other
+   profile consults the docker probe at all. *)
+let test_docker_preflight_is_consulted_only_for_the_docker_profile () =
+  with_test_context
+  @@ fun ctx ->
+  let probes = ref 0 in
+  let switched_off ~timeout_sec:_ =
+    incr probes;
+    None
+  in
+  (match Keeper_turn_up_args.parse ~docker_preflight:switched_off ctx (docker_args ~profile:"docker") with
+   | Ok _ -> ()
+   | Error result ->
+     failf
+       "docker with the preflight switched off must be admitted: %s"
+       (Keeper_types_profile.tool_result_body result));
+  check int "docker consulted the probe" 1 !probes;
+  let failing ~timeout_sec:_ =
+    incr probes;
+    Some (preflight_fixture ~ok:false)
+  in
+  (match Keeper_turn_up_args.parse ~docker_preflight:failing ctx (docker_args ~profile:"microvm") with
+   | Ok _ -> ()
+   | Error result ->
+     failf
+       "microvm must not be judged by the docker preflight: %s"
+       (Keeper_types_profile.tool_result_body result));
+  check int "microvm never consulted the probe" 1 !probes
 ;;
 
 (* The schema the model reads and the parse that answers it have to say the
@@ -1464,6 +1573,18 @@ let () =
             "remote endpoint required and registry-resolved"
             `Quick
             test_remote_endpoint_validation
+        ; test_case
+            "docker profile is refused when its preflight fails"
+            `Quick
+            test_docker_profile_is_refused_when_its_preflight_fails
+        ; test_case
+            "docker profile is admitted when its preflight passes"
+            `Quick
+            test_docker_profile_is_admitted_when_its_preflight_passes
+        ; test_case
+            "docker preflight is consulted only for the docker profile"
+            `Quick
+            test_docker_preflight_is_consulted_only_for_the_docker_profile
         ; test_case
             "remote endpoint persists and null clears"
             `Quick

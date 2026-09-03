@@ -171,13 +171,15 @@ val batch_disposition_of_cycle_outcome :
     receipt proves completion without a direct surface reply. A mismatched
     surface route, absent terminal receipt, or inapplicable continuation route
     ACKs already-projected attention-only sources but preserves Connector
-    attention; none is evidence of model intent. A
-    durable-stimulus or repeated-assistant-text checkpoint ACKs attention-only
-    sources after preserving the continuation, but preserves
-    Connector_attention until an exact reply/ignore settlement exists. Every
-    other incomplete, failed, cancelled, or checkpointed outcome leaves the
-    whole batch pending. Provider/runtime failure is not authority to discard
-    input. *)
+    attention; none is evidence of model intent. Every typed checkpoint
+    (durable stimulus arrived, loop guard, Gate-deferred tool call, queued
+    chat operation) ACKs attention-only sources after preserving the
+    continuation, because each one is produced after a model round ran with
+    the admitted batch projected; Connector_attention stays pending until an
+    exact reply/ignore settlement exists, and a HITL resolution stays pending
+    until its continuation receipt is recorded. Every failed, cancelled,
+    input-required, or skipped outcome leaves the whole batch pending.
+    Provider/runtime failure is not authority to discard input. *)
 
 type connector_attention_settlement =
   | Settle_resolved
@@ -227,15 +229,11 @@ val run_keepalive_unified_turn :
   on_deferred_runtime_consumed:(unit -> unit) ->
   record_deferred_runtime_lane:
     (Keeper_turn_driver.deferred_runtime_lane -> unit) ->
-  previous_turn_stop:Keeper_turn_checkpoint_reason.t option ->
-  record_turn_stop:(Keeper_turn_checkpoint_reason.t option -> unit) ->
   keepalive_turn_outcome
-(** [previous_turn_stop] is why the last turn that ran in this process ended
-    before completing; the prompt renders it. [record_turn_stop] receives the
-    new value after a cycle runs — [Some reason] for a checkpoint, [None] for
-    every other outcome — and is not called when no cycle ran, so the last
-    real turn's reason survives skipped cycles. The heartbeat loop owns the
-    ref behind both, like [record_deferred_runtime_lane]. *)
+(** Why the last turn that ran ended before completing is no longer this
+    loop's state: {!Keeper_heartbeat_loop_cycle.run_keeper_cycle} records it
+    into {!Keeper_last_turn_stop} after every cycle it runs, on every lane,
+    and reads it back for the next turn's prompt. *)
 
 val refresh_work_as_heartbeat :
   ctx:'a context ->

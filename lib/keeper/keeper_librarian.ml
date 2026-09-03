@@ -271,19 +271,51 @@ let fact_of_json ~now (json : Yojson.Safe.t) : fact option =
           | Some _ | None -> None)
      with
      | Some claim, Some category ->
-       (* Origin is the extraction itself: this row is a copy of something
-          the keeper already saw. [trace_id] is empty by construction — the
-          committing journal entry (snapshot-level source) carries the exact
-          trace; the row never guesses one. *)
-       Some
-         { claim
-         ; category
-         ; first_seen = now
-         ; last_seen = now
-         ; reinforcement = 0
-         ; origin = { kind = Keeper_memory_os_types.Injected; trace_id = "" }
-         ; basis = Keeper_memory_os_types.Observed
-         }
+       (* Where the claim was read: a Board post the librarian names, or the
+          transcript. The schema answers both fields on every claim, null for
+          the transcript. A field that is present but not null and not a
+          non-blank string, a comment without its post, or an id the Board
+          grammar rejects all reject the claim, like any other malformed
+          claim field; only null or absence means the transcript. *)
+       let board_field key =
+         match List.assoc_opt key fields with
+         | None | Some `Null -> Ok None
+         | Some (`String raw) ->
+           (match trim_nonempty raw with
+            | Some value -> Ok (Some value)
+            | None -> Error ())
+         | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _) ->
+           Error ()
+       in
+       let observation =
+         match
+           ( board_field Keeper_memory_os_types.wire_field_board_post_id
+           , board_field Keeper_memory_os_types.wire_field_board_comment_id )
+         with
+         | Error (), _ | _, Error () -> None
+         | Ok None, Ok None -> Some Keeper_memory_os_types.Transcript
+         | Ok None, Ok (Some _) -> None
+         | Ok (Some post_id), Ok comment_id ->
+           (match Keeper_memory_os_types.board_ref_of_ids ~post_id ~comment_id with
+            | Ok board -> Some (Keeper_memory_os_types.Board board)
+            | Error _ -> None)
+       in
+       (match observation with
+        | None -> None
+        | Some observation ->
+          (* Origin is the extraction itself: this row is a copy of something
+             the keeper already saw. [trace_id] is empty by construction — the
+             committing journal entry (snapshot-level source) carries the exact
+             trace; the row never guesses one. *)
+          Some
+            { claim
+            ; category
+            ; first_seen = now
+            ; last_seen = now
+            ; reinforcement = 0
+            ; origin = { kind = Keeper_memory_os_types.Injected; trace_id = "" }
+            ; basis = Keeper_memory_os_types.Observed observation
+            })
      | (Some _, None) | (None, _) -> None)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;

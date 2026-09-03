@@ -18,7 +18,6 @@ type resource_config =
   { memory : string option
   ; cpus : string option
   ; work_volume_size : string option
-  ; build_volume_size : string option
   ; pids_limit : int option
   ; tmpfs_size : string option
   }
@@ -29,7 +28,6 @@ type sandbox_paths =
   ; guest_workspace : string option
   ; guest_config : string option
   ; guest_work_volume : string option
-  ; guest_build_volume : string option
   }
 
 type sandbox_profile =
@@ -37,30 +35,11 @@ type sandbox_profile =
   | Micro_vm
   | Remote_ssh
 
-(** A checkout whose [_build] is not on the volume, and why.
-
-    This is the row an operator acts on: it is still writing to the virtiofs
-    share, which is what exhausted the host's vnode table. Only a person can
-    clear one -- the server refuses to delete build output it did not
-    create. *)
-type unlinked_checkout =
-  { checkout_path : string
-  ; checkout_reason : string
-  }
-
-type build_volume =
-  { volume_name : string option
-  ; guest_root : string
-  ; linked : int
-  ; unlinked : unlinked_checkout list
-  }
-
 type t =
   { sandbox_profile : sandbox_profile option
   ; configured_network_mode : string option
   ; containers : container list option
   ; container_error : string option
-  ; build_volume : build_volume option
   ; resource_config : resource_config option
   ; paths : sandbox_paths option
   ; keeper_last_error : string option
@@ -164,57 +143,6 @@ let decode_containers ~sanitize fields =
     |> Result.map Option.some
   | Some _ -> Error "sandbox_live.containers must be a list or null"
 
-let decode_unlinked ~sanitize index json =
-  let open Result.Syntax in
-  let prefix = Printf.sprintf "sandbox_live.build_volume.unlinked[%d]." index in
-  let* fields = assoc (prefix ^ "row") json in
-  let required name =
-    match field name fields with
-    | Some (`String value) -> Ok (sanitize value)
-    | Some _ -> Error (prefix ^ name ^ " must be a string")
-    | None -> Error (prefix ^ name ^ " is required")
-  in
-  let* checkout_path = required "path" in
-  let* checkout_reason = required "reason" in
-  Ok { checkout_path; checkout_reason }
-;;
-
-(* [`Null] rather than a missing key is the docker and remote_ssh answer:
-   they have no build volume, which is not the same as one that could not be
-   read. Both decode to [None] and the view says nothing, but the server
-   states which it means. *)
-let decode_build_volume ~sanitize fields =
-  let open Result.Syntax in
-  match field "build_volume" fields with
-  | None | Some `Null -> Ok None
-  | Some (`Assoc inner) ->
-    let* volume_name = string_opt ~sanitize ~key:"name" ~path:"build_volume.name" inner in
-    let* guest_root =
-      match field "guest_root" inner with
-      | Some (`String value) -> Ok (sanitize value)
-      | _ -> Error "sandbox_live.build_volume.guest_root must be a string"
-    in
-    let* linked =
-      match field "linked" inner with
-      | Some (`Int value) -> Ok value
-      | _ -> Error "sandbox_live.build_volume.linked must be an integer"
-    in
-    let* unlinked =
-      match field "unlinked" inner with
-      | Some (`List rows) ->
-        List.fold_right
-          (fun row result ->
-            match row, result with
-            | Ok row, Ok rows -> Ok (row :: rows)
-            | Error detail, _ | _, Error detail -> Error detail)
-          (List.mapi (decode_unlinked ~sanitize) rows)
-          (Ok [])
-      | _ -> Error "sandbox_live.build_volume.unlinked must be a list"
-    in
-    Ok (Some { volume_name; guest_root; linked; unlinked })
-  | Some _ -> Error "sandbox_live.build_volume must be an object or null"
-;;
-
 let decode_optional_object ~path decode fields =
   match field path fields with
   | None | Some `Null -> Ok None
@@ -231,12 +159,9 @@ let decode_resource_config ~sanitize fields =
       let* work_volume_size =
         string_opt ~sanitize ~key:"work_volume_size" ~path:"resource_config.work_volume_size" inner
       in
-      let* build_volume_size =
-        string_opt ~sanitize ~key:"build_volume_size" ~path:"resource_config.build_volume_size" inner
-      in
       let* pids_limit = int_opt ~key:"pids_limit" ~path:"resource_config.pids_limit" inner in
       let* tmpfs_size = string_opt ~sanitize ~key:"tmpfs_size" ~path:"resource_config.tmpfs_size" inner in
-      Ok { memory; cpus; work_volume_size; build_volume_size; pids_limit; tmpfs_size })
+      Ok { memory; cpus; work_volume_size; pids_limit; tmpfs_size })
     fields
 ;;
 
@@ -250,14 +175,12 @@ let decode_paths ~sanitize fields =
       let* guest_workspace = get "guest_workspace" in
       let* guest_config = get "guest_config" in
       let* guest_work_volume = get "guest_work_volume" in
-      let* guest_build_volume = get "guest_build_volume" in
       Ok
         { host_workspace
         ; guest_home
         ; guest_workspace
         ; guest_config
         ; guest_work_volume
-        ; guest_build_volume
         })
     fields
 ;;
@@ -282,7 +205,6 @@ let decode ~sanitize json =
   let* container_error =
     string_opt ~sanitize ~path:"container_error" live
   in
-  let* build_volume = decode_build_volume ~sanitize live in
   let* resource_config = decode_resource_config ~sanitize live in
   let* paths = decode_paths ~sanitize live in
   Ok
@@ -290,7 +212,6 @@ let decode ~sanitize json =
     ; configured_network_mode
     ; containers
     ; container_error
-    ; build_volume
     ; resource_config
     ; paths
     ; keeper_last_error
@@ -454,9 +375,7 @@ let resource_rows ~width = function
       |> joined_opt
     in
     let storage =
-      [ Option.map (fun size -> "work " ^ size) resources.work_volume_size
-      ; Option.map (fun size -> "build " ^ size) resources.build_volume_size
-      ]
+      [ Option.map (fun size -> "work " ^ size) resources.work_volume_size ]
       |> joined_opt
     in
     (match compute with
@@ -488,53 +407,12 @@ let path_lines ~width = function
     @ (match paths.guest_work_volume with
        | None -> []
        | Some path -> wrapped_rows ~width ~label:"Work volume" ~tone:`Muted path)
-    @ (match paths.guest_build_volume with
-       | None -> []
-       | Some path -> wrapped_rows ~width ~label:"Build cache" ~tone:`Muted path)
-
-(* Where this keeper's build output lands.
-
-   A checkout on the share pins one host descriptor per file it writes, and
-   a host descriptor is a host vnode; that is what emptied the table and
-   panicked the machine. The count alone is not enough -- an operator needs
-   the paths, because clearing a real [_build] is a person's job. The server
-   will not delete build output it did not create. *)
-let build_volume_lines ~width = function
-  | None -> []
-  | Some volume ->
-    let headline =
-      match volume.unlinked with
-      | [] ->
-        ( `Ok
-        , Printf.sprintf "%d checkout(s) use the build volume" volume.linked )
-      | rows ->
-        ( `Warn
-        , Printf.sprintf
-            "%d use the build volume · %d still use the shared filesystem"
-            volume.linked
-            (List.length rows) )
-    in
-    let tone, summary = headline in
-    [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "build cache" ]
-    @ wrapped_rows ~width ~label:"Volume" ~tone:`Muted
-        (Printf.sprintf "%s at %s" (value volume.volume_name) volume.guest_root)
-    @ wrapped_rows ~width ~label:"Checkouts" ~tone summary
-    @ List.concat_map
-        (fun row ->
-          wrapped_rows
-            ~width
-            ~label:"Shared fs"
-            ~tone:`Warn
-            (row.checkout_path ^ " — " ^ row.checkout_reason))
-        volume.unlinked
-;;
 
 let view_lines ~width reading =
   status_lines ~width reading
   @ configured_lines ~width reading
   @ container_lines ~width reading.containers
   @ path_lines ~width reading.paths
-  @ build_volume_lines ~width reading.build_volume
   @ (match reading.keeper_last_error with
      | None -> []
      | Some detail ->

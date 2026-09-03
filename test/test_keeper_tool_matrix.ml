@@ -200,7 +200,6 @@ let isolated_child_env_unset =
   ; "MISTRAL_API_KEY"
   ; "OPENROUTER_API_KEY"
   ; "ZAI_API_KEY"
-  ; "DASHSCOPE_API_KEY"
   ; "OLLAMA_HOST"
   ]
 

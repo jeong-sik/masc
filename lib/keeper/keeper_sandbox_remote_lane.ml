@@ -16,6 +16,18 @@ let docker_has_no_remote_lane (meta : keeper_meta) =
     meta.name
 ;;
 
+(* The preflight is the OpenSSH bootstrap contract: a host the operator
+   provisioned, reachable over the network, holding a GitHub identity the
+   bootstrap installed. It stays with that transport. *)
+let ready endpoint =
+  let* () =
+    if Env_config_sandbox.Preflight.enabled ()
+    then Keeper_sandbox_remote.check_preflight endpoint
+    else Ok ()
+  in
+  Ok endpoint
+;;
+
 let openssh_endpoint ~(config : Workspace.config) ~(meta : keeper_meta) =
   let* endpoint =
     Keeper_sandbox_ssh.resolve_endpoint
@@ -25,12 +37,18 @@ let openssh_endpoint ~(config : Workspace.config) ~(meta : keeper_meta) =
     Keeper_sandbox_ssh.create ~base_path:config.base_path
       ~keeper_name:meta.name ~endpoint ()
   in
-  let* () =
-    if Env_config_sandbox.Preflight.enabled ()
-    then Keeper_sandbox_remote.check_preflight ssh
-    else Ok ()
-  in
-  Ok ssh
+  ready ssh
+;;
+
+(* No preflight for a guest. The runtime that boots it establishes what the
+   preflight would ask of an OpenSSH host -- the image, the shim mount, the
+   work volume, the keeper's root on it, the identity snapshot -- and the
+   preflight's last step is [gh auth status], which a guest whose profile
+   closes its network ([Network_none]) or whose keeper has no GitHub login
+   cannot pass. Running it here refused every Execute, Read, Write and Edit
+   of such a keeper, on a lane the Docker container never gated on identity. *)
+let microvm_endpoint ?timeout_sec runtime =
+  Keeper_turn_sandbox_runtime.microvm_remote_endpoint ?timeout_sec runtime
 ;;
 
 let profile_contract_mismatch ~expected ~actual =
@@ -43,7 +61,7 @@ let profile_contract_mismatch ~expected ~actual =
 let guest_endpoint ~turn_sandbox_factory ~(meta : keeper_meta) ~cwd =
   match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
   | Keeper_sandbox_factory.Runtime { runtime; guest_profile = Micro_vm_guest; _ } ->
-    Keeper_turn_sandbox_runtime.microvm_remote_endpoint runtime
+    microvm_endpoint runtime
   | Keeper_sandbox_factory.Runtime { guest_profile = Docker_guest; _ } ->
     Error (profile_contract_mismatch ~expected:meta.sandbox_profile ~actual:Docker)
   | Keeper_sandbox_factory.Remote_ssh_profile ->
@@ -51,8 +69,20 @@ let guest_endpoint ~turn_sandbox_factory ~(meta : keeper_meta) ~cwd =
   | Keeper_sandbox_factory.No_factory ->
     Error
       (Printf.sprintf
-         "microvm_remote_requires_turn_sandbox_factory: keeper %s's guest is known only to the turn's sandbox factory, and this call has none"
+         "microvm_remote_requires_turn_sandbox_factory: keeper %s's guest may have to be started to serve this call, and only the turn that owns its lifecycle may start it. A read that only needs a running guest takes attached_guest_endpoint instead"
          meta.name)
+;;
+
+(* The turn-free door to the same guest. [endpoint] above finds the guest
+   through the turn that owns its lifecycle and may start it; this one names
+   the guest directly and cannot start anything. A caller with no turn --
+   verification lookup, an operator surface -- reads through this and gets a
+   refusal only when the guest is genuinely down. *)
+let attached_guest_endpoint ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  match meta.sandbox_profile with
+  | Docker -> Error (docker_has_no_remote_lane meta)
+  | Remote_ssh -> openssh_endpoint ~config ~meta
+  | Micro_vm -> Keeper_turn_sandbox_runtime.microvm_attached_endpoint ~config ~meta ()
 ;;
 
 let endpoint ?turn_sandbox_factory ~(config : Workspace.config) ~(meta : keeper_meta) ~cwd () =

@@ -32,44 +32,20 @@ open Alcotest
    back out of [Execute], whose redirect objects spelled "exactly one of these
    keys" as a oneOf branch per pair of property names.
 
-   What is left to take is measured and not taken here. The Execute schema
-   ships the same prose several times over — the argv paragraph four times, the
-   fd sentence eight — because the exec-stage shape repeats at the top level,
-   inside pipeline, inside then, and inside then's pipeline. That is 4,158
-   bytes of duplicated description, and JSON Schema names the fix ($defs and
-   $ref). Sending one meant knowing every provider resolves it, which was not
-   a thing to guess at on the surface every turn carries. Both halves are done
-   now -- the probes below, then the collapse the paragraph after them
-   records.
+   2026-08-30: 75,000. The surface measured 71,691 bytes across 83 tools that
+   day and 71,812 across the same 83 on 2026-08-31, so 85,000 had stopped
+   tracking it; the reduction is banked here.
 
-   Every lane was probed with the same two-variant experiment: one logical
-   tool offered flat and with $defs/$ref, one prompt naming the same nested
-   values, compare the arguments the model produced. Each ran through its own
-   transport, so what was measured is the lane and not just the model behind
-   it -- codex over [app-server --stdio] dynamicTools, antigravity over the
-   stdio MCP config agy reads.
+   2026-09-02: Execute's schema went from a typed pipeline/then/redirect
+   grammar -- 6,118 bytes of the 08-30 reading, used in 3 of 866 calls over
+   two days -- to five parameters (argv, script, shell, cwd, timeout_sec)
+   under a 694-byte description. The ceiling stays at 75,000; whether the
+   slack that opens still sits inside a third of it is what
+   [test_the_ceiling_still_tracks_the_surface] below answers.
 
-     ollama-cloud minimax-m3   resolves, exact args   (2026-08-29)
-     zai glm-4.6               resolves, exact args   (2026-08-29)
-     codex app-server          resolves, exact args   (2026-08-30)
-     antigravity agy 1.1.22    resolves, exact args   (2026-08-30)
-
-   One caveat found on the way, for a lane that does not exist yet: Gemini's
-   legacy [parameters] field rejects $defs and $ref by name at payload
-   parsing, before auth ("Unknown name \"$defs\" ... Cannot find field"). agy
-   does not use that field, which is why its lane passes. A future
-   direct-Gemini lane must send [parametersJsonSchema]. *)
-(* Lowered from 85,000 on 2026-08-30, banking what naming Execute's repeated
-   exec-stage shapes gave back: the surface measured 71,691 bytes across 83
-   tools that day, down 2,925 from 74,616, and Execute itself went 9,049 ->
-   6,118. That is the whole of the repeat: no other tool ships a shape twice,
-   so this is not a lever to pull again and the next reduction comes from
-   somewhere else.
-
-   The figure is a reading, not a constant -- 71,812 across the same 83 tools
-   on 2026-08-31, the surface having grown 121 bytes since. What the ceiling
-   holds is the slack, which [test_the_ceiling_still_tracks_the_surface]
-   below bounds; the numbers here say where it came from. *)
+   The figure is a reading, not a constant. What the ceiling holds is the
+   slack, which [test_the_ceiling_still_tracks_the_surface] below bounds;
+   the numbers here say where it came from. *)
 let ceiling_bytes = 75_000
 
 let schema_json (schema : Masc_domain.tool_schema) =
@@ -80,23 +56,11 @@ let schema_json (schema : Masc_domain.tool_schema) =
     ]
 ;;
 
-(* Measured after [Json_schema_shared_defs.collapse], because that is what
-   [Tool_bridge] hands the provider and so what the model is charged for. The
-   descriptor's own schema stays expanded for argument validation; counting it
-   here would report a surface nothing sends. *)
 let measured () =
   let schemas = Masc.Keeper_tool_descriptor.model_visible_schemas () in
   let bytes =
     List.fold_left
-      (fun acc (schema : Masc_domain.tool_schema) ->
-         acc
-         + String.length
-             (Yojson.Safe.to_string
-                (schema_json
-                   { schema with
-                     input_schema =
-                       Json_schema_shared_defs.collapse schema.input_schema
-                   })))
+      (fun acc schema -> acc + String.length (Yojson.Safe.to_string (schema_json schema)))
       0
       schemas
   in
@@ -176,6 +140,12 @@ let all_surface_golden_names =
   ; "keeper_webmcp_call"
   ; "keeper_webmcp_list"
   ; "masc_agent_fitness"
+    (* +3 for the ask family: the answer→wake chain existed end to end, but
+       without descriptors the agent-core lane never saw the tools, so no
+       Keeper running in-process could ask the operator anything. *)
+  ; "masc_ask"
+  ; "masc_ask_status"
+  ; "masc_ask_withdraw"
   ; "masc_board_cleanup"
   ; "masc_board_comment"
   ; "masc_board_comment_vote"

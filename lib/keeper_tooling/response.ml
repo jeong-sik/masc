@@ -31,7 +31,14 @@ let accept_rejection_kind_to_string = function
 let response_accept_rejection (response : Agent_core.Types.api_response) =
   let shape = Agent_core.Response_shape.summarize response in
   let response_shape = Agent_core.Response_shape.content_shape response shape in
-  if not (Agent_core.Response_shape.has_deliverable_content shape) then
+  if response.stop_reason = Agent_core.Types.MaxTokens
+  then
+    Some
+      { kind = No_usable_progress
+      ; reason = Agent_core.Response_shape.diagnostic_summary response
+      ; response_shape = Some response_shape
+      }
+  else if not (Agent_core.Response_shape.has_deliverable_content shape) then
     Some
       { kind = No_usable_progress
       ; reason = Agent_core.Response_shape.diagnostic_summary response

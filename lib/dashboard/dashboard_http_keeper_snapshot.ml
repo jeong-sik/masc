@@ -135,11 +135,13 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
             ~pending_board_events:(Some pending_board_events) ~config ~meta:m
         in
         let parts =
-          let active_goal_summaries =
-            Keeper_unified_prompt.active_goal_summaries_of_store ~config
-          in
           let current_task =
             Keeper_world_observation_inputs.read_current_task ~config ~meta:m
+          in
+          let active_goal_summaries =
+            Keeper_unified_prompt.active_goal_summaries_for_task
+              ~config
+              ~current_task
           in
           (* The preview must advertise the same per-task Skill surfaces the
              real turn computes; omitting them renders every Task Skill as

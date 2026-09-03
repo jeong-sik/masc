@@ -1384,7 +1384,7 @@ let run_named
           in
           Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
           let provider_result, checkpoint_after, _success_sample =
-            Keeper_turn_driver_try_provider.run_try_provider_with_context_overflow_shrink
+            Keeper_turn_driver_try_provider.run_try_provider_with_truncation_recovery
               try_provider_ctx candidate
           in
           let outcomes =

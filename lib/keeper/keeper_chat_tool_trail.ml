@@ -68,7 +68,8 @@ let call_count t = List.length t.rev_order
    tools, and a name table would need an entry per tool. Mirrors SUBJECT_KEYS in
    dashboard/src/components/tool-call-shared.ts. *)
 let subject_keys =
-  [ "argv" (* Execute: the command that ran *)
+  [ "argv" (* Execute: the command that ran, without a shell *)
+  ; "script" (* Execute: the command line a shell ran *)
   ; "command"
   ; "cmd"
   ; "file_path" (* Read / Edit / Write *)

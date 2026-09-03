@@ -351,7 +351,6 @@
   --shadow-panel: 0 2px 12px rgba(0, 0, 0, 0.6);
   --shadow-glow: 0 0 20px var(--accent-glow);
   --shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border-highlight);
-  --shadow-ring: inset 0 0 0 1px rgba(196, 162, 101, 0.25);
   --shadow-cmd-palette: 0 12px 40px rgb(0 0 0 / .6);
   --shadow-drawer-left: -8px 0 24px rgb(0 0 0 / .4);
   --focus-ring: 0 0 0 1px var(--brass-1), 0 0 0 3px rgb(var(--brass-glow) / .25);

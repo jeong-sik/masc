@@ -26,7 +26,19 @@ let fact ?(claim = "claim") () :
   ; last_seen = 100.0
   ; reinforcement = 0
   ; origin = { kind = Types.Authored; trace_id = "trace" }
-  ; basis = Types.Observed
+  ; basis = Types.Observed Types.Transcript
+  }
+;;
+
+let board_ref ?comment_id post_id =
+  match Types.board_ref_of_ids ~post_id ~comment_id with
+  | Ok board -> board
+  | Error error -> failf "board ref fixture: %s" (Types.wire_error_to_string error)
+;;
+
+let board_fact ?(claim = "board claim") ?comment_id post_id : Types.fact =
+  { (fact ~claim ()) with
+    basis = Types.Observed (Types.Board (board_ref ?comment_id post_id))
   }
 ;;
 
@@ -133,7 +145,7 @@ let test_derivation_contract_canonicalizes_sets_and_rejects_duplicate_rules () =
      check (list string) "premise set has canonical order"
        (List.sort String.compare [ Types.memory_id first; Types.memory_id second ])
        derivation.premise_ids
-   | Types.Derived _ | Types.Observed -> fail "unexpected canonical basis");
+   | Types.Derived _ | Types.Observed _ -> fail "unexpected canonical basis");
   match
     Types.derived
       ~claim:"duplicate rules"
@@ -282,7 +294,7 @@ let test_alternate_support_path_keeps_derived_fact_current () =
   (match rollout.basis with
    | Types.Derived derivations ->
      check int "re-observation joins alternate proofs" 2 (List.length derivations)
-   | Types.Observed -> fail "derived conclusion was promoted without observation");
+   | Types.Observed _ -> fail "derived conclusion was promoted without observation");
   let second =
     replace
       ~keepers_dir
@@ -365,7 +377,7 @@ let test_same_rule_replaces_its_premise_set () =
      check (list string) "same rule carries only its current premise set"
        (List.sort String.compare [ Types.memory_id first; Types.memory_id second ])
        derivation.premise_ids
-   | Types.Derived _ | Types.Observed -> fail "rule replacement changed basis shape");
+   | Types.Derived _ | Types.Observed _ -> fail "rule replacement changed basis shape");
   let retracted =
     replace
       ~keepers_dir
@@ -437,7 +449,7 @@ let test_unsupported_derived_upsert_has_no_effect () =
   (match (List.nth unchanged.facts 1).basis with
    | Types.Derived derivations ->
      check int "unsupported alternative is not stored" 1 (List.length derivations)
-   | Types.Observed -> fail "derived conclusion changed basis");
+   | Types.Observed _ -> fail "derived conclusion changed basis");
   check int "only the seed commit is journaled" 1
     (List.length (read_journal_lines ~keepers_dir))
 ;;
@@ -1425,6 +1437,106 @@ let test_two_quarantines_at_the_same_time_keep_both_files () =
          (String.concat "; " files))
 ;;
 
+(* Provenance rides the basis: an observed fact says where it was read.
+   The wire keeps {"kind":"observed"} for transcript facts, so every existing
+   snapshot still decodes, and adds a board object only when a Board post is
+   named. The ids are checked against the Board id grammar, not for existence:
+   whether the post still exists is a reader's question. *)
+let test_board_provenance_survives_the_wire () =
+  let round_trip fact =
+    match Types.fact_of_json (Types.fact_to_json fact) with
+    | Ok decoded -> decoded
+    | Error error -> failf "fact did not decode: %s" (Types.wire_error_to_string error)
+  in
+  let transcript = fact () in
+  check
+    bool
+    "transcript basis serializes as the bare observed object"
+    true
+    (Types.basis_to_json transcript.basis
+     = `Assoc [ Types.wire_field_kind, `String "observed" ]);
+  check bool "transcript round trip" true ((round_trip transcript).basis = transcript.basis);
+  let post = board_fact "p-0123456789abcdef0123456789abcdef" in
+  check bool "post round trip" true ((round_trip post).basis = post.basis);
+  let comment =
+    board_fact ~comment_id:"c-0123456789abcdef0123456789abcdef" "p-0123456789abcdef0123456789abcdef"
+  in
+  check bool "comment round trip" true ((round_trip comment).basis = comment.basis);
+  check
+    bool
+    "memory identity is the claim bytes, not the provenance"
+    true
+    (String.equal (Types.memory_id post) (Types.memory_id (fact ~claim:"board claim" ())))
+;;
+
+let test_board_provenance_rejects_bad_ids () =
+  let rejects label json =
+    match Types.basis_of_json json with
+    | Ok _ -> failf "%s: decoded a basis the Board would not accept" label
+    | Error _ -> ()
+  in
+  rejects
+    "blank post id"
+    (`Assoc
+       [ Types.wire_field_kind, `String "observed"
+       ; Types.wire_field_board, `Assoc [ Types.wire_field_post_id, `String "" ]
+       ]);
+  rejects
+    "post id with a space"
+    (`Assoc
+       [ Types.wire_field_kind, `String "observed"
+       ; Types.wire_field_board, `Assoc [ Types.wire_field_post_id, `String "p-1 2" ]
+       ]);
+  rejects
+    "unknown field inside the board object"
+    (`Assoc
+       [ Types.wire_field_kind, `String "observed"
+       ; ( Types.wire_field_board
+         , `Assoc
+             [ Types.wire_field_post_id, `String "p-0123456789abcdef0123456789abcdef"
+             ; "author", `String "rondo"
+             ] )
+       ]);
+  rejects
+    "board object on a derived basis"
+    (`Assoc
+       [ Types.wire_field_kind, `String "derived"
+       ; Types.wire_field_board, `Assoc [ Types.wire_field_post_id, `String "p-1" ]
+       ]);
+  match
+    Types.board_ref_of_ids
+      ~post_id:"p-0123456789abcdef0123456789abcdef"
+      ~comment_id:(Some "not a comment id")
+  with
+  | Ok _ -> fail "a comment id the Board would not accept was decoded"
+  | Error _ -> ()
+;;
+
+let test_board_reference_outranks_transcript_on_merge () =
+  let post = "p-0123456789abcdef0123456789abcdef" in
+  let transcript = (fact ()).basis in
+  let board = (board_fact post).basis in
+  check bool "transcript then board keeps the board" true
+    (Current.merge_basis transcript board = board);
+  check bool "board then transcript keeps the board" true
+    (Current.merge_basis board transcript = board);
+  let other = (board_fact "p-fedcba9876543210fedcba9876543210").basis in
+  check bool "two board references to different posts keep the first" true
+    (Current.merge_basis board other = board);
+  let comment =
+    (board_fact ~comment_id:"c-0123456789abcdef0123456789abcdef" post).basis
+  in
+  check bool "a comment under the same post replaces the bare post" true
+    (Current.merge_basis board comment = comment);
+  check bool "a bare post does not replace a comment under it" true
+    (Current.merge_basis comment board = comment);
+  check bool "an observation outranks a derivation" true
+    (Current.merge_basis
+       board
+       (Types.Derived [ { rule_id = "r"; premise_ids = [ Types.memory_id (fact ()) ] } ])
+     = board)
+;;
+
 let () =
   run
     "keeper_memory_os_current"
@@ -1514,6 +1626,18 @@ let () =
             "explicit upsert preserves first seen"
             `Quick
             test_explicit_upsert_preserves_first_seen_for_same_claim
+        ; test_case
+            "board provenance survives the wire"
+            `Quick
+            test_board_provenance_survives_the_wire
+        ; test_case
+            "board provenance rejects ids the Board would not accept"
+            `Quick
+            test_board_provenance_rejects_bad_ids
+        ; test_case
+            "a board reference outranks the transcript on re-observation"
+            `Quick
+            test_board_reference_outranks_transcript_on_merge
         ; test_case
             "explicit keepers dirs stay isolated"
             `Quick

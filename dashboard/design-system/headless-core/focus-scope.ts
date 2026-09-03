@@ -3,7 +3,7 @@
  *
  * Replaces the inline `useRef + useEffect + document.addEventListener
  * ("mousedown")` pattern that every Drawer/Popover/Dialog reimplements.
- * Adapters (headless-preact/use-focus-scope.ts, future Bonsai adapter)
+ * Adapters (headless-preact/use-focus-scope.ts)
  * call activate() on mount and deactivate() on unmount.
  *
  * MVP scope (RFC 0001 §"createFocusScope"):

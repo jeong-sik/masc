@@ -1,8 +1,6 @@
 module Gate = Masc_exec_command_gate.Shell_command_gate
 
-type field =
-  | Stdin
-  | Connector
+type field = Connector
 
 type call =
   | Spawn
@@ -29,8 +27,6 @@ type t =
       because : string;
     }
 
-let stdin_is_a_field because = Move_to_field { field = Stdin; because }
-
 (* RFC execute-boundary-is-the-sandbox. Every sentence below was written while
    the subset was what ran, so "this tool does not do that" was a fact about
    the tool. It is not one any more: [script] is a shell, and an argv-shaped
@@ -40,8 +36,9 @@ let stdin_is_a_field because = Move_to_field { field = Stdin; because }
    Advising against it is not merely stale, it is the failure this module was
    written to end -- 2026-08-31, lane-smith was told "this tool runs no shell"
    for a working [$PWD] and rewrote it into an absolute path. What is left is
-   the two constructs where a typed field is still the better call, and for
-   the rest the honest answer is that there is nothing to say. *)
+   [&], where another call is the better move, and a nested pipeline, where a
+   field still is; for the rest the honest answer is that there is nothing to
+   say. *)
 let a_shell_is_the_answer construct because =
   Unrepresentable { construct; because }
 ;;
@@ -49,12 +46,6 @@ let a_shell_is_the_answer construct because =
 (* Exhaustive on purpose.  A construct cannot join the excluded list without
    someone choosing whether the caller should have done something else. *)
 let of_construct : Masc_exec.Parsed.reason_too_complex -> t = function
-  (* Still worth saying: the field takes the body as bytes, so it does not have
-     to survive the shell's quoting on the way in. *)
-  | `Heredoc ->
-    stdin_is_a_field "a heredoc is the child's stdin, and stdin is a typed field"
-  | `Here_string ->
-    stdin_is_a_field "a here-string is the child's stdin, and stdin is a typed field"
   (* Still true, and not about the subset: the shell that runs the line exits
      when the line ends, so [&] leaves a child with no handle to wait on or
      stop. Spawn is the tool that returns one. *)
@@ -65,7 +56,9 @@ let of_construct : Masc_exec.Parsed.reason_too_complex -> t = function
           "the shell running this line exits when the line does, so [&] \
            leaves a child with no handle to wait on, read from, or stop"
       }
-  | ( `Cmd_subst
+  | ( `Heredoc
+    | `Here_string
+    | `Cmd_subst
     | `Param_expansion
     | `Arith_expansion
     | `Glob_brace
@@ -76,9 +69,9 @@ let of_construct : Masc_exec.Parsed.reason_too_complex -> t = function
     | `Redirect ) as construct ->
     a_shell_is_the_answer
       construct
-      "a shell runs this line, so it does what you wrote. The typed argv and \
-       pipeline forms cannot say it, and they are the ones that get path \
-       scope -- use them when the line does not need a shell"
+      "a shell runs this line, so it does what you wrote. The typed argv form \
+       cannot say it, and argv is the form that gets path scope -- use it \
+       when the line does not need a shell"
   | `Unknown_construct _ as construct ->
     a_shell_is_the_answer
       construct
@@ -98,7 +91,6 @@ let of_reason : Gate.too_complex_reason -> t = function
 ;;
 
 let field_name = function
-  | Stdin -> "stdin"
   | Connector -> "connector"
 ;;
 
@@ -109,11 +101,10 @@ let call_name = function
   | Spawn -> "spawn"
 ;;
 
-(* What the caller types. Two of these are patterns over calls the caller
-   already has, so they read as descriptions and the hyphens say so. [Spawn]
-   became one concrete tool, so it is named exactly -- "call spawn instead"
-   sent the reader looking for a tool nobody has. This library cannot see the
-   tool schemas, so a test at a layer that sees both holds the two together. *)
+(* What the caller types. [Spawn] is one concrete tool, so it is named
+   exactly -- "call spawn instead" sent the reader looking for a tool nobody
+   has. This library cannot see the tool schemas, so a test at a layer that
+   sees both holds the two together. *)
 let call_instruction = function
   | Spawn -> "keeper_spawn"
 ;;

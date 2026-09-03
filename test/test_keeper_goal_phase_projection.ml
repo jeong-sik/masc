@@ -1,8 +1,9 @@
-(** A keeper is handed only the shared Goals it can still progress.
+(** A keeper is handed only the Goals its task serves and can still progress.
 
-    Two prompt surfaces read the open Goal store: [<available_goals>] in the system prompt
-    (via {!Keeper_unified_prompt.active_goal_summaries_of_store}) and [### Active Goals]
-    in the per-turn world state (via [world_observation.active_goals]). Both
+    The turn's [### Active Goals] block reads the Goal store twice over: the
+    link registry says which Goals this turn's task serves
+    ({!Keeper_unified_prompt.active_goal_summaries_for_task}), and
+    [world_observation.active_goals] carries the ids the frame counts. Both
     announced terminal goals as this keeper's work, on every turn, under
     headings that call them available.
 
@@ -92,6 +93,32 @@ let keeper_meta () =
   | Error e -> failwith ("meta_of_json failed: " ^ e)
 ;;
 
+(* A task whose link registry entry says which Goals it serves. The turn
+   surface reads the link, not the whole store. *)
+let task_named id : Masc_domain.task =
+  { id
+  ; title = "linked work"
+  ; description = ""
+  ; task_status = Masc_domain.Todo
+  ; priority = 1
+  ; files = []
+  ; created_at = "2026-09-02T01:00:00Z"
+  ; created_by = Some "test"
+  ; predecessor_task_id = None
+  ; contract = None
+  ; execution_links = Masc_domain.no_execution_links
+  ; handoff_context = None
+  ; cycle_count = 0
+  ; reclaim_policy = None
+  ; do_not_reclaim_reason = None
+  ; skills = []
+  }
+;;
+
+let current_task_of id =
+  Keeper_world_observation_inputs.Current_task (task_named id)
+;;
+
 let summary_ids summaries =
   List.map
     (fun (s : Keeper_unified_prompt.goal_summary) -> s.summary_goal_id)
@@ -109,16 +136,56 @@ let summary_title_opt goal_id summaries =
   | None -> None
 ;;
 
-let test_system_prompt_surface_drops_terminal_goals () =
+let test_turn_surface_drops_terminal_goals () =
   with_workspace @@ fun config ->
   seed_all_phases config;
   let _meta = keeper_meta () in
-  let summaries = Keeper_unified_prompt.active_goal_summaries_of_store ~config in
+  Workspace_goal_index.write_goal_task_links
+    config
+    [ "goal-executing", [ "task-linked" ]
+    ; "goal-verifying", [ "task-linked" ]
+    ; "goal-completed", [ "task-linked" ]
+    ; "goal-dropped", [ "task-linked" ]
+    ];
+  let summaries =
+    Keeper_unified_prompt.active_goal_summaries_for_task
+      ~config
+      ~current_task:(current_task_of "task-linked")
+  in
   check (list string) "only progressable goals are offered"
     [ "goal-executing"; "goal-verifying" ]
     (summary_ids summaries);
   check (option string) "its title still resolves" (Some "still work")
     (summary_title_opt "goal-executing" summaries)
+;;
+
+(* The task decides which Goals are this turn's context. A Goal the task does
+   not serve is not offered, and a turn holding no task is offered none --
+   [masc_goal_list] is where the rest of the store is read. *)
+let test_turn_surface_carries_only_the_tasks_goals () =
+  with_workspace @@ fun config ->
+  seed_all_phases config;
+  Workspace_goal_index.write_goal_task_links
+    config
+    [ "goal-executing", [ "task-linked" ]; "goal-verifying", [ "task-other" ] ];
+  check (list string) "the linked goal only"
+    [ "goal-executing" ]
+    (summary_ids
+       (Keeper_unified_prompt.active_goal_summaries_for_task
+          ~config
+          ~current_task:(current_task_of "task-linked")));
+  check (list string) "a task with no link carries none"
+    []
+    (summary_ids
+       (Keeper_unified_prompt.active_goal_summaries_for_task
+          ~config
+          ~current_task:(current_task_of "task-unlinked")));
+  check (list string) "and no task at all carries none"
+    []
+    (summary_ids
+       (Keeper_unified_prompt.active_goal_summaries_for_task
+          ~config
+          ~current_task:Keeper_world_observation_inputs.No_current_task))
 ;;
 
 let test_world_observation_drops_terminal_goals () =
@@ -141,8 +208,14 @@ let test_no_goals_surface_when_all_are_terminal () =
   with_workspace @@ fun config ->
   seed_terminal_phases_only config;
   let meta = keeper_meta () in
+  Workspace_goal_index.write_goal_task_links
+    config
+    [ "goal-completed", [ "task-linked" ]; "goal-dropped", [ "task-linked" ] ];
   check (list string) "no goal block rather than an empty-looking one" []
-    (summary_ids (Keeper_unified_prompt.active_goal_summaries_of_store ~config));
+    (summary_ids
+       (Keeper_unified_prompt.active_goal_summaries_for_task
+          ~config
+          ~current_task:(current_task_of "task-linked")));
   let observation =
     Keeper_world_observation.observe ~pending_board_events:(Some []) ~config
       ~meta
@@ -196,8 +269,10 @@ let test_no_goal_is_offered_as_work_to_pick_up () =
 let () =
   run "keeper_goal_phase_projection"
     [ ( "prompt surfaces"
-      , [ test_case "system prompt drops terminal goals" `Quick
-            test_system_prompt_surface_drops_terminal_goals
+      , [ test_case "the turn surface drops terminal goals" `Quick
+            test_turn_surface_drops_terminal_goals
+        ; test_case "the turn surface carries only the task's goals" `Quick
+            test_turn_surface_carries_only_the_tasks_goals
         ; test_case "world observation drops terminal goals" `Quick
             test_world_observation_drops_terminal_goals
         ; test_case "all-terminal yields no goals at either surface" `Quick

@@ -477,7 +477,6 @@ let snapshot_to_json (snap : snapshot) =
     ]
 ;;
 
-let take_snapshot () = Atomic.exchange current_snapshot empty_snapshot |> reverse_snapshot
 let peek_snapshot () = Atomic.get current_snapshot |> reverse_snapshot
 
 (* Emit wrappers: accumulate into snapshot + forward to registered sink. *)

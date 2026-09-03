@@ -858,7 +858,7 @@ let test_embedded_mimo_binding_preserves_default_model () =
 ;;
 
 let test_registry_bindings_do_not_invent_model_defaults () =
-  [ "gemini"; "glm"; "kimi"; "dashscope"; "deepseek"; "groq"; "openrouter" ]
+  [ "gemini"; "glm"; "kimi"; "deepseek"; "groq"; "openrouter" ]
   |> List.iter (fun provider_id ->
     let binding = expect_binding provider_id in
     Alcotest.(check bool)
@@ -874,7 +874,6 @@ let test_builtin_selectors_are_exact () =
     ; "kimi", "kimi"
     ; "gemini", "gemini"
     ; "glm", "glm"
-    ; "dashscope", "dashscope"
     ]
   in
   List.iter

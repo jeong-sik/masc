@@ -124,6 +124,35 @@ describe('memory journal', () => {
     expect(entry.drops[0]?.reason).toBe('superseded by the openssl decision')
   })
 
+  // An observed fact may name the Board post it was read from; the decoder
+  // keeps the reference and answers null for a transcript observation.
+  it('keeps the board post an observed fact was read from', async () => {
+    const withBoard = {
+      ...committed,
+      change: {
+        ...committed.change,
+        added: [
+          { ...committed.change.added[0], basis: { kind: 'observed', board: { post_id: 'p-abc' } } },
+          {
+            ...committed.change.added[0],
+            claim: 'y',
+            basis: { kind: 'observed', board: { post_id: 'p-abc', comment_id: 'c-def' } },
+          },
+        ],
+      },
+    }
+    stubFetch(payload([withBoard]))
+    const journal = await fetchKeeperMemoryJournal('kidsnote')
+    const entry = journal.entries[0]
+    if (!entry?.ok || entry.outcome !== 'committed') throw new Error('expected a commit')
+    expect(entry.added[0]?.basis).toEqual({ kind: 'observed', board: { post_id: 'p-abc', comment_id: null } })
+    expect(entry.added[1]?.basis).toEqual({
+      kind: 'observed',
+      board: { post_id: 'p-abc', comment_id: 'c-def' },
+    })
+    expect(entry.invalidated[0]?.fact.basis).toEqual({ kind: 'derived', derivations: expect.any(Array) })
+  })
+
   it('keeps explicit retraction as a typed committed source', async () => {
     stubFetch(payload([{ ...committed, source: { kind: 'explicit_retract', trace_id: 'trace-r' } }]))
     const journal = await fetchKeeperMemoryJournal('kidsnote')

@@ -552,6 +552,55 @@ let test_skill_source_ignores_other_tools () =
     [ "keeper_spawn"; "Execute"; Catalog.status_tool_name; "keeper_compose_" ]
 ;;
 
+
+(* The failure payload is truncated on the serialized string at
+   [Keeper_tool_call_log.max_output_len], so its field order decides what a
+   reader can still see. [settled] carries one entry per node with that node's
+   whole result; a composition over a task list produced 12KB there, the cut
+   landed inside it, and eight failures were recorded with no readable reason
+   (2026-09-03). This pins that the diagnosis outlives the cut. *)
+let test_failure_payload_keeps_cause_under_truncation () =
+  let big_node index =
+    `Assoc
+      [ "node_id", `String (Printf.sprintf "node-%d" index)
+      ; "tool_name", `String "keeper_tasks_list"
+      ; "result", `String (String.make 4000 'x')
+      ]
+  in
+  let payload =
+    Masc.Keeper_tool_composition_surface.For_testing.failure_payload
+      ~tool_name:"keeper_compose_work-intake"
+      ~tool_kind:Masc.Keeper_tool_descriptor.Composition_tool
+      ~cause:(`Assoc [ "kind", `String "plan_execution_failed" ])
+      ~effect_disposition:"no_effect"
+      ~settled:(List.init 3 big_node)
+  in
+  let serialized = Yojson.Safe.to_string payload in
+  check
+    bool
+    "the payload is longer than the durable row keeps"
+    true
+    (String.length serialized > Masc.Keeper_tool_call_log.max_output_len);
+  let kept = String.sub serialized 0 Masc.Keeper_tool_call_log.max_output_len in
+  let contains needle haystack =
+    let n = String.length needle in
+    let rec scan i =
+      if i + n > String.length haystack
+      then false
+      else if String.sub haystack i n = needle
+      then true
+      else scan (i + 1)
+    in
+    scan 0
+  in
+  check bool "cause survives the cut" true (contains "\"cause\"" kept);
+  check
+    bool
+    "effect_disposition survives the cut"
+    true
+    (contains "\"effect_disposition\"" kept)
+;;
+
 let () =
   run
     "keeper_tool_composition_catalog"
@@ -617,6 +666,10 @@ let () =
             "other tool names resolve to none"
             `Quick
             test_skill_source_ignores_other_tools
+        ; test_case
+            "a failed composition keeps its cause when the row is truncated"
+            `Quick
+            test_failure_payload_keeps_cause_under_truncation
         ] )
     ]
 ;;

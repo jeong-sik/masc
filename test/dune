@@ -2031,6 +2031,7 @@
 (include stanzas/test_env_snapshot_reports_applied_default.inc)
 (include stanzas/test_verification_authority_tools.inc)
 (include stanzas/test_keeper_microvm_backend.inc)
+(include stanzas/test_keeper_paste_delivery.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
 
 (include stanzas/test_exec_policy_cwd_hint.inc)

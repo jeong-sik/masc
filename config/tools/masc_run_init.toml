@@ -1,9 +1,8 @@
 name = "masc_run_init"
 description = """
-Create an execution memory directory (.masc/runs/{task_id}/) to track the \
-run plan. Call when starting work on a claimed task to enable structured \
-progress tracking. After init, use masc_run_plan to set approach and \
-masc_run_get to review."""
+Create an execution memory directory to track the run plan.
+
+The directory is .masc/runs/{task_id}/. Call when starting work on a claimed task to enable structured progress tracking. After init, use masc_run_plan to set approach and masc_run_get to review."""
 additional_properties = false
 
 

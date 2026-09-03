@@ -1,10 +1,8 @@
 name = "masc_keeper_delegate"
 description = """
-Submit one typed Keeper chat operation and return its durable operation_id \
-without waiting for the turn. A Keeper that submits one is woken with the \
-answer when that turn ends: the reply lands in its own queue, carrying the \
-text, so there is nothing to poll for. Use masc_keeper_delegate_status only \
-to read the operation's state before then."""
+Submit one typed Keeper chat operation and get its operation_id back.
+
+The id is durable and returns without waiting for the turn. A Keeper that submits one is woken with the answer when that turn ends: the reply lands in its own queue, carrying the text, so there is nothing to poll for. Use masc_keeper_delegate_status only to read the operation's state before then."""
 additional_properties = false
 
 

@@ -172,6 +172,11 @@ val clear_prompt_override_persisted :
 (** Atomically persist the candidate table without [key], then commit it to
     memory.  A persistence failure leaves the live table unchanged. *)
 
+val override_entries : unit -> Prompt_override_persistence.entry list
+(** The live override table as persistence entries, in no particular order.
+    A preset captures these — the durable operator layer — rather than the
+    managed prompt files, which boot re-syncs from the binary. *)
+
 val restore_overrides : string -> unit
 (** Reads
     [<base_path>/.masc/prompt_overrides.json] and reapplies

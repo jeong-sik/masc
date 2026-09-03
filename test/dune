@@ -3654,6 +3654,18 @@
  (action
   (run python3 %{dep:test_capture_tui_keeper_chat.py})))
 
+(rule
+ (alias runtest-test_tui_frame_latency_verdict)
+ (deps
+  test_tui_frame_latency_verdict.py
+  ../scripts/tui-frame-latency.py)
+ (action
+  (run python3 %{dep:test_tui_frame_latency_verdict.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_frame_latency_verdict)))
+
 (alias
  (name runtest)
  (deps (alias runtest-test_capture_tui_keeper_chat)))

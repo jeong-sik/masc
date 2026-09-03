@@ -99,7 +99,7 @@ let test_write_shapes_stay_blocked () =
 (* ── script→argv equivalence (RFC-0404) ─────────────────────────────── *)
 
 let equivalent label script argv =
-  check (list string) label argv (Option.value ~default:[] (Readonly.script_argv_equivalent script))
+  check (list string) label argv (Option.get (Readonly.script_argv_equivalent script))
 ;;
 
 let not_equivalent label script =
@@ -113,6 +113,16 @@ let test_script_equivalence_unit () =
   equivalent "git status through -C" "git -C repos/masc status"
     [ "git"; "-C"; "repos/masc"; "status" ];
   equivalent "repeated spaces collapse to the same argv" "uname  -a" [ "uname"; "-a" ];
+  (* A tab is not quoting but the shell splits on it, so a tab can split a
+     guarded flag out of a token we classified whole — "sed -e\t-i" reads
+     as one harmless token here and as ["-e"; "-i"] in-place edit in the
+     shell. Every tab moves the line to the judge. *)
+  not_equivalent "tab field-splits past the sed in-place guard" "sed -e\t-i s/a/b/ f";
+  not_equivalent "tab field-splits past the rg preprocessor guard" "rg --pre\trm x";
+  not_equivalent "tab field-splits past the sort output guard" "sort -o\tout f";
+  not_equivalent "tab field-splits past the uniq operand guard" "uniq -c\ta b";
+  not_equivalent "bare tab" "ls\t-la";
+  not_equivalent "bracket glob" "ls [a-z]*";
   not_equivalent "newline carries a second command" "ls\nrm -rf /";
   not_equivalent "carriage return" "ls -la\r";
   not_equivalent "command separator" "ls; rm -rf /";

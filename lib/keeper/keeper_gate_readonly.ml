@@ -143,11 +143,20 @@ let classify_argv argv =
    the tool still executes the script through a shell, that identity is
    what makes classifying the split as safe as classifying a real array.
    Anything else — quotes, a pipe, command substitution, a second line —
-   stays with the judge. *)
+   stays with the judge.
+
+   A tab is on the list even though it quotes nothing: the shell's field
+   splitting treats it as a word boundary, so a tab can split one token of
+   ours into two of the shell's — and the flag guards below examine whole
+   tokens. "sed -e\t-i s/a/b/ f" classifies as ["-e\t-i"] (not in-place,
+   observation) while the shell executes ["-e"; "-i"] (in-place write). A
+   tab anywhere moves the whole line to the judge; the same reasoning
+   closes the bracket of a character class glob, which also reshapes argv
+   when a matching file exists. *)
 let shell_primitive_chars =
   [ ';'; '|'; '&'; '>'; '<'; '$'; '`'; '\\'
   ; '('; ')'; '{'; '}'; '*'; '?'; '~'; '#'
-  ; '\''; '"'
+  ; '\''; '"'; '\t'; '['
   ]
 ;;
 

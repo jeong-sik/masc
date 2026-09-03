@@ -875,17 +875,38 @@ let keeper_staging_dir ~base_path ~keeper_name =
       | false -> None
       | exception Sys_error _ -> None)
 
+(* Written beside the final name and renamed over it: a turn starting while
+   this write is mid-flight enumerates the staging directory, and a file it
+   can see must be whole. The temporary name is outside the
+   [Keeper_paste_naming] shape, so enumeration never picks it up. *)
 let write_file path contents =
-  match open_out_bin path with
+  let drop_tmp tmp_path = try Sys.remove tmp_path with Sys_error _ -> () in
+  match
+    Filename.temp_file ~temp_dir:(Filename.dirname path) "spill-write-" ".tmp"
+  with
   | exception Sys_error detail -> Error detail
-  | channel -> (
+  | tmp_path -> (
       match
-        Fun.protect
-          ~finally:(fun () -> close_out_noerr channel)
-          (fun () -> output_string channel contents)
+        match open_out_bin tmp_path with
+        | exception Sys_error detail -> Error detail
+        | channel -> (
+            match
+              Fun.protect
+                ~finally:(fun () -> close_out_noerr channel)
+                (fun () -> output_string channel contents)
+            with
+            | () -> Ok ()
+            | exception Sys_error detail -> Error detail)
       with
-      | () -> Ok ()
-      | exception Sys_error detail -> Error detail)
+      | Error detail ->
+          drop_tmp tmp_path;
+          Error detail
+      | Ok () -> (
+          match Unix.rename tmp_path path with
+          | () -> Ok ()
+          | exception Unix.Unix_error (error, _, _) ->
+              drop_tmp tmp_path;
+              Error (Unix.error_message error)))
 
 (* Stage a spilled paste as a file the keeper will be able to read, and put
    a line naming that file where the placeholder stands.

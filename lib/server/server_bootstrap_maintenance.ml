@@ -196,6 +196,18 @@ let owner_absent_reported : (string, unit) Hashtbl.t = Hashtbl.create 4
    owner. Say it once per process; the next distinct detail still logs. *)
 let owner_unknown_reported : (string, unit) Hashtbl.t = Hashtbl.create 4
 
+(* Recovery passes that retained a non-executable owner, per keeper+reason.
+   Purely per process; see the retained arm below.
+
+   Declared here rather than after the function that reads it: OCaml resolves
+   in file order, so below its reader it is not a late definition but no
+   definition at all. *)
+let retained_owner_passes : (string, int) Hashtbl.t = Hashtbl.create 8
+
+(* One pass a minute means 1440 is about a day. The pass that lands exactly
+   on a full day warns; the rest stay quiet. Exposed for the suite. *)
+let retention_becomes_warning (count : int) = count > 0 && count mod 1440 = 0
+
 let load_durable_demand_meta ~base_path ~config ~keeper_name =
   match
     Executor_pool_ref.submit_strict (fun () ->
@@ -416,14 +428,6 @@ let recover_projected_durable_demand_owner
                 action=resume)"
              else "")))
 ;;
-
-(* Recovery passes that retained a non-executable owner, per keeper+reason.
-   Purely per process; see the retained arm below. *)
-let retained_owner_passes : (string, int) Hashtbl.t = Hashtbl.create 8
-
-(* One pass a minute means 1440 is about a day. The pass that lands exactly
-   on a full day warns; the rest stay quiet. Exposed for the suite. *)
-let retention_becomes_warning (count : int) = count > 0 && count mod 1440 = 0
 
 let consume_owner_projection_batch
       ~commit_cursor

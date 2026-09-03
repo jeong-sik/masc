@@ -48,6 +48,7 @@ let with_gate ~timeout_sec f =
       let events = Events.create () in
       let gate =
         Gate.create ~registry
+          ~late_approvals:(Masc.Keeper_late_approval.create ())
           ~publish:(Keeper_chat_events_publish.publish events)
           ~clock ~keeper_name:keeper ~timeout_sec
       in
@@ -97,7 +98,7 @@ let test_an_edit_asks () =
         | other -> "not-an-ask: " ^ decision_to_string other
       in
       check string "the ask carries why this call was held"
-        "ask:Run Edit on lib/a.ml? because=fs tools change something outside this turn"
+        "ask:Run Edit on lib/a.ml? because=this call reaches outside masc"
         why)
 
 let test_other_stages_pass_through () =

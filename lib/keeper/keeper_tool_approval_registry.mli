@@ -12,7 +12,10 @@
     Not a queue and not a scheduler. One tool call, one waiter, one answer.
     A call whose waiter is gone is not held for later: [settle] says the answer
     arrived too late rather than storing it, because an approval that outlives
-    the turn it was asked about would authorize a call nobody is making. *)
+    the turn it was asked about would authorize a call nobody is making. The
+    answer itself is not lost, though: the HTTP handler passes it to
+    {!Keeper_late_approval}, which can settle only the identical call made
+    again — never a call nobody is making. *)
 
 type t
 

@@ -14,7 +14,6 @@
     "lib/keeper/keeper_vision_ingest.ml",
     "lib/keeper/keeper_vision_tool.ml",
     "lib/keeper/keeper_world_observation.ml",
-    "lib/keeper_canary/keeper_canary_judge.ml",
     "lib/mcp_server_eio_tool_profile.ml",
     "lib/operator/operator_tool.ml",
     "lib/server/server_dashboard_http_composite_recommendations.ml",
@@ -42,14 +41,10 @@
     "packages/agent_core/lib/sessions_types.ml": "inline let%test fixtures"
   },
   "total": {
-    "bytes": 28592,
-    "count": 449
+    "bytes": 21669,
+    "count": 383
   },
   "files": {
-    "lib/agent_core_tool_contract.ml": {
-      "bytes": 493,
-      "count": 8
-    },
     "lib/eval_calibration.ml": {
       "bytes": 166,
       "count": 4
@@ -69,10 +64,6 @@
     "lib/keeper/keeper_prompt.ml": {
       "bytes": 693,
       "count": 5
-    },
-    "lib/keeper/keeper_tool_descriptor.ml": {
-      "bytes": 1690,
-      "count": 8
     },
     "lib/keeper/keeper_tool_filesystem_runtime.ml": {
       "bytes": 3121,
@@ -94,10 +85,6 @@
       "bytes": 640,
       "count": 14
     },
-    "lib/keeper_canary/keeper_canary_judge.ml": {
-      "bytes": 1320,
-      "count": 20
-    },
     "lib/mcp_prompt_surface.ml": {
       "bytes": 108,
       "count": 3
@@ -107,8 +94,8 @@
       "count": 23
     },
     "lib/mcp_server_eio_tool_profile.ml": {
-      "bytes": 2201,
-      "count": 24
+      "bytes": 848,
+      "count": 21
     },
     "lib/operator/operator_tool.ml": {
       "bytes": 1019,
@@ -127,36 +114,20 @@
       "count": 1
     },
     "lib/task/anti_rationalization.ml": {
-      "bytes": 1187,
-      "count": 25
+      "bytes": 978,
+      "count": 22
     },
     "lib/tool_agent.ml": {
       "bytes": 37,
       "count": 1
     },
-    "lib/tool_agent_timeline.ml": {
-      "bytes": 345,
-      "count": 7
-    },
-    "lib/tool_schemas/tool_schemas_agent.ml": {
-      "bytes": 511,
-      "count": 9
-    },
     "lib/tool_surface/tool_help_registry.ml": {
       "bytes": 457,
       "count": 14
     },
-    "lib/tool_surface/tool_shard_types_schemas_library.ml": {
-      "bytes": 507,
-      "count": 4
-    },
-    "lib/tool_surface/tool_shard_types_schemas_taskboard.ml": {
-      "bytes": 509,
-      "count": 5
-    },
     "packages/agent_core/lib/agent/agent_tools.ml": {
-      "bytes": 531,
-      "count": 9
+      "bytes": 545,
+      "count": 10
     },
     "packages/agent_core/lib/agent_tool.ml": {
       "bytes": 45,

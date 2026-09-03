@@ -691,6 +691,7 @@ let make_tool_bundle_for_descriptors_with_policy
         Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
   ; terminal_effect_state = (fun () -> Atomic.get terminal_effect_state)
   ; gate_replay_delivery
+  ; turn_sandbox_factory
   }
 ;;
 

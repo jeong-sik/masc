@@ -44,6 +44,12 @@ val newly_opened_ask_ids :
     (no previous), both return none, so a caller rings once per new question
     rather than once per poll or once at start-up. *)
 
+val should_ring_for_new_ask :
+  new_ids:string list -> operator_is_watching_asks:bool -> bool
+(** Whether an arrival should ring: something arrived ([new_ids] non-empty) and
+    the operator is not already watching the asks surface. The watching flag is
+    the caller's to compute from the surface (and later window focus). *)
+
 val toggle_choice :
   draft ->
   question:Masc.Tui_decode.ask_question ->

@@ -1490,6 +1490,10 @@ type http_surface_results = {
   http_server_identity: (Tui_decode.server_identity, string) result;
 }
 
+type preset_sink =
+  | Preset_to_chat of string option
+  | Preset_to_pane
+
 type async_msg =
   | Http_refresh_done of http_surface_results
   | Http_refresh_failed of string * Approval.Flow.generation option
@@ -1689,9 +1693,11 @@ type async_msg =
   | Runtime_params_loaded of
       (Tui_decode.runtime_param_row list, string) result
   | Prompts_loaded of (Tui_decode.prompts_snapshot, string) result
-  | Presets_listed of string option * (Tui_decode.presets_snapshot, string) result
-  | Preset_saved of string option * (Tui_decode.preset_manifest, string) result
-  | Preset_restored of string option * (Tui_decode.preset_restore_report, string) result
+  (* Where a preset answer goes: the chat pane that typed the command, or
+     the Config pane that pressed the key. *)
+  | Presets_listed of preset_sink * (Tui_decode.presets_snapshot, string) result
+  | Preset_saved of preset_sink * (Tui_decode.preset_manifest, string) result
+  | Preset_restored of preset_sink * (Tui_decode.preset_restore_report, string) result
   | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of (Masc_tui_mcp.resource list, string) result
   | Code_entries_loaded of
@@ -3309,6 +3315,21 @@ let launch_preset_call state ~mailbox ~call ~wrap =
           `Stop_daemon)
   | None -> enqueue_async mailbox (wrap (Error "Eio switch is unavailable"))
 
+let launch_presets_load state ~mailbox =
+  state.presets_error <- None;
+  launch_preset_call state ~mailbox
+    ~call:(fun ~host ~port -> Masc_tui_loader.load_presets ~host ~port)
+    ~wrap:(fun result -> Presets_listed (Preset_to_pane, result))
+
+let preset_rows_for_state state =
+  match state.presets_snapshot with
+  | None -> []
+  | Some snapshot -> snapshot.Tui_decode.pss_presets
+
+let selected_preset_for_state state =
+  let rows = preset_rows_for_state state in
+  List.nth_opt rows (max 0 (min state.presets_cursor (List.length rows - 1)))
+
 let prompt_rows_for_state state =
   match state.prompts_snapshot with
   | None -> []
@@ -4410,6 +4431,7 @@ let goto_surface state ~mailbox (destination : surface) =
           comes from instead of quietly inheriting runtime.toml's. *)
        match state.config_pane with
        | Config_prompts -> launch_prompts_load state ~mailbox
+       | Config_presets -> launch_presets_load state ~mailbox
        | Config_params -> launch_runtime_params_load state ~mailbox
        | Config_runtime | Config_models | Config_themes ->
            launch_runtime_config_load state ~mailbox)
@@ -6010,7 +6032,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port -> Masc_tui_loader.load_presets ~host ~port)
-        ~wrap:(fun result -> Presets_listed (target, result))
+        ~wrap:(fun result -> Presets_listed (Preset_to_chat target, result))
   | Masc_tui_command.Preset_save_missing_name ->
       notice ~role:Message_error "/preset save needs a name on the same line"
   | Masc_tui_command.Preset_save { name; description } ->
@@ -6018,7 +6040,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port ->
           Masc_tui_loader.save_preset ~host ~port ~name ~description)
-        ~wrap:(fun result -> Preset_saved (target, result))
+        ~wrap:(fun result -> Preset_saved (Preset_to_chat target, result))
   | Masc_tui_command.Preset_restore_missing_name ->
       notice ~role:Message_error "/preset restore needs a name on the same line"
   | Masc_tui_command.Preset_restore name ->
@@ -6027,7 +6049,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (Printf.sprintf "restoring preset %s — the live state is autosaved first" name);
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
-        ~wrap:(fun result -> Preset_restored (target, result))
+        ~wrap:(fun result -> Preset_restored (Preset_to_chat target, result))
   | Masc_tui_command.Unknown word ->
       add_event state "error"
         (Printf.sprintf
@@ -8586,31 +8608,57 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                   (prompt_catalog_count_for_state state - 1));
            state.prompts_error <- None
        | Error detail -> state.prompts_error <- Some detail)
-  | Presets_listed (target, result) ->
-      (match result with
-       | Ok snapshot ->
+  | Presets_listed (sink, result) ->
+      (match sink, result with
+       | Preset_to_chat target, Ok snapshot ->
            chat_notice state ~keeper_name:target ~role:Message_status
              (String.concat "\n" (Masc_tui_preset_text.listing_lines snapshot))
-       | Error detail ->
-           chat_notice state ~keeper_name:target ~role:Message_error detail)
-  | Preset_saved (target, result) ->
-      (match result with
-       | Ok manifest ->
+       | Preset_to_chat target, Error detail ->
+           chat_notice state ~keeper_name:target ~role:Message_error detail
+       | Preset_to_pane, Ok snapshot ->
+           state.presets_snapshot <- Some snapshot;
+           state.presets_error <- None;
+           state.presets_cursor <-
+             max 0
+               (min state.presets_cursor
+                  (List.length snapshot.Tui_decode.pss_presets - 1))
+       | Preset_to_pane, Error detail -> state.presets_error <- Some detail)
+  | Preset_saved (sink, result) ->
+      (match sink, result with
+       | Preset_to_chat target, Ok manifest ->
            chat_notice state ~keeper_name:target ~role:Message_status
              (Masc_tui_preset_text.saved_line manifest)
-       | Error detail ->
-           chat_notice state ~keeper_name:target ~role:Message_error detail)
-  | Preset_restored (target, result) ->
-      (match result with
-       | Ok report ->
+       | Preset_to_chat target, Error detail ->
+           chat_notice state ~keeper_name:target ~role:Message_error detail
+       | Preset_to_pane, Ok manifest ->
+           state.preset_busy <- false;
+           report_action state "system" (Masc_tui_preset_text.saved_line manifest);
+           launch_presets_load state ~mailbox
+       | Preset_to_pane, Error detail ->
+           state.preset_busy <- false;
+           report_action state "error" ("preset save: " ^ detail))
+  | Preset_restored (sink, result) ->
+      (match sink, result with
+       | Preset_to_chat target, Ok report ->
            let role =
              if Masc_tui_preset_text.restore_is_clean report then Message_status
              else Message_error
            in
            chat_notice state ~keeper_name:target ~role
              (String.concat "\n" (Masc_tui_preset_text.restore_lines report))
-       | Error detail ->
-           chat_notice state ~keeper_name:target ~role:Message_error detail)
+       | Preset_to_chat target, Error detail ->
+           chat_notice state ~keeper_name:target ~role:Message_error detail
+       | Preset_to_pane, Ok report ->
+           state.preset_busy <- false;
+           state.preset_report <- Some report;
+           report_action state
+             (if Masc_tui_preset_text.restore_is_clean report then "system" else "error")
+             (Printf.sprintf "%s 복원 · 이전 상태는 %s"
+                report.Tui_decode.prr_restored report.Tui_decode.prr_autosave);
+           launch_presets_load state ~mailbox
+       | Preset_to_pane, Error detail ->
+           state.preset_busy <- false;
+           report_action state "error" ("preset restore: " ^ detail))
   | Librarian_input_loaded (prompt_key, result) ->
       let still_selected =
         match selected_prompt_for_state state with
@@ -11888,8 +11936,12 @@ and is loaded on demand through keeper_skill.
        | Verification ->
            if cancelled [ "a"; "A" ] then
              state.verification_verdict_armed <- None
+       | Config ->
+           (* A restore rewrites three surfaces; its arm must not outlive the
+              keypress that set it. *)
+           if cancelled [ "r"; "R" ] then state.preset_restore_armed <- None
        | Overview | Acting | Lanes | Harness | Memory | Fusion | Repositories
-       | Changes | Connectors | Runtime | Config | Resources | Tools
+       | Changes | Connectors | Runtime | Resources | Tools
        | System_logs | Code -> ());
       (* Destructive binding removal deliberately requires two consecutive
          [u] presses. Any intervening action invalidates the ownership
@@ -11925,6 +11977,40 @@ and is loaded on demand through keeper_skill.
           belong to the value.  Friendly mode turns the registry's declared
           type into a bool/number/string control; capital E is the explicit
           raw-JSON escape hatch.  The server remains the final authority. *)
+       (* Typing a preset name. The pane owns every printable key while a
+          draft is open, so a name with an s or an r in it does not fire the
+          save and restore keys under it. *)
+       | Some k
+         when state.view = Config
+              && state.config_pane = Config_presets
+              && Option.is_some state.preset_save_draft ->
+           (match state.preset_save_draft with
+            | None -> ()
+            | Some draft ->
+              (match k with
+               | "esc" ->
+                 state.preset_save_draft <- None;
+                 report_action state "system" "프리셋 저장 취소"
+               | "\r" | "\n" | "enter" ->
+                 let name = String.trim draft in
+                 if String.equal name "" then
+                   report_action state "error" "프리셋 이름이 필요합니다"
+                 else begin
+                   state.preset_save_draft <- None;
+                   state.preset_busy <- true;
+                   report_action state "system" (name ^ " 저장 중");
+                   launch_preset_call state ~mailbox:async_messages
+                     ~call:(fun ~host ~port ->
+                       Masc_tui_loader.save_preset ~host ~port ~name ~description:"")
+                     ~wrap:(fun result -> Preset_saved (Preset_to_pane, result))
+                 end
+               | "\127" | "\b" | "backspace" ->
+                 let length = String.length draft in
+                 if length > 0 then
+                   state.preset_save_draft <- Some (String.sub draft 0 (length - 1))
+               | s when String.length s = 1 && Char.code s.[0] >= 32 ->
+                 state.preset_save_draft <- Some (draft ^ s)
+               | _ -> ()))
        | Some k when Option.is_some state.runtime_param_edit ->
            (match state.runtime_param_edit with
             | None -> ()
@@ -13740,6 +13826,38 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers _ | Approvals | Planning
             | Memory | Repositories | Changes | Connectors
             | Runtime | Config | Tools | Resources | System_logs -> ())
+       | Some "s" | Some "S"
+         when state.view = Config && state.config_pane = Config_presets ->
+           if state.preset_busy then
+             report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
+           else begin
+             state.preset_restore_armed <- None;
+             state.preset_save_draft <- Some ""
+           end
+       | Some "g" | Some "G"
+         when state.view = Config && state.config_pane = Config_presets ->
+           launch_presets_load state ~mailbox:async_messages
+       | Some "r" | Some "R"
+         when state.view = Config && state.config_pane = Config_presets ->
+           (match selected_preset_for_state state with
+            | None -> report_action state "error" "복원할 프리셋을 고르세요"
+            | Some manifest ->
+              let name = manifest.Tui_decode.pm_name in
+              if state.preset_busy then
+                report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
+              else if state.preset_restore_armed = Some name then begin
+                state.preset_restore_armed <- None;
+                state.preset_busy <- true;
+                report_action state "system" (name ^ " 복원 중 · 지금 상태는 먼저 저장됩니다");
+                launch_preset_call state ~mailbox:async_messages
+                  ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
+                  ~wrap:(fun result -> Preset_restored (Preset_to_pane, result))
+              end
+              else begin
+                state.preset_restore_armed <- Some name;
+                report_action state "system"
+                  (Printf.sprintf "r 을 한 번 더 누르면 %s 로 되돌립니다" name)
+              end)
        | Some "r" | Some "R" ->
            state.pending_approval_action <- None;
            load_local_workspace_if_safe state base_path;
@@ -14297,6 +14415,13 @@ and is loaded on demand through keeper_skill.
                 let last = List.length (Masc_tui_theme_choice.entries ()) - 1 in
                 state.theme_cursor <- min (max 0 last) (state.theme_cursor + 1);
                 preview_theme_under_cursor ()
+            | Config when state.config_pane = Config_presets ->
+                let count = List.length (preset_rows_for_state state) in
+                if state.presets_cursor < count - 1 then begin
+                  state.presets_cursor <- state.presets_cursor + 1;
+                  state.config_scroll <- 0;
+                  state.preset_restore_armed <- None
+                end
             | Config when state.config_pane = Config_prompts ->
                 let count = prompt_catalog_count_for_state state in
                 if state.prompts_cursor < count - 1 then begin
@@ -14641,6 +14766,13 @@ and is loaded on demand through keeper_skill.
             | Config when state.config_pane = Config_themes ->
                 state.theme_cursor <- max 0 (state.theme_cursor - 1);
                 preview_theme_under_cursor ()
+            | Config when state.config_pane = Config_presets ->
+                let next = max 0 (state.presets_cursor - 1) in
+                if next <> state.presets_cursor then begin
+                  state.presets_cursor <- next;
+                  state.config_scroll <- 0;
+                  state.preset_restore_armed <- None
+                end
             | Config when state.config_pane = Config_prompts ->
                 let next = max 0 (state.prompts_cursor - 1) in
                 if next <> state.prompts_cursor then begin
@@ -15700,7 +15832,8 @@ and is loaded on demand through keeper_skill.
               | Config_runtime -> Config_models
               | Config_models -> Config_params
               | Config_params -> Config_prompts
-              | Config_prompts -> Config_themes
+              | Config_prompts -> Config_presets
+              | Config_presets -> Config_themes
               | Config_themes -> Config_runtime);
            state.prompts_cursor <- 0;
            state.config_scroll <- 0;
@@ -15721,6 +15854,12 @@ and is loaded on demand through keeper_skill.
             | Config_prompts ->
               if state.prompts_snapshot = None
               then launch_prompts_load state ~mailbox:async_messages
+            | Config_presets ->
+              state.presets_cursor <- 0;
+              state.preset_save_draft <- None;
+              state.preset_restore_armed <- None;
+              if state.presets_snapshot = None
+              then launch_presets_load state ~mailbox:async_messages
             | Config_params -> launch_runtime_params_load state ~mailbox:async_messages
             (* Same first-visit load as the prompts pane. The models table is
                a projection of runtime.toml, so entering it without the file
@@ -15881,7 +16020,8 @@ and is loaded on demand through keeper_skill.
                     selected model's [models.NAME] line, where the existing
                     $EDITOR path takes over. One write path, not two. *)
                  | Config_models -> handle_config_models_open_source ()
-                 | Config_themes -> ())
+                 (* The preset pane writes through s and r, never $EDITOR. *)
+                 | Config_presets | Config_themes -> ())
             | Tools -> handle_skill_edit ()
             | Schedules -> handle_schedule_modify ()
             | Approvals ->

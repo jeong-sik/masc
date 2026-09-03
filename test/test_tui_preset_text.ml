@@ -65,6 +65,26 @@ let test_restore_lines_show_skips_and_the_runtime_outcome () =
   check bool "unchanged runtime is clean" true
     (Text.restore_is_clean (report ~skipped:[] ~runtime:D.Preset_runtime_unchanged))
 
+let test_pane_row_and_detail () =
+  check string "pane row" "morning                      overrides 1 · keepers 2 · assignments 12 · lanes 4  2026-09-03T10:26:08Z"
+    (Text.pane_row morning);
+  check (list string) "detail without a report"
+    [ "morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
+    ; "before the campaign"
+    ; "저장 시각 2026-09-03T10:26:08Z"
+    ; "지시문 analyst, sangsu"
+    ]
+    (Text.detail_lines ~selected:(Some morning) ~report:None);
+  check (list string) "no selection says so"
+    [ "선택한 프리셋이 없습니다" ]
+    (Text.detail_lines ~selected:None ~report:None);
+  let with_report =
+    Text.detail_lines ~selected:(Some morning)
+      ~report:(Some (report ~skipped:[] ~runtime:D.Preset_runtime_committed))
+  in
+  check bool "the report follows the preset in the detail" true
+    (List.exists (fun line -> line = "runtime: committed — runtime.toml rewritten, assignments and exact lanes live") with_report)
+
 let () =
   run "Masc_tui_preset_text"
     [ ( "preset text"
@@ -73,5 +93,6 @@ let () =
         ; test_case "saved line carries the counts" `Quick test_saved_line_carries_the_counts
         ; test_case "restore lines show skips and the runtime outcome" `Quick
             test_restore_lines_show_skips_and_the_runtime_outcome
+        ; test_case "pane row and detail lines" `Quick test_pane_row_and_detail
         ] )
     ]

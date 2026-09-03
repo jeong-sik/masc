@@ -7,15 +7,21 @@
     canonical operation arguments. The runtime resolves agent-core calls
     via {!resolve_requested_tool_call}.
 
-    Internal helpers (the [Tool_schema_dsl] [string_prop] /
-    [object_schema] re-binds, [task_item_schema] /
-    [assoc_field] / [dedupe_strings],
+    Internal helpers ([identity_arg_bindings], [projection_of_name] /
+    the [*_projection] bindings, [dedupe_strings],
     [find_property] / [assoc_members] / [int_member],
     [schema_type] / [label_or_default],
     [validate_json_value] / [validate_input_json], and
     [build_operation_arguments]) are hidden — callers consume the
     typed records, the lookup helpers, the canonical operation list,
-    and the resolver entry points only. *)
+    and the resolver entry points only.
+
+    The [masc_batch_add_tasks] / [masc_broadcast] / [masc_heartbeat]
+    bindings read their deliberately narrower descriptions and input
+    schemas from the [agent_core_projection] tables of the tools' own
+    [config/tools/masc_*.toml] declarations (RFC
+    prompts-and-tool-definitions-outside-ocaml §2.2); a missing or
+    undecodable projection refuses the boot. *)
 
 (** {1 Typed binding} *)
 

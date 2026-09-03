@@ -9330,6 +9330,14 @@ def changes_keeper_and_arrow_detail_interaction(
                 f"right opened a diff that is not the marked row ({needle!r} "
                 f"missing): {second_diff_plain!r}"
             )
+    # The row that says how to leave. The screen tallied its own chrome one
+    # row short, which put it a row over its budget, and a surface over budget
+    # loses its last rows -- the footer being the last of them. Nothing else
+    # on this screen names the key that closes it.
+    if "open in editor" not in second_diff_plain:
+        raise AssertionError(
+            f"the diff drew no footer: {second_diff_plain[-800:]!r}"
+        )
     send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
     # An open diff scrolls to its end and stops there. The keypress steps
     # without a bound -- the rows are the drawing's -- so the frame reports

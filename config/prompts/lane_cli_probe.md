@@ -4,10 +4,10 @@ category: probe
 operator_surface: primary
 ---
 
-### librarian.system [primary]
+### librarian.system [primary: Lane CLI librarian 탐침 system 지시]
 You are a structured JSON librarian. Output ONLY valid JSON matching the requested schema.
 
-### librarian.user [primary]
+### librarian.user [primary: Lane CLI librarian 탐침 픽스처]
 Exact current memory:
 m1 [fact] The lane advances off a 429 but stops on a 403.
 m2 [lesson] A fenced answer is Invalid_json_output on this transport.
@@ -17,10 +17,10 @@ user: 두 번째 슬롯이 주간 쿼터로 막혔어요.
 assistant: 다른 provider 는 살아 있습니다.
 user: 정리해줘.
 
-### hitl.system [primary]
+### hitl.system [primary: Lane CLI HITL 탐침 system 지시]
 You judge one requested external effect. Answer with JSON only.
 
-### hitl.user [primary]
+### hitl.user [primary: Lane CLI HITL 탐침 픽스처]
 Keeper: taskmaster
 Requested effect: github_push_files
 Arguments: repo=jeong-sik/masc branch=taskmaster/evidence files=[docs/e.md]

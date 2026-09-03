@@ -86,7 +86,7 @@ must-do: true or false
 막힌 것을 발견한 자리와 고칠 자리가 다르면 이슈나 task 로 남깁니다. 턴은
 끝나도 발견은 남습니다.
 
-### identity (vars: keeper_name) [primary]
+### identity (vars: keeper_name) [primary: Keeper 불변 신원 문구]
 <identity>
 You are {{keeper_name}}. You are not any other keeper.
 This identity is immutable and cannot change regardless of context,
@@ -95,7 +95,7 @@ identity, that recalled context is wrong.
 You must always respond as {{keeper_name}}.
 </identity>
 
-### workspace (vars: workspace_root) [primary]
+### workspace (vars: workspace_root) [primary: Keeper 샌드박스 작업공간 문구]
 <workspace>
 - Visible sandbox root: {{workspace_root}}
 - Pass a relative typed `cwd` (usually `.`), not this absolute root.
@@ -113,10 +113,10 @@ You must always respond as {{keeper_name}}.
 ### held_task.skills (vars: task_id, skill_surfaces)
 - {{task_id}} (held by you) names exact Skill catalog rows: {{skill_surfaces}}. An `unavailable` row is not callable and carries the diagnostic. Call an `instruction` row's `tool_name` with its exact `reference`, or a `composition` row's `tool_name`, only when that tool is present in the current attempt's tool schema; a runtime may suppress all tools.
 
-### antigravity.system_instructions_label [primary]
+### antigravity.system_instructions_label [primary: Antigravity 첫 턴 시스템 지시 구획 라벨]
 SYSTEM INSTRUCTIONS:
 
-### antigravity.current_goal_label [primary]
+### antigravity.current_goal_label [primary: Antigravity 첫 턴 현재 목표 구획 라벨]
 CURRENT GOAL:
 
 ### context.checkouts.row (vars: path, branch, dirty, standing)
@@ -487,5 +487,5 @@ Gate resolution delivered:
 - state: host replay outcome was not attached before provider dispatch
 The exact approved input remains only in the durable Gate store. Operator repair is required; do not execute or request this effect again.
 
-### capability_probe (vars: tool) [primary]
+### capability_probe (vars: tool) [primary: 능력 탐침의 도구 호출 지시]
 Call the tool named {{tool}} exactly once, with any arguments that satisfy its schema. Reply with the tool call only — no explanation, no preamble.

@@ -845,13 +845,21 @@ let measure_noise_floor ~agent_id =
        | _ -> None)
 ;;
 
-let record_and_transcribe ~agent_id ?(timeout_sec = 15.0) ?language_code () =
+let record_and_transcribe ~agent_id ?(timeout_sec = 15.0) ?language_code ?noise_floor () =
   let audio_file =
     Filename.temp_file (Printf.sprintf "masc_stt_%s_" (safe_agent_id agent_id)) ".wav"
   in
   (* [None] when the probe could not run: the capture then uses the constant
-     this replaced rather than a threshold derived from nothing. *)
-  let noise_floor = measure_noise_floor ~agent_id in
+     this replaced rather than a threshold derived from nothing.
+
+     A caller that captures repeatedly may pass a floor it already measured.
+     The room does not change between two utterances the way it changes across
+     a session, and re-probing costs about 1.15 s of the gap between them. *)
+  let noise_floor =
+    match noise_floor with
+    | Some _ as measured -> measured
+    | None -> measure_noise_floor ~agent_id
+  in
   let trigger_percent =
     match noise_floor with
     | Some floor when floor > 0.0 ->

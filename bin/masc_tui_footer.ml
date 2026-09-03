@@ -353,7 +353,7 @@ let line ?(status = []) ~dim ~reset ~max_cells ~port ~hints () =
 let chat_hints ~enter_hint ~scroll_hint ~switch_hint ~escape_hint =
   Printf.sprintf
     "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:journal  \
-     Ctrl-F:metadata  Ctrl-O:image  %s%s  %s  Ctrl-U:clear"
+     Ctrl-F:metadata  Ctrl-O:image  %s%s  %s  Ctrl-U:clear  Ctrl-W:word"
     enter_hint scroll_hint switch_hint escape_hint
 
 (** Below 120 columns the fixed set drops to what leaves room for the message

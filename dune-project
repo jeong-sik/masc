@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.29.0)
+(version 0.29.1)
 
 ; Format OCaml, and only OCaml. CI's formatting check runs ocamlformat over
 ; **/*.ml and **/*.mli (.github/workflows/ocamlformat.yml) and says nothing

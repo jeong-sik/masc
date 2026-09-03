@@ -332,11 +332,8 @@ let masc_agent_core_error_bare_prefix = String.trim masc_internal_error_prefix
 let masc_agent_core_error_wrapped_prefix = "Internal error: " ^ masc_agent_core_error_bare_prefix
 
 let has_masc_agent_core_error_prefix (s : string) : bool =
-  let starts_with prefix =
-    let pl = String.length prefix in
-    String.length s >= pl && String.sub s 0 pl = prefix
-  in
-  starts_with masc_agent_core_error_bare_prefix || starts_with masc_agent_core_error_wrapped_prefix
+  String.starts_with ~prefix:masc_agent_core_error_bare_prefix s
+  || String.starts_with ~prefix:masc_agent_core_error_wrapped_prefix s
 
 let cap_blocker_detail (s : string) : string =
   (* +3 bytes of headroom for the "…" ellipsis suffix. *)

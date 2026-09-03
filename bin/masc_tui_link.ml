@@ -27,14 +27,12 @@ let is_unreserved = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '.' | '_' | '~' -> true
   | _ -> false
 
-let percent_encode_segment value =
-  let buf = Buffer.create (String.length value) in
-  String.iter
-    (fun byte ->
-       if is_unreserved byte then Buffer.add_char buf byte
-       else Buffer.add_string buf (Printf.sprintf "%%%02X" (Char.code byte)))
-    value;
-  Buffer.contents buf
+(* [`Generic] is the component that leaves only RFC 3986 unreserved bytes
+   alone, which is what a masc:// segment needs. Checked against the byte
+   string 0..255: identical to the hand-rolled encoder this replaced.
+   [is_unreserved] stays because [reference_byte] below reads it for a
+   different question -- which bytes a written reference may contain. *)
+let percent_encode_segment value = Uri.pct_encode ~component:`Generic value
 
 let reference kind id =
   Printf.sprintf "masc://%s/%s" (path kind) (percent_encode_segment id)

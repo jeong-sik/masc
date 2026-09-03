@@ -329,14 +329,23 @@ let test_sandbox_log_target_uses_effective_meta () =
         effective_name ) ->
     Alcotest.(check string) "effective keeper name" name effective_name
 
+(* Named once and asserted by both tests below, so a reworded sentence is one
+   edit rather than a pair that can drift apart. *)
+let expected_no_local_stream_reason =
+  "This Keeper runs on its configured SSH endpoint, so no container log \
+   stream exists on this host; read the logs on the endpoint."
+
 (* A remote_ssh Keeper owns no container here. That is the profile working as
    declared, so resolution answers a source rather than an error: the route
    that reads it must be able to say 200. *)
 let test_sandbox_log_target_reports_no_local_stream_for_remote_ssh () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "remote-logs" in
-  (* [write_keeper_toml] writes no [remote_endpoint], and config load rejects a
-     remote_ssh keeper without one, so the TOML is written out here. *)
+  (* [write_keeper_toml] writes no [remote_endpoint]. The TOML is written out
+     here so the fixture matches a deployed remote_ssh Keeper, which names the
+     endpoint its dispatch reads. The loader does not require the key: it
+     rejects [remote_endpoint] under any other profile, not its absence under
+     this one. *)
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
@@ -357,9 +366,52 @@ instructions = "Run on the endpoint."
   | Ok (Sandbox_control.No_local_stream reason, effective_name) ->
     Alcotest.(check string) "effective keeper name" name effective_name;
     Alcotest.(check string) "operator is told where the logs are"
-      "This Keeper runs on its configured SSH endpoint, so no container log \
-       stream exists on this host; read the logs on the endpoint."
-      reason
+      expected_no_local_stream_reason reason
+
+(* The one [logs_json] branch that starts no process, and the branch this fix
+   exists for. It pins the wire the TUI decoder parses: the same six keys in
+   the same order as the two local shapes, a null backend, an empty instance
+   list, and the reason carried through. Without it the payload is asserted
+   only by a hand-written fixture on the reader's side, which cannot notice
+   the producer moving. *)
+let test_logs_json_answers_no_local_stream_for_remote_ssh () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "remote-logs-json" in
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+sandbox_profile = "remote_ssh"
+remote_endpoint = "test-endpoint"
+instructions = "Run on the endpoint."
+|};
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  match
+    Sandbox_control.logs_json ~config ~keeper_name:name ~timeout_sec:5.0
+      ~tail:200 ()
+  with
+  | Error Sandbox_control.Sandbox_logs_keeper_not_found ->
+    Alcotest.fail "expected seeded keeper meta"
+  | Error (Sandbox_control.Sandbox_logs_meta_read_failed detail)
+  | Error (Sandbox_control.Sandbox_logs_backend_failed detail) ->
+    Alcotest.failf "remote_ssh logs_json failed: %s" detail
+  | Ok
+      (`Assoc
+        [ ("keeper", `String keeper)
+        ; ("backend", `Null)
+        ; ("state", `String state)
+        ; ("reason", `String reason)
+        ; ("tail", `Int tail)
+        ; ("instances", `List instances)
+        ]) ->
+    Alcotest.(check string) "canonical keeper name" name keeper;
+    Alcotest.(check string) "state" "no_local_stream" state;
+    Alcotest.(check string) "reason" expected_no_local_stream_reason reason;
+    Alcotest.(check int) "the requested tail is echoed" 200 tail;
+    Alcotest.(check int) "no instances" 0 (List.length instances)
+  | Ok payload ->
+    Alcotest.failf "logs_json answered an unexpected shape: %s"
+      (Yojson.Safe.to_string payload)
 
 (* The direct-turn path holds profile defaults it loaded once and overlays with
    them, rather than re-reading the profile per use: two reads inside one turn
@@ -1423,6 +1475,9 @@ let () =
           Alcotest.test_case
             "remote_ssh sandbox logs answer no local stream"
             `Quick test_sandbox_log_target_reports_no_local_stream_for_remote_ssh;
+          Alcotest.test_case
+            "remote_ssh logs_json answers the no-local-stream payload"
+            `Quick test_logs_json_answers_no_local_stream_for_remote_ssh;
           Alcotest.test_case
             "turn_profile_and_meta applies the declared sandbox profile"
             `Quick test_turn_profile_and_meta_applies_the_declared_profile;

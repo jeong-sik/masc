@@ -126,6 +126,14 @@ val live_status_json :
 type sandbox_log_backend =
   | Docker_logs
   | Apple_container_logs
+      (** The microvm profile resolves here unconditionally, so this reads
+          Apple's [container] even for a Keeper whose [microvm_backend] names
+          [microsandbox] or [nerdctl_kata]. That call fails and surfaces as
+          [Sandbox_logs_backend_failed] for a Keeper that is running
+          correctly. The backend axis is not part of the match below, so
+          adding a microVM runtime asks nothing here. Threading it changes
+          this wire's backend label and the reader that parses it, tracked
+          in issue 32916 alongside RFC-0405. *)
 
 type sandbox_log_source =
   | Local_backend of sandbox_log_backend
@@ -142,8 +150,10 @@ type sandbox_logs_error =
   | Sandbox_logs_keeper_not_found
   | Sandbox_logs_backend_failed of string
       (** A container runtime was asked for this Keeper's instances and the
-          call failed. A profile that owns no local instances does not reach
-          this constructor: it answers [No_local_stream]. *)
+          call failed. Neither neighbouring case reaches this constructor: a
+          profile that keeps no container on this host answers
+          [No_local_stream], and a runtime that answers an empty inventory is
+          an [Ok] result carrying no instances. *)
 
 val resolve_sandbox_log_target :
   config:Workspace.config ->
@@ -163,9 +173,11 @@ val logs_json :
   tail:int ->
   unit ->
   (Yojson.Safe.t, sandbox_logs_error) result
-(** Read the selected Keeper's actual Docker or Apple Container stdio logs.
-    Container discovery remains label-scoped to [config.base_path] and
-    the effective Keeper name.
+(** Answer where the selected Keeper's stdio logs are: the Docker or Apple
+    Container stream when the profile keeps one on this host, and the
+    sentence naming the endpoint when it does not. Container discovery
+    remains label-scoped to [config.base_path] and the effective Keeper
+    name.
 
     Three success shapes, all under one constant key set ([keeper],
     [backend], [state], [reason], [tail], [instances]): [state="available"]

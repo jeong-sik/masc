@@ -36,7 +36,9 @@ val decode_logs :
     backend or instance list contradicts it is refused. *)
 
 val logs_view_lines : width:int -> logs -> string list
-(** Render actual Docker or Apple Container stdout/stderr, distinct from
-    Keeper activity and tool-call history. A Keeper with no local stream gets
-    the endpoint sentence instead of an empty pane, in the informational tone:
-    it is not a fault. *)
+(** Render the log pane for one Keeper, distinct from Keeper activity and
+    tool-call history: Docker or Apple Container stdout/stderr when a local
+    stream exists, and otherwise the sentence saying where the logs are.
+    A Keeper with no local stream previously drew the red fetch-failure row;
+    it now gets that sentence in the informational tone, and no backend name
+    or tail count, because there is no stream for either to describe. *)

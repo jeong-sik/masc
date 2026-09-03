@@ -388,7 +388,7 @@ let allocate_keeper_columns ~inner_width =
     ; kcol_task = base.kcol_task + slack
     }
 
-module Message_layout = Masc_tui_message_layout
+module Table = Masc_tui_table
 
 (* Memory fleet columns.
 
@@ -404,10 +404,8 @@ module Message_layout = Masc_tui_message_layout
    so most rows sat three cells right of their own header. Each number gets a
    cell here.
 
-   [memory_cells] is the one place the order, the widths and the alignment are
-   written down. The header row and the data row are both built from it, so
-   the two cannot drift -- a column added to one is added to the other, at the
-   same width, in the same place. *)
+   [memory_cells] is this screen's description of its columns; {!Masc_tui_table}
+   draws both the header and the rows from it, so the two cannot drift. *)
 
 let memory_state_width = 10
 let memory_minimum_name_width = 16
@@ -442,10 +440,6 @@ type memory_row_values = {
   mrow_delta : string;
 }
 
-type memory_cell_align =
-  | Memory_cell_left
-  | Memory_cell_right
-
 (* The header carries no values, and the row carries no labels; one shape
    holds both so neither can be built without the other's widths. *)
 let memory_no_values =
@@ -461,28 +455,34 @@ let memory_no_values =
 let memory_cells columns values =
   let revision =
     if columns.mcol_show_revision then
-      [ (memory_revision_width, Memory_cell_right, "REV", values.mrow_revision) ]
+      [ Table.cell ~align:Table.Right ~header:"REV"
+          ~width:memory_revision_width values.mrow_revision
+      ]
     else []
   in
   let source =
     if columns.mcol_show_source then
-      [ (memory_source_width, Memory_cell_left, "SOURCE", values.mrow_source) ]
+      [ Table.cell ~header:"SOURCE" ~width:memory_source_width
+          values.mrow_source
+      ]
     else []
   in
-  [ (memory_state_width, Memory_cell_left, "STATE", values.mrow_state)
-  ; (columns.mcol_name, Memory_cell_left, "KEEPER", values.mrow_name)
+  [ Table.cell ~header:"STATE" ~width:memory_state_width values.mrow_state
+  ; Table.cell ~header:"KEEPER" ~width:columns.mcol_name values.mrow_name
   ]
   @ revision
-  @ [ (memory_facts_width, Memory_cell_right, "FACTS", values.mrow_facts)
-    ; (memory_size_width, Memory_cell_right, "SIZE", values.mrow_size)
+  @ [ Table.cell ~align:Table.Right ~header:"FACTS" ~width:memory_facts_width
+        values.mrow_facts
+    ; Table.cell ~align:Table.Right ~header:"SIZE" ~width:memory_size_width
+        values.mrow_size
     ]
   @ source
-  @ [ (memory_delta_width, Memory_cell_right, "\xce\x94", values.mrow_delta) ]
+  @ [ Table.cell ~align:Table.Right ~header:"\xce\x94"
+        ~width:memory_delta_width values.mrow_delta
+    ]
 
 let memory_columns_used_width columns =
-  let cells = memory_cells columns memory_no_values in
-  List.fold_left (fun total (width, _, _, _) -> total + width) 0 cells
-  + (memory_cell_gap * max 0 (List.length cells - 1))
+  Table.used_width ~gap:memory_cell_gap (memory_cells columns memory_no_values)
 
 let allocate_memory_columns ~inner_width =
   let inner_width = max 0 inner_width in
@@ -505,32 +505,11 @@ let allocate_memory_columns ~inner_width =
     in
     { base with mcol_name = base.mcol_name + growth }
 
-(* Identifiers fold in the middle: two keepers sharing a prefix are told apart
-   by the tail, and a name cut at the head reads as a different keeper. The
-   numbers fold the same way rather than losing a digit off one end, because a
-   truncated number is a wrong number and a folded one is visibly incomplete. *)
-let memory_pad ~align width text =
-  let fitted = Message_layout.fit_middle width text in
-  let gap = max 0 (width - Message_layout.display_width fitted) in
-  match align with
-  | Memory_cell_left -> fitted ^ String.make gap ' '
-  | Memory_cell_right -> String.make gap ' ' ^ fitted
-
-let memory_render_cells cells ~pick =
-  String.concat
-    (String.make memory_cell_gap ' ')
-    (List.map
-       (fun (width, align, header, value) ->
-         memory_pad ~align width (pick (header, value)))
-       cells)
-
 let memory_header_row columns =
-  memory_render_cells
-    (memory_cells columns memory_no_values)
-    ~pick:(fun (header, _) -> header)
+  Table.header_row ~gap:memory_cell_gap (memory_cells columns memory_no_values)
 
 let memory_row columns values =
-  memory_render_cells (memory_cells columns values) ~pick:(fun (_, value) -> value)
+  Table.row ~gap:memory_cell_gap (memory_cells columns values)
 
 module Terminal_size_cache = struct
   type refresh =

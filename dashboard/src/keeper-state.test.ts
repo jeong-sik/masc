@@ -1117,6 +1117,56 @@ describe('thread history merge & persistence', () => {
     expect(entries.every(entry => entry.deliveryProvenance != null)).toBe(true)
   })
 
+  it('keeps a Gate lifecycle row whose content is empty, and renders requested', () => {
+    // The store writes both a typed lifecycle and a prose retelling of it. Once
+    // the prose stops being written the row arrives with empty content, and the
+    // emptiness guard used to drop it before the typed field was ever read.
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'system',
+        content: '',
+        ts: 1_780_000_000,
+        delivery_provenance: {
+          delivery_key: { kind: 'approval_lifecycle', approval_id: 'appr_01empty' },
+          transcript_slot: { kind: 'approval_request' },
+        },
+        delivery_provenance_status: 'valid',
+        approval_lifecycle: {
+          approval_id: 'appr_01empty',
+          tool_name: 'Execute',
+          phase: 'requested',
+        },
+      },
+      {
+        role: 'system',
+        content: '',
+        ts: 1_780_000_001,
+        delivery_provenance: {
+          delivery_key: { kind: 'approval_lifecycle', approval_id: 'appr_01empty' },
+          transcript_slot: { kind: 'approval_resolution' },
+        },
+        delivery_provenance_status: 'valid',
+        approval_lifecycle: {
+          approval_id: 'appr_01empty',
+          tool_name: 'Execute',
+          phase: 'resolved_approved',
+        },
+      },
+    ])
+    expect(entries.map(entry => entry.approvalLifecycle?.phase)).toEqual([
+      'requested',
+      'resolved_approved',
+    ])
+    expect(entries.every(isDefaultVisibleConversationEntry)).toBe(true)
+  })
+
+  it('drops a row that is empty and carries nothing of its own', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'system', content: '', ts: 1_780_000_000 },
+    ])
+    expect(entries).toEqual([])
+  })
+
   it('prefers server-provided rich blocks for assistant rows', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'assistant', content: 'hello', ts: 1_780_000_000, blocks: [{ t: 'image', src: 'https://x.com/a.png' }] },

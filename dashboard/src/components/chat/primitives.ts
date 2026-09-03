@@ -2286,6 +2286,8 @@ function ChatFailureCard({ diagnostic }: { diagnostic: string }) {
 function ApprovalLifecycleCard({ lifecycle }: { lifecycle: KeeperApprovalLifecycle }) {
   const spec = (() => {
     switch (lifecycle.phase) {
+      case 'requested':
+        return { badge: '요청됨', title: '실행 권한을 요청했습니다', detail: '이 호출만 기다리고 나머지 작업은 이어서 진행합니다.', tone: 'var(--color-status-warning)' }
       case 'resolved_approved':
         return { badge: '승인됨', title: '실행 권한이 승인되었습니다', detail: '외부 효과는 아직 적용 확인 전입니다.', tone: 'var(--color-status-info)' }
       case 'resolved_rejected':

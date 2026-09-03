@@ -616,6 +616,7 @@ export interface KeeperDiagnostic {
 export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 'other'
 
 export type KeeperApprovalLifecyclePhase =
+  | 'requested'
   | 'resolved_approved'
   | 'resolved_rejected'
   | 'replay_applied'

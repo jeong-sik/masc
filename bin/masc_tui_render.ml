@@ -7254,13 +7254,39 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
    Committed rows only. The turn still streaming is built where it is drawn:
    its row count changes on every frame, which is exactly what a stable
    position must not be measured against. *)
+(* The timeline moments of one row list, computed once per list.
+
+   [chat_projected_timeline_ats] walks the whole list with a floor per
+   request id, and the chat frame asked for it twice per frame on the same
+   rows: once to draw and once through [keeper_message_layout_entries]. The
+   rows come from [chat_rows_for], which returns the same list until the
+   conversation changes, so the list's physical identity is the key. A list
+   built elsewhere (a search over a slice) replaces the slot and the next
+   frame computes once more; nothing is kept stale. *)
+let chat_timeline_ats_memo :
+    (Masc_tui_types.msg_entry list
+    * (Masc_tui_types.msg_entry * float option) list)
+    option
+    ref =
+  ref None
+
+let chat_rows_with_timeline_ats messages =
+  match !chat_timeline_ats_memo with
+  | Some (key, combined) when key == messages -> combined
+  | Some _ | None ->
+      let combined =
+        List.combine messages (chat_projected_timeline_ats messages)
+      in
+      chat_timeline_ats_memo := Some (messages, combined);
+      combined
+
 let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
   let messages =
     match messages with
     | Some messages -> messages
     | None -> chat_rows_for state keeper_name
   in
-  List.combine messages (chat_projected_timeline_ats messages)
+  chat_rows_with_timeline_ats messages
   |> List.filter (fun (message, _) ->
     state.msg_memory_visibility <> Memory_hidden
     || message.me_role <> Message_memory)

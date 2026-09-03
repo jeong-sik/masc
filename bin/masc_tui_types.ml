@@ -3430,12 +3430,8 @@ let empty_page_of ~snapshot ~error =
   | None, None -> Page_unread
   | Some _, None -> Page_empty
 
-let chat_rows_for (state : state) keeper_name =
-  let promoted_request_id =
-    Option.map
-      (fun entry -> entry.sent_request.request_id)
-      (promoted_inflight_for_keeper state keeper_name)
-  in
+let compute_chat_rows_for (state : state) keeper_name ~promoted_request_id
+    ~queued_request_ids =
   let not_promoted row =
     not
       (Option.exists
@@ -3454,11 +3450,75 @@ let chat_rows_for (state : state) keeper_name =
         String.equal entry.me_keeper_name keeper_name && not_promoted entry)
       state.msg_history
   in
+  chat_timeline ~loaded ~session ~queued_request_ids |> chat_timeline_rows
+
+(* One conversation's rows, computed once per change of its inputs.
+
+   The projection walks every loaded row -- grouping into turns, timeline
+   floors, a sort -- and the chat frame asked for it three to four times:
+   on every key, every two-second tick and every async message, whether or
+   not the conversation had changed. Its inputs are the loaded page, the
+   loaded keeper, the session rows, and two small readings of the queue and
+   the inflight list: which request was promoted out of the queue and which
+   requests still wait. The lists are replaced rather than mutated in place
+   when the conversation changes, so physical equality on them says whether
+   the last answer still holds; the two readings are compared by value, so a
+   queue or an inflight turn that changed in a way the rows do not depend on
+   (a live turn streaming, another keeper's line) keeps the answer.
+
+   Module state rather than a field on [state], like the renderer's markdown
+   cache: a derived reading is not authority, and the input layer that reads
+   these rows would otherwise have to invalidate it at every mutation site. *)
+type chat_rows_memo = {
+  crm_keeper_name : string;
+  crm_loaded_keeper : string option;
+  crm_loaded : msg_entry list;
+  crm_history : msg_entry list;
+  crm_promoted_request_id : string option;
+  crm_queued_request_ids : string list;
+  crm_rows : msg_entry list;
+}
+
+let chat_rows_memo : chat_rows_memo option ref = ref None
+
+let chat_rows_for (state : state) keeper_name =
+  let promoted_request_id =
+    Option.map
+      (fun entry -> entry.sent_request.request_id)
+      (promoted_inflight_for_keeper state keeper_name)
+  in
   let queued_request_ids =
     Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name
     |> List.map (fun item -> item.Masc_tui_keeper_chat_queue.request.request_id)
   in
-  chat_timeline ~loaded ~session ~queued_request_ids |> chat_timeline_rows
+  match !chat_rows_memo with
+  | Some memo
+    when String.equal memo.crm_keeper_name keeper_name
+         && Option.equal String.equal memo.crm_loaded_keeper
+              state.msg_loaded_keeper
+         && memo.crm_loaded == state.msg_loaded
+         && memo.crm_history == state.msg_history
+         && Option.equal String.equal memo.crm_promoted_request_id
+              promoted_request_id
+         && List.equal String.equal memo.crm_queued_request_ids
+              queued_request_ids ->
+      memo.crm_rows
+  | Some _ | None ->
+      let rows =
+        compute_chat_rows_for state keeper_name ~promoted_request_id
+          ~queued_request_ids
+      in
+      chat_rows_memo :=
+        Some
+          { crm_keeper_name = keeper_name;
+            crm_loaded_keeper = state.msg_loaded_keeper;
+            crm_loaded = state.msg_loaded;
+            crm_history = state.msg_history;
+            crm_promoted_request_id = promoted_request_id;
+            crm_queued_request_ids = queued_request_ids;
+            crm_rows = rows;
+          };
+      rows
 
 (* The one place [msg_scroll] moves, so the pin it counts back from cannot be
    forgotten at one of the dozen keys that scroll. Leaving the bottom takes the

@@ -5,6 +5,11 @@ remote_ssh 엔드포인트로 붙이는 절차. 서버 preflight(`perform_prefli
 `lib/keeper/keeper_sandbox_remote.ml`)가 강제하는 계약을 그대로 따른다.
 task-859에서 실측으로 확정했다.
 
+같은 계약을 다루는 문서가 하나 더 있다. `docs/operations/ssh-endpoints-runbook.md`
+는 셸 스크립트 대신 함께 배포되는 `masc-exec-ssh-bootstrap` 실행 파일로 같은
+절차를 밟고, 실패 코드별 대응을 더 길게 적는다. 두 도구는 서로를 호출하지 않는
+별개 구현이므로, 한 엔드포인트에는 둘 중 하나만 쓴다.
+
 ## 계약: 원격 머신에 필요한 6가지
 
 | # | 항목 | preflight 에러 코드 |

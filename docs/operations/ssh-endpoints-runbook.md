@@ -4,6 +4,11 @@ This is the operator runbook for RFC-0395 and `sandbox_profile = "remote_ssh"`.
 The lane is fail-closed: do not recover an SSH failure by changing a keeper to
 `local` or silently routing it to Docker.
 
+A second document covers the same contract. `docs/REMOTE-SSH-RUNBOOK.md` walks it
+with `scripts/remote-ssh/bootstrap-endpoint.sh` instead of the executable used
+here, and adds per-vendor notes. The two provisioning tools are separate
+implementations that do not call each other, so pick one per endpoint.
+
 ## Prerequisites
 
 - A Linux host reachable with OpenSSH and a dedicated remote account.

@@ -60,7 +60,7 @@ let sandbox_target_label = function
 
 (* The Gate operation name this runtime submits under. Shared with the replay
    path so the two cannot drift apart into an unsupported-replay repair. *)
-let gate_operation = "tool_execute"
+let gate_operation = Keeper_gate.tool_execute_gate_operation
 
 let execute_gate_input ~input ~cwd ~sandbox_profile ~sandbox_target =
   `Assoc

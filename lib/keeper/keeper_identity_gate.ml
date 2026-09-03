@@ -5,7 +5,7 @@ module Provider = Keeper_oauth_provider
 
 let ( let* ) = Result.bind
 
-let gate_operation = "identity_call"
+let gate_operation = Keeper_gate.identity_call_gate_operation
 
 let gate_input ~provider_id ~remote_name ~arguments =
   `Assoc

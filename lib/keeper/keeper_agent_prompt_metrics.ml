@@ -169,9 +169,6 @@ let provider_content_messages
          (remove_prompt_context false [] projection_input))
 ;;
 
-let empty_prompt_segment_metrics =
-  { bytes = 0; fingerprint = None }
-
 let prompt_segment_metrics_of_sanitized_text (text : string) : prompt_segment_metrics =
   {
     bytes = String.length text;
@@ -250,20 +247,22 @@ let prompt_metrics_to_json (metrics : prompt_metrics) : Yojson.Safe.t =
       ("user_message", prompt_segment_metrics_to_json metrics.user_message_segment);
     ]
 
+(* A bucket that receives one contribution keeps its fingerprint; a bucket
+   that receives several loses it. Summing bytes is arithmetic, but there is
+   no digest of two digests that names the concatenation, and answering with
+   the first contribution's would name a part while the row says the whole.
+   [Tool_schemas] is the single-contribution case the tool array needs: it is
+   the provider's cache prefix, and only a fingerprint over the whole array in
+   the order sent says whether two turns could share one. *)
 let add_segment_metric
     (totals : (Turn_record.input_component_id, prompt_segment_metrics) Hashtbl.t)
     ~(bucket : Turn_record.input_component_id)
     (metric : prompt_segment_metrics) : unit =
-  let prev =
-    match Hashtbl.find_opt totals bucket with
-    | Some existing -> existing
-    | None -> empty_prompt_segment_metrics
-  in
-  Hashtbl.replace totals bucket
-    {
-      bytes = prev.bytes + metric.bytes;
-      fingerprint = None;
-    }
+  match Hashtbl.find_opt totals bucket with
+  | None -> Hashtbl.replace totals bucket metric
+  | Some prev ->
+    Hashtbl.replace totals bucket
+      { bytes = prev.bytes + metric.bytes; fingerprint = None }
 
 let metric_of_block
     ~role:(_ : Agent_core.Types.role)

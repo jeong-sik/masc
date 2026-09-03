@@ -2529,6 +2529,8 @@ let dashboard_tools_http_json ?keeper ?timing (config : Workspace.config) : Yojs
       run Tools_compute (fun () ->
         Tool_unified.summary_report
           ~runtime_metrics:Runtime_observation.runtime_metrics_json
+          ~public_names:
+            Keeper_tool_descriptor_resolution.public_names_for_internal
           ()
         |> Tool_usage_log.attach_source_metadata
              ~masc_root:(Workspace.masc_root_dir config))

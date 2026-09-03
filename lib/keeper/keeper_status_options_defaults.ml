@@ -9,11 +9,18 @@ let min_tail_turns = 0
 let min_tail_messages = 0
 let min_tail_bytes = 1_000
 
-(* A status request must not read more source bytes for one tail than the
-   process will publish for one tool result.  Count ceilings are derived from
-   that byte ceiling and the exact overscan factors used by the readers, so
-   the decoder cannot admit values that overflow the downstream products. *)
-let max_tail_bytes = Common.max_tool_output_bytes
+(* How many source bytes one tail request may read. Count ceilings are derived
+   from it and the exact overscan factors used by the readers, so the decoder
+   cannot admit values that overflow the downstream products.
+
+   This is an admission bound on the read, not on what gets published. It used
+   to be written as the tool-response cap on the premise that a tail must not
+   read more than one result publishes; the publish side is bounded
+   independently by [Tool_output.default_model_projection] at
+   [Common.max_tool_result_wire_bytes], which externalizes anything larger, so
+   the two no longer have to be the same number and this one is stated
+   directly. *)
+let max_tail_bytes = 64 * 1024
 let metrics_lines_per_turn = 10
 let max_tail_turns = max_tail_bytes / metrics_lines_per_turn
 let max_tail_messages = max_tail_bytes

@@ -122,6 +122,29 @@ let agents_dir_from_base_path ~base_path =
     separate ceiling on what the runtime accepts from a subprocess. *)
 let max_tool_output_bytes = 65_536
 
+(** How large one tool result may be on the wire before the harness carrying
+    it writes it to a file of its own.
+
+    An official-client CLI spills a tool result it considers too large to a
+    path under its own session directory and hands the model that path. A
+    Keeper cannot read it: its tools resolve inside the sandbox, and on a
+    microvm profile the host path is not even mounted. The model is told
+    about a file nothing it holds can open.
+
+    Measured 2026-09-03 on the claude_code lane: a 20,000-byte result passed
+    through whole, and the smallest spilled file on disk was 31,558 bytes, so
+    the harness cuts somewhere between. This sits below the low end with
+    room, which is what keeps a MASC result on the model's side of that line.
+
+    Below [max_tool_output_bytes] on purpose. That constant decided both when
+    a result is stored as a blob and how much of a blob one read returns, so
+    a read of an externalized result came back at exactly the size that gets
+    spilled — the mechanism defeated itself, and six of the eighteen measured
+    rejections were reads of MASC's own artifacts. Storing and reading are
+    now bounded by the same wire ceiling, and a result larger than it arrives
+    as pages the model can ask for. *)
+let max_tool_result_wire_bytes = 16_384
+
 (** Acceptance ceiling for one captured subprocess stream, split head/tail.
 
     Head is an [Exec_buffer] head buffer, which grows only as far as the

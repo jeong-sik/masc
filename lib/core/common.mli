@@ -101,6 +101,14 @@ val max_tool_output_bytes : int
     {!max_process_capture_tail_bytes}. Conflating the two is what let a
     single [Execute] call retain 590MB. *)
 
+val max_tool_result_wire_bytes : int
+(** Ceiling for one tool result on the wire, below which an official-client
+    CLI does not spill it to a file the Keeper cannot read.
+
+    Bounds both halves of externalization: what becomes a blob, and how much
+    of a blob one read returns. Sharing {!max_tool_output_bytes} for both
+    made a read of an externalized result exactly the size that gets spilled. *)
+
 val max_process_capture_head_bytes : int
 (** Bytes retained from the {e start} of one captured subprocess stream.
     Backed by a growable buffer, so this budget costs nothing until output

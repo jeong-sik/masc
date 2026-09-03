@@ -277,7 +277,7 @@ let test_tools_scroll_counts_the_rendered_projection () =
     (calls
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"tools_scrolled"
-       ~callee:"tools_display_lines");
+       ~callee:"Render_tools.tools_display_lines");
   check int "the main loop routes Tools to that bound" 1
     (calls
        ~module_path:"bin/masc_tui.ml"
@@ -290,7 +290,7 @@ let test_tools_renderer_reads_the_typed_scroll_layout () =
     (calls
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_tools"
-       ~callee:"tools_display_lines");
+       ~callee:"Render_tools.tools_display_lines");
   check int "the renderer derives geometry from those same rows" 1
     (calls
        ~module_path:"bin/masc_tui_render.ml"
@@ -299,14 +299,16 @@ let test_tools_renderer_reads_the_typed_scroll_layout () =
 ;;
 
 let test_tools_projection_defers_inactive_panes () =
+  (* The Tools projection moved to masc_tui_render_tools when the chrome
+     became a library; the binding is read in the file that holds it. *)
   check int "only selected typed branches force their projection" 4
     (calls
-       ~module_path:"bin/masc_tui_render.ml"
+       ~module_path:"bin/masc_tui_render_tools.ml"
        ~binding_name:"tools_display_lines"
        ~callee:"Lazy.force");
   check int "the async branch remains a direct selected projection" 1
     (calls
-       ~module_path:"bin/masc_tui_render.ml"
+       ~module_path:"bin/masc_tui_render_tools.ml"
        ~binding_name:"tools_display_lines"
        ~callee:"async_request_observation_lines")
 ;;

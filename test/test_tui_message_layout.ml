@@ -422,19 +422,19 @@ let test_input_cursor_uses_visible_terminal_cells () =
     Layout.align_role_label ~style label
   in
   check int "short role label pads to the column"
-    16 (Layout.display_width (badge "you"));
+    10 (Layout.display_width (badge "you"));
   check int "wide-char role label pads by cells not bytes"
-    16 (Layout.display_width (badge "한글"));
-  (* Right-aligned, so the cut is at the head: two canaries differ only in
-     their tails and a head-preserving cut would draw them identically. *)
+    10 (Layout.display_width (badge "한글"));
+  (* An overrun is cut at the head: two canaries differ only in their tails
+     and a head-preserving cut would draw them identically. *)
   check string "long role label loses its head, not its tail"
-    ("\xe2\x97\x8f " ^ "…456789abcdefg")
+    ("\xe2\x97\x8f " ^ "…abcdefg")
     (badge "0123456789abcdefg");
-  check string "column-width role label only pads"
-    ("\xe2\x97\x8f " ^ "0123456789abcd")
-    (badge "0123456789abcd");
-  check string "short role label pads on the left"
-    ("\xe2\x97\x8f " ^ String.make 11 ' ' ^ "you")
+  check string "inner-width role label reads whole"
+    ("\xe2\x97\x8f " ^ "01234567")
+    (badge "01234567");
+  check string "short role label pads on the right"
+    ("\xe2\x97\x8f " ^ "you" ^ String.make 5 ' ')
     (badge "you");
   (* The mark sits outside the truncation. Inside it, the labels that overrun
      would be the ones that lost their glyph -- and those are the names a
@@ -1487,9 +1487,11 @@ let inline_rows ~terminal_cols source =
 
 (* The clock used to take the narrow gutter from the left and cut the source
    away before its first cell. These widths exercise the smallest supported
-   pane and two wider ceilings. The two source names share their head and
-   differ at the tail, so distinct suffixes prove that the identity -- not
-   just a generic speaker mark -- survived. *)
+   pane and two wider ceilings; at twenty columns and up the aligned badge
+   leaves room for the clock beside it, and the gutter is no longer a bare
+   source. The two source names share their head and differ at the tail, so
+   distinct suffixes prove that the identity -- not just a generic speaker
+   mark -- survived. *)
 let test_a_narrow_inline_margin_keeps_the_source () =
   List.iter
     (fun terminal_cols ->
@@ -1527,7 +1529,7 @@ let test_a_narrow_inline_margin_keeps_the_source () =
              + Layout.display_width row.Layout.text
             <= inner_width))
         (one_rows @ two_rows))
-    [ 13; 16; 24 ]
+    [ 13; 16; 18 ]
 
 (* A normal pane has room for both pieces. Pin the exact bytes, including the
    aligned badge, and the continuation rule: keep the clock, drop the repeated
@@ -1550,10 +1552,10 @@ let test_normal_inline_margin_bytes_stay_stable () =
   with
   | [ first; second ] ->
       check string "normal first gutter bytes"
-        ("12:34 " ^ Layout.speaker_mark Layout.Keeper ^ "     keeper.one")
+        ("12:34 " ^ Layout.speaker_mark Layout.Keeper ^ " …per.one")
         first.Layout.gutter;
       check string "normal continuation bytes"
-        ("12:35 " ^ Layout.speaker_mark Layout.Keeper ^ String.make 15 ' ')
+        ("12:35 " ^ Layout.speaker_mark Layout.Keeper ^ String.make 9 ' ')
         second.Layout.gutter;
       check int "normal gutter keeps clock plus mark boundary" 8
         first.Layout.gutter_label_at;

@@ -88,6 +88,40 @@ val transcribe_audio :
     endpoint fails, the returned error names each attempted endpoint
     and its failure. *)
 
+(** {1 Microphone capture thresholds} *)
+
+(** The room is measured at each capture rather than assumed. The recording
+    threshold was a literal 1% of full scale (about -40 dBFS); measured on one
+    workstation 2026-09-03 the noise floor sat at -37.2 dB on one pass and
+    -26.3 dB on another minutes later, both above it. The silence filter then
+    saw sound continuously, so every capture ran to its timeout and handed the
+    transcriber a room. A floor that moves 10 dB between passes in one room is
+    why this is read per capture. *)
+
+val trigger_margin_db : float
+(** How far above the measured floor a capture must rise to start recording.
+    Speech sat 5.0 dB and 6.1 dB above the floor on the two measured passes --
+    an ordinary sentence at a built-in microphone -- so a margin near that
+    separation would swallow the utterance. *)
+
+val speech_margin_db : float
+(** How far above the floor a whole capture must average to be transcribed at
+    all. Below {!trigger_margin_db}, so a capture that did start but carries
+    only room tone is still refused.
+
+    This exists because whisper answers silence with a sentence: three captures
+    of an empty room returned "감사합니다.", "감사합니다." and "네". Byte size
+    cannot separate those from speech, since a capture that ran to its timeout
+    on room tone is large. Once audio reaches the endpoint chain a hallucinated
+    transcript is indistinguishable from a real one, so the refusal has to
+    happen here. *)
+
+val db_of_amplitude : float -> float
+(** dBFS for a linear RMS amplitude; [neg_infinity] at zero. *)
+
+val amplitude_of_db : float -> float
+(** The inverse, with [neg_infinity] mapping back to zero. *)
+
 (** {1 Microphone record + transcribe} *)
 
 val record_and_transcribe :

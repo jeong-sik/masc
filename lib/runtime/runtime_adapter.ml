@@ -304,7 +304,6 @@ let agent_core_thinking_control_format = function
     Llm_provider.Capabilities.Chat_template_token token
   | Runtime_schema.Ollama_think -> Llm_provider.Capabilities.Ollama_think
   | Runtime_schema.Reasoning_effort -> Llm_provider.Capabilities.Reasoning_effort
-  | Runtime_schema.Enable_thinking -> Llm_provider.Capabilities.Enable_thinking
 ;;
 
 (** A runtime [api-name] is an opaque deployment string, not automatically an

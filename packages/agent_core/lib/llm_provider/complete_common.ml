@@ -461,8 +461,7 @@ let thinking_control_request_rejection
                   | Capabilities.Chat_template_kwargs
                   | Capabilities.Chat_template_token _
                   | Capabilities.Ollama_think
-                  | Capabilities.Reasoning_effort
-                  | Capabilities.Enable_thinking )
+                  | Capabilities.Reasoning_effort )
                 , (false | true) ) -> Some Enable_not_encodable)))
      | Provider_config.Anthropic
      | Provider_config.Kimi

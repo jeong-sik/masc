@@ -301,7 +301,6 @@ let clear_thinking_object_request_field
   | Capabilities.No_preserve_thinking_control
   | Capabilities.Thinking_object_keep_all
   | Capabilities.Chat_template_kwargs_preserve_thinking
-  | Capabilities.Top_level_preserve_thinking
   | Capabilities.Always_preserved_thinking -> None
 ;;
 
@@ -518,8 +517,7 @@ let wire_reasoning_effort (config : t) ~(caps : Capabilities.capabilities) =
   | Capabilities.Thinking_object_only
   | Capabilities.Chat_template_kwargs
   | Capabilities.Chat_template_token _
-  | Capabilities.Ollama_think
-  | Capabilities.Enable_thinking -> config.reasoning_effort
+  | Capabilities.Ollama_think -> config.reasoning_effort
 ;;
 
 let validate_reasoning_effort_request_typed (config : t) =
@@ -537,8 +535,7 @@ let validate_reasoning_effort_request_typed (config : t) =
           | Capabilities.Thinking_object_only
           | Capabilities.Chat_template_kwargs
           | Capabilities.Chat_template_token _
-          | Capabilities.Ollama_think
-          | Capabilities.Enable_thinking )
+          | Capabilities.Ollama_think )
         , _ ) -> false
     in
     (match caps.Capabilities.accepted_reasoning_efforts with

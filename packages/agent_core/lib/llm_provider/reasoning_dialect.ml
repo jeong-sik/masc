@@ -14,7 +14,6 @@ type toggle_wire =
   | Chat_template_token
   | Ollama_think
   | Reasoning_effort
-  | Enable_thinking
   | Anthropic_thinking
   | Gemini_thinking_config
 
@@ -143,8 +142,7 @@ let base_of_capabilities (caps : Capabilities.capabilities) =
      | No_preserve_thinking_control
      | Thinking_object_keep_all
      | Chat_template_kwargs_preserve_thinking
-     | Thinking_object_clear_thinking
-     | Top_level_preserve_thinking -> dialect)
+     | Thinking_object_clear_thinking -> dialect)
   | Thinking_object ->
     { toggle_default = Enabled
     ; toggle_wire = Thinking_object { includes_reasoning_effort = true }
@@ -176,7 +174,6 @@ let base_of_capabilities (caps : Capabilities.capabilities) =
       | No_preserve_thinking_control
       | Chat_template_kwargs_preserve_thinking
       | Thinking_object_clear_thinking
-      | Top_level_preserve_thinking
       | Always_preserved_thinking -> default.replay_policy
     in
     { default with
@@ -215,13 +212,6 @@ let base_of_capabilities (caps : Capabilities.capabilities) =
     ; streaming = Delta_field "reasoning"
     ; output_wire
     }
-  | Enable_thinking ->
-    { default with
-      toggle_wire = Enable_thinking
-    ; preserve_wire
-    ; streaming = Delta_field "reasoning_content"
-    ; output_wire
-    }
 ;;
 
 let apply_replay_override caps dialect =
@@ -252,14 +242,12 @@ let with_preserve_thinking ~preserve_thinking dialect =
   | Always_preserved_thinking, _ ->
     { dialect with replay_policy = All_assistant_messages }
   | ( ( Thinking_object_keep_all
-      | Chat_template_kwargs_preserve_thinking
-      | Top_level_preserve_thinking )
+      | Chat_template_kwargs_preserve_thinking )
     , Some true ) -> { dialect with replay_policy = All_assistant_messages }
   | ( ( No_preserve_thinking_control
       | Thinking_object_keep_all
       | Chat_template_kwargs_preserve_thinking
-      | Thinking_object_clear_thinking
-      | Top_level_preserve_thinking )
+      | Thinking_object_clear_thinking )
     , _ ) -> dialect
 ;;
 
@@ -279,7 +267,6 @@ let thinking_object_only_control dialect ~enable_thinking ~preserve_thinking =
     | No_preserve_thinking_control
     | Chat_template_kwargs_preserve_thinking
     | Thinking_object_clear_thinking
-    | Top_level_preserve_thinking
     | Always_preserved_thinking -> false
   in
   let enabled =
@@ -296,17 +283,6 @@ let chat_template_kwargs_preserve_field dialect ~preserve_thinking =
   | Chat_template_kwargs_preserve_thinking -> preserve_thinking
   | No_preserve_thinking_control
   | Thinking_object_keep_all
-  | Thinking_object_clear_thinking
-  | Top_level_preserve_thinking
-  | Always_preserved_thinking -> None
-;;
-
-let top_level_preserve_field dialect ~preserve_thinking =
-  match dialect.preserve_wire with
-  | Top_level_preserve_thinking -> preserve_thinking
-  | No_preserve_thinking_control
-  | Thinking_object_keep_all
-  | Chat_template_kwargs_preserve_thinking
   | Thinking_object_clear_thinking
   | Always_preserved_thinking -> None
 ;;
@@ -348,9 +324,11 @@ let validate_request_control_inputs
       ~reasoning_effort
   =
   let thinking_budget_result =
-    match thinking_budget, request_wire, dialect.toggle_wire with
-    | None, _, _ | Some _, Chat_completions, Enable_thinking -> Ok ()
-    | Some _, _, _ -> Error Thinking_budget_unsupported
+    (* No OpenAI-compatible wire carries a numeric budget; Anthropic and
+       Gemini budgets travel on their own serializers. *)
+    match thinking_budget with
+    | None -> Ok ()
+    | Some _ -> Error Thinking_budget_unsupported
   in
   match thinking_budget_result with
   | Error _ as error -> error
@@ -400,7 +378,6 @@ let request_control_fields
     | Chat_template_kwargs
     | Chat_template_token
     | Ollama_think
-    | Enable_thinking
     | Anthropic_thinking
     | Gemini_thinking_config -> reasoning_effort
   in
@@ -458,7 +435,6 @@ let request_control_fields
              | Chat_template_kwargs
              | Chat_template_token
              | Ollama_think
-             | Enable_thinking
              | Anthropic_thinking
              | Gemini_thinking_config ) ) -> [], None
          | Chat_completions, Chat_template_kwargs ->
@@ -480,19 +456,6 @@ let request_control_fields
            in
            [], encoding
          | Chat_completions, Ollama_think -> [], None
-         | Chat_completions, Enable_thinking ->
-           let fields =
-             bool_field "enable_thinking" enable_thinking
-             @ bool_field
-                 "preserve_thinking"
-                 (top_level_preserve_field dialect ~preserve_thinking)
-           in
-           let fields =
-             match enable_thinking, thinking_budget with
-             | Some true, Some budget -> ("thinking_budget", `Int budget) :: fields
-             | _ -> fields
-           in
-           fields, explicit_field_encoding
          | Chat_completions, Reasoning_effort ->
            let fields = normalized_effort_field () in
            fields, explicit_reasoning_effort_encoding
@@ -635,7 +598,6 @@ let apply_clear_thinking_replay_gate (config : Provider_config.t) dialect =
   | No_preserve_thinking_control
   | Thinking_object_keep_all
   | Chat_template_kwargs_preserve_thinking
-  | Top_level_preserve_thinking
   | Always_preserved_thinking -> dialect
 ;;
 
@@ -697,8 +659,7 @@ let rotation_policy dialect : Reasoning_replay_contract.rotation_policy =
      | Chat_template_kwargs
      | Chat_template_token
      | Ollama_think
-     | Reasoning_effort
-     | Enable_thinking -> Allow_endpoint_rotation)
+     | Reasoning_effort -> Allow_endpoint_rotation)
 ;;
 
 (* Artifact provenance is derived from the stable provider/model/transport
@@ -758,8 +719,7 @@ let sampling_params_ignored_for_format
   | Capabilities.Chat_template_kwargs
   | Capabilities.Chat_template_token _
   | Capabilities.Ollama_think
-  | Capabilities.Reasoning_effort
-  | Capabilities.Enable_thinking -> []
+  | Capabilities.Reasoning_effort -> []
 ;;
 
 let sampling_field_ignored_when_thinking
@@ -799,7 +759,6 @@ let toggle_wire_to_string = function
   | Chat_template_token -> "chat_template_token"
   | Ollama_think -> "ollama_think"
   | Reasoning_effort -> "reasoning_effort"
-  | Enable_thinking -> "enable_thinking"
   | Anthropic_thinking -> "anthropic_thinking"
   | Gemini_thinking_config -> "gemini_thinking_config"
 ;;

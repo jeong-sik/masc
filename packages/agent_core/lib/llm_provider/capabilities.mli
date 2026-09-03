@@ -17,9 +17,6 @@ type thinking_control_format = Capability_vocab.thinking_control_format =
           the system turn; the token is carried in the constructor. *)
   | Ollama_think
   | Reasoning_effort
-  | Enable_thinking
-  (** Top-level [enable_thinking] / [preserve_thinking] bools
-      plus optional [thinking_budget]. *)
 [@@deriving show, eq]
 
 type preserve_thinking_control_format =
@@ -27,7 +24,6 @@ type preserve_thinking_control_format =
   | No_preserve_thinking_control
   | Thinking_object_keep_all
   | Chat_template_kwargs_preserve_thinking
-  | Top_level_preserve_thinking
   | Always_preserved_thinking
   | Thinking_object_clear_thinking
   (** Provider [thinking] object whose [clear_thinking] member gates prior-turn

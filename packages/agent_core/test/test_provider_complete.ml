@@ -1288,8 +1288,13 @@ let accept_rejected_reason label = function
   | Error _ -> Alcotest.failf "%s: expected typed AcceptRejected" label
 ;;
 
+(* The declared toggle wire under test is chat_template_kwargs, the one
+   OpenAI-compatible format that still carries a boolean enable_thinking. *)
 let enable_thinking_field body =
-  body |> Yojson.Safe.from_string |> Yojson.Safe.Util.member "enable_thinking"
+  body
+  |> Yojson.Safe.from_string
+  |> Yojson.Safe.Util.member "chat_template_kwargs"
+  |> Yojson.Safe.Util.member "enable_thinking"
 ;;
 
 let test_unknown_openai_compat_enable_rejected_sync_and_stream () =
@@ -1330,7 +1335,7 @@ let test_declared_enable_dialect_passes_sync_stream_and_wire () =
     { Llm_provider.Capabilities.openai_compat_chat_capabilities with
       supports_reasoning = true
     ; supports_extended_thinking = true
-    ; thinking_control_format = Llm_provider.Capabilities.Enable_thinking
+    ; thinking_control_format = Llm_provider.Capabilities.Chat_template_kwargs
     }
   in
   let config =
@@ -1503,7 +1508,7 @@ let test_explicit_false_semantics_remain_typed () =
     stream_reason;
   let encodable_caps =
     { inherent_caps with
-      thinking_control_format = Llm_provider.Capabilities.Enable_thinking
+      thinking_control_format = Llm_provider.Capabilities.Chat_template_kwargs
     }
   in
   let encodable =

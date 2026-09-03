@@ -117,6 +117,38 @@ let drop_last_utf8_scalar text =
     in
     String.sub text 0 (find_last 0 0)
 
+(* Ctrl-W, and Alt+Backspace where the terminal sends ESC DEL: the last word
+   goes, the separator before it stays, and two presses walk two words. The
+   separators are the blanks a chat draft can hold -- space, tab, and the
+   newline Ctrl-J puts in. A blank is always a whole one-byte scalar, so
+   testing the lead byte is the whole test. *)
+let drop_last_utf8_word text =
+  if String.equal text "" || not (String.is_valid_utf_8 text) then text
+  else
+    let length = String.length text in
+    let blank_at offset =
+      match text.[offset] with ' ' | '\t' | '\n' -> true | _ -> false
+    in
+    let rec collect offset acc =
+      if offset >= length then acc
+      else
+        let scalar_length =
+          String.get_utf_8_uchar text offset |> Uchar.utf_decode_length
+        in
+        collect (offset + scalar_length) ((offset, scalar_length) :: acc)
+    in
+    (* The span list comes out newest-first: trailing blanks go first, then
+       the word run before them. *)
+    let rec skip_while blanking spans =
+      match spans with
+      | (start, _) :: rest when Bool.equal blanking (blank_at start) ->
+          skip_while blanking rest
+      | _ -> spans
+    in
+    match collect 0 [] |> skip_while true |> skip_while false with
+    | (start, scalar_length) :: _ -> String.sub text 0 (start + scalar_length)
+    | [] -> ""
+
 let ansi_csi_end text offset =
   let length = String.length text in
   if offset + 1 >= length || text.[offset] <> '\x1B' || text.[offset + 1] <> '['

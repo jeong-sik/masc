@@ -621,6 +621,7 @@ let make_tool_bundle_for_descriptors_with_policy
                List.map deferred_of deferred_builtin_tools
            ; agent_cell = ref None
            ; history = []
+           ; carry_window = Keeper_config.keeper_tool_carry_window ()
            })
     | Some surface ->
       Keeper_identity_tool_search.make
@@ -632,6 +633,7 @@ let make_tool_bundle_for_descriptors_with_policy
             @ List.map deferred_of deferred_builtin_tools
         ; agent_cell = surface.Keeper_tools_agent_core.agent_cell
         ; history = surface.Keeper_tools_agent_core.history
+        ; carry_window = Keeper_config.keeper_tool_carry_window ()
         }
   in
   (* The lanes that cannot widen a turn get every tool as a schema: holding

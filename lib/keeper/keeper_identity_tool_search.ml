@@ -28,6 +28,7 @@ type surface =
   { deferred : deferred list
   ; agent_cell : Agent_core.Agent.t option ref
   ; history : Agent_core.Types.message list
+  ; carry_window : int
   }
 
 type entry =
@@ -253,26 +254,82 @@ let observe_turn ~keeper_name ~usage () =
     Loaded_unused loaded
 ;;
 
-(* Which attached tools this conversation actually ran.
+(* Which attached tools this conversation carries with their schemas, and
+   which of the ones it ran are no longer carried.
 
    Read off the tools' own ToolUse blocks: a call the model made is a call the
    model needed, and the block carries the tool's name directly. Nothing about
    the listing is parsed -- the request for a tool is not evidence that the
-   tool was wanted, only that it looked wanted.
+   tool was wanted, only that it looked wanted. Carrying every requested tool
+   grows the surface back toward the full attached list: measured 2026-08-30
+   after one hour, polisher was at 111 tools of a possible 133 and still
+   climbing.
 
-   That distinction is the bound. Carrying every requested tool grows the
-   surface toward the full attached list on a long conversation: measured
-   2026-08-30 after one hour, polisher was at 111 tools of a possible 133 and
-   still climbing. Carrying only what ran stops where use stops -- 29 of 145
-   attached tools were called at all on the day the RFC measured, 20%. *)
-let already_used_from_history ~entries history =
-  let called = Hashtbl.create 8 in
+   Carrying everything ever used has no upper bound either, only a slower one.
+   Measured over 19,100 turns 2026-09-01..03, the per-keeper median carried
+   was 32.1 KB of schema and reached 51.9 KB, against a re-use gap whose
+   median is 2 turns and whose p90 is 24: most of what was carried was last
+   used far outside the work still in progress.
+
+   So the carry is cut back to [carry_window], and cut on the calls that grow
+   it -- a call to a name the carry does not already hold. The tool array is
+   the head of the provider's cache prefix, so every turn whose array differs
+   from the turn before pays the whole prefix again. A call to a name already
+   carried only moves that name's ordinal, which leaves the array identical,
+   so cutting there would forfeit the prefix for a change nothing else asked
+   for. A call to a name not carried adds it to the array, which forfeits the
+   prefix anyway, so the cut rides an invalidation already being paid.
+
+   The consequence is that the window is sampled at those calls and not
+   continuously: between two of them the carried set is frozen, so a tool can
+   age past [carry_window] and stay placed until the next call grows the
+   carry. A Keeper that stops reaching for tools it is not already carrying
+   stops evicting. The alternative is cutting on every call, which pays a full
+   prefix on turns whose array would otherwise be byte-identical.
+
+   [ordinal] counts every ToolUse block, not only the offered ones: the window
+   measures distance back through the conversation, and a built-in call fills
+   the conversation the same way an attached one does. *)
+let carry_from_history ~carry_window ~entries history =
+  (* One membership table for the offering rather than a scan per block:
+     [observe] runs on every ToolUse block in the whole history, built-ins
+     included, and history is not pruned, so a scan here is the attached list
+     (145 tools on the largest measured Keeper) times the conversation. *)
+  let offered_names : (string, unit) Hashtbl.t = Hashtbl.create 64 in
+  List.iter (fun (entry : entry) -> Hashtbl.replace offered_names entry.name ()) entries;
+  let offered name = Hashtbl.mem offered_names name in
+  (* Name and the ordinal of its most recent call. A list because the largest
+     carried set measured over three days was 41 tools. *)
+  let carried : (string * int) list ref = ref [] in
+  let ever : string list ref = ref [] in
+  let ordinal = ref 0 in
+  let observe name =
+    incr ordinal;
+    if offered name
+    then begin
+      if not (List.exists (String.equal name) !ever) then ever := name :: !ever;
+      let others =
+        List.filter (fun (carried_name, _) -> not (String.equal carried_name name)) !carried
+      in
+      (* [others] is [!carried] without [name], so it is shorter exactly when
+         the carry already held it. That is the test for whether this call
+         grows the array, and it is true again for a name the window dropped
+         earlier -- which is what keeps a re-used name from re-entering the
+         carry without the rest of it being measured. *)
+      let grows = List.compare_lengths others !carried = 0 in
+      let grown = (name, !ordinal) :: others in
+      carried
+        := (if grows && carry_window > 0
+            then List.filter (fun (_, seen) -> !ordinal - seen <= carry_window) grown
+            else grown)
+    end
+  in
   List.iter
     (fun (message : Agent_core.Types.message) ->
        List.iter
          (fun (block : Agent_core.Types.content_block) ->
             match block with
-            | Agent_core.Types.ToolUse { name; _ } -> Hashtbl.replace called name ()
+            | Agent_core.Types.ToolUse { name; _ } -> observe name
             | Agent_core.Types.Text _
             | Agent_core.Types.Thinking _
             | Agent_core.Types.RedactedThinking _
@@ -283,13 +340,31 @@ let already_used_from_history ~entries history =
             | Agent_core.Types.Audio _ -> ())
          message.Agent_core.Types.content)
     history;
-  List.filter_map
-    (fun entry ->
-       if Hashtbl.mem called entry.name then Some entry.callable else None)
-    entries
+  let carried_names = List.map (fun (carried_name, _) -> carried_name) !carried in
+  let held name = List.exists (String.equal name) carried_names in
+  (* Ran at some point in this conversation and not carried now. The only
+     input an operator has for deciding whether the window is too tight. *)
+  let dropped = List.filter (fun name -> not (held name)) (List.rev !ever) in
+  carried_names, dropped
 ;;
 
-let make ~keeper_name { deferred; agent_cell; history } =
+(* [entries] order, not carry order: the tool array is a cache prefix keyed by
+   the exact bytes in the exact order sent, so a tool that leaves the window
+   and comes back must come back in the slot it left. *)
+let already_used_from_history ~carry_window ~entries history =
+  let carried_names, dropped = carry_from_history ~carry_window ~entries history in
+  let placed =
+    List.filter_map
+      (fun entry ->
+         if List.exists (String.equal entry.name) carried_names
+         then Some entry.callable
+         else None)
+      entries
+  in
+  placed, carried_names, dropped
+;;
+
+let make ~keeper_name { deferred; agent_cell; history; carry_window } =
   match deferred with
   | [] -> None
   | _ :: _ ->
@@ -303,7 +378,40 @@ let make ~keeper_name { deferred; agent_cell; history } =
            })
         deferred
     in
-    let already_used = already_used_from_history ~entries history in
+    let already_used, carried_names, dropped =
+      already_used_from_history ~carry_window ~entries history
+    in
+    (match dropped with
+     | [] -> ()
+     | _ :: _ ->
+       (* State, not an event, and named as one. [dropped] is recomputed by
+          replaying the whole history every turn, so once a tool is outside
+          the window every later turn recomputes the same answer: this line
+          says what the carry holds now, and it says it on every turn of the
+          rest of the conversation. It cannot say "a cut happened this turn",
+          because the turn boundary is not recoverable from a flat message
+          list -- the same reason the window is counted in tool calls.
+
+          [Debug] for that reason rather than [Info]: a per-turn line for the
+          life of a conversation is not an event an operator should be shown
+          by default, and a tool ageing out of the window is what the window
+          is for. The names rather than a count -- a count cannot say whether
+          the window is too tight for this Keeper, which is the only question
+          an operator tuning it has.
+
+          [error_kind] is the key every other emit in this directory uses. *)
+       Log.Keeper.emit
+         Log.Debug
+         ~keeper_name
+         ~category:Log.Tool
+         ~details:
+           (`Assoc
+              [ "error_kind", `String "keeper_attached_tool_carry_state"
+              ; "carry_window", `Int carry_window
+              ; "carried", `Int (List.length carried_names)
+              ; "dropped", Json_util.json_string_list dropped
+              ])
+         "Tools this conversation ran are outside the carry window");
     let placed =
       List.map
         (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)

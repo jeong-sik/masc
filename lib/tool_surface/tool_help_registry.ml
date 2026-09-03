@@ -284,9 +284,37 @@ let find_entry (schemas : Masc_domain.tool_schema list) name =
   |> List.find_opt (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
   |> Option.map entry_of_schema
 
+(* Only the short description, without building the rest of the entry.
+
+   [canonicalize_schema] took [entry_of_schema] and kept one field. Building
+   the whole entry also renders [when_to_use] and the constraint notes, and
+   those renders read the prompt registry -- so canonicalizing the catalog
+   asked for prompts and then threw the answers away.
+
+   That mattered because [Config.all_tool_schemas] is a top-level binding:
+   it runs at module initialization, before any process has loaded prompts.
+   Every binary that links this library opened with one ERROR line per tool
+   whose help needed a prompt, for fields nobody was going to read (masc
+   #32991). Deriving the description alone keeps the registry out of the
+   initialization path. *)
+let short_description_of_schema (schema : Masc_domain.tool_schema) =
+  match toml_help schema.name with
+  | Some (help : Tool_definition_toml.help) ->
+    (match help.short_description with
+     | Some text -> text
+     | None ->
+       derived_short_description_with_meta
+         (Tool_catalog.metadata schema.name)
+         schema.name
+         schema.description)
+  | None ->
+    derived_short_description_with_meta
+      (Tool_catalog.metadata schema.name)
+      schema.name
+      schema.description
+
 let canonicalize_schema (schema : Masc_domain.tool_schema) : Masc_domain.tool_schema =
-  let entry = entry_of_schema schema in
-  { schema with description = entry.short_description }
+  { schema with description = short_description_of_schema schema }
 
 let canonicalize_schemas schemas =
   List.map canonicalize_schema schemas

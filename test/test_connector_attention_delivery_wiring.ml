@@ -10,13 +10,11 @@
    holding workspace health at "warning" over three Discord asides nobody was
    ever going to answer.
 
-   These are the two facts the type checker cannot hold: that both gateways
-   deliver through one function rather than building the stimulus themselves,
-   and that the function marks the row [Quarantined] when the queue refuses
-   the entry. What [Quarantined] then does to the pending projection is
-   already measured, in test_keeper_external_attention. *)
+   The fact the type checker cannot hold: both gateways deliver through one
+   function rather than building the stimulus themselves. A refused entry now
+   leaves nothing behind to close -- the queue is the only thing that says an
+   answer is owed -- so there is no second write to pin. *)
 
-let delivery = "lib/server/server_connector_attention_delivery.ml"
 let discord = "lib/server/server_discord_in_process_gateway.ml"
 let slack = "lib/server/server_slack_in_process_gateway.ml"
 
@@ -38,21 +36,10 @@ let test_both_gateways_deliver_through_one_function () =
        ~binding_name:"handle_ambient"
        ~callee:"Server_connector_attention_delivery.deliver")
 
-let test_a_refused_enqueue_closes_the_row () =
-  Alcotest.(check int) "the refused branch marks the row quarantined" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:delivery
-       ~binding_name:"quarantine_undelivered"
-       ~callee:"Keeper_external_attention.mark_quarantined");
-  Alcotest.(check int) "and delivery reaches that branch" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:delivery
-       ~binding_name:"deliver" ~callee:"quarantine_undelivered")
-
 let () =
   Alcotest.run "connector_attention_delivery_wiring"
     [ ( "delivery"
       , [ Alcotest.test_case "both gateways deliver through one function"
             `Quick test_both_gateways_deliver_through_one_function
-        ; Alcotest.test_case "a refused enqueue closes the row" `Quick
-            test_a_refused_enqueue_closes_the_row
         ] )
     ]

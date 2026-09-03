@@ -263,6 +263,7 @@ let test_open_count_only_non_terminal () =
              { assignee = "a"
              ; started_at = "2026-07-13T00:00:00Z"
              ; submitted_at = ""
+             ; intent = Complete_task
              ; verification_id = ""
              })
     ]

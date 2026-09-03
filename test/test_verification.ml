@@ -1039,6 +1039,7 @@ let test_system_llm_agent_defers_invalid_contract_without_rejecting_task () =
                        { assignee = "contract-retry-worker"
                        ; started_at = original_started_at
                        ; submitted_at = "2026-08-04T00:01:00Z"
+                       ; intent = Complete_task
                        ; verification_id
                        }
                  })
@@ -1265,6 +1266,7 @@ let test_rejected_verdict_audit_preserves_reason () =
                    { assignee = "audit-producer"
                    ; started_at = "2026-07-27T23:59:00Z"
                    ; submitted_at = Masc_domain.now_iso ()
+                   ; intent = Complete_task
                    ; verification_id = "vrf-audit-rejected"
                    }
              }
@@ -1362,6 +1364,7 @@ let test_verdict_audit_names_the_judging_runtime () =
                    { assignee = "runtime-producer"
                    ; started_at = "2026-08-05T00:00:00Z"
                    ; submitted_at = Masc_domain.now_iso ()
+                   ; intent = Complete_task
                    ; verification_id = "vrf-runtime-named"
                    }
              }
@@ -2736,6 +2739,7 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
                  { assignee = "omega"
                  ; started_at = "2026-07-27T23:59:00Z"
                  ; submitted_at = "2026-07-28T00:00:00Z"
+                 ; intent = Complete_task
                  ; verification_id = request_id
                  }
            })

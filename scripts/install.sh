@@ -343,6 +343,43 @@ report_provider_availability() {
   done
 }
 
+# The second axis: where a keeper's tools execute. Unlike the model source, the
+# sandbox has no install-time global default to write -- it is per-keeper, in
+# .masc/config/keepers/<name>.toml, and a --team preset carries its own choice.
+# So this only reports which backends the host can offer, and points at where
+# the choice is actually made. The three real backends are docker, microvm
+# (Apple's `container` CLI on macOS), and remote_ssh.
+report_sandbox_backends() {
+  log "detected execution sandboxes (set per keeper, not here):"
+
+  if command -v docker >/dev/null 2>&1; then
+    # docker info fails fast when the daemon socket is absent, so this does not
+    # hang when Docker is installed but not running.
+    if docker info >/dev/null 2>&1; then
+      log "  - docker: available"
+    else
+      log "  - docker: installed, daemon not responding"
+    fi
+  else
+    log "  - docker: not installed"
+  fi
+
+  if [ -e /System/Library/CoreServices/SystemVersion.plist ]; then
+    if command -v container >/dev/null 2>&1; then
+      log "  - microvm (apple container): available"
+    else
+      log "  - microvm (apple container): not installed"
+    fi
+  else
+    log "  - microvm (apple container): macOS only"
+  fi
+
+  # remote_ssh is transport-only; its endpoints live in runtime.toml, so host
+  # detection is not meaningful -- point at where they are declared instead.
+  log "  - remote_ssh: declare endpoints in runtime.toml [exec.ssh.endpoints]"
+  log "  choose one per keeper via sandbox_profile in .masc/config/keepers/<name>.toml, or --team <preset>"
+}
+
 prompt_provider() {
   if ! is_tty; then
     echo "$DEFAULT_PROVIDER_INDEX"
@@ -607,6 +644,7 @@ run_wizard() {
   local provider_idx key
   load_provider_catalog "$base_path"
   report_provider_availability
+  report_sandbox_backends
 
   if [ -n "$WIZARD_PROVIDER" ]; then
     provider_idx=$(provider_index_by_id "$WIZARD_PROVIDER") \

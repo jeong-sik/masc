@@ -399,6 +399,44 @@ val harness_row :
     gate name longer than its column pushed the evaluator and the reason
     beside it out of line with every other row. *)
 
+(** Planning goal columns.
+
+    The list named no columns at all, and its title took the terminal minus a
+    hand-summed constant minus however wide the age and the due date happened
+    to be. Both are optional, so the pair at the end of the row began at a
+    different column on every row -- a goal with no due date started them ten
+    cells left of the goal above it. Each has a widest form and each has a
+    column now. *)
+
+type planning_row_values = {
+  prow_phase : string;
+      (** The phase carries the brackets it is drawn in, so [phase_width] below
+          is the bracketed width rather than the label's own. *)
+  prow_proof : string;
+  prow_priority : string;
+  prow_open : string;
+  prow_title : string;
+  prow_age : string;
+  prow_due : string;
+}
+
+val planning_title_width : inner_width:int -> phase_width:int -> int
+(** What the title has after the named columns, never below a floor: a title
+    folded past that point identifies no goal, and the row is better off
+    running to the frame's edge than naming nothing. *)
+
+val planning_header_row : phase_width:int -> title_width:int -> string
+
+val planning_row :
+  phase_style:string ->
+  phase_width:int ->
+  title_width:int ->
+  planning_row_values ->
+  string
+(** One goal, on the same columns as {!planning_header_row}. The proof mark's
+    column is named with a space: it is a mark like the roster's, and a name
+    would be four cells wider than the cell holding it. *)
+
 module Terminal_size_cache : sig
   type refresh =
     | Changed of (int * int)

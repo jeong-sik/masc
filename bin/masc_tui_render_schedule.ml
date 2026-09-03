@@ -915,6 +915,77 @@ let harness_row ~verdict_style ~reason_width values =
   Table.row
     (harness_cells ~verdict_style ~reason_width values)
 
+(* Planning goal columns.
+
+   This list named no columns at all. A reader met "[shaping] * P2  3 open 1
+   ver" and had to work out every field from its shape, and the two fields
+   whose shape says least -- a priority and a tally -- are the two a reader
+   scans a list of goals for.
+
+   The title took the terminal minus forty-seven minus however wide the age and
+   the due date happened to be, and both of those are optional, so the pair at
+   the end of the row began at a different column on every row: a goal with no
+   due date started them ten cells left of the goal above it. Each has a widest
+   form and each gets a column.
+
+   The phase carries the brackets it is drawn in, so the caller passes the
+   width of the bracketed label rather than the label's own. *)
+
+let planning_proof_width = 1
+let planning_priority_width = 3
+let planning_open_width = 16
+let planning_age_width = 6
+let planning_due_width = 10
+let planning_minimum_title_width = 12
+
+type planning_row_values = {
+  prow_phase : string;
+  prow_proof : string;
+  prow_priority : string;
+  prow_open : string;
+  prow_title : string;
+  prow_age : string;
+  prow_due : string;
+}
+
+let planning_no_values =
+  { prow_phase = ""
+  ; prow_proof = ""
+  ; prow_priority = ""
+  ; prow_open = ""
+  ; prow_title = ""
+  ; prow_age = ""
+  ; prow_due = ""
+  }
+
+let planning_cells ?(phase_style = "") ~phase_width ~title_width values =
+  [ Table.cell ~style:phase_style ~header:"PHASE" ~width:phase_width
+      values.prow_phase
+    (* The proof mark is a mark, like the roster's. A name would be four cells
+       wider than the cell it names, and the contract folds a header that does
+       not fit rather than letting it push the columns after it. *)
+  ; Table.cell ~header:" " ~width:planning_proof_width values.prow_proof
+  ; Table.cell ~header:"PRI" ~width:planning_priority_width values.prow_priority
+  ; Table.cell ~header:"OPEN" ~width:planning_open_width values.prow_open
+  ; Table.cell ~header:"TITLE" ~width:title_width values.prow_title
+  ; Table.cell ~align:Table.Right ~header:"AGE" ~width:planning_age_width
+      values.prow_age
+  ; Table.cell ~header:"DUE" ~width:planning_due_width values.prow_due
+  ]
+
+let planning_title_width ~inner_width ~phase_width =
+  let named =
+    Table.used_width
+      (planning_cells ~phase_width ~title_width:0 planning_no_values)
+  in
+  max planning_minimum_title_width (inner_width - named)
+
+let planning_header_row ~phase_width ~title_width =
+  Table.header_row (planning_cells ~phase_width ~title_width planning_no_values)
+
+let planning_row ~phase_style ~phase_width ~title_width values =
+  Table.row (planning_cells ~phase_style ~phase_width ~title_width values)
+
 module Terminal_size_cache = struct
   type refresh =
     | Changed of (int * int)

@@ -105,7 +105,7 @@ let connector_projection ~turn_outcome ~reply =
     Connector_status { kind = Continuation_checkpoint }
   | Keeper_turn_outcome.External_effect_pending, _ ->
     Connector_status { kind = External_effect_pending }
-  | Keeper_turn_outcome.External_effect_completed, _ ->
+  | Keeper_turn_outcome.Terminal_effect_settled, _ ->
     Connector_no_visible_reply
   | Keeper_turn_outcome.Visible_reply, Some reply ->
     let reply = String.trim reply in

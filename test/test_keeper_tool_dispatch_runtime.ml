@@ -4210,7 +4210,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
          fail "later failure was hidden by the completed terminal effect")
 ;;
 
-let with_openai_tool_call_server ~tool_name ~tool_input f =
+let with_openai_tool_call_server ?second_response ~tool_name ~tool_input f =
   let sw =
     match Eio_context.get_switch_opt () with
     | Some sw -> sw
@@ -4265,11 +4265,16 @@ let with_openai_tool_call_server ~tool_name ~tool_input f =
     incr provider_call_count;
     if !provider_call_count = 1
     then Cohttp_eio.Server.respond_string ~status:`OK ~body:response_body ()
-    else
-      Cohttp_eio.Server.respond_string
-        ~status:`Internal_server_error
-        ~body:{|{"error":"terminal failure re-entered the provider"}|}
-        ()
+    else (
+      (* A caller that expects the turn to continue supplies the next answer;
+         without one, a second call is the failure the test is looking for. *)
+      match second_response with
+      | Some body -> Cohttp_eio.Server.respond_string ~status:`OK ~body ()
+      | None ->
+        Cohttp_eio.Server.respond_string
+          ~status:`Internal_server_error
+          ~body:{|{"error":"terminal failure re-entered the provider"}|}
+          ())
   in
   let socket =
     Eio.Net.listen
@@ -4292,7 +4297,10 @@ let with_openai_tool_call_server ~tool_name ~tool_input f =
   result, !provider_call_count
 ;;
 
-let test_deferred_web_search_yields_before_provider_retry () =
+(* A Gate deferral parks the search and the turn keeps going: the model gets
+   the deferred tool result and answers in the same turn. The parked call is
+   replayed by the host once the approval resolves. *)
+let test_deferred_web_search_keeps_the_turn_going () =
   with_exec_fixture
     ~bind_eio_context:true
     "deferred_web_search_yield"
@@ -4315,6 +4323,32 @@ let test_deferred_web_search_yields_before_provider_retry () =
        in
        let runtime_result, provider_call_count =
          with_openai_tool_call_server
+           ~second_response:
+             (Yojson.Safe.to_string
+                (`Assoc
+                    [ "id", `String "deferred-effect-followup"
+                    ; "object", `String "chat.completion"
+                    ; "created", `Int 0
+                    ; "model", `String "deferred-effect-model"
+                    ; ( "choices"
+                      , `List
+                          [ `Assoc
+                              [ "index", `Int 0
+                              ; ( "message"
+                                , `Assoc
+                                    [ "role", `String "assistant"
+                                    ; ( "content"
+                                      , `String "search parked; continuing" )
+                                    ] )
+                              ; "finish_reason", `String "stop"
+                              ] ] )
+                    ; ( "usage"
+                      , `Assoc
+                          [ "prompt_tokens", `Int 1
+                          ; "completion_tokens", `Int 1
+                          ; "total_tokens", `Int 2
+                          ] )
+                    ]))
            ~tool_name:"WebSearch"
            ~tool_input:
              (`Assoc [ "query", `String "hourly scheduled search" ])
@@ -4346,8 +4380,8 @@ let test_deferred_web_search_yields_before_provider_retry () =
            [ Agent_core.Types.Text "search for the tool" ]
        in
        check int
-         "deferred effect stops before a second provider call"
-         1
+         "the turn continued past the parked effect"
+         2
          provider_call_count;
        (match
           Masc.Keeper_approval_queue.list_pending_entries_for_workspace
@@ -4362,20 +4396,15 @@ let test_deferred_web_search_yields_before_provider_retry () =
           fail
             (Masc.Keeper_approval_queue.storage_error_to_string error));
        (match runtime_result with
-        | Ok
-            { Runtime_agent.stop_reason =
-                Runtime_agent.Awaiting_external_effect _
-            ; _
-            } ->
-          ()
+        | Ok { Runtime_agent.stop_reason = Runtime_agent.Completed; _ } -> ()
         | Ok result ->
           failf
-            "deferred effect returned stop_reason=%s"
+            "parked effect returned stop_reason=%s"
             (Masc.Keeper_execution_receipt_types.stop_reason_to_string
                result.Runtime_agent.stop_reason)
         | Error error ->
           failf
-            "deferred effect failed instead of yielding: %s"
+            "parked effect failed instead of continuing: %s"
             (Agent_core.Error.to_string error));
        match bundle.terminal_effect_state () with
        | Masc.Keeper_tools_agent_core.External_effect_deferred -> ()
@@ -7324,8 +7353,8 @@ let () =
         test_malformed_json_looking_success_stays_success;
       test_case "only typed producer failure is failure" `Quick
         test_only_typed_producer_failure_is_failure;
-      test_case "deferred WebSearch yields before provider retry" `Quick
-        test_deferred_web_search_yields_before_provider_retry;
+      test_case "deferred WebSearch keeps the turn going" `Quick
+        test_deferred_web_search_keeps_the_turn_going;
       test_case "invalid surface input stays correction-capable" `Quick
         test_invalid_surface_post_input_stays_correction_capable;
       test_case "surface append failure is not terminal completion" `Quick

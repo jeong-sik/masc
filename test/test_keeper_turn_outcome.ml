@@ -25,7 +25,7 @@ let outcome : TO.t testable =
 let all =
   [ TO.Visible_reply
   ; TO.Continuation_checkpoint
-  ; TO.External_effect_completed
+  ; TO.Terminal_effect_settled
   ; TO.External_effect_pending
   ; TO.No_visible_reply
   ]
@@ -99,7 +99,7 @@ let test_external_effect_wait_is_typed_status () =
 let test_external_effect_completed_has_no_direct_reply_error () =
   let payload_json =
     `Assoc
-      [ TO.wire_key, `String (TO.to_label TO.External_effect_completed)
+      [ TO.wire_key, `String (TO.to_label TO.Terminal_effect_settled)
       ; "reply", `String ""
       ]
   in
@@ -119,7 +119,7 @@ let test_canonical_payload_carries_delivery_target () =
        @ target_json)
     |> Yojson.Safe.to_string
   in
-  let body_with = body_for TO.External_effect_completed in
+  let body_with = body_for TO.Terminal_effect_settled in
   (match
      Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
        (body_with
@@ -205,7 +205,7 @@ let test_canonical_payload_carries_memory_revision () =
        @ effect_json)
     |> Yojson.Safe.to_string
   in
-  let body_with = body_for TO.External_effect_completed in
+  let body_with = body_for TO.Terminal_effect_settled in
   let revision_key = Masc.Keeper_tool_execution.memory_revision_wire_key in
   (* A memory-write completion is the other receipt shape for this outcome:
      it proves the effect through its revision and has no delivery target
@@ -365,10 +365,16 @@ let test_terminal_effect_defer_kinds_remain_distinct () =
     "generic deferred tool preserves existing checkpoint"
     Masc.Keeper_tools_agent_core.Deferred_tool_result
     "durable_stimulus_waiting";
-  expect_yield
-    "typed external effect uses Gate acknowledgement path"
-    Masc.Keeper_tools_agent_core.External_effect_deferred
-    "external_effect_deferred"
+  (* A Gate deferral parks one call and nothing has run yet, so the turn keeps
+     going. The host replays the parked call once the approval resolves. *)
+  match
+    Masc.Keeper_agent_run.terminal_effect_boundary_decision
+      Masc.Keeper_tools_agent_core.External_effect_deferred
+  with
+  | Ok Runtime_agent.Continue -> ()
+  | Ok (Runtime_agent.Yield _) -> fail "a parked external effect ended the turn"
+  | Error error ->
+    fail ("parked external effect: " ^ Agent_core.Error.to_string error)
 
 let test_applied_gate_replay_seeds_terminal_settlement () =
   let output_ref =
@@ -676,7 +682,7 @@ let test_payload_decode () =
   check outcome "visible label" TO.Visible_reply
     (decoded_exn
        (payload [ (TO.wire_key, `String "visible_reply") ]));
-  check outcome "completed external effect label" TO.External_effect_completed
+  check outcome "completed external effect label" TO.Terminal_effect_settled
     (decoded_exn
        (payload [ (TO.wire_key, `String "external_effect_completed") ]));
   check outcome "no visible reply label" TO.No_visible_reply
@@ -823,7 +829,7 @@ let test_control_turn_keeps_spoken_words () =
     ~turn_outcome:Masc.Keeper_turn_outcome.External_effect_pending
     ~spoken:(Some words) words;
   spoken_row "completed external effect keeps the words"
-    ~turn_outcome:Masc.Keeper_turn_outcome.External_effect_completed
+    ~turn_outcome:Masc.Keeper_turn_outcome.Terminal_effect_settled
     ~spoken:(Some words) words
 
 let test_wordless_control_turn_delivery () =
@@ -838,7 +844,7 @@ let test_wordless_control_turn_delivery () =
     ~spoken:None "";
   match
     Stream.For_testing.control_turn_delivery
-      ~turn_outcome:Masc.Keeper_turn_outcome.External_effect_completed
+      ~turn_outcome:Masc.Keeper_turn_outcome.Terminal_effect_settled
       ~spoken:None
   with
   | `Tool_calls_only -> ()
@@ -976,7 +982,7 @@ let test_connector_projection_keeps_continuation_typed () =
 let test_connector_projection_suppresses_completed_external_effect () =
   match
     Masc.Keeper_chat_blocks.connector_projection
-      ~turn_outcome:TO.External_effect_completed
+      ~turn_outcome:TO.Terminal_effect_settled
       ~reply:None
   with
   | Connector_no_visible_reply -> ()

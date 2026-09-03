@@ -35,6 +35,15 @@ val summarize_answer : draft -> row:Masc.Tui_decode.ask_row -> string
     quoted, a skipped question named. Empty when nothing is answered yet, so a
     caller can fall back to the Keeper name alone. *)
 
+val newly_opened_ask_ids :
+  previous:Masc.Tui_decode.asks_snapshot option ->
+  current:Masc.Tui_decode.asks_snapshot ->
+  string list
+(** Ask ids open in [current] but not in [previous] — the questions that
+    arrived since the last read. A re-read of the same asks, and a first read
+    (no previous), both return none, so a caller rings once per new question
+    rather than once per poll or once at start-up. *)
+
 val toggle_choice :
   draft ->
   question:Masc.Tui_decode.ask_question ->

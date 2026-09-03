@@ -2939,6 +2939,65 @@ let test_runtime_binding_disable_excludes_only_that_binding () =
         (String_util.contains_substring msg "disabled by runtime.toml"))
 ;;
 
+(* verifier_exact slots are read twice: the exact registry admits them against
+   the AGENT_CORE catalog, and completion-authority judgement dispatches them
+   through resolve_assignment, which knows only configured runtimes and lanes.
+   A slot that satisfies the catalog and names no configured route used to
+   load, then fail at every judgement — 113 of them on 2026-09-02. *)
+let exact_lane_runtime_toml ~lane ~slot =
+  Printf.sprintf
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n\
+     \n\
+     [runtime.exact_output_lanes.%s]\n\
+     slots = [\"local.sample\", %S]\n"
+    lane
+    slot
+;;
+
+let test_verifier_exact_slot_must_name_a_configured_route () =
+  with_temp_runtime_toml
+    (exact_lane_runtime_toml ~lane:"verifier_exact" ~slot:"local.absent")
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Ok _ ->
+         failf "a verifier_exact slot naming no configured runtime should be rejected"
+       | Error msg ->
+         check bool "error names the lane's slots" true
+           (String_util.contains_substring
+              msg
+              "[runtime.exact_output_lanes.verifier_exact].slots");
+         check bool "error names the unresolved id" true
+           (String_util.contains_substring msg "local.absent"))
+;;
+
+(* The sibling lanes dispatch through the registry alone, so a catalog-only
+   target id is correct for them — hitl_auto_judge holds one today
+   (glm-coding.glm-5.3-flash-nothink, which is no configured runtime). Load
+   must not reject it, or the check above takes the fleet down with it. *)
+let test_sibling_exact_lanes_keep_catalog_only_slots () =
+  List.iter
+    (fun lane ->
+       with_temp_runtime_toml
+         (exact_lane_runtime_toml ~lane ~slot:"local.absent")
+         (fun path ->
+            match Runtime.load_list ~config_path:path with
+            | Ok _ -> ()
+            | Error msg ->
+              failf "%s must accept a catalog-only slot id, got: %s" lane msg))
+    [ "hitl_auto_judge"; "librarian_exact"; "board_attention_exact" ]
+;;
+
 (* masc#28404. Same config the test above proves must still boot: [local.sample]
    is routed and capped, [local.dormant] is declared, materialized, and cannot
    carry a keeper turn. Boot staying up is correct; the runtime being blocked
@@ -4599,6 +4658,10 @@ let () =
             test_runtime_provider_disable_excludes_its_bindings;
           test_case "disabled binding is excluded and rejected when referenced" `Quick
             test_runtime_binding_disable_excludes_only_that_binding;
+          test_case "verifier_exact slot must name a configured route" `Quick
+            test_verifier_exact_slot_must_name_a_configured_route;
+          test_case "sibling exact lanes keep catalog-only slots" `Quick
+            test_sibling_exact_lanes_keep_catalog_only_slots;
           test_case "unreferenced binding naming an undeclared model fails the load"
             `Quick test_binding_naming_an_undeclared_model_fails_the_load;
           test_case "non-provider top-level namespaces are not bindings" `Quick

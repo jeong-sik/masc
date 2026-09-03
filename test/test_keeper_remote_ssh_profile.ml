@@ -138,6 +138,62 @@ let test_endpoint_blank_rejected () =
   reject "";
   reject "   "
 
+(* RFC-0405. [microvm_backend] names which runtime supplies the guest. It sits
+   beside [remote_endpoint] because both are keys only one profile reads, and
+   both are typos rather than overrides anywhere else. *)
+let test_microvm_backend_parses_under_microvm () =
+  let doc =
+    toml_doc_of_string_pairs
+      [ "keeper.sandbox_profile", "microvm"
+      ; "keeper.microvm_backend", "microsandbox"
+      ]
+  in
+  match Masc.Keeper_types_profile_toml_parser.profile_defaults_of_toml doc with
+  | Error msg -> fail ("a declared backend was rejected: " ^ msg)
+  | Ok defaults ->
+    (match defaults.microvm_backend with
+     | Some Masc.Keeper_microvm_backend.Microsandbox -> ()
+     | Some other ->
+       failf
+         "microsandbox parsed as %s"
+         (Masc.Keeper_microvm_backend.to_string other)
+     | None -> fail "a declared backend did not reach the defaults")
+;;
+
+let test_microvm_backend_requires_microvm () =
+  let reject profile_pair =
+    let doc =
+      toml_doc_of_string_pairs
+        (profile_pair @ [ "keeper.microvm_backend", "microsandbox" ])
+    in
+    match Masc.Keeper_types_profile_toml_parser.profile_defaults_of_toml doc with
+    | Ok _ -> fail "microvm_backend outside the microvm profile must be rejected"
+    | Error msg ->
+      check bool "named error" true
+        (contains "microvm_backend_requires_microvm" msg)
+  in
+  reject [ "keeper.sandbox_profile", "docker" ];
+  reject [ "keeper.sandbox_profile", "remote_ssh" ];
+  reject []
+;;
+
+(* An unknown spelling is refused by name. Falling back to a runtime the
+   keeper did not ask for would defeat the key: the point of naming a backend
+   is that the isolation is the declared one. *)
+let test_an_unknown_backend_is_refused_by_name () =
+  let doc =
+    toml_doc_of_string_pairs
+      [ "keeper.sandbox_profile", "microvm"
+      ; "keeper.microvm_backend", "firecracker"
+      ]
+  in
+  match Masc.Keeper_types_profile_toml_parser.profile_defaults_of_toml doc with
+  | Ok _ -> fail "an unimplemented runtime must not load"
+  | Error msg ->
+    check bool "names the key" true (contains "microvm_backend_unknown" msg);
+    check bool "names what it would have taken" true (contains "microsandbox" msg)
+;;
+
 let test_remote_endpoint_requires_remote_ssh () =
   let reject profile_pair =
     let doc =
@@ -150,7 +206,11 @@ let test_remote_endpoint_requires_remote_ssh () =
         (contains "remote_endpoint_requires_remote_ssh" msg)
   in
   reject [ "keeper.sandbox_profile", "docker" ];
-  reject [ "keeper.sandbox_profile", "local" ];
+  (* "local" was this case's second profile until #32078 retired it. The load
+     now refuses the value before it ever reaches the remote_endpoint check,
+     so the assertion was reading a different error than the one it names.
+     microvm is a live profile that is still not remote_ssh. *)
+  reject [ "keeper.sandbox_profile", "microvm" ];
   (* Absent profile defaults away from remote_ssh, so the endpoint is still
      rejected. *)
   reject []
@@ -167,4 +227,10 @@ let () =
                   ; test_case "blank rejected" `Quick test_endpoint_blank_rejected
                   ; test_case "present accepted" `Quick test_endpoint_present_accepted
                   ; test_case "requires remote_ssh" `Quick
-                      test_remote_endpoint_requires_remote_ssh ] ]
+                      test_remote_endpoint_requires_remote_ssh
+                  ; Alcotest.test_case "microvm_backend parses under microvm"
+                      `Quick test_microvm_backend_parses_under_microvm
+                  ; Alcotest.test_case "microvm_backend requires microvm"
+                      `Quick test_microvm_backend_requires_microvm
+                  ; Alcotest.test_case "an unknown backend is refused by name"
+                      `Quick test_an_unknown_backend_is_refused_by_name ] ]

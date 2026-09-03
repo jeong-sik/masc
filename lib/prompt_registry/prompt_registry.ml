@@ -331,7 +331,7 @@ let clear () : unit =
    I/O under the lock (the original sin that [resolve_prompt] at the
    bottom of this file was explicitly refactored to avoid, see #3335). *)
 let build_resolved_from_snapshot ~key ~override_value ~file_value =
-  let file_path = prompt_markdown_path key in
+  let file_path = prompt_source_path key in
   let source, effective =
     match override_value with
     | Some value -> ("override", value)

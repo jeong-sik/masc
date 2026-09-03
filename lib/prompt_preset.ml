@@ -116,6 +116,15 @@ let compact_stamp () =
     tm.Unix.tm_sec
 ;;
 
+(* The filesystem boundary raises; a preset call answers with [Error]. *)
+let guard f =
+  match f () with
+  | value -> value
+  | exception Sys_error message -> Error message
+  | exception Unix.Unix_error (error, operation, argument) ->
+    Error (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
+;;
+
 (* ── JSON ──────────────────────────────────────────────────────────── *)
 
 let strings values = `List (List.map (fun v -> `String v) values)
@@ -197,6 +206,11 @@ let manifest_of_json (json : Yojson.Safe.t) =
       let* preset_created_at = string_field fields "created_at" in
       let* override_count = int_field fields "override_count" in
       let* keepers = string_list_field fields "keepers" in
+      let* () =
+        match List.find_opt (fun keeper -> not (is_valid_name keeper)) keepers with
+        | Some keeper -> Error ("manifest keeper name is not a file name: " ^ keeper)
+        | None -> Ok ()
+      in
       let* assignment_count = int_field fields "assignment_count" in
       let* lane_count = int_field fields "lane_count" in
       Ok
@@ -308,10 +322,16 @@ let capture_instructions ~base_path =
   else
     Keeper_types_profile.discover_keepers_toml dir
     |> List.filter_map (function
-      | Keeper_types_profile.Loaded { keeper_name; defaults } ->
-        Option.map
-          (fun text -> keeper_name, text)
-          defaults.Keeper_types_profile_defaults.instructions
+      | Keeper_types_profile.Loaded { keeper_name = _; defaults } ->
+        (* Keyed by the TOML file name, which is what restore resolves;
+           [keeper.name] may differ from it. *)
+        (match
+           ( defaults.Keeper_types_profile_defaults.manifest_path
+           , defaults.Keeper_types_profile_defaults.instructions )
+         with
+         | Some path, Some text ->
+           Some (Filename.remove_extension (Filename.basename path), text)
+         | _ -> None)
       | Keeper_types_profile.Invalid _ -> None)
 ;;
 
@@ -349,16 +369,17 @@ let capture ~base_path ~name ~description =
   if not (is_valid_name name)
   then Error ("invalid preset name: " ^ name)
   else
-    let* assignments, lanes = capture_runtime ~base_path in
-    Ok
-      { name
-      ; description
-      ; created_at = now_iso ()
-      ; prompt_overrides = Prompt_registry.override_entries ()
-      ; instructions = capture_instructions ~base_path
-      ; assignments
-      ; lanes
-      }
+    guard (fun () ->
+      let* assignments, lanes = capture_runtime ~base_path in
+      Ok
+        { name
+        ; description
+        ; created_at = now_iso ()
+        ; prompt_overrides = Prompt_registry.override_entries ()
+        ; instructions = capture_instructions ~base_path
+        ; assignments
+        ; lanes
+        })
 ;;
 
 (* ── Files ─────────────────────────────────────────────────────────── *)
@@ -387,12 +408,18 @@ let clear_instruction_files dir =
       then Sys.remove (Filename.concat instructions file))
 ;;
 
+(* The manifest goes last and the old one goes first, so a save that stops
+   midway leaves a directory without a manifest — unreadable to [load] and
+   listed under [unreadable] — never an old manifest over new files. *)
 let save ~base_path (s : snapshot) =
   if not (is_valid_name s.name)
   then Error ("invalid preset name: " ^ s.name)
   else
+    guard (fun () ->
     let dir = preset_dir ~base_path s.name in
     let* () = mkdir_p (Filename.concat dir instructions_dir) in
+    let manifest = Filename.concat dir manifest_file in
+    if Sys.file_exists manifest then Sys.remove manifest;
     clear_instruction_files dir;
     let* () =
       Override.save ~path:(Filename.concat dir overrides_file) s.prompt_overrides
@@ -414,8 +441,8 @@ let save ~base_path (s : snapshot) =
         s.instructions
     in
     Fs_compat.save_file_atomic
-      (Filename.concat dir manifest_file)
-      (Yojson.Safe.pretty_to_string (manifest_to_json (manifest_of_snapshot s)) ^ "\n")
+      manifest
+      (Yojson.Safe.pretty_to_string (manifest_to_json (manifest_of_snapshot s)) ^ "\n"))
 ;;
 
 let read_manifest dir =
@@ -430,6 +457,7 @@ let load ~base_path name =
   if not (is_valid_name name)
   then Error ("invalid preset name: " ^ name)
   else
+    guard (fun () ->
     let dir = preset_dir ~base_path name in
     if not (Sys.file_exists (Filename.concat dir manifest_file))
     then Error ("preset not found: " ^ name)
@@ -465,23 +493,31 @@ let load ~base_path name =
         ; instructions
         ; assignments
         ; lanes
-        }
+        })
 ;;
 
 let list ~base_path =
   let dir = presets_dir ~base_path in
   if not (Sys.file_exists dir && Sys.is_directory dir)
   then { presets = []; unreadable = [] }
-  else
-    Fs_compat.read_dir dir
-    |> List.filter (fun name -> Sys.is_directory (Filename.concat dir name))
-    |> List.fold_left
-         (fun acc name ->
-           match read_manifest (Filename.concat dir name) with
-           | Ok m -> { acc with presets = m :: acc.presets }
-           | Error message -> { acc with unreadable = (name, message) :: acc.unreadable })
-         { presets = []; unreadable = [] }
-    |> fun acc -> { presets = List.rev acc.presets; unreadable = List.rev acc.unreadable }
+  else (
+    match guard (fun () -> Ok (Fs_compat.read_dir dir)) with
+    | Error message -> { presets = []; unreadable = [ dir, message ] }
+    | Ok names ->
+      names
+      |> List.fold_left
+           (fun acc name ->
+             match
+               guard (fun () ->
+                 if Sys.is_directory (Filename.concat dir name)
+                 then Result.map Option.some (read_manifest (Filename.concat dir name))
+                 else Ok None)
+             with
+             | Ok (Some m) -> { acc with presets = m :: acc.presets }
+             | Ok None -> acc
+             | Error message -> { acc with unreadable = (name, message) :: acc.unreadable })
+           { presets = []; unreadable = [] }
+      |> fun acc -> { presets = List.rev acc.presets; unreadable = List.rev acc.unreadable })
 ;;
 
 (* ── Restore ───────────────────────────────────────────────────────── *)
@@ -506,7 +542,13 @@ let restore_prompt_overrides ~base_path (entries : Override.entry list) =
   in
   List.fold_left
     (fun acc (e : Override.entry) ->
-      match Prompt_registry.set_override_persisted ~base_path e.Override.key e.Override.value with
+      match
+        Prompt_registry.set_override_persisted
+          ~expected_contract_revision:e.Override.contract_revision
+          ~base_path
+          e.Override.key
+          e.Override.value
+      with
       | Ok () -> { acc with applied = e.Override.key :: acc.applied }
       | Error (Prompt_registry.Validation_error message)
       | Error (Prompt_registry.Persistence_error message) ->
@@ -577,26 +619,52 @@ let runtime_text_with ~current_assignments ~assignments ~lanes content =
     lanes
 ;;
 
+(* The preset's routing already holds in the file: the same assignment
+   rows, and every preset lane present with the same slots. Compared on the
+   parsed values, not the text — the writers reformat rows they touch. *)
+let routing_holds ~current_assignments ~current_lanes ~assignments ~lanes =
+  let sorted = List.sort compare in
+  sorted current_assignments = sorted assignments
+  && List.for_all
+       (fun lane ->
+         match List.find_opt (fun current -> String.equal current.id lane.id) current_lanes with
+         | Some current -> current.slots = lane.slots && current.cli_slots = lane.cli_slots
+         | None -> false)
+       lanes
+;;
+
 let restore_runtime ~base_path ~assignments ~lanes =
   let path = runtime_toml_path ~base_path in
-  match Fs_compat.load_file_opt path with
-  | None -> Runtime_failed ("runtime.toml missing at " ^ path)
-  | Some content ->
+  match guard (fun () -> Ok (Fs_compat.load_file_opt path)) with
+  | Error message -> Runtime_failed message
+  | Ok None -> Runtime_failed ("runtime.toml missing at " ^ path)
+  | Ok (Some content) ->
     (match runtime_of_text content with
      | Error message -> Runtime_failed ("current runtime.toml does not parse: " ^ message)
-     | Ok (current_assignments, _) ->
-       let text = runtime_text_with ~current_assignments ~assignments ~lanes content in
-       if String.equal text content
+     | Ok (current_assignments, current_lanes) ->
+       if routing_holds ~current_assignments ~current_lanes ~assignments ~lanes
        then Runtime_unchanged
        else (
+         let text = runtime_text_with ~current_assignments ~assignments ~lanes content in
          match Runtime.save_config_text ~runtime_config_path:path text with
          | Ok _receipt -> Runtime_committed
          | Error message -> Runtime_failed message))
 ;;
 
+(* The stamp has one-second resolution; a second restore inside that second
+   takes the next free suffix rather than overwriting the first autosave. *)
+let fresh_autosave_name ~base_path =
+  let stamp = autosave_prefix ^ compact_stamp () in
+  let rec pick n =
+    let candidate = if n = 0 then stamp else Printf.sprintf "%s-%d" stamp n in
+    if Sys.file_exists (preset_dir ~base_path candidate) then pick (n + 1) else candidate
+  in
+  pick 0
+;;
+
 let restore ~base_path name =
   let* target = load ~base_path name in
-  let autosave = autosave_prefix ^ compact_stamp () in
+  let autosave = fresh_autosave_name ~base_path in
   let* current =
     capture ~base_path ~name:autosave ~description:("state before restoring " ^ name)
   in

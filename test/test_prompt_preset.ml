@@ -216,6 +216,47 @@ let test_restore_puts_the_saved_state_back () =
       autosave.Preset.instructions)
 ;;
 
+let test_stale_override_revision_is_skipped () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    set_override ~base_path "Morning override.";
+    let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    let stale =
+      { morning with
+        Preset.name = "stale"
+      ; prompt_overrides =
+          List.map
+            (fun (e : Override.entry) -> { e with Override.contract_revision = "0000" })
+            morning.Preset.prompt_overrides
+      }
+    in
+    or_fail (Preset.save ~base_path stale);
+    set_override ~base_path "Afternoon override.";
+    let report = or_fail (Preset.restore ~base_path "stale") in
+    check (list string) "the stale override is not applied" []
+      report.Preset.prompt_overrides_result.Preset.applied;
+    check (list string) "it is reported skipped under its key" [ prompt_key ]
+      (List.map fst report.Preset.prompt_overrides_result.Preset.skipped);
+    check string "the live override is untouched" "Afternoon override."
+      (Prompt_registry.get_prompt prompt_key))
+;;
+
+let test_two_restores_keep_two_autosaves () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    or_fail (Preset.save ~base_path morning);
+    let first = or_fail (Preset.restore ~base_path "morning") in
+    let second = or_fail (Preset.restore ~base_path "morning") in
+    check bool "the second autosave has its own name" true
+      (not (String.equal first.Preset.autosave second.Preset.autosave));
+    let names =
+      List.map (fun (m : Preset.manifest) -> m.Preset.preset_name) (Preset.list ~base_path).Preset.presets
+    in
+    check bool "both autosaves are listed" true
+      (List.mem first.Preset.autosave names && List.mem second.Preset.autosave names))
+;;
+
 let test_runtime_text_transform () =
   let open Alcotest in
   let text =
@@ -253,6 +294,10 @@ let () =
             test_restore_puts_the_saved_state_back
         ; Alcotest.test_case "the runtime.toml text transform keeps every other line" `Quick
             test_runtime_text_transform
+        ; Alcotest.test_case "a stale contract revision is skipped, not applied" `Quick
+            test_stale_override_revision_is_skipped
+        ; Alcotest.test_case "two restores keep two autosaves" `Quick
+            test_two_restores_keep_two_autosaves
         ] )
     ]
 ;;

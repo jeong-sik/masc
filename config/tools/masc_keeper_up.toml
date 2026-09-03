@@ -35,9 +35,13 @@ type = "string"
 enum = ["docker", "microvm", "remote_ssh"]
 description = """
 Sandbox isolation profile. Pass explicitly: \"docker\" for containerized \
-execution. \"microvm\" runs each guest as a lightweight VM through \
-Apple's container CLI (host needs the CLI and the sandbox image already \
-present; network defaults to none like docker). \"remote_ssh\" targets the \
+execution. \"microvm\" runs each guest as a lightweight VM behind a \
+hypervisor; which runtime supplies it is the keeper TOML's \
+microvm_backend (apple_container, microsandbox, or nerdctl_kata), and the \
+host needs that runtime's CLI and sandbox image already present. Naming a \
+backend is not something this tool does: on a host with no assumed one, a \
+microvm keeper is refused at boot rather than handed a different isolation \
+than it declared. Network defaults to none like docker. \"remote_ssh\" targets the \
 SSH remote execution lane (Phase 1; requires remote_endpoint in the \
 keeper TOML, runner lands with the lane). There is no host profile: every \
 keeper runs under one of these three. Creating a keeper without this field \

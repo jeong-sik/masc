@@ -78,7 +78,7 @@ factory 가 진짜 하는 일은 부팅, `(in_playground, network_mode)` 별 메
 producer 로 설 수 있는 keeper 중 트리를 열어볼 수 있는 대상이 없다.
 
 승인 2건이 특히 문제다. 검증 프롬프트
-(`config/prompts/verification.lookup.producer_tree.md`)는 이렇게 적어놨다.
+(`config/prompts/verification.md` 의 `lookup.producer_tree` 슬롯)는 이렇게 적어놨다.
 
 > 확인 가능한 주장을 확인하지 않고 승인하면 그것은 제출자가 아니라 당신의
 > 누락입니다.

@@ -7,7 +7,7 @@
     순수 함수 — agent_core 의존 없이 fusion_core에서 단위 테스트 가능. AGENT_CORE의
     [tool_param list] schema 구성은 소비자(lib/fusion/fusion_judge)가 담당한다.
 
-    기대 JSON 형태 (LLM 지시는 [config/prompts/fusion.judge.output.md]):
+    기대 JSON 형태 (LLM 지시는 [config/prompts/fusion.judge.md] 의 [output] 슬롯):
     {[
       {
         "consensus":        [ { "text": "...", "supporting_models": ["m1"] } ],

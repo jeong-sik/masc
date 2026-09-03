@@ -618,7 +618,7 @@
  (name masc_tui_observation_layout)
  (wrapped false)
  (modules masc_tui_observation_layout)
- (libraries masc masc_tui_message_layout))
+ (libraries masc masc_tui_message_layout masc_tui_table))
 
 (library
  (name masc_tui_tool_table)

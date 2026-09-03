@@ -937,6 +937,7 @@
   masc.masc_random_id
    masc.time_codec
   terminal_size
+  base64
   masc_tui_credential
   masc_tui_types
   masc_tui_terminal_profile
@@ -983,6 +984,7 @@
   masc_tui_markdown
   masc_tui_graphics
   masc_tui_image_ref
+  masc_tui_image_preview
   masc_tui_link
   masc_tui_link_label
   masc_tui_markdown_render_cache
@@ -1101,6 +1103,12 @@
  (name masc_tui_image_ref)
  (wrapped false)
  (modules masc_tui_image_ref))
+
+(library
+ (name masc_tui_image_preview)
+ (wrapped false)
+ (modules masc_tui_image_preview)
+ (libraries masc_tui_keeper_chat_projection))
 
 (library
  (name masc_tui_link_label)

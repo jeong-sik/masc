@@ -3147,6 +3147,11 @@
  (libraries alcotest masc_tui_clipboard))
 
 (test
+ (name test_tui_image_preview)
+ (modules test_tui_image_preview)
+ (libraries alcotest masc_tui_image_preview masc_tui_keeper_chat_projection))
+
+(test
  (name test_tui_keeper_chat_projection)
  (modules test_tui_keeper_chat_projection)
  (libraries

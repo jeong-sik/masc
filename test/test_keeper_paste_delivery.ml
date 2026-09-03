@@ -308,12 +308,14 @@ let test_delivery_lands_at_the_endpoint_workspace_root () =
         ~keeper_name:"keeper-a" ~remote_root:"/masc-work"
         ~gh_config_dir:"/identity/gh" ~injected_env:[] ~env_allowlist:[]
         ~connect_timeout_sec:1 ~max_concurrent_sessions:2
-        { Masc.Keeper_sandbox_remote.cli = [ cli ]
+        { Masc.Keeper_sandbox_remote.prefix =
+            [ cli; "exec"; "-i"; "--user"; "501:20"; "-w"; "/masc-work"
+            ; "--env"
+            ; "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf"
+            ; "masc-keeper-vm-keeper-a"
+            ]
         ; container_name = "masc-keeper-vm-keeper-a"
-        ; uid = 501
-        ; gid = 20
         ; shim_path = "/opt/masc-exec-shim/masc-exec-shim"
-        ; shim_config_path = "/opt/masc-exec-shim/masc-exec-shim.conf"
         }
     in
     let outcomes =

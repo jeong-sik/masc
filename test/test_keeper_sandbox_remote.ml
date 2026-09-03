@@ -124,8 +124,16 @@ let shim_config_path = "/opt/masc-exec-shim/masc-exec-shim.conf"
 let remote_root = "/masc-work"
 let gh_config_dir = "/masc-runtime/.masc/keepers/keeper-a/github-cli"
 
+(* The prefix is built by the declaring microVM runtime and handed over whole
+   ({!Keeper_sandbox_microvm.shim_exec_prefix_for}), so the fixture spells out
+   what Apple's runtime produces rather than letting this file re-derive it. *)
+let exec_prefix ~cli =
+  [ cli; "exec"; "-i"; "--user"; "501:20"; "-w"; remote_root
+  ; "--env"; "MASC_EXEC_SHIM_CONFIG=" ^ shim_config_path; guest_name ]
+;;
+
 let guest ~cli : Keeper_sandbox_remote.container_exec =
-  { cli = [ cli ]; container_name = guest_name; uid = 501; gid = 20; shim_path; shim_config_path }
+  { prefix = exec_prefix ~cli; container_name = guest_name; shim_path }
 ;;
 
 let make_state ~base_path ~cli =
@@ -151,10 +159,24 @@ let status_testable =
 
 let test_transport_and_probe_argv () =
   let state = make_state ~base_path:"/workspace" ~cli:"container" in
-  let prefix =
-    [ "container"; "exec"; "-i"; "--user"; "501:20"; "-w"; remote_root
-    ; "--env"; "MASC_EXEC_SHIM_CONFIG=" ^ shim_config_path; guest_name ]
-  in
+  let prefix = exec_prefix ~cli:"container" in
+  (* The other tests here drive a stub CLI, so the fixture has to stay
+     parameterised by executable. This one is about the argv, so it first
+     pins the fixture against the builder that actually runs: without this
+     the two can drift and every assertion below would keep passing against
+     a prefix production no longer produces. *)
+  (match
+     Keeper_sandbox_microvm.shim_exec_prefix_for
+       Keeper_microvm_backend.Apple_container
+       ~container_name:guest_name
+       ~uid:501
+       ~gid:20
+       ~remote_root
+       ~shim_config_path
+   with
+   | Error detail -> fail ("the declaring runtime refused its own prefix: " ^ detail)
+   | Ok built ->
+     check (list string) "the fixture is what the production builder emits" built prefix);
   check (list string) "exec argv delivers the frame to the shim"
     (prefix @ [ shim_path ])
     (Keeper_sandbox_remote.transport_argv state);

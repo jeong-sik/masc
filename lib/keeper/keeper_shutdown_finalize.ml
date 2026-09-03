@@ -691,15 +691,21 @@ let complete_cleanup
     operation
     cleanup
   =
+  (* Teardown runs after the registry entry is gone, so the microVM runtime
+     has to be read here, while the meta is still readable, and carried to the
+     call. Dropping it would send Apple's removal spelling to a guest another
+     runtime booted -- or, since the teardown refuses an unnamed runtime,
+     remove nothing at all and leave the guest running. *)
   let sandbox_backend =
     match read_operation_meta ~config operation with
     | Error detail -> Error detail
     | Ok meta ->
       Ok
-        (match meta.Keeper_meta_contract.sandbox_profile with
-         | Docker -> Keeper_sandbox.Docker
-         | Micro_vm -> Keeper_sandbox.Micro_vm
-         | Remote_ssh -> Keeper_sandbox.Remote_ssh)
+        ( (match meta.Keeper_meta_contract.sandbox_profile with
+           | Docker -> Keeper_sandbox.Docker
+           | Micro_vm -> Keeper_sandbox.Micro_vm
+           | Remote_ssh -> Keeper_sandbox.Remote_ssh)
+        , meta.Keeper_meta_contract.microvm_backend )
   in
   let require_released_summary_owner () =
     match operation.cleanup_intent.reason with
@@ -810,11 +816,12 @@ let complete_cleanup
           (match
              match sandbox_backend with
              | Error detail -> Error detail
-             | Ok backend ->
+             | Ok (backend, microvm_backend) ->
                Keeper_turn_sandbox_runtime.teardown_keeper_sandbox_by_name
                  ~config
                  ~keeper_name:operation.keeper_name
                  ~backend
+                 ?microvm_backend
                  ()
            with
            | Ok () -> ()

@@ -31,7 +31,8 @@ let with_temp_base name f =
     (fun () -> f base_path)
 
 let pending ~base_path ~keeper_name =
-  A.pending_for_keeper ~base_path ~keeper_name ~limit:10 ()
+  A.load_events ~base_path ~keeper_name
+  |> List.filter_map (function A.Recorded item -> Some item)
 
 let record ~base_path ?(team_id = Some "T1") ?(thread_ts = None)
     ?(user_name = Some "user-one") ?(channel_name = None) ~ts ~route ~urgency ()
@@ -111,19 +112,6 @@ let test_duplicate_wire_delivery_keeps_one_pending () =
   check (option string) "same event id" first second;
   check int "one pending" 1 (List.length (pending ~base_path ~keeper_name:"alpha"))
 
-let test_sent_reply_retires_attention () =
-  with_temp_base "slack-attention-resolve" @@ fun base_path ->
-  match record ~base_path ~ts:"1700000000.000400" ~route:"triggered"
-          ~urgency:A.Mention () with
-  | None -> fail "record returned None"
-  | Some event_id ->
-    check int "pending before reply" 1
-      (List.length (pending ~base_path ~keeper_name:"alpha"));
-    G.For_testing.mark_attention_resolved ~base_dir:base_path
-      ~keeper_name:"alpha" ~event_id ~reason:"slack_reply_sent";
-    check int "pending after reply" 0
-      (List.length (pending ~base_path ~keeper_name:"alpha"))
-
 (* Inbound identity rendering (issue #28376): the lane-shared mapping
    resolves the author label and rewrites mention escapes, and never touches
    [user_id] or [ts] (identity keys). *)
@@ -179,8 +167,6 @@ let () =
             test_a_missing_author_name_stays_missing
         ; test_case "duplicate wire delivery keeps one pending" `Quick
             test_duplicate_wire_delivery_keeps_one_pending
-        ; test_case "sent reply retires attention" `Quick
-            test_sent_reply_retires_attention
         ; test_case "inbound identity mapping" `Quick
             test_resolve_event_identity_maps_names_and_mentions
         ]

@@ -20,6 +20,14 @@ type t =
   | Microsandbox
       (** [msb] (microsandbox, libkrun). Runs where KVM is available, which
           includes Linux — the platform Apple's runtime cannot serve. *)
+  | Nerdctl_kata
+      (** [nerdctl] driving containerd with the Kata Containers runtime. A
+          Kata pod is a microVM with its own kernel and a [kata-agent] that
+          takes OCI Exec over vsock, so a guest can be booted detached and
+          driven across turns the way the other two are. The CLI is Docker's
+          grammar, and [nerdctl inspect] defaults to [--mode dockercompat],
+          so this backend reuses the Docker state format rather than needing
+          a parse of its own. *)
 
 val to_string : t -> string
 val of_string : string -> t option
@@ -28,6 +36,13 @@ val all : t list
 val valid_strings : string list
 (** The accepted spellings, for a schema mirror and for a refusal that can
     name what it would have taken. *)
+
+val run_runtime_args : t -> string list
+(** Extra argv the boot needs to get a microVM rather than whatever the CLI
+    would default to. Apple's [container] and [msb] are microVM runtimes by
+    construction and answer none; [nerdctl] drives containerd, whose default
+    is a shared-kernel runtime, so the Kata shim has to be named or the guest
+    would be a container wearing this profile's name. *)
 
 val cli_name : t -> string
 (** The executable this backend drives. A backend whose CLI is absent is

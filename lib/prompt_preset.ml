@@ -264,9 +264,9 @@ let runtime_of_json (json : Yojson.Safe.t) =
   | _ -> Error "runtime.json must be an object"
 ;;
 
-let part_to_json ~effect (r : part_result) : Yojson.Safe.t =
+let part_to_json ~timing (r : part_result) : Yojson.Safe.t =
   `Assoc
-    [ "effect", `String effect
+    [ "effect", `String timing
     ; "applied", strings r.applied
     ; ( "skipped"
       , `List
@@ -293,8 +293,8 @@ let report_to_json (r : restore_report) : Yojson.Safe.t =
   `Assoc
     [ "restored", `String r.restored
     ; "autosave", `String r.autosave
-    ; "prompt_overrides", part_to_json ~effect:"immediate" r.prompt_overrides_result
-    ; "instructions", part_to_json ~effect:"keeper_restart" r.instructions_result
+    ; "prompt_overrides", part_to_json ~timing:"immediate" r.prompt_overrides_result
+    ; "instructions", part_to_json ~timing:"keeper_restart" r.instructions_result
     ; "runtime", runtime
     ]
 ;;

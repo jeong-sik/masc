@@ -43,6 +43,22 @@ module For_testing : sig
   (** [Some true] is the only automatic-retry authority. [Some false] and
       [None] preserve the producer/operator action contract. *)
 
+  (** Whether a rediscovered stall is news to the Board. A Task awaiting
+      verification keeps one [verification_id] until its producer acts, so
+      every backlog walk reaches the stall path again; the last completed run
+      for that id says what the Board was already told. *)
+  type stall_notice =
+    | Post_stall_notice
+    | Stall_already_on_the_board
+
+  val stall_notice
+    :  last_reported:(string * string) option
+    -> gate:string
+    -> detail:string
+    -> stall_notice
+  (** [last_reported] is the [(gate, detail)] of the previous run's
+      [Not_reviewed] outcome, or [None] when there is no such run. *)
+
   type review_key =
     { task_id : string
     ; verification_id : string

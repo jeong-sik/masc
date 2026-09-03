@@ -197,6 +197,49 @@ let test_stalled_metadata_preserves_typed_authority () =
     "required artifact list is empty"
     (metadata |> member "detail" |> to_string)
 
+(* A stalled review is rediscovered by every backlog walk, because the Task
+   keeps its [verification_id] while it waits for its producer. Posting on
+   each rediscovery turned one stall into 40+ Board posts over 1h44m
+   (goal-failure-storm-cost-20260828). The previous run's [Not_reviewed]
+   outcome is what the Board already says. *)
+let stall_notice_case ~last_reported ~gate ~detail =
+  match CA.For_testing.stall_notice ~last_reported ~gate ~detail with
+  | CA.For_testing.Post_stall_notice -> "post"
+  | CA.For_testing.Stall_already_on_the_board -> "skip"
+;;
+
+let test_a_rediscovered_stall_does_not_repost () =
+  Alcotest.(check string)
+    "the first sighting has nothing to repeat"
+    "post"
+    (stall_notice_case ~last_reported:None ~gate:"evaluator_unavailable"
+       ~detail:"requested runtime or lane not found");
+  Alcotest.(check string)
+    "the same gate and detail is the post already on the board"
+    "skip"
+    (stall_notice_case
+       ~last_reported:(Some ("evaluator_unavailable", "requested runtime or lane not found"))
+       ~gate:"evaluator_unavailable"
+       ~detail:"requested runtime or lane not found")
+;;
+
+let test_a_different_stall_still_reaches_the_board () =
+  Alcotest.(check string)
+    "a new gate is a different stall"
+    "post"
+    (stall_notice_case
+       ~last_reported:(Some ("evaluator_unavailable", "requested runtime or lane not found"))
+       ~gate:"review_preparation"
+       ~detail:"requested runtime or lane not found");
+  Alcotest.(check string)
+    "a new detail under the same gate is new information"
+    "post"
+    (stall_notice_case
+       ~last_reported:(Some ("evaluator_unavailable", "requested runtime or lane not found"))
+       ~gate:"evaluator_unavailable"
+       ~detail:"the evaluator answered with an empty verdict")
+;;
+
 let test_rejected_verdict_event_preserves_wire_type () =
   let event =
     VP.For_testing.verdict_event_json
@@ -3006,6 +3049,10 @@ let () =
         test_stalled_projection_names_forward_paths;
       Alcotest.test_case "stalled metadata keeps typed authority" `Quick
         test_stalled_metadata_preserves_typed_authority;
+      Alcotest.test_case "a rediscovered stall does not repost" `Quick
+        test_a_rediscovered_stall_does_not_repost;
+      Alcotest.test_case "a different stall still reaches the board" `Quick
+        test_a_different_stall_still_reaches_the_board;
     ];
     "storage", [
       Alcotest.test_case "create and load" `Quick test_create_and_load;

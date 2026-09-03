@@ -542,6 +542,27 @@ let commit_verdict
     , Verification_run_registry.Commit_failed { detail } )
 ;;
 
+(** Whether this sweep's stall is news to the Board.
+
+    A Task sits in [AwaitingVerification] carrying one [verification_id]
+    until its producer acts, so every backlog walk rediscovers it and reaches
+    the stall path again. The last completed run for that id is the durable
+    record of what the Board was already told: a repeat of the same gate and
+    detail adds nothing, while a different gate or detail is a different
+    stall and still reaches the producer. *)
+type stall_notice =
+  | Post_stall_notice
+  | Stall_already_on_the_board
+
+let stall_notice ~last_reported ~gate ~detail =
+  match last_reported with
+  | None -> Post_stall_notice
+  | Some (reported_gate, reported_detail) ->
+    if String.equal reported_gate gate && String.equal reported_detail detail
+    then Stall_already_on_the_board
+    else Post_stall_notice
+;;
+
 let process_task_once
       (runtime : runtime)
       (task : Masc_domain.task)
@@ -563,6 +584,21 @@ let process_task_once
         ~finished_at:(Eio.Time.now runtime.clock)
         result
       :: !tools
+  in
+  (* Read before [register_running] overwrites it: the run this sweep is
+     about to start replaces whatever the last sweep recorded for the same
+     [verification_id], and the stall notice below needs to know what the
+     board was already told. *)
+  let stall_last_reported =
+    match Verification_run_registry.get registry ~verification_id with
+    | None -> None
+    | Some (previous : Verification_run_registry.run) -> (
+      match previous.status with
+      | Verification_run_registry.Completed
+          { outcome = Verification_run_registry.Not_reviewed { gate; detail }; _ } ->
+        Some (gate, detail)
+      | Verification_run_registry.Completed _ | Verification_run_registry.Running ->
+        None)
   in
   Verification_run_registry.register_running
     registry
@@ -671,16 +707,26 @@ let process_task_once
            | None -> gate
          in
          (* No verdict means nobody judged this submission. The registry row
-            alone reaches no one, so the outcome is always promoted to the
-            Board, where the producer Keeper and the operator both read it and
+            alone reaches no one, so the outcome is promoted to the Board,
+            where the producer Keeper and the operator both read it and
             decide whether to resubmit. The authority does not decide that on
-            their behalf. *)
-         Verification_protocol.notify_stalled_verification
-           ~authority
-           ~task_id:task.id
-           ~verification_id
-           ~gate
-           ~detail;
+            their behalf.
+
+            Once per stall, not once per sweep: a stall that outlived one
+            maintenance pulse used to become a fresh post every pulse (40+ on
+            one verification over 1h44m). [stall_notice] reads that from the
+            run this sweep is replacing. The registry retains a bounded
+            number of completed runs, so a stall long enough to age out
+            posts again — which is the right thing that far in. *)
+         (match stall_notice ~last_reported:stall_last_reported ~gate ~detail with
+          | Stall_already_on_the_board -> ()
+          | Post_stall_notice ->
+            Verification_protocol.notify_stalled_verification
+              ~authority
+              ~task_id:task.id
+              ~verification_id
+              ~gate
+              ~detail);
          complete
            ~evaluator_runtime
            ( defer
@@ -957,6 +1003,12 @@ module For_testing = struct
 
   let process_outcome_of_evaluator_retryable =
     process_outcome_of_evaluator_retryable
+
+  type nonrec stall_notice = stall_notice =
+    | Post_stall_notice
+    | Stall_already_on_the_board
+
+  let stall_notice = stall_notice
 
   type nonrec review_key = review_key =
     { task_id : string

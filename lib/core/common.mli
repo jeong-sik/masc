@@ -91,23 +91,18 @@ val agents_dir_from_base_path : base_path:string -> string
     {!auth_dir_from_base_path}; this is where keeper credential JSON
     files live ([<agent_name>.json]). *)
 
-val max_tool_output_bytes : int
-(** SSOT 64KB cap for MCP tool response bodies.
-
-    This is an {e inline} threshold: it decides how much of a result is
-    carried in the response body versus offloaded to the blob store. It is
-    not a bound on how much output the runtime will accept from a
-    subprocess — that bound is {!max_process_capture_head_bytes} +
-    {!max_process_capture_tail_bytes}. Conflating the two is what let a
-    single [Execute] call retain 590MB. *)
-
 val max_tool_result_wire_bytes : int
 (** Ceiling for one tool result on the wire, below which an official-client
     CLI does not spill it to a file the Keeper cannot read.
 
     Bounds both halves of externalization: what becomes a blob, and how much
-    of a blob one read returns. Sharing {!max_tool_output_bytes} for both
-    made a read of an externalized result exactly the size that gets spilled. *)
+    of a blob one read returns, and it is the only ceiling on a tool result.
+    A separate 64KB constant once carried both, which made a read of an
+    externalized result exactly the size that gets spilled.
+
+    It does not bound how much output the runtime accepts from a subprocess —
+    that is {!max_process_capture_head_bytes} + {!max_process_capture_tail_bytes}.
+    Conflating the two is what let a single [Execute] call retain 590MB. *)
 
 val max_process_capture_head_bytes : int
 (** Bytes retained from the {e start} of one captured subprocess stream.
@@ -128,12 +123,6 @@ val max_process_capture_tail_bytes : int
     retention is bounded, so memory is O(head + tail) rather than
     O(output). Elided bytes are reported by {!Exec_buffer.render}'s
     truncation marker rather than dropped silently. *)
-
-(** [truncate_response ?max_bytes ~total_count s] returns [s] unchanged
-    when its length is at most [max_bytes] (default
-    {!max_tool_output_bytes}). Otherwise returns the first [max_bytes]
-    characters followed by a machine-readable truncation suffix that
-    records the original length and [total_count]. *)
 
 val safe_filename : string -> string
 (** Fold a value into one path component: lowercase, keep [a-z0-9._-], and

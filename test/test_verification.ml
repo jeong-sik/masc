@@ -197,6 +197,63 @@ let test_stalled_metadata_preserves_typed_authority () =
     "required artifact list is empty"
     (metadata |> member "detail" |> to_string)
 
+(* A stalled review is rediscovered by every backlog walk, because the Task
+   keeps its verification_id while it waits for its producer. Posting on each
+   rediscovery turned one stall into 40+ Board posts over 1h44m
+   (goal-failure-storm-cost-20260828). The Board is what the repeat is about,
+   so the Board is what the notice asks. *)
+let stall_authority =
+  Masc_domain.System_llm_agent { agent_run_id = "agent_core-agent-run-stall" }
+;;
+
+(* Count this test's own stall posts, by the same typed metadata the notice
+   reads, so sibling tests posting to the shared hearth cannot move the
+   number. *)
+let stalled_posts_for ~verification_id =
+  Masc.Board_dispatch.list_posts ~hearth:"verification" ~limit:200 ()
+  |> List.filter (fun (post : Masc.Board.post) ->
+    match post.meta_json with
+    | Some (`Assoc fields) ->
+      List.assoc_opt "type" fields = Some (`String "verification_stalled")
+      && List.assoc_opt "verification_id" fields
+         = Some (`String verification_id)
+    | Some _ | None -> false)
+  |> List.length
+;;
+
+let test_the_same_stall_is_posted_once () =
+  Eio_main.run @@ fun _env ->
+  Masc.Board_dispatch.reset_for_test ();
+  for _ = 1 to 3 do
+    VP.notify_stalled_verification ~authority:stall_authority
+      ~task_id:"task-stall" ~verification_id:"vrf-stall-1"
+      ~gate:"evaluator_unavailable"
+      ~detail:"requested runtime or lane not found"
+  done;
+  Alcotest.(check int) "three rediscoveries, one post" 1
+    (stalled_posts_for ~verification_id:"vrf-stall-1")
+;;
+
+let test_a_different_stall_still_reaches_the_board () =
+  Eio_main.run @@ fun _env ->
+  Masc.Board_dispatch.reset_for_test ();
+  VP.notify_stalled_verification ~authority:stall_authority
+    ~task_id:"task-stall" ~verification_id:"vrf-stall-1"
+    ~gate:"evaluator_unavailable"
+    ~detail:"requested runtime or lane not found";
+  VP.notify_stalled_verification ~authority:stall_authority
+    ~task_id:"task-stall" ~verification_id:"vrf-stall-1"
+    ~gate:"review_preparation"
+    ~detail:"requested runtime or lane not found";
+  VP.notify_stalled_verification ~authority:stall_authority
+    ~task_id:"task-stall" ~verification_id:"vrf-stall-1"
+    ~gate:"evaluator_unavailable"
+    ~detail:"the evaluator answered with an empty verdict";
+  Alcotest.(check int)
+    "a new gate and a new detail are each their own stall" 3
+    (stalled_posts_for ~verification_id:"vrf-stall-1")
+;;
+
 let test_rejected_verdict_event_preserves_wire_type () =
   let event =
     VP.For_testing.verdict_event_json
@@ -3006,6 +3063,10 @@ let () =
         test_stalled_projection_names_forward_paths;
       Alcotest.test_case "stalled metadata keeps typed authority" `Quick
         test_stalled_metadata_preserves_typed_authority;
+      Alcotest.test_case "the same stall is posted once" `Quick
+        test_the_same_stall_is_posted_once;
+      Alcotest.test_case "a different stall still reaches the board" `Quick
+        test_a_different_stall_still_reaches_the_board;
     ];
     "storage", [
       Alcotest.test_case "create and load" `Quick test_create_and_load;

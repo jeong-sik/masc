@@ -317,7 +317,7 @@ let handle_keeper_tool_approval state request reqd =
             match
               Keeper_late_approval.remember_late
                 (Keeper_late_approval.shared ())
-                ~keeper_name ~tool_call_id decision
+                ~keeper_name ~tool_call_id decision ()
             with
             | Keeper_late_approval.Remembered _ -> true
             | Keeper_late_approval.No_matching_ask -> false

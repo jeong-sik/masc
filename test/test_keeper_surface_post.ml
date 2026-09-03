@@ -684,11 +684,43 @@ let test_resolve_explicit_thread_ts_without_continuation () =
        ~bound_discord_channels:[] ~bound_slack_channels:[ "AAA" ] ())
 
 
+(* ── resolve_bound_channel_reference ─────────────────────────────── *)
+
+let ref names bound requested =
+  SP.resolve_bound_channel_reference ~names ~bound requested
+;;
+
+let test_channel_reference_resolution () =
+  let names = [ ("C1", "dev-team"); ("C2", "release-deployment") ] in
+  let bound = [ "C1"; "C2" ] in
+  check (option string) "plain id passes through"
+    (Some "C1") (ref names bound "C1");
+  check (option string) "whitespace is trimmed around an id"
+    (Some "C1") (ref names bound " C1 ");
+  check (option string) "bare name resolves to the bound id"
+    (Some "C2") (ref names bound "release-deployment");
+  check (option string) "hash-prefixed name resolves to the bound id"
+    (Some "C1") (ref names bound "#dev-team");
+  check (option string) "name case must match exactly"
+    None (ref names bound "#Dev-Team");
+  check (option string) "unknown name does not resolve"
+    None (ref names bound "#unknown");
+  (* A name matching an id of a channel that is NOT bound must not resolve:
+     the binding contract, not the store, decides where a post may land. *)
+  let wider_names = names @ [ ("C3", "ops") ] in
+  check (option string) "unbound channel's name never resolves"
+    None (ref wider_names bound "ops");
+  check (option string) "unbound channel's id passes through unresolved"
+    (Some "C3") (ref wider_names bound "C3")
+;;
+
 let () =
   run "keeper_surface_post"
     [
       ( "resolve_target",
         [
+          test_case "channel reference resolution" `Quick
+            test_channel_reference_resolution;
           test_case "dashboard always resolves" `Quick
             test_dashboard_always_resolves;
           test_case "discord unbound is an error" `Quick

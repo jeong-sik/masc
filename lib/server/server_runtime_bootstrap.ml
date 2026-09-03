@@ -253,8 +253,13 @@ let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
     mandatory_exact_output_lane_ids
 ;;
 
-let warn_rejected_exact_output_slots registry =
+let warn_rejected_exact_output_slots ~resolver_snapshot registry =
   let rejected = Runtime_exact_output_registry.rejected_slots registry in
+  let rejected_bindings =
+    Exact_output.resolver_rejected_target_bindings resolver_snapshot
+    |> List.map (fun (binding : Exact_output.rejected_target_binding) -> binding.target_ref)
+  in
+  let declared_target_rejected slot_id = List.mem slot_id rejected_bindings in
   let configured_runtime slot_id =
     Option.map
       (fun (rt : Runtime.t) ->
@@ -264,34 +269,57 @@ let warn_rejected_exact_output_slots registry =
   let diagnoses =
     List.map
       (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
-         slot, Runtime_exact_output_registry.diagnose_rejected_slot slot ~configured_runtime)
+         ( slot
+         , Runtime_exact_output_registry.diagnose_rejected_slot
+             slot
+             ~declared_target_rejected
+             ~configured_runtime ))
       rejected
   in
   List.iter
     (fun ((slot : Runtime_exact_output_registry.rejected_slot), diagnosis) ->
        match diagnosis with
-       | Runtime_exact_output_registry.Retired_catalog_target ->
+       | Runtime_exact_output_registry.Declared_target_binding_rejected ->
          Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because target %S is absent from the frozen catalog; remaining admitted slots stay active"
+           "exact_output: lane %S slot %d (%S) ignored because the overlay declares that target but its provider binding was rejected (see the target binding report above); fix the binding, the slot needs no change"
            slot.lane_id
            slot.position
            slot.slot_id
-           slot.target_ref
-       | Runtime_exact_output_registry.Configured_runtime_id { provider_id; api_name } ->
+       | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name }
+         when String.equal slot.lane_id Runtime.verifier_exact_lane_id ->
+         (* verifier_exact admits slots here but dispatches them through
+            Runtime.resolve_assignment, so its ids must exist in both
+            registries; #32653 measured the catalog-id form failing at
+            dispatch 27 times on 2026-08-29. *)
          Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because it is a runtime.toml runtime id (provider %S, api-name %S), not an exact-output target; exact lanes resolve overlay [[targets]] ids only — name the target that declares model %S; remaining admitted slots stay active"
+           "exact_output: lane %S slot %d (%S) ignored because it is a runtime.toml runtime id (provider %S, api-name %S) with no overlay [[targets]] row of the same id; this lane dispatches by configured runtime id, so keep the id and add an overlay target with the same id for model %S"
            slot.lane_id
            slot.position
            slot.slot_id
            provider_id
            api_name
-           api_name)
+           api_name
+       | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name } ->
+         Log.Server.warn
+           "exact_output: lane %S slot %d (%S) ignored because it is a runtime.toml runtime id (provider %S, api-name %S), not an exact-output target; this lane dispatches by admitted target, so name the overlay [[targets]] id that declares model %S"
+           slot.lane_id
+           slot.position
+           slot.slot_id
+           provider_id
+           api_name
+           api_name
+       | Runtime_exact_output_registry.Unknown_to_both_registries ->
+         Log.Server.warn
+           "exact_output: lane %S slot %d (%S) ignored because it is neither an overlay target nor an enabled configured runtime; the catalog moved on, the runtime is disabled, or the id is mistyped"
+           slot.lane_id
+           slot.position
+           slot.slot_id)
     diagnoses;
-  (* One consolidated line at ERROR, because per-slot WARNs at "remaining
-     slots stay active" read as tolerable degradation and get discounted:
-     four lanes carried retired targets for days on 2026-08-28 while the
-     warnings repeated unread. The count and lane list make the standing
-     config debt visible once per publish. *)
+  (* One consolidated line at ERROR, because per-slot WARNs read as
+     tolerable degradation and get discounted: four lanes carried retired
+     targets for days on 2026-08-28 while the warnings repeated unread. The
+     count per cause and the lane list make the standing config debt visible
+     once per publish. *)
   (match rejected with
    | [] -> ()
    | rejected ->
@@ -301,22 +329,26 @@ let warn_rejected_exact_output_slots registry =
               slot.lane_id)
        |> List.sort_uniq String.compare
      in
-     let runtime_ids =
-       List.length
-         (List.filter
-            (fun (_, diagnosis) ->
-               match diagnosis with
-               | Runtime_exact_output_registry.Configured_runtime_id _ -> true
-               | Runtime_exact_output_registry.Retired_catalog_target -> false)
-            diagnoses)
+     let count predicate =
+       List.length (List.filter (fun (_, diagnosis) -> predicate diagnosis) diagnoses)
      in
      Log.Server.error
-       "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d retired target ref(s), %d runtime.toml runtime id(s) written where a catalog target id belongs — delete or replace them"
+       "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d unknown to both registries, %d runtime.toml runtime id(s) without a same-id overlay target, %d declared target(s) whose binding was rejected — fix runtime.toml or the overlay"
        (List.length rejected)
        (List.length lanes)
        (String.concat ", " lanes)
-       (List.length rejected - runtime_ids)
-       runtime_ids)
+       (count (function
+          | Runtime_exact_output_registry.Unknown_to_both_registries -> true
+          | Runtime_exact_output_registry.Configured_runtime_only _
+          | Runtime_exact_output_registry.Declared_target_binding_rejected -> false))
+       (count (function
+          | Runtime_exact_output_registry.Configured_runtime_only _ -> true
+          | Runtime_exact_output_registry.Unknown_to_both_registries
+          | Runtime_exact_output_registry.Declared_target_binding_rejected -> false))
+       (count (function
+          | Runtime_exact_output_registry.Declared_target_binding_rejected -> true
+          | Runtime_exact_output_registry.Unknown_to_both_registries
+          | Runtime_exact_output_registry.Configured_runtime_only _ -> false)))
 ;;
 
 (* Retracted (2026-08-28, hours after #31445): the classifier reuses
@@ -411,7 +443,7 @@ let configure_exact_output_registry ?config_root () =
          (Env_config_core.Config_error
             ("exact-output resolver-and-lane registry: " ^ detail))
      | Ok registry ->
-       warn_rejected_exact_output_slots registry;
+       warn_rejected_exact_output_slots ~resolver_snapshot registry;
        warn_catalog_absent_keeper_assignments resolver_snapshot;
        Log.Misc.info
          "exact_output: immutable resolver-and-lane registry published%s"

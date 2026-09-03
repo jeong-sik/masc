@@ -26,22 +26,29 @@ type rejected_slot =
   }
 
 type rejected_slot_diagnosis =
-  | Retired_catalog_target
-  | Configured_runtime_id of
+  | Declared_target_binding_rejected
+  | Configured_runtime_only of
       { provider_id : string
       ; api_name : string
       }
+  | Unknown_to_both_registries
 
-(* An exact lane resolves overlay [[targets]] ids only; a runtime.toml
-   runtime id is invisible to it even when both name the same model. The
-   two registries share a naming scheme, so an operator can write the wrong
-   one and read "absent from the frozen catalog" as the catalog having moved
-   on (verifier_exact, 2026-09-02). The lookup is injected because the
-   registry sits below [Runtime]. *)
-let diagnose_rejected_slot (slot : rejected_slot) ~configured_runtime =
-  match configured_runtime slot.slot_id with
-  | Some (provider_id, api_name) -> Configured_runtime_id { provider_id; api_name }
-  | None -> Retired_catalog_target
+(* An exact lane admits overlay [[targets]] ids; a runtime.toml runtime id
+   is invisible to it even when both name the same model, and the two
+   registries share a naming scheme, so an operator can write the wrong one
+   and read "absent from the frozen catalog" as the catalog having moved on
+   (verifier_exact, 2026-09-02). A declared target whose provider binding was
+   rejected also lands here, since the resolver drops it from the admitted
+   set; that case is named first so it is not mistaken for a runtime id that
+   happens to share the string. Both lookups are injected because the
+   registry sits below [Runtime] and the resolver snapshot is opaque here. *)
+let diagnose_rejected_slot (slot : rejected_slot) ~declared_target_rejected ~configured_runtime =
+  if declared_target_rejected slot.slot_id
+  then Declared_target_binding_rejected
+  else (
+    match configured_runtime slot.slot_id with
+    | Some (provider_id, api_name) -> Configured_runtime_only { provider_id; api_name }
+    | None -> Unknown_to_both_registries)
 ;;
 
 type t =

@@ -534,3 +534,14 @@ id = "ollama_cloud.deepseek-v4-flash-0731"
 provider_ref = "ollama_cloud"
 model_id = "deepseek-v4-flash:0731"
 enable_thinking = false
+
+# verifier_exact admits its slots through the exact-output registry but
+# dispatches them by configured runtime id (Runtime.resolve_assignment), so a
+# slot there must exist under the same string in both registries. This row
+# mirrors the runtime.toml runtime of the same name; same model, same
+# settings as the row above, only the id differs.
+[[targets]]
+id = "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
+provider_ref = "ollama_cloud"
+model_id = "deepseek-v4-flash:0731"
+enable_thinking = false

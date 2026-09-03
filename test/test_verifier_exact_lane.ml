@@ -359,22 +359,31 @@ let test_rejected_slot_diagnosis_names_a_runtime_id () =
   let as_runtime id =
     if String.equal id slot.slot_id then Some ("ollama_cloud", "deepseek-v4-flash:0731") else None
   in
-  (match
-     Runtime_exact_output_registry.diagnose_rejected_slot slot ~configured_runtime:as_runtime
-   with
-   | Runtime_exact_output_registry.Configured_runtime_id { provider_id; api_name } ->
-     Alcotest.(check string) "provider" "ollama_cloud" provider_id;
-     Alcotest.(check string) "api-name" "deepseek-v4-flash:0731" api_name
-   | Runtime_exact_output_registry.Retired_catalog_target ->
-     Alcotest.fail "a slot that is a configured runtime id must be diagnosed as one");
-  match
+  let diagnose ~declared_target_rejected ~configured_runtime =
     Runtime_exact_output_registry.diagnose_rejected_slot
       slot
-      ~configured_runtime:(fun _ -> None)
-  with
-  | Runtime_exact_output_registry.Retired_catalog_target -> ()
-  | Runtime_exact_output_registry.Configured_runtime_id _ ->
-    Alcotest.fail "an id no registry knows is a retired catalog target"
+      ~declared_target_rejected
+      ~configured_runtime
+  in
+  (match diagnose ~declared_target_rejected:(fun _ -> false) ~configured_runtime:as_runtime with
+   | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name } ->
+     Alcotest.(check string) "provider" "ollama_cloud" provider_id;
+     Alcotest.(check string) "api-name" "deepseek-v4-flash:0731" api_name
+   | Runtime_exact_output_registry.Declared_target_binding_rejected
+   | Runtime_exact_output_registry.Unknown_to_both_registries ->
+     Alcotest.fail "a slot that is a configured runtime id must be diagnosed as one");
+  (* A declared target whose binding was rejected wins over the runtime
+     lookup even when the same string is also a runtime id. *)
+  (match diagnose ~declared_target_rejected:(fun _ -> true) ~configured_runtime:as_runtime with
+   | Runtime_exact_output_registry.Declared_target_binding_rejected -> ()
+   | Runtime_exact_output_registry.Configured_runtime_only _
+   | Runtime_exact_output_registry.Unknown_to_both_registries ->
+     Alcotest.fail "a declared target with a rejected binding must be named as such");
+  match diagnose ~declared_target_rejected:(fun _ -> false) ~configured_runtime:(fun _ -> None) with
+  | Runtime_exact_output_registry.Unknown_to_both_registries -> ()
+  | Runtime_exact_output_registry.Configured_runtime_only _
+  | Runtime_exact_output_registry.Declared_target_binding_rejected ->
+    Alcotest.fail "an id no registry knows is unknown to both"
 ;;
 
 let () =

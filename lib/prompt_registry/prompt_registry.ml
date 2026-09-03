@@ -363,7 +363,6 @@ type prompt_snapshot = {
    mutex.  Intended for batch [list_prompts]/[validate_prompt_templates]
    call sites that previously held [with_mutex] across [read_file_if_exists]. *)
 let resolved_of_snapshot (s : prompt_snapshot) =
-  let file_path = prompt_source_path s.snap_key in
   let file_value = file_value_of_key s.snap_key in
   build_resolved_from_snapshot
     ~key:s.snap_key

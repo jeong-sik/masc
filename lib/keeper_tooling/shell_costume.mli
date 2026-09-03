@@ -38,7 +38,12 @@ val ir_keeps_a_shell : Masc_exec.Shell_ir.t -> bool
 
     The tap asks this of the dispatch result to report whether the costume came
     off. Every stage answers, because lowering rewrites one costume and leaves a
-    sibling stage's [bash -c] where it was. *)
+    sibling stage's [bash -c] where it was.
+
+    That sibling no longer arrives from Execute -- since #32662 its input
+    lowers to a single [Simple] -- so in production this reads one stage.
+    The multi-stage arms answer for the rest of [Shell_ir.t] and are covered
+    by this module's own tests. *)
 
 val of_argv : string list -> t option
 (** [Some t] when [argv] is a shell invoked with [-c] and a script argument.

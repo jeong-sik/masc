@@ -904,11 +904,20 @@ let test_goal_summaries_render_titles () =
       observation
   in
   check bool "id and title" true
-    (contains ~needle:"- goal-x — Improve wake context" with_titles);
+    (contains ~needle:"- goal-x — Improve wake context" with_titles)
+
+(* The caller resolves the goals linked to this turn's task. Omitting them
+   used to mean the workspace's whole open-goal list, read off
+   [observation.active_goals] -- the same list #32665 took out of the system
+   prompt, arriving in the turn context instead. The observation below still
+   carries an open goal, and the layer still has to be absent. *)
+let test_no_summaries_renders_no_goal_layer () =
+  let observation = { base_observation with active_goals = [ "goal-x" ] } in
   let bare = user_message observation in
-  check bool "bare id" true (contains ~needle:"- goal-x" bare);
-  check bool "bare id has no title" false
-    (contains ~needle:"Improve wake context" bare)
+  check bool "no Active Goals heading" false
+    (contains ~needle:"### Active Goals" bare);
+  check bool "no goal id from the observation" false
+    (contains ~needle:"goal-x" bare)
 
 (* The heading and the list are read off one list, so the keeper is never told
    it holds goals the block does not name. *)
@@ -1001,6 +1010,8 @@ let () =
             test_goal_summaries_render_titles;
           test_case "the heading counts what the block lists" `Quick
             test_goal_heading_counts_what_the_block_lists;
+          test_case "no summaries renders no layer" `Quick
+            test_no_summaries_renders_no_goal_layer;
         ] );
       ( "previous turn stop reaches the next prompt",
         [

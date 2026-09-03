@@ -1,5 +1,8 @@
 name = "keeper_composition_status"
-description = "Read the exact durable status and structured result of one async Keeper composition request."
+description = """
+Read the status and structured result of one async Keeper composition.
+
+Both are exact and durable, addressed by the request's own id."""
 additional_properties = false
 
 
@@ -7,6 +10,7 @@ additional_properties = false
 # 2026-09-01..03: 5 turns needed it across 6317 provider requests, and its
 # 293 B schema rode every one of those requests. Loading it on demand costs
 # one extra request on those 5 turns and saves the 293 B on the rest.
+# What that trade does not cover is in Tool_loading_declarations.
 defer_loading = true
 [[params]]
 name = "request_id"

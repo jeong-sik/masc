@@ -2998,6 +2998,13 @@
   (source_tree ../bin)))
 
 (test
+ (name test_tui_ask_selection_wiring)
+ (modules test_tui_ask_selection_wiring)
+ (libraries alcotest ast_grep)
+ (deps
+  (source_tree ../bin)))
+
+(test
  (name test_tui_operator_projection)
  (modules test_tui_operator_projection)
  (libraries alcotest masc_tui_operator_projection yojson))

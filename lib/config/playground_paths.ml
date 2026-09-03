@@ -19,6 +19,13 @@
 let all_playgrounds_prefix : string =
   Filename.concat Common.masc_dirname "playground"
 
+(** The [repos] segment inside a keeper's bundle, spelled once. The repo
+    tree has a segment with the same spelling but a different owner:
+    the server-side registration store under [.masc/repos/<id>],
+    resolved by [Config_dir_resolver.repos_dirname]. Do not merge them;
+    they are two constants. *)
+let bundle_repos_dirname = "repos"
+
 (** Strip the [keeper-...-agent] canonical wrapper when present,
     returning the inner short name.  E.g.
     ["keeper-example-keeper-agent"] -> ["example-keeper"].
@@ -46,14 +53,6 @@ let all_playgrounds_prefix : string =
     components [.] / [..] are replaced with [_], so
     [sanitize_keeper_name ".."] returns ["__"] rather than returning a
     traversal segment as a directory name. *)
-(** The [repos] segment inside a keeper's bundle, spelled once. The repo
-    tree has a second, unrelated [repos]: the server-side registration
-    store under [.masc/repos/<id>] owned by [Config_dir_resolver]. Same
-    spelling, different concept — one names the clone directory inside
-    one keeper's bundle, the other a store under the server base path.
-    They are two constants. *)
-let bundle_repos_dirname = "repos"
-
 let sanitize_keeper_name (name : string) : string =
   let mapped =
     String.map (fun c ->

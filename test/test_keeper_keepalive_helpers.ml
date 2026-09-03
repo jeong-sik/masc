@@ -1066,6 +1066,51 @@ let test_thread_participant_drop_is_bounded_under_persistent_failure () =
        | None -> fail "boundlane registry entry missing")
 ;;
 
+(* #27329 regression: a comment signal classifies as [Thread_participants],
+   and a lane that never touched the thread has no deterministic address —
+   [wake_reason] answers [Available None] for it. That folded to [Ignore]
+   for every non-participant lane, so a comment could never reach attention
+   judgment: [Judge_discoverable] was produced only for the [Discoverable]
+   audience, and the owner cursor scan re-synthesizes post_created signals
+   only — no other net catches comments. Now the [None] fold escalates to
+   [Judge_discoverable] for comment signals and the push path records the
+   attention candidate, while the participant lane keeps its direct
+   delivery. *)
+let test_comment_routes_bystander_lane_to_attention_judgment () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.set_board_signal_hook (fun _ -> ());
+      Keeper_registry.For_testing.clear ())
+    (fun () ->
+       let meta, addressed = create_thread_fixture config ~keeper_name:"threadlane" in
+       let bystander = make_board_resume_meta "bystanderlane" in
+       persist_and_register_board_lane config bystander;
+       let audience =
+         match KBA.of_board_audience addressed.Board_dispatch.audience with
+         | Ok audience -> audience
+         | Error error -> fail (KBA.classification_error_to_string error)
+       in
+       check bool "participant lane keeps direct delivery" true
+         (match route ~audience ~meta addressed.Board_dispatch.signal with
+          | KBA.Deliver KWOBS.Thread_reply_after_self_comment -> true
+          | KBA.Deliver _ | KBA.Judge_discoverable | KBA.Ignore -> false);
+       check bool "bystander lane escalates to judgment" true
+         (match route ~audience ~meta:bystander addressed.Board_dispatch.signal with
+          | KBA.Judge_discoverable -> true
+          | KBA.Deliver _ | KBA.Ignore -> false);
+       KKS.wakeup_relevant_keeper_for_board_signal ~config addressed;
+       check int "participant lane still wakes directly" 1
+         (board_queue_length config meta.Keeper_meta_contract.name);
+       check int "bystander lane is not directly woken" 0
+         (board_queue_length config bystander.Keeper_meta_contract.name);
+       check int "bystander lane holds one attention candidate" 1
+         (board_attention_count config bystander.Keeper_meta_contract.name);
+       check int "participant lane holds no attention candidate" 0
+         (board_attention_count config meta.Keeper_meta_contract.name))
+;;
+
 let test_autoboot_warmup_bounds_first_cadence_sleep () =
   let next = Keeper_heartbeat_loop.For_testing.next_keepalive_sleep_duration_sec in
   check (float 0.001) "fresh warmup" 66.0
@@ -1204,6 +1249,8 @@ let () =
             test_thread_participant_wakes_after_transient_store_read_failure
         ; test_case "thread participant drop is bounded under persistent failure" `Quick
             test_thread_participant_drop_is_bounded_under_persistent_failure
+        ; test_case "comment routes bystander lane to attention judgment" `Quick
+            test_comment_routes_bystander_lane_to_attention_judgment
         ; test_case "comment on own post wakes the author" `Quick
             test_comment_on_own_post_wakes_the_author
         ; test_case "vote on own post wakes the author once" `Quick

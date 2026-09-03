@@ -169,9 +169,6 @@ let provider_content_messages
          (remove_prompt_context false [] projection_input))
 ;;
 
-let empty_prompt_segment_metrics =
-  { bytes = 0; fingerprint = None }
-
 let prompt_segment_metrics_of_sanitized_text (text : string) : prompt_segment_metrics =
   {
     bytes = String.length text;

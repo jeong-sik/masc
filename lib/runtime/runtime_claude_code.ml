@@ -83,6 +83,20 @@ type turn_usage =
   ; cache_read_input_tokens : int
   }
 
+(* Token counts summed over the assistant frames of one turn. Each assistant
+   frame carries the usage of the API call that produced it, and parallel
+   tool calls repeat one message id with identical usage, so ids are
+   deduplicated (code.claude.com/docs/en/agent-sdk/cost-tracking, read
+   2026-09-03). A host stop reports this sum: the result frame that would
+   carry the turn total never arrives once the host ends the turn, which is
+   why every host-stopped turn recorded output_tokens = 0 until now.
+   Declared here, before handle_control_request reads assistant_usage.total,
+   so the field is in scope at its use site. *)
+type assistant_usage =
+  { seen_message_ids : (string, unit) Hashtbl.t
+  ; mutable total : turn_usage option
+  }
+
 type turn_result =
   { session_id : string
   ; turn_id : string
@@ -804,18 +818,6 @@ let turn_usage_of_fields fields =
      | Some _, None | None, Some _ | None, None -> None)
   | Some _ -> None
 ;;
-
-(* Token counts summed over the assistant frames of one turn. Each assistant
-   frame carries the usage of the API call that produced it, and parallel
-   tool calls repeat one message id with identical usage, so ids are
-   deduplicated (code.claude.com/docs/en/agent-sdk/cost-tracking, read
-   2026-09-03). A host stop reports this sum: the result frame that would
-   carry the turn total never arrives once the host ends the turn, which is
-   why every host-stopped turn recorded output_tokens = 0 until now. *)
-type assistant_usage =
-  { seen_message_ids : (string, unit) Hashtbl.t
-  ; mutable total : turn_usage option
-  }
 
 let new_assistant_usage () = { seen_message_ids = Hashtbl.create 8; total = None }
 

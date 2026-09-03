@@ -14,7 +14,6 @@
     "lib/keeper/keeper_vision_ingest.ml",
     "lib/keeper/keeper_vision_tool.ml",
     "lib/keeper/keeper_world_observation.ml",
-    "lib/keeper_canary/keeper_canary_judge.ml",
     "lib/mcp_server_eio_tool_profile.ml",
     "lib/operator/operator_tool.ml",
     "lib/server/server_dashboard_http_composite_recommendations.ml",

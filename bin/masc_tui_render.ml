@@ -5417,9 +5417,16 @@ let render_lane_run_list (state : state) ~lane_id =
     if String.equal lane_id Runtime.verifier_exact_lane_id then "SUBJECT"
     else "ACTOR"
   in
+  (* The run id takes what the named columns leave; it used to run off the
+     header with no end while the row cut it at twelve. *)
+  let run_id_width =
+    Render_schedule.lane_run_id_width
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
+  in
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  %-17s %-16s %-11s %-8s %-16s %s" "STARTED"
-       identity_heading "STATUS" "ELAPSED" "SLOT" "RUN ID");
+    ("  "
+    ^ Render_schedule.lane_run_header_row ~identity_header:identity_heading
+        ~run_id_width);
   box_divider buf cols;
   (match state.lane_runs_error with
    | None -> ()
@@ -5460,17 +5467,22 @@ let render_lane_run_list (state : state) ~lane_id =
             | Some seconds -> Printf.sprintf "%.1fs" seconds
           in
           let line =
-            Printf.sprintf "  %-17s %-16s %s%-11s%s %-8s %-16s %s"
-              (lane_run_clock run.lrs_started_at)
-              (fit_width (Terminal_text.single_line (lane_run_subject run)) 16)
-              (lane_run_status_style run.lrs_status)
-              (fit_width (Tui_decode.lane_run_status_label run.lrs_status) 11)
-              Ansi.reset elapsed
-              (fit_width
-                 (Terminal_text.single_line_or ~default:"—"
-                    run.lrs_selected_slot)
-                 16)
-              (fit_width (Terminal_text.single_line run.lrs_run_id) 12)
+            "  "
+            ^ Render_schedule.lane_run_row ~identity_header:identity_heading
+                ~status_style:(lane_run_status_style run.lrs_status)
+                ~run_id_width
+                { Render_schedule.lrow_started =
+                    lane_run_clock run.lrs_started_at
+                ; lrow_subject =
+                    Terminal_text.single_line (lane_run_subject run)
+                ; lrow_status =
+                    Tui_decode.lane_run_status_label run.lrs_status
+                ; lrow_elapsed = elapsed
+                ; lrow_slot =
+                    Terminal_text.single_line_or ~default:"—"
+                      run.lrs_selected_slot
+                ; lrow_run_id = Terminal_text.single_line run.lrs_run_id
+                }
           in
           if index + scroll = state.lane_runs_cursor then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
@@ -8669,9 +8681,13 @@ let render_system_logs (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  (* The message takes what the named columns leave, asked of the columns. *)
+  let message_width =
+    Render_schedule.system_log_message_width
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
+  in
   let col_hdr =
-    Printf.sprintf "  %-8s %-7s %-16s %-12s %-9s %s" "Time" "Level" "Module"
-      "Keeper" "Category" "Message"
+    "  " ^ Render_schedule.system_log_header_row ~message_width
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -8715,22 +8731,28 @@ let render_system_logs (state : state) =
           in
           let category = system_log_category_text e in
           let level_style = system_log_level_style e.sl_level in
-          (* Module and keeper are fitted rather than only padded: a long
-             module name used to push every column right of it out of line
-             with the header. *)
+          (* Every cell is fitted to the width its header is drawn at; a long
+             module name used to push every column right of it out of line. *)
           let line =
-            Printf.sprintf "  %s%-8s%s %s%s %-5s%s %s%s%s %s%s%s %s%s%s %s"
-              Ansi.dim (Terminal_text.clock_timestamp e.sl_ts) Ansi.reset
-              level_style (system_log_level_mark e.sl_level)
-              (Masc.Tui_decode.system_log_level_label e.sl_level) Ansi.reset
-              (Masc_tui_theme.tone Masc_tui_theme.Accent) (fit_width (Terminal_text.single_line e.sl_module) 16)
-              Ansi.reset
-              (Theme.keeper_origin ())
-          (fit_width (Terminal_text.single_line keeper) 12)
-              Ansi.reset
-              Ansi.dim (fit_width (Terminal_text.single_line category) 9)
-              Ansi.reset
-              (Terminal_text.single_line e.sl_message)
+            "  "
+            ^ Render_schedule.system_log_row ~message_width ~level_style
+                ~styles:
+                  { Render_schedule.slog_time_style = Ansi.dim
+                  ; slog_module_style =
+                      Masc_tui_theme.tone Masc_tui_theme.Accent
+                  ; slog_keeper_style = Theme.keeper_origin ()
+                  ; slog_category_style = Ansi.dim
+                  }
+                { Render_schedule.slog_time =
+                    Terminal_text.clock_timestamp e.sl_ts
+                ; slog_level =
+                    system_log_level_mark e.sl_level ^ " "
+                    ^ Masc.Tui_decode.system_log_level_label e.sl_level
+                ; slog_module = Terminal_text.single_line e.sl_module
+                ; slog_keeper = Terminal_text.single_line keeper
+                ; slog_category = Terminal_text.single_line category
+                ; slog_message = Terminal_text.single_line e.sl_message
+                }
           in
           if idx = state.system_logs_cursor then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
@@ -9650,12 +9672,17 @@ let render_fusion_list (state : state) =
       16 runs
     |> min 26
   in
+  (* The run id takes what the named columns leave, once the keeper column has
+     been sized to the names it actually holds. *)
+  let run_width =
+    Render_schedule.fusion_run_width ~keeper_width
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
+  in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  %-8s %-7s %-18s %-*s %-10s %s" "TIME" "AGE" "STATE"
-       keeper_width "KEEPER" "PRESET" "RUN");
+    ("  " ^ Render_schedule.fusion_header_row ~keeper_width ~run_width);
   box_divider buf cols;
   (match state.fusion_error with
    | None -> ()
@@ -9699,15 +9726,15 @@ let render_fusion_list (state : state) =
             | Fusion_completed | Fusion_failed _ -> status
           in
           let line =
-            (* [fit_width] pads, so the cell is already the column's width. *)
-            Printf.sprintf "%-8s %-7s %s%-18s%s %s %-10s %s"
-              (fusion_run_clock run)
-              (fit_width (fusion_run_age ~now:now_epoch run) 7)
-              (fusion_run_status_color run.fur_status)
-              (fit_width state_text 18) Ansi.reset
-              (fit_width (Terminal_text.single_line run.fur_keeper) keeper_width)
-              (fit_width (Terminal_text.single_line run.fur_preset) 10)
-              (fit_width (Terminal_text.single_line run.fur_run_id) 14)
+            Render_schedule.fusion_row ~keeper_width ~run_width
+              ~state_style:(fusion_run_status_color run.fur_status)
+              { Render_schedule.frow_time = fusion_run_clock run
+              ; frow_age = fusion_run_age ~now:now_epoch run
+              ; frow_state = state_text
+              ; frow_keeper = Terminal_text.single_line run.fur_keeper
+              ; frow_preset = Terminal_text.single_line run.fur_preset
+              ; frow_run = Terminal_text.single_line run.fur_run_id
+              }
           in
           if row_index = state.fusion_cursor then
             box_line buf cols (Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line)
@@ -11035,9 +11062,13 @@ let render_changes_list (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  (* What the turn did takes the cells the named columns leave. *)
+  let summary_width =
+    Render_schedule.change_summary_width
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
+  in
   let col_hdr =
-    Printf.sprintf "  %-6s %-10s %-5s %-8s %-38s %s"
-      "Turn" "Task" "Op" "Result" "File" "What"
+    "  " ^ Render_schedule.change_header_row ~summary_width
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -11120,15 +11151,22 @@ let render_changes_list (state : state) =
           let kind_style, kind = change_kind_badge change in
           let result_style, result = change_result_badge change in
           let line =
-            Printf.sprintf "  %-6s %-10s %s%-5s%s %s%-8s%s %-38s %s"
-              (Option.fold ~none:"-" ~some:string_of_int
-                 change.Masc.Tui_decode.fc_turn)
-              (Terminal_text.single_line
-                 (Option.value ~default:"-" change.Masc.Tui_decode.fc_task_id))
-              kind_style kind Ansi.reset
-              result_style result Ansi.reset
-              (Terminal_text.single_line (change_row_address change))
-              (change_row_summary change)
+            "  "
+            ^ Render_schedule.change_row ~op_style:kind_style ~result_style
+                ~summary_width
+                { Render_schedule.crow_turn =
+                    Option.fold ~none:"-" ~some:string_of_int
+                      change.Masc.Tui_decode.fc_turn
+                ; crow_task =
+                    Terminal_text.single_line
+                      (Option.value ~default:"-"
+                         change.Masc.Tui_decode.fc_task_id)
+                ; crow_op = kind
+                ; crow_result = result
+                ; crow_file =
+                    Terminal_text.single_line (change_row_address change)
+                ; crow_summary = change_row_summary change
+                }
           in
           (* A call that failed still changed what the keeper tried to do, and
              it is the row an operator is looking for. Dim marks it as an

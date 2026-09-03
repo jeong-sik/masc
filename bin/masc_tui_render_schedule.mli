@@ -226,6 +226,154 @@ val workspace_row : path_width:int -> workspace_row_values -> string
     print one format string in two places; a column can no longer exist in the
     header at a width the rows do not use. *)
 
+(** {1 System log columns} *)
+
+val system_log_time_width : int
+val system_log_level_width : int
+val system_log_module_width : int
+val system_log_keeper_width : int
+val system_log_category_width : int
+val system_log_minimum_message_width : int
+val system_log_cell_gap : int
+
+type system_log_row_values = {
+  slog_time : string;
+  slog_level : string;
+  slog_module : string;
+  slog_keeper : string;
+  slog_category : string;
+  slog_message : string;
+}
+
+type system_log_styles = {
+  slog_time_style : string;
+  slog_module_style : string;
+  slog_keeper_style : string;
+  slog_category_style : string;
+}
+(** The dresses a log row wears whatever it says. The level's is separate
+    because it is the one that changes with the reading. *)
+
+val system_log_plain_styles : system_log_styles
+(** No dress at all, for a caller drawing an undressed row and for the tests
+    that check a dressed row measures the same. *)
+
+val system_log_message_width : inner_width:int -> int
+(** Cells the message may occupy: what the named columns leave, never below
+    {!system_log_minimum_message_width}. *)
+
+val system_log_header_row : message_width:int -> string
+
+val system_log_row :
+  styles:system_log_styles ->
+  level_style:string ->
+  message_width:int ->
+  system_log_row_values ->
+  string
+(** One entry, laid out on the same columns as {!system_log_header_row}. The
+    widths used to live in two format strings, the row's threaded between five
+    escape sequences where nothing could compare them with the header's. *)
+
+(** {1 Lane run columns} *)
+
+val lane_started_width : int
+val lane_subject_width : int
+val lane_status_width : int
+val lane_elapsed_width : int
+val lane_slot_width : int
+val lane_minimum_run_id_width : int
+val lane_cell_gap : int
+
+type lane_run_row_values = {
+  lrow_started : string;
+  lrow_subject : string;
+  lrow_status : string;
+  lrow_elapsed : string;
+  lrow_slot : string;
+  lrow_run_id : string;
+}
+
+val lane_run_id_width : inner_width:int -> int
+(** Cells the run id may occupy: the remainder, never below
+    {!lane_minimum_run_id_width}. *)
+
+val lane_run_header_row : identity_header:string -> run_id_width:int -> string
+
+val lane_run_row :
+  identity_header:string ->
+  status_style:string ->
+  run_id_width:int ->
+  lane_run_row_values ->
+  string
+(** One run, on the same columns as {!lane_run_header_row}. [identity_header]
+    names the second column, which reads differently for one keeper's runs and
+    for a fleet's. *)
+
+(** {1 File change columns} *)
+
+val change_turn_width : int
+val change_task_width : int
+val change_op_width : int
+val change_result_width : int
+val change_file_width : int
+val change_minimum_summary_width : int
+val change_cell_gap : int
+
+type change_row_values = {
+  crow_turn : string;
+  crow_task : string;
+  crow_op : string;
+  crow_result : string;
+  crow_file : string;
+  crow_summary : string;
+}
+
+val change_summary_width : inner_width:int -> int
+val change_header_row : summary_width:int -> string
+
+val change_row :
+  op_style:string ->
+  result_style:string ->
+  summary_width:int ->
+  change_row_values ->
+  string
+(** One change, on the same columns as {!change_header_row}. The file cell is
+    fitted now: it was padded and never cut, so a long path pushed the summary
+    beside it -- the column that says what the turn actually did -- off the
+    frame. *)
+
+(** {1 Fusion run columns} *)
+
+val fusion_time_width : int
+val fusion_age_width : int
+val fusion_state_width : int
+val fusion_preset_width : int
+val fusion_minimum_run_width : int
+val fusion_cell_gap : int
+
+type fusion_row_values = {
+  frow_time : string;
+  frow_age : string;
+  frow_state : string;
+  frow_keeper : string;
+  frow_preset : string;
+  frow_run : string;
+}
+
+val fusion_run_width : inner_width:int -> keeper_width:int -> int
+val fusion_header_row : keeper_width:int -> run_width:int -> string
+
+val fusion_row :
+  state_style:string ->
+  keeper_width:int ->
+  run_width:int ->
+  fusion_row_values ->
+  string
+(** One run, on the same columns as {!fusion_header_row}. The keeper cell is
+    sized by the caller to the names it holds; the run id takes what is left,
+    where it used to be unbounded in the header and cut at fourteen in the
+    row. *)
+
 module Terminal_size_cache : sig
   type refresh =
     | Changed of (int * int)

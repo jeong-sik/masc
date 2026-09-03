@@ -572,6 +572,277 @@ let workspace_header_row ~path_width =
 let workspace_row ~path_width values =
   Table.row ~gap:workspace_cell_gap (workspace_cells ~path_width values)
 
+(* System log columns.
+
+   The header wrote its widths in one format string and the rows in another,
+   and the row's had grown a second job: it interleaved five colours with the
+   five readings, so the widths sat between escape sequences where nothing
+   could check them against the header's. The row had already been taught to
+   fit its module and keeper cells -- a comment there records a long module
+   name pushing every column right of it -- but the header it was fitting to
+   was a separate string.
+
+   The colours ride the cells now. Four of them never vary and are passed once;
+   the level's changes with the reading, which is the one thing on this screen
+   a colour is for. *)
+
+let system_log_time_width = 8
+let system_log_level_width = 7
+let system_log_module_width = 16
+let system_log_keeper_width = 12
+let system_log_category_width = 9
+let system_log_minimum_message_width = 12
+let system_log_cell_gap = 1
+
+type system_log_row_values = {
+  slog_time : string;
+  slog_level : string;
+  slog_module : string;
+  slog_keeper : string;
+  slog_category : string;
+  slog_message : string;
+}
+
+(* The four dresses a log row wears whatever it says: a timestamp is always
+   receded, a module is always the accent, a keeper is always its origin
+   colour, a category is always dim. Passed once rather than per row, because
+   nothing in a reading changes them. *)
+type system_log_styles = {
+  slog_time_style : string;
+  slog_module_style : string;
+  slog_keeper_style : string;
+  slog_category_style : string;
+}
+
+let system_log_plain_styles =
+  { slog_time_style = ""
+  ; slog_module_style = ""
+  ; slog_keeper_style = ""
+  ; slog_category_style = ""
+  }
+
+let system_log_no_values =
+  { slog_time = ""
+  ; slog_level = ""
+  ; slog_module = ""
+  ; slog_keeper = ""
+  ; slog_category = ""
+  ; slog_message = ""
+  }
+
+let system_log_cells ?(styles = system_log_plain_styles) ?(level_style = "")
+    ~message_width values =
+  [ Table.cell ~style:styles.slog_time_style ~header:"TIME"
+      ~width:system_log_time_width values.slog_time
+  ; Table.cell ~style:level_style ~header:"LEVEL"
+      ~width:system_log_level_width values.slog_level
+  ; Table.cell ~style:styles.slog_module_style ~header:"MODULE"
+      ~width:system_log_module_width values.slog_module
+  ; Table.cell ~style:styles.slog_keeper_style ~header:"KEEPER"
+      ~width:system_log_keeper_width values.slog_keeper
+  ; Table.cell ~style:styles.slog_category_style ~header:"CATEGORY"
+      ~width:system_log_category_width values.slog_category
+  ; Table.cell ~header:"MESSAGE" ~width:message_width values.slog_message
+  ]
+
+let system_log_message_width ~inner_width =
+  let named =
+    Table.used_width ~gap:system_log_cell_gap
+      (system_log_cells ~message_width:0 system_log_no_values)
+  in
+  max system_log_minimum_message_width (inner_width - named)
+
+let system_log_header_row ~message_width =
+  Table.header_row ~gap:system_log_cell_gap
+    (system_log_cells ~message_width system_log_no_values)
+
+let system_log_row ~styles ~level_style ~message_width values =
+  Table.row ~gap:system_log_cell_gap
+    (system_log_cells ~styles ~level_style ~message_width values)
+
+(* Lane run columns.
+
+   The header and the rows carried the same six widths in two format strings,
+   the row's with the status colour spliced between two of them. The run id was
+   the tail of the header and a twelve-cell fit in the row, so the column the
+   header opened had no end and the reading in it had one nobody could see. *)
+
+let lane_started_width = 17
+let lane_subject_width = 16
+let lane_status_width = 11
+let lane_elapsed_width = 8
+let lane_slot_width = 16
+
+(* A run id truncated below this identifies nothing; the screen is better off
+   dropping the frame's last cells than showing half of one. *)
+let lane_minimum_run_id_width = 12
+let lane_cell_gap = 1
+
+type lane_run_row_values = {
+  lrow_started : string;
+  lrow_subject : string;
+  lrow_status : string;
+  lrow_elapsed : string;
+  lrow_slot : string;
+  lrow_run_id : string;
+}
+
+let lane_run_no_values =
+  { lrow_started = ""
+  ; lrow_subject = ""
+  ; lrow_status = ""
+  ; lrow_elapsed = ""
+  ; lrow_slot = ""
+  ; lrow_run_id = ""
+  }
+
+(* The identity column is named by the caller: this table lists runs of one
+   keeper under one heading and runs of many under another. *)
+let lane_run_cells ~identity_header ?(status_style = "") ~run_id_width values =
+  [ Table.cell ~header:"STARTED" ~width:lane_started_width values.lrow_started
+  ; Table.cell ~header:identity_header ~width:lane_subject_width
+      values.lrow_subject
+  ; Table.cell ~style:status_style ~header:"STATUS" ~width:lane_status_width
+      values.lrow_status
+  ; Table.cell ~align:Table.Right ~header:"ELAPSED" ~width:lane_elapsed_width
+      values.lrow_elapsed
+  ; Table.cell ~header:"SLOT" ~width:lane_slot_width values.lrow_slot
+  ; Table.cell ~header:"RUN ID" ~width:run_id_width values.lrow_run_id
+  ]
+
+let lane_run_id_width ~inner_width =
+  let named =
+    Table.used_width ~gap:lane_cell_gap
+      (lane_run_cells ~identity_header:"" ~run_id_width:0 lane_run_no_values)
+  in
+  max lane_minimum_run_id_width (inner_width - named)
+
+let lane_run_header_row ~identity_header ~run_id_width =
+  Table.header_row ~gap:lane_cell_gap
+    (lane_run_cells ~identity_header ~run_id_width lane_run_no_values)
+
+let lane_run_row ~identity_header ~status_style ~run_id_width values =
+  Table.row ~gap:lane_cell_gap
+    (lane_run_cells ~identity_header ~status_style ~run_id_width values)
+
+(* File change columns.
+
+   Six widths in the header's format string and the same six in the row's, the
+   row's split around two colours. The file cell was padded but never fitted,
+   so a path longer than its budget pushed the summary beside it off the frame
+   -- the one column an operator reads to know what the turn did. *)
+
+let change_turn_width = 6
+let change_task_width = 10
+let change_op_width = 5
+let change_result_width = 8
+let change_file_width = 38
+let change_minimum_summary_width = 12
+let change_cell_gap = 1
+
+type change_row_values = {
+  crow_turn : string;
+  crow_task : string;
+  crow_op : string;
+  crow_result : string;
+  crow_file : string;
+  crow_summary : string;
+}
+
+let change_no_values =
+  { crow_turn = ""
+  ; crow_task = ""
+  ; crow_op = ""
+  ; crow_result = ""
+  ; crow_file = ""
+  ; crow_summary = ""
+  }
+
+let change_cells ?(op_style = "") ?(result_style = "") ~summary_width values =
+  [ Table.cell ~align:Table.Right ~header:"TURN" ~width:change_turn_width
+      values.crow_turn
+  ; Table.cell ~header:"TASK" ~width:change_task_width values.crow_task
+  ; Table.cell ~style:op_style ~header:"OP" ~width:change_op_width
+      values.crow_op
+  ; Table.cell ~style:result_style ~header:"RESULT" ~width:change_result_width
+      values.crow_result
+  ; Table.cell ~header:"FILE" ~width:change_file_width values.crow_file
+  ; Table.cell ~header:"WHAT" ~width:summary_width values.crow_summary
+  ]
+
+let change_summary_width ~inner_width =
+  let named =
+    Table.used_width ~gap:change_cell_gap
+      (change_cells ~summary_width:0 change_no_values)
+  in
+  max change_minimum_summary_width (inner_width - named)
+
+let change_header_row ~summary_width =
+  Table.header_row ~gap:change_cell_gap
+    (change_cells ~summary_width change_no_values)
+
+let change_row ~op_style ~result_style ~summary_width values =
+  Table.row ~gap:change_cell_gap
+    (change_cells ~op_style ~result_style ~summary_width values)
+
+(* Fusion run columns.
+
+   Six widths in the header and the same six in the row, the row's wrapped
+   around the status colour. The run id was unbounded in the header and cut at
+   fourteen in the row, so the column had no end where it was named and an
+   invisible one where it was filled. *)
+
+let fusion_time_width = 8
+let fusion_age_width = 7
+let fusion_state_width = 18
+let fusion_preset_width = 10
+let fusion_minimum_run_width = 12
+let fusion_cell_gap = 1
+
+type fusion_row_values = {
+  frow_time : string;
+  frow_age : string;
+  frow_state : string;
+  frow_keeper : string;
+  frow_preset : string;
+  frow_run : string;
+}
+
+let fusion_no_values =
+  { frow_time = ""
+  ; frow_age = ""
+  ; frow_state = ""
+  ; frow_keeper = ""
+  ; frow_preset = ""
+  ; frow_run = ""
+  }
+
+let fusion_cells ?(state_style = "") ~keeper_width ~run_width values =
+  [ Table.cell ~header:"TIME" ~width:fusion_time_width values.frow_time
+  ; Table.cell ~align:Table.Right ~header:"AGE" ~width:fusion_age_width
+      values.frow_age
+  ; Table.cell ~style:state_style ~header:"STATE" ~width:fusion_state_width
+      values.frow_state
+  ; Table.cell ~header:"KEEPER" ~width:keeper_width values.frow_keeper
+  ; Table.cell ~header:"PRESET" ~width:fusion_preset_width values.frow_preset
+  ; Table.cell ~header:"RUN" ~width:run_width values.frow_run
+  ]
+
+let fusion_run_width ~inner_width ~keeper_width =
+  let named =
+    Table.used_width ~gap:fusion_cell_gap
+      (fusion_cells ~keeper_width ~run_width:0 fusion_no_values)
+  in
+  max fusion_minimum_run_width (inner_width - named)
+
+let fusion_header_row ~keeper_width ~run_width =
+  Table.header_row ~gap:fusion_cell_gap
+    (fusion_cells ~keeper_width ~run_width fusion_no_values)
+
+let fusion_row ~state_style ~keeper_width ~run_width values =
+  Table.row ~gap:fusion_cell_gap
+    (fusion_cells ~state_style ~keeper_width ~run_width values)
+
 module Terminal_size_cache = struct
   type refresh =
     | Changed of (int * int)

@@ -22,12 +22,14 @@
     pinned exactly, and the name list below is pinned in order because the list
     order is the order a model sees the tools in.
 
-    Three of the fifteen carry values derived from an owner module rather than
-    literals -- masc_keeper_status from [Keeper_status_options_defaults],
-    masc_keeper_sandbox_stop from [Keeper_sandbox_control_contract], and the
-    network-mode enum from [Keeper_types_profile_sandbox]. They stay in OCaml
-    until each has a test pinning the TOML against its owner, the way
-    [test_operator_surface_toml_parity] pins the masc_config category enum. *)
+    Three of the fifteen carry values an owner module owns: masc_keeper_status
+    from [Keeper_status_options_defaults], masc_keeper_sandbox_stop from
+    [Keeper_sandbox_control_contract], and the network-mode enum from
+    [Keeper_types_profile_sandbox]. All three already read from TOML, so the
+    literals in those files are copies and something has to compare them back.
+    Two are compared elsewhere -- the stop scopes in [test_enum_mirror_sync]
+    and both enums in [test_keeper_tool_descriptor_registry_integrity]. The
+    third is compared below. *)
 
 open Alcotest
 
@@ -98,6 +100,50 @@ let test_the_published_order_is_unchanged () =
     (List.map (fun (s : Masc_domain.tool_schema) -> s.name) published)
 ;;
 
+
+(* The one owner derivation in this file that nothing was checking.
+
+   The sibling two the header names are pinned elsewhere —
+   [Keeper_sandbox_control_contract.stop_scope_strings] in
+   [test_enum_mirror_sync] and [test_keeper_tool_descriptor_registry_integrity],
+   and the network-mode enum in the latter. masc_keeper_status had no such
+   pin, so the TOML and [Keeper_status_options_defaults] agreed only by
+   nobody having changed one of them. #32763 changed max_tail_bytes from a
+   shared constant to its own literal; the value came out the same, and
+   nothing here would have said otherwise if it had not. *)
+let declared_int schema_name ~field ~key =
+  match (find schema_name).input_schema with
+  | `Assoc top ->
+    (match List.assoc_opt "properties" top with
+     | Some (`Assoc properties) ->
+       (match List.assoc_opt field properties with
+        | Some (`Assoc declaration) ->
+          (match List.assoc_opt key declaration with
+           | Some (`Int value) -> Some value
+           | _ -> None)
+        | _ -> None)
+     | _ -> None)
+  | _ -> None
+;;
+
+let test_status_bounds_match_their_owner () =
+  let module D = Masc.Keeper_status_options_defaults in
+  List.iter
+    (fun (field, key, owned) ->
+       check
+         (option int)
+         (Printf.sprintf "masc_keeper_status %s %s" field key)
+         (Some owned)
+         (declared_int "masc_keeper_status" ~field ~key))
+    [ "tail_turns", "minimum", D.min_tail_turns
+    ; "tail_turns", "maximum", D.max_tail_turns
+    ; "tail_messages", "minimum", D.min_tail_messages
+    ; "tail_messages", "maximum", D.max_tail_messages
+    ; "tail_bytes", "minimum", D.min_tail_bytes
+    ; "tail_bytes", "maximum", D.max_tail_bytes
+    ]
+;;
+
 let () =
   run
     "keeper_schema_toml_parity"
@@ -108,6 +154,12 @@ let () =
             `Quick
             test_input_schemas_match_with_keys_sorted
         ; test_case "published order" `Quick test_the_published_order_is_unchanged
+        ] )
+    ; ( "owner_derivation"
+      , [ test_case
+            "masc_keeper_status bounds match their owner"
+            `Quick
+            test_status_bounds_match_their_owner
         ] )
     ]
 ;;

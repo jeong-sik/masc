@@ -17,10 +17,13 @@ let slack_label = "slack"
    the channel's name, optionally "#" prefixed. Names resolve against the
    (id, name) projection the caller supplies — the connector_names store,
    which a gateway fills automatically when a channel's first inbound event
-   arrives. Resolution is deliberately confined to bound channels: a name
-   that matches some other channel's id in the store does not post there.
-   [None] leaves the reference untouched so [resolve_target] answers with
-   its binding error, as it always did for an unknown id. *)
+   arrives, with names stored trimmed. Resolution is deliberately confined
+   to bound channels: a name that matches some other channel's id in the
+   store does not post there. A reference that matches more than one bound
+   channel's name stays unresolved — an ambiguous "#general" must not pick
+   a channel silently. [None] returns nothing; the caller passes the
+   reference through unchanged so [resolve_target] answers with its
+   binding error, as it always did for an unknown id. *)
 let resolve_bound_channel_reference ~names ~bound requested =
   let requested = String.trim requested in
   if List.exists (String.equal requested) bound then Some requested
@@ -30,9 +33,17 @@ let resolve_bound_channel_reference ~names ~bound requested =
       then String.sub requested 1 (String.length requested - 1)
       else requested
     in
-    (match List.find_opt (fun (_, name) -> String.equal name bare) names with
-     | Some (id, _) when List.exists (String.equal id) bound -> Some id
-     | _ -> None)
+    let bare = String.trim bare in
+    (match
+       List.filter_map
+         (fun (id, name) ->
+            if String.equal name bare && List.exists (String.equal id) bound
+            then Some id
+            else None)
+         names
+     with
+    | [ id ] -> Some id
+    | _ -> None)
 ;;
 
 let max_user_mentions = 100

@@ -35,17 +35,9 @@ type tool_response =
 
 let max_body_bytes = 1024 * 1024
 
-let hex_of_cstruct bytes =
-  let alphabet = "0123456789abcdef" in
-  let length = Cstruct.length bytes in
-  let result = Bytes.create (length * 2) in
-  for index = 0 to length - 1 do
-    let value = Cstruct.get_uint8 bytes index in
-    Bytes.set result (index * 2) alphabet.[value lsr 4];
-    Bytes.set result ((index * 2) + 1) alphabet.[value land 0x0f]
-  done;
-  Bytes.unsafe_to_string result
-;;
+(* Checked against the byte string 0..255: identical output, lowercase, no
+   separators. Cstruct is already a dependency here. *)
+let hex_of_cstruct = Cstruct.to_hex_string
 
 let fresh_capabilities secure_random =
   let entropy = Cstruct.create 48 in

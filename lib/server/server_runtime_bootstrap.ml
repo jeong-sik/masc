@@ -255,15 +255,38 @@ let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
 
 let warn_rejected_exact_output_slots registry =
   let rejected = Runtime_exact_output_registry.rejected_slots registry in
+  let configured_runtime slot_id =
+    Option.map
+      (fun (rt : Runtime.t) ->
+         rt.Runtime.provider.Runtime_schema.id, rt.Runtime.model.Runtime_schema.api_name)
+      (Runtime.get_runtime_by_id slot_id)
+  in
+  let diagnoses =
+    List.map
+      (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
+         slot, Runtime_exact_output_registry.diagnose_rejected_slot slot ~configured_runtime)
+      rejected
+  in
   List.iter
-    (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
-       Log.Server.warn
-         "exact_output: lane %S slot %d (%S) ignored because target %S is absent from the frozen catalog; remaining admitted slots stay active"
-         slot.lane_id
-         slot.position
-         slot.slot_id
-         slot.target_ref)
-    rejected;
+    (fun ((slot : Runtime_exact_output_registry.rejected_slot), diagnosis) ->
+       match diagnosis with
+       | Runtime_exact_output_registry.Retired_catalog_target ->
+         Log.Server.warn
+           "exact_output: lane %S slot %d (%S) ignored because target %S is absent from the frozen catalog; remaining admitted slots stay active"
+           slot.lane_id
+           slot.position
+           slot.slot_id
+           slot.target_ref
+       | Runtime_exact_output_registry.Configured_runtime_id { provider_id; api_name } ->
+         Log.Server.warn
+           "exact_output: lane %S slot %d (%S) ignored because it is a runtime.toml runtime id (provider %S, api-name %S), not an exact-output target; exact lanes resolve overlay [[targets]] ids only — name the target that declares model %S; remaining admitted slots stay active"
+           slot.lane_id
+           slot.position
+           slot.slot_id
+           provider_id
+           api_name
+           api_name)
+    diagnoses;
   (* One consolidated line at ERROR, because per-slot WARNs at "remaining
      slots stay active" read as tolerable degradation and get discounted:
      four lanes carried retired targets for days on 2026-08-28 while the
@@ -278,11 +301,22 @@ let warn_rejected_exact_output_slots registry =
               slot.lane_id)
        |> List.sort_uniq String.compare
      in
+     let runtime_ids =
+       List.length
+         (List.filter
+            (fun (_, diagnosis) ->
+               match diagnosis with
+               | Runtime_exact_output_registry.Configured_runtime_id _ -> true
+               | Runtime_exact_output_registry.Retired_catalog_target -> false)
+            diagnoses)
+     in
      Log.Server.error
-       "exact_output: %d retired target ref(s) ignored across %d lane(s) (%s) — the catalog moved on and runtime.toml has not; delete or replace them"
+       "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d retired target ref(s), %d runtime.toml runtime id(s) written where a catalog target id belongs — delete or replace them"
        (List.length rejected)
        (List.length lanes)
-       (String.concat ", " lanes))
+       (String.concat ", " lanes)
+       (List.length rejected - runtime_ids)
+       runtime_ids)
 ;;
 
 (* Retracted (2026-08-28, hours after #31445): the classifier reuses

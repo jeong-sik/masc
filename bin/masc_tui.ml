@@ -52,9 +52,7 @@ let scrolled_surface state surface =
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
 
-let json_assoc_member_opt name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
+let json_assoc_member_opt = Masc_tui_json.member_opt
 
 (** One 60 Hz frame window: bursts are coalesced without delaying an idle
     terminal's first changed frame. *)

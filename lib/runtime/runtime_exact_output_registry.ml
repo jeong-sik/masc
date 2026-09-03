@@ -25,6 +25,25 @@ type rejected_slot =
   ; target_ref : string
   }
 
+type rejected_slot_diagnosis =
+  | Retired_catalog_target
+  | Configured_runtime_id of
+      { provider_id : string
+      ; api_name : string
+      }
+
+(* An exact lane resolves overlay [[targets]] ids only; a runtime.toml
+   runtime id is invisible to it even when both name the same model. The
+   two registries share a naming scheme, so an operator can write the wrong
+   one and read "absent from the frozen catalog" as the catalog having moved
+   on (verifier_exact, 2026-09-02). The lookup is injected because the
+   registry sits below [Runtime]. *)
+let diagnose_rejected_slot (slot : rejected_slot) ~configured_runtime =
+  match configured_runtime slot.slot_id with
+  | Some (provider_id, api_name) -> Configured_runtime_id { provider_id; api_name }
+  | None -> Retired_catalog_target
+;;
+
 type t =
   { resolver_snapshot : Exact_output.resolver_snapshot
   ; declared_lanes : Runtime_schema.exact_output_lane_decl list

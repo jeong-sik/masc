@@ -84,7 +84,7 @@ The existing `Multimodal.Workspace` / `Workspace_holder` is **not reusable as-is
 - **Always wired**: typed multimodal artifacts flow through the normal Keeper
   runtime. Provider/model selection remains configurable and any external
   effect is independently decided at Gate.
-- **Not durable**: `Payload.of_json` is lossy by construction (`payload.mli:35-42`), so a handle that survives checkpoint/compaction/restart returns empty bytes — fatal for multi-turn re-query.
+- **Not durable**: `Payload.of_json` is lossy by construction (`payload.mli:35-42`), so a handle that survives checkpoint/restart returns empty bytes — fatal for multi-turn re-query.
 
 Required: a handle-keyed store on the **input** path, backing bytes with a durable content-addressed file (the handle is the content hash, not inline base64), surviving the checkpoint round-trip.
 

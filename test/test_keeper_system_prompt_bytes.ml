@@ -28,6 +28,17 @@ let repo_source_root () =
   | Some root -> root
   | None -> Sys.getcwd ()
 
+(* The assembled prompt renders registry slots (keeper.md: identity,
+   workspace, instructions.custom, and the tags slots), so resolution must be
+   pinned to the repo's own prompt files; otherwise the build raises on a
+   missing prompt inside the dune sandbox. Same pinning idiom as
+   test_fusion_wake. *)
+let () =
+  Prompt_registry.set_markdown_dir
+    (Filename.concat (repo_source_root ()) "config/prompts");
+  Masc.Prompt_defaults.init ()
+;;
+
 let golden_path () =
   Filename.concat
     (repo_source_root ())

@@ -71,7 +71,7 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
     snapshot_to_json — the schema MUST accept this without transformation.
     FSM strings are lowercase snake_case because the observer serializes
     via `Keeper_state_machine.phase_to_string` (and the parallel
-    *_to_string for turn_phase / decision / runtime / compaction).  The
+    *_to_string for turn_phase / decision / runtime).  The
     capitalized `Stable` form lives in the TLA+ composite projection,
     not in the runtime JSON. */
 const REAL_COMPOSITE_PAYLOAD = {

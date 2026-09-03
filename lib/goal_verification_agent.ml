@@ -180,15 +180,25 @@ let render_lookup_section (lookup : Task.Anti_rationalization.lookup_surface) =
       |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
       |> String.concat ", "
     in
+    (* The empty-root sentence is the same prose the task verifier renders;
+       both lanes share the one slot in verification.md. *)
     let root_layout_lines =
       match root_layout with
-      | [] -> "  (this root is empty)"
+      | [] ->
+        Result.map
+          (fun text -> "  " ^ String.trim text)
+          (Prompt_registry.render_prompt_template
+             Prompt_names.verification_lookup_root_layout_empty
+             [])
       | entries ->
-        entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n"
+        Ok (entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n")
     in
-    Prompt_registry.render_prompt_template
-      Prompt_names.goal_verification_lookup
-      [ "lookup_tools", tool_names; "lookup_root_layout", root_layout_lines ]
+    (match root_layout_lines with
+     | Error _ as error -> error
+     | Ok root_layout_lines ->
+       Prompt_registry.render_prompt_template
+         Prompt_names.goal_verification_lookup
+         [ "lookup_tools", tool_names; "lookup_root_layout", root_layout_lines ])
 ;;
 
 let render_proof_prompt ~lookup (goal : Goal_store.goal) =

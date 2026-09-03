@@ -1062,10 +1062,10 @@ describe('filterSignalGroups', () => {
       ],
     },
     {
-      title: '메모리 & 컴팩션',
+      title: '메모리',
       rows: [
         { label: '메모리 통과율', value: '88.0%' },
-        { label: '컴팩션 절감', value: '42.0%' },
+        { label: '회상 적중률', value: '42.0%' },
       ],
     },
   ]
@@ -1086,11 +1086,11 @@ describe('filterSignalGroups', () => {
   })
 
   it('preserves only the matching rows within a group', () => {
-    const result = filterSignalGroups(sampleGroups, '컴팩션')
+    const result = filterSignalGroups(sampleGroups, '회상')
     expect(result).toHaveLength(1)
-    expect(result[0]?.title).toBe('메모리 & 컴팩션')
+    expect(result[0]?.title).toBe('메모리')
     expect(result[0]?.rows).toHaveLength(1)
-    expect(result[0]?.rows[0]?.label).toBe('컴팩션 절감')
+    expect(result[0]?.rows[0]?.label).toBe('회상 적중률')
   })
 
   it('drops groups that have zero matching rows', () => {

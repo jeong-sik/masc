@@ -49,6 +49,30 @@ let render_fragment key vars =
   | Error detail -> key ^ ": " ^ detail
 ;;
 
+(* The diagnostic attached to an [unavailable] Skill catalog row lives in
+   keeper.md (one slot, two render sites: the current task and the other held
+   tasks). A slot that does not render is logged, and the failure text
+   becomes the property value — the same contract [render_fragment] above
+   documents: the failure is placed in the row rather than dropped, because a
+   silently missing key reads as an absent condition rather than a broken
+   one. *)
+let skills_unavailable_diagnostic_property () =
+  match
+    Prompt_registry.render_prompt_template
+      Prompt_names.keeper_skills_unavailable_diagnostic
+      []
+  with
+  | Ok text -> [ "diagnostic", `String text ]
+  | Error detail ->
+    Log.Misc.error
+      "keeper skills-unavailable diagnostic prompt %s did not render: %s"
+      Prompt_names.keeper_skills_unavailable_diagnostic
+      detail;
+    [ ( "diagnostic"
+      , `String (Prompt_names.keeper_skills_unavailable_diagnostic ^ ": " ^ detail) )
+    ]
+;;
+
 let format_pending_messages
       (messages : Keeper_world_observation_message_scope.pending_message list)
   : string
@@ -166,11 +190,10 @@ let format_task_skills ?surfaces skills =
          (List.map
             (fun reference ->
                `Assoc
-                 [ "reference", Skill_reference.to_yojson reference
-                 ; "kind", `String "unavailable"
-                 ; ( "diagnostic"
-                   , `String "exact executable Skill projection is unavailable" )
-                 ])
+                 ([ "reference", Skill_reference.to_yojson reference
+                  ; "kind", `String "unavailable"
+                  ]
+                  @ skills_unavailable_diagnostic_property ()))
             skills))
     |> Yojson.Safe.to_string
   in
@@ -230,12 +253,10 @@ let format_held_task_skills
                  (List.map
                     (fun reference ->
                        `Assoc
-                         [ "reference", Skill_reference.to_yojson reference
-                         ; "kind", `String "unavailable"
-                         ; ( "diagnostic"
-                           , `String
-                               "exact executable Skill projection is unavailable" )
-                         ])
+                         ([ "reference", Skill_reference.to_yojson reference
+                          ; "kind", `String "unavailable"
+                          ]
+                          @ skills_unavailable_diagnostic_property ()))
                     entry.held_skills)
                |> Yojson.Safe.to_string
            in

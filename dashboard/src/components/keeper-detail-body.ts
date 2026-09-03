@@ -146,9 +146,6 @@ export function KeeperDetailBody({
         <${KeeperStateDiagramPanel} keeperName=${keeper.name} snapshot=${compositeSnapshot} />
       <//>
 
-      <${CollapsibleSection} title="Compaction">
-      <//>
-
       ${'' /* ── Divergent conditions (amber banner; renders only when phase lags observed signals) ── */}
       <${KeeperConditionsDivergent} keeper=${keeper} />
 

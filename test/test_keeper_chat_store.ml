@@ -4,6 +4,35 @@ module MS = Masc.Keeper_world_observation_message_scope
 module P = Masc.Otel_metric_store
 module KT = Masc.Keeper_turn
 
+(* The transcript-block prose this suite asserts ("without tool evidence")
+   lives in config/prompts/keeper.world.transcript.md, rendered through the
+   prompt registry. Pin resolution to the repo's own prompt files — the same
+   idiom test_fusion_wake and test_tool_task_coverage use — so the assertions
+   see the real templates instead of the bare-data fallback inside the dune
+   sandbox. *)
+let has_prompt_root path =
+  Sys.file_exists (Filename.concat path "config/prompts/keeper.world.transcript.md")
+;;
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_prompt_root root -> root
+  | _ ->
+    let rec ascend path =
+      if has_prompt_root path
+      then path
+      else (
+        let parent = Filename.dirname path in
+        if String.equal parent path then Sys.getcwd () else ascend parent)
+    in
+    ascend (Sys.getcwd ())
+;;
+
+let () =
+  Prompt_registry.set_markdown_dir (Filename.concat (repo_root ()) "config/prompts");
+  Masc.Prompt_defaults.init ()
+;;
+
 let rec remove_tree path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin

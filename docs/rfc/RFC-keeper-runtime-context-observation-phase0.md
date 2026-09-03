@@ -47,8 +47,8 @@ The last turn's usage remains available under a separately named observation:
 }
 ```
 
-No consumer may derive context pressure, compaction advice, attention state, or
-continuity state from `last_turn_usage`.
+No consumer may derive context pressure, attention state, or continuity
+state from `last_turn_usage`.
 
 ## 2. Evidence and failure flow
 
@@ -79,7 +79,7 @@ last provider response usage.input_tokens
   -> fallback_keeper_context_snapshot
   -> context_tokens / context_ratio
   -> execution / briefing / roster / fleet thresholds
-  -> operator attention and compaction wording
+  -> operator attention wording
 ```
 
 The numerator is a provider usage counter for one response. It is not an
@@ -93,15 +93,15 @@ This RFC authorizes one hard-cut implementation slice:
 1. Delete the fabricated context fallback and its persisted-row reader.
 2. Publish one shared `not_observed` context projection and keep last-turn
    usage under a separate name.
-3. Ensure unknown context contributes to no attention, urgency, sorting,
-   pressure, or compaction projection.
+3. Ensure unknown context contributes to no attention, urgency, sorting, or
+   pressure projection.
 4. Add the mandatory `keeper.metrics.v1` + `record_kind` identity to current
    turn and heartbeat writers; current readers reject versionless rows without
    a migration path.
 5. Persist current `tools_used`/`tool_call_count` and remove tool-name aliases,
    decision-log guessing, and zero-call fabrication.
-6. Remove producer-less metrics context, model, drift, compaction, fallback,
-   event, and history surfaces instead of filling them with defaults.
+6. Remove producer-less metrics context, model, drift, fallback, event, and
+   history surfaces instead of filling them with defaults.
 7. Delete the dormant context-bearing agent_core keeper snapshot publisher and its
    Dashboard decoder/state.
 8. Make the direct `keeper_context_status` tool output and both of its
@@ -110,8 +110,8 @@ This RFC authorizes one hard-cut implementation slice:
 9. Correct the Dashboard, Keeper manual, inventory, and regression fixtures.
 
 The implementation changes observation writers and read models. It does not
-change Keeper turn scheduling, heartbeat cadence, compaction admission,
-provider routing, checkpoints, or the agent_core runtime contract.
+change Keeper turn scheduling, heartbeat cadence, provider routing,
+checkpoints, or the agent_core runtime contract.
 
 ## 4. Typed contract
 
@@ -187,7 +187,7 @@ Every current metrics row carries:
 
 `record_kind` is `turn` or `heartbeat`. Turn rows carry the current typed
 `turn_mode`, `tools_used`, and `tool_call_count`; heartbeat rows do not mimic a
-turn or compaction event. Versionless rows are opaque to current status,
+turn event. Versionless rows are opaque to current status,
 Dashboard, cost, handoff, and operator-audit readers. No compatibility decoder
 or migration routine exists.
 
@@ -232,8 +232,8 @@ this regression test fail.
 ### 6.2 Retired-row counterfactual
 
 A versionless persisted row containing
-`snapshot_source="keeper_context_status"`, context-looking numbers, old tool
-aliases, or compaction-looking fields contributes to no current projection.
+`snapshot_source="keeper_context_status"`, context-looking numbers, or old
+tool aliases contributes to no current projection.
 Reintroducing any versionless metrics decoder must make the regression tests
 fail.
 
@@ -271,14 +271,14 @@ Implementation blast radius:
 - shared missing-context projection and operator/status call sites;
 - direct `keeper_context_status` output, model schema, and internal descriptor;
 - Dashboard Keeper/agent_core types, normalizers, telemetry panels, and focused tests;
-- deletion of the private context snapshot decoder, producer-less compaction
-  history options, tool-alias facade, dormant agent_core snapshot publisher/decoder,
+- deletion of the private context snapshot decoder, producer-less history
+  options, tool-alias facade, dormant agent_core snapshot publisher/decoder,
   and their tests;
 - `docs/KEEPER-USER-MANUAL.md` and
   `docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md`.
 
-Compaction policy, provider routing, and agent_core request/response serialization
-remain outside this RFC.
+Provider routing and agent_core request/response serialization remain outside
+this RFC.
 
 ## 8. Rejected alternatives
 
@@ -301,11 +301,6 @@ class.
 
 Rejected. Model prose is not a state transport and is orthogonal to context
 measurement.
-
-### Change compaction admission in the same PR
-
-Rejected. RFC-0349 concerns a control policy. This RFC removes a false
-read-side projection and cannot make that usage counter load-bearing.
 
 ## 9. Workaround rejection check
 

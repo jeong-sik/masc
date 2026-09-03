@@ -95,6 +95,7 @@ let test_self_authored_verification_remains_eligible () =
       { assignee = "omega"
       ; started_at = "2026-07-20T00:00:00Z"
       ; submitted_at = "2026-07-20T01:00:00Z"
+      ; intent = Complete_task
       ; verification_id = "verification-1"
       }
   in

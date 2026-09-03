@@ -45,7 +45,6 @@ let test_model_surface_exposes_delegation_not_keeper_administration () =
     [ "masc_keeper_waiting_inventory"
     ; "masc_keeper_list"
     ; "masc_keeper_delegate_list"
-    ; "masc_keeper_compact"
     ; "masc_keeper_clear"
     ; "masc_keeper_sandbox_start"
     ; "masc_keeper_sandbox_stop"

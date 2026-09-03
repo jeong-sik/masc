@@ -3032,6 +3032,11 @@
  (libraries alcotest masc_tui_types))
 
 (test
+ (name test_tui_text_input_target)
+ (modules test_tui_text_input_target)
+ (libraries alcotest fmt masc_tui_types))
+
+(test
  (name test_tui_ask_selection_wiring)
  (modules test_tui_ask_selection_wiring)
  (libraries alcotest ast_grep)

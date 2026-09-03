@@ -6,7 +6,7 @@ author: Claude Opus 5 (1M context)
 created: 2026-08-05
 supersedes: []
 related:
-  - RFC-0351 (memory-first context management, compaction sunset) — this implements the L5 tool_result line
+  - RFC-0351 (memory-first context management) — this implements the L5 tool_result line
   - RFC-memory-os-bounded-context-and-librarian-curator (#26534)
   - "#26545 / #26551 / #26800 (Runtime_model_input_tail_window)"
   - "#25096 (Tool_output / Tool_blob_store externalization)"
@@ -184,8 +184,6 @@ where saturating_ref = make_artifact_ref
 
 ## 5. 비목표
 
-- 컴팩션 파이프라인 투자 — RFC-0351 §8 금지.
-- 자동 컴팩션 트리거 복구 — 별건. receipt 없는 window 로 트리거를 쏘면 조용한 손실이 예정된 조용한 손실이 된다.
 - durable 히스토리 재작성.
 - checkpoint 크기 축소 (안 B 의 영역).
 - 중요도 점수 · 문자열 분류 · 휴리스틱 임계값 — RFC-0351 §2 원칙 2.

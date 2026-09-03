@@ -96,6 +96,22 @@ val completion_authority_kind : completion_authority -> string
 val completion_authority_has_identity : completion_authority -> bool
 (** Whether the provenance carries a non-empty authenticated identity. *)
 
+(** Which question a completion authority is being asked. A producer submits
+    work it believes is finished, or a stop it believes is right; both wait in
+    the same place and both end on one verdict, so the verdict needs to know
+    which terminal state it is authorising. *)
+type verification_intent =
+  | Complete_task
+  | Cancel_task
+[@@deriving show]
+
+val verification_intent_to_string : verification_intent -> string
+
+val verification_intent_of_string : string -> (verification_intent, string) result
+(** Closed parse. An unknown word is an error, never a default: reading an
+    unrecognised intent as [Complete_task] would turn a cancellation into a
+    completion at the moment a verdict lands. *)
+
 type task_status =
   | Todo
   | Claimed of { assignee : string; claimed_at : string }
@@ -104,6 +120,7 @@ type task_status =
       { assignee : string
       ; started_at : string
       ; submitted_at : string
+      ; intent : verification_intent
       ; verification_id : string
       }
       (** No verifier binding. [started_at] preserves the producer's original

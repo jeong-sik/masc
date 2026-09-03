@@ -10,7 +10,6 @@ type module_tag =
   | Mod_operator
   | Mod_local_runtime
   | Mod_run
-  | Mod_compact
   | Mod_agent
   | Mod_task
   | Mod_state

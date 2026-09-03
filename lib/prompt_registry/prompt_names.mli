@@ -27,6 +27,8 @@ val goal_verification_lookup : string
 
 val verification_lookup_none : string
 val verification_lookup_producer_tree : string
+val verification_lookup_root_layout_empty : string
+(** The line a readable-but-empty lookup root produces in the root layout. *)
 val verification_contract : string
 val verification_required_evidence : string
 val keeper_observation_recovered_current_task : string
@@ -45,6 +47,10 @@ val keeper_observation_previous_turn_stop_repeated_assistant_text : string
 val keeper_current_task_skills : string
 val keeper_held_task_skills : string
 val keeper_held_task_skills_heading : string
+
+val keeper_skills_unavailable_diagnostic : string
+(** The diagnostic on an [unavailable] Skill catalog row. One sentence, two
+    render sites (current task and other held tasks). *)
 val keeper_observation_rejected_digest_heading : string
 val keeper_observation_rejected_digest_row : string
 (** The instruction attached to the skills named by the current task. *)
@@ -77,6 +83,16 @@ val mcp_tool_help_docs_heading : string
 val mcp_tool_help_doc_ref_row : string
 val keeper_workspace : string
 val keeper_identity : string
+
+val keeper_instructions_custom : string
+(** The operator-instructions block. Variable: [instructions]. *)
+
+val keeper_tags_system_open : string
+val keeper_tags_system_close : string
+val keeper_tags_instructions_open : string
+val keeper_tags_instructions_close : string
+(** The structural tags wrapping the shared prefix and the instructions. *)
+
 val keeper_capability_probe : string
 val lane_cli_probe_librarian_system : string
 val lane_cli_probe_librarian_user : string
@@ -86,6 +102,10 @@ val keeper_antigravity_system_instructions_label : string
 val keeper_antigravity_current_goal_label : string
 val eval_calibration_few_shot : string
 val eval_calibration_few_shot_example : string
+
+val eval_calibration_few_shot_rejected_label : string
+(** The label a divergence example carries when the human rejected what the
+    evaluator approved. *)
 
 (** Repository checkout freshness fragments. *)
 val keeper_context_checkouts_section : string
@@ -113,6 +133,12 @@ val keeper_context_approval_authority_footer : string
     prompt key. *)
 
 val keeper_world_frame_frame : string
+
+val keeper_world_transcript_header : string
+val keeper_world_transcript_intro : string
+(** Durable direct-conversation transcript block, prepended to the quoted
+    recent-conversation rows in the turn context. *)
+
 val keeper_world_active_goals_heading : string
 val keeper_world_active_goals_row : string
 val keeper_world_active_goals_row_untitled : string
@@ -229,3 +255,30 @@ val keeper_gate_replay_resolution_exact_input : string
     [schema_json]. *)
 
 val judge_effect_output_contract : string
+
+(** {1 Tool help — shared fallback prose and markdown scaffold}
+
+    Per-tool authored help lives in [config/tools/<name>.toml] [help]; these
+    keys are the wording the derivation path renders for a tool without
+    [help], plus the section scaffold every help entry's markdown shares. *)
+
+val tool_help_prompt_hint_tool_help : string
+val tool_help_when_to_use_tool_help : string
+val tool_help_when_to_use_generic : string
+val tool_help_constraint_hidden : string
+val tool_help_constraint_placeholder : string
+val tool_help_constraint_simulation : string
+val tool_help_constraint_adapter : string
+val tool_help_short_description_empty : string
+
+val tool_help_entry_header : string
+(** Variables: [name], [short_description], [visibility], [lifecycle]. *)
+
+val tool_help_entry_when_to_use : string
+val tool_help_entry_key_constraints : string
+val tool_help_entry_details : string
+val tool_help_entry_docs : string
+val tool_help_entry_prompt_hints : string
+val tool_help_entry_examples : string
+val tool_help_entry_alternatives : string
+val tool_help_index_header : string

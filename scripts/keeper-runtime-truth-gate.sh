@@ -235,8 +235,6 @@ if [[ "$MODE" = "provider" ]]; then
       select(.event == "event_bus_correlated")
       | (.decision.correlation_id == null or (.decision.correlation_id | type == "string"))
         and (.decision.run_id == null or (.decision.run_id | type == "string"))
-        and (.decision.context_compact_started_count | type == "number")
-        and (.decision.context_compacted_count | type == "number")
     ' >/dev/null || fail "event_bus_correlated is missing AGENT_CORE event-bus summary fields"
   fi
 

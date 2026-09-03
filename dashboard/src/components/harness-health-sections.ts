@@ -177,7 +177,7 @@ export function heroBody(data: HarnessHealthData): string {
     return '세대 교체 기록에 누락 필드가 있어 keeper 연속성 점검이 필요합니다.'
   }
   if (data.overview.last_signal_at == null) {
-    return 'keeper 장기 실행 중 평가, 압축, 세대 교체가 정상인지 감시합니다.'
+    return 'keeper 장기 실행 중 평가와 세대 교체가 정상인지 감시합니다.'
   }
   return `마지막 안전 신호는 ${freshnessLabel(data.overview.last_signal_at)}에 들어왔습니다.`
 }

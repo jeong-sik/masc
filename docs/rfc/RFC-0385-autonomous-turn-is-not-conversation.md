@@ -274,10 +274,6 @@ RFC-0376 §4.3 이 dashboard chat 응답 계약으로 보존하기로 한 지점
   RFC-0376 §5 를 승계한다.
 - 침묵 강제. keeper 가 말할지 말지는 keeper 가 정한다.
 - 스케줄러 깨우기 빈도 변경.
-- compaction 정책 변경. `Compaction_trigger.t` 는 provider overflow, request body
-  capacity, provider refusal, serving input capacity, manual 다섯 종이며 모두
-  측정된 사실에 반응한다. 선제 임계값이 없는 것은 설계이고, compaction 은
-  컨텍스트가 한계를 넘었을 때의 생존 수단이지 적재 위생 수단이 아니다.
 - 외부 채널 인바운드 턴. §9 로 넘긴다.
 
 ## 9. 후속

@@ -2541,6 +2541,7 @@ let test_gc_preserves_awaiting_verification () =
              { assignee = "claude"
              ; started_at = gc_ancient_ts
              ; submitted_at = gc_ancient_ts
+             ; intent = Complete_task
              ; verification_id = "verif-900"
              })
     in
@@ -2569,6 +2570,7 @@ let test_gc_restores_orphaned_nonterminal_from_archive () =
              { assignee = "claude"
              ; started_at = gc_ancient_ts
              ; submitted_at = gc_ancient_ts
+             ; intent = Complete_task
              ; verification_id = "verif-901"
              })
     in
@@ -2604,6 +2606,7 @@ let test_gc_restored_task_preserves_old_messages_same_pass () =
              { assignee = "claude"
              ; started_at = gc_ancient_ts
              ; submitted_at = gc_ancient_ts
+             ; intent = Complete_task
              ; verification_id = "verif-904"
              })
     in

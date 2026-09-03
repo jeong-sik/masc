@@ -7,9 +7,9 @@
     {b Usage:}
     {[
       let spec = Tool_spec.create
-        ~name:"masc_compact_context"
-        ~description:"Apply context compaction strategies"
-        ~module_tag:Mod_compact
+        ~name:"masc_library_search"
+        ~description:"Search stored library entries"
+        ~module_tag:Mod_library
         ~input_schema:(...)
         ~is_read_only:true
         ~is_idempotent:true

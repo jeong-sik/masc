@@ -374,10 +374,6 @@ offline/no-embedding tenet and slot onto the organs above (full extract:
   promote). Confirms the §2.2 shape: exactly one writer to durable memory, staging
   and reflection non-mutating, text re-grounded at promote time — the antidote to
   the 1800→89-line confabulation drift.
-- **Compaction circuit breaker** (claude-code `MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES
-  =3`, cited against 250K-wasted-calls/day thrash). Out of scope for memory-os but
-  the single highest-value transferable anti-thrash control for the keeper
-  compaction path — tracked separately (Track C).
 
 These are enrichments, not new organs; each is additive and default-off, gated the
 same way as the core phases.

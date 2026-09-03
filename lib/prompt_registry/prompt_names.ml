@@ -18,6 +18,7 @@ let goal_verification_lookup = "goal_verification.lookup"
    no review prose of its own. *)
 let verification_lookup_none = "verification.lookup.none"
 let verification_lookup_producer_tree = "verification.lookup.producer_tree"
+let verification_lookup_root_layout_empty = "verification.lookup.root_layout_empty"
 let verification_contract = "verification.contract"
 let verification_required_evidence = "verification.required_evidence"
 
@@ -55,6 +56,11 @@ let keeper_observation_rejected_digest_row = "keeper.observation.rejected_digest
 let keeper_current_task_skills = "keeper.current_task.skills"
 let keeper_held_task_skills = "keeper.held_task.skills"
 let keeper_held_task_skills_heading = "keeper.held_task.skills_heading"
+
+(* One sentence, two render sites (current task and other held tasks): the
+   diagnostic attached to an [unavailable] Skill catalog row when the exact
+   executable projection cannot be produced. *)
+let keeper_skills_unavailable_diagnostic = "keeper.skills.unavailable_diagnostic"
 let librarian = "librarian"
 
 (* Runtime-owned instruction assets.  A caller may supply data to these
@@ -80,6 +86,14 @@ let mcp_tool_help_docs_heading = "mcp.tool_help.docs_heading"
 let mcp_tool_help_doc_ref_row = "mcp.tool_help.doc_ref_row"
 let keeper_workspace = "keeper.workspace"
 let keeper_identity = "keeper.identity"
+
+(* System-prompt assembly pieces: the operator-instructions block and the
+   structural tags that wrap the shared prefix and the instructions. *)
+let keeper_instructions_custom = "keeper.instructions.custom"
+let keeper_tags_system_open = "keeper.tags.system_open"
+let keeper_tags_system_close = "keeper.tags.system_close"
+let keeper_tags_instructions_open = "keeper.tags.instructions_open"
+let keeper_tags_instructions_close = "keeper.tags.instructions_close"
 let keeper_capability_probe = "keeper.capability_probe"
 let lane_cli_probe_librarian_system = "lane_cli_probe.librarian.system"
 let lane_cli_probe_librarian_user = "lane_cli_probe.librarian.user"
@@ -89,6 +103,10 @@ let keeper_antigravity_system_instructions_label = "keeper.antigravity.system_in
 let keeper_antigravity_current_goal_label = "keeper.antigravity.current_goal_label"
 let eval_calibration_few_shot = "eval.calibration.few_shot"
 let eval_calibration_few_shot_example = "eval.calibration.few_shot.example"
+
+(* The label a divergence example carries when the human rejected what the
+   evaluator approved. *)
+let eval_calibration_few_shot_rejected_label = "eval.calibration.few_shot.rejected_label"
 
 (* Repository checkout freshness — one fragment per line part, so an
    operator can reword any of them without an OCaml change. *)
@@ -115,6 +133,11 @@ let keeper_context_approval_authority_footer = "keeper.context.approval_authorit
    registers as keeper.world.<group>.<marker>. The bare [keeper.world] key is a
    historical dashboard name only — never a prompt key. *)
 let keeper_world_frame_frame = "keeper.world.frame.frame"
+
+(* Durable direct-conversation transcript block, prepended to the quoted
+   recent-conversation rows in the turn context. *)
+let keeper_world_transcript_header = "keeper.world.transcript.header"
+let keeper_world_transcript_intro = "keeper.world.transcript.intro"
 let keeper_world_active_goals_heading = "keeper.world.active_goals.heading"
 let keeper_world_active_goals_row = "keeper.world.active_goals.row"
 let keeper_world_active_goals_row_untitled = "keeper.world.active_goals.row_untitled"
@@ -384,3 +407,25 @@ let keeper_gate_replay_resolution_exact_input =
 (* HITL context-summary canonical output contract — the schema is data the
    caller supplies; the contract sentence lives in the template. *)
 let judge_effect_output_contract = "judge.effect.output_contract"
+
+(* Tool-help registry fallback prose and markdown scaffold — shared wording,
+   not per-tool data (per-tool authored help lives in config/tools/<name>.toml
+   [help]). The derivation path for a tool without [help] renders these; the
+   execution path only picks the key and supplies the entry data. *)
+let tool_help_prompt_hint_tool_help = "tool_help.prompt_hint.tool_help"
+let tool_help_when_to_use_tool_help = "tool_help.when_to_use.tool_help"
+let tool_help_when_to_use_generic = "tool_help.when_to_use.generic"
+let tool_help_constraint_hidden = "tool_help.constraint.hidden"
+let tool_help_constraint_placeholder = "tool_help.constraint.placeholder"
+let tool_help_constraint_simulation = "tool_help.constraint.simulation"
+let tool_help_constraint_adapter = "tool_help.constraint.adapter"
+let tool_help_short_description_empty = "tool_help.short_description.empty"
+let tool_help_entry_header = "tool_help.entry.header"
+let tool_help_entry_when_to_use = "tool_help.entry.when_to_use"
+let tool_help_entry_key_constraints = "tool_help.entry.key_constraints"
+let tool_help_entry_details = "tool_help.entry.details"
+let tool_help_entry_docs = "tool_help.entry.docs"
+let tool_help_entry_prompt_hints = "tool_help.entry.prompt_hints"
+let tool_help_entry_examples = "tool_help.entry.examples"
+let tool_help_entry_alternatives = "tool_help.entry.alternatives"
+let tool_help_index_header = "tool_help.index.header"

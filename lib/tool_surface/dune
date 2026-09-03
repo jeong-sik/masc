@@ -55,6 +55,11 @@
   ; the leaf constraint above still holds.
   otoml
   masc.embedded_config
+  ; Tool_help_registry renders its shared fallback prose from
+  ; config/prompts/tool_help.md slots (RFC prompts-and-tool-definitions-outside-ocaml).
+  ; prompt_registry sits on the workspace/core spine, not on keeper/runtime,
+  ; so the leaf constraint above still holds.
+  masc.prompt_registry
   eio
   unix)
  (preprocess

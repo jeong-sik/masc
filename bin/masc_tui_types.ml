@@ -3068,6 +3068,72 @@ type state = {
   refresh_interval: float;
 }
 
+(* Which field a typed character lands in.
+
+   Seven fields take letters. Paste named four of them and typing named all
+   seven, each with its own guard written where the field was added, so a
+   paste into the palette, into row search, or into a preset name went to the
+   chat draft the operator was not looking at -- or, with no keeper selected,
+   nowhere at all. The operator sees a paste that works on one screen and
+   does nothing on the next.
+
+   Both paths read this now. A field added here has to be answered by every
+   match over the result, which is what keeps the next field from taking
+   letters without taking pasted text.
+
+   The board draft is one of these and the chat composer is not, which reads
+   backwards until you look at what a paste has to do in each. Both hold many
+   lines, but the composer's paste also classifies a dropped file and spills a
+   long paste to a file in the keeper's workspace -- neither of which a board
+   post has anywhere to go. What the board draft needs is the text, and that
+   is what a case here gives it.
+
+   The chat composer is not one of these. It is the fallback both paths already
+   share -- keys reach it through [Composer.classify_key] before this is
+   consulted, and a paste reaches it when this says [None] -- and its paste
+   path does work these cannot (a dropped file, a spill to disk) that has no
+   meaning in a one-line field.
+
+   [compact_viewport] is the frame's, not the state's: a surface the last
+   paint had to draw compact is not showing the field, and the two identity
+   fields already refused keys on that ground. Passed in rather than read,
+   because this module cannot see a frame. *)
+type text_input_target =
+  | Text_preset_name
+  | Text_runtime_param
+  | Text_palette
+  | Text_row_search
+  | Text_identity_app_form
+  | Text_identity_filter
+  | Text_board_draft
+
+(* The order is the key dispatch's order, which is what an operator already
+   experiences: a preset name being typed holds every letter, and the two
+   identity fields come last because the surface under them reads letters as
+   commands. *)
+let text_input_target (state : state) ~compact_viewport =
+  let identity_surface =
+    state.view = Keepers Keeper_detail
+    && state.detail_tab = Detail_identity
+    && not compact_viewport
+  in
+  if
+    state.view = Config
+    && state.config_pane = Config_presets
+    && Option.is_some state.preset_save_draft
+  then Some Text_preset_name
+  else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
+  else if state.palette_open then Some Text_palette
+  else if Option.is_some state.search then Some Text_row_search
+  else if identity_surface && Option.is_some state.identity_app_form then
+    Some Text_identity_app_form
+  else if identity_surface && Option.is_some state.identity_filter then
+    Some Text_identity_filter
+  else if state.view = Board && state.board_mode = Board_compose then
+    Some Text_board_draft
+  else None
+;;
+
 (* One reading of the state for both the send path and the footer; the order
    and the reasoning live in [Masc_tui_send_disposition]. *)
 type send_disposition =

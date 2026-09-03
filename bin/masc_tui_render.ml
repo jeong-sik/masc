@@ -2468,10 +2468,21 @@ let render_approvals (state : state) =
   Buffer.add_buffer buf ask_buf;
 
   let hints =
+    (* One name for the key in both modes. [ and ] call the same function
+       either way -- they walk the asks -- and the surface used to call that
+       "question" while browsing and "ask" while answering, which is the same
+       key asking the operator to learn it twice. Named once here so the two
+       footers cannot drift apart again.
+
+       The vocabulary is the repository's: [/] walks the container a surface
+       is a list of. Board says post, Changes says keeper, this says ask. *)
+    let walk_asks = "[/]:ask" in
     match state.ask_answer_mode with
     | Ask_browsing ->
-        "j/k:move  y/n:decide  e:outside lane  [/]:question  \
-         a:answer a question  r:refresh  Tab:next"
+        Printf.sprintf
+          "j/k:move  y/n:decide  e:outside lane  %s  a:answer a question  \
+           r:refresh  Tab:next"
+          walk_asks
     | Ask_answering { aam_ask_id } ->
         (* Say when the next Enter sends. The approval queue two panes up
            already draws its armed state; this one announced itself only as an
@@ -2481,8 +2492,10 @@ let render_approvals (state : state) =
          | Some armed when String.equal armed aam_ask_id ->
              "Press Enter again to send  |  s:skip  c:clear  Esc:back"
          | Some _ | None ->
-             "j/k:question  [/]:ask  1-9:pick  s:skip  c:clear  Enter:answer  \
-              Esc:back")
+             Printf.sprintf
+               "j/k:question  %s  1-9:pick  s:skip  c:clear  Enter:answer  \
+                Esc:back"
+               walk_asks)
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
 

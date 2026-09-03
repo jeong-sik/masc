@@ -8534,9 +8534,13 @@ let render_system_logs (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  (* The message takes what the named columns leave, asked of the columns. *)
+  let message_width =
+    Render_schedule.system_log_message_width
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
+  in
   let col_hdr =
-    Printf.sprintf "  %-8s %-7s %-16s %-12s %-9s %s" "Time" "Level" "Module"
-      "Keeper" "Category" "Message"
+    "  " ^ Render_schedule.system_log_header_row ~message_width
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -8580,22 +8584,28 @@ let render_system_logs (state : state) =
           in
           let category = system_log_category_text e in
           let level_style = system_log_level_style e.sl_level in
-          (* Module and keeper are fitted rather than only padded: a long
-             module name used to push every column right of it out of line
-             with the header. *)
+          (* Every cell is fitted to the width its header is drawn at; a long
+             module name used to push every column right of it out of line. *)
           let line =
-            Printf.sprintf "  %s%-8s%s %s%s %-5s%s %s%s%s %s%s%s %s%s%s %s"
-              Ansi.dim (Terminal_text.clock_timestamp e.sl_ts) Ansi.reset
-              level_style (system_log_level_mark e.sl_level)
-              (Masc.Tui_decode.system_log_level_label e.sl_level) Ansi.reset
-              (Masc_tui_theme.tone Masc_tui_theme.Accent) (fit_width (Terminal_text.single_line e.sl_module) 16)
-              Ansi.reset
-              (Theme.keeper_origin ())
-          (fit_width (Terminal_text.single_line keeper) 12)
-              Ansi.reset
-              Ansi.dim (fit_width (Terminal_text.single_line category) 9)
-              Ansi.reset
-              (Terminal_text.single_line e.sl_message)
+            "  "
+            ^ Render_schedule.system_log_row ~message_width ~level_style
+                ~styles:
+                  { Render_schedule.slog_time_style = Ansi.dim
+                  ; slog_module_style =
+                      Masc_tui_theme.tone Masc_tui_theme.Accent
+                  ; slog_keeper_style = Theme.keeper_origin ()
+                  ; slog_category_style = Ansi.dim
+                  }
+                { Render_schedule.slog_time =
+                    Terminal_text.clock_timestamp e.sl_ts
+                ; slog_level =
+                    system_log_level_mark e.sl_level ^ " "
+                    ^ Masc.Tui_decode.system_log_level_label e.sl_level
+                ; slog_module = Terminal_text.single_line e.sl_module
+                ; slog_keeper = Terminal_text.single_line keeper
+                ; slog_category = Terminal_text.single_line category
+                ; slog_message = Terminal_text.single_line e.sl_message
+                }
           in
           if idx = state.system_logs_cursor then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr line)

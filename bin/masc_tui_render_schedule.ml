@@ -572,6 +572,94 @@ let workspace_header_row ~path_width =
 let workspace_row ~path_width values =
   Table.row ~gap:workspace_cell_gap (workspace_cells ~path_width values)
 
+(* System log columns.
+
+   The header wrote its widths in one format string and the rows in another,
+   and the row's had grown a second job: it interleaved five colours with the
+   five readings, so the widths sat between escape sequences where nothing
+   could check them against the header's. The row had already been taught to
+   fit its module and keeper cells -- a comment there records a long module
+   name pushing every column right of it -- but the header it was fitting to
+   was a separate string.
+
+   The colours ride the cells now. Four of them never vary and are passed once;
+   the level's changes with the reading, which is the one thing on this screen
+   a colour is for. *)
+
+let system_log_time_width = 8
+let system_log_level_width = 7
+let system_log_module_width = 16
+let system_log_keeper_width = 12
+let system_log_category_width = 9
+let system_log_minimum_message_width = 12
+let system_log_cell_gap = 1
+
+type system_log_row_values = {
+  slog_time : string;
+  slog_level : string;
+  slog_module : string;
+  slog_keeper : string;
+  slog_category : string;
+  slog_message : string;
+}
+
+(* The four dresses a log row wears whatever it says: a timestamp is always
+   receded, a module is always the accent, a keeper is always its origin
+   colour, a category is always dim. Passed once rather than per row, because
+   nothing in a reading changes them. *)
+type system_log_styles = {
+  slog_time_style : string;
+  slog_module_style : string;
+  slog_keeper_style : string;
+  slog_category_style : string;
+}
+
+let system_log_plain_styles =
+  { slog_time_style = ""
+  ; slog_module_style = ""
+  ; slog_keeper_style = ""
+  ; slog_category_style = ""
+  }
+
+let system_log_no_values =
+  { slog_time = ""
+  ; slog_level = ""
+  ; slog_module = ""
+  ; slog_keeper = ""
+  ; slog_category = ""
+  ; slog_message = ""
+  }
+
+let system_log_cells ?(styles = system_log_plain_styles) ?(level_style = "")
+    ~message_width values =
+  [ Table.cell ~style:styles.slog_time_style ~header:"TIME"
+      ~width:system_log_time_width values.slog_time
+  ; Table.cell ~style:level_style ~header:"LEVEL"
+      ~width:system_log_level_width values.slog_level
+  ; Table.cell ~style:styles.slog_module_style ~header:"MODULE"
+      ~width:system_log_module_width values.slog_module
+  ; Table.cell ~style:styles.slog_keeper_style ~header:"KEEPER"
+      ~width:system_log_keeper_width values.slog_keeper
+  ; Table.cell ~style:styles.slog_category_style ~header:"CATEGORY"
+      ~width:system_log_category_width values.slog_category
+  ; Table.cell ~header:"MESSAGE" ~width:message_width values.slog_message
+  ]
+
+let system_log_message_width ~inner_width =
+  let named =
+    Table.used_width ~gap:system_log_cell_gap
+      (system_log_cells ~message_width:0 system_log_no_values)
+  in
+  max system_log_minimum_message_width (inner_width - named)
+
+let system_log_header_row ~message_width =
+  Table.header_row ~gap:system_log_cell_gap
+    (system_log_cells ~message_width system_log_no_values)
+
+let system_log_row ~styles ~level_style ~message_width values =
+  Table.row ~gap:system_log_cell_gap
+    (system_log_cells ~styles ~level_style ~message_width values)
+
 module Terminal_size_cache = struct
   type refresh =
     | Changed of (int * int)

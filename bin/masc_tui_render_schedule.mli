@@ -226,6 +226,54 @@ val workspace_row : path_width:int -> workspace_row_values -> string
     print one format string in two places; a column can no longer exist in the
     header at a width the rows do not use. *)
 
+(** {1 System log columns} *)
+
+val system_log_time_width : int
+val system_log_level_width : int
+val system_log_module_width : int
+val system_log_keeper_width : int
+val system_log_category_width : int
+val system_log_minimum_message_width : int
+val system_log_cell_gap : int
+
+type system_log_row_values = {
+  slog_time : string;
+  slog_level : string;
+  slog_module : string;
+  slog_keeper : string;
+  slog_category : string;
+  slog_message : string;
+}
+
+type system_log_styles = {
+  slog_time_style : string;
+  slog_module_style : string;
+  slog_keeper_style : string;
+  slog_category_style : string;
+}
+(** The dresses a log row wears whatever it says. The level's is separate
+    because it is the one that changes with the reading. *)
+
+val system_log_plain_styles : system_log_styles
+(** No dress at all, for a caller drawing an undressed row and for the tests
+    that check a dressed row measures the same. *)
+
+val system_log_message_width : inner_width:int -> int
+(** Cells the message may occupy: what the named columns leave, never below
+    {!system_log_minimum_message_width}. *)
+
+val system_log_header_row : message_width:int -> string
+
+val system_log_row :
+  styles:system_log_styles ->
+  level_style:string ->
+  message_width:int ->
+  system_log_row_values ->
+  string
+(** One entry, laid out on the same columns as {!system_log_header_row}. The
+    widths used to live in two format strings, the row's threaded between five
+    escape sequences where nothing could compare them with the header's. *)
+
 module Terminal_size_cache : sig
   type refresh =
     | Changed of (int * int)

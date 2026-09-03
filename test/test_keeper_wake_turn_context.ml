@@ -28,43 +28,55 @@ let skill_reference name revision =
     ~content_revision
 ;;
 
-(* The shared Keeper prompt identifies the repository root from a Dune sandbox. *)
-let has_repo_prompts root =
-  Sys.file_exists (Filename.concat root "config/prompts/keeper.md")
+(* The prompts these tests render ship inside the binary and reach a config
+   directory through [Managed_asset_sync], which is the step the server takes
+   at boot. Unpacking them once is the whole of this suite's prompt setup.
 
-let repo_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root when has_repo_prompts root -> root
-  | _ ->
-    let rec ascend path =
-      if has_repo_prompts path then path
-      else
-        let parent = Filename.dirname path in
-        if String.equal parent path then Sys.getcwd () else ascend parent
-    in
-    ascend (Sys.getcwd ())
+   What this replaced was two answers to one question: a per-test wrapper that
+   pinned the repository's own [config/prompts] and cleared the registry when
+   it left, and a suite-wide init that pinned a directory without reading it.
+   The wrapper found the repository by climbing up to eight directories from
+   the cwd, which a Dune sandbox does not contain, and its clear was global —
+   it reached every later test that did not wrap itself, which then read the
+   emptied registry as a missing prompt. One source, read once, has neither
+   problem. *)
+let unpacked_prompt_config =
+  lazy
+    (let config_dir = Filename.temp_dir "wake_turn_context_config_" "" in
+     let prompts_dir = Filename.concat config_dir "prompts" in
+     Unix.mkdir prompts_dir 0o700;
+     (* [Config_dir_resolver] reports on both children; make the second one so
+        a resolution warning does not ride along with every run. *)
+     Unix.mkdir (Filename.concat config_dir "keepers") 0o700;
+     let sync =
+       Masc.Managed_asset_sync.sync
+         ~domain:Masc.Managed_asset_sync.Prompts
+         ~read:Embedded_config.read
+         ~files:Embedded_config.file_list
+         ~dest_dir:prompts_dir
+         ()
+     in
+     (match sync.Masc.Managed_asset_sync.failed with
+      | [] -> ()
+      | failures ->
+          Alcotest.failf "the binary's prompt assets did not unpack: %s"
+            (String.concat "; "
+               (List.map (fun (rel, msg) -> rel ^ ": " ^ msg) failures)));
+     (config_dir, prompts_dir))
 
-let restore_env name = function
-  | Some value -> Unix.putenv name value
-  | None -> Unix.putenv name ""
-
-let with_repo_prompt_config f =
-  let root = repo_root () in
-  let config_dir = Filename.concat root "config" in
-  let prompts_dir = Filename.concat config_dir "prompts" in
-  let original_config = Sys.getenv_opt "MASC_CONFIG_DIR" in
-  Fun.protect
-    ~finally:(fun () ->
-      restore_env "MASC_CONFIG_DIR" original_config;
-      Config_dir_resolver.reset ();
-      Prompt_registry.clear ())
-    (fun () ->
-      Unix.putenv "MASC_CONFIG_DIR" config_dir;
-      Config_dir_resolver.reset ();
-      Prompt_registry.clear ();
-      Prompt_registry.set_markdown_dir prompts_dir;
-      Masc.Prompt_defaults.init ();
-      f ())
+(* Pinning the directory is only half of it. [keeper.workspace] is a slot
+   inside [keeper.md] since the fragment files were folded into their group
+   files, and slot keys exist only once the directory has been read — pinning
+   alone leaves the registry looking for a [keeper.workspace.md] that no
+   longer exists, which is what "Prompt 'keeper.workspace' is missing" was.
+   [set_markdown_dir] then [Prompt_defaults.init] is the pair
+   [Prompt_defaults.bootstrap_runtime] performs at boot. *)
+let init_prompt_config_for_tests () =
+  let config_dir, prompts_dir = Lazy.force unpacked_prompt_config in
+  Unix.putenv "MASC_CONFIG_DIR" config_dir;
+  Config_dir_resolver.reset ();
+  Prompt_registry.set_markdown_dir prompts_dir;
+  Masc.Prompt_defaults.init ()
 
 let base_observation : WO.world_observation =
   {
@@ -134,24 +146,6 @@ let init_runtime_default_for_tests () =
   match Runtime.init_default ~config_path:path with
   | Ok () -> ()
   | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
-
-let init_prompt_config_for_tests () =
-  let original_cwd = Sys.getcwd () in
-  let rec find_root dir hops =
-    if hops > 8 then None
-    else if Sys.file_exists (Filename.concat dir "config/prompts")
-    then Some dir
-    else
-      let parent = Filename.dirname dir in
-      if parent = dir then None else find_root parent (hops + 1)
-  in
-  match find_root original_cwd 0 with
-  | None ->
-      Alcotest.fail
-        "could not locate repo root (config/prompts) from test cwd"
-  | Some root ->
-      Unix.putenv "MASC_CONFIG_DIR" (Filename.concat root "config");
-      Config_dir_resolver.reset ()
 
 let contains ~needle haystack =
   let n = String.length needle and h = String.length haystack in
@@ -240,12 +234,11 @@ let user_message ?turn_decision ?current_task ?active_goal_summaries
    match against its own history. *)
 let test_repeated_tool_call_stop_is_named_in_the_next_prompt () =
   let body =
-    with_repo_prompt_config (fun () ->
-      user_message
-        ~previous_turn_stop:
-          (Masc.Keeper_turn_checkpoint_reason.Repeated_tool_call
-             { tool_name = "atlassian_searchJiraIssuesUsingJql"; repeated_count = 3 })
-        base_observation)
+    user_message
+      ~previous_turn_stop:
+        (Masc.Keeper_turn_checkpoint_reason.Repeated_tool_call
+           { tool_name = "atlassian_searchJiraIssuesUsingJql"; repeated_count = 3 })
+      base_observation
   in
   check bool "the section that carries wake reasons carries the stop" true
     (contains ~needle:"### Autonomous Trigger" body);
@@ -257,12 +250,11 @@ let test_repeated_tool_call_stop_is_named_in_the_next_prompt () =
 
 let test_repeated_text_stop_is_named_in_the_next_prompt () =
   let body =
-    with_repo_prompt_config (fun () ->
-      user_message
-        ~previous_turn_stop:
-          (Masc.Keeper_turn_checkpoint_reason.Repeated_assistant_text
-             { repeated_count = 3 })
-        base_observation)
+    user_message
+      ~previous_turn_stop:
+        (Masc.Keeper_turn_checkpoint_reason.Repeated_assistant_text
+           { repeated_count = 3 })
+      base_observation
   in
   check bool "the repeated-message count is named" true
     (contains ~needle:"wrote the same message 3 times" body)
@@ -313,7 +305,7 @@ let test_successful_call_arguments_are_not_replayed () =
         ]
     }
   in
-  let body = with_repo_prompt_config (fun () -> user_message observation) in
+  let body = user_message observation in
   let section = own_recent_actions_section body in
   check bool "the calls are still listed" true
     (Option.is_some
@@ -340,7 +332,7 @@ let test_refused_call_keeps_its_arguments () =
         ]
     }
   in
-  let body = with_repo_prompt_config (fun () -> user_message observation) in
+  let body = user_message observation in
   let section = own_recent_actions_section body in
   check bool "the refused call keeps what was sent" true
     (Option.is_some (Astring.String.find_sub ~sub:payload section));
@@ -370,7 +362,7 @@ let test_failure_digest_dedupes_and_counts () =
               ])
     }
   in
-  let body = with_repo_prompt_config (fun () -> user_message observation) in
+  let body = user_message observation in
   let section = own_recent_actions_section body in
   check bool "digest heading present" true
     (Option.is_some (Astring.String.find_sub ~sub:"Rejected already" section));
@@ -395,7 +387,7 @@ let test_no_digest_without_failures () =
         ]
     }
   in
-  let body = with_repo_prompt_config (fun () -> user_message observation) in
+  let body = user_message observation in
   let section = own_recent_actions_section body in
   check bool "no digest heading without refusals" true
     (Option.is_none (Astring.String.find_sub ~sub:"Rejected already" section))
@@ -443,7 +435,6 @@ let test_current_task_section_renders () =
 (* task-364: the other held tasks' skills get their own lines. *)
 let test_held_task_skills_section_renders () =
   let user =
-    with_repo_prompt_config @@ fun () ->
     user_message
       { base_observation with
         held_task_skills =
@@ -529,11 +520,10 @@ let task_id_exn value =
   | Error message -> fail message
 
 let test_current_task_unavailable_is_explicit () =
-  (* The needles assert the configured prose (config/prompts/
-     keeper.observation.current_task_unobservable.md), so the repo prompt
-     config must be loaded the way the passing siblings load it; without it
-     the renderer falls back to different built-in wording. *)
-  with_repo_prompt_config @@ fun () ->
+  (* The needles assert the configured prose — the
+     [current_task_unobservable] slot of [keeper.observation.md] — so the
+     suite's prompts have to be loaded; without them the renderer falls back
+     to different built-in wording. *)
   let task_id = task_id_exn "task-42" in
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let { Prompt.world_state; _ } =
@@ -552,7 +542,6 @@ let test_current_task_unavailable_is_explicit () =
     (contains ~needle:"primary and recovery backlog decode failed" world_state)
 
 let test_current_task_missing_is_explicit () =
-  with_repo_prompt_config @@ fun () ->
   let task_id = task_id_exn "task-42" in
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let { Prompt.world_state; _ } =
@@ -567,7 +556,6 @@ let test_current_task_missing_is_explicit () =
     (contains ~needle:"Do not infer or invent task details" world_state)
 
 let test_recovered_current_task_is_non_authoritative () =
-  with_repo_prompt_config @@ fun () ->
   let recovered_task : Masc_domain.task =
     make_task ~task_status:(Masc_domain.Todo : Masc_domain.task_status) ()
   in
@@ -642,7 +630,6 @@ let test_direct_turn_reuses_current_task_context () =
    claimed gets the same skill lines the scheduled lane renders. *)
 let test_direct_turn_carries_held_task_skills () =
   let context =
-    with_repo_prompt_config @@ fun () ->
     Turn.For_testing.direct_turn_dynamic_context
       ~current_task:Inputs.No_current_task
       ~held_task_skills:
@@ -684,7 +671,6 @@ let test_direct_turn_has_no_synthetic_task_context () =
   check string "non-task context remains" "recent owner message" context
 
 let test_direct_and_autonomous_share_system_prompt () =
-  with_repo_prompt_config @@ fun () ->
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let { Prompt.system_prompt = autonomous_system_prompt; _ } =
     Prompt.build_prompt
@@ -717,7 +703,6 @@ let test_direct_and_autonomous_share_system_prompt () =
     (contains_prose ~needle:"결과를 먼저 쓰고" base_system_prompt)
 
 let test_open_goal_store_keeps_one_stable_safety_contract () =
-  with_repo_prompt_config @@ fun () ->
   let meta_with_goal =
     meta_of_json
       (`Assoc

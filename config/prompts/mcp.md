@@ -4,7 +4,7 @@ category: mcp
 operator_surface: primary
 ---
 
-### full
+### full [primary]
 MASC (Multi-Agent Streaming Workspace) enables AI agent collaboration.
 PROJECT: Agents sharing the same base path (.masc/ folder) align together.
 CLUSTER: Set MASC_CLUSTER_NAME for multi-machine workspace (otherwise tool
@@ -13,12 +13,12 @@ READ: use resources/list + resources/read (status/tasks/agents/events/schema)
 for snapshots.
 WRITE: task state changes are CAS-guarded; pass expected_version.
 
-### managed_agent
+### managed_agent [primary]
 MASC managed-agent profile exposes the internal agent control surface. Do not
 assume that the public /mcp surface and the managed-agent surface have the same
 inventory.
 
-### operator_remote
+### operator_remote [primary]
 MASC remote operator profile exposes six operator tools:
 masc_operator_snapshot, masc_operator_digest, masc_operator_action,
 masc_operator_board_attention_quarantine_requeue,

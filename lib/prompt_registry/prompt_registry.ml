@@ -208,9 +208,23 @@ let is_slot_marker marker =
 (* Marker line shapes: "### name" or "### name (vars: a, b)", where
    [name] obeys [is_slot_marker]. [None] for every other line, including
    a markdown heading that is prose. *)
+(* A slot is a fragment of the prompt its group assembles, so that is the
+   default. A slot an operator tunes on its own says so by ending its marker
+   line with [\[primary\]] — the surface has to be per slot, because folding
+   files by reader put operator-facing prompts and assembly fragments in the
+   same file. *)
+let strip_primary_suffix rest =
+  let suffix = "[primary]" in
+  if String.ends_with ~suffix rest then
+    (String.trim (String.sub rest 0 (String.length rest - String.length suffix)), true)
+  else (rest, false)
+;;
+
 let parse_slot_header line =
   if String.length line > 4 && String.sub line 0 4 = "### " then (
-    let rest = String.trim (String.sub line 4 (String.length line - 4)) in
+    let rest, primary =
+      strip_primary_suffix (String.trim (String.sub line 4 (String.length line - 4)))
+    in
     let marker, vars =
       match String.index_opt rest '(' with
       | Some open_paren when
@@ -222,13 +236,13 @@ let parse_slot_header line =
             (String.sub rest (open_paren + 7) (String.length rest - open_paren - 8)) )
       | _ -> (rest, None)
     in
-    if is_slot_marker marker then Some (marker, vars) else None)
+    if is_slot_marker marker then Some (marker, vars, primary) else None)
   else None
 
 type body_split = {
   preamble : string;  (** trimmed prose before the first marker *)
-  slots : (string * string option * string) list;
-      (** (marker, declared vars, trimmed paragraph) in file order *)
+  slots : (string * string option * bool * string) list;
+      (** (marker, declared vars, operator-facing, paragraph) in file order *)
 }
 
 (* Body → preamble and slots, walking the lines in file order. A
@@ -238,7 +252,8 @@ let split_body body : body_split =
   let close_pending pending paragraph slots =
     match pending with
     | None -> slots
-    | Some (marker, vars) -> (marker, vars, close paragraph) :: slots
+    | Some (marker, vars, primary) ->
+      (marker, vars, primary, close paragraph) :: slots
   in
   let rec gather ~preamble ~slots ~pending ~paragraph = function
     | [] ->
@@ -261,8 +276,8 @@ let split_body body : body_split =
 
 let slot_paragraph body marker =
   (split_body body).slots
-  |> List.find_opt (fun (m, _, _) -> String.equal m marker)
-  |> Option.map (fun (_, _, paragraph) -> paragraph)
+  |> List.find_opt (fun (m, _, _, _) -> String.equal m marker)
+  |> Option.map (fun (_, _, _, paragraph) -> paragraph)
 
 (* The file a key resolves against: its own file, or its group's file. *)
 let prompt_source_path key =
@@ -515,7 +530,7 @@ let load_prompts_from_directory dir =
                        no paragraph is logged and not registered. *)
                     let (_ : string list) =
                       List.fold_left
-                        (fun seen (marker, slot_vars, paragraph) ->
+                        (fun seen (marker, slot_vars, primary, paragraph) ->
                           if List.mem marker seen then begin
                             Log.Misc.error
                               "prompt %s declares slot %s twice; the first paragraph stands and the later one is ignored"
@@ -538,7 +553,9 @@ let load_prompts_from_directory dir =
                             in
                             Hashtbl.replace fragment_tbl slot_key (key, marker);
                             register_prompt_unlocked ~key:slot_key ~description
-                              ~category ~operator_surface
+                              ~category
+                              ~operator_surface:
+                                (if primary then Types.Primary else Types.Fragment)
                               ~required_file:true ~template_variables ();
                             marker :: seen
                           end)

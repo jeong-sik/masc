@@ -940,14 +940,21 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
   in
   { Masc_tui_context_inspector.turn; provider_input; response }
 
-(** Answer a tool call the keeper is holding.
+(** What the server did with one answer to a held tool call.
 
     [settled] reports whether a wait was actually released. False means the
-    call had already timed out or been answered, so the pane says that rather
-    than showing the answer as taken. *)
+    call had already timed out or been answered. [remembered] reports whether
+    the server kept the answer for the identical retried call: a late answer
+    that still descends from a question the operator was shown is not wasted,
+    and the pane should say so rather than only "too late". *)
+type tool_approval_answer =
+  { settled : bool
+  ; remembered : bool
+  }
+
 let post_keeper_tool_approval ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(tool_call_id : string) ~(allow : bool) :
-    (bool, string) result =
+    (tool_approval_answer, string) result =
   let body =
     Yojson.Safe.to_string
       (`Assoc
@@ -961,9 +968,13 @@ let post_keeper_tool_approval ~(host : string) ~(port : int)
   | Ok json -> (
       match json with
       | `Assoc fields -> (
-          match List.assoc_opt "settled" fields with
-          | Some (`Bool settled) -> Ok settled
-          | Some _ | None -> Error "approval response has no settled flag")
+          match
+            ( List.assoc_opt "settled" fields
+            , List.assoc_opt "remembered" fields )
+          with
+          | Some (`Bool settled), Some (`Bool remembered) ->
+              Ok { settled; remembered }
+          | _ -> Error "approval response has no settled/remembered flags")
       | _ -> Error "approval response was not a JSON object")
 
 let post_keeper_turn_interrupt ~(host : string) ~(port : int)
@@ -2104,6 +2115,27 @@ let post_prompt_clear ~(host : string) ~(port : int) ~(key : string)
     ~body:
       (Yojson.Safe.to_string
          (`Assoc [ ("key", `String key); ("action", `String "clear") ]))
+
+(** GET /api/v1/presets — the prompt presets under <base>/.masc/presets, as
+    manifests, plus the directories whose manifest did not read. *)
+let fetch_presets ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/presets"
+
+(** POST /api/v1/presets — body {name, description}: snapshot the live
+    prompt overrides, keeper instructions and runtime routing under [name]. *)
+let post_preset_save ~(host : string) ~(port : int) ~(name : string)
+    ~(description : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port ~path:"/api/v1/presets"
+    ~body:
+      (Yojson.Safe.to_string
+         (`Assoc [ ("name", `String name); ("description", `String description) ]))
+
+(** POST /api/v1/presets/restore — body {name}: the server autosaves the live
+    state, applies the preset surface by surface, and answers a report. *)
+let post_preset_restore ~(host : string) ~(port : int) ~(name : string)
+    : (Yojson.Safe.t, string) result =
+  post_json ~host ~port ~path:"/api/v1/presets/restore"
+    ~body:(Yojson.Safe.to_string (`Assoc [ ("name", `String name) ]))
 
 (** POST /api/v1/gate/connector/bind?name= — body {channel_id, keeper_name}. *)
 let post_connector_bind ~(host : string) ~(port : int) ~(connector : string)

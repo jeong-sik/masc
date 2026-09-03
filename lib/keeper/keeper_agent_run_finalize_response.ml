@@ -74,7 +74,10 @@ let finalize
   Keeper_replay_checkpoint.emit_wire_capture_response_suppressed_metrics
     ~keeper_name:meta.name
     suppression_reasons;
-  let { Keeper_agent_run_response_text.response_text } =
+  (* The replay decision is [suppress_visible_response], computed above and
+     passed in; the finalized record no longer answers it by emptying the
+     string, so the operator surface keeps what the keeper said. *)
+  let { Keeper_agent_run_response_text.response_text; withheld_from_replay = _ } =
     Keeper_agent_run_response_text.finalize
       ~stop_reason:result.stop_reason
       ~raw_response_text

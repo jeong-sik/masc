@@ -37,6 +37,13 @@ type structured_output_support =
   | Json_object_only
   | Native_json_schema
 
+(** Whether a model also embeds reasoning in the content channel, and in what
+    shape. Separate from {!reasoning_streaming_format}, which says how reasoning
+    arrives on its own channel: a model can use both at once. *)
+type content_inline_reasoning =
+  | No_content_inline_reasoning
+  | Think_tags
+
 type reasoning_streaming_format =
   | Default_reasoning_streaming
   | No_reasoning_streaming
@@ -128,6 +135,8 @@ val assistant_tool_content_format_of_string
 
 val reasoning_output_format_values : string list
 val reasoning_output_format_of_string : string -> reasoning_output_format option
+val content_inline_reasoning_values : string list
+val content_inline_reasoning_of_string : string -> content_inline_reasoning option
 val reasoning_streaming_format_values : string list
 val reasoning_streaming_format_syntax : string
 val reasoning_streaming_format_of_string : string -> reasoning_streaming_format option

@@ -1042,6 +1042,7 @@ let%test "unrelated output field cannot satisfy explicit enable receipt" =
       { Capabilities.default_capabilities with
         supports_reasoning = true
       ; thinking_control_format = Capabilities.Ollama_think
+      ; content_inline_reasoning = Capabilities.No_content_inline_reasoning
       ; reasoning_output_format = Capabilities.Split_reasoning_fields
       }
   in

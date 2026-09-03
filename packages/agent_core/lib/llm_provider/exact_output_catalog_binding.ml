@@ -286,6 +286,8 @@ let merge_exact_model_entry
       prefer_overlay
         overlay.preserve_thinking_control_format
         base.preserve_thinking_control_format
+  ; content_inline_reasoning =
+      prefer_overlay overlay.content_inline_reasoning base.content_inline_reasoning
   ; reasoning_output_format =
       prefer_overlay overlay.reasoning_output_format base.reasoning_output_format
   ; reasoning_streaming_format =

@@ -249,6 +249,93 @@ let test_cursor_clamps_to_shorter_list () =
   Alcotest.(check int) "clamped" 0
     (Ask.reconcile_cursor ~current_rows:(rows [ "a1"; "a2"; "a3" ]) ~cursor:2 ~next_rows:(rows [ "x" ]))
 
+(* summarize_answer: the confirmation after an answer reads the labels the
+   operator saw, never the choice ids the wire carries. *)
+let test_summarize_names_chosen_label () =
+  let q = question "q1" in
+  let r = row ~questions:[ q ] "a1" in
+  let d =
+    Ask.toggle_choice (Ask.empty_draft ~ask_id:"a1") ~question:q
+      ~choice:(choice "yes" "Yes")
+  in
+  Alcotest.(check string) "the label, not the id" "Yes"
+    (Ask.summarize_answer d ~row:r)
+
+let test_summarize_empty_when_unanswered () =
+  let q = question "q1" in
+  let r = row ~questions:[ q ] "a1" in
+  Alcotest.(check string) "nothing answered is empty" ""
+    (Ask.summarize_answer (Ask.empty_draft ~ask_id:"a1") ~row:r)
+
+let test_summarize_quotes_written_answer () =
+  let q = question ~free_text:(Decode.Ask_free_text_allowed { aft_hint = None }) "q1" in
+  let r = row ~questions:[ q ] "a1" in
+  let d = Ask.set_text (Ask.empty_draft ~ask_id:"a1") ~slot:(slot_of q) ~text:"do it" in
+  Alcotest.(check string) "written is quoted" "\"do it\""
+    (Ask.summarize_answer d ~row:r)
+
+let test_summarize_names_skip () =
+  let q = question "q1" in
+  let r = row ~questions:[ q ] "a1" in
+  let d = Ask.skip (Ask.empty_draft ~ask_id:"a1") ~question:q in
+  Alcotest.(check string) "skip is named" "skipped"
+    (Ask.summarize_answer d ~row:r)
+
+let test_summarize_joins_questions_in_ask_order () =
+  let q1 = question "q1" in
+  let q2 = question ~choices:[ choice "a" "Alpha"; choice "b" "Beta" ] "q2" in
+  let r = row ~questions:[ q1; q2 ] "a1" in
+  let d = Ask.empty_draft ~ask_id:"a1" in
+  let d = Ask.toggle_choice d ~question:q1 ~choice:(choice "no" "No") in
+  let d = Ask.toggle_choice d ~question:q2 ~choice:(choice "b" "Beta") in
+  Alcotest.(check string) "joined with ; in ask order" "No; Beta"
+    (Ask.summarize_answer d ~row:r)
+
+(* newly_opened_ask_ids: the bell rings once per question that arrives, not
+   per poll and not for the state the session started in. *)
+let snapshot rows : Decode.asks_snapshot =
+  { asn_keeper = None; asn_open_count = List.length rows; asn_rows = rows }
+
+let answered_row id =
+  row
+    ~resolution:(Decode.Ask_answered { aa_answered_at = 1.0; aa_question_ids = [] })
+    id
+
+let test_newly_opened_silent_on_first_read () =
+  Alcotest.(check (list string)) "first read establishes a baseline silently" []
+    (Ask.newly_opened_ask_ids ~previous:None ~current:(snapshot [ row "a1" ]))
+
+let test_newly_opened_reports_arrival () =
+  let before = snapshot [ row "a1" ] in
+  let after = snapshot [ row "a1"; row "a2" ] in
+  Alcotest.(check (list string)) "the ask that arrived" [ "a2" ]
+    (Ask.newly_opened_ask_ids ~previous:(Some before) ~current:after)
+
+let test_newly_opened_silent_on_reread () =
+  let s = snapshot [ row "a1" ] in
+  Alcotest.(check (list string)) "the same open asks ring nothing" []
+    (Ask.newly_opened_ask_ids ~previous:(Some s) ~current:s)
+
+let test_newly_opened_ignores_answered () =
+  let before = snapshot [ row "a1" ] in
+  let after = snapshot [ answered_row "a1"; row "a2" ] in
+  Alcotest.(check (list string)) "a1 closing is not an arrival, a2 is" [ "a2" ]
+    (Ask.newly_opened_ask_ids ~previous:(Some before) ~current:after)
+
+let test_ring_when_arrival_and_not_watching () =
+  Alcotest.(check bool) "arrival off the asks surface rings" true
+    (Ask.should_ring_for_new_ask ~new_ids:[ "a1" ]
+       ~operator_is_watching_asks:false)
+
+let test_silent_when_watching_asks () =
+  Alcotest.(check bool) "on the asks surface it stays silent" false
+    (Ask.should_ring_for_new_ask ~new_ids:[ "a1" ]
+       ~operator_is_watching_asks:true)
+
+let test_silent_when_nothing_arrived () =
+  Alcotest.(check bool) "no arrival, no ring, even off the surface" false
+    (Ask.should_ring_for_new_ask ~new_ids:[] ~operator_is_watching_asks:false)
+
 let () =
   Alcotest.run "TUI ask projection"
     [
@@ -304,5 +391,34 @@ let () =
           Alcotest.test_case "follows the ask" `Quick test_cursor_follows_the_ask;
           Alcotest.test_case "falls back when gone" `Quick test_cursor_falls_back_when_ask_is_gone;
           Alcotest.test_case "clamps" `Quick test_cursor_clamps_to_shorter_list;
+        ] );
+      ( "summary",
+        [
+          Alcotest.test_case "names the chosen label" `Quick
+            test_summarize_names_chosen_label;
+          Alcotest.test_case "empty when unanswered" `Quick
+            test_summarize_empty_when_unanswered;
+          Alcotest.test_case "quotes a written answer" `Quick
+            test_summarize_quotes_written_answer;
+          Alcotest.test_case "names a skip" `Quick test_summarize_names_skip;
+          Alcotest.test_case "joins questions in ask order" `Quick
+            test_summarize_joins_questions_in_ask_order;
+        ] );
+      ( "arrival",
+        [
+          Alcotest.test_case "silent on the first read" `Quick
+            test_newly_opened_silent_on_first_read;
+          Alcotest.test_case "reports an arrival" `Quick
+            test_newly_opened_reports_arrival;
+          Alcotest.test_case "silent on a re-read" `Quick
+            test_newly_opened_silent_on_reread;
+          Alcotest.test_case "ignores a closing ask" `Quick
+            test_newly_opened_ignores_answered;
+          Alcotest.test_case "rings off the asks surface" `Quick
+            test_ring_when_arrival_and_not_watching;
+          Alcotest.test_case "silent on the asks surface" `Quick
+            test_silent_when_watching_asks;
+          Alcotest.test_case "silent with no arrival" `Quick
+            test_silent_when_nothing_arrived;
         ] );
     ]

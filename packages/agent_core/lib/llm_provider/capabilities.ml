@@ -59,6 +59,10 @@ type assistant_tool_content_format = Capability_vocab.assistant_tool_content_for
   | Assistant_tool_content_null
   | Assistant_tool_content_empty_string
 
+type content_inline_reasoning = Capability_vocab.content_inline_reasoning =
+  | No_content_inline_reasoning
+  | Think_tags
+
 type reasoning_output_format = Capability_vocab.reasoning_output_format =
   | No_reasoning_output_format
   | Split_reasoning_fields
@@ -147,6 +151,7 @@ type capabilities =
         This is intentionally separate from [thinking_control_format]: some
         models use [thinking.keep], some have no request toggle but require
         replay, and Qwen-style chat templates use a nested boolean. *)
+  ; content_inline_reasoning : content_inline_reasoning
   ; reasoning_output_format : reasoning_output_format
     (** Request-side control for where provider reasoning is returned. Some
         OpenAI-compatible providers require an explicit split switch before
@@ -240,6 +245,7 @@ let default_capabilities =
   ; accepted_reasoning_efforts = None
   ; thinking_control_format = No_thinking_control
   ; preserve_thinking_control_format = No_preserve_thinking_control
+  ; content_inline_reasoning = No_content_inline_reasoning
   ; reasoning_output_format = No_reasoning_output_format
   ; reasoning_streaming_format = Default_reasoning_streaming
   ; reasoning_replay_override = Default_reasoning_replay
@@ -475,6 +481,7 @@ let mimo_capabilities =
   ; supports_extended_thinking = true
   ; supports_reasoning_budget = false
   ; thinking_control_format = Thinking_object_only
+  ; content_inline_reasoning = No_content_inline_reasoning
   ; reasoning_output_format = Split_reasoning_fields
   ; reasoning_streaming_format = Delta_reasoning_field "reasoning_content"
   ; reasoning_replay_override = Force_drop_without_tool_preserve_with_tool
@@ -821,6 +828,10 @@ let assistant_tool_content_format_of_catalog_string raw =
   Capability_vocab.assistant_tool_content_format_of_string raw
 ;;
 
+let content_inline_reasoning_of_catalog_string raw =
+  Capability_vocab.content_inline_reasoning_of_string raw
+;;
+
 let reasoning_output_format_of_catalog_string raw =
   Capability_vocab.reasoning_output_format_of_string raw
 ;;
@@ -902,6 +913,7 @@ type declarative_capability_overrides =
     (* Already joined with its token by the catalog/manifest parser; the token
        lives in the [Chat_template_token] constructor, not a sibling field. *)
   ; preserve_thinking_control_format : string option
+  ; content_inline_reasoning : string option
   ; reasoning_output_format : string option
   ; reasoning_streaming_format : string option
   ; reasoning_replay : string option
@@ -945,6 +957,7 @@ let overrides_of_manifest_entry (entry : Capability_manifest.entry) =
   ; supports_code_execution = entry.supports_code_execution
   ; thinking_control_format = entry.thinking_control_format
   ; preserve_thinking_control_format = entry.preserve_thinking_control_format
+  ; content_inline_reasoning = entry.content_inline_reasoning
   ; reasoning_output_format = entry.reasoning_output_format
   ; reasoning_streaming_format = entry.reasoning_streaming_format
   ; reasoning_replay = entry.reasoning_replay
@@ -1097,6 +1110,15 @@ let apply_declarative_capability_overrides overrides =
             warn_unknown_capability_value ~field:"preserve_thinking_control_format" s;
             base.preserve_thinking_control_format)
        | None -> base.preserve_thinking_control_format)
+  ; content_inline_reasoning =
+      (match overrides.content_inline_reasoning with
+       | Some s ->
+         (match content_inline_reasoning_of_catalog_string s with
+          | Some format -> format
+          | None ->
+            warn_unknown_capability_value ~field:"content_inline_reasoning" s;
+            base.content_inline_reasoning)
+       | None -> base.content_inline_reasoning)
   ; reasoning_output_format =
       (match overrides.reasoning_output_format with
        | Some s ->
@@ -1239,6 +1261,7 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   ; supports_code_execution = entry.supports_code_execution
   ; thinking_control_format = entry.thinking_control_format
   ; preserve_thinking_control_format = entry.preserve_thinking_control_format
+  ; content_inline_reasoning = entry.content_inline_reasoning
   ; reasoning_output_format = entry.reasoning_output_format
   ; reasoning_streaming_format = entry.reasoning_streaming_format
   ; reasoning_replay = entry.reasoning_replay
@@ -1501,6 +1524,7 @@ let test_catalog_entry id_prefix : Model_catalog.model_entry =
   ; thinking_control_format = None
   ; anthropic_thinking_control = None
   ; preserve_thinking_control_format = None
+  ; content_inline_reasoning = None
   ; reasoning_output_format = None
   ; reasoning_streaming_format = None
   ; reasoning_replay = None
@@ -1546,6 +1570,7 @@ let[@warning "-32"] test_manifest_entry id_prefix : Capability_manifest.entry =
   ; thinking_control_format = None
   ; anthropic_thinking_control = None
   ; preserve_thinking_control_format = None
+  ; content_inline_reasoning = None
   ; reasoning_output_format = None
   ; reasoning_streaming_format = None
   ; reasoning_replay = None
@@ -2232,6 +2257,7 @@ let%test "capabilities_for_provider_label: aliases resolve to identical capabili
       && ca.thinking_control_format = cb.thinking_control_format
       && ca.accepted_reasoning_efforts = cb.accepted_reasoning_efforts
       && ca.preserve_thinking_control_format = cb.preserve_thinking_control_format
+      && ca.content_inline_reasoning = cb.content_inline_reasoning
       && ca.reasoning_output_format = cb.reasoning_output_format
       && ca.reasoning_streaming_format = cb.reasoning_streaming_format
       && ca.assistant_tool_content_format = cb.assistant_tool_content_format

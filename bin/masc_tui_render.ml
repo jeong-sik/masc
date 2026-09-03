@@ -1220,19 +1220,75 @@ let render_overview (state : state) =
     | Some o, None ->
         let health_color = workspace_health_color o.ov_workspace_health in
         let health_label = workspace_health_label o.ov_workspace_health in
+        (* The tab strip's badge counts held keeper tool calls, pending gate
+           rows, and confirm-queue entries together, and so does the Approvals
+           screen's own header. This row counted only the third of those, off
+           the confirm queue's own visible count, so a runtime holding one
+           keeper tool call drew "Approvals: 0" beside a tab reading
+           "Approvals·1" -- one name over two populations. All three now walk
+           [approval_items].
+
+           The "?" tail marks a count no source will stand behind, and it does
+           not say which way the number is wrong, because the failures do not
+           agree on that. A dropped confirm queue empties its list, leaving the
+           count short. A failed held-calls or gate poll replaces nothing --
+           the previous rows stay on screen, which the Approvals header calls
+           "held calls stale" -- so that count can just as easily be long,
+           describing rows the server no longer holds. Which list failed is a
+           question that header answers; at this width the row says only that
+           one did. *)
         let approval_count =
-          match state.approval_snapshot, state.approvals_error with
-          | Some snapshot, None -> string_of_int snapshot.aps_visible_count
-          | None, _ | Some _, Some _ -> "?"
+          let on_screen = List.length (Masc_tui_types.approval_items state) in
+          let source_unread =
+            Option.is_none state.approval_snapshot
+            || Option.is_some state.approvals_error
+            || Option.is_some state.keeper_tool_approvals_error
+            || Option.is_some state.gate_error
+            || Option.is_some state.gate_queue_unavailable
+          in
+          if source_unread then Printf.sprintf "%d?" on_screen
+          else string_of_int on_screen
         in
         (* Keepers and MCP clients are counted apart: a row reading
            "Agents: 2" over a runtime with ten keepers named the wrong
-           population. *)
+           population.
+
+           The incident count used to ride here too, over an Attention panel
+           three lines below drawing those same incidents one per row. A
+           number above the list it counts is not a summary of anything the
+           reader cannot already see; where the panel cannot fit them all,
+           the panel's own title says so. *)
+        (* Nine Keepers with two that had stopped doing anything and one an
+           operator had paused read exactly like nine running ones. The
+           briefing has carried the control plane's word for each of them all
+           along; only the number reached this row.
+
+           The states that are not "active" are the ones an operator acts on,
+           so those are the ones named. A fleet where every Keeper is active
+           says only its number -- an always-on breakdown would be texture,
+           the way an always-on tab badge would be. *)
+        let keeper_note =
+          let l = o.ov_keeper_liveness in
+          let parts =
+            List.filter_map
+              (fun (count, label) ->
+                if count = 0 then None
+                else Some (Printf.sprintf "%d %s" count label))
+              [ (l.klc_paused, "paused")
+              ; (l.klc_offline, "offline")
+              ; (l.klc_inactive, "inactive")
+              ; (l.klc_idle, "idle")
+              ; (l.klc_unreadable, "unreadable")
+              ]
+          in
+          match parts with
+          | [] -> ""
+          | _ :: _ -> Printf.sprintf " (%s)" (String.concat ", " parts)
+        in
         Printf.sprintf
-          "  Health: %s%s%s  Keepers: %d  MCP agents: %d  Approvals: %s  \
-           Incidents: %d"
-          health_color health_label Ansi.reset o.ov_keepers o.ov_mcp_agents
-          approval_count o.ov_incident_count
+          "  Health: %s%s%s  Keepers: %d%s  MCP agents: %d  Approvals: %s"
+          health_color health_label Ansi.reset o.ov_keepers keeper_note
+          o.ov_mcp_agents approval_count
   in
   box_line buf cols summary_line;
 
@@ -1311,7 +1367,19 @@ let render_overview (state : state) =
      to the right panel. *)
   let panel_width = (cols - 3) / 2 in
   let right_panel_width = cols - 3 - panel_width in
-  let attention_title = " Attention " in
+  (* The count used to ride the summary row three lines above, over the very
+     rows it counted. It belongs to the panel, and it earns its place only
+     where it says something the rows cannot: that some did not fit. The
+     Events panel beside it states its window the same way. *)
+  let attention_count = List.length attention_items in
+  let attention_title =
+    if attention_count = 0 then " Attention "
+    else if attention_count <= row_budget.attention_rows then
+      Printf.sprintf " Attention %d " attention_count
+    else
+      Printf.sprintf " Attention %d/%d " row_budget.attention_rows
+        attention_count
+  in
   (* A burst of identical lines (manual refreshes, a broadcast fan-out) folds
      into one row with a ×N tail; the window scrolls over folded rows. *)
   let collapsed_events =

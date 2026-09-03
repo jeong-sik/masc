@@ -196,6 +196,18 @@ let owner_absent_reported : (string, unit) Hashtbl.t = Hashtbl.create 4
    owner. Say it once per process; the next distinct detail still logs. *)
 let owner_unknown_reported : (string, unit) Hashtbl.t = Hashtbl.create 4
 
+(* Recovery passes that retained a non-executable owner, per keeper+reason.
+   Purely per process; see the retained arm below.
+
+   Declared here rather than after the function that reads it: OCaml resolves
+   in file order, so below its reader it is not a late definition but no
+   definition at all. *)
+let retained_owner_passes : (string, int) Hashtbl.t = Hashtbl.create 8
+
+(* One pass a minute means 1440 is about a day. The pass that lands exactly
+   on a full day warns; the rest stay quiet. Exposed for the suite. *)
+let retention_becomes_warning (count : int) = count > 0 && count mod 1440 = 0
+
 let load_durable_demand_meta ~base_path ~config ~keeper_name =
   match
     Executor_pool_ref.submit_strict (fun () ->
@@ -390,10 +402,31 @@ let recover_projected_durable_demand_owner
             keeper_name
             detail
         | Retain_non_executable_owner reason ->
-          Log.Server.info
-            "keeper durable demand recovery retained keeper=%s reason=%s"
+          (* A paused keeper retains recovery every pass — one line a minute,
+             forever, and an operator-paused latch can never clear itself
+             (an edgar.a.poe sat here for days before anyone looked). The
+             first retention stays quiet; every full day of them says so at
+             WARN once, naming the fix. Counting is per process — a restart
+             resets the clock but the keeper keeps its latch, so the warning
+             returns with the next day. *)
+          let key = keeper_name ^ "\000" ^ reason in
+          let current =
+            match Hashtbl.find_opt retained_owner_passes key with
+            | Some n -> n
+            | None -> 0
+          in
+          Hashtbl.replace retained_owner_passes key (current + 1);
+          let count = current + 1 in
+          let daily = retention_becomes_warning count in
+          (if daily then Log.Server.warn else Log.Server.info)
+            "keeper durable demand recovery retained keeper=%s reason=%s%s"
             keeper_name
-            reason))
+            reason
+            (if daily then
+               " — paused beyond a day of recovery passes; only an operator \
+                resume clears this (POST /api/v1/keepers_bulk/directive, \
+                action=resume)"
+             else "")))
 ;;
 
 let consume_owner_projection_batch

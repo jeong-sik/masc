@@ -52,6 +52,7 @@
  (names
   test_metrics_aggregating
   test_modality
+  test_inline_reasoning_split
   test_capabilities
   test_agent_card
   test_agent_auto_dump
@@ -191,6 +192,7 @@
   provider_mock
   test_metrics_aggregating
   test_modality
+  test_inline_reasoning_split
   test_capabilities
   test_agent_card
   test_agent_auto_dump

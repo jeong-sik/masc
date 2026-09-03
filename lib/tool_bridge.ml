@@ -27,7 +27,7 @@
     projection capability-aware: runtimes that do not also expose an artifact
     reader cannot accidentally replace exact output with an unreadable marker. *)
 
-let default_externalize_threshold_bytes = Common.max_tool_output_bytes
+let default_externalize_threshold_bytes = Common.max_tool_result_wire_bytes
 
 type projection_error_kind =
   | Artifact_storage_failure
@@ -421,10 +421,13 @@ let agent_core_tool_of_masc_with_execution_env
   handler
   : Agent_core.Tool.t
   =
+  (* Resolved per call, not per tool. One bundle is built before the turn
+     picks a runtime, and a heterogeneous lane fallback can change the answer
+     between attempts, so a value captured here would describe the wrong lane. *)
   let agent_core_handler execution_env json_args =
     to_agent_core_typed_result
       ?base_path
-      ?model_projection
+      ?model_projection:(Option.map (fun decide -> decide ()) model_projection)
       ?on_externalization_error
       (handler execution_env json_args)
   in

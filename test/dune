@@ -340,6 +340,8 @@
   test_keeper_library_tool_toml_parity
   test_library_tool_toml_parity
   test_execute_tool_toml_parity
+  test_agent_timeline_tool_toml_parity
+  test_agent_core_projection_toml_parity
   test_descriptor_description_from_catalog
   test_keeper_schema_toml_parity
   test_keeper_runtime_schemas_toml_parity
@@ -352,6 +354,7 @@
   test_schedule_tool_toml_parity
   test_surface_tool_toml_parity
   test_keeper_artifact_read_request
+  test_tool_result_wire_ceiling
   test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
@@ -683,6 +686,8 @@
   test_keeper_library_tool_toml_parity
   test_library_tool_toml_parity
   test_execute_tool_toml_parity
+  test_agent_timeline_tool_toml_parity
+  test_agent_core_projection_toml_parity
   test_descriptor_description_from_catalog
   test_keeper_schema_toml_parity
   test_keeper_runtime_schemas_toml_parity
@@ -695,6 +700,7 @@
   test_schedule_tool_toml_parity
   test_surface_tool_toml_parity
   test_keeper_artifact_read_request
+  test_tool_result_wire_ceiling
   test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
@@ -771,6 +777,17 @@
   ;; The fake ssh shim renders its result trailer with the same function
   ;; the real shim uses, so the wire version cannot be typed in by hand.
  exec_ssh_protocol))
+
+(test
+ (name test_connector_attention_delivery_wiring)
+ (modules test_connector_attention_delivery_wiring)
+ ; Read through Ast_grep, so the sources are deps: without them the test runs
+ ; against whatever the build directory happens to hold.
+ (deps
+  %{workspace_root}/lib/server/server_connector_attention_delivery.ml
+  %{workspace_root}/lib/server/server_discord_in_process_gateway.ml
+  %{workspace_root}/lib/server/server_slack_in_process_gateway.ml)
+ (libraries alcotest ast_grep))
 
 (test
  (name test_voice_session_manager)
@@ -1472,6 +1489,7 @@
   test_keeper_goal_phase_projection
   test_string_util
   test_prompt_asset_sync
+  test_prompt_preset
   test_managed_assets_sync_from_binary
   test_system_error_class
   test_set_util
@@ -1616,6 +1634,7 @@
   test_keeper_goal_phase_projection
   test_string_util
   test_prompt_asset_sync
+  test_prompt_preset
   test_managed_assets_sync_from_binary
   test_system_error_class
   test_set_util
@@ -2017,6 +2036,8 @@
 (include stanzas/test_rfc3339_format_owner.inc)
 (include stanzas/test_env_snapshot_reports_applied_default.inc)
 (include stanzas/test_verification_authority_tools.inc)
+(include stanzas/test_keeper_microvm_backend.inc)
+(include stanzas/test_keeper_paste_delivery.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
 
 (include stanzas/test_exec_policy_cwd_hint.inc)
@@ -2060,6 +2081,7 @@
 
 (include stanzas/test_channel_gate_discord_state_in_process.inc)
 (include stanzas/test_discord_directory_failure.inc)
+(include stanzas/test_bootstrap_retention_warning.inc)
 
 (include stanzas/test_gate_surface.inc)
 
@@ -2092,6 +2114,7 @@
 
 (include stanzas/test_keeper_chat_discord.inc)
 (include stanzas/test_keeper_chat_tool_trail.inc)
+(include stanzas/test_keeper_late_approval.inc)
 
 (test
  (name test_keeper_chat_slack)
@@ -2894,7 +2917,9 @@
 (test
  (name test_keeper_shell_tool_command)
  (modules test_keeper_shell_tool_command)
- (libraries alcotest masc))
+ ; masc.masc_exec: the refusal case builds a Shell IR by hand, which is the
+ ; shape a replayed effect hands the runtime.
+ (libraries alcotest masc masc.masc_exec))
 
 (test
  (name test_keeper_tool_read_window)
@@ -3063,6 +3088,11 @@
  (name test_tui_command)
  (modules test_tui_command)
  (libraries alcotest masc_tui_command masc_tui_mcp yojson))
+
+(test
+ (name test_tui_preset_text)
+ (modules test_tui_preset_text)
+ (libraries alcotest masc masc_tui_preset_text))
 
 (test
  (name test_tui_surface_needs)
@@ -3245,6 +3275,11 @@
  (name test_tui_frame_presenter)
  (modules test_tui_frame_presenter)
  (libraries alcotest str masc_tui_frame_presenter masc_tui_terminal_palette))
+
+(test
+ (name test_tui_frame_timing)
+ (modules test_tui_frame_timing)
+ (libraries alcotest masc_tui_frame_timing))
 
 (test
  (name test_tui_approval_authority)
@@ -3880,11 +3915,6 @@
 (include stanzas/test_verifier_exact_lane.inc)
 
 
-(include stanzas/test_keeper_canary_facts.inc)
-(include stanzas/test_keeper_canary_evidence.inc)
-(include stanzas/test_keeper_canary_judge.inc)
-(include stanzas/test_keeper_canary_failover.inc)
-(include stanzas/test_keeper_canary_serving.inc)
 
 (include stanzas/test_run_registry_concurrent_mutation.inc)
 (include stanzas/test_exact_lane_run_registry.inc)

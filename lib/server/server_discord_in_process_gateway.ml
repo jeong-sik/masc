@@ -349,14 +349,26 @@ let refresh_discord_directory_once ~clock ~base_dir ~token =
   in
   let record_rest_error ~scope ~target error =
     let detail = Format.asprintf "%a" Discord_rest_client.pp_error error in
-    (match classify_directory_rest_failure error with
+    let classification = classify_directory_rest_failure error in
+    (match classification with
      | Directory_authentication_failed ->
        authentication_failed := scope :: !authentication_failed
      | Directory_permission_denied ->
        permission_denied := scope :: !permission_denied
      | Directory_channel_gone -> ()
      | Directory_operation_failed -> errors := scope :: !errors);
-    Log.Server.warn "Discord directory %s target=%s: %s" scope target detail
+    let reason = match classification with
+      | Directory_authentication_failed ->
+        "the bot token was rejected — check the token"
+      | Directory_permission_denied ->
+        "the bot lacks access (channel/server permissions) — grant access or \
+         unbind it"
+      | Directory_channel_gone ->
+        "the channel is deleted"
+      | Directory_operation_failed -> ""
+    in
+    Log.Server.warn "Discord directory %s target=%s: %s%s%s" scope target detail
+      (if reason = "" then "" else " — ") reason
   in
   let refresh_channel channel_id =
     if Hashtbl.mem gone_bound_channels channel_id then ()
@@ -613,21 +625,6 @@ let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
         channel_id keeper_name error;
       None
 
-let mark_attention_resolved ~base_dir ~keeper_name ~event_id ~reason =
-  match
-    Keeper_external_attention.mark_resolved
-      ~base_path:base_dir
-      ~keeper_name
-      ~event_ids:[ event_id ]
-      ~reason
-      ()
-  with
-  | Ok () -> ()
-  | Error error ->
-      Log.Server.warn
-        "discord external attention resolve failed (keeper=%s event=%s): %s"
-        keeper_name event_id error
-
 let log_binding_lookup_failure ~channel_id error =
   let detail =
     Format.asprintf "%a" State.pp_binding_lookup_error error
@@ -721,7 +718,9 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
     (* Resolved once for this message, so the attention record and the
        durable chat row name the same room. *)
     let channel_name = resolve_channel_name ~base_dir ~channel_id in
-    let attention_event_id =
+    (* Recorded as evidence; this route answers inline rather than queueing, so
+       nothing downstream needs the id. *)
+    let (_ : string option) =
       record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id ~channel_name
         ~message_id ~author_id ~author_name ~content ~mentions_bot
         ~route:"triggered" ~urgency
@@ -791,12 +790,7 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
             (Channel_gate.gate_error_to_string gate_err))
      | Ok out ->
        if String.equal out.content "" then begin
-         (match attention_event_id with
-          | Some event_id ->
-              mark_attention_resolved ~base_dir ~keeper_name ~event_id
-                ~reason:"discord_empty_reply"
-          | None -> ());
-         Discord_observability.record_inbound_dispatch
+                  Discord_observability.record_inbound_dispatch
            Discord_observability.Empty_reply;
          Discord_observability.record_reply Discord_observability.Reply_empty
        end
@@ -806,12 +800,7 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
               ~reply_to_message_id:message_id ()
           with
           | Ok _ ->
-            (match attention_event_id with
-             | Some event_id ->
-               mark_attention_resolved ~base_dir ~keeper_name ~event_id
-                 ~reason:"discord_reply_sent"
-             | None -> ());
-            Discord_observability.record_inbound_dispatch
+                        Discord_observability.record_inbound_dispatch
               Discord_observability.Reply_sent;
             Discord_observability.record_reply
               Discord_observability.Reply_send_ok
@@ -961,77 +950,27 @@ let handle_ambient ?resolved_keeper_name ~base_dir
          lane cycle. *)
       (match attention_event_id with
        | Some event_id ->
-         let stimulus =
-           { Keeper_event_queue.post_id = event_id
-           ; urgency = Keeper_event_queue.Low
-           ; arrived_at = Unix.gettimeofday ()
-             (* NDT-OK: stimulus receipt time, used only for ordering/age *)
-           ; payload =
-               (* RFC-0320: carry the originating Discord channel+author so a
-                  woken keeper replies into the same thread, not its own state. *)
-               Keeper_event_queue.Connector_attention
-                 { event_id
-                 ; channel =
-                     (match
-                        Keeper_continuation_channel.discord
-                          ~guild_id
-                          ~channel_id
-                          ~parent_channel_id
-                          ~thread_id
-                          ~reply_to_message_id:message_id
-                          ~user_id:author_id
-                          ()
-                      with
-                      | Ok channel -> channel
-                      | Error message -> invalid_arg message)
-                 }
-           }
+         let channel =
+           (* RFC-0320: carry the originating Discord channel+author so a woken
+              keeper replies into the same thread, not its own state. *)
+           match
+             Keeper_continuation_channel.discord
+               ~guild_id
+               ~channel_id
+               ~parent_channel_id
+               ~thread_id
+               ~reply_to_message_id:message_id
+               ~user_id:author_id
+               ()
+           with
+           | Ok channel -> channel
+           | Error message -> invalid_arg message
          in
-         (match
-            Keeper_registry_event_queue.enqueue_stimulus_durable_result
-              ~base_path:base_dir
-              keeper_name
-              stimulus
-          with
-          | Keeper_registry_event_queue.Stimulus_storage_error detail ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string KeepaliveSignalFailures)
-              ~labels:
-                [ ("keeper", keeper_name)
-                ; ("phase", "connector_attention_delivery")
-                ]
-              ();
-            Log.Server.error
-              "connector attention durable delivery failed (keeper=%s event=%s): %s"
-              keeper_name
-              event_id
-              detail
-          | Keeper_registry_event_queue.Stimulus_enqueued
-          | Keeper_registry_event_queue.Stimulus_already_present ->
-            (match
-               Keeper_registry.wakeup_running
-                 ~intent:Keeper_registry.Reactive_signal
-                 ~base_path:base_dir
-                 keeper_name
-             with
-             | Keeper_registry.Signaled -> ()
-             | Keeper_registry.Deferred_unregistered ->
-               Log.Server.info
-                 "connector attention durably queued; wake deferred for unregistered Keeper (keeper=%s event=%s)"
-                 keeper_name
-                 event_id
-             | Keeper_registry.Deferred_not_running phase ->
-               Log.Server.info
-                 "connector attention durably queued; wake deferred by Keeper phase (keeper=%s event=%s phase=%s)"
-                 keeper_name
-                 event_id
-                 (Keeper_state_machine.phase_to_string phase)
-             | Keeper_registry.Deferred_lifecycle denial ->
-               Log.Server.info
-                 "connector attention durably queued; wake deferred by lifecycle (keeper=%s event=%s reason=%s)"
-                 keeper_name
-                 event_id
-                 (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)))
+         Server_connector_attention_delivery.deliver
+           ~base_path:base_dir
+           ~keeper_name
+           ~event_id
+           ~channel
        | None -> ());
       Discord_observability.record_ambient
         Discord_observability.Ambient_recorded

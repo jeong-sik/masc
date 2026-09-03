@@ -161,6 +161,7 @@ let test_rejected_branch_finalizes_stream (name, _expected_status, dispatch) () 
       Keeper_tool_execute_runtime.For_testing.dispatch_override := Some dispatch;
       let raw =
         Keeper_tool_execute_runtime.handle_tool_execute
+          ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
           ~turn_sandbox_factory:None
           ~config
           ~meta

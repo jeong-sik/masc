@@ -257,7 +257,15 @@ let keeper_tool_approval_timeout_sec = 180.0
    The reply says whether a wait was actually released. A late answer -- one
    whose call already timed out, or was never held -- reports [settled: false]
    rather than reading as success, so an operator is not told a call was
-   approved when nothing was listening for it. *)
+   approved when nothing was listening for it.
+
+   A late answer is not discarded, though: when the wait it names timed out
+   here, the decision is remembered in {!Keeper_late_approval} and the reply
+   says [remembered: true]. The operator's decision is about the call, and
+   the retried call -- same tool, same arguments, new call id -- is then
+   settled by it once instead of asking the same question again. An answer
+   that names no wait this process ever held matches nothing and is dropped,
+   as before. *)
 let handle_keeper_tool_approval state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in
@@ -300,14 +308,29 @@ let handle_keeper_tool_approval state request reqd =
             (Keeper_tool_approval_registry.shared ())
             ~keeper_name ~tool_call_id decision
         in
+        let remembered =
+          if settled then false
+          else
+            (* The wait is gone, but if it timed out here the answer still
+               descends from a question this operator was really shown, so it
+               stands for the identical retried call. *)
+            match
+              Keeper_late_approval.remember_late
+                (Keeper_late_approval.shared ())
+                ~keeper_name ~tool_call_id decision ()
+            with
+            | Keeper_late_approval.Remembered _ -> true
+            | Keeper_late_approval.No_matching_ask -> false
+        in
         Log.Keeper.info
-          "keeper_tool_approval: keeper=%s tool_call_id=%s decision=%s settled=%b"
+          "keeper_tool_approval: keeper=%s tool_call_id=%s decision=%s settled=%b remembered=%b"
           keeper_name tool_call_id
           (Keeper_tool_approval_registry.decision_to_string decision)
-          settled;
+          settled remembered;
         respond_json_value_with_cors ~status:`OK request reqd
           (`Assoc
              [ ("settled", `Bool settled)
+             ; ("remembered", `Bool remembered)
              ; ( "decision"
                , `String (Keeper_tool_approval_registry.decision_to_string decision) )
              ])))
@@ -1470,6 +1493,29 @@ let empty_reply_delivery_plan ~has_visible_blocks ~has_tool_calls =
   then `Tool_calls_only
   else `Failure
 
+(* What a turn writes when its outcome is a control boundary or an external
+   effect rather than a plain reply. [spoken] is the turn's words, already
+   trimmed, and [None] means the model produced none.
+
+   Words are kept on every outcome. They used to be dropped on all three of
+   these: the operator who asked a direct question got a status row and an
+   empty assistant row, while the raw trace still held the reply. The replay
+   decision -- whether these words re-enter model history -- is answered
+   separately by the stop reason and never by discarding the string here
+   (masc #32727, #32660).
+
+   Only a wordless [External_effect_completed] writes no assistant row: the
+   typed tool-call record is the whole of what that turn did. *)
+let control_turn_delivery ~turn_outcome ~spoken =
+  match (turn_outcome : Keeper_turn_outcome.t), spoken with
+  | (Continuation_checkpoint | External_effect_pending), spoken ->
+    `Assistant_row (Option.value spoken ~default:"")
+  | External_effect_completed, Some words -> `Assistant_row words
+  | External_effect_completed, None -> `Tool_calls_only
+  | (Visible_reply | No_visible_reply), spoken ->
+    (* Reached by their own arms, which carry the same answer for words. *)
+    `Assistant_row (Option.value spoken ~default:"")
+
 type keeper_stream_bridge_state = Keeper_chat_agent_core_stream_bridge.state
 
 type translated_keeper_stream_event =
@@ -1818,6 +1864,7 @@ let process_single_turn ~user_row_origin ~submission
   let approval_gate =
     Keeper_tool_approval_gate.create
       ~registry:(Keeper_tool_approval_registry.shared ())
+      ~late_approvals:(Keeper_late_approval.shared ())
       ~publish:(fun event -> push_worker_event (Stream_chat_event event))
       ~clock
       ~keeper_name:payload.name
@@ -2048,17 +2095,42 @@ let process_single_turn ~user_row_origin ~submission
                  let turn_outcome = canonical_reply.turn_outcome in
                  let delivery_result =
                    match turn_outcome, String_util.trim_nonempty visible_reply with
-                   | Keeper_turn_outcome.Continuation_checkpoint, _ ->
+                   | ( ( Keeper_turn_outcome.Continuation_checkpoint
+                       | Keeper_turn_outcome.External_effect_pending
+                       | Keeper_turn_outcome.External_effect_completed ) as
+                       control_outcome )
+                   , spoken -> (
                        (* [persisted_reply_blocks] always returns [Some _] for
                           [Continuation_checkpoint] (a typed status block), so
-                          [has_visible_blocks] is always true on this arm: a
+                          [has_visible_blocks] is always true for it: a
                           checkpoint turn always persists a delivered assistant
-                          row with [content = ""] plus the status block —
-                          including turns that also produced tool calls and
-                          turns carrying a direct-delivery checkpoint. There is
-                          no tool-calls-only or user-only continuation path. *)
-                       persist_assistant_reply ~assistant_content:""
-                       |> delivered_after_persist
+                          row plus the status block — including turns that also
+                          produced tool calls and turns carrying a
+                          direct-delivery checkpoint. There is no
+                          tool-calls-only or user-only continuation path.
+
+                          What the row carries is [control_turn_delivery]'s
+                          answer, so the words survive here and in its tests
+                          together. *)
+                       match
+                         control_turn_delivery ~turn_outcome:control_outcome
+                           ~spoken
+                       with
+                       | `Assistant_row assistant_content ->
+                           persist_assistant_reply ~assistant_content
+                           |> delivered_after_persist ?content:spoken
+                       | `Tool_calls_only ->
+                           Result.bind
+                             (persist_tool_calls_only ())
+                             (fun () ->
+                                Keeper_chat_broadcast.chat_appended
+                                  ~keeper_name:payload.name
+                                  ~source:chat_source
+                                  ();
+                                Ok
+                                  (Some
+                                     (queued_delivery_outcome_of_turn_ref
+                                        turn_ref))))
                    | Keeper_turn_outcome.No_visible_reply, _
                    | Keeper_turn_outcome.Visible_reply, None ->
                        let detail =
@@ -2087,20 +2159,6 @@ let process_single_turn ~user_row_origin ~submission
                    | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
                        persist_assistant_reply ~assistant_content:visible_reply
                        |> delivered_after_persist ~content:visible_reply
-                   | Keeper_turn_outcome.External_effect_completed, _ ->
-                       Result.bind
-                         (persist_tool_calls_only ())
-                         (fun () ->
-                            Keeper_chat_broadcast.chat_appended
-                              ~keeper_name:payload.name
-                              ~source:chat_source
-                              ();
-                            Ok
-                              (Some
-                                 (queued_delivery_outcome_of_turn_ref turn_ref)))
-                   | Keeper_turn_outcome.External_effect_pending, _ ->
-                       persist_assistant_reply ~assistant_content:""
-                       |> delivered_after_persist
                  in
                  (match delivery_result with
                   | Error persist_error ->
@@ -3040,6 +3098,7 @@ module For_testing = struct
     queued_delivery_outcome_of_turn_ref
   let committed_delivery_outcome = committed_delivery_outcome
   let empty_reply_delivery_plan = empty_reply_delivery_plan
+  let control_turn_delivery = control_turn_delivery
   let surface_context_to_instructions = surface_context_to_instructions
   let keeper_tool_failure_log_details = keeper_tool_failure_log_details
   let keeper_chat_stream_headers = keeper_chat_stream_headers

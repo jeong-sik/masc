@@ -1239,7 +1239,7 @@ let make_instruction_skill_tool
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
     ~base_path:config.base_path
-    ~model_projection:Tool_output.bounded_inline_model_projection
+    ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
     ~name
     ~description
     ~input_schema:skill_reference_input_schema
@@ -1306,7 +1306,7 @@ let make_instruction_skill_tool
               in
               let record_and_return ~content ~wire_content metadata =
                 let wire_bytes = String.length wire_content in
-                if wire_bytes > Common.max_tool_output_bytes
+                if wire_bytes > Common.max_tool_result_wire_bytes
                 then
                   Tool_result.make_err
                     ~tool_name:name
@@ -1318,13 +1318,13 @@ let make_instruction_skill_tool
                            , `Assoc
                                [ "kind", `String "provider_inline_too_large"
                                ; "observed_bytes", `Int wire_bytes
-                               ; "max_bytes", `Int Common.max_tool_output_bytes
+                               ; "max_bytes", `Int Common.max_tool_result_wire_bytes
                                ] )
                          ])
                     (Printf.sprintf
                        "Skill content does not fit the provider inline tool-result boundary: observed_bytes=%d max_bytes=%d"
                        wire_bytes
-                       Common.max_tool_output_bytes)
+                       Common.max_tool_result_wire_bytes)
                 else
                   match record_activation with
                   | Some record ->

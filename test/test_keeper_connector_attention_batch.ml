@@ -426,7 +426,6 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
        (Some (completed_outcome ~route:Keeper_unified_turn.Continuation_route_addressed meta))
    with
    | Keeper_heartbeat_loop.Batch_ack_completed
-       { connector_attention_outcome = Keeper_heartbeat_loop.Attention_resolved }
      -> ()
    | _ ->
      fail "Completed + addressed route must drive Batch_ack_completed/Attention_resolved");
@@ -438,7 +437,6 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
              meta))
    with
    | Keeper_heartbeat_loop.Batch_ack_completed
-       { connector_attention_outcome = Keeper_heartbeat_loop.Attention_ignored }
      -> ()
    | _ ->
      fail
@@ -451,7 +449,6 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
              meta))
    with
    | Keeper_heartbeat_loop.Batch_ack_completed
-       { connector_attention_outcome = Keeper_heartbeat_loop.Attention_ignored }
      -> ()
    | _ ->
      fail
@@ -469,6 +466,23 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
    | _ ->
      fail
        "durable-stimulus checkpoint must advance attention-only sources before the newer source");
+  (* A turn that ended on a Gate-deferred tool call has also projected the
+     admitted batch; retaining it re-spent a turn per wake on a spent HITL
+     grant (edgar.a.poe, 2026-09-02; #32602). *)
+  (match
+     Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
+       (Some
+          (Keeper_heartbeat_loop_cycle.Checkpointed
+             { meta
+             ; checkpoint_reason = Keeper_unified_turn.Awaiting_external_effect
+             ; continuation_route =
+                 Keeper_unified_turn.Continuation_no_terminal_effect_receipt
+             }))
+   with
+   | Keeper_heartbeat_loop.Batch_ack_attention_only -> ()
+   | _ ->
+     fail
+       "awaiting-external-effect checkpoint must advance attention-only sources it already projected");
   List.iter
     (fun (outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option) ->
        match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome outcome with
@@ -487,13 +501,6 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
            ~route:(deterministic_route ~detail:"deterministic rejection")
            ~deferred_runtime_lane:None
            meta)
-    ; Some
-        (Keeper_heartbeat_loop_cycle.Checkpointed
-           { meta
-           ; checkpoint_reason = Keeper_unified_turn.Awaiting_external_effect
-           ; continuation_route =
-               Keeper_unified_turn.Continuation_no_terminal_effect_receipt
-           })
     ; Some (Keeper_heartbeat_loop_cycle.Input_required meta)
     ; Some (Keeper_heartbeat_loop_cycle.Cancelled meta)
     ; Some (Keeper_heartbeat_loop_cycle.Skipped meta)
@@ -516,7 +523,7 @@ let test_batch_disposition_keeps_unsettled_evidence_pending () =
            (Some (completed_outcome ~route meta))
        with
        | Keeper_heartbeat_loop.Batch_ack_attention_only -> ()
-       | Keeper_heartbeat_loop.Batch_ack_completed _ ->
+       | Keeper_heartbeat_loop.Batch_ack_completed ->
          fail
            "unsettled route evidence must not label the attention row \
             (no judgement was made)"
@@ -696,7 +703,7 @@ let test_batch_turn_failure_leaves_every_member_queued () =
          (Some failed_cycle_outcome)
      with
      | Keeper_heartbeat_loop.Batch_no_action -> ()
-     | Keeper_heartbeat_loop.Batch_ack_completed _
+     | Keeper_heartbeat_loop.Batch_ack_completed
      | Keeper_heartbeat_loop.Batch_ack_attention_only ->
        fail "a failed turn must leave every admitted source pending");
     let queued =
@@ -749,7 +756,7 @@ let test_batch_completion_acks_every_member () =
        Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
          (Some (completed_outcome ~route:Keeper_unified_turn.Continuation_route_addressed meta))
      with
-     | Keeper_heartbeat_loop.Batch_ack_completed _ ->
+     | Keeper_heartbeat_loop.Batch_ack_completed ->
        let acked =
          List.for_all
            (fun (selection : Keeper_event_queue_state.pending_selection) ->
@@ -777,38 +784,6 @@ let test_batch_completion_acks_every_member () =
     in
     check int "turn completion acks all 3 batch members: none remain queued" 0
       (Q.length queued))
-;;
-
-(* The queue entry and the external-attention row are separate writes. Only a
-   completed turn terminalizes the entry, so only completed dispositions may
-   settle the attention row. *)
-let test_every_terminalizing_disposition_settles_its_attention_rows () =
-  (match
-     Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
-       (Keeper_heartbeat_loop.Batch_ack_completed
-          { connector_attention_outcome = Keeper_heartbeat_loop.Attention_resolved })
-   with
-   | Keeper_heartbeat_loop.Settle_resolved -> ()
-   | _ -> fail "a completed addressed turn must settle as Settle_resolved");
-  (match
-     Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
-       (Keeper_heartbeat_loop.Batch_ack_completed
-          { connector_attention_outcome = Keeper_heartbeat_loop.Attention_ignored })
-   with
-   | Keeper_heartbeat_loop.Settle_ignored -> ()
-   | _ -> fail "a completed unaddressed turn must settle as Settle_ignored");
-  (match
-     Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
-       Keeper_heartbeat_loop.Batch_no_action
-   with
-   | Keeper_heartbeat_loop.Settle_pending_in_queue -> ()
-   | _ -> fail "an unfinished turn must not settle a still-pending row");
-  (match
-     Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
-       Keeper_heartbeat_loop.Batch_ack_attention_only
-   with
-   | Keeper_heartbeat_loop.Settle_pending_in_queue -> ()
-   | _ -> fail "a checkpoint yield must not settle connector attention")
 ;;
 
 let () =
@@ -850,10 +825,6 @@ let () =
             "unsettled route evidence stays pending, never Ignored"
             `Quick
             test_batch_disposition_keeps_unsettled_evidence_pending
-        ; test_case
-            "every terminalizing disposition settles its attention rows"
-            `Quick
-            test_every_terminalizing_disposition_settles_its_attention_rows
         ] )
     ]
 ;;

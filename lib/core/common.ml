@@ -117,10 +117,46 @@ let auth_dir_from_base_path ~base_path =
 let agents_dir_from_base_path ~base_path =
   Filename.concat (auth_dir_from_base_path ~base_path) "agents"
 
-(** Maximum output bytes for tool responses. SSOT for the 64KB cap.
-    Inline-vs-blob threshold only; see [max_process_capture_*_bytes] for the
-    separate ceiling on what the runtime accepts from a subprocess. *)
-let max_tool_output_bytes = 65_536
+(** How large one tool result may be on the wire before the harness carrying
+    it writes it to a file of its own.
+
+    An official-client CLI spills a tool result it considers too large to a
+    path under its own session directory and hands the model that path. A
+    Keeper cannot read it: its tools resolve inside the sandbox, and on a
+    microvm profile the host path is not even mounted. The model is told
+    about a file nothing it holds can open.
+
+    Measured 2026-09-03 on the claude_code lane: a 20,000-byte result passed
+    through whole, and the smallest spilled file on disk was 31,558 bytes, so
+    the harness cuts somewhere between. This sits below the low end with
+    room, which is what keeps a MASC result on the model's side of that line.
+
+    This is the only ceiling on a tool result. A separate 64KB constant used
+    to decide both when a result is stored as a blob and how much of a blob
+    one read returns, so a read of an externalized result came back at
+    exactly the size that gets spilled — the mechanism defeated itself, and
+    six of the eighteen measured rejections were reads of MASC's own
+    artifacts. Storing and reading are bounded by this one value, and a
+    result larger than it arrives as pages the model can ask for. *)
+let max_tool_result_wire_bytes = 16_384
+
+(** How much of one tool result MASC carries inline when it owns the wire.
+
+    On an agent-core lane MASC builds the request itself, so no CLI is sitting
+    between the model and the result and nothing spills it to a file. The
+    reason {!max_tool_result_wire_bytes} is low does not exist here, and
+    applying it anyway turns a result the model could have read into a blob it
+    has to fetch back — an extra round trip in the same turn that produced it.
+
+    Measured over tool_calls 2026-09-01..03: 702 of 20,117 agent-core results
+    landed between the two ceilings. 211 of those were {!Keeper_artifact_read}
+    pages, which the wire ceiling now caps below 16KB anyway, leaving about
+    491 results over three days — near 12% of agent-core turns — that become
+    blobs for no reason a harness imposes.
+
+    This bounds context growth rather than avoiding a spill, which is why it
+    is a separate number and not the same one scaled. *)
+let max_agent_core_inline_result_bytes = 65_536
 
 (** Acceptance ceiling for one captured subprocess stream, split head/tail.
 
@@ -137,9 +173,6 @@ let max_tool_output_bytes = 65_536
 let max_process_capture_head_bytes = 8 * 1024 * 1024
 
 let max_process_capture_tail_bytes = 256 * 1024
-
-(** BUG-016: Truncate large tool responses to prevent MCP transport overload.
-    Default max: 64KB. Appends truncation metadata when trimmed. *)
 
 (* One spelling of "this string is going into a path component". It lived in
    [Workspace_utils_ops], which sits above [masc_auth], so the auth layer built

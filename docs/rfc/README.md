@@ -241,10 +241,13 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0398 | Edit addresses lines and proves freshness; the substring search goes away | Draft | - |
 | 0399 | Build output leaves the virtiofs share | Draft | - |
 | 0400 | The microVM guest owns its working tree | Draft | - |
-| 0401 | Task 검증의 typed probe·verdict·harness fact — 제출 경계는 parse 사실만 거절하고, 판정자는 하네스가 ... (`RFC-0401-typed-probes-verdicts-and-harness-facts.md`)<br>검증자는 떠 있는 게스트에 붙는다 (`RFC-0401-verification-attaches-to-a-running-guest.md`) | Draft<br>Draft | - |
+| 0401 | Task 검증의 typed probe·verdict·harness fact — 제출 경계는 parse 사실만 거절하고, 판정자는 하네스가 ... | Draft | - |
 | 0402 | Memory OS: an observed fact names the Board post it was read from — RFC-0251 ... | Draft | - |
 | 0403 | Keeper 별 도구 선택 — 부착 서비스는 provider 단위로만 켜고 끌 수 있다 | Draft | - |
 | 0404 | 관측 script 는 readonly argv 테이블을 탄다 — 메타문자 없는 단일 명령 문자열은 argv 와 동치로 판별한다 | Draft | - |
+| 0405 | microVM 백엔드를 하나 더 고를 수 있게 한다 | Draft | - |
+| 0406 | 검증자는 떠 있는 게스트에 붙는다 | Draft | - |
+| 0407 | 판정자의 읽기 경로 — 지금은 제출 스냅샷과 스필이 정본이고, sandbox 읽기는 트리를 소유한 레인이 생긴 뒤에 돌아온다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |
@@ -259,6 +262,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-event-queue-admit-all-ready | 이벤트 큐 — 준비된 자극은 한 턴이 전부 본다, 턴 실패는 자극을 버리지 않는다 | Draft | - |
 | RFC-exact-lane-delivery-channel | exact 레인이 답을 받는 통로를 고른다 — 본문 JSON 이 후보를 절반 떨어뜨린다 | Draft | - |
 | RFC-execute-boundary-is-the-sandbox | The subset judges; the sandbox contains | Draft | - |
+| RFC-execute-command-string | Execute 는 명령 하나를 받는다 — typed 파이프라인 객체는 걷어내고, 도구 표면은 캐시 접두사로 다룬다 | Draft | - |
 | RFC-execute-subset-dispositions | Execute subset dispositions: resolve it, spawn it, or name the replacement | Draft | - |
 | RFC-keeper-conversation-hitl-flow | Keeper conversation and non-blocking HITL | Implemented | - |
 | RFC-keeper-external-tools-and-produced-artifacts | Keeper 외부 도구와 생성 이미지 증거를 선언형 계약으로 연결한다 | Draft | - |
@@ -275,12 +279,15 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-prompts-and-tool-definitions-outside-ocaml | 프롬프트와 도구 정의를 OCaml 밖으로 — 모델이 읽는 모든 글은 config 파일이 소유한다 | Draft | - |
 | RFC-runtime-note-field-and-dashboard-surfacing | Per-runtime note field & dashboard surfacing | Draft | - |
 | RFC-schedule-history-and-outcome | # RFC — A schedule's past and its result | Draft | - |
+| RFC-settings-typed-delivery | 설정은 env 이름이 아니라 typed 값으로 읽는 곳에 닿는다 | Draft | - |
 | RFC-shell-ir-lines-heredoc-dquote | 셸 서브셋이 줄과 인용 heredoc과 큰따옴표 보간을 읽는다 | Draft | - |
 | RFC-shell-ir-simple-param-expansion | Shell IR가 단순 파라미터 확장($VAR)을 닫는다 — env 세팅 패턴이 마지막 걸림돌이다 | Draft | - |
 | RFC-shell-ir-typed-command-substitution | typed 커맨드 치환 — `$(cmd)`를 자식 IR로 읽고, 그 stdout을 argv 한 원소로 쓴다 | Draft | - |
 | RFC-skills-as-tools | Skill 과 Tool 은 한 카탈로그의 두 표면 — SKILL.md 가 지시·합성·비동기를 선언한다 | Active | - |
 | RFC-spawn-a-process-that-outlives-the-call | Spawn: a process that outlives the call | Draft | - |
+| RFC-tool-results-age-out-of-context | 도구 결과는 만든 턴에서만 원문이다 — 컴팩션을 걷어낸 뒤 남은 누적을 닫는다 | Draft | - |
 | RFC-tools-as-shell-commands | 도구를 셸 first-class 커맨드로 — 순차 결합의 provider 왕복을 없앤다 | Draft | - |
+| RFC-tui-frame-budget | TUI 프레임 예산 — 모든 화면에서 build p99 8ms, 입력→화면 p99 20ms | Draft | - |
 | RFC-tui-operator-ia | TUI 정보 구조 재설계 — 18탭을 숫자 키 10개로 접고, Keeper 워크벤치를 중심 화면으로 | Draft | - |
 | RFC-tui-server-lifecycle | TUI 안에서 서버를 켠다 — opt-in 온디맨드 서버 시작으로 TUI 를 기본 진입점으로 | Draft | - |
 | RFC-turn-failure-visible-stop | 턴 실패를 숨기지 않고 상태로 보여준다 — 실패 면제와 예산 계정을 걷어낸다 | Implemented | - |

@@ -833,22 +833,31 @@ let materialise_spilled_paste state text =
         (Masc_tui_paste_spill.substituted spill
            ~replacement:spill.Masc_tui_paste_spill.text text)
 
-(* Where a keeper can read a file this process writes.
+(* Where this process stages a spilled paste for the keeper.
 
-   [Keeper_sandbox_config.host_root_abs_of_agent] is the same answer the
-   server gives: it reads the keeper's own TOML for the sandbox profile and
-   returns the backend-scoped root -- [.masc/playground/<name>/] for a local
-   keeper and [.masc/playground/docker/<name>/] for a Docker one. Working the
-   path out here instead would be this process copying a layout the server
-   owns, and the two roots differ by a directory that is easy to get right
-   once and wrong afterwards.
+   [Keeper_sandbox_config] is the same answer the server gives: it reads the
+   keeper's own TOML for the sandbox profile and returns the backend-scoped
+   root -- [.masc/playground/docker/<name>/] for a Docker keeper and
+   [.masc/playground/<name>/] for the endpoint-owned profiles (microvm,
+   remote_ssh). Working the path out here instead would be this process
+   copying a layout the server owns, and the two roots differ by a directory
+   that is easy to get right once and wrong afterwards.
+
+   "Staging" is the honest word. For Docker the root is bind-mounted into
+   the container, so the staged file is already where the keeper reads it.
+   For an endpoint-owned tree the root is only the host bookkeeping bundle
+   and the keeper cannot see it; [Keeper_paste_delivery] carries the file to
+   the endpoint's workspace root at the next turn setup, the first moment a
+   turn-owned endpoint exists. Writing here at paste time is still right:
+   the paste is durable from the moment the operator sends it, and no
+   endpoint has to be up for this process to receive it.
 
    [None] when the root cannot be named or does not exist. A keeper that has
    never run has no playground, and creating one from outside would be this
    process deciding something about the keeper's own space. *)
-let keeper_readable_dir ~base_path ~keeper_name =
+let keeper_staging_dir ~base_path ~keeper_name =
   match
-    Keeper_sandbox_config.host_root_abs_of_agent ~base_path
+    Keeper_sandbox_config.sandbox_profile_of_agent ~base_path
       ~agent_name:keeper_name
   with
   (* [sandbox_profile_of_agent] raises on a keeper TOML it cannot read, and
@@ -856,31 +865,64 @@ let keeper_readable_dir ~base_path ~keeper_name =
      calls. Neither is a reason to lose the paste -- the caller falls back to
      sending the text. *)
   | exception _ -> None
-  | dir -> (
+  | profile -> (
+      let dir =
+        Filename.concat base_path
+          (Keeper_sandbox_config.host_root_rel_of_profile profile keeper_name)
+      in
       match Sys.file_exists dir && Sys.is_directory dir with
-      | true -> Some dir
+      | true -> Some (dir, profile)
       | false -> None
       | exception Sys_error _ -> None)
 
+(* Written beside the final name and renamed over it: a turn starting while
+   this write is mid-flight enumerates the staging directory, and a file it
+   can see must be whole. The temporary name is outside the
+   [Keeper_paste_naming] shape, so enumeration never picks it up. *)
 let write_file path contents =
-  match open_out_bin path with
+  let drop_tmp tmp_path = try Sys.remove tmp_path with Sys_error _ -> () in
+  match
+    Filename.temp_file ~temp_dir:(Filename.dirname path) "spill-write-" ".tmp"
+  with
   | exception Sys_error detail -> Error detail
-  | channel -> (
+  | tmp_path -> (
       match
-        Fun.protect
-          ~finally:(fun () -> close_out_noerr channel)
-          (fun () -> output_string channel contents)
+        match open_out_bin tmp_path with
+        | exception Sys_error detail -> Error detail
+        | channel -> (
+            match
+              Fun.protect
+                ~finally:(fun () -> close_out_noerr channel)
+                (fun () -> output_string channel contents)
+            with
+            | () -> Ok ()
+            | exception Sys_error detail -> Error detail)
       with
-      | () -> Ok ()
-      | exception Sys_error detail -> Error detail)
+      | Error detail ->
+          drop_tmp tmp_path;
+          Error detail
+      | Ok () -> (
+          match Unix.rename tmp_path path with
+          | () -> Ok ()
+          | exception Unix.Unix_error (error, _, _) ->
+              drop_tmp tmp_path;
+              Error (Unix.error_message error)))
 
-(* Hand a spilled paste to the keeper as a file it can read, and put a line
-   naming that file where the placeholder stands.
+(* Stage a spilled paste as a file the keeper will be able to read, and put
+   a line naming that file where the placeholder stands.
 
    Measured before it was built: a keeper reads paths relative to its own
    sandbox root and refuses anything outside it, so [/tmp] comes back as
    [path_outside_sandbox] and a workspace-relative path is simply not found.
-   The file goes into the root and the message names it bare.
+   The file goes into the root the server names for this keeper and the
+   message names it bare.
+
+   For Docker that root is the bind-mounted workspace itself, so the file is
+   already where the keeper reads it. For the endpoint-owned profiles it is
+   the host bookkeeping bundle -- staging, not the destination -- and
+   [Keeper_paste_delivery] writes it through the remote lane at the next
+   turn setup. The keeper-facing line ("It is in your working directory")
+   becomes true before that turn's first Read.
 
    Every failure falls back to sending the text itself. A paste that reached
    the keeper as a large message is worse than one it can read off disk; a
@@ -903,7 +945,7 @@ let place_spilled_paste state ~base_path ~keeper_name text =
              nothing to hand the keeper. *)
           text
       | Some pointed -> (
-          match keeper_readable_dir ~base_path ~keeper_name with
+          match keeper_staging_dir ~base_path ~keeper_name with
           | None ->
               add_event state "system"
                 (Printf.sprintf
@@ -911,7 +953,7 @@ let place_spilled_paste state ~base_path ~keeper_name text =
                     the message instead"
                    (Keeper_chat.terminal_safe_text keeper_name));
               inline ()
-          | Some dir -> (
+          | Some (dir, profile) -> (
               let path =
                 Filename.concat dir spill.Masc_tui_paste_spill.file_name
               in
@@ -924,11 +966,25 @@ let place_spilled_paste state ~base_path ~keeper_name text =
                        (Keeper_chat.terminal_safe_text keeper_name) detail);
                   inline ()
               | Ok () ->
-                  add_event state "system"
-                    (Printf.sprintf "Wrote %s (%d bytes) into %s's workspace"
-                       spill.Masc_tui_paste_spill.file_name
-                       spill.Masc_tui_paste_spill.bytes
-                       (Keeper_chat.terminal_safe_text keeper_name));
+                  (match profile with
+                   | Keeper_sandbox_config.Docker ->
+                       (* The staged directory is the bind-mounted workspace
+                          itself: written is delivered. *)
+                       add_event state "system"
+                         (Printf.sprintf
+                            "Wrote %s (%d bytes) into %s's workspace"
+                            spill.Masc_tui_paste_spill.file_name
+                            spill.Masc_tui_paste_spill.bytes
+                            (Keeper_chat.terminal_safe_text keeper_name))
+                   | Keeper_sandbox_config.Micro_vm
+                   | Keeper_sandbox_config.Remote_ssh ->
+                       add_event state "system"
+                         (Printf.sprintf
+                            "Staged %s (%d bytes) for %s; it lands in the \
+                             workspace when the next turn starts"
+                            spill.Masc_tui_paste_spill.file_name
+                            spill.Masc_tui_paste_spill.bytes
+                            (Keeper_chat.terminal_safe_text keeper_name)));
                   pointed)))
 
 let reset_message_file_changes state keeper_name =
@@ -1450,7 +1506,9 @@ type async_msg =
       * approval_observation
   (* The answer that came back, and the list re-read behind it. The store
      settles on first write, so the response says what was actually recorded
-     -- which may be someone else's answer. *)
+     -- which may be someone else's answer. The first field is the human
+     confirmation label (the Keeper and what was chosen), built at submit time
+     from the labels the operator saw rather than the ask's opaque id. *)
   | Ask_answer_done of
       string
       * (Yojson.Safe.t, string) result
@@ -1538,7 +1596,10 @@ type async_msg =
       (** keeper, the runtime it was pointed at ([None] = back to default),
           and whether the server took it. *)
   | Keeper_chat_approval_answered of
-      Keeper_chat.request * string * bool * (bool, string) result
+      Keeper_chat.request
+      * string
+      * bool
+      * (Masc_tui_http.tool_approval_answer, string) result
   | Keeper_tool_approvals_loaded of
       (Tui_decode.keeper_tool_approval list, string) result
   | Keeper_turns_loaded of (Tui_decode.keeper_turn_row list, string) result
@@ -1562,7 +1623,11 @@ type async_msg =
       (** The external-services lane the operator asked for, and whether the
           server took it. *)
   | Surface_tool_approval_answered of
-      string * string * bool * (bool, string) result * Approval.Flow.generation
+      string
+      * string
+      * bool
+      * (Masc_tui_http.tool_approval_answer, string) result
+      * Approval.Flow.generation
   (* Its own message rather than a field on the stance one: the two come from
      different endpoints and one failing must not blank the other. *)
   | Keeper_gate_settings_loaded of
@@ -1624,6 +1689,9 @@ type async_msg =
   | Runtime_params_loaded of
       (Tui_decode.runtime_param_row list, string) result
   | Prompts_loaded of (Tui_decode.prompts_snapshot, string) result
+  | Presets_listed of string option * (Tui_decode.presets_snapshot, string) result
+  | Preset_saved of string option * (Tui_decode.preset_manifest, string) result
+  | Preset_restored of string option * (Tui_decode.preset_restore_report, string) result
   | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of (Masc_tui_mcp.resource list, string) result
   | Code_entries_loaded of
@@ -3219,6 +3287,27 @@ let launch_prompts_load state ~mailbox =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox (Prompts_loaded (Error "Eio switch is unavailable"))
+
+(* A /preset call runs off the input loop like the prompt catalog load; its
+   answer comes back as a chat notice for the pane that asked, so [wrap]
+   carries that pane's keeper. *)
+let launch_preset_call state ~mailbox ~call ~wrap =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try call ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (wrap result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None -> enqueue_async mailbox (wrap (Error "Eio switch is unavailable"))
 
 let prompt_rows_for_state state =
   match state.prompts_snapshot with
@@ -5917,6 +6006,28 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
        | None ->
            notice ~role:Message_error
              "/context needs a Keeper selected on the roster")
+  | Masc_tui_command.Preset_list ->
+      Buffer.clear state.msg_input;
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port -> Masc_tui_loader.load_presets ~host ~port)
+        ~wrap:(fun result -> Presets_listed (target, result))
+  | Masc_tui_command.Preset_save_missing_name ->
+      notice ~role:Message_error "/preset save needs a name on the same line"
+  | Masc_tui_command.Preset_save { name; description } ->
+      Buffer.clear state.msg_input;
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port ->
+          Masc_tui_loader.save_preset ~host ~port ~name ~description)
+        ~wrap:(fun result -> Preset_saved (target, result))
+  | Masc_tui_command.Preset_restore_missing_name ->
+      notice ~role:Message_error "/preset restore needs a name on the same line"
+  | Masc_tui_command.Preset_restore name ->
+      Buffer.clear state.msg_input;
+      notice ~role:Message_status
+        (Printf.sprintf "restoring preset %s — the live state is autosaved first" name);
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
+        ~wrap:(fun result -> Preset_restored (target, result))
   | Masc_tui_command.Unknown word ->
       add_event state "error"
         (Printf.sprintf
@@ -6086,10 +6197,44 @@ let apply_approvals_load state = function
 (* A read that fails leaves the last snapshot in place rather than blanking
    the pane: an operator mid-decision should not lose the question they were
    reading because one refresh could not reach the server. *)
+(* A new question can arrive while the operator is on another surface. The
+   bell reaches every terminal; OSC 9 adds a desktop banner on the terminals
+   that read it (iTerm2, WezTerm, kitty) and is ignored elsewhere. Neither
+   moves the cursor, so this writes out of band rather than through the frame.
+   The banner names the Keeper so it says who is waiting. *)
+let notify_new_asks (snapshot : Tui_decode.asks_snapshot) arrived_ids =
+  let keeper_of id =
+    List.find_opt
+      (fun (row : Tui_decode.ask_row) -> String.equal row.Tui_decode.ar_id id)
+      snapshot.Tui_decode.asn_rows
+    |> Option.map (fun (row : Tui_decode.ask_row) -> row.Tui_decode.ar_keeper)
+  in
+  let message =
+    match List.filter_map keeper_of arrived_ids with
+    | [ one ] -> Printf.sprintf "%s is waiting on a decision" one
+    | _ ->
+        Printf.sprintf "%d keepers are waiting on a decision"
+          (List.length arrived_ids)
+  in
+  write_to_terminal (Printf.sprintf "\x07\x1b]9;%s\x07" message)
+
 let apply_asks_load state = function
   | Ok snapshot ->
+      (* The delta against the last snapshot, so a poll that re-reads the same
+         asks stays silent and only a question that just arrived rings. *)
+      let arrived =
+        Ask.newly_opened_ask_ids ~previous:state.asks_snapshot ~current:snapshot
+      in
       state.asks_snapshot <- Some snapshot;
-      state.asks_error <- None
+      state.asks_error <- None;
+      (* Silent while the operator is on the Approvals surface -- the panel is
+         already in front of them there. A question that arrives on any other
+         surface rings, since nothing else on that surface would show it. *)
+      let watching_asks = match state.view with Approvals -> true | _ -> false in
+      if
+        Ask.should_ring_for_new_ask ~new_ids:arrived
+          ~operator_is_watching_asks:watching_asks
+      then notify_new_asks snapshot arrived
   | Error err ->
       remember_surface_error state ~surface:"asks" ~current_error:state.asks_error
         ~set_error:(fun value -> state.asks_error <- value)
@@ -6402,8 +6547,14 @@ let load_http_surfaces ~host ~port ~approval_generation ~board_sort
      on every refresh rather than inferred from connection failure. *)
   let http_server_identity = load_server_identity ~host ~port in
   let http_scoped =
+    (* Asks ride every refresh, not just the Approvals surface. A question that
+       arrives while the operator is elsewhere has to be read to be announced,
+       so the periodic refresh always fetches them; the surface still decides
+       whether the panel renders, only the fetch is unconditional. Targeted
+       scoped refreshes keep their own needs. *)
     load_http_scoped_surfaces ~host ~port ~approval_generation:None ~board_sort
-      ~board_hearth ~system_log_level ~needs
+      ~board_hearth ~system_log_level
+      ~needs:{ needs with needs_asks = true }
   in
   { http_overview; http_approvals; http_scoped; http_server_identity }
 
@@ -7143,14 +7294,14 @@ let skip_ask_question state =
 let clear_ask_question state =
   with_ask_draft state (fun draft question -> Ask.clear draft ~question)
 
-let apply_ask_answer_completion state ask_id result asks =
+let apply_ask_answer_completion state answered_label result asks =
   state.ask_submit_inflight <- false;
   state.pending_ask_submit <- None;
   (match result with
    | Ok _ ->
        state.ask_draft <- None;
        state.ask_answer_mode <- Ask_browsing;
-       add_event state "system" (Printf.sprintf "Answered %s" ask_id)
+       add_event state "system" (Printf.sprintf "Answered %s" answered_label)
    | Error err ->
        (* The mode stays open on failure: the draft is still the operator's
           work, and a conflict means someone else answered, which the reloaded
@@ -7160,7 +7311,7 @@ let apply_ask_answer_completion state ask_id result asks =
 
 (* TEL-OK: the TUI-local submit gate emits user-visible events here; the
    ask-answer endpoint owns the durable answer telemetry. *)
-let start_ask_answer state ~keeper_name ~ask_id ~answers ~mailbox =
+let start_ask_answer state ~keeper_name ~ask_id ~answered_label ~answers ~mailbox =
   state.ask_submit_inflight <- true;
   let host = server_peer_host in
   let port = state.port in
@@ -7178,7 +7329,7 @@ let start_ask_answer state ~keeper_name ~ask_id ~answers ~mailbox =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error ("asks reload failed: " ^ Printexc.to_string exn)
     in
-    enqueue_async mailbox (Ask_answer_done (ask_id, result, asks))
+    enqueue_async mailbox (Ask_answer_done (answered_label, result, asks))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run_action
@@ -7193,7 +7344,7 @@ let start_ask_answer state ~keeper_name ~ask_id ~answers ~mailbox =
         try Masc_tui_http.fetch_keeper_asks ~host ~port () with
         | exn -> Error ("asks reload failed: " ^ Printexc.to_string exn)
       in
-      apply_ask_answer_completion state ask_id result asks
+      apply_ask_answer_completion state answered_label result asks
 
 let handle_ask_submit state ~mailbox =
   match selected_ask_row state with
@@ -7227,8 +7378,15 @@ let handle_ask_submit state ~mailbox =
                 (Printf.sprintf "Press enter again to answer %s"
                    row.Tui_decode.ar_keeper)
           | Ask.Ask_gate_submit ->
+              (* Name the Keeper and what was chosen, not the ask's opaque id,
+                 so the confirmation says which decision landed and as what. *)
+              let answered_label =
+                match Ask.summarize_answer draft ~row with
+                | "" -> row.Tui_decode.ar_keeper
+                | chosen -> Printf.sprintf "%s: %s" row.Tui_decode.ar_keeper chosen
+              in
               start_ask_answer state ~keeper_name:row.Tui_decode.ar_keeper
-                ~ask_id:row.Tui_decode.ar_id ~answers ~mailbox))
+                ~ask_id:row.Tui_decode.ar_id ~answered_label ~answers ~mailbox))
 
 (* Run one lifecycle action's steps against the server.
 
@@ -7925,6 +8083,10 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Attach_image _ | Masc_tui_command.Attach_image_missing_path
+       | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
+       | Masc_tui_command.Preset_save_missing_name
+       | Masc_tui_command.Preset_restore _
+       | Masc_tui_command.Preset_restore_missing_name
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
               the keeper, and the answer lands in Recent Events. *)
@@ -8411,6 +8573,31 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                   (prompt_catalog_count_for_state state - 1));
            state.prompts_error <- None
        | Error detail -> state.prompts_error <- Some detail)
+  | Presets_listed (target, result) ->
+      (match result with
+       | Ok snapshot ->
+           chat_notice state ~keeper_name:target ~role:Message_status
+             (String.concat "\n" (Masc_tui_preset_text.listing_lines snapshot))
+       | Error detail ->
+           chat_notice state ~keeper_name:target ~role:Message_error detail)
+  | Preset_saved (target, result) ->
+      (match result with
+       | Ok manifest ->
+           chat_notice state ~keeper_name:target ~role:Message_status
+             (Masc_tui_preset_text.saved_line manifest)
+       | Error detail ->
+           chat_notice state ~keeper_name:target ~role:Message_error detail)
+  | Preset_restored (target, result) ->
+      (match result with
+       | Ok report ->
+           let role =
+             if Masc_tui_preset_text.restore_is_clean report then Message_status
+             else Message_error
+           in
+           chat_notice state ~keeper_name:target ~role
+             (String.concat "\n" (Masc_tui_preset_text.restore_lines report))
+       | Error detail ->
+           chat_notice state ~keeper_name:target ~role:Message_error detail)
   | Librarian_input_loaded (prompt_key, result) ->
       let still_selected =
         match selected_prompt_for_state state with
@@ -8959,8 +9146,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Approval_decision_done (approval, decision, result, approvals) ->
       apply_approval_decision_completion state approvals.ao_generation approval
         decision result approvals.ao_result
-  | Ask_answer_done (ask_id, result, asks) ->
-      apply_ask_answer_completion state ask_id result asks
+  | Ask_answer_done (answered_label, result, asks) ->
+      apply_ask_answer_completion state answered_label result asks
   | Keeper_chat_dispatch_started (request, was_replay, acknowledge) ->
       let proceed = ref false in
       Fun.protect
@@ -9042,21 +9229,35 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Keeper_chat_approval_answered (request, tool_call_id, allow, result) ->
       let text =
         match result with
-        | Ok true ->
+        | Ok { Masc_tui_http.settled = true; _ } ->
             Printf.sprintf "%s %s"
               (if allow then "allowed" else "denied")
               (Keeper_chat.compact_request_id tool_call_id)
-        | Ok false ->
-            (* The wait was gone: it timed out, or something answered it
-               first. Said plainly rather than shown as taken, so an operator
-               is not told a call was allowed when nothing was listening. *)
+        | Ok { Masc_tui_http.settled = false; remembered = true } ->
+            (* The wait was gone, but the server kept the answer for the
+               identical retried call -- said so plainly, or an operator reads
+               "too late" as their decision having been thrown away. *)
+            Printf.sprintf
+              "too late for %s, but the answer is remembered -- the next \
+               identical call is %s without asking"
+              (Keeper_chat.compact_request_id tool_call_id)
+              (if allow then "allowed" else "denied")
+        | Ok { Masc_tui_http.settled = false; remembered = false } ->
+            (* The wait was gone and nothing this keeper asked matches: it
+               was answered already, or never held. Said plainly rather than
+               shown as taken, so an operator is not told a call was allowed
+               when nothing was listening. *)
             Printf.sprintf
               "too late for %s; the call was no longer waiting"
               (Keeper_chat.compact_request_id tool_call_id)
         | Error detail -> "could not answer the held call: " ^ detail
       in
       append_chat_history state request
-        (match result with Ok true -> Message_status | _ -> Message_error)
+        (match result with
+         | Ok { Masc_tui_http.settled = true; _ }
+         | Ok { Masc_tui_http.remembered = true; _ } ->
+             Message_status
+         | _ -> Message_error)
         text
   | Keeper_tool_approvals_loaded result ->
       (match result with
@@ -9224,14 +9425,25 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       if state.approval_cursor >= count then
         state.approval_cursor <- max 0 (count - 1);
       add_event state
-        (match result with Ok true -> "system" | _ -> "error")
         (match result with
-         | Ok true ->
+         | Ok { Masc_tui_http.settled = true; _ }
+         | Ok { Masc_tui_http.remembered = true; _ } ->
+             "system"
+         | _ -> "error")
+        (match result with
+         | Ok { Masc_tui_http.settled = true; _ } ->
              Printf.sprintf "%s %s's held call %s"
                (if allow then "allowed" else "denied")
                keeper_name
                (Keeper_chat.compact_request_id tool_call_id)
-         | Ok false ->
+         | Ok { Masc_tui_http.settled = false; remembered = true } ->
+             Printf.sprintf
+               "too late for %s's call %s, but the answer is remembered -- \
+                the next identical call is %s without asking"
+               keeper_name
+               (Keeper_chat.compact_request_id tool_call_id)
+               (if allow then "allowed" else "denied")
+         | Ok { Masc_tui_http.settled = false; remembered = false } ->
              Printf.sprintf
                "too late for %s's call %s; it was no longer waiting"
                keeper_name
@@ -15955,8 +16167,9 @@ and is loaded on demand through keeper_skill.
        | Render_schedule.Render when Option.is_some state.image_open -> ()
        | Render_schedule.Render ->
            let frame, clamped, approval =
-             Masc_tui_frame_timing.time Masc_tui_frame_timing.Build (fun () ->
-               render state)
+             Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
+               ~tag:(fun (frame, _, _) -> frame.Frame_presenter.surface_key)
+               (fun () -> render state)
            in
            (* The frame is what the operator will act on next, so the scroll it
               had to clamp is the scroll the next keypress moves from. Applied
@@ -15968,8 +16181,9 @@ and is loaded on demand through keeper_skill.
              Terminal_title.present terminal_title ~write:(output_string stdout)
                ~flush:(fun () -> flush stdout)
                (terminal_title_snapshot state);
-           Masc_tui_frame_timing.time Masc_tui_frame_timing.Present (fun () ->
-             present_frame frame approval)
+           Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Present
+             ~tag:(fun () -> frame.Frame_presenter.surface_key)
+             (fun () -> present_frame frame approval)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

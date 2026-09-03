@@ -434,3 +434,34 @@ let assert_same_string_set ~label ~expected ~actual =
       (String.concat "; " only_actual);
     failwith (label ^ " differs")
   end
+
+(* Which sandbox a fixture's keeper runs in.
+
+   Nothing used to answer this, so the profile came from the placeholder
+   keeper_meta_json_parse.ml fills in -- the same file whose comment says
+   reading that field as authority is a bug regardless of the value being a
+   safe backend. Every suite that builds a meta from JSON inherited Docker
+   without asking for it, and on a machine with no Docker daemon every case
+   in those suites failed on the same container probe.
+
+   Docker stays the default because that is what a CI runner has.
+   MASC_TEST_SANDBOX names another; an unreadable value is a hard failure
+   rather than a silent fallback, because falling back would put the run
+   under a backend the operator did not pick and did not see. *)
+let fixture_sandbox_profile () =
+  match Sys.getenv_opt "MASC_TEST_SANDBOX" with
+  | None -> Masc.Keeper_types_profile.Docker
+  | Some raw ->
+    (match
+       Masc.Keeper_types_profile.sandbox_profile_of_string (String.trim raw)
+     with
+     | Some profile -> profile
+     | None ->
+       failwith
+         (Printf.sprintf
+            "MASC_TEST_SANDBOX=%S is not one of %s"
+            raw
+            (String.concat
+               ", "
+               Masc.Keeper_types_profile.valid_sandbox_profile_strings)))
+;;

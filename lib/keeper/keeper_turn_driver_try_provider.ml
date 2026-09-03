@@ -1272,12 +1272,13 @@ let checkpoint_before_incomplete_response (checkpoint : Agent_core.Checkpoint.t)
     None
 ;;
 
-(* Every no-progress rejection the provider stopped at [MaxTokens] gets the
-   continuation attempt, whatever its shape: the checkpoint is cut before the
-   incomplete response and re-run with thinking off, which is exactly the
-   remedy for a budget spent on thinking. The retry kind is read afterwards,
-   by the lane, to decide whether a failed or unreachable continuation
-   rotates (no deliverable content) or ends the lane (partial content). *)
+(* Every no-progress rejection the provider stopped at [MaxTokens] cuts the
+   checkpoint before the incomplete response. Whether that cut is followed by a
+   continuation attempt is a separate question -- see
+   [run_try_provider_with_truncation_recovery]. The retry kind is read
+   afterwards, by the lane, to decide whether a failed or unreachable
+   continuation rotates (no deliverable content) or ends the lane (partial
+   content). *)
 let max_tokens_truncation_error error =
   match Keeper_internal_error.classify_masc_internal_error error with
   | Some
@@ -1310,6 +1311,39 @@ let thinking_was_enabled = function
   | Some true | None -> true
 ;;
 
+(* What a max-tokens rejection owes the checkpoint. Two things were decided by
+   one condition here, and only one of them is about thinking.
+
+   Turning thinking off is the remedy for a budget spent thinking, so it is
+   worth a second attempt only when thinking was on. Dropping the rejected
+   response is owed either way: accept judged it unusable, and a checkpoint
+   that keeps it feeds it back as input on every later turn.
+
+   Measured on sangsu, 2026-09-03, with thinking off throughout: the model
+   collapsed into one repeated word, accept rejected it at max_tokens, and
+   message_assistant_text climbed 136 KB -> 308 KB over twelve turns, stepping
+   30-40 KB on each collapse -- the size of the rejected text. Larger input
+   makes the next collapse likelier, so the refused response was financing its
+   own repeat.
+
+   Decided without running anything, so the decision is checkable on its own. *)
+type truncation_recovery =
+  | Recovery_not_applicable
+  | Retry_without_thinking of Agent_core.Checkpoint.t
+  | Drop_rejected_response of Agent_core.Checkpoint.t
+
+let truncation_recovery ~enable_thinking ~result ~checkpoint =
+  match result, checkpoint with
+  | Error error, Some checkpoint when max_tokens_truncation_error error -> (
+    match checkpoint_before_incomplete_response checkpoint with
+    | None -> Recovery_not_applicable
+    | Some cut ->
+      if thinking_was_enabled enable_thinking
+      then Retry_without_thinking cut
+      else Drop_rejected_response cut)
+  | Error _, _ | Ok _, _ -> Recovery_not_applicable
+;;
+
 let run_try_provider_with_truncation_recovery
       (ctx : try_provider_ctx)
       candidate
@@ -1317,33 +1351,49 @@ let run_try_provider_with_truncation_recovery
   let first_result, checkpoint_after, success_sample =
     run_try_provider_with_context_overflow_shrink ctx candidate
   in
-  match first_result, checkpoint_after with
-  | Error error, Some checkpoint
-    when max_tokens_truncation_error error
-         && thinking_was_enabled ctx.enable_thinking ->
-    (match checkpoint_before_incomplete_response checkpoint with
-     | None -> first_result, checkpoint_after, success_sample
-     | Some continuation_checkpoint ->
-       emit_runtime_manifest ctx
-         ~status:"max_tokens_continuation"
-         ~decision:
-           (`Assoc
-             [ "continuation", `String "post_tool_checkpoint"
-             ; "thinking", `String "disabled"
-             ])
-         Keeper_runtime_manifest.Provider_lane_resolved;
-       run_try_provider
-         ~continuation_checkpoint
-         { ctx with enable_thinking = Some false; preserve_thinking = Some false }
-         candidate)
-  | Error _, None | Ok _, _ | Error _, Some _ ->
-    first_result, checkpoint_after, success_sample
+  match
+    truncation_recovery
+      ~enable_thinking:ctx.enable_thinking
+      ~result:first_result
+      ~checkpoint:checkpoint_after
+  with
+  | Recovery_not_applicable -> first_result, checkpoint_after, success_sample
+  | Retry_without_thinking continuation_checkpoint ->
+    emit_runtime_manifest ctx
+      ~status:"max_tokens_continuation"
+      ~decision:
+        (`Assoc
+          [ "continuation", `String "post_tool_checkpoint"
+          ; "thinking", `String "disabled"
+          ])
+      Keeper_runtime_manifest.Provider_lane_resolved;
+    run_try_provider
+      ~continuation_checkpoint
+      { ctx with enable_thinking = Some false; preserve_thinking = Some false }
+      candidate
+  | Drop_rejected_response cut ->
+    emit_runtime_manifest ctx
+      ~status:"max_tokens_rejected_response_dropped"
+      ~decision:
+        (`Assoc
+          [ "continuation", `String "none"
+          ; "thinking", `String "already_disabled"
+          ])
+      Keeper_runtime_manifest.Provider_lane_resolved;
+    first_result, Some cut, success_sample
 ;;
 
 module For_testing = struct
   let apply_accept = apply_accept
   let checkpoint_before_incomplete_response = checkpoint_before_incomplete_response
   let max_tokens_truncation_error = max_tokens_truncation_error
+
+  type nonrec truncation_recovery = truncation_recovery =
+    | Recovery_not_applicable
+    | Retry_without_thinking of Agent_core.Checkpoint.t
+    | Drop_rejected_response of Agent_core.Checkpoint.t
+
+  let truncation_recovery = truncation_recovery
   let thinking_was_enabled = thinking_was_enabled
   let observe_request_wire_error = observe_request_wire_error
   let memoize_message_measurement = memoize_message_measurement

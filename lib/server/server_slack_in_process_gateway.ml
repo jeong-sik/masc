@@ -240,21 +240,6 @@ let record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
       channel_id keeper_name error;
     None
 
-let mark_attention_resolved ~base_dir ~keeper_name ~event_id ~reason =
-  match
-    Keeper_external_attention.mark_resolved
-      ~base_path:base_dir
-      ~keeper_name
-      ~event_ids:[ event_id ]
-      ~reason
-      ()
-  with
-  | Ok () -> ()
-  | Error error ->
-    Log.Server.warn
-      "slack external attention resolve failed (keeper=%s event=%s): %s"
-      keeper_name event_id error
-
 (* ---------------------------------------------------------------- *)
 (* Inbound delivery                                                 *)
 (* ---------------------------------------------------------------- *)
@@ -409,12 +394,7 @@ let deliver_inbound ~clock ~base_dir accepted =
            (Channel_gate.gate_error_to_string gate_err))
      | Ok out ->
        if String.equal out.content "" then begin
-         (match attention_event_id with
-          | Some event_id ->
-            mark_attention_resolved ~base_dir ~keeper_name ~event_id
-              ~reason:"slack_empty_reply"
-          | None -> ());
-         Slack_observability.record_inbound_dispatch
+                  Slack_observability.record_inbound_dispatch
            Slack_observability.Empty_reply;
          Slack_observability.record_reply Slack_observability.Reply_empty
        end
@@ -424,12 +404,7 @@ let deliver_inbound ~clock ~base_dir accepted =
              ~reply_to_message_id:reply_to_thread_ts ()
          with
          | Ok _ ->
-           (match attention_event_id with
-            | Some event_id ->
-              mark_attention_resolved ~base_dir ~keeper_name ~event_id
-                ~reason:"slack_reply_sent"
-            | None -> ());
-           Slack_observability.record_inbound_dispatch
+                      Slack_observability.record_inbound_dispatch
              Slack_observability.Reply_sent;
            Slack_observability.record_reply Slack_observability.Reply_send_ok
          | Error e ->
@@ -661,71 +636,21 @@ let handle_ambient ?resolved_keeper_name ~base_dir ~team_id ~channel_id
          lane cycle. *)
       (match attention_event_id with
        | Some event_id ->
-         let stimulus =
-           { Keeper_event_queue.post_id = event_id
-           ; urgency = Keeper_event_queue.Low
-           ; arrived_at = Unix.gettimeofday ()
-             (* NDT-OK: stimulus receipt time, used only for ordering/age *)
-           ; payload =
-               (* RFC-0320: carry the originating Slack channel+author so a
-                  woken keeper replies into the same thread, not its own state. *)
-               Keeper_event_queue.Connector_attention
-                 { event_id
-                 ; channel =
-                     (match
-                        Keeper_continuation_channel.slack ~team_id ~channel_id
-                          ~thread_ts ~user_id
-                      with
-                      | Ok channel -> channel
-                      | Error message -> invalid_arg message)
-                 }
-           }
+         let channel =
+           (* RFC-0320: carry the originating Slack channel+author so a woken
+              keeper replies into the same thread, not its own state. *)
+           match
+             Keeper_continuation_channel.slack ~team_id ~channel_id ~thread_ts
+               ~user_id
+           with
+           | Ok channel -> channel
+           | Error message -> invalid_arg message
          in
-         (match
-            Keeper_registry_event_queue.enqueue_stimulus_durable_result
-              ~base_path:base_dir
-              keeper_name
-              stimulus
-          with
-          | Keeper_registry_event_queue.Stimulus_storage_error detail ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string KeepaliveSignalFailures)
-              ~labels:
-                [ ("keeper", keeper_name)
-                ; ("phase", "connector_attention_delivery")
-                ]
-              ();
-            Log.Server.error
-              "connector attention durable delivery failed (keeper=%s event=%s): %s"
-              keeper_name
-              event_id
-              detail
-          | Keeper_registry_event_queue.Stimulus_enqueued
-          | Keeper_registry_event_queue.Stimulus_already_present ->
-            (match
-               Keeper_registry.wakeup_running
-                 ~intent:Keeper_registry.Reactive_signal
-                 ~base_path:base_dir
-                 keeper_name
-             with
-             | Keeper_registry.Signaled -> ()
-             | Keeper_registry.Deferred_unregistered ->
-               Log.Server.info
-                 "connector attention durably queued; wake deferred for unregistered Keeper (keeper=%s event=%s)"
-                 keeper_name
-                 event_id
-             | Keeper_registry.Deferred_not_running phase ->
-               Log.Server.info
-                 "connector attention durably queued; wake deferred by Keeper phase (keeper=%s event=%s phase=%s)"
-                 keeper_name
-                 event_id
-                 (Keeper_state_machine.phase_to_string phase)
-             | Keeper_registry.Deferred_lifecycle denial ->
-               Log.Server.info
-                 "connector attention durably queued; wake deferred by lifecycle (keeper=%s event=%s reason=%s)"
-                 keeper_name
-                 event_id
-                 (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)))
+         Server_connector_attention_delivery.deliver
+           ~base_path:base_dir
+           ~keeper_name
+           ~event_id
+           ~channel
        | None -> ());
       Slack_observability.record_ambient Slack_observability.Ambient_recorded
     end
@@ -800,7 +725,6 @@ module For_testing = struct
   let submit_event = submit_event
   let submit_ambient_event = submit_ambient_event
   let record_external_attention = record_external_attention
-  let mark_attention_resolved = mark_attention_resolved
   let resolve_event_identity = resolve_event_identity
 end
 

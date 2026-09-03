@@ -1,3 +1,8 @@
+> **상태 갱신 (2026-09-03)**: model-prose ratchet 게이트(`scripts/model-prose-{ratchet.sh,scan.py,baseline.json}`)는 제거됐다.
+> allowlist 25파일·2만자가 상주하는 상태에서 게이트가 잡는 것은 신규 유입(+14자 수준)뿐이어서
+> 유지 비용이 값보다 컸다. 프롬프트 외부화 원칙(RFC 본문)은 그대로 산다 — 게이트가 아니라
+> 리뷰와 managed 파일 규칙(managed-assets.json)이 지킨다.
+
 ---
 rfc: "prompts-and-tool-definitions-outside-ocaml"
 title: "프롬프트와 도구 정의를 OCaml 밖으로 — 모델이 읽는 모든 글은 config 파일이 소유한다"
@@ -259,7 +264,7 @@ constraints = "..."
 8. `tool_help_registry` → `[help]`, `mcp_server` 리소스 → `config/mcp/resources.toml`, tool_profile
    instructions/title → `config/mcp/profiles.toml`, `mcp_prompt_surface` (6.5 KB).
 9. `keeper_unified_prompt.ml` 섹션 헤더·힌트 + `keeper_prompt.ml` identity/workspace + extra 블록 머리말
-   (B 6.8 KB) → `keeper.world.*.md`, `keeper.identity.md`, `keeper.workspace.md`.
+   (B 6.8 KB) → `keeper.world.*.md`, `keeper.md` 의 `identity`·`workspace` 슬롯.
 10. 서브에이전트 프롬프트 (C 7.6 KB) → `compaction.summarizer.md`, `fusion.{panel,judge,synthesis}.md`,
     `canary.judge.md`, `vision.*.md`.
 11. 도구 결과 안내문 (D 7.2 KB): 닫힌 변형 `Tool_guidance.t` → 프롬프트 키 매핑, 본문은 md.

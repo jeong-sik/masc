@@ -1135,13 +1135,32 @@ let acting_retained_entries = 1000
    screens at the row heights this TUI draws. *)
 let acting_retained_quiet = 200
 
+(** How many Keepers stand in each state the control plane names, counted off
+    [keeper_briefs]. The briefing carries a liveness word per Keeper and the
+    Overview row used to carry only their number, so a fleet with two Keepers
+    that had stopped doing anything and one an operator had paused read the
+    same as nine running ones.
+
+    [klc_unreadable] counts rows whose word is missing or outside the
+    vocabulary. They are not folded into any state: a Keeper whose liveness
+    this build cannot name is a different fact from an idle one, and the row
+    says so rather than picking the convenient neighbour. *)
+type keeper_liveness_counts = {
+  klc_active: int;
+  klc_inactive: int;
+  klc_offline: int;
+  klc_idle: int;
+  klc_paused: int;
+  klc_unreadable: int;
+}
+
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_cluster: string;
   ov_project: string;
   ov_keepers: int;  (** [keeper_briefs] the briefing carried *)
+  ov_keeper_liveness: keeper_liveness_counts;
   ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
-  ov_incident_count: int;
   ov_attention_items: attention_item list;
   ov_top_attention: attention_item option;
   ov_generated_at: string;

@@ -110,6 +110,7 @@ type entry =
         thinking_object_keep_all / chat_template_kwargs_preserve_thinking /
         top_level_preserve_thinking / always_preserved); applied in
         {!Capabilities.apply_manifest_entry}. *)
+  ; content_inline_reasoning : string option
   ; reasoning_output_format : string option
     (** Canonical request-side reasoning output split control (none /
         split_reasoning_fields); applied in {!Capabilities.apply_manifest_entry}. *)

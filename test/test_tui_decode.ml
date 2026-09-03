@@ -4901,6 +4901,83 @@ let prompts_payload =
           ] );
     ]
 
+let presets_payload : Yojson.Safe.t =
+  `Assoc
+    [ ("ok", `Bool true)
+    ; ( "presets"
+      , `List
+          [ `Assoc
+              [ ("schema_version", `Int 1)
+              ; ("name", `String "morning")
+              ; ("description", `String "before the campaign")
+              ; ("created_at", `String "2026-09-03T10:26:08Z")
+              ; ("override_count", `Int 1)
+              ; ("keepers", `List [ `String "analyst"; `String "sangsu" ])
+              ; ("assignment_count", `Int 12)
+              ; ("lane_count", `Int 4)
+              ]
+          ] )
+    ; ("unreadable", `List [ `Assoc [ ("name", `String "torn"); ("reason", `String "manifest.json missing") ] ])
+    ]
+
+let restore_payload : Yojson.Safe.t =
+  `Assoc
+    [ ("ok", `Bool true)
+    ; ( "report"
+      , `Assoc
+          [ ("restored", `String "morning")
+          ; ("autosave", `String "_autosave-20260903T103201Z")
+          ; ( "prompt_overrides"
+            , `Assoc
+                [ ("effect", `String "immediate")
+                ; ("applied", `List [ `String "keeper" ])
+                ; ("skipped", `List [ `Assoc [ ("key", `String "stale"); ("reason", `String "contract revision mismatch") ] ])
+                ] )
+          ; ( "instructions"
+            , `Assoc
+                [ ("effect", `String "keeper_restart")
+                ; ("applied", `List [ `String "analyst" ])
+                ; ("skipped", `List [])
+                ] )
+          ; ("runtime", `Assoc [ ("effect", `String "runtime_commit"); ("status", `String "failed"); ("error", `String "invalid runtime TOML") ])
+          ] )
+    ]
+
+let test_decode_presets_reads_manifests_and_unreadable () =
+  match Tui_decode.decode_presets presets_payload with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    let first = List.hd snapshot.Tui_decode.pss_presets in
+    Alcotest.(check string) "name" "morning" first.Tui_decode.pm_name;
+    Alcotest.(check int) "assignments" 12 first.Tui_decode.pm_assignment_count;
+    Alcotest.(check (list string)) "keepers" [ "analyst"; "sangsu" ] first.Tui_decode.pm_keepers;
+    Alcotest.(check (list (pair string string))) "unreadable"
+      [ "torn", "manifest.json missing" ] snapshot.Tui_decode.pss_unreadable
+
+let test_decode_preset_restore_reads_each_surface () =
+  match Tui_decode.decode_preset_restore restore_payload with
+  | Error detail -> Alcotest.fail detail
+  | Ok report ->
+    Alcotest.(check string) "autosave" "_autosave-20260903T103201Z" report.Tui_decode.prr_autosave;
+    Alcotest.(check (list string)) "overrides applied" [ "keeper" ]
+      report.Tui_decode.prr_prompt_overrides.Tui_decode.pp_applied;
+    Alcotest.(check (list (pair string string))) "overrides skipped"
+      [ "stale", "contract revision mismatch" ]
+      report.Tui_decode.prr_prompt_overrides.Tui_decode.pp_skipped;
+    Alcotest.(check string) "instructions effect" "keeper_restart"
+      report.Tui_decode.prr_instructions.Tui_decode.pp_effect;
+    Alcotest.(check bool) "runtime failure carries its reason" true
+      (report.Tui_decode.prr_runtime = Tui_decode.Preset_runtime_failed "invalid runtime TOML")
+
+let test_decode_preset_refusal_is_the_servers_sentence () =
+  let refused : Yojson.Safe.t = `Assoc [ ("ok", `Bool false); ("error", `String "invalid preset name: bad name") ] in
+  (match Tui_decode.decode_preset_saved refused with
+   | Error detail -> Alcotest.(check string) "save refusal" "invalid preset name: bad name" detail
+   | Ok _ -> Alcotest.fail "a refused save decoded as a manifest");
+  match Tui_decode.decode_presets refused with
+  | Error detail -> Alcotest.(check string) "list refusal" "invalid preset name: bad name" detail
+  | Ok _ -> Alcotest.fail "a refused list decoded as a snapshot"
+
 let test_decode_prompts_reads_the_live_shape () =
   match Tui_decode.decode_prompts prompts_payload with
   | Error detail -> Alcotest.fail detail
@@ -7169,7 +7246,13 @@ let () =
     ( "prompts",
       [
         Alcotest.test_case "reads the live shape" `Quick
-          test_decode_prompts_reads_the_live_shape;
+          test_decode_prompts_reads_the_live_shape
+      ; Alcotest.test_case "decode_presets reads manifests and unreadable rows" `Quick
+          test_decode_presets_reads_manifests_and_unreadable
+      ; Alcotest.test_case "decode_preset_restore reads each surface" `Quick
+          test_decode_preset_restore_reads_each_surface
+      ; Alcotest.test_case "a preset refusal decodes to the server's sentence" `Quick
+          test_decode_preset_refusal_is_the_servers_sentence;
         Alcotest.test_case "reads separate read-only runtime assets" `Quick
           test_decode_prompts_reads_runtime_assets;
         Alcotest.test_case "hides assembly fragments by default" `Quick

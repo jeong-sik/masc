@@ -1,5 +1,17 @@
-let default_max_bytes = Common.max_tool_output_bytes
-let maximum_max_bytes = Common.max_tool_output_bytes
+(* A page must never itself be large enough to spill. An official-client CLI
+   writes an oversized tool result to a file under its own session directory,
+   which a Keeper cannot open, so a page returned at that size would be an
+   unreadable answer to a request for unreadable content — the loop #32748
+   closed.
+
+   Both bounds are therefore the narrower of the two lane ceilings, not the
+   lane's own. The advertised schema is built once for every Keeper, before a
+   turn resolves which runtime executes it, so a page bound that varied by
+   lane could not be declared. [config/tools/keeper_artifact_read.toml]
+   carries these same numbers as the wire contract and
+   [test_keeper_runtime_schemas_toml_parity] pins it against them. *)
+let default_max_bytes = Common.max_tool_result_wire_bytes
+let maximum_max_bytes = Common.max_tool_result_wire_bytes
 let minimum_max_bytes = 1
 
 type request =
@@ -238,7 +250,7 @@ let page_of_slice_within_output_budget request ~total_bytes requested_bytes =
   in
   let fits page =
     page |> page_to_json |> Yojson.Safe.to_string |> String.length
-    <= Common.max_tool_output_bytes
+    <= Common.max_tool_result_wire_bytes
   in
   match candidate 0 with
   | Error _ as error -> error

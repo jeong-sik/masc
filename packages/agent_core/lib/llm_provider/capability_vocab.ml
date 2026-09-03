@@ -48,6 +48,15 @@ type reasoning_output_format =
   | No_reasoning_output_format
   | Split_reasoning_fields
 
+(* Whether a model also embeds reasoning in the content channel, and in what
+   shape. Separate from [reasoning_streaming_format], which says how reasoning
+   arrives on its own channel: a model can do both at once, and minimax-m3
+   does. Folding this into that axis costs the model its reasoning_details
+   stream. *)
+type content_inline_reasoning =
+  | No_content_inline_reasoning
+  | Think_tags
+
 (** Structured-output tier a resolved model/provider capability advertises.
 
     This is the typed view the request-admission decision
@@ -455,6 +464,7 @@ let capability_fields =
   ; "preserve_thinking_control_format"
   ; "reasoning_output_format"
   ; "reasoning_streaming_format"
+  ; "content_inline_reasoning"
   ; "reasoning_replay"
   ; "supports_response_format_json"
   ; "supports_structured_output"
@@ -561,6 +571,18 @@ let reasoning_output_format_of_string raw =
   match normalize raw with
   | "" -> Some No_reasoning_output_format
   | normalized -> List.assoc_opt normalized reasoning_output_format_table
+;;
+
+let content_inline_reasoning_table =
+  [ "none", No_content_inline_reasoning; "think_tags", Think_tags ]
+;;
+
+let content_inline_reasoning_values = List.map fst content_inline_reasoning_table
+
+let content_inline_reasoning_of_string raw =
+  match normalize raw with
+  | "" -> Some No_content_inline_reasoning
+  | normalized -> List.assoc_opt normalized content_inline_reasoning_table
 ;;
 
 let reasoning_streaming_format_values =

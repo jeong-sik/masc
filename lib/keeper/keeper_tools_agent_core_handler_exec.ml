@@ -187,12 +187,12 @@ let execute_with_observers_with_authority
          masking.
 
          Truncating first means [sanitize_text_utf8] scans at most
-         [max_tool_output_bytes] instead of the whole payload, and it repairs
+         [max_tool_result_wire_bytes] instead of the whole payload, and it repairs
          any multi-byte character the cut split. *)
       let detail =
         raw_result
         |> Observability_redact.redact_preview
-             ~max_len:Common.max_tool_output_bytes
+             ~max_len:Common.max_tool_result_wire_bytes
         |> Safe_ops.sanitize_text_utf8
       in
       let ts = Time_compat.now () in

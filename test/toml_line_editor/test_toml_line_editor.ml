@@ -77,6 +77,36 @@ let test_multiline_array_edit_preserves_comments () =
   Alcotest.(check bool) "sibling scalar untouched" true
     (has_line out {|judge = "old-judge"|})
 
+(* A comment inside a multi-line array may mention a table name in brackets
+   (the live runtime.toml lane blocks do). The bracket in that comment is not
+   the array close: the whole old block must go, or the leftover elements and
+   the real close make the file unparseable. *)
+let test_multiline_array_close_ignores_bracket_in_comment () =
+  let commented =
+    {|[runtime.exact_output_lanes.verifier_exact]
+slots = [
+  "provider.a",
+  # the same id lives in [runtime.lanes] too
+  "provider.b",
+]
+next_key = 1
+|}
+  in
+  let out =
+    Toml_line_editor.edit_table_multiline_array commented
+      ~path:"runtime.exact_output_lanes.verifier_exact" ~key:"slots"
+      ~values:[ "provider.z" ]
+  in
+  Alcotest.(check bool) "old element after the comment is gone" false
+    (has_line out {|  "provider.b",|});
+  Alcotest.(check bool) "the comment inside the block is dropped with the block" false
+    (has_line out "  # the same id lives in [runtime.lanes] too");
+  Alcotest.(check int) "exactly one close bracket remains" 1
+    (List.length
+       (List.filter (String.equal "]") (fst (Toml_line_editor.split_lines out))));
+  Alcotest.(check bool) "the key after the block survives" true
+    (has_line out "next_key = 1")
+
 (* The scalar editor must target the right table: [enabled] exists in [fusion]
    and must not be touched when editing [fusion.presets.trio]. *)
 let test_scalar_edit_is_table_scoped () =
@@ -97,5 +127,7 @@ let () =
             test_multiline_array_edit_preserves_comments
         ; Alcotest.test_case "scalar edit is table-scoped" `Quick
             test_scalar_edit_is_table_scoped
+        ; Alcotest.test_case "a bracket inside a comment does not close the array" `Quick
+            test_multiline_array_close_ignores_bracket_in_comment
         ] )
     ]

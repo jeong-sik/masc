@@ -26,6 +26,7 @@ type t =
 
 val create :
   registry:Keeper_tool_approval_registry.t ->
+  late_approvals:Keeper_late_approval.t ->
   publish:(Keeper_chat_events.keeper_chat_event -> unit) ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   keeper_name:string ->
@@ -43,4 +44,13 @@ val create :
     call claiming the same id — denies the call. Denial goes back to the model
     as a failure it can respond to, so the turn continues and the keeper can
     say it was refused. Admitting on silence would run the call this exists to
-    hold. *)
+    hold.
+
+    [late_approvals] bridges one gap in that: a timed-out ask is recorded
+    there, and an operator's answer arriving after the wait is gone settles
+    the identical retried call once instead of being dropped. The callback
+    consults it before opening a new wait, so a remembered answer still
+    publishes the requested/settled pair — the stream shows the question was
+    raised and settled from the operator's earlier word. The memory is
+    age-bounded ({!Keeper_late_approval.ttl_sec}): an answer too old to still
+    be the operator's moment is reaped, and the call is asked about again. *)

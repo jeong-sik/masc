@@ -6,13 +6,13 @@ open Masc
 
 let test_day_boundary () =
   check bool "the first pass stays quiet" false
-    Server_bootstrap_maintenance.retention_becomes_warning 1;
+    (Server_bootstrap_maintenance.retention_becomes_warning 1);
   check bool "the pass before a day stays quiet" false
-    Server_bootstrap_maintenance.retention_becomes_warning 1439;
+    (Server_bootstrap_maintenance.retention_becomes_warning 1439);
   check bool "a full day warns" true
-    Server_bootstrap_maintenance.retention_becomes_warning 1440;
+    (Server_bootstrap_maintenance.retention_becomes_warning 1440);
   check bool "two days warn again" true
-    Server_bootstrap_maintenance.retention_becomes_warning 2880;
+    (Server_bootstrap_maintenance.retention_becomes_warning 2880);
   check bool "zero never warns" false
     Server_bootstrap_maintenance.retention_becomes_warning 0
 ;;

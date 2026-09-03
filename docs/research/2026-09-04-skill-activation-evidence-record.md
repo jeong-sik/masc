@@ -71,3 +71,23 @@
 
 읽지 못한 것: `keeper_compose_work-intake` 실패의 `cause` 값. 저장소가 그 자리에서
 잘린다. raw-traces 에서도 해당 `tool_execution_finished` 행을 특정하지 못했다.
+
+## 두 번째 정정 — 카탈로그는 닿는다
+
+앞의 두 판이 "프롬프트에 0바이트니까 도달 불가"라고 했다. 프롬프트만 보고
+도구 서술을 안 본 것이다.
+
+| Evidence | Timestamp | Confidence | Delta |
+|---|---|---|---|
+| `lib/keeper/keeper_tool_composition_surface.ml:72` `instruction_skill_description` — `skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed`, listed 는 스킬마다 `참조JSON: 설명` | 02:3x | High | `keeper_skill` 도구 서술이 카탈로그를 진다. 프롬프트가 아니다 |
+| 라이브 `/api/v1/skills` 로 같은 문자열을 재구성해 바이트 계산 | 02:3x | High | `Available:` 블록 3,765B, 스킬당 376B. 참조 JSON 만 약 190B |
+| `lib/keeper/keeper_skill_catalog.ml:376` `project_turn` | 02:3x | High | `names = None` 이면 task + 전역 카탈로그 전부. `Some` 이면 그 이름들만. `skill_names` 는 좁히는 필터다 |
+| `lib/keeper/keeper_capability_surface.ml:53` `valid_skill_availability` | 02:3x | High | `skill_names` 밖이면 `Outside_skill_surface` — 역시 좁히는 방향 |
+| `lib/keeper/keeper_effective_tool_surface.ml:241` `selection_reason` | 02:3x | High | 이건 관측 라벨(`Keeper_profile` / `Catalog_default`)이지 로딩 결정이 아니다. 첫 판이 이걸 로딩 경로로 읽었다 |
+
+그래서 `#31324` 에 단 "전제가 라이브와 다르다" 코멘트는 **철회**한다. 그 이슈가
+맞다 — 참조는 매 턴 실린다.
+
+읽지 못한 것: 도구 스키마가 실제 요청에 실린 원문. wire-capture 는 agent-core
+텍스트만 담아 도구 정의가 없다. 위 3,765B 는 라이브 카탈로그로 같은 코드 경로를
+재구성해 계산한 값이다.

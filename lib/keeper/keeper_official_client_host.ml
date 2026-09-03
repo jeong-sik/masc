@@ -899,7 +899,8 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
                     { stage = (Post_tool_use | Post_tool_use_failure); _ } ->
                   record_terminal_error terminal_error detail;
                   { success = true
-                  ; content = "Tool completed, but its post-execution hook failed; do not retry"
+                  ; content =
+                      Tool_guidance.to_string Tool_guidance.Post_execution_hook_failed
                   ; abort_turn = None
                   }
                 | Agent_core.Agent_tools.Hook_execution_failed _ ->

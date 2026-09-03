@@ -261,8 +261,11 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
     match verdict_str with
     | "APPROVE" -> Ok (Approve reason)
     | "REJECT" ->
+      (* A tool result the reviewer LLM reads back, so the sentence is a
+         managed prompt; the pure parse errors below stay inline (RFC §6
+         mechanically-derived validation). *)
       if String.equal (String.trim reason) ""
-      then Error "REJECT verdict requires a non-empty reason"
+      then Error (Tool_guidance.to_string Tool_guidance.Reject_verdict_requires_reason)
       else Ok (Reject reason)
     | other -> Error (sprintf "unexpected review verdict value: %s" other)
   with

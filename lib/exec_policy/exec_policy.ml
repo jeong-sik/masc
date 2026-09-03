@@ -20,8 +20,36 @@ type block_reason =
   | Unsafe_redirect
   | Pipes_not_allowed
 
+let block_reason_tag = function
+  | Empty_command -> "empty_command"
+  | Chain_or_redirect -> "chain_or_redirect"
+  | Injection -> "injection"
+  | Process_substitution -> "process_substitution"
+  | Unsafe_redirect -> "unsafe_redirect"
+  | Pipes_not_allowed -> "pipes_not_allowed"
+;;
+
+(* The short block reasons are model-facing next-move guidance, so their
+   sentences live in managed templates (config/prompts/exec_policy.md) and
+   this module only picks the key. A template that does not render is logged
+   and falls back to the bare variant tag, never to prose written here
+   (#32848 precedent). The long chaining/injection/redirect wording stays
+   inline for now: it is multi-paragraph setup documentation, outside the
+   class-(ii) sentence slice. *)
+let render_block_reason key reason =
+  match Prompt_registry.render_prompt_template key [] with
+  | Ok text -> String.trim text
+  | Error detail ->
+    Log.Misc.warn
+      "exec_policy block reason %s did not render, falling back to the bare tag: %s"
+      key
+      detail;
+    block_reason_tag reason
+;;
+
 let block_reason_to_string = function
-  | Empty_command -> "command must not be empty"
+  | Empty_command ->
+    render_block_reason Prompt_names.exec_policy_block_reason_empty_command Empty_command
   | Chain_or_redirect ->
     "Blocked: chaining (&&/||/;) and redirects (|/>) are not allowed. Run ONE command \
      per call. To change directory, use the `cwd` argument instead of `cd` - Good: \
@@ -34,11 +62,17 @@ let block_reason_to_string = function
      cmd='ls'. Bad: cmd='cd <dir> && ls' or cmd='cmd1 ; cmd2'. \
      Relative paths resolve from `cwd` (defaults to playground root). For file writes, \
      use Edit or Write."
-  | Process_substitution -> "Process substitution (<(...) or >(...)) is not allowed."
+  | Process_substitution ->
+    render_block_reason
+      Prompt_names.exec_policy_block_reason_process_substitution
+      Process_substitution
   | Unsafe_redirect ->
     "Redirect syntax is not allowed in this shell surface. Consume stdout/stderr \
      directly from the tool response, and use a dedicated write tool for files."
-  | Pipes_not_allowed -> "Pipes are not allowed. Run one command per call."
+  | Pipes_not_allowed ->
+    render_block_reason
+      Prompt_names.exec_policy_block_reason_pipes_not_allowed
+      Pipes_not_allowed
 ;;
 
 
@@ -202,12 +236,25 @@ let existing_sibling_dirs_hint ?workdir path =
           let suffix =
             if omitted > 0 then Printf.sprintf ", +%d more" omitted else ""
           in
-          Some
-            (Printf.sprintf
-               "(existing directories under %s/: %s%s)"
-               (Filename.basename ancestor)
-               (String.concat ", " shown)
-               suffix)))
+          let vars =
+            [ "ancestor", Filename.basename ancestor
+            ; "dirs", String.concat ", " shown
+            ; "suffix", suffix
+            ]
+          in
+          (match
+             Prompt_registry.render_prompt_template
+               Prompt_names.exec_policy_cwd_existing_siblings_hint
+               vars
+           with
+           | Ok text -> Some (String.trim text)
+           | Error detail ->
+             (* Bare data, never inline prose: the sibling list still reaches
+                the model when the managed hint template is missing. *)
+             Log.Misc.warn
+               "exec_policy cwd hint did not render, falling back to the bare data: %s"
+               detail;
+             Some (String.concat ", " shown ^ suffix))))
 ;;
 
 let validate_shell_ir_paths ?workdir shell_ir =

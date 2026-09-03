@@ -66,6 +66,43 @@ let test_observation_table_is_fully_read () =
     Readonly.git_read_subcommands
 ;;
 
+(* gh reads the same endpoints git ls-remote already reaches, with the same
+   identity. What the judge decides is whether an effect lands; a listed verb
+   lands none. Every verb that does — merge, create, comment, checkout, clone,
+   auth login — is absent from the table and therefore judged. *)
+let test_gh_read_verbs_pass () =
+  passes "pr list" [ "gh"; "pr"; "list" ];
+  passes "pr view with json" [ "gh"; "pr"; "view"; "32891"; "--json"; "state,title" ];
+  passes "pr checks" [ "gh"; "pr"; "checks"; "32891" ];
+  passes "pr diff" [ "gh"; "pr"; "diff"; "32891" ];
+  passes "issue view in another repo" [ "gh"; "issue"; "view"; "-R"; "jeong-sik/masc"; "1" ];
+  passes "run list" [ "gh"; "run"; "list"; "--limit"; "5" ];
+  passes "search prs" [ "gh"; "search"; "prs"; "--state"; "open" ];
+  passes "auth status" [ "gh"; "auth"; "status" ];
+  passes "api get" [ "gh"; "api"; "repos/jeong-sik/masc" ];
+  passes "api with an explicit jq" [ "gh"; "api"; "user"; "--jq"; ".login" ]
+
+let test_gh_write_shapes_stay_blocked () =
+  blocked "pr merge" [ "gh"; "pr"; "merge"; "32891"; "--squash" ];
+  blocked "pr create" [ "gh"; "pr"; "create"; "--title"; "x" ];
+  blocked "pr comment" [ "gh"; "pr"; "comment"; "32891"; "--body"; "x" ];
+  blocked "pr checkout writes the worktree" [ "gh"; "pr"; "checkout"; "32891" ];
+  blocked "repo clone writes the worktree" [ "gh"; "repo"; "clone"; "jeong-sik/masc" ];
+  blocked "auth login writes credentials" [ "gh"; "auth"; "login" ];
+  blocked "an unlisted family" [ "gh"; "secret"; "list" ];
+  blocked "an unlisted verb" [ "gh"; "pr"; "ready"; "32891" ];
+  blocked "a bare family" [ "gh"; "pr" ];
+  blocked "bare gh" [ "gh" ];
+  (* --web opens a browser on the host, outside the guest. *)
+  blocked "pr view --web" [ "gh"; "pr"; "view"; "1"; "--web" ];
+  (* A field flag alone flips gh api to POST. *)
+  blocked "api with a method" [ "gh"; "api"; "-X"; "POST"; "repos/x/y/issues" ];
+  blocked "api with --method=" [ "gh"; "api"; "--method=DELETE"; "x" ];
+  blocked "api with a field" [ "gh"; "api"; "repos/x/y/issues"; "-f"; "title=x" ];
+  blocked "api with --field=" [ "gh"; "api"; "x"; "--field=a=b" ];
+  blocked "api with an input file" [ "gh"; "api"; "x"; "--input"; "body.json" ];
+  blocked "bare api" [ "gh"; "api" ]
+
 let test_write_shapes_stay_blocked () =
   blocked "empty argv" [];
   blocked "empty command" [ "" ];
@@ -526,6 +563,8 @@ let () =
     [ ( "argv classification"
       , [ test_case "observation table is fully read" `Quick test_observation_table_is_fully_read
         ; test_case "write shapes stay blocked" `Quick test_write_shapes_stay_blocked
+        ; test_case "gh read verbs pass" `Quick test_gh_read_verbs_pass
+        ; test_case "gh write shapes stay blocked" `Quick test_gh_write_shapes_stay_blocked
         ; test_case "gate shape gates" `Quick test_gate_shape_gates
         ; test_case
             "network observation capabilities"

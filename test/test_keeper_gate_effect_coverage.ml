@@ -726,7 +726,22 @@ let test_ollama_probe_leaf_requests_exact_authorization () =
   | calls -> failf "expected one authorization request, got %d" (List.length calls)
 ;;
 
+(* Speak reaches the Gate only from a runtime that could actually speak: its
+   handler asks the Eio context for a switch, a clock and a net first, and
+   without all three it returns a text-fallback payload and never authorizes
+   anything. That is the right shape -- nothing left the process, so there was
+   no external effect to review -- but it means a test with no Eio context
+   measures the fallback instead of the boundary. The Gate defers before it
+   runs the continuation, so installing the context here queues the request
+   without any speech being synthesized. *)
 let test_voice_effect_defers_without_gating_local_reads () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio_context.set_switch sw;
+  Eio_context.set_clock (Eio.Stdenv.clock env);
+  Eio_context.set_net (Eio.Stdenv.net env);
   with_clean_gate_runtime @@ fun () ->
   let base_path = temp_dir "voice-gate-effect" in
   Fun.protect ~finally:(fun () -> remove_tree base_path) @@ fun () ->

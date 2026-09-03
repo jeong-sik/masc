@@ -2,8 +2,9 @@ name = "keeper_artifact_read"
 description = """
 Restore the content of a [masc:blob ...] ToolResult by its sha256. The \
 marker's bytes= field is the artifact's total size. max_bytes defaults to \
-the 65536 maximum, so one call returns most artifacts whole; read whole \
-artifacts, not small slices. If the response has eof=false, continue from \
+the 16384 maximum, which is the largest page that never itself becomes an \
+unreadable spilled file; read whole artifacts by paging, not by small \
+slices. If the response has eof=false, continue from \
 next_offset until eof=true. Text pages use UTF-8; arbitrary bytes use \
 base64. The runtime never re-inlines a stored artifact into model history; \
 this tool is the only way to read one."""
@@ -26,6 +27,6 @@ description = "Byte offset to read from. Continue a paged read at the returned n
 name = "max_bytes"
 type = "integer"
 minimum = 1
-maximum = 65536
-default = 65536
+maximum = 16384
+default = 16384
 description = "Maximum source bytes in this model-visible page. Defaults to the maximum; lower it only for a deliberate slice, not for paging."

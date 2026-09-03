@@ -3023,6 +3023,11 @@
  (libraries alcotest masc_tui_keeper_chat_projection masc_tui_keeper_chat_queue masc_tui_types))
 
 (test
+ (name test_tui_chat_timeline_assembly)
+ (modules test_tui_chat_timeline_assembly)
+ (libraries alcotest masc_tui_types))
+
+(test
  (name test_tui_ask_selection_wiring)
  (modules test_tui_ask_selection_wiring)
  (libraries alcotest ast_grep)

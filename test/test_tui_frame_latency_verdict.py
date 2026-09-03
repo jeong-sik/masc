@@ -75,6 +75,12 @@ class FrameLatencyVerdictTest(unittest.TestCase):
         self.assertEqual(verdict, "EMPTY")
         self.assertIn("nothing to move", why)
 
+    def test_only_the_end_of_the_run_says_the_chat_was_empty(self):
+        # Every run opens the pane before its history arrives, so the notice
+        # is in the stream of a healthy run too. The window that decides is
+        # the closing one, and it is smaller than the tail that is kept.
+        self.assertLess(harness.CLOSING_BYTES, harness.TAIL_BYTES)
+
     def test_a_chat_that_never_loaded_is_not_a_fast_chat(self):
         # The pane redrew a thousand times and every frame was quick, because
         # the transcript was not there to draw.

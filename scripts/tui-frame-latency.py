@@ -43,9 +43,12 @@ from dataclasses import dataclass, field
 
 FRAME_MARK = b"\x1b[?7l"  # disable_autowrap, written once per presented frame
 TAIL_BYTES = 1 << 20
-# What the chat pane draws instead of a transcript. Its presence in the last
-# of the stream is the difference between a fast pane and an empty one.
+# What the chat pane draws instead of a transcript. Every run passes through
+# it: the pane opens before its history arrives. What separates a fast pane
+# from an empty one is whether the notice is still on screen at the end, so
+# only the last of the stream is asked.
 EMPTY_CHAT_NOTICE = b"no messages yet"
+CLOSING_BYTES = 128 << 10
 KEY_UP, KEY_DOWN = b"\x1b[A", b"\x1b[B"
 PAGE_UP, PAGE_DOWN = b"\x1b[5~", b"\x1b[6~"
 WHEEL_UP, WHEEL_DOWN = b"\x1b[<64;10;10M", b"\x1b[<65;10;10M"
@@ -276,7 +279,8 @@ def main() -> int:
     else:
         print("(no timing file: the TUI did not exit through at_exit)")
     drew_empty_chat = (
-        args.scenario in ("chat", "all") and EMPTY_CHAT_NOTICE in bytes(session.tail)
+        args.scenario in ("chat", "all")
+        and EMPTY_CHAT_NOTICE in bytes(session.tail[-CLOSING_BYTES:])
     )
     verdict, why = judge(phases, session, timing_text, drew_empty_chat=drew_empty_chat)
     print(f"verdict={verdict} ({why})")

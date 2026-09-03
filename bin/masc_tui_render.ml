@@ -10008,10 +10008,14 @@ let render_repository_list (state : state) =
   surface_chrome state ~terminal_rows ~cols ~surface_key:"repositories"
     ~title ~hints:(Masc_tui_keys.footer_hints state.view)
     ~body:(fun ~budget c ->
-      let path_width = max 8 (cols - 55) in
+      (* The path takes what the named columns leave, asked of the columns
+         rather than of a constant standing in for their total. *)
+      let path_width =
+        Render_schedule.workspace_path_width
+          ~inner_width:(max 1 (framed_inner_width cols - 2))
+      in
       c.push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "  %-18s %-12s %-9s %-6s %s" "Name" "Branch" "Status"
-           "Sync" "Path");
+        ("  " ^ Render_schedule.workspace_header_row ~path_width);
       c.push_divider ();
       (match state.repositories_error with
        | None -> ()
@@ -10055,13 +10059,17 @@ let render_repository_list (state : state) =
           | Some r ->
               let open Masc.Tui_decode in
               let line =
-                Printf.sprintf "  %-18s %-12s %-9s %-6s %s"
-                  (Terminal_text.single_line r.rp_name)
-                  (Terminal_text.single_line r.rp_default_branch)
-                  (Terminal_text.single_line r.rp_status)
-                  (if r.rp_auto_sync then "auto" else "manual")
-                  (Message_layout.fit_middle path_width
-                     (Terminal_text.single_line r.rp_resolved_local_path))
+                "  "
+                ^ Render_schedule.workspace_row ~path_width
+                    { Render_schedule.wrow_name =
+                        Terminal_text.single_line r.rp_name
+                    ; wrow_branch =
+                        Terminal_text.single_line r.rp_default_branch
+                    ; wrow_status = Terminal_text.single_line r.rp_status
+                    ; wrow_sync = (if r.rp_auto_sync then "auto" else "manual")
+                    ; wrow_path =
+                        Terminal_text.single_line r.rp_resolved_local_path
+                    }
               in
               if idx = state.repositories_cursor then c.push_selected line
               else c.push line

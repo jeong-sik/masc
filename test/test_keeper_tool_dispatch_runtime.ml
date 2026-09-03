@@ -100,7 +100,12 @@ let make_meta ?(name = "keeper-exec-tools") () =
           ("trace_id", `String "keeper-exec-tools-trace");
         ])
   with
-  | Ok meta -> meta
+  | Ok meta ->
+    (* The decoder leaves a placeholder here that its own file calls a bug to
+       read as authority, and nothing overwrote it, so every case ran under
+       whatever that placeholder was -- Docker. What this suite measures is
+       tool dispatch, not a backend. *)
+    { meta with sandbox_profile = Masc_test_deps.fixture_sandbox_profile () }
   | Error err -> failwith ("make_meta failed: " ^ err)
 
 (* Durable HITL intake reads the recipient's metadata to decide whether the

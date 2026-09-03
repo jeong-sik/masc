@@ -93,9 +93,28 @@ let test_the_overview_row_counts_every_approval_list () =
     "no confirm-queue count of its own in the Overview summary" 0
     (reads ~binding_name:"render_overview"
        ~fields:[ "aps_visible_count"; "aps_total_count" ]);
+  (* Both spellings: the file reaches this function qualified in some places
+     and bare in others, and which one a call site uses is not the fact under
+     test. Asking for only one of them is how this guard passed review while
+     counting zero. *)
   Alcotest.(check int) "the row walks the list the badge walks" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"render_overview" ~callee:"approval_items")
+       ~binding_name:"render_overview" ~callee:"approval_items"
+     + Ast_grep.count_calls_in_value_binding ~module_path:render
+         ~binding_name:"render_overview"
+         ~callee:"Masc_tui_types.approval_items");
+  (* Every list the walk can come up short or long on has to be able to mark
+     the count unreliable. The gate poll was the one left out: a failed fetch
+     fills gate_error and leaves the previous rows standing, so the row drew a
+     bare number over a list the server no longer holds. *)
+  Alcotest.(check int) "every approval source can mark the count unreliable" 4
+    (reads ~binding_name:"render_overview"
+       ~fields:
+         [ "approvals_error"
+         ; "keeper_tool_approvals_error"
+         ; "gate_error"
+         ; "gate_queue_unavailable"
+         ])
 
 (* The briefing answers with two lists that carry the same incidents, and the
    loader folds them into one. It also read a third key, "attention_items",
@@ -382,14 +401,18 @@ let test_a_turn_on_a_keeper_that_is_not_running_stops_moving () =
 
 (* These labels were committed as the UTF-8 bytes interpreted once and then
    encoded again, so operators saw byte-decoding debris instead of the
-   arrow/dash. Pin the semantic values, not their source spelling. *)
+   arrow/dash. Pin the semantic values, not their source spelling.
+
+   The Code footer used to be pinned here too. #32643 rebuilt it out of
+   Masc_tui_keys, where the pan keys are spelled "Shift-Left / Shift-Right" in
+   ASCII, so the glyph literal this asserted no longer exists anywhere in the
+   surface -- and an assertion whose subject is gone had been failing since
+   that merge, unseen, because CI links no test executable. *)
 let test_visible_navigation_glyphs_are_not_mojibake () =
   let count binding literals =
     Ast_grep.count_string_literals_in_value_binding ~module_path:render
       ~binding_name:binding ~literals
   in
-  Alcotest.(check int) "Code teaches the real left/right arrows" 1
-    (count "render_code" [ "Shift-\xe2\x86\x90/\xe2\x86\x92:pan  " ]);
   Alcotest.(check int) "Answering draws the real running arrow" 2
     (count "render_answering" [ "\xe2\x96\xb6 "; "\xe2\x96\xb6 writing" ]);
   Alcotest.(check int) "Answering draws the real em dash" 1
@@ -401,8 +424,7 @@ let test_visible_navigation_glyphs_are_not_mojibake () =
        ; "\xc3\xa2\xc2\x96\xc2\xb6 writing"
        ; "live preview \xc3\xa2\xc2\x80\xc2\x94 none for this row"
        ]
-     + count "render_code"
-         [ "Shift-\xc3\xa2\xc2\x86\xc2\x90/\xc3\xa2\xc2\x86\xc2\x92:pan  " ])
+)
 
 let () =
   Alcotest.run "masc_tui_row_wiring"

@@ -136,10 +136,118 @@ let override_restore_failure_count () =
     ~labels:[ ("prompt", "override_restore") ]
     ()
 
+(* ── Fragment-group slots (#32780) ────────────────────────────────────
+
+   A group file registers each [### marker] paragraph as
+   <group>.<marker>; the group key itself stays unregistered. Variables
+   declared on the marker line become the slot's template_variables, so
+   per-slot validation keeps its old strength despite the merge. *)
+let test_fragment_group_slots () =
+  let open Alcotest in
+  let dir = test_dir () in
+  let prompts_dir = Filename.concat dir "prompts" in
+  Unix.mkdir prompts_dir 0o755;
+  write_file
+    (Filename.concat prompts_dir "test.group.md")
+    {|
+---
+description: group fragments for the slot test
+category: test
+---
+### standing.current (vars: target, behind)
+At {{target}}, even with {{behind}} behind.
+
+### standing.diverged
+Diverged; no numbers.
+|};
+  Fun.protect
+    ~finally:(fun () ->
+      Prompt_registry.clear ();
+      cleanup_dir dir)
+    (fun () ->
+      Prompt_registry.clear ();
+      Prompt_registry.set_markdown_dir prompts_dir;
+      Lib.Prompt_defaults.init ();
+      check string "slot value is its paragraph"
+        "Diverged; no numbers."
+        (Prompt_registry.get_prompt "test.group.standing.diverged");
+      check bool "slot value omits the marker line"
+        (not
+           (String.contains
+              (Prompt_registry.get_prompt "test.group.standing.diverged")
+              '#'))
+        true;
+      (match
+         Prompt_registry.render_prompt_template "test.group.standing.current"
+           [ ("target", "T"); ("behind", "2") ]
+       with
+      | Ok rendered ->
+        check string "slot renders its variables" "At T, even with 2 behind."
+          rendered
+      | Error message -> fail ("render failed: " ^ message));
+      check string "group key is not registered" ""
+        (Prompt_registry.get_prompt "test.group"))
+;;
+
 let () =
   let open Alcotest in
+(* ── Fragment-group slots (#32780) ────────────────────────────────────
+
+   A group file registers each [### marker] paragraph as
+   <group>.<marker>; the group key itself stays unregistered. Variables
+   declared on the marker line become the slot's template_variables, so
+   per-slot validation keeps its old strength despite the merge. *)
+let test_fragment_group_slots () =
+  let dir = test_dir () in
+  let prompts_dir = Filename.concat dir "prompts" in
+  Unix.mkdir prompts_dir 0o755;
+  write_file
+    (Filename.concat prompts_dir "test.group.md")
+    {|
+---
+description: group fragments for the slot test
+category: test
+---
+### standing.current (vars: target, behind)
+At {{target}}, even with {{behind}} behind.
+
+### standing.diverged
+Diverged; no numbers.
+|};
+  Fun.protect
+    ~finally:(fun () ->
+      Prompt_registry.clear ();
+      cleanup_dir dir)
+    (fun () ->
+      Prompt_registry.clear ();
+      Prompt_registry.set_markdown_dir prompts_dir;
+      Lib.Prompt_defaults.init ();
+      check string "slot value is its paragraph"
+        "Diverged; no numbers."
+        (Prompt_registry.get_prompt "test.group.standing.diverged");
+      check bool "slot value omits the marker line"
+        (not
+           (String.contains
+              (Prompt_registry.get_prompt "test.group.standing.diverged")
+              '#'))
+        true;
+      (match
+         Prompt_registry.render_prompt_template "test.group.standing.current"
+           [ ("target", "T"); ("behind", "2") ]
+       with
+      | Ok rendered ->
+        check string "slot renders its variables" "At T, even with 2 behind."
+          rendered
+      | Error message -> fail ("render failed: " ^ message));
+      check string "group key is not registered" ""
+        (Prompt_registry.get_prompt "test.group")) )
+;;
+
   run "Prompt_registry_defaults"
     [
+      ( "fragment_group_slots",
+        [ test_case "slots register, render, and leave the group key unregistered"
+            `Quick test_fragment_group_slots ] );
       ( "registration",
         [
           (* Guards the count assertion below: a bulk key rename that maps two
@@ -641,3 +749,4 @@ let () =
               | _ -> fail "unexpected prompt JSON");
         ] );
     ]
+

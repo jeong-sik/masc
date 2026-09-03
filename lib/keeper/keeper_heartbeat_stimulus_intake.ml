@@ -205,11 +205,7 @@ let recorded_attention_item_by_event_id ~base_path ~keeper_name ~event_id =
        | Keeper_external_attention.Recorded item
          when String.equal item.Keeper_external_attention.event_id event_id ->
          Some item
-       | Keeper_external_attention.Recorded _
-       | Keeper_external_attention.Resolved _
-       | Keeper_external_attention.Ignored _
-       | Keeper_external_attention.Quarantined _ ->
-         None)
+       | Keeper_external_attention.Recorded _ -> None)
 ;;
 
 let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =

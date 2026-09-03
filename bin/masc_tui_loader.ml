@@ -1380,11 +1380,18 @@ let save_preset ~(host : string) ~(port : int) ~(name : string) ~(description : 
   | Error err -> Error ("preset save failed: " ^ err)
   | Ok json -> Tui_decode.decode_preset_saved json
 
-(** POST /api/v1/presets/restore — the per-surface report. *)
+(** POST /api/v1/presets/restore — the per-surface report. A transport
+    failure leaves the outcome unknown: the server writes an autosave and
+    three surfaces, and it may have finished after the client gave up, so the
+    operator is told to read the preset list rather than to retry. *)
 let restore_preset ~(host : string) ~(port : int) ~(name : string)
     : (Tui_decode.preset_restore_report, string) result =
   match Masc_tui_http.post_preset_restore ~host ~port ~name with
-  | Error err -> Error ("preset restore failed: " ^ err)
+  | Error (`Refused message) -> Error ("preset restore refused: " ^ message)
+  | Error (`Unknown_outcome message) ->
+    Error
+      ("preset restore outcome unknown — the server may have finished it; \
+        check the preset list for a new autosave before retrying: " ^ message)
   | Ok json -> Tui_decode.decode_preset_restore json
 
 (* The fleet reading answers what the keeper list cannot: a keeper that never

@@ -143,16 +143,19 @@ let test_preset_commands_parse_verb_name_and_description () =
        ])
 
 let test_every_command_has_a_help_line () =
-  (* /help itself and every slash word the parser knows appear in the list,
-     so a new command cannot ship silently undocumented. *)
+  (* Read from the catalog, so a command added there is checked without
+     anyone remembering to extend a list here. The hand-written list this
+     replaced had gone stale twice: it never gained image, attach or
+     preset. *)
+  check bool "the catalog is not empty" true (Command.catalog <> []);
   List.iter
-    (fun word ->
+    (fun (entry : Command.command_help) ->
+      let word = entry.Command.word in
       check bool (Printf.sprintf "help mentions /%s" word) true
         (List.exists
            (fun line -> String.starts_with ~prefix:("/" ^ word) line)
            Command.help_lines))
-    [ "task"; "keeper"; "settings"; "interrupt"; "steer"; "thinking"; "tools"; "memory"
-    ; "find"; "context"; "help" ]
+    Command.catalog
 
 let test_keeper_names_resolve_by_unique_prefix () =
   let names = [ "orbiter"; "orbit"; "lantern"; "zephyr" ] in

@@ -1336,8 +1336,9 @@ let test_decode_json_response_body_rejects_error_status () =
   with
   | Ok _ -> Alcotest.fail "expected HTTP 400 to fail"
   | Error err ->
-      Alcotest.(check string)
-        "http error" "HTTP 400: {\"error\":\"bad confirm\"}" err
+      (* The status still leads; the envelope no longer follows it, because
+         the server already wrote the sentence. *)
+      Alcotest.(check string) "http error" "HTTP 400: bad confirm" err
 
 let test_decode_json_response_body_allows_empty_success () =
   match
@@ -4969,6 +4970,33 @@ let test_decode_preset_restore_reads_each_surface () =
     Alcotest.(check bool) "runtime failure carries its reason" true
       (report.Tui_decode.prr_runtime = Tui_decode.Preset_runtime_failed "invalid runtime TOML")
 
+let test_a_two_hundred_carrying_only_an_error_is_an_error () =
+  (* The auth and warm-up answers ride a 200 with no [ok] field. *)
+  let warming : Yojson.Safe.t = `Assoc [ ("error", `String "not initialized") ] in
+  (match Tui_decode.decode_presets warming with
+   | Error detail -> Alcotest.(check string) "list" "not initialized" detail
+   | Ok _ -> Alcotest.fail "a warm-up answer decoded as a snapshot");
+  (match Tui_decode.decode_preset_saved warming with
+   | Error detail -> Alcotest.(check string) "save" "not initialized" detail
+   | Ok _ -> Alcotest.fail "a warm-up answer decoded as a manifest");
+  match Tui_decode.decode_preset_restore warming with
+  | Error detail -> Alcotest.(check string) "restore" "not initialized" detail
+  | Ok _ -> Alcotest.fail "a warm-up answer decoded as a report"
+
+let test_a_json_refusal_shows_its_sentence_not_the_envelope () =
+  let decode status body =
+    match
+      Tui_decode.decode_json_response_body ~allow_empty:true ~status_code:status ~body
+    with
+    | Ok _ -> Alcotest.fail "a refusal decoded as a body"
+    | Error detail -> detail
+  in
+  Alcotest.(check string) "the server's sentence, with its status"
+    "HTTP 400: invalid preset name: ../x"
+    (decode 400 {|{"ok":false,"error":"invalid preset name: ../x"}|});
+  Alcotest.(check string) "a body that is not a JSON error keeps its text"
+    "HTTP 500: upstream exploded" (decode 500 "upstream exploded")
+
 let test_decode_preset_refusal_is_the_servers_sentence () =
   let refused : Yojson.Safe.t = `Assoc [ ("ok", `Bool false); ("error", `String "invalid preset name: bad name") ] in
   (match Tui_decode.decode_preset_saved refused with
@@ -7252,7 +7280,11 @@ let () =
       ; Alcotest.test_case "decode_preset_restore reads each surface" `Quick
           test_decode_preset_restore_reads_each_surface
       ; Alcotest.test_case "a preset refusal decodes to the server's sentence" `Quick
-          test_decode_preset_refusal_is_the_servers_sentence;
+          test_decode_preset_refusal_is_the_servers_sentence
+      ; Alcotest.test_case "a 200 carrying only an error is an error" `Quick
+          test_a_two_hundred_carrying_only_an_error_is_an_error
+      ; Alcotest.test_case "a JSON refusal shows its sentence, not the envelope" `Quick
+          test_a_json_refusal_shows_its_sentence_not_the_envelope;
         Alcotest.test_case "reads separate read-only runtime assets" `Quick
           test_decode_prompts_reads_runtime_assets;
         Alcotest.test_case "hides assembly fragments by default" `Quick

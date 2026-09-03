@@ -5,6 +5,12 @@ let default_timeout_sec = 10.0
 let request_timeout_sec () = default_timeout_sec
 let keeper_chat_timeout_sec = 180.0
 
+(* A preset restore captures the live state into an autosave, then rewrites
+   the override table, every keeper TOML and runtime.toml. The read timeout
+   would give up while the server is still writing, and the operator would
+   lose the only report that says what landed. *)
+let preset_restore_timeout_sec = 120.0
+
 (* One name for the send target. The buffered send and the streaming send are
    two ways of reading the same turn, not two endpoints, and a contract test
    pins that this literal appears once so they cannot drift apart. *)
@@ -151,16 +157,20 @@ let http_get ~(host : string) ~(port : int) ~(path : string) :
   | Error e -> Error (report_err "GET failed" e)
 
 (** Send an HTTP POST request with a JSON body and return the structured status/body pair. *)
-let http_post ~headers ~(host : string) ~(port : int) ~(path : string)
-    ~(body : string) : (int * string, string) result =
+let http_post_with_timeout ~timeout_sec ~headers ~(host : string) ~(port : int)
+    ~(path : string) ~(body : string) : (int * string, string) result =
   let url = url_of ~host ~port ~path in
   match
     Masc_http_client.post_sync ?clock:(request_clock ())
-      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(json_headers headers)
-      ~body ()
+      ~timeout_sec ~url ~headers:(json_headers headers) ~body ()
   with
   | Ok (status, body) -> Ok (status, body)
   | Error e -> Error (report_err "POST failed" e)
+
+let http_post ~headers ~(host : string) ~(port : int) ~(path : string)
+    ~(body : string) : (int * string, string) result =
+  http_post_with_timeout ~timeout_sec:(request_timeout_sec ()) ~headers ~host
+    ~port ~path ~body
 
 (* A refusal is about this client's credential, not about the surface that
    asked for the data. Every surface used to paste the server's auth JSON into
@@ -185,6 +195,15 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
   | Ok (status_code, body) -> decode_json ~allow_empty:false ~status_code ~body
 
 (** POST a JSON body and parse the JSON response. *)
+let post_json_with_timeout ~timeout_sec ~(host : string) ~(port : int)
+    ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
+  match
+    http_post_with_timeout ~timeout_sec ~headers:(auth_headers ()) ~host ~port
+      ~path ~body
+  with
+  | Error e -> Error e
+  | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
+
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
   | Error e -> Error e
@@ -2132,10 +2151,22 @@ let post_preset_save ~(host : string) ~(port : int) ~(name : string)
 
 (** POST /api/v1/presets/restore — body {name}: the server autosaves the live
     state, applies the preset surface by surface, and answers a report. *)
+(* A restore is a write, so a transport failure is not a refusal: the server
+   may have finished it. The two are separated here because only this layer
+   knows which one happened, and the operator's next move differs — a refusal
+   is retried, an unknown outcome is read off the preset list first. *)
 let post_preset_restore ~(host : string) ~(port : int) ~(name : string)
-    : (Yojson.Safe.t, string) result =
-  post_json ~host ~port ~path:"/api/v1/presets/restore"
-    ~body:(Yojson.Safe.to_string (`Assoc [ ("name", `String name) ]))
+    : (Yojson.Safe.t, [ `Refused of string | `Unknown_outcome of string ]) result =
+  match
+    http_post_with_timeout ~timeout_sec:preset_restore_timeout_sec
+      ~headers:(auth_headers ()) ~host ~port ~path:"/api/v1/presets/restore"
+      ~body:(Yojson.Safe.to_string (`Assoc [ ("name", `String name) ]))
+  with
+  | Error transport -> Error (`Unknown_outcome transport)
+  | Ok (status_code, body) -> (
+    match decode_json ~allow_empty:true ~status_code ~body with
+    | Ok json -> Ok json
+    | Error message -> Error (`Refused message))
 
 (** POST /api/v1/gate/connector/bind?name= — body {channel_id, keeper_name}. *)
 let post_connector_bind ~(host : string) ~(port : int) ~(connector : string)

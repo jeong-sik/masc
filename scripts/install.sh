@@ -408,6 +408,21 @@ prefer_available_default() {
   done
 }
 
+# Prints the index of the one ready ("green") source, or nothing when zero or
+# more than one are ready. "Exactly one" is the only unambiguous choice, so it is
+# the only case the wizard makes for the operator without a terminal or a
+# --provider (RFC-0408 zero-config). Zero or several stays a question.
+single_green_index() {
+  local found="" i
+  for i in "${!PROVIDER_IDS[@]}"; do
+    if provider_is_green "$i"; then
+      [ -n "$found" ] && return 0
+      found="$i"
+    fi
+  done
+  printf '%s' "$found"
+}
+
 # The second axis: where a keeper's tools execute. Unlike the model source, the
 # sandbox has no install-time global default to write -- it is per-keeper, in
 # .masc/config/keepers/<name>.toml, and a --team preset carries its own choice.
@@ -715,11 +730,27 @@ run_wizard() {
   if [ -n "$WIZARD_PROVIDER" ]; then
     provider_idx=$(provider_index_by_id "$WIZARD_PROVIDER") \
       || die "unknown provider: $WIZARD_PROVIDER"
-  else
-    # No explicit provider, so the menu default is what most installs accept.
-    # Move it onto a source that is actually ready before showing the menu.
+  elif is_tty; then
+    # A terminal is here to choose, so move the menu default onto a source that
+    # is actually ready and let the operator confirm or change it.
     prefer_available_default
     provider_idx=$(prompt_provider)
+  else
+    # No terminal and no --provider. Make the choice only when it is not a
+    # choice at all -- exactly one ready source; otherwise leave it to the
+    # operator rather than guess between several or seed a dead default.
+    local green_idx
+    green_idx="$(single_green_index)"
+    if [ -n "$green_idx" ]; then
+      provider_idx="$green_idx"
+      log "no terminal and no --provider; using the only ready source: ${PROVIDER_NAMES[$provider_idx]}"
+    elif [ "$WIZARD" = "1" ]; then
+      die "no terminal, no --provider, and not exactly one ready source; pass --provider (with --api-key/env) or --no-wizard"
+    else
+      log "non-interactive shell and no single ready source; skipping first-time setup wizard"
+      log "edit .masc/config/.env.local and .masc/config/runtime.toml to finish setup"
+      return 0
+    fi
   fi
 
   # A local server that is not up will not answer once the default is set, so
@@ -805,16 +836,10 @@ maybe_run_wizard() {
     fi
   fi
 
-  if ! is_tty; then
-    if [ -z "$WIZARD_PROVIDER" ]; then
-      if [ "$WIZARD" = "1" ]; then
-        die "cannot run wizard in non-TTY shell without --provider (use --provider with --api-key/env, or --no-wizard)"
-      fi
-      log "non-interactive shell detected; skipping first-time setup wizard"
-      log "edit .masc/config/.env.local and .masc/config/runtime.toml to finish setup"
-      return 0
-    fi
-  fi
+  # The non-TTY, no --provider case is decided inside run_wizard now: it can
+  # auto-select when exactly one source is ready (zero-config), and otherwise
+  # skips or, under --wizard, errors -- the same outcomes as before, but only
+  # after checking whether a choice was even needed.
   run_wizard "$base_path"
 }
 

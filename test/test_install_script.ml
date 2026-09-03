@@ -1193,6 +1193,58 @@ let test_wizard_reports_subscription_sign_in () =
         "Claude Code Max Subscription: installed, not signed in")
 ;;
 
+let test_wizard_zero_config_auto_selects_single_ready_source () =
+  let tmpdir = Filename.temp_file "masc-install-zeroconf-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      (* Non-TTY (the harness pipes stdio) and no --provider. The local server is
+         down and only the cloud provider has its key, so exactly one source is
+         ready and the wizard uses it without being told to. *)
+      let output, status =
+        run_install_status ~extra_env:"DEEPSEEK_API_KEY=fake-key" [ "--dry-run" ]
+          tmpdir
+      in
+      check bool "zero-config auto-select exits 0" true (status = Unix.WEXITED 0);
+      assert_contains
+        "the one ready source is selected without a prompt"
+        output
+        "using the only ready source: DeepSeek";
+      assert_contains
+        "the selected source becomes the default"
+        output
+        {|[dry-run] would set [runtime].default = "deepseek.qwen"|})
+;;
+
+let test_wizard_skips_when_no_single_ready_source () =
+  let tmpdir = Filename.temp_file "masc-install-zeroconf-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      (* Same config, but with no key the cloud provider is not ready either, so
+         no source is unambiguously ready. Without a terminal the wizard leaves
+         the choice to the operator rather than guess. *)
+      let output, status =
+        run_install_status ~extra_env:"env -u DEEPSEEK_API_KEY" [ "--dry-run" ]
+          tmpdir
+      in
+      check bool "no-ready-source skip exits 0" true (status = Unix.WEXITED 0);
+      assert_contains
+        "the wizard says it will not choose"
+        output
+        "no single ready source";
+      assert_not_contains
+        "and does not seed a default"
+        output
+        "would set [runtime].default")
+;;
+
 let test_provider_ping_does_not_expose_key_in_curl_argv () =
   let script = install_script () in
   assert_contains
@@ -1888,6 +1940,14 @@ let () =
             "wizard reports available execution sandboxes"
             `Quick
             test_wizard_reports_execution_sandboxes
+        ; test_case
+            "wizard auto-selects the single ready source without a terminal"
+            `Quick
+            test_wizard_zero_config_auto_selects_single_ready_source
+        ; test_case
+            "wizard skips when no single source is ready"
+            `Quick
+            test_wizard_skips_when_no_single_ready_source
         ; test_case
             "wizard reports whether a subscription is signed in"
             `Quick

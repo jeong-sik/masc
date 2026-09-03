@@ -1,12 +1,8 @@
 name = "keeper_webmcp_call"
 description = """
-Execute one WebMCP tool a browser page has registered on \
-document.modelContext, with a JSON object as arguments. Discover names and \
-schemas with keeper_webmcp_list first. Requires an operator-run headed Chrome \
-with --enable-features=WebMCP and --remote-debugging-port, and the target \
-page already open; when a prerequisite is missing the call fails immediately \
-with the reason instead of retrying. Returns JSON {found, result} where \
-result is the page tool's MCP-style content."""
+Execute one WebMCP tool a browser page has registered.
+
+The registration is on document.modelContext, and the arguments are a JSON object. Discover names and schemas with keeper_webmcp_list first. Requires an operator-run headed Chrome with --enable-features=WebMCP and --remote-debugging-port, and the target page already open; when a prerequisite is missing the call fails immediately with the reason instead of retrying. Returns JSON {found, result} where result is the page tool's MCP-style content."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name.

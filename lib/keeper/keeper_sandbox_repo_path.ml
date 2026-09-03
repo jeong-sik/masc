@@ -79,17 +79,24 @@ let host_execution_location_json
     match strip_segment_prefix ~prefix:playground_segments cwd_segments with
     | None -> Outside_playground, [], None, None
     | Some [] -> Playground_root, [], None, None
-    | Some ("repos" :: repo_name :: rest)
-      when safe_repo_component repo_name ->
+    | Some (repos_segment :: repo_name :: rest)
+      when String.equal repos_segment Playground_paths.bundle_repos_dirname
+           && safe_repo_component repo_name ->
       let repo_root =
-        Filename.concat (Filename.concat playground "repos") repo_name
+        Filename.concat
+          (Filename.concat playground Playground_paths.bundle_repos_dirname)
+          repo_name
         |> normalize_path
       in
       (match rest with
        | [] ->
-         Repo_root, [ "repos"; repo_name ], Some repo_name, Some repo_root
+         Repo_root,
+         [ Playground_paths.bundle_repos_dirname; repo_name ],
+         Some repo_name, Some repo_root
        | _ ->
-         Repo_subpath, [ "repos"; repo_name ] @ rest, Some repo_name, Some repo_root)
+         Repo_subpath,
+         [ Playground_paths.bundle_repos_dirname; repo_name ] @ rest,
+         Some repo_name, Some repo_root)
     | Some rest -> Playground_subpath, rest, None, None
   in
   let relative_cwd =

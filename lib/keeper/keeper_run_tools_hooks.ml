@@ -260,7 +260,7 @@ let sandbox_rooted_relative_path raw =
   Filename.is_relative raw
   && List.exists
        (fun prefix -> relative_path_has_segment_prefix prefix raw)
-       [ "repos"; Common.masc_dirname; "playground" ]
+       [ Playground_paths.bundle_repos_dirname; Common.masc_dirname; "playground" ]
 ;;
 
 let non_empty_string_member name input =

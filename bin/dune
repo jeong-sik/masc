@@ -621,14 +621,19 @@
  (libraries masc masc_tui_message_layout))
 
 (library
+ (name masc_tui_table)
+ (wrapped false)
+ ; masc_tui_message_layout so a cell is fitted in display cells rather than
+ ; bytes: a keeper named in Hangul would otherwise sit at a different offset
+ ; from the header naming it.
+ (modules masc_tui_table)
+ (libraries masc_tui_message_layout))
+
+(library
  (name masc_tui_render_schedule)
  (wrapped false)
- ; masc_tui_message_layout so a Memory cell is fitted in display cells rather
- ; than bytes: the header row and the data row are laid out here, and a byte
- ; count would put a keeper named in Hangul at a different offset from its own
- ; header.
  (modules masc_tui_render_schedule)
- (libraries masc_tui_message_layout))
+ (libraries masc_tui_table))
 
 (library
  (name masc_tui_frame_timing)

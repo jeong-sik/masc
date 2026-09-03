@@ -3897,6 +3897,11 @@
  (libraries alcotest masc_tui_approval_detail))
 
 (test
+ (name test_tui_table)
+ (modules test_tui_table)
+ (libraries alcotest masc_tui_message_layout masc_tui_table))
+
+(test
  (name test_tui_render_schedule)
  (modules test_tui_render_schedule)
  ; masc_tui_message_layout so a column offset is asked in display cells rather

@@ -1421,7 +1421,11 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          (* The attachments come back with the text. They were staged for this
             line and remain on the queued request while it is edited in place.
             The composer mirrors them so replacing the body retains the exact
-            payload; Ctrl-U abandons only the edit and leaves the queue item. *)
+            payload; Ctrl-U abandons only the edit and leaves the queue item.
+            The batch and its marker move together, so the old pair goes first:
+            a text-only recall would otherwise leave the dropped batch's anchor
+            behind. *)
+         clear_staged_attachments state;
          state.msg_attachments <- request.Keeper_chat.attachments;
          (* The original staging moment is gone -- the send that queued this
             line cleared the marker with the batch -- so the recall is what

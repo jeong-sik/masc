@@ -422,20 +422,32 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
             if context.ambient_background then context.inline_restore
             else Ansi.reset
           in
-          let at = max 0 (min row.gutter_label_at (Message_layout.display_width row.gutter)) in
+          let width = Message_layout.display_width row.gutter in
+          let at = max 0 (min row.gutter_label_at width) in
+          let rail_cells = max 0 (min row.gutter_rail_cells at) in
           (* A plain prefix, not [fit_width]: that one marks an overrun with a
              trailing "~", which here would land in the middle of the gutter.
              Not [split_cells] either -- it wraps, so it hands back one piece
              even at zero cells, and a row that continues the speaker above it
              carries no mark and asks for exactly zero. That drew the clock's
              first digit twice: "222:32" for a row sent at 22:32. *)
-          let marked = Message_layout.take_cells row.gutter at in
-          let label = Message_layout.drop_cells row.gutter at in
+          (* The turn rail is structure, not status, so it takes the quiet tone
+             rather than the speaker's colour. An errored turn already says so
+             on its own glyph; painting the bracket red as well would say it a
+             second time, down the side of every row the turn touched. *)
+          let rail = Message_layout.take_cells row.gutter rail_cells in
+          let after_rail = Message_layout.drop_cells row.gutter rail_cells in
+          let marked = Message_layout.take_cells after_rail (at - rail_cells) in
+          let label = Message_layout.drop_cells after_rail (at - rail_cells) in
+          let rail =
+            if String.equal rail "" then ""
+            else Printf.sprintf "%s%s%s" (Theme.recede ()) rail Ansi.reset
+          in
           if String.equal label "" then
-            Printf.sprintf "%s%s%s%s" (Chat_theme.origin row.style) Ansi.bold
-              row.gutter restore
+            Printf.sprintf "%s%s%s%s%s" rail (Chat_theme.origin row.style)
+              Ansi.bold marked restore
           else
-            Printf.sprintf "%s%s%s%s%s%s%s" (Chat_theme.origin row.style)
+            Printf.sprintf "%s%s%s%s%s%s%s%s" rail (Chat_theme.origin row.style)
               Ansi.bold marked Ansi.reset (Theme.recede ()) label restore
       in
       if
@@ -7420,6 +7432,32 @@ let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
   |> List.map fst
 ;;
 
+(* Which piece of its turn's bracket a row draws.
+
+   [Turn_alone] draws nothing. One row is not a hierarchy, and marking it would
+   put a rail on nearly every row of ordinary chatter, which is where a reader
+   stops seeing it at all.
+
+   The split between speech and work is the fact the pane was missing.
+   Reasoning, tool calls and skills are what a turn did to arrive at what it
+   said, and they were drawn at the same depth as the answer -- same column,
+   same indent, same clock -- so a turn's work read as a sibling of its speech.
+   They hang off the trunk instead. *)
+let turn_rail_of ~(edge : Masc_tui_types.turn_edge)
+    ~(style : Message_layout.style) =
+  match edge with
+  | Turn_outside | Turn_alone -> Message_layout.Rail_none
+  | Turn_opens -> Message_layout.Rail_opens
+  | Turn_closes -> Message_layout.Rail_closes
+  | Turn_continues -> (
+      match style with
+      | Message_layout.Tool | Message_layout.Skill _ | Message_layout.Thinking
+        ->
+          Message_layout.Rail_does
+      | Message_layout.User | Message_layout.Inbound | Message_layout.Keeper
+      | Message_layout.Status | Message_layout.Journal | Message_layout.Error ->
+          Message_layout.Rail_says)
+
 let compute_keeper_message_layout_entries (state : state) ~keeper_name
     ~chat_cols ~start_index visible_entries =
   (* Derived once for the width and again per row, so the badge the pane
@@ -7620,6 +7658,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                    observed_at = message.me_at;
                    entry_index;
                  };
+             turn_rail = turn_rail_of ~edge ~style;
            }
             : Message_layout.entry))
       visible_entries
@@ -8150,8 +8189,23 @@ let render_keeper_message (state : state) =
                request_label;
                body;
                markdown_source;
+               (* No closing corner while the turn is still arriving. The
+                  bracket stays open until the turn ends, which is how a
+                  running turn reads without a second spinner beside it. *)
+               turn_rail =
+                 turn_rail_of ~edge:Masc_tui_types.Turn_continues ~style;
              }
               : Message_layout.entry)
+          in
+          (* The opening corner belongs to the turn's first row wherever it
+             is. A turn that began before this trail already drew it among the
+             committed rows; one that did not draws it here. *)
+          let turn_opens_here =
+            not
+              (List.exists
+                 (fun (message : Masc_tui_types.msg_entry) ->
+                   String.equal message.me_request_id request_id)
+                 committed_messages)
           in
           (* The turn in the order it happened, one entry per stretch. A
              tool-call round interleaves reasoning, calls and reply text, and
@@ -8245,12 +8299,57 @@ let render_keeper_message (state : state) =
                        Message_layout.Keeper keeper_label text))
                  (Keeper_chat_transcript.trail live)
           in
+          (* Applied after the filter, not at trail position zero: hidden
+             reasoning drops rows, and the corner belongs to the first row the
+             pane actually draws. *)
+          let entries =
+            match entries with
+            | first :: rest when turn_opens_here ->
+                { first with Message_layout.turn_rail = Message_layout.Rail_opens }
+                :: rest
+            | entries -> entries
+          in
           Some (request_id, timeline_at, entries)
       | Some _ | None -> None
     in
     let committed_tagged =
       List.combine committed_messages committed_layout_entries
       |> List.map (fun (message, entry) -> Some message, entry)
+    in
+    (* A turn whose rows are still arriving has not closed. Its last committed
+       row carries the closing corner, and the live rows continue below it, so
+       left alone the pane ends the same turn twice.
+
+       Corrected here rather than where the entries are built: the entry memo
+       does not read the live turn -- it is built where it is drawn -- and a
+       cached entry would keep whichever corner it was born with. *)
+    let committed_tagged =
+      match live_projection with
+      | None -> committed_tagged
+      | Some (live_request_id, _, _) ->
+          List.map
+            (fun ((message, entry) :
+                   Masc_tui_types.msg_entry option * Message_layout.entry) ->
+              match message with
+              | Some message
+                when String.equal message.me_request_id live_request_id -> (
+                  match entry.Message_layout.turn_rail with
+                  | Message_layout.Rail_closes ->
+                      ( Some message
+                      , { entry with
+                          Message_layout.turn_rail = Message_layout.Rail_says
+                        } )
+                  (* A turn of one committed row is about to gain more. *)
+                  | Message_layout.Rail_none ->
+                      ( Some message
+                      , { entry with
+                          Message_layout.turn_rail = Message_layout.Rail_opens
+                        } )
+                  | Message_layout.Rail_opens | Message_layout.Rail_says
+                  | Message_layout.Rail_does ->
+                      (Some message, entry))
+              | Some _ | None -> (message, entry))
+            committed_tagged
     in
     let rec insert_at index inserted reversed = function
       | rest when index <= 0 -> List.rev_append reversed (inserted @ rest)

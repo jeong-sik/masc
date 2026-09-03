@@ -173,7 +173,16 @@ let parse text =
         match split_word rest with
         | "save", "" -> Preset_save_missing_name
         | "save", name_and_description ->
-            let name, description = split_word name_and_description in
+            (* The lines below the command are description, the way /task
+               takes its body. Dropping them would lose text the operator
+               typed on purpose. *)
+            let name, first_line = split_word name_and_description in
+            let description =
+              match (first_line, body) with
+              | "", body -> body
+              | first_line, "" -> first_line
+              | first_line, body -> first_line ^ "\n" ^ body
+            in
             Preset_save { name; description }
         | "restore", "" -> Preset_restore_missing_name
         | "restore", name -> Preset_restore name

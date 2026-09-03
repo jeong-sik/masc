@@ -51,4 +51,6 @@ val create :
     the identical retried call once instead of being dropped. The callback
     consults it before opening a new wait, so a remembered answer still
     publishes the requested/settled pair — the stream shows the question was
-    raised and settled from the operator's earlier word. *)
+    raised and settled from the operator's earlier word. The memory is
+    age-bounded ({!Keeper_late_approval.ttl_sec}): an answer too old to still
+    be the operator's moment is reaped, and the call is asked about again. *)

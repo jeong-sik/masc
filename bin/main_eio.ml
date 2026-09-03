@@ -932,6 +932,79 @@ let login_cmd =
       $ login_role $ login_client_env $ login_no_expiry $ login_expiry_hours
       $ login_json $ login_shell)
 
+(* One-touch "connect your MCP client". [login] mints and persists the bearer;
+   this reuses that same local mint ([Auth_login.mint], no running server) and
+   wraps the result in a ready client-config block. It exists so a new user
+   pastes one block instead of assembling the URL, the bearer, and the header
+   by hand. The blocks are the two shapes the docs already document
+   (docs/MCP-TEMPLATE.md, README "MCP client setup"): a bearer-env TOML for
+   Codex-style clients, a mcp-remote JSON for Claude Desktop, and the shell
+   exports for anything that reads the token from the environment. *)
+let mcp_config_agent =
+  let doc = "Agent identity bound to the minted bearer token" in
+  Arg.(value & opt string "local-mcp-client" & info ["agent"] ~docv:"AGENT" ~doc)
+
+let mcp_config_client_env =
+  let doc =
+    "Env var name your MCP client reads to pick up the bearer token. Rendered \
+     verbatim into the emitted config."
+  in
+  Arg.(value & opt string "MASC_TOKEN" & info ["client-env"] ~docv:"VAR" ~doc)
+
+let mcp_config_expiring =
+  let doc =
+    "Mint an expiring token instead of a long-lived one. A one-touch client \
+     config defaults to long-lived because a local MCP daemon cannot refresh \
+     on expiry; pass this for a session-scoped bearer."
+  in
+  Arg.(value & flag & info ["expiring"] ~doc)
+
+let mcp_config_client =
+  let doc =
+    "Which config block to emit: env (shell exports, any bearer-env client), \
+     codex (bearer-env TOML), or claude-desktop (mcp-remote JSON)."
+  in
+  Arg.(value & opt string "env" & info ["client"] ~docv:"CLIENT" ~doc)
+
+let mcp_config_cmd_exit base_path host port agent client_env expiring client =
+  match Auth_login.mcp_client_of_string client with
+  | None ->
+      Printf.eprintf
+        "mcp-config: unknown client %S (use env, codex, or claude-desktop)\n"
+        client;
+      2
+  | Some mcp_client -> (
+      match
+        Auth_login.lifetime_of_flags ~no_expiry:(not expiring) ~expiry_hours:None
+      with
+      | Error message ->
+          Printf.eprintf "mcp-config failed: %s\n" message;
+          1
+      | Ok token_lifetime -> (
+          match
+            Auth_login.mint ~base_path ~host ~port ~agent_name:agent
+              ~role:Masc_domain.Worker ~token_env_var:client_env ~token_lifetime
+              ()
+          with
+          | Error err ->
+              Printf.eprintf "mcp-config failed: %s\n"
+                (Masc_domain.masc_error_to_string err);
+              1
+          | Ok report ->
+              print_endline (Auth_login.render_mcp_client_config report mcp_client);
+              0))
+
+let mcp_config_cmd =
+  let doc =
+    "Mint a bearer and print a ready MCP client config so a client can connect \
+     without hand-wiring the URL, token, and header."
+  in
+  let info = Cmd.info "mcp-config" ~doc in
+  Cmd.v info
+    Term.(
+      const mcp_config_cmd_exit $ base_path $ host $ port $ mcp_config_agent
+      $ mcp_config_client_env $ mcp_config_expiring $ mcp_config_client)
+
 let start_cmd =
   let doc =
     "Start the MASC MCP server (HTTP/SSE). Same as running `masc` with no \
@@ -1488,6 +1561,7 @@ let cmd =
     [ init_cmd
     ; start_cmd
     ; login_cmd
+    ; mcp_config_cmd
     ; runtime_default_set_cmd
     ; runtime_wizard_catalog_cmd
     ; runtime_probe_cmd

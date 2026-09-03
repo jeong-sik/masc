@@ -9,4 +9,11 @@ val compute_metrics_window :
   parsed_metrics:Yojson.Safe.t list ->
   compact:bool ->
   series_points:int ->
-  Yojson.Safe.t list * Yojson.Safe.t * Yojson.Safe.t option
+  Yojson.Safe.t list * Yojson.Safe.t
+(** [compute_metrics_window ~parsed_metrics ~compact ~series_points] returns the
+    per-turn series and the window summary.
+
+    A Turn row enters both when it carries [ts_unix], a non-empty [trace_id],
+    [latency_ms], [tool_call_count], [tools_used], a decodable work kind and a
+    known [channel]. Heartbeat rows raise the heartbeat counter only. With
+    [compact] set the series is empty and the summary still counts every row. *)

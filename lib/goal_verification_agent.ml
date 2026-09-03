@@ -18,7 +18,7 @@
     the handler binds [ctx.agent_name] into the verdict, and this lane's
     context names the lane. Evidence is the model's stated reason, which the
     verdict itself now carries on either outcome, and
-    config/prompts/goal_verification.proof.md makes it mandatory for both. A
+    config/prompts/goal_verification.md (slot proof) makes it mandatory for both. A
     verdict without a stated reason is not a judgment: nothing is committed and
     the pending row stays durable.
 
@@ -160,7 +160,7 @@ let collect_pending config : (pending_work list, string) result =
 
    A Goal declares a metric and a target value when it is created. The proof
    review asks one question: did that metric reach that target. The prompt is
-   config/prompts/goal_verification.proof.md and its variables are the goal's
+   config/prompts/goal_verification.md (slot proof) and its variables are the goal's
    own — nothing about Tasks reaches the judge, because a Task proves its own
    contract and says nothing about a Goal's metric. *)
 

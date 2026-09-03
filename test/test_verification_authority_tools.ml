@@ -529,7 +529,7 @@ let test_prompt_states_the_root_and_not_a_repository () =
        prompts were translated (#32133), and the check had been asserting
        prose no template could produce. What the section says -- a missing
        path answers about the path, not about the work -- is reviewed in
-       config/prompts/verification.lookup.producer_tree.md. *)
+       config/prompts/verification.md, slot lookup.producer_tree. *)
     Alcotest.(check bool)
       "the live lookup section reaches the prompt"
       true
@@ -583,7 +583,7 @@ let test_prompt_states_the_available_surface () =
       false
       (Astring.String.is_infix ~affix:"<no_lookup_surface>" with_tools);
     (* The read-only boundary is a sentence inside the live-lookup fragment
-       (config/prompts/verification.lookup.producer_tree.md); the prompt is
+       (config/prompts/verification.md, slot lookup.producer_tree); the prompt is
        checked for carrying that fragment, and the sentence is reviewed there. *)
     Alcotest.(check bool)
       "tool prompt carries the live lookup section"

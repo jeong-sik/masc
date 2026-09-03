@@ -98,6 +98,245 @@ let keeper_context_approval_authority_state_partial = "keeper.context.approval_a
 let keeper_context_approval_authority_state_unavailable = "keeper.context.approval_authority.state.unavailable"
 let keeper_context_approval_authority_footer = "keeper.context.approval_authority.footer"
 
+(* keeper.world.* — the unified turn frame's section prose. One group file per
+   Keeper_context_layers section (plus the frame preamble and the observation
+   event rows); each [### marker] slot in config/prompts/keeper.world.<group>.md
+   registers as keeper.world.<group>.<marker>. The bare [keeper.world] key is a
+   historical dashboard name only — never a prompt key. *)
+let keeper_world_frame_frame = "keeper.world.frame.frame"
+let keeper_world_active_goals_heading = "keeper.world.active_goals.heading"
+let keeper_world_active_goals_row = "keeper.world.active_goals.row"
+let keeper_world_active_goals_row_untitled = "keeper.world.active_goals.row_untitled"
+
+let keeper_world_active_goals_verifying_annotation =
+  "keeper.world.active_goals.verifying_annotation"
+;;
+
+let keeper_world_current_task_heading_held = "keeper.world.current_task.heading.held"
+
+let keeper_world_current_task_heading_submitted =
+  "keeper.world.current_task.heading.submitted"
+;;
+
+let keeper_world_current_task_heading_recovery =
+  "keeper.world.current_task.heading.recovery"
+;;
+
+let keeper_world_current_task_status_claimed = "keeper.world.current_task.status.claimed"
+
+let keeper_world_current_task_status_in_progress =
+  "keeper.world.current_task.status.in_progress"
+;;
+
+let keeper_world_current_task_status_awaiting_verification =
+  "keeper.world.current_task.status.awaiting_verification"
+;;
+
+let keeper_world_current_task_status_todo = "keeper.world.current_task.status.todo"
+let keeper_world_current_task_status_done = "keeper.world.current_task.status.done"
+
+let keeper_world_current_task_status_cancelled =
+  "keeper.world.current_task.status.cancelled"
+;;
+
+let keeper_world_current_task_row = "keeper.world.current_task.row"
+let keeper_world_current_task_handoff = "keeper.world.current_task.handoff"
+
+let keeper_world_current_task_handoff_next_step =
+  "keeper.world.current_task.handoff_next_step"
+;;
+
+let keeper_world_current_task_handoff_evidence =
+  "keeper.world.current_task.handoff_evidence"
+;;
+
+let keeper_world_current_task_attribution_full =
+  "keeper.world.current_task.attribution.full"
+;;
+
+let keeper_world_current_task_attribution_who =
+  "keeper.world.current_task.attribution.who"
+;;
+
+let keeper_world_current_task_attribution_at = "keeper.world.current_task.attribution.at"
+
+let keeper_world_current_task_attribution_none =
+  "keeper.world.current_task.attribution.none"
+;;
+
+let keeper_world_connected_surfaces_heading = "keeper.world.connected_surfaces.heading"
+
+let keeper_world_connected_surfaces_state_alive =
+  "keeper.world.connected_surfaces.state.alive"
+;;
+
+let keeper_world_connected_surfaces_state_offline =
+  "keeper.world.connected_surfaces.state.offline"
+;;
+
+let keeper_world_connected_surfaces_failure = "keeper.world.connected_surfaces.failure"
+let keeper_world_namespace_state_heading = "keeper.world.namespace_state.heading"
+
+let keeper_world_namespace_state_backlog_unreadable =
+  "keeper.world.namespace_state.backlog_unreadable"
+;;
+
+let keeper_world_namespace_state_backlog_empty =
+  "keeper.world.namespace_state.backlog_empty"
+;;
+
+let keeper_world_namespace_state_backlog_revision =
+  "keeper.world.namespace_state.backlog_revision"
+;;
+
+let keeper_world_namespace_state_unclaimed = "keeper.world.namespace_state.unclaimed"
+let keeper_world_namespace_state_claimable = "keeper.world.namespace_state.claimable"
+
+let keeper_world_namespace_state_claimable_more =
+  "keeper.world.namespace_state.claimable_more"
+;;
+
+let keeper_world_namespace_state_unclaimed_not_offered =
+  "keeper.world.namespace_state.unclaimed_not_offered"
+;;
+
+let keeper_world_namespace_state_failed = "keeper.world.namespace_state.failed"
+
+let keeper_world_namespace_state_running_fibers =
+  "keeper.world.namespace_state.running_fibers"
+;;
+
+let keeper_world_autonomous_trigger_heading = "keeper.world.autonomous_trigger.heading"
+
+let keeper_world_autonomous_trigger_scheduler_scheduled =
+  "keeper.world.autonomous_trigger.scheduler_scheduled"
+;;
+
+let keeper_world_autonomous_trigger_scheduler_reactive =
+  "keeper.world.autonomous_trigger.scheduler_reactive"
+;;
+
+let keeper_world_autonomous_trigger_reasons = "keeper.world.autonomous_trigger.reasons"
+
+let keeper_world_autonomous_trigger_since_last =
+  "keeper.world.autonomous_trigger.since_last"
+;;
+
+let keeper_world_scheduled_automation_heading =
+  "keeper.world.scheduled_automation.heading"
+;;
+
+let keeper_world_scheduled_automation_counts = "keeper.world.scheduled_automation.counts"
+
+let keeper_world_scheduled_automation_next_due =
+  "keeper.world.scheduled_automation.next_due"
+;;
+
+let keeper_world_scheduled_automation_attention_heading =
+  "keeper.world.scheduled_automation.attention_heading"
+;;
+
+let keeper_world_scheduled_automation_attention_note =
+  "keeper.world.scheduled_automation.attention_note"
+;;
+
+let keeper_world_scheduled_wake_heading_single =
+  "keeper.world.scheduled_wake.heading_single"
+;;
+
+let keeper_world_scheduled_wake_heading_multi =
+  "keeper.world.scheduled_wake.heading_multi"
+;;
+
+let keeper_world_scheduled_wake_intro = "keeper.world.scheduled_wake.intro"
+
+let keeper_world_completion_authority_heading =
+  "keeper.world.completion_authority.heading"
+;;
+
+let keeper_world_completion_authority_intro = "keeper.world.completion_authority.intro"
+let keeper_world_task_cancellations_heading = "keeper.world.task_cancellations.heading"
+let keeper_world_task_cancellations_intro = "keeper.world.task_cancellations.intro"
+let keeper_world_own_recent_actions_heading = "keeper.world.own_recent_actions.heading"
+let keeper_world_own_recent_actions_intro = "keeper.world.own_recent_actions.intro"
+
+let keeper_world_own_recent_actions_turn_ok_row =
+  "keeper.world.own_recent_actions.turn_ok_row"
+;;
+
+let keeper_world_own_recent_actions_turn_rejected_row =
+  "keeper.world.own_recent_actions.turn_rejected_row"
+;;
+
+let keeper_world_own_recent_actions_turn_rejected_detail_row =
+  "keeper.world.own_recent_actions.turn_rejected_detail_row"
+;;
+
+let keeper_world_pending_messages_heading = "keeper.world.pending_messages.heading"
+let keeper_world_pending_messages_intro = "keeper.world.pending_messages.intro"
+
+let keeper_world_pending_messages_mention_row =
+  "keeper.world.pending_messages.mention_row"
+;;
+
+let keeper_world_pending_messages_scope_row = "keeper.world.pending_messages.scope_row"
+let keeper_world_own_board_posts_heading = "keeper.world.own_board_posts.heading"
+let keeper_world_own_board_posts_intro = "keeper.world.own_board_posts.intro"
+let keeper_world_board_activity_heading = "keeper.world.board_activity.heading"
+let keeper_world_board_activity_intro = "keeper.world.board_activity.intro"
+let keeper_world_fleet_messages_heading = "keeper.world.fleet_messages.heading"
+let keeper_world_fleet_messages_intro = "keeper.world.fleet_messages.intro"
+let keeper_world_fleet_messages_row = "keeper.world.fleet_messages.row"
+
+(* Event-row titles and previews, rendered when the observation is created
+   rather than when the prompt is assembled. *)
+let keeper_world_event_rows_fusion_title_succeeded =
+  "keeper.world.event_rows.fusion_title_succeeded"
+;;
+
+let keeper_world_event_rows_fusion_title_failed =
+  "keeper.world.event_rows.fusion_title_failed"
+;;
+
+let keeper_world_event_rows_fusion_title_cancelled =
+  "keeper.world.event_rows.fusion_title_cancelled"
+;;
+
+let keeper_world_event_rows_fusion_cancelled_preview =
+  "keeper.world.event_rows.fusion_cancelled_preview"
+;;
+
+let keeper_world_event_rows_scheduled_wake_title =
+  "keeper.world.event_rows.scheduled_wake_title"
+;;
+
+let keeper_world_event_rows_external_attention_title =
+  "keeper.world.event_rows.external_attention_title"
+;;
+
+let keeper_world_event_rows_ask_title = "keeper.world.event_rows.ask_title"
+let keeper_world_event_rows_ask_skipped = "keeper.world.event_rows.ask_skipped"
+
+let keeper_world_event_rows_completion_authority_title =
+  "keeper.world.event_rows.completion_authority_title"
+;;
+
+let keeper_world_event_rows_completion_authority_preview =
+  "keeper.world.event_rows.completion_authority_preview"
+;;
+
+let keeper_world_event_rows_task_cancelled_title =
+  "keeper.world.event_rows.task_cancelled_title"
+;;
+
+let keeper_world_event_rows_task_cancelled_preview =
+  "keeper.world.event_rows.task_cancelled_preview"
+;;
+
+let keeper_world_event_rows_task_cancelled_no_reason =
+  "keeper.world.event_rows.task_cancelled_no_reason"
+;;
+
 (* Tool failure next-move sentences, one per Tool_result.tool_failure_class. *)
 let tool_failure_dependency_unavailable = "tool_failure.dependency_unavailable"
 let tool_failure_policy_rejection = "tool_failure.policy_rejection"

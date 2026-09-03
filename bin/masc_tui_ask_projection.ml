@@ -65,6 +65,15 @@ let newly_opened_ask_ids ~previous ~current =
       let before = open_ask_ids previous in
       List.filter (fun id -> not (List.mem id before)) (open_ask_ids current)
 
+(* Ring for a question that just arrived only when the operator is not already
+   watching the asks surface -- the panel is in front of them there, so a bell
+   would say what they can see. [new_ids] empty means nothing arrived. The
+   watching flag is passed in rather than read here: the surface an operator is
+   on, and later whether the window has focus, are the caller's to know. *)
+let should_ring_for_new_ask ~new_ids ~operator_is_watching_asks =
+  (match new_ids with [] -> false | _ :: _ -> true)
+  && not operator_is_watching_asks
+
 let without question_id responses =
   List.filter (fun (id, _) -> not (String.equal id question_id)) responses
 

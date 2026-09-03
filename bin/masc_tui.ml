@@ -6118,7 +6118,14 @@ let apply_asks_load state = function
       in
       state.asks_snapshot <- Some snapshot;
       state.asks_error <- None;
-      if arrived <> [] then notify_new_asks snapshot arrived
+      (* Silent while the operator is on the Approvals surface -- the panel is
+         already in front of them there. A question that arrives on any other
+         surface rings, since nothing else on that surface would show it. *)
+      let watching_asks = match state.view with Approvals -> true | _ -> false in
+      if
+        Ask.should_ring_for_new_ask ~new_ids:arrived
+          ~operator_is_watching_asks:watching_asks
+      then notify_new_asks snapshot arrived
   | Error err ->
       remember_surface_error state ~surface:"asks" ~current_error:state.asks_error
         ~set_error:(fun value -> state.asks_error <- value)
@@ -6431,8 +6438,14 @@ let load_http_surfaces ~host ~port ~approval_generation ~board_sort
      on every refresh rather than inferred from connection failure. *)
   let http_server_identity = load_server_identity ~host ~port in
   let http_scoped =
+    (* Asks ride every refresh, not just the Approvals surface. A question that
+       arrives while the operator is elsewhere has to be read to be announced,
+       so the periodic refresh always fetches them; the surface still decides
+       whether the panel renders, only the fetch is unconditional. Targeted
+       scoped refreshes keep their own needs. *)
     load_http_scoped_surfaces ~host ~port ~approval_generation:None ~board_sort
-      ~board_hearth ~system_log_level ~needs
+      ~board_hearth ~system_log_level
+      ~needs:{ needs with needs_asks = true }
   in
   { http_overview; http_approvals; http_scoped; http_server_identity }
 

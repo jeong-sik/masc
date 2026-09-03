@@ -568,72 +568,21 @@ let build_timeline ?(load_chat = fun ~agent_name:_ -> ([] : chat_line list))
           ] );
     ]
 
-(* Schema for MCP tool registration *)
-let schemas : Masc_domain.tool_schema list =
-  [
-    {
-      name = "masc_agent_timeline";
-      description =
-        "Unified timeline of an agent's activity in the currently selected workspace \
-         across tasks, messages, and joins.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ( "agent_name",
-                    `Assoc
-                      [
-                        ("type", `String "string");
-                        ("description", `String "Agent name to query");
-                      ] );
-                  ( "since_hours",
-                    `Assoc
-                      [
-                        ("type", `String "number");
-                        ( "description",
-                          `String "Look back N hours (default: 24)" );
-                      ] );
-                  ( "limit",
-                    `Assoc
-                      [
-                        ("type", `String "integer");
-                        ( "description",
-                          `String "Max events to return (default: 50)" );
-                      ] );
-                  ( "include_tasks",
-                    `Assoc
-                      [
-                        ("type", `String "boolean");
-                        ( "description",
-                          `String
-                            "Include task state changes (default: true)" );
-                      ] );
-                  ( "include_board",
-                    `Assoc
-                      [
-                        ("type", `String "boolean");
-                        ( "description",
-                          `String
-                            "Include board activity (default: false, \
-                             reserved)" );
-                      ] );
-                  ( "include_tool_calls",
-                    `Assoc
-                      [
-                        ("type", `String "boolean");
-                        ( "description",
-                          `String
-                            "Include tool call events from Activity Graph \
-                             (default: true)" );
-                      ] );
-                ] );
-            ("required", `List [ `String "agent_name" ]);
-          ];
-    };
-  ]
+(* Schema for MCP tool registration, read from
+   [config/tools/masc_agent_timeline.toml] (RFC
+   prompts-and-tool-definitions-outside-ocaml §2.2). Decoded once at module
+   initialization; a missing file or a declaration that does not decode
+   refuses the boot rather than advertising a partial surface. *)
+let schema_of_name name : Masc_domain.tool_schema =
+  let rel = "tools/" ^ name ^ ".toml" in
+  match Embedded_config.read rel with
+  | None -> failwith (Printf.sprintf "embedded tool definition missing: %s" rel)
+  | Some contents ->
+    (match Tool_definition_toml.load ~name ~contents with
+     | Ok { Tool_definition_toml.schema; _ } -> schema
+     | Error message -> failwith message)
+
+let schemas : Masc_domain.tool_schema list = [ schema_of_name "masc_agent_timeline" ]
 
 (* RFC-0189 PR-1b.13 — typed result. Caller-input violation
    ("agent_name is required") tagged [Workflow_rejection]; success

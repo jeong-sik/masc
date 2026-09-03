@@ -336,6 +336,12 @@
  (modules masc_tui_command))
 
 (library
+ (name masc_tui_preset_text)
+ (wrapped false)
+ (modules masc_tui_preset_text)
+ (libraries masc))
+
+(library
  (name masc_tui_mcp)
  (wrapped false)
  (modules masc_tui_mcp)
@@ -966,6 +972,7 @@
   masc_tui_observer
   masc_tui_acting
   masc_tui_command
+  masc_tui_preset_text
   masc_tui_mcp
   masc_tui_keeper_chat_transcript
   masc_tui_composer

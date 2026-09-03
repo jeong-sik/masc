@@ -3090,6 +3090,11 @@
  (libraries alcotest masc_tui_command masc_tui_mcp yojson))
 
 (test
+ (name test_tui_preset_text)
+ (modules test_tui_preset_text)
+ (libraries alcotest masc masc_tui_preset_text))
+
+(test
  (name test_tui_surface_needs)
  (modules test_tui_surface_needs)
  (libraries alcotest masc_tui_types))

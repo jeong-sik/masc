@@ -1,16 +1,18 @@
 (** Severity levels for operator attention items and recommendations.
     Closed set — exhaustive matching catches new levels at compile time. *)
-type operator_severity = Sev_critical | Sev_bad | Sev_warn
+type operator_severity = Sev_critical | Sev_bad | Sev_warn | Sev_info
 
 let operator_severity_to_string = function
   | Sev_critical -> "critical"
   | Sev_bad -> "bad"
   | Sev_warn -> "warn"
+  | Sev_info -> "info"
 
 let operator_severity_of_string_opt = function
   | "critical" -> Some Sev_critical
   | "bad" -> Some Sev_bad
   | "warn" -> Some Sev_warn
+  | "info" -> Some Sev_info
   | _ -> None
 
 let operator_severity_of_failure_envelope
@@ -41,10 +43,14 @@ type recommended_action = {
 
 let stalled_session_threshold_sec = Env_config.InternalTimers.stalled_session_threshold_sec
 
+(* Every level ranks above 0, which [severity_rank_of_string] keeps for a
+   string that is not a severity at all. An informational row that ranked with
+   the unrecognized ones would sort as if the wire had said nothing. *)
 let severity_rank = function
-  | Sev_critical -> 3
-  | Sev_bad -> 2
-  | Sev_warn -> 1
+  | Sev_critical -> 4
+  | Sev_bad -> 3
+  | Sev_warn -> 2
+  | Sev_info -> 1
 
 (* The wire carries [operator_severity_to_string]'s output, so ranking a
    serialized severity means decoding it first. Ranking the raw string
@@ -129,13 +135,25 @@ let summary_of_attention_items (items : attention_item list) =
   let bad_count =
     List.fold_left
       (fun acc (item : attention_item) ->
-        match item.severity with Sev_bad -> acc + 1 | Sev_critical | Sev_warn -> acc)
+        match item.severity with
+        | Sev_bad -> acc + 1
+        | Sev_critical | Sev_warn | Sev_info -> acc)
+      0 sorted
+  in
+  let info_count =
+    List.fold_left
+      (fun acc (item : attention_item) ->
+        match item.severity with
+        | Sev_info -> acc + 1
+        | Sev_critical | Sev_bad | Sev_warn -> acc)
       0 sorted
   in
   let warn_count =
     List.fold_left
       (fun acc (item : attention_item) ->
-        match item.severity with Sev_warn -> acc + 1 | Sev_critical | Sev_bad -> acc)
+        match item.severity with
+        | Sev_warn -> acc + 1
+        | Sev_critical | Sev_bad | Sev_info -> acc)
       0 sorted
   in
   `Assoc
@@ -143,6 +161,7 @@ let summary_of_attention_items (items : attention_item list) =
       ("count", `Int (List.length sorted));
       ("bad_count", `Int bad_count);
       ("warn_count", `Int warn_count);
+      ("info_count", `Int info_count);
       ("top_item", Json_util.option_to_yojson attention_item_to_yojson top_item);
       ("provenance", `String "derived");
       ("authoritative", `Bool false);

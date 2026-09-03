@@ -302,7 +302,52 @@ let test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidenc
    The string ranker this replaced mapped "critical" and "bad" to the same
    value, so a critical attention item sorted no higher than a bad one — while
    the typed [Operator_digest_types.severity_rank] has always separated them
-   (3 vs 2). *)
+   (4 vs 3, since [Sev_info] joined the scale below them). *)
+(* Workspace health is read off which severities are present, not off whether
+   the list is non-empty. The old shape called every non-empty list without a
+   [Sev_bad] row "warn", which put a critical row in the amber bucket and let a
+   purely informational one -- a Keeper holding messages it has not answered
+   yet -- turn the whole workspace amber. On the live runtime that held health
+   at "warning" for eleven days over three Discord asides nobody was going to
+   answer. *)
+let attention_row severity =
+  { Operator_digest.kind = "fixture"
+  ; severity
+  ; summary = "fixture row"
+  ; target_type = Lib.Operator_action_constants.workspace_target_type
+  ; target_id = None
+  ; actor = None
+  ; evidence = `Assoc []
+  }
+
+let test_workspace_health_reads_the_severities_present () =
+  let health items = Operator_digest.health_from_attention_items items in
+  Alcotest.(check string) "no rows is ok" "ok" (health []);
+  Alcotest.(check string) "an informational row alone stays ok" "ok"
+    (health [ attention_row Operator_digest.Sev_info ]);
+  Alcotest.(check string) "a warning row is warn" "warn"
+    (health
+       [ attention_row Operator_digest.Sev_info
+       ; attention_row Operator_digest.Sev_warn
+       ]);
+  Alcotest.(check string) "a critical row is bad, not warn" "bad"
+    (health [ attention_row Operator_digest.Sev_critical ]);
+  Alcotest.(check string) "a bad row outranks a warning" "bad"
+    (health
+       [ attention_row Operator_digest.Sev_warn
+       ; attention_row Operator_digest.Sev_bad
+       ])
+
+let test_informational_severity_ranks_below_warn_and_above_nothing () =
+  let rank = Operator_digest.severity_rank in
+  Alcotest.(check bool) "info ranks under warn" true
+    (rank Operator_digest.Sev_info < rank Operator_digest.Sev_warn);
+  (* 0 is reserved for a string that is not a severity at all, so an
+     informational row must not share it. *)
+  Alcotest.(check bool) "info ranks above an unreadable severity" true
+    (rank Operator_digest.Sev_info
+     > Operator_digest_types.severity_rank_of_string "not-a-severity")
+
 let test_internal_signals_rank_critical_above_bad () =
   let workspace = Lib.Operator_action_constants.workspace_target_type in
   let incident kind severity =
@@ -635,6 +680,10 @@ let () =
             test_dashboard_keeper_unknown_context_is_informational;
           Alcotest.test_case "internal signals rank critical above bad" `Quick
             test_internal_signals_rank_critical_above_bad;
+          Alcotest.test_case "workspace health reads the severities present"
+            `Quick test_workspace_health_reads_the_severities_present;
+          Alcotest.test_case "informational severity ranks below warn" `Quick
+            test_informational_severity_ranks_below_warn_and_above_nothing;
           Alcotest.test_case "pressure rank orders by health" `Quick
             test_pressure_rank_orders_by_surface_status;
           Alcotest.test_case "keeper brief publishes health and phase" `Quick

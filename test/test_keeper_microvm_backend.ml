@@ -74,6 +74,41 @@ let test_microsandbox_inspect_asks_for_the_machine_form () =
     (Microvm.inspect_argv_for Backend.Apple_container ~container_name:"g")
 ;;
 
+(* nerdctl drives containerd, whose default runtime shares the host kernel.
+   Without the shim named, a keeper that declared microvm would get a
+   container — the isolation would be weaker than the profile it asked for,
+   and nothing in the argv would say so. *)
+let test_only_the_containerd_backend_names_a_runtime () =
+  check
+    (Alcotest.list Alcotest.string)
+    "nerdctl names the Kata shim"
+    [ "--runtime"; "io.containerd.kata.v2" ]
+    (Backend.run_runtime_args Backend.Nerdctl_kata);
+  List.iter
+    (fun backend ->
+      check
+        (Alcotest.list Alcotest.string)
+        (Backend.to_string backend ^ " is a microVM runtime already")
+        []
+        (Backend.run_runtime_args backend))
+    [ Backend.Apple_container; Backend.Microsandbox ]
+;;
+
+let test_kata_removal_and_inspect_are_dockers_grammar () =
+  check
+    (Alcotest.list Alcotest.string)
+    "nerdctl rm --force"
+    [ "nerdctl"; "rm"; "--force"; "g" ]
+    (Microvm.delete_force_argv_for Backend.Nerdctl_kata ~container_name:"g");
+  (* dockercompat is nerdctl inspect's default mode, so the template masc
+     already sends Docker is reused rather than a second document parsed. *)
+  check
+    (Alcotest.list Alcotest.string)
+    "nerdctl inspect uses Docker's template"
+    [ "nerdctl"; "inspect"; "--format"; "{{json .State.Running}}"; "g" ]
+    (Microvm.inspect_argv_for Backend.Nerdctl_kata ~container_name:"g")
+;;
+
 (* ── the parse ──────────────────────────────────────────────────────── *)
 
 let running = function
@@ -98,6 +133,16 @@ let test_each_parser_reads_its_own_runtimes_shape () =
        (Microvm.running_of_inspect_json_for
           Backend.Microsandbox
           {|{"name":"g","status":"Running"}|}));
+  check
+    Alcotest.bool
+    "nerdctl: the bare State.Running literal"
+    true
+    (running (Microvm.running_of_inspect_json_for Backend.Nerdctl_kata "true"));
+  check
+    Alcotest.bool
+    "nerdctl: false is stopped"
+    false
+    (running (Microvm.running_of_inspect_json_for Backend.Nerdctl_kata "false"));
   check
     Alcotest.bool
     "msb: stopped is stopped"
@@ -126,6 +171,10 @@ let test_an_unrecognised_shape_is_an_error_not_a_no () =
     "msb given container's shape"
     Backend.Microsandbox
     {|[{"status":{"state":"running"}}]|};
+  (* A Go template that stops resolving prints an empty line. Read as "not
+     running" it takes a live guest down and boots a second beside it. *)
+  refuses "nerdctl given an empty template result" Backend.Nerdctl_kata "";
+  refuses "nerdctl given a whole document" Backend.Nerdctl_kata {|{"State":{"Running":true}}|};
   refuses "container given rubbish" Backend.Apple_container "not json at all";
   refuses "msb given rubbish" Backend.Microsandbox "not json at all"
 ;;
@@ -219,6 +268,10 @@ let () =
     ; ( "argv"
       , [ Alcotest.test_case "each backend drives its own executable" `Quick
             test_each_backend_drives_its_own_executable
+        ; Alcotest.test_case "only the containerd backend names a runtime" `Quick
+            test_only_the_containerd_backend_names_a_runtime
+        ; Alcotest.test_case "kata removal and inspect are Docker's grammar" `Quick
+            test_kata_removal_and_inspect_are_dockers_grammar
         ; Alcotest.test_case "removal is spelled per runtime" `Quick
             test_removal_is_spelled_per_runtime
         ; Alcotest.test_case "msb inspect asks for the machine form" `Quick

@@ -346,6 +346,8 @@ let test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks () =
         size = 1024;
         mime_type = "image/png";
         data = "data:image/png;base64,abc123";
+      width = None;
+        height = None;
       };
     ]
   in
@@ -433,6 +435,8 @@ let document_input ~mime_type ~payload =
         size = String.length payload;
         mime_type;
         data = Printf.sprintf "data:%s;base64,%s" mime_type payload;
+      width = None;
+        height = None;
       };
     ]
   in
@@ -544,6 +548,8 @@ let test_keeper_multimodal_input_accepts_mixed_case_data_url () =
         size = 1024;
         mime_type = "image/png";
         data = "DATA:IMAGE/PNG;BASE64,abc123";
+      width = None;
+        height = None;
       };
     ]
   in
@@ -576,6 +582,8 @@ let test_keeper_multimodal_input_normalizes_inferred_data_url_mime () =
         size = 1024;
         mime_type = "";
         data = "DATA:IMAGE/PNG;BASE64,abc123";
+      width = None;
+        height = None;
       };
     ]
   in
@@ -608,6 +616,8 @@ let test_keeper_multimodal_input_rejects_mismatched_data_url_mime () =
         size = 1024;
         mime_type = "image/png";
         data = "data:image/png;base64,abc123";
+      width = None;
+        height = None;
       };
     ]
   in
@@ -639,6 +649,8 @@ let test_keeper_multimodal_input_rejects_malformed_data_url () =
         size = 1024;
         mime_type = "image/png";
         data = "data:image/png,abc123";
+      width = None;
+        height = None;
       };
     ]
   in
@@ -681,7 +693,7 @@ let test_keeper_stream_args_preserve_user_blocks () =
       ; size = 1024
       ; mime_type = "image/png"
       ; data = "data:image/png;base64,abc123"
-      }
+      ; width = None; height = None}
     ]
   in
   let payload =
@@ -2689,7 +2701,9 @@ let test_keeper_chat_history_persists_attachment_refs_not_raw_media () =
               size = 1024;
               mime_type = "image/png";
               data = raw_media;
-            };
+            width = None;
+        height = None;
+      };
           ]
         ~assistant_content:"looks like a dashboard"
         ();
@@ -2734,7 +2748,9 @@ let test_keeper_chat_user_only_persists_attachment_refs_not_raw_media () =
               size = 1024;
               mime_type = "image/png";
               data = raw_media;
-            };
+            width = None;
+        height = None;
+      };
           ]
         ();
       let path =

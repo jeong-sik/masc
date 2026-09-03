@@ -228,19 +228,74 @@ let split_on_double_space text =
   in
   loop 0 0 []
 
+(* What a cut row keeps whatever else it loses.
+
+   Dropping from the back is right for the tail it was written for: [r],
+   [Tab] and [q] are the same on every surface, so a reader learns them once
+   and the sheet holds them. It stops being right where the row is fullest.
+   Measured at 160 usable cells: the chat pane lost [Esc] -- which is also
+   how a running turn is interrupted -- and [y / n], which answers the
+   approval a Keeper is waiting on; Config lost the [Esc] that leaves it.
+
+   The rule is not a priority list, it is one sentence: a row may lose what
+   the reader can look up, and it does not lose the way out. [Esc] leaves,
+   [q] quits, [y / n] answers what is being asked. The three are spelled the
+   same on every surface that has them, so this is a constant rather than a
+   per-surface declaration -- one place to read, and no table can forget to
+   mark itself.
+
+   A pinned item keeps its position rather than moving to the front: the
+   groups print in a fixed order so that the same action sits in the same
+   place on every screen, and rescuing an item by moving it would trade one
+   of those promises for the other. *)
+let never_dropped_keys = [ "Esc"; "q"; "y / n" ]
+
+let item_is_pinned item =
+  (* Items are [key:label]; the key is what the projection built the item
+     from, and the first colon is where it ends. A label may hold colons of
+     its own -- "Enter:edit / use" -- so only the first one splits. *)
+  match String.index_opt item ':' with
+  | None -> false
+  | Some i ->
+    let key = String.trim (String.sub item 0 i) in
+    List.exists
+      (fun pinned ->
+        String.equal key pinned
+        (* [Left / Esc] and [Right / Esc] are the same door under a compound
+           spelling; the surfaces that write it that way mean the same key. *)
+        || (String.equal pinned "Esc"
+            && String.length key > 4
+            && String.equal (String.sub key (String.length key - 4) 4) " Esc"))
+      never_dropped_keys
+
 let drop_hint_items ~max_cells hints =
   let items =
     split_on_double_space hints
     |> List.filter (fun item -> not (String.equal (String.trim item) ""))
   in
+  let fits kept =
+    let candidate = "  " ^ String.concat "  " kept ^ "  " ^ cut_marker in
+    Masc_tui_message_layout.display_width candidate <= max_cells
+  in
+  (* The last item that may be dropped, by index. [None] once only pinned
+     items are left, which is when this gives up and the caller truncates by
+     cells instead. *)
+  let last_droppable kept =
+    List.fold_left
+      (fun (index, found) item ->
+        (index + 1, if item_is_pinned item then found else Some index))
+      (0, None)
+      kept
+    |> snd
+  in
   let rec fit kept =
     match kept with
     | [] -> None
+    | _ when fits kept -> Some ("  " ^ String.concat "  " kept ^ "  " ^ cut_marker)
     | _ ->
-      let candidate = "  " ^ String.concat "  " kept ^ "  " ^ cut_marker in
-      if Masc_tui_message_layout.display_width candidate <= max_cells
-      then Some candidate
-      else fit (List.filteri (fun i _ -> i < List.length kept - 1) kept)
+      (match last_droppable kept with
+       | None -> None
+       | Some index -> fit (List.filteri (fun i _ -> i <> index) kept))
   in
   fit items
 
@@ -297,13 +352,14 @@ let line ?(status = []) ~dim ~reset ~max_cells ~port ~hints () =
     Ctrl-N never reached the test's copy. *)
 let chat_hints ~enter_hint ~scroll_hint ~switch_hint ~escape_hint =
   Printf.sprintf
-    "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:memory  \
-     Ctrl-F:layout  Ctrl-O:image  %s%s  %s  Ctrl-U:clear"
+    "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:journal  \
+     Ctrl-F:metadata  Ctrl-O:image  %s%s  %s  Ctrl-U:clear"
     enter_hint scroll_hint switch_hint escape_hint
 
 (** Below 120 columns the fixed set drops to what leaves room for the message
     itself; {!line}'s fitting machinery trims from the tail beyond that. *)
 let compact_chat_hints ~enter_hint ~scroll_hint ~escape_hint =
   Printf.sprintf
-    "%s  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-F:layout  %s  %s"
+    "%s  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:journal  \
+     Ctrl-F:metadata  %s  %s"
     enter_hint scroll_hint escape_hint

@@ -16,7 +16,6 @@ let capability_source_to_string = function
 
 let base_capabilities_for_kind = function
   | Provider_config.Ollama -> Capabilities.ollama_capabilities
-  | DashScope -> Capabilities.dashscope_capabilities
   | Anthropic -> Capabilities.anthropic_capabilities
   | Kimi -> Capabilities.kimi_capabilities
   | Glm -> Capabilities.glm_capabilities
@@ -310,7 +309,6 @@ let patch_telemetry
     Kept in sync with the log tag used by the [WARN Complete] line. *)
 let provider_name_of_kind : Provider_config.provider_kind -> string = function
   | Ollama -> "ollama"
-  | DashScope -> "dashscope"
   | Anthropic -> "anthropic"
   | Kimi -> "kimi"
   | OpenAI_compat -> "openai"
@@ -351,8 +349,7 @@ let requires_non_http_transport = function
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama
   | Provider_config.Gemini
-  | Provider_config.Glm
-  | Provider_config.DashScope -> false
+  | Provider_config.Glm -> false
 ;;
 
 let validate_output_schema_request (config : Provider_config.t) =
@@ -402,7 +399,11 @@ let validate_request_path (config : Provider_config.t) =
      explicit effort value; merely naming the dialect emits no wire control.
 
    Absence remains absence: [enable_thinking = None] never invents a policy.
-   Explicit disable on a non-reasoning model remains a satisfied no-op. *)
+   Explicit disable on a non-reasoning model remains a satisfied no-op, except
+   on a [Reasoning_effort] row: that wire has no toggle besides the effort, so
+   the disable travels as [reasoning_effort = "none"] and the effort ladder
+   ([Provider_config.validate_reasoning_effort_request_typed]) decides whether
+   the row can carry it. *)
 type thinking_control_request_rejection =
   | Enable_not_declared
   | Enable_not_encodable
@@ -460,15 +461,13 @@ let thinking_control_request_rejection
                   | Capabilities.Chat_template_kwargs
                   | Capabilities.Chat_template_token _
                   | Capabilities.Ollama_think
-                  | Capabilities.Reasoning_effort
-                  | Capabilities.Enable_thinking )
+                  | Capabilities.Reasoning_effort )
                 , (false | true) ) -> Some Enable_not_encodable)))
      | Provider_config.Anthropic
      | Provider_config.Kimi
      | Provider_config.Ollama
      | Provider_config.Gemini
-     | Provider_config.Glm
-     | Provider_config.DashScope -> None)
+     | Provider_config.Glm -> None)
   | Some false, _ ->
     let disable_not_encodable =
       match config.kind with
@@ -487,8 +486,7 @@ let thinking_control_request_rejection
       | Provider_config.OpenAI_compat
       | Provider_config.Ollama
       | Provider_config.Gemini
-      | Provider_config.Glm
-      | Provider_config.DashScope ->
+      | Provider_config.Glm ->
         let preserve_wire_encodes_toggle =
           (* backend_openai_request still encodes an explicit thinking toggle
              for rows whose preserve wire is a provider [thinking] object, even
@@ -641,8 +639,7 @@ let validate_all (config : Provider_config.t) =
      | Provider_config.OpenAI_compat
      | Provider_config.Ollama
      | Provider_config.Gemini
-     | Provider_config.Glm
-     | Provider_config.DashScope ->
+     | Provider_config.Glm ->
        (match validate_thinking_control_request config with
         | Error _ as e -> e
         | Ok () -> validate_admission_declaration config))

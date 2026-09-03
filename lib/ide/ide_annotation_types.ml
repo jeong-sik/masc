@@ -85,15 +85,11 @@ let annotation_to_json (a : annotation) : Yojson.Safe.t =
    noted in PR #16915 body (lib/shared_types/json_kind.ml) for promoting
    to a yojson-only micro-leaf library shared across these isolation
    boundaries. *)
-let kind_label : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
+(* The local copy is gone. It carried a comment explaining that its name
+   was chosen to slip the lint counting these copies, and naming the pile
+   [lib/shared_types/json_kind.ml] as the fix; that file exists now, and
+   masc_ide reaches it without taking masc_core. *)
+let kind_label = Shared_types.Json_kind.name
 ;;
 
 let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =

@@ -2569,6 +2569,9 @@ def keeper_message_unreliable_roster_interaction(
         )
         if any(path == chat_path for path, _body in requests):
             raise AssertionError("unreliable Keeper roster allowed a message POST")
+        send_and_wait(
+            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
 
@@ -3214,6 +3217,91 @@ def keeper_ask_answer_interaction(
                 f"the answer never reached the server: {ask_requests!r}"
             )
 
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+BLOCKED_GATE_REASON_PREFIX = b"Auto Judge exact attempt quarantined after provider"
+BLOCKED_GATE_REASON_TAIL = b"operator must retain this terminal explanation"
+
+
+def blocked_gate_detail_http_fixtures() -> HttpFixtures:
+    fixtures = overview_event_http_fixtures()
+    reason = (
+        "Auto Judge exact attempt quarantined after provider transport closed "
+        "while decoding the structured verdict; operator must retain this "
+        "terminal explanation"
+    )
+    fixtures["/api/v1/dashboard/gate"] = (
+        200,
+        {
+            "approval_queue": [
+                {
+                    "id": "appr-blocked-detail",
+                    "keeper_name": "alpha",
+                    "tool_name": "tool_execute",
+                    "input_preview": '{"command":"deploy"}',
+                    "input_hash": "a" * 64,
+                    "sequence": 41,
+                    "exact_attempt": {
+                        "state": "bound",
+                        "status": "quarantined",
+                        "quarantine_cause": "cancellation",
+                    },
+                    "summary_status": {"status": "failed", "reason": reason},
+                    "summary_attempt_disposition": {"code": "settled"},
+                }
+            ],
+            "approval_queue_state": {"state": "ready"},
+            "hitl": {
+                "gate_mode": {"mode": "auto_judge"},
+                "external_gate_mode": {"mode": "manual"},
+            },
+            "approval_rules": [],
+            "approval_rules_state": {"state": "ready"},
+        },
+    )
+    return fixtures
+
+
+def blocked_gate_detail_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=40,
+            columns=100,
+            needle=b"MASC Overview",
+        )
+        tab_until(process, master_fd, output, b"MASC Approvals")
+        wait_for_output(
+            process, master_fd, output, b"AUTO JUDGE BLOCKED", start=0, timeout=5.0
+        )
+        detail = send_and_wait(
+            process, master_fd, output, b"\r", BLOCKED_GATE_REASON_TAIL
+        )
+        frame = frame_containing(detail, BLOCKED_GATE_REASON_TAIL)
+        plain = CSI_RE.sub(b"", frame)
+        for needle in (
+            b"reason",
+            BLOCKED_GATE_REASON_PREFIX,
+            BLOCKED_GATE_REASON_TAIL,
+            b"this exact attempt cannot be replayed",
+        ):
+            if needle not in plain:
+                raise AssertionError(
+                    f"blocked Gate detail omitted {needle!r}: {frame!r}"
+                )
+        if BLOCKED_GATE_REASON_PREFIX + b"~" in plain:
+            raise AssertionError(f"blocked Gate reason was cell-truncated: {frame!r}")
         os.write(master_fd, b"q")
 
     return interact
@@ -4483,6 +4571,86 @@ def keeper_chat_succeeded_response(request_body: bytes) -> RawHttpResponse:
     )
 
 
+ERROR_DETAIL_PREFIX = b"Keeper turn failed: Provider stream parse failed: json decoder"
+ERROR_DETAIL_TAIL = b"exact terminal detail survives wrapping"
+
+
+def keeper_chat_failed_response(request_body: bytes) -> RawHttpResponse:
+    request = json.loads(request_body)
+    request_id = request.get("request_id")
+    keeper_name = request.get("name")
+    run_id = f"keeper-operation-run-{request_id}"
+    thread_id = f"keeper:{keeper_name}"
+    reason = (
+        "Provider stream parse failed: json decoder rejected nested payload "
+        "at byte 8192; exact terminal detail survives wrapping"
+    )
+    events = [
+        {
+            "type": "CUSTOM",
+            "threadId": "default",
+            "timestamp": 1.0,
+            "name": "KEEPER_CHAT_OPERATION_ACCEPTED",
+            "value": {
+                "operation_id": request_id,
+                "state": "Queued",
+                "queued_count": 0,
+            },
+        },
+        {
+            "type": "RUN_STARTED",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+        },
+        {
+            "type": "RUN_ERROR",
+            "threadId": thread_id,
+            "timestamp": 1.0,
+            "runId": run_id,
+            "message": reason,
+        },
+    ]
+    return RawHttpResponse(
+        200,
+        "".join(f"data: {json.dumps(event)}\n\n" for event in events).encode(),
+        content_type="text/event-stream",
+    )
+
+
+def keeper_chat_error_detail_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        resize_and_wait(
+            process, master_fd, output, rows=24, columns=100, needle=b"MASC Overview"
+        )
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        send_and_wait(process, master_fd, output, b"trigger-error", b"trigger-error")
+        failed = send_and_wait(
+            process, master_fd, output, b"\r", ERROR_DETAIL_TAIL
+        )
+        frame = frame_containing(failed, ERROR_DETAIL_TAIL)
+        plain = CSI_RE.sub(b"", frame)
+        for needle in (b"ERROR", ERROR_DETAIL_PREFIX, ERROR_DETAIL_TAIL):
+            if needle not in plain:
+                raise AssertionError(
+                    f"wrapped Keeper error omitted {needle!r}: {frame!r}"
+                )
+        if ERROR_DETAIL_PREFIX + b"~" in plain:
+            raise AssertionError(f"Keeper error was cell-truncated: {frame!r}")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def chat_queue_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     # The turn has to still be running while the scenario types the lines that
     # queue behind it, so the fixture holds the answer rather than sending one.
@@ -4569,7 +4737,7 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
         plain = CSI_RE.sub(b"", frame)
         # Pending messages are visible but not represented as turns the model
         # has already received.
-        turn_user = "TURN · YOU".encode()
+        turn_user = "▶  YOU".encode()
         for expected in (
             turn_user,
             b"NEXT 1",
@@ -5442,7 +5610,7 @@ def autonomous_turn_history_interaction() -> Interaction:
             (b"2 reasoning steps, content withheld", "the withheld reasoning count"),
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
             ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
-            ("TURN \u00b7 THINKING".encode(), "the turn start"),
+            ("\u00b7 THINKING".encode(), "the thinking lane"),
             ("TOOLS\u2502".encode(), "the nested tool block"),
         ):
             if needle not in plain_pane:
@@ -5497,12 +5665,12 @@ def memory_journal_timeline_interaction(
                 f"reply did not share one monotonic axis: {frame!r}"
             )
         for pattern, label in (
-            ("TURN · YOU".encode(), "direct turn start"),
-            (re.compile("↳\\s+alpha".encode()), "post-Journal continuation"),
+            (re.compile("▶\\s+YOU".encode()), "direct turn start"),
+            (re.compile("●\\s+alpha".encode()), "post-Journal continuation"),
         ):
             if find_needle(plain, pattern) < 0:
                 raise AssertionError(f"Missing {label} label: {frame!r}")
-        for label in ("TURN · YOU".encode(), "↳ alpha".encode()):
+        for label in (b"YOU", b"alpha"):
             if b"\x1b[7m" + label not in frame:
                 raise AssertionError(
                     f"Direct causal label lost its reverse-video badge {label!r}: "
@@ -5527,6 +5695,10 @@ def memory_journal_timeline_interaction(
             b"m",
             b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
         )
+        # This scenario verifies the complete timestamp axis. Chat itself now
+        # rests in the clock-free reading layout, so opt into full metadata.
+        send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
+        send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
         # At rest the journal draws only its one-line summary: the header
         # with source, revision, and counts. The change fence under it is a
         # keypress away.
@@ -5556,6 +5728,10 @@ def memory_journal_timeline_interaction(
         )
         plain_resting = CSI_RE.sub(b"", resting)
         assert_monotonic_direct_turn(resting)
+        if b"Ctrl-N: journal detail" not in plain_resting:
+            raise AssertionError(
+                f"Journal summary did not expose its detail key: {resting!r}"
+            )
         if re.search("\u25c8\\s+JOURNAL".encode(), plain_resting) is None:
             raise AssertionError(
                 f"Memory timeline did not draw its distinct Journal marker: {resting!r}"
@@ -5748,7 +5924,7 @@ def memory_journal_timeline_interaction(
             needle=b"memory:full",
             controls=(FULL_REDRAW,),
         )
-        if b"memory:full clock:inline" not in CSI_RE.sub(b"", widened):
+        if b"memory:full" not in CSI_RE.sub(b"", widened):
             raise AssertionError(
                 "A display toggle pressed on the narrow-pane notice screen "
                 f"was swallowed by the composer gate: {widened!r}"
@@ -6126,7 +6302,9 @@ def clipboard_paste_key_interaction() -> Interaction:
     return interact
 
 
-def chat_visibility_modes_interaction() -> Interaction:
+def chat_visibility_modes_interaction(
+    tool_calls_gate: GatedHttpResponse | None = None,
+) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
         master_fd: int,
@@ -6143,14 +6321,16 @@ def chat_visibility_modes_interaction() -> Interaction:
             needle=b"MASC Overview",
         )
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
-        select_keeper_row(process, master_fd, output, b"alpha")
-        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        # Keep the roster cursor on beta, then open alpha through the palette.
+        # Durable call details belong to the chat target, not that unrelated
+        # cursor; the old response guard discarded this successful GET.
+        select_keeper_row(process, master_fd, output, b"beta")
         pane_start = len(output)
-        initial = send_and_wait(
+        initial = palette_go(
             process,
             master_fd,
             output,
-            b"m",
+            b"keeper alpha",
             b"ci-red-attribution",
         )
         wait_for_output(
@@ -6175,7 +6355,7 @@ def chat_visibility_modes_interaction() -> Interaction:
             "\u25c6".encode(),
             "DELIVERED \u00b7 USED".encode(),
             b"masc_fusion",
-            b"Ctrl-D: details / diffs",
+            b"Ctrl-D: full calls / schedule / diffs",
         ):
             wait_for_output(
                 process,
@@ -6186,9 +6366,20 @@ def chat_visibility_modes_interaction() -> Interaction:
                 timeout=5.0,
             )
         initial += bytes(output[pane_start:])
+        initial_frame = frame_containing(initial, b"ci-red-attribution")
+        plain_initial_frame = CSI_RE.sub(b"", initial_frame)
+        title_row = frame_row_of(
+            plain_initial_frame, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        )
+        identity_row = frame_row_of(plain_initial_frame, b"gate:auto_judge")
+        if identity_row != title_row + 1:
+            raise AssertionError(
+                "chat navigation and operational identity did not occupy "
+                f"adjacent dedicated rows: {initial_frame!r}"
+            )
         if b"2 reasoning steps, content withheld" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
-        if "TURN · SKILL".encode() not in CSI_RE.sub(b"", initial):
+        if re.search("◆\\s+SKILL".encode(), CSI_RE.sub(b"", initial)) is None:
             raise AssertionError(
                 f"the exact Skill evidence did not start its turn: {initial!r}"
             )
@@ -6219,6 +6410,29 @@ def chat_visibility_modes_interaction() -> Interaction:
             b"\x04",
             b"reasoning:full tools:full",
         )
+        if tool_calls_gate is not None:
+            if not wait_for_fixture_event(
+                process,
+                master_fd,
+                output,
+                tool_calls_gate.requested,
+                timeout=3.0,
+            ):
+                raise AssertionError("tool-call detail GET did not reach fixture gate")
+            # A second forced open while the first GET is held must coalesce
+            # into one follow-up, not advance generation and orphan both.
+            send_and_wait(
+                process, master_fd, output, b"\x04", b"reasoning:full tools:compact"
+            )
+            send_and_wait(
+                process, master_fd, output, b"\x04", b"reasoning:full tools:full"
+            )
+            if tool_calls_gate.calls != 1:
+                raise AssertionError(
+                    "same-Keeper in-flight detail refresh was duplicated: "
+                    f"{tool_calls_gate.calls} GETs"
+                )
+            tool_calls_gate.release.set()
         wait_for_output(
             process,
             master_fd,
@@ -6227,8 +6441,30 @@ def chat_visibility_modes_interaction() -> Interaction:
             start=tools_start,
             timeout=5.0,
         )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"execution=exec-fusion-1",
+            b"provider-call=call-fusion-1",
+            start=tools_start,
+            timeout=5.0,
+        )
         tools += bytes(output[tools_start:])
-        for needle in (b"masc_fusion", b"turn=trace-1787333555531-00020#54"):
+        for needle in (
+            b"masc_fusion",
+            b"turn=trace-1787333555531-00020#54",
+            b"state",
+            b"FAILED",
+            b"DEFERRED",
+            b"ASYNC CONTINUATION",
+            b"concurrent",
+            b"batch 2",
+            b"width 3",
+            b"panel-input-exact",
+            b"panel-output-exact",
+            b"execution=exec-fusion-1",
+        ):
             if needle not in tools:
                 raise AssertionError(
                     f"full tool view did not restore {needle!r}: {tools!r}"
@@ -6237,7 +6473,7 @@ def chat_visibility_modes_interaction() -> Interaction:
             raise AssertionError(
                 f"exact Skill evidence was duplicated as a generic tool: {tools!r}"
             )
-        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"\x1b", keeper_row_selected(b"beta"))
         os.write(master_fd, b"q")
 
     return interact
@@ -6252,6 +6488,7 @@ def chat_clarity_http_fixtures() -> HttpFixtures:
     trace = history_rows[0]["blocks"][0]["trace"]
     trace[1]["name"] = "keeper_skill"
     trace[3]["name"] = "masc_fusion"
+    trace[3]["execution_id"] = "exec-fusion-1"
     history_rows[0]["skill_activations"] = {
         "schema": "masc.keeper_chat.skill_activations.v1",
         "status": "available",
@@ -6299,6 +6536,33 @@ def chat_clarity_http_fixtures() -> HttpFixtures:
         {"modes": [], "judges": []},
     )
     fixtures["/api/v1/keepers/tool-approval-mode"] = (200, {"overrides": []})
+    fixtures["/api/v1/keepers/alpha/tool-calls?limit=100"] = (
+        200,
+        {
+            "keeper": "alpha",
+            "count": 1,
+            "health": "ok",
+            "entries": [
+                {
+                    "ts": 1787348490.3,
+                    "keeper": "alpha",
+                    "tool": "masc_fusion",
+                    "input": {"prompt": "panel-input-exact"},
+                    "output": "panel-output-exact",
+                    "success": False,
+                    "duration_ms": 1200.0,
+                    "execution_id": "exec-fusion-1",
+                    "tool_use_id": "call-fusion-1",
+                    "planned_index": 4,
+                    "batch_index": 1,
+                    "batch_size": 3,
+                    "execution_mode": "concurrent",
+                    "disposition": "deferred",
+                    "result_bytes": 18,
+                }
+            ],
+        },
+    )
     return fixtures
 
 
@@ -6547,6 +6811,9 @@ def message_origin_badge_interaction(
     send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     pane_start = len(output)
     send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+    send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
+    pane_start = len(output)
+    send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
     wait_for_output(
         process,
         master_fd,
@@ -6593,7 +6860,14 @@ def message_origin_badge_interaction(
         if forbidden in frame:
             raise AssertionError(f"chat frame retained {description}: {frame!r}")
 
-    inline = send_and_wait(process, master_fd, output, b"\x06", b"clock:inline")
+    bare = send_and_wait(process, master_fd, output, b"\x06", b"operator-body-neutral")
+    bare_plain = CSI_RE.sub(b"", bare)
+    if b"operator-body-neutral" not in bare_plain or b"keeper-body-neutral" not in bare_plain:
+        raise AssertionError(f"clock-free inline layout lost a speaker body: {bare!r}")
+    if re.search(rb"\d\d:\d\d\s+\xe2\x96\xb6", bare_plain) is not None:
+        raise AssertionError(f"clock-free metadata layout still rendered a clock: {bare!r}")
+
+    inline = send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
     inline_plain = CSI_RE.sub(b"", inline)
     for pattern in (
         b"\xe2\x96\xb6\\s+(?:TURN \xc2\xb7 )?vincent {2}operator-body-neutral",
@@ -6603,13 +6877,6 @@ def message_origin_badge_interaction(
             raise AssertionError(
                 f"Ctrl-F header said inline but its physical rows did not: {inline!r}"
             )
-
-    bare = send_and_wait(process, master_fd, output, b"\x06", b"clock:off")
-    bare_plain = CSI_RE.sub(b"", bare)
-    if b"operator-body-neutral" not in bare_plain or b"keeper-body-neutral" not in bare_plain:
-        raise AssertionError(f"clock-free inline layout lost a speaker body: {bare!r}")
-    if re.search(rb"\d\d:\d\d\s+\xe2\x96\xb6", bare_plain) is not None:
-        raise AssertionError(f"clock:off still rendered an inline clock: {bare!r}")
 
     draft_frame = send_and_wait(
         process, master_fd, output, b"draft-neutral", b"draft-neutral"
@@ -6633,7 +6900,7 @@ def viewport_gap_interaction(
         process,
         master_fd,
         output,
-        rows=11,
+        rows=12,
         columns=100,
         needle=b"MASC Overview",
     )
@@ -6649,20 +6916,20 @@ def viewport_gap_interaction(
             f"oversized live edge did not order opening, gap, and latest row: {opened!r}"
         )
 
-    send_and_wait(process, master_fd, output, b"\x1b[5~", b"line-18")
-    complete = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=12,
-        columns=100,
-        needle=b"line-18",
-        controls=(FULL_REDRAW,),
+    complete = send_and_wait(
+        process, master_fd, output, b"\x1b[5~", b"line-18"
     )
     complete_plain = CSI_RE.sub(b"", complete)
     if marker in complete_plain or b"hidden" in complete_plain:
         raise AssertionError(
             f"PgUp retained a synthetic gap inside transcript rows: {complete!r}"
+        )
+    newest = send_and_wait(process, master_fd, output, b"\x1b[6~", b"line-23")
+    newest_plain = CSI_RE.sub(b"", newest)
+    if b"line-00" not in newest_plain or marker not in newest_plain:
+        raise AssertionError(
+            "PgDn did not return the exact oversized live-edge projection "
+            f"after one PgUp: {newest!r}"
         )
     send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     os.write(master_fd, b"q")
@@ -10926,6 +11193,21 @@ def run_keyboard_regression(executable: str) -> None:
         interact=chat_visibility_modes_interaction(),
         http_fixtures=chat_visibility_fixtures,
     )
+    error_detail_fixtures = keeper_runtime_http_fixtures()
+    error_detail_fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
+    error_detail_fixtures["/api/v1/keepers/alpha/memory-journal?limit=20"] = (
+        200,
+        {"keeper": "alpha", "entries": []},
+    )
+    error_detail_fixtures["/api/v1/keepers/chat/stream"] = RequestHttpResponse(
+        keeper_chat_failed_response
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper chat errors preserve their complete detail",
+        interact=keeper_chat_error_detail_interaction(),
+        http_fixtures=error_detail_fixtures,
+    )
     run_terminal_scenario(
         executable,
         description="Keeper message origin badges",
@@ -11265,6 +11547,12 @@ def run_keyboard_regression(executable: str) -> None:
     ask_requests: HttpRequests = []
     run_terminal_scenario(
         executable,
+        description="Blocked Gate reason remains whole in approval detail",
+        interact=blocked_gate_detail_interaction(),
+        http_fixtures=blocked_gate_detail_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
         description="Answering a Keeper's question from an approval detail",
         interact=keeper_ask_answer_interaction(keeper_ask_fixtures, ask_requests),
         http_fixtures=keeper_ask_fixtures,
@@ -11466,11 +11754,21 @@ def run_config_regression(executable: str) -> None:
 
 
 def run_chat_clarity_regression(executable: str) -> None:
+    fixtures = chat_clarity_http_fixtures()
+    tool_calls_path = "/api/v1/keepers/alpha/tool-calls?limit=100"
+    tool_calls_response = fixtures[tool_calls_path]
+    if not isinstance(tool_calls_response, tuple):
+        raise AssertionError("chat clarity tool-call fixture must be a JSON response")
+    tool_calls_gate = GatedHttpResponse(
+        tool_calls_response,
+        subsequent_response=tool_calls_response,
+    )
+    fixtures[tool_calls_path] = tool_calls_gate
     run_terminal_scenario(
         executable,
         description="Keeper chat mode and Tool detail clarity",
-        interact=chat_visibility_modes_interaction(),
-        http_fixtures=chat_clarity_http_fixtures(),
+        interact=chat_visibility_modes_interaction(tool_calls_gate),
+        http_fixtures=fixtures,
     )
     run_terminal_scenario(
         executable,

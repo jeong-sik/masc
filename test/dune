@@ -294,6 +294,7 @@
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
   test_keeper_wake_turn_context
+  test_keeper_last_turn_stop
   test_keeper_unified_verification_surface
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
@@ -339,6 +340,7 @@
   test_keeper_library_tool_toml_parity
   test_library_tool_toml_parity
   test_execute_tool_toml_parity
+  test_descriptor_description_from_catalog
   test_keeper_schema_toml_parity
   test_keeper_runtime_schemas_toml_parity
   test_taskboard_tool_toml_parity
@@ -635,6 +637,7 @@
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
   test_keeper_wake_turn_context
+  test_keeper_last_turn_stop
   test_keeper_unified_verification_surface
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
@@ -680,6 +683,7 @@
   test_keeper_library_tool_toml_parity
   test_library_tool_toml_parity
   test_execute_tool_toml_parity
+  test_descriptor_description_from_catalog
   test_keeper_schema_toml_parity
   test_keeper_runtime_schemas_toml_parity
   test_taskboard_tool_toml_parity
@@ -2253,6 +2257,7 @@
 (include stanzas/test_keeper_context_isolation.inc)
 
 (include stanzas/test_keeper_turn_up_args.inc)
+(include stanzas/test_keeper_turn_up_create_response.inc)
 
 (include stanzas/test_keeper_cwd_response.inc)
 
@@ -2266,8 +2271,6 @@
 
 
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
-
-(include stanzas/test_json_schema_shared_defs.inc)
 
 (include stanzas/test_keeper_tool_plan_executor.inc)
 (include stanzas/test_keeper_tool_progress_identity.inc)
@@ -2931,6 +2934,11 @@
  (libraries masc_test_deps masc.runtime))
 
 (test
+ (name test_keeper_image_dimensions)
+ (modules test_keeper_image_dimensions)
+ (libraries alcotest masc))
+
+(test
  (name test_keeper_vision_ingest)
  (modules test_keeper_vision_ingest)
  (libraries alcotest masc masc.runtime masc.tool_types))
@@ -3173,6 +3181,11 @@
  (libraries alcotest masc_tui_diff))
 
 (test
+ (name test_tui_tool_detail)
+ (modules test_tui_tool_detail)
+ (libraries alcotest masc_tui_tool_detail yojson))
+
+(test
  (name test_tui_keeper_chat_diff)
  (modules test_tui_keeper_chat_diff)
  (libraries
@@ -3343,6 +3356,16 @@
  (name test_tui_context_bars)
  (modules test_tui_context_bars)
  (libraries alcotest masc_tui_context_bars))
+
+(test
+ (name test_tui_retained_view)
+ (modules test_tui_retained_view)
+ (libraries
+  alcotest
+  yojson
+  masc
+  masc.agent_core
+  masc_tui_retained_view))
 
 (test
  (name test_tui_server_lifecycle)
@@ -3619,13 +3642,29 @@
  (deps
   test_keeper_multi_collaboration_acceptance.py
   ../scripts/harness/workload/keeper_multi_collaboration_acceptance.py
-  ../scripts/fixtures/keeper-multi-collaboration/missions.json)
+  ../scripts/fixtures/keeper-multi-collaboration/missions.json
+  ../config/tools/masc_keeper_up.toml
+  ../lib/server/server_routes_http_routes_dashboard.ml
+  ../lib/keeper/keeper_tool_approval_mode.ml)
  (action
   (run python3 %{dep:test_keeper_multi_collaboration_acceptance.py})))
 
 (alias
  (name runtest)
  (deps (alias runtest-test_keeper_multi_collaboration_acceptance)))
+
+(rule
+ (alias runtest-test_campaign_scoreboard)
+ (deps
+  test_campaign_scoreboard.py
+  ../scripts/harness/workload/campaign_scoreboard.py
+  ../scripts/fixtures/keeper-multi-collaboration/missions.json)
+ (action
+  (run python3 %{dep:test_campaign_scoreboard.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_campaign_scoreboard)))
 
 (rule
  (alias runtest-test_keeper_skill_use_proof)
@@ -4152,6 +4191,8 @@
 
 (include stanzas/test_mcp_client.inc)
 
+(include stanzas/test_keeper_identity_tool_allow.inc)
+(include stanzas/test_tool_name_prefix_boundary.inc)
 (include stanzas/test_keeper_identity_tools.inc)
 
 (include stanzas/test_keeper_identity_gate.inc)

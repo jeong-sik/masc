@@ -9,10 +9,13 @@ val decode :
     fetched string is passed through [sanitize] before it enters TUI state. *)
 
 val view_lines : width:int -> t -> string list
-(** Render declared -> effective -> observed flow plus live containers,
-    errors, explanations, and identity warnings. [width] is the available
-    content width, so long server explanations wrap instead of disappearing
-    at the pane edge.
+(** Render an operator-facing status summary: whether commands can run, what
+    happens next, configured resources and filesystem locations, then live
+    CPU/memory/network facts when an instance exists. Internal projection
+    names and server explanations are deliberately absent. Unobserved facts
+    remain explicit rather than being inferred. [width] is the available
+    content width, so long diagnostics wrap instead of disappearing at the
+    pane edge.
 
     For a microvm keeper this also says where its build output lands: how
     many checkouts write to the block volume, and the path of each one still
@@ -20,3 +23,14 @@ val view_lines : width:int -> t -> string list
     a checkout on the share pins a host vnode per file it writes, and only a
     person can clear it, because the server refuses to delete build output it
     did not create. *)
+
+type logs
+
+val decode_logs :
+  sanitize:(string -> string) -> Yojson.Safe.t -> (logs, string) result
+(** Decode the authenticated host-runtime log response. Log payloads are split
+    into lines before each line is terminal-sanitized. *)
+
+val logs_view_lines : width:int -> logs -> string list
+(** Render actual Docker or Apple Container stdout/stderr, distinct from
+    Keeper activity and tool-call history. *)

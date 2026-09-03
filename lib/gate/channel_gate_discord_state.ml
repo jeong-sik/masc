@@ -67,6 +67,10 @@ let read_bindings_lookup_result () =
   read_bindings_result ()
   |> Result.map_error (fun detail -> Binding_store_read_failed detail)
 
+let configured_channel_ids_result () =
+  read_bindings_lookup_result ()
+  |> Result.map (List.map (fun (binding : binding) -> binding.channel_id))
+
 (* ── Thread registry ──────────────────────────────────────────────
    Thread→parent mapping populated from THREAD_CREATE gateway events.
    Used by [resolve_keeper_for_channel_result] to resolve bindings for thread
@@ -154,8 +158,10 @@ let gateway_state_label = function
 type ready_info = Channel_gate_connector.ready_info
 
 let last_ready : ready_info option Atomic.t = Atomic.make None
+let last_bot_user_name : string option Atomic.t = Atomic.make None
+let current_guild_ids_ref : string list Atomic.t = Atomic.make []
 
-let record_ready ~bot_user_id =
+let record_ready ~bot_user_id ~bot_user_name ~guild_ids =
   Atomic.set last_ready
     (Some
        {
@@ -163,7 +169,71 @@ let record_ready ~bot_user_id =
          (* NDT-OK: READY wall-clock is operator-facing telemetry only
             (status_json last_ready_at); no control flow reads it. *)
          ready_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
-       })
+       });
+  Atomic.set last_bot_user_name bot_user_name;
+  Atomic.set current_guild_ids_ref guild_ids
+
+let current_guild_ids () = Atomic.get current_guild_ids_ref
+
+type directory_phase =
+  | Directory_not_started
+  | Directory_refreshing
+  | Directory_complete
+  | Directory_partial
+
+type directory_observation = {
+  phase : directory_phase;
+  server_count : int;
+  channel_count : int;
+  person_count : int;
+  authentication_failed : string list;
+  permission_denied : string list;
+  errors : string list;
+  updated_at : string option;
+}
+
+let directory_observation : directory_observation Atomic.t =
+  Atomic.make
+    { phase = Directory_not_started
+    ; server_count = 0
+    ; channel_count = 0
+    ; person_count = 0
+    ; authentication_failed = []
+    ; permission_denied = []
+    ; errors = []
+    ; updated_at = None
+    }
+
+let record_directory_refresh_started () =
+  let previous = Atomic.get directory_observation in
+  Atomic.set directory_observation { previous with phase = Directory_refreshing }
+
+let record_directory_refresh_finished ~server_count ~channel_count ~person_count
+    ~authentication_failed ~permission_denied ~errors =
+  let authentication_failed =
+    List.sort_uniq String.compare authentication_failed
+  in
+  let permission_denied = List.sort_uniq String.compare permission_denied in
+  let errors = List.sort_uniq String.compare errors in
+  Atomic.set directory_observation
+    { phase =
+        (if authentication_failed = [] && permission_denied = [] && errors = []
+         then Directory_complete
+         else Directory_partial)
+    ; server_count
+    ; channel_count
+    ; person_count
+    ; authentication_failed
+    ; permission_denied
+    ; errors
+    ; updated_at = Some (Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()))
+    }
+
+let directory_phase_label = function
+  | Directory_not_started -> "not_started"
+  | Directory_refreshing -> "refreshing"
+  | Directory_complete -> "complete"
+  | Directory_partial -> "partial"
 
 let status_json ?(audit_limit = 10) () =
   let binding_store_path = binding_store_read_path () in
@@ -210,6 +280,7 @@ let status_json ?(audit_limit = 10) () =
     |> List.filter_map Fun.id
     |> String.concat "; "
   in
+  let directory = Atomic.get directory_observation in
   `Assoc
     [
       ("channel", `String channel);
@@ -222,6 +293,7 @@ let status_json ?(audit_limit = 10) () =
           (Channel_gate_connector.connector_state_label ~available ~connected
              ~stale:false) );
       ("error", `String error);
+      ("bot_token_present", `Bool token_present);
       ("status_source", `String "in_process_gateway");
       ("gateway_state", `String (gateway_state_label gateway_state));
       ("trigger_policy", trigger_policy_json ());
@@ -236,15 +308,27 @@ let status_json ?(audit_limit = 10) () =
           (match Atomic.get last_ready with
            | Some { ready_at; _ } -> ready_at
            | None -> "") );
-      (* READY carries only the bot user id; the gateway does not parse
-         the username. *)
-      ("bot_user_name", `String "");
+      ( "bot_user_name",
+        `String (Option.value ~default:"" (Atomic.get last_bot_user_name)) );
       ( "bot_user_id",
         `String
           (match Atomic.get last_ready with
            | Some { ready_bot_user_id; _ } -> ready_bot_user_id
            | None -> "") );
-      ("guild_count", `Int 0);
+      ("guild_count", `Int (List.length (current_guild_ids ())));
+      ("directory_state", `String (directory_phase_label directory.phase));
+      ("directory_server_count", `Int directory.server_count);
+      ("directory_channel_count", `Int directory.channel_count);
+      ("directory_person_count", `Int directory.person_count);
+      ( "directory_authentication_failed",
+        `List
+          (List.map (fun value -> `String value)
+             directory.authentication_failed) );
+      ( "directory_permission_denied",
+        `List (List.map (fun value -> `String value) directory.permission_denied) );
+      ("directory_errors", `List (List.map (fun value -> `String value) directory.errors));
+      ( "directory_updated_at",
+        `String (Option.value ~default:"" directory.updated_at) );
       ("gate_base_url", `String "in-process");
       ("gate_healthy", if connected then `Bool true else `Null);
       ("gate_health_checked_at", `String (if connected then updated_at else ""));
@@ -276,6 +360,7 @@ let connector_json ?(audit_limit = 10) () =
       ("status_source", status |> U.member "status_source");
       ("gateway_state", status |> U.member "gateway_state");
       ("error", `String (string_member status "error"));
+      ("bot_token_present", status |> U.member "bot_token_present");
       ("binding_store_path", `String (string_member status "binding_store_path"));
       ("binding_store_read_ok", status |> U.member "binding_store_read_ok");
       ("binding_store_error", status |> U.member "binding_store_error");
@@ -287,6 +372,16 @@ let connector_json ?(audit_limit = 10) () =
       ("bot_user_name", `String (string_member status "bot_user_name"));
       ("bot_user_id", `String (string_member status "bot_user_id"));
       ("guild_count", `Int (int_member status "guild_count"));
+      ("directory_state", status |> U.member "directory_state");
+      ("directory_server_count", status |> U.member "directory_server_count");
+      ("directory_channel_count", status |> U.member "directory_channel_count");
+      ("directory_person_count", status |> U.member "directory_person_count");
+      ( "directory_authentication_failed",
+        status |> U.member "directory_authentication_failed" );
+      ( "directory_permission_denied",
+        status |> U.member "directory_permission_denied" );
+      ("directory_errors", status |> U.member "directory_errors");
+      ("directory_updated_at", status |> U.member "directory_updated_at");
       ("gate_base_url", `String (string_member status "gate_base_url"));
       ( "gate_healthy",
         Option.value ~default:`Null
@@ -350,7 +445,7 @@ let bind ~channel_id ~keeper_name ~actor_name =
     |> Result.map_error Store.mutation_error_to_string
     |> Result.map (fun () -> status_json ())
 
-let unbind ~channel_id ~actor_name =
+let unbind_internal ?expected_keeper_name ~channel_id ~actor_name () =
   let channel_id = String.trim channel_id in
   if channel_id = "" then
     Error "channel_id is required"
@@ -362,6 +457,12 @@ let unbind ~channel_id ~actor_name =
              String.equal binding.channel_id channel_id)
       with
       | None -> Error "binding not found"
+      | Some (removed_binding : binding)
+        when (match expected_keeper_name with
+              | Some expected ->
+                not (String.equal expected removed_binding.keeper_name)
+              | None -> false) ->
+        Error "binding changed"
       | Some (removed_binding : binding) ->
         let updated_bindings =
           List.filter
@@ -385,6 +486,12 @@ let unbind ~channel_id ~actor_name =
           , () ))
     |> Result.map_error Store.mutation_error_to_string
     |> Result.map (fun () -> status_json ())
+
+let unbind ~channel_id ~actor_name =
+  unbind_internal ~channel_id ~actor_name ()
+
+let unbind_if_keeper ~channel_id ~expected_keeper_name ~actor_name =
+  unbind_internal ~expected_keeper_name ~channel_id ~actor_name ()
 
 (* ---------------------------------------------------------------- *)
 (* In-process gateway support                                       *)

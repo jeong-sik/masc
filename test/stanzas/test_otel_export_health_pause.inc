@@ -11,6 +11,7 @@
   eio_main
   eio.unix
   masc
+  masc.masc_log
   masc.otel_spans
   opentelemetry
   unix))

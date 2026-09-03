@@ -67,22 +67,25 @@ let test_chat_help_names_memory_cycle () =
         binding.help
 
 let test_plain_listing_footer_shape () =
+  (* Connectors answers the row search, so its footer carries the two Search
+     hints between its own keys and the shared meta tail. That order is the
+     shape being pinned: groups, then declaration order inside each. *)
   let canonical =
-    "j/k:scroll  b / u:bind / unbind  Esc:keeper  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  b / u:bind / unbind  Esc:keeper  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
   in
   check str "the plain listing keeps its footer" canonical
     (Masc_tui_keys.footer_hints Connectors)
 
 let test_system_logs_footer_names_browser_controls () =
   check str "logs names filters and detail"
-    "j/k:move / scroll  PgUp/PgDn:detail page  [ / ]:previous / next  l:level floor  v:verbose  c:category  Right / Enter:detail  Left / Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:move / scroll  PgUp/PgDn:detail page  [ / ]:previous / next  l:level floor  v:verbose  c:category  Right / Enter:detail  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints System_logs)
 
 let test_lanes_footer_opens_standalone_runs () =
   check str "Lanes names its run drill-down, config source, and way back"
     (* [hints_of_bindings] stable-sorts by group: Navigate (j/k, e, p)
        precedes Act (Right/Enter, Esc) regardless of declaration order. *)
-    "j/k:move  e:lane config  p:runtime  Right / Enter:runs  Esc:runtime  r:refresh  Tab:next  q:quit"
+    "j/k:move  e:lane config  p:runtime  Right / Enter:runs  Esc:runtime  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =
@@ -115,7 +118,7 @@ let test_lanes_scroll_reserves_standalone_matrix_rows () =
 
 let test_harness_footer_links_to_overview_task () =
   check str "Harness names its task link"
-    "j/k:move  v:next Planning tab  PgUp/PgDn:page  [ / ]:previous / next  Right / Enter:verdict  Left / Esc:back  y:agree  n:overrule  Y:copy task  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  PgUp/PgDn:page  [ / ]:previous / next  Right / Enter:verdict  Left / Esc:back  y:agree  x:overrule  Y:copy task  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Harness)
 
 let test_schedules_footer_names_write_and_read_controls () =
@@ -243,17 +246,24 @@ let test_resources_footer_steps_through_detail () =
 
 let test_repositories_footer_offers_code_and_git_changes () =
   check str "repositories names the Code and Git changes paths"
-    "j/k:scroll  Enter:browse  d:Git changes  a:add  Left / Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  Enter:browse  d:Git changes  a:add  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Repositories)
 
 let test_memory_footer_offers_the_fact_browser () =
+  (* One spelling for the keeper row. [ / ] was listed beside j/k for the
+     same movement and no arm answered it. *)
   check str "the health table names the way into the facts"
-    "j/k:scroll  [ / ]:keeper  Enter:facts  r:refresh  Tab:next  q:quit"
-    (Masc_tui_keys.footer_hints Memory)
+    "j/k:move  Enter:facts  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Memory);
+  check Alcotest.bool "the dead bracket hint is gone" false
+    (List.exists
+       (fun (binding : Masc_tui_keys.binding) ->
+          String.equal binding.Masc_tui_keys.key "[ / ]")
+       (Masc_tui_keys.for_surface Memory))
 
 let test_memory_facts_footer_names_filter_and_way_back () =
   check str "the browser names movement, the category cycle, and Esc"
-    "j/k:move  c:category  Esc:health  /:find  r:refresh  Tab:next  q:quit"
+    "j/k:move  c:category  Esc:health  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_memory_facts
 
 let sample_memory_fact ~category ~claim : Tui_decode.memory_fact =
@@ -344,7 +354,7 @@ let test_verification_footer_carries_the_verdict_keys () =
   (* Verification is a list/detail surface: Enter explains the request before
      the two-press approve or the $EDITOR reject reason changes it. *)
   check str "verification names detail, approve, and reject"
-    "j/k:move  v:next Planning tab  [ / ]:previous / next  Right / Enter:details  Left / Esc:back  a:approve  x:reject  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  [ / ]:previous / next  Right / Enter:details  Left / Esc:back  a:approve  x:reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Verification)
 
 let test_fusion_footer_pins_the_shared_list_projection () =
@@ -871,12 +881,12 @@ let test_detail_tab_hint_projects_the_table () =
    GitHub tab, e for the settings form). *)
 let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   [ Detail_info, []
-  ; Detail_sandbox, [ "R" ]
+  ; Detail_sandbox, [ "o"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []
   ; Detail_github, [ "L" ]
   ; Detail_identity, [ "arrows+enter"; "T"; "A"; "/"; "R" ]
-  ; Detail_channels, [ "b / u" ]
+  ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u u" ]
   ; Detail_automation, []
   ; Detail_runs, []
   ]
@@ -893,6 +903,241 @@ let test_detail_tab_bindings_cover_the_live_keys () =
          (keeper_detail_tab_label tab ^ " tab keys")
          expected actual)
     live_tab_keys
+
+let test_keeper_detail_reserves_lowercase_u_for_channel_unbind () =
+  let keys =
+    Masc_tui_keys.for_surface (Keepers Keeper_detail)
+    |> List.map (fun (binding : Masc_tui_keys.binding) -> binding.key)
+  in
+  Alcotest.(check bool) "uppercase runtime remains" true (List.mem "U" keys);
+  Alcotest.(check bool) "lowercase u is free for Channels" false
+    (List.mem "u" keys)
+
+let test_a_loop_turn_without_input_keeps_an_arm () =
+  (* The defect this closes: the dispatch loop turns on its own timeout as
+     well as on input, so reading that turn as an unrelated key left every
+     two-press arm alive for exactly one iteration. Two [u] presses removed a
+     channel binding only when both bytes arrived in the same read. *)
+  check Alcotest.bool "a turn that read nothing cancels nothing" false
+    (Masc_tui_keys.cancels_two_press ~input_seen:false ~key:None
+       ~second_press:[ "u" ]);
+  check Alcotest.bool "and the key it did not read is not the second press"
+    false
+    (Masc_tui_keys.cancels_two_press ~input_seen:false ~key:(Some "j")
+       ~second_press:[ "u" ])
+
+let test_input_that_is_not_the_second_press_cancels () =
+  (* [key] is [None] for a mouse report, a paste, and a graphics reply. Those
+     are input the operator produced, so they end the confirmation. *)
+  check Alcotest.bool "a mouse report or a paste cancels" true
+    (Masc_tui_keys.cancels_two_press ~input_seen:true ~key:None
+       ~second_press:[ "u" ]);
+  List.iter
+    (fun (pressed, second_press, expected, label) ->
+       check Alcotest.bool label expected
+         (Masc_tui_keys.cancels_two_press ~input_seen:true
+            ~key:(Some pressed) ~second_press))
+    [ "u", [ "u" ], false, "the second press holds the arm"
+    ; "j", [ "u" ], true, "a cursor move cancels it"
+    ; "U", [ "u" ], true, "a different case is a different key"
+    ; "Y", [ "y"; "Y"; "n"; "N" ], false, "either answer holds the approval"
+    ; "e", [ "y"; "Y"; "n"; "N" ], true, "an unrelated key cancels it"
+    ; "x", [], true, "an arm with no second press cancels on any key"
+    ]
+
+let surface_keys surface =
+  List.map
+    (fun (binding : Masc_tui_keys.binding) -> binding.Masc_tui_keys.key)
+    (Masc_tui_keys.for_surface surface)
+
+(* Every surface [Masc_tui_types.surface_row_texts] can answer with rows.
+   Read off that function's arms, which is where the row search comes from:
+   the arm that opens [/] asks it, and so does the arm that steps [n] / [N].
+   Keeper detail is absent on purpose -- its rows exist only while the
+   context inspector is open on the request tab, and both that inspector and
+   the Identity tab's filter claim [/] above the surface search and declare
+   it in their own tables. *)
+let surfaces_that_answer_the_row_search =
+  [ "Keepers", Keepers Keeper_list
+  ; "Lanes", Lanes
+  ; "Verification", Verification
+  ; "Harness", Harness
+  ; "Repositories", Repositories
+  ; "Memory", Memory
+  ; "Connectors", Connectors
+  ; "Runtime", Runtime
+  ; "System logs", System_logs
+  ; "Code", Code
+  ]
+
+let test_every_searchable_surface_names_its_search () =
+  (* A key that works and is not listed is the same drift as a listed key
+     that does nothing, pointing the other way. Eight of these ten answered
+     [/] and said nothing about it. *)
+  List.iter
+    (fun (label, surface) ->
+       let keys = surface_keys surface in
+       check Alcotest.bool (label ^ " names /") true (List.mem "/" keys);
+       check Alcotest.bool (label ^ " names n / N") true
+         (List.mem "n / N" keys))
+    surfaces_that_answer_the_row_search
+
+let test_a_surface_without_rows_offers_no_row_search () =
+  (* The other direction: [/] on these reaches the same arm and finds no row
+     list, so listing it would advertise a key that does nothing. Board's
+     Search-group [f] narrows to a hearth and is not the row search. *)
+  List.iter
+    (fun (label, surface) ->
+       check Alcotest.bool (label ^ " has no row list to search") false
+         (List.mem "/" (surface_keys surface)))
+    [ "Overview", Overview
+    ; "Activity", Acting
+    ; "Keeper detail", Keepers Keeper_detail
+    ; "Keeper logs", Keepers Keeper_logs
+    ; "Keeper calls", Keepers Keeper_calls
+    ; "Chat", Keepers Keeper_message
+    ; "Runtime pick", Keepers Keeper_runtime_pick
+    ; "Board", Board
+    ; "Approvals", Approvals
+    ; "Planning", Planning
+    ; "Schedules", Schedules
+    ; "Fusion", Fusion
+    ; "Resources", Resources
+    ; "Changes", Changes
+    ; "Config", Config
+    ; "Tools", Tools
+    ]
+
+let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
+  (* The renderer used to spell this footer by hand, naming d, H, m and w.
+     The three language-server questions worked on that screen and never
+     appeared on it; blame and the row search did not either once they
+     arrived. Projected from the table now, narrowed per pane. *)
+  let file = Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_file in
+  let tree = Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_tree in
+  let overlay =
+    Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_overlay
+  in
+  let holds needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec scan i =
+      i + n <= h
+      && (String.equal (String.sub haystack i n) needle || scan (i + 1))
+    in
+    scan 0
+  in
+  List.iter
+    (fun hint ->
+       check Alcotest.bool ("an open file names " ^ hint) true
+         (holds hint file))
+    [ "K:hover"; "D:definition"; "R:references"; "b:blame"; "/:find"
+    ; "d:diff"; "H:history"; "m:notes" ];
+  check Alcotest.bool "an open file scrolls" true (holds "j/k:scroll" file);
+  (* The tree answers none of the file's keys, and says so by not naming
+     them -- a hint for a key the pane will not take is the same lie as a
+     key with no hint. *)
+  List.iter
+    (fun hint ->
+       check Alcotest.bool ("the tree does not name " ^ hint) false
+         (holds hint tree))
+    [ "K:hover"; "D:definition"; "R:references"; "b:blame"; "H:history" ];
+  check Alcotest.bool "the tree moves" true (holds "j/k:move" tree);
+  (* An overlay covers the code, so the keys that act on it are gone while
+     it is up -- and [w], which writes a note, is live only there. *)
+  check Alcotest.bool "an overlay drops the code keys" false
+    (holds "b:blame" overlay);
+  check Alcotest.bool "an overlay keeps the note write" true
+    (holds "w:add note" overlay);
+  check Alcotest.bool "and the open file does not offer it" false
+    (holds "w:add note" file);
+  (* The history view has commits to open; the other two panes do not, and
+     named the key anyway until it was read off a running screen. *)
+  check Alcotest.bool "an overlay opens a commit" true
+    (holds "Enter (history):open" overlay);
+  List.iter
+    (fun (label, hints) ->
+       check Alcotest.bool (label ^ " has no commit to open") false
+         (holds "Enter (history)" hints))
+    [ ("the tree", tree); ("an open file", file) ]
+
+let test_the_note_form_offers_the_line_the_cursor_is_on () =
+  (* The anchor was the literal 1. It shows in the store: every one of this
+     workspace's 51 annotations sits at line 1, including the two written
+     from this pane -- which is what a form that never offered a line
+     produces, not a workspace that declined to anchor.
+
+     1-based, because it is the number the gutter draws beside the line. *)
+  let holds needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec scan i =
+      i + n <= h
+      && (String.equal (String.sub haystack i n) needle || scan (i + 1))
+    in
+    scan 0
+  in
+  let stem = Masc_tui_types.code_note_stem ~anchor:412 in
+  check Alcotest.bool "the cursor line opens the form" true
+    (holds {|"line_start": 412|} stem);
+  check Alcotest.bool "and closes it" true (holds {|"line_end": 412|} stem);
+  check Alcotest.bool "the anchor is not pinned to the top" false
+    (holds {|"line_start": 1,|} stem);
+  check Alcotest.bool "the kind still leads with a comment" true
+    (holds {|"kind": "Comment"|} stem);
+  (* The first line is a real anchor, not the absence of one. *)
+  check Alcotest.bool "line one is expressible" true
+    (holds {|"line_start": 1|} (Masc_tui_types.code_note_stem ~anchor:1))
+
+let test_code_asks_the_language_server_three_questions () =
+  (* K hover, D definition, R references -- one family, one case each, and
+     uppercase throughout so the surface's lowercase keys stay its own. The
+     route behind them refused [references] until it was opened; the key
+     table is where an operator finds out it is there. *)
+  let keys = surface_keys Code in
+  List.iter
+    (fun key ->
+       check Alcotest.bool ("Code asks " ^ key) true (List.mem key keys))
+    [ "K"; "D"; "R" ]
+
+let test_code_separates_blame_from_the_definition_walk () =
+  (* [b] and [B] sit next to each other on one surface and mean unrelated
+     things: the margin naming who last touched each run, and the walk back
+     through definition jumps. The surface already pairs [d] diff with [D]
+     definition the same way, so the hazard is the pair being read as one
+     binding -- both spellings stay listed, and separately.
+
+     This pins the declaration, not the dispatch: the ordered match lives
+     inside the event loop where no test reaches it. *)
+  let keys = surface_keys Code in
+  check Alcotest.bool "blame is listed" true (List.mem "b" keys);
+  check Alcotest.bool "the definition walk kept its own key" true
+    (List.mem "B" keys);
+  let labelled key =
+    List.find_map
+      (fun (binding : Masc_tui_keys.binding) ->
+         if String.equal binding.Masc_tui_keys.key key then
+           Some binding.Masc_tui_keys.label
+         else None)
+      (Masc_tui_keys.for_surface Code)
+  in
+  check (Alcotest.option str) "b reads as blame" (Some "blame") (labelled "b");
+  check (Alcotest.option str) "B reads as back" (Some "back") (labelled "B")
+
+let test_a_searchable_surface_does_not_also_bind_n () =
+  (* [n] / [N] step the last row search on every surface that does not bind
+     the key itself, and [search_last] outlives the surface it was typed on.
+     A surface that both answers the row search and binds [n] therefore loses
+     that key for the rest of the session. Harness did: its overrule now
+     spells [x], the way Verification spells its own rejection.
+
+     Read over the same list the declaration test uses, so the two cannot
+     disagree about which surfaces the row search reaches. *)
+  List.iter
+    (fun (label, surface) ->
+       check Alcotest.bool (label ^ " leaves n to the search step") false
+         (List.mem "n" (surface_keys surface)))
+    surfaces_that_answer_the_row_search;
+  check Alcotest.bool "Harness overrules with x" true
+    (List.mem "x" (surface_keys Harness))
 
 let test_detail_tab_keys_reach_the_help_sheet () =
   let sheet = Masc_tui_keys.help_sections ~current:(Keepers Keeper_detail) () in
@@ -927,6 +1172,26 @@ let () =
             test_one_spelling_per_key
         ; Alcotest.test_case "chat help names the Memory cycle" `Quick
             test_chat_help_names_memory_cycle
+        ; Alcotest.test_case "a searchable surface does not also bind n" `Quick
+            test_a_searchable_surface_does_not_also_bind_n
+        ; Alcotest.test_case "Code separates blame from the definition walk"
+            `Quick test_code_separates_blame_from_the_definition_walk
+        ; Alcotest.test_case "Code asks the language server three questions"
+            `Quick test_code_asks_the_language_server_three_questions
+        ; Alcotest.test_case "the Code footer names the keys of its pane"
+            `Quick test_the_code_footer_names_the_keys_of_the_pane_it_draws
+        ; Alcotest.test_case "the note form offers the cursor line" `Quick
+            test_the_note_form_offers_the_line_the_cursor_is_on
+        ; Alcotest.test_case "every searchable surface names its search"
+            `Quick test_every_searchable_surface_names_its_search
+        ; Alcotest.test_case "a surface without rows offers no row search"
+            `Quick test_a_surface_without_rows_offers_no_row_search
+        ] )
+    ; ( "two-press arms"
+      , [ Alcotest.test_case "a loop turn without input keeps an arm" `Quick
+            test_a_loop_turn_without_input_keeps_an_arm
+        ; Alcotest.test_case "input that is not the second press cancels"
+            `Quick test_input_that_is_not_the_second_press_cancels
         ] )
     ; ( "projections"
       , [ Alcotest.test_case "plain listing footer shape" `Quick
@@ -1001,6 +1266,8 @@ let () =
             test_logs_is_an_activity_child
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
+        ; Alcotest.test_case "Keeper detail reserves u for channel unbind"
+            `Quick test_keeper_detail_reserves_lowercase_u_for_channel_unbind
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick
             test_keepers_jump_uses_one_binding_for_dispatch_and_help
         ; Alcotest.test_case "the sheet opens on the current surface" `Quick

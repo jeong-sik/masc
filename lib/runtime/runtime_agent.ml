@@ -1048,7 +1048,11 @@ let config_with_boundary_response_capture
   { config with hooks = Some hooks }
 ;;
 
-let run_blocks
+type run_input =
+  | New_input of Agent_core.Types.content_block list
+  | Continue_from_checkpoint
+
+let run_blocks_internal
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
@@ -1058,6 +1062,7 @@ let run_blocks
     ?(on_resume : (unit -> unit) option)
     ?(agent_ref : Agent_core.Agent.t option ref option)
     ?cooperative_yield_probe
+    ~(run_input : run_input)
     (goal_blocks : Agent_core.Types.content_block list)
   : (run_result, Agent_core.Error.t) result =
   match
@@ -1117,25 +1122,62 @@ let run_blocks
           let boundary_probe = cooperative_yield_probe in
           match boundary_probe with
             | None ->
-              (match on_event with
-               | Some cb ->
-                 Agent_core.Agent.run_stream_blocks
-                   ~sw
-                   ?clock
-                   ?on_yield
-                   ?on_resume
-                   ~on_event:cb
-                   agent
-                   goal_blocks
-               | None ->
-                 Agent_core.Agent.run_blocks
-                   ~sw
-                   ?clock
-                   ?on_yield
-                   ?on_resume
-                   agent
-                   goal_blocks)
-              |> Result.map (fun response -> `Completed response)
+              (match run_input with
+               | New_input goal_blocks ->
+                 (match on_event with
+                  | Some cb ->
+                    Agent_core.Agent.run_stream_blocks
+                      ~sw
+                      ?clock
+                      ?on_yield
+                      ?on_resume
+                      ~on_event:cb
+                      agent
+                      goal_blocks
+                  | None ->
+                    Agent_core.Agent.run_blocks
+                      ~sw
+                      ?clock
+                      ?on_yield
+                      ?on_resume
+                      agent
+                      goal_blocks)
+                 |> Result.map (fun response -> `Completed response)
+               | Continue_from_checkpoint ->
+                 let api_strategy =
+                   match on_event with
+                   | None -> Agent_core.Agent.Sync
+                   | Some on_event ->
+                     let on_telemetry =
+                       Option.map
+                         (fun bus ->
+                            Agent_core.Telemetry_bus.publish
+                              (Agent_core.Telemetry_bus.of_event_bus bus))
+                         (Agent_core.Agent.options agent).event_bus
+                     in
+                     Agent_core.Agent.Stream { on_event; on_telemetry }
+                 in
+                 (match
+                    Agent_core.Agent.Advanced.continue
+                      ~sw
+                      ?clock
+                      ?on_yield
+                      ?on_resume
+                      ~api_strategy
+                      ~on_tool_boundary:(fun _ -> Agent_core.Agent.Advanced.Continue)
+                      agent
+                  with
+                  | Ok (Agent_core.Agent.Advanced.Completed response) ->
+                    Ok (`Completed response)
+                  | Ok
+                      (Agent_core.Agent.Advanced.Terminal_tool_completed completion)
+                    ->
+                    Ok (`Completed completion.receipt.response)
+                  | Ok (Agent_core.Agent.Advanced.Yielded _) ->
+                    Error
+                      (Agent_core.Error.Internal
+                         "checkpoint continuation yielded without a cooperative probe")
+                  | Error _ as error -> error))
             | Some probe ->
               let probe_error = ref None in
               let yield_decision = ref None in
@@ -1156,15 +1198,26 @@ let run_blocks
                   Agent_core.Agent.Stream { on_event; on_telemetry }
               in
               let advanced_result =
-                Agent_core.Agent.Advanced.run_blocks
-                  ~sw
-                  ?clock
-                  ?on_yield
-                  ?on_resume
-                  ~api_strategy
-                  ~on_tool_boundary
-                  agent
-                  goal_blocks
+                match run_input with
+                | New_input goal_blocks ->
+                  Agent_core.Agent.Advanced.run_blocks
+                    ~sw
+                    ?clock
+                    ?on_yield
+                    ?on_resume
+                    ~api_strategy
+                    ~on_tool_boundary
+                    agent
+                    goal_blocks
+                | Continue_from_checkpoint ->
+                  Agent_core.Agent.Advanced.continue
+                    ~sw
+                    ?clock
+                    ?on_yield
+                    ?on_resume
+                    ~api_strategy
+                    ~on_tool_boundary
+                    agent
               in
               (match
                  prefer_cooperative_probe_error !probe_error advanced_result
@@ -1353,6 +1406,56 @@ let run_blocks
         }
     in
     Error (Keeper_internal_error.core_error_of_masc_internal_error typed_internal_error))
+
+let run_blocks
+    ~sw
+    ~net
+    ~config
+    ?agent_core_checkpoint
+    ?on_event
+    ?on_yield
+    ?on_resume
+    ?agent_ref
+    ?cooperative_yield_probe
+    goal_blocks
+  =
+  run_blocks_internal
+    ~sw
+    ~net
+    ~config
+    ?agent_core_checkpoint
+    ?on_event
+    ?on_yield
+    ?on_resume
+    ?agent_ref
+    ?cooperative_yield_probe
+    ~run_input:(New_input goal_blocks)
+    goal_blocks
+
+let continue_from_checkpoint
+    ~sw
+    ~net
+    ~config
+    ~checkpoint
+    ?on_event
+    ?on_yield
+    ?on_resume
+    ?agent_ref
+    ?cooperative_yield_probe
+    ()
+  =
+  run_blocks_internal
+    ~sw
+    ~net
+    ~config
+    ~agent_core_checkpoint:checkpoint
+    ?on_event
+    ?on_yield
+    ?on_resume
+    ?agent_ref
+    ?cooperative_yield_probe
+    ~run_input:Continue_from_checkpoint
+    []
 
 let run
     ~(sw : Eio.Switch.t)

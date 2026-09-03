@@ -41,8 +41,10 @@ type error =
   | Http_status of { request_id : string; code : int; body_bytes : int }
     (** Non-2xx HTTP status whose body did not parse as a Discord
         error envelope. *)
-  | Discord_api of { request_id : string; code : int }
-    (** Non-2xx HTTP status carrying a Discord error envelope. *)
+  | Discord_api of { request_id : string; http_status : int; code : int }
+    (** Non-2xx HTTP status carrying a Discord error envelope. [http_status]
+        preserves authentication/authorization classification even when the
+        Discord payload's own [code] is zero or unrelated. *)
   | Other of { request_id : string; reason : string; body_bytes : int }
     (** A response whose body or shape was not usable. *)
 
@@ -118,6 +120,24 @@ val get_channel :
   unit ->
   (Yojson.Safe.t, error) result
 (** Fetch the Discord channel object for [channel_id]. *)
+
+val get_guild :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  guild_id:snowflake ->
+  unit ->
+  (Yojson.Safe.t, error) result
+(** Fetch the Discord guild object for [guild_id]. *)
+
+val get_guild_channels :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  guild_id:snowflake ->
+  unit ->
+  (Yojson.Safe.t, error) result
+(** List all guild channels visible to the bot. *)
 
 val get_channel_messages :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
@@ -237,6 +257,18 @@ val build_typing_request :
 val build_channel_request :
   token:string ->
   channel_id:snowflake ->
+  unit ->
+  string * (string * string) list * string
+
+val build_guild_request :
+  token:string ->
+  guild_id:snowflake ->
+  unit ->
+  string * (string * string) list * string
+
+val build_guild_channels_request :
+  token:string ->
+  guild_id:snowflake ->
   unit ->
   string * (string * string) list * string
 

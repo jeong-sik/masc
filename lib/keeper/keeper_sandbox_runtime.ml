@@ -34,6 +34,12 @@ type live_container =
   ; owner_pid : int option
   ; started_at : float option
   ; ttl_sec : float option
+  ; cpus : int option
+  ; memory_bytes : int option
+  ; hostname : string option
+  ; ipv4_address : string option
+  ; ipv6_address : string option
+  ; gateway : string option
   }
 
 type cleanup_remove_outcome =
@@ -185,6 +191,12 @@ let parse_live_container_line line =
       ; owner_pid = int_opt owner_pid
       ; started_at = float_opt started_at
       ; ttl_sec = float_opt ttl_sec
+      ; cpus = None
+      ; memory_bytes = None
+      ; hostname = None
+      ; ipv4_address = None
+      ; ipv6_address = None
+      ; gateway = None
       }
   | _ ->
     Error
@@ -534,6 +546,12 @@ let live_container_to_yojson (c : live_container) =
     ; option_int_field "owner_pid" c.owner_pid
     ; option_float_field "started_at" c.started_at
     ; option_float_field "ttl_sec" c.ttl_sec
+    ; option_int_field "cpus" c.cpus
+    ; option_int_field "memory_bytes" c.memory_bytes
+    ; option_string_field "hostname" c.hostname
+    ; option_string_field "ipv4_address" c.ipv4_address
+    ; option_string_field "ipv6_address" c.ipv6_address
+    ; option_string_field "gateway" c.gateway
     ]
 ;;
 
@@ -655,6 +673,41 @@ let image_preflight_start_error (failure : classified_error) =
   docker_image_preflight_failure_message
     ~prefix:"docker_container_start_failed"
     failure
+;;
+
+let docker_preflight_failed_label = "docker_preflight_failed"
+
+(* One line an operator can act on: every check the preflight failed, then
+   the next actions the preflight already names. Consumed by keeper_up
+   admission, so a Docker keeper is refused where it is declared instead of
+   failing its first Execute. The failure classes ride along so the line
+   stays non-empty even if a future check records a class without a
+   message. *)
+let docker_preflight_rejection (preflight : docker_preflight) =
+  if preflight.ok
+  then None
+  else (
+    let failures =
+      [ preflight.docker_runtime_error; preflight.image_error; preflight.hardening_error ]
+      |> List.filter_map (fun failure -> failure)
+    in
+    let classes =
+      match preflight.failure_classes with
+      | [] -> ""
+      | classes -> Printf.sprintf " (classes: %s)" (String.concat "," classes)
+    in
+    let next =
+      match preflight.next_actions with
+      | [] -> ""
+      | actions -> Printf.sprintf "; next: %s" (String.concat " " actions)
+    in
+    Some
+      (Printf.sprintf
+         "%s: %s%s%s"
+         docker_preflight_failed_label
+         (String.concat "; " failures)
+         classes
+         next))
 ;;
 
 let docker_preflight_to_yojson (preflight : docker_preflight) =

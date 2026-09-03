@@ -155,7 +155,8 @@ remote_endpoint = "build-box"
   let cli, frame_path = make_stub ~dir:base ~mode in
   let endpoint =
     Keeper_sandbox_remote.of_container_exec ~base_path:base ~keeper_name:"keeper-a"
-      ~remote_root:"/masc-work" ~gh_config_dir:"/identity/gh" ~env_allowlist:[]
+      ~remote_root:"/masc-work" ~gh_config_dir:"/identity/gh" ~injected_env:[]
+      ~env_allowlist:[]
       ~connect_timeout_sec:1 ~max_concurrent_sessions:2
       { cli = [ cli ]
       ; container_name = "masc-keeper-vm-keeper-a"

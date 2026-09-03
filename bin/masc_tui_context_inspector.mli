@@ -42,6 +42,20 @@ type attributed_turn =
             newest row returned is itself attributed. *)
   }
 
+type recent_turn =
+  { turn : int
+        (** Absolute-turn number, as [Turn_record.absolute_turn]. *)
+  ; ts : float
+  ; input_tokens : int option
+        (** What the provider counted as this request's input. [None] when
+            the provider reported a conversation-cumulative figure instead,
+            which is a number about the whole conversation and not a fact
+            about this turn. *)
+  ; cache_read : int option
+  ; output_tokens : int option
+  ; scope : Runtime_usage_scope.t
+  }
+
 (** What one turn-records page yields.
 
     Two readings rather than one, because a keeper can keep turning while its
@@ -51,15 +65,42 @@ type attributed_turn =
     attributed row threw away the token, usage, wire and window readings the
     newest row did carry. [latest] is always the newest row on the page;
     [attributed] is the newest row that also has an exact composition, when
-    the page holds one. *)
+    the page holds one. [recent] is every row on the page, newest first,
+    with the figures a per-turn reading wants; the page is what the caller
+    asked the server for, not a curated window. *)
 type selection =
   { latest : Turn_record.t
   ; attributed : attributed_turn option
+  ; recent : recent_turn list
+  ; rows : Turn_record.t list
+        (** Every row on the page, newest first. [latest] is its head and
+            [recent] is its projection; the list itself is what turn
+            navigation steps through, so the row an operator stepped back to
+            is the same row the page decoded, not a re-derived one. *)
+  }
+
+(** What the chat transcript holds for the inspected turn -- the answer
+    that came back for the request this pane is reading. The parts are
+    display-ready rows from the transcript reader; this pane owns only
+    their placement and their cap. *)
+type response_part =
+  | Reply_text of string
+  | Tool_steps of string list
+  | Reasoning_lines of string list
+
+type response_turn =
+  { parts : response_part list
+  ; outside_newest_page : bool
+        (** [true] when the newest history page held no row for this turn.
+            The reply exists but this fetch did not reach it -- stepping far
+            enough back outruns one page, and the pane says so rather than
+            showing another turn's answer. *)
   }
 
 type reading =
   { turn : (selection, string) result
   ; provider_input : (provider_input, string) result
+  ; response : (response_turn, string) result
   }
 
 type tab =

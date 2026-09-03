@@ -2,9 +2,18 @@ open Keeper_memory_os_types
 
 let recorded_at fact = Masc_domain.iso8601_of_unix_seconds fact.first_seen
 
+(* A Board source is rendered as the ids the Board tools accept, so the model
+   can open it; no prose is added here. *)
 let basis_label fact =
   match fact.basis with
-  | Observed -> "observed"
+  | Observed Transcript -> "observed"
+  | Observed (Board { post_id; comment_id = None }) ->
+    Printf.sprintf "observed board=%s" (Board_types.Post_id.to_string post_id)
+  | Observed (Board { post_id; comment_id = Some comment_id }) ->
+    Printf.sprintf
+      "observed board=%s comment=%s"
+      (Board_types.Post_id.to_string post_id)
+      (Board_types.Comment_id.to_string comment_id)
   | Derived _ -> "derived"
 ;;
 

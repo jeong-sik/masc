@@ -7,6 +7,7 @@
 type scope =
   | Person
   | Channel
+  | Server
 
 val remember :
   base_dir:string ->
@@ -23,3 +24,11 @@ val recall :
   base_dir:string -> connector:string -> scope:scope -> id:string -> string option
 (** Recall the most recently observed name. Each scoped connector file is
     loaded once per process, so fallback cost does not grow per message. *)
+
+val entries :
+  base_dir:string -> connector:string -> scope:scope -> (string * string) list
+(** Current ID-to-name projection, sorted by ID. Name changes replace the
+    projected value while the JSONL retains their append-only history. *)
+
+val path : base_dir:string -> connector:string -> scope:scope -> string
+(** Durable JSONL path for this connector/scope mapping. *)

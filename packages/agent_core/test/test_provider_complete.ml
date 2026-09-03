@@ -593,7 +593,7 @@ let test_ollama_output_schema () =
   let config =
     PC.make
       ~kind:Ollama
-      ~model_id:"dashscope-3.5:9b"
+      ~model_id:"qwen3.5:9b"
       ~base_url:"http://localhost:11434"
       ~response_format:(JsonSchema schema)
       ()
@@ -671,7 +671,7 @@ let test_ollama_native_multimodal_request_body () =
 
 let test_ollama_parse_parallel_tool_calls_object_arguments () =
   let body =
-    {|{"model":"dashscope-3:8b","done":true,"done_reason":"tool_calls",
+    {|{"model":"qwen3:8b","done":true,"done_reason":"tool_calls",
        "message":{"role":"assistant","content":"",
          "tool_calls":[
            {"function":{"index":0,"name":"get_temperature","arguments":{"city":"New York"}}},
@@ -700,7 +700,7 @@ let test_ollama_parse_parallel_tool_calls_object_arguments () =
 
 let test_ollama_parse_tool_call_preserves_explicit_id_and_string_arguments () =
   let body =
-    {|{"model":"dashscope-3:8b","done":true,"done_reason":"tool_calls",
+    {|{"model":"qwen3:8b","done":true,"done_reason":"tool_calls",
        "message":{"role":"assistant","content":"",
          "tool_calls":[
            {"id":"call_explicit","function":{"name":"get_weather","arguments":"{\"city\":\"Seoul\"}"}}
@@ -722,7 +722,7 @@ let test_ollama_parse_tool_call_preserves_explicit_id_and_string_arguments () =
 
 let test_ollama_parse_rejects_malformed_tool_call () =
   let body =
-    {|{"model":"dashscope-3:8b","done":true,"done_reason":"tool_calls",
+    {|{"model":"qwen3:8b","done":true,"done_reason":"tool_calls",
        "message":{"role":"assistant","content":"",
          "tool_calls":[
            {"function":{"name":"ok_tool","arguments":{"city":"Seoul"}}},
@@ -740,7 +740,7 @@ let test_ollama_parse_rejects_malformed_tool_call () =
 
 let test_ollama_parse_rejects_non_object_tool_arguments () =
   let body =
-    {|{"model":"dashscope-3:8b","done":true,"done_reason":"tool_calls",
+    {|{"model":"qwen3:8b","done":true,"done_reason":"tool_calls",
        "message":{"role":"assistant","content":"",
          "tool_calls":[
            {"function":{"name":"get_weather","arguments":"42"}}
@@ -1288,8 +1288,13 @@ let accept_rejected_reason label = function
   | Error _ -> Alcotest.failf "%s: expected typed AcceptRejected" label
 ;;
 
+(* The declared toggle wire under test is chat_template_kwargs, the one
+   OpenAI-compatible format that still carries a boolean enable_thinking. *)
 let enable_thinking_field body =
-  body |> Yojson.Safe.from_string |> Yojson.Safe.Util.member "enable_thinking"
+  body
+  |> Yojson.Safe.from_string
+  |> Yojson.Safe.Util.member "chat_template_kwargs"
+  |> Yojson.Safe.Util.member "enable_thinking"
 ;;
 
 let test_unknown_openai_compat_enable_rejected_sync_and_stream () =
@@ -1330,7 +1335,7 @@ let test_declared_enable_dialect_passes_sync_stream_and_wire () =
     { Llm_provider.Capabilities.openai_compat_chat_capabilities with
       supports_reasoning = true
     ; supports_extended_thinking = true
-    ; thinking_control_format = Llm_provider.Capabilities.Enable_thinking
+    ; thinking_control_format = Llm_provider.Capabilities.Chat_template_kwargs
     }
   in
   let config =
@@ -1503,7 +1508,7 @@ let test_explicit_false_semantics_remain_typed () =
     stream_reason;
   let encodable_caps =
     { inherent_caps with
-      thinking_control_format = Llm_provider.Capabilities.Enable_thinking
+      thinking_control_format = Llm_provider.Capabilities.Chat_template_kwargs
     }
   in
   let encodable =

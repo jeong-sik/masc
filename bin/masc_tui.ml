@@ -1003,12 +1003,22 @@ let consume_dispatched_message_draft state request =
    would leave rows the reader has to catch with the arrow keys anyway. *)
 let keeper_message_page_rows state =
   let rows, _cols = get_terminal_size () in
-  (* The pane's fixed chrome is 7 rows (render_keeper_message names them);
+  (* The pane's fixed chrome is shared with [render_keeper_message];
      composer growth is already inside [keeper_message_status_rows]. Adding
      composer_max_rows here counted it twice, and every PgUp jumped four
      rows short of the screenful the comment promises. *)
-  let chrome = 7 in
-  max 1 (rows - chrome - keeper_message_status_rows state)
+  let status_rows = keeper_message_status_rows state in
+  (* PgUp creates the reading-back notice and PgDn removes it. Reserve that
+     possible row on both sides of the transition: using only the rows drawn
+     right now made a 46-row pane move 38 up, then only 37 down, leaving the
+     operator one row behind the live edge. One stable reserved budget also
+     leaves a single context row overlapping adjacent pages. *)
+  let page_status_rows =
+    keeper_message_support_status_rows state ~status_rows
+  in
+  max 1
+    (Masc_tui_message_layout.message_history_height ~terminal_rows:rows
+       ~status_rows:page_status_rows)
 
 (* What this pane has of the operator's own lines for the keeper on screen,
    oldest first. The arrows walk it the way a shell walks its own history.
@@ -1250,8 +1260,8 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       if visibility = Tools_full then load_tool_changes ();
       true
     end else if c = Some 6 then begin
-      (* Ctrl-F folds the origin headings into the body's margin and then
-         drops the clock from it, handing those rows back to the messages.
+      (* Ctrl-F starts with the clock-free gutter, then adds an inline clock,
+         then gives full timestamp/request metadata a row of its own.
          Ctrl-O would have read better for an origin, but it is VDISCARD on
          this platform and [Unix.terminal_io] carries no IEXTEN field to turn
          that off, so the terminal would eat the key before the loop saw it. *)
@@ -1583,7 +1593,7 @@ type async_msg =
   | Verification_verdict_done of (string * bool, string) result
   | Harness_label_done of (string, string) result
   | Keeper_calls_loaded of
-      string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
+      int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Goal_timeline_loaded of
       string * (Masc.Tui_decode.goal_timeline, string) result
   | Task_history_loaded of
@@ -1594,6 +1604,8 @@ type async_msg =
   | Keeper_config_view_loaded of string * (string list, string) result
   | Keeper_sandbox_view_loaded of
       string * (Masc_tui_keeper_sandbox.t, string) result
+  | Keeper_sandbox_logs_loaded of
+      string * int * (Masc_tui_keeper_sandbox.logs, string) result
   | Runtime_config_view_loaded of (string * string list, string) result
   | Runtime_params_loaded of
       (Tui_decode.runtime_param_row list, string) result
@@ -1611,6 +1623,10 @@ type async_msg =
       string * (Masc.Tui_decode.git_diff, string) result
   | Code_notes_loaded of
       string * (Masc.Tui_decode.ide_annotation list, string) result
+  (* The path the margin describes; stamped so a late answer cannot caption
+     another file. *)
+  | Code_blame_loaded of
+      string * (Masc.Tui_decode.blame_block list, string) result
   (* The path the note anchored to; success re-reads the listing. *)
   | Code_note_written of string * (unit, string) result
   (* (question, symbol, answer) — the note the pane shows names both. *)
@@ -2422,26 +2438,42 @@ let launch_schedules_load state ~mailbox =
 (* The durable call log of one keeper, over HTTP. The row the answer is
    applied to is named in the message so a load that returns after the
    operator moved to another keeper is discarded, not drawn under it. *)
-let launch_keeper_calls_load state ~mailbox keeper_name =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_keeper_calls ~host ~port ~keeper_name ~limit:100
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Keeper_calls_loaded (keeper_name, result))
+let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
+  let same_scope =
+    Option.equal String.equal state.keeper_calls_keeper (Some keeper_name)
   in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
+  if state.keeper_calls_loading && same_scope then
+    if force then state.keeper_calls_refresh_pending <- true else ()
+  else begin
+    state.keeper_calls_generation <- state.keeper_calls_generation + 1;
+    let generation = state.keeper_calls_generation in
+    if not same_scope then state.keeper_calls <- None;
+    state.keeper_calls_keeper <- Some keeper_name;
+    state.keeper_calls_loading <- true;
+    state.keeper_calls_refresh_pending <- false;
+    state.keeper_calls_error <- None;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_http.fetch_keeper_calls ~host ~port ~keeper_name ~limit:100
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
       enqueue_async mailbox
-        (Keeper_calls_loaded (keeper_name, Error "Eio switch is unavailable"))
+        (Keeper_calls_loaded (generation, keeper_name, result))
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        enqueue_async mailbox
+          (Keeper_calls_loaded
+             (generation, keeper_name, Error "Eio switch is unavailable"))
+  end
 
 (* The two detail-pane histories, over HTTP. Same discipline as the call
    log: the answer names the row it is for, so a load that returns after the
@@ -2910,6 +2942,32 @@ let github_pr_url ~remote ~number =
 (* The codebase slug for the surface's scope, when it has one. Only a
    repository row carries the server-minted slug (RFC-0378: the client
    never re-derives it); the other scopes honestly have none. *)
+(* Same fiber-and-mailbox shape as the notes read below. Scoped by the same
+   keeper / repo axes the file itself was read through, so the margin
+   describes the checkout on screen rather than whichever one the server
+   would default to. *)
+let launch_code_blame_load state ~mailbox ~path =
+  let host = server_peer_host in
+  let port = state.port in
+  let keeper, repo = code_scope_axes state in
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_git_blame ?keeper ?repo ~host ~port ~path ()
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_blame_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_blame_loaded (path, Error "Eio switch is unavailable"))
+
 let launch_code_notes_load state ~mailbox ~codebase ~path =
   let host = server_peer_host in
   let port = state.port in
@@ -3237,6 +3295,34 @@ let launch_keeper_sandbox_view state ~mailbox keeper_name =
       enqueue_async mailbox
         (Keeper_sandbox_view_loaded
            (keeper_name, Error "Eio switch is unavailable"))
+
+let launch_keeper_sandbox_logs state ~mailbox keeper_name =
+  let host = server_peer_host in
+  let port = state.port in
+  state.keeper_sandbox_logs_generation <- state.keeper_sandbox_logs_generation + 1;
+  let generation = state.keeper_sandbox_logs_generation in
+  state.keeper_sandbox_logs_inflight <- Some (keeper_name, generation);
+  let run () =
+    let result =
+      try
+        Masc_tui_loader.load_keeper_sandbox_logs ~host ~port ~keeper_name
+          ~tail:200
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox
+      (Keeper_sandbox_logs_loaded (keeper_name, generation, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      run ();
+      `Stop_daemon)
+  | None ->
+    enqueue_async mailbox
+      (Keeper_sandbox_logs_loaded
+         (keeper_name, generation, Error "Eio switch is unavailable"))
 
 let launch_github_identity_view state ~mailbox keeper_name =
   let host = server_peer_host in
@@ -3739,6 +3825,14 @@ let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
     end
   end
 
+let launch_keeper_chat_tool_details_load ?(force = false) state ~mailbox
+    ~keeper_name =
+  if state.msg_tool_visibility <> Tools_full then ()
+  else begin
+    launch_keeper_chat_file_changes_load ~force state ~mailbox ~keeper_name;
+    launch_keeper_calls_load ~force state ~mailbox keeper_name
+  end
+
 (* Changes follows the selected Keeper, but the surface is useful precisely
    when comparing more than one Keeper. Brackets move that shared selection
    and invalidate every row whose identity belonged to the previous Keeper;
@@ -4049,6 +4143,11 @@ let search_land state index =
   in
   match state.view with
   | Keepers Keeper_list -> state.keeper_cursor <- index
+  | Keepers Keeper_detail when state.context_inspector_open ->
+      (* A landed search row is a new item: its reader starts at the top of
+         the detail, the way a j/k move does. *)
+      state.context_inspector_cursor <- index;
+      state.context_inspector_detail_scroll <- 0
   | Lanes -> state.lanes_standalone_cursor <- index
   | Verification ->
       state.verification_cursor <- index;
@@ -4300,7 +4399,7 @@ let launch_keeper_history_load ?(load_file_changes = true) state ~mailbox
   (* Full tool detail owns the only lazy read. Compact chat remains byte- and
      network-compatible; repeated history refreshes reuse this separate cache. *)
   if load_file_changes then
-    launch_keeper_chat_file_changes_load state ~mailbox ~keeper_name
+    launch_keeper_chat_tool_details_load state ~mailbox ~keeper_name
 
 let launch_context_inspector_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
@@ -4308,16 +4407,19 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
   state.context_inspector_generation <- state.context_inspector_generation + 1;
   state.context_inspector_loading <- true;
   let generation = state.context_inspector_generation in
+  let turn_back = state.context_inspector_turn_back in
   let run () =
     let reading =
       try
         Masc_tui_http.fetch_keeper_context_inspector ~host ~port ~keeper_name
+          ~turn_back
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
           let error = Error (Printexc.to_string exn) in
           { Masc_tui_context_inspector.turn = error
           ; provider_input = error
+          ; response = error
           }
     in
     enqueue_async mailbox
@@ -4336,6 +4438,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
            , keeper_name
            , { Masc_tui_context_inspector.turn = error
              ; provider_input = error
+             ; response = error
              } ))
 
 let open_context_inspector state ~mailbox ~keeper_name =
@@ -4350,6 +4453,7 @@ let open_context_inspector state ~mailbox ~keeper_name =
   state.context_inspector_cursor <- 0;
   state.context_inspector_scroll <- 0;
   state.context_inspector_exact <- None;
+  state.context_inspector_turn_back <- 0;
   launch_context_inspector_load state ~mailbox ~keeper_name
 
 let switch_to_next_keeper_message state ~mailbox =
@@ -4836,17 +4940,74 @@ let launch_keeper_request ?promoted state ~mailbox request =
         (Keeper_chat_dispatch_blocked
            (request, "Eio switch is unavailable"))
 
+(* The joined line keeps the request identity the history row already carries,
+   so the row is rewritten rather than duplicated. [append_user_history_once]
+   matches on identity AND text, so a changed text would otherwise append a
+   second row for the same queue item. *)
+let update_queued_history_text state (request : Keeper_chat.request) =
+  let text =
+    Keeper_chat.terminal_safe_text ~preserve_newlines:true request.message
+  in
+  state.msg_history <-
+    List.map
+      (fun entry ->
+        if
+          (match entry.me_role with Message_user _ -> true | _ -> false)
+          && String.equal entry.me_request_id request.Keeper_chat.request_id
+          && String.equal entry.me_keeper_name request.keeper_name
+        then { entry with me_text = text }
+        else entry)
+      state.msg_history
+
 let queue_keeper_message state request =
   let submitted_at = Unix.gettimeofday () in
-  match Chat_queue.push state.msg_queued ~submitted_at request with
-  | Error _ as error -> error
-  | Ok (queue, waiting) ->
+  let joined =
+    if not state.coalesce_queued_input
+    then None
+    else (
+      match
+        Chat_queue.join_target state.msg_queued
+          ~keeper_name:request.Keeper_chat.keeper_name
+      with
+      | None -> None
+      | Some item ->
+        let waiting_request = item.Chat_queue.request in
+        let merged =
+          { waiting_request with
+            Keeper_chat.message =
+              waiting_request.Keeper_chat.message
+              ^ "\n"
+              ^ request.Keeper_chat.message
+          ; Keeper_chat.attachments =
+              waiting_request.Keeper_chat.attachments
+              @ request.Keeper_chat.attachments
+          }
+        in
+        (match
+           Chat_queue.replace_request state.msg_queued
+             ~request_id:merged.Keeper_chat.request_id merged
+         with
+         | Error _ -> None
+         | Ok queue -> Some (queue, merged)))
+  in
+  match joined with
+  | Some (queue, merged) ->
       state.msg_queued <- queue;
-      (* Keep one request-owned session row for recall and the later active
-         turn, but causal projection withholds it from the transcript while
-         the queue owns it. NEXT renders the queue item itself. *)
-      append_user_history_once ~submitted_at state request;
-      Ok waiting
+      update_queued_history_text state merged;
+      Ok
+        (Chat_queue.length_for_keeper queue
+           ~keeper_name:merged.Keeper_chat.keeper_name)
+  | None ->
+      (match Chat_queue.push state.msg_queued ~submitted_at request with
+       | Error _ as error -> error
+       | Ok (queue, waiting) ->
+           state.msg_queued <- queue;
+           (* Keep one request-owned session row for recall and the later
+              active turn, but causal projection withholds it from the
+              transcript while the queue owns it. NEXT renders the queue item
+              itself. *)
+           append_user_history_once ~submitted_at state request;
+           Ok waiting)
 ;;
 
 let queue_keeper_steer state ~causal_parent_request_id request =
@@ -5708,7 +5869,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          | `Toggle -> toggle_tool_visibility state.msg_tool_visibility);
       (match state.msg_tool_visibility, target with
        | Tools_full, Some keeper_name ->
-           launch_keeper_chat_file_changes_load ~force:true state ~mailbox
+           launch_keeper_chat_tool_details_load ~force:true state ~mailbox
              ~keeper_name
        | Tools_compact, _ | Tools_full, None -> ());
       notice ~role:Message_status
@@ -6311,7 +6472,17 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
        | Detail_sandbox ->
            state.keeper_sandbox_view <- None;
            state.keeper_sandbox_view_error <- None;
-           launch_keeper_sandbox_view state ~mailbox keeper.k_name
+           launch_keeper_sandbox_view state ~mailbox keeper.k_name;
+           let logs_were_open =
+             match
+               state.keeper_sandbox_logs, state.keeper_sandbox_logs_error
+             with
+             | Some (stamp, _), _ | _, Some (stamp, _) ->
+               String.equal stamp keeper.k_name
+             | None, None -> false
+           in
+           if logs_were_open then
+             launch_keeper_sandbox_logs state ~mailbox keeper.k_name
        | Detail_instructions ->
            state.keeper_config_view <- None;
            state.keeper_config_view_error <- None;
@@ -7762,7 +7933,7 @@ let handle_composer_key state ~base_path ~mailbox key =
           ~load_tool_changes:(fun () ->
             match state.msg_target_keeper_name with
             | Some keeper_name ->
-                launch_keeper_chat_file_changes_load ~force:true state ~mailbox
+                launch_keeper_chat_tool_details_load ~force:true state ~mailbox
                   ~keeper_name
             | None -> ())
           ~drain_queue:(fun () -> ())
@@ -8139,18 +8310,42 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Some current when String.equal current task_id ->
            state.task_history <- Some (task_id, result)
        | _ -> ())
-  | Keeper_calls_loaded (keeper_name, result) -> (
-      let still_selected =
-        match List.nth_opt state.keepers state.keeper_cursor with
-        | Some keeper -> String.equal keeper.k_name keeper_name
-        | None -> false
+  | Keeper_calls_loaded (generation, keeper_name, result) -> (
+      let still_current =
+        generation = state.keeper_calls_generation
+        && Option.equal String.equal state.keeper_calls_keeper
+             (Some keeper_name)
       in
-      if still_selected then
-        match result with
-        | Ok snapshot ->
-            state.keeper_calls <- Some snapshot;
-            state.keeper_calls_error <- None
-        | Error detail -> state.keeper_calls_error <- Some detail)
+      if still_current then begin
+        let refresh_pending = state.keeper_calls_refresh_pending in
+        state.keeper_calls_loading <- false;
+        state.keeper_calls_refresh_pending <- false;
+        (match result with
+         | Ok snapshot when String.equal snapshot.kcs_keeper keeper_name ->
+             state.keeper_calls <- Some snapshot;
+             state.keeper_calls_error <- None
+         | Ok snapshot ->
+             state.keeper_calls_error <-
+               Some
+                 (Printf.sprintf
+                    "tool-call response named keeper %s, expected %s"
+                    snapshot.kcs_keeper keeper_name)
+         | Error detail -> state.keeper_calls_error <- Some detail);
+        let still_visible =
+          match state.view with
+          | Keepers Keeper_message ->
+              state.msg_tool_visibility = Tools_full
+              && Option.equal String.equal state.msg_target_keeper_name
+                   (Some keeper_name)
+          | Keepers Keeper_calls ->
+              Option.exists
+                (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+                (selected_keeper state)
+          | _ -> false
+        in
+        if refresh_pending && still_visible then
+          launch_keeper_calls_load ~force:true state ~mailbox keeper_name
+      end)
   | Keeper_config_view_loaded (keeper_name, result) -> (
       let still_selected =
         match List.nth_opt state.keepers state.keeper_cursor with
@@ -8175,6 +8370,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             state.keeper_sandbox_view <- Some (keeper_name, reading);
             state.keeper_sandbox_view_error <- None
         | Error detail -> state.keeper_sandbox_view_error <- Some detail)
+  | Keeper_sandbox_logs_loaded (keeper_name, generation, result) -> (
+      let is_current =
+        state.keeper_sandbox_logs_inflight = Some (keeper_name, generation)
+      in
+      if is_current then begin
+        state.keeper_sandbox_logs_inflight <- None;
+        match result with
+        | Ok logs ->
+          state.keeper_sandbox_logs <- Some (keeper_name, logs);
+          state.keeper_sandbox_logs_error <- None
+        | Error detail ->
+          state.keeper_sandbox_logs_error <- Some (keeper_name, detail)
+      end)
   | Prompts_loaded result ->
       (match result with
        | Ok snapshot ->
@@ -8315,8 +8523,27 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.code_notes <- None;
           state.code_notes_error <- None;
           state.code_notes_open <- false;
-          state.code_notes_scroll <- 0
+          state.code_notes_scroll <- 0;
+          state.code_blame <- None;
+          state.code_blame_error <- None
       | Error detail -> state.code_file_error <- Some detail)
+  | Code_blame_loaded (path, result) ->
+      (* Stamped by path like the notes below: an answer that arrives after
+         the operator moved on describes bytes that are no longer on screen,
+         and a margin naming the wrong authors is worse than no margin. *)
+      let still_current =
+        match state.code_file with
+        | Some (open_path, _) -> String.equal open_path path
+        | None -> false
+      in
+      if still_current then (
+        match result with
+        | Ok blocks ->
+            state.code_blame <- Some (path, blocks);
+            state.code_blame_error <- None
+        | Error detail ->
+            state.code_blame <- None;
+            state.code_blame_error <- Some detail)
   | Code_notes_loaded (path, result) ->
       let still_current =
         match state.code_file with
@@ -8767,7 +8994,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           launch_keeper_history_load ~load_file_changes:false state ~mailbox
             ~keeper_name:request.Keeper_chat.keeper_name;
           if state.view = Keepers Keeper_message then
-            launch_keeper_chat_file_changes_load ~force:true state ~mailbox
+            launch_keeper_chat_tool_details_load ~force:true state ~mailbox
               ~keeper_name:request.Keeper_chat.keeper_name
         end;
         load_local_workspace_if_safe state base_path;
@@ -9168,8 +9395,27 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Connectors_loaded result -> (
       match result with
       | Ok snapshot ->
+          let previous_id =
+            Option.bind state.connectors (fun previous ->
+                Option.map
+                  (fun (connector : Tui_decode.connector) -> connector.cn_id)
+                  (List.nth_opt previous.cs_connectors state.connectors_cursor))
+          in
           state.connectors <- Some snapshot;
-          state.connectors_error <- None
+          state.connectors_error <- None;
+          state.connectors_cursor <-
+            (match previous_id with
+             | None -> 0
+             | Some id ->
+                 let rec find index = function
+                   | [] -> 0
+                   | (connector : Tui_decode.connector) :: rest ->
+                       if String.equal connector.cn_id id then index
+                       else find (index + 1) rest
+                 in
+                 find 0 snapshot.cs_connectors);
+          state.connectors_binding_cursor <- 0;
+          state.connector_unbind_armed <- None
       | Error detail -> state.connectors_error <- Some detail)
   | Runtime_surface_loaded (generation, result) ->
       let is_current = generation = state.runtime_surface_generation in
@@ -9272,7 +9518,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                (Printf.sprintf
                   "file-change response named keeper %s, expected %s"
                   snapshot.Masc.Tui_decode.fcs_keeper keeper_name)
-         | Error detail -> store_error detail);
+        | Error detail -> store_error detail);
         if refresh_pending && state.view = Keepers Keeper_message then
           launch_keeper_chat_file_changes_load ~force:true state ~mailbox
             ~keeper_name
@@ -9725,6 +9971,10 @@ let main () =
      key, and a reader who never set it sees no change. *)
   state.hints_visible <-
     Option.value (Masc_tui_config.hints_visible ~base_path) ~default:true;
+  state.coalesce_queued_input <-
+    Option.value
+      (Masc_tui_config.coalesce_queued_input ~base_path)
+      ~default:true;
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
@@ -10093,10 +10343,11 @@ let main () =
      then the server's preview validation; only a preview that passes is
      written. A failed preview keeps the operator's text out of the file
      and puts the validator's words in Recent Events. *)
-  (* Connector bind/unbind: the form is three fields, and $EDITOR is the
-     form we already have. The name field picks the connector; the rest is
-     the route's body. *)
-  let handle_connector_form ~action ~stem ~post () =
+  (* Connector bind/unbind: the highlighted transport owns the route. The
+     form edits only the route body, so its visible selection and mutation
+     target cannot disagree. *)
+  let handle_connector_form ?fixed_channel_id ~action ~connector
+      ~required_fields ~stem ~post () =
     match Masc_tui_editor.editor_command () with
     | None ->
       report_action state "error"
@@ -10121,42 +10372,137 @@ let main () =
                 | _ -> None)
             | _ -> None
           in
-          match field "name" with
-          | None -> report_action state "error" (action ^ ": \"name\" is required")
-          | Some connector -> (
-            match post ~connector ~json with
-            | Ok _ ->
-              report_action state "system" (action ^ ": ok (" ^ connector ^ ")");
-              launch_connectors_load state ~mailbox:async_messages
-            | Error detail -> report_action state "error" (action ^ ": " ^ detail)))))
+          match List.find_opt (fun key -> Option.is_none (field key)) required_fields with
+          | Some key ->
+              report_action state "error"
+                (Printf.sprintf "%s: %S is required" action key)
+          | None -> (
+              match fixed_channel_id with
+              | Some expected when field "channel_id" <> Some expected ->
+                  report_action state "error"
+                    (action ^ ": channel_id must remain the selected binding")
+              | Some _ | None -> (
+                  match post ~connector ~json with
+                  | Ok _ ->
+                      state.connector_unbind_armed <- None;
+                      report_action state "system"
+                        (action ^ ": ok (" ^ connector ^ ")");
+                      launch_connectors_load state ~mailbox:async_messages
+                  | Error detail ->
+                      report_action state "error" (action ^ ": " ^ detail))))))
+  in
+  let selected_connector () =
+    Option.bind state.connectors (fun snapshot ->
+        List.nth_opt snapshot.cs_connectors state.connectors_cursor)
+  in
+  let selected_connector_binding (connector : Tui_decode.connector) =
+    List.nth_opt connector.cn_bindings state.connectors_binding_cursor
   in
   let handle_connector_bind () =
+    state.connector_unbind_armed <- None;
     let host = server_peer_host in
     let port = state.port in
     let keeper_name =
-      match selected_keeper state with
-      | Some keeper -> keeper.k_name
-      | None -> ""
+      match state.view, selected_keeper state with
+      | Keepers Keeper_detail, Some keeper -> keeper.k_name
+      | _, _ -> ""
     in
-    handle_connector_form ~action:"bind"
-      ~stem:
-        (Printf.sprintf
-           "{\n  \"name\": \"discord\",\n  \"channel_id\": \"\",\n  \"keeper_name\": \"%s\"\n}\n"
-           (String.escaped keeper_name))
-      ~post:(fun ~connector ~json ->
-        Masc_tui_http.post_connector_bind ~host ~port ~connector
-          ~body_json:(Yojson.Safe.to_string json))
-      ()
+    match selected_connector () with
+    | None -> report_action state "error" "bind: select a transport first"
+    | Some selected ->
+        handle_connector_form ~action:"bind" ~connector:selected.cn_id
+          ~required_fields:[ "channel_id"; "keeper_name" ]
+          ~stem:
+            (Yojson.Safe.pretty_to_string
+               (`Assoc
+                 [ "channel_id", `String ""
+                 ; "keeper_name", `String keeper_name
+                 ])
+             ^ "\n")
+          ~post:(fun ~connector ~json ->
+            Masc_tui_http.post_connector_bind ~host ~port ~connector
+              ~body_json:(Yojson.Safe.to_string json))
+          ()
   in
   let handle_connector_unbind () =
     let host = server_peer_host in
     let port = state.port in
-    handle_connector_form ~action:"unbind"
-      ~stem:"{\n  \"name\": \"discord\",\n  \"channel_id\": \"\"\n}\n"
-      ~post:(fun ~connector ~json ->
-        Masc_tui_http.post_connector_unbind ~host ~port ~connector
-          ~body_json:(Yojson.Safe.to_string json))
-      ()
+    match selected_connector () with
+    | None -> report_action state "error" "unbind: select a transport first"
+    | Some selected ->
+        let submit ?fixed_channel_id channel_id =
+          handle_connector_form ?fixed_channel_id ~action:"unbind"
+            ~connector:selected.cn_id ~required_fields:[ "channel_id" ]
+            ~stem:
+              (Yojson.Safe.pretty_to_string
+                 (`Assoc [ "channel_id", `String channel_id ])
+               ^ "\n")
+            ~post:(fun ~connector ~json ->
+              Masc_tui_http.post_connector_unbind ~host ~port ~connector
+                ~body_json:(Yojson.Safe.to_string json))
+            ()
+        in
+        (match state.view with
+         | Keepers Keeper_detail ->
+             (match selected_connector_binding selected with
+              | None ->
+                  report_action state "error"
+                    "unbind: select a binding with J/K"
+              | Some binding ->
+                  let exact =
+                    selected.cn_id, binding.cb_channel_id, binding.cb_keeper_name
+                  in
+                  if state.connector_unbind_armed = Some exact then begin
+                    state.connector_unbind_armed <- None;
+                    match
+                      Masc_tui_http.post_connector_unbind ~host ~port
+                        ~connector:selected.cn_id
+                        ~body_json:
+                          (Yojson.Safe.to_string
+                             (`Assoc
+                               [ "channel_id", `String binding.cb_channel_id
+                               ; "keeper_name", `String binding.cb_keeper_name
+                               ]))
+                    with
+                    | Ok _ ->
+                      report_action state "system"
+                        ("unbind: removed " ^ binding.cb_channel_id);
+                      launch_connectors_load state ~mailbox:async_messages
+                    | Error detail ->
+                      report_action state "error" ("unbind: " ^ detail)
+                  end else begin
+                    state.connector_unbind_armed <- Some exact;
+                    report_action state "system"
+                      (Printf.sprintf
+                         "unbind armed: press u again to remove %s → %s"
+                         binding.cb_channel_id binding.cb_keeper_name)
+                  end)
+         | _ -> submit "")
+  in
+  let handle_connector_edit () =
+    state.connector_unbind_armed <- None;
+    match selected_connector (), selected_keeper state with
+    | None, _ -> report_action state "error" "edit: select a transport first"
+    | _, None -> report_action state "error" "edit: select a Keeper first"
+    | Some connector, Some keeper ->
+        (match selected_connector_binding connector with
+         | None -> report_action state "error" "edit: select a binding with J/K"
+         | Some binding ->
+             handle_connector_form ~fixed_channel_id:binding.cb_channel_id
+               ~action:"edit binding" ~connector:connector.cn_id
+               ~required_fields:[ "channel_id"; "keeper_name" ]
+               ~stem:
+                 (Yojson.Safe.pretty_to_string
+                    (`Assoc
+                      [ "channel_id", `String binding.cb_channel_id
+                      ; "keeper_name", `String keeper.k_name
+                      ])
+                  ^ "\n")
+               ~post:(fun ~connector ~json ->
+                 Masc_tui_http.post_connector_bind ~host:server_peer_host
+                   ~port:state.port ~connector
+                   ~body_json:(Yojson.Safe.to_string json))
+               ())
   in
   (* A new note over the open file: $EDITOR is the form, and the editor is
      the confirmation step -- a non-zero exit or an empty content leaves the
@@ -10174,8 +10520,20 @@ let main () =
                 report_action state "error"
                   "no $EDITOR set; export EDITOR to add a note here"
             | Some _ -> (
+                (* The line the cursor is on, which is the line the operator
+                   pressed [w] about. This was the literal 1, and it shows:
+                   every one of the 51 annotations this workspace has ever
+                   stored anchors at line 1, including the two written from
+                   here. Nobody declined to anchor -- the form never offered
+                   their line, and correcting it meant editing JSON in
+                   $EDITOR before writing a word.
+
+                   [code_file_cursor] is 0-based and is the same anchor a
+                   language-server question is asked at, so [w] and [K]/[D]/
+                   [R] now agree about which line the operator means. *)
                 let stem =
-                  "{\n  \"line_start\": 1,\n  \"line_end\": 1,\n  \"kind\": \"Comment\",\n  \"content\": \"\"\n}\n"
+                  Masc_tui_types.code_note_stem
+                    ~anchor:(state.code_file_cursor + 1)
                 in
                 match
                   Masc_tui_editor.roundtrip ~restore:restore_terminal
@@ -11255,25 +11613,47 @@ and is loaded on demand through keeper_skill.
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
          a mouse report, or any other key means the operator stayed. *)
       if Option.is_some input && not quit_key then state.quit_armed <- false;
-      (match state.view, key with
-       | _ when compact_viewport -> ()
-       | Approvals, Some ("y" | "Y" | "n" | "N") -> ()
-       | Approvals, Some _ -> state.pending_approval_action <- None
-       (* An armed shutdown expires on the next unrelated key. Otherwise it
-          waits indefinitely and a later press of the same key -- after the
-          cursor has moved, after a refresh -- submits work the operator armed
-          minutes ago for something else. Same rule for an armed goal action. *)
-       | Keepers _, Some ("s" | "S") -> ()
-       | Keepers _, Some _ -> state.keeper_action_pending <- None
-       | Board, Some ("v" | "V") -> ()
-       | Board, Some _ -> state.board_vote_armed <- None
-       | Planning, Some ("c" | "C" | "x" | "X" | "o" | "O") -> ()
-       | Planning, Some _ -> state.goal_action_armed <- None
-       | Schedules, Some ("x" | "X") -> ()
-       | Schedules, Some _ -> state.schedule_cancel_armed <- None
-       | Verification, Some ("a" | "A") -> ()
-       | Verification, Some _ -> state.verification_verdict_armed <- None
-       | _ -> ());
+      (* An armed shutdown expires on the next unrelated input. Otherwise it
+         waits indefinitely and a later press of the same key -- after the
+         cursor has moved, after a refresh -- submits work the operator armed
+         minutes ago for something else. Same rule for every other armed
+         action here, and the same one the quit confirmation above already
+         uses: deliberate input that is not the second press ends it.
+
+         One predicate rather than one restatement per field. The connector
+         unbind used to spell the rule itself and read a loop turn that
+         fetched no input as an unrelated key, so its arm survived a single
+         iteration. The viewport is not part of the rule: an armed
+         destructive action must not outlive the moment it was armed in,
+         least of all across a resize the operator cannot see it through. *)
+      let cancelled second_press =
+        Masc_tui_keys.cancels_two_press
+          ~input_seen:(Option.is_some input) ~key ~second_press
+      in
+      (match state.view with
+       | Approvals ->
+           if cancelled [ "y"; "Y"; "n"; "N" ] then
+             state.pending_approval_action <- None
+       | Keepers _ ->
+           if cancelled [ "s"; "S" ] then state.keeper_action_pending <- None
+       | Board -> if cancelled [ "v"; "V" ] then state.board_vote_armed <- None
+       | Planning ->
+           if cancelled [ "c"; "C"; "x"; "X"; "o"; "O" ] then
+             state.goal_action_armed <- None
+       | Schedules ->
+           if cancelled [ "x"; "X" ] then state.schedule_cancel_armed <- None
+       | Verification ->
+           if cancelled [ "a"; "A" ] then
+             state.verification_verdict_armed <- None
+       | Overview | Acting | Lanes | Harness | Memory | Fusion | Repositories
+       | Changes | Connectors | Runtime | Config | Resources | Tools
+       | System_logs | Code -> ());
+      (* Destructive binding removal deliberately requires two consecutive
+         [u] presses. Any intervening action invalidates the ownership
+         snapshot; the server also compares that owner inside the store lock.
+         Not scoped to the Channels tab: an arm the operator left behind on
+         another surface is exactly the stale confirmation this cancels. *)
+      if cancelled [ "u" ] then state.connector_unbind_armed <- None;
       (* The composer sees the key first, and takes it only when it has one to
          take: unfocused it claims a single key, and only with somewhere to
          send. Everything it does not claim reaches the surface with its
@@ -11410,8 +11790,11 @@ and is loaded on demand through keeper_skill.
            Render_schedule.request render_schedule Render_schedule.Force
        (* [/context] is modal: the summary and exact input text must not leak
           keys into the composer underneath. The quit confirmation and chrome
-          toggles remain global above it, matching Help and Palette. *)
-       | Some k when state.context_inspector_open ->
+          toggles remain global above it, matching Help and Palette. An
+          active surface search outranks it: typing during a search is the
+          search, and the search arm below owns those keys. *)
+       | Some k
+         when state.context_inspector_open && Option.is_none state.search ->
            let exact_input_items () =
              match state.context_inspector_reading with
              | Some
@@ -11447,7 +11830,10 @@ and is loaded on demand through keeper_skill.
            let close () =
              state.context_inspector_open <- false;
              state.context_inspector_exact <- None;
-             state.context_inspector_scroll <- 0
+             state.context_inspector_scroll <- 0;
+             state.context_inspector_detail_scroll <- 0;
+             state.context_inspector_focus <- Left_pane;
+             state.context_inspector_turn_back <- 0
            in
            (match k with
             | "esc" ->
@@ -11456,6 +11842,48 @@ and is loaded on demand through keeper_skill.
                      state.context_inspector_exact <- None;
                      state.context_inspector_scroll <- 0
                  | None -> close ())
+            | "[" | "]" ->
+                (* Turn navigation: [ steps back through the page's rows, ]
+                   steps forward, and the fetch re-reads the exact provider
+                   input for the row they name. The keys work on every tab;
+                   a row without a snapshot says so on the request tab. *)
+                let count =
+                  match state.context_inspector_reading with
+                  | Some
+                      ( _
+                      , { Masc_tui_context_inspector.turn =
+                            Ok { Masc_tui_context_inspector.rows; _ }
+                        ; _ } ) ->
+                      List.length rows
+                  | _ -> 0
+                in
+                if count > 0 then begin
+                  let moved =
+                    if k = "[" then
+                      min (count - 1) (state.context_inspector_turn_back + 1)
+                    else max 0 (state.context_inspector_turn_back - 1)
+                  in
+                  if moved <> state.context_inspector_turn_back then begin
+                    state.context_inspector_turn_back <- moved;
+                    state.context_inspector_cursor <- 0;
+                    state.context_inspector_exact <- None;
+                    state.context_inspector_scroll <- 0;
+                    state.context_inspector_detail_scroll <- 0;
+                    Option.iter
+                      (fun keeper_name ->
+                         launch_context_inspector_load state
+                           ~mailbox:async_messages ~keeper_name)
+                      state.context_inspector_keeper
+                  end
+                end
+            | "/" when
+                state.context_inspector_tab
+                = Masc_tui_context_inspector.Exact_input
+                && Option.is_some state.context_inspector_reading ->
+                (* The surface search's own arm sits below this modal block,
+                   so the pane starts the search itself: same state, same
+                   keys, and the block above now yields while it runs. *)
+                state.search <- Some ""
             | "r" ->
                 Option.iter
                   (fun keeper_name ->
@@ -11467,19 +11895,25 @@ and is loaded on demand through keeper_skill.
                   Masc_tui_context_inspector.Composition;
                 state.context_inspector_exact <- None;
                 state.context_inspector_cursor <- 0;
-                state.context_inspector_scroll <- 0
+                state.context_inspector_scroll <- 0;
+                state.context_inspector_detail_scroll <- 0;
+                state.context_inspector_focus <- Left_pane
             | "2" ->
                 state.context_inspector_tab <-
                   Masc_tui_context_inspector.Exact_input;
                 state.context_inspector_exact <- None;
                 state.context_inspector_cursor <- 0;
-                state.context_inspector_scroll <- 0
+                state.context_inspector_scroll <- 0;
+                state.context_inspector_detail_scroll <- 0;
+                state.context_inspector_focus <- Left_pane
             | "3" ->
                 state.context_inspector_tab <-
                   Masc_tui_context_inspector.Input_map;
                 state.context_inspector_exact <- None;
                 state.context_inspector_cursor <- 0;
-                state.context_inspector_scroll <- 0
+                state.context_inspector_scroll <- 0;
+                state.context_inspector_detail_scroll <- 0;
+                state.context_inspector_focus <- Left_pane
             | "\t" | "left" | "right" when Option.is_none state.context_inspector_exact ->
                 state.context_inspector_tab <-
                   (match state.context_inspector_tab with
@@ -11490,7 +11924,19 @@ and is loaded on demand through keeper_skill.
                    | Masc_tui_context_inspector.Input_map ->
                        Masc_tui_context_inspector.Composition);
                 state.context_inspector_cursor <- 0;
-                state.context_inspector_scroll <- 0
+                state.context_inspector_scroll <- 0;
+                state.context_inspector_detail_scroll <- 0;
+                state.context_inspector_focus <- Left_pane
+            | "h" | "l"
+              when Option.is_none state.context_inspector_exact
+                   && terminal_columns >= keeper_split_threshold_cols
+                   && state.context_inspector_tab
+                      <> Masc_tui_context_inspector.Composition ->
+                (* The same caret the roster and the board carry: which pane
+                   hears j/k is a question the reader answers, not the
+                   layout. *)
+                state.context_inspector_focus <-
+                  (if k = "h" then Left_pane else Right_pane)
             | ("j" | "down" | "k" | "up")
               when Option.is_some state.context_inspector_exact
                    || state.context_inspector_tab
@@ -11505,6 +11951,25 @@ and is loaded on demand through keeper_skill.
                 in
                 state.context_inspector_scroll <-
                   move ~count ~height state.context_inspector_scroll
+            | ("j" | "down" | "k" | "up")
+              when state.context_inspector_focus = Right_pane
+                   && terminal_columns >= keeper_split_threshold_cols ->
+                (* The width condition mirrors the h/l arm that set the
+                   focus. A terminal narrowed under the threshold keeps the
+                   stored focus but renders no split, and without this guard
+                   j/k would reach for a detail window that does not exist --
+                   while the cursor arms below, which do work, sat
+                   shadowed. *)
+                let count, height =
+                  Masc_tui_render.context_inspector_detail_viewport state
+                in
+                let move =
+                  match k with
+                  | "j" | "down" -> Masc_tui_scroll.down
+                  | _ -> Masc_tui_scroll.up
+                in
+                state.context_inspector_detail_scroll <-
+                  move ~count ~height state.context_inspector_detail_scroll
             | "j" | "down" ->
                 let count =
                   match state.context_inspector_tab with
@@ -11516,10 +11981,14 @@ and is loaded on demand through keeper_skill.
                 in
                 let last = max 0 (count - 1) in
                 state.context_inspector_cursor <-
-                  min last (state.context_inspector_cursor + 1)
+                  min last (state.context_inspector_cursor + 1);
+                (* A new item is a new document; its reader starts at its
+                   top, not at the window the previous one was left in. *)
+                state.context_inspector_detail_scroll <- 0
             | "k" | "up" ->
                 state.context_inspector_cursor <-
-                  max 0 (state.context_inspector_cursor - 1)
+                  max 0 (state.context_inspector_cursor - 1);
+                state.context_inspector_detail_scroll <- 0
             | "\r" ->
                 if
                   state.context_inspector_tab
@@ -11661,8 +12130,9 @@ and is loaded on demand through keeper_skill.
             | "esc" -> close ()
             | "\r" when
                 (let q = String.trim state.palette_query in
-                 String.starts_with ~prefix:"hover " q
-                 || String.starts_with ~prefix:"def " q) ->
+                 List.exists
+                   (fun (prefix, _) -> String.starts_with ~prefix q)
+                   Masc_tui_types.lsp_question_prefixes) ->
                 (* A typed command, not an entry: the argument is the symbol
                    the language-server question is asked about, on the Code
                    pane's cursor line. *)
@@ -11675,9 +12145,17 @@ and is loaded on demand through keeper_skill.
                           (String.sub q (i + 1) (String.length q - i - 1)) )
                   | None -> (q, "")
                 in
+                (* The typed word back to the question it names, through the
+                   same table the entries were built from. *)
                 let question =
-                  if String.equal question "def" then "definition"
-                  else question
+                  match
+                    List.find_opt
+                      (fun (prefix, _) ->
+                        String.equal (String.trim prefix) question)
+                      Masc_tui_types.lsp_question_prefixes
+                  with
+                  | Some (_, canonical) -> canonical
+                  | None -> question
                 in
                 if String.equal symbol "" then begin
                   (* Bare "def " or "hover ": run the highlighted candidate
@@ -11706,7 +12184,8 @@ and is loaded on demand through keeper_skill.
                   if state.view <> Code || Option.is_none state.code_file
                   then
                     add_event state "error"
-                      "hover/def ask about the file open on the Code surface"
+                      "hover, def and refs ask about the file open on the \
+                       Code surface"
                   else
                     start_code_lsp_question state ~mailbox:async_messages
                       ~question ~symbol
@@ -12199,6 +12678,22 @@ and is loaded on demand through keeper_skill.
        | Some (("[" | "]") as bracket) when state.view = Tools ->
            cycle_tools_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
+       | Some ("J" | "K")
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_channels ->
+           let count =
+             match selected_connector () with
+             | None -> 0
+             | Some connector -> List.length connector.cn_bindings
+           in
+           state.connector_unbind_armed <- None;
+           state.connectors_binding_cursor <-
+             (if key = Some "J" then
+                Masc_tui_scroll.cursor_down ~count
+                  state.connectors_binding_cursor
+              else
+                Masc_tui_scroll.cursor_up ~count
+                  state.connectors_binding_cursor)
        | Some "L"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_github ->
@@ -12331,12 +12826,6 @@ and is loaded on demand through keeper_skill.
           parent, off the Tab ring. *)
        | Some ("l" | "L") when state.view = Acting ->
            goto_surface state ~mailbox:async_messages System_logs
-       | Some (("n" | "N") as direction)
-         when state.search_last <> ""
-              && Option.is_some (surface_row_texts state state.view) ->
-           let after = Option.value (search_row_cursor state) ~default:0 in
-           search_jump state ~query:state.search_last ~after
-             ~backwards:(String.equal direction "N")
        (* In chat, printable keys normally belong to the draft. Keep [?] as
           the documented global Help key when the draft is empty; once a
           sentence has started it remains an ordinary question mark. This
@@ -12459,7 +12948,7 @@ and is loaded on demand through keeper_skill.
                    ~load_tool_changes:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->
-                         launch_keeper_chat_file_changes_load ~force:true state
+                         launch_keeper_chat_tool_details_load ~force:true state
                            ~mailbox:async_messages ~keeper_name
                      | None -> ())
                    ~drain_queue:(fun () ->
@@ -12567,7 +13056,7 @@ and is loaded on demand through keeper_skill.
                          state.code_target_line <- Some (cursor + 1);
                          launch_code_file_load state
                            ~mailbox:async_messages ~path)))
-       | Some (("K" | "D") as key_name)
+       | Some (("K" | "D" | "R") as key_name)
          when state.view = Code && state.code_focus_file = Right_pane
               && Option.is_some state.code_file
               && not state.code_history_open
@@ -12579,8 +13068,10 @@ and is loaded on demand through keeper_skill.
               palette with each as an entry (typing still narrows, and a
               typed "def <name>" keeps working), and none says so. *)
            let question, prefix =
-             if String.equal key_name "K" then ("hover", "hover ")
-             else ("definition", "def ")
+             match key_name with
+             | "K" -> ("hover", "hover ")
+             | "R" -> ("references", "refs ")
+             | "D" | _ -> ("definition", "def ")
            in
            (match Masc_tui_types.code_cursor_line_symbols state with
             | [] ->
@@ -12597,6 +13088,28 @@ and is loaded on demand through keeper_skill.
            (* Adding a note lives inside the notes view: the view proves the
               scope, and the fresh listing lands where the writer looks. *)
            handle_code_note_write ()
+       | Some "b" when state.view = Code && state.code_focus_file = Right_pane
+                       && Option.is_some state.code_file ->
+           (* Who last touched each run of lines, in the margin beside the
+              code. A margin rather than a view: blame answers a question
+              about the line you are reading, and a separate screen would
+              take that line away to answer it.
+
+              Loaded is showing, so this toggles by fetching or dropping.
+              Re-fetched rather than kept on a second press: an edit or a
+              commit since the last read moves the runs, and a stale margin
+              names the wrong author with no sign that it is stale. *)
+           (match state.code_file with
+            | None -> ()
+            | Some (path, _) ->
+                if Option.is_some state.code_blame then begin
+                  state.code_blame <- None;
+                  state.code_blame_error <- None
+                end
+                else begin
+                  state.code_blame_error <- None;
+                  launch_code_blame_load state ~mailbox:async_messages ~path
+                end)
        | Some "m" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some state.code_file ->
            (* The notes anchored to the open file. Repository scope only:
@@ -12676,6 +13189,19 @@ and is loaded on demand through keeper_skill.
                 state.board_detail_wide <- not state.board_detail_wide;
                 state.board_focus <- Right_pane
             | Board_list | Board_compose -> ())
+       | Some (("o" | "O" | "l") as sandbox_log_key)
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_sandbox
+              && (not (String.equal sandbox_log_key "l")
+                  || terminal_columns < keeper_split_threshold_cols
+                  || state.keeper_detail_focus = Right_pane) ->
+           (match selected_keeper state with
+            | None -> ()
+            | Some keeper ->
+              state.keeper_sandbox_logs <- None;
+              state.keeper_sandbox_logs_error <- None;
+              launch_keeper_sandbox_logs state ~mailbox:async_messages
+                keeper.k_name)
        | Some ("h" | "l")
          when terminal_columns >= keeper_split_threshold_cols
               && (match state.view with
@@ -12785,12 +13311,33 @@ and is loaded on demand through keeper_skill.
             | Approvals -> answer_presented_approval Confirm
             | Harness -> handle_harness_agree ()
             | _ -> ())
-       | Some "n" | Some "N" ->
+       (* Stepping the last search is what [n] means on a surface that binds
+          it to nothing else, so it is the tail of this arm rather than an
+          arm of its own above it. As its own arm it sat above every surface
+          that binds the key, and [search_last] is one string for the whole
+          session: a surface with row texts and its own [n] would lose that
+          key permanently after any search anywhere. Nothing is in that
+          position today -- Harness was, and its overrule moved to [x] --
+          and this shape is what keeps it that way.
+
+          The match is exhaustive on purpose. A surface added later has to
+          say whether [n] is its own key or the search step. *)
+       | Some (("n" | "N") as direction) ->
            (match state.view with
             | Approvals -> answer_presented_approval Deny
-            | Harness -> handle_harness_overrule ()
             | Schedules -> handle_schedule_create ()
-            | _ -> ())
+            | Overview | Acting | Keepers _ | Memory | Lanes | Board | Planning
+            | Verification | Harness | Fusion | Repositories | Code | Changes
+            | Connectors | Runtime | Config | Resources | Tools | System_logs ->
+                if
+                  state.search_last <> ""
+                  && Option.is_some (surface_row_texts state state.view)
+                then
+                  let after =
+                    Option.value (search_row_cursor state) ~default:0
+                  in
+                  search_jump state ~query:state.search_last ~after
+                    ~backwards:(String.equal direction "N"))
        | Some "home" when state.view = Tools -> state.tools_scroll <- 0
        | Some "end" when state.view = Tools ->
            state.tools_scroll <-
@@ -12894,6 +13441,12 @@ and is loaded on demand through keeper_skill.
             | System_logs when Option.is_some state.system_logs_detail_seq ->
                 state.system_logs_detail_scroll <-
                   max 0 (state.system_logs_detail_scroll + (direction * page))
+            | Keepers Keeper_detail when state.detail_tab = Detail_channels ->
+                state.detail_scroll <-
+                  max 0 (state.detail_scroll + (direction * page))
+            | Keepers Keeper_detail ->
+                state.detail_scroll <-
+                  max 0 (state.detail_scroll + (direction * page))
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
@@ -12953,7 +13506,8 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_calls ->
                 (match selected_keeper state with
                  | Some keeper ->
-                     launch_keeper_calls_load state ~mailbox:async_messages
+                     launch_keeper_calls_load ~force:true state
+                       ~mailbox:async_messages
                        keeper.k_name
                  | None -> ())
             | Keepers Keeper_detail ->
@@ -12970,7 +13524,7 @@ and is loaded on demand through keeper_skill.
                  | Some keeper_name ->
                      launch_keeper_history_load ~load_file_changes:false state
                        ~mailbox:async_messages ~keeper_name;
-                     launch_keeper_chat_file_changes_load ~force:true state
+                     launch_keeper_chat_tool_details_load ~force:true state
                        ~mailbox:async_messages ~keeper_name
                  | None -> ())
             | Planning | Verification ->
@@ -13224,9 +13778,19 @@ and is loaded on demand through keeper_skill.
                   state.changes_tree_diff_path <- None
                 end
                 else
-                  (* Changes opens from the roster, so Esc goes back to the
-                     roster rather than to Overview. *)
-                  state.view <- Keepers Keeper_list
+                  (* Changes opens from a keeper surface, so Esc goes back to
+                     the one it was opened from rather than to Overview. The
+                     detail draws whoever the roster cursor names, and the
+                     roster can shrink while this surface is up: with nobody
+                     under the cursor the detail has nothing to draw, so the
+                     way back is the roster. The chat pane demotes its own
+                     return for the same reason. *)
+                  state.view <-
+                    (match state.changes_return, selected_keeper state with
+                     | Changes_return_detail, Some _ -> Keepers Keeper_detail
+                     | Changes_return_detail, None
+                     | Changes_return_list, (Some _ | None) ->
+                         Keepers Keeper_list)
             | Repositories ->
                 if state.repository_changes_open then
                   close_repository_changes state
@@ -13451,6 +14015,17 @@ and is loaded on demand through keeper_skill.
                 end
                 else if state.detail_tab = Detail_identity then
                   move_identity_cursor state ~delta:1
+                else if state.detail_tab = Detail_channels then begin
+                  let count =
+                    match state.connectors with
+                    | None -> 0
+                    | Some snapshot -> List.length snapshot.cs_connectors
+                  in
+                  state.connectors_cursor <-
+                    Masc_tui_scroll.cursor_down ~count state.connectors_cursor;
+                  state.connectors_binding_cursor <- 0;
+                  state.detail_scroll <- 0
+                end
                 else state.detail_scroll <- state.detail_scroll + 1
             | Keepers Keeper_logs ->
                 state.log_scroll <-
@@ -13783,6 +14358,17 @@ and is loaded on demand through keeper_skill.
                 end
                 else if state.detail_tab = Detail_identity then
                   move_identity_cursor state ~delta:(-1)
+                else if state.detail_tab = Detail_channels then begin
+                  let count =
+                    match state.connectors with
+                    | None -> 0
+                    | Some snapshot -> List.length snapshot.cs_connectors
+                  in
+                  state.connectors_cursor <-
+                    Masc_tui_scroll.cursor_up ~count state.connectors_cursor;
+                  state.connectors_binding_cursor <- 0;
+                  state.detail_scroll <- 0
+                end
                 else if state.detail_scroll > 0 then
                   state.detail_scroll <- state.detail_scroll - 1
             | Keepers Keeper_logs ->
@@ -14375,9 +14961,18 @@ and is loaded on demand through keeper_skill.
             | Acting
             | Connectors | Config | Resources | Tools -> ())
        (* Changes reads one keeper's file writes and already binds to the
-          roster cursor on entry, so it opens from the roster rather than
-          from the Tab ring. *)
+          roster cursor on entry, so it opens from a keeper surface rather
+          than from the Tab ring. Both of them list [f] in their footer and
+          both name the keeper with the same cursor; detail listed the key
+          with no arm behind it, so the hint was dead there.
+
+          One arm each rather than one arm with a disjunction, because each
+          also records where Esc goes back to. *)
        | Some "f" | Some "F" when state.view = Keepers Keeper_list ->
+           state.changes_return <- Changes_return_list;
+           goto_surface state ~mailbox:async_messages Changes
+       | Some "f" | Some "F" when state.view = Keepers Keeper_detail ->
+           state.changes_return <- Changes_return_detail;
            goto_surface state ~mailbox:async_messages Changes
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
@@ -14425,7 +15020,8 @@ and is loaded on demand through keeper_skill.
              ~keeper_name:keeper.k_name ~mode
        | Some "u" | Some "U"
          when (match state.view with
-               | Keepers Keeper_list | Keepers Keeper_detail -> true
+               | Keepers Keeper_list -> true
+               | Keepers Keeper_detail -> key = Some "U"
                | _ -> false)
               && state.keeper_cursor < List.length state.keepers ->
            (* Open the runtime picker for the keeper under the cursor. The
@@ -14718,6 +15314,12 @@ and is loaded on demand through keeper_skill.
            (* Reject wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)
            handle_verification_reject ()
+       | Some "x" | Some "X" when state.view = Harness ->
+           (* The negative verdict, spelled the way Verification spells its
+              own. It was [n], which this surface cannot keep: Harness
+              answers the row search, and [n] steps that search on every
+              surface that does not bind the key itself. *)
+           handle_harness_overrule ()
        | Some (("l" | "L" | "o") as log_key)
          when (match log_key, state.view with
                | ("l" | "L"), Keepers (Keeper_list | Keeper_detail)
@@ -14965,6 +15567,10 @@ and is loaded on demand through keeper_skill.
        | Some "E"
          when state.view = Config && state.config_pane = Config_params ->
            handle_runtime_param_edit_open ~advanced:true ()
+       | Some "e" | Some "E"
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_channels ->
+           handle_connector_edit ()
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
               inside the keeper-action pipeline: the loop is inside the

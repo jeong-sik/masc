@@ -100,6 +100,8 @@ type dispatched_event =
       { session_id : string
       ; resume_gateway_url : string
       ; bot_user_id : string
+      ; bot_user_name : string option
+      ; guild_ids : string list
       }
   | Message_create of
       { channel_id : string
@@ -431,12 +433,47 @@ let decode_ready ~payload =
     | Some user_json -> field_string_opt "id" user_json
     | None -> None
   in
-  match session_id, resume_gateway_url, bot_user_id with
-  | Some session_id, Some resume_gateway_url, Some bot_user_id ->
-      Ok (Ready { session_id; resume_gateway_url; bot_user_id })
-  | _ ->
-      Error
-        "READY payload: missing session_id / resume_gateway_url / user.id"
+  let bot_user_name =
+    match user with
+    | None -> None
+    | Some user_json ->
+      (match field_string_opt "global_name" user_json with
+       | Some name when String.trim name <> "" -> Some (String.trim name)
+       | Some _ | None ->
+         (match field_string_opt "username" user_json with
+          | Some name when String.trim name <> "" -> Some (String.trim name)
+          | Some _ | None -> None))
+  in
+  let guild_ids =
+    match assoc_opt "guilds" payload with
+    | Some (`List guilds) ->
+      let rec decode acc = function
+        | [] -> Ok (List.rev acc |> List.sort_uniq String.compare)
+        | guild :: rest ->
+          (match field_string_opt "id" guild with
+           | Some id when String.trim id <> "" -> decode (String.trim id :: acc) rest
+           | Some _ | None -> Error "READY payload: guild missing id")
+      in
+      decode [] guilds
+    | Some _ -> Error "READY payload: guilds is not a list"
+    | None -> Error "READY payload: missing guilds"
+  in
+  match guild_ids with
+  | Error detail -> Error detail
+  | Ok guild_ids ->
+    (match session_id, resume_gateway_url, bot_user_id with
+     | Some session_id, Some resume_gateway_url, Some bot_user_id ->
+       Ok
+         (Ready
+            { session_id
+            ; resume_gateway_url
+            ; bot_user_id
+            ; bot_user_name
+            ; guild_ids
+            })
+     | None, _, _ | Some _, None, _ | Some _, Some _, None ->
+       Error
+         "READY payload: missing session_id / resume_gateway_url / user.id")
 
 (* Files Discord says came with the message. Every required field must be
    there or the entry is dropped: a file with no url is not something a reader
@@ -861,7 +898,7 @@ let handle_dispatch t (frame : frame) =
        | Error reason ->
            log_warn t'
              (Printf.sprintf "dispatch %s decode failed: %s" event_name reason)
-       | Ok (Ready { session_id; resume_gateway_url; bot_user_id }) ->
+       | Ok (Ready { session_id; resume_gateway_url; bot_user_id; bot_user_name; guild_ids }) ->
            let new_config =
              { t'.config with bot_user_id = Some bot_user_id }
            in
@@ -873,7 +910,13 @@ let handle_dispatch t (frame : frame) =
              ; resume_context = None
              }
            , [ Emit_event
-                 (Ready { session_id; resume_gateway_url; bot_user_id })
+                 (Ready
+                    { session_id
+                    ; resume_gateway_url
+                    ; bot_user_id
+                    ; bot_user_name
+                    ; guild_ids
+                    })
              ; Log
                  { level = `Info
                  ; message = Printf.sprintf "READY (bot_user_id=%s)" bot_user_id

@@ -84,19 +84,12 @@ let host_root_rel_of_profile profile name =
       Printf.sprintf "%s/docker/%s/"
         Playground_paths.all_playgrounds_prefix
         (Playground_paths.sanitize_keeper_name name)
-  (* Its own root for the same reason Docker has one: the guest mounts this
-     path, and a keeper that moves between profiles must not find the other
-     lane's tree already in place. *)
-  | Micro_vm ->
-      Printf.sprintf "%s/microvm/%s/"
-        Playground_paths.all_playgrounds_prefix
-        (Playground_paths.sanitize_keeper_name name)
-  | Remote_ssh ->
-      (* Host-side bookkeeping bundle (telemetry, workspace views). The
-         keeper's working files live on the remote endpoint, and this path
-         is only what the host keeps about them; [Keeper_remote_path]
-         translates between the two. *)
-      Playground_paths.bundle_root name
+  (* Host-side bookkeeping bundle (telemetry, workspace views) for both
+     profiles whose tree lives on the endpoint: an OpenSSH host, or an Apple
+     [container] guest's work volume (RFC-0400). The keeper's working files
+     never sit under this path; [Keeper_remote_path] translates between the
+     bundle and the endpoint's spelling. *)
+  | Micro_vm | Remote_ssh -> Playground_paths.bundle_root name
 
 let host_root_rel_of_agent ~base_path ~agent_name =
   sandbox_profile_of_agent ~base_path ~agent_name

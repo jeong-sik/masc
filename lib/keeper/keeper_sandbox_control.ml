@@ -629,7 +629,7 @@ let why_no_container (meta : keeper_meta) ~preflight containers =
       Some "remote_ssh executes on its configured endpoint and does not own a local container"
     | Docker -> (
       match preflight_ok preflight with
-      | Some false -> Some "docker_preflight_failed"
+      | Some false -> Some Keeper_sandbox_runtime.docker_preflight_failed_label
       | _ -> (
           match meta.network_mode with
           | Network_inherit ->
@@ -639,61 +639,69 @@ let why_no_container (meta : keeper_meta) ~preflight containers =
               Some
                 "no active turn or visible managed sandbox container; Docker containers start on sandboxed tool calls or via masc_keeper_sandbox_start, with the keeper playground mounted"))
 
-(** Where a microvm keeper's build output actually sits.
-
-    The vnode exhaustion that panicked this host three times was invisible
-    from every operator surface: whether a checkout writes to the virtiofs
-    share or to the block volume decided whether the machine survived, and
-    nothing showed it. This answers that per checkout.
-
-    Read-only. Opening a tab must not install links, so it walks through
-    [observe_build_links] rather than the ensure path.
-
-    [unlinked] is the actionable list: a checkout still holding a real
-    [_build] keeps writing to the share, and only a person can clear it --
-    the ensure path refuses to delete build output it did not create. *)
-let microvm_build_volume_json ~(config : Workspace.config) ~(meta : keeper_meta) =
+let sandbox_resource_config_json (meta : keeper_meta) =
   match meta.sandbox_profile with
-  | Docker | Remote_ssh -> `Null
   | Micro_vm ->
-    let playground_root =
-      Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path
+    let memory =
+      match Env_config_sandbox.Runtime.microvm_memory () with
+      | "" -> Env_config_sandbox.Hardening.memory ()
+      | configured -> configured
     in
-    let observations = Keeper_sandbox_microvm.observe_build_links ~playground_root in
-    let is_linked (_, state) =
-      match state with
-      | Keeper_sandbox_microvm.Build_symlink _ -> true
-      | Keeper_sandbox_microvm.Build_absent | Keeper_sandbox_microvm.Build_real_directory
-        -> false
-    in
-    let linked, unlinked = List.partition is_linked observations in
-    let relative path =
-      match Keeper_sandbox_microvm.playground_relative ~playground_root path with
-      | Some rel -> rel
-      | None -> path
+    let cpus =
+      match Env_config_sandbox.Runtime.microvm_cpus () with
+      | "" -> `Null
+      | configured -> `String configured
     in
     `Assoc
-      [ ( "name"
-        , match Keeper_sandbox_microvm.build_volume_name ~keeper_name:meta.name with
-          | Ok name -> `String name
-          | Error _ -> `Null )
-      ; ("guest_root", `String Keeper_sandbox_microvm.build_volume_guest_root)
-      ; ("linked", `Int (List.length linked))
-      ; ( "unlinked"
-        , `List
-            (List.map
-               (fun (path, state) ->
-                 `Assoc
-                   [ ("path", `String (relative path))
-                   ; ( "reason"
-                     , `String
-                         (match state with
-                          | Keeper_sandbox_microvm.Build_real_directory ->
-                            "holds build output on the share"
-                          | Keeper_sandbox_microvm.Build_absent -> "not built yet"
-                          | Keeper_sandbox_microvm.Build_symlink _ -> "linked") )
-                   ])
-               unlinked) )
+      [ "memory", `String memory
+      ; "cpus", cpus
+      ; "work_volume_size", `String (Env_config_sandbox.Runtime.microvm_work_volume_size ())
+      ; "pids_limit", `Null
+      ; "tmpfs_size", `Null
+      ]
+  | Docker ->
+    `Assoc
+      [ "memory", `String (Env_config_sandbox.Hardening.memory ())
+      ; "cpus", `Null
+      ; "work_volume_size", `Null
+      ; "pids_limit", `Int (Env_config_sandbox.Hardening.pids_limit ())
+      ; "tmpfs_size", `String (Env_config_sandbox.Hardening.tmpfs_size ())
+      ]
+  | Remote_ssh -> `Null
+;;
+
+let sandbox_paths_json ~(config : Workspace.config) (meta : keeper_meta) =
+  let host_workspace =
+    Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path
+  in
+  match meta.sandbox_profile with
+  | Remote_ssh ->
+    `Assoc
+      [ "host_workspace", `String host_workspace
+      ; "guest_home", `Null
+      ; "guest_workspace", `Null
+      ; "guest_config", `Null
+      ; "guest_work_volume", `Null
+      ]
+  | Docker | Micro_vm ->
+    let container_root = Keeper_sandbox.container_root meta.name in
+    let guest_workspace =
+      match meta.sandbox_profile with
+      | Micro_vm -> Keeper_sandbox_microvm.keeper_work_root ~keeper_name:meta.name
+      | Docker | Remote_ssh -> container_root
+    in
+    `Assoc
+      [ "host_workspace", `String host_workspace
+      ; "guest_home", `Null
+      ; "guest_workspace", `String guest_workspace
+      ; ( "guest_config"
+        , `String
+            (Keeper_sandbox_runtime.container_masc_config_dir
+               ~container_root) )
+      ; ( "guest_work_volume"
+        , match meta.sandbox_profile with
+          | Micro_vm -> `String Keeper_sandbox_microvm.work_volume_guest_root
+          | Docker | Remote_ssh -> `Null )
       ]
 ;;
 
@@ -762,7 +770,8 @@ let live_status_json ?(include_preflight = true)
             Keeper_sandbox_runtime.docker_preflight_to_yojson
             preflight
         else `Null );
-      ("build_volume", microvm_build_volume_json ~config ~meta);
+      ("resource_config", sandbox_resource_config_json meta);
+      ("paths", sandbox_paths_json ~config meta);
       ("container_error", Json_util.string_opt_to_json container_error);
       ("why_no_container", Json_util.string_opt_to_json why_no_container);
       ( "repository_checkouts",
@@ -771,3 +780,103 @@ let live_status_json ?(include_preflight = true)
         else
           `Assoc [ "state", `String "not_inspected"; "entries", `List [] ] );
     ]
+
+type sandbox_log_backend =
+  | Docker_logs
+  | Apple_container_logs
+
+type sandbox_logs_error =
+  | Sandbox_logs_meta_read_failed of string
+  | Sandbox_logs_keeper_not_found
+  | Sandbox_logs_backend_failed of string
+
+let sandbox_log_backend_label = function
+  | Docker_logs -> "docker"
+  | Apple_container_logs -> "apple_container"
+;;
+
+let resolve_sandbox_log_target ~(config : Workspace.config) ~keeper_name =
+  match Keeper_meta_store.read_effective_meta config keeper_name with
+  | Error detail -> Error (Sandbox_logs_meta_read_failed detail)
+  | Ok None -> Error Sandbox_logs_keeper_not_found
+  | Ok (Some meta) ->
+    (match meta.sandbox_profile with
+     | Docker -> Ok (Docker_logs, meta.name)
+     | Micro_vm -> Ok (Apple_container_logs, meta.name)
+     | Remote_ssh ->
+       Error
+         (Sandbox_logs_backend_failed
+            "remote SSH Keeper has no local container log stream; inspect the configured endpoint"))
+;;
+
+let sandbox_log_argv backend ~tail ~container_id =
+  match backend with
+  | Docker_logs ->
+    Keeper_sandbox_runtime.docker_command_argv ()
+    @ [ "logs"; "--tail"; string_of_int tail; container_id ]
+  | Apple_container_logs ->
+    Keeper_sandbox_microvm.command_argv ()
+    @ [ "logs"; "-n"; string_of_int tail; container_id ]
+;;
+
+let logs_json ~(config : Workspace.config) ~keeper_name ~timeout_sec ~tail () =
+  let tail = max 1 (min 500 tail) in
+  let discovered =
+    match resolve_sandbox_log_target ~config ~keeper_name with
+    | Error _ as error -> error
+    | Ok (backend, effective_keeper_name) ->
+      let containers =
+        match backend with
+        | Docker_logs ->
+          Keeper_sandbox_runtime.list_containers
+            ~keeper_name:effective_keeper_name
+            ~base_path:config.Workspace.base_path
+            ~timeout_sec
+            ()
+        | Apple_container_logs ->
+          Keeper_sandbox_microvm.list_live_containers
+            ~base_path:config.Workspace.base_path
+            ~keeper_name:effective_keeper_name
+            ~timeout_sec
+      in
+      Result.map_error
+        (fun detail -> Sandbox_logs_backend_failed detail)
+        containers
+      |> Result.map (fun containers -> backend, effective_keeper_name, containers)
+  in
+  Result.map
+    (fun (backend, effective_keeper_name, containers) ->
+      let rows =
+        List.map
+          (fun (container : Keeper_sandbox_runtime.live_container) ->
+            let status, stdout, stderr =
+              Process_eio.run_argv_with_status_split ~timeout_sec
+                (sandbox_log_argv backend ~tail ~container_id:container.id)
+            in
+            let error =
+              match status with
+              | Unix.WEXITED 0 -> `Null
+              | status ->
+                `String
+                  (Printf.sprintf "log command failed (%s)"
+                     (Keeper_sandbox_exec_failure.status_label status))
+            in
+            `Assoc
+              [ "instance_id", `String container.id
+              ; "instance_name", `String container.name
+              ; "running", Json_util.bool_opt_to_json container.running
+              ; "stdout", `String stdout
+              ; "stderr", `String stderr
+              ; "error", error
+              ])
+          containers
+      in
+      `Assoc
+        [ "keeper", `String effective_keeper_name
+        ; "backend", `String (sandbox_log_backend_label backend)
+        ; "state", `String (if rows = [] then "no_instance" else "available")
+        ; "tail", `Int tail
+        ; "instances", `List rows
+        ])
+    discovered
+;;

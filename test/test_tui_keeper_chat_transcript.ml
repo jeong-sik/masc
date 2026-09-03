@@ -251,6 +251,43 @@ let test_quarantine_freezes_late_args_and_result () =
   | None -> fail "quarantine diagnostics were dropped"
 ;;
 
+(* The attempt boundary discards UNFINISHED narrative. Speech the reader has
+   already read is finished the moment a tool stretch opens after it, and it
+   stays -- otherwise the trail keeps the tool rows and loses the words
+   between them, which is what the operator sees as the conversation
+   rearranging itself. The buffer accessors above cannot catch this: they are
+   cleared either way. Only the trail shows it. *)
+let test_runtime_attempt_reset_keeps_finished_speech_in_the_trail () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Text "finished before the tool"
+    ; tool_started "call-kept" "Read"
+    ; tool_ended "call-kept"
+    ; tool_result "call-kept" "exec-kept"
+    ; Live.Text "still growing when the attempt turned over"
+    ; Live.Runtime_attempt_started
+    ; Live.Text "second attempt"
+    ];
+  let texts =
+    List.filter_map
+      (function Transcript.Trail_text text -> Some text | _ -> None)
+      (Transcript.trail t)
+  in
+  check bool "the finished stretch survives the attempt boundary" true
+    (List.exists
+       (fun text ->
+         String_util.contains_substring text "finished before the tool")
+       texts);
+  check bool "the stretch that was still growing is dropped" false
+    (List.exists
+       (fun text -> String_util.contains_substring text "still growing") texts);
+  check bool "a tool stretch is still drawn between them" true
+    (List.exists
+       (function Transcript.Trail_tools _ -> true | _ -> false)
+       (Transcript.trail t))
+;;
+
 let test_runtime_attempt_reset_discards_only_unfinished_narrative () =
   let t = fresh () in
   feed t
@@ -708,7 +745,7 @@ let test_tool_rows_mark_how_far_each_call_got () =
   match Transcript.tool_rows t with
   | [ open_call; running; done_call ] ->
       check bool "a call still taking arguments is marked as open" true
-        (contains ~needle:"·" open_call);
+        (contains ~needle:"◌" open_call);
       check bool "a closed call with no result yet is marked as running" true
         (contains ~needle:"▶" running);
       check bool "a call whose result landed is marked as done" true
@@ -1105,6 +1142,14 @@ let test_a_fold_names_the_tool_that_failed () =
 ;;
 
 let test_a_fold_names_calls_still_out_and_never_returned () =
+  let running =
+    summary_row Transcript.Compact
+      [ activity ~name:"read_file" ~outcome:Transcript.Started
+      ; activity ~name:"glob" ~outcome:Transcript.Returned
+      ]
+  in
+  check bool "an open call says running, not merely started" true
+    (contains_substring running "1 running");
   let awaiting =
     summary_row Transcript.Compact
       [ activity ~name:"read_file" ~outcome:Transcript.Returned
@@ -1145,6 +1190,8 @@ let () =
             test_the_whole_reasoning_trail_is_kept
         ; test_case "runtime attempt resets unfinished narrative" `Quick
             test_runtime_attempt_reset_discards_only_unfinished_narrative
+        ; test_case "runtime attempt keeps finished speech in the trail" `Quick
+            test_runtime_attempt_reset_keeps_finished_speech_in_the_trail
         ] )
     ; ( "trail"
       , [ test_case "arrival order is kept" `Quick

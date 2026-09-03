@@ -1,24 +1,15 @@
 name = "tool_execute"
 description = """
-Execute a typed process invocation inside the Keeper sandbox. Accepted \
-fields: argv, pipeline, script, shell, env, cwd, timeout_sec, stdin, \
-stdout, stderr. Provide exactly one of: a non-empty argv process vector, an \
-explicit pipeline of typed stages, or a script command line run by a real \
-shell in the sandbox; this tool does not expose background task lifecycle \
-tools. The cmd and command string fields are rejected. Shell \
-metacharacters in argv are data, not syntax; use typed stdin/stdout/stderr \
-objects for redirection and the pipeline field for pipelines. Use Grep for \
-structured file-content search. cwd must resolve inside the Keeper path \
-jail. Pass a relative cwd (typically '.') and relative filesystem operands, \
-which resolve against cwd. The Keeper-visible absolute root is \
-informational; Docker host absolute paths are unavailable. MASC does not \
-interpret program or subcommand meaning: after typed lowering, path \
-containment, sandbox resolution, and the external-effect Gate, the invoked \
-program owns its syntax and exit result. MASC's own tools are reachable \
-inside a script line as the reserved command 'masc': 'masc board post get \
-p-123; masc board list' calls those tools without leaving the line, and \
-';', '&&' and '||' sequence them like any command. Each tool declares its \
-own path; the paths on this turn's surface are the ones that answer."""
+Run one command inside the Keeper sandbox. Give exactly one of argv or \
+script: argv is one non-empty argv process vector run without a shell, tokens \
+verbatim, and script is one line handed to a real shell, so \
+pipes, redirections, ';', '&&', '$(...)' and FOO=1 prefixes belong in script. \
+cwd is a relative path inside the path jail, and MASC never \
+interprets program or subcommand meaning: after path containment, sandbox \
+resolution and the external-effect Gate, the program owns its syntax and exit \
+result. A call runs to completion or stops at timeout_sec; there is \
+no background task lifecycle. MASC's own tools answer to argv ["masc", ...] \
+one call each, by the paths on this turn's surface."""
 additional_properties = false
 
 [[params]]
@@ -30,446 +21,9 @@ description = """
 Non-empty process vector: argv[0] is the executable and remaining tokens are \
 arguments, all passed verbatim. There is no shell, so a literal '|', '&&' or \
 '>' token is data, not an operator, and wildcards (*, ?, [...]) are not \
-expanded: 'foo*.ml' names a file called 'foo*.ml'. Use script for a line you would \
-have given a shell, or pipeline, then and the redirect fields to say the \
-same thing field by field, and pass exact paths. Filesystem arguments use \
-the selected sandbox namespace; relative operands resolve against the typed \
-cwd, and Docker cannot reach host absolute paths."""
-
-[[params]]
-name = "pipeline"
-type = "array"
-description = """
-Typed pipeline form: ordered exec stages. Use this instead of putting '|' in \
-argv. Each stage may carry its own stdin/stdout/stderr, so piping and \
-redirecting combine in one call. Stage argv uses the selected sandbox \
-namespace, and relative path operands resolve against the typed cwd. \
-Mutually exclusive with top-level argv."""
-
-[params.items]
-type = "object"
-additional_properties = false
-
-[[params.items.params]]
-name = "argv"
-type = "array"
-required = true
-items = { type = "string" }
-min_items = 1
-description = """
-Same shape as the top-level argv. Still no shell: '|', '&&' and '>' are \
-data, and wildcards are not expanded."""
-
-[[params.items.params]]
-name = "stdin"
-type = "object"
-additional_properties = false
-min_properties = 1
-max_properties = 1
-
-[[params.items.params.params]]
-name = "discard"
-type = "boolean"
-
-[[params.items.params.params]]
-name = "file"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-
-[[params.items.params.params]]
-name = "literal"
-type = "string"
-description = """
-The bytes themselves, fed to the child's stdin without touching the \
-filesystem — what a heredoc is. Use this to pipe a patch, a script body, \
-or any inline input; mutually exclusive with discard and file."""
-
-[[params.items.params]]
-name = "stdout"
-type = "object"
-additional_properties = false
-min_properties = 1
-max_properties = 1
-
-[[params.items.params.params]]
-name = "discard"
-type = "boolean"
-
-[[params.items.params.params]]
-name = "truncate"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-
-[[params.items.params.params]]
-name = "append"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-
-[[params.items.params.params]]
-name = "fd"
-type = "integer"
-enum = [1, 2]
-
-[[params.items.params]]
-name = "stderr"
-type = "object"
-additional_properties = false
-min_properties = 1
-max_properties = 1
-
-[[params.items.params.params]]
-name = "discard"
-type = "boolean"
-
-[[params.items.params.params]]
-name = "truncate"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-
-[[params.items.params.params]]
-name = "append"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-
-[[params.items.params.params]]
-name = "fd"
-type = "integer"
-enum = [1, 2]
-
-[[params]]
-name = "then"
-type = "array"
-description = """
-Programs to run after this one, each guarded by how the one before it ended, \
-the typed form of '&&' and '||'. Use this instead of putting those operators \
-in argv, where nothing reads them. Guards apply left to right."""
-
-[params.items]
-type = "object"
-additional_properties = false
-
-[[params.items.params]]
-name = "on"
-type = "string"
-required = true
-enum = ["success", "failure"]
-
-[[params.items.params]]
-name = "argv"
-type = "array"
-items = { type = "string" }
-min_items = 1
-description = """
-Same shape as the top-level argv. Still no shell: '|', '&&' and '>' are \
-data, and wildcards are not expanded."""
-
-[[params.items.params]]
-name = "pipeline"
-type = "array"
-
-[params.items.params.items]
-type = "object"
-additional_properties = false
-
-[[params.items.params.items.params]]
-name = "argv"
-type = "array"
-required = true
-items = { type = "string" }
-min_items = 1
-description = """
-Same shape as the top-level argv. Still no shell: '|', '&&' and '>' are \
-data, and wildcards are not expanded."""
-
-[[params.items.params.items.params]]
-name = "stdin"
-type = "object"
-additional_properties = false
-min_properties = 1
-max_properties = 1
-
-[[params.items.params.items.params.params]]
-name = "discard"
-type = "boolean"
-
-[[params.items.params.items.params.params]]
-name = "file"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-
-[[params.items.params.items.params.params]]
-name = "literal"
-type = "string"
-description = """
-The bytes themselves, fed to the child's stdin without touching the \
-filesystem — what a heredoc is. Use this to pipe a patch, a script body, \
-or any inline input; mutually exclusive with discard and file."""
-
-[[params.items.params.items.params]]
-name = "stdout"
-type = "object"
-additional_properties = false
-min_properties = 1
-max_properties = 1
-
-[[params.items.params.items.params.params]]
-name = "discard"
-type = "boolean"
-
-[[params.items.params.items.params.params]]
-name = "truncate"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-
-[[params.items.params.items.params.params]]
-name = "append"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-
-[[params.items.params.items.params.params]]
-name = "fd"
-type = "integer"
-enum = [1, 2]
-
-[[params.items.params.items.params]]
-name = "stderr"
-type = "object"
-additional_properties = false
-min_properties = 1
-max_properties = 1
-
-[[params.items.params.items.params.params]]
-name = "discard"
-type = "boolean"
-
-[[params.items.params.items.params.params]]
-name = "truncate"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-
-[[params.items.params.items.params.params]]
-name = "append"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-
-[[params.items.params.items.params.params]]
-name = "fd"
-type = "integer"
-enum = [1, 2]
-
-[[params.items.params]]
-name = "stdin"
-type = "object"
-additional_properties = false
-min_properties = 1
-max_properties = 1
-
-[[params.items.params.params]]
-name = "discard"
-type = "boolean"
-
-[[params.items.params.params]]
-name = "file"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-
-[[params.items.params.params]]
-name = "literal"
-type = "string"
-description = """
-The bytes themselves, fed to the child's stdin without touching the \
-filesystem — what a heredoc is. Use this to pipe a patch, a script body, \
-or any inline input; mutually exclusive with discard and file."""
-
-[[params.items.params]]
-name = "stdout"
-type = "object"
-additional_properties = false
-min_properties = 1
-max_properties = 1
-
-[[params.items.params.params]]
-name = "discard"
-type = "boolean"
-
-[[params.items.params.params]]
-name = "truncate"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-
-[[params.items.params.params]]
-name = "append"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-
-[[params.items.params.params]]
-name = "fd"
-type = "integer"
-enum = [1, 2]
-
-[[params.items.params]]
-name = "stderr"
-type = "object"
-additional_properties = false
-min_properties = 1
-max_properties = 1
-
-[[params.items.params.params]]
-name = "discard"
-type = "boolean"
-
-[[params.items.params.params]]
-name = "truncate"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-
-[[params.items.params.params]]
-name = "append"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-
-[[params.items.params.params]]
-name = "fd"
-type = "integer"
-enum = [1, 2]
-
-[[params]]
-name = "env"
-type = "object"
-additional_properties = { type = "string" }
-description = """
-Optional typed environment bindings. Keys must be [A-Za-z0-9_]+ and values \
-are strings."""
-
-[[params]]
-name = "cwd"
-type = "string"
-description = """
-Working directory for the command, and the only way to set one: there is no \
-shell, so 'cd' runs as a program, changes the directory of a child that \
-exits, and reports success having done nothing. Must stay within the keeper \
-sandbox or an explicit allowed path. Pass a relative cwd, typically '.'. The \
-Keeper-visible absolute root is informational, not a cwd input. Docker host \
-absolute paths are unavailable."""
-
-[[params]]
-name = "timeout_sec"
-type = "number"
-exclusive_minimum = 0.0
-description = """
-Explicit subprocess wall-clock timeout in seconds. When absent it is 600, so \
-name one for a command that legitimately runs longer, such as a whole test \
-suite. A call that runs out of time is stopped and says so; it does not \
-continue in the background."""
-
-[[params]]
-name = "stdin"
-type = "object"
-additional_properties = false
-min_properties = 1
-max_properties = 1
-
-[[params.params]]
-name = "discard"
-type = "boolean"
-
-[[params.params]]
-name = "file"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-description = "Absolute path to read from, the typed form of '<'."
-
-[[params.params]]
-name = "literal"
-type = "string"
-description = """
-The bytes themselves, fed to the child's stdin without touching the \
-filesystem — what a heredoc is. Use this to pipe a patch, a script body, \
-or any inline input; mutually exclusive with discard and file."""
-
-[[params]]
-name = "stdout"
-type = "object"
-additional_properties = false
-min_properties = 1
-max_properties = 1
-
-[[params.params]]
-name = "discard"
-type = "boolean"
-
-[[params.params]]
-name = "truncate"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-description = "Absolute path to replace, the typed form of '>'."
-
-[[params.params]]
-name = "append"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-description = "Absolute path to add to, the typed form of '>>'."
-
-[[params.params]]
-name = "fd"
-type = "integer"
-enum = [1, 2]
-description = """
-Send this stream into another of the stage's output descriptors, the typed \
-form of '2>&1'. The two streams are captured separately and joined \
-afterwards, so the merged text is grouped by stream, not ordered by time."""
-
-[[params]]
-name = "stderr"
-type = "object"
-additional_properties = false
-min_properties = 1
-max_properties = 1
-
-[[params.params]]
-name = "discard"
-type = "boolean"
-
-[[params.params]]
-name = "truncate"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-description = "Absolute path to replace, the typed form of '>'."
-
-[[params.params]]
-name = "append"
-type = "string"
-min_length = 1
-pattern = "^/.*$"
-description = "Absolute path to add to, the typed form of '>>'."
-
-[[params.params]]
-name = "fd"
-type = "integer"
-enum = [1, 2]
-description = """
-Send this stream into another of the stage's output descriptors, the typed \
-form of '2>&1'. The two streams are captured separately and joined \
-afterwards, so the merged text is grouped by stream, not ordered by time."""
+expanded: 'foo*.ml' names a file called 'foo*.ml'. Use script for a line you \
+would have given a shell, and pass exact paths. Relative operands resolve \
+against the typed cwd; Docker cannot reach host absolute paths."""
 
 [[params]]
 name = "script"
@@ -477,11 +31,11 @@ type = "string"
 min_length = 1
 description = """
 Shell form: one command line, run by a real shell inside your sandbox. Write \
-whatever a shell takes -- pipes, '&&', ';', redirections, $(...), loops. Use \
-this instead of putting a script in argv as 'bash -c'; that spelling is read \
-as this field. Mutually exclusive with 'argv' and 'pipeline'. Prefer 'argv' \
-or 'pipeline' when you do not need a shell: they run the program directly, so \
-nothing is word-split or expanded."""
+whatever a shell takes -- pipes, '&&', ';', redirections, $(...), loops, \
+FOO=1 prefixes. Use this instead of putting a script in argv as 'bash -c'; \
+that spelling is read as this field. Mutually exclusive with 'argv'. Prefer \
+'argv' when you do not need a shell: it runs the program directly, so nothing \
+is word-split or expanded."""
 
 [[params]]
 name = "shell"
@@ -493,23 +47,35 @@ Which shell runs 'script'. Defaults to 'sh'. Name 'bash' when the script uses \
 bash-only syntax; a container's 'sh' is often dash. Ignored unless 'script' \
 is present."""
 
-[[one_of]]
-required = ["argv"]
-forbidden = ["pipeline"]
+[[params]]
+name = "cwd"
+type = "string"
 description = """
-Single-process form: include one non-empty 'argv'. DO NOT also include \
-'pipeline' in the same call."""
+Working directory for the command. With argv there is no shell, so 'cd' runs \
+as a program that changes only its own directory and exits; set cwd instead. \
+Must stay within the keeper sandbox or an explicit allowed path. Pass a \
+relative cwd, typically '.'. The Keeper-visible absolute root is \
+informational, not a cwd input. Docker host absolute paths are unavailable."""
+
+[[params]]
+name = "timeout_sec"
+type = "number"
+exclusive_minimum = 0.0
+description = """
+Explicit subprocess wall-clock timeout in seconds. When absent it is 600, so \
+name one for a command that legitimately runs longer, such as a whole test \
+suite. A call that runs out of time is stopped and says so; it does not \
+continue in the background."""
 
 [[one_of]]
-required = ["pipeline"]
-forbidden = ["argv"]
+required = ["argv"]
+forbidden = ["script"]
 description = """
-Pipeline form: include 'pipeline' array of exec stages.  DO NOT also include \
-top-level 'argv' in the same call."""
+Direct form: include one non-empty 'argv'. DO NOT also include 'script' in \
+the same call."""
 
 [[one_of]]
 required = ["script"]
-forbidden = ["argv", "pipeline"]
+forbidden = ["argv"]
 description = """
-Shell form: include 'script'.  DO NOT also include 'argv' or 'pipeline' in \
-the same call."""
+Shell form: include 'script'. DO NOT also include 'argv' in the same call."""

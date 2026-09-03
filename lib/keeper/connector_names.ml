@@ -10,10 +10,12 @@ let sanitize_name name =
 type scope =
   | Person
   | Channel
+  | Server
 
 let scope_segment = function
   | Person -> "people"
   | Channel -> "channels"
+  | Server -> "servers"
 ;;
 
 let names_dir base_dir =
@@ -71,6 +73,10 @@ let parse_row ~file_path line =
    answers append the same row forever. The mutex also serializes shared
    connector writers. *)
 let directories : (string, (string, string) Hashtbl.t) Hashtbl.t =
+  Hashtbl.create 8
+;;
+
+let sorted_directories : (string, (string * string) list) Hashtbl.t =
   Hashtbl.create 8
 ;;
 
@@ -136,7 +142,8 @@ let remember ~base_dir ~connector ~scope ~(id : string) ~(name : string) () =
                  ])
            in
            Fs_compat.append_file file_path (line ^ "\n");
-           Hashtbl.replace directory id name
+           Hashtbl.replace directory id name;
+           Hashtbl.remove sorted_directories file_path
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
@@ -154,4 +161,24 @@ let recall ~base_dir ~connector ~scope ~(id : string) =
     with_directories_lock (fun () ->
       let file_path = names_path ~base_dir ~connector ~scope in
       directory_for_path file_path |> fun directory -> Hashtbl.find_opt directory id)
+;;
+
+let entries ~base_dir ~connector ~scope =
+  with_directories_lock (fun () ->
+    let file_path = names_path ~base_dir ~connector ~scope in
+    match Hashtbl.find_opt sorted_directories file_path with
+    | Some snapshot -> snapshot
+    | None ->
+      let snapshot =
+        directory_for_path file_path
+        |> Hashtbl.to_seq
+        |> List.of_seq
+        |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+      in
+      Hashtbl.replace sorted_directories file_path snapshot;
+      snapshot)
+;;
+
+let path ~base_dir ~connector ~scope =
+  names_path ~base_dir ~connector ~scope
 ;;

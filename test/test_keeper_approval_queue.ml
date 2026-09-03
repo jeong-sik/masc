@@ -1778,6 +1778,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
          ; operation = "external-effect"
          ; input
          ; base_path
+         ; sandbox_profile = None
          ; causal_context =
              Some { Gate.turn_id = Some 99; snapshot = `Assoc [] }
          ; task_id
@@ -4328,6 +4329,7 @@ let test_default_auto_judge_defers_without_blocking () =
          ; operation = "external-effect"
          ; input = `Assoc [ "target", `String "auto-judge" ]
          ; base_path
+         ; sandbox_profile = None
          ; causal_context =
              Some { Gate.turn_id = Some 9; snapshot = `Assoc [] }
          ; task_id = Some "task-auto-judge"
@@ -4400,6 +4402,7 @@ let test_unavailable_cycle_grant_never_falls_through () =
          ; operation = "external-effect"
          ; input
          ; base_path
+         ; sandbox_profile = None
          ; causal_context = None
          ; task_id = None
          ; continuation_channel = None
@@ -4617,6 +4620,7 @@ let test_audit_store_failure_keeps_defer_committed_and_visible () =
          ; operation = "external-effect"
          ; input = `Assoc [ "target", `String "store-create" ]
          ; base_path
+         ; sandbox_profile = None
          ; causal_context = None
          ; task_id = None
          ; continuation_channel = None
@@ -4755,6 +4759,7 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
          ; operation = "external-effect"
          ; input
          ; base_path
+         ; sandbox_profile = None
          ; causal_context = None
          ; task_id = None
          ; continuation_channel = None
@@ -4866,6 +4871,7 @@ let test_cancelled_audit_observation_preserves_committed_allow () =
          ; operation = "external-effect"
          ; input = `Assoc [ "target", `String "cancelled-observer" ]
          ; base_path
+         ; sandbox_profile = None
          ; causal_context = None
          ; task_id = None
          ; continuation_channel = None

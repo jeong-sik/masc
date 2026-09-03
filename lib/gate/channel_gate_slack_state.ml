@@ -97,6 +97,7 @@ let gateway_state_label = function
 type ready_info = Channel_gate_connector.ready_info
 
 let last_ready : ready_info option Atomic.t = Atomic.make None
+let workspace_id : string option Atomic.t = Atomic.make None
 let startup_error : string option Atomic.t = Atomic.make None
 
 let record_startup_error message = Atomic.set startup_error (Some message)
@@ -108,6 +109,13 @@ let record_ready ~bot_user_id =
        { ready_bot_user_id = bot_user_id
        ; (* NDT-OK: hello wall-clock is operator-facing telemetry only. *)
          ready_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) })
+
+let record_workspace_id value =
+  let value = String.trim value in
+  if not (String.equal value "") then Atomic.set workspace_id (Some value)
+
+let current_workspace_id () = Atomic.get workspace_id
+let clear_workspace_id () = Atomic.set workspace_id None
 
 let status_json ?(audit_limit = 10) () =
   let gateway_state = Slack_socket_client.connection_state () in
@@ -198,6 +206,7 @@ let status_json ?(audit_limit = 10) () =
           (match Atomic.get last_ready with
            | Some r -> r.ready_bot_user_id
            | None -> "") )
+    ; ("pid", `Int (if available then Unix.getpid () else 0))
     ]
 
 let connector_json ?(audit_limit = 10) () =
@@ -223,6 +232,9 @@ let connector_json ?(audit_limit = 10) () =
     ; "updated_at"
     ; "last_ready_at"
     ; "bot_user_id"
+    ; "bot_token_present"
+    ; "app_token_present"
+    ; "pid"
     ]
   in
   `Assoc
@@ -274,7 +286,7 @@ let bind ~channel_id ~keeper_name ~actor_name =
     |> Result.map_error Store.mutation_error_to_string
     |> Result.map (fun () -> status_json ())
 
-let unbind ~channel_id ~actor_name =
+let unbind_internal ?expected_keeper_name ~channel_id ~actor_name () =
   let channel_id = String.trim channel_id in
   if String.equal channel_id "" then Error "channel_id is required"
   else
@@ -285,6 +297,11 @@ let unbind ~channel_id ~actor_name =
                String.equal b.channel_id channel_id)
       with
       | None -> Error "binding not found"
+      | Some (removed : binding)
+        when (match expected_keeper_name with
+              | Some expected -> not (String.equal expected removed.keeper_name)
+              | None -> false) ->
+        Error "binding changed"
       | Some (removed : binding) ->
         let updated_bindings =
           List.filter
@@ -308,6 +325,12 @@ let unbind ~channel_id ~actor_name =
         Ok (updated_bindings, event, ()))
     |> Result.map_error Store.mutation_error_to_string
     |> Result.map (fun () -> status_json ())
+
+let unbind ~channel_id ~actor_name =
+  unbind_internal ~channel_id ~actor_name ()
+
+let unbind_if_keeper ~channel_id ~expected_keeper_name ~actor_name =
+  unbind_internal ~expected_keeper_name ~channel_id ~actor_name ()
 
 (* ---- In-process gateway support ---- *)
 

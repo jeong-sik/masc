@@ -123,3 +123,30 @@ val live_status_json :
     [include_repository_checkouts=false] skips Git checkout inspection for
     dashboard hot paths. *)
 
+type sandbox_log_backend =
+  | Docker_logs
+  | Apple_container_logs
+
+type sandbox_logs_error =
+  | Sandbox_logs_meta_read_failed of string
+  | Sandbox_logs_keeper_not_found
+  | Sandbox_logs_backend_failed of string
+
+val resolve_sandbox_log_target :
+  config:Workspace.config ->
+  keeper_name:string ->
+  (sandbox_log_backend * string, sandbox_logs_error) result
+(** Resolve the selected Keeper's effective TOML-owned sandbox profile and
+    canonical name. Durable metadata carries only a placeholder profile and
+    must never choose the log backend. *)
+
+val logs_json :
+  config:Workspace.config ->
+  keeper_name:string ->
+  timeout_sec:float ->
+  tail:int ->
+  unit ->
+  (Yojson.Safe.t, sandbox_logs_error) result
+(** Read the selected Keeper's actual Docker or Apple Container stdio logs.
+    Container discovery remains label-scoped to [config.base_path] and
+    the effective Keeper name. *)

@@ -31,6 +31,7 @@
   eval_tool_selector)
  (libraries
   (re_export masc_string_util)
+  shared_types
   yojson
   unix
   re

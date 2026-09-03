@@ -80,7 +80,18 @@ let route_for_keeper ~audience ~(meta : Keeper_meta_contract.keeper_meta) ~signa
       (match Board_signal.wake_reason ~meta ~signal with
        | Board_signal.Unavailable _ as unavailable -> unavailable
        | Board_signal.Available (Some reason) -> Board_signal.Available (Deliver reason)
-       | Board_signal.Available None -> Board_signal.Available Ignore)
+       | Board_signal.Available None ->
+         (* #27329: a comment classified as [Thread_participants] has no
+            deterministic address for a lane that never touched the thread.
+            Folding those lanes to [Ignore] starved the attention judge on
+            the comment surface — the push path is the only producer of
+            comment judgment candidates (the replay scan re-synthesizes
+            post_created signals only). Escalate to [Judge_discoverable] so
+            the lane records an attention candidate; every other kind keeps
+            the [Ignore] fold. *)
+         if signal.Board_dispatch.kind = Board_dispatch.Board_comment_added
+         then Board_signal.Available Judge_discoverable
+         else Board_signal.Available Ignore)
     | Discoverable -> Board_signal.Available Judge_discoverable
 ;;
 

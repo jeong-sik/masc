@@ -1127,7 +1127,79 @@ let load_connectors ~(host : string) ~(port : int) :
     (Tui_decode.connector_snapshot, string) result =
   match fetch_connectors ~host ~port with
   | Error err -> Error ("connector load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_connector_snapshot json
+  | Ok json ->
+      (match Tui_decode.decode_connector_snapshot json with
+       | Error _ as error -> error
+       | Ok snapshot ->
+           let load_pages connector kind =
+             let page_limit = 500 in
+             let rec loop after_id pages =
+               match
+                 Masc_tui_http.fetch_connector_names ~host ~port
+                   ~connector:connector.Tui_decode.cn_id ~kind ?after_id
+                   ~limit:page_limit ()
+               with
+               | Error detail ->
+                 List.rev pages, Some (kind ^ ": " ^ detail)
+               | Ok json ->
+                 (match Tui_decode.decode_connector_name_page json with
+                  | Error detail ->
+                    List.rev pages, Some (kind ^ ": " ^ detail)
+                  | Ok page ->
+                    let count = List.length page.cnp_mappings in
+                    if page.cnp_after_id <> after_id then
+                      ( List.rev pages
+                      , Some (kind ^ ": directory cursor response mismatch") )
+                    else if page.cnp_total < count then
+                      ( List.rev pages
+                      , Some (kind ^ ": directory page count exceeds total") )
+                    else if page.cnp_has_more && count = 0 then
+                      ( List.rev (page :: pages)
+                      , Some (kind ^ ": directory pagination made no progress") )
+                    else if page.cnp_has_more then
+                      (match page.cnp_next_after_id with
+                       | None ->
+                         ( List.rev (page :: pages)
+                         , Some (kind ^ ": directory page has no next cursor") )
+                       | Some next_after
+                         when (match after_id with
+                               | Some previous ->
+                                 String.compare next_after previous <= 0
+                               | None -> false) ->
+                         ( List.rev (page :: pages)
+                         , Some
+                             (kind ^ ": directory cursor did not advance") )
+                       | Some next_after ->
+                         loop (Some next_after) (page :: pages))
+                    else List.rev (page :: pages), None)
+             in
+             loop None []
+           in
+           let connectors =
+             List.map
+               (fun connector ->
+                  let directory_results =
+                    [ load_pages connector "server"
+                    ; load_pages connector "channel"
+                    ; load_pages connector "person"
+                    ]
+                  in
+                  let pages =
+                    directory_results
+                    |> List.map fst
+                    |> List.flatten
+                  in
+                  let read_problems =
+                    List.filter_map snd directory_results
+                  in
+                  Tui_decode.connector_with_name_pages connector ~pages
+                    ~error:
+                      (match read_problems with
+                       | [] -> None
+                       | problems -> Some (String.concat "; " problems)))
+               snapshot.cs_connectors
+           in
+           Ok { snapshot with cs_connectors = connectors })
 
 (** Load the light Lanes projection from /api/v1/keepers/composite, together
     with the secret projection the same body carries.
@@ -1329,6 +1401,17 @@ let load_keeper_sandbox_view ~(host : string) ~(port : int)
     Masc_tui_keeper_sandbox.decode
       ~sanitize:Masc.Tui_decode.sanitize_terminal_text
       json
+
+let load_keeper_sandbox_logs ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(tail : int) :
+    (Masc_tui_keeper_sandbox.logs, string) result =
+  match
+    Masc_tui_http.fetch_keeper_sandbox_logs ~host ~port ~keeper_name ~tail
+  with
+  | Error err -> Error ("keeper sandbox logs load failed: " ^ err)
+  | Ok json ->
+    Masc_tui_keeper_sandbox.decode_logs
+      ~sanitize:Masc.Tui_decode.sanitize_terminal_text json
 
 let load_keeper_config_editor ~(host : string) ~(port : int)
     ~(keeper_name : string) : (Yojson.Safe.t * string, string) result =

@@ -432,6 +432,29 @@ let fetch_git_log ?keeper ?repo ~(host : string) ~(port : int)
           Error ("git log was not JSON: " ^ detail)
       | json -> Masc.Tui_decode.decode_git_log json)
 
+(** Who last touched each run of lines in the file ([/api/v1/git/blame]).
+    Scoped by the same keeper / repo axes the tree and the log use, so the
+    answer describes the checkout the file was read from. *)
+let fetch_git_blame ?keeper ?repo ~(host : string) ~(port : int)
+    ~(path : string) () :
+    (Masc.Tui_decode.blame_block list, string) result =
+  let route =
+    Printf.sprintf "/api/v1/git/blame?path=%s%s%s"
+      (percent_encode_query_value path)
+      (keeper_query_suffix keeper)
+      (repo_query_suffix repo)
+  in
+  match http_get ~host ~port ~path:route with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "git blame returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | exception Yojson.Json_error detail ->
+          Error ("git blame was not JSON: " ^ detail)
+      | json -> Masc.Tui_decode.decode_git_blame json)
+
 (** The notes anchored to [file_path] in [codebase]
     ([/api/v1/ide/annotations]). The slug is the server's own mint, carried
     from the repositories listing -- never re-derived here (RFC-0378). *)
@@ -781,52 +804,12 @@ let fetch_lane_run_detail ~(host : string) ~(port : int) ~(run_id : string) :
          | exception Yojson.Json_error detail ->
              Error ("lane run detail was not JSON: " ^ detail))
 
-(** Fetch one completed turn and the immutable provider-input snapshot joined
-    by that turn's exact [turn_ref]. A failure on either side stays visible;
-    no mutable latest-prompt value is allowed to fill another turn. *)
-let fetch_keeper_context_inspector ~(host : string) ~(port : int)
-    ~(keeper_name : string) : Masc_tui_context_inspector.reading =
-  let fetch ~label ~path ~decode =
-    match http_get ~host ~port ~path with
-    | Error detail -> Error (label ^ " request failed: " ^ detail)
-    | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-        Error (Printf.sprintf "%s returned %d: %s" label status body)
-    | Ok (_, body) ->
-        (match Yojson.Safe.from_string body with
-         | json -> decode json
-         | exception Yojson.Json_error detail ->
-             Error (label ^ " was not JSON: " ^ detail))
-  in
-  let encoded = percent_encode_path_segment keeper_name in
-  let turn =
-    fetch ~label:"turn-records"
-      ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=50" encoded)
-      ~decode:Masc_tui_context_inspector.decode_turn_records
-  in
-  let provider_input =
-    match turn with
-    | Error detail -> Error ("provider-input turn unavailable: " ^ detail)
-    | Ok { Masc_tui_context_inspector.attributed = None; _ } ->
-      Error "provider-input unavailable: no turn on this page recorded an exact input composition"
-    | Ok { Masc_tui_context_inspector.attributed = Some { record; _ }; _ } ->
-      let turn_ref = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
-      fetch ~label:"provider-input"
-        ~path:
-          (Printf.sprintf
-             "/api/v1/keepers/%s/provider-input?turn_ref=%s"
-             encoded
-             (percent_encode_query_value turn_ref))
-        ~decode:
-          (Masc_tui_context_inspector.decode_provider_input
-             ~expected_keeper:keeper_name
-             ~expected_turn_ref:record.Turn_record.turn_ref)
-  in
-  { Masc_tui_context_inspector.turn; provider_input }
-
 (** Fetch one page of chat rows older than [before].
 
     [before] absent asks for the newest window, which is what the transcript
-    fetch already returns; the pane passes a cursor, so it is required here. *)
+    fetch already returns; the pane passes a cursor, so it is required here.
+    Defined before {!fetch_keeper_context_inspector}, which reads the answer
+    to a turn through it. *)
 let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(before : float) :
     (Masc_tui_keeper_chat_history.page, string) result =
@@ -848,6 +831,114 @@ let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
       | json -> Masc_tui_keeper_chat_history.page_of_json json
       | exception Yojson.Json_error detail ->
           Error ("chat history page was not JSON: " ^ detail))
+
+(** Fetch one completed turn and the immutable provider-input snapshot joined
+    by that turn's exact [turn_ref]. A failure on either side stays visible;
+    no mutable latest-prompt value is allowed to fill another turn. *)
+let fetch_keeper_context_inspector ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(turn_back : int)
+    : Masc_tui_context_inspector.reading =
+  let fetch ~label ~path ~decode =
+    match http_get ~host ~port ~path with
+    | Error detail -> Error (label ^ " request failed: " ^ detail)
+    | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+        Error (Printf.sprintf "%s returned %d: %s" label status body)
+    | Ok (_, body) ->
+        (match Yojson.Safe.from_string body with
+         | json -> decode json
+         | exception Yojson.Json_error detail ->
+             Error (label ^ " was not JSON: " ^ detail))
+  in
+  let encoded = percent_encode_path_segment keeper_name in
+  let turn =
+    fetch ~label:"turn-records"
+      ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=50" encoded)
+      ~decode:Masc_tui_context_inspector.decode_turn_records
+  in
+  (* Which row the exact provider input is read for. Stepping back names the
+     row itself; the newest reading keeps the attributed fallback, because a
+     keeper mid-turn has not written the snapshot for the row it is on and
+     the newest row that did is still the honest newest answer. *)
+  let viewing_record selection =
+    if turn_back <= 0 then
+      Option.map
+        (fun (attributed : Masc_tui_context_inspector.attributed_turn) ->
+           attributed.record)
+        selection.Masc_tui_context_inspector.attributed
+    else
+      List.nth_opt selection.Masc_tui_context_inspector.rows turn_back
+  in
+  let provider_input =
+    match turn with
+    | Error detail -> Error ("provider-input turn unavailable: " ^ detail)
+    | Ok selection -> (
+      match viewing_record selection with
+      | None ->
+          Error "provider-input unavailable: no turn on this page recorded an exact input composition"
+      | Some record ->
+          let turn_ref = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
+          fetch ~label:"provider-input"
+            ~path:
+              (Printf.sprintf
+                 "/api/v1/keepers/%s/provider-input?turn_ref=%s"
+                 encoded
+                 (percent_encode_query_value turn_ref))
+            ~decode:
+              (Masc_tui_context_inspector.decode_provider_input
+                 ~expected_keeper:keeper_name
+                 ~expected_turn_ref:record.Turn_record.turn_ref))
+  in
+  (* The answer that came back: the newest transcript page, joined to the
+     row by the turn_ref the chat rows carry. Rows this join cannot reach
+     say so; they never borrow another turn's answer. *)
+  let response =
+    match turn with
+    | Error detail -> Error ("response unavailable: " ^ detail)
+    | Ok selection -> (
+      match viewing_record selection with
+      | None -> Error "response unavailable: no row on this page to name"
+      | Some record ->
+          let key = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
+          (match fetch_keeper_chat_history_page ~host ~port ~keeper_name
+                   ~before:(Unix.gettimeofday ()) with
+            | Error detail -> Error ("response unavailable: " ^ detail)
+            | Ok page ->
+                let parts =
+                  List.filter_map
+                    (fun (row : Masc_tui_keeper_chat_history.row) ->
+                       if
+                         not
+                           (String.equal
+                              (Option.value ~default:"" row.turn_id)
+                              key)
+                       then None
+                       else
+                         match row.kind with
+                         | Masc_tui_keeper_chat_history.Said_by_keeper
+                         | Masc_tui_keeper_chat_history.Autonomous_reply ->
+                             if row.text = "" then None
+                             else
+                               Some
+                                 (Masc_tui_context_inspector.Reply_text
+                                    row.text)
+                         | Masc_tui_keeper_chat_history.Tool_calls block ->
+                             Some
+                               (Masc_tui_context_inspector.Tool_steps
+                                  (Masc_tui_keeper_chat_history.tool_rows
+                                     block))
+                         | Masc_tui_keeper_chat_history.Reasoning lines ->
+                             Some
+                               (Masc_tui_context_inspector.Reasoning_lines
+                                  lines)
+                         | _ -> None)
+                    page.Masc_tui_keeper_chat_history.decoded.rows
+                in
+                Ok
+                  { Masc_tui_context_inspector.parts
+                  ; outside_newest_page = parts = []
+                  }))
+  in
+  { Masc_tui_context_inspector.turn; provider_input; response }
 
 (** Answer a tool call the keeper is holding.
 
@@ -1585,6 +1676,27 @@ let fetch_connectors ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/gate/connectors"
 
+let fetch_connector_names ~(host : string) ~(port : int) ~(connector : string)
+    ~(kind : string) ?(offset = 0) ?after_id ?(limit = 500) ?(ids = []) () :
+    (Yojson.Safe.t, string) result =
+  let exact =
+    match ids with
+    | [] -> ""
+    | ids ->
+      "&ids=" ^ percent_encode_query_value (String.concat "," ids)
+  in
+  let cursor =
+    match after_id with
+    | None -> ""
+    | Some value -> "&after_id=" ^ percent_encode_query_value value
+  in
+  get_json ~host ~port
+    ~path:
+      (Printf.sprintf
+         "/api/v1/gate/connector/names?name=%s&scope=%s&offset=%d&limit=%d%s%s"
+         (percent_encode_query_value connector)
+         (percent_encode_query_value kind) offset limit exact cursor)
+
 (** Fetch the workspace skills catalog (/api/v1/skills): per-skill usage
     rows and execution-plan flows for the Tools screen tracking views. *)
 let fetch_skills_catalog ~(host : string) ~(port : int) :
@@ -1703,6 +1815,13 @@ let fetch_keeper_status_snapshot ~(host : string) ~(port : int)
     ~path:
       (Printf.sprintf "/api/v1/gate/keeper-status?name=%s"
          (percent_encode_query_value keeper_name))
+
+let fetch_keeper_sandbox_logs ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(tail : int) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/gate/keeper-sandbox-logs?name=%s&tail=%d"
+         (percent_encode_query_value keeper_name) tail)
 
 (** GET /api/v1/keepers/:name/github-identity — the keeper's GitHub CLI
     identity observation (config dir, projected token env, stored and

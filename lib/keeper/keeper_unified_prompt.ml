@@ -1048,46 +1048,62 @@ let effective_instructions
   | Some d -> Option.value d.instructions ~default:meta.instructions
   | None -> meta.instructions
 ;;
-(* Titles and phases for the Goals that are still open, read from the store
-   under the same phase predicate the world observation uses. The phase rides
-   along so the Active Goals block can annotate a [Verifying] goal (RFC-0387
-   stage 2: the gate must not make the goal read as ordinary open work, nor
-   disappear — review P0-1). *)
-let active_goal_summaries_of_store ~(config : Workspace.config) =
-  List.filter_map
-    (fun (goal : Goal_store.goal) ->
-       if Goal_phase.admits_self_directed_progress goal.phase
-       then
-         Some
-           { summary_goal_id = goal.id
-           ; summary_title = goal.title
-           ; summary_phase = Some goal.phase
-           }
-       else None)
-    (Goal_store.list_goals config ())
+(* Titles and phases for the Goals this turn's task is linked to, read from
+   the store under the same phase predicate the world observation uses. The
+   phase rides along so the Active Goals block can annotate a [Verifying]
+   goal (RFC-0387 stage 2: the gate must not make the goal read as ordinary
+   open work, nor disappear — review P0-1).
+
+   A Goal is shared intent and names no keeper, so the store answers the same
+   list for everyone. What makes it this turn's context is the task the
+   keeper holds: the link registry says which Goals that task serves, and a
+   turn with no task carries no Goals here — [masc_goal_list] answers the
+   rest. *)
+let active_goal_summaries_for_task
+      ~(config : Workspace.config)
+      ~(current_task : Keeper_world_observation_inputs.current_task_observation)
+  =
+  let task_id =
+    match current_task with
+    | Keeper_world_observation_inputs.Current_task task
+    | Keeper_world_observation_inputs.Recovered_current_task { task; _ } ->
+      Some task.Masc_domain.id
+    | Keeper_world_observation_inputs.No_current_task
+    | Keeper_world_observation_inputs.Current_task_missing _
+    | Keeper_world_observation_inputs.Current_task_unavailable _ -> None
+  in
+  match task_id with
+  | None -> []
+  | Some task_id ->
+    let linked =
+      Workspace_goal_index.goals_for_task
+        (Workspace_goal_index.build_task_goal_index_for_config config)
+        ~task_id
+    in
+    List.filter_map
+      (fun (goal : Goal_store.goal) ->
+         if List.exists (String.equal goal.id) linked
+            && Goal_phase.admits_self_directed_progress goal.phase
+         then
+           Some
+             { summary_goal_id = goal.id
+             ; summary_title = goal.title
+             ; summary_phase = Some goal.phase
+             }
+         else None)
+      (Goal_store.list_goals config ())
 ;;
 
 let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
-    ?(active_goal_summaries : goal_summary list option)
     ()
   =
   let instructions = effective_instructions ~meta ?profile_defaults () in
-  (* [Keeper_prompt.build_keeper_system_prompt] renders id+title only; the
-     phase stays on the [goal_summary] for the Active Goals layer. *)
-  let active_goals =
-    List.map
-      (fun (s : goal_summary) -> s.summary_goal_id, s.summary_title)
-      (Option.value
-         ~default:(active_goal_summaries_of_store ~config)
-         active_goal_summaries)
-  in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
       ~instructions
       ~keeper_name:meta.name
-      ~active_goals
       ~workspace_root:(Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
       ()
   in
@@ -1187,12 +1203,11 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     () : turn_prompt_parts
   =
   let system_prompt =
-    build_system_prompt
-      ~meta
-      ~config
-      ?profile_defaults
-      ?active_goal_summaries
-      ()
+    (* No goal list here: #32665 took the summaries out of the system prompt
+       so a Keeper's stable contract stops restating a store the turn already
+       carries. The value stays in scope because this function still renders
+       it into the turn's own context below -- that is the half #32665 kept. *)
+    build_system_prompt ~meta ~config ?profile_defaults ()
   in
   (* User message: structured world observation — reactive triggers + resource state only.
      Runtime telemetry remains on decision_audit and independent observation paths.

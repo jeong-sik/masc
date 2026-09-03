@@ -422,6 +422,27 @@ let prepare_agent_setup
              ])
         "An attached service names a tool this turn cannot offer")
     identity_offering.Keeper_identity_tools.unusable;
+  (* RFC-0403: the profile's own selection over what the services offered.
+     Absent selection keeps the whole offering, so a keeper that declares
+     nothing sends the same bytes it sent before this existed. *)
+  let identity_allow =
+    Keeper_identity_tool_allow.apply
+      ~allow:profile_defaults.Keeper_types_profile.attached_tool_allow
+      identity_offering.Keeper_identity_tools.offered
+  in
+  List.iter
+    (fun name ->
+      Log.Keeper.emit
+        Log.Warn
+        ~keeper_name:meta.name
+        ~category:Log.Tool
+        ~details:
+          (`Assoc
+             [ "error_kind", `String "keeper_attached_tool_allow_unnamed"
+             ; "tool", `String name
+             ])
+        "The profile allows an attached tool no attached service offers")
+    identity_allow.Keeper_identity_tool_allow.unnamed;
   let turn_model_visible_descriptors =
     Keeper_capability_surface.descriptors capability_surface
   in
@@ -445,7 +466,7 @@ let prepare_agent_setup
       ?hitl_resolution
       ~identity_surface:
         { Keeper_tools_agent_core.offered =
-            identity_offering.Keeper_identity_tools.offered
+            identity_allow.Keeper_identity_tool_allow.kept
         ; agent_cell
         ; history = history_messages
         }
@@ -575,11 +596,15 @@ let prepare_agent_setup
   let all_tool_names =
     List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) keeper_tools
   in
+  (* The selection, not the offering (RFC-0403). This names what the bundle
+     is expected to carry, and the bundle is built from the kept list:
+     checking against the whole offering would report every tool the profile
+     deliberately left out as a projection defect. *)
   let attached_names =
     List.map
       (fun (offered : Keeper_identity_tools.offered_tool) ->
          offered.Keeper_identity_tools.schema.name)
-      identity_offering.Keeper_identity_tools.offered
+      identity_allow.Keeper_identity_tool_allow.kept
   in
   (* Two surfaces now, and each is checked against the names it carries. One
      check over one of them would leave the other free to drift: they differ

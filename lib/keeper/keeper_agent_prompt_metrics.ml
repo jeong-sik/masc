@@ -169,9 +169,6 @@ let provider_content_messages
          (remove_prompt_context false [] projection_input))
 ;;
 
-let empty_prompt_segment_metrics =
-  { bytes = 0; fingerprint = None }
-
 let prompt_segment_metrics_of_sanitized_text (text : string) : prompt_segment_metrics =
   {
     bytes = String.length text;
@@ -250,20 +247,22 @@ let prompt_metrics_to_json (metrics : prompt_metrics) : Yojson.Safe.t =
       ("user_message", prompt_segment_metrics_to_json metrics.user_message_segment);
     ]
 
+(* A bucket that receives one contribution keeps its fingerprint; a bucket
+   that receives several loses it. Summing bytes is arithmetic, but there is
+   no digest of two digests that names the concatenation, and answering with
+   the first contribution's would name a part while the row says the whole.
+   [Tool_schemas] is the single-contribution case the tool array needs: it is
+   the provider's cache prefix, and only a fingerprint over the whole array in
+   the order sent says whether two turns could share one. *)
 let add_segment_metric
     (totals : (Turn_record.input_component_id, prompt_segment_metrics) Hashtbl.t)
     ~(bucket : Turn_record.input_component_id)
     (metric : prompt_segment_metrics) : unit =
-  let prev =
-    match Hashtbl.find_opt totals bucket with
-    | Some existing -> existing
-    | None -> empty_prompt_segment_metrics
-  in
-  Hashtbl.replace totals bucket
-    {
-      bytes = prev.bytes + metric.bytes;
-      fingerprint = None;
-    }
+  match Hashtbl.find_opt totals bucket with
+  | None -> Hashtbl.replace totals bucket metric
+  | Some prev ->
+    Hashtbl.replace totals bucket
+      { bytes = prev.bytes + metric.bytes; fingerprint = None }
 
 let metric_of_block
     ~role:(_ : Agent_core.Types.role)
@@ -354,19 +353,28 @@ let build_ctx_composition_metrics
           ~bucket:(Turn_record.Prompt_block block.block)
           { bytes = block.bytes; fingerprint = Some block.digest })
     prompt_blocks;
+  (* The tool array is the first segment of the provider's cache prefix, and
+     what makes it reusable is byte-for-byte sameness including order. The
+     digest is taken over the schemas as they are sent, so a reordering reads
+     as a different tool surface here even when the same tools are present:
+     two turns of one keeper whose fingerprints differ are two turns that
+     could not share a cached prefix. *)
+  let tool_schema_json =
+    List.map (fun tool -> Yojson.Safe.to_string (Agent_core.Tool.schema_to_json tool)) tools
+  in
   let tool_schema_bytes =
-    List.fold_left
-      (fun total tool ->
-        total
-        + String.length
-            (Yojson.Safe.to_string (Agent_core.Tool.schema_to_json tool)))
-      0 tools
+    List.fold_left (fun total json -> total + String.length json) 0 tool_schema_json
   in
   if tool_schema_bytes > 0
   then
     add_segment_metric totals
       ~bucket:Turn_record.Tool_schemas
-      { bytes = tool_schema_bytes; fingerprint = None };
+      { bytes = tool_schema_bytes
+      ; fingerprint =
+          Some
+            Digestif.SHA256.(
+              digest_string (String.concat "\n" tool_schema_json) |> to_hex)
+      };
   List.iter
     (fun (message : Agent_core.Types.message) ->
       List.iter

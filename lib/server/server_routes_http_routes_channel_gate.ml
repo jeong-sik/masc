@@ -232,6 +232,127 @@ let handle_gate_connectors _state request reqd =
   let json = Channel_gate_connector.connectors_json ~audit_limit () in
   respond_public_read_json_value ~status:`OK request reqd json
 
+(** Authenticated, paged ID-to-name directory. Connector status remains
+    public and aggregate-only; learned people/place names and their durable
+    paths stay behind read auth. Existing name rows predate workspace scoping,
+    so the response labels that provenance instead of attributing them to the
+    currently authenticated Slack workspace. *)
+let handle_gate_connector_names state request reqd =
+  let connector =
+    match Option.map String.trim (query_param request "name") with
+    | Some name when not (String.equal name "") ->
+        Some (String.lowercase_ascii name)
+    | Some _ | None -> None
+  in
+  let scope =
+    match Option.map String.trim (query_param request "scope") with
+    | Some "channel" -> Ok (Connector_names.Channel, "channel")
+    | Some "person" -> Ok (Connector_names.Person, "person")
+    | Some "server" -> Ok (Connector_names.Server, "server")
+    | Some unknown -> Error ("unknown scope: " ^ unknown)
+    | None -> Error "scope is required"
+  in
+  match connector, scope with
+  | None, _ ->
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (Channel_gate.error_json "name is required")
+  | Some connector, Error detail ->
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (Channel_gate.error_json detail)
+  | Some connector, Ok (scope, scope_label) ->
+      (match Channel_gate_connector.find connector with
+       | None ->
+           respond_json_value_with_cors ~status:`Not_found request reqd
+             (Channel_gate.error_json ("unknown connector: " ^ connector))
+       | Some _ ->
+           let offset = int_query_param request "offset" ~default:0 |> max 0 in
+           let after_id =
+             match query_param request "after_id" with
+             | Some value ->
+               let value = String.trim value in
+               if String.equal value "" then None else Some value
+             | None -> None
+           in
+           let limit =
+             int_query_param request "limit" ~default:100 |> max 1 |> min 500
+           in
+           let base_dir = (Mcp_server.workspace_config state).base_path in
+           let exact_ids =
+             match query_param request "ids", query_param request "id" with
+             | Some raw, _ ->
+               raw
+               |> String.split_on_char ','
+               |> List.map String.trim
+               |> List.filter (fun value -> not (String.equal value ""))
+               |> List.sort_uniq String.compare
+             | None, Some raw ->
+               let id = String.trim raw in
+               if String.equal id "" then [] else [ id ]
+             | None, None -> []
+           in
+           if List.length exact_ids > 100
+           then
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (Channel_gate.error_json "ids accepts at most 100 values")
+           else
+             let entries =
+               match exact_ids with
+               | [] -> Connector_names.entries ~base_dir ~connector ~scope
+               | ids ->
+                 List.filter_map
+                   (fun id ->
+                     Option.map
+                       (fun name -> id, name)
+                       (Connector_names.recall ~base_dir ~connector ~scope ~id))
+                   ids
+             in
+             let entries =
+               match after_id with
+               | None -> entries
+               | Some cursor ->
+                 List.filter
+                   (fun (id, _) -> String.compare id cursor > 0)
+                   entries
+             in
+             let total = List.length entries in
+             let page_offset = if Option.is_some after_id then 0 else offset in
+             let page = entries |> List.drop page_offset |> List.take limit in
+             let next_after_id =
+               List.rev page |> List.find_map (fun (id, _) -> Some id)
+             in
+             let workspace_id =
+               if String.equal connector Channel_gate_slack_state.connector_id
+               then Channel_gate_slack_state.current_workspace_id ()
+               else None
+             in
+             respond_json_value_with_cors ~status:`OK request reqd
+               (`Assoc
+                 [ "connector_id", `String connector
+                 ; "kind", `String scope_label
+                 ; "mapping_scope", `String "unscoped_historical"
+                 ; ( "current_workspace_id"
+                   , match workspace_id with
+                     | Some value -> `String value
+                     | None -> `Null )
+                 ; "path", `String (Connector_names.path ~base_dir ~connector ~scope)
+                 ; "offset", `Int offset
+                 ; "limit", `Int limit
+                 ; "total", `Int total
+                 ; ( "after_id"
+                   , match after_id with Some value -> `String value | None -> `Null )
+                 ; ( "next_after_id"
+                   , match next_after_id with
+                     | Some value -> `String value
+                     | None -> `Null )
+                 ; "has_more", `Bool (page_offset + List.length page < total)
+                 ; ( "mappings"
+                   , `List
+                       (List.map
+                          (fun (id, name) ->
+                             `Assoc [ "id", `String id; "name", `String name ])
+                          page) )
+                 ]))
+
 (** GET /api/v1/gate/connector/status?name=<connector>&audit_limit=<n>
 
     Generic connector status. [name=<connector>] is the only accepted form;
@@ -370,8 +491,44 @@ let handle_gate_keeper_status_by_name ~sw ~clock state request reqd =
       respond_json_value_with_cors ~status:`Bad_request request reqd
         (Channel_gate.error_json "name is required")
 
+(** GET /api/v1/gate/keeper-sandbox-logs?name=<keeper>&tail=<n>
+
+    Authenticated host-runtime log read for the selected Keeper. Discovery is
+    label-scoped by the sandbox layer; the route never accepts a caller-owned
+    container id. *)
+let handle_gate_keeper_sandbox_logs state request reqd =
+  let respond ?(status = `OK) value =
+    (* Container stdout/stderr can contain credentials. It is deliberately
+       not exposed to browser origins, even after token authentication. *)
+    Http_server_eio.Response.json_value ~status ~request value reqd
+  in
+  let keeper_name =
+    query_param request "name"
+    |> Option.map String.trim
+    |> Option.value ~default:""
+  in
+  if String.equal keeper_name "" then
+    respond ~status:`Bad_request (Channel_gate.error_json "name is required")
+  else
+    let config = Mcp_server.workspace_config state in
+    let tail = int_query_param request "tail" ~default:200 |> max 1 |> min 500 in
+    let timeout_sec =
+      Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()
+    in
+    (match
+       Keeper_sandbox_control.logs_json ~config ~keeper_name ~timeout_sec ~tail ()
+     with
+     | Ok json -> respond json
+     | Error (Keeper_sandbox_control.Sandbox_logs_meta_read_failed detail) ->
+       respond ~status:`Service_unavailable (Channel_gate.error_json detail)
+     | Error Keeper_sandbox_control.Sandbox_logs_keeper_not_found ->
+       respond ~status:`Not_found
+         (Channel_gate.error_json ("unknown keeper: " ^ keeper_name))
+     | Error (Keeper_sandbox_control.Sandbox_logs_backend_failed detail) ->
+       respond ~status:`Bad_gateway (Channel_gate.error_json detail))
+
 (** Shared bind handler: parse body, validate keeper, dispatch to connector. *)
-let handle_bind_for_connector ~sw ~clock state request reqd
+let handle_bind_for_connector ~sw ~clock state request reqd ~connector_name
     ~(bind_fn :
        channel_id:string ->
        keeper_name:string ->
@@ -413,6 +570,13 @@ let handle_bind_for_connector ~sw ~clock state request reqd
             in
             match bind_fn ~channel_id ~keeper_name ~actor_name with
             | Ok payload ->
+                if
+                  String.equal connector_name
+                    Channel_gate_discord_state.connector_id
+                then
+                  Server_discord_in_process_gateway.request_directory_refresh
+                    ~sw ~clock
+                    ~base_dir:(Mcp_server.workspace_config state).base_path;
                 respond_json_value_with_cors ~status:`OK request reqd payload
             | Error err ->
                 respond_json_value_with_cors ~status:`Internal_server_error
@@ -426,6 +590,11 @@ let handle_unbind_for_connector state request reqd
     ~(unbind_fn :
        channel_id:string ->
        actor_name:string ->
+       (Yojson.Safe.t, string) result)
+    ~(unbind_if_keeper_fn :
+       channel_id:string ->
+       expected_keeper_name:string ->
+       actor_name:string ->
        (Yojson.Safe.t, string) result) =
   Http.Request.read_body_async reqd (fun body_str ->
     try
@@ -434,6 +603,13 @@ let handle_unbind_for_connector state request reqd
         Json_util.get_string json "channel_id"
         |> Option.value ~default:""
         |> String.trim
+      in
+      let expected_keeper_name =
+        match Json_util.get_string json "keeper_name" with
+        | Some value ->
+          let value = String.trim value in
+          if String.equal value "" then None else Some value
+        | None -> None
       in
       if channel_id = "" then
         respond_json_value_with_cors ~status:`Bad_request request reqd
@@ -445,12 +621,21 @@ let handle_unbind_for_connector state request reqd
           |> Option.value ~default:"dashboard"
           |> String.trim
         in
-        match unbind_fn ~channel_id ~actor_name with
+        let result =
+          match expected_keeper_name with
+          | None -> unbind_fn ~channel_id ~actor_name
+          | Some expected_keeper_name ->
+            unbind_if_keeper_fn ~channel_id ~expected_keeper_name ~actor_name
+        in
+        match result with
         | Ok payload ->
             respond_json_value_with_cors ~status:`OK request reqd payload
         | Error "binding not found" ->
             respond_json_value_with_cors ~status:`Not_found request reqd
               (Channel_gate.error_json "binding not found")
+        | Error "binding changed" ->
+            respond_json_value_with_cors ~status:`Conflict request reqd
+              (Channel_gate.error_json "binding changed")
         | Error err ->
             respond_json_value_with_cors ~status:`Internal_server_error request reqd
               (Channel_gate.error_json err)
@@ -478,7 +663,7 @@ let handle_gate_connector_bind ~sw ~clock state request reqd =
           (Channel_gate.error_json ("unknown connector: " ^ connector_name))
     | Some (module C) ->
         handle_bind_for_connector ~sw ~clock state request reqd
-          ~bind_fn:C.bind
+          ~connector_name ~bind_fn:C.bind
 
 (** POST /api/v1/gate/connector/unbind?name=<connector>
 
@@ -499,7 +684,7 @@ let handle_gate_connector_unbind _state request reqd =
           (Channel_gate.error_json ("unknown connector: " ^ connector_name))
     | Some (module C) ->
         handle_unbind_for_connector _state request reqd
-          ~unbind_fn:C.unbind
+          ~unbind_fn:C.unbind ~unbind_if_keeper_fn:C.unbind_if_keeper
 
 (** Register all gate routes on the router. *)
 let add_routes ~sw ~clock router =
@@ -524,6 +709,11 @@ let add_routes ~sw ~clock router =
          handle_gate_connectors state request reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/gate/connector/names" (fun request reqd ->
+       with_read_auth (fun state _req reqd ->
+         handle_gate_connector_names state request reqd
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/gate/connector/status" (fun request reqd ->
        with_public_read (fun state _req reqd ->
          handle_gate_connector_status state request reqd
@@ -543,6 +733,12 @@ let add_routes ~sw ~clock router =
        with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
          handle_gate_keeper_status_by_name ~sw ~clock state request reqd
        ) request reqd)
+
+  |> Http.Router.get "/api/v1/gate/keeper-sandbox-logs" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanReadState
+         (fun state _agent_name _req reqd ->
+           handle_gate_keeper_sandbox_logs state request reqd)
+         request reqd)
 
   (* Generic connector routes — dispatch by ?name=<connector> *)
   |> Http.Router.post "/api/v1/gate/connector/bind" (fun request reqd ->

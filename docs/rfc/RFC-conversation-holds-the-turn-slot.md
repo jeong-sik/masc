@@ -256,11 +256,10 @@ W = 180은 cadence 300보다 **작게** 잡았다. 끼어들기 위험은 W가 �
 D = 4는 최악 연속 상실을 4사이클(약 20분)로 묶고, 연속 대화에서 지급 인터리브가
 약 20분당 1회다. 대화 중 상실률 상한 D/(D+1) = 80% — 0이 아니라고 RFC가 명시한다.
 
-**폐기 선례와의 구별.** `MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC`
-(`keeper_runtime_setting_registry.ml:170-181`)은 Retired다. 사유: "No runtime reader
-consumed this overlay; retaining it fabricated operator control". 그것은 자율 실행을
-억제하는 cooldown이었다. 본 RFC의 W/D는 반대 방향이다 — chat 우선의 유계화와
-자율 실행의 하한 보장이고, 두 설정 모두 첫 PR부터 실제 reader를 가진다.
+**지워진 설정과의 구별.** 예전 `MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC` 는
+읽는 곳이 없어서 지워진, 자율 실행을 억제하는 cooldown이었다. 본 RFC의 W/D는 반대
+방향이다 — chat 우선의 유계화와 자율 실행의 하한 보장이고, 두 설정 모두 첫 PR부터
+실제 reader를 가진다.
 
 ## 6. Telemetry
 

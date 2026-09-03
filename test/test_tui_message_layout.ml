@@ -119,6 +119,38 @@ let test_row_mode_keeps_the_heading_opening_and_latest_output () =
         (match latest.kind with Layout.Body -> true | _ -> false)
   | _ -> fail "row mode did not preserve heading, opening, gap, and latest row"
 
+let test_live_edge_collapses_repeated_wrapped_tail_rows () =
+  let repeated_line = String.concat "" (List.init 9 (fun _ -> "가")) in
+  let newest =
+    entry Layout.Keeper "keeper.one" "turn-degenerate"
+      (String.concat "\n" (List.init 12 (fun _ -> repeated_line)))
+  in
+  let visible = Layout.visible_rows ~inner_width:20 ~height:10 [ newest ] in
+  let repeated_gaps =
+    List.filter
+      (fun (row : Layout.row) ->
+         match row.kind with
+         | Layout.Viewport_gap { hidden_rows } ->
+           hidden_rows > 0
+           && String.starts_with ~prefix:"↻" (String.trim row.text)
+         | Layout.Metadata _ | Layout.Body -> false)
+      visible
+  in
+  check int "one visible repeated run is collapsed" 1 (List.length repeated_gaps);
+  check bool "live edge no longer fills with identical rows" true
+    (List.length visible < 10);
+  let scrolled =
+    Layout.scrolled_rows ~inner_width:20 ~height:10 ~from_bottom:1 [ newest ]
+  in
+  check bool "PgUp still reveals only original transcript rows" true
+    (List.for_all
+       (fun (row : Layout.row) ->
+          match row.kind with
+          | Layout.Metadata _ | Layout.Body -> true
+          | Layout.Viewport_gap _ -> false)
+       scrolled)
+;;
+
 let test_oversized_entry_small_height_policy () =
   let newest =
     entry Layout.Keeper "keeper.one" "tui-..cccccccc" (String.make 160 'x')
@@ -447,17 +479,36 @@ let test_input_cursor_uses_visible_terminal_cells () =
   in
   check bool "nine rows cannot show first, gap, and latest" false
     (supported 9 80 0);
-  check bool "ten rows fit three history rows" true (supported 10 80 0);
+  check bool "ten rows cannot fit two header rows and three history rows" false
+    (supported 10 80 0);
+  check bool "eleven rows fit three history rows" true (supported 11 80 0);
   check bool "status rows raise the minimum height" false
-    (supported 12 80 3);
-  check bool "status frame keeps three history rows" true
     (supported 13 80 3);
+  check bool "status frame keeps three history rows" true
+    (supported 14 80 3);
   check bool "twelve columns cannot preserve a source suffix" false
     (supported 30 12 0);
   check bool "thirteen columns preserve a source suffix" true
     (supported 30 13 0);
   check int "the minimum terminal leaves nine framed content cells" 9
     (Frame.inner_width ~cols:13)
+
+let test_chat_history_height_uses_the_shared_chrome () =
+  check int "46-row pane exposes 38 transcript rows" 38
+    (Layout.message_history_height ~terminal_rows:46 ~status_rows:0);
+  check int "three status rows reduce both viewport and page by three" 35
+    (Layout.message_history_height ~terminal_rows:46 ~status_rows:3)
+
+let test_chat_title_yields_before_projection_modes () =
+  let modes = "  memory:off · reasoning:full · tools:full" in
+  let row =
+    Layout.chat_title_row ~inner_cells:52
+      ~title:"Keepers ▸ a-very-long-keeper-identity ▸ chat"
+      ~mode_suffix:modes
+  in
+  check int "title row keeps its exact budget" 52 (Layout.display_width row);
+  check bool "projection modes survive title fitting" true
+    (String.ends_with ~suffix:modes row)
 
 let test_history_wraps_by_cells_without_losing_bytes () =
   let body = "A한🙂B" in
@@ -1250,23 +1301,20 @@ let test_bare_links_are_dressed_and_bounded () =
    times, and [msg_scroll] counts rows back from the newest, so the operator's
    place in the conversation moved with it.
 
-   The badge is a budget now. [codex-mcp-client] still reads whole -- that was
-   the original complaint and 24 covers it -- and a name past the budget loses
-   its head rather than its tail, because these labels are [agent · surface]
-   and share long prefixes. *)
+   The badge is a budget now. Built-in activity labels read whole; an opaque
+   name past the budget loses its head rather than its tail, because these
+   labels are [agent · surface] and share long prefixes. *)
 let test_badge_is_a_budget_not_a_measurement () =
   let width = Layout.chat_role_label_width ~pane_cells:200 in
-  check int "a wide pane spends the budget and no more" 24 width;
-  (* Whole, not merely present: the assertion is on the tail, because the
-     badge pads between the mark and the name and [String.trim] cannot reach
-     that padding. *)
-  check bool "the name the old constant cut still reads whole" true
-    (String.starts_with ~prefix:(Layout.speaker_mark Layout.Keeper)
-       (Layout.align_role_label ~column:width ~style:Layout.Keeper
-          "codex-mcp-client")
-     && String.ends_with ~suffix:"codex-mcp-client"
-          (Layout.align_role_label ~column:width ~style:Layout.Keeper
-             "codex-mcp-client"))
+  check int "a wide pane spends the budget and no more" 14 width;
+  List.iter
+    (fun label ->
+      let drawn =
+        Layout.align_role_label ~column:width ~style:Layout.Keeper label
+      in
+      check bool (label ^ " reads whole") true
+        (String.equal label (String.trim (Layout.drop_cells drawn 2))))
+    [ "JOURNAL"; "THINKING" ]
 
 let test_badge_keeps_the_tail_when_it_cannot_fit () =
   let width = Layout.chat_role_label_width ~pane_cells:200 in
@@ -1288,13 +1336,13 @@ let test_badge_keeps_the_tail_when_it_cannot_fit () =
      n >= m && String.sub drawn (n - m) m = suffix)
 
 let test_badge_narrows_with_the_pane () =
-  (* Under 64 cells a quarter is below the old constant and the floor wins,
-     so a narrow terminal draws the badge it always drew. *)
-  check int "a wide pane spends the budget" 24
+  (* The fixed floor keeps every built-in activity label; wider panes add a
+     small, bounded amount for speaker identities. *)
+  check int "a wide pane spends the budget" 14
     (Layout.chat_role_label_width ~pane_cells:400);
-  check int "40-cell pane keeps the old badge" 16
+  check int "40-cell pane keeps the compact badge" 10
     (Layout.chat_role_label_width ~pane_cells:40);
-  check int "16-cell pane keeps the old badge" 16
+  check int "16-cell pane keeps the compact badge" 10
     (Layout.chat_role_label_width ~pane_cells:16)
 
 let test_one_long_name_cannot_crowd_the_messages () =
@@ -1305,11 +1353,9 @@ let test_one_long_name_cannot_crowd_the_messages () =
   check bool "so the body keeps most of the width" true
     (pane - width > pane / 2)
 
-let test_a_narrow_pane_draws_what_it_always_did () =
-  (* Under 64 cells a quarter is below 16, and the floor wins -- the same
-     badge these panes have always had. *)
-  check int "40-cell pane" 16 (Layout.chat_role_label_width ~pane_cells:40);
-  check int "16-cell pane" 16 (Layout.chat_role_label_width ~pane_cells:16)
+let test_a_narrow_pane_keeps_the_builtin_labels () =
+  check int "40-cell pane" 10 (Layout.chat_role_label_width ~pane_cells:40);
+  check int "16-cell pane" 10 (Layout.chat_role_label_width ~pane_cells:16)
 
 let test_every_row_gets_the_same_badge () =
   (* Alignment is the reason the badge exists: one width for the pane, not
@@ -1628,12 +1674,11 @@ let test_skill_marks_keep_state_without_colour () =
     ; Layout.Skill_failure
     ]
 
-(* The badge is drawn in reverse video, and a right-aligned label carries its
-   alignment as leading spaces. Reversing the two together painted a dozen
-   cells of highlighted nothing in front of a four-letter name. *)
+(* The badge is drawn in reverse video, while its fixed-column padding is
+   layout rather than content. *)
 let test_alignment_padding_is_kept_apart_from_the_name () =
   let aligned = Layout.align_role_label ~column:16 ~style:Layout.Keeper "AUTO" in
-  let mark, alignment, name =
+  let mark, name, alignment =
     Layout.split_aligned_role_label ~style:Layout.Keeper aligned
   in
   check bool "the mark leads" true
@@ -1643,16 +1688,16 @@ let test_alignment_padding_is_kept_apart_from_the_name () =
      && String.for_all (fun c -> Char.equal c ' ') alignment);
   check string "the name is the label alone" "AUTO" name;
   check string "the three pieces rebuild the label" aligned
-    (mark ^ alignment ^ name);
+    (mark ^ name ^ alignment);
   (* A column too narrow for both drops the mark, and the split says so rather
      than colouring the first byte of a name as though it were one. *)
   let narrow = Layout.align_role_label ~column:2 ~style:Layout.Keeper "AUTO" in
-  let mark, alignment, name =
+  let mark, name, alignment =
     Layout.split_aligned_role_label ~style:Layout.Keeper narrow
   in
   check string "a markless label reports no mark" "" mark;
   check string "the three pieces still rebuild it" narrow
-    (mark ^ alignment ^ name)
+    (mark ^ name ^ alignment)
 
 let test_a_continuation_survives_the_renderer_cut () =
   let entries =
@@ -1807,6 +1852,8 @@ let () =
             test_inline_oversized_entry_marks_the_missing_middle
         ; test_case "row mode keeps heading, opening, and latest output" `Quick
             test_row_mode_keeps_the_heading_opening_and_latest_output
+        ; test_case "live edge collapses repeated wrapped tail rows" `Quick
+            test_live_edge_collapses_repeated_wrapped_tail_rows
         ; test_case "oversized entry has an explicit small-height policy" `Quick
             test_oversized_entry_small_height_policy
         ; test_case "scrolling shows transcript rows without synthetic gaps" `Quick
@@ -1833,6 +1880,10 @@ let () =
             test_input_viewport_keeps_latest_complete_scalars
         ; test_case "input cursor uses visible cells" `Quick
             test_input_cursor_uses_visible_terminal_cells
+        ; test_case "history height uses the shared chrome" `Quick
+            test_chat_history_height_uses_the_shared_chrome
+        ; test_case "chat title yields before projection modes" `Quick
+            test_chat_title_yields_before_projection_modes
         ; test_case "last page start counts rows" `Quick
             test_last_page_start_counts_rows_not_items
         ; test_case "last page keeps the last item reachable" `Quick
@@ -1905,8 +1956,8 @@ let () =
             test_badge_narrows_with_the_pane
         ; test_case "one long name cannot crowd the messages" `Quick
             test_one_long_name_cannot_crowd_the_messages
-        ; test_case "a narrow pane draws what it always did" `Quick
-            test_a_narrow_pane_draws_what_it_always_did
+        ; test_case "a narrow pane keeps built-in labels" `Quick
+            test_a_narrow_pane_keeps_the_builtin_labels
         ; test_case "every row gets the same badge" `Quick
             test_every_row_gets_the_same_badge
         ; test_case "origin rows draw what they always did" `Quick

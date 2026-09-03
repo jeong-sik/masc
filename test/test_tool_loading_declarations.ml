@@ -158,6 +158,22 @@ defer_loading = true
        ~contents)
 ;;
 
+(* The way out of a listing. A deferred tool is named but not described, and
+   the model reaches it by asking one of these three. Deferring one of them
+   would leave its own name in the listing that only it can read: the tools
+   below it become unreachable, and nothing reports it, because a name in a
+   listing is a live tool as far as every other check can tell. *)
+let test_the_tools_that_load_deferred_tools_are_never_deferred () =
+  List.iter
+    (fun name ->
+       check
+         loading
+         (name ^ " rides in every request")
+         Tool_definition_toml.Always_loaded
+         (Tool_loading_declarations.loading_of_tool name))
+    [ "keeper_tool_search"; "keeper_tools_list"; "keeper_capability_search" ]
+;;
+
 let () =
   run
     "tool loading declarations"
@@ -173,6 +189,8 @@ let () =
             test_a_malformed_file_raises_rather_than_reading_as_absent
         ; test_case "a well-formed file reads through the same door" `Quick
             test_a_well_formed_file_reads_through_the_same_door
+        ; test_case "the tools that load deferred tools are never deferred" `Quick
+            test_the_tools_that_load_deferred_tools_are_never_deferred
         ] )
     ]
 ;;

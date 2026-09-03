@@ -83,8 +83,6 @@ module Runtime : sig
       "8"). Empty passes no [--cpus] and takes the container CLI's
       default allocation. *)
 
-  val microvm_build_volume_size : unit -> string
-
   val microvm_work_volume_size : unit -> string
   (** [MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE], default [256g]. Ceiling of the
       per-keeper work volume that holds the keeper's working tree (RFC-0400);
@@ -95,16 +93,6 @@ module Runtime : sig
       every payload, written into the guest's shim config as [path=].
       Default names the keeper image's opam switch ahead of the system
       directories. *)
-  (** Ceiling for a keeper's build volume
-      ([MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE], e.g. "128g").
-
-      The image is sparse -- 4 GiB nominal measured at 84 MB on disk -- so
-      this reserves nothing and a generous default costs nothing until a
-      build fills it. It is a ceiling rather than an allocation, and a build
-      that exceeds it fails inside the guest with ENOSPC, so size it above
-      the heaviest checkout set a keeper holds. The default is set against a
-      measurement: one keeper's playground held three 29 GB [_build]
-      directories, 87 GB together. *)
   (** Env: [MASC_KEEPER_SANDBOX_DOCKER_IMAGE].  Default:
       ["masc-keeper-sandbox:local"]. *)
 

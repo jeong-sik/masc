@@ -906,7 +906,6 @@ let decode_log_entry json =
   let* _ts_unix = require_float_field json "ts_unix" in
   let* raw_channel = require_string_field json "channel" in
   let* _name = require_string_field json "name" in
-  let* _agent_name = require_string_field json "agent_name" in
   let* _trace_id = require_string_field json "trace_id" in
   match kind with
   | Keeper_metrics_record.Heartbeat ->
@@ -1586,6 +1585,22 @@ type system_log_source =
   | System_client_tool_host
   | System_source_unknown of string
 
+type keeper_call_execution_mode =
+  | Keeper_call_serial
+  | Keeper_call_concurrent
+
+type keeper_call_schedule = {
+  kcs_planned_index : int;
+  kcs_batch_index : int;
+  kcs_batch_size : int;
+  kcs_execution_mode : keeper_call_execution_mode;
+}
+
+type keeper_call_disposition =
+  | Keeper_call_completed
+  | Keeper_call_deferred
+  | Keeper_call_failed
+
 type keeper_call = {
   kc_at : float;
   kc_tool : string;
@@ -1596,6 +1611,12 @@ type keeper_call = {
   kc_turn : int option;
   kc_task_id : string option;
   kc_model : string option;
+  kc_execution_id : string option;
+  kc_tool_use_id : string option;
+  kc_schedule : keeper_call_schedule option;
+  kc_result_bytes : int option;
+  kc_truncated_to : int option;
+  kc_disposition : keeper_call_disposition option;
 }
 
 type keeper_calls_snapshot = {
@@ -1856,13 +1877,94 @@ type tool_snapshot = {
   ts_skill_activations : skill_activation_projection option;
 }
 
+type connector_connection =
+  | Connector_connected
+  | Connector_connected_unavailable
+  | Connector_disconnected
+  | Connector_offline
+  | Connector_stale
+
+type connector_binding = {
+  cb_channel_id : string;
+  cb_channel_name : string option;
+  cb_keeper_name : string;
+}
+
+type connector_name_kind =
+  | Connector_channel_name
+  | Connector_person_name
+  | Connector_server_name
+
+type connector_name_mapping = {
+  cnm_kind : connector_name_kind;
+  cnm_id : string;
+  cnm_name : string;
+}
+
+type connector_directory_state =
+  | Connector_directory_not_started
+  | Connector_directory_refreshing
+  | Connector_directory_complete
+  | Connector_directory_partial
+
 type connector = {
   cn_id : string;
   cn_display_name : string;
   cn_available : bool;
   cn_connected : bool;
   cn_status : string;
+  cn_connection : connector_connection;
   cn_channel : string option;
+  cn_error : string option;
+  cn_status_source : string option;
+  cn_gateway_state : string option;
+  cn_poll_state : string option;
+  cn_endpoint : string option;
+  cn_status_path : string option;
+  cn_binding_store_path : string option;
+  cn_binding_store_read_ok : bool option;
+  cn_binding_store_error : string option;
+  cn_updated_at : string option;
+  cn_binding_source : string option;
+  cn_trigger_policy : string option;
+  cn_reply_mode : string option;
+  cn_chat_db_path : string option;
+  cn_bot_user_id : string option;
+  cn_bot_user_name : string option;
+  cn_bot_token_present : bool option;
+  cn_app_token_present : bool option;
+  cn_gate_healthy : bool option;
+  cn_pid : int option;
+  cn_guild_count : int option;
+  cn_directory_state : connector_directory_state option;
+  cn_directory_server_count : int option;
+  cn_directory_channel_count : int option;
+  cn_directory_person_count : int option;
+  cn_directory_authentication_failed : string list;
+  cn_directory_permission_denied : string list;
+  cn_directory_errors : string list;
+  cn_directory_updated_at : string option;
+  cn_workspace_id : string option;
+  cn_server_names_path : string option;
+  cn_channel_names_path : string option;
+  cn_people_names_path : string option;
+  cn_name_mappings : connector_name_mapping list;
+  cn_name_mapping_scope : string option;
+  cn_names_error : string option;
+  cn_bindings : connector_binding list;
+}
+
+type connector_name_page = {
+  cnp_connector_id : string;
+  cnp_kind : connector_name_kind;
+  cnp_mapping_scope : string;
+  cnp_current_workspace_id : string option;
+  cnp_path : string;
+  cnp_after_id : string option;
+  cnp_next_after_id : string option;
+  cnp_total : int;
+  cnp_has_more : bool;
+  cnp_mappings : connector_name_mapping list;
 }
 
 type connector_snapshot = {
@@ -2968,6 +3070,44 @@ let decode_tool_snapshot json =
     ; ts_skill_activations
     }
 
+let nonblank_option = function
+  | Some value ->
+      let value = String.trim value in
+      if String.equal value "" then None else Some value
+  | None -> None
+
+let decode_connector_binding json =
+  let* cb_channel_id = required_string_field json "channel_id" in
+  let* cb_channel_name = optional_string_field json "channel_name" in
+  let* cb_keeper_name = required_string_field json "keeper_name" in
+  Ok { cb_channel_id; cb_channel_name = nonblank_option cb_channel_name; cb_keeper_name }
+
+let decode_connector_name_mapping json =
+  let* raw_kind = required_string_field json "kind" in
+  let* cnm_kind =
+    match raw_kind with
+    | "channel" -> Ok Connector_channel_name
+    | "person" -> Ok Connector_person_name
+    | "server" -> Ok Connector_server_name
+    | unknown -> Error (Printf.sprintf "unknown connector name kind %S" unknown)
+  in
+  let* cnm_id = required_string_field json "id" in
+  let* cnm_name = required_string_field json "name" in
+  Ok { cnm_kind; cnm_id; cnm_name }
+
+let decode_connector_connection ~status ~available ~connected =
+  match status, available, connected with
+  | "connected", true, true -> Ok Connector_connected
+  | "offline", false, true -> Ok Connector_connected_unavailable
+  | "disconnected", true, false -> Ok Connector_disconnected
+  | "offline", false, false -> Ok Connector_offline
+  | "stale", true, false -> Ok Connector_stale
+  | _ ->
+      Error
+        (Printf.sprintf
+           "connector status %S contradicts available=%b connected=%b" status
+           available connected)
+
 let decode_connector json =
   let* cn_id = required_string_field json "connector_id" in
   let* cn_display_name = required_string_field json "display_name" in
@@ -2977,13 +3117,242 @@ let decode_connector json =
      connector as a working one. *)
   let* cn_available = decode_bool_field_or json "available" ~default:false in
   let* cn_connected = decode_bool_field_or json "connected" ~default:false in
+  let* cn_connection =
+    decode_connector_connection ~status:cn_status ~available:cn_available
+      ~connected:cn_connected
+  in
   let* cn_channel = optional_string_field json "channel" in
-  Ok { cn_id; cn_display_name; cn_available; cn_connected; cn_status; cn_channel }
+  let* cn_error = optional_string_field json "error" in
+  let* cn_status_source = optional_string_field json "status_source" in
+  let* cn_gateway_state = optional_string_field json "gateway_state" in
+  let* cn_poll_state = optional_string_field json "poll_state" in
+  let* cn_endpoint = optional_string_field json "gate_base_url" in
+  let* cn_status_path = optional_string_field json "status_path" in
+  let* cn_binding_store_path = optional_string_field json "binding_store_path" in
+  let* cn_binding_store_read_ok = optional_bool_field json "binding_store_read_ok" in
+  let* cn_binding_store_error = optional_string_field json "binding_store_error" in
+  let* cn_updated_at = optional_string_field json "updated_at" in
+  let* cn_binding_source = optional_string_field json "binding_source" in
+  let* cn_trigger_policy = optional_string_field json "trigger_policy" in
+  let* cn_reply_mode = optional_string_field json "reply_mode" in
+  let* cn_chat_db_path = optional_string_field json "chat_db_path" in
+  let* cn_bot_user_id = optional_string_field json "bot_user_id" in
+  let* cn_bot_user_name = optional_string_field json "bot_user_name" in
+  let* cn_bot_token_present = optional_bool_field json "bot_token_present" in
+  let* cn_app_token_present = optional_bool_field json "app_token_present" in
+  let* cn_gate_healthy = optional_bool_field json "gate_healthy" in
+  let* cn_pid = optional_int_field json "pid" in
+  let* cn_guild_count = optional_int_field json "guild_count" in
+  let* raw_directory_state = optional_string_field json "directory_state" in
+  let* cn_directory_state =
+    match nonblank_option raw_directory_state with
+    | None -> Ok None
+    | Some "not_started" -> Ok (Some Connector_directory_not_started)
+    | Some "refreshing" -> Ok (Some Connector_directory_refreshing)
+    | Some "complete" -> Ok (Some Connector_directory_complete)
+    | Some "partial" -> Ok (Some Connector_directory_partial)
+    | Some unknown ->
+      Error (Printf.sprintf "unknown connector directory state %S" unknown)
+  in
+  let* cn_directory_server_count =
+    optional_int_field json "directory_server_count"
+  in
+  let* cn_directory_channel_count =
+    optional_int_field json "directory_channel_count"
+  in
+  let* cn_directory_person_count =
+    optional_int_field json "directory_person_count"
+  in
+  let decode_string_rows label rows =
+    decode_list label
+      (function
+        | `String value -> Ok value
+        | _ -> Error (label ^ " contains a non-string value"))
+      rows
+  in
+  let* authentication_rows =
+    optional_list_field json "directory_authentication_failed"
+  in
+  let* cn_directory_authentication_failed =
+    decode_string_rows "directory_authentication_failed" authentication_rows
+  in
+  let* permission_rows = optional_list_field json "directory_permission_denied" in
+  let* cn_directory_permission_denied =
+    decode_string_rows "directory_permission_denied" permission_rows
+  in
+  let* error_rows = optional_list_field json "directory_errors" in
+  let* cn_directory_errors = decode_string_rows "directory_errors" error_rows in
+  let* cn_directory_updated_at =
+    optional_string_field json "directory_updated_at"
+  in
+  let* cn_workspace_id = optional_string_field json "workspace_id" in
+  let* cn_server_names_path = optional_string_field json "server_names_path" in
+  let* cn_channel_names_path = optional_string_field json "channel_names_path" in
+  let* cn_people_names_path = optional_string_field json "people_names_path" in
+  let* name_mappings_json = optional_list_field json "name_mappings" in
+  let* cn_name_mappings =
+    decode_list "name_mappings" decode_connector_name_mapping name_mappings_json
+  in
+  let* bindings_json = required_list_field json "configured_bindings" in
+  let* cn_bindings =
+    decode_list "configured_bindings" decode_connector_binding bindings_json
+  in
+  Ok
+    { cn_id
+    ; cn_display_name
+    ; cn_available
+    ; cn_connected
+    ; cn_status
+    ; cn_connection
+    ; cn_channel = nonblank_option cn_channel
+    ; cn_error = nonblank_option cn_error
+    ; cn_status_source = nonblank_option cn_status_source
+    ; cn_gateway_state = nonblank_option cn_gateway_state
+    ; cn_poll_state = nonblank_option cn_poll_state
+    ; cn_endpoint = nonblank_option cn_endpoint
+    ; cn_status_path = nonblank_option cn_status_path
+    ; cn_binding_store_path = nonblank_option cn_binding_store_path
+    ; cn_binding_store_read_ok
+    ; cn_binding_store_error = nonblank_option cn_binding_store_error
+    ; cn_updated_at = nonblank_option cn_updated_at
+    ; cn_binding_source = nonblank_option cn_binding_source
+    ; cn_trigger_policy = nonblank_option cn_trigger_policy
+    ; cn_reply_mode = nonblank_option cn_reply_mode
+    ; cn_chat_db_path = nonblank_option cn_chat_db_path
+    ; cn_bot_user_id = nonblank_option cn_bot_user_id
+    ; cn_bot_user_name = nonblank_option cn_bot_user_name
+    ; cn_bot_token_present
+    ; cn_app_token_present
+    ; cn_gate_healthy
+    ; cn_pid =
+        (match cn_pid with
+         | Some pid when pid > 0 -> Some pid
+         | Some _ | None -> None)
+    ; cn_guild_count
+    ; cn_directory_state
+    ; cn_directory_server_count
+    ; cn_directory_channel_count
+    ; cn_directory_person_count
+    ; cn_directory_authentication_failed
+    ; cn_directory_permission_denied
+    ; cn_directory_errors
+    ; cn_directory_updated_at = nonblank_option cn_directory_updated_at
+    ; cn_workspace_id = nonblank_option cn_workspace_id
+    ; cn_server_names_path = nonblank_option cn_server_names_path
+    ; cn_channel_names_path = nonblank_option cn_channel_names_path
+    ; cn_people_names_path = nonblank_option cn_people_names_path
+    ; cn_name_mappings
+    ; cn_name_mapping_scope = None
+    ; cn_names_error = None
+    ; cn_bindings
+    }
+
+let decode_connector_name_page json =
+  let* cnp_connector_id = required_string_field json "connector_id" in
+  let* raw_kind = required_string_field json "kind" in
+  let* cnp_kind =
+    match raw_kind with
+    | "channel" -> Ok Connector_channel_name
+    | "person" -> Ok Connector_person_name
+    | "server" -> Ok Connector_server_name
+    | unknown -> Error (Printf.sprintf "unknown connector name kind %S" unknown)
+  in
+  let* cnp_mapping_scope = required_string_field json "mapping_scope" in
+  let* cnp_current_workspace_id =
+    optional_string_field json "current_workspace_id"
+  in
+  let* cnp_path = required_string_field json "path" in
+  let* cnp_after_id = optional_string_field json "after_id" in
+  let* cnp_next_after_id = optional_string_field json "next_after_id" in
+  let* cnp_total = required_int_field json "total" in
+  let* cnp_has_more = required_bool_field json "has_more" in
+  let* mappings_json = required_list_field json "mappings" in
+  let decode_mapping row =
+    let* cnm_id = required_string_field row "id" in
+    let* cnm_name = required_string_field row "name" in
+    Ok { cnm_kind = cnp_kind; cnm_id; cnm_name }
+  in
+  let* cnp_mappings = decode_list "mappings" decode_mapping mappings_json in
+  Ok
+    { cnp_connector_id
+    ; cnp_kind
+    ; cnp_mapping_scope
+    ; cnp_current_workspace_id = nonblank_option cnp_current_workspace_id
+    ; cnp_path
+    ; cnp_after_id = nonblank_option cnp_after_id
+    ; cnp_next_after_id = nonblank_option cnp_next_after_id
+    ; cnp_total
+    ; cnp_has_more
+    ; cnp_mappings
+    }
+
+let connector_with_name_pages connector ~pages ~error =
+  let pages =
+    List.filter
+      (fun page -> String.equal page.cnp_connector_id connector.cn_id)
+      pages
+  in
+  let mappings =
+    let keyed = Hashtbl.create 32 in
+    List.iter
+      (fun page ->
+        List.iter
+          (fun mapping ->
+            Hashtbl.replace keyed (mapping.cnm_kind, mapping.cnm_id) mapping)
+          page.cnp_mappings)
+      pages;
+    Hashtbl.to_seq_values keyed
+    |> List.of_seq
+    |> List.sort (fun left right ->
+           match compare left.cnm_kind right.cnm_kind with
+           | 0 -> String.compare left.cnm_id right.cnm_id
+           | order -> order)
+  in
+  let channel_name channel_id =
+    List.find_map
+      (fun mapping ->
+         match mapping.cnm_kind with
+         | Connector_channel_name when String.equal mapping.cnm_id channel_id ->
+             Some mapping.cnm_name
+         | Connector_channel_name | Connector_person_name
+         | Connector_server_name -> None)
+      mappings
+  in
+  let page_path kind =
+    List.find_map
+      (fun page -> if page.cnp_kind = kind then Some page.cnp_path else None)
+      pages
+  in
+  let workspace_id =
+    List.find_map (fun page -> page.cnp_current_workspace_id) pages
+  in
+  { connector with
+    cn_bindings =
+      List.map
+        (fun binding ->
+           { binding with
+             cb_channel_name = channel_name binding.cb_channel_id
+           })
+        connector.cn_bindings
+  ; cn_name_mappings = mappings
+  ; cn_server_names_path = page_path Connector_server_name
+  ; cn_channel_names_path = page_path Connector_channel_name
+  ; cn_people_names_path = page_path Connector_person_name
+  ; cn_workspace_id = workspace_id
+  ; cn_name_mapping_scope =
+      List.find_map (fun page -> Some page.cnp_mapping_scope) pages
+  ; cn_names_error = error
+  }
 
 let decode_connector_snapshot json =
   let* connectors_json = required_list_field json "connectors" in
   let* cs_connectors =
     decode_list "connectors" decode_connector connectors_json
+  in
+  let cs_connectors =
+    List.sort
+      (fun left right -> String.compare left.cn_id right.cn_id)
+      cs_connectors
   in
   let* cs_total = required_int_field json "total" in
   let* cs_active = required_int_field json "active_count" in
@@ -4341,6 +4710,57 @@ let decode_keeper_call json =
     | `String value when String.trim value <> "" -> Some value
     | _ -> None
   in
+  let optional_nonnegative_int key =
+    match member key json with
+    | `Null -> Ok None
+    | `Int value when value >= 0 -> Ok (Some value)
+    | `Int _ -> Error ("keeper call " ^ key ^ " is negative")
+    | _ -> Error ("keeper call " ^ key ^ " is not an int")
+  in
+  let* planned_index = optional_nonnegative_int "planned_index" in
+  let* batch_index = optional_nonnegative_int "batch_index" in
+  let* batch_size = optional_nonnegative_int "batch_size" in
+  let* execution_mode = optional_string_field json "execution_mode" in
+  let nonblank = function
+    | Some value when String.trim value <> "" -> Some value
+    | Some _ | None -> None
+  in
+  let execution_mode = nonblank execution_mode in
+  let* kc_execution_id = optional_string_field json "execution_id" in
+  let* kc_tool_use_id = optional_string_field json "tool_use_id" in
+  let* kc_schedule =
+    match planned_index, batch_index, batch_size, execution_mode with
+    | None, None, None, None -> Ok None
+    | Some kcs_planned_index, Some kcs_batch_index, Some kcs_batch_size,
+      Some mode when kcs_batch_size > 0 ->
+        let* kcs_execution_mode =
+          match mode with
+          | "serial" -> Ok Keeper_call_serial
+          | "concurrent" -> Ok Keeper_call_concurrent
+          | unknown -> Error ("keeper call has unknown execution_mode " ^ unknown)
+        in
+        Ok
+          (Some
+             { kcs_planned_index
+             ; kcs_batch_index
+             ; kcs_batch_size
+             ; kcs_execution_mode
+             })
+    | Some _, Some _, Some 0, Some _ ->
+        Error "keeper call batch_size must be positive"
+    | _ -> Error "keeper call schedule is partial"
+  in
+  let* kc_result_bytes = optional_nonnegative_int "result_bytes" in
+  let* kc_truncated_to = optional_nonnegative_int "truncated_to" in
+  let* disposition = optional_string_field json "disposition" in
+  let* kc_disposition =
+    match nonblank disposition with
+    | None -> Ok None
+    | Some "completed" -> Ok (Some Keeper_call_completed)
+    | Some "deferred" -> Ok (Some Keeper_call_deferred)
+    | Some "failed" -> Ok (Some Keeper_call_failed)
+    | Some unknown -> Error ("keeper call has unknown disposition " ^ unknown)
+  in
   Ok
     ( keeper
     , { kc_at
@@ -4352,6 +4772,12 @@ let decode_keeper_call json =
       ; kc_turn
       ; kc_task_id = string_opt "task_id"
       ; kc_model = string_opt "model"
+      ; kc_execution_id = nonblank kc_execution_id
+      ; kc_tool_use_id = nonblank kc_tool_use_id
+      ; kc_schedule
+      ; kc_result_bytes
+      ; kc_truncated_to
+      ; kc_disposition
       } )
 
 let decode_keeper_calls_snapshot ~requested_keeper json =
@@ -5359,22 +5785,7 @@ let execute_gate_command envelope =
   | `Assoc _ as args -> (
     match stage_command args with
     | Some command -> Some command
-    | None -> (
-      match script_command args with
-      | Some command -> Some command
-      | None -> (
-      (* A staged call carries no top-level argv; the tool takes one shape or
-         the other, never both. Stages read the way they run. *)
-      match member "pipeline" args with
-      | `List (_ :: _ as stages) ->
-        List.fold_right
-          (fun stage acc ->
-            match stage_command stage, acc with
-            | Some command, Some rest -> Some (command :: rest)
-            | _, _ -> None)
-          stages (Some [])
-        |> Option.map (String.concat " | ")
-      | _ -> None)))
+    | None -> script_command args)
   | _ -> None
 
 (* Where the command would run. The same envelope carries it, and it decides
@@ -7091,6 +7502,54 @@ let decode_git_log json =
   else
     let* rows_json = required_list_field json "commits" in
     decode_list "commits" decode_git_log_row rows_json
+
+(* ── git blame: runs of adjacent lines one author last touched ─────── *)
+
+(** One run of adjacent lines the same author last touched.
+
+    The route ([GET /api/v1/git/blame]) groups [git blame --porcelain]'s
+    per-line output into these before answering, so a file settled by two
+    commits arrives as two blocks rather than as one row per line. The wire
+    spells the author [keeper_id], the shape it shares with the activity and
+    annotation routes; here it is whatever git reported as the author, which
+    is a person's name and not a Keeper. *)
+type blame_block = {
+  bb_line_start : int;
+  bb_line_end : int;
+  bb_author : string;
+  bb_at_ms : float;
+}
+
+let decode_blame_block json =
+  let* bb_line_start = required_int_field json "line_start" in
+  let* bb_line_end = required_int_field json "line_end" in
+  let* bb_author = required_string_field json "keeper_id" in
+  let* bb_at_ms = timestamp_ms_field json in
+  Ok { bb_line_start; bb_line_end; bb_author; bb_at_ms }
+
+(* This route answers with a bare array rather than the [{ok; data}] envelope
+   its neighbours use. Decoded as what it is: reshaping it here would hide
+   which of the two shapes the server actually sends. *)
+let decode_git_blame json =
+  match json with
+  | `List items -> decode_list "blame" decode_blame_block items
+  | bad -> field_type_error "blame" "a list of blocks" bad
+
+(** The block covering [line], and whether [line] is where that block starts.
+
+    Blocks arrive sorted and do not overlap, so the first cover is the only
+    one. The second half is what lets the gutter print an author once per run
+    instead of once per line -- the run boundary is the fact worth drawing,
+    and repeating the name down every line of a block hides it. *)
+let blame_block_at blocks line =
+  let rec find = function
+    | [] -> None
+    | block :: rest ->
+        if line >= block.bb_line_start && line <= block.bb_line_end then
+          Some (block, line = block.bb_line_start)
+        else find rest
+  in
+  find blocks
 
 (* ── IDE annotations: notes anchored to lines of a codebase ────────── *)
 

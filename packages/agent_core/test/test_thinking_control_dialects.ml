@@ -328,47 +328,6 @@ let test_qwen36_reasoning_dialect_without_preserve_keeps_tool_reasoning () =
     (RD.should_replay_reasoning dialect ~assistant_had_tool_call:true)
 ;;
 
-let test_qwen36_dashscope_uses_top_level_enable_thinking () =
-  let config =
-    PC.make
-      ~kind:DashScope
-      ~model_id:"Qwen3.6-35B-A3B"
-      ~base_url:"https://dashscope.aliyuncs.com/compatible-mode/v1"
-      ~enable_thinking:true
-      ~preserve_thinking:true
-      ~thinking_budget:4096
-      ()
-  in
-  let json = BOR.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
-  check bool "enable_thinking true" true (json |> member "enable_thinking" |> to_bool);
-  check bool "preserve_thinking true" true (json |> member "preserve_thinking" |> to_bool);
-  check int "thinking budget" 4096 (json |> member "thinking_budget" |> to_int);
-  check_member_absent "chat_template_kwargs" json;
-  check_member_absent "thinking" json;
-  check_member_absent "reasoning_effort" json
-;;
-
-let test_qwen36_dashscope_dialect_reports_enable_thinking () =
-  (* The reported dialect metadata must match what build_request actually emits
-     for a DashScope Qwen config (top-level enable_thinking, asserted above),
-     not the model catalog's chat_template_kwargs. *)
-  let config =
-    PC.make
-      ~kind:DashScope
-      ~model_id:"Qwen3.6-35B-A3B"
-      ~base_url:"https://dashscope.aliyuncs.com/compatible-mode/v1"
-      ~enable_thinking:true
-      ~preserve_thinking:true
-      ()
-  in
-  let dialect = RD.for_provider_config config in
-  check
-    string
-    "toggle wire"
-    "enable_thinking"
-    (RD.toggle_wire_to_string dialect.toggle_wire)
-;;
-
 let test_mimo_v25_uses_thinking_object_and_json_mode () =
   let config =
     declared_catalog_openai_compat_config
@@ -472,6 +431,69 @@ let test_openai_reasoning_request_uses_reasoning_effort () =
        check_member_absent "thinking" json;
        check_member_absent "enable_thinking" json;
        check_member_absent "chat_template_kwargs" json)
+;;
+
+let test_openai_reasoning_request_renders_explicit_disable_as_none () =
+  with_manifest
+    {|{"schema_version":1,"models":[{"id_prefix":"openai-reasoning-off-test-2kq","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["none","low","high"]}]}|}
+    (fun () ->
+       let config ~enable_thinking =
+         PC.make
+           ~kind:OpenAI_compat
+           ~model_id:"openai-reasoning-off-test-2kq"
+           ~base_url:"https://api.openai.com/v1"
+           ~model_capabilities_override:
+             (catalog_capabilities "openai-reasoning-off-test-2kq")
+           ~enable_thinking
+           ~reasoning_effort:RE.High
+           ()
+       in
+       let body enable_thinking =
+         BOR.build_request ~config:(config ~enable_thinking) ~messages:[ user_msg "hi" ] ()
+         |> json_of_body
+       in
+       (* The max_tokens continuation in keeper_turn_driver_try_provider
+          retries with enable_thinking = Some false and the row's effort
+          untouched. The retry differs from the first request only if the
+          disable lands on the wire. *)
+       check
+         string
+         "explicit disable renders none"
+         "none"
+         (body false |> member "reasoning_effort" |> to_string);
+       check
+         string
+         "explicit enable keeps the row effort"
+         "high"
+         (body true |> member "reasoning_effort" |> to_string);
+       check_member_absent "thinking" (body false);
+       check_member_absent "enable_thinking" (body false))
+;;
+
+let test_openai_reasoning_request_rejects_disable_outside_ladder () =
+  with_manifest
+    {|{"schema_version":1,"models":[{"id_prefix":"openai-reasoning-no-off-test-7pd","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low","high"]}]}|}
+    (fun () ->
+       let config =
+         PC.make
+           ~kind:OpenAI_compat
+           ~model_id:"openai-reasoning-no-off-test-7pd"
+           ~base_url:"https://api.openai.com/v1"
+           ~model_capabilities_override:
+             (catalog_capabilities "openai-reasoning-no-off-test-7pd")
+           ~enable_thinking:false
+           ~reasoning_effort:RE.High
+           ()
+       in
+       match BOR.build_request ~config ~messages:[ user_msg "hi" ] () with
+       | _ -> fail "a disable the ladder cannot carry must not build a request"
+       | exception Invalid_argument message ->
+         check
+           bool
+           "rejection names the missing off value"
+           true
+           (string_contains_sub message "enable_thinking=false"
+            && string_contains_sub message "\"none\""))
 ;;
 
 let test_deepseek_openai_compat_uses_thinking_object () =
@@ -1380,14 +1402,6 @@ let () =
               `Quick
               test_qwen36_reasoning_dialect_without_preserve_keeps_tool_reasoning
           ; test_case
-              "qwen3.6 dashscope uses top-level enable_thinking"
-              `Quick
-              test_qwen36_dashscope_uses_top_level_enable_thinking
-          ; test_case
-              "qwen3.6 dashscope dialect reports enable_thinking"
-              `Quick
-              test_qwen36_dashscope_dialect_reports_enable_thinking
-          ; test_case
               "mimo v2.5 uses thinking object and json mode"
               `Quick
               test_mimo_v25_uses_thinking_object_and_json_mode
@@ -1399,6 +1413,14 @@ let () =
               "openai reasoning request uses reasoning_effort"
               `Quick
               test_openai_reasoning_request_uses_reasoning_effort
+          ; test_case
+              "openai reasoning request renders explicit disable as none"
+              `Quick
+              test_openai_reasoning_request_renders_explicit_disable_as_none
+          ; test_case
+              "openai reasoning request rejects disable outside ladder"
+              `Quick
+              test_openai_reasoning_request_rejects_disable_outside_ladder
           ; test_case
               "deepseek uses thinking object"
               `Quick

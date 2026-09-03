@@ -5,6 +5,7 @@ type span = string * string
 type palette = {
   strong : span;
   emphasis : span;
+  strike : span;
   code : span;
   heading : int -> span;
   quote : span;
@@ -46,6 +47,7 @@ type palette = {
 let plain_palette =
   { strong = ("", "")
   ; emphasis = ("", "")
+  ; strike = ("", "")
   ; code = ("", "")
   ; heading = (fun _ -> ("", ""))
   ; quote = ("", "")
@@ -81,6 +83,7 @@ type streaming_render = {
 let kind_plain = "plain"
 let kind_strong = "strong"
 let kind_emphasis = "emphasis"
+let kind_strike = "strike"
 let kind_code = Masc_tui_code_lexer.kind_code
 let kind_link_text = "link_text"
 let kind_link_target = "link_target"
@@ -193,6 +196,10 @@ let inline_segments text =
             styled ~closes:(fun close -> underscore_closes text (close + 1)) "__"
               kind_strong
           else literal ()
+      (* [~~] only. A single [~] is a shell home directory and an
+         approximation sign far more often than it is a marker, and treating
+         it as one ate text nobody meant to strike. *)
+      | '~' when starts_at text index "~~" -> styled "~~" kind_strike
       | '*' -> styled "*" kind_emphasis
       | '_' ->
           if underscore_opens text index then
@@ -233,6 +240,7 @@ let inline_segments text =
 let span_of_palette palette kind =
   if String.equal kind kind_strong then palette.strong
   else if String.equal kind kind_emphasis then palette.emphasis
+  else if String.equal kind kind_strike then palette.strike
   else if String.equal kind kind_code then palette.code
   else if String.equal kind kind_link_text then palette.link_text
   else if String.equal kind kind_link_target then palette.link_target

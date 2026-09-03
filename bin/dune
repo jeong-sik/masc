@@ -379,6 +379,12 @@
  (modules masc_tui_scroll))
 
 (library
+ (name masc_tui_retained_view)
+ (wrapped false)
+ (modules masc_tui_retained_view)
+ (libraries yojson masc masc.agent_core))
+
+(library
  (name masc_tui_frame)
  (wrapped false)
  (modules masc_tui_frame))
@@ -523,6 +529,12 @@
  (wrapped false)
  (modules masc_tui_message_layout)
  (libraries uucp uuseg))
+
+(library
+ (name masc_tui_tool_detail)
+ (wrapped false)
+ (modules masc_tui_tool_detail)
+ (libraries masc_tui_keeper_chat_projection masc_tui_message_layout yojson))
 
 (library
  (name masc_tui_keeper_chat_diff)
@@ -897,6 +909,7 @@
   masc_tui_help
   masc_tui_context_state
   masc_tui_context_inspector
+  masc_tui_retained_view
   masc_tui_frame_presenter
   masc_tui_keeper_activity
   masc_tui_keeper_chat_history
@@ -943,6 +956,7 @@
   masc_tui_render_schedule
   masc_tui_context_bars
   masc_tui_tool_tree
+  masc_tui_tool_detail
   masc_tui_terminal_write_repair
   masc_tui_editor
   masc_tui_editor_jump

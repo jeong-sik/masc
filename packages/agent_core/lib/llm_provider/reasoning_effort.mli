@@ -32,3 +32,17 @@ val show : t -> string
 val all_wire_values : string list
 val of_string : string -> t option
 val values_for_log : string
+
+(** The effort a categorical-effort wire carries once an explicit thinking
+    toggle is applied. That wire ({!Capabilities.Reasoning_effort}) has no
+    boolean field: its only control is the effort, and [None_] is its off
+    value. [enable_thinking = Some false] therefore replaces the caller's
+    effort with [None_]; [Some true] and absence keep the caller's effort.
+
+    Both the request encoder ({!Reasoning_dialect.request_control_fields})
+    and the effort-ladder admission
+    ({!Provider_config.validate_reasoning_effort_request_typed}) go through
+    this function, so the effort that is admitted is the effort that reaches
+    the wire. Callers on any other control format keep their effort as is:
+    their toggle is a separate field, or there is none. *)
+val under_explicit_toggle : enable_thinking:bool option -> t option -> t option

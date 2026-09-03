@@ -70,6 +70,13 @@ let test_the_pane_fits_inside_the_threshold () =
   check_bool "a shown roster always leaves the surface something" true
     (Pane.content_cols ~hidden:false ~cols:Pane.threshold_cols > 0)
 
+let test_the_pane_keeps_an_ordinary_configured_name_whole () =
+  let name = "kidsnote-pr-jira-checker" in
+  let width = Pane.pane_cols - 7 in
+  check_string "ordinary configured name is not ellipsized" name
+    (String.trim
+       (Pane.name_window ~selected:false ~frame:0 ~width name))
+
 let test_marquee_pauses_travels_and_returns () =
   let offset frame = Pane.marquee_offset ~frame ~overflow:3 in
   List.iter (fun frame -> check_int "opening pause" 0 (offset frame))
@@ -172,6 +179,8 @@ let () =
             test_a_narrow_terminal_never_loses_columns
         ; Alcotest.test_case "the pane fits inside the threshold" `Quick
             test_the_pane_fits_inside_the_threshold
+        ; Alcotest.test_case "ordinary configured name reads whole" `Quick
+            test_the_pane_keeps_an_ordinary_configured_name_whole
         ] )
     ; ( "marquee"
       , [ Alcotest.test_case "pauses, travels, and returns" `Quick

@@ -493,6 +493,21 @@ let chat_input_prompt_cells = display_width chat_input_prompt_prefix
    space after it before any content starts. *)
 let chat_input_box_cells = 2
 
+(* One authority for the rows that never belong to message history: box top,
+   navigation header, operational identity header, header divider, input
+   divider, composer, box bottom, and footer. Rendering and PgUp/PgDn must
+   subtract the same number or a page skips one transcript row. *)
+let message_fixed_chrome_rows = 8
+
+let message_history_height ~terminal_rows ~status_rows =
+  max 0 (terminal_rows - message_fixed_chrome_rows - max 0 status_rows)
+
+let chat_title_row ~inner_cells ~title ~mode_suffix =
+  let inner_cells = max 0 inner_cells in
+  let mode_cells = display_width mode_suffix in
+  if mode_cells >= inner_cells then fit_width mode_suffix inner_cells
+  else fit_width title (inner_cells - mode_cells) ^ mode_suffix
+
 (* At the newest row the arrows answer the composer's history. Once PgUp has
    moved into the transcript they adjust it one row at a time, so the hint can
    name them without risking a draft replacement. *)
@@ -526,13 +541,14 @@ let input_cursor_column ~terminal_cols ~input =
 
    The badge used to be 16 cells whatever the terminal was, so a
    [codex-mcp-client] read as [codex-mcp-clien…] on a 200-column screen with
-   the room to spell it. The width is the widest label actually on the pane
-   now, never below the old 16 so a narrow terminal draws what it always did,
-   and never past a quarter of the pane so one long name cannot squeeze the
-   messages everyone came to read. *)
-let chat_role_label_column = 16
+   the room to spell it. The width is a fixed pane-derived budget, never below
+   10 so the built-in activity labels remain legible, and
+   never past 14: the built-in activity labels still read whole beside their
+   marks, while an opaque long speaker name yields its middle instead of
+   reserving empty cells on every body row. *)
+let chat_role_label_column = 10
 
-let chat_role_label_share = 4
+let chat_role_label_share = 10
 
 (* A budget, not a measurement of what happens to be loaded.
    Measuring the widest label on the pane tied body width to the message
@@ -545,16 +561,17 @@ let chat_role_label_share = 4
    ("keeper-canary-10t-cdx-sol-xhigh-r2-20260820-agent · agent"), so the
    badge took a quarter of the pane and gave it back one message later.
    Fixed, the body keeps its width and only a resize re-wraps. *)
-let chat_role_label_budget = 24
+let chat_role_label_budget = 14
 
 let chat_role_label_width ~pane_cells =
   max chat_role_label_column
     (min chat_role_label_budget (pane_cells / chat_role_label_share))
 
-(* Right-align [label] in [column] cells. An overrun loses its head: these
-   read [agent · surface] and share long prefixes -- every canary starts
-   "keeper-canary-10t-cdx-sol-" -- so the tail is what tells two of them
-   apart. *)
+(* Put the mark and label next to one another, then pad the column. The former
+   right alignment made a short label look causally detached from its mark --
+   [●                polisher] -- even though those cells carried no fact.
+   An overrun still loses its head: these read [agent · surface] and share long
+   prefixes, so the tail is what tells two of them apart. *)
 let fit_name column label =
   let pieces = display_pieces label in
   let cells = pieces_width pieces in
@@ -562,7 +579,7 @@ let fit_name column label =
     let kept = cell_suffix_of_pieces label pieces (column - 1) in
     let pad = max 0 (column - 1 - pieces_width (display_pieces kept)) in
     "…" ^ String.make pad ' ' ^ kept
-  else String.make (column - cells) ' ' ^ label
+  else label ^ String.make (column - cells) ' '
 
 (* Keep both ends of [label] in [column] cells, dropping the middle.
 
@@ -646,8 +663,8 @@ let align_role_label ?(column = chat_role_label_column) ~style label =
     fit_name column label
   else mark ^ " " ^ fit_name inner label
 
-(* The inverse of {!align_role_label}: the mark, the alignment that follows it,
-   and the name. Written here because this is where the three are joined, and a
+(* The inverse of {!align_role_label}: the mark, the name, and the trailing
+   column padding. Written here because this is where the three are joined, and a
    renderer taking them apart by measuring again is how the two drift.
 
    The renderer draws the name in reverse video. Reversing the aligned label
@@ -667,25 +684,27 @@ let split_aligned_role_label ~style label =
     else label
   in
   let mark = if String.equal after_mark label then "" else prefix in
-  let limit = String.length after_mark in
   let rec walk index =
-    if index < limit && Char.equal after_mark.[index] ' ' then walk (index + 1)
+    if index > 0 && Char.equal after_mark.[index - 1] ' ' then walk (index - 1)
     else index
   in
-  let boundary = walk 0 in
+  let boundary = walk (String.length after_mark) in
   ( mark
   , String.sub after_mark 0 boundary
-  , String.sub after_mark boundary (limit - boundary) )
+  , String.sub after_mark boundary (String.length after_mark - boundary) )
 
 let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
   (* At thirteen columns the frame leaves nine content cells: two for the
      body indent, four for the body itself, and three for a shortened source
      such as […aa]. Eleven columns left one source cell, which could draw only
      the omission marker and therefore admitted a chat pane with no identity. *)
-  (* The fixed chrome costs seven rows. Three history rows are the minimum that
+  (* The fixed chrome costs eight rows. The title and operational identity use
+     separate rows so a provider id cannot cut the title or context reading.
+     Three history rows are the minimum that
      can show an oversized entry's identity/opening, an omission marker, and
      its latest output instead of silently dropping one of those facts. *)
-  terminal_cols >= 13 && terminal_rows >= 10 + max 0 status_rows
+  terminal_cols >= 13
+  && message_history_height ~terminal_rows ~status_rows >= 3
 
 let take_last count values =
   let drop = max 0 (List.length values - max 0 count) in
@@ -1081,6 +1100,60 @@ let viewport_gap_text ~inner_width hidden_rows =
     (List.find_opt (fun text -> display_width text <= inner_width) candidates)
     ~default:""
 
+let repeated_rows_gap_text ~inner_width repeated_rows =
+  let candidates =
+    [ Printf.sprintf "  ↻ previous row repeated %d×" repeated_rows
+    ; Printf.sprintf "  ↻ repeated %d×" repeated_rows
+    ; Printf.sprintf "↻%d×" repeated_rows
+    ; "↻"
+    ]
+  in
+  Option.value
+    (List.find_opt (fun text -> display_width text <= inner_width) candidates)
+    ~default:""
+
+let same_repeatable_body_row left right =
+  match left.kind, right.kind with
+  | Body, Body ->
+    left.style = right.style
+    && left.shade = right.shade
+    && String.equal left.text right.text
+    && String.equal left.gutter right.gutter
+  | (Metadata _ | Viewport_gap _), _
+  | Body, (Metadata _ | Viewport_gap _) ->
+    false
+;;
+
+let collapse_repeated_body_rows ~inner_width rows =
+  let gap row repeated_rows =
+    { style = Status
+    ; kind = Viewport_gap { hidden_rows = repeated_rows }
+    ; shade = Shade_none
+    ; text = repeated_rows_gap_text ~inner_width repeated_rows
+    ; gutter_label_at = 0
+    ; gutter = row.gutter
+    }
+  in
+  let emit_run reversed row count =
+    if count <= 1 then row :: reversed
+    else gap row (count - 1) :: row :: reversed
+  in
+  let rec loop reversed current count = function
+    | [] ->
+      (match current with
+       | None -> List.rev reversed
+       | Some row -> List.rev (emit_run reversed row count))
+    | row :: rest ->
+      (match current with
+       | Some current when same_repeatable_body_row current row ->
+         loop reversed (Some current) (count + 1) rest
+       | None -> loop reversed (Some row) 1 rest
+       | Some current ->
+         loop (emit_run reversed current count) (Some row) 1 rest)
+  in
+  loop [] None 0 rows
+;;
+
 (* At the live edge, keep enough of an oversized newest entry to identify it,
    see its opening when space permits, and see its latest output. The typed gap
    makes the missing middle explicit; without it, inline mode looked like one
@@ -1108,9 +1181,10 @@ let newest_entry_window ~inner_width ~height rows =
         | Metadata _, body :: rest when height >= 4 -> [ first; body ], rest
         | (Metadata _ | Body | Viewport_gap _), _ -> [ first ], rest
       in
-      let tail = take_last (height - 1 - List.length start) rest in
+      let physical_tail = take_last (height - 1 - List.length start) rest in
+      let tail = collapse_repeated_body_rows ~inner_width physical_tail in
       let hidden_rows =
-        List.length rows - List.length start - List.length tail
+        List.length rows - List.length start - List.length physical_tail
         + hidden_timeline_rows
       in
       let gap =

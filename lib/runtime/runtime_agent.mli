@@ -411,6 +411,23 @@ val run_blocks :
   (run_result, Agent_core.Error.t) result
 (** Runs an Agent Core agent against structured user-authored content blocks. *)
 
+val continue_from_checkpoint :
+  sw:Eio.Switch.t ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  config:config ->
+  checkpoint:Agent_core.Checkpoint.t ->
+  ?on_event:(Agent_core.Types.sse_event -> unit) ->
+  ?on_yield:(unit -> unit) ->
+  ?on_resume:(unit -> unit) ->
+  ?agent_ref:Agent_core.Agent.t option ref ->
+  ?cooperative_yield_probe:cooperative_yield_probe ->
+  unit ->
+  (run_result, Agent_core.Error.t) result
+(** Resumes the checkpoint's next provider turn without appending another User
+    message. The checkpoint must already contain the caller-authored request and
+    every completed tool result. This is for same-turn continuation after a
+    typed incomplete provider terminal, not for starting a new Keeper turn. *)
+
 type agent_core_tool_projector =
   name:string ->
   description:string ->

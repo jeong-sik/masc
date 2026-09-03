@@ -274,17 +274,6 @@ let projected_config_dir env =
     env
 ;;
 
-let validate_local_tool_env bindings =
-  let reserved_names = "GH_CONFIG_DIR" :: github_token_env_names in
-  match List.find_opt (fun (key, _) -> List.mem key reserved_names) bindings with
-  | None -> Ok ()
-  | Some (key, _) ->
-    Error
-      (Printf.sprintf
-         "typed Execute env must not override Keeper-owned GitHub identity variable %s"
-         key)
-;;
-
 let strip_github_token_env env = remove_env_keys github_token_env_names env
 
 let projected_token_env_names env =

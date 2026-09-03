@@ -13,15 +13,9 @@ let to_json = function
   | Streaming n ->
       `Assoc [ ("kind", `String "streaming"); ("bytes", `Int n) ]
 
-let json_kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
+(* [Json_kind] is the yojson-only leaf this library can reach; masc_core,
+   where the name used to live, is the dependency it must not take. *)
+let json_kind_name = Shared_types.Json_kind.name
 
 let of_json = function
   | `Assoc kv -> (

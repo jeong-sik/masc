@@ -54,6 +54,14 @@ val unbind :
 (** Remove a channel→keeper binding, append an audit event, and
     return the removed binding row as JSON. *)
 
+val unbind_if_keeper :
+  channel_id:string ->
+  expected_keeper_name:string ->
+  actor_name:string ->
+  (Yojson.Safe.t, string) result
+(** Atomically remove a binding only while it still belongs to the expected
+    Keeper. *)
+
 (** {1 In-process gateway support}
 
     Used by {!Server_discord_in_process_gateway}, the OCaml gateway
@@ -93,18 +101,44 @@ val bound_channels :
 val bound_channels_result :
   keeper_name:string -> (string list, binding_lookup_error) result
 (** Typed bound-channel lookup. Store failures use the same error contract as
-    single-channel lookup. *)
+single-channel lookup. *)
+
+val configured_channel_ids_result :
+  unit -> (string list, binding_lookup_error) result
+(** Every configured channel snowflake, freshly read from the authoritative
+    binding store. Used to scope connector directory refresh to channels MASC
+    actually routes. *)
 
 val connected : unit -> bool
 (** Whether the in-process gateway's run loop currently reports
     [Connected]. Reads {!Discord_gateway_client.connection_state};
     no file indirection. RFC-0223 P2 presence. *)
 
-val record_ready : bot_user_id:string -> unit
+val record_ready :
+  bot_user_id:string ->
+  bot_user_name:string option ->
+  guild_ids:string list ->
+  unit
 (** Called by the in-process gateway's READY handler. Stores the bot
     identity and timestamp that {!status_json} reports as
     [bot_user_id] / [last_ready_at]. Atomic write — safe to call from
     the gateway fiber while HTTP handlers read. *)
+
+val current_guild_ids : unit -> string list
+(** Guild identities from the latest READY dispatch. *)
+
+val record_directory_refresh_started : unit -> unit
+
+val record_directory_refresh_finished :
+  server_count:int ->
+  channel_count:int ->
+  person_count:int ->
+  authentication_failed:string list ->
+  permission_denied:string list ->
+  errors:string list ->
+  unit
+(** Publish one completed full-directory attempt. Permission denials remain
+    distinct from other failures in connector status. *)
 
 (** {2 Thread registry}
 

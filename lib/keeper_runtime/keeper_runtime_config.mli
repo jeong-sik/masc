@@ -86,7 +86,6 @@ type validation_severity =
 type validation_issue_kind =
   | Invalid_schema_version
   | Unknown_key
-  | Retired_key
   | Type_mismatch
   | Out_of_range
 
@@ -134,5 +133,5 @@ val overlay_application_to_yojson :
       provider                    = "auto"
     ]}
 
-    Keeper-owned unknown and retired keys are validated explicitly; unrelated
+    Keeper-owned unknown keys are validated explicitly; unrelated
     runtime/provider namespaces remain owned by their respective loaders. *)

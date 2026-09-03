@@ -5,7 +5,8 @@ open Turn_record
 
 let turn_ref trace turn = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:turn
 
-let record ?(blocks = []) ?input_components ~trace ~turn () : Turn_record.t =
+let record ?(blocks = []) ?input_components ?(usage_scope = Runtime_usage_scope.Per_request)
+    ~trace ~turn () : Turn_record.t =
   { execution_ids = []
   ; keeper = "omega"
   ; agent_name = "keeper-omega"
@@ -41,7 +42,7 @@ let record ?(blocks = []) ?input_components ~trace ~turn () : Turn_record.t =
       ; output_tokens = Some 200
       ; cache_creation_input_tokens = None
       ; cache_read_input_tokens = Some 500
-      ; scope = Runtime_usage_scope.Per_request
+      ; scope = usage_scope
       }
   ; ts = 1_787_600_000.
   }
@@ -58,6 +59,42 @@ let envelope records =
                   ])
              records) )
     ]
+
+(* The per-turn figures ride along on the page the caller already fetched,
+   newest first. A provider that counts its usage across the whole
+   conversation carries a number that is not about any one turn; the
+   reading must not offer it as this turn's input even though the record
+   holds it. *)
+let test_recent_turns_carry_the_provider_counts () =
+  let newest = record ~trace:"trace-b" ~turn:7 () in
+  let cumulative =
+    record ~trace:"trace-b" ~turn:6
+      ~usage_scope:Runtime_usage_scope.Conversation_cumulative ()
+  in
+  let middle = record ~trace:"trace-b" ~turn:5 () in
+  let unavailable =
+    record ~trace:"trace-b" ~turn:4
+      ~usage_scope:Runtime_usage_scope.Usage_scope_unavailable ()
+  in
+  match
+    Inspector.decode_turn_records
+      (envelope [ unavailable; middle; cumulative; newest ])
+  with
+  | Error detail -> fail detail
+  | Ok decoded -> (
+      check int "one row per page row" 4
+        (List.length decoded.Inspector.recent);
+      match decoded.Inspector.recent with
+      | first :: second :: _ :: unavailable_row :: _ ->
+          check int "newest first" 7 first.Inspector.turn;
+          check bool "the provider's per-request figure rides along" true
+            (first.Inspector.input_tokens = Some 1000);
+          check bool "a cumulative scope yields no per-request figure" true
+            (second.Inspector.input_tokens = None);
+          check bool
+            "an unknown scope keeps whatever figure the record carried" true
+            (unavailable_row.Inspector.input_tokens = Some 1000)
+      | _ -> fail "the page held four rows")
 
 let test_newest_exact_composition_wins () =
   let observed =
@@ -76,6 +113,10 @@ let test_newest_exact_composition_wins () =
   | Ok decoded ->
       check int "the latest row is the newest one, attributed or not" 2
         decoded.Inspector.latest.absolute_turn;
+      check int "rows keeps the whole page" 2
+        (List.length decoded.Inspector.rows);
+      check int "rows is newest first" 2
+        (List.hd decoded.Inspector.rows).absolute_turn;
       (match decoded.Inspector.attributed with
        | None -> fail "an attributed row was on the page and must be reported"
        | Some attributed ->
@@ -351,6 +392,8 @@ let () =
             test_newest_exact_composition_wins
         ; test_case "an unattributed page still reads" `Quick
             test_page_without_attribution_still_reads
+        ; test_case "recent turns carry the provider counts" `Quick
+            test_recent_turns_carry_the_provider_counts
         ; test_case "an empty page is an error" `Quick
             test_empty_page_is_an_error
         ; test_case "rejects malformed rows" `Quick

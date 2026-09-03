@@ -115,16 +115,20 @@ type row_kind =
   | Body
   | Viewport_gap of { hidden_rows : int }
       (** A synthetic row marking content omitted from an oversized newest
-          entry at the live edge. It is not part of transcript row counts. *)
+          entry at the live edge, including an explicitly collapsed run of
+          identical wrapped rows. It is not part of transcript row counts;
+          ordinary scrollback still reads the original physical rows. *)
 
 type origin_display =
   | Origin_row  (** The origin keeps a row of its own, above the body. *)
   | Origin_inline
       (** The origin folds into the body's left margin, clock included. *)
   | Origin_bare  (** The same margin without the clock. *)
-(** Where a message's origin is drawn. [Origin_row] is what the pane has
-    always done. The other two hand that row back to the conversation: eight
-    speakers taking turns spent eight rows of a forty-row pane on headings.
+(** Where a message's origin is drawn. [Origin_bare] is the chat default.
+    [Origin_inline] adds its clock; [Origin_row] adds a full timestamp and
+    request-id heading. Folding headings into the gutter hands their rows back
+    to the conversation: eight speakers taking turns otherwise spend eight
+    rows of a forty-row pane on headings.
 
     Every layout and scroll function takes this, and passing it to one but not
     another would measure the pane against a height it does not draw. *)
@@ -261,12 +265,25 @@ val chat_input_prompt_prefix : string
 
 val chat_input_prompt_cells : int
 
+val message_fixed_chrome_rows : int
+(** Rows outside chat history. Shared by rendering, viewport admission, and
+    PgUp/PgDn so a page is exactly the history height that is visible. *)
+
+val message_history_height : terminal_rows:int -> status_rows:int -> int
+(** Physical transcript rows left after fixed chrome and variable status rows.
+    This is both the renderer height and the PgUp/PgDn distance. *)
+
+val chat_title_row :
+  inner_cells:int -> title:string -> mode_suffix:string -> string
+(** Fit a chat navigation title while reserving the complete projection-mode
+    suffix first. The opaque title yields width before semantic display state. *)
+
 val chat_role_label_width : pane_cells:int -> int
 (** The badge budget for a pane this wide. It does not read the labels: body
     width is taken from what the badge leaves, so measuring the loaded
     messages made every body re-wrap whenever a differently-named speaker
-    posted. Capped at a quarter of the pane so a narrow terminal still has
-    room to read. *)
+    posted. The bounded 10--14 cell result keeps the built-in activity names
+    whole without turning their alignment padding into a wide empty gutter. *)
 
 val speaker_mark : style -> string
 (** One glyph per speaker. Colour says the same thing more legibly, and
@@ -276,17 +293,17 @@ val speaker_mark : style -> string
 val split_aligned_role_label :
   style:style -> string -> string * string * string
 (** An {!align_role_label} result taken back apart into its mark, the
-    alignment between mark and name, and the name. The alignment is layout and
-    the name is content: a renderer that reverses the whole label paints the
-    alignment as though it were the badge. The mark is empty for a label
+    name, and its trailing column padding. The padding is layout and the name
+    is content: a renderer that reverses the whole label paints empty cells as
+    though they were the badge. The mark is empty for a label
     narrow enough that {!align_role_label} dropped it. *)
 
 val align_role_label : ?column:int -> style:style -> string -> string
-(** Right-align a role label in [column] cells, defaulting to
+(** Left-align a role label in [column] cells, defaulting to
     {!chat_role_label_column}; pass the budget {!chat_role_label_width}
     answered for the pane. A label that does not fit loses its head, not its
     tail: these read [agent · surface] and share long prefixes, so the end is
-    what tells two of them apart. *)
+    what tells two of them apart. Remaining column cells follow the name. *)
 
 val message_viewport_supported :
   terminal_rows:int -> terminal_cols:int -> status_rows:int -> bool

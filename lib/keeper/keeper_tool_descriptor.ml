@@ -609,18 +609,7 @@ let public_descriptors =
       ~id:"agent.execute"
       ~public_name:"Execute"
       ~internal_name:"tool_execute"
-      ~description:
-        "Execute one opaque typed process invocation inside the Keeper sandbox. \
-         Provide one non-empty argv process vector, an explicit typed \
-         pipeline, or a script command line that is parsed rather than handed \
-         to a shell. Use typed stdin/stdout/stderr fields for \
-         I/O and typed env for environment variables. MASC validates the input \
-         shape, path jail, sandbox target, and external-effect Gate but never \
-         interprets program or subcommand meaning. The invoked program owns \
-         its syntax and exit result. A successful result exposes typed status, \
-         output and execution_time_ms fields to later composition nodes. Small \
-         output stays inline; oversized output is represented by canonical \
-         output/stdout/stderr artifact references."
+      ~description:Tool_shard_types.tool_execute_schema.description
       ~input_schema:execute_schema
       ~policy:
         (policy
@@ -803,14 +792,6 @@ let public_descriptors =
 
 (** Descriptor-backed workspace tools that are not public model names. *)
 
-let empty_object_schema =
-  `Assoc
-    [ "type", `String "object"
-    ; "properties", `Assoc []
-    ; "additionalProperties", `Bool false
-    ]
-;;
-
 (* The whole registry record, not just its input schema: [cluster_descriptor]
    takes the description from this same lookup. *)
 let find_schema_opt schemas name =
@@ -894,16 +875,9 @@ let find_cluster_schema_opt name =
         | None -> find_masc_schema_opt name))
 ;;
 
-let base_schema_input name =
-  match find_base_schema_opt name with
-  | Some (schema : Masc_domain.tool_schema) ->
-    Canonical_registry, schema.input_schema
-  | None -> invalid_arg ("missing base tool schema for " ^ name)
-
-(* [base_schema_input] keeps only the schema, so a descriptor whose
-   description is the TOML's own cannot be built from it -- there is nothing
-   left to read the description off. This keeps the whole record for that
-   case. *)
+(* The whole schema record: the descriptor's description is the TOML's own,
+   so the catalog is the one declaration the model reads -- never a thinner
+   OCaml literal standing in for it. *)
 let base_schema_declared name =
   match find_base_schema_opt name with
   | Some (schema : Masc_domain.tool_schema) -> Canonical_registry, schema
@@ -913,6 +887,18 @@ let keeper_tools_list_schema =
   match find_base_schema_opt "keeper_tools_list" with
   | Some schema -> schema
   | None -> invalid_arg "missing base tool schema for keeper_tools_list"
+;;
+
+let time_now_schema =
+  match find_base_schema_opt "keeper_time_now" with
+  | Some schema -> schema
+  | None -> invalid_arg "missing base tool schema for keeper_time_now"
+;;
+
+let context_status_schema =
+  match find_base_schema_opt "keeper_context_status" with
+  | Some schema -> schema
+  | None -> invalid_arg "missing base tool schema for keeper_context_status"
 ;;
 
 let keeper_capability_search_schema =
@@ -938,7 +924,7 @@ let library_read = shard_library_schema "keeper_library_read"
 
 let shard_surface_schema name =
   match find_schema_opt Tool_shard_types.surface_tools name with
-  | Some schema -> schema.Masc_domain.input_schema
+  | Some schema -> schema
   | None -> failwith (Printf.sprintf "surface shard is missing %s" name)
 ;;
 
@@ -947,7 +933,7 @@ let surface_post_schema = shard_surface_schema "keeper_surface_post"
 let person_note_set_schema = shard_surface_schema "keeper_person_note_set"
 
 let memory_search_schema_source, memory_search_schema =
-  base_schema_input "keeper_memory_search"
+  base_schema_declared "keeper_memory_search"
 ;;
 
 let memory_retract_schema_source, memory_retract_schema =
@@ -955,11 +941,11 @@ let memory_retract_schema_source, memory_retract_schema =
 ;;
 
 let memory_write_schema_source, memory_write_schema =
-  base_schema_input "keeper_memory_write"
+  base_schema_declared "keeper_memory_write"
 ;;
 
 let ide_annotate_schema_source, ide_annotate_schema =
-  base_schema_input "keeper_ide_annotate"
+  base_schema_declared "keeper_ide_annotate"
 ;;
 
 let read_only_in_process_policy ?(polling_read = false) () =
@@ -1820,26 +1806,31 @@ let masc_keeper_descriptor
     ()
 ;;
 
+(* A library tool reaches the Keeper under the file's [keeper_projection]
+   when the file declares one (masc_library_list names its siblings by the
+   keeper_* names a Keeper can call) and under the catalog row otherwise. *)
 let masc_library_descriptor (definition : Tool_schemas_library.definition) =
   let schema = definition.schema in
-  let keeper_model_projection, description =
+  let keeper_model_projection =
     match definition.operation with
-    | Tool_schemas_library.List_documents ->
-      ( Internal_name
-      , "List all documents in the agent knowledge library with title, source, \
-         author, created date, and tags. Use keeper_library_read to fetch a \
-         document or keeper_library_search to query by content." )
+    | Tool_schemas_library.List_documents -> Internal_name
     | Tool_schemas_library.Read_document ->
-      Transport_alias { projected_by = "keeper_library_read" }, schema.description
+      Transport_alias { projected_by = "keeper_library_read" }
     | Tool_schemas_library.Search_documents ->
-      Transport_alias { projected_by = "keeper_library_search" }, schema.description
-    | Tool_schemas_library.Add_document -> Internal_name, schema.description
+      Transport_alias { projected_by = "keeper_library_search" }
+    | Tool_schemas_library.Add_document -> Internal_name
+  in
+  let input_schema_source, description, input_schema =
+    match definition.keeper_projection with
+    | Some projection ->
+      Keeper_projection, projection.description, projection.input_schema
+    | None -> Canonical_registry, schema.description, schema.input_schema
   in
   cluster_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection
-    ~input_schema_source:Canonical_registry
-    ~input_schema:schema.input_schema
+    ~input_schema_source
+    ~input_schema
     ~id:("masc.library." ^ Tool_schemas_library.operation_id definition.operation)
     ~name:schema.name
     ~description
@@ -1889,18 +1880,18 @@ let masc_local_runtime_descriptors =
 
 let internal_descriptors : t list =
   [ (* ── time / catalog (RFC-0179 PR-2 + PR-3) ────────── *)
-    (in_process_descriptor
-      ~keeper_model_projection:Internal_name
-      ~id:"keeper.time.now"
-      ~name:"keeper_time_now"
-      ~description:
-        "Return the current wall-clock time as ISO 8601 and Unix epoch \
-         seconds. No arguments."
-      ~input_schema:empty_object_schema
-      ~ordinary_execution_mode:Concurrent
-      ~policy:(read_only_in_process_policy ())
-      ~handler:Tool_time_now
-      ()
+    (in_process_descriptor_with_schema_source
+       ~capability_identity:Internal_name_identity
+       ~keeper_model_projection:Internal_name
+       ~input_schema_source:Canonical_registry
+       ~id:"keeper.time.now"
+       ~name:"keeper_time_now"
+       ~description:time_now_schema.description
+       ~input_schema:time_now_schema.input_schema
+       ~ordinary_execution_mode:Concurrent
+       ~policy:(read_only_in_process_policy ())
+       ~handler:Tool_time_now
+       ()
      |> with_composable_output (Json_output { schema = time_now_output_schema }))
   ; (in_process_descriptor_with_schema_source
        ~capability_identity:Internal_name_identity
@@ -1931,15 +1922,14 @@ let internal_descriptors : t list =
        ()
      |> with_eval_tags [ "capability_introspection" ])
     (* ── memory / context (RFC-0179 PR-3) ─────────────────────── *)
-  ; in_process_descriptor
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
       ~id:"keeper.context.status"
       ~name:"keeper_context_status"
-      ~description:
-        "Return persisted checkpoint, recent-message, memory, and sandbox \
-         state for this keeper turn. Context-window occupancy is not \
-         currently observed."
-      ~input_schema:empty_object_schema
+      ~description:context_status_schema.description
+      ~input_schema:context_status_schema.input_schema
       (* Serial, deliberately: the memory section runs
          Keeper_memory_source_current.revalidate, which persists pending
          invalidations under the source-store lock — a write during read.
@@ -1953,9 +1943,9 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Internal_name
       ~input_schema_source:Canonical_registry
       ~id:"keeper.artifact.read"
-      ~name:Keeper_tool_runtime_schemas.artifact_read.name
-      ~description:Keeper_tool_runtime_schemas.artifact_read.description
-      ~input_schema:Keeper_tool_runtime_schemas.artifact_read.input_schema
+      ~name:Keeper_runtime_schemas_toml.artifact_read.name
+      ~description:Keeper_runtime_schemas_toml.artifact_read.description
+      ~input_schema:Keeper_runtime_schemas_toml.artifact_read.input_schema
       (* Concurrent: content-addressed blob reads; the validated-file
          cache in Tool_blob_store is an Atomic CAS over an immutable map. *)
       ~ordinary_execution_mode:Concurrent
@@ -1970,9 +1960,8 @@ let internal_descriptors : t list =
       ~input_schema_source:memory_search_schema_source
       ~id:"keeper.memory.search"
       ~name:"keeper_memory_search"
-      ~description:
-        "Search keeper memory or history; current facts use explicit substring filtering and snapshot order."
-      ~input_schema:memory_search_schema
+      ~description:memory_search_schema.description
+      ~input_schema:memory_search_schema.input_schema
       (* Serial, deliberately: the memory/all sources run
          Keeper_memory_source_current.revalidate, which persists pending
          invalidations under the source-store lock — a write during read.
@@ -1998,8 +1987,8 @@ let internal_descriptors : t list =
       ~input_schema_source:memory_write_schema_source
       ~id:"keeper.memory.write"
       ~name:"keeper_memory_write"
-      ~description:"Persist a memory entry for this keeper."
-      ~input_schema:memory_write_schema
+      ~description:memory_write_schema.description
+      ~input_schema:memory_write_schema.input_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_memory_write
       ()
@@ -2031,13 +2020,8 @@ let internal_descriptors : t list =
        ~keeper_model_projection:Internal_name
        ~id:"keeper.surface.read"
        ~name:"keeper_surface_read"
-       ~description:
-         "Read recent messages from one conversation endpoint (dashboard, \
-          discord, slack, or another connector label) with speaker identity \
-          and a derived participant roster. With mode='channel', 'messages', \
-          'members', or 'member', the Discord lane can also query its live \
-          channel and server read surface within the keeper's bound channels."
-       ~input_schema:surface_read_schema
+       ~description:surface_read_schema.description
+       ~input_schema:surface_read_schema.input_schema
        (* Concurrent: the local lane pages the chat store and person notes
           through plain file reads (the person-notes Hashtbl is
           function-local); the Discord lane issues one HTTP request per
@@ -2052,8 +2036,8 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Internal_name
       ~id:"keeper.surface.post"
       ~name:"keeper_surface_post"
-      ~description:Tool_shard_types.keeper_surface_post_description
-      ~input_schema:surface_post_schema
+      ~description:surface_post_schema.description
+      ~input_schema:surface_post_schema.input_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_surface_post
       ()
@@ -2061,12 +2045,8 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Internal_name
       ~id:"keeper.person.note_set"
       ~name:"keeper_person_note_set"
-      ~description:
-        "Remember (or clear) a note about a person met on a connected \
-         surface, keyed by their roster speaker_id. Deliberate memory: \
-         the note survives after their chat rows age out of the log \
-         window and shows up on the keeper_surface_read roster."
-      ~input_schema:person_note_set_schema
+      ~description:person_note_set_schema.description
+      ~input_schema:person_note_set_schema.input_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_person_note_set
       ()
@@ -2077,8 +2057,8 @@ let internal_descriptors : t list =
       ~input_schema_source:ide_annotate_schema_source
       ~id:"keeper.ide.annotate"
       ~name:"keeper_ide_annotate"
-      ~description:"Emit an IDE annotation event for the current keeper."
-      ~input_schema:ide_annotate_schema
+      ~description:ide_annotate_schema.description
+      ~input_schema:ide_annotate_schema.input_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_ide_annotate
       ()
@@ -2088,9 +2068,9 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Internal_name
       ~input_schema_source:Canonical_registry
       ~id:"masc.fusion.deliberate"
-      ~name:Keeper_tool_runtime_schemas.fusion.name
-      ~description:Keeper_tool_runtime_schemas.fusion.description
-      ~input_schema:Keeper_tool_runtime_schemas.fusion.input_schema
+      ~name:Keeper_runtime_schemas_toml.fusion.name
+      ~description:Keeper_runtime_schemas_toml.fusion.description
+      ~input_schema:Keeper_runtime_schemas_toml.fusion.input_schema
       (* The explicit [Internal_name] projection makes Fusion available. *)
       ~policy:(write_in_process_policy ())
       ~handler:Tool_masc_fusion_dispatch
@@ -2101,9 +2081,9 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Internal_name
       ~input_schema_source:Canonical_registry
       ~id:"masc.fusion.status"
-      ~name:Keeper_tool_runtime_schemas.fusion_status.name
-      ~description:Keeper_tool_runtime_schemas.fusion_status.description
-      ~input_schema:Keeper_tool_runtime_schemas.fusion_status.input_schema
+      ~name:Keeper_runtime_schemas_toml.fusion_status.name
+      ~description:Keeper_runtime_schemas_toml.fusion_status.description
+      ~input_schema:Keeper_runtime_schemas_toml.fusion_status.input_schema
       (* [Internal_name] is the model exposure authority. *)
       (* Concurrent: projects an [Atomic.get] snapshot of the fusion run
          registry (Run_registry_core); mutation goes through its own
@@ -2122,9 +2102,9 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Operator_only
       ~input_schema_source:Canonical_registry
       ~id:"keeper.vision.analyze_image"
-      ~name:Keeper_tool_runtime_schemas.keeper_analyze_image.name
-      ~description:Keeper_tool_runtime_schemas.keeper_analyze_image.description
-      ~input_schema:Keeper_tool_runtime_schemas.keeper_analyze_image.input_schema
+      ~name:Keeper_runtime_schemas_toml.keeper_analyze_image.name
+      ~description:Keeper_runtime_schemas_toml.keeper_analyze_image.description
+      ~input_schema:Keeper_runtime_schemas_toml.keeper_analyze_image.input_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_analyze_image
       ()
@@ -2325,6 +2305,19 @@ let internal_descriptors : t list =
        "tool_help" "masc_tool_help"
        ~readonly:true
   ; masc_misc_descriptor "gc" "masc_gc"
+      ~readonly:false
+  (* The ask chain — store, operator surfaces, answer→wake — was reachable
+     only from the MCP lane: nothing in this registry named the tools, so the
+     agent-core lane never advertised them and could not dispatch a call.
+     [Internal_name] puts them on the model surface; [Tool_masc_misc_dispatch]
+     routes them to the same handlers the MCP lane uses, with the Keeper's own
+     [meta.name] as the asking identity, so the store's unregistered-keeper
+     refusal still applies. *)
+  ; masc_misc_descriptor "ask" "masc_ask"
+      ~readonly:false
+  ; masc_misc_descriptor "ask_status" "masc_ask_status"
+      ~readonly:true
+  ; masc_misc_descriptor "ask_withdraw" "masc_ask_withdraw"
       ~readonly:false
   (* [masc_web_search] / [masc_web_fetch] are already owned by the
      MASC-owned web descriptors above. Do not add

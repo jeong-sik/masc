@@ -978,27 +978,6 @@ let test_lane_rejects_unknown_key () =
          errors)
   | Ok _ -> fail "unknown lane key must fail config parsing"
 
-let test_retired_native_streaming_capability_is_rejected () =
-  let config =
-    "[models.sample]\n\
-     api-name = \"sample\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.sample.capabilities]\n\
-     supports-native-streaming = true\n"
-  in
-  match Runtime_toml.parse_string config with
-  | Ok _ -> fail "retired supports-native-streaming key must fail config parsing"
-  | Error errors ->
-    check bool "retired key path is exact" true
-      (List.exists
-         (fun (error : Runtime_toml.parse_error) ->
-            String.equal
-              error.path
-              "models.sample.capabilities.supports-native-streaming"
-            && String_util.contains_substring error.message "was removed")
-         errors)
-
 (* A [models.X].max-context above the model's catalog window resolves to the
    catalog number with source Override_clamped_by_capability: the declaration
    is clamped away and reaches nothing. Two shipped runtimes carried one, and
@@ -3784,7 +3763,7 @@ let test_structured_judge_runtime_key_is_rejected () =
   with
   | Ok _ -> fail "[runtime].structured_judge must be rejected as an unknown key"
   | Error errors ->
-    check bool "retired key is named in the parse error" true
+    check bool "removed key is named in the parse error" true
       (List.exists
          (fun (error : Runtime_toml.parse_error) ->
             String.equal error.path "runtime.structured_judge"
@@ -4564,8 +4543,6 @@ let () =
             test_exact_output_lane_rejects_unknown_key;
           test_case "lane rejects unknown keys" `Quick
             test_lane_rejects_unknown_key;
-          test_case "retired native-streaming capability is rejected" `Quick
-            test_retired_native_streaming_capability_is_rejected;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
           test_case "kimi-for-coding declares the reasoning it returns" `Quick
@@ -4581,7 +4558,7 @@ let () =
             `Quick
             test_deployment_exact_output_catalog_admits_seed_lanes;
           test_case
-            "retired [runtime].structured_judge key is rejected"
+            "removed [runtime].structured_judge key is unknown"
             `Quick test_structured_judge_runtime_key_is_rejected;
           test_case
             "save_config_text commits exact registry with runtime state"

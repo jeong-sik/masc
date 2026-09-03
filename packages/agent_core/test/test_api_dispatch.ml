@@ -91,7 +91,7 @@ let test_pricing_known_models () =
     bool
     "catalog zero remains declared despite absent cache multipliers"
     true
-    (match Llm_provider.Pricing.pricing_for_model_opt "dashscope-3.5-35b" with
+    (match Llm_provider.Pricing.pricing_for_model_opt "qwen3.5-35b" with
      | Some
          { input_per_million = 0.0
          ; output_per_million = 0.0

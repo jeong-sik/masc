@@ -265,7 +265,7 @@ let complete_http
       let url =
         match config.kind with
         | Provider_config.Gemini -> gemini_url ~config ~stream:false
-        | Anthropic | Kimi | OpenAI_compat | Ollama | Glm | DashScope ->
+        | Anthropic | Kimi | OpenAI_compat | Ollama | Glm ->
           config.base_url ^ config.request_path
       in
       (* Pre-flight body validation: detect truncated JSON before sending.

@@ -509,10 +509,12 @@ and emphasis keep their own hierarchy. Connector and agent origins remain in
 the badge label (`vincent · slack`, `taskmaster · agent`) instead of being
 inferred from row position.
 
-Chat opens in the roomier origin-row layout: the timestamp and reverse-video
-speaker badge form a heading, and prose starts on the following row. `Ctrl-F`
-cycles to the denser inline-clock layout and then the clock-free inline layout;
-the header names either compact choice as `clock:inline` or `clock:off`. When
+Chat opens in the clock-free compact layout: the speaker mark and label remain
+beside the prose while bookkeeping stays out of the reading path. `Ctrl-F`
+adds an inline clock, then a full timestamp/request-id heading; the header names
+those added projections as `metadata:inline` or `metadata:full`. A streaming
+row uses its actual start clock rather than the word `live`; the active-turn
+status below the history carries the live state and elapsed time. When
 one newest message is taller than the history pane, the live edge keeps its
 heading (or inline opening) and latest rows with an explicit
 `⋯ N hidden · PgUp` separator.
@@ -528,24 +530,32 @@ and full; `Ctrl-D` toggles compact and full tool details. `/thinking` and
 override the initial modes.
 
 Memory journal rows open in summary mode, using producer-owned compact text
-instead of reconstructing a summary from rendered prose. `Ctrl-N` or `/memory`
+instead of reconstructing a summary from rendered prose. The summary itself
+ends in `Ctrl-N: journal detail`; `Ctrl-N` or `/memory`
 cycles those rows through summary, full, and hidden; the header names the two
 non-default states as `memory:full` and `memory:off`. Neutral system rows that
 share the journal lane have no summary projection and therefore remain whole.
 
 The folded tool row retains exact outcome counts and ends with
-`Ctrl-D: details / diffs`, so the hidden change view is discoverable from the
-row that owns it. The typed calls themselves stay attached to the message, so
+`Ctrl-D: full calls / schedule / diffs`, so full names, typed execution state,
+actual batch/concurrent scheduling, exact served input/output, and the hidden
+change view are discoverable from the row that owns it. The typed calls
+themselves stay attached to the message, so
 changing the view does not reconstruct facts from rendered glyphs. Expanded
 Tool folds also retain operational kinds (`Skill`, `Keeper`, and `Fusion`), so
 a mixed block does not collapse into an anonymous tool count. A held tool call
 uses decision vocabulary independently of execution: `approval approved`,
 `approval denied`, `approval timed out`, or `approval displaced`. Its later
 tool row still reports whether execution returned or failed.
-calls use the finished glyph for a call that
-returned, `✗` for one that returned an error, `·` for one the trace never saw
-finish, and `?` for one whose outcome the trace did not record. A finished call
-carries its server-recorded duration; an open call has none.
+Tool calls use `✓` for a returned call, `✗` for a failure, `◌` while arguments
+are still streaming, `▶` while awaiting a result, `!` when the trace never saw
+the call finish, and `?` when it recorded no outcome. A finished call carries
+its server-recorded duration; an open call has none.
+
+`ERROR` rows keep the complete producer message and wrap it through the same
+scrollable transcript layout as ordinary prose. They are never reduced with a
+cell-fit `~`; a reason longer than the visible page remains reachable with
+PgUp rather than being presented as a complete error.
 
 Full tool detail also keeps a Keeper's recorded file change inside the turn
 that made it. The pane does not fetch file-change bodies in compact mode;
@@ -602,10 +612,58 @@ keeper while navigating.
 the recorded context composition, `2:request` lists the exact canonical input
 items retained for the provider request, and `3:proof` explains each recorded
 component's source and evidence strength. At 110 columns and wider, the request
-and proof tabs use a `STACK │ SELECTED` layout so `j`/`k` can move the left
-list while the selected item's text or provenance remains visible on the
-right. Narrow terminals keep the same facts in one column; `Enter` opens exact
-text at full width.
+and proof tabs draw two columns with their headers pinned above independent
+windows: `j`/`k` moves the left list while the selected item's text or
+provenance stays put at the top of the right column, `h`/`l` moves which pane
+hears `j`/`k` (the caret on the pinned header names it), and with the right
+pane focused `j`/`k` scrolls the item itself. Narrow terminals keep the same
+facts in one column; `Enter` opens exact text at full width.
+
+`1:stack` is three measurements of one turn, not three views of one number,
+and the section says so at the bottom. SERIALIZED REQUEST is the request the
+dispatcher actually serialized, in bytes and in the provider's own token
+count. HISTORY REACH is how much of the Keeper's recent history that request
+carried: atoms are the indivisible units a cut falls between, so a tool call
+and the result it answers travel together or not at all, and the count says
+how many stayed behind — which is where "why does it not remember that"
+usually ends. COMPOSITION divides the turn's attributed bytes by where they
+came from (tool results, memory recall, schemas) and is a proportion table,
+not a breakdown of the request: the attributed total and the serialized bytes
+are measured at different points and the gap is not explained. A provider
+that reports usage across the whole conversation rather than per request
+gets no window percentage here, only the number it reported and a note that
+this request's own share was not. RECENT TURNS, the section at the bottom,
+is one row per dispatched turn on the fetched page, carrying the input,
+cache read, and output the provider itself counted — the per-turn answer to
+how much context goes in, newest first. A turn whose provider counted
+across the conversation states that instead of figures, and a turn whose
+provider reported nothing says the input was not reported; neither gets a
+number that looks like its own and is not.
+
+`[` and `]` step back and forward through the page's turns -- the caret on
+a RECENT TURNS row names the one on screen -- and every tab re-reads the
+exact provider input for the row they name; a turn that retained no
+snapshot says so on the request tab rather than showing another turn's.
+
+On the request tab, `/` searches the item labels the way the keeper
+roster searches names: typing jumps to the first match, `n`/`N` cycle,
+`Enter` settles, `Esc` clears. The query draws beside the tab row.
+
+`2:request` marks where each item stands in the assembly: `F` the fixed
+system prompt, `H` history the window carried forward, `N` the newest
+message added this turn (the wire is append-only, so the last message is the
+turn's own input, whether a user's text or this turn's latest tool result),
+`S` a tool schema. The header also states what came back, to the extent the
+turn record observed it: output tokens and the finish reason, and a
+RESPONSE band under the summary shows the reply itself -- the keeper's
+speech as markdown, its tool steps and reasoning dimmed -- joined from
+the newest transcript page by the turn's own key and capped at a
+screenful, with the chat pane named for the full text. A turn whose
+reply the newest page no longer reaches says so instead of borrowing
+another turn's answer. An item's text
+is the retained pre-dispatch copy; message rows are read as their typed
+blocks — prose as markdown, structured payloads as pretty JSON, tool calls
+and results under labels that name the tool and the outcome.
 
 Evidence badges are claims, not decoration. `VERIFIED` means exact text was
 checked against the producer digest and byte count. `SERIALIZED` means an exact
@@ -757,6 +815,14 @@ Operator approvals scoped to the acting actor.
 `y` and `n` post to `/api/v1/operator/confirm`. Selection is held by item
 identity, so a refresh that reorders or drops items does not move the cursor
 onto a different request.
+
+`Enter` opens the selected request as a wrapped, scrollable field list before
+the operator decides it. A blocked Auto Judge request puts `state`, the exact
+producer `reason`, and the available `next` action before its approval ID,
+execution location, and input. The one-line queue summary may end in `~`; the
+detail never treats that prefix as the whole reason. `R` retries only when the
+detail says retry is offered, while `y` and `n` remain available for a human
+decision.
 
 ### Board
 

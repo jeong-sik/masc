@@ -70,6 +70,17 @@ type memory_write_error_kind =
   | Derivation_incomplete
   | Derivation_invalid
   | Derived_source_path_unsupported
+  | Board_ref_invalid
+      (** [board_post_id] or [board_comment_id] is not a string, is blank, or
+          fails the Board id grammar. *)
+  | Board_comment_without_post
+      (** [board_comment_id] was given without [board_post_id]. *)
+  | Board_ref_with_derivation_unsupported
+      (** A Board reference is an observation source; a derived conclusion
+          cannot carry one. *)
+  | Board_ref_with_source_path_unsupported
+      (** A source-bound claim already names its file; it cannot also name a
+          Board post. *)
   | Unsupported_derivation
   | Persistence_failed
   | Commit_receipt_inconsistent

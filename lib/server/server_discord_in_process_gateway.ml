@@ -209,10 +209,346 @@ let resolve_channel_name ~base_dir ~channel_id =
           (* A direct message has no name. Absent, not blank. *)
           | Some _ | None -> None))))
 
+let nonblank_string_field json field =
+  match Json_util.get_string json field with
+  | Some value when String.trim value <> "" -> Some (String.trim value)
+  | Some _ | None -> None
+
+let discord_channel_directory_entry json =
+  match
+    nonblank_string_field json "id",
+    nonblank_string_field json "name"
+  with
+  | Some id, Some name -> Ok (id, name)
+  | Some _, None | None, Some _ | None, None ->
+    Error "Discord channel response has no id/name pair"
+
+let discord_message_people_entries = function
+  | `List messages ->
+    let people = Hashtbl.create 32 in
+    List.iter
+      (fun message ->
+         match message with
+         | `Assoc fields ->
+           (match List.assoc_opt "author" fields with
+            | None -> ()
+            | Some author ->
+              (match nonblank_string_field author "id" with
+               | None -> ()
+               | Some id when Hashtbl.mem people id -> ()
+               | Some id ->
+                 let name =
+                   match nonblank_string_field author "global_name" with
+                   | Some _ as global_name -> global_name
+                   | None -> nonblank_string_field author "username"
+                 in
+                 Option.iter (fun name -> Hashtbl.add people id name) name))
+         | _ -> ())
+      messages;
+    Ok
+      (Hashtbl.to_seq people |> List.of_seq
+       |> List.sort (fun (left, _) (right, _) -> String.compare left right))
+  | _ -> Error "Discord channel messages response is not a list"
+
+let discord_channel_directory_entries = function
+  | `List channels ->
+    let rec decode acc = function
+      | [] -> Ok (List.rev acc)
+      | channel :: rest ->
+        (match discord_channel_directory_entry channel with
+         | Ok entry -> decode (entry :: acc) rest
+         | Error _ as error -> error)
+    in
+    decode [] channels
+  | _ -> Error "Discord guild channels response is not a list"
+
+let discord_member_directory_page = function
+  | `List members ->
+    let entry member =
+      match member with
+      | `Assoc fields ->
+        (match List.assoc_opt "user" fields with
+         | None -> Error "Discord guild member has no user"
+         | Some user ->
+           (match nonblank_string_field user "id" with
+            | None -> Error "Discord guild member user has no id"
+            | Some id ->
+            let name =
+             match nonblank_string_field user "global_name" with
+             | Some _ as global_name -> global_name
+             | None -> nonblank_string_field user "username"
+           in
+            (match name with
+             | Some name -> Ok (id, name)
+             | None -> Error "Discord guild member user has no name")))
+      | _ -> Error "Discord guild member is not an object"
+    in
+    let rec decode acc = function
+      | [] -> Ok (List.rev acc)
+      | member :: rest ->
+        (match entry member with
+         | Ok value -> decode (value :: acc) rest
+         | Error _ as error -> error)
+    in
+    (match decode [] members with
+     | Error _ as error -> error
+     | Ok entries ->
+       let after = List.rev entries |> List.find_map (fun (id, _) -> Some id) in
+       Ok (entries, after, List.length members))
+  | _ -> Error "Discord guild members response is not a list"
+
+let remember_directory_entries ~base_dir ~scope entries =
+  List.iter
+    (fun (id, name) ->
+       Connector_names.remember ~base_dir ~connector:State.channel ~scope ~id
+         ~name ())
+    entries
+
+let discord_recent_message_limit = 100
+let discord_member_page_limit = 1000
+
+type directory_rest_failure =
+  | Directory_authentication_failed
+  | Directory_permission_denied
+  | Directory_operation_failed
+
+let classify_directory_rest_failure = function
+  | Discord_rest_client.Http_status { code = 401; _ } ->
+    Directory_authentication_failed
+  | Discord_rest_client.Discord_api { http_status = 401; _ } ->
+    Directory_authentication_failed
+  | Discord_rest_client.Http_status { code = 403; _ }
+  | Discord_rest_client.Discord_api { http_status = 403; _ }
+  | Discord_rest_client.Discord_api { code = 50001 | 50013; _ } ->
+    Directory_permission_denied
+  | Discord_rest_client.Network _
+  | Discord_rest_client.Http_status _
+  | Discord_rest_client.Discord_api _
+  | Discord_rest_client.Other _ -> Directory_operation_failed
+
+let refresh_discord_directory_once ~clock ~base_dir ~token =
+  State.record_directory_refresh_started ();
+  let servers = Hashtbl.create 8 in
+  let channels = Hashtbl.create 64 in
+  let people = Hashtbl.create 256 in
+  let authentication_failed = ref [] in
+  let permission_denied = ref [] in
+  let errors = ref [] in
+  let remember ~scope table entries =
+    List.iter (fun (id, name) -> Hashtbl.replace table id name) entries;
+    remember_directory_entries ~base_dir ~scope entries
+  in
+  let record_rest_error ~scope ~target error =
+    let detail = Format.asprintf "%a" Discord_rest_client.pp_error error in
+    (match classify_directory_rest_failure error with
+     | Directory_authentication_failed ->
+       authentication_failed := scope :: !authentication_failed
+     | Directory_permission_denied ->
+       permission_denied := scope :: !permission_denied
+     | Directory_operation_failed -> errors := scope :: !errors);
+    Log.Server.warn "Discord directory %s target=%s: %s" scope target detail
+  in
+  let refresh_channel channel_id =
+    match Discord_rest_client.snowflake_of_string channel_id with
+    | Error detail ->
+      Log.Server.warn "Discord directory skipped channel %s: %s" channel_id detail
+    | Ok channel_snowflake ->
+      (match
+         Discord_rest_client.get_channel ~clock ~token
+           ~channel_id:channel_snowflake ()
+       with
+       | Error error ->
+         record_rest_error ~scope:"bound_channel" ~target:channel_id error
+       | Ok json ->
+         (match discord_channel_directory_entry json with
+          | Error detail ->
+            Log.Server.warn "Discord channel directory rejected channel=%s: %s"
+              channel_id detail
+          | Ok (returned_id, name) when String.equal returned_id channel_id ->
+            remember ~scope:Connector_names.Channel channels
+              [ returned_id, name ]
+          | Ok (returned_id, _) ->
+            Log.Server.warn
+              "Discord channel directory identity mismatch requested=%s returned=%s"
+              channel_id returned_id));
+      (match
+         Discord_rest_client.get_channel_messages ~clock ~token
+           ~channel_id:channel_snowflake ~limit:discord_recent_message_limit ()
+       with
+       | Error error ->
+         record_rest_error ~scope:"recent_people" ~target:channel_id error
+       | Ok json ->
+         (match discord_message_people_entries json with
+          | Error detail ->
+            Log.Server.warn "Discord people directory rejected channel=%s: %s"
+              channel_id detail
+          | Ok entries ->
+            remember ~scope:Connector_names.Person people entries))
+  in
+  let refresh_guild guild_id =
+    match Discord_rest_client.snowflake_of_string guild_id with
+    | Error detail ->
+      errors := "server_identity" :: !errors;
+      Log.Server.warn "Discord directory invalid guild id %s: %s" guild_id detail
+    | Ok guild_snowflake ->
+      (match Discord_rest_client.get_guild ~clock ~token ~guild_id:guild_snowflake () with
+       | Error error -> record_rest_error ~scope:"server" ~target:guild_id error
+       | Ok json ->
+         (match discord_channel_directory_entry json with
+          | Ok (returned_id, name) when String.equal returned_id guild_id ->
+            remember ~scope:Connector_names.Server servers [ returned_id, name ]
+          | Ok (returned_id, _) ->
+            errors := "server: identity mismatch" :: !errors;
+            Log.Server.warn
+              "Discord directory server identity mismatch requested=%s returned=%s"
+              guild_id returned_id
+          | Error detail ->
+            errors := "server" :: !errors;
+            Log.Server.warn "Discord directory server rejected guild=%s: %s"
+              guild_id detail));
+      (match
+         Discord_rest_client.get_guild_channels ~clock ~token
+           ~guild_id:guild_snowflake ()
+       with
+       | Error error -> record_rest_error ~scope:"channels" ~target:guild_id error
+       | Ok json ->
+         (match discord_channel_directory_entries json with
+          | Ok entries -> remember ~scope:Connector_names.Channel channels entries
+          | Error detail ->
+            errors := "channels" :: !errors;
+            Log.Server.warn "Discord directory channels rejected guild=%s: %s"
+              guild_id detail));
+      let seen_member_cursors = Hashtbl.create 16 in
+      let rec refresh_members after =
+        match
+          Discord_rest_client.get_guild_members ~clock ~token
+            ~guild_id:guild_snowflake ~limit:discord_member_page_limit ?after ()
+        with
+        | Error error -> record_rest_error ~scope:"members" ~target:guild_id error
+        | Ok json ->
+          (match discord_member_directory_page json with
+           | Error detail ->
+             errors := "members" :: !errors;
+             Log.Server.warn "Discord directory members rejected guild=%s: %s"
+               guild_id detail
+           | Ok (entries, next_after, count) ->
+             remember ~scope:Connector_names.Person people entries;
+             if count = discord_member_page_limit then
+               match next_after with
+               | None ->
+                 errors :=
+                   "members: full page has no cursor"
+                   :: !errors
+               | Some cursor ->
+                 if Hashtbl.mem seen_member_cursors cursor then begin
+                   errors := "members: cursor did not advance" :: !errors;
+                   Log.Server.warn
+                     "Discord directory member cursor repeated guild=%s cursor=%s"
+                     guild_id cursor
+                 end else begin
+                   Hashtbl.replace seen_member_cursors cursor ();
+                   match Discord_rest_client.snowflake_of_string cursor with
+                   | Ok cursor -> refresh_members (Some cursor)
+                   | Error detail ->
+                     errors := "members_cursor" :: !errors;
+                     Log.Server.warn
+                       "Discord directory member cursor rejected guild=%s: %s"
+                       guild_id detail
+                 end)
+      in
+      refresh_members None
+  in
+  List.iter refresh_guild (State.current_guild_ids ());
+  (match State.configured_channel_ids_result () with
+   | Error error ->
+     errors := "bindings" :: !errors;
+     Log.Server.warn "Discord directory binding read failed: %s"
+       (State.binding_lookup_error_to_string error)
+   | Ok channel_ids -> List.iter refresh_channel channel_ids);
+  State.record_directory_refresh_finished
+    ~server_count:(Hashtbl.length servers)
+    ~channel_count:(Hashtbl.length channels)
+    ~person_count:(Hashtbl.length people)
+    ~authentication_failed:!authentication_failed
+    ~permission_denied:!permission_denied ~errors:!errors
+
+(* READY and successful binds share one coalescing queue. A request arriving
+   during network I/O sets [pending]; the worker rereads the authoritative
+   binding store before the follow-up pass, so a just-created binding is not
+   stranded until the next reconnect. The global mutex protects only booleans
+   and is never held across I/O or a fiber yield. *)
+let discord_directory_refresh_mu = Stdlib.Mutex.create ()
+let discord_directory_refresh_running = ref false
+let discord_directory_refresh_pending = ref false
+
+let with_directory_refresh_lock f =
+  Stdlib.Mutex.lock discord_directory_refresh_mu;
+  match f () with
+  | result ->
+    Stdlib.Mutex.unlock discord_directory_refresh_mu;
+    result
+  | exception exn ->
+    Stdlib.Mutex.unlock discord_directory_refresh_mu;
+    raise exn
+
+let request_directory_refresh ~sw ~clock ~base_dir =
+  match bot_token_opt () with
+  | None -> ()
+  | Some token ->
+    let start_worker =
+      with_directory_refresh_lock (fun () ->
+        discord_directory_refresh_pending := true;
+        if !discord_directory_refresh_running then false
+        else begin
+          discord_directory_refresh_running := true;
+          true
+        end)
+    in
+    if start_worker then
+      Eio.Fiber.fork ~sw (fun () ->
+        let stop_worker () =
+          with_directory_refresh_lock (fun () ->
+            discord_directory_refresh_running := false;
+            discord_directory_refresh_pending := false)
+        in
+        let take_pending_or_stop () =
+          with_directory_refresh_lock (fun () ->
+            if !discord_directory_refresh_pending then begin
+              discord_directory_refresh_pending := false;
+              true
+            end else begin
+              discord_directory_refresh_running := false;
+              false
+            end)
+        in
+        let rec loop () =
+          if take_pending_or_stop () then begin
+            refresh_discord_directory_once ~clock ~base_dir ~token;
+            loop ()
+          end
+        in
+        try loop () with
+        | Eio.Cancel.Cancelled _ as exn ->
+          stop_worker ();
+          raise exn
+        | exn ->
+          stop_worker ();
+          State.record_directory_refresh_finished ~server_count:0
+            ~channel_count:0 ~person_count:0 ~authentication_failed:[]
+            ~permission_denied:[]
+            ~errors:[ "worker" ];
+          Log.Server.error "Discord directory refresh crashed: %s"
+            (Printexc.to_string exn))
+
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
       ~channel_name ~message_id ~author_id ~author_name ~content ~mentions_bot
       ~route ~urgency
   =
+  Option.iter
+    (fun name ->
+      Connector_names.remember ~base_dir ~connector:State.channel
+        ~scope:Connector_names.Person ~id:author_id ~name ())
+    author_name;
   let surface =
     discord_attention_surface ~guild_id ~channel_id ~channel_name
   in
@@ -473,8 +809,8 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
 let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
     (ev : Gw.gateway_event) =
   match ev with
-  | Gw.Ready { bot_user_id; _ } ->
-    State.record_ready ~bot_user_id;
+  | Gw.Ready { bot_user_id; bot_user_name; guild_ids; _ } ->
+    State.record_ready ~bot_user_id ~bot_user_name ~guild_ids;
     Log.Server.info "Discord gateway READY (bot_user_id=%s)" bot_user_id;
     None
   | Gw.Message_create
@@ -749,6 +1085,10 @@ let submit_ingress ingress ~lane ~event_id run =
 
 module For_testing = struct
   let submit_triggered_event = submit_triggered_event
+  let discord_channel_directory_entry = discord_channel_directory_entry
+  let discord_channel_directory_entries = discord_channel_directory_entries
+  let discord_member_directory_page = discord_member_directory_page
+  let discord_message_people_entries = discord_message_people_entries
 end
 
 let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
@@ -826,7 +1166,15 @@ let start ~sw ~env ~clock ~state =
               ingress
               ~dispatch_for_delivery:(dispatch_for_config config)
               ~base_dir:config.base_path
-              ev)
+              ev;
+            (* READY must be admitted first: [accept_event] publishes the
+               authoritative guild ids that the refresh worker consumes. *)
+            (match ev with
+             | Gw.Ready _ ->
+               request_directory_refresh ~sw ~clock ~base_dir:config.base_path
+             | Gw.Message_create _ | Gw.Reaction_add _ | Gw.Thread_tracked _
+             | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ ->
+               ()))
           ~on_ambient:(fun ev ->
             let config = Mcp_server.workspace_config state in
             submit_ambient_event ingress ~base_dir:config.base_path ev)

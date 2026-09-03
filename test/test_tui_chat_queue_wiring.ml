@@ -30,12 +30,12 @@ let test_every_way_back_asks_for_what_is_behind_it () =
       n
 ;;
 
-let entry_at at : Tui_types.msg_entry =
+let entry_at ?(id = "") at : Tui_types.msg_entry =
   { Tui_types.me_keeper_name = "alpha"
   ; me_role = Tui_types.Message_keeper
   ; me_identity =
-      Tui_types.Persisted_legacy_row
-        { request_id = ""; operation_seq = 0 }
+      Tui_types.Persisted_row
+        (if id = "" then Printf.sprintf "msg-%.0f" at else id)
   ; me_turn_phase = Tui_types.Turn_output
   ; me_turn_sequence = None
   ; me_operation_seq = 0
@@ -88,14 +88,35 @@ let test_a_refresh_keeps_what_was_paged_back_to () =
 ;;
 
 (* Rows the fresh window already carries come back in it, so keeping the paged
-   copy too would show them twice. *)
+   copy too would show them twice. Same row, same id: the window's copy
+   replaces the held one. *)
 let test_a_refresh_does_not_double_the_overlap () =
-  let paged = [ entry_at 100.; entry_at 300.; entry_at 400. ] in
-  let fresh = [ entry_at 300.; entry_at 400.; entry_at 500. ] in
+  let paged =
+    [ entry_at 100.; entry_at ~id:"msg-300" 300.; entry_at ~id:"msg-400" 400. ]
+  in
+  let fresh =
+    [ entry_at ~id:"msg-300" 300.; entry_at ~id:"msg-400" 400.; entry_at 500. ]
+  in
   check
     (list (float 0.001))
     "only rows older than the window survive"
     [ 100.; 300.; 400.; 500. ]
+    (ats (Tui_types.merge_paged_history ~paged ~fresh))
+;;
+
+(* The tail window is bounded, and a keeper flooding approval rows pushes
+   conversation rows out of it between two refreshes. The old rule dropped
+   every held row at or after the window's oldest -- on the assumption the
+   window still carried it -- so the middle of the conversation vanished on
+   the tick that pushed it out (#32660). A row the window does not carry
+   stays on screen. *)
+let test_a_row_the_window_evicted_stays_visible () =
+  let paged = [ entry_at 300.; entry_at 400. ] in
+  let fresh = [ entry_at 500.; entry_at 600. ] in
+  check
+    (list (float 0.001))
+    "evicted rows kept, fresh window appended"
+    [ 300.; 400.; 500.; 600. ]
     (ats (Tui_types.merge_paged_history ~paged ~fresh))
 ;;
 
@@ -775,7 +796,7 @@ let test_approval_detail_scroll_accepts_the_rendered_clamp () =
    Every combination is listed rather than described, because the rule is
    about which of eight cases produce which string. *)
 let test_the_header_names_only_unusual_modes () =
-  let summary ?(origin = Masc_tui_message_layout.Origin_row) memory
+  let summary ?(origin = Masc_tui_message_layout.Origin_bare) memory
       reasoning tools =
     Tui_types.chat_visibility_summary ~memory ~reasoning ~tools ~origin
   in
@@ -792,18 +813,18 @@ let test_the_header_names_only_unusual_modes () =
   in
   check
     bool
-    "the pane starts with a separate origin row"
+    "the pane starts without timestamp rows"
     true
     (started.Tui_types.msg_origin_display
-     = Masc_tui_message_layout.Origin_row);
+     = Masc_tui_message_layout.Origin_bare);
   check string "everything at its default says nothing" ""
     (summary ~origin:started.Tui_types.msg_origin_display memory_summary
        hidden compact);
-  check string "the compact inline layout is named" "clock:inline"
+  check string "the inline metadata layout is named" "metadata:inline"
     (summary ~origin:Masc_tui_message_layout.Origin_inline memory_summary hidden
        compact);
-  check string "dropping the clock is named" "clock:off"
-    (summary ~origin:Masc_tui_message_layout.Origin_bare memory_summary hidden
+  check string "full metadata is named" "metadata:full"
+    (summary ~origin:Masc_tui_message_layout.Origin_row memory_summary hidden
        compact);
   check string "full reasoning alone" "reasoning:full"
     (summary memory_summary full compact);
@@ -861,6 +882,16 @@ let test_chat_visibility_defaults_and_cycles () =
     (Tui_types.tool_visibility_to_string default.msg_tool_visibility);
   check string "Memory journal starts as one line per pass" "summary"
     (Tui_types.memory_visibility_to_string default.msg_memory_visibility);
+  check (list string) "message metadata grows from none to inline to full"
+    [ "off"; "inline"; "row"; "off" ]
+    (let rec collect count mode =
+       if count = 0
+       then [ Tui_types.origin_display_to_string mode ]
+       else
+         Tui_types.origin_display_to_string mode
+         :: collect (count - 1) (Tui_types.next_origin_display mode)
+     in
+     collect 3 default.msg_origin_display);
   let configured =
     Tui_types.create_state
       ~reasoning_visibility:Tui_types.Reasoning_hidden
@@ -913,6 +944,7 @@ let test_chat_shortcuts_reach_visibility_state () =
     [ "next_reasoning_visibility"
     ; "toggle_tool_visibility"
     ; "next_memory_visibility"
+    ; "next_origin_display"
     ]
 ;;
 
@@ -1091,6 +1123,16 @@ let test_the_support_threshold_reserves_the_scrollback_row () =
       ~status_rows:reading_back_status_rows
   in
   check int "PgUp does not move the viewport support threshold" newest reading_back
+;;
+
+let test_page_navigation_uses_the_reserved_scrollback_budget () =
+  let calls =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"keeper_message_page_rows"
+      ~callee:"keeper_message_support_status_rows"
+  in
+  check int "PgUp and PgDn share the support-reserved row budget" 1 calls
 ;;
 
 let layout_binding = "keeper_message_layout_entries"
@@ -1387,6 +1429,8 @@ let () =
             test_the_budget_and_the_pane_agree_about_the_scrollback_row
         ; test_case "the support threshold reserves the scrollback row" `Quick
             test_the_support_threshold_reserves_the_scrollback_row
+        ; test_case "page navigation reserves the scrollback row" `Quick
+            test_page_navigation_uses_the_reserved_scrollback_budget
         ; test_case "the pane builds one full message layout" `Quick
             test_the_pane_builds_one_full_message_layout
         ; test_case "pending input is not mixed into the transcript" `Quick
@@ -1415,6 +1459,8 @@ let () =
             test_a_refresh_keeps_what_was_paged_back_to
         ; test_case "a refresh does not double the overlap" `Quick
             test_a_refresh_does_not_double_the_overlap
+        ; test_case "a row the window evicted stays visible" `Quick
+            test_a_row_the_window_evicted_stays_visible
         ; test_case "an empty refresh keeps the transcript" `Quick
             test_an_empty_refresh_keeps_the_transcript
         ; test_case "oldest_at reports the cursor" `Quick

@@ -51,10 +51,32 @@ val resolved_trigger_policy :
   unit -> (Discord_gateway_client.trigger_policy, trigger_policy_load_error) result
 (** Env > TOML > default. [MASC_DISCORD_TRIGGER_POLICY] wins when set and
     valid; an invalid env value is a load error (never a silent default);
-    otherwise the [discord.trigger_policy] runtime.toml key applies, and a
-    missing file/key yields {!default_trigger_policy}. *)
+otherwise the [discord.trigger_policy] runtime.toml key applies, and a
+missing file/key yields {!default_trigger_policy}. *)
+
+val request_directory_refresh :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  base_dir:string ->
+  unit
+(** Coalesce a refresh of names for configured Discord channels and their
+    recent participants. Safe to call after READY and successful binding
+    mutations. *)
 
 module For_testing : sig
+  val discord_channel_directory_entry :
+    Yojson.Safe.t -> (string * string, string) result
+
+  val discord_channel_directory_entries :
+    Yojson.Safe.t -> ((string * string) list, string) result
+
+  val discord_member_directory_page :
+    Yojson.Safe.t ->
+    ((string * string) list * string option * int, string) result
+
+  val discord_message_people_entries :
+    Yojson.Safe.t -> ((string * string) list, string) result
+
   val submit_triggered_event :
     ?deliver:(unit -> unit) ->
     Connector_ingress_lane.t ->

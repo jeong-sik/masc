@@ -37,8 +37,8 @@ Top-leak files (count per file):
 - `lib/agent/agent_config.ml` — 2 literals (file removed 2026-07-21, test-only surface cut)
 - `lib/completion_contract.ml` — 2 literals (`"claude-haiku-4-5-20251001"` × 2)
 
-11 `Provider_kind.t` variants (`lib/llm_provider/provider_kind.ml:9-23`):
-`Anthropic | OpenAI_compat | Ollama | Kimi | Gemini | Glm | DashScope | Claude_code | Gemini_cli | Kimi_cli | Codex_cli`.
+10 `Provider_kind.t` variants (`lib/llm_provider/provider_kind.ml:9-23`):
+`Anthropic | OpenAI_compat | Ollama | Kimi | Gemini | Glm | Claude_code | Gemini_cli | Kimi_cli | Codex_cli`.
 
 ### 1.1 Concrete leak examples
 
@@ -125,7 +125,7 @@ SDK 핵심 가정:
   ```ocaml
   type t =
     | Anthropic                       (* native protocol *)
-    | OpenAI_compat of { vendor : string }   (* opaque tag — replaces Ollama/Kimi/Gemini/Glm/DashScope/OpenAI_compat *)
+    | OpenAI_compat of { vendor : string }   (* opaque tag — replaces Ollama/Kimi/Gemini/Glm/OpenAI_compat *)
     | Gemini_native                   (* protocol family, not vendor *)
     | Cli_subprocess of { kind : string }    (* replaces Claude_code/Gemini_cli/Kimi_cli/Codex_cli *)
   ```

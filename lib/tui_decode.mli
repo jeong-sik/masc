@@ -161,6 +161,22 @@ type system_log_entry = {
     ([GET /api/v1/keepers/:name/tool-calls]). The row's own [keeper] is
     checked against the keeper that was asked for; a row naming another is
     rejected rather than attributed by envelope position. *)
+type keeper_call_execution_mode =
+  | Keeper_call_serial
+  | Keeper_call_concurrent
+
+type keeper_call_schedule = {
+  kcs_planned_index : int;
+  kcs_batch_index : int;
+  kcs_batch_size : int;
+  kcs_execution_mode : keeper_call_execution_mode;
+}
+
+type keeper_call_disposition =
+  | Keeper_call_completed
+  | Keeper_call_deferred
+  | Keeper_call_failed
+
 type keeper_call = {
   kc_at : float;  (** [ts], unix seconds *)
   kc_tool : string;
@@ -174,6 +190,18 @@ type keeper_call = {
   kc_turn : int option;
   kc_task_id : string option;
   kc_model : string option;
+  kc_execution_id : string option;
+      (** Canonical physical execution identity. Chat tool activity joins to
+          this field only; timestamps, names, and list positions never join. *)
+  kc_tool_use_id : string option;
+  kc_schedule : keeper_call_schedule option;
+      (** Actual Agent Core schedule, absent only when the producer carried no
+          schedule fields. Partial or unknown schedules reject the row. *)
+  kc_result_bytes : int option;
+  kc_truncated_to : int option;
+  kc_disposition : keeper_call_disposition option;
+      (** Typed execution disposition. [Deferred] means the invocation handed
+          continuation to the async path rather than returning synchronously. *)
 }
 
 type keeper_calls_snapshot = {
@@ -371,7 +399,38 @@ type tool_snapshot = {
   ts_skill_activations : skill_activation_projection option;
 }
 
-(** A connector the gate can deliver through. *)
+type connector_connection =
+  | Connector_connected
+  | Connector_connected_unavailable
+  | Connector_disconnected
+  | Connector_offline
+  | Connector_stale
+
+type connector_binding = {
+  cb_channel_id : string;
+  cb_channel_name : string option;
+  cb_keeper_name : string;
+}
+
+type connector_name_kind =
+  | Connector_channel_name
+  | Connector_person_name
+  | Connector_server_name
+
+type connector_name_mapping = {
+  cnm_kind : connector_name_kind;
+  cnm_id : string;
+  cnm_name : string;
+}
+
+type connector_directory_state =
+  | Connector_directory_not_started
+  | Connector_directory_refreshing
+  | Connector_directory_complete
+  | Connector_directory_partial
+
+(** A connector the gate can deliver through, including the server-owned
+    configuration and route evidence an operator needs to act on it. *)
 type connector = {
   cn_id : string;
   cn_display_name : string;
@@ -381,8 +440,65 @@ type connector = {
           be configured and unreachable, and the two call for different
           actions. *)
   cn_status : string;
+  cn_connection : connector_connection;
   cn_channel : string option;
+  cn_error : string option;
+  cn_status_source : string option;
+  cn_gateway_state : string option;
+  cn_poll_state : string option;
+  cn_endpoint : string option;
+  cn_status_path : string option;
+  cn_binding_store_path : string option;
+  cn_binding_store_read_ok : bool option;
+  cn_binding_store_error : string option;
+  cn_updated_at : string option;
+  cn_binding_source : string option;
+  cn_trigger_policy : string option;
+  cn_reply_mode : string option;
+  cn_chat_db_path : string option;
+  cn_bot_user_id : string option;
+  cn_bot_user_name : string option;
+  cn_bot_token_present : bool option;
+  cn_app_token_present : bool option;
+  cn_gate_healthy : bool option;
+  cn_pid : int option;
+  cn_guild_count : int option;
+  cn_directory_state : connector_directory_state option;
+  cn_directory_server_count : int option;
+  cn_directory_channel_count : int option;
+  cn_directory_person_count : int option;
+  cn_directory_authentication_failed : string list;
+  cn_directory_permission_denied : string list;
+  cn_directory_errors : string list;
+  cn_directory_updated_at : string option;
+  cn_workspace_id : string option;
+  cn_server_names_path : string option;
+  cn_channel_names_path : string option;
+  cn_people_names_path : string option;
+  cn_name_mappings : connector_name_mapping list;
+  cn_name_mapping_scope : string option;
+  cn_names_error : string option;
+  cn_bindings : connector_binding list;
 }
+
+type connector_name_page = {
+  cnp_connector_id : string;
+  cnp_kind : connector_name_kind;
+  cnp_mapping_scope : string;
+  cnp_current_workspace_id : string option;
+  cnp_path : string;
+  cnp_after_id : string option;
+  cnp_next_after_id : string option;
+  cnp_total : int;
+  cnp_has_more : bool;
+  cnp_mappings : connector_name_mapping list;
+}
+
+val decode_connector_name_page :
+  Yojson.Safe.t -> (connector_name_page, string) result
+
+val connector_with_name_pages :
+  connector -> pages:connector_name_page list -> error:string option -> connector
 
 type connector_snapshot = {
   cs_connectors : connector list;
@@ -2013,6 +2129,27 @@ type git_log_row = {
 
 val decode_git_log : Yojson.Safe.t -> (git_log_row list, string) result
 (** The route's [{ok; commits}] envelope, most recent first. *)
+
+(** One run of adjacent lines the same author last touched, as
+    [/api/v1/git/blame] groups them. The wire spells the author [keeper_id],
+    the shape it shares with the activity and annotation routes; here it is
+    whatever git reported, which is a person and not a Keeper. *)
+type blame_block = {
+  bb_line_start : int;
+  bb_line_end : int;
+  bb_author : string;
+  bb_at_ms : float;
+}
+
+val decode_git_blame : Yojson.Safe.t -> (blame_block list, string) result
+(** The route's bare array -- it does not carry the [{ok; data}] envelope its
+    neighbours do. *)
+
+val blame_block_at : blame_block list -> int -> (blame_block * bool) option
+(** [blame_block_at blocks line] is the block covering [line] and whether
+    [line] is where that block starts. Blocks do not overlap, so the first
+    cover is the only one; the flag is what lets a gutter name an author once
+    per run instead of once per line. *)
 
 (** One [/api/v1/ide/annotations] note: where it anchors, who left it, the
     server's kind word, and what it says. *)

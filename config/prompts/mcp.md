@@ -1,7 +1,7 @@
 ---
 description: MCP 서버 instructions — 프로필별 도구 발견 안내(full / managed_agent / operator_remote)
 category: mcp
-operator_surface: fragment
+operator_surface: primary
 ---
 
 ### full

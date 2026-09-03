@@ -106,6 +106,7 @@
   masc.keeper_chat_operations
   masc.runtime_model
   masc.runtime
+  masc.toml_line_editor
   masc.provider_tool_support
   masc.auth
   masc.fd_accountant

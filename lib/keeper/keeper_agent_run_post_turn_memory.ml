@@ -24,10 +24,7 @@ let counterpart_observations_before ~base_dir ~keeper_name ~before =
     |> List.filter_map (function
       | Keeper_external_attention.Recorded item when item.received_at < before ->
         Some item
-      | Keeper_external_attention.Recorded _
-      | Keeper_external_attention.Resolved _
-      | Keeper_external_attention.Ignored _
-      | Keeper_external_attention.Quarantined _ -> None)
+      | Keeper_external_attention.Recorded _ -> None)
   in
   let external_delivery_keys =
     external_items

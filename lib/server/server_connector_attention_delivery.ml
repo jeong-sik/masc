@@ -1,22 +1,3 @@
-let quarantine_undelivered ~base_path ~keeper_name ~event_id ~detail =
-  match
-    Keeper_external_attention.mark_quarantined
-      ~base_path
-      ~keeper_name
-      ~event_ids:[ event_id ]
-      ~reason:("connector_attention_enqueue_failed: " ^ detail)
-      ()
-  with
-  | Ok () -> ()
-  | Error err ->
-    Log.Server.error
-      "connector attention quarantine after refused enqueue failed (keeper=%s \
-       event=%s): %s"
-      keeper_name
-      event_id
-      err
-;;
-
 let deliver ~base_path ~keeper_name ~event_id ~channel =
   let stimulus =
     { Keeper_event_queue.post_id = event_id
@@ -42,8 +23,7 @@ let deliver ~base_path ~keeper_name ~event_id ~channel =
       "connector attention durable delivery failed (keeper=%s event=%s): %s"
       keeper_name
       event_id
-      detail;
-    quarantine_undelivered ~base_path ~keeper_name ~event_id ~detail
+      detail
   | Keeper_registry_event_queue.Stimulus_enqueued
   | Keeper_registry_event_queue.Stimulus_already_present ->
     (match

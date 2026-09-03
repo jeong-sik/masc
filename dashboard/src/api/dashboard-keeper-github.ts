@@ -15,7 +15,7 @@ export interface KeeperGithubIdentityObservation {
   projected_token_env_names: string[]
   stored: KeeperGithubAuthResult
   effective: KeeperGithubAuthResult
-  effective_probe_scope: 'host_process_credential_only'
+  effective_probe_scope: 'host_process_credential_only' | 'endpoint_process_only'
   checked_at_unix: number
 }
 

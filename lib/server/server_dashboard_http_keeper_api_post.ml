@@ -43,23 +43,22 @@ let handle_keeper_github_login_post state req reqd =
   else if not (Keeper_config.validate_name name) then
     respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
   else
-    match Keeper_meta_store.read_meta config name with
+    (* Effective meta, not persisted meta: [sandbox_profile] is TOML-owned and
+       a persisted read answers with the default, which would send every
+       Keeper's login to this host. *)
+    match Keeper_meta_store.read_effective_meta config name with
     | Error message -> respond_error ~status:`Internal_server_error reqd message
     | Ok None ->
       respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
-    | Ok (Some _) ->
+    | Ok (Some meta) ->
       let hostname =
         match Server_utils.query_param req "hostname" with
         | Some hostname -> hostname
         | None -> "github.com"
       in
-      (match
-         Keeper_github_identity.login_env
-           ~config
-           ~keeper_name:name
-       with
+      (match Keeper_github_login_lane.for_keeper ~config ~meta ~hostname with
        | Error message -> respond_error reqd message
-       | Ok env ->
+       | Ok lane ->
          let headers =
            github_login_stream_headers (Server_auth.get_origin req)
          in
@@ -72,8 +71,7 @@ let handle_keeper_github_login_post state req reqd =
                 Keeper_github_identity.stream_login
                   ~config
                   ~keeper_name:name
-                  ~hostname
-                  ~env
+                  ~lane
                   ~is_closed:(fun () -> Httpun.Body.Writer.is_closed writer)
                   ~send_event:(github_login_stream_send writer)
               with

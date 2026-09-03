@@ -108,6 +108,7 @@ let keeper_root ~remote_root ~keeper_name =
 ;;
 
 let remote_keeper_root t = keeper_root ~remote_root:t.remote_root ~keeper_name:t.keeper_name
+let gh_config_dir t = t.gh_config_dir
 
 let of_openssh ~base_path ~keeper_name (o : openssh) =
   let remote_root = o.endpoint.remote_root in

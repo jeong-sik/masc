@@ -90,6 +90,9 @@ PROVIDER_PING_PATHS=()
 PROVIDER_DEFAULT_RUNTIME_IDS=()
 PROVIDER_KINDS=()
 PROVIDER_COMMANDS=()
+# Availability label per provider, computed once so the report and the default
+# preference below do not each re-run the (subprocess) probes.
+PROVIDER_AVAIL=()
 PROVIDER_INDEX_RESULT=""
 DEFAULT_PROVIDER_INDEX=0
 CATALOG_FILE=""
@@ -141,6 +144,7 @@ load_provider_catalog() {
   PROVIDER_DEFAULT_RUNTIME_IDS=()
   PROVIDER_KINDS=()
   PROVIDER_COMMANDS=()
+  PROVIDER_AVAIL=()
   DEFAULT_PROVIDER_INDEX=0
 
   local kind id name key endpoint ping_path runtime_id command default_provider_id="" missing_default_runtime_id=""
@@ -347,11 +351,60 @@ provider_availability_label() {
 # Runs on every wizard invocation (including --dry-run and --provider), so the
 # operator sees which local servers are up and which subscriptions are signed
 # in before anything is written.
+# Probe every source once and cache the label, so the report and the default
+# preference share one pass instead of each spawning the probes again.
+compute_provider_availability() {
+  PROVIDER_AVAIL=()
+  local i
+  for i in "${!PROVIDER_IDS[@]}"; do
+    PROVIDER_AVAIL[i]="$(provider_availability_label "$i")"
+  done
+}
+
+# "green" = ready to serve a turn right now: a reachable local server, a signed-in
+# subscription, or a cloud provider whose API key is already in the environment
+# (a keyless cloud entry counts as ready). Everything else needs a step first.
+provider_is_green() {
+  local idx="$1"
+  case "${PROVIDER_AVAIL[$idx]}" in
+    reachable | "installed, signed in")
+      return 0
+      ;;
+    cloud)
+      local key_var="${PROVIDER_KEYS[$idx]}"
+      [ -z "$key_var" ] && return 0
+      provider_env_key "$key_var" >/dev/null 2>&1 && return 0
+      return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 report_provider_availability() {
   log "detected model sources:"
   local i
   for i in "${!PROVIDER_IDS[@]}"; do
-    log "  - ${PROVIDER_NAMES[$i]}: $(provider_availability_label "$i")"
+    log "  - ${PROVIDER_NAMES[$i]}: ${PROVIDER_AVAIL[$i]}"
+  done
+}
+
+# Pre-select a source that actually works. If the configured default is already
+# green, keep it; otherwise move the menu default to the first green source, so a
+# fresh install does not open on a dead default the operator then has to change.
+# This only moves which entry the menu pre-selects -- an explicit --provider
+# still wins, and the operator can still pick any listed source.
+prefer_available_default() {
+  provider_is_green "$DEFAULT_PROVIDER_INDEX" && return 0
+  local i
+  for i in "${!PROVIDER_IDS[@]}"; do
+    if provider_is_green "$i"; then
+      [ "$i" -eq "$DEFAULT_PROVIDER_INDEX" ] || \
+        log "default source ${PROVIDER_NAMES[$DEFAULT_PROVIDER_INDEX]} is not ready; pre-selecting ${PROVIDER_NAMES[$i]}"
+      DEFAULT_PROVIDER_INDEX="$i"
+      return 0
+    fi
   done
 }
 
@@ -655,6 +708,7 @@ run_wizard() {
   local base_path="$1"
   local provider_idx key
   load_provider_catalog "$base_path"
+  compute_provider_availability
   report_provider_availability
   report_sandbox_backends
 
@@ -662,6 +716,9 @@ run_wizard() {
     provider_idx=$(provider_index_by_id "$WIZARD_PROVIDER") \
       || die "unknown provider: $WIZARD_PROVIDER"
   else
+    # No explicit provider, so the menu default is what most installs accept.
+    # Move it onto a source that is actually ready before showing the menu.
+    prefer_available_default
     provider_idx=$(prompt_provider)
   fi
 

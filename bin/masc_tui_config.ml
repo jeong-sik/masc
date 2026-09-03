@@ -30,6 +30,38 @@ let theme ~base_path =
   | None -> None
   | Some doc -> theme_of_doc doc
 
+(* The writer for the one key above that changes while masc runs. The other
+   settings in this file are read once at boot and never moved from inside
+   the TUI, so they have nothing to store; the theme is picked on a pane, and
+   a pick that does not survive a restart is not a setting.
+
+   [None] withdraws the choice: the key is removed rather than set to a name
+   meaning "the terminal's", because absence is the state the reader is going
+   back to -- the same absence [theme] already reads as "no stored choice".
+
+   Pure, and deliberately spelled in the editor's table-and-key form while
+   [theme_of_doc] reads the loader's dotted form. The two grammars are not
+   the same, so nothing can be shared between them; what proves they meet is
+   the round trip in test_tui_config.ml. *)
+let text_with_theme content ~theme =
+  Toml_line_editor.edit_table_scalar content ~path:"tui" ~key:"theme" ~value:theme
+
+(* Store [theme] in the same runtime.toml [theme] reads. Runtime does the
+   load, the edit and the write under one lock, so the keeper assignment an
+   operator changes from the dashboard at that moment is not lost.
+
+   The error is returned rather than swallowed: by the time this is called the
+   scheme is already on the screen, so a reader who is not told would take the
+   screen as proof it was stored and find the old one back after a restart. *)
+let set_theme ~base_path theme =
+  match
+    Runtime.edit_config_text
+      ~runtime_config_path:(runtime_toml_path ~base_path)
+      (fun content -> text_with_theme content ~theme)
+  with
+  | Ok (_ : Runtime.config_commit_receipt) -> Ok ()
+  | Error message -> Error message
+
 (* Whether masc lifts colours the reader's theme leaves under the readable
    floor, [tui].lift_colours. Absent reads as "yes", which is what masc did
    before the key existed.

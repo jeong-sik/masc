@@ -693,6 +693,17 @@ val save_config_text :
     the same write-stage rules apply to the runtime cache while the registry
     remains unpublished. *)
 
+val edit_config_text :
+  ?runtime_config_path:string ->
+  (string -> string) ->
+  (config_commit_receipt, string) result
+(** Read runtime.toml, hand its text to [edit], and commit what comes back --
+    all three inside the config write lock, so a write that lands between the
+    read and the commit cannot be silently overwritten. Everything after the
+    edit is {!save_config_text}'s: the same validation, the same atomic
+    replace, the same receipt. Use this rather than loading the file and
+    calling {!save_config_text}, which leaves that gap open. *)
+
 val validate_config_text :
   ?runtime_config_path:string -> string -> (unit, string) result
 (** Run the raw runtime.toml save precondition — TOML parse, ordered Skill

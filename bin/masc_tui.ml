@@ -10727,6 +10727,23 @@ let main () =
            })
          (Masc_tui_terminal_palette.current ()))
   in
+  (* The pick, written to the runtime.toml boot reads it back from. Only a
+     commit comes here: a preview is a look at a scheme, not a choice of one,
+     and storing every row the cursor passes would make Esc a lie.
+
+     A failure is said out loud. The scheme is already on the screen by the
+     time this runs, so silence would let the screen stand as proof it was
+     kept, and the reader would find the old one back after a restart with
+     nothing having told them. *)
+  let store_theme_choice choice =
+    match Masc_tui_config.set_theme ~base_path choice with
+    | Ok () -> ()
+    | Error message ->
+        add_event state "error"
+          (Printf.sprintf
+             "테마를 runtime.toml 에 저장하지 못했습니다. 이번 세션에만 적용됩니다: %s"
+             message)
+  in
   (* Live preview, the way a theme picker is expected to work: moving the
      cursor draws in that scheme so the reader judges it on the screen they
      actually use, Enter keeps it, Esc puts back whatever was in force before
@@ -13443,11 +13460,13 @@ and is loaded on demand through keeper_skill.
            handle_runtime_param_edit_open ~advanced:false ()
        | Some ("\r" | "\n" | "enter")
          when state.view = Config && state.config_pane = Config_themes ->
-           (* Applying is the whole action: the palette's generation bumps and
-              every cached colour rebuilds, which is the same road a theme
-              switch reported by the terminal takes. A name no bundled scheme
-              answers to leaves the screen alone rather than quietly dropping
-              to colours nobody picked.
+           (* Applying draws it: the palette's generation bumps and every
+              cached colour rebuilds, which is the same road a theme switch
+              reported by the terminal takes. Storing it is what makes the
+              pick still be there on the next start -- boot reads the same
+              key back. A name no bundled scheme answers to leaves the screen
+              alone rather than quietly dropping to colours nobody picked,
+              and nothing is stored for it either.
 
               All three spellings, because a terminal sends CR, a Kitty-
               protocol one sends the name, and a footer that says "Enter" has
@@ -13465,7 +13484,8 @@ and is loaded on demand through keeper_skill.
                    scheme picks dark text because it expects a light page, so
                    leaving the terminal's own background is what made "light
                    theme is still black". *)
-                sync_theme_page ()
+                sync_theme_page ();
+                store_theme_choice (Some entry.Masc_tui_theme_choice.name)
               end)
        | Some "c" when state.view = Tools -> handle_skill_create ~composition:false ()
        | Some "C" when state.view = Tools -> handle_skill_create ~composition:true ()
@@ -16119,12 +16139,15 @@ and is loaded on demand through keeper_skill.
          when state.view = Config && state.config_pane = Config_themes ->
            (* Back to whatever the terminal reports. Not a theme named
               "terminal" -- there is nothing to name, only the absence of a
-              choice, which is where masc started. *)
+              choice, which is where masc started. The stored key goes with
+              it, for the same reason: absence is the state, so it is written
+              by removing the key rather than by naming one. *)
            Masc_tui_theme_choice.follow_terminal ();
            state.theme_choice <- None;
            state.theme_before_preview <- None;
            (* Withdrawing the choice withdraws the background with it. *)
-           sync_theme_page ()
+           sync_theme_page ();
+           store_theme_choice None
        | Some "i" | Some "I"
          when state.view = Config && state.config_pane = Config_prompts ->
            if state.prompts_show_runtime_assets

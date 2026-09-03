@@ -768,6 +768,79 @@ let test_memory_name_width_never_shrinks_as_the_terminal_grows () =
     previous := name
   done
 
+(* Workspace repository columns.
+
+   This screen printed one format string twice and sized its path cell by
+   subtracting a constant from the terminal width. Both are gone; these check
+   what replaced them. *)
+
+let workspace_probe =
+  { Schedule.wrow_name = "N"
+  ; wrow_branch = "B"
+  ; wrow_status = "S"
+  ; wrow_sync = "Y"
+  ; wrow_path = "P"
+  }
+
+let workspace_overflowing =
+  { Schedule.wrow_name = "kidsnote-web-store-and-a-longer-tail"
+  ; wrow_branch = "feature/PK-12345-a-long-branch"
+  ; wrow_status = "conflicted"
+  ; wrow_sync = "manual"
+  ; wrow_path = "/Users/dancer/me/workspace/kidsnote/kidsnote-web-store"
+  }
+
+(* The path takes what the named columns leave, so the row fills the frame it
+   was allocated for rather than falling short of it or spilling past it. *)
+let test_workspace_path_takes_the_remainder () =
+  for inner_width = 20 to 300 do
+    let path_width = Schedule.workspace_path_width ~inner_width in
+    let drawn =
+      Masc_tui_message_layout.display_width
+        (Schedule.workspace_header_row ~path_width)
+    in
+    if path_width > Schedule.workspace_minimum_path_width then
+      check int
+        (Printf.sprintf "inner %d is fully allocated" inner_width)
+        inner_width drawn
+    else
+      check bool
+        (Printf.sprintf "inner %d keeps the path readable" inner_width)
+        true
+        (path_width = Schedule.workspace_minimum_path_width)
+  done
+
+(* The defect that stood here: a header and a row carrying the same widths in
+   two format strings. *)
+let test_workspace_header_and_row_share_their_offsets () =
+  for inner_width = 60 to 240 do
+    let path_width = Schedule.workspace_path_width ~inner_width in
+    let header = Schedule.workspace_header_row ~path_width in
+    let row = Schedule.workspace_row ~path_width workspace_probe in
+    check_left_cell "NAME" "N" ~header ~row ~inner_width;
+    check_left_cell "BRANCH" "B" ~header ~row ~inner_width;
+    check_left_cell "STATUS" "S" ~header ~row ~inner_width;
+    check_left_cell "SYNC" "Y" ~header ~row ~inner_width;
+    check_left_cell "PATH" "P" ~header ~row ~inner_width
+  done
+
+(* A repository named past its cell, on a branch named past its cell, at a path
+   longer than the frame: none of it may move a column. *)
+let test_workspace_row_width_does_not_depend_on_its_readings () =
+  for inner_width = 60 to 240 do
+    let path_width = Schedule.workspace_path_width ~inner_width in
+    let width text = Masc_tui_message_layout.display_width text in
+    let header = width (Schedule.workspace_header_row ~path_width) in
+    check int
+      (Printf.sprintf "inner %d: a short row" inner_width)
+      header
+      (width (Schedule.workspace_row ~path_width workspace_probe));
+    check int
+      (Printf.sprintf "inner %d: an overflowing row" inner_width)
+      header
+      (width (Schedule.workspace_row ~path_width workspace_overflowing))
+  done
+
 (* The strip named five stops while the Planning walk had three: Schedules and
    Fusion had become tabs of the selected Keeper and nothing took their names
    off this row. A reader pressing 4 or 5 arrived nowhere. *)
@@ -913,6 +986,12 @@ let () =
             test_memory_columns_drop_from_the_right
         ; test_case "memory name width never shrinks" `Quick
             test_memory_name_width_never_shrinks_as_the_terminal_grows
+        ; test_case "workspace path takes the remainder" `Quick
+            test_workspace_path_takes_the_remainder
+        ; test_case "workspace header and row share their offsets" `Quick
+            test_workspace_header_and_row_share_their_offsets
+        ; test_case "workspace row width ignores its readings" `Quick
+            test_workspace_row_width_does_not_depend_on_its_readings
         ; test_case "planning strip names only its own stops" `Quick
             test_planning_strip_names_only_its_own_stops
         ; test_case "planning window rides the active stop" `Quick

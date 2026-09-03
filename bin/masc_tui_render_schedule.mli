@@ -184,6 +184,35 @@ val memory_row : memory_columns -> memory_row_values -> string
     replaces, where a name over eighteen cells or a reading over fourteen
     pushed the rest of its row right of the header. *)
 
+(** {1 Workspace repository columns} *)
+
+val workspace_name_width : int
+val workspace_branch_width : int
+val workspace_status_width : int
+val workspace_sync_width : int
+val workspace_minimum_path_width : int
+val workspace_cell_gap : int
+
+type workspace_row_values = {
+  wrow_name : string;
+  wrow_branch : string;
+  wrow_status : string;
+  wrow_sync : string;
+  wrow_path : string;
+}
+(** One repository row's readings, already rendered as text. *)
+
+val workspace_path_width : inner_width:int -> int
+(** Cells the path may occupy: what the named columns leave, never below
+    {!workspace_minimum_path_width}. Computed from the column widths rather
+    than from a constant kept in step with them by hand. *)
+
+val workspace_header_row : path_width:int -> string
+val workspace_row : path_width:int -> workspace_row_values -> string
+(** The header and one row, laid out on the same columns. This screen used to
+    print one format string in two places; a column can no longer exist in the
+    header at a width the rows do not use. *)
+
 module Terminal_size_cache : sig
   type refresh =
     | Changed of (int * int)

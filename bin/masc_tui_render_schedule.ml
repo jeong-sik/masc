@@ -511,6 +511,64 @@ let memory_header_row columns =
 let memory_row columns values =
   Table.row ~gap:memory_cell_gap (memory_cells columns values)
 
+(* Workspace repository columns.
+
+   This screen wrote one format string twice -- once for the header and once
+   for the rows -- so the two were a copy-paste apart from disagreeing, and the
+   path cell was sized by subtracting 55 from the terminal width, a number that
+   matched the other four columns only by hand. The columns are declared here
+   and the leftover is computed from them. *)
+
+let workspace_name_width = 18
+let workspace_branch_width = 12
+let workspace_status_width = 9
+let workspace_sync_width = 6
+
+(* A path is the one reading here with no widest form; it takes what the named
+   columns leave. Below this it is folded so hard that neither end identifies
+   the repository, and the screen is better off dropping cells from the frame
+   than showing a path nobody can place. *)
+let workspace_minimum_path_width = 8
+let workspace_cell_gap = 1
+
+type workspace_row_values = {
+  wrow_name : string;
+  wrow_branch : string;
+  wrow_status : string;
+  wrow_sync : string;
+  wrow_path : string;
+}
+
+let workspace_no_values =
+  { wrow_name = ""
+  ; wrow_branch = ""
+  ; wrow_status = ""
+  ; wrow_sync = ""
+  ; wrow_path = ""
+  }
+
+let workspace_cells ~path_width values =
+  [ Table.cell ~header:"NAME" ~width:workspace_name_width values.wrow_name
+  ; Table.cell ~header:"BRANCH" ~width:workspace_branch_width values.wrow_branch
+  ; Table.cell ~header:"STATUS" ~width:workspace_status_width values.wrow_status
+  ; Table.cell ~header:"SYNC" ~width:workspace_sync_width values.wrow_sync
+  ; Table.cell ~header:"PATH" ~width:path_width values.wrow_path
+  ]
+
+let workspace_path_width ~inner_width =
+  let named =
+    Table.used_width ~gap:workspace_cell_gap
+      (workspace_cells ~path_width:0 workspace_no_values)
+  in
+  max workspace_minimum_path_width (inner_width - named)
+
+let workspace_header_row ~path_width =
+  Table.header_row ~gap:workspace_cell_gap
+    (workspace_cells ~path_width workspace_no_values)
+
+let workspace_row ~path_width values =
+  Table.row ~gap:workspace_cell_gap (workspace_cells ~path_width values)
+
 module Terminal_size_cache = struct
   type refresh =
     | Changed of (int * int)

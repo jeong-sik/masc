@@ -3250,6 +3250,16 @@ let planning_phase_label phase = Goal_phase.to_string phase
    [complet~] with sixty columns of space to its right -- the mark that says
    "there was more" on a value nothing was cut from. Taken from the phase list
    so a new phase widens the column instead of losing its last letter. *)
+(* Rows the Planning list spends above its goals, and the row it holds below
+   them for the selected goal's verdict. Both were bare numbers at the two
+   places that read them, and both went up by two when the list gained the
+   column names it never had. Still tallied rather than counted: the counted
+   form needs the rows below the list to be certain, and being one short is
+   silent -- the frame drops its last row, which is the footer. #32928 carries
+   that change for the three surfaces where the tail is already established. *)
+let planning_list_chrome_rows = 14
+let planning_list_verdict_rows = 2
+
 let planning_phase_column =
   List.fold_left
     (fun widest phase ->
@@ -3455,6 +3465,16 @@ let render_planning_list (state : state) =
        box_line buf cols
          (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
        box_divider buf cols;
+       (* The list drew rows and never said what they were. *)
+       let phase_width = planning_phase_column + 2 in
+       let title_width =
+         Render_schedule.planning_title_width
+           ~inner_width:(max 1 (framed_inner_width cols - 2))
+           ~phase_width
+       in
+       box_line_styled buf cols ~style:(Theme.recede ())
+         ("  " ^ Render_schedule.planning_header_row ~phase_width ~title_width);
+       box_divider buf cols;
 
        if count = 0 then begin
          (* An empty filter and an empty store are different facts: the first
@@ -3465,12 +3485,12 @@ let render_planning_list (state : state) =
            | _ -> "  no goals in this filter (f to change)"
          in
          box_line buf cols (Ansi.dim ^ empty_note ^ Ansi.reset);
-         for _ = 1 to rows - 12 do
+         for _ = 1 to rows - planning_list_chrome_rows do
            box_empty buf cols
          done
        end else begin
          (* One row is reserved below the list for the selected goal's verdict. *)
-         let content_height = rows - 14 in
+         let content_height = rows - planning_list_chrome_rows - planning_list_verdict_rows in
          let scroll_offset =
            if state.planning_cursor >= content_height then
              state.planning_cursor - content_height + 1
@@ -3483,14 +3503,17 @@ let render_planning_list (state : state) =
              let is_selected = idx = state.planning_cursor in
              let status_color = planning_phase_color g.pg_phase in
              let status_label = planning_phase_label g.pg_phase in
+            (* The gap belonged to the reading before; the columns space
+               themselves now, and an absent date leaves its cell empty rather
+               than moving the one beside it. *)
             let due =
               match Terminal_text.optional_single_line g.pg_due_date with
-              | Some d -> "  " ^ d
+              | Some d -> d
               | None -> ""
             in
              let age =
                match planning_updated_age ~now:now_unix g with
-               | Some a -> "  " ^ a
+               | Some a -> a
                | None -> ""
              in
              (* What is being done about this goal, on the row itself. The
@@ -3539,18 +3562,17 @@ let render_planning_list (state : state) =
                    else Printf.sprintf "%d open" total
              in
              let line =
-               Printf.sprintf "  %s[%s]%s %s P%d  %-16s %s%s"
-                 status_color
-                 (fit_width status_label planning_phase_column)
-                 Ansi.reset
-                 (planning_proof_mark g.pg_proof)
-                 g.pg_priority
-                 (fit_width open_note 16)
-                 (fit_width
-                    (Terminal_text.single_line g.pg_title)
-                    (cols - 47 - Message_layout.display_width due
-                     - Message_layout.display_width age))
-                 (Ansi.dim ^ age ^ due ^ Ansi.reset)
+               "  "
+               ^ Render_schedule.planning_row ~phase_style:status_color
+                   ~phase_width ~title_width
+                   { Render_schedule.prow_phase = "[" ^ status_label ^ "]"
+                   ; prow_proof = planning_proof_mark g.pg_proof
+                   ; prow_priority = Printf.sprintf "P%d" g.pg_priority
+                   ; prow_open = open_note
+                   ; prow_title = Terminal_text.single_line g.pg_title
+                   ; prow_age = age
+                   ; prow_due = due
+                   }
              in
              let content =
                if is_selected then

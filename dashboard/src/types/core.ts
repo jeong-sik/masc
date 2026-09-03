@@ -1210,6 +1210,63 @@ export function toSandboxProfile(raw: string | null | undefined): SandboxProfile
   return normalized as SandboxProfile
 }
 
+/** What `normalizeKeeperConfig` (api/dashboard-keeper-config.ts) writes into
+ *  `KeeperConfig.sandbox_profile` when the response has no such key. The server
+ *  omits it whenever the keeper's profile fails to load: `keeper_config_json`
+ *  still answers `200` and the body then carries `config_error` with no sandbox
+ *  keys (`lib/dashboard/dashboard_http_keeper_snapshot.mli`). A reader telling
+ *  the operator what the server sent has to compare against this first, or it
+ *  attributes the client's own placeholder to the server. */
+export const UNKNOWN_SANDBOX_PROFILE = '(unknown sandbox_profile)'
+
+/** The same substitution for `network_mode`, omitted on the same branch. */
+export const UNKNOWN_NETWORK_MODE = '(unknown network_mode)'
+
+/** Whether the profile runs the keeper inside a guest this host creates and
+ *  discards, rather than on an account that outlives the turn. Three panel
+ *  branches ask this question: `network_mode` accepts `none` only for a guest,
+ *  the hardening guide card applies only to a guest, and switching profile
+ *  rewrites a stored `none` back to `inherit` when the new profile has no
+ *  guest to isolate.
+ *
+ *  `satisfies Record<SandboxProfile, boolean>` makes a new union member fail to
+ *  typecheck until this record answers for it, so the question is never
+ *  answered by a fallthrough. */
+export const SANDBOX_PROFILE_IS_GUEST = {
+  docker: true,
+  microvm: true,
+  remote_ssh: false,
+} as const satisfies Record<SandboxProfile, boolean>
+
+/** [SANDBOX_PROFILE_IS_GUEST] for a server-supplied string. An unreadable
+ *  profile returns `false`: it is not known to run a guest, and the branches
+ *  that read this widen what the operator may save. */
+export function isGuestSandboxProfile(raw: string | null | undefined): boolean {
+  const profile = toSandboxProfile(raw)
+  return profile !== null && SANDBOX_PROFILE_IS_GUEST[profile]
+}
+
+/** The CLI that lists and follows a profile's containers. `remote_ssh` maps to
+ *  `null` because it has none — `keeper_sandbox_control.ml` returns no
+ *  containers for it (`Remote_ssh -> ([], None)`) and emits
+ *  `managed_container_kind: null`. `null` means there is no command to print,
+ *  not a command to guess.
+ *
+ *  `satisfies Record<SandboxProfile, string | null>` makes a new union member
+ *  fail to typecheck until this record answers for it. */
+export const SANDBOX_PROFILE_CONTAINER_CLI = {
+  docker: 'docker',
+  microvm: 'container',
+  remote_ssh: null,
+} as const satisfies Record<SandboxProfile, string | null>
+
+/** [SANDBOX_PROFILE_CONTAINER_CLI] for a server-supplied string. Returns
+ *  `null` for an unreadable profile as well as for one with no CLI. */
+export function sandboxContainerCli(raw: string | null | undefined): string | null {
+  const profile = toSandboxProfile(raw)
+  return profile === null ? null : SANDBOX_PROFILE_CONTAINER_CLI[profile]
+}
+
 export interface Keeper {
   name: string
   keeper_id?: string | null
@@ -1580,8 +1637,10 @@ export interface KeeperConfig {
   max_context_override: number | null
   // The server's string, unnormalized. It is not a `SandboxProfile`: when the
   // response omits the field `normalizeKeeperConfig` writes the placeholder
-  // '(unknown sandbox_profile)' here, and a future runtime member arrives
-  // before this bundle knows it. `'docker' | 'microvm' | 'remote_ssh' | string`
+  // `UNKNOWN_SANDBOX_PROFILE` (api/dashboard-keeper-config.ts) here, and a
+  // future runtime member arrives before this bundle knows it. Anything
+  // telling the operator what the server sent has to compare against that
+  // constant first. `'docker' | 'microvm' | 'remote_ssh' | string`
   // collapsed to `string` anyway, so the literals only looked like a contract.
   // The contract is `toSandboxProfile`, which every reader goes through.
   sandbox_profile?: string

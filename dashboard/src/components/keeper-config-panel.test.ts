@@ -2,7 +2,16 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KeeperConfig, KeeperHookSlot } from '../types'
-import { SANDBOX_PROFILE_COVERAGE, SANDBOX_PROFILE_OPTIONS, toSandboxProfile } from '../types'
+import {
+  SANDBOX_PROFILE_CONTAINER_CLI,
+  SANDBOX_PROFILE_COVERAGE,
+  SANDBOX_PROFILE_IS_GUEST,
+  SANDBOX_PROFILE_OPTIONS,
+  isGuestSandboxProfile,
+  sandboxContainerCli,
+  toSandboxProfile,
+  UNKNOWN_SANDBOX_PROFILE,
+} from '../types'
 import { ApiRequestError } from '../api/core'
 import {
   buildRuntimePayload,
@@ -306,6 +315,39 @@ describe('sandbox coerce helpers', () => {
     expect(coerceNetworkMode('inherit')).toBe('inherit')
     expect(coerceNetworkMode('host')).toBe('inherit')
     expect(coerceNetworkMode(undefined)).toBe('inherit')
+  })
+
+  // network_mode = none, the hardening guide card and the 'none' rewrite on a
+  // profile switch each used to spell out `=== 'docker' || === 'microvm'`.
+  // Three copies meant a fourth profile needed three hand edits with nothing
+  // to catch a missed one; the record answers for every union member or the
+  // file does not typecheck.
+  it('answers the guest question for every profile from one record', () => {
+    expect(Object.keys(SANDBOX_PROFILE_IS_GUEST)).toEqual(SANDBOX_PROFILE_OPTIONS)
+    expect(isGuestSandboxProfile('docker')).toBe(true)
+    expect(isGuestSandboxProfile('microvm')).toBe(true)
+    expect(isGuestSandboxProfile('remote_ssh')).toBe(false)
+  })
+
+  // An unreadable profile is not known to run a guest. Answering true would
+  // offer network_mode = none for a keeper whose backend may refuse it.
+  it('does not call an unreadable profile a guest', () => {
+    expect(isGuestSandboxProfile('local')).toBe(false)
+    expect(isGuestSandboxProfile(UNKNOWN_SANDBOX_PROFILE)).toBe(false)
+    expect(isGuestSandboxProfile(undefined)).toBe(false)
+    expect(isGuestSandboxProfile(null)).toBe(false)
+  })
+
+  // The live panel printed `docker logs -f <id>` for anything that was not
+  // microvm. remote_ssh holds no containers docker can reach, so it gets no
+  // command rather than a wrong one.
+  it('names a container CLI only for the profiles that have one', () => {
+    expect(Object.keys(SANDBOX_PROFILE_CONTAINER_CLI)).toEqual(SANDBOX_PROFILE_OPTIONS)
+    expect(sandboxContainerCli('docker')).toBe('docker')
+    expect(sandboxContainerCli('microvm')).toBe('container')
+    expect(sandboxContainerCli('remote_ssh')).toBeNull()
+    expect(sandboxContainerCli('something_else')).toBeNull()
+    expect(sandboxContainerCli(null)).toBeNull()
   })
 
 })
@@ -2391,6 +2433,29 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
       node => node.textContent ?? '',
     )
     expect(errors.some(text => text.includes('샌드박스 프로필을 읽지 못했습니다'))).toBe(true)
+  })
+
+  // The callout said "서버가 보낸 값은 X 입니다" with X taken straight from the
+  // normalized config -- but normalizeKeeperConfig never leaves that field
+  // null, it writes UNKNOWN_SANDBOX_PROFILE when the response has no such key.
+  // So an omitted field was reported to the operator as a string the server
+  // had sent.
+  it('does not attribute the client placeholder to the server', async () => {
+    await openAccessTab(makeKeeperConfig({ sandbox_profile: UNKNOWN_SANDBOX_PROFILE }))
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('서버 응답에 sandbox_profile 이 없습니다')
+    expect(text).not.toContain(`서버가 보낸 값은 ${UNKNOWN_SANDBOX_PROFILE}`)
+  })
+
+  // The other half of the same state: the server did send something, this
+  // bundle just does not know it. Quoting it is correct here.
+  it('quotes a value the server really sent', async () => {
+    await openAccessTab(makeKeeperConfig({ sandbox_profile: 'some_future_profile' }))
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('서버가 보낸 값은 some_future_profile')
+    expect(text).not.toContain('서버 응답에 sandbox_profile 이 없습니다')
   })
 
   // The second producer #32894 added. It has to land on the endpoint row, not

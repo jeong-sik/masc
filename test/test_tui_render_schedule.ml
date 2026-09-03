@@ -1041,6 +1041,10 @@ let test_change_columns_hold_their_offsets () =
    Overview" in a column of fourteen would have been drawn "Task -> Ov...iew".
    Neither is acceptable, and only this notices the second. *)
 
+(* The widest bracketed phase label the renderer computes; the columns after
+   it are placed from this, so the sweep uses one value for both. *)
+let planning_phase_width = 11
+
 let test_headers_fit_their_columns () =
   for inner_width = 80 to 240 do
     let headers =
@@ -1063,6 +1067,11 @@ let test_headers_fit_their_columns () =
         , let keeper_width = 16 in
           Schedule.fusion_header_row ~keeper_width
             ~run_width:(Schedule.fusion_run_width ~inner_width ~keeper_width) )
+      ; ( "planning"
+        , let phase_width = planning_phase_width in
+          Schedule.planning_header_row ~phase_width
+            ~title_width:
+              (Schedule.planning_title_width ~inner_width ~phase_width) )
       ; ( "harness"
         , Schedule.harness_header_row
             ~reason_width:(Schedule.harness_reason_width ~inner_width) )
@@ -1257,6 +1266,83 @@ let test_keeper_columns_grow_identifiers_first () =
     (one_twenty.kcol_name > (at 118).kcol_name
     || one_twenty.kcol_task > (at 118).kcol_task)
 
+(* Planning goal columns.
+
+   The list named nothing and sized its title by subtracting a constant from
+   the terminal, minus however wide the age and the due date happened to be.
+   Both readings are optional, so the pair at the end of the row began at a
+   different column on every row. *)
+
+let planning_probe =
+  { Schedule.prow_phase = "A"
+  ; prow_proof = "B"
+  ; prow_priority = "C"
+  ; prow_open = "D"
+  ; prow_title = "E"
+  ; prow_age = "F"
+  ; prow_due = "G"
+  }
+
+let planning_row_of ~title_width values =
+  Schedule.planning_row ~phase_style:"" ~phase_width:planning_phase_width
+    ~title_width values
+
+let test_planning_columns_hold_their_offsets () =
+  for inner_width = 80 to 240 do
+    let title_width =
+      Schedule.planning_title_width ~inner_width
+        ~phase_width:planning_phase_width
+    in
+    let header =
+      Schedule.planning_header_row ~phase_width:planning_phase_width
+        ~title_width
+    in
+    let row = planning_row_of ~title_width planning_probe in
+    check_left_cell "PHASE" "A" ~header ~row ~inner_width;
+    check_left_cell "PRI" "C" ~header ~row ~inner_width;
+    check_left_cell "OPEN" "D" ~header ~row ~inner_width;
+    check_left_cell "TITLE" "E" ~header ~row ~inner_width;
+    check_right_cell "AGE" "F" ~header ~row ~inner_width;
+    check_left_cell "DUE" "G" ~header ~row ~inner_width
+  done
+
+(* The defect this closes. A goal with no due date used to pull the age and
+   the date ten cells left of the goal above it, because the title was sized
+   from what those two happened to measure on that row. *)
+let test_an_absent_date_does_not_move_the_age () =
+  let inner_width = 120 in
+  let title_width =
+    Schedule.planning_title_width ~inner_width ~phase_width:planning_phase_width
+  in
+  let with_both =
+    planning_row_of ~title_width
+      { planning_probe with Schedule.prow_age = "F"; prow_due = "2026-09-04" }
+  in
+  let without_date =
+    planning_row_of ~title_width
+      { planning_probe with Schedule.prow_age = "F"; prow_due = "" }
+  in
+  let long_title =
+    planning_row_of ~title_width
+      { planning_probe with
+        Schedule.prow_title = String.make 200 'x'
+      ; prow_age = "F"
+      ; prow_due = ""
+      }
+  in
+  let age_at row =
+    match index_of row "F" with
+    | Some at -> Masc_tui_message_layout.display_width (String.sub row 0 at)
+    | None -> Alcotest.failf "the age is not in %S" row
+  in
+  check int "an absent date leaves the age where it was" (age_at with_both)
+    (age_at without_date);
+  check int "and a title past its column does not move it either"
+    (age_at with_both) (age_at long_title);
+  check int "every row is as wide as the others"
+    (Masc_tui_message_layout.display_width with_both)
+    (Masc_tui_message_layout.display_width without_date)
+
 let () =
   run "tui_render_schedule"
     [ ( "render scheduling"
@@ -1342,6 +1428,10 @@ let () =
             test_change_columns_hold_their_offsets
         ; test_case "harness columns hold their offsets" `Quick
             test_harness_columns_hold_their_offsets
+        ; test_case "planning columns hold their offsets" `Quick
+            test_planning_columns_hold_their_offsets
+        ; test_case "an absent date does not move the age" `Quick
+            test_an_absent_date_does_not_move_the_age
         ; test_case "every header fits its column" `Quick
             test_headers_fit_their_columns
         ; test_case "fusion columns hold their offsets" `Quick

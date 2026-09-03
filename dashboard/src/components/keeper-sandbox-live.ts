@@ -6,6 +6,7 @@ import {
 } from '../api/keeper'
 import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { errorMessageOr } from '../lib/format-string'
+import { sandboxContainerCli } from '../types'
 import { DetailCard, DetailRow, MutedSpan } from './keeper-detail-kpi'
 
 type LoadState =
@@ -26,6 +27,12 @@ function ContainerRows({ status }: { status: KeeperSandboxLiveStatus }) {
   if (status.containers.length === 0) {
     return html`<${MutedSpan}>실행 중인 관리 컨테이너가 없습니다.</${MutedSpan}>`
   }
+  // The CLI comes from the profile table, not from a two-way test. Asking
+  // "is it microvm?" and answering "docker" otherwise handed a remote_ssh
+  // keeper a `docker logs -f` line for a container docker does not hold.
+  // remote_ssh maps to null here, and so does a profile this bundle cannot
+  // name — in both cases the row shows the id and no command to copy.
+  const logCli = sandboxContainerCli(status.sandbox_profile)
   return html`
     <div class="flex flex-col gap-2">
       ${status.containers.map(container => html`
@@ -41,9 +48,11 @@ function ContainerRows({ status }: { status: KeeperSandboxLiveStatus }) {
             ${container.id} · ${container.image}
           </div>
           <div class="mt-1 text-3xs text-[var(--color-fg-muted)]">${container.status}</div>
-          <div class="mt-2 rounded bg-[var(--color-bg-raised)] px-2 py-1 font-mono text-3xs" aria-label="container log command">
-            ${status.sandbox_profile === 'microvm' ? 'container' : 'docker'} logs -f ${container.id}
-          </div>
+          ${logCli === null ? null : html`
+            <div class="mt-2 rounded bg-[var(--color-bg-raised)] px-2 py-1 font-mono text-3xs" aria-label="container log command">
+              ${logCli} logs -f ${container.id}
+            </div>
+          `}
         </div>
       `)}
     </div>

@@ -515,6 +515,9 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
    is computed from the prompt's width, does not have to know about it. *)
 let voice_meter_text (state : state) =
   match state.voice_capture, state.voice_level_db with
+  (* Continuous mode between utterances: no capture is running, but the row is
+     still listening and the operator needs to know before speaking. *)
+  | None, _ when state.voice_continuous <> None -> "[대기] "
   | None, _ -> ""
   | Some _, None -> "[듣는 중] "
   | Some _, Some db ->
@@ -756,8 +759,10 @@ let composer_line state ~cols =
        draft to crowd. It goes away once a capture starts, because the meter
        has taken that space and says the same thing louder. *)
     | Composer.Focused, Composer.Ready _
-      when state.voice_capture = None && Buffer.length state.msg_input = 0 ->
-        "  (^Y to speak)"
+      when state.voice_capture = None
+           && state.voice_continuous = None
+           && Buffer.length state.msg_input = 0 ->
+        "  (^Y to speak, ^A to keep listening)"
     | Composer.Focused, _ -> ""
     | Composer.Unfocused, Composer.Ready _ ->
         Printf.sprintf "  (%s to write)" Composer.focus_key

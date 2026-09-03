@@ -2445,6 +2445,17 @@ type state = {
      device and a quiet room look identical — both end as an empty draft. *)
   mutable voice_capture: string option;
   mutable voice_level_db: float option;
+  (* Continuous mode: the keeper whose row re-arms a capture after each
+     transcript, until the operator turns it off. Separate from
+     [voice_capture], which is the capture running right now — between two
+     utterances the mode is on and no capture is in flight.
+
+     [voice_floor] is the room level measured when the mode started, reused for
+     every capture in it. Re-probing costs about 1.15 s of the gap between
+     utterances, and a room does not change between two sentences the way it
+     changes across a session. *)
+  mutable voice_continuous: string option;
+  mutable voice_floor: float option;
   (* A top-level [q] arms exit instead of ending the TUI immediately. The next
      unrelated input clears it; a second [q] exits. *)
   mutable quit_armed: bool;
@@ -3263,6 +3274,8 @@ let create_state
   composer_focused = false;
   voice_capture = None;
   voice_level_db = None;
+  voice_continuous = None;
+  voice_floor = None;
   quit_armed = false;
   last_action = None;
   fleet_safety = None;

@@ -29,6 +29,7 @@ let outcome_testable =
           | Composer.Release_focus -> "release_focus"
           | Composer.Send -> "send"
           | Composer.Start_listening -> "start_listening"
+          | Composer.Toggle_continuous -> "toggle_continuous"
           | Composer.Edit -> "edit"
           | Composer.Pass_to_surface -> "pass"))
     ( = )
@@ -172,6 +173,49 @@ let test_the_listen_key_is_not_typable () =
     (String.length Composer.listen_key = 1 && Char.code byte < 32)
 ;;
 
+
+(* Ctrl-A toggles continuous capture. Ctrl-K would have been the obvious
+   second control key and is taken: it cancels a queued line. *)
+let test_focused_composer_claims_the_continuous_key () =
+  check_key
+    ~label:"ctrl-a toggles continuous capture"
+    (make ~focus:Composer.Focused ())
+    Composer.continuous_key
+    Composer.Toggle_continuous
+;;
+
+let test_continuous_key_needs_a_recipient () =
+  check_key
+    ~label:"no keeper, no mode"
+    (make ~target:Composer.No_target ~focus:Composer.Focused ())
+    Composer.continuous_key
+    Composer.Edit
+;;
+
+let test_unfocused_composer_does_not_claim_the_continuous_key () =
+  check_key
+    ~label:"the surface still gets ctrl-a while the row is idle"
+    (make ~focus:Composer.Unfocused ())
+    Composer.continuous_key
+    Composer.Pass_to_surface
+;;
+
+(* Two capture keys, and they have to stay distinct: bound to the same byte,
+   one of them silently stops working and the tests above still pass. *)
+let test_the_two_capture_keys_are_distinct_control_codes () =
+  Alcotest.(check bool)
+    "listen and continuous are different keys"
+    true
+    (not (String.equal Composer.listen_key Composer.continuous_key));
+  List.iter
+    (fun key ->
+       Alcotest.(check bool)
+         "each is one control byte"
+         true
+         (String.length key = 1 && Char.code key.[0] < 32))
+    [ Composer.listen_key; Composer.continuous_key ]
+;;
+
 let () =
   Alcotest.run "tui-composer"
     [ ( "what the row says"
@@ -205,6 +249,14 @@ let () =
             test_unfocused_composer_does_not_claim_the_listen_key
         ; Alcotest.test_case "the listen key is not typable" `Quick
             test_the_listen_key_is_not_typable
+        ; Alcotest.test_case "focused it claims the continuous key" `Quick
+            test_focused_composer_claims_the_continuous_key
+        ; Alcotest.test_case "the continuous key needs a recipient" `Quick
+            test_continuous_key_needs_a_recipient
+        ; Alcotest.test_case "unfocused it does not claim the continuous key"
+            `Quick test_unfocused_composer_does_not_claim_the_continuous_key
+        ; Alcotest.test_case "the two capture keys are distinct" `Quick
+            test_the_two_capture_keys_are_distinct_control_codes
         ] )
     ; ( "layout"
       , [ Alcotest.test_case "the cursor stays inside the row" `Quick

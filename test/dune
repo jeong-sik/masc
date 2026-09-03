@@ -3005,6 +3005,13 @@
  (libraries alcotest masc_tui_runtime_config_receipt yojson))
 
 (test
+ (name test_tui_chat_gate_row)
+ (modules test_tui_chat_gate_row)
+ (libraries alcotest ast_grep masc_tui_types)
+ (deps
+  (source_tree ../bin)))
+
+(test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
  (libraries

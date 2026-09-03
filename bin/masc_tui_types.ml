@@ -4541,6 +4541,23 @@ let keeper_message_pending_status_rows items =
     0 (keeper_message_pending_preview items)
 ;;
 
+(* External effects this Keeper handed to the Gate and has not got back.
+
+   Measured over 2026-09-01..03: 2,067 of 35,658 recorded calls were deferred,
+   and in 872 of them the Keeper went on to make further calls in the same
+   turn. Those rows draw in the chat as ordinary returns, because a deferral
+   returns successfully -- the effect is what is outstanding, not the call. The
+   pane had no way to say so.
+
+   Read from [gate_pending], which rides every tick from every surface for the
+   strip's badge, so this is as current in the chat pane as it is on Approvals.
+   A projection of rows already loaded: no new field, no new request. *)
+let keeper_effects_at_the_gate (state : state) ~keeper_name =
+  List.filter
+    (fun (pending : Tui_decode.gate_pending) ->
+      String.equal pending.gp_keeper keeper_name)
+    state.gate_pending
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -4581,6 +4598,14 @@ let keeper_message_status_rows (state : state) =
      transcript. When its turn starts those two rows are handed to the active
      USER one-for-one, so the text does not jump through an older turn's
      tool/output block. *)
+  (* One row whatever the queue holds, so the reservation cannot drift from
+     the drawing: the pane names as many effects as fit on it and truncates
+     the rest, the way every other single-line status row does. *)
+  + (match state.msg_target_keeper_name with
+     | Some keeper_name
+       when keeper_effects_at_the_gate state ~keeper_name <> [] ->
+         1
+     | Some _ | None -> 0)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
   + (if state.msg_memory_visibility <> Memory_hidden
         && Option.is_some state.msg_memory_error then 1 else 0)

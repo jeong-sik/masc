@@ -29,9 +29,6 @@ val runtime_lens_keeper_terminal_status :
   Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan ->
   string
 
-val runtime_lens_provider_terminal_status :
-  Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan -> string
-
 val runtime_lens_memory_terminal_status :
   Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan -> string
 

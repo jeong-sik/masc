@@ -7,11 +7,6 @@ open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 
 let runtime_lens_gaps ~terminal_event_present ~config_drift scan =
-  let has_provider_lane =
-    runtime_manifest_scan_event_count scan
-      Keeper_runtime_manifest.Provider_lane_resolved
-    > 0
-  in
   let has_context_delta =
     scan.context_injected_count > 0 || scan.event_bus_count > 0
   in
@@ -52,24 +47,13 @@ let runtime_lens_gaps ~terminal_event_present ~config_drift scan =
            gaps
        else gaps)
   |> (fun gaps ->
-       if scan.provider_started_count > 0 && not has_provider_lane
-       then
-         add
-           { code = "provider_lane_unresolved"
-           ; severity = "bad"
-           ; lane = "masc_policy_runtime"
-           ; detail = Some "provider attempt exists without provider_lane_resolved"
-           }
-           gaps
-       else gaps)
-  |> (fun gaps ->
-       if scan.provider_started_count > 0 && not has_context_delta
+       if scan.has_terminal && not has_context_delta
        then
          add
            { code = "context_delta_missing"
            ; severity = "warn"
            ; lane = "memory_context"
-           ; detail = Some "provider turn has no context or event-bus delta rows"
+           ; detail = Some "turn finished with no context or event-bus delta rows"
            }
            gaps
        else gaps)
@@ -125,7 +109,7 @@ let runtime_lens_gaps ~terminal_event_present ~config_drift scan =
   let gaps =
     gaps
     |> (fun gaps ->
-         match scan.provider_terminal_row with
+         match scan.terminal_row with
          | Some row when row.Keeper_runtime_manifest.links.receipt_path = None ->
            { code = "receipt_missing"
            ; severity = "warn"
@@ -135,7 +119,7 @@ let runtime_lens_gaps ~terminal_event_present ~config_drift scan =
            :: gaps
          | _ -> gaps)
     |> (fun gaps ->
-         match scan.provider_terminal_row with
+         match scan.terminal_row with
          | Some row when row.Keeper_runtime_manifest.links.checkpoint_path = None ->
            { code = "checkpoint_missing"
            ; severity = "warn"
@@ -145,7 +129,7 @@ let runtime_lens_gaps ~terminal_event_present ~config_drift scan =
            :: gaps
          | _ -> gaps)
     |> (fun gaps ->
-         match scan.provider_terminal_row with
+         match scan.terminal_row with
          | Some row when row.Keeper_runtime_manifest.links.tool_call_log_path = None ->
            { code = "artifact_link_missing"
            ; severity = "warn"
@@ -201,16 +185,15 @@ let runtime_lens_gaps ~terminal_event_present ~config_drift scan =
              :: gaps
          else gaps)
     |> (fun gaps ->
-         if scan.provider_started_count > 0
+         if scan.has_terminal
             && scan.event_bus_correlation_ids = []
             && scan.event_bus_run_ids = []
          then
-           { code = "provider_agent_core_link_missing"
+           { code = "agent_core_link_missing"
            ; severity = "warn"
-           ; lane = "provider"
+           ; lane = "memory_context"
            ; detail =
-               Some
-                 "provider attempt started but no event_bus correlation or run_id links"
+               Some "turn finished with no event_bus correlation or run_id links"
            }
            :: gaps
          else gaps)
@@ -242,35 +225,6 @@ let runtime_lens_gaps ~terminal_event_present ~config_drift scan =
            }
            :: gaps
          else gaps)
-    |> (fun gaps ->
-         if scan.provider_started_count > scan.provider_finished_count
-         then
-           { code = "provider_attempt_unclosed"
-           ; severity = "bad"
-           ; lane = "provider"
-           ; detail =
-               Some
-                 (Printf.sprintf
-                    "provider attempts started (%d) exceeds finished (%d)"
-                    scan.provider_started_count
-                    scan.provider_finished_count)
-           }
-           :: gaps
-         else gaps)
-    |> (fun gaps ->
-         match scan.provider_terminal_row with
-         | Some row ->
-           let decision = row.Keeper_runtime_manifest.decision in
-           (match Json_util.get_string decision "terminal_provider_kind" with
-            | Some _ -> gaps
-            | None ->
-              { code = "provider_provenance_missing"
-              ; severity = "warn"
-              ; lane = "provider"
-              ; detail = Some "terminal provider row lacks terminal_provider_kind"
-              }
-              :: gaps)
-         | None -> gaps)
     |> (fun gaps ->
          match scan.latest_context_injected_row with
          | Some row ->

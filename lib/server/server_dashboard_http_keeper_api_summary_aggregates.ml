@@ -1,6 +1,5 @@
 (* Aggregate summary JSON builders consumed by
    [Server_dashboard_http_keeper_api.keeper_runtime_trace_json]:
-     - provider attempts terminal/list aggregation
      - turn-identity counts derived from manifest scan + receipt rows
 
    Pulled out of [server_dashboard_http_keeper_api.ml] to shrink the
@@ -11,35 +10,6 @@ open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_api_types
 
 module Scan_summary = Server_dashboard_http_keeper_api_scan_summary
-
-let provider_attempts_summary_json (scan : runtime_manifest_scan) : Yojson.Safe.t =
-  let attempt_rows = queue_to_list scan.provider_attempt_rows in
-  let terminal = scan.provider_terminal_row in
-  let terminal_decision_string key =
-    Option.bind terminal (fun row ->
-      Json_util.get_string row.Keeper_runtime_manifest.decision key)
-  in
-  `Assoc
-    [ "started_count", `Int scan.provider_started_count
-    ; "finished_count", `Int scan.provider_finished_count
-    ; ( "terminal_status"
-      , Json_util.string_opt_to_json
-          (Option.map (fun row -> row.Keeper_runtime_manifest.status) terminal) )
-    ; "terminal_model_source", Json_util.string_opt_to_json (terminal_decision_string "model_source")
-    ; ( "terminal_resolved_model_source"
-      , Json_util.string_opt_to_json (terminal_decision_string "resolved_model_source") )
-    ; ( "terminal_capability_source"
-      , Json_util.string_opt_to_json (terminal_decision_string "capability_source") )
-    ; ( "terminal_fallback_authority"
-      , Json_util.string_opt_to_json (terminal_decision_string "fallback_authority") )
-    ; ( "terminal_provider_source_runtime"
-      , Json_util.string_opt_to_json (terminal_decision_string "provider_source_runtime") )
-    ; "terminal_error", Json_util.string_opt_to_json (terminal_decision_string "error")
-    ; ( "terminal_exception_kind"
-      , Json_util.string_opt_to_json (terminal_decision_string "exception_kind") )
-    ; "attempts", `List (List.map provider_attempt_row_json attempt_rows)
-    ]
-;;
 
 let turn_identity_summary_json
       ?turn_id
@@ -65,16 +35,16 @@ let turn_identity_summary_json
           (runtime_manifest_scan_event_count
              scan
              Keeper_runtime_manifest.Provider_lane_resolved) )
-    ; ( "provider_attempt_started_count"
+    ; ( "runtime_completed_count"
       , `Int
           (runtime_manifest_scan_event_count
              scan
-             Keeper_runtime_manifest.Provider_attempt_started) )
-    ; ( "provider_attempt_finished_count"
+             Keeper_runtime_manifest.Runtime_completed) )
+    ; ( "runtime_failed_count"
       , `Int
           (runtime_manifest_scan_event_count
              scan
-             Keeper_runtime_manifest.Provider_attempt_finished) )
+             Keeper_runtime_manifest.Runtime_failed) )
     ; ( "checkpoint_saved_count"
       , `Int
           (runtime_manifest_scan_event_count

@@ -54,14 +54,6 @@ let runtime_lens_keeper_terminal_status ~terminal_event_present scan =
   else if scan.total_rows = 0 then "empty"
   else "open"
 
-let runtime_lens_provider_terminal_status scan =
-  match scan.provider_terminal_row with
-  | Some row -> row.Keeper_runtime_manifest.status
-  | None when scan.provider_started_count > scan.provider_finished_count ->
-    "unfinished"
-  | None when scan.provider_started_count = 0 -> "not_started"
-  | None -> "unknown"
-
 let runtime_lens_memory_terminal_status scan =
   if runtime_lens_event_count scan Keeper_runtime_manifest.Checkpoint_saved > 0
   then "checkpoint_saved"
@@ -107,16 +99,18 @@ let lane_policies =
         ]
     ; terminal_events = [ Keeper_runtime_manifest.Turn_finished ]
     }
-  ; { lane = "provider"
-    ; mandatory_events =
-        [ Keeper_runtime_manifest.Provider_attempt_started
-        ; Keeper_runtime_manifest.Provider_attempt_finished
-        ]
-    ; terminal_events = [ Keeper_runtime_manifest.Provider_attempt_finished ]
-    }
+    (* The dispatch that used to be asserted on a separate "provider" lane is
+       asserted here. Runtime_routed opens a candidate attempt and
+       Runtime_completed / Runtime_failed closes it, which is the boundary the
+       retired provider_attempt_started / provider_attempt_finished pair
+       described. Over the 23,089 finished turns in the live store, 528 (2.29%)
+       open an attempt that never terminates — the condition this asserts. *)
   ; { lane = "masc_policy_runtime"
     ; mandatory_events = [ Keeper_runtime_manifest.Runtime_routed ]
-    ; terminal_events = []
+    ; terminal_events =
+        [ Keeper_runtime_manifest.Runtime_completed
+        ; Keeper_runtime_manifest.Runtime_failed
+        ]
     }
   ; { lane = "agent_core_agent"
     ; mandatory_events = [ Keeper_runtime_manifest.Checkpoint_saved ]
@@ -146,9 +140,6 @@ let event_lane = function
   | Keeper_runtime_manifest.Runtime_failed
   | Keeper_runtime_manifest.Provider_lane_resolved ->
     "masc_policy_runtime"
-  | Keeper_runtime_manifest.Provider_attempt_started
-  | Keeper_runtime_manifest.Provider_attempt_finished ->
-    "provider"
   | Keeper_runtime_manifest.Checkpoint_loaded
   | Keeper_runtime_manifest.Checkpoint_saved ->
     "agent_core_agent"

@@ -82,10 +82,6 @@ let maybe_prune_retention ~base_dir =
 let mandatory_clock_refs_for_event = function
   | Turn_started ->
     [ "edge_id"; "lane" ]
-  | Provider_attempt_started ->
-    [ "edge_id"; "lane"; "provider_attempt_id" ]
-  | Provider_attempt_finished ->
-    [ "edge_id"; "lane"; "provider_attempt_id"; "elapsed_ms" ]
   | Provider_lane_resolved ->
     [ "edge_id"; "lane"; "tool_batch_id" ]
   | Checkpoint_saved ->

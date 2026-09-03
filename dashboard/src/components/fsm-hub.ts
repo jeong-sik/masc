@@ -166,26 +166,25 @@ function runtimeTraceClass(trace: KeeperRuntimeTraceResponse): string {
   }
 }
 
-function runtimeProviderAttemptClass(trace: KeeperRuntimeTraceResponse): string {
-  const provider = trace.provider_attempts
-  const status = provider.terminal_status?.toLowerCase() ?? ''
-  if (provider.finished_count < provider.started_count) {
+function runtimeDispatchClass(trace: KeeperRuntimeTraceResponse): string {
+  const turn = trace.turn_identity
+  if (turn.runtime_failed_count > 0) {
     return 'border-[var(--bad-30)] text-[var(--bad-light)] bg-[var(--bad-6)]'
   }
-  if (status === 'provider_returned') {
+  if (turn.runtime_completed_count > 0) {
     return 'border-[var(--ok-20)] text-[var(--color-status-ok)] bg-[var(--ok-10)]'
-  }
-  if (status === 'timeout' || status === 'error' || status === 'exception' || status === 'cancelled') {
-    return 'border-[var(--bad-30)] text-[var(--bad-light)] bg-[var(--bad-6)]'
   }
   return 'border-[var(--color-border-default)] text-[var(--color-fg-muted)] bg-[var(--color-bg-surface)]'
 }
 
-function runtimeProviderAttemptLabel(trace: KeeperRuntimeTraceResponse): string {
-  const provider = trace.provider_attempts
-  if (provider.started_count === 0 && provider.finished_count === 0) return 'prov none'
-  const status = shortText(provider.terminal_status, 18) || 'unknown'
-  return ['prov', status].filter(Boolean).join(' ')
+// No dispatch row is "not observed", never "none": a turn whose window holds
+// no runtime_completed / runtime_failed row was not measured here.
+function runtimeDispatchLabel(trace: KeeperRuntimeTraceResponse): string {
+  const turn = trace.turn_identity
+  const closed = turn.runtime_completed_count + turn.runtime_failed_count
+  if (closed === 0) return 'dispatch not observed'
+  if (turn.runtime_failed_count > 0) return `dispatch failed ${turn.runtime_failed_count}`
+  return `dispatch ok ${turn.runtime_completed_count}`
 }
 
 function runtimeTraceTurnLabel(trace: KeeperRuntimeTraceResponse): string {
@@ -202,7 +201,6 @@ function runtimeTraceTitle(trace: KeeperRuntimeTraceResponse): string {
   const turn = trace.turn_identity
   const eventBus = trace.event_bus
   const memory = trace.memory
-  const provider = trace.provider_attempts
   return [
     `trace_id: ${trace.trace_id || '(unknown)'}`,
     trace.stale_reason ? `stale_reason: ${trace.stale_reason}` : '',
@@ -212,12 +210,7 @@ function runtimeTraceTitle(trace: KeeperRuntimeTraceResponse): string {
     `receipt rows: ${trace.receipt_returned_rows}`,
 	    turn.manifest_keeper_turn_ids.length > 0 ? `keeper_turn_ids: ${turn.manifest_keeper_turn_ids.join(', ')}` : '',
 	    turn.receipt_turn_counts.length > 0 ? `receipt_turn_counts: ${turn.receipt_turn_counts.join(', ')}` : '',
-	    // provider_attempt_finished ≤ provider_attempt_started is a true invariant pair
-	    // (a finish is always preceded by a start). Started is the denominator.
-	    `provider attempts: ${formatRatioPair({ numerator: turn.provider_attempt_finished_count, denominator: turn.provider_attempt_started_count })}`,
-	    provider.terminal_status ? `provider terminal: ${provider.terminal_status}` : '',
-	    provider.terminal_exception_kind ? `provider exception: ${provider.terminal_exception_kind}` : '',
-	    provider.terminal_error ? `provider error: ${shortText(provider.terminal_error, 220)}` : '',
+	    `runtime dispatch: completed ${turn.runtime_completed_count} · failed ${turn.runtime_failed_count}`,
 	    eventBus.correlation_ids.length > 0 ? `correlation_ids: ${eventBus.correlation_ids.join(', ')}` : '',
     eventBus.run_ids.length > 0 ? `run_ids: ${eventBus.run_ids.join(', ')}` : '',
     // memory_injected_count and memory_flushed_count are independent monotonic
@@ -257,8 +250,8 @@ function RuntimeEvidenceSummary({
 	    <span class=${`${commonClass} border-[var(--color-border-default)] text-[var(--color-fg-primary)]`} title=${title}>
 	      ${runtimeTraceTurnLabel(trace)}
 	    </span>
-	    <span class=${`${commonClass} ${runtimeProviderAttemptClass(trace)}`} title=${title}>
-	      ${runtimeProviderAttemptLabel(trace)}
+	    <span class=${`${commonClass} ${runtimeDispatchClass(trace)}`} title=${title}>
+	      ${runtimeDispatchLabel(trace)}
 	    </span>
 	    <span class=${`${commonClass} border-[var(--info-border)] text-[var(--info-fg)]`} title=${title}>
       evt ${eventBus.event_bus_correlated_count}

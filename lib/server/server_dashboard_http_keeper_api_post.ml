@@ -335,10 +335,6 @@ let terminal_event_present_for_turn = Scan_summary.terminal_event_present_for_tu
 let runtime_lens_json =
   Server_dashboard_http_keeper_api_runtime_lens.runtime_lens_json
 
-let provider_attempts_summary_json =
-  Server_dashboard_http_keeper_api_summary_aggregates.provider_attempts_summary_json
-;;
-
 let turn_identity_summary_json =
   Server_dashboard_http_keeper_api_summary_aggregates.turn_identity_summary_json
 ;;
@@ -447,7 +443,6 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
               ("receipt_returned_rows", `Int (List.length receipts));
               ( "turn_identity",
                 turn_identity_summary_json ?turn_id manifest_scan receipts );
-              ("provider_attempts", provider_attempts_summary_json manifest_scan);
               ("event_bus", event_bus_summary_json manifest_scan);
               ( "runtime_lens",
                 runtime_lens_json ~config ~keeper_name:name ~trace_id ?turn_id

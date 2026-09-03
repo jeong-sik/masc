@@ -319,22 +319,14 @@ describe('RuntimeLensSection', () => {
         receipt_turn_counts: [7],
         max_agent_core_turn_count: 3,
         provider_lane_resolved_count: 1,
-        provider_attempt_started_count: 1,
-        provider_attempt_finished_count: 1,
+        runtime_completed_count: 1,
+        runtime_failed_count: 0,
         checkpoint_saved_count: 1,
         event_bus_correlated_count: 1,
         memory_injected_count: 1,
         memory_flushed_count: 1,
         receipt_appended_count: 1,
         turn_finished_count: 1,
-      },
-      provider_attempts: {
-        started_count: 1,
-        finished_count: 1,
-        terminal_status: 'timeout',
-        terminal_error: 'Timeout after 120s',
-        terminal_exception_kind: 'outer_agent_core_timeout',
-        attempts: [],
       },
       event_bus: {
         event_bus_correlated_count: 1,
@@ -372,11 +364,6 @@ describe('RuntimeLensSection', () => {
             resolved: true,
             status: 'error',
             resolved_lane: 'inline',
-          },
-          provider_attempt: {
-            started_count: 1,
-            finished_count: 1,
-            terminal_status: 'timeout',
           },
           payload_role: {
             counts: {},
@@ -417,16 +404,15 @@ describe('RuntimeLensSection', () => {
           keeper: lane('keeper', 'Keeper', 2, 'finished'),
           masc_policy_runtime: lane('masc_policy_runtime', 'MASC Runtime', 1, 'error'),
           agent_core_agent: lane('agent_core_agent', 'Agent Core', 2, 'checkpoint_saved'),
-          provider: lane('provider', 'Provider', 2, 'timeout'),
           tool_runtime: lane('tool_runtime', 'Tool Runtime', 0, 'not_observed'),
           memory_context: lane('memory_context', 'Memory/Context', 3, 'flushed'),
         },
         clock_edges: [
           {
-            edge_id: 'edge-provider-start',
-            lane: 'provider',
-            event: 'provider_attempt_started',
-            status: 'started',
+            edge_id: 'edge-runtime-routed',
+            lane: 'masc_policy_runtime',
+            event: 'runtime_routed',
+            status: 'attempt',
             observed_at: '2026-05-13T00:00:03Z',
             source_clock: 'wall',
             started_at: '2026-05-13T00:00:03Z',
@@ -434,7 +420,6 @@ describe('RuntimeLensSection', () => {
             trace_id: 'trace-lens',
             keeper_turn_id: 7,
             agent_core_turn_count: 2,
-            provider_attempt_id: 'trace-lens:keeper-7:provider-attempt-1',
             tool_batch_id: null,
             checkpoint_id: null,
             event_bus_correlation_id: 'corr-1',
@@ -455,10 +440,10 @@ describe('RuntimeLensSection', () => {
             group_type: 'event_bus_correlation',
             group_id: 'corr-1',
             edge_count: 1,
-            edge_ids: ['edge-provider-start'],
+            edge_ids: ['edge-runtime-routed'],
             lanes: ['provider'],
-            events: ['provider_attempt_started'],
-            statuses: ['started'],
+            events: ['runtime_routed'],
+            statuses: ['attempt'],
             first_observed_at: '2026-05-13T00:00:03Z',
             last_observed_at: '2026-05-13T00:00:03Z',
             closed: true,
@@ -605,23 +590,20 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('tool log artifacts')).toBeInTheDocument()
     expect(screen.getAllByText('1/1').length).toBeGreaterThan(1)
     expect(screen.getByText('0/1')).toBeInTheDocument()
-    expect(screen.getByText('provider attempts')).toBeInTheDocument()
-    expect(screen.getAllByText('1/1').length).toBeGreaterThan(0)
-    expect(screen.getByText('provider terminal')).toBeInTheDocument()
-    expect(screen.getByText('timeout / outer_agent_core_timeout')).toBeInTheDocument()
+    expect(screen.getByText('runtime dispatch')).toBeInTheDocument()
+    expect(screen.getByText('completed 1 / failed 0')).toBeInTheDocument()
     expect(screen.getByText('clock edges')).toBeInTheDocument()
     expect(screen.getByText('clock groups')).toBeInTheDocument()
     expect(screen.getByTestId('runtime-lens-clock-groups')).toBeInTheDocument()
     expect(screen.getByText('event_bus_correlation')).toBeInTheDocument()
     expect(screen.getByText('tool_called · tool_completed')).toBeInTheDocument()
     expect(screen.getByTestId('runtime-lens-clock-edges')).toBeInTheDocument()
-    expect(screen.getByText('provider_attempt_started')).toBeInTheDocument()
-    expect(screen.getByText('edge-provider-start')).toBeInTheDocument()
+    expect(screen.getByText('runtime_routed')).toBeInTheDocument()
+    expect(screen.getByText('edge-runtime-routed')).toBeInTheDocument()
     expect(screen.getByText('event ids')).toBeInTheDocument()
     expect(screen.getByText('corr corr-1 · run run-1')).toBeInTheDocument()
     expect(screen.getByText('memory evidence')).toBeInTheDocument()
     expect(screen.getByText('inj 1/1 · flush success 1 · error 0 · ep/proc ep 2 · proc 1')).toBeInTheDocument()
-    expect(screen.getByText('Provider')).toBeInTheDocument()
     expect(screen.getByText('Tool Runtime')).toBeInTheDocument()
   })
 

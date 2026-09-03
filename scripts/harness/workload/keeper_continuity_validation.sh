@@ -387,8 +387,8 @@ runtime_terminal_summary() {
         {
           turn_status: (([ $rows[] | select(.event == "turn_finished") | .status // empty ] | last) // ""),
           terminal_reason: (([ $rows[] | select(.event == "turn_finished") | .decision.terminal_reason_code // empty ] | last) // ""),
-          provider_status: (([ $rows[] | select(.event == "provider_attempt_finished") | .status // empty ] | last) // ""),
-          provider_error: (([ $rows[] | select(.event == "provider_attempt_finished") | .decision.error // empty ] | last) // "")
+          provider_status: (([ $rows[] | select(.event == "runtime_completed" or .event == "runtime_failed") | .status // empty ] | last) // ""),
+          provider_error: (([ $rows[] | select(.event == "runtime_failed") | .decision.error // empty ] | last) // "")
         }
         | if ([.turn_status,.terminal_reason,.provider_status,.provider_error] | map(select(length > 0)) | length) == 0 then ""
           else "runtime_terminal turn_status=\(.turn_status) terminal_reason=\(.terminal_reason) provider_status=\(.provider_status) provider_error=\(.provider_error)"

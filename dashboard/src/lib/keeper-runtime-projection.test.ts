@@ -104,7 +104,6 @@ function runtimeTrace(overrides: Partial<KeeperRuntimeTraceResponse> = {}): Keep
     manifest_returned_rows: 6,
     receipt_returned_rows: 1,
     turn_identity: { requested_keeper_turn_id: 7 },
-    provider_attempts: {},
     event_bus: {},
     memory: {},
     runtime_lens: {

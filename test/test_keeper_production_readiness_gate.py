@@ -192,7 +192,7 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
                 any("order_violations" in failure for failure in summary.failures)
             )
 
-    def test_missing_provider_attempt_rows_fail_closure_gate(self):
+    def test_missing_runtime_terminal_rows_fail_closure_gate(self):
         tmp, root, keeper, trace = self.make_fixture()
         with tmp:
             manifest = (
@@ -214,7 +214,7 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
                 if not (
                     row.get("keeper_turn_id") == 1
                     and row.get("event")
-                    in {"provider_attempt_started", "provider_attempt_finished"}
+                    in {"runtime_routed", "runtime_completed", "runtime_failed"}
                 )
             ]
             manifest.write_text(
@@ -328,7 +328,7 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
             )
 
             self.assertEqual(summary.status, "FAIL")
-            self.assertEqual(summary.metrics["dangling_provider_attempts"], 1)
+            self.assertEqual(summary.metrics["dangling_runtime_dispatches"], 1)
             self.assertLess(summary.derived["provider_closure_pct"], 100.0)
             self.assertTrue(
                 any("provider_closure_pct" in failure for failure in summary.failures)

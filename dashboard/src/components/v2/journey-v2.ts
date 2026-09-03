@@ -110,7 +110,6 @@ const EV_KO: Readonly<Record<string, string>> = {
 
 /** Provider terminal statuses that mean the model call path completed. Other
  * values (`exhausted`, `not_observed`, ...) render as-is, never dressed up. */
-const PROVIDER_SUCCESS_STATUSES = new Set(['succeeded', 'provider_returned'])
 
 function msTxt(ms: number | null): string {
   if (ms == null) return '미기록'
@@ -122,10 +121,6 @@ function msTxt(ms: number | null): string {
 function isHealthy(health: string): boolean {
   const normalized = health.trim().toLowerCase()
   return normalized === 'healthy' || normalized === 'ok'
-}
-
-function isProviderSuccess(status: string | null): boolean {
-  return status != null && PROVIDER_SUCCESS_STATUSES.has(status)
 }
 
 // --- waterfall loading (trajectory + tool-call I/O + runtime trace) ---
@@ -199,7 +194,7 @@ function EvidenceStrip({
 }) {
   if (!ev) return html`<div class="jw-ev none">실행 기록 없음</div>`
 
-  const providerTerminal = ev.providerTerminalStatus ?? 'not_observed'
+  const dispatched = ev.runtimeCompletedCount + ev.runtimeFailedCount
   const items: Array<readonly [string, string | number, string]> = dev
     ? [
         ['health', ev.health, isHealthy(ev.health) ? 'ok' : 'warn'],
@@ -212,14 +207,11 @@ function EvidenceStrip({
           'dim',
         ],
         [
-          'provider terminal',
-          providerTerminal + (ev.providerTerminalExceptionKind ? ` · ${ev.providerTerminalExceptionKind}` : ''),
-          isProviderSuccess(ev.providerTerminalStatus) ? 'ok' : 'bad',
-        ],
-        [
-          'provider attempt',
-          `${ev.providerAttemptFinishedCount}/${ev.providerAttemptStartedCount} 완료`,
-          ev.providerAttemptFinishedCount === ev.providerAttemptStartedCount ? 'dim' : 'warn',
+          'runtime dispatch',
+          dispatched === 0
+            ? '관측 없음'
+            : `완료 ${ev.runtimeCompletedCount} · 실패 ${ev.runtimeFailedCount}`,
+          dispatched === 0 ? 'dim' : ev.runtimeFailedCount > 0 ? 'bad' : 'ok',
         ],
         ['event bus 상관', ev.eventBusCorrelatedCount, 'dim'],
         ['memory', `주입 ${ev.memoryInjectedCount} · flush ${ev.memoryFlushedCount}`, 'dim'],
@@ -228,16 +220,12 @@ function EvidenceStrip({
         ['상태', isHealthy(ev.health) ? '정상' : '오래된 기록', isHealthy(ev.health) ? 'ok' : 'warn'],
         [
           '모델 호출',
-          isProviderSuccess(ev.providerTerminalStatus)
-            ? '성공'
-            : providerTerminal === 'not_observed'
-              ? '관측 없음'
-              : `실패 · ${providerTerminal}`,
-          isProviderSuccess(ev.providerTerminalStatus)
-            ? 'ok'
-            : providerTerminal === 'not_observed'
-              ? 'dim'
-              : 'bad',
+          dispatched === 0
+            ? '관측 없음'
+            : ev.runtimeFailedCount > 0
+              ? `실패 ${ev.runtimeFailedCount}건`
+              : '성공',
+          dispatched === 0 ? 'dim' : ev.runtimeFailedCount > 0 ? 'bad' : 'ok',
         ],
         ['기억', `불러옴 ${ev.memoryInjectedCount} · 저장 ${ev.memoryFlushedCount}`, 'dim'],
       ]

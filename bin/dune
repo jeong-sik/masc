@@ -186,6 +186,8 @@
   masc.server
   masc.runtime
   masc.fusion_core
+  masc.tool_catalog_surfaces
+  masc.masc_tool_surface
   masc_eio_context
   unix
   yojson

@@ -417,13 +417,6 @@ let memory_source_width = 20
 let memory_delta_width = 6
 let memory_cell_gap = 2
 
-(* The source-bound reading answers "is anything pinned to a file", and the
-   revision answers "how far has the snapshot moved". Neither is the question
-   the screen exists for -- which keeper remembers how much -- so they are the
-   two that leave, in that order. *)
-let memory_source_minimum_inner_width = 84
-let memory_revision_minimum_inner_width = 62
-
 type memory_columns = {
   mcol_show_revision : bool;
   mcol_show_source : bool;
@@ -486,10 +479,33 @@ let memory_cells ?(state_style = "") ?(size_style = "") ?(delta_style = "")
 let memory_columns_used_width columns =
   Table.used_width ~gap:memory_cell_gap (memory_cells columns memory_no_values)
 
+(* The source-bound reading answers "is anything pinned to a file", and the
+   revision answers "how far has the snapshot moved". Neither is the question
+   the screen exists for -- which keeper remembers how much -- so they are the
+   two that leave, in that order, and a dropped one returns only once it fits
+   beside a keeper name at its widest.
+
+   Both used to return at a hand-typed width measured against the narrowest
+   name, so the returning column took back cells the name had already grown
+   into: at 61 cells the name held 23, at 62 the revision returned and left it
+   16, and the same keeper read worse on the wider terminal. *)
+let memory_columns_minimum_inner_width ~show_revision ~show_source =
+  memory_columns_used_width
+    { mcol_show_revision = show_revision
+    ; mcol_show_source = show_source
+    ; mcol_name = memory_maximum_name_width
+    }
+
 let allocate_memory_columns ~inner_width =
   let inner_width = max 0 inner_width in
-  let show_source = inner_width >= memory_source_minimum_inner_width in
-  let show_revision = inner_width >= memory_revision_minimum_inner_width in
+  let show_revision =
+    inner_width
+    >= memory_columns_minimum_inner_width ~show_revision:true ~show_source:false
+  in
+  let show_source =
+    inner_width
+    >= memory_columns_minimum_inner_width ~show_revision:true ~show_source:true
+  in
   let base =
     { mcol_show_revision = show_revision
     ; mcol_show_source = show_source
@@ -842,6 +858,69 @@ let fusion_header_row ~keeper_width ~run_width =
 let fusion_row ~state_style ~keeper_width ~run_width values =
   Table.row ~gap:fusion_cell_gap
     (fusion_cells ~state_style ~keeper_width ~run_width values)
+
+(* Harness verdict columns.
+
+   Six widths in the header and the same six in the rows. The header called
+   the task column "Task -> Overview" -- fifteen cells in a column of
+   fourteen -- so the header itself ran over and pushed Gate and every column
+   after it one cell right of the rows they labelled. The arrow was also
+   saying something the footer already says: it names the cursor's task as a
+   link on every draw. The task and gate cells were padded and never cut, so
+   an id longer than its column moved those same columns again from the row
+   side. *)
+
+let harness_time_width = 8
+let harness_task_width = 14
+let harness_gate_width = 9
+let harness_verdict_width = 9
+let harness_evaluator_width = 24
+let harness_minimum_reason_width = 12
+let harness_cell_gap = 1
+
+type harness_row_values = {
+  hrow_time : string;
+  hrow_task : string;
+  hrow_gate : string;
+  hrow_verdict : string;
+  hrow_evaluator : string;
+  hrow_reason : string;
+}
+
+let harness_no_values =
+  { hrow_time = ""
+  ; hrow_task = ""
+  ; hrow_gate = ""
+  ; hrow_verdict = ""
+  ; hrow_evaluator = ""
+  ; hrow_reason = ""
+  }
+
+let harness_cells ?(verdict_style = "") ~reason_width values =
+  [ Table.cell ~header:"TIME" ~width:harness_time_width values.hrow_time
+  ; Table.cell ~header:"TASK" ~width:harness_task_width values.hrow_task
+  ; Table.cell ~header:"GATE" ~width:harness_gate_width values.hrow_gate
+  ; Table.cell ~style:verdict_style ~header:"VERDICT"
+      ~width:harness_verdict_width values.hrow_verdict
+  ; Table.cell ~header:"EVALUATOR" ~width:harness_evaluator_width
+      values.hrow_evaluator
+  ; Table.cell ~header:"REASON" ~width:reason_width values.hrow_reason
+  ]
+
+let harness_reason_width ~inner_width =
+  let named =
+    Table.used_width ~gap:harness_cell_gap
+      (harness_cells ~reason_width:0 harness_no_values)
+  in
+  max harness_minimum_reason_width (inner_width - named)
+
+let harness_header_row ~reason_width =
+  Table.header_row ~gap:harness_cell_gap
+    (harness_cells ~reason_width harness_no_values)
+
+let harness_row ~verdict_style ~reason_width values =
+  Table.row ~gap:harness_cell_gap
+    (harness_cells ~verdict_style ~reason_width values)
 
 module Terminal_size_cache = struct
   type refresh =

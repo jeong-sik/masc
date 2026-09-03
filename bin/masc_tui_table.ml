@@ -39,12 +39,19 @@ let used_width ~gap cells =
   List.fold_left (fun total cell -> total + cell.width) 0 cells
   + (max 0 gap * max 0 (List.length cells - 1))
 
-(* Fitted before it is padded, and folded in the middle rather than cut at one
-   end: an identifier cut at the head reads as a different identifier, and a
-   number cut at either end is a wrong number where a folded one is visibly
-   incomplete. *)
+(* Folded in the middle rather than cut at one end: an identifier cut at the
+   head reads as a different identifier, and a number cut at either end is a
+   wrong number where a folded one is visibly incomplete.
+
+   Only a reading that overruns its column is folded. [fit_middle] pads a short
+   reading out to the column on the left, which left no slack for this to place
+   and made {!Right} a column that declared an alignment it never got: every
+   count and size drew flush left under a right-aligned name. *)
 let pad cell text =
-  let fitted = Masc_tui_message_layout.fit_middle cell.width text in
+  let fitted =
+    if Masc_tui_message_layout.display_width text <= cell.width then text
+    else Masc_tui_message_layout.fit_middle cell.width text
+  in
   let slack =
     max 0 (cell.width - Masc_tui_message_layout.display_width fitted)
   in

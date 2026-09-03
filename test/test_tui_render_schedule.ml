@@ -750,7 +750,9 @@ let test_memory_columns_drop_from_the_right () =
   check bool "no source when narrow" false narrow.Schedule.mcol_show_source;
   check bool "no revision when narrow" false narrow.Schedule.mcol_show_revision;
   check bool "the name still has cells" true (narrow.Schedule.mcol_name > 0);
-  let medium = Schedule.allocate_memory_columns ~inner_width:70 in
+  (* Wide enough for the revision beside a keeper name at its widest, which is
+     what a returning column now waits for. *)
+  let medium = Schedule.allocate_memory_columns ~inner_width:80 in
   check bool "revision returns first" true medium.Schedule.mcol_show_revision;
   check bool "source is still out" false medium.Schedule.mcol_show_source;
   let wide = Schedule.allocate_memory_columns ~inner_width:120 in
@@ -1031,6 +1033,95 @@ let test_change_columns_hold_their_offsets () =
             ~summary_width change_overflowing))
   done
 
+(* Every column name has to survive its own column.
+
+   Header and row are padded through the same fit, so a name wider than the
+   column it labels can no longer push the columns after it -- it folds
+   instead. That trades a shifted table for an unreadable one: "Task ->
+   Overview" in a column of fourteen would have been drawn "Task -> Ov...iew".
+   Neither is acceptable, and only this notices the second. *)
+
+let test_headers_fit_their_columns () =
+  for inner_width = 80 to 240 do
+    let headers =
+      [ ( "memory"
+        , Schedule.memory_header_row
+            (Schedule.allocate_memory_columns ~inner_width) )
+      ; ( "workspace"
+        , Schedule.workspace_header_row
+            ~path_width:(Schedule.workspace_path_width ~inner_width) )
+      ; ( "system log"
+        , Schedule.system_log_header_row
+            ~message_width:(Schedule.system_log_message_width ~inner_width) )
+      ; ( "lane run"
+        , Schedule.lane_run_header_row ~identity_header:"ACTOR"
+            ~run_id_width:(Schedule.lane_run_id_width ~inner_width) )
+      ; ( "change"
+        , Schedule.change_header_row
+            ~summary_width:(Schedule.change_summary_width ~inner_width) )
+      ; ( "fusion"
+        , let keeper_width = 16 in
+          Schedule.fusion_header_row ~keeper_width
+            ~run_width:(Schedule.fusion_run_width ~inner_width ~keeper_width) )
+      ; ( "harness"
+        , Schedule.harness_header_row
+            ~reason_width:(Schedule.harness_reason_width ~inner_width) )
+      ]
+    in
+    List.iter
+      (fun (screen, header) ->
+        check bool
+          (Printf.sprintf "inner %d: %s names every column whole" inner_width
+             screen)
+          true
+          (index_of header "\xe2\x80\xa6" = None))
+      headers
+  done
+
+(* Harness verdict columns. The header called the task column
+   "Task -> Overview" -- fifteen cells in a column of fourteen -- so it pushed
+   every column after it one cell right of the rows it labelled. *)
+
+let harness_probe =
+  { Schedule.hrow_time = "A"
+  ; hrow_task = "B"
+  ; hrow_gate = "C"
+  ; hrow_verdict = "D"
+  ; hrow_evaluator = "E"
+  ; hrow_reason = "F"
+  }
+
+let harness_overflowing =
+  { Schedule.hrow_time = "2026-09-03 11:08:43.512"
+  ; hrow_task = "task-1279-and-a-good-deal-more"
+  ; hrow_gate = "completion-contract"
+  ; hrow_verdict = "inconclusive"
+  ; hrow_evaluator = "kidsnote-pr-jira-checker-verifier"
+  ; hrow_reason = String.concat "" (List.init 20 (fun _ -> "reason "))
+  }
+
+let test_harness_columns_hold_their_offsets () =
+  for inner_width = 80 to 240 do
+    let reason_width = Schedule.harness_reason_width ~inner_width in
+    let width text = Masc_tui_message_layout.display_width text in
+    let header = Schedule.harness_header_row ~reason_width in
+    let row = Schedule.harness_row ~verdict_style:"" ~reason_width harness_probe in
+    check_left_cell "TIME" "A" ~header ~row ~inner_width;
+    check_left_cell "TASK" "B" ~header ~row ~inner_width;
+    check_left_cell "GATE" "C" ~header ~row ~inner_width;
+    check_left_cell "VERDICT" "D" ~header ~row ~inner_width;
+    check_left_cell "EVALUATOR" "E" ~header ~row ~inner_width;
+    check_left_cell "REASON" "F" ~header ~row ~inner_width;
+    (* The task and gate cells were padded and never fitted, so a long id used
+       to make this row wider than the header it sits under. *)
+    check int
+      (Printf.sprintf "inner %d: a long id no longer widens the row" inner_width)
+      (width header)
+      (width
+         (Schedule.harness_row ~verdict_style:"\027[31m" ~reason_width
+            harness_overflowing))
+  done
+
 (* Fusion run columns. The run id was unbounded where it was named and cut at
    fourteen where it was filled. *)
 
@@ -1249,6 +1340,10 @@ let () =
             test_lane_columns_hold_their_offsets
         ; test_case "change columns hold their offsets" `Quick
             test_change_columns_hold_their_offsets
+        ; test_case "harness columns hold their offsets" `Quick
+            test_harness_columns_hold_their_offsets
+        ; test_case "every header fits its column" `Quick
+            test_headers_fit_their_columns
         ; test_case "fusion columns hold their offsets" `Quick
             test_fusion_columns_hold_their_offsets
         ; test_case "fusion keeper growth comes out of the run id" `Quick

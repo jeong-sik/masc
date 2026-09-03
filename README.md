@@ -242,6 +242,20 @@ tables, per-surface behavior, themes, and troubleshooting are in
 
 ## MCP client setup
 
+The one-step path is `masc mcp-config`: it mints a bearer and prints a ready
+config block for your client, so you paste one block instead of assembling the
+URL, token, and header by hand.
+
+```bash
+masc mcp-config --base-path /path/to/project --client codex
+masc mcp-config --base-path /path/to/project --client claude-desktop
+masc mcp-config --base-path /path/to/project --client env   # shell exports
+```
+
+It mints a long-lived worker token (pass `--expiring` for a session-scoped one)
+and embeds the endpoint, token, and header for the chosen client. The manual
+pieces below are the same shapes, for wiring a client the command does not cover.
+
 HTTP is the public MCP path. First load the worker bearer created by
 `quickstart.sh`:
 
@@ -506,6 +520,7 @@ masc/
 | [`docs/SKILLS.md`](docs/SKILLS.md) | Declaring a capability in `SKILL.md` and handing it to a Keeper |
 | [`docs/ENV-CONTRACT.md`](docs/ENV-CONTRACT.md) | Environment variables the runtime reads |
 | [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | Local bearer and dashboard write access |
+| [`docs/operations/ssh-endpoints-runbook.md`](docs/operations/ssh-endpoints-runbook.md) | Provisioning a `remote_ssh` endpoint with `masc-exec-ssh-bootstrap`, migrating a Keeper onto it, and every preflight failure code |
 | [`docs/AGENT-CORE-BOUNDARY.md`](docs/AGENT-CORE-BOUNDARY.md) | Responsibility split between MASC and embedded Agent Core |
 | [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | Specification index; inventory counts inside it are historical unless marked current |
 | [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md) | Release evidence format; verify its version header before reuse |

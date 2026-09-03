@@ -374,6 +374,38 @@ val fusion_row :
     where it used to be unbounded in the header and cut at fourteen in the
     row. *)
 
+(** {1 Harness verdict columns} *)
+
+val harness_time_width : int
+val harness_task_width : int
+val harness_gate_width : int
+val harness_verdict_width : int
+val harness_evaluator_width : int
+val harness_minimum_reason_width : int
+val harness_cell_gap : int
+
+type harness_row_values = {
+  hrow_time : string;
+  hrow_task : string;
+  hrow_gate : string;
+  hrow_verdict : string;
+  hrow_evaluator : string;
+  hrow_reason : string;
+}
+
+val harness_reason_width : inner_width:int -> int
+val harness_header_row : reason_width:int -> string
+
+val harness_row :
+  verdict_style:string ->
+  reason_width:int ->
+  harness_row_values ->
+  string
+(** One verdict, on the same columns as {!harness_header_row}. The task and
+    gate cells are fitted now: they were padded and never cut, so an id or a
+    gate name longer than its column pushed the evaluator and the reason
+    beside it out of line with every other row. *)
+
 module Terminal_size_cache : sig
   type refresh =
     | Changed of (int * int)

@@ -290,6 +290,54 @@ let test_persisted_token_round_trips () =
       check (option string) "another agent's file is not borrowed" None
         (Auth_login.read_persisted_token ~base_path ~agent_name:"other-agent")
 
+let string_contains haystack needle =
+  let nlen = String.length needle and hlen = String.length haystack in
+  if nlen = 0 then true
+  else if nlen > hlen then false
+  else begin
+    let found = ref false in
+    for i = 0 to hlen - nlen do
+      if not !found && String.sub haystack i nlen = needle then found := true
+    done;
+    !found
+  end
+
+let test_mcp_client_config_renders_each_client () =
+  with_temp_dir "auth-login-mcp" @@ fun base_path ->
+  match
+    Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name:"mcp-agent" ~role:Masc_domain.Worker
+      ~token_env_var:"MASC_TOKEN" ~token_lifetime:Auth_login.Long_lived ()
+  with
+  | Error err -> failf "mint failed: %s" (Masc_domain.masc_error_to_string err)
+  | Ok report ->
+      check bool "codex name parses" true
+        (Auth_login.mcp_client_of_string "codex" = Some Auth_login.Codex);
+      check bool "claude-desktop name parses" true
+        (Auth_login.mcp_client_of_string "claude-desktop"
+        = Some Auth_login.Claude_desktop);
+      check bool "env name parses" true
+        (Auth_login.mcp_client_of_string "env" = Some Auth_login.Env);
+      check bool "unknown client name is rejected" true
+        (Auth_login.mcp_client_of_string "cursor" = None);
+      let codex = Auth_login.render_mcp_client_config report Auth_login.Codex in
+      check bool "codex block carries the mcp url" true
+        (string_contains codex report.mcp_url);
+      check bool "codex block names the bearer env var" true
+        (string_contains codex "bearer_token_env_var");
+      check bool "codex block exports the minted token" true
+        (string_contains codex report.bearer_token);
+      let claude =
+        Auth_login.render_mcp_client_config report Auth_login.Claude_desktop
+      in
+      check bool "claude-desktop block bridges over mcp-remote" true
+        (string_contains claude "mcp-remote");
+      check bool "claude-desktop block carries the minted token" true
+        (string_contains claude report.bearer_token);
+      let env = Auth_login.render_mcp_client_config report Auth_login.Env in
+      check bool "env block equals the shell exports" true
+        (String.equal env (Auth_login.render_shell report))
+
 let () =
   run "auth_login"
     [
@@ -311,5 +359,7 @@ let () =
             test_login_urls_do_not_advertise_a_bind_wildcard;
           test_case "persisted token round-trips" `Quick
             test_persisted_token_round_trips;
+          test_case "mcp-config renders each client block" `Quick
+            test_mcp_client_config_renders_each_client;
         ] );
     ]

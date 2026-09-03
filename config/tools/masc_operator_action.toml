@@ -1,0 +1,33 @@
+name = "masc_operator_action"
+description = """
+Run a structured operator action against the namespace or a keeper. Use \
+this when you need guided control with preview-confirm safety for \
+disruptive actions."""
+operator_remote_description = """
+Preview or run a structured operator action. Use this when you need to \
+broadcast, pause a namespace, inject work, or message a keeper through \
+the remote operator surface."""
+
+[[params]]
+name = "actor"
+type = "string"
+
+[[params]]
+name = "action_type"
+type = "string"
+required = true
+enum = ["broadcast", "namespace_pause", "namespace_resume", "task_inject", "keeper_message", "keeper_probe", "keeper_recover"]
+
+[[params]]
+name = "target_type"
+type = "string"
+enum = ["workspace", "keeper", "goal"]
+
+[[params]]
+name = "target_id"
+type = "string"
+
+[[params]]
+name = "payload"
+type = "object"
+required = true

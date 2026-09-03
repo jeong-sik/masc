@@ -69,6 +69,11 @@ type loaded =
   ; help : help option
   ; loading : loading
     (** From the file's [defer_loading] key; [Always_loaded] when absent. *)
+  ; operator_remote_description : string option
+    (** From the file's [operator_remote_description] key: the sentence the
+        operator-remote subset publishes for this tool, when the file
+        declares one. [schema.description] stays the local surface's
+        sentence; nothing here swaps them, the consumer picks. *)
   ; shell_command : string list option
     (** From the file's [shell_command] key, stored word-split.  The
         sub-command path this tool answers to inside a keeper's shell line
@@ -88,7 +93,8 @@ val load
     Accepted top-level keys: [name], [description] (non-empty),
     [additional_properties] (bool), [[params]], [keeper_projection]
     (a table of [description] / [additional_properties] / [[params]]),
-    [agent_core_projection] (the same table grammar), and
+    [agent_core_projection] (the same table grammar), [defer_loading]
+    (bool), [operator_remote_description] (non-empty string), and
     [help] (a table of [short_description] / [when_to_use] /
     [details_markdown] strings and [key_constraints] / [doc_refs] /
     [prompt_hints] / [examples] / [alternatives] string lists, at least one

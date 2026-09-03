@@ -5,12 +5,15 @@
 
     Single dispatch entry: {!dispatch}.  Two schema lists exposed
     so the Agent Core adapter can advertise the operator-remote subset
-    separately from the full tool catalog.
+    separately from the full tool catalog.  Every schema body loads
+    from [config/tools/masc_operator_*.toml] through
+    {!Operator_tool_toml}; the dual-surface tools (snapshot / digest /
+    action) carry their remote sentence in the file's
+    [operator_remote_description] key.
 
-    Internal schema-constructor / action-enum / dispatcher helpers stay
-    private — the .mli pins {!schemas} /
-    {!remote_schemas} list contents at module init, so caller
-    contract is the lists, not the constructors. *)
+    Internal dispatcher helpers stay private — the .mli pins
+    {!schemas} / {!remote_schemas} list contents at module init, so
+    caller contract is the lists. *)
 
 (** {1 Per-call context} *)
 

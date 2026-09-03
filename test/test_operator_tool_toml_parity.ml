@@ -39,6 +39,46 @@ let expected =
     ]
 ;;
 
+(* The remote subset publishes a different sentence for the three
+   dual-surface tools; the file's [operator_remote_description] supplies it.
+   Pinned here for the first time -- before the move, the remote sentences
+   lived in [~remote] branches nothing asserted. *)
+let expected_remote_descriptions =
+  [ ( {|masc_operator_snapshot|}
+    , {|Read unified operator state. Use this when you need current workspace, keeper, message, and pending-confirm data before taking action.|}
+    )
+  ; ( {|masc_operator_digest|}
+    , {|Read an intervention-oriented operator digest with workspace health, attention items, worker summaries, and recommended next actions.|}
+    )
+  ; ( {|masc_operator_action|}
+    , {|Preview or run a structured operator action. Use this when you need to broadcast, pause a namespace, inject work, or message a keeper through the remote operator surface.|}
+    )
+  ]
+;;
+
+(* judgment_write stays local-only. *)
+let expected_remote_order =
+  [ {|masc_operator_snapshot|}
+  ; {|masc_operator_digest|}
+  ; {|masc_operator_action|}
+  ; {|masc_operator_board_attention_quarantine_requeue|}
+  ; {|masc_operator_task_recovery_resolve|}
+  ; {|masc_operator_confirm|}
+  ]
+;;
+
+let published_remote = Operator_tool.remote_schemas
+
+let find_remote name =
+  match
+    List.find_opt
+      (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
+      published_remote
+  with
+  | Some schema -> schema
+  | None -> failwith (name ^ " is absent from Operator_tool.remote_schemas")
+;;
+
 let published = Operator_tool.schemas
 
 let find name =
@@ -77,6 +117,25 @@ let test_the_published_order_is_unchanged () =
     (List.map (fun (s : Masc_domain.tool_schema) -> s.name) published)
 ;;
 
+let test_remote_descriptions_are_byte_identical () =
+  List.iter
+    (fun (name, description) ->
+       check
+         string
+         (name ^ " remote description")
+         description
+         (find_remote name).description)
+    expected_remote_descriptions
+;;
+
+let test_the_remote_order_is_unchanged () =
+  check
+    (list string)
+    "Operator_tool.remote_schemas in order"
+    expected_remote_order
+    (List.map (fun (s : Masc_domain.tool_schema) -> s.name) published_remote)
+;;
+
 let () =
   run
     "operator_tool_toml_parity"
@@ -87,6 +146,11 @@ let () =
             `Quick
             test_input_schemas_match_with_keys_sorted
         ; test_case "published order" `Quick test_the_published_order_is_unchanged
+        ; test_case
+            "remote descriptions"
+            `Quick
+            test_remote_descriptions_are_byte_identical
+        ; test_case "remote order" `Quick test_the_remote_order_is_unchanged
         ] )
     ]
 ;;

@@ -48,6 +48,49 @@ let restore_env name = function
   | Some value -> Unix.putenv name value
   | None -> Unix.putenv name ""
 
+(* The prompts these tests render ship inside the binary and reach a config
+   directory through [Managed_asset_sync], which is the step the server takes
+   at boot. Unpacking them once leaves the suite with nothing to find: what
+   this replaced climbed up to eight directories from the cwd hunting for a
+   repo root a Dune sandbox does not contain. *)
+let unpacked_prompt_config =
+  lazy
+    (let config_dir = Filename.temp_dir "wake_turn_context_config_" "" in
+     let prompts_dir = Filename.concat config_dir "prompts" in
+     Unix.mkdir prompts_dir 0o700;
+     (* [Config_dir_resolver] reports on both children; make the second one so
+        a resolution warning does not ride along with every run. *)
+     Unix.mkdir (Filename.concat config_dir "keepers") 0o700;
+     let sync =
+       Masc.Managed_asset_sync.sync
+         ~domain:Masc.Managed_asset_sync.Prompts
+         ~read:Embedded_config.read
+         ~files:Embedded_config.file_list
+         ~dest_dir:prompts_dir
+         ()
+     in
+     (match sync.Masc.Managed_asset_sync.failed with
+      | [] -> ()
+      | failures ->
+          Alcotest.failf "the binary's prompt assets did not unpack: %s"
+            (String.concat "; "
+               (List.map (fun (rel, msg) -> rel ^ ": " ^ msg) failures)));
+     (config_dir, prompts_dir))
+
+(* Pinning the directory is only half of it. [keeper.workspace] is a slot
+   inside [keeper.md] since the fragment files were folded into their group
+   files, and slot keys exist only once the directory has been read — pinning
+   alone leaves the registry looking for a [keeper.workspace.md] that no
+   longer exists, which is what "Prompt 'keeper.workspace' is missing" was.
+   [set_markdown_dir] then [Prompt_defaults.init] is the pair
+   [Prompt_defaults.bootstrap_runtime] performs at boot. *)
+let init_prompt_config_for_tests () =
+  let config_dir, prompts_dir = Lazy.force unpacked_prompt_config in
+  Unix.putenv "MASC_CONFIG_DIR" config_dir;
+  Config_dir_resolver.reset ();
+  Prompt_registry.set_markdown_dir prompts_dir;
+  Masc.Prompt_defaults.init ()
+
 let with_repo_prompt_config f =
   let root = repo_root () in
   let config_dir = Filename.concat root "config" in
@@ -57,7 +100,12 @@ let with_repo_prompt_config f =
     ~finally:(fun () ->
       restore_env "MASC_CONFIG_DIR" original_config;
       Config_dir_resolver.reset ();
-      Prompt_registry.clear ())
+      (* Put the suite's prompts back rather than leaving the registry empty.
+         Clearing here is global: it survived into every later test that does
+         not wrap itself in this helper, and those read the emptied registry
+         as a missing prompt. *)
+      Prompt_registry.clear ();
+      init_prompt_config_for_tests ())
     (fun () ->
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
       Config_dir_resolver.reset ();
@@ -134,24 +182,6 @@ let init_runtime_default_for_tests () =
   match Runtime.init_default ~config_path:path with
   | Ok () -> ()
   | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
-
-let init_prompt_config_for_tests () =
-  let original_cwd = Sys.getcwd () in
-  let rec find_root dir hops =
-    if hops > 8 then None
-    else if Sys.file_exists (Filename.concat dir "config/prompts")
-    then Some dir
-    else
-      let parent = Filename.dirname dir in
-      if parent = dir then None else find_root parent (hops + 1)
-  in
-  match find_root original_cwd 0 with
-  | None ->
-      Alcotest.fail
-        "could not locate repo root (config/prompts) from test cwd"
-  | Some root ->
-      Unix.putenv "MASC_CONFIG_DIR" (Filename.concat root "config");
-      Config_dir_resolver.reset ()
 
 let contains ~needle haystack =
   let n = String.length needle and h = String.length haystack in

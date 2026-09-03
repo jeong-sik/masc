@@ -37,9 +37,10 @@ let declared_lane_failure_of_error err =
   | Some (Provider_request_body_refusal _)
   | None -> Declared_runtime_lane_exhausted
 
-(* Keeps the exact blocker-detail shape the retired
-   [Keeper_state_machine.Context_overflow_detected] event printed, so
-   operator-facing blocker history stays greppable across #26546. *)
+(* [context_overflow_detected(limit=N)] is a durable string in operator blocker
+   history, not a rendering of any current type. Rows written years apart are
+   read with the same grep, so the shape is fixed here and changing it splits
+   that history. *)
 let context_overflow_blocker_label ~limit_tokens =
   Printf.sprintf
     "context_overflow_detected(limit=%s)"

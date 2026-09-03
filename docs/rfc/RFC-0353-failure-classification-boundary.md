@@ -6,7 +6,7 @@ status: Draft
 # RFC-0353 — 실패 분류가 모듈 경계에서 소실되는 결함 (결정 요청)
 
 **Status**: Draft — 결정 요청
-**연관**: #25489 (수집 이슈), #25482, #25488, #24838, agent_core#2736, #25052
+**연관**: #25489 (수집 이슈), #25482, #25488, #25443, #24838, agent_core#2736, #25052
 **제약**: RFC-0000 §1.2 LAW 1 (No dead-end) · LAW 2 (연속 횟수는 결정 권한 없음) · §9 Anti-patterns
 
 ---
@@ -21,10 +21,13 @@ status: Draft
 |---|---|---|---|---|
 | #25482 | `keeper_checkpoint_store` → lane | `Ref_identity_invalid Generation_missing` | 오버플로 실패와 동일 취급, 재시도 | 3일간 ERROR 1,354건. keeper 2기 wedge |
 | #25488 | `keeper_approval_queue` → `keeper_heartbeat_loop:322` | grant 5종 중 결정론 3종 | `\| Error error ->` catch-all → requeue | 45분 86건. 재부팅 5회 관통 |
+| #25443 † | compaction plan | 동일 `(trace_id, generation, sha256)` 무변화 | ~50초 주기 재시도, 매회 유료 LLM 호출 | sangsu 시간당 59 거부 + 62 cycle 실패 |
 | #24838 | provider 4xx | gateway opaque 400 | `InvalidRequest` → 비재시도 **이자 비회전** | analyst 41/41 동일 런타임, rotation 0건 |
 | (해소됨) | scheduler dispatch | `unsupported snapshot schema` | 에러 문자열이 자칭 `retryable` | 07-17 하루 98회 |
 
 **공통점**: 재시도 가능성이 타입이 아니라 (a) catch-all, (b) 문자열 관례(`"retryable …"`), (c) 다른 축과의 결합(`InvalidRequest` 하나가 재시도와 회전을 동시에 차단)으로 결정된다.
+
+† **#25443 은 형태 A 가 아니다 (2026-07-21 재분류).** 위 실측은 2026-07 의 기록이고, 그 계획을 만들던 경로는 2026-08 에 없어졌다. 행을 남기는 이유는 실측 자체가 §2 의 근거이기 때문이다 — 같은 증상이 형태 A 로 오분류되기 쉽다는 것을 보여주는 유일한 사례다. 경로가 사라졌다고 오분류가 사라지지는 않으므로, 새 재시도 루프를 설계할 때 이 행을 먼저 읽는다.
 
 ### 1.2 형태 B — 실패 사유가 소실 → 진단 불가, 이어서 로그 강등으로 은폐
 
@@ -101,6 +104,6 @@ status: Draft
 
 ## 6. 비목표
 
-- 개별 이슈(#25482, #24838 …)의 즉시 수정. 본 RFC 는 그 수정들이 **어떤 형태여야 하는가**를 정한다.
+- 개별 이슈(#25482, #25443, #24838 …)의 즉시 수정. 본 RFC 는 그 수정들이 **어떤 형태여야 하는가**를 정한다.
 - 로그 볼륨 감소 자체. 감소는 결과이지 목표가 아니다 — §9 "Log Dedup/Demote" 는 목표로 삼는 순간 안티패턴이 된다.
 - `Reconciliation_required` 흡수 상태의 해소(#25491). LAW 1 위반으로 별건 우선 처리 대상이다.

@@ -230,12 +230,16 @@ if [[ "$MODE" = "provider" ]]; then
     log "event_bus_correlated absent for terminal error turn; accepting pre-correlation failure path"
   fi
 
+  # Both ids are optional at the producer (keeper_unified_turn.ml passes them as
+  # `?event_bus_correlation_id` / `?event_bus_run_id`), and a row carrying
+  # neither is reported by the runtime lens as clock_event_bus_uncorrelated.
+  # So this pins the type when a field is present; it must not assert presence.
   if has_event "event_bus_correlated"; then
     printf '%s\n' "$turn_rows" | jq -e '
       select(.event == "event_bus_correlated")
       | (.decision.correlation_id == null or (.decision.correlation_id | type == "string"))
         and (.decision.run_id == null or (.decision.run_id | type == "string"))
-    ' >/dev/null || fail "event_bus_correlated is missing AGENT_CORE event-bus summary fields"
+    ' >/dev/null || fail "event_bus_correlated carries a non-string correlation_id or run_id"
   fi
 
   printf '%s\n' "$turn_rows" | jq -e '

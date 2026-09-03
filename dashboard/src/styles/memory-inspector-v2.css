@@ -5,8 +5,8 @@
    and the drawer shell from keeper-v2/styles/v2.css.
 
    The prototype reuses .turn-overlay / .turn-drawer / .turn-hd /
-   .turn-body / .turn-sec / .cmp-diff (defined in keeper-v2/styles/v2.css
-   :687-706, :1316-1326). Those shell classes do NOT yet exist in this
+   .turn-body / .turn-sec (defined in keeper-v2/styles/v2.css:687-706).
+   Those shell classes do NOT yet exist in this
    dashboard, so they are ported here verbatim (scoped where the
    prototype scopes them). Everything else is the prototype's .mem-* set,
    copied 1:1 from keeper-v2/styles/memory.css.
@@ -51,21 +51,6 @@
 .turn-sec h4 { font-family: var(--font-ui); text-transform: uppercase; letter-spacing: 0.1em; font-size: var(--fs-10); color: var(--text-dim); margin: 0 0 8px; }
 /* keeper-v2/styles/v2.css:891 */
 .sub-k { font-family: var(--font-ui); font-size: var(--fs-9); text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); margin-right: 4px; }
-/* keeper-v2/styles/v2.css:1282-1283 */
-.cmp-trigger { font-size: var(--fs-12); color: var(--text-mid); margin-bottom: 4px; }
-.cmp-trigger .sub-k { margin-right: 6px; }
-/* keeper-v2/styles/v2.css:1316-1326 */
-.cmp-diff { display: grid; grid-template-columns: 1fr; gap: 10px; }
-.cmp-col { border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 9px 11px; }
-.cmp-col-h { font-family: var(--font-ui); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 7px; }
-.cmp-col.kept { border-left: 2px solid var(--status-ok); }
-.cmp-col.kept .cmp-col-h { color: var(--status-ok); }
-.cmp-col.summ { border-left: 2px solid var(--info); }
-.cmp-col.summ .cmp-col-h { color: var(--info); }
-.cmp-col.drop { border-left: 2px solid var(--text-dim); }
-.cmp-col.drop .cmp-col-h { color: var(--text-dim); }
-.cmp-li { font-size: var(--fs-12); line-height: 1.5; color: var(--text-mid); padding: 3px 0; border-top: 1px solid var(--border-soft); }
-.cmp-li:first-of-type { border-top: 0; }
 /* keeper-v2/styles/v2.css:190 — .mono (drawer uses tabular numerals) */
 .v2-app .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 

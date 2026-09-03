@@ -115,8 +115,9 @@ old push-scoped message feed.
    roster is a fold over existing JSONL lines — no roster store. The only
    persistent addition in this RFC is optional data fields on lines that are
    already written. No budgets, no cursors, no caps, no cooldowns: the
-   deleted tool-retry budget (#20624) is the cautionary precedent for what
-   accumulating small state machines produces.
+   deleted tool-retry budget (#20624) and the removed tool_heavy compaction
+   trigger (#20694) are the cautionary precedents for what accumulating
+   small state machines produces.
 
 ## §3 Typed model
 

@@ -240,8 +240,8 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
     Some
       { blocker_class = "turn_overflow_failure"
       ; summary =
-          "Context overflow recorded by the retired automatic-recovery path \
-           (#26546); the Keeper remains active."
+          "The turn's request exceeded the context window. Nothing recovers \
+           from this on its own; the Keeper stays active."
       }
   | Keeper_registry.Exception detail ->
     Some

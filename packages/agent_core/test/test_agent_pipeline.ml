@@ -36,6 +36,13 @@ let openai_tool_use_response tool_name input_json =
     (escape_json_string input_json)
 ;;
 
+let openai_two_tool_use_response first_name second_name =
+  Printf.sprintf
+    {|{"id":"chatcmpl-t","object":"chat.completion","model":"mock","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"%s","arguments":"{}"}},{"id":"call_2","type":"function","function":{"name":"%s","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":15,"completion_tokens":10,"total_tokens":25}}|}
+    first_name
+    second_name
+;;
+
 (** Multi-response mock: returns responses in order, cycling. *)
 let start_multi_mock ?(on_body = fun _ -> ()) ~sw ~net ~port (responses : string list) =
   let idx = Atomic.make 0 in
@@ -716,6 +723,92 @@ let test_unroutable_tool_name_is_refused_not_replayed () =
   | Exit -> ()
 ;;
 
+(* A turn that routes something and drops something else. Before this, the
+   refusal was skipped entirely whenever any call routed: the model got results
+   for what worked and silence for the rest, and its own dropped block is gone
+   from the transcript by then, so silence left it nothing to correct.
+
+   The refusal lands after the tool results, not before them -- a User message
+   between the assistant's tool_use blocks and their tool_results is the one
+   position the pairing cannot take. *)
+let test_mixed_turn_refuses_the_call_it_dropped () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let bodies = ref [] in
+    let url =
+      start_multi_mock
+        ~on_body:(fun body -> bodies := body :: !bodies)
+        ~sw
+        ~net:env#net
+        ~port:20043
+        [ openai_two_tool_use_response "Execute" unroutable_tool_name
+        ; openai_text_response "done"
+        ]
+    in
+    let agent = make_agent ~net:env#net ~tools:[ execute_tool ] url in
+    (match Agent.run ~sw agent "call two tools" with
+     | Ok _ -> ()
+     | Error error ->
+       failf "run must survive a partially unroutable turn: %s" (Error.to_string error));
+    let body = second_request_body !bodies in
+    let messages = request_messages body in
+    let carried_by role =
+      List.exists
+        (fun (message_role, text) ->
+           String.equal message_role role
+           && string_contains ~needle:unroutable_tool_name text)
+        messages
+    in
+    check
+      bool
+      "the routable call still ran"
+      true
+      (List.exists
+         (fun (role, text) ->
+            String.equal role "tool" && string_contains ~needle:"ran" text)
+         messages);
+    check
+      bool
+      "no assistant turn replays the unroutable name as a call"
+      false
+      (carried_by "assistant");
+    check
+      bool
+      "the model is told about the dropped call"
+      true
+      (string_contains ~needle:"named no registered tool" body);
+    check bool "the refusal names it" true (carried_by "user");
+    (* Position, not just presence: a refusal that landed before the results
+       would separate the tool_use blocks from their tool_results. *)
+    let index_of predicate =
+      let rec walk index = function
+        | [] -> -1
+        | entry :: rest -> if predicate entry then index else walk (index + 1) rest
+      in
+      walk 0 messages
+    in
+    let last_tool_index =
+      let rec walk index found = function
+        | [] -> found
+        | (role, _) :: rest ->
+          walk (index + 1) (if String.equal role "tool" then index else found) rest
+      in
+      walk 0 (-1) messages
+    in
+    let refusal_index =
+      index_of (fun (role, text) ->
+        String.equal role "user" && string_contains ~needle:"named no registered tool" text)
+    in
+    check bool "a tool result message exists" true (last_tool_index >= 0);
+    check bool "the refusal follows the tool results" true (refusal_index > last_tool_index);
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
 (* The call-number recovery landed in #29999 fixed dispatch but not the
    transcript: the fused spelling stayed in history and kept being replayed.
    Recovery is only complete when the next request carries the stem. *)
@@ -782,6 +875,10 @@ let () =
             "unroutable name is refused, not replayed"
             `Quick
             test_unroutable_tool_name_is_refused_not_replayed
+        ; test_case
+            "a mixed turn refuses the call it dropped"
+            `Quick
+            test_mixed_turn_refuses_the_call_it_dropped
         ; test_case
             "recovered name is replayed as the registered name"
             `Quick

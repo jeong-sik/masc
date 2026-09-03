@@ -396,7 +396,7 @@ let parse
             | Some preflight ->
               Keeper_sandbox_runtime.docker_preflight_rejection preflight)
          (* No microvm preflight exists yet; the guest is created on the first
-            sandboxed call (RFC-0401). *)
+            sandboxed call (RFC-0406). *)
          | Some Micro_vm, None -> None)
     in
     match

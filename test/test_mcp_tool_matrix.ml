@@ -62,7 +62,17 @@ let run_process_capture prog argv =
         Unix.close err_fd)
       (fun () -> Unix.create_process prog argv Unix.stdin out_fd err_fd)
   in
-  let _, status = Unix.waitpid [] pid in
+  (* EINTR is not a failed wait -- the kernel is saying a signal arrived
+     before the child did, and the call has to be made again. #32766 fixed
+     this in the keeper matrix; this suite runs the same one-child-per-tool
+     shape and had the same line, so all 88 of its cases reported the same
+     harness exception and none of them reported a tool. *)
+  let rec wait_for_child () =
+    match Unix.waitpid [] pid with
+    | _, status -> status
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_for_child ()
+  in
+  let status = wait_for_child () in
   let code =
     match status with
     | Unix.WEXITED code -> code

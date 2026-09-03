@@ -135,6 +135,34 @@ let stage_route
 
 (* ── Stage 4: Collect ────────────────────────────────────── *)
 
+(* One sentence, one builder. The turn refuses a call in two places -- before
+   tool results when nothing routed, after them when something did -- and a
+   model that reads two different wordings for one refusal has to work out
+   that they are the same refusal.
+
+   It is a plain [User] message with no metadata, which is what lets the
+   Anthropic path fold it into the tool_result message it follows
+   ([Api_common.merge_tool_result_followup_user_messages] requires
+   [is_mergeable_followup], and empty metadata satisfies it). On the OpenAI
+   path it stays its own [role: user] message after the [role: tool] ones. *)
+let admission_refusal_message names : Types.message =
+  { Types.role = User
+  ; content =
+      [ Types.Text
+          (Printf.sprintf
+             "%d tool call(s) in your previous message named no registered \
+              tool and were not run: %s. Send a registered tool name on its \
+              own and put every argument in the input object."
+             (List.length names)
+             (Agent_tools.describe_rejected_names names))
+      ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+;;
+
+
 (** Accumulate usage, invoke AfterTurn hook, emit events, append
     assistant message, and increment turn_count. *)
 let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
@@ -253,24 +281,13 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
          in
          match admission.Agent_tools.rejected_names with
          | [] -> None
+         (* A turn that also routed something answers its refusal after the
+            tool results, in [stage_execute]. Appending here would put a User
+            message between the assistant's tool_use blocks and their
+            tool_results, which is the one place the pairing cannot take
+            one. *)
          | _ when admitted_any_call -> None
-         | names ->
-           Some
-             { Types.role = User
-             ; content =
-                 [ Types.Text
-                     (Printf.sprintf
-                        "%d tool call(s) in your previous message named no \
-                         registered tool and were not run: %s. Send a \
-                         registered tool name on its own and put every \
-                         argument in the input object."
-                        (List.length names)
-                        (Agent_tools.describe_rejected_names names))
-                 ]
-             ; name = None
-             ; tool_call_id = None
-             ; metadata = []
-             }
+         | names -> Some (admission_refusal_message names)
        in
        let collected_messages base =
          let with_assistant = Util.snoc base assistant_message in
@@ -375,7 +392,15 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
 (* ── Stage 5: Execute ────────────────────────────────────── *)
 
 (** Handle tool execution and context injection. *)
-let stage_execute ?raw_trace_run ?before_tool_execution ~turn ~response agent tools =
+let stage_execute
+      ?raw_trace_run
+      ?before_tool_execution
+      ~turn
+      ~rejected_tool_calls
+      ~response
+      agent
+      tools
+  =
   (* [stage_output] rejects empty StopToolUse from provider and injected
      transports. [Nonempty.t] then prevents a silent empty [ToolsExecuted]
      loop at compile time. *)
@@ -409,9 +434,22 @@ let stage_execute ?raw_trace_run ?before_tool_execution ~turn ~response agent to
               replay even when the caller-owned checkpoint sink itself fails;
               the checkpoint then makes the same invariant durable. *)
            update_state agent (fun state ->
-             { state with
-               messages = Util.snoc state.messages (make_message ~role:Tool tool_results)
-             });
+             let with_results =
+               Util.snoc state.messages (make_message ~role:Tool tool_results)
+             in
+             (* The refusal rides in the same update as the results it follows,
+                so the checkpoint below cannot persist a turn that answered two
+                calls and stayed silent about the third. Before this, a turn
+                that routed anything at all said nothing about what it dropped:
+                the model got results for what worked and silence for the rest,
+                and its own dropped block is already gone from the transcript,
+                so silence left it nothing to correct. *)
+             let messages =
+               match rejected_tool_calls with
+               | [] -> with_results
+               | names -> Util.snoc with_results (admission_refusal_message names)
+             in
+             { state with messages });
            let base_state = agent.state in
            persist_turn_checkpoint_for_state agent After_tool_results_appended base_state
        in
@@ -520,6 +558,7 @@ let stage_output ?raw_trace_run ?before_tool_execution ~turn ~rejected_tool_call
               ?raw_trace_run
               ?before_tool_execution
               ~turn
+              ~rejected_tool_calls
               ~response
               agent
               tool_uses_nonempty)
@@ -782,7 +821,21 @@ let run_turn
          ([turn_ordinal]), not [agent.state.turn_count], so the resumed turn is
          traced under the exact ordinal the crashed run used (#2709). *)
     ~execute:(fun ~turn ~response tool_uses ->
-      stage_execute ?raw_trace_run ?before_tool_execution ~turn ~response agent tool_uses)
+      (* Empty, and not because a resumed turn refused nothing. The checkpoint
+         this path replays holds the ADMITTED response -- the dropped blocks
+         are already out of it -- and the names are not stored anywhere the
+         resume can read. So a turn that crashed after admission and resumed
+         re-runs its tools and says nothing about what it dropped. Carrying the
+         names would mean putting them on the checkpoint, which is a schema
+         cut; tracked separately rather than guessed at here. *)
+      stage_execute
+        ?raw_trace_run
+        ?before_tool_execution
+        ~turn
+        ~rejected_tool_calls:[]
+        ~response
+        agent
+        tool_uses)
     ~all_pre_tool_use_blocked:(ToolsExecuted After_tool_results_appended)
     ~tools_settled_before_checkpoint:(replay_settled_before_checkpoint agent)
     ~tools_settled:Pipeline_terminal_tool.recovered_outcome

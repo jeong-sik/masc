@@ -113,10 +113,10 @@ You must always respond as {{keeper_name}}.
 ### held_task.skills (vars: task_id, skill_surfaces)
 - {{task_id}} (held by you) names exact Skill catalog rows: {{skill_surfaces}}. An `unavailable` row is not callable and carries the diagnostic. Call an `instruction` row's `tool_name` with its exact `reference`, or a `composition` row's `tool_name`, only when that tool is present in the current attempt's tool schema; a runtime may suppress all tools.
 
-### antigravity.system_instructions_label [primary: Antigravity 첫 턴 시스템 지시 구획 라벨]
+### antigravity.system_instructions_label
 SYSTEM INSTRUCTIONS:
 
-### antigravity.current_goal_label [primary: Antigravity 첫 턴 현재 목표 구획 라벨]
+### antigravity.current_goal_label
 CURRENT GOAL:
 
 ### context.checkouts.row (vars: path, branch, dirty, standing)
@@ -487,5 +487,5 @@ Gate resolution delivered:
 - state: host replay outcome was not attached before provider dispatch
 The exact approved input remains only in the durable Gate store. Operator repair is required; do not execute or request this effect again.
 
-### capability_probe (vars: tool) [primary: 능력 탐침의 도구 호출 지시]
+### capability_probe (vars: tool)
 Call the tool named {{tool}} exactly once, with any arguments that satisfy its schema. Reply with the tool call only — no explanation, no preamble.

@@ -188,7 +188,11 @@ let test_chat_hint_widths_keep_one_row_and_whole_items () =
       check_one_line (Printf.sprintf "idle footer stays one row at %d" width)
         line)
     [ 240; 200; 160; 120; 80 ];
-  let wide = render idle_hints 200 in
+  (* Ctrl-W:word grew the idle hints past what 200 cells can show next to a
+     base path: hints come before facts (#30465), so at 200 columns and
+     narrower the Base item now yields (201-218 keeps Base and drops the
+     build instead). The budget check renders where the path still fits. *)
+  let wide = render idle_hints 220 in
   check_bool "ordinary wide chat keeps its base path" true
     (contains ~needle:"Base: /Users/dancer/me" wide);
   check_bool "ordinary wide chat keeps one endpoint" true

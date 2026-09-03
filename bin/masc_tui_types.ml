@@ -1655,9 +1655,12 @@ type changes_return =
 (* A picture currently on the terminal. Only the drawn case: a refusal has
    nothing to draw, and putting one here would take the screen away from the
    frame to show a message the frame is the only thing that can show. Refusals
-   go to the pane as text, like every other thing that did not happen. *)
+   go to the pane as text, like every other thing that did not happen.
+   [image_title] is the line drawn above the picture: a path when the
+   conversation named one, the attachment's name when a staged image is shown
+   -- a staged image has no path, so the field is not called one. *)
 type image_shown = {
-  image_path : string;
+  image_title : string;
   image_bytes : int;
 }
 

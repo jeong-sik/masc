@@ -312,7 +312,7 @@ let handle_message t ~request ~tool_specs ~call_tool body =
          (protocol_error_response
             id
             (-32603)
-            "MCP tool outcome is unknown; do not retry this call id")
+            (Tool_guidance.to_string Tool_guidance.Mcp_outcome_unknown))
      | Ok ({ response = None; _ }, _) -> respond `Accepted ""
      | Ok ({ response = Some response; _ }, after_response_sent) ->
        let protocol_version = (snapshot t).negotiated_protocol_version in

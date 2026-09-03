@@ -96,6 +96,23 @@ let persist_replay_evidence ~base_path payload =
   | Some persist -> persist ~base_path payload
 ;;
 
+(* Every model-facing Gate replay/resolution instruction lives in a managed
+   template under the keeper.gate_replay prefix; the execution path only picks
+   the key and supplies the data. A template that does not render is logged
+   and falls back to the bare data, never to prose written here. Defined
+   ahead of [retrieve_replay_artifact]: the artifact-integrity arms below
+   render through the same contract. *)
+let render_gate_replay_prompt key vars ~fallback =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok text -> String.trim text
+  | Error detail ->
+    Log.Keeper.error
+      "gate replay prompt %s did not render, falling back to the bare data: %s"
+      key
+      detail;
+    fallback
+;;
+
 let retrieve_replay_artifact ~base_path artifact_ref =
   let store = Tool_blob_store.create ~base_path in
   match Tool_blob_store.fetch store ~sha256:artifact_ref.Tool_output.sha256 with
@@ -103,20 +120,28 @@ let retrieve_replay_artifact ~base_path artifact_ref =
     Error (Tool_blob_store.fetch_error_to_string error)
   | Ok None ->
     Error
-      (Printf.sprintf
-         "replay artifact %s is missing"
-         artifact_ref.Tool_output.sha256)
+      (render_gate_replay_prompt
+         Prompt_names.keeper_gate_replay_artifact_missing
+         [ "sha256", artifact_ref.Tool_output.sha256 ]
+         ~fallback:artifact_ref.Tool_output.sha256)
   | Ok (Some payload) ->
     let actual_bytes = String.length payload in
     if actual_bytes = artifact_ref.Tool_output.bytes
     then Ok payload
     else
       Error
-        (Printf.sprintf
-           "replay artifact %s byte length mismatch: expected=%d actual=%d"
-           artifact_ref.Tool_output.sha256
-           artifact_ref.Tool_output.bytes
-           actual_bytes)
+        (render_gate_replay_prompt
+           Prompt_names.keeper_gate_replay_artifact_length_mismatch
+           [ "sha256", artifact_ref.Tool_output.sha256
+           ; "expected", string_of_int artifact_ref.Tool_output.bytes
+           ; "actual", string_of_int actual_bytes
+           ]
+           ~fallback:
+             (Printf.sprintf
+                "replay artifact %s expected=%d actual=%d"
+                artifact_ref.Tool_output.sha256
+                artifact_ref.Tool_output.bytes
+                actual_bytes))
 ;;
 
 let outcome_to_string = function
@@ -309,9 +334,10 @@ let summarize_execution ~operation (execution : Keeper_tool_execution.t) =
        the approval pinned is not what replay would act on now. The effect
        stays unapplied and its new request follows the ordinary Gate. *)
     Effect_failed
-      (Printf.sprintf
-         "approved %s no longer matches what was approved; not applied"
-         operation)
+      (render_gate_replay_prompt
+         Prompt_names.keeper_gate_replay_approval_input_drifted
+         [ "operation", operation ]
+         ~fallback:("approval_input_drifted operation=" ^ operation))
   | Tool_result.Failed _ ->
     (match execution.failure_effect_disposition with
      | Tool_result.Proven_pre_effect -> Effect_failed execution.raw_output
@@ -338,7 +364,11 @@ let retire_stale_grant
   | Ok Keeper_approval_queue.Consumption_already_committed ->
     Ok ()
   | Ok Keeper_approval_queue.Consumption_not_matching ->
-    Error "stored approval did not match its own exact request"
+    Error
+      (render_gate_replay_prompt
+         Prompt_names.keeper_gate_replay_approval_consumption_mismatch
+         []
+         ~fallback:"approval_consumption_mismatch")
   | Error error ->
     Error (Keeper_approval_queue.grant_error_to_string error)
 ;;
@@ -570,21 +600,6 @@ let replay_evidence_json evidence =
   |> Yojson.Safe.to_string
 ;;
 
-(* Every model-facing Gate replay/resolution instruction lives in a managed
-   template under the keeper.gate_replay prefix; the execution path only picks
-   the key and supplies the data. A template that does not render is logged
-   and falls back to the bare data, never to prose written here. *)
-let render_gate_replay_prompt key vars ~fallback =
-  match Prompt_registry.render_prompt_template key vars with
-  | Ok text -> String.trim text
-  | Error detail ->
-    Log.Keeper.error
-      "gate replay prompt %s did not render, falling back to the bare data: %s"
-      key
-      detail;
-    fallback
-;;
-
 let replay_evidence_fragment evidence =
   let key =
     match evidence.effect_kind with
@@ -770,11 +785,16 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
             "\n"
             [ user_message
             ; ""
-            ; "Gate resolution delivered:"
-            ; Printf.sprintf "- approval_id: %s" approval_id
-            ; Printf.sprintf "- operation: %s" request.tool_name
-            ; "- state: authorization consumed, replay outcome unavailable"
-            ; "Do not request the operation again: its effect may already have happened. Operator repair is required."
+            ; render_gate_replay_prompt
+                Prompt_names.keeper_gate_replay_resolution_consumed_without_outcome
+                [ "approval_id", approval_id; "operation", request.tool_name ]
+                ~fallback:
+                  (String.concat
+                     "\n"
+                     [ Printf.sprintf "- approval_id: %s" approval_id
+                     ; Printf.sprintf "- operation: %s" request.tool_name
+                     ; "- state: authorization consumed, replay outcome unavailable"
+                     ])
             ])
      | Ok
          { state = Keeper_approval_queue.Resolution_unconsumed
@@ -789,9 +809,13 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
             "\n"
             [ user_message
             ; ""
-            ; Printf.sprintf
-                "Gate resolution %s has an invalid durable replay state. Do not execute the external effect; operator repair is required."
-                approval_id
+            ; render_gate_replay_prompt
+                Prompt_names.keeper_gate_replay_resolution_invalid_replay_state
+                [ "approval_id", approval_id ]
+                ~fallback:
+                  (Printf.sprintf
+                     "- approval_id: %s\n- state: invalid durable replay state"
+                     approval_id)
             ])
      | Error error ->
        Log.Keeper.error
@@ -803,9 +827,10 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
             "\n"
             [ user_message
             ; ""
-            ; Printf.sprintf
-                "Gate resolution %s could not be read from its durable journal; this event will be retried."
-                approval_id
+            ; render_gate_replay_prompt
+                Prompt_names.keeper_gate_replay_resolution_journal_unreadable
+                [ "approval_id", approval_id ]
+                ~fallback:(Printf.sprintf "- approval_id: %s" approval_id)
             ]))
   | Some
       { Keeper_event_queue.approval_id
@@ -817,13 +842,16 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
          "\n"
          [ user_message
          ; ""
-         ; "Gate resolution delivered:"
-         ; Printf.sprintf "- approval_id: %s" approval_id
-         ; "- decision: rejected"
-         ; Printf.sprintf "- rationale: %s" rationale
-         ; "This resolution grants no authorization."
-         ; "If you told someone this call was parked, say it was declined and \
-            carry the conversation on from there."
+         ; render_gate_replay_prompt
+             Prompt_names.keeper_gate_replay_resolution_rejected
+             [ "approval_id", approval_id; "rationale", rationale ]
+             ~fallback:
+               (String.concat
+                  "\n"
+                  [ Printf.sprintf "- approval_id: %s" approval_id
+                  ; "- decision: rejected"
+                  ; Printf.sprintf "- rationale: %s" rationale
+                  ])
          ])
   | None -> plain_model_message user_message
 ;;
@@ -963,7 +991,10 @@ let replay_approved_effect_with_receipt
          ~approval_id
          ~operation:request.tool_name
          (Effect_indeterminate
-            "authorization was consumed before restart, but no durable replay outcome exists; the effect may already have happened and will not be replayed"))
+            (render_gate_replay_prompt
+               Prompt_names.keeper_gate_replay_replay_outcome_missing_after_restart
+               []
+               ~fallback:"replay_outcome_missing_after_restart")))
   | Ok
       { request
       ; state = Keeper_approval_queue.Resolution_unconsumed
@@ -973,7 +1004,11 @@ let replay_approved_effect_with_receipt
       (Repair_required
          { operation = request.tool_name
          ; stage = Invalid_resolution_state
-         ; detail = "replay outcome exists before grant consumption"
+         ; detail =
+             render_gate_replay_prompt
+               Prompt_names.keeper_gate_replay_replay_outcome_before_consumption
+               []
+               ~fallback:"replay_outcome_before_consumption"
          })
   | Ok
       { request
@@ -992,9 +1027,10 @@ let replay_approved_effect_with_receipt
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
           Error
-            (Printf.sprintf
-               "approved effect raised during replay: %s"
-               (Printexc.to_string exn))
+            (render_gate_replay_prompt
+               Prompt_names.keeper_gate_replay_replay_effect_raised
+               [ "detail", Printexc.to_string exn ]
+               ~fallback:(Printexc.to_string exn))
       in
       match execution with
       | Error detail ->

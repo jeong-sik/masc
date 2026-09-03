@@ -11,6 +11,12 @@
   masc.masc_exec_command_gate
   masc_core
   masc.host_config
+  ; The short block reasons and the cwd sibling-dirs hint are managed prompt
+  ; templates (config/prompts/exec_policy.md); the dep-graph closure of
+  ; masc.prompt_registry does not reach this library, so the edge is
+  ; cycle-free.
+  masc.prompt_registry
+  masc.masc_log
   masc.repo_manager
   masc.config_dir_resolver
   unix

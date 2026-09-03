@@ -2,7 +2,9 @@
   "managed_by": "MASC",
   "schema": "masc.prompt-managed-assets.v1",
   "paths": [
+    "agent_core.md",
     "eval.calibration.few_shot.md",
+    "exec_policy.md",
     "fusion.judge.md",
     "goal_verification.md",
     "harness.coding_keeper.txt",
@@ -11,13 +13,17 @@
     "harness.tool_quality.verifier.txt",
     "judge.md",
     "keeper.autonomous.wake.txt",
+    "keeper.gate_replay.md",
     "keeper.md",
+    "keeper.tool_filesystem.md",
     "keeper.world.transcript.md",
     "lane_cli_probe.md",
     "librarian.md",
     "mcp.md",
     "mcp.tool_help.md",
+    "subset_rewrite.md",
     "tool_failure.md",
+    "tool_guidance.md",
     "tool_help.md",
     "verification.md"
   ]

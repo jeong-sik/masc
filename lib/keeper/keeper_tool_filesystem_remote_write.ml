@@ -194,7 +194,8 @@ let handle_with_endpoint
                       Keeper_tool_execution.failure
                         ~class_:Tool_result.Policy_rejection
                         (error_json
-                           "mode=patch requires non-empty old_string. Good: old_string='let x = 1'.")
+                           (Keeper_tool_filesystem_guidance.patch_requires_old_string_text
+                              ()))
                     else
                       let status, current, stderr =
                         run ~endpoint ~cwd:keeper_root ~argv:(read_source_argv ~remote_path) ~stdin:""
@@ -211,7 +212,7 @@ let handle_with_endpoint
                               ~evidence:(Some (Keeper_tool_patch.file_change_evidence application)))
                        | Unix.WEXITED code when code = patch_source_missing_exit ->
                          failure ~class_:Tool_result.Workflow_rejection ~target
-                           "patch target file does not exist. Use mode=overwrite to create it."
+                           (Keeper_tool_filesystem_guidance.patch_target_missing_text ())
                        | status ->
                          failure ~class_:Tool_result.Runtime_failure ~target
                            (Printf.sprintf

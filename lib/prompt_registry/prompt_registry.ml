@@ -363,7 +363,9 @@ type prompt_snapshot = {
    mutex.  Intended for batch [list_prompts]/[validate_prompt_templates]
    call sites that previously held [with_mutex] across [read_file_if_exists]. *)
 let resolved_of_snapshot (s : prompt_snapshot) =
-  let file_path = prompt_source_path s.snap_key in
+  (* [file_value_of_key] resolves the path and reads it, and for a fragment
+     slot it also picks the paragraph out of the group file. The separate
+     path binding this used to need is what that function absorbed. *)
   let file_value = file_value_of_key s.snap_key in
   build_resolved_from_snapshot
     ~key:s.snap_key

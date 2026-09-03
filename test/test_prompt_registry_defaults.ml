@@ -136,8 +136,6 @@ let override_restore_failure_count () =
     ~labels:[ ("prompt", "override_restore") ]
     ()
 
-let () =
-  let open Alcotest in
 (* ── Fragment-group slots (#32780) ────────────────────────────────────
 
    A group file registers each [### marker] paragraph as
@@ -145,6 +143,10 @@ let () =
    declared on the marker line become the slot's template_variables, so
    per-slot validation keeps its old strength despite the merge. *)
 let test_fragment_group_slots () =
+  (* [check] and its testables come from Alcotest, which this file opens
+     inside its entry point rather than at the top. A case defined outside
+     that scope has to open it for itself. *)
+  let open Alcotest in
   let dir = test_dir () in
   let prompts_dir = Filename.concat dir "prompts" in
   Unix.mkdir prompts_dir 0o755;
@@ -190,6 +192,8 @@ Diverged; no numbers.
         (Prompt_registry.get_prompt "test.group"))
 ;;
 
+let () =
+  let open Alcotest in
   run "Prompt_registry_defaults"
     [
       ( "fragment_group_slots",

@@ -286,7 +286,7 @@ generic untyped `tool_call(name, json)`로 policy boundary를 우회하는 설�
 
 ## 10. Required tests
 
-### 11.1 Adapter classification
+### 10.1 Adapter classification
 
 (2026-08-12 개정: CLI 2.1.228 result frame의 `terminal_reason` enum이
 `prompt_too_long`을 실제 방출함을 강제 overflow stdio 캡처로 확증하여 분류
@@ -302,14 +302,14 @@ generic untyped `tool_call(name, json)`로 policy boundary를 우회하는 설�
 4. unrelated 400, case drift, 중간 substring은 generic failure로 남는다.
 5. tool/response activity flag가 terminal error에 보존된다.
 
-### 11.2 Frozen episode
+### 10.2 Frozen episode
 
 1. full + shrink retries 전체에서 preparation hook은 한 번만 실행된다.
 2. source projection과 operator-note consumption은 한 번만 실행된다.
 3. tool surface와 system prompt는 모든 view에서 동일하다.
 4. capacity만 달라지고 `episode_sha256`은 동일하다.
 
-### 11.3 Floor convergence
+### 10.3 Floor convergence
 
 1. full rejection 뒤 midpoint가 성공한다.
 2. midpoint가 계속 실패하면 마지막 attempt는 zero-history floor다.
@@ -318,7 +318,7 @@ generic untyped `tool_call(name, json)`로 policy boundary를 우회하는 설�
 5. prior history가 단일 atom이어도 zero-history floor를 시도한다.
 6. oversized current goal/pinned context는 floor rejection으로 분류된다.
 
-### 11.4 Durable re-entry
+### 10.4 Durable re-entry
 
 1. 같은 episode의 다음 heartbeat는 provider를 spawn하지 않는다.
 2. process restart 뒤에도 같은 episode는 spawn되지 않는다.
@@ -326,7 +326,7 @@ generic untyped `tool_call(name, json)`로 policy boundary를 우회하는 설�
 4. effect-fenced episode는 입력 변경만으로 재개되지 않는다.
 5. operator resolution만 effect fence를 해제한다.
 
-### 11.5 Incident fixture
+### 10.5 Incident fixture
 
 sanitized fixture는 최소 다음 shape를 유지한다.
 

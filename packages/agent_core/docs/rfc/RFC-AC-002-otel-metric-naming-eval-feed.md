@@ -79,7 +79,6 @@ agent_core.<subsystem>.<metric_name>[.<unit>]
 | (신규) | `agent_core.llm.tokens_output_total` | counter |
 | (신규) | `agent_core.llm.cost_usd` | counter (monotonic) |
 | (신규) | `agent_core.llm.cache_hit_total` | counter |
-| (신규) | `agent_core.context.compaction_total` | counter |
 | (신규) | `agent_core.eval.verdict_passed_total` | counter |
 | (신규) | `agent_core.eval.verdict_failed_total` | counter |
 | (신규) | `agent_core.eval.coverage` | gauge (0.0-1.0) |

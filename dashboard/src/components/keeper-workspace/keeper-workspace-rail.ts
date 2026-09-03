@@ -7,8 +7,10 @@
 // Live wiring (Keeper object + tasks store + waiting inventory) is
 // unchanged; only the DOM/classes changed. Documented
 // local divergences: the 처리량 `.tps-card` section was removed as low-signal
-// (#22681), and the last-turn meter stays (design deleted the gauge;
-// #22681 explicitly kept it). Data gaps (runtime capability flags, effort
+// (#22681); the last-turn meter stays (design deleted the gauge; #22681
+// explicitly kept it); and the design's 컴팩션 스냅샷 button has no
+// counterpart here because no backend surface writes it (#29503) — do not
+// port it back from rails.jsx. Data gaps (runtime capability flags, effort
 // segments, memory inspector, live ctx occupancy) are MARKED, never faked.
 
 import { html } from 'htm/preact'

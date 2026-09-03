@@ -40,8 +40,8 @@ const KEEPERS = ['iron-claw', 'luna', 'vex', 'atlas', 'nimbus', 'ember', 'drift'
 const MSGS = [
   'masc_amplitude_query 완료',
   'edit_file 적용',
-  '컨텍스트 임계치 접근',
-  'masc_compact 완료 (−61%)',
+  '체크포인트 저장',
+  'masc_library_search 완료',
   'masc_trace_window 실패',
   '태스크 인계 메모 기록',
   'preflight green',

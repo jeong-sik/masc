@@ -660,8 +660,8 @@ supports-structured-output = false
 #
 # Both candidate values have a recorded failure, and neither is safe by
 # arithmetic. 262144 latched analyst on 2026-07-29: its history serialized to
-# 355,286 B, every request was refused, and the turn had no way out.
-# 524288 failed the next day when five keepers landed at 524,335 B — 47
+# 355,286 B, every request was refused, and the turn could not compact its way
+# out. 524288 failed the next day when five keepers landed at 524,335 B — 47
 # bytes over — because the window fills toward whatever ceiling it is given and
 # the envelope is not part of what it measures. What made that catastrophic
 # rather than a retry was the recovery chain, fixed since in #27813.

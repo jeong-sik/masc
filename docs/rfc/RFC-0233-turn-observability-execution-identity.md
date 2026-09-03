@@ -429,8 +429,11 @@ view-side-repair violation of §2.3.
 ```
 
 - `context_window` is the `max_context` parameter at
-  `lib/keeper/keeper_agent_run.ml:693` — the window the turn's history is
-  assembled to fit. Stored as `Some max_context`.
+  `lib/keeper/keeper_agent_run.ml:693` — the ceiling the turn ran under,
+  which under #28765 is the minimum effective budget across the lane's
+  candidates, not the window of whichever candidate served the turn. Nothing
+  trims history to fit it; it is recorded, not enforced. Stored as
+  `Some max_context`.
 - The two prices come from `Runtime.pricing_of_runtime_id`
   (`lib/runtime/runtime.ml:386`): a sibling of the existing
   `max_context_of_runtime_id` / `thinking_support_of_runtime_id`
@@ -456,7 +459,7 @@ runtime.toml.
 
 - No backfill: legacy rows decode all three as `None`; the view renders
   "미상" for them.
-- `context_window` is the **keeper's history-assembly window**, not the provider's
+- `context_window` is the **keeper-resolved lane budget**, not the provider's
   per-request `num_ctx` cap. `num_ctx` is an Ollama-only transport detail
   (`agent_core/lib/llm_provider/backend_ollama.ml`: honored by Ollama only); the
   keeper resolver does not consult it, and conflating the two would mis-state
@@ -508,8 +511,8 @@ the shared-record field addition catches every literal construction site
    duplicates the SSOT already retained in the `Runtime` singleton (where
    price is read once as a boolean signal then discarded). →
    `pricing_of_runtime_id` projection.
-5. Sourcing `context_window` from `binding.num_ctx` — conflates the keeper's
-   history-assembly window with an Ollama-only transport KV-cache cap and would
+5. Sourcing `context_window` from `binding.num_ctx` — conflates the
+   keeper-resolved lane budget with an Ollama-only transport KV-cache cap and would
    mis-state the window (see §8.4). → `max_context`.
 
 ### §8.7 Verification harness

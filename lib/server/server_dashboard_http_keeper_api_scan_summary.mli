@@ -22,12 +22,11 @@ val unique_ints : int list -> int list
 (** [json_int_list values] wraps [values] as [`List] of [`Int]. *)
 val json_int_list : int list -> Yojson.Safe.t
 
-(** [json_string_list values] wraps [values] as [`List] of [`String]. *)
-
-(** [event_bus_summary_json scan] folds the event-bus / context-compact
-    counters out of [scan] into a single [`Assoc] payload for the
-    dashboard. Correlation IDs and run IDs are reversed and
-    deduplicated (preserving first-seen order). *)
+(** [event_bus_summary_json scan] folds the event-bus counters out of
+    [scan] into a single [`Assoc] payload for the dashboard, carrying
+    [event_bus_correlated_count], [correlation_ids] and [run_ids].
+    Correlation IDs and run IDs are reversed and deduplicated
+    (preserving first-seen order). *)
 val event_bus_summary_json
   :  Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan
   -> Yojson.Safe.t

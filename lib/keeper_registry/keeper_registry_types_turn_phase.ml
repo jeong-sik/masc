@@ -103,7 +103,10 @@ module Turn_phase_transition = struct
     | Finalizing_to_routing : (turn_finalizing, turn_routing) t
     | Finalizing_to_executing : (turn_finalizing, turn_executing) t
     | Finalizing_to_exhausted : (turn_finalizing, turn_exhausted) t
-    (* From Exhausted (3): prompting / routing / executing. *)
+    (* From Exhausted (3). Declared legal and resolved by
+       [resolve_turn_phase_transition], but no site in this tree drives a turn
+       out of Exhausted, so the three are reachable only through that table.
+       Census candidate. *)
     | Exhausted_to_prompting : (turn_exhausted, turn_prompting) t
     | Exhausted_to_routing : (turn_exhausted, turn_routing) t
     | Exhausted_to_executing : (turn_exhausted, turn_executing) t

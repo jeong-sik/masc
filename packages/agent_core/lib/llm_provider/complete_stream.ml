@@ -558,6 +558,14 @@ let complete_stream_http
               let streaming_reasoning =
                 (Reasoning_dialect.for_provider_config config).streaming
               in
+              (* Whether this model also embeds reasoning in its content
+                 channel. Separate from [streaming_reasoning], which says how
+                 reasoning arrives on its own channel: minimax-m3 uses both. *)
+              let content_inline_reasoning =
+                match Capabilities.for_model_id model with
+                | Some caps -> caps.Capabilities.content_inline_reasoning
+                | None -> Capabilities.No_content_inline_reasoning
+              in
               (* Agent Core contract: first_chunk_seen / chunk_counter / last_chunk_t
                  hoisted out of body_logic so publish_summary on
                  exception paths sees consistent state. *)
@@ -565,7 +573,18 @@ let complete_stream_http
                 match !openai_state with
                 | Some s -> s
                 | None ->
-                  let s = Streaming.create_openai_stream_state ~provider ~model () in
+                  let inline_reasoning =
+                    match content_inline_reasoning with
+                    | Capabilities.Think_tags -> true
+                    | Capabilities.No_content_inline_reasoning -> false
+                  in
+                  let s =
+                    Streaming.create_openai_stream_state
+                      ~provider
+                      ~model
+                      ~inline_reasoning
+                      ()
+                  in
                   openai_state := Some s;
                   s
               in

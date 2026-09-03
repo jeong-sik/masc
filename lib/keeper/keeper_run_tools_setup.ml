@@ -535,7 +535,20 @@ let prepare_agent_setup
      so delivery runs here, ahead of prompt assembly, so the first Read of
      the turn finds the file. Shared-mount keepers read the staged file
      directly and this is a no-op for them. *)
-  Keeper_paste_delivery.deliver_for_turn ~config ~meta ~turn_sandbox_factory;
+  let retained_pastes =
+    Keeper_paste_delivery.deliver_for_turn ~config ~meta ~turn_sandbox_factory
+  in
+  (* For every retained paste the pointer in the message ("It is in your
+     working directory") is false. The TUI's own contract for a paste it
+     cannot place is to send the text itself, so the correction does exactly
+     that: it says the file is not there and carries the text, riding the
+     turn message the transcript persists -- visible to keeper and operator
+     alike. *)
+  let user_message =
+    match Keeper_paste_delivery.inlined_correction retained_pastes with
+    | None -> user_message
+    | Some correction -> user_message ^ "\n\n" ^ correction
+  in
   let model_message =
     Keeper_gate_replay.compose_model_message
       ~base_path:config.base_path

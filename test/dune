@@ -1489,6 +1489,7 @@
   test_keeper_goal_phase_projection
   test_string_util
   test_prompt_asset_sync
+  test_prompt_preset
   test_managed_assets_sync_from_binary
   test_system_error_class
   test_set_util
@@ -1633,6 +1634,7 @@
   test_keeper_goal_phase_projection
   test_string_util
   test_prompt_asset_sync
+  test_prompt_preset
   test_managed_assets_sync_from_binary
   test_system_error_class
   test_set_util
@@ -3088,6 +3090,11 @@
  (libraries alcotest masc_tui_command masc_tui_mcp yojson))
 
 (test
+ (name test_tui_preset_text)
+ (modules test_tui_preset_text)
+ (libraries alcotest masc masc_tui_preset_text))
+
+(test
  (name test_tui_surface_needs)
  (modules test_tui_surface_needs)
  (libraries alcotest masc_tui_types))
@@ -3268,6 +3275,11 @@
  (name test_tui_frame_presenter)
  (modules test_tui_frame_presenter)
  (libraries alcotest str masc_tui_frame_presenter masc_tui_terminal_palette))
+
+(test
+ (name test_tui_frame_timing)
+ (modules test_tui_frame_timing)
+ (libraries alcotest masc_tui_frame_timing))
 
 (test
  (name test_tui_approval_authority)

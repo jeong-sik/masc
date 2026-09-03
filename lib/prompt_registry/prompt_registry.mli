@@ -159,18 +159,26 @@ val persist_overrides : string -> (unit, string) result
     Returns an explicit error when the persistence boundary fails. *)
 
 val set_override_persisted :
+  ?expected_contract_revision:string ->
   base_path:string ->
   string ->
   string ->
   (unit, persisted_mutation_error) result
 (** Validate an override, atomically persist the complete candidate table,
     then commit it to memory.  A persistence failure leaves the live table
-    unchanged. *)
+    unchanged. With [expected_contract_revision], the override is refused as
+    a validation error when the prompt's current contract revision differs —
+    the same check the boot-time restore applies. *)
 
 val clear_prompt_override_persisted :
   base_path:string -> string -> (unit, string) result
 (** Atomically persist the candidate table without [key], then commit it to
     memory.  A persistence failure leaves the live table unchanged. *)
+
+val override_entries : unit -> Prompt_override_persistence.entry list
+(** The live override table as persistence entries, in no particular order.
+    A preset captures these — the durable operator layer — rather than the
+    managed prompt files, which boot re-syncs from the binary. *)
 
 val restore_overrides : string -> unit
 (** Reads

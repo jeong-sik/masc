@@ -669,6 +669,16 @@ val load_config_observation :
 (** Load one immutable runtime.toml observation, including its exact source
     revision. *)
 
+val update_runtime_assignment_text :
+  string -> keeper_name:string -> runtime_id:string -> string
+(** runtime.toml text with [keeper_name] assigned to [runtime_id] in
+    [\[runtime.assignments\]]: the row is replaced or appended, the section
+    is created when absent, every other line is kept. Keys are quoted, so a
+    dotted keeper name stays one key. Pure; the commit is the caller's. *)
+
+val remove_runtime_assignment_text : string -> keeper_name:string -> string
+(** runtime.toml text without [keeper_name]'s row. Pure. *)
+
 val save_config_text :
   ?runtime_config_path:string -> string -> (config_commit_receipt, string) result
 (** Validate raw runtime.toml and prepare its exact-output replacement without

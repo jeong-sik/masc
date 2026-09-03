@@ -459,6 +459,15 @@ supports_extended_thinking = true
 supports_reasoning_budget = false
 thinking_control_format = "thinking_object_adaptive"
 reasoning_output_format = "split_reasoning_fields"
+# This model answers on two channels at once: part of its reasoning arrives in
+# the reasoning field, and part inside the reply text wrapped in <think> tags,
+# which the note above already records. Nothing separated the second kind, so
+# it reached the chat pane as speech. Measured 2026-09-03 on the live fleet:
+# 58 thinking blocks arrived on the field and were fine, while 46 of 85 text
+# blocks opened with reasoning; removing it left a real answer of 338
+# characters at the median. template_parser keeps reading the field and splits
+# the tagged reasoning out of the content channel.
+content_inline_reasoning = "think_tags"
 reasoning_replay = "preserve_always"
 supports_response_format_json = false
 supports_structured_output = false

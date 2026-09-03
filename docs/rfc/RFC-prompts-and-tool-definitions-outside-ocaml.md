@@ -264,7 +264,7 @@ constraints = "..."
 8. `tool_help_registry` → `[help]`, `mcp_server` 리소스 → `config/mcp/resources.toml`, tool_profile
    instructions/title → `config/mcp/profiles.toml`, `mcp_prompt_surface` (6.5 KB).
 9. `keeper_unified_prompt.ml` 섹션 헤더·힌트 + `keeper_prompt.ml` identity/workspace + extra 블록 머리말
-   (B 6.8 KB) → `keeper.world.*.md`, `keeper.identity.md`, `keeper.workspace.md`.
+   (B 6.8 KB) → `keeper.world.*.md`, `keeper.md` 의 `identity`·`workspace` 슬롯.
 10. 서브에이전트 프롬프트 (C 7.6 KB) → `compaction.summarizer.md`, `fusion.{panel,judge,synthesis}.md`,
     `canary.judge.md`, `vision.*.md`.
 11. 도구 결과 안내문 (D 7.2 KB): 닫힌 변형 `Tool_guidance.t` → 프롬프트 키 매핑, 본문은 md.

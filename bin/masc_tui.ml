@@ -875,17 +875,38 @@ let keeper_staging_dir ~base_path ~keeper_name =
       | false -> None
       | exception Sys_error _ -> None)
 
+(* Written beside the final name and renamed over it: a turn starting while
+   this write is mid-flight enumerates the staging directory, and a file it
+   can see must be whole. The temporary name is outside the
+   [Keeper_paste_naming] shape, so enumeration never picks it up. *)
 let write_file path contents =
-  match open_out_bin path with
+  let drop_tmp tmp_path = try Sys.remove tmp_path with Sys_error _ -> () in
+  match
+    Filename.temp_file ~temp_dir:(Filename.dirname path) "spill-write-" ".tmp"
+  with
   | exception Sys_error detail -> Error detail
-  | channel -> (
+  | tmp_path -> (
       match
-        Fun.protect
-          ~finally:(fun () -> close_out_noerr channel)
-          (fun () -> output_string channel contents)
+        match open_out_bin tmp_path with
+        | exception Sys_error detail -> Error detail
+        | channel -> (
+            match
+              Fun.protect
+                ~finally:(fun () -> close_out_noerr channel)
+                (fun () -> output_string channel contents)
+            with
+            | () -> Ok ()
+            | exception Sys_error detail -> Error detail)
       with
-      | () -> Ok ()
-      | exception Sys_error detail -> Error detail)
+      | Error detail ->
+          drop_tmp tmp_path;
+          Error detail
+      | Ok () -> (
+          match Unix.rename tmp_path path with
+          | () -> Ok ()
+          | exception Unix.Unix_error (error, _, _) ->
+              drop_tmp tmp_path;
+              Error (Unix.error_message error)))
 
 (* Stage a spilled paste as a file the keeper will be able to read, and put
    a line naming that file where the placeholder stands.
@@ -1668,6 +1689,9 @@ type async_msg =
   | Runtime_params_loaded of
       (Tui_decode.runtime_param_row list, string) result
   | Prompts_loaded of (Tui_decode.prompts_snapshot, string) result
+  | Presets_listed of string option * (Tui_decode.presets_snapshot, string) result
+  | Preset_saved of string option * (Tui_decode.preset_manifest, string) result
+  | Preset_restored of string option * (Tui_decode.preset_restore_report, string) result
   | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of (Masc_tui_mcp.resource list, string) result
   | Code_entries_loaded of
@@ -3263,6 +3287,27 @@ let launch_prompts_load state ~mailbox =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox (Prompts_loaded (Error "Eio switch is unavailable"))
+
+(* A /preset call runs off the input loop like the prompt catalog load; its
+   answer comes back as a chat notice for the pane that asked, so [wrap]
+   carries that pane's keeper. *)
+let launch_preset_call state ~mailbox ~call ~wrap =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try call ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (wrap result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None -> enqueue_async mailbox (wrap (Error "Eio switch is unavailable"))
 
 let prompt_rows_for_state state =
   match state.prompts_snapshot with
@@ -5961,6 +6006,28 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
        | None ->
            notice ~role:Message_error
              "/context needs a Keeper selected on the roster")
+  | Masc_tui_command.Preset_list ->
+      Buffer.clear state.msg_input;
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port -> Masc_tui_loader.load_presets ~host ~port)
+        ~wrap:(fun result -> Presets_listed (target, result))
+  | Masc_tui_command.Preset_save_missing_name ->
+      notice ~role:Message_error "/preset save needs a name on the same line"
+  | Masc_tui_command.Preset_save { name; description } ->
+      Buffer.clear state.msg_input;
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port ->
+          Masc_tui_loader.save_preset ~host ~port ~name ~description)
+        ~wrap:(fun result -> Preset_saved (target, result))
+  | Masc_tui_command.Preset_restore_missing_name ->
+      notice ~role:Message_error "/preset restore needs a name on the same line"
+  | Masc_tui_command.Preset_restore name ->
+      Buffer.clear state.msg_input;
+      notice ~role:Message_status
+        (Printf.sprintf "restoring preset %s — the live state is autosaved first" name);
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
+        ~wrap:(fun result -> Preset_restored (target, result))
   | Masc_tui_command.Unknown word ->
       add_event state "error"
         (Printf.sprintf
@@ -8016,6 +8083,10 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Attach_image _ | Masc_tui_command.Attach_image_missing_path
+       | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
+       | Masc_tui_command.Preset_save_missing_name
+       | Masc_tui_command.Preset_restore _
+       | Masc_tui_command.Preset_restore_missing_name
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
               the keeper, and the answer lands in Recent Events. *)
@@ -8502,6 +8573,31 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                   (prompt_catalog_count_for_state state - 1));
            state.prompts_error <- None
        | Error detail -> state.prompts_error <- Some detail)
+  | Presets_listed (target, result) ->
+      (match result with
+       | Ok snapshot ->
+           chat_notice state ~keeper_name:target ~role:Message_status
+             (String.concat "\n" (Masc_tui_preset_text.listing_lines snapshot))
+       | Error detail ->
+           chat_notice state ~keeper_name:target ~role:Message_error detail)
+  | Preset_saved (target, result) ->
+      (match result with
+       | Ok manifest ->
+           chat_notice state ~keeper_name:target ~role:Message_status
+             (Masc_tui_preset_text.saved_line manifest)
+       | Error detail ->
+           chat_notice state ~keeper_name:target ~role:Message_error detail)
+  | Preset_restored (target, result) ->
+      (match result with
+       | Ok report ->
+           let role =
+             if Masc_tui_preset_text.restore_is_clean report then Message_status
+             else Message_error
+           in
+           chat_notice state ~keeper_name:target ~role
+             (String.concat "\n" (Masc_tui_preset_text.restore_lines report))
+       | Error detail ->
+           chat_notice state ~keeper_name:target ~role:Message_error detail)
   | Librarian_input_loaded (prompt_key, result) ->
       let still_selected =
         match selected_prompt_for_state state with
@@ -16071,8 +16167,9 @@ and is loaded on demand through keeper_skill.
        | Render_schedule.Render when Option.is_some state.image_open -> ()
        | Render_schedule.Render ->
            let frame, clamped, approval =
-             Masc_tui_frame_timing.time Masc_tui_frame_timing.Build (fun () ->
-               render state)
+             Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
+               ~tag:(fun (frame, _, _) -> frame.Frame_presenter.surface_key)
+               (fun () -> render state)
            in
            (* The frame is what the operator will act on next, so the scroll it
               had to clamp is the scroll the next keypress moves from. Applied
@@ -16084,8 +16181,9 @@ and is loaded on demand through keeper_skill.
              Terminal_title.present terminal_title ~write:(output_string stdout)
                ~flush:(fun () -> flush stdout)
                (terminal_title_snapshot state);
-           Masc_tui_frame_timing.time Masc_tui_frame_timing.Present (fun () ->
-             present_frame frame approval)
+           Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Present
+             ~tag:(fun () -> frame.Frame_presenter.surface_key)
+             (fun () -> present_frame frame approval)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

@@ -131,10 +131,10 @@ Task Skill은 실행 projection과 prompt에서 unavailable이며 admission 전�
 (`lib/keeper/keeper_unified_prompt.ml`):
 
 - **current task 블록**: `format_task_skills` → `Skills named by this task: …`
-  (`config/prompts/keeper.current_task.skills.md`).
+  (`config/prompts/keeper.md` 의 `current_task.skills` 슬롯).
 - **Skills Named by Tasks You Hold 블록**(task-364): current 말고 다른 보유 task가
   지명한 스킬을 task별 한 줄씩. `format_held_task_skills`
-  + `config/prompts/keeper.held_task.skills{,_heading}.md`. 이유: `current_task_id`는
+  + `config/prompts/keeper.md` 의 `held_task.skills` / `held_task.skills_heading` 슬롯. 이유: `current_task_id`는
   소유에서 reconcile되고 이미 current가 있으면 유지되므로, 두 번째 task를 claim해도
   그 스킬이 current 블록에 안 실린다. 그래서 별도 블록으로 뽑는다.
 

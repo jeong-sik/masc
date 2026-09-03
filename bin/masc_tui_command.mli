@@ -68,6 +68,17 @@ type t =
           sends nothing: one is for the operator to look at, the other is for
           the Keeper to read. The path grammar matches [/image]. *)
   | Attach_image_missing_path  (** [/attach] with no path on the line. *)
+  | Preset_list  (** [/preset] — list the prompt presets the server holds. *)
+  | Preset_save of {
+      name : string;
+      description : string;
+    }
+      (** [/preset save <name> [description]] — snapshot prompt overrides,
+          keeper instructions and runtime routing under [name]. *)
+  | Preset_save_missing_name  (** [/preset save] with no name. *)
+  | Preset_restore of string
+      (** [/preset restore <name>] — autosave the live state, then apply. *)
+  | Preset_restore_missing_name  (** [/preset restore] with no name. *)
   | Unknown of string  (** A slash word this build does not know, by name. *)
 
 type command_help = {

@@ -64,6 +64,7 @@ type model_entry =
     (** Anthropic Messages API thinking-control policy. This is explicit
         catalog data; request builders must not infer it from model-id text. *)
   ; preserve_thinking_control_format : string option
+  ; content_inline_reasoning : string option
   ; reasoning_output_format : string option
   ; reasoning_streaming_format : string option
   ; reasoning_replay : string option

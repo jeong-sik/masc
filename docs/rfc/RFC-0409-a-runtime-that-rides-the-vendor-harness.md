@@ -1,5 +1,5 @@
 ---
-rfc: "0406"
+rfc: "0409"
 title: vendor 하네스를 타는 runtime — 도구를 싣지 않는 변종을 한 줄로 고른다
 status: Draft
 created: 2026-09-03

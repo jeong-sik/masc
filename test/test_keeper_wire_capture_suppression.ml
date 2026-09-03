@@ -159,7 +159,7 @@ let test_direct_response_observation_preserves_raw_response_text () =
     finalized.response_text
 ;;
 
-let test_terminal_effect_completion_suppresses_plain_provider_text () =
+let test_terminal_effect_completion_withholds_plain_provider_text_from_replay () =
   let suppress_response_text =
     Finalize.wire_capture_response_suppression_reasons
       ~control_checkpoint:false
@@ -173,9 +173,16 @@ let test_terminal_effect_completion_suppresses_plain_provider_text () =
       ~suppress_response_text
       ()
   in
+  Alcotest.(check bool)
+    "plain provider text after a terminal replay stays out of replay"
+    true
+    finalized.withheld_from_replay;
+  (* The words survive finalization. Keeping them out of replay and hiding them
+     from the operator were one decision until #32727/#32660; only the first is
+     this flag's business. *)
   Alcotest.(check string)
-    "plain provider text after a terminal replay is not a second reply"
-    ""
+    "the keeper's words are not erased by the replay decision"
+    "The approved connector post already went out."
     finalized.response_text
 ;;
 
@@ -220,7 +227,7 @@ let () =
         ; Alcotest.test_case
             "terminal replay suppresses plain provider text"
             `Quick
-            test_terminal_effect_completion_suppresses_plain_provider_text
+            test_terminal_effect_completion_withholds_plain_provider_text_from_replay
         ] )
     ]
 ;;

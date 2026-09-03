@@ -49,7 +49,7 @@ let command_argv () = [ "container" ]
 |---|---|---|---|---|
 | Apple `container` (현재) | Virtualization.framework | `run` `exec` `stop` `delete` `inspect` `volume *` `image *` | macOS 26+ 전용 | v1.0 (2026-06) |
 | microsandbox | libkrun | `run` `exec` `stop` `rm` `inspect` `ls` `image ls/rm` `pull` | macOS(AS) · Linux(KVM) · Windows(WHP) | **beta — breaking changes 명시** |
-| gondolin | QEMU (krun 선택) | `list` `attach` `snapshot` `bash` + TS SDK | macOS · Linux, arm64 위주 | **experimental** |
+| gondolin | QEMU (krun 선택) | `exec` `bash` `list` `attach` — 세션은 남으나 **CLI 로 주입 불가** | macOS · Linux, arm64 위주 | experimental · **이 모양에서 탈락** |
 
 microsandbox 가 문법상 가장 가깝다. gondolin 은 QEMU 라 **KVM 이 필요 없다** —
 중첩 가상화가 막힌 CI 나 클라우드 VM 에서도 도는 유일한 후보다.
@@ -159,6 +159,43 @@ gondolin exec --sock PATH -- CMD [ARGS...]
 
 Apple/microsandbox 와 다른 점은 **주소가 이름이 아니라 소켓 경로**라는 것뿐이다.
 masc 가 안정적 컨테이너 이름을 유도하듯 안정적 소켓 경로를 유도하면 된다.
+
+### gondolin: 세션은 남지만 CLI 로 그 안에 명령을 못 넣는다 (qemu 설치 후 재측정)
+
+첫 측정은 qemu 없이 했고 그래서 틀렸다. `gondolin bash` 가 120초 매달리다 죽고
+세션도 안 남는 것을 보고 "대화형이라 detached 부팅 불가" 로 읽었는데, 매달린 건
+QEMU 백엔드가 없어서였다. qemu 를 설치하고 다시 쟀다.
+
+**세션은 남는다.**
+
+```
+$ gondolin bash < /dev/null &
+$ gondolin list
+ID                                    PID    AGE  ALIVE
+4c67f582-2a7b-4d58-8c44-541f44092f4a  89249  49s  yes
+```
+
+`exec -- CMD` 도 in-process 모드로 실제로 돈다 (`GONDOLIN_EXEC_OK`, aarch64).
+
+**막히는 자리는 그 세션에 명령을 넣는 것이다.**
+
+| 시도 | 결과 |
+|---|---|
+| `exec --sock <세션의 virtio 소켓>` | `connected` 후 `write EPIPE` — 채널을 대화형 bash 가 쥐고 있다 |
+| `attach <ID> -- CMD < /dev/null` | `session connection closed` — 출력 없음, 대화형 전용 |
+| 소켓을 여는 세션 생성 플래그 | 없다. `bash` 에 `--listen`(HTTP 인그레스)과 `--ssh-port` 는 있어도 제어 소켓은 없다 |
+
+`exec --sock PATH` 가 받는 소켓은 **TS SDK 가 여는 것**이지 CLI 가 만들 수 있는
+것이 아니다. masc 는 TTY 없는 서버 프로세스에서 게스트를 띄우고 턴마다 프레임을
+밀어야 하는데, CLI 만으로는 그 두 번째 절반이 없다.
+
+그래서 **argv 빌더 뒤에 구현을 놓는 이 RFC 의 모양으로는 안 붙는다.** SDK 로 가려면
+VM 을 들고 있는 node 사이드카가 필요하고, 그건 Firecracker 를 뺀 것과 같은 이유로
+범위 밖이다.
+
+**다만 다른 길이 하나 보인다.** `bash --ssh-port` 와 `gondolin-virtio-ssh-*.sock`
+이 있다. 게스트에 SSH 가 열린다면 masc 의 **기존 `Remote_ssh` 프로필**이 백엔드
+코드 한 줄 없이 그걸 몬다. 재보지 않았고, 이 RFC 의 범위도 아니다.
 
 ### inspect 모양이 백엔드마다 다르다는 것은 확인됐다
 

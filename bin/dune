@@ -186,6 +186,8 @@
   masc.server
   masc.runtime
   masc.fusion_core
+  masc.tool_catalog_surfaces
+  masc.masc_tool_surface
   masc_eio_context
   unix
   yojson
@@ -332,6 +334,12 @@
  (name masc_tui_command)
  (wrapped false)
  (modules masc_tui_command))
+
+(library
+ (name masc_tui_preset_text)
+ (wrapped false)
+ (modules masc_tui_preset_text)
+ (libraries masc))
 
 (library
  (name masc_tui_mcp)
@@ -493,7 +501,7 @@
  (name masc_tui_paste_spill)
  (wrapped false)
  (modules masc_tui_paste_spill)
- (libraries masc_tui_message_layout))
+ (libraries masc_tui_message_layout masc.keeper_paste_naming))
 
 (library
  (name masc_tui_graphics)
@@ -964,6 +972,7 @@
   masc_tui_observer
   masc_tui_acting
   masc_tui_command
+  masc_tui_preset_text
   masc_tui_mcp
   masc_tui_keeper_chat_transcript
   masc_tui_composer

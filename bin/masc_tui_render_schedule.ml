@@ -452,7 +452,8 @@ let memory_no_values =
   ; mrow_delta = ""
   }
 
-let memory_cells columns values =
+let memory_cells ?(state_style = "") ?(size_style = "") ?(delta_style = "")
+    columns values =
   let revision =
     if columns.mcol_show_revision then
       [ Table.cell ~align:Table.Right ~header:"REV"
@@ -467,17 +468,18 @@ let memory_cells columns values =
       ]
     else []
   in
-  [ Table.cell ~header:"STATE" ~width:memory_state_width values.mrow_state
+  [ Table.cell ~style:state_style ~header:"STATE" ~width:memory_state_width
+      values.mrow_state
   ; Table.cell ~header:"KEEPER" ~width:columns.mcol_name values.mrow_name
   ]
   @ revision
   @ [ Table.cell ~align:Table.Right ~header:"FACTS" ~width:memory_facts_width
         values.mrow_facts
-    ; Table.cell ~align:Table.Right ~header:"SIZE" ~width:memory_size_width
-        values.mrow_size
+    ; Table.cell ~align:Table.Right ~style:size_style ~header:"SIZE"
+        ~width:memory_size_width values.mrow_size
     ]
   @ source
-  @ [ Table.cell ~align:Table.Right ~header:"\xce\x94"
+  @ [ Table.cell ~align:Table.Right ~style:delta_style ~header:"\xce\x94"
         ~width:memory_delta_width values.mrow_delta
     ]
 
@@ -508,8 +510,9 @@ let allocate_memory_columns ~inner_width =
 let memory_header_row columns =
   Table.header_row ~gap:memory_cell_gap (memory_cells columns memory_no_values)
 
-let memory_row columns values =
-  Table.row ~gap:memory_cell_gap (memory_cells columns values)
+let memory_row ?state_style ?size_style ?delta_style ?close columns values =
+  Table.row ~gap:memory_cell_gap ?close
+    (memory_cells ?state_style ?size_style ?delta_style columns values)
 
 module Terminal_size_cache = struct
   type refresh =

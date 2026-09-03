@@ -10265,6 +10265,36 @@ let memory_state_cell = function
    outgrew the cell -- "r6476/139/94.4 KB" is seventeen cells against fourteen.
    Each gets a cell, and every cell is fitted to the same allocation the header
    is drawn from. *)
+(* How a keeper that is not reading normally is dressed. A starving keeper is
+   an error the server graded; a keeper with a config but no snapshot yet is
+   quiet, not bad. A source-bound snapshot changes the label, not the server's
+   severity: the Librarian failure remains red and its exact message stays in
+   the detail pane.
+
+   This dresses cells, not the line. It sits above the row builder because the
+   row asks for it. *)
+let memory_deviation_style (k : Masc.Tui_decode.memory_keeper_health) =
+  let open Masc.Tui_decode in
+  (* An error the server graded outranks every reading taken here: the row is
+     red whatever the snapshot looks like. Everything below it reads the same
+     variant the cell and the detail pane read, so one keeper cannot be graded
+     two ways, and a state added later has to be given a colour here before
+     this compiles. *)
+  let server_error =
+    List.exists (fun alert -> String.equal alert.ma_severity "error") k.mkh_alerts
+  in
+  if server_error then Some (Theme.bad ())
+  else
+    match memory_state k with
+    | Memory_starving -> Some (Theme.bad ())
+    | Memory_read_error
+    | Memory_no_current
+    | Memory_source_only
+    | Memory_degraded
+    | Memory_warning ->
+        Some (Theme.warn ())
+    | Memory_ordinary -> None
+
 let memory_row_line columns (k : Masc.Tui_decode.memory_keeper_health) =
   let open Masc.Tui_decode in
   let em_dash = "\xe2\x80\x94" in
@@ -10287,8 +10317,21 @@ let memory_row_line columns (k : Masc.Tui_decode.memory_keeper_health) =
     | 0, removed -> Printf.sprintf "-%d" removed
     | added, removed -> Printf.sprintf "+%d -%d" added removed
   in
+  (* Colour lands on the cell that deviates and on the reading that measures
+     it, not on the line. A whole row turned amber makes an operator hunt for
+     which of six readings meant it; two dressed cells say so directly. The
+     Keepers table has drawn its health this way for as long as it has had a
+     health column. *)
+  let deviation = Option.value (memory_deviation_style k) ~default:"" in
+  let state_style = deviation in
+  (* An absent snapshot is why the state cell is dressed at all, and the size
+     is where that absence shows as a reading. *)
+  let size_style = if k.mkh_snapshot_present then "" else deviation in
+  (* Facts leaving a keeper's memory is the one movement worth a colour of its
+     own; facts arriving is what a working keeper does all day. *)
+  let delta_style = if k.mkh_removed > 0 then Theme.warn () else "" in
   "  "
-  ^ Render_schedule.memory_row columns
+  ^ Render_schedule.memory_row ~state_style ~size_style ~delta_style columns
       { Render_schedule.mrow_state = memory_state_cell (memory_state k)
       ; mrow_name = k.mkh_keeper_id
       ; mrow_revision = ordinary_reading (fun () -> string_of_int k.mkh_revision)
@@ -10299,32 +10342,6 @@ let memory_row_line columns (k : Masc.Tui_decode.memory_keeper_health) =
       ; mrow_source = source
       ; mrow_delta = delta
       }
-
-(* A starving keeper is an error the server graded; a keeper with a config
-   but no snapshot yet is quiet, not bad. A source-bound snapshot changes the
-   label, not the server's severity: the Librarian failure remains red and its
-   exact message stays in the detail pane. *)
-let memory_row_style (k : Masc.Tui_decode.memory_keeper_health) =
-  let open Masc.Tui_decode in
-  (* An error the server graded outranks every reading taken here: the row is
-     red whatever the snapshot looks like. Everything below it reads the same
-     variant the cell and the detail pane read, so one keeper cannot be graded
-     two ways, and a state added later has to be given a colour here before
-     this compiles. *)
-  let server_error =
-    List.exists (fun alert -> String.equal alert.ma_severity "error") k.mkh_alerts
-  in
-  if server_error then Some (Theme.bad ())
-  else
-    match memory_state k with
-    | Memory_starving -> Some (Theme.bad ())
-    | Memory_read_error
-    | Memory_no_current
-    | Memory_source_only
-    | Memory_degraded
-    | Memory_warning ->
-        Some (Theme.warn ())
-    | Memory_ordinary -> None
 
 let render_memory (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -10412,10 +10429,7 @@ let render_memory (state : state) =
                  row. *)
               if idx = state.memory_health_cursor then
                 c.push_selected (memory_row_line columns k)
-              else
-                match memory_row_style k with
-                | Some style -> c.push_styled ~style (memory_row_line columns k)
-                | None -> c.push (memory_row_line columns k)
+              else c.push (memory_row_line columns k)
         done;
         if overflowing then
           c.push_styled ~style:(Theme.recede ())

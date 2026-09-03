@@ -152,7 +152,11 @@ let classify_argv argv =
    observation) while the shell executes ["-e"; "-i"] (in-place write). A
    tab anywhere moves the whole line to the judge; the same reasoning
    closes the bracket of a character class glob, which also reshapes argv
-   when a matching file exists. *)
+   when a matching file exists. Blocking the characters — rather than
+   splitting on them ourselves — is also the only choice that holds under
+   an inherited non-default IFS in the executing environment: we cannot
+   know which separators that shell would use, so the line keeps its
+   judgment instead. *)
 let shell_primitive_chars =
   [ ';'; '|'; '&'; '>'; '<'; '$'; '`'; '\\'
   ; '('; ')'; '{'; '}'; '*'; '?'; '~'; '#'

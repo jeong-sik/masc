@@ -1,4 +1,5 @@
 name = "masc_plan_clear_task"
+title = "Clear Current Task"
 description = """
 Clear your current task assignment without completing it.
 

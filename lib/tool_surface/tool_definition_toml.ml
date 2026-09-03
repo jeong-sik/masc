@@ -556,6 +556,7 @@ let loading_to_string = function
 
 type loaded =
   { schema : Masc_domain.tool_schema
+  ; title : string option
   ; keeper_projection : Masc_domain.tool_schema option
   ; agent_core_projection : Masc_domain.tool_schema option
   ; help : help option
@@ -793,6 +794,13 @@ let tool_of_pairs ~name pairs =
     | None -> Error "missing the required key \"description\""
     | Some value -> as_non_empty_string ~context:"description" value
   in
+  let* title =
+    match List.assoc_opt "title" pairs with
+    | None -> Ok None
+    | Some value ->
+      let* text = as_non_empty_string ~context:"title" value in
+      Ok (Some text)
+  in
   let* additional_properties =
     match List.assoc_opt "additional_properties" pairs with
     | None -> Ok None
@@ -865,6 +873,7 @@ let tool_of_pairs ~name pairs =
         (String.equal key)
         [ "name"
         ; "description"
+        ; "title"
         ; "additional_properties"
         ; "params"
         ; "one_of"
@@ -889,6 +898,7 @@ let tool_of_pairs ~name pairs =
         ; input_schema =
             assemble_input_schema ~params ~additional_properties ~alternatives
         }
+    ; title
     ; keeper_projection
     ; agent_core_projection
     ; help

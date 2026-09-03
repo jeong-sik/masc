@@ -1,4 +1,5 @@
 name = "masc_broadcast"
+title = "Broadcast Message"
 description = """
 Send a message visible to ALL agents via SSE push.
 

@@ -35,6 +35,7 @@
     "lane_cli_probe.md",
     "librarian.md",
     "mcp.md",
+    "mcp.tool_help.md",
     "tool_failure.md",
     "verification.md"
   ]

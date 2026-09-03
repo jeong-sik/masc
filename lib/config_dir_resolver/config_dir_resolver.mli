@@ -82,6 +82,12 @@ val tools_dir : unit -> string
 (** [<config-root>/tools] — runtime home of the managed tool definition
     assets ([Managed_asset_sync.Tools]). Created on demand by the asset
     sync; a fresh config root does not have it yet. *)
+
+val mcp_dir : unit -> string
+(** [<config-root>/mcp] — runtime home of the managed MCP surface assets
+    ([Managed_asset_sync.Mcp]). Created on demand by the asset sync, like
+    {!tools_dir}, and deliberately absent from the diagnostics record for the
+    same reason. *)
 val keeper_toml_path_opt : string -> string option
 (** [keeper_toml_path_opt name] checks for [keepers/<name>.toml]. *)
 

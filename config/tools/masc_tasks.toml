@@ -1,4 +1,5 @@
 name = "masc_tasks"
+title = "List Tasks"
 description = """
 List tasks in backlog with their status and assignee. Defaults to active \
 tasks (todo/claimed/in_progress/awaiting_verification). Use \

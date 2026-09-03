@@ -36,7 +36,6 @@ let managed_agent_passthrough_tool_set : (string, unit) Hashtbl.t =
   tbl
 
 module StringSet = Set_util.StringSet
-module StringMap = Set_util.StringMap
 
 let default_instructions () = instruction Prompt_names.mcp_full
 
@@ -144,45 +143,44 @@ let label_words_from_identifier ident =
            ^ String.lowercase_ascii
                (String.sub word 1 (String.length word - 1)))
 
-(** Custom human-readable titles for key tools.
-    Falls back to auto-generated Title Case when absent. *)
-let custom_tool_titles : (string * string) list = [
-  (* Workspace lifecycle *)
-  ("masc_status", "Project Status");
-  ("masc_check", "Check Preconditions");
-  (* Task management *)
-  ("masc_tasks", "List Tasks");
-  ("masc_add_task", "Add Task");
-  ("masc_batch_add_tasks", "Batch Add Tasks");
-  ("masc_transition", "Transition Task State");
-  ("masc_update_priority", "Update Task Priority");
-  ("masc_task_history", "Task Event History");
-  (* Communication *)
-  ("masc_broadcast", "Broadcast Message");
-  ("masc_messages", "Read Messages");
-  (* Planning *)
-  ("masc_plan_set_task", "Bind Current Task");
-  ("masc_plan_get_task", "Get Current Task");
-  ("masc_plan_clear_task", "Clear Current Task");
-  (* Heartbeat *)
-  ("masc_heartbeat", "Send Heartbeat");
-  (* Operations *)
-  ("masc_operator_snapshot", "Operator Snapshot");
-  ("masc_operator_digest", "Operator Digest");
-  ("masc_operator_action", "Operator Action");
-  ("masc_operator_board_attention_quarantine_requeue", "Requeue Board Quarantine");
-  ("masc_operator_task_recovery_resolve", "Resolve Task Recovery");
-  ("masc_operator_confirm", "Operator Confirm");
-  (* agent-core projections *)
-]
+(** Human-readable tool titles now live in each tool's own
+    [config/tools/<name>.toml] as the optional [title] key (RFC
+    prompts-and-tool-definitions-outside-ocaml §2.2). One parse of the
+    embedded tool tree, on first ask — the same idiom as
+    [Tool_loading_declarations]: the files are crunched into the binary, so a
+    second parse would read the same bytes to the same answer. A file that
+    does not parse raises rather than answering "no title": a misplaced
+    declaration and no declaration are the same answer at every call site. *)
+let declared_title_table : (string, string) Hashtbl.t Lazy.t =
+  lazy
+    (let table = Hashtbl.create 256 in
+     List.iter
+       (fun path ->
+          match Filename.dirname path, Filename.extension path with
+          | "tools", ".toml" ->
+            let name = Filename.remove_extension (Filename.basename path) in
+            (match Embedded_config.read path with
+             | None -> ()
+             | Some contents ->
+               (match Tool_definition_toml.load ~name ~contents with
+                | Error message ->
+                  failwith (Printf.sprintf "tool titles: %s: %s" path message)
+                | Ok loaded ->
+                  (match loaded.Tool_definition_toml.title with
+                   | Some title -> Hashtbl.replace table name title
+                   | None -> ())))
+          | _, _ -> ())
+       Embedded_config.file_list;
+     table)
 
-let custom_title_table : string StringMap.t =
-  List.fold_left
-    (fun acc (name, title) -> StringMap.add name title acc)
-    StringMap.empty custom_tool_titles
-
+(* Three titled tools have no [config/tools] file to carry the key:
+   masc_operator_snapshot, masc_operator_digest and masc_operator_action each
+   declare two descriptions in OCaml, one per surface (see
+   [Operator_tool_toml]). Their [custom_tool_titles] entries were exactly what
+   the mechanical fallback below derives from the name, so the fallback covers
+   them byte-identically. *)
 let tool_title_of_name name =
-  match StringMap.find_opt name custom_title_table with
+  match Hashtbl.find_opt (Lazy.force declared_title_table) name with
   | Some title -> title
   | None ->
     let trimmed =

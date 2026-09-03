@@ -1,0 +1,8 @@
+{
+  "managed_by": "MASC",
+  "schema": "masc.mcp-managed-assets.v1",
+  "paths": [
+    "prompts.toml",
+    "resources.toml"
+  ]
+}

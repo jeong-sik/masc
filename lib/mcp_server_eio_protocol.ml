@@ -390,7 +390,7 @@ let handle_list_resources_eio id cursor =
       let entry = Tool_help_registry.entry_of_schema schema in
       Mcp_server.make_resource
         ~uri:("masc://tool-help/" ^ schema.name)
-        ~name:(schema.name ^ " Help")
+        ~name:(schema.name ^ Mcp_surface_toml.tool_help_name_suffix)
         ~description:entry.short_description
         ~mime_type:"text/markdown"
         ())

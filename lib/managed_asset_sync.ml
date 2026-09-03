@@ -4,10 +4,12 @@
 type domain =
   | Prompts
   | Tools
+  | Mcp
 
 let prefix = function
   | Prompts -> "prompts/"
   | Tools -> "tools/"
+  | Mcp -> "mcp/"
 ;;
 
 (* One schema string per domain: a tools manifest pasted into prompts/ (or
@@ -15,12 +17,14 @@ let prefix = function
 let manifest_schema = function
   | Prompts -> "masc.prompt-managed-assets.v1"
   | Tools -> "masc.tool-managed-assets.v1"
+  | Mcp -> "masc.mcp-managed-assets.v1"
 ;;
 
 (* The noun used in operator-facing error messages. *)
 let noun = function
   | Prompts -> "prompt"
   | Tools -> "tool"
+  | Mcp -> "mcp"
 ;;
 
 let manifest_path domain = prefix domain ^ "managed-assets.json"

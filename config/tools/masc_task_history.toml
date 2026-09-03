@@ -1,4 +1,5 @@
 name = "masc_task_history"
+title = "Task Event History"
 description = """
 Fetch recent task transition history from event logs. Useful for audits or \
 debugging transitions."""

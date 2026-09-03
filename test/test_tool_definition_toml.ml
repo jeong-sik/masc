@@ -617,6 +617,54 @@ let test_shipped_embedded_tree_loads () =
     failf "the shipped embedded tool tree does not load: %s" message
 ;;
 
+(* ── Optional title key ─────────────────────────────────────────────────
+   The human-readable tool name MCP clients show moved out of
+   mcp_server_eio_tool_profile's custom_tool_titles table into each tool's
+   own file. *)
+let test_title_key () =
+  (match
+     Tool_definition_toml.load ~name:"masc_example_ok"
+       ~contents:(minimal "masc_example_ok")
+   with
+   | Ok loaded ->
+     check bool "absent title decodes to None" true
+       (Option.is_none loaded.Tool_definition_toml.title)
+   | Error message -> failf "expected the minimal file to load: %s" message);
+  (match
+     Tool_definition_toml.load ~name:"masc_example_ok"
+       ~contents:
+         "name = \"masc_example_ok\"\ndescription = \"d.\"\ntitle = \"Example Tool\"\n"
+   with
+   | Ok loaded ->
+     check (option string) "title decodes" (Some "Example Tool")
+       loaded.Tool_definition_toml.title
+   | Error message -> failf "expected a titled file to load: %s" message);
+  match
+    Tool_definition_toml.load ~name:"masc_example_ok"
+      ~contents:
+        "name = \"masc_example_ok\"\ndescription = \"d.\"\ntitle = \"\"\n"
+  with
+  | Ok _ -> fail "expected an empty title to be an error"
+  | Error message ->
+    check bool "empty title named" true (contains ~needle:"title" message)
+;;
+
+(* Same shipped-tree gate as [test_shipped_embedded_tree_loads], for the
+   config/mcp/ pair: boot calls exactly this validator
+   (server_runtime_bootstrap.ml: validate_embedded_mcp_surface), so a
+   resources.toml or prompts.toml that does not decode fails the build here
+   instead of refusing every boot after the release. *)
+let test_shipped_embedded_mcp_surface_loads () =
+  match
+    Masc.Mcp_surface_toml.validate_embedded
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+  with
+  | Ok () -> ()
+  | Error message ->
+    failf "the shipped embedded mcp surface does not load: %s" message
+;;
+
 
 let test_validate_embedded () =
   let good = minimal "masc_example_ok" in
@@ -1124,6 +1172,10 @@ let () =
             test_validate_embedded
         ; test_case "the shipped embedded tree loads" `Quick
             test_shipped_embedded_tree_loads
+        ; test_case "the shipped embedded mcp surface loads" `Quick
+            test_shipped_embedded_mcp_surface_loads
         ] )
+    ; ( "title"
+      , [ test_case "optional, non-empty when present" `Quick test_title_key ] )
     ]
 ;;

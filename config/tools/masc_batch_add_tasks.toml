@@ -1,4 +1,5 @@
 name = "masc_batch_add_tasks"
+title = "Batch Add Tasks"
 description = """
 Add multiple tasks in one call (more efficient than repeated masc_add_task). \
 Use when: loading sprint backlog, importing from JIRA, creating related \

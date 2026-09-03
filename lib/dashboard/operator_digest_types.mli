@@ -5,7 +5,7 @@
 
     Closed set — exhaustive matching catches new levels at compile time. *)
 
-type operator_severity = Sev_critical | Sev_bad | Sev_warn
+type operator_severity = Sev_critical | Sev_bad | Sev_warn | Sev_info
 
 val operator_severity_to_string : operator_severity -> string
 
@@ -42,8 +42,9 @@ type recommended_action = {
 
 val stalled_session_threshold_sec : float
 
-(** [Sev_critical → 3], [Sev_bad → 2], [Sev_warn → 1]. Used for
-    descending-severity comparators. *)
+(** [Sev_critical → 4], [Sev_bad → 3], [Sev_warn → 2], [Sev_info → 1]. Used
+    for descending-severity comparators; 0 is reserved for a string that is
+    not a severity. *)
 val severity_rank : operator_severity -> int
 
 (** [severity_rank_of_string raw] decodes a serialized severity and ranks it.

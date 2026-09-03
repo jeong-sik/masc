@@ -291,6 +291,37 @@ let test_summarize_joins_questions_in_ask_order () =
   Alcotest.(check string) "joined with ; in ask order" "No; Beta"
     (Ask.summarize_answer d ~row:r)
 
+(* newly_opened_ask_ids: the bell rings once per question that arrives, not
+   per poll and not for the state the session started in. *)
+let snapshot rows : Decode.asks_snapshot =
+  { asn_keeper = None; asn_open_count = List.length rows; asn_rows = rows }
+
+let answered_row id =
+  row
+    ~resolution:(Decode.Ask_answered { aa_answered_at = 1.0; aa_question_ids = [] })
+    id
+
+let test_newly_opened_silent_on_first_read () =
+  Alcotest.(check (list string)) "first read establishes a baseline silently" []
+    (Ask.newly_opened_ask_ids ~previous:None ~current:(snapshot [ row "a1" ]))
+
+let test_newly_opened_reports_arrival () =
+  let before = snapshot [ row "a1" ] in
+  let after = snapshot [ row "a1"; row "a2" ] in
+  Alcotest.(check (list string)) "the ask that arrived" [ "a2" ]
+    (Ask.newly_opened_ask_ids ~previous:(Some before) ~current:after)
+
+let test_newly_opened_silent_on_reread () =
+  let s = snapshot [ row "a1" ] in
+  Alcotest.(check (list string)) "the same open asks ring nothing" []
+    (Ask.newly_opened_ask_ids ~previous:(Some s) ~current:s)
+
+let test_newly_opened_ignores_answered () =
+  let before = snapshot [ row "a1" ] in
+  let after = snapshot [ answered_row "a1"; row "a2" ] in
+  Alcotest.(check (list string)) "a1 closing is not an arrival, a2 is" [ "a2" ]
+    (Ask.newly_opened_ask_ids ~previous:(Some before) ~current:after)
+
 let () =
   Alcotest.run "TUI ask projection"
     [
@@ -358,5 +389,16 @@ let () =
           Alcotest.test_case "names a skip" `Quick test_summarize_names_skip;
           Alcotest.test_case "joins questions in ask order" `Quick
             test_summarize_joins_questions_in_ask_order;
+        ] );
+      ( "arrival",
+        [
+          Alcotest.test_case "silent on the first read" `Quick
+            test_newly_opened_silent_on_first_read;
+          Alcotest.test_case "reports an arrival" `Quick
+            test_newly_opened_reports_arrival;
+          Alcotest.test_case "silent on a re-read" `Quick
+            test_newly_opened_silent_on_reread;
+          Alcotest.test_case "ignores a closing ask" `Quick
+            test_newly_opened_ignores_answered;
         ] );
     ]

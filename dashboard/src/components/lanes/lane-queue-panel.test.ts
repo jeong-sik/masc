@@ -75,21 +75,20 @@ function waitingInventory(name: string): DashboardKeeperWaitingInventory {
     keeper_count: 1,
     waiting_keeper_count: 1,
     row_count: 2,
-    external_attention_row_limit: 64,
     keepers: [{
       keeper_name: name,
       state: 'waiting',
       waiting_count: 2,
-      sources: { external_attention: 1, hitl_pending: 1 },
+      sources: { event_queue_pending: 1, hitl_pending: 1 },
       waiting_on: [
         {
           keeper_name: name,
-          source: 'external_attention',
+          source: 'event_queue_pending',
           waiting_on: 'discord:product-review',
           what: 'Discord · product-review 알림',
-          wake_producer: 'external_attention_store',
+          wake_producer: 'connector_attention_hook',
           since: NOW - 600,
-          next_action: 'keeper_process_external_attention',
+          next_action: 'keeper_drain_event_queue',
         },
         {
           keeper_name: name,
@@ -234,8 +233,8 @@ describe('LaneQueuePanel', () => {
 
     const rows = getAllByTestId('lane-wait-row')
     expect(rows).toHaveLength(2)
-    // Oldest first: the 10-minute external attention row leads the 2-minute HITL row.
-    expect(rows[0]?.querySelector('.wa-src')?.textContent).toBe('외부 알림')
+    // Oldest first: the 10-minute queue row leads the 2-minute HITL row.
+    expect(rows[0]?.querySelector('.wa-src')?.textContent).toBe('자율 이벤트')
     expect(rows[0]?.querySelector('.wa-age')?.textContent).toBe('10분 전')
 
     fireEvent.click(rows[0]!.querySelector('.wa-bar')!)

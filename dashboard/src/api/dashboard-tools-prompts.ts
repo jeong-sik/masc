@@ -345,7 +345,6 @@ export type DashboardKeeperWaitingSource =
   | 'chat_operation_queued'
   | 'chat_operation_running'
   | 'hitl_pending'
-  | 'external_attention'
   | 'fusion_running'
   | 'schedule_waiting'
   | 'owner_shutdown'
@@ -357,7 +356,6 @@ export const DASHBOARD_KEEPER_WAITING_SOURCE_VALUES = [
   'chat_operation_queued',
   'chat_operation_running',
   'hitl_pending',
-  'external_attention',
   'fusion_running',
   'schedule_waiting',
   'owner_shutdown',
@@ -410,8 +408,6 @@ export interface DashboardKeeperWaitingKeeper {
   state: DashboardKeeperWaitingState
   waiting_on: DashboardKeeperWaitingRow[]
   waiting_count: number
-  waiting_count_truncated?: boolean
-  truncated_sources?: Record<string, boolean>
   sources?: Record<string, number>
   since?: number | null
   since_iso?: string | null
@@ -453,9 +449,6 @@ export interface DashboardKeeperWaitingInventory {
   keeper_count: number
   waiting_keeper_count: number
   row_count: number
-  row_count_truncated?: boolean
-  external_attention_row_limit?: number
-  external_attention_truncated_keeper_count?: number
   global_row_count?: number
   global_pending_confirm_count_known?: boolean
   global_pending_confirm_count?: number

@@ -13,13 +13,19 @@ let min_tail_bytes = 1_000
    from it and the exact overscan factors used by the readers, so the decoder
    cannot admit values that overflow the downstream products.
 
-   This is an admission bound on the read, not on what gets published. It used
-   to be written as the tool-response cap on the premise that a tail must not
-   read more than one result publishes; the publish side is bounded
-   independently by [Tool_output.default_model_projection] at
-   [Common.max_tool_result_wire_bytes], which externalizes anything larger, so
-   the two no longer have to be the same number and this one is stated
-   directly. *)
+   This is an admission bound on the read, not on what gets published, and
+   nothing downstream bounds the publish. [masc_keeper_status] is registered
+   [~keeper_model_projection:Operator_only], [keeper_model_names] answers []
+   for that projection, and the agent-core bundle builds a [Tool.t] only over
+   the names that function returns, so no [Tool_bridge] conversion exists for
+   this tool and its result never meets a model projection. It leaves over
+   MCP at whatever size the readers produce.
+
+   It used to be written as the tool-response cap, on the premise that a tail
+   must not read more than one result publishes. That tied an operator
+   surface to a keeper-wire ceiling it never crosses, so the number is stated
+   directly here instead. Changing it changes what an operator may ask for,
+   not what a Keeper receives. *)
 let max_tail_bytes = 64 * 1024
 let metrics_lines_per_turn = 10
 let max_tail_turns = max_tail_bytes / metrics_lines_per_turn

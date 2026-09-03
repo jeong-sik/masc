@@ -145,6 +145,16 @@ let for_surface = function
       ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
+  | Clients ->
+      [ b Navigate "j/k" "move" ~help:"move the roster cursor"
+      ; b Navigate "p" "runtime"
+          ~help:"back to the Runtime surface this hangs off"
+      ; b Act "Esc" "runtime" ~help:"back to the Runtime surface it hangs off"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching attached name"
+      ; b Search "n / N" "next / previous match"
+      ]
+      @ listing_meta
   | Board ->
       [ b Navigate "j/k" "move"
       ; b Act "Right / Enter" "read" ~help:"read the post"
@@ -314,6 +324,9 @@ let for_surface = function
       ; b Navigate "p" "keeper lanes / all runtimes / service lanes"
           ~help:"walk the three substrate readings; the third is the \
                  standalone Lanes surface"
+      ; b Navigate "c" "clients"
+          ~help:"everyone attached to this workspace, off the ring under \
+                 Runtime"
       ; b Act "Left / Esc" "back"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching lane id or runtime id"
@@ -616,6 +629,7 @@ let help_surfaces : (string * surface) list =
   ; "Keeper detail", Keepers Keeper_detail
   ; "Chat", Keepers Keeper_message
   ; "Runtime / Lanes", Lanes
+  ; "Runtime / Clients", Clients
   ; "Board", Board
   ; "Approvals", Approvals
   ; "Planning / Goals", Planning

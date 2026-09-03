@@ -28,6 +28,7 @@ let make_routes ~port ~host:_ ~sw ~clock =
   |> Server_routes_http_routes_verification.add_routes
   |> Server_routes_http_routes_attribution.add_routes
   |> Server_routes_http_routes_activity.add_routes ~sw ~clock
+  |> Server_routes_http_routes_presets.add_routes
   |> Server_routes_http_routes_artifacts.add_routes
   |> Server_routes_http_routes_voice.add_routes
   |> Server_routes_http_routes_multimodal.add_routes

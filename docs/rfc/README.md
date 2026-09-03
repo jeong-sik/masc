@@ -245,10 +245,10 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0402 | Memory OS: an observed fact names the Board post it was read from — RFC-0251 ... | Draft | - |
 | 0403 | Keeper 별 도구 선택 — 부착 서비스는 provider 단위로만 켜고 끌 수 있다 | Draft | - |
 | 0404 | 관측 script 는 readonly argv 테이블을 탄다 — 메타문자 없는 단일 명령 문자열은 argv 와 동치로 판별한다 | Draft | - |
-| 0405 | 판정자의 읽기 경로 — 지금은 제출 스냅샷과 스필이 정본이고, sandbox 읽기는 트리를 소유한 레인이 생긴 뒤에 돌아온다 (`RFC-0405-judge-reads-the-snapshot-not-the-tree.md`)<br>microVM 백엔드를 하나 더 고를 수 있게 한다 (`RFC-0405-microvm-backends.md`) | Draft<br>Draft | - |
+| 0405 | microVM 백엔드를 하나 더 고를 수 있게 한다 | Draft | - |
 | 0406 | 검증자는 떠 있는 게스트에 붙는다 | Draft | - |
+| 0407 | 판정자의 읽기 경로 — 지금은 제출 스냅샷과 스필이 정본이고, sandbox 읽기는 트리를 소유한 레인이 생긴 뒤에 돌아온다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
-| RFC-artifact-read-repeat-signal | 동일 페이지 재독출은 거부 문장으로 답한다 — post-tool 라운드는 맥락이 없으니 도구 출력이 탈출을 알려야 한다 | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |
 | RFC-chat-references-are-recorded-not-guessed | 대화의 명시 참조와 해석된 언급을 구분해 기록한다 | Draft | - |

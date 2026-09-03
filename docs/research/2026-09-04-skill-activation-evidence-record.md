@@ -91,3 +91,18 @@
 읽지 못한 것: 도구 스키마가 실제 요청에 실린 원문. wire-capture 는 agent-core
 텍스트만 담아 도구 정의가 없다. 위 3,685B 는 라이브 카탈로그로 같은 코드 경로를
 재구성해 계산한 값이다.
+
+## 세 번째 정정 — masc 가 이미 재고 있었다
+
+손으로 재구성한 3,685B 는 버린다. `/api/v1/skills` 의
+`surfaces[].profile.context` 가 스킬마다 이미 낸다.
+
+| Evidence | Timestamp | Confidence | Delta |
+|---|---|---|---|
+| `GET /api/v1/skills` 의 `surfaces[].profile.context.{discovery_bytes,tool_schema_bytes,body_bytes}` 10개 합산 | 02:5x | High | 발견 3,383B / 도구 스키마 553B / 본문 22,874B. 재구성값(3,685)이 아니라 이 값이 권위다 |
+| 같은 응답의 `surfaces[].profile.plan.{node_count,batch_count,max_parallelism}` | 02:5x | High | work-intake 3노드/2배치, mission-snapshot 4/2, background-snapshot 2/1. 배치 분할이 이미 노출돼 있다 |
+| `keeper_tool_descriptor.ml:1931` 주석 | 02:4x | High | `keeper_context_status` 는 의도적으로 Serial (memory 절이 lock 아래 write). 그래서 work-intake 3노드가 2배치로 갈린다 |
+| `keeper_tool_plan_executor.ml:84-88` | 02:4x | High | Serial 은 batch_size 1 자기 배치, Concurrent 는 묶음. 실패 기록의 batch_size 2 와 일치 |
+
+곁가지: `ci-red-attribution` 은 발견 355B 로 본문 2,180B 를 가린다(16%).
+점진 공개 자체는 동작하고 있다.

@@ -225,6 +225,22 @@ module For_testing : sig
   val max_tokens_truncation_error : Agent_core.Error.t -> bool
   val thinking_was_enabled : bool option -> bool
 
+  (** What a max-tokens rejection owes the checkpoint. Retrying without
+      thinking is a remedy for a budget spent thinking and applies only when
+      thinking was on; dropping the rejected response is owed either way,
+      because accept judged it unusable and a checkpoint that keeps it feeds
+      it back as input on every later turn. *)
+  type truncation_recovery =
+    | Recovery_not_applicable
+    | Retry_without_thinking of Agent_core.Checkpoint.t
+    | Drop_rejected_response of Agent_core.Checkpoint.t
+
+  val truncation_recovery :
+    enable_thinking:bool option ->
+    result:(Runtime_agent.run_result, Agent_core.Error.t) result ->
+    checkpoint:Agent_core.Checkpoint.t option ->
+    truncation_recovery
+
   val apply_accept :
     runtime_id:string ->
     accept:(Agent_core.Types.api_response -> bool) ->

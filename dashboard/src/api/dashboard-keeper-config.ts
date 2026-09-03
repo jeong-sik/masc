@@ -346,6 +346,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     max_context_override: maxContextOverride,
     sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
     network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
+    remote_endpoint: asNullableString(data.remote_endpoint),
     keeper_last_error: asNullableString(data.keeper_last_error),
     sandbox_roots: normalizeStringList(data.sandbox_roots),
     prompt: {
@@ -434,7 +435,10 @@ export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
     .then(raw => normalizeKeeperConfig(raw, name))
 }
 
-export type SandboxProfile = 'local' | 'docker' | 'microvm'
+// Mirrors the runtime's closed set (lib/config/keeper_sandbox_config.ml).
+// Anything outside it parses to None there, so the dashboard must not add a
+// member of its own.
+export type SandboxProfile = 'docker' | 'microvm' | 'remote_ssh'
 export type SandboxNetworkMode = 'none' | 'inherit'
 
 export type KeeperConfigUpdatePayload = {
@@ -445,6 +449,9 @@ export type KeeperConfigUpdatePayload = {
   // Sandbox
   sandbox_profile?: SandboxProfile
   network_mode?: SandboxNetworkMode
+  // null detaches the endpoint. Omitting it carries the keeper TOML's value
+  // into the new profile, which the runtime then refuses.
+  remote_endpoint?: string | null
   // Prompt fields
   instructions?: string
   // Proactive

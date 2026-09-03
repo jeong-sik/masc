@@ -3436,6 +3436,39 @@ let test_config_patch_accepts_typed_skills () =
   check_error "skills must be an object" [ "skills", `List [] ]
 ;;
 
+(* [remote_endpoint] takes a string or an explicit null, so it cannot sit in
+   [dashboard_config_string_fields]: that list demands a string and would
+   refuse the null an operator sends to detach the endpoint. Whether the name
+   is declared under [exec.ssh.endpoints], and whether the profile admits an
+   endpoint at all, are decided later by [Keeper_turn_up_args.parse]. *)
+let test_config_patch_remote_endpoint_shape () =
+  let meta = shrink_base_meta () in
+  let validate fields =
+    Keeper_config_post.validate_dashboard_config_patch ~meta fields
+  in
+  let check_ok label fields =
+    match validate fields with
+    | Ok () -> ()
+    | Error error -> Alcotest.failf "%s: %s" label error
+  in
+  let check_error label fields =
+    match validate fields with
+    | Error _ -> ()
+    | Ok () -> Alcotest.failf "%s unexpectedly accepted" label
+  in
+  check_ok "an endpoint name is accepted"
+    [ "remote_endpoint", `String "builder" ];
+  check_ok "null detaches the endpoint" [ "remote_endpoint", `Null ];
+  check_ok "it travels with the profile that requires it"
+    [ ("sandbox_profile", `String "remote_ssh")
+    ; ("remote_endpoint", `String "builder")
+    ];
+  check_error "whitespace is not a name" [ "remote_endpoint", `String "  " ];
+  check_error "the empty string is not a name" [ "remote_endpoint", `String "" ];
+  check_error "a non-string, non-null value is refused"
+    [ "remote_endpoint", `Int 1 ]
+;;
+
 let prepare_config_sync_keeper ~sw config name =
   let runtime_path =
     Config_dir_resolver.runtime_toml_path_for_base_path
@@ -4717,6 +4750,8 @@ let () =
             test_context_shrink_detection;
           test_case "config patch accepts typed Skills" `Quick
             test_config_patch_accepts_typed_skills;
+          test_case "config patch shape-checks remote_endpoint" `Quick
+            test_config_patch_remote_endpoint_shape;
           test_case "config POST atomically restarts runtime" `Quick
             test_config_post_restarts_from_atomic_toml;
           test_case "config POST requires expected revision" `Quick

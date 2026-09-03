@@ -253,13 +253,8 @@ let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
     mandatory_exact_output_lane_ids
 ;;
 
-let warn_rejected_exact_output_slots ~resolver_snapshot registry =
+let warn_rejected_exact_output_slots registry =
   let rejected = Runtime_exact_output_registry.rejected_slots registry in
-  let rejected_bindings =
-    Exact_output.resolver_rejected_target_bindings resolver_snapshot
-    |> List.map (fun (binding : Exact_output.rejected_target_binding) -> binding.target_ref)
-  in
-  let declared_target_rejected slot_id = List.mem slot_id rejected_bindings in
   let configured_runtime slot_id =
     Option.map
       (fun (rt : Runtime.t) ->
@@ -271,8 +266,8 @@ let warn_rejected_exact_output_slots ~resolver_snapshot registry =
       (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
          ( slot
          , Runtime_exact_output_registry.diagnose_rejected_slot
+             registry
              slot
-             ~declared_target_rejected
              ~configured_runtime ))
       rejected
   in
@@ -443,7 +438,7 @@ let configure_exact_output_registry ?config_root () =
          (Env_config_core.Config_error
             ("exact-output resolver-and-lane registry: " ^ detail))
      | Ok registry ->
-       warn_rejected_exact_output_slots ~resolver_snapshot registry;
+       warn_rejected_exact_output_slots registry;
        warn_catalog_absent_keeper_assignments resolver_snapshot;
        Log.Misc.info
          "exact_output: immutable resolver-and-lane registry published%s"

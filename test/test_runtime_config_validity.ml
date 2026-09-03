@@ -1247,9 +1247,9 @@ check
   (list (pair string (list string)))
   "Board exact-output lanes and opaque slot order"
   [ ( "board_attention_exact"
-    , [ "glm-coding.glm-5-turbo"; "glm-coding.glm-4-7-coding" ] )
+    , [ "glm-coding.glm-5-3"; "ollama_cloud.deepseek-v4-flash-0731" ] )
   ; ( "hitl_auto_judge"
-    , [ "glm-coding.glm-5-turbo"; "glm-coding.glm-4-7-coding" ] )
+    , [ "glm-coding.glm-5-3"; "ollama_cloud.deepseek-v4-flash-0731" ] )
   ]
   (List.filter
      (fun (lane_id, _) ->
@@ -1261,7 +1261,7 @@ check
 check
   (option (list string))
   "verifier_exact slot order is frozen"
-  (Some [ "glm-coding.glm-5-turbo"; "kimi_coding.kimi-for-coding" ])
+  (Some [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731" ])
   (match
      List.find_opt
        (fun (lane_id, _) -> String.equal lane_id "verifier_exact")

@@ -353,19 +353,18 @@ let test_rejected_slot_diagnosis_names_a_runtime_id () =
     { lane_id = "verifier_exact"
     ; position = 2
     ; slot_id = "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
-    ; target_ref = "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
     }
   in
   let as_runtime id =
     if String.equal id slot.slot_id then Some ("ollama_cloud", "deepseek-v4-flash:0731") else None
   in
-  let diagnose ~declared_target_rejected ~configured_runtime =
-    Runtime_exact_output_registry.diagnose_rejected_slot
+  let classify ~declared_target_rejected ~configured_runtime =
+    Runtime_exact_output_registry.For_testing.classify_rejected_slot
       slot
       ~declared_target_rejected
       ~configured_runtime
   in
-  (match diagnose ~declared_target_rejected:(fun _ -> false) ~configured_runtime:as_runtime with
+  (match classify ~declared_target_rejected:(fun _ -> false) ~configured_runtime:as_runtime with
    | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name } ->
      Alcotest.(check string) "provider" "ollama_cloud" provider_id;
      Alcotest.(check string) "api-name" "deepseek-v4-flash:0731" api_name
@@ -374,16 +373,62 @@ let test_rejected_slot_diagnosis_names_a_runtime_id () =
      Alcotest.fail "a slot that is a configured runtime id must be diagnosed as one");
   (* A declared target whose binding was rejected wins over the runtime
      lookup even when the same string is also a runtime id. *)
-  (match diagnose ~declared_target_rejected:(fun _ -> true) ~configured_runtime:as_runtime with
+  (match classify ~declared_target_rejected:(fun _ -> true) ~configured_runtime:as_runtime with
    | Runtime_exact_output_registry.Declared_target_binding_rejected -> ()
    | Runtime_exact_output_registry.Configured_runtime_only _
    | Runtime_exact_output_registry.Unknown_to_both_registries ->
      Alcotest.fail "a declared target with a rejected binding must be named as such");
-  match diagnose ~declared_target_rejected:(fun _ -> false) ~configured_runtime:(fun _ -> None) with
-  | Runtime_exact_output_registry.Unknown_to_both_registries -> ()
-  | Runtime_exact_output_registry.Configured_runtime_only _
-  | Runtime_exact_output_registry.Declared_target_binding_rejected ->
-    Alcotest.fail "an id no registry knows is unknown to both"
+  (match classify ~declared_target_rejected:(fun _ -> false) ~configured_runtime:(fun _ -> None) with
+   | Runtime_exact_output_registry.Unknown_to_both_registries -> ()
+   | Runtime_exact_output_registry.Configured_runtime_only _
+   | Runtime_exact_output_registry.Declared_target_binding_rejected ->
+     Alcotest.fail "an id no registry knows is unknown to both");
+  (* Through a published registry: the fixture snapshot rejects no binding,
+     so the verdict comes from the runtime lookup alone. *)
+  let snapshot = load_verifier_snapshot () in
+  (match
+     Runtime.publish_exact_output_registry
+       ~lanes:
+         [ { Runtime_schema.id = "verifier_exact"
+           ; slot_ids = [ "verifier-a"; "verifier-missing" ]
+           ; cli_slot_ids = []
+           }
+         ]
+       snapshot
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.failf "lane publication failed: %s" detail);
+  match Runtime_exact_output_registry.current () with
+  | Error error ->
+    Alcotest.failf
+      "registry should be published: %s"
+      (Runtime_exact_output_registry.publication_error_to_string error)
+  | Ok registry ->
+    (match Runtime_exact_output_registry.rejected_slots registry with
+     | [ rejected ] ->
+       Alcotest.(check string) "rejected slot" "verifier-missing" rejected.slot_id;
+       (match
+          Runtime_exact_output_registry.diagnose_rejected_slot
+            registry
+            rejected
+            ~configured_runtime:(fun _ -> None)
+        with
+        | Runtime_exact_output_registry.Unknown_to_both_registries -> ()
+        | Runtime_exact_output_registry.Configured_runtime_only _
+        | Runtime_exact_output_registry.Declared_target_binding_rejected ->
+          Alcotest.fail "a slot no registry knows is unknown to both");
+       (match
+          Runtime_exact_output_registry.diagnose_rejected_slot
+            registry
+            rejected
+            ~configured_runtime:(fun _ -> Some ("ollama_cloud", "deepseek-v4-flash:0731"))
+        with
+        | Runtime_exact_output_registry.Configured_runtime_only _ -> ()
+        | Runtime_exact_output_registry.Unknown_to_both_registries
+        | Runtime_exact_output_registry.Declared_target_binding_rejected ->
+          Alcotest.fail "a runtime id with no same-id target is Configured_runtime_only")
+     | slots ->
+       Alcotest.failf "expected one rejected slot, got %d" (List.length slots))
 ;;
 
 let () =

@@ -32,7 +32,6 @@ type rejected_slot =
   { lane_id : string
   ; position : int
   ; slot_id : string
-  ; target_ref : string
   }
 
 type rejected_slot_diagnosis =
@@ -125,16 +124,16 @@ val current : unit -> (t, publication_error) result
 val rejected_slots : t -> rejected_slot list
 
 val diagnose_rejected_slot
-  :  rejected_slot
-  -> declared_target_rejected:(string -> bool)
+  :  t
+  -> rejected_slot
   -> configured_runtime:(string -> (string * string) option)
   -> rejected_slot_diagnosis
-(** Why a slot was rejected, for the boot report. [declared_target_rejected]
-    says whether the resolver snapshot declares the id as a target whose
-    binding it rejected; [configured_runtime] answers with the runtime's
-    [(provider_id, api_name)] when the id is an enabled runtime.toml runtime.
-    The caller supplies both because this module sits below [Runtime] and the
-    resolver snapshot is opaque here. The first lookup wins. *)
+(** Why a slot was rejected, for the boot report. A target the overlay
+    declares but whose binding the resolver rejected is named first, read
+    from the snapshot this registry holds; otherwise [configured_runtime]
+    decides, answering with the runtime's [(provider_id, api_name)] when the
+    id is an enabled runtime.toml runtime. The caller supplies that lookup
+    because this module sits below [Runtime]. *)
 
 val catalog_absent_assignments :
   Agent_core.Exact_output.resolver_snapshot ->
@@ -156,6 +155,15 @@ val publication_error_to_string : publication_error -> string
 val lane_resolution_error_to_string : lane_resolution_error -> string
 
 module For_testing : sig
+  val classify_rejected_slot
+    :  rejected_slot
+    -> declared_target_rejected:(string -> bool)
+    -> configured_runtime:(string -> (string * string) option)
+    -> rejected_slot_diagnosis
+  (** The pure classification behind {!diagnose_rejected_slot}, with both
+      lookups injected so the precedence can be pinned without a snapshot
+      that carries a rejected binding. *)
+
   type reservation
   type reservation_error = Reservation_inactive
 

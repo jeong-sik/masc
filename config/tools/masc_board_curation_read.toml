@@ -1,9 +1,8 @@
 name = "masc_board_curation_read"
 description = """
-Read the latest AI curation snapshot for the board: TL;DR summary, post ordering, \
-highlights, tag suggestions, answer matches, rationale, and operator-auditable \
-provenance. Returns null when no snapshot has been submitted \
-yet."""
+Read the latest AI curation snapshot for the board.
+
+It holds the TL;DR summary, post ordering, highlights, tag suggestions, answer matches, rationale, and operator-auditable provenance. Returns null when no snapshot has been submitted yet."""
 
 # Held back from the request until the model asks for it by name.
 # 2026-08-25..08-31 across the fleet: called 3 times in 2 turns, 372 bytes of

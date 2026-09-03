@@ -145,8 +145,11 @@ val lower_typed_pipeline
   -> sandbox:sandbox_context
   -> unit
   -> verdict
-(** Lower a typed pipeline (e.g. from {!Keeper_tool_execute_typed_input}) into
-    the same {!verdict} shape. Empty input yields {!Cannot_parse
+(** Lower a stage list assembled by the caller into the same {!verdict}
+    shape. Not from {!Keeper_tool_execute_typed_input}: since #32662 that
+    module's [source] is [Argv] or [Script] and it lowers to a single
+    [Shell_ir.Simple], so it can no longer hand this function more than one
+    stage. Empty input yields {!Cannot_parse
     Parse_error}; a single stage yields [Allow] with a [Simple] AST;
     multiple stages yield [Allow] with a non-nested
     [Pipeline]. Nested pipelines are forbidden because the input type

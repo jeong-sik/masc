@@ -2170,16 +2170,23 @@ let test_the_session_filter_reads_the_transcript () =
    cell off its data.
 
    A header that disagrees with its rows is worse than no header: it labels
-   the wrong column and the reader has no way to notice. This pins that both
-   still ask [board_row_layout] rather than each doing its own arithmetic. *)
+   the wrong column and the reader has no way to notice.
+
+   The shared arithmetic became a shared column description. This pins that
+   the surface draws its header and its rows from it rather than either one
+   spelling widths again: one title width, asked once, and the two rows built
+   from the description that width was measured against. *)
 let test_the_board_header_and_rows_share_one_layout () =
   let module_path = "bin/masc_tui_render.ml" in
-  Alcotest.(check bool)
-    "the shared layout is defined" true
-    (Ast_grep.count_value_bindings ~module_path ~name:"board_row_layout" > 0);
-  Alcotest.(check bool)
-    "and something asks it" true
-    (Ast_grep.count_calls ~module_path ~callee:"board_row_layout" > 0)
+  let in_board callee =
+    Ast_grep.count_calls_in_value_binding ~module_path
+      ~binding_name:"render_board_list" ~callee
+  in
+  check int "the title is sized once for the whole surface" 1
+    (in_board "board_title_width");
+  check int "the header is drawn from the column description" 1
+    (in_board "Render_schedule.board_header_row");
+  check int "and so is every row" 1 (in_board "Render_schedule.board_row")
 ;;
 
 (* Exact lane payloads used to pretty-print JSON and hand its plain lines

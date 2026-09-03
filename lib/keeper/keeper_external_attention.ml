@@ -89,29 +89,13 @@ type item = {
   metadata : (string * string) list;
 }
 
-type event =
-  | Recorded of item
-  | Resolved of {
-      event_id : string;
-      resolved_at : float;
-      reason : string;
-    }
-  | Ignored of {
-      event_id : string;
-      ignored_at : float;
-      reason : string;
-    }
-  | Quarantined of {
-      event_id : string;
-      quarantined_at : float;
-      reason : string;
-    }
-
 type record_result =
   [ `Recorded
   | `Duplicate of item
   | `Error of string
   ]
+
+type event = Recorded of item
 
 let event_id_of_dedupe_key key =
   Digestif.SHA256.(digest_string key |> to_hex)
@@ -262,54 +246,15 @@ let item_of_json json =
 
 let event_to_json = function
   | Recorded item -> `Assoc [ ("event", `String "recorded"); ("item", item_to_json item) ]
-  | Resolved { event_id; resolved_at; reason } ->
-      `Assoc
-        [
-          ("event", `String "resolved");
-          ("event_id", `String event_id);
-          ("resolved_at", `Float resolved_at);
-          ("reason", `String reason);
-        ]
-  | Ignored { event_id; ignored_at; reason } ->
-      `Assoc
-        [
-          ("event", `String "ignored");
-          ("event_id", `String event_id);
-          ("ignored_at", `Float ignored_at);
-          ("reason", `String reason);
-        ]
-  | Quarantined { event_id; quarantined_at; reason } ->
-      `Assoc
-        [
-          ("event", `String "quarantined");
-          ("event_id", `String event_id);
-          ("quarantined_at", `Float quarantined_at);
-          ("reason", `String reason);
-        ]
 
 let event_of_json json =
-  let* tag = Json_util.require_string json "event" in
-  match tag with
+  let* kind = Json_util.require_string json "event" in
+  match kind with
   | "recorded" ->
       let* item_json = required_object "item" json in
       let* item = item_of_json item_json in
       Ok (Recorded item)
-  | "resolved" ->
-      let* event_id = Json_util.require_string json "event_id" in
-      let* resolved_at = required_float "resolved_at" json in
-      let* reason = Json_util.require_string json "reason" in
-      Ok (Resolved { event_id; resolved_at; reason })
-  | "ignored" ->
-      let* event_id = Json_util.require_string json "event_id" in
-      let* ignored_at = required_float "ignored_at" json in
-      let* reason = Json_util.require_string json "reason" in
-      Ok (Ignored { event_id; ignored_at; reason })
-  | "quarantined" ->
-      let* event_id = Json_util.require_string json "event_id" in
-      let* quarantined_at = required_float "quarantined_at" json in
-      let* reason = Json_util.require_string json "reason" in
-      Ok (Quarantined { event_id; quarantined_at; reason })
-  | other -> Error (Printf.sprintf "unknown external attention event %S" other)
+  | other -> Error (Printf.sprintf "unknown external attention event: %s" other)
 
 let report_read_drop ~reason ~path ~detail =
   Safe_ops.report_persistence_read_drop_counted
@@ -409,7 +354,7 @@ let recorded_item_by_event_id events event_id =
   List.find_map
     (function
       | Recorded item when String.equal item.event_id event_id -> Some item
-      | Recorded _ | Resolved _ | Ignored _ | Quarantined _ -> None)
+      | Recorded _ -> None)
     events
 
 (* RFC-0377: [load_events] parses the whole file on every call, exactly the
@@ -432,7 +377,7 @@ let recorded_items_by_event_ids ~base_path ~keeper_name ~event_ids =
         when Hashtbl.mem wanted item.event_id
              && not (Hashtbl.mem found item.event_id) ->
         Hashtbl.add found item.event_id item
-      | Recorded _ | Resolved _ | Ignored _ | Quarantined _ -> ())
+      | Recorded _ -> ())
     events;
   List.filter_map
     (fun event_id ->
@@ -491,95 +436,7 @@ let record ~base_path (item : item) =
       | Ok () -> `Recorded
       | Error detail -> `Error detail)
 
-let now_or_default = function
-  | Some now -> now
-  | None -> Time_compat.now ()
-
-let append_many ~base_path ~keeper_name events =
-  try
-    ensure_attention_dir ~base_path;
-    let path = attention_path ~base_path ~keeper_name in
-    let jsons = List.map event_to_json events in
-    Fs_compat.append_jsonl_batch path jsons;
-    Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-      let detail = Printexc.to_string exn in
-      Log.Keeper.warn "keeper_external_attention: append batch failed for %s: %s"
-        (sanitize_name keeper_name) detail;
-      Error detail
-
-let mark_resolved ~base_path ~keeper_name ~event_ids ~reason ?now () =
-  let resolved_at = now_or_default now in
-  let events =
-    List.map
-      (fun event_id -> Resolved { event_id; resolved_at; reason })
-      event_ids
-  in
-  append_many ~base_path ~keeper_name events
-
-let mark_ignored ~base_path ~keeper_name ~event_ids ~reason ?now () =
-  let ignored_at = now_or_default now in
-  let events =
-    List.map
-      (fun event_id -> Ignored { event_id; ignored_at; reason })
-      event_ids
-  in
-  append_many ~base_path ~keeper_name events
-
-let mark_quarantined ~base_path ~keeper_name ~event_ids ~reason ?now () =
-  let quarantined_at = now_or_default now in
-  let events =
-    List.map
-      (fun event_id -> Quarantined { event_id; quarantined_at; reason })
-      event_ids
-  in
-  append_many ~base_path ~keeper_name events
-
-type projected_state =
-  | Pending of item
-  | Terminal
-
-let project_pending events =
-  let tbl : (string, projected_state) Hashtbl.t = Hashtbl.create 16 in
-  List.iter
-    (function
-      | Recorded item -> (
-          match Hashtbl.find_opt tbl item.event_id with
-          | Some Terminal -> ()
-          | Some (Pending _) | None ->
-              Hashtbl.replace tbl item.event_id (Pending item))
-      | Resolved { event_id; _ }
-      | Ignored { event_id; _ }
-      | Quarantined { event_id; _ } ->
-          Hashtbl.replace tbl event_id Terminal)
-    events;
-  Hashtbl.fold
-    (fun _ state acc ->
-      match state with
-      | Pending item -> item :: acc
-      | Terminal -> acc)
-    tbl []
-  |> List.sort (fun a b -> compare a.received_at b.received_at)
-
-let take limit items =
-  let rec loop n acc = function
-    | _ when n <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | item :: rest -> loop (n - 1) (item :: acc) rest
-  in
-  loop limit [] items
-
-let pending_for_keeper_result ~base_path ~keeper_name ~limit () =
-  let* events = load_events_result ~base_path ~keeper_name in
-  Ok (events |> project_pending |> take (max 0 limit))
-
-let pending_for_keeper ~base_path ~keeper_name ~limit () =
-  match
-    pending_for_keeper_result ~base_path ~keeper_name ~limit ()
-  with
-  | Ok pending -> pending
-  | Error msg ->
-      Log.Keeper.warn "keeper_external_attention: %s" msg;
-      []
+let store_read_error ~base_path ~keeper_name =
+  match load_events_result ~base_path ~keeper_name with
+  | Ok _ -> None
+  | Error detail -> Some detail

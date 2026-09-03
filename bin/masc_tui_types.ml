@@ -361,41 +361,52 @@ let message_display_at row =
   | Some _ | None -> if valid row.me_at then Some row.me_at else None
 ;;
 
+(* One moment per row, with a floor per request id so a turn's rows cannot
+   read as moving backwards.
+
+   Both tables were assoc lists. A conversation carries about as many request
+   ids as it has turns, and the floor list was rebuilt with
+   [List.remove_assoc] on every row: 561 rows over 200 turns walked a hundred
+   thousand pairs to answer a question that is one lookup per row. The tables
+   are created and dropped inside the call, so this is still a map from rows
+   to moments and nothing outside sees them. *)
 let chat_projected_timeline_ats messages =
-  let first_known_by_request =
-    List.fold_left
-      (fun known (row : msg_entry) ->
-        let request_id = row.me_request_id in
-        if String.equal request_id "" || List.mem_assoc request_id known
-        then known
-        else
-          match message_display_at row with
-          | Some at -> (request_id, at) :: known
-          | None -> known)
-      [] messages
-  in
-  let rec project floors reversed = function
+  let first_known_by_request = Hashtbl.create 64 in
+  List.iter
+    (fun (row : msg_entry) ->
+      let request_id = row.me_request_id in
+      if (not (String.equal request_id ""))
+         && not (Hashtbl.mem first_known_by_request request_id)
+      then
+        (* A row without a moment does not claim the id: a later row of the
+           same request can still be the first known one. *)
+        match message_display_at row with
+        | Some at -> Hashtbl.replace first_known_by_request request_id at
+        | None -> ())
+    messages;
+  let floors = Hashtbl.create 64 in
+  let rec project reversed = function
     | [] -> List.rev reversed
-    | row :: rest ->
+    | (row : msg_entry) :: rest ->
         let request_id = row.me_request_id in
         let raw_at = message_display_at row in
         if String.equal request_id ""
-        then project floors (raw_at :: reversed) rest
+        then project (raw_at :: reversed) rest
         else
           let projected_at =
-            match List.assoc_opt request_id floors, raw_at with
+            (* A floor recorded as [None] is a request known to have no
+               moment, which is not the same as a request not seen yet. *)
+            match Hashtbl.find_opt floors request_id, raw_at with
             | None, Some at -> Some at
-            | None, None -> List.assoc_opt request_id first_known_by_request
+            | None, None -> Hashtbl.find_opt first_known_by_request request_id
             | Some None, _ -> None
             | Some (Some floor), Some at -> Some (Float.max floor at)
             | Some (Some floor), None -> Some floor
           in
-          let floors =
-            (request_id, projected_at) :: List.remove_assoc request_id floors
-          in
-          project floors (projected_at :: reversed) rest
+          Hashtbl.replace floors request_id projected_at;
+          project (projected_at :: reversed) rest
   in
-  project [] [] messages
+  project [] messages
 ;;
 
 type msg_anchor =
@@ -437,51 +448,105 @@ let order_chat_turn_rows rows =
     rows
 ;;
 
-let same_turn_user left right =
-  match left.me_role, right.me_role with
-  | Message_user _, Message_user _ ->
-      String.equal left.me_request_id right.me_request_id
-      && String.equal left.me_text right.me_text
-  | (Message_keeper | Message_autonomous | Message_status | Message_error
-    | Message_tool | Message_thinking | Message_memory | Message_skill _), _
-  | _, (Message_keeper | Message_autonomous | Message_status | Message_error
-       | Message_tool | Message_thinking | Message_memory | Message_skill _) ->
+(* A turn while it is being assembled. The rows arrive in the order the
+   conversation carries them and are ordered once, when the turn is finished;
+   [order_chat_turn_rows] is a stable sort, so sorting once over the arrival
+   order lands every row where sorting after each arrival did.
+
+   [ctb_user_texts] is what recognises a user line the transcript already
+   holds. Two user rows of one request with the same text are one line
+   submitted twice -- the session copy and the server's persisted copy -- and
+   only one belongs on screen. Within a turn the request id is fixed, so the
+   text alone is the question, and the table answers it without walking the
+   turn. Non-user rows never fold: two tool rows with the same text are two
+   calls. *)
+type chat_turn_builder = {
+  ctb_request_id : string;
+  mutable ctb_rows_rev : msg_entry list;
+  mutable ctb_turn_sequence : int option;
+  ctb_user_texts : (string, unit) Hashtbl.t;
+}
+
+type chat_timeline_slot =
+  | Slot_turn of chat_turn_builder
+  | Slot_unowned of msg_entry
+  | Slot_memory of msg_entry
+
+let is_user_row row =
+  match row.me_role with
+  | Message_user _ -> true
+  | Message_keeper | Message_autonomous | Message_status | Message_error
+  | Message_tool | Message_thinking | Message_memory | Message_skill _ ->
       false
 ;;
 
-let append_chat_timeline_row items row =
-  if row.me_role = Message_memory
-  then items @ [ Chat_memory row ]
-  else if String.equal row.me_request_id ""
-  then items @ [ Chat_unowned row ]
-  else
-    let rec append reversed = function
-      | [] ->
-          List.rev
-            (Chat_turn
-               { ct_request_id = row.me_request_id
-               ; ct_turn_sequence = row.me_turn_sequence
-               ; ct_rows = [ row ]
-               }
-             :: reversed)
-      | Chat_turn turn :: rest
-        when String.equal turn.ct_request_id row.me_request_id ->
-          let rows =
-            if List.exists (same_turn_user row) turn.ct_rows
-            then turn.ct_rows
-            else order_chat_turn_rows (turn.ct_rows @ [ row ])
-          in
-          let ct_turn_sequence =
-            match turn.ct_turn_sequence, row.me_turn_sequence with
-            | None, sequence | sequence, None -> sequence
-            | Some left, Some right when Int.equal left right -> Some left
-            | Some _, Some _ -> None
-          in
-          List.rev_append reversed
-            (Chat_turn { turn with ct_turn_sequence; ct_rows = rows } :: rest)
-      | item :: rest -> append (item :: reversed) rest
-    in
-    append [] items
+(* Two rows of one turn can disagree about which turn of the conversation it
+   was. A disagreement is not a tie to break: the turn stops claiming a
+   number rather than picking one of them. *)
+let merge_turn_sequence held arriving =
+  match held, arriving with
+  | None, sequence | sequence, None -> sequence
+  | Some left, Some right when Int.equal left right -> Some left
+  | Some _, Some _ -> None
+;;
+
+(* The conversation's rows as turns, journal lines and unowned lines, in the
+   order each first appears.
+
+   Assembling this walked the items built so far for every row and rebuilt
+   the list to put one row in one turn, so a conversation cost the square of
+   its length. The table finds the turn a row belongs to in one lookup; the
+   slots keep the order the walk found. *)
+let chat_timeline_slots rows =
+  let slots_rev = ref [] in
+  let builders : (string, chat_turn_builder) Hashtbl.t = Hashtbl.create 64 in
+  List.iter
+    (fun (row : msg_entry) ->
+      if row.me_role = Message_memory
+      then slots_rev := Slot_memory row :: !slots_rev
+      else if String.equal row.me_request_id ""
+      then slots_rev := Slot_unowned row :: !slots_rev
+      else
+        match Hashtbl.find_opt builders row.me_request_id with
+        | Some builder ->
+            (* The sequence is merged even when the row itself folds into a
+               line already held: a duplicate still carries what it knows
+               about which turn this was. *)
+            builder.ctb_turn_sequence <-
+              merge_turn_sequence builder.ctb_turn_sequence row.me_turn_sequence;
+            let folds =
+              is_user_row row && Hashtbl.mem builder.ctb_user_texts row.me_text
+            in
+            if not folds
+            then begin
+              if is_user_row row
+              then Hashtbl.replace builder.ctb_user_texts row.me_text ();
+              builder.ctb_rows_rev <- row :: builder.ctb_rows_rev
+            end
+        | None ->
+            let user_texts = Hashtbl.create 4 in
+            if is_user_row row then Hashtbl.replace user_texts row.me_text ();
+            let builder =
+              { ctb_request_id = row.me_request_id
+              ; ctb_rows_rev = [ row ]
+              ; ctb_turn_sequence = row.me_turn_sequence
+              ; ctb_user_texts = user_texts
+              }
+            in
+            Hashtbl.replace builders row.me_request_id builder;
+            slots_rev := Slot_turn builder :: !slots_rev)
+    rows;
+  List.rev_map
+    (function
+      | Slot_memory row -> Chat_memory row
+      | Slot_unowned row -> Chat_unowned row
+      | Slot_turn builder ->
+          Chat_turn
+            { ct_request_id = builder.ctb_request_id
+            ; ct_turn_sequence = builder.ctb_turn_sequence
+            ; ct_rows = order_chat_turn_rows (List.rev builder.ctb_rows_rev)
+            })
+    !slots_rev
 ;;
 
 type projected_chat_row =
@@ -549,10 +614,7 @@ let chat_timeline ~loaded ~session ~queued_request_ids =
   let visible_session =
     List.filter (fun row -> not (queued row.me_request_id)) session
   in
-  let items =
-    List.fold_left append_chat_timeline_row [] (loaded @ visible_session)
-  in
-  { ctl_items = items }
+  { ctl_items = chat_timeline_slots (loaded @ visible_session) }
 ;;
 
 let chat_timeline_rows timeline =

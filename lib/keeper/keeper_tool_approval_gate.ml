@@ -90,9 +90,13 @@ let create ~registry ~late_approvals ~publish ~clock ~keeper_name ~timeout_sec =
           | Registry.Answered Registry.Deny ->
               (Agent_core.Hooks.Denied, Registry.decision_to_string Registry.Deny)
           | Registry.Timed_out ->
-              (* The turn ends here, but the ask's description is kept so an
-                 operator's late answer is not discarded: it will settle the
-                 identical retried call once. *)
+              (* Timing out blocks this call, not the turn: Agent Core turns
+                 [Hooks.Timed_out] into a blocked tool result carrying
+                 "Tool execution approval timed out" and reports
+                 [Continue_after_batch], so the Keeper reads that result and
+                 carries on. The ask's description is kept so an operator's
+                 late answer is not discarded: it settles the identical call
+                 once, whenever that call comes back. *)
               Late.note_timed_out late_approvals ~now:(Eio.Time.now clock)
                 ~keeper_name ~tool_call_id
                 ~tool_name:request.tool_name ~args:request.input ();

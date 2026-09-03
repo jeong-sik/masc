@@ -112,6 +112,28 @@ let init_keeper_bridge =
 
 let keeper_matrix_owner = "keeper-tool-matrix"
 
+(* Which sandbox the cases run in. Docker on a CI runner, microVM on a laptop
+   that has Apple's container runtime and no Docker daemon -- the suite has to
+   reach a backend that is actually up, or all 88 cases report the same probe
+   failure and none of them reports a tool.
+
+   [MASC_MATRIX_SANDBOX] names it; the default is Docker, which is what CI
+   has. Reading an env var here rather than probing keeps the choice explicit
+   in the run that made it. *)
+let matrix_sandbox_profile () =
+  match Sys.getenv_opt "MASC_MATRIX_SANDBOX" with
+  | None -> Masc.Keeper_types_profile.Docker
+  | Some raw ->
+    (match Masc.Keeper_types_profile.sandbox_profile_of_string (String.trim raw) with
+     | Some profile -> profile
+     | None ->
+       failwith
+         (Printf.sprintf
+            "MASC_MATRIX_SANDBOX=%S is not one of %s"
+            raw
+            (String.concat ", " Masc.Keeper_types_profile.valid_sandbox_profile_strings)))
+;;
+
 let make_meta ?(name = keeper_matrix_owner) () =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -121,7 +143,13 @@ let make_meta ?(name = keeper_matrix_owner) () =
           ("trace_id", `String "keeper-tool-matrix-trace");
         ])
   with
-  | Ok meta -> meta
+  | Ok meta ->
+    (* The decoder fills [sandbox_profile] with a placeholder its own comment
+       calls a bug to read as authority, and nothing here overwrote it, so
+       every case ran under whatever that placeholder happened to be --
+       Docker. What this suite measures is the tools, not a backend, so it
+       says which backend it wants instead of inheriting one it never chose. *)
+    { meta with sandbox_profile = matrix_sandbox_profile () }
   | Error err -> failwith ("make_meta failed: " ^ err)
 
 let all_keeper_tool_schemas_raw () =

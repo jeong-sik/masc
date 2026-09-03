@@ -238,7 +238,11 @@ let split_slots body =
         | None -> gather acc None [] rest
         (* prose before the first marker *) ) )
   in
-  gather [] None [] (List.rev lines)
+  (* Forward, not [List.rev lines]. A marker opens the paragraph that follows
+     it, so walking backwards pairs each marker with the paragraph above it:
+     the first slot came out empty and every later one carried its
+     predecessor's body. *)
+  gather [] None [] lines
 
 let slot_paragraph body marker =
   split_slots body
@@ -363,7 +367,8 @@ type prompt_snapshot = {
    mutex.  Intended for batch [list_prompts]/[validate_prompt_templates]
    call sites that previously held [with_mutex] across [read_file_if_exists]. *)
 let resolved_of_snapshot (s : prompt_snapshot) =
-  let file_path = prompt_source_path s.snap_key in
+  (* The path was read here until #32789 moved the read into
+     [file_value_of_key], which resolves it itself. *)
   let file_value = file_value_of_key s.snap_key in
   build_resolved_from_snapshot
     ~key:s.snap_key

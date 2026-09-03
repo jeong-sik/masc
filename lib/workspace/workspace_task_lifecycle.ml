@@ -111,10 +111,25 @@ let decide
   | Masc_domain.Cancel, Masc_domain.Cancelled _ -> ok task_status
   | Masc_domain.Cancel, Masc_domain.Todo ->
     ok (cancelled_status ~agent_name ~now ~reason)
+  (* A producer stops its own work the same way it finishes it: by submitting
+     the claim and waiting for a verdict. Cancelling outright would give a
+     Keeper one terminal state it can reach alone while [Done_action] refuses
+     every lane that is not a submission — "I could not do this" would settle
+     itself and "I did this" would not. *)
   | ( Masc_domain.Cancel
-    , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _}) ) ->
+    , Masc_domain.Claimed { assignee; claimed_at = started_at } )
+  | ( Masc_domain.Cancel
+    , Masc_domain.InProgress { assignee; started_at } ) ->
     if same_agent assignee
-    then ok (cancelled_status ~agent_name ~now ~reason)
+    then
+      ok
+        (Masc_domain.AwaitingVerification
+           { assignee
+           ; started_at
+           ; submitted_at = now
+           ; intent = Masc_domain.Cancel_task
+           ; verification_id = new_verification_id ()
+           })
     else Error Invalid_transition
   | Masc_domain.Cancel, Masc_domain.AwaitingVerification { assignee; _ } ->
     if same_agent assignee
@@ -137,6 +152,7 @@ let decide
            { assignee
            ; started_at = claimed_at
            ; submitted_at = now
+           ; intent = Masc_domain.Complete_task
            ; verification_id = new_verification_id ()
            })
     else Error Invalid_transition
@@ -149,6 +165,7 @@ let decide
            { assignee
            ; started_at
            ; submitted_at = now
+           ; intent = Masc_domain.Complete_task
            ; verification_id = new_verification_id ()
            })
     else Error Invalid_transition
@@ -172,6 +189,7 @@ let decide
            { assignee
            ; started_at
            ; submitted_at = now
+           ; intent = Masc_domain.Complete_task
            ; verification_id = new_verification_id ()
            })
     else Error Invalid_transition
@@ -220,7 +238,7 @@ let decide_verdict
   in
   match task_status with
   | Masc_domain.AwaitingVerification
-      { assignee; started_at; verification_id = actual_verification_id; _ } ->
+      { assignee; started_at; intent; verification_id = actual_verification_id; _ } ->
     if not (String.equal expected_verification_id actual_verification_id)
     then
       Error
@@ -228,11 +246,20 @@ let decide_verdict
            { expected = expected_verification_id; actual = actual_verification_id })
     else
       (match verdict with
+       (* One verdict, two terminals. The obligation records which question
+          was asked, so an approval ends the Task the way the producer asked
+          rather than the way this branch used to assume. *)
        | Masc_domain.Verdict_approved ->
+         let new_status =
+           match intent with
+           | Masc_domain.Complete_task -> done_status ~assignee ~now ~notes
+           | Masc_domain.Cancel_task ->
+             cancelled_status ~agent_name:assignee ~now ~reason:notes
+         in
          provenance
            ~producer:assignee
            ~verification_id:actual_verification_id
-           { new_status = done_status ~assignee ~now ~notes; set_current = None }
+           { new_status; set_current = None }
        | Masc_domain.Verdict_rejected { reason } ->
          if String.equal (String.trim reason) ""
          then Error Verdict_rejection_reason_required

@@ -344,14 +344,38 @@ let awaiting_status_json =
     ; ("assignee", `String "producer")
     ; ("started_at", `String "2026-07-12T23:59:00Z")
     ; ("submitted_at", `String "2026-07-13T00:00:00Z")
+    ; ("intent", `String "complete")
     ; ("verification_id", `String "vrf-006")
     ]
+
+(* [intent] is required rather than defaulted. A row without it is refused,
+   because reading its absence as a completion would turn a cancellation
+   waiting for a verdict into a completion at the moment one lands. *)
+let test_task_status_awaiting_requires_intent () =
+  let without_intent =
+    match awaiting_status_json with
+    | `Assoc fields -> `Assoc (List.remove_assoc "intent" fields)
+    | _ -> assert false
+  in
+  (match Masc_domain.task_status_of_yojson without_intent with
+   | Error _ -> ()
+   | Ok _ -> fail "awaiting_verification without intent must be refused");
+  let unknown_intent =
+    match awaiting_status_json with
+    | `Assoc fields ->
+      `Assoc (("intent", `String "abandon") :: List.remove_assoc "intent" fields)
+    | _ -> assert false
+  in
+  match Masc_domain.task_status_of_yojson unknown_intent with
+  | Error _ -> ()
+  | Ok _ -> fail "an unrecognised intent must be refused, never defaulted"
+;;
 
 let test_task_status_awaiting_round_trip_preserves_start () =
   match Masc_domain.task_status_of_yojson awaiting_status_json with
   | Ok
       (Masc_domain.AwaitingVerification
-         { assignee; started_at; submitted_at; verification_id }) ->
+         { assignee; started_at; submitted_at; intent = Complete_task; verification_id }) ->
     check string "assignee" "producer" assignee;
     check string "started_at" "2026-07-12T23:59:00Z" started_at;
     check string "submitted_at" "2026-07-13T00:00:00Z" submitted_at;
@@ -363,7 +387,7 @@ let test_task_status_awaiting_round_trip_preserves_start () =
          awaiting_status_json
          (Masc_domain.task_status_to_yojson
             (Masc_domain.AwaitingVerification
-               { assignee; started_at; submitted_at; verification_id })))
+               { assignee; started_at; submitted_at; intent = Complete_task; verification_id })))
   | Ok _ | Error _ -> fail "awaiting_verification must decode with its original start"
 
 let test_task_status_awaiting_rejects_missing_or_invalid_start () =
@@ -1484,6 +1508,7 @@ let test_task_claim_awaiting_verification_is_pending_verdict () =
       assignee = "producer";
       started_at = "2026-07-12T23:59:00Z";
       submitted_at = "2026-07-13T00:00:00Z";
+      intent = Masc_domain.Complete_task;
       verification_id = "vrf-006";
     };
     priority = 1;
@@ -1659,6 +1684,8 @@ let () =
       test_case "in_progress" `Quick test_task_status_to_yojson_in_progress;
       test_case "awaiting preserves start" `Quick
         test_task_status_awaiting_round_trip_preserves_start;
+      test_case "awaiting requires intent" `Quick
+        test_task_status_awaiting_requires_intent;
       test_case "done with notes" `Quick test_task_status_to_yojson_done_with_notes;
       test_case "done no notes" `Quick test_task_status_to_yojson_done_no_notes;
       test_case "cancelled with reason" `Quick test_task_status_to_yojson_cancelled_with_reason;

@@ -31,6 +31,7 @@ let awaiting =
     { assignee = owner
     ; started_at = now
     ; submitted_at = now
+    ; intent = Complete_task
     ; verification_id = "vrf-1"
     }
 ;;
@@ -64,21 +65,23 @@ let test_done_has_no_non_verification_lane () =
   |> expect_error L.Verification_submission_required
 ;;
 
-(* Cancel had no test of its own, and it does not answer the way Done does.
-   Done refuses every non-verification lane; Cancel ends a Task the assignee
-   holds with nothing checking the claim. Pinned here so the asymmetry is a
-   decision someone made rather than something a reader has to notice. *)
-let cancelled_by = function
-  | Ok { L.new_status = D.Cancelled { cancelled_by; _ }; _ } -> cancelled_by
-  | Ok _ -> failwith "cancel did not produce Cancelled"
+(* Cancel had no test of its own. It now answers the way Done does: a
+   producer submits the stop and waits for a verdict, and the same verdict
+   path ends the Task as Cancelled rather than Done because the obligation
+   records which question was asked. *)
+let awaiting_cancel = function
+  | Ok { L.new_status = D.AwaitingVerification { intent = D.Cancel_task; verification_id; _ }; _ } ->
+    verification_id
+  | Ok { L.new_status = D.AwaitingVerification { intent = D.Complete_task; _ }; _ } ->
+    failwith "cancel submitted as a completion"
+  | Ok _ -> failwith "cancel did not wait for a verdict"
   | Error _ -> failwith "cancel was refused"
 ;;
 
-let test_cancel_ends_an_owned_task_without_verification () =
-  let actor = cancelled_by (decide ~same_agent:true ~task_status:in_progress ~action:D.Cancel ()) in
-  if not (String.equal actor owner)
-  then failwith "cancel recorded the wrong actor";
-  (* The same state refuses Done outright. *)
+let test_cancel_waits_for_a_verdict_like_done_does () =
+  let vrf = awaiting_cancel (decide ~same_agent:true ~task_status:in_progress ~action:D.Cancel ()) in
+  if not (String.equal vrf "vrf-1") then failwith "cancel must mint a verification id";
+  (* Neither terminal is reachable alone from the same state. *)
   decide ~same_agent:true ~task_status:in_progress ~action:D.Done_action ()
   |> expect_error L.Verification_submission_required
 ;;
@@ -90,20 +93,61 @@ let test_cancel_of_someone_elses_task_is_refused () =
   |> expect_error L.Invalid_transition
 ;;
 
-(* An unclaimed Task has no assignee, so [same_agent] answers for nobody and
-   the cancel lands regardless. No Keeper tool reaches this today — the
-   Keeper surface has claim/create/done/release and no cancel — so the only
-   callers are operator clients. A Keeper-facing cancel would inherit this. *)
-let test_cancel_of_an_unclaimed_task_asks_no_owner () =
-  let actor = cancelled_by (decide ~same_agent:false ~task_status:D.Todo ~action:D.Cancel ()) in
-  if not (String.equal actor owner)
-  then failwith "cancel of a Todo recorded the wrong actor"
-;;
-
 let test_cancel_cannot_undo_a_finished_task () =
   let done_status = D.Done { assignee = owner; completed_at = now; notes = None } in
   decide ~same_agent:true ~task_status:done_status ~action:D.Cancel ()
   |> expect_error L.Invalid_transition
+;;
+
+(* The verdict is where the two intents part. Same authority, same call, two
+   terminals — and a rejection returns a cancellation to its producer exactly
+   as it returns a completion. *)
+let awaiting_with intent =
+  D.AwaitingVerification
+    { assignee = owner
+    ; started_at = now
+    ; submitted_at = now
+    ; intent
+    ; verification_id = "vrf-1"
+    }
+;;
+
+let approve status =
+  L.decide_verdict
+    ~authority:(D.Human_operator { operator_id = "op-1" })
+    ~verdict:D.Verdict_approved
+    ~task_id:"task-1"
+    ~verification_id:"vrf-1"
+    ~task_status:status
+    ~now
+    ~notes:"the premise no longer holds"
+;;
+
+let test_approval_ends_the_task_the_way_it_was_asked () =
+  (match approve (awaiting_with D.Complete_task) with
+   | Ok { decision = { new_status = D.Done _; _ }; _ } -> ()
+   | Ok _ | Error _ -> failwith "an approved completion must end as Done");
+  match approve (awaiting_with D.Cancel_task) with
+  | Ok { decision = { new_status = D.Cancelled { cancelled_by; reason; _ }; _ }; _ }
+    when String.equal cancelled_by owner
+         && reason = Some "the premise no longer holds" -> ()
+  | Ok _ | Error _ -> failwith "an approved cancellation must end as Cancelled"
+;;
+
+let test_a_rejected_cancellation_returns_to_its_producer () =
+  match
+    L.decide_verdict
+      ~authority:(D.System_llm_agent { agent_run_id = "judge-run-cancel" })
+      ~verdict:(D.Verdict_rejected { reason = "the task is still doable" })
+      ~task_id:"task-1"
+      ~verification_id:"vrf-1"
+      ~task_status:(awaiting_with D.Cancel_task)
+      ~now
+      ~notes:""
+  with
+  | Ok { decision = { new_status = D.InProgress { assignee; _ }; _ }; _ }
+    when String.equal assignee owner -> ()
+  | Ok _ | Error _ -> failwith "a refused cancellation must go back to the producer"
 ;;
 
 let test_verification_preserves_original_start_time () =
@@ -125,7 +169,7 @@ let test_verification_preserves_original_start_time () =
            && String.equal submitted_at now
            && String.equal verification_id "vrf-1" ->
       D.AwaitingVerification
-        { assignee = owner; started_at; submitted_at; verification_id }
+        { assignee = owner; started_at; submitted_at; intent = Complete_task; verification_id }
     | Ok _ | Error _ -> failwith "submission must preserve the producer start time"
   in
   match
@@ -156,6 +200,7 @@ let test_awaiting_metrics_use_original_start_time () =
          { assignee = owner
          ; started_at = original_started_at
          ; submitted_at = "2026-07-13T00:00:00Z"
+         ; intent = Complete_task
          ; verification_id = "vrf-metrics"
          })
   in
@@ -319,8 +364,9 @@ let () =
   test_verdict_rejects_stale_verification_id ();
   test_claim_on_awaiting_is_refused ();
   test_awaiting_is_claimable_by_nobody ();
-  test_cancel_ends_an_owned_task_without_verification ();
+  test_cancel_waits_for_a_verdict_like_done_does ();
   test_cancel_of_someone_elses_task_is_refused ();
-  test_cancel_of_an_unclaimed_task_asks_no_owner ();
   test_cancel_cannot_undo_a_finished_task ();
+  test_approval_ends_the_task_the_way_it_was_asked ();
+  test_a_rejected_cancellation_returns_to_its_producer ();
   Printf.printf "workspace_task_lifecycle: all tests passed\n%!"

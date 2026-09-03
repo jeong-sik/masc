@@ -1219,12 +1219,29 @@ let split_headers_body response =
 
 let is_success_http_status status_code = status_code >= 200 && status_code < 300
 
+(* A refused request usually answers [{"ok":false,"error":"..."}] with a
+   4xx or 5xx status. Pasting that envelope into the pane hands the operator
+   JSON to read when the server already wrote the sentence, so the sentence
+   wins and the envelope is the fallback. *)
+let json_error_sentence body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields -> (
+    match List.assoc_opt "error" fields with
+    | Some (`String message) when String.trim message <> "" -> Some (String.trim message)
+    | Some _ | None -> None)
+  | _ -> None
+  | exception Yojson.Json_error _ -> None
+;;
+
 let http_status_error ~status_code ~body =
   let body = String.trim body in
   let detail =
-    if body = "" then "empty response body"
-    else if String.length body > 240 then String.sub body 0 240 ^ "..."
-    else body
+    match json_error_sentence body with
+    | Some sentence -> sentence
+    | None ->
+      if body = "" then "empty response body"
+      else if String.length body > 240 then String.sub body 0 240 ^ "..."
+      else body
   in
   Printf.sprintf "HTTP %d: %s" status_code detail
 
@@ -6502,12 +6519,14 @@ type preset_restore_report =
 
 (* The routes answer [{ok:false, error}] on a refused request; read that
    before any field, so the operator sees the server's sentence. *)
+(* [ok] is false on a refusal, but the auth and warm-up answers carry only
+   [error] and ride a 200, so an [error] field is an error whatever [ok]
+   says. *)
 let preset_ok json =
-  match member "ok" json with
-  | `Bool false ->
-    (match member "error" json with
-     | `String message -> Error message
-     | _ -> Error "the server refused the request without a reason")
+  match (member "ok" json, member "error" json) with
+  | `Bool false, `String message -> Error message
+  | `Bool false, _ -> Error "the server refused the request without a reason"
+  | _, `String message when String.trim message <> "" -> Error (String.trim message)
   | _ -> Ok ()
 ;;
 

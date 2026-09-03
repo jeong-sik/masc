@@ -309,10 +309,22 @@ provider_availability_label() {
   case "${PROVIDER_KINDS[$idx]}" in
     subscription)
       local cmd="${PROVIDER_COMMANDS[$idx]}"
-      if [ -n "$cmd" ] && command -v "$cmd" >/dev/null 2>&1; then
-        echo "installed"
-      else
+      if [ -z "$cmd" ] || ! command -v "$cmd" >/dev/null 2>&1; then
         echo "not installed"
+      else
+        # Installed -- also ask its own CLI whether it is signed in. A login
+        # check has no drift-safe shell form, so it goes through the masc
+        # runtime-probe subcommand, which reuses the server's official-client
+        # login probe. 0=signed in, 1=not signed in; anything else (probe not
+        # applicable) leaves it at the plain "installed" the CLI presence proved.
+        local probe_status=0
+        "$DEST" runtime-probe --base-path "$BASE_PATH" \
+          "${PROVIDER_DEFAULT_RUNTIME_IDS[$idx]}" >/dev/null 2>&1 || probe_status=$?
+        case "$probe_status" in
+          0) echo "installed, signed in" ;;
+          1) echo "installed, not signed in" ;;
+          *) echo "installed" ;;
+        esac
       fi
       ;;
     *)

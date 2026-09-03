@@ -1239,7 +1239,7 @@ let make_instruction_skill_tool
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
     ~base_path:config.base_path
-    ~model_projection:Tool_output.bounded_inline_model_projection
+    ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
     ~name
     ~description
     ~input_schema:skill_reference_input_schema

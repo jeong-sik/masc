@@ -350,7 +350,7 @@ describe('KeeperLaneInventoryPanel', () => {
         waiting_on: [
           {
             keeper_name: 'partial-lane',
-            source: 'external_attention',
+            source: 'event_queue_pending',
             waiting_on: 'discord:ops',
             what: 'discord:ops 멘션',
             wake_producer: null,

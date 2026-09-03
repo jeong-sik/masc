@@ -140,6 +140,24 @@ let agents_dir_from_base_path ~base_path =
     result larger than it arrives as pages the model can ask for. *)
 let max_tool_result_wire_bytes = 16_384
 
+(** How much of one tool result MASC carries inline when it owns the wire.
+
+    On an agent-core lane MASC builds the request itself, so no CLI is sitting
+    between the model and the result and nothing spills it to a file. The
+    reason {!max_tool_result_wire_bytes} is low does not exist here, and
+    applying it anyway turns a result the model could have read into a blob it
+    has to fetch back — an extra round trip in the same turn that produced it.
+
+    Measured over tool_calls 2026-09-01..03: 702 of 20,117 agent-core results
+    landed between the two ceilings. 211 of those were {!Keeper_artifact_read}
+    pages, which the wire ceiling now caps below 16KB anyway, leaving about
+    491 results over three days — near 12% of agent-core turns — that become
+    blobs for no reason a harness imposes.
+
+    This bounds context growth rather than avoiding a spill, which is why it
+    is a separate number and not the same one scaled. *)
+let max_agent_core_inline_result_bytes = 65_536
+
 (** Acceptance ceiling for one captured subprocess stream, split head/tail.
 
     Head is an [Exec_buffer] head buffer, which grows only as far as the

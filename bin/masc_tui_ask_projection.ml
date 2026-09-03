@@ -45,6 +45,26 @@ let summarize_answer draft ~(row : Decode.ask_row) =
   in
   String.concat "; " (List.filter_map per_question row.ar_questions)
 
+let open_ask_ids (snapshot : Decode.asks_snapshot) =
+  List.filter_map
+    (fun (row : Decode.ask_row) ->
+      match row.ar_resolution with
+      | Decode.Ask_open -> Some row.ar_id
+      | Decode.Ask_answered _ | Decode.Ask_withdrawn _ -> None)
+    snapshot.asn_rows
+
+(* Ask ids open in [current] that were not open in [previous] — the questions
+   that arrived since the last read. A poll that re-reads the same open asks
+   returns none, and a first read (no previous) returns none rather than every
+   open ask, so a caller rings once as each new question arrives and not for
+   the state the session started in. *)
+let newly_opened_ask_ids ~previous ~current =
+  match previous with
+  | None -> []
+  | Some previous ->
+      let before = open_ask_ids previous in
+      List.filter (fun id -> not (List.mem id before)) (open_ask_ids current)
+
 let without question_id responses =
   List.filter (fun (id, _) -> not (String.equal id question_id)) responses
 

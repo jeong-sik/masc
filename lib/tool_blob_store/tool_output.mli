@@ -130,6 +130,13 @@ val bounded_inline_model_projection : model_projection
 (** Keep a result inline only while it remains inside that same canonical
     tool-output budget. This is for explicit artifact-page readers. *)
 
+val agent_core_model_projection : model_projection
+(** {!default_model_projection} widened to {!Common.max_agent_core_inline_result_bytes}.
+
+    Applies when MASC owns the wire, where no CLI spills an oversized result
+    and the lower ceiling only forces a blob the model must read back. The
+    lane is resolved where it is known, not here. *)
+
 val marker_prefix : string
 (** Exact wire-grammar introducer [[masc:blob sha256=]. Prose placeholders
     such as [[masc:blob ...]] are not artifact references. *)

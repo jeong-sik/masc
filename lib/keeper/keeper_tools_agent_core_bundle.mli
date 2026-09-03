@@ -18,12 +18,22 @@ val make_tool_bundle_for_capability_surface
   -> ?composition_plan_index:Keeper_tool_composition_plan_index.t
   -> ?skill_activation_context:Keeper_skill_activation_recorder.t
   -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
+  -> ?checkpoint_owner:(unit -> Runtime_execution.checkpoint_owner option)
   -> capability_surface:Keeper_capability_surface.t
   -> unit
   -> Keeper_tools_agent_core.tool_bundle
 (** Build a bundle from the immutable Tool and Skill authority frozen by the
     turn caller. Named compositions receive its exact descriptor list, so they
-    cannot widen the configured Tool Group surface. *)
+    cannot widen the configured Tool Group surface.
+
+    [checkpoint_owner] is asked on each tool call, not when the bundle is
+    built: the turn resolves its runtime afterwards, and a heterogeneous lane
+    fallback can change the answer between attempts. It decides how large a
+    result stays inline — {!Common.max_tool_result_wire_bytes} when a CLI owns
+    the loop and would spill anything larger to a file the Keeper cannot open,
+    {!Common.max_agent_core_inline_result_bytes} when MASC owns the wire and
+    nothing spills. Omitted, or before an attempt has been observed, the
+    descriptor's own projection stands, which is the narrower answer. *)
 
 module For_testing : sig
   val make_tool_bundle

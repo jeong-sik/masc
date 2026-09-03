@@ -445,6 +445,12 @@ let decode_current_meta fields =
          as [remote_ssh] rejects that outright. [Network_inherit] is the value
          every profile accepts, which is what a placeholder has to be. *)
       ; network_mode = Keeper_types_profile.Network_inherit
+      (* A placeholder for the same reason the profile above is one: which
+         microVM runtime serves a keeper is TOML-owned, and durable meta is
+         not its authority. [None] rather than a runtime because there is no
+         value here that is safe to dispatch on — a stored name would be the
+         drift the comment above describes, in a second field. *)
+      ; microvm_backend = None
       ; mention_targets = []
       ; proactive = { enabled = default_proactive_enabled }
       ; always_allow = None

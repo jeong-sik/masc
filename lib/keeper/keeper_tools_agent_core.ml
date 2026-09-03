@@ -46,6 +46,7 @@ type tool_bundle =
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
   ; gate_replay_delivery : gate_replay_delivery option
+  ; turn_sandbox_factory : Keeper_sandbox_factory.t option
   }
 
 (** Tool usage now lives in Keeper_registry (per-entry tool_usage Hashtbl).

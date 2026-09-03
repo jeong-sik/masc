@@ -21,7 +21,11 @@ let operation_id = function
 ;;
 
 let definition operation ~read_only (loaded : Tool_definition_toml.loaded) =
-  { operation; schema = loaded.schema; keeper_projection = loaded.keeper_projection; read_only }
+  { operation
+  ; schema = loaded.schema
+  ; keeper_projection = loaded.keeper_projection
+  ; read_only
+  }
 ;;
 
 let definitions : definition list =

@@ -235,8 +235,13 @@ let test_a_block_keeps_the_pane_foreground () =
   let payload = {|{"output":"line one\nline two"}|} in
   let rendered = Tool_detail.structured ~palette:marked payload in
   check bool "the block marker recedes" true (holds "<pun>|<->" rendered);
+  (* Four spaces, not two: the block sits one level inside the key that owns
+     it, which the rows contract in [test_multiline_strings_become_blocks]
+     already pins. This assertion is about the line carrying no palette
+     wrapper, so it has to quote the indent the renderer actually emits or it
+     fails for the wrong reason. *)
   check bool "the block's own line is unpainted" true
-    (holds "\n  line one" rendered)
+    (holds "\n    line one" rendered)
 
 let () =
   run

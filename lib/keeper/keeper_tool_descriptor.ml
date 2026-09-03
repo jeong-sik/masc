@@ -1679,7 +1679,6 @@ let masc_agent_timeline_descriptor
     ?(keeper_model_projection = Internal_name)
     ?ordinary_execution_mode
     name
-    description
     ~readonly
   =
   cluster_descriptor
@@ -2332,7 +2331,7 @@ let internal_descriptors : t list =
        "masc_agent_timeline"
        (* No composable output, for the same reason as masc_agent_card above:
           off the model surface since #29681, so no plan can name it. *)
-       "Read agent timeline events." ~readonly:true)
+       ~readonly:true)
   (* ── RFC-0234 — scheduled internal automation (6 entries) ─────── *)
   ]
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions

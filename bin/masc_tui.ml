@@ -8070,6 +8070,23 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Switch_keeper _ ->
            (* The switch handler owns the view change. *)
            set_msg_scroll state 0
+       (* The preset answers are chat notices — a listing, a saved line, a
+          restore report. Typed from the roster they would land in a pane the
+          operator is not looking at, so the chat pane comes forward the way
+          it does for a message. *)
+       | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
+       | Masc_tui_command.Preset_save_missing_name
+       | Masc_tui_command.Preset_restore _
+       | Masc_tui_command.Preset_restore_missing_name ->
+           set_msg_scroll state 0;
+           if state.view <> Keepers Keeper_message then begin
+             match state.msg_target_keeper_name with
+             | Some keeper_name ->
+                 reset_message_file_changes state keeper_name;
+                 launch_keeper_history_load state ~mailbox ~keeper_name
+             | None -> ()
+           end;
+           state.view <- Keepers Keeper_message
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
        | Masc_tui_command.Open_settings
@@ -8083,10 +8100,6 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Attach_image _ | Masc_tui_command.Attach_image_missing_path
-       | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
-       | Masc_tui_command.Preset_save_missing_name
-       | Masc_tui_command.Preset_restore _
-       | Masc_tui_command.Preset_restore_missing_name
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
               the keeper, and the answer lands in Recent Events. *)

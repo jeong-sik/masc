@@ -1250,10 +1250,37 @@ let render_overview (state : state) =
            number above the list it counts is not a summary of anything the
            reader cannot already see; where the panel cannot fit them all,
            the panel's own title says so. *)
+        (* Nine Keepers with two that had stopped doing anything and one an
+           operator had paused read exactly like nine running ones. The
+           briefing has carried the control plane's word for each of them all
+           along; only the number reached this row.
+
+           The states that are not "active" are the ones an operator acts on,
+           so those are the ones named. A fleet where every Keeper is active
+           says only its number -- an always-on breakdown would be texture,
+           the way an always-on tab badge would be. *)
+        let keeper_note =
+          let l = o.ov_keeper_liveness in
+          let parts =
+            List.filter_map
+              (fun (count, label) ->
+                if count = 0 then None
+                else Some (Printf.sprintf "%d %s" count label))
+              [ (l.klc_paused, "paused")
+              ; (l.klc_offline, "offline")
+              ; (l.klc_inactive, "inactive")
+              ; (l.klc_idle, "idle")
+              ; (l.klc_unreadable, "unreadable")
+              ]
+          in
+          match parts with
+          | [] -> ""
+          | _ :: _ -> Printf.sprintf " (%s)" (String.concat ", " parts)
+        in
         Printf.sprintf
-          "  Health: %s%s%s  Keepers: %d  MCP agents: %d  Approvals: %s"
-          health_color health_label Ansi.reset o.ov_keepers o.ov_mcp_agents
-          approval_count
+          "  Health: %s%s%s  Keepers: %d%s  MCP agents: %d  Approvals: %s"
+          health_color health_label Ansi.reset o.ov_keepers keeper_note
+          o.ov_mcp_agents approval_count
   in
   box_line buf cols summary_line;
 

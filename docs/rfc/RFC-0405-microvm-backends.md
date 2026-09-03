@@ -49,7 +49,7 @@ let command_argv () = [ "container" ]
 |---|---|---|---|---|
 | Apple `container` (현재) | Virtualization.framework | `run` `exec` `stop` `delete` `inspect` `volume *` `image *` | macOS 26+ 전용 | v1.0 (2026-06) |
 | microsandbox | libkrun | `run` `exec` `stop` `rm` `inspect` `ls` `image ls/rm` `pull` | macOS(AS) · Linux(KVM) · Windows(WHP) | **beta — breaking changes 명시** |
-| gondolin | QEMU (krun 선택) | `list` `attach` `snapshot` `bash` + TS SDK | macOS · Linux, arm64 위주 | **experimental** |
+| gondolin | QEMU (krun 선택) | `exec` `bash` `list` `attach` — **detached 부팅 없음** | macOS · Linux, arm64 위주 | experimental · **이 모양에서 탈락** |
 
 microsandbox 가 문법상 가장 가깝다. gondolin 은 QEMU 라 **KVM 이 필요 없다** —
 중첩 가상화가 막힌 CI 나 클라우드 VM 에서도 도는 유일한 후보다.
@@ -159,6 +159,40 @@ gondolin exec --sock PATH -- CMD [ARGS...]
 
 Apple/microsandbox 와 다른 점은 **주소가 이름이 아니라 소켓 경로**라는 것뿐이다.
 masc 가 안정적 컨테이너 이름을 유도하듯 안정적 소켓 경로를 유도하면 된다.
+
+### gondolin 은 이 모양으로 못 붙는다 (2026-09-03 실측)
+
+초안은 `attach` 가 대화형이라 탈락할 수 있다고 적었고, 그건 틀렸다 — `exec` 가
+따로 있다. 탈락은 다른 자리에서 났다: **게스트를 띄울 방법이 없다.**
+
+CLI 전체가 `exec` · `bash` · `list` · `attach` · `snapshot` · `build` ·
+`image` 다. `create` 도 `start` 도 `up` 도 없다.
+
+- `exec --sock PATH` 는 **이미 떠 있는** VM 을 지목한다. 만들지 않는다
+- `exec` 를 `--sock` 없이 쓰면 in-process VM 이고 그 호출과 함께 죽는다
+- `bash` 가 유일한 세션 생성자인데 대화형이다
+
+비대화형으로 돌려봤다:
+
+```
+$ gondolin bash < /dev/null
+(120초 매달림, timeout 으로 종료)
+$ gondolin list
+No running sessions.
+```
+
+매달리고, 세션도 안 남는다.
+
+masc 는 TTY 없는 서버 프로세스에서 게스트를 띄우고, 턴과 서버 재기동을 넘겨 같은
+게스트에 exec 한다(#31340). gondolin 의 지속 모델은 그게 아니라 **사람이 붙어
+있는 대화형 세션**이다.
+
+TS SDK 의 `VM.create` / `vm.exec` / `vm.close` 는 프로세스에 묶인다. 그걸 쓰려면
+VM 을 들고 있는 node 사이드카가 필요하고, 그건 argv 빌더 뒤에 구현을 하나 더
+놓는 이 RFC 의 모양이 아니다 — Firecracker 를 범위 밖으로 둔 것과 같은 이유다.
+
+**그래서 gondolin 은 이 RFC 에서 뺀다.** QEMU 라 KVM 이 필요 없다는 장점은
+그대로지만, 그 장점을 쓰려면 다른 통합 모양이 필요하고 그건 별도 RFC 다.
 
 ### inspect 모양이 백엔드마다 다르다는 것은 확인됐다
 

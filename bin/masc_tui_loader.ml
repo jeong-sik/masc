@@ -1,6 +1,7 @@
 (** TUI data loading functions — split from masc_tui.ml (#3808) *)
 
 module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_status_runtime = Masc.Keeper_status_runtime
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Keeper_runtime_root_entry = Masc.Keeper_runtime_root_entry
@@ -1023,6 +1024,43 @@ let load_transport_health ~(host : string) ~(port : int) :
   | Error err -> Error ("transport health load failed: " ^ err)
   | Ok json -> Tui_decode.decode_transport_health json
 
+(* The briefing gives each Keeper the control plane's own liveness word, and
+   [Keeper_status_runtime] owns both ends of that vocabulary -- the producer
+   writes through its printer, so parsing through its strict reader is what
+   keeps the two from drifting apart. A word this build does not know counts
+   as unreadable rather than as the nearest state: the Overview row would
+   otherwise report a Keeper as idle on no evidence at all. *)
+let keeper_liveness_of_briefs briefs =
+  let empty =
+    { klc_active = 0
+    ; klc_inactive = 0
+    ; klc_offline = 0
+    ; klc_idle = 0
+    ; klc_paused = 0
+    ; klc_unreadable = 0
+    }
+  in
+  List.fold_left
+    (fun counts brief ->
+      match Yojson.Safe.Util.member "status" brief with
+      | `String status -> (
+          match Keeper_status_runtime.control_plane_status_of_string_opt status with
+          | Some Keeper_status_runtime.Cp_paused ->
+              { counts with klc_paused = counts.klc_paused + 1 }
+          | Some (Keeper_status_runtime.Cp_surface surface) -> (
+              match surface with
+              | Keeper_status_runtime.Surface_active ->
+                  { counts with klc_active = counts.klc_active + 1 }
+              | Keeper_status_runtime.Surface_inactive ->
+                  { counts with klc_inactive = counts.klc_inactive + 1 }
+              | Keeper_status_runtime.Surface_offline ->
+                  { counts with klc_offline = counts.klc_offline + 1 }
+              | Keeper_status_runtime.Surface_idle ->
+                  { counts with klc_idle = counts.klc_idle + 1 })
+          | None -> { counts with klc_unreadable = counts.klc_unreadable + 1 })
+      | _ -> { counts with klc_unreadable = counts.klc_unreadable + 1 })
+    empty briefs
+
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :
     (overview_snapshot, string) result =
@@ -1066,6 +1104,7 @@ let load_overview ~(host : string) ~(port : int) :
          [lib/dashboard/dashboard_briefing.ml] writes no count into it -- so
          a count read from there was a default dressed as a reading. *)
       let ov_keepers = List.length keeper_briefs in
+      let ov_keeper_liveness = keeper_liveness_of_briefs keeper_briefs in
       let ov_mcp_agents = List.length agent_briefs in
       let* ov_generated_at = required_string_field json "generated_at" in
       Ok
@@ -1074,6 +1113,7 @@ let load_overview ~(host : string) ~(port : int) :
           ov_cluster;
           ov_project;
           ov_keepers;
+          ov_keeper_liveness;
           ov_mcp_agents;
           (* The briefing projects one fact onto two lists: an incident is
              also queued for operator attention, as the same JSON row. On the

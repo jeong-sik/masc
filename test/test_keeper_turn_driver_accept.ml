@@ -709,32 +709,6 @@ let test_finalization_blank_response_is_typed_accept_rejection () =
        Alcotest.failf "expected typed keeper error, got %s"
          (Agent_core.Error.to_string err))
 
-let test_external_effect_finalization_returns_no_synthetic_prose () =
-  let run_result =
-    { (run_result ()) with
-      stop_reason = Runtime_agent.Awaiting_external_effect { turns_used = 1 }
-    }
-  in
-  match
-    Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
-      ~runtime_id:"test-runtime"
-      ~initial_messages:[]
-      ~run_result
-      ~text:""
-      ~tool_names:[]
-      ()
-  with
-  | Ok response_text ->
-    Alcotest.(check string)
-      "external effect status stays out of assistant speech"
-      ""
-      response_text
-  | Error error ->
-    Alcotest.failf
-      "external effect typed status unexpectedly rejected: %s"
-      (Agent_core.Error.to_string error)
-;;
-
 let test_finalization_does_not_surface_hidden_reasoning () =
   let hidden = "private chain of thought must not become a user reply" in
   let response =
@@ -2093,10 +2067,6 @@ let () =
             "blank finalization response is typed no-progress"
             `Quick
             test_finalization_blank_response_is_typed_accept_rejection;
-          Alcotest.test_case
-            "external effect finalization returns no synthetic prose"
-            `Quick
-            test_external_effect_finalization_returns_no_synthetic_prose;
           Alcotest.test_case
             "finalization does not surface hidden reasoning"
             `Quick

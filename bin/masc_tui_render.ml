@@ -6,6 +6,7 @@ open Masc_tui_ansi
 
 module Frame_presenter = Masc_tui_frame_presenter
 module Ask_projection = Masc_tui_ask_projection
+module Ask_layout = Masc_tui_ask_layout
 module Board_detail = Masc_tui_board_detail
 module Magnitude = Masc_tui_magnitude
 module Board_comment_thread = Masc_tui_board_comment_thread
@@ -422,20 +423,32 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
             if context.ambient_background then context.inline_restore
             else Ansi.reset
           in
-          let at = max 0 (min row.gutter_label_at (Message_layout.display_width row.gutter)) in
+          let width = Message_layout.display_width row.gutter in
+          let at = max 0 (min row.gutter_label_at width) in
+          let rail_cells = max 0 (min row.gutter_rail_cells at) in
           (* A plain prefix, not [fit_width]: that one marks an overrun with a
              trailing "~", which here would land in the middle of the gutter.
              Not [split_cells] either -- it wraps, so it hands back one piece
              even at zero cells, and a row that continues the speaker above it
              carries no mark and asks for exactly zero. That drew the clock's
              first digit twice: "222:32" for a row sent at 22:32. *)
-          let marked = Message_layout.take_cells row.gutter at in
-          let label = Message_layout.drop_cells row.gutter at in
+          (* The turn rail is structure, not status, so it takes the quiet tone
+             rather than the speaker's colour. An errored turn already says so
+             on its own glyph; painting the bracket red as well would say it a
+             second time, down the side of every row the turn touched. *)
+          let rail = Message_layout.take_cells row.gutter rail_cells in
+          let after_rail = Message_layout.drop_cells row.gutter rail_cells in
+          let marked = Message_layout.take_cells after_rail (at - rail_cells) in
+          let label = Message_layout.drop_cells after_rail (at - rail_cells) in
+          let rail =
+            if String.equal rail "" then ""
+            else Printf.sprintf "%s%s%s" (Theme.recede ()) rail Ansi.reset
+          in
           if String.equal label "" then
-            Printf.sprintf "%s%s%s%s" (Chat_theme.origin row.style) Ansi.bold
-              row.gutter restore
+            Printf.sprintf "%s%s%s%s%s" rail (Chat_theme.origin row.style)
+              Ansi.bold marked restore
           else
-            Printf.sprintf "%s%s%s%s%s%s%s" (Chat_theme.origin row.style)
+            Printf.sprintf "%s%s%s%s%s%s%s%s" rail (Chat_theme.origin row.style)
               Ansi.bold marked Ansi.reset (Theme.recede ()) label restore
       in
       if
@@ -1970,10 +1983,178 @@ let box_wrapped_field buf cols ~head ~style body =
         (fun segment -> box_line buf cols (hang ^ style ^ segment ^ Ansi.reset))
         rest
 
+(* The question the ask cursor is on, or none when nothing is waiting. The
+   footer asks for it to decide which keys it can honestly name: a question
+   with no choices makes [1-9] a promise the surface cannot keep, and one that
+   refuses free text makes [t] the same. *)
+let selected_ask_question (state : state) =
+  match state.asks_snapshot with
+  | None -> None
+  | Some snapshot -> (
+      match List.nth_opt (Ask_projection.open_rows snapshot) state.ask_cursor with
+      | None -> None
+      | Some (row : Masc.Tui_decode.ask_row) ->
+          List.nth_opt row.Masc.Tui_decode.ar_questions state.ask_question_cursor)
+
 (* Drawn into its own buffer so the pane above can be told how many rows it
    has to give up. Counting the rows a second way is what let the section draw
    its header into the one row left over and push every question off-screen. *)
-let draw_ask_questions buf cols (state : state) =
+let ask_section_rows buf =
+  let n = ref 0 in
+  String.iter (fun c -> if c = '\n' then incr n) (Buffer.contents buf);
+  !n
+
+(* One question with everything the operator answers it by: the prompt, the
+   choices and their marks, whatever the draft holds, and the free-text line.
+   Lifted out of the panel so the panel can draw a question into a buffer of
+   its own and ask how tall it came out before deciding to spend those rows. *)
+let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
+    ~draft ~(question : Masc.Tui_decode.ask_question) ~answering
+    ~selected_question =
+  (* The caret is the only thing saying where the cursor is: which question
+     [a] opens while browsing, and which one the digits land on while
+     answering. A blank on every row reads as no selection at all. *)
+  let caret = if selected_question then ">" else " " in
+  box_wrapped_field buf cols
+    ~head:
+      (Printf.sprintf " %s%s%s%s%s  " caret
+         (if selected_question then Ansi.bold else "")
+         (fit_width (Terminal_text.single_line row.Masc.Tui_decode.ar_keeper) 16)
+         (if selected_question then Ansi.reset else "")
+         Ansi.reset)
+    ~style:(if selected_question then Ansi.bold else "")
+    question.Masc.Tui_decode.aq_prompt;
+  let chosen =
+    match Ask_projection.response_for draft ~question with
+    | Some (Ask_projection.Draft_chose ids) -> ids
+    | Some (Ask_projection.Draft_wrote _)
+    | Some Ask_projection.Draft_skipped
+    | None -> []
+  in
+  List.iteri
+    (fun choice_index (choice : Masc.Tui_decode.ask_choice) ->
+      let picked =
+        List.exists (String.equal choice.Masc.Tui_decode.ac_id) chosen
+      in
+      (* One mark shape per mode: a round one where only one answer fits, a
+         square one where several do. The operator should not have to read the
+         header to know whether picking a second choice replaces the first. *)
+      let mark =
+        match (question.Masc.Tui_decode.aq_mode, picked) with
+        | Masc.Tui_decode.Ask_single, true -> "(o)"
+        | Masc.Tui_decode.Ask_single, false -> "( )"
+        | Masc.Tui_decode.Ask_multi, true -> "[x]"
+        | Masc.Tui_decode.Ask_multi, false -> "[ ]"
+      in
+      (* Numbers only where they do something: the digits answer the question
+         under the caret, and only once the operator is answering it. A number
+         on every row, or one drawn while browsing, promises a key that does
+         nothing. *)
+      let position =
+        if answering && selected_question && choice_index < 9 then
+          Printf.sprintf "%d" (choice_index + 1)
+        else " "
+      in
+      box_wrapped_field buf cols
+        ~head:
+          (Printf.sprintf "    %s %s %s%s%s  " position mark
+             (if picked then Ansi.bold else Ansi.dim)
+             (Terminal_text.single_line choice.Masc.Tui_decode.ac_id)
+             Ansi.reset)
+        ~style:(if picked then Ansi.bold else Ansi.dim)
+        choice.Masc.Tui_decode.ac_label)
+    question.Masc.Tui_decode.aq_choices;
+  (* What the operator has put down so far, in the two shapes a list of
+     choices cannot show. *)
+  (match Ask_projection.response_for draft ~question with
+   | Some (Ask_projection.Draft_wrote text) ->
+       box_wrapped_field buf cols
+         ~head:(Printf.sprintf "      %swrote: " Ansi.bold)
+         ~style:Ansi.bold text
+   | Some Ask_projection.Draft_skipped ->
+       box_line buf cols (Printf.sprintf "      %sskipped%s" Ansi.dim Ansi.reset)
+   | Some (Ask_projection.Draft_chose _) | None -> ());
+  match question.Masc.Tui_decode.aq_free_text with
+  | Masc.Tui_decode.Ask_choices_only -> ()
+  | Masc.Tui_decode.Ask_free_text_allowed { aft_hint } -> (
+      (* The editor belongs to one question, and the slot it holds names
+         which. Matching on that rather than on the cursor means a snapshot
+         arriving mid-sentence cannot move the typing onto another row. *)
+      let editing_here =
+        match state.ask_text_entry with
+        | Some entry
+          when String.equal
+                 (Ask_projection.free_text_question_id entry.ate_slot)
+                 question.Masc.Tui_decode.aq_id ->
+            Some entry
+        | Some _ | None -> None
+      in
+      match editing_here with
+      (* The typing is drawn where it lands, with the same block caret the row
+         search uses. Without it the keys went into a buffer nothing on screen
+         showed, which reads as a terminal that has stopped listening. *)
+      | Some entry ->
+          box_wrapped_field buf cols
+            ~head:(Printf.sprintf "      %swrite: " Ansi.bold)
+            ~style:Ansi.bold
+            (Terminal_text.single_line entry.ate_text ^ "\xe2\x96\x8c");
+          (* The domain's response is one of three -- chosen, written, or
+             skipped -- so saving text drops the picks. Said while the marks
+             are still on screen: a choice that vanishes on Enter reads as the
+             surface having lost it. *)
+          (match Ask_projection.response_for draft ~question with
+           | Some (Ask_projection.Draft_chose _) ->
+               box_line buf cols
+                 (Printf.sprintf "      %ssaving replaces what you picked%s"
+                    Ansi.dim Ansi.reset)
+           | Some (Ask_projection.Draft_wrote _)
+           | Some Ask_projection.Draft_skipped
+           | None -> ())
+      | None -> (
+          (* The key that opens the editor is named by the footer, which knows
+             whether the question under the cursor takes text; naming it on
+             every row that welcomes free text would offer [t] on rows it does
+             nothing to. *)
+          match aft_hint with
+          | None ->
+              box_line buf cols
+                (Printf.sprintf "      %sfree text welcome%s" Ansi.dim Ansi.reset)
+          | Some hint ->
+              box_wrapped_field buf cols
+                ~head:(Printf.sprintf "      %sfree text welcome -- " Ansi.dim)
+                ~style:Ansi.dim hint))
+
+(* The reason is what separates a decision that matters from one that does
+   not, so it is drawn, not hidden behind a detail view. *)
+let draw_ask_context buf cols ~(row : Masc.Tui_decode.ask_row) =
+  match row.Masc.Tui_decode.ar_context with
+  | None -> ()
+  | Some context ->
+      box_wrapped_field buf cols
+        ~head:(Printf.sprintf "    %swhy: " Ansi.dim)
+        ~style:Ansi.dim context
+
+(* One line for an ask the cursor is not on: who is waiting and how much they
+   asked. What the operator needs from a folded ask is that it exists and can
+   be reached; the choices belong to the one they are on. *)
+let ask_summary_line ~(row : Masc.Tui_decode.ask_row) =
+  let count = List.length row.Masc.Tui_decode.ar_questions in
+  Printf.sprintf " %s%s  %d question%s waiting%s" Ansi.dim
+    (fit_width (Terminal_text.single_line row.Masc.Tui_decode.ar_keeper) 16)
+    count
+    (if count = 1 then "" else "s")
+    Ansi.reset
+
+(* Draw [f] into a buffer of its own and report how tall it came out. Height
+   is a measured fact here rather than an estimate: a prompt wraps against the
+   terminal's width, so the only honest way to know what a question costs is
+   to draw it. *)
+let ask_block f =
+  let b = Buffer.create 256 in
+  f b;
+  (Buffer.contents b, ask_section_rows b)
+
+let draw_ask_questions buf cols (state : state) ~budget =
   (* Questions Keepers put to a human sit under the approval queue rather than
      in it. Nothing is held waiting on them -- the Keeper that asked kept
      working -- so they are not a queue of blocked calls, but an operator
@@ -1983,147 +2164,85 @@ let draw_ask_questions buf cols (state : state) =
     | Ask_answering { aam_ask_id } -> Some aam_ask_id
     | Ask_browsing -> None
   in
-  (match state.asks_snapshot with
-   | None -> ()
-   | Some snapshot ->
-       let open_rows =
-         List.filter
-           (fun (row : Masc.Tui_decode.ask_row) ->
-             match row.Masc.Tui_decode.ar_resolution with
-             | Masc.Tui_decode.Ask_open -> true
-             | Masc.Tui_decode.Ask_answered _ | Masc.Tui_decode.Ask_withdrawn _ -> false)
-           snapshot.Masc.Tui_decode.asn_rows
-       in
-       box_divider buf cols;
-       box_line buf cols
-         (Printf.sprintf "%sQuestions waiting on you (%d)%s" Ansi.bold
-            (List.length open_rows) Ansi.reset);
-       (match open_rows with
-        | [] ->
+  match state.asks_snapshot with
+  | None -> ()
+  | Some snapshot -> (
+      let open_rows = Ask_projection.open_rows snapshot in
+      box_divider buf cols;
+      box_line buf cols
+        (Printf.sprintf "%sQuestions waiting on you (%d)%s" Ansi.bold
+           (List.length open_rows) Ansi.reset);
+      match open_rows with
+      | [] ->
+          box_line buf cols
+            (Printf.sprintf "  %snone -- no Keeper is waiting on a decision%s"
+               Ansi.dim Ansi.reset)
+      | rows ->
+          (* Only the ask under the cursor keeps its questions; every other one
+             folds to a line. Before this the panel drew all of them and the
+             surface, which puts this block last, dropped whatever ran past its
+             budget -- an ask of four questions was enough to push the rest off
+             the bottom, the cursor with it, so [/] and j/k moved a selection
+             nothing on screen showed. *)
+          let count = List.length rows in
+          let cursor = min (max 0 state.ask_cursor) (count - 1) in
+          let selected = List.nth rows cursor in
+          let draft = Ask_projection.draft_for state.ask_draft ~row:selected in
+          let answering =
+            match answering_ask_id with
+            | Some ask_id -> String.equal ask_id selected.Masc.Tui_decode.ar_id
+            | None -> false
+          in
+          let questions = selected.Masc.Tui_decode.ar_questions in
+          let question_blocks =
+            List.mapi
+              (fun index question ->
+                ask_block (fun b ->
+                    draw_ask_question b cols state ~row:selected ~draft ~question
+                      ~answering
+                      ~selected_question:(index = state.ask_question_cursor)))
+              questions
+          in
+          let why_text, why_rows =
+            ask_block (fun b -> draw_ask_context b cols ~row:selected)
+          in
+          let plan =
+            Ask_layout.plan ~budget ~spent:(ask_section_rows buf)
+              ~question_heights:(List.map snd question_blocks)
+              ~question_cursor:state.ask_question_cursor
+              ~context_height:why_rows ~other_asks:(count - 1)
+          in
+          List.iteri
+            (fun index (text, _) ->
+              if
+                index >= plan.Ask_layout.question_start
+                && index
+                   < plan.Ask_layout.question_start
+                     + plan.Ask_layout.questions_shown
+              then Buffer.add_string buf text)
+            question_blocks;
+          if plan.Ask_layout.questions_hidden > 0 then
             box_line buf cols
-              (Printf.sprintf "  %snone -- no Keeper is waiting on a decision%s" Ansi.dim
-                 Ansi.reset)
-        | rows ->
-            List.iteri
-              (fun row_index (row : Masc.Tui_decode.ask_row) ->
-                let answering =
-                  match answering_ask_id with
-                  | Some ask_id -> String.equal ask_id row.Masc.Tui_decode.ar_id
-                  | None -> false
-                in
-                let draft = Ask_projection.draft_for state.ask_draft ~row in
-                (* The cursor exists in both modes and [a] opens whatever it
-                   is on, so it is drawn in both. Tying it to [answering] made
-                   the caret appear only after the operator had already
-                   committed to a row -- the surface asked them to choose
-                   first and showed them nothing to choose between. *)
-                let selected_row = row_index = state.ask_cursor in
-                List.iteri
-                  (fun question_index (question : Masc.Tui_decode.ask_question) ->
-                    let selected_question =
-                      selected_row && question_index = state.ask_question_cursor
-                    in
-                    (* The caret is the only thing saying where the cursor
-                       is: which question [a] opens while browsing, and which
-                       one the digits land on while answering. A blank on every
-                       row reads as no selection at all. *)
-                    let caret = if selected_question then ">" else " " in
-                    box_wrapped_field buf cols
-                      ~head:
-                        (Printf.sprintf " %s%s%s%s%s  " caret
-                           (if selected_question then Ansi.bold else "")
-                           (fit_width
-                              (Terminal_text.single_line row.Masc.Tui_decode.ar_keeper)
-                              16)
-                           (if selected_question then Ansi.reset else "")
-                           Ansi.reset)
-                      ~style:(if selected_question then Ansi.bold else "")
-                      question.Masc.Tui_decode.aq_prompt;
-                    let chosen =
-                      match Ask_projection.response_for draft ~question with
-                      | Some (Ask_projection.Draft_chose ids) -> ids
-                      | Some (Ask_projection.Draft_wrote _)
-                      | Some Ask_projection.Draft_skipped
-                      | None -> []
-                    in
-                    List.iteri
-                      (fun choice_index (choice : Masc.Tui_decode.ask_choice) ->
-                        let picked =
-                          List.exists
-                            (String.equal choice.Masc.Tui_decode.ac_id)
-                            chosen
-                        in
-                        (* One mark shape per mode: a round one where only one
-                           answer fits, a square one where several do. The
-                           operator should not have to read the header to know
-                           whether picking a second choice replaces the first. *)
-                        let mark =
-                          match (question.Masc.Tui_decode.aq_mode, picked) with
-                          | Masc.Tui_decode.Ask_single, true -> "(o)"
-                          | Masc.Tui_decode.Ask_single, false -> "( )"
-                          | Masc.Tui_decode.Ask_multi, true -> "[x]"
-                          | Masc.Tui_decode.Ask_multi, false -> "[ ]"
-                        in
-                        (* Numbers only where they do something: the digits
-                           answer the question under the caret, and only once
-                           the operator is answering it. A number on every row,
-                           or one drawn while browsing, promises a key that
-                           does nothing. *)
-                        let position =
-                          if answering && selected_question && choice_index < 9
-                          then
-                            Printf.sprintf "%d" (choice_index + 1)
-                          else " "
-                        in
-                        box_wrapped_field buf cols
-                          ~head:
-                            (Printf.sprintf "    %s %s %s%s%s  " position mark
-                               (if picked then Ansi.bold else Ansi.dim)
-                               (Terminal_text.single_line choice.Masc.Tui_decode.ac_id)
-                               Ansi.reset)
-                          ~style:(if picked then Ansi.bold else Ansi.dim)
-                          choice.Masc.Tui_decode.ac_label)
-                      question.Masc.Tui_decode.aq_choices;
-                    (* What the operator has put down so far, in the two shapes
-                       a list of choices cannot show. *)
-                    (match Ask_projection.response_for draft ~question with
-                     | Some (Ask_projection.Draft_wrote text) ->
-                         box_wrapped_field buf cols
-                           ~head:(Printf.sprintf "      %swrote: " Ansi.bold)
-                           ~style:Ansi.bold text
-                     | Some Ask_projection.Draft_skipped ->
-                         box_line buf cols
-                           (Printf.sprintf "      %sskipped%s" Ansi.dim Ansi.reset)
-                     | Some (Ask_projection.Draft_chose _) | None -> ());
-                    match question.Masc.Tui_decode.aq_free_text with
-                    | Masc.Tui_decode.Ask_choices_only -> ()
-                    | Masc.Tui_decode.Ask_free_text_allowed { aft_hint } ->
-                        (match aft_hint with
-                         | None ->
-                             box_line buf cols
-                               (Printf.sprintf "      %sfree text welcome%s" Ansi.dim
-                                  Ansi.reset)
-                         | Some hint ->
-                             box_wrapped_field buf cols
-                               ~head:
-                                 (Printf.sprintf "      %sfree text welcome -- " Ansi.dim)
-                               ~style:Ansi.dim hint))
-                  row.Masc.Tui_decode.ar_questions;
-                (* The reason is what separates a decision that matters from
-                   one that does not, so it is drawn, not hidden behind a
-                   detail view. *)
-                match row.Masc.Tui_decode.ar_context with
-                | None -> ()
-                | Some context ->
-                    box_wrapped_field buf cols
-                      ~head:(Printf.sprintf "    %swhy: " Ansi.dim)
-                      ~style:Ansi.dim context)
-              rows))
-
-let ask_section_rows buf =
-  let n = ref 0 in
-  String.iter (fun c -> if c = '\n' then incr n) (Buffer.contents buf);
-  !n
+              (Printf.sprintf "    %s+%d more question%s -- j/k to reach%s"
+                 Ansi.dim plan.Ask_layout.questions_hidden
+                 (if plan.Ask_layout.questions_hidden = 1 then "" else "s")
+                 Ansi.reset);
+          if plan.Ask_layout.context_shown then Buffer.add_string buf why_text;
+          let printed = ref 0 in
+          List.iteri
+            (fun index row ->
+              if index <> cursor && !printed < plan.Ask_layout.summaries_shown
+              then begin
+                box_line buf cols (ask_summary_line ~row);
+                incr printed
+              end)
+            rows;
+          if plan.Ask_layout.summaries_hidden > 0 then
+            box_line buf cols
+              (Printf.sprintf "  %s+%d more ask%s -- [/] to reach%s" Ansi.dim
+                 plan.Ask_layout.summaries_hidden
+                 (if plan.Ask_layout.summaries_hidden = 1 then "" else "s")
+                 Ansi.reset))
 
 (* The selected row's detail, and the only one of the three detail rows whose
    height depends on which kind is selected. A held tool call answers two
@@ -2247,11 +2366,6 @@ let render_approvals (state : state) =
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  (* The questions come first so their height is a measured fact rather than a
-     second estimate that can disagree with the drawing. *)
-  let ask_buf = Buffer.create 1024 in
-  draw_ask_questions ask_buf cols state;
-  let ask_rows = ask_section_rows ask_buf in
   (* Two extra chrome rows on this surface only, both always drawn between
      the header and the divider: the Gate lane line, and the standing
      always-allow rule line under it. *)
@@ -2264,11 +2378,25 @@ let render_approvals (state : state) =
      budgets one row for this detail and every kind but one takes it; a held
      tool call takes two. Reading the height off the string the pane is about
      to draw is what keeps the two from drifting -- the same thing
-     [ask_section_rows] does for the block above. *)
+     [ask_section_rows] does for the block below. *)
   let detail_line =
     approval_detail_line state ~approvals ~cols ~action_inflight
   in
   let detail_extra_rows = approval_detail_rows detail_line - 1 in
+  (* What the questions may spend. The block is drawn last, and a surface that
+     overruns loses its final rows, so an unbudgeted question list does not
+     push the approval queue off the screen -- it pushes itself off, cursor and
+     all. One row is held back for the queue, which is what the [max 1] below
+     was already trying to promise and could not keep. *)
+  let ask_budget =
+    max 4
+      (rows - boxed_surface_chrome_rows - gate_lane_rows - detail_extra_rows - 1)
+  in
+  (* Drawn before the queue's own budget is settled so its height is a measured
+     fact rather than a second estimate that can disagree with the drawing. *)
+  let ask_buf = Buffer.create 1024 in
+  draw_ask_questions ask_buf cols state ~budget:ask_budget;
+  let ask_rows = ask_section_rows ask_buf in
   let approval_body_rows =
     max 1
       (rows - boxed_surface_chrome_rows - gate_lane_rows - ask_rows
@@ -2603,19 +2731,42 @@ let render_approvals (state : state) =
           "j/k:move  y/n:decide  e:outside lane  %s  a:answer a question  \
            r:refresh  Tab:next"
           walk_asks
-    | Ask_answering { aam_ask_id } ->
-        (* Say when the next Enter sends. The approval queue two panes up
-           already draws its armed state; this one announced itself only as an
-           event, on a surface that draws no events, so the first Enter looked
-           like a key that had not landed. *)
-        (match state.pending_ask_submit with
-         | Some armed when String.equal armed aam_ask_id ->
-             "Press Enter again to send  |  s:skip  c:clear  Esc:back"
-         | Some _ | None ->
-             Printf.sprintf
-               "j/k:question  %s  1-9:pick  s:skip  c:clear  Enter:answer  \
-                Esc:back"
-               walk_asks)
+    | Ask_answering { aam_ask_id } -> (
+        match state.ask_text_entry with
+        (* Typing owns the keyboard, so the footer stops offering the keys it
+           has taken: the digits are text here, not choices. *)
+        | Some _ -> "Enter:save  Esc:cancel"
+        | None ->
+            (* Say when the next Enter sends. The approval queue two panes up
+               already draws its armed state; this one announced itself only as
+               an event, on a surface that draws no events, so the first Enter
+               looked like a key that had not landed. *)
+            (match state.pending_ask_submit with
+             | Some armed when String.equal armed aam_ask_id ->
+                 "Press Enter again to send  |  s:skip  c:clear  Esc:back"
+             | Some _ | None ->
+                 (* Only the keys the selected question answers to. A question
+                    can arrive with no choices at all -- the server accepts one
+                    as long as it welcomes free text -- and there [1-9] does
+                    nothing, which reads as a pane that has stopped listening
+                    rather than as a key that was never for this question. *)
+                 let question = selected_ask_question state in
+                 let has_choices =
+                   match question with
+                   | Some (q : Masc.Tui_decode.ask_question) ->
+                       q.Masc.Tui_decode.aq_choices <> []
+                   | None -> false
+                 in
+                 let takes_text =
+                   match question with
+                   | Some q -> Option.is_some (Ask_projection.free_text_slot q)
+                   | None -> false
+                 in
+                 Printf.sprintf "j/k:question  %s  %s%ss:skip  c:clear  \
+                                 Enter:answer  Esc:back"
+                   walk_asks
+                   (if has_choices then "1-9:pick  " else "")
+                   (if takes_text then "t:write  " else "")))
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
 
@@ -7533,6 +7684,8 @@ let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
         |> List.filter (fun (message, _) ->
           message.me_role <> Message_thinking
           || state.msg_reasoning_visibility <> Reasoning_hidden)
+        |> Masc_tui_types.fold_memory_summary_runs
+             ~visibility:state.msg_memory_visibility
       in
       visible_timeline_memo :=
         Some
@@ -7548,6 +7701,32 @@ let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
   keeper_message_visible_timeline ?messages state ~keeper_name
   |> List.map fst
 ;;
+
+(* Which piece of its turn's bracket a row draws.
+
+   [Turn_alone] draws nothing. One row is not a hierarchy, and marking it would
+   put a rail on nearly every row of ordinary chatter, which is where a reader
+   stops seeing it at all.
+
+   The split between speech and work is the fact the pane was missing.
+   Reasoning, tool calls and skills are what a turn did to arrive at what it
+   said, and they were drawn at the same depth as the answer -- same column,
+   same indent, same clock -- so a turn's work read as a sibling of its speech.
+   They hang off the trunk instead. *)
+let turn_rail_of ~(edge : Masc_tui_types.turn_edge)
+    ~(style : Message_layout.style) =
+  match edge with
+  | Turn_outside | Turn_alone -> Message_layout.Rail_none
+  | Turn_opens -> Message_layout.Rail_opens
+  | Turn_closes -> Message_layout.Rail_closes
+  | Turn_continues -> (
+      match style with
+      | Message_layout.Tool | Message_layout.Skill _ | Message_layout.Thinking
+        ->
+          Message_layout.Rail_does
+      | Message_layout.User | Message_layout.Inbound | Message_layout.Keeper
+      | Message_layout.Status | Message_layout.Journal | Message_layout.Error ->
+          Message_layout.Rail_says)
 
 let compute_keeper_message_layout_entries (state : state) ~keeper_name
     ~chat_cols ~start_index visible_entries =
@@ -7749,6 +7928,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                    observed_at = message.me_at;
                    entry_index;
                  };
+             turn_rail = turn_rail_of ~edge ~style;
            }
             : Message_layout.entry))
       visible_entries
@@ -8279,8 +8459,23 @@ let render_keeper_message (state : state) =
                request_label;
                body;
                markdown_source;
+               (* No closing corner while the turn is still arriving. The
+                  bracket stays open until the turn ends, which is how a
+                  running turn reads without a second spinner beside it. *)
+               turn_rail =
+                 turn_rail_of ~edge:Masc_tui_types.Turn_continues ~style;
              }
               : Message_layout.entry)
+          in
+          (* The opening corner belongs to the turn's first row wherever it
+             is. A turn that began before this trail already drew it among the
+             committed rows; one that did not draws it here. *)
+          let turn_opens_here =
+            not
+              (List.exists
+                 (fun (message : Masc_tui_types.msg_entry) ->
+                   String.equal message.me_request_id request_id)
+                 committed_messages)
           in
           (* The turn in the order it happened, one entry per stretch. A
              tool-call round interleaves reasoning, calls and reply text, and
@@ -8374,12 +8569,57 @@ let render_keeper_message (state : state) =
                        Message_layout.Keeper keeper_label text))
                  (Keeper_chat_transcript.trail live)
           in
+          (* Applied after the filter, not at trail position zero: hidden
+             reasoning drops rows, and the corner belongs to the first row the
+             pane actually draws. *)
+          let entries =
+            match entries with
+            | first :: rest when turn_opens_here ->
+                { first with Message_layout.turn_rail = Message_layout.Rail_opens }
+                :: rest
+            | entries -> entries
+          in
           Some (request_id, timeline_at, entries)
       | Some _ | None -> None
     in
     let committed_tagged =
       List.combine committed_messages committed_layout_entries
       |> List.map (fun (message, entry) -> Some message, entry)
+    in
+    (* A turn whose rows are still arriving has not closed. Its last committed
+       row carries the closing corner, and the live rows continue below it, so
+       left alone the pane ends the same turn twice.
+
+       Corrected here rather than where the entries are built: the entry memo
+       does not read the live turn -- it is built where it is drawn -- and a
+       cached entry would keep whichever corner it was born with. *)
+    let committed_tagged =
+      match live_projection with
+      | None -> committed_tagged
+      | Some (live_request_id, _, _) ->
+          List.map
+            (fun ((message, entry) :
+                   Masc_tui_types.msg_entry option * Message_layout.entry) ->
+              match message with
+              | Some message
+                when String.equal message.me_request_id live_request_id -> (
+                  match entry.Message_layout.turn_rail with
+                  | Message_layout.Rail_closes ->
+                      ( Some message
+                      , { entry with
+                          Message_layout.turn_rail = Message_layout.Rail_says
+                        } )
+                  (* A turn of one committed row is about to gain more. *)
+                  | Message_layout.Rail_none ->
+                      ( Some message
+                      , { entry with
+                          Message_layout.turn_rail = Message_layout.Rail_opens
+                        } )
+                  | Message_layout.Rail_opens | Message_layout.Rail_says
+                  | Message_layout.Rail_does ->
+                      (Some message, entry))
+              | Some _ | None -> (message, entry))
+            committed_tagged
     in
     let rec insert_at index inserted reversed = function
       | rest when index <= 0 -> List.rev_append reversed (inserted @ rest)
@@ -8720,6 +8960,63 @@ let render_keeper_message (state : state) =
                   box_line_styled chat_buf chat_cols ~style ("  " ^ text)))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
      | Some _ | None -> ());
+    (* Effects this Keeper is not waiting on. A deferral returns successfully
+       and the Keeper carries on, so the tool row reads as a plain return and
+       nothing else on this pane said the effect was still out. The phase
+       vocabulary and the age are the Approvals screen's own, so the two
+       surfaces cannot disagree about a row they both hold. *)
+    (match state.msg_target_keeper_name with
+     | None -> ()
+     | Some keeper_name -> (
+         match keeper_effects_at_the_gate state ~keeper_name with
+         | [] -> ()
+         | pending ->
+             let severity (row : Tui_decode.gate_pending) =
+               match row.gp_phase with
+               | Tui_decode.Gate_blocked -> 3
+               | Tui_decode.Gate_human_required -> 2
+               | Tui_decode.Gate_queued -> 1
+               | Tui_decode.Gate_judging -> 0
+             in
+             let worst =
+               List.fold_left
+                 (fun worst row ->
+                   if severity row > severity worst then row else worst)
+                 (List.hd pending) (List.tl pending)
+             in
+             let style =
+               match worst.gp_phase with
+               | Tui_decode.Gate_blocked -> Theme.bad ()
+               | Tui_decode.Gate_queued | Tui_decode.Gate_human_required ->
+                   Theme.warn ()
+               | Tui_decode.Gate_judging -> Theme.info ()
+             in
+             let named =
+               List.map
+                 (fun (row : Tui_decode.gate_pending) ->
+                   let phase =
+                     match row.gp_phase with
+                     | Tui_decode.Gate_queued -> "queued"
+                     | Tui_decode.Gate_judging -> "judging"
+                     | Tui_decode.Gate_human_required -> "human"
+                     | Tui_decode.Gate_blocked -> "blocked"
+                   in
+                   let age =
+                     match row.gp_waiting_s with
+                     | Some seconds -> Masc_tui_answering.duration_text seconds
+                     | None -> "?"
+                   in
+                   Printf.sprintf "%s %s %s"
+                     (Keeper_chat.terminal_safe_text row.gp_display_tool)
+                     age phase)
+                 pending
+             in
+             let count = List.length pending in
+             box_line_styled chat_buf chat_cols ~style
+               (Printf.sprintf "  AT THE GATE · %d external effect%s out · %s"
+                  count
+                  (if count = 1 then "" else "s")
+                  (String.concat " · " named))));
     if not target_registered then begin
       let unavailable_message =
         match state.keepers_error with

@@ -1,6 +1,6 @@
 /* ══════════════════════════════════════════════════════════════
    MASC v2 — Keeper memory inspector. Reuses the .turn-overlay /
-   .turn-drawer / .turn-sec / .cmp-diff shell; everything new is .mem-*.
+   .turn-drawer / .turn-sec shell; everything new is .mem-*.
    v2 tokens only.
 
    SYNC CONTRACT — this is the vendored design mirror (imported at

@@ -398,9 +398,7 @@ let test_terminal_post_effect_failure_aborts_the_official_client_turn () =
     | Some
         (Terminal_tool_boundary
           { outcome =
-              ( Terminal_completed
-              | Durable_stimulus_deferred
-              | External_effect_deferred )
+              (Terminal_completed | Durable_stimulus_deferred)
           ; _
           })
     | Some (Repeated_tool_call _)
@@ -602,14 +600,6 @@ let test_terminal_host_stop_preserves_completed_deferred_and_failed () =
        } ->
      ()
    | Ok _ | Error _ -> fail "generic deferral changed outcome");
-  (match project External_effect_deferred with
-   | Ok
-       { Runtime_agent.stop_reason =
-           Runtime_agent.Awaiting_external_effect { turns_used = 4 }
-       ; _
-       } ->
-     ()
-   | Ok _ | Error _ -> fail "external deferral changed outcome");
   match
     project
       (Terminal_failed

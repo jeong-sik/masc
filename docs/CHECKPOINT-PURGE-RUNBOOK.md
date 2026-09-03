@@ -120,8 +120,8 @@ a decision before it is added.
 ## Relation to the sanctioned pipeline
 
 Purge is an explicit operator action, not an automatic runtime mechanism.
-Settlement ceilings remain
-the normal capacity boundary (#25536, #25541, #25544). If a purge is needed twice on
+Settlement ceilings remain the normal capacity boundary (#25536, #25541,
+#25544). If a purge is needed twice on
 the same keeper, that is a signal the inflow paths (#25462 wake markers,
 oversized tool results) are not closed — fix the inflow, do not schedule the
 purge.

@@ -70,7 +70,9 @@ val of_reason : Masc_exec_command_gate.Shell_command_gate.too_complex_reason -> 
 
 val to_string : t -> string
 (** One line, for a log or a message back to the caller: what to do, and why
-    this construct needs it. *)
+    this construct needs it. The sentence templates are managed prompts
+    ([config/prompts/subset_rewrite.md]); on render failure the bare
+    [because] is returned and the miss is logged. *)
 
 val tag : t -> string
 (** Closed-vocabulary tag for aggregation, coarser than {!to_string}. *)

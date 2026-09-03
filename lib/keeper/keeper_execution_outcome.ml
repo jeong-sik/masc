@@ -17,7 +17,6 @@ let terminal_of_stop_reason = function
   | Runtime_agent.Completed -> Completed
   | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Awaiting_external_effect _
   | Runtime_agent.Yielded_after_repeated_tool_call _
   | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
     Checkpointed

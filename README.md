@@ -137,9 +137,9 @@ Two axes are reported. The **model source** is where turns get their tokens:
 The **execution sandbox** is where a Keeper's tools run. The wizard only reports
 which backends the host can offer — `docker` (daemon reachable), `microvm` via
 Apple's `container` CLI on macOS, and `remote_ssh` (endpoints declared in
-`runtime.toml`). It does not choose one: the sandbox is set per Keeper in
-`.masc/config/keepers/<name>.toml`, or by a `--team <preset>` that carries its
-own choice.
+`runtime.toml`). It does not pick one on its own: the sandbox is set per Keeper
+in `.masc/config/keepers/<name>.toml`, or by a `--team <preset>` that carries its
+own choice — pass `--sandbox docker|microvm|remote_ssh` to set the seeded team's.
 
 The subscription sign-in check is also a standalone command:
 `masc runtime-probe <runtime_id>` exits `0` when the CLI is signed in and `1`

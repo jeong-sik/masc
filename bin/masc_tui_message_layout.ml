@@ -15,6 +15,13 @@ type style =
   | Skill of skill_tone
   | Thinking
 
+type turn_rail =
+  | Rail_opens
+  | Rail_says
+  | Rail_does
+  | Rail_closes
+  | Rail_none
+
 type markdown_source =
   | Markdown_stable of {
       keeper_name : string;
@@ -46,6 +53,7 @@ type entry = {
   request_label : string;
   body : string;
   markdown_source : markdown_source;
+  turn_rail : turn_rail;
 }
 
 type metadata =
@@ -76,6 +84,7 @@ type row = {
   kind : row_kind;
   shade : shade;
   text : string;
+  gutter_rail_cells : int;
   gutter_label_at : int;
   gutter : string;
 }
@@ -680,6 +689,30 @@ let speaker_mark : style -> string = function
   | Skill Skill_failure -> "\xe2\x9c\x97"
   | Thinking -> "\xc2\xb7"
 
+(* The bracket a turn draws down the left margin. One cell of box drawing plus
+   the space that keeps it off the clock.
+
+   Separate from {!speaker_mark} on purpose: that alphabet answers "who is
+   talking" and this one answers "which turn is this row part of". Folding the
+   second question into the first was the shape that failed -- a mark that
+   means two things stops meaning either.
+
+   [Rail_none] is a blank rather than a fifth glyph. A turn of one row has no
+   hierarchy to show, and marking it would put the rail on nearly every row of
+   an ordinary conversation, which is where a reader stops seeing it. *)
+let turn_rail_glyph : turn_rail -> string = function
+  | Rail_opens -> "\xe2\x95\xad"   (* the turn starts here *)
+  | Rail_says -> "\xe2\x94\x82"    (* the turn itself, still going *)
+  | Rail_does -> "\xe2\x94\x9c"    (* work hanging off the turn *)
+  | Rail_closes -> "\xe2\x95\xb0"  (* the turn ended on this row *)
+  | Rail_none -> " "
+
+(* Charged to every row, drawn or not. The margin's width is what the body's
+   width is taken from, so a rail column that appeared and vanished with the
+   rows would re-wrap the conversation under a scroll position taken before
+   it. Two cells out of a sixty-cell pane, spent once. *)
+let turn_rail_cells = 2
+
 (* Cells the speaker mark and its separator occupy at the head of a label, or
    zero when the column was too narrow to keep the mark at all. One reader, so
    the renderer that styles the mark and the layout that lays it out cannot
@@ -876,6 +909,7 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
       ; kind = Metadata metadata
       ; shade = Shade_none
       ; text = fitted
+      ; gutter_rail_cells = 0
       ; gutter_label_at = 0
       ; gutter = ""
       }
@@ -915,6 +949,7 @@ let timeline_break_row ~(previous : entry option) ~inner_width (entry : entry) =
         ; kind = Metadata (Timeline_break bucket)
         ; shade = Shade_none
         ; text
+        ; gutter_rail_cells = 0
         ; gutter_label_at = 0
         ; gutter = ""
         }
@@ -1018,8 +1053,22 @@ let origin_gutter ~origin ~previous ~inner_width entry =
          {!rows_of_entry} floors the body at; the margin gets whatever is
          left, and on a pane with nothing left it gets nothing rather than
          pushing the messages out. *)
-      let ceiling = max 0 (inner_width - 2 - min_body_cells) in
+      let spare = inner_width - 2 - min_body_cells in
       let role_cells = display_width entry.role_label in
+      (* The rail is dropped before the name is, on the same reasoning the mark
+         is: a pane too narrow for both keeps the fact that says who is
+         talking. The bar is the whole label, not the rail's own two cells --
+         paying for the rail out of a margin that was already cutting the name
+         took the tail off exactly the identifiers a reader needs to tell two
+         keepers apart. Thirteen terminal cells drew "…aa" before and "…"
+         after.
+
+         The label arrives padded to one column, so every row on a pane
+         decides this the same way and the margin keeps one width. *)
+      let rail_cells =
+        if role_cells + turn_rail_cells <= spare then turn_rail_cells else 0
+      in
+      let ceiling = max 0 (spare - rail_cells) in
       let role_fits = role_cells <= ceiling in
       let label, mark_cells =
         if role_fits then
@@ -1060,7 +1109,7 @@ let origin_gutter ~origin ~previous ~inner_width entry =
          deriving it would be measuring the same two things a second time.
          [mark_cells] is zero for a shortened source, because that row no
          longer contains the mark the original boundary described. *)
-      let label_at = clock_cells + mark_cells in
+      let label_at = rail_cells + clock_cells + mark_cells in
 
       if continues_previous ~previous entry then
         (* Padded rather than repeated: a second row from the same speaker in
@@ -1078,13 +1127,18 @@ let origin_gutter ~origin ~previous ~inner_width entry =
            the telling -- a name appears only where the speaker changes. *)
         (* No label to hold back on a row that draws no name. *)
         let continued = clock ^ continued_mark entry.style ^ " " in
-        Some (fit_width continued (display_width filled), 0)
-      else Some (filled, label_at)
+        (* The rail keeps its own span even here. Past it the row is all
+           receded: a continuation draws no name, so there is no boundary left
+           between a mark and a label to colour differently. *)
+        Some (fit_width continued (display_width filled), rail_cells, rail_cells)
+      else Some (filled, rail_cells, label_at)
 
 let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =
   let gutter = origin_gutter ~origin ~previous ~inner_width entry in
   let gutter_width =
-    match gutter with None -> 0 | Some (text, _) -> display_width text
+    match gutter with
+    | None -> 0
+    | Some (text, rail_cells, _) -> rail_cells + display_width text
   in
   let body_width = max min_body_cells (inner_width - 2 - gutter_width) in
   (* Keepers write markdown. Rendering it is the caller's to supply, so this
@@ -1107,16 +1161,39 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     | chunks -> chunks
   in
   let body_rows =
-    let margin, label_at = Option.value gutter ~default:("", 0) in
+    let margin, rail_cells, label_at = Option.value gutter ~default:("", 0, 0) in
     let blank = fit_width "" (display_width margin) in
+    let last = List.length body_chunks - 1 in
+    (* The bracket runs the height of the entry, so a wrapped body keeps the
+       line its first row started. Broken at every wrap it would read as one
+       turn per screen line, which is the opposite of what it is for.
+
+       The corners go where they mean something: the opening one on the row the
+       entry starts, the closing one on the row it ends. A [Rail_closes] entry
+       whose reply wraps ten rows would otherwise end the turn at the top of
+       its own last paragraph. *)
+    let rail_at index =
+      if rail_cells = 0 then ""
+      else
+        let piece =
+          match entry.turn_rail with
+          | Rail_none -> Rail_none
+          | Rail_says -> Rail_says
+          | Rail_opens -> if index = 0 then Rail_opens else Rail_says
+          | Rail_does -> if index = 0 then Rail_does else Rail_says
+          | Rail_closes -> if index = last then Rail_closes else Rail_says
+        in
+        turn_rail_glyph piece ^ String.make (rail_cells - 1) ' '
+    in
     body_chunks
     |> List.mapi (fun index chunk ->
       { style = entry.style
       ; kind = Body
       ; shade = shade_of_style entry.style
       ; text = "  " ^ chunk
-      ; gutter_label_at = (if index = 0 then label_at else 0)
-      ; gutter = (if index = 0 then margin else blank)
+      ; gutter_rail_cells = rail_cells
+      ; gutter_label_at = (if index = 0 then label_at else rail_cells)
+      ; gutter = rail_at index ^ (if index = 0 then margin else blank)
       })
   in
   let message_rows =
@@ -1183,6 +1260,7 @@ let collapse_repeated_body_rows ~inner_width rows =
         repeated_rows_gap_text
           ~inner_width:(inner_width - display_width row.gutter)
           repeated_rows
+    ; gutter_rail_cells = row.gutter_rail_cells
     ; gutter_label_at = 0
     ; gutter = row.gutter
     }
@@ -1245,6 +1323,7 @@ let newest_entry_window ~inner_width ~height rows =
         ; kind = Viewport_gap { hidden_rows }
         ; shade = Shade_none
         ; text = viewport_gap_text ~inner_width hidden_rows
+        ; gutter_rail_cells = 0
         ; gutter_label_at = 0
         ; gutter = ""
         }

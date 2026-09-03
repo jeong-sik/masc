@@ -394,6 +394,18 @@ let contains ~needle haystack =
   in
   needle_length = 0 || scan 0
 
+(* Where the first occurrence starts. Order within one row is a fact a test can
+   only check by position, and the row is built by concatenation. *)
+let index_of ~needle haystack =
+  let needle_length = String.length needle in
+  let limit = String.length haystack - needle_length in
+  let rec scan index =
+    if index > limit then None
+    else if String.sub haystack index needle_length = needle then Some index
+    else scan (index + 1)
+  in
+  scan 0
+
 let test_control_bytes_never_reach_the_pane () =
   let t = fresh () in
   feed t
@@ -456,6 +468,77 @@ let test_progress_row_carries_the_turn_age () =
   match rows ~now:(origin -. 5.) t with
   | (Transcript.Progress, text) :: _ ->
       check string "a backwards clock drops the age" "working" text
+  | got -> failf "expected a progress row, got %d rows" (List.length got)
+
+(* Slow or stuck is the question an operator holds while the row is up, and a
+   count of calls cannot answer it: seven tools reads the same whether all
+   seven came back and the model is writing, or two are still out. *)
+let test_progress_row_names_the_calls_still_out () =
+  let t = fresh () in
+  feed t [ Live.Run_started ];
+  feed t
+    [ tool_started "a" "Read"
+    ; tool_args_snapshot "a" {|{"file_path":"one.ml"}|}
+    ; tool_ended "a"
+    ; tool_result "a" "exec-a"
+    ];
+  (match rows t with
+   | (Transcript.Progress, text) :: _ ->
+       check bool "a returned call is not reported as running" false
+         (contains ~needle:"still running" text)
+   | got -> failf "expected a progress row, got %d rows" (List.length got));
+  (* One call whose invocation ended without a result, one still taking its
+     arguments. Both are out; neither was visible on this row. *)
+  feed t
+    [ tool_started "b" "Bash"
+    ; tool_args_snapshot "b" {|{"command":"sleep 60"}|}
+    ; tool_ended "b"
+    ; tool_started "c" "WebFetch"
+    ];
+  match rows t with
+  | (Transcript.Progress, text) :: _ ->
+      check bool "the row says something is still out" true
+        (contains ~needle:"still running" text);
+      check bool "and names the call whose result has not landed" true
+        (contains ~needle:"Bash" text);
+      check bool "and the one still taking arguments" true
+        (contains ~needle:"WebFetch" text);
+      check bool "the finished call keeps out of it" false
+        (contains ~needle:"still running: Read" text);
+      (* Before the tool mix, which is what a narrow row loses first. *)
+      check bool "the running calls come before the mix" true
+        (match
+           ( index_of ~needle:"still running" text
+           , index_of ~needle:"Read 1" text )
+         with
+         | Some running, Some mix -> running < mix
+         | _ -> false)
+  | got -> failf "expected a progress row, got %d rows" (List.length got)
+
+(* The names and the open call's age describe the same calls, so they read
+   together. Split by the tool mix, the age is what a narrow row drops. *)
+let test_the_open_call_age_sits_with_the_names () =
+  let t = fresh () in
+  feed t [ Live.Run_started ];
+  feed t
+    [ tool_started "a" "Read"
+    ; tool_args_snapshot "a" {|{"file_path":"one.ml"}|}
+    ; tool_ended "a"
+    ; tool_result "a" "exec-a"
+    ];
+  feed ~now:(origin +. 5.) t [ tool_started "b" "Bash" ];
+  match rows ~now:(origin +. 47.) t with
+  | (Transcript.Progress, text) :: _ ->
+      check bool "the open call still reports its age" true
+        (contains ~needle:"in this call 42s" text);
+      check bool "the age follows the names it belongs to" true
+        (match
+           ( index_of ~needle:"still running" text
+           , index_of ~needle:"in this call" text
+           , index_of ~needle:"Read 1" text )
+         with
+         | Some running, Some age, Some mix -> running < age && age < mix
+         | _ -> false)
   | got -> failf "expected a progress row, got %d rows" (List.length got)
 
 (* The prompt. It is the one row an operator has to act on, so what matters is
@@ -1287,6 +1370,10 @@ let () =
     ; ( "status rows"
       , [ test_case "rows grow only with what they report" `Quick
             test_status_rows_grow_only_with_what_they_report
+        ; test_case "the progress row names the calls still out" `Quick
+            test_progress_row_names_the_calls_still_out
+        ; test_case "the open call age sits with the names" `Quick
+            test_the_open_call_age_sits_with_the_names
         ; test_case "the wait says why once the server has said" `Quick
             test_the_wait_says_why_once_the_server_has_said
         ; test_case "the queue does not outlive the wait" `Quick

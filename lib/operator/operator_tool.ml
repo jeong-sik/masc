@@ -50,7 +50,7 @@ let result_of_json ~tool_name ~start_time = function
            ~class_:Tool_result.Workflow_rejection
            ~start_time
            ~data:json
-           "Workspace message persisted, but Keeper delivery was rejected; do not resend"
+           (Tool_guidance.to_string Tool_guidance.Workspace_message_delivery_rejected)
        | Some _ | None ->
          Tool_result.make_ok ~tool_name ~start_time ~data:json ())
   | Error message ->

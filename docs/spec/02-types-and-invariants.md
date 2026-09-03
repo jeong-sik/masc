@@ -379,17 +379,17 @@ type dispatch_observer = Dispatch_outcome.t -> Tool_result.result option -> unit
 type module_tag =
   | Mod_plan | Mod_operator
   | Mod_local_runtime
-  | Mod_worktree
-  | Mod_code | Mod_code_write
-  | Mod_a2a
   | Mod_run
-  | Mod_agent | Mod_task | Mod_workspace
-  | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
-  | Mod_library | Mod_keeper
+  | Mod_agent | Mod_task | Mod_state
+  | Mod_control | Mod_agent_timeline | Mod_schedule | Mod_spawn
+  | Mod_code_query | Mod_misc
+  | Mod_library | Mod_external
   | Mod_inline
+  | Mod_keeper_task
 ```
 
-Variant SSOT는 `lib/tool/tool_dispatch.mli`다. 도구 이름으로 O(1) tag
+Variant SSOT는 `lib/tool/tool_tag_types.mli`다 (`tool_dispatch.mli`는 같은
+타입을 재노출한다). 도구 이름으로 O(1) tag
 lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다. 제거된 모듈
 이름은 tag 목록이나 운영 문서의 기준 목록으로 보존하지 않는다.
 

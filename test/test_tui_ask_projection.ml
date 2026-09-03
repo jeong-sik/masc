@@ -109,6 +109,13 @@ let text_question = text_question_named "q1"
 let slot_of q =
   match Ask.free_text_slot q with None -> Alcotest.fail "expected a slot" | Some s -> s
 
+(* The panel draws the caret on a row, and the editor holds a slot rather than
+   a row index; without a way back to the question id the surface would have to
+   store that id a second time and the two could disagree. *)
+let test_free_text_slot_names_its_question () =
+  Alcotest.(check string) "the slot names the question it writes to" "q7"
+    (Ask.free_text_question_id (slot_of (text_question_named "q7")))
+
 let test_set_text_records () =
   let d = Ask.set_text (Ask.empty_draft ~ask_id:"a1") ~slot:(slot_of text_question) ~text:"ship it" in
   check_ids "text is the answer" [ "wrote:ship it" ] (chosen d text_question)
@@ -301,6 +308,16 @@ let answered_row id =
     ~resolution:(Decode.Ask_answered { aa_answered_at = 1.0; aa_question_ids = [] })
     id
 
+(* One filter, three callers: the panel draws these rows, its footer names the
+   keys that work on the one under the cursor, and the executable answers it. A
+   second copy is how a cursor and the rows it indexes come apart. *)
+let test_open_rows_keeps_only_what_is_waiting () =
+  let rows = [ row "a1"; answered_row "a2"; row "a3" ] in
+  Alcotest.(check (list string)) "the open ones, in wire order" [ "a1"; "a3" ]
+    (List.map
+       (fun (r : Decode.ask_row) -> r.Decode.ar_id)
+       (Ask.open_rows (snapshot rows)))
+
 let test_newly_opened_silent_on_first_read () =
   Alcotest.(check (list string)) "first read establishes a baseline silently" []
     (Ask.newly_opened_ask_ids ~previous:None ~current:(snapshot [ row "a1" ]))
@@ -359,6 +376,8 @@ let () =
           Alcotest.test_case "absent for choices-only" `Quick
             test_free_text_slot_absent_for_choices_only;
           Alcotest.test_case "carries the hint" `Quick test_free_text_slot_carries_hint;
+          Alcotest.test_case "names its question" `Quick
+            test_free_text_slot_names_its_question;
           Alcotest.test_case "records text" `Quick test_set_text_records;
           Alcotest.test_case "blank clears" `Quick test_blank_text_clears;
         ] );
@@ -403,6 +422,11 @@ let () =
           Alcotest.test_case "names a skip" `Quick test_summarize_names_skip;
           Alcotest.test_case "joins questions in ask order" `Quick
             test_summarize_joins_questions_in_ask_order;
+        ] );
+      ( "open rows",
+        [
+          Alcotest.test_case "keeps only what is waiting" `Quick
+            test_open_rows_keeps_only_what_is_waiting;
         ] );
       ( "arrival",
         [

@@ -417,9 +417,9 @@ let test_fusion_block_tolerates_missing_run_id () =
   | _ -> Alcotest.fail "fusion block with board_post_id only should decode with empty run_id"
 
 let test_status_block_roundtrip () =
-  let original = [ B.Status { kind = B.External_effect_pending } ] in
+  let original = [ B.Status { kind = B.Awaiting_gate_approval } ] in
   match B.blocks_of_yojson (B.blocks_to_yojson original) with
-  | Some [ B.Status { kind = B.External_effect_pending } ] -> ()
+  | Some [ B.Status { kind = B.Awaiting_gate_approval } ] -> ()
   | Some _ -> Alcotest.fail "status block changed shape across round-trip"
   | None -> Alcotest.fail "blocks_of_yojson rejected valid status block"
 

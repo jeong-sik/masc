@@ -209,6 +209,24 @@ let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~operation_id =
      Alcotest.fail
        (Masc.Keeper_registry_event_queue.transfer_pending_error_to_string detail))
 
+(* Keeper world event rows render their title and preview from prompt templates
+   under the keeper.world.event_rows key space, which now live in config/prompts
+   rather than in code. A test that projects such a row -- the completion-
+   authority rejection case below -- must load those templates, or the preview
+   renders empty and the assertion on it fails. Other prompt-rendering tests do
+   the same load; without it this test passed only while the prompts were still
+   inline, and the release-evidence bundle is where the gap surfaced. *)
+let () =
+  let prompt_dir =
+    Filename.concat
+      (match Sys.getenv_opt "DUNE_SOURCEROOT" with
+       | Some root -> root
+       | None -> Sys.getcwd ())
+      "config/prompts"
+  in
+  Prompt_registry.set_markdown_dir prompt_dir;
+  Prompt_registry.load_prompts_from_directory prompt_dir
+
 let () =
   let open Keeper_event_queue in
   let board_payload () =

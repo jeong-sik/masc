@@ -37,11 +37,11 @@ MASC(Multi-Agent Shared Context)는 여러 코딩 에이전트가 같이 쓰는 
 | **대시보드** | 브라우저에서 전체를 보고 운영자로서 조작할 때 | 서버가 같은 프로세스에서 `/dashboard/` 로 띄웁니다 |
 | **TUI** | 터미널에서 Keeper를 지켜보고 지시할 때. 코드와 diff도 여기서 봅니다 | `masc-tui`. 설치하면 `masc` 옆에 같이 깔립니다 |
 
-![MASC 대시보드 개요](docs/screenshots/dashboard/2026-08-26/01-overview.png)
+![MASC 터미널 UI](docs/screenshots/tui/2026-08-26/surfaces/01-overview.png)
 
-로컬에서 실행 중인 MASC를 캡처한 화면입니다. 운영 정보는 알아볼 수 없도록
-바꿨습니다. [대시보드 화면 목록](docs/screenshots/dashboard/2026-08-26/README.md)에서
-24개 화면과 캡처 조건을 확인할 수 있습니다.
+로컬에서 실행 중인 MASC의 터미널 UI입니다. Keeper 이름과 경로는 같은 글자 수의
+가짜 값으로 바꿨습니다. 다섯 장과 캡처 조건은
+[화면 목록](docs/screenshots/tui/2026-08-26/surfaces/README.md)에 있습니다.
 
 ## 처음 실행하기
 
@@ -110,7 +110,51 @@ bash /tmp/masc-install.sh --version "$TAG"
 릴리스에는 서버 바이너리와 터미널 UI, 배포 점검 도구가 들어갑니다. 설치 스크립트가
 `masc-tui`를 `masc` 옆에 놓고, 실행 명령까지 화면에 찍어 줍니다.
 
+### 처음 설정
+
+바이너리를 놓은 뒤 설치 스크립트가 일회성 설정 마법사를 실행합니다(`--no-wizard`
+로 건너뜀). 아무것도 쓰기 전에 이 호스트에서 감지한 것을 먼저 보여주고, 실제로
+쓰는 파일은 `.masc/config/.env.local`(provider 키 하나)과 `runtime.toml`의
+`[runtime].default` 둘뿐입니다.
+
+두 축을 보여줍니다. **모델 소스**는 턴이 토큰을 받는 곳입니다.
+
+- 클라우드 provider(Anthropic, OpenAI, GLM, DeepSeek …)는 API 키 환경 변수로
+  제안됩니다. `--provider <id>`로 묻지 않고 고르고, `--api-key`나
+  `--api-key-stdin`으로 키를 줍니다.
+- 로컬 서버(Ollama, llama-server, MLX)는 healthcheck 경로로 curl해
+  `reachable`(도달) / `not running`(안 뜸)으로 표시합니다. 안 떠 있는 서버가
+  고르기 전에 보입니다.
+- subscription CLI(Claude Code, Codex, Antigravity)는 그 CLI 자신의 로그인으로
+  연결돼 키가 필요 없습니다. 명령이 `PATH`에 있으면 `installed`(설치됨), 자체
+  로그인 검사를 통과하면 `signed in`(로그인됨)으로 표시합니다.
+
+**실행 샌드박스**는 Keeper의 도구가 도는 곳입니다. 마법사는 호스트가 제공 가능한
+백엔드를 **감지·표시만** 합니다 — `docker`(데몬 도달), macOS의 Apple `container`
+CLI로 `microvm`, `remote_ssh`(runtime.toml에 endpoint 선언). 고르지는 않습니다.
+샌드박스는 `.masc/config/keepers/<name>.toml`에서 Keeper마다, 또는 자기 선택을
+지닌 `--team <preset>`으로 정합니다(`--sandbox docker|microvm|remote_ssh`로 그
+팀의 샌드박스를 지정할 수 있습니다).
+
+subscription 로그인 확인은 독립 명령이기도 합니다. `masc runtime-probe
+<runtime_id>`는 CLI가 로그인돼 있으면 `0`, 아니면 `1`로 끝나며, 자격증명 파일을
+읽지 않고 서버의 로그인 probe를 재사용합니다.
+
 ## MCP 클라이언트 설정
+
+한 번에 끝내는 길은 `masc mcp-config`입니다. bearer를 발급하고 클라이언트용
+완성 config 블록을 찍어 주므로, URL·토큰·헤더를 손으로 맞추지 않고 한 블록만
+붙여 넣으면 됩니다.
+
+```bash
+masc mcp-config --base-path /path/to/project --client codex
+masc mcp-config --base-path /path/to/project --client claude-desktop
+masc mcp-config --base-path /path/to/project --client env   # 셸 export
+```
+
+long-lived worker 토큰을 발급하며(`--expiring`으로 세션 한정), 고른 클라이언트에
+맞게 endpoint·토큰·헤더를 담습니다. 아래 수동 블록은 이 명령이 다루지 않는
+클라이언트를 직접 배선할 때 쓰는 같은 형식입니다.
 
 공개된 MCP 경로는 HTTP입니다. 먼저 `quickstart.sh`가 만든 worker bearer를
 불러옵니다.
@@ -202,12 +246,6 @@ dune build --root . bin/masc_tui.exe
 넘기는 경로 바로 아래에 `.masc`가 있어야 합니다. `--base-path`를 안 주면
 `MASC_BASE_PATH`를, 그것도 없으면 현재 디렉터리를 씁니다. `dune install`이나 opam
 설치를 하면 `masc-tui` 이름으로 `PATH`에 올라갑니다.
-
-![MASC 터미널 UI](docs/screenshots/tui/2026-08-26/surfaces/01-overview.png)
-
-이 화면의 Keeper 이름과 경로는 같은 글자 수의 가짜 값으로 바꿨습니다. 나머지 네
-장과 캡처 조건은
-[화면 목록](docs/screenshots/tui/2026-08-26/surfaces/README.md)에 있습니다.
 
 `Tab`을 누르면 화면 20개를 돌아가며 보여 주고, 지금 보는 화면은 맨 윗줄 띠에
 표시됩니다.
@@ -356,6 +394,10 @@ curl -fsS 'http://127.0.0.1:8935/health?full=1' \
 
 서버가 `/dashboard/`로 대시보드를 띄웁니다. 화면 구성은
 `dashboard/src/config/navigation.ts`에 정의돼 있습니다.
+
+![MASC 대시보드 개요](docs/screenshots/dashboard/2026-08-26/01-overview.png)
+
+로컬에서 실행 중인 MASC의 대시보드입니다. 운영 정보는 알아볼 수 없도록 바꿨습니다.
 
 왼쪽 주 메뉴 화면:
 

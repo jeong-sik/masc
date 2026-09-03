@@ -224,6 +224,7 @@ type task_op =
   | Task_create
   | Task_claim
   | Task_done
+  | Task_cancel
   | Task_release
 
 let task_op_of_keeper_tool = function
@@ -233,6 +234,7 @@ let task_op_of_keeper_tool = function
   | Keeper_tooling.Name.Task_create -> Some Task_create
   | Keeper_tooling.Name.Task_claim -> Some Task_claim
   | Keeper_tooling.Name.Task_done -> Some Task_done
+  | Keeper_tooling.Name.Task_cancel -> Some Task_cancel
   | Keeper_tooling.Name.Task_release -> Some Task_release
 ;;
 
@@ -562,7 +564,7 @@ let handle_keeper_task_tool_with_outcome
     then
       Keeper_tool_execution.failure
         ~class_:Tool_result.Policy_rejection
-        (error_json "content is required. Good: content='Build complete, all tests pass.'.")
+        (error_json (Tool_guidance.to_string Tool_guidance.Broadcast_content_required))
     else (
       match task_cache_signal_result with
       | Error detail ->
@@ -605,9 +607,9 @@ let handle_keeper_task_tool_with_outcome
              ~class_:Tool_result.Workflow_rejection
              ~effect_disposition:Tool_result.Proven_post_effect
              ~message:
-               (Printf.sprintf
-                  "Broadcast persisted, but the explicit Keeper delivery was rejected; do not resend; request_id=%s"
-                  delivery.request_id)
+               (Tool_guidance.to_string
+                  (Tool_guidance.Broadcast_delivery_rejected
+                     { request_id = delivery.request_id }))
              data))
     | Task_create ->
     let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
@@ -960,6 +962,69 @@ let handle_keeper_task_tool_with_outcome
              | Tool_result.Failed _ ->
                (* A refused release (not the owner, stale version) left the
                   keeper holding the task, so it is not progress. *)
+               Some
+                 (Keeper_tool_outcome.Error
+                    { reason = Tool_result.message transition_result }))
+          transition_result
+      in
+      match transition_result with
+      | Tool_result.Completed _ -> Keeper_tool_execution.success payload
+      | Tool_result.Deferred { metadata; _ } ->
+        Keeper_tool_execution.deferred_data ?metadata (Tool_result.data transition_result)
+      | Tool_result.Failed { class_; _ } ->
+        Keeper_tool_execution.failure ~class_ payload)
+    | Task_cancel ->
+    let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
+    let reason = Safe_ops.json_string ~default:"" "reason" args |> String.trim in
+    if task_id = ""
+    then
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Workflow_rejection
+        (workflow_rejection_error_json
+           ~typed_outcome:
+             (Keeper_tool_outcome.Error
+                { reason = "keeper_task_cancel rejected: task_id required" })
+           "task_id is required.")
+    else if reason = ""
+    then
+      (* The authority judges this and nothing else, so an empty reason is
+         refused here rather than sent as a case with no argument. *)
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Workflow_rejection
+        (workflow_rejection_error_json
+           ~typed_outcome:
+             (Keeper_tool_outcome.Error
+                { reason = "keeper_task_cancel rejected: reason required" })
+           "reason is required. Say why this task should stop existing rather \
+            than move to someone else. Example: reason='the defect was fixed \
+            in #32078; what this task describes no longer occurs'.")
+    else (
+      let args_for_transition =
+        [ "task_id", `String task_id
+        ; "action", `String "cancel"
+        ; "reason", `String reason
+        ]
+      in
+      let transition_result =
+        Task.Tool.handle_transition
+          ~tool_name:"keeper_task_cancel"
+          ~start_time:0.0
+          { Task.Tool.config
+          ; agent_name = keeper_agent_sender ~meta
+          ; sw = Eio_context.get_switch_opt ()
+          }
+          (`Assoc args_for_transition)
+      in
+      let payload =
+        keeper_tool_result_json
+          ~typed_outcome:
+            (match transition_result with
+             (* The task is waiting for a verdict, not cancelled. Reporting
+                progress here would tell the keeper it is finished with a
+                task it still holds. *)
+             | Tool_result.Completed _ -> Some Keeper_tool_outcome.Progress
+             | Tool_result.Deferred _ -> None
+             | Tool_result.Failed _ ->
                Some
                  (Keeper_tool_outcome.Error
                     { reason = Tool_result.message transition_result }))

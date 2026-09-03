@@ -125,15 +125,18 @@ let child_output_to_json output =
 
 (* ── Tool handler ────────────────────────────────────────────── *)
 
-let prompt_param =
+(* A function, not a top-level value: the description is host-installed text
+   ([Tool_guidance_text]), read at tool-construction time so a host that
+   configures during startup is seen. *)
+let prompt_param () =
   { name = "prompt"
-  ; description = "The prompt to send to the agent"
+  ; description = (Tool_guidance_text.current ()).agent_tool_prompt_param_description
   ; param_type = String
   ; required = true
   }
 ;;
 
-let parameters = [ prompt_param ]
+let parameters () = [ prompt_param () ]
 
 let prompt_of_input = function
   | `Assoc fields ->
@@ -184,7 +187,7 @@ let create config =
   Tool.create
     ~name:config.name
     ~description:config.description
-    ~parameters
+    ~parameters:(parameters ())
     (make_handler config)
 ;;
 
@@ -192,7 +195,7 @@ let create_typed config =
   Typed_tool.create
     ~name:config.name
     ~description:config.description
-    ~params:parameters
+    ~params:(parameters ())
     ~parse:prompt_of_input
     ~handler:(make_typed_handler config)
     ~encode:child_output_to_json
@@ -275,5 +278,5 @@ let%test "declared inputs exactly match the consumed prompt" =
       ; output_summarizer = None
       }
   in
-  tool.schema.parameters = [ prompt_param ]
+  tool.schema.parameters = [ prompt_param () ]
 ;;

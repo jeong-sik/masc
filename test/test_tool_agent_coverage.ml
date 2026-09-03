@@ -9,6 +9,35 @@ module Tool_agent = Masc.Tool_agent
 module Metrics_store_eio = Masc.Metrics_store_eio
 module Workspace = Masc.Workspace
 
+(* The tool-result guidance this suite asserts (the "no metrics found"
+   message) moved out of the .ml sources into config/prompts/*.md group
+   files, rendered through the prompt registry at result-construction time.
+   Pin resolution to the repo's own prompt files — the same idiom
+   test_tool_task_coverage uses; that executable passes inside the CI
+   sandbox, so the mechanism is CI-proven. *)
+let has_prompt_root path =
+  Sys.file_exists (Filename.concat path "config/prompts/tool_failure.md")
+;;
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_prompt_root root -> root
+  | _ ->
+    let rec ascend path =
+      if has_prompt_root path
+      then path
+      else (
+        let parent = Filename.dirname path in
+        if String.equal parent path then Sys.getcwd () else ascend parent)
+    in
+    ascend (Sys.getcwd ())
+;;
+
+let () =
+  Prompt_registry.set_markdown_dir (Filename.concat (repo_root ()) "config/prompts");
+  Masc.Prompt_defaults.init ()
+;;
+
 let test_counter = ref 0
 
 let temp_dir () =

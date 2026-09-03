@@ -4322,7 +4322,24 @@ let search_row_cursor state =
         && not state.code_diff_open && not state.code_notes_open
       then Some state.code_file_cursor
       else Some state.code_cursor
-  | _ -> None
+  | Board ->
+      (match state.board_mode with
+       | Board_read _ | Board_compose -> None
+       | Board_list -> Some state.board_cursor)
+  | Planning ->
+      (match state.planning_mode with
+       | Planning_detail _ -> None
+       | Planning_list -> Some state.planning_cursor)
+  (* Named rather than left to a wildcard. [surface_row_texts] is exhaustive
+     and will name a new surface; this used to end in [_ -> None], so a
+     surface given searchable rows there still had no cursor to move here and
+     the key did nothing. The three matches -- the rows, this reading, and
+     the write below -- have to agree, and only naming every surface makes
+     the compiler say so. *)
+  | Overview | Acting | Keepers Keeper_detail | Keepers Keeper_logs
+  | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
+  | Approvals | Schedules | Fusion | Changes | Config | Resources | Tools ->
+      None
 
 let search_land state index =
   let follow ?(cursor = index) scroll set_scroll =
@@ -4410,9 +4427,21 @@ let search_land state index =
      compile time; this match has to move with it or the search finds a row and
      then goes nowhere. A [_] here would let the two drift apart silently, and
      the drift shows up as a search that quietly does nothing. *)
+  (* These three lists window themselves around the cursor when they draw --
+     the same reason the Code tree above takes no [follow] -- so the landing
+     is on screen without a scroll to move. [state.board_scroll] is the
+     reading pane's, not the list's. *)
+  | Board ->
+      (match state.board_mode with
+       | Board_read _ | Board_compose -> ()
+       | Board_list -> state.board_cursor <- index)
+  | Planning ->
+      (match state.planning_mode with
+       | Planning_detail _ -> ()
+       | Planning_list -> state.planning_cursor <- index)
   | Overview | Acting | Keepers Keeper_detail | Keepers Keeper_logs
   | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
-  | Board | Approvals | Planning | Schedules | Fusion | Changes | Config
+  | Approvals | Schedules | Fusion | Changes | Config
   | Resources | Tools ->
       ()
 
@@ -5473,7 +5502,7 @@ let chat_status_text completed =
       Printf.sprintf "Continuation checkpoint recorded (turn %s)" turn_ref
   | Keeper_chat.Terminal_effect_settled ->
       Printf.sprintf "Reply delivered by a terminal tool (turn %s)" turn_ref
-  | Keeper_chat.External_effect_pending ->
+  | Keeper_chat.Awaiting_gate_approval ->
       Printf.sprintf "Waiting for Gate approval (turn %s)" turn_ref
   | Keeper_chat.No_visible_reply ->
       Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
@@ -6253,7 +6282,7 @@ let apply_keeper_chat_result state request result =
              | Keeper_chat.Visible_reply
              | Keeper_chat.Continuation_checkpoint
              | Keeper_chat.Terminal_effect_settled
-             | Keeper_chat.External_effect_pending
+             | Keeper_chat.Awaiting_gate_approval
              | Keeper_chat.No_visible_reply -> Message_status
            in
            append_chat_history ~turn_phase:Turn_output state request role
@@ -7362,18 +7391,13 @@ let handle_approval_decision state approval decision ~mailbox =
            approval.ap_summary)
 
 (* The asks an operator can act on: the open ones, in the order the server
-   sent them. The pane draws the same filter, so this cursor and those rows
-   are one list rather than two that drift. *)
+   sent them. The pane draws the same list through the same function, so this
+   cursor and those rows cannot drift apart. *)
 let open_ask_rows state =
   match state.asks_snapshot with
   | None -> []
   | Some snapshot ->
-      List.filter
-        (fun (row : Tui_decode.ask_row) ->
-          match row.Tui_decode.ar_resolution with
-          | Tui_decode.Ask_open -> true
-          | Tui_decode.Ask_answered _ | Tui_decode.Ask_withdrawn _ -> false)
-        snapshot.Tui_decode.asn_rows
+      Ask.open_rows snapshot
 
 let selected_ask_row state = List.nth_opt (open_ask_rows state) state.ask_cursor
 
@@ -7389,6 +7413,7 @@ let selected_ask_question state =
 let leave_ask_answering state =
   state.ask_answer_mode <- Ask_browsing;
   state.ask_draft <- None;
+  state.ask_text_entry <- None;
   state.pending_ask_submit <- None
 
 let enter_ask_answering state =
@@ -7459,6 +7484,58 @@ let toggle_ask_choice state index =
       | Some choice ->
           with_ask_draft state (fun draft question ->
               Ask.toggle_choice draft ~question ~choice))
+
+(* Open the editor on the question under the cursor.
+
+   A question can arrive with no choices at all -- the domain accepts one as
+   long as it welcomes free text -- and on those the digits answer nothing.
+   Until this key existed the panel drew "free text welcome" beside a keyboard
+   that had no way to write any, so the only answer the terminal could give
+   such a question was [s]: skipped. The dashboard has had a textarea for it
+   since the surface shipped.
+
+   Reopening on an answer already written starts from that text rather than
+   from blank: a typo in a long answer should cost a backspace, not the whole
+   sentence. *)
+let begin_ask_text_entry state =
+  match (selected_ask_row state, selected_ask_question state) with
+  | Some row, Some (question : Tui_decode.ask_question) -> (
+      match Ask.free_text_slot question with
+      | None ->
+          add_event state "system"
+            (Printf.sprintf "%s takes one of its choices, not free text"
+               question.Tui_decode.aq_header)
+      | Some slot ->
+          let existing =
+            match Ask.response_for (Ask.draft_for state.ask_draft ~row) ~question with
+            | Some (Ask.Draft_wrote text) -> text
+            | Some (Ask.Draft_chose _) | Some Ask.Draft_skipped | None -> ""
+          in
+          state.ask_text_entry <- Some { ate_slot = slot; ate_text = existing })
+  | (Some _ | None), _ -> ()
+
+(* Typing edits the buffer alone. The draft is written once, on the key that
+   closes the editor, so a half-typed answer is never a response the submit
+   gate would count as answered. *)
+let edit_ask_text state f =
+  match state.ask_text_entry with
+  | None -> ()
+  | Some entry -> state.ask_text_entry <- Some { entry with ate_text = f entry.ate_text }
+
+let commit_ask_text_entry state =
+  match state.ask_text_entry with
+  | None -> ()
+  | Some entry ->
+      (* Through the slot, which names its own question: the cursor may have
+         been moved by a snapshot arriving while the operator typed, and the
+         answer belongs to the question the editor was opened on. Blank text
+         clears the response rather than recording one -- an editor emptied by
+         backspaces means unanswered, and the domain refuses a blank write. *)
+      with_ask_draft state (fun draft _question ->
+          Ask.set_text draft ~slot:entry.ate_slot ~text:entry.ate_text);
+      state.ask_text_entry <- None
+
+let cancel_ask_text_entry state = state.ask_text_entry <- None
 
 let skip_ask_question state =
   with_ask_draft state (fun draft question -> Ask.skip draft ~question)
@@ -12511,6 +12588,25 @@ and is loaded on demand through keeper_skill.
           modal and surface branch: those states are hidden, and a question,
           search cursor, or draft must not move behind the fallback. *)
        | Some _ when compact_viewport -> ()
+       (* Writing an answer takes every printable key, the way the row search
+          and the app form do, and it sits above the answering arm because
+          that arm reads digits as choices and [s]/[c] as commands. An
+          operator typing "1 second" must not have the 1 picked for them. *)
+       | Some k
+         when state.view = Approvals
+              && Option.is_some state.ask_text_entry
+              && not state.context_inspector_open ->
+           (match k with
+            | "esc" -> cancel_ask_text_entry state
+            | "\r" | "\n" | "enter" -> commit_ask_text_entry state
+            | "\127" | "\b" ->
+                edit_ask_text state Masc_tui_message_layout.drop_last_utf8_scalar
+            | s
+              when (String.length s = 1 && Char.code s.[0] >= 32)
+                   || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
+                edit_ask_text state (fun text -> text ^ s)
+            | _ -> ());
+           Render_schedule.request render_schedule Render_schedule.Force
        (* Answering is modal. A question needs a key per choice, and this
           surface already spent its arrows and its y/n on the approval queue,
           so the keys have to come from somewhere. Quit and the chrome
@@ -12530,6 +12626,10 @@ and is loaded on demand through keeper_skill.
             | "]" -> move_ask_cursor state 1
             | "s" | "S" -> skip_ask_question state
             | "c" | "C" -> clear_ask_question state
+            (* Ahead of the digit arm below, which takes every one-character
+               key and drops the ones that are not positions -- [t] landed
+               there and did nothing. *)
+            | "t" | "T" -> begin_ask_text_entry state
             (* Terminals send Enter as CR. "enter" is the name the Kitty
                protocol gives codepoint 13, and this was the only site in the
                file waiting for it -- the other twelve read "\r" -- so the
@@ -14782,7 +14882,7 @@ and is loaded on demand through keeper_skill.
                 state.system_logs_detail_scroll <- 0
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
             | Keepers Keeper_list | Acting | Approvals
-             | Memory | Repositories | Connectors | Config | Tools | Clients -> ()
+             | Memory | Repositories | Connectors | Config | Tools | Clients -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
             | Code ->
@@ -16439,7 +16539,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Schedules | Verification | Harness
-             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients -> ()
+             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
@@ -16561,7 +16661,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Board | Planning | Verification | Harness
-             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs | Clients -> ()
+             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs | Clients -> ())
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_prompts ->
            if state.prompts_show_runtime_assets
@@ -16622,7 +16722,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Memory | Lanes
             | Board | Planning | Schedules | Harness
-            | Fusion | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients -> ()
+            | Fusion | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients -> ())
       | _ -> ());
 
       (* Surface navigation asks only for datasets the destination adds. The

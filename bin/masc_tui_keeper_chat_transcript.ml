@@ -763,26 +763,54 @@ let phase_text ~now t =
   | Working ->
       let activities = tool_calls t in
       let calls = List.length activities in
+      (* The row exists to answer "is this slow or stuck", and the count alone
+         cannot: seven tools reads the same whether all seven returned and the
+         model is writing, or two are still out. The outcome is on every
+         activity and this row was dropping it.
+
+         Named rather than counted, and placed before the mix: the question is
+         which call is still out, the names are few -- a round holds a handful
+         -- and a long tool mix is what a narrow row loses first. *)
+      let still_running =
+        List.filter
+          (fun activity ->
+            match activity.outcome with
+            | Started | Awaiting_result -> true
+            | Returned | Failed | Never_returned | Outcome_unrecorded -> false)
+          activities
+      in
+      let running =
+        match still_running with
+        | [] -> ""
+        | running ->
+            Printf.sprintf " · still running: %s"
+              (String.concat ", " (compact_tool_parts running))
+      in
+      (* The turn age alone cannot tell a slow tool from a stall. This says how
+         long the call it is sitting in has been open, which is the number that
+         stops moving when something is stuck.
+
+         Beside the names rather than after the mix (#32955 put it there before
+         the names existed): the two describe the same open calls, and the mix
+         is long enough to push whatever follows it off a narrow row. *)
+      let in_this_call =
+        match oldest_open_call t with
+        | None -> ""
+        | Some call -> (
+          match Masc_tui_message_layout.age_text ~now ~since:call.started_at with
+          | None -> ""
+          | Some age -> Printf.sprintf " · in this call %s" age)
+      in
       let work =
-        if calls = 0 then "working"
+        if calls = 0 then "working" ^ in_this_call
         else
-          Printf.sprintf "working · %s · %s"
-            (plural calls "tool") (compact_tool_mix activities)
+          Printf.sprintf "working · %s%s%s · %s"
+            (plural calls "tool") running in_this_call
+            (compact_tool_mix activities)
       in
       (* A checkpoint means the turn ran out of context and carried on rather
          than stopping. An operator watching a turn take a long time is owed
          the difference between that and a stall. *)
-      let work =
-        (* The turn age alone cannot tell a slow tool from a stall. This says
-           how long the call it is sitting in has been open, which is the
-           number that stops moving when something is stuck. *)
-        match oldest_open_call t with
-        | None -> work
-        | Some call -> (
-          match Masc_tui_message_layout.age_text ~now ~since:call.started_at with
-          | None -> work
-          | Some age -> Printf.sprintf "%s · in this call %s" work age)
-      in
       if t.checkpoints = 0 then work
       else
         Printf.sprintf "%s, continued past %d context checkpoint(s)" work

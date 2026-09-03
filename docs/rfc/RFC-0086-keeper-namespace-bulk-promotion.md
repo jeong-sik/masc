@@ -21,7 +21,7 @@ related: ["0056", "0042", "0050"]
 > the implementation surface).
 
 > Companion to RFC-0056. RFC-0056 enumerated *incremental* leaf extraction
-> (1A trajectory → 1J keeper_invariant, 10 phases shipped). This RFC
+> (1A trajectory → 1K compaction_trigger, 11 phases shipped). This RFC
 > evaluates whether the **remaining ~244 modules in `lib/keeper/`** should
 > be promoted to a single sub-library `masc.keeper` in one PR, instead
 > of continuing leaf-by-leaf sweep. Recommendation: **Option B with

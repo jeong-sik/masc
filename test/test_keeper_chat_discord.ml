@@ -348,7 +348,7 @@ let test_external_effect_status_replaces_assistant_preface () =
           { run_id = "run-status"; thread_id = "thread-status" }
       ; Masc.Keeper_chat_events.Text_delta "assistant preface that must not survive"
       ; Masc.Keeper_chat_events.Status_block
-          { kind = Masc.Keeper_chat_blocks.External_effect_pending }
+          { kind = Masc.Keeper_chat_blocks.Awaiting_gate_approval }
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-status" }
       ]
       ~post_message:(fun ~content ->

@@ -32,7 +32,7 @@ LoC inventory at origin/main @ eeddea6095:
 | `fleet-fsm-matrix.ts` | 1247 | FSM visualization tokens + history constants + state chips |
 | `keeper-detail-panels.ts` | 1239 | KPI grid + autonomy hints + formatting utilities |
 | `keeper-config-panel.ts` | 1159 | Hook slot filtering + sandbox profiles + config types & renderers |
-| `memory-subsystems.ts` | 1055 | Hebbian + episodes state surface |
+| `memory-subsystems.ts` | 1055 | Hebbian + episodes + compaction state surface |
 | `fsm-hub.ts` | 1055 | Composite FSM snapshot rendering (post-RFC-0046) |
 | `telemetry-unified.ts` | 1042 | Telemetry view, multi-section render |
 | `journey-panel.ts` | 903 | Journey timeline render |
@@ -165,8 +165,8 @@ not before.
 
 ### 4.3 Deferred (need refactor first)
 
-- **`memory-subsystems.ts` (1055)** — two sub-systems (Hebbian,
-  episodes) but they share the keeper-state signal at the
+- **`memory-subsystems.ts` (1055)** — three sub-systems (Hebbian,
+  episodes, compaction) but they share the keeper-state signal at the
   top of the file. Splitting requires lifting state management; defer
   until that infrastructure is in place.
 - **`telemetry-unified.ts` (1042)** — Phase 1 already merged

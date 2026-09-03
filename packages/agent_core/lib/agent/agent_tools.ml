@@ -177,36 +177,28 @@ let unknown_tool_failure ~requested ~available =
      registered: 1,915 of the message's 1,975 bytes were the list, and one turn
      missed 88 times in a row, so a model already failing under tool-surface
      pressure was handed 170 KB more of it. What it cannot derive is which name
-     failed and how that name was malformed; those stay. *)
+     failed and how that name was malformed; those stay. The sentences
+     themselves are host-installed text ([Tool_guidance_text]): the host
+     renders them from config/prompts/agent_core.md at prompt-init time and
+     the defaults here are the last-resort copy. *)
+  let text = Tool_guidance_text.current () in
   let base =
     match available with
-    | [] -> Printf.sprintf "Tool not found: %s. No tools are registered" requested
-    | _ :: _ -> Printf.sprintf "Tool not found: %s" requested
+    | [] -> text.unknown_tool_not_found_no_tools ~requested
+    | _ :: _ -> text.unknown_tool_not_found ~requested
   in
   let extras =
     match identifier_prefix requested with
     | None ->
       (match closest_registered ~requested ~available with
        | None -> []
-       | Some name -> [ Printf.sprintf "Closest registered name: %s." name ])
+       | Some name -> [ text.unknown_tool_closest_registered ~name ])
     | Some prefix when List.exists (String.equal prefix) available ->
-      [ Printf.sprintf
-          "The name carries extra characters after %S; send the tool name alone and \
-           put arguments in the input object."
-          prefix
-      ]
+      [ text.unknown_tool_extra_characters ~prefix ]
     | Some prefix ->
       (match closest_registered ~requested:prefix ~available with
-       | Some name ->
-         [ Printf.sprintf
-             "The name is not a bare identifier (closest registered name: %s); send \
-              the registered tool name alone and put arguments in the input object."
-             name
-         ]
-       | None ->
-         [ "The name is not a bare identifier; send the registered tool name alone \
-            and put arguments in the input object."
-         ])
+       | Some name -> [ text.unknown_tool_not_bare_with_closest ~name ]
+       | None -> [ text.unknown_tool_not_bare ])
   in
   (* [base] carries no trailing period, so the sentence join supplies
      it; with no extras the legacy message stays byte-identical. *)

@@ -3005,6 +3005,13 @@
  (libraries alcotest masc_tui_runtime_config_receipt yojson))
 
 (test
+ (name test_tui_chat_gate_row)
+ (modules test_tui_chat_gate_row)
+ (libraries alcotest ast_grep masc_tui_types)
+ (deps
+  (source_tree ../bin)))
+
+(test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
  (libraries
@@ -3119,6 +3126,11 @@
  (libraries alcotest masc_tui_types))
 
 (test
+ (name test_tui_memory_fold)
+ (modules test_tui_memory_fold)
+ (libraries alcotest masc_tui_types))
+
+(test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
  (libraries alcotest masc masc_tui_types unix))
@@ -3177,6 +3189,14 @@
 (test
  (name test_tui_fit_middle)
  (modules test_tui_fit_middle)
+ (libraries
+  alcotest
+  masc_tui_markdown_render_cache
+  masc_tui_message_layout))
+
+(test
+ (name test_tui_turn_rail)
+ (modules test_tui_turn_rail)
  (libraries
   alcotest
   masc_tui_markdown_render_cache
@@ -4286,6 +4306,8 @@
 (include stanzas/test_keeper_identity_gate.inc)
 
 (include stanzas/test_masc_ask_tool_surface.inc)
+
+(include stanzas/test_tui_ask_layout.inc)
 
 (include stanzas/test_tui_ask_projection.inc)
 

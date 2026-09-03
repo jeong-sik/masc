@@ -12,6 +12,9 @@ type block_reason =
   | Unsafe_redirect
   | Pipes_not_allowed
 
+(** The model-facing sentence for a block reason. The short reasons render
+    from managed templates ([config/prompts/exec_policy.md]); on render
+    failure the bare variant tag is returned and the miss is logged. *)
 val block_reason_to_string : block_reason -> string
 
 type parse_mode = Strict | Tool_execute

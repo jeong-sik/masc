@@ -429,3 +429,199 @@ let tool_help_entry_prompt_hints = "tool_help.entry.prompt_hints"
 let tool_help_entry_examples = "tool_help.entry.examples"
 let tool_help_entry_alternatives = "tool_help.entry.alternatives"
 let tool_help_index_header = "tool_help.index.header"
+
+(* Tool-result guidance (RFC prompts-and-tool-definitions-outside-ocaml §3.11):
+   each closed variant arm maps to exactly one key here; the prose lives in
+   the group file, and the execution path only picks the variant and supplies
+   the data. *)
+
+(* keeper.tool_filesystem.* — Keeper filesystem tool-result wording
+   (keeper_tool_filesystem_runtime.fs_guidance). *)
+let keeper_tool_filesystem_offset_not_1_based =
+  "keeper.tool_filesystem.offset_not_1_based"
+;;
+
+let keeper_tool_filesystem_limit_not_positive =
+  "keeper.tool_filesystem.limit_not_positive"
+;;
+
+let keeper_tool_filesystem_available_cwds_partial =
+  "keeper.tool_filesystem.available_cwds_partial"
+;;
+
+let keeper_tool_filesystem_checkout_scan_failed =
+  "keeper.tool_filesystem.checkout_scan_failed"
+;;
+
+let keeper_tool_filesystem_cwd_not_directory = "keeper.tool_filesystem.cwd_not_directory"
+
+let keeper_tool_filesystem_offset_beyond_window =
+  "keeper.tool_filesystem.offset_beyond_window"
+;;
+
+let keeper_tool_filesystem_offset_beyond_scan_budget =
+  "keeper.tool_filesystem.offset_beyond_scan_budget"
+;;
+
+let keeper_tool_filesystem_capability_unavailable =
+  "keeper.tool_filesystem.capability_unavailable"
+;;
+
+let keeper_tool_filesystem_publication_failed =
+  "keeper.tool_filesystem.publication_failed"
+;;
+
+let keeper_tool_filesystem_directory_publication_failed =
+  "keeper.tool_filesystem.directory_publication_failed"
+;;
+
+let keeper_tool_filesystem_append_capability_failed =
+  "keeper.tool_filesystem.append_capability_failed"
+;;
+
+let keeper_tool_filesystem_append_incomplete = "keeper.tool_filesystem.append_incomplete"
+
+let keeper_tool_filesystem_recovery_lane_committed =
+  "keeper.tool_filesystem.recovery_lane_committed"
+;;
+
+let keeper_tool_filesystem_recovery_lane_effect_observed =
+  "keeper.tool_filesystem.recovery_lane_effect_observed"
+;;
+
+let keeper_tool_filesystem_recovery_lane_not_executed =
+  "keeper.tool_filesystem.recovery_lane_not_executed"
+;;
+
+let keeper_tool_filesystem_recovery_lane_indeterminate =
+  "keeper.tool_filesystem.recovery_lane_indeterminate"
+;;
+
+let keeper_tool_filesystem_recovery_lane_cleanup_detail =
+  "keeper.tool_filesystem.recovery_lane_cleanup_detail"
+;;
+
+let keeper_tool_filesystem_gate_record_unavailable =
+  "keeper.tool_filesystem.gate_record_unavailable"
+;;
+
+let keeper_tool_filesystem_path_required = "keeper.tool_filesystem.path_required"
+
+let keeper_tool_filesystem_patch_requires_old_string =
+  "keeper.tool_filesystem.patch_requires_old_string"
+;;
+
+let keeper_tool_filesystem_patch_target_missing =
+  "keeper.tool_filesystem.patch_target_missing"
+;;
+
+(* keeper.gate_replay.* — one slot per replay resolution state / artifact
+   integrity failure; composed per state arm, never one shared template. *)
+let keeper_gate_replay_resolution_consumed_without_outcome =
+  "keeper.gate_replay.resolution_consumed_without_outcome"
+;;
+
+let keeper_gate_replay_resolution_invalid_replay_state =
+  "keeper.gate_replay.resolution_invalid_replay_state"
+;;
+
+let keeper_gate_replay_resolution_journal_unreadable =
+  "keeper.gate_replay.resolution_journal_unreadable"
+;;
+
+let keeper_gate_replay_resolution_rejected = "keeper.gate_replay.resolution_rejected"
+let keeper_gate_replay_artifact_missing = "keeper.gate_replay.artifact_missing"
+
+let keeper_gate_replay_artifact_length_mismatch =
+  "keeper.gate_replay.artifact_length_mismatch"
+;;
+
+let keeper_gate_replay_approval_input_drifted =
+  "keeper.gate_replay.approval_input_drifted"
+;;
+
+let keeper_gate_replay_approval_consumption_mismatch =
+  "keeper.gate_replay.approval_consumption_mismatch"
+;;
+
+let keeper_gate_replay_replay_outcome_missing_after_restart =
+  "keeper.gate_replay.replay_outcome_missing_after_restart"
+;;
+
+let keeper_gate_replay_replay_outcome_before_consumption =
+  "keeper.gate_replay.replay_outcome_before_consumption"
+;;
+
+let keeper_gate_replay_replay_effect_raised = "keeper.gate_replay.replay_effect_raised"
+
+(* exec_policy.* — the short block reasons surfaced via
+   [Exec_policy.block_reason_to_string] and the cwd sibling-dirs hint. *)
+let exec_policy_block_reason_empty_command = "exec_policy.block_reason.empty_command"
+
+let exec_policy_block_reason_process_substitution =
+  "exec_policy.block_reason.process_substitution"
+;;
+
+let exec_policy_block_reason_pipes_not_allowed =
+  "exec_policy.block_reason.pipes_not_allowed"
+;;
+
+let exec_policy_cwd_existing_siblings_hint = "exec_policy.cwd_existing_siblings_hint"
+
+(* subset_rewrite.* — the advice templates [Subset_rewrite.to_string]
+   renders around the caller-supplied [because]. *)
+let subset_rewrite_move_to_field = "subset_rewrite.move_to_field"
+let subset_rewrite_call_this_instead = "subset_rewrite.call_this_instead"
+let subset_rewrite_spell_it_as = "subset_rewrite.spell_it_as"
+
+(* tool_guidance.* — generic cross-domain tool-result guidance, one arm of
+   [Tool_guidance.t] per key. *)
+let tool_guidance_broadcast_delivery_rejected =
+  "tool_guidance.broadcast_delivery_rejected"
+;;
+
+let tool_guidance_broadcast_content_required = "tool_guidance.broadcast_content_required"
+
+let tool_guidance_workspace_message_delivery_rejected =
+  "tool_guidance.workspace_message_delivery_rejected"
+;;
+
+let tool_guidance_post_execution_hook_failed = "tool_guidance.post_execution_hook_failed"
+let tool_guidance_mcp_outcome_unknown = "tool_guidance.mcp_outcome_unknown"
+
+let tool_guidance_reject_verdict_requires_reason =
+  "tool_guidance.reject_verdict_requires_reason"
+;;
+
+let tool_guidance_no_metrics_found_for_agent = "tool_guidance.no_metrics_found_for_agent"
+let tool_guidance_invalid_agent_card_action = "tool_guidance.invalid_agent_card_action"
+
+(* agent_core.* — templates the host installs into
+   [Agent_core.Tool_guidance_text] at prompt-init time; agent_core itself
+   stays config-free. *)
+let agent_core_unknown_tool_not_found = "agent_core.unknown_tool.not_found"
+
+let agent_core_unknown_tool_not_found_no_tools =
+  "agent_core.unknown_tool.not_found_no_tools"
+;;
+
+let agent_core_unknown_tool_closest_registered =
+  "agent_core.unknown_tool.closest_registered"
+;;
+
+let agent_core_unknown_tool_extra_characters = "agent_core.unknown_tool.extra_characters"
+
+let agent_core_unknown_tool_not_bare_with_closest =
+  "agent_core.unknown_tool.not_bare_with_closest"
+;;
+
+let agent_core_unknown_tool_not_bare = "agent_core.unknown_tool.not_bare"
+let agent_core_handoff_description = "agent_core.handoff.description"
+
+let agent_core_handoff_prompt_param_description =
+  "agent_core.handoff.prompt_param_description"
+;;
+
+let agent_core_agent_tool_prompt_param_description =
+  "agent_core.agent_tool.prompt_param_description"
+;;

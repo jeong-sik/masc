@@ -23,6 +23,32 @@ type style =
   | Skill of skill_tone
   | Thinking
 
+type turn_rail =
+  | Rail_opens  (** The turn's first row. *)
+  | Rail_says
+      (** The turn talking: the Keeper's reply, the operator's prompt, the
+          error it ended on. *)
+  | Rail_does
+      (** What the turn did to get there -- reasoning, tool calls, a skill.
+          Drawn as a branch off the trunk, because a turn's work is
+          subordinate to the turn and was reading as a sibling of it. *)
+  | Rail_closes  (** The last row of a turn that has finished. *)
+  | Rail_none
+      (** Nothing to hang: a row belonging to no turn, or a turn of one row.
+          A single-row turn has no hierarchy to draw, so ordinary chatter
+          carries no rail and the mark appears only where there is structure
+          to read. *)
+(** Where a row sits in the bracket its turn draws down the left margin.
+
+    A turn interleaves with broadcasts, journal commits and other keepers'
+    turns on one clock, and nothing said which rows were one turn's. The
+    bracket answers that without a heading row: rows inside it are this turn,
+    rows beside it are not.
+
+    An open bracket is also how a running turn reads. A turn still streaming
+    emits no {!Rail_closes}, so the rail stays open until the turn ends -- the
+    fact is structural rather than a second spinner. *)
+
 type markdown_source =
   | Markdown_stable of {
       keeper_name : string;
@@ -74,6 +100,10 @@ type entry = {
   request_label : string;
   body : string;
   markdown_source : markdown_source;
+  turn_rail : turn_rail;
+      (** Which piece of its turn's bracket this entry draws. Carried on the
+          entry because only the caller knows the turn's extent: the layout
+          sees one entry at a time. *)
 }
 
 type metadata =
@@ -139,8 +169,15 @@ type row = {
   shade : shade;
       (** Which belonging layer this row sits in. See {!shade}. *)
   text : string;
+  gutter_rail_cells : int;
+      (** Cells at the head of {!gutter} holding the turn rail and the space
+          after it. Zero where no rail is drawn at all, so a pane that never
+          shows one pays nothing for it. The renderer draws these cells in the
+          quiet tone: the rail is structure, and colour on this row is already
+          spent saying status. *)
   gutter_label_at : int;
-      (** Cells of {!gutter} that belong to the clock and the speaker mark. The
+      (** Cells of {!gutter} that belong to the rail, the clock and the speaker
+          mark. The
           rest is the kind label. The renderer colours what comes before this
           by status and lets the label recede; without the offset it would have
           to find the mark by measuring the glyph a second time. Zero on rows
@@ -151,6 +188,15 @@ type row = {
           the same width in blanks on the rest, so a wrapped body lines up
           under where it started. *)
 }
+
+val turn_rail_glyph : turn_rail -> string
+(** The one cell this rail piece draws, or a blank for {!Rail_none}. Box
+    drawing so the bracket survives NO_COLOR as a shape. *)
+
+val turn_rail_cells : int
+(** Cells the rail column costs every row: the glyph and the space after it.
+    Spent uniformly whether or not a rail is drawn, because a margin that
+    changed width per row would re-wrap every body below it. *)
 
 val utf8_scalar_byte_length : char -> int option
 (** Expected byte length for one well-formed UTF-8 lead byte. Invalid leads and

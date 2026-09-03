@@ -231,9 +231,9 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         (validation_error_data
            "reason is required for masc_keeper_clear (audit trail)")
     else
-    (* Same registry race guard as [handle_keeper_compact]: if the keeper
-       disappeared between [resolve_keeper_name] and [get], abort cleanly
-       rather than silently proceed with a half-applied clear. *)
+    (* Registry race guard: if the keeper disappeared between
+       [resolve_keeper_name] and [get], abort cleanly rather than silently
+       proceed with a half-applied clear. *)
     match Keeper_registry.get ~base_path:config.base_path name with
     | None ->
       tool_result_error_data ~class_:Tool_result.Workflow_rejection

@@ -1271,8 +1271,7 @@ let previous_turn_stop_lines (stop : Keeper_turn_checkpoint_reason.t option) :
         [ "repeated_count", string_of_int repeated_count ]
   | Some
       ( Keeper_turn_checkpoint_reason.Operation_queued
-      | Keeper_turn_checkpoint_reason.Durable_stimulus_arrived
-      | Keeper_turn_checkpoint_reason.Awaiting_external_effect ) -> []
+      | Keeper_turn_checkpoint_reason.Durable_stimulus_arrived ) -> []
 
 let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)

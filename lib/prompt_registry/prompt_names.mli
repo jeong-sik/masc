@@ -282,3 +282,90 @@ val tool_help_entry_prompt_hints : string
 val tool_help_entry_examples : string
 val tool_help_entry_alternatives : string
 val tool_help_index_header : string
+
+(** {1 Tool-result guidance keys}
+
+    RFC prompts-and-tool-definitions-outside-ocaml §3.11: each closed variant
+    arm maps to exactly one key; the prose lives in the group file and the
+    execution path only picks the variant and supplies the data. *)
+
+(** keeper.tool_filesystem.* — Keeper filesystem tool-result wording
+    ([keeper_tool_filesystem_runtime.fs_guidance]). *)
+
+val keeper_tool_filesystem_offset_not_1_based : string
+val keeper_tool_filesystem_limit_not_positive : string
+val keeper_tool_filesystem_available_cwds_partial : string
+val keeper_tool_filesystem_checkout_scan_failed : string
+val keeper_tool_filesystem_cwd_not_directory : string
+val keeper_tool_filesystem_offset_beyond_window : string
+val keeper_tool_filesystem_offset_beyond_scan_budget : string
+val keeper_tool_filesystem_capability_unavailable : string
+val keeper_tool_filesystem_publication_failed : string
+val keeper_tool_filesystem_directory_publication_failed : string
+val keeper_tool_filesystem_append_capability_failed : string
+val keeper_tool_filesystem_append_incomplete : string
+val keeper_tool_filesystem_recovery_lane_committed : string
+val keeper_tool_filesystem_recovery_lane_effect_observed : string
+val keeper_tool_filesystem_recovery_lane_not_executed : string
+val keeper_tool_filesystem_recovery_lane_indeterminate : string
+val keeper_tool_filesystem_recovery_lane_cleanup_detail : string
+val keeper_tool_filesystem_gate_record_unavailable : string
+val keeper_tool_filesystem_path_required : string
+val keeper_tool_filesystem_patch_requires_old_string : string
+val keeper_tool_filesystem_patch_target_missing : string
+
+(** keeper.gate_replay.* — one slot per replay resolution state / artifact
+    integrity failure; composed per state arm, never one shared template. *)
+
+val keeper_gate_replay_resolution_consumed_without_outcome : string
+val keeper_gate_replay_resolution_invalid_replay_state : string
+val keeper_gate_replay_resolution_journal_unreadable : string
+val keeper_gate_replay_resolution_rejected : string
+val keeper_gate_replay_artifact_missing : string
+val keeper_gate_replay_artifact_length_mismatch : string
+val keeper_gate_replay_approval_input_drifted : string
+val keeper_gate_replay_approval_consumption_mismatch : string
+val keeper_gate_replay_replay_outcome_missing_after_restart : string
+val keeper_gate_replay_replay_outcome_before_consumption : string
+val keeper_gate_replay_replay_effect_raised : string
+
+(** exec_policy.* — the short block reasons surfaced via
+    [Exec_policy.block_reason_to_string] and the cwd sibling-dirs hint. *)
+
+val exec_policy_block_reason_empty_command : string
+val exec_policy_block_reason_process_substitution : string
+val exec_policy_block_reason_pipes_not_allowed : string
+val exec_policy_cwd_existing_siblings_hint : string
+
+(** subset_rewrite.* — the advice templates [Subset_rewrite.to_string]
+    renders around the caller-supplied [because]. *)
+
+val subset_rewrite_move_to_field : string
+val subset_rewrite_call_this_instead : string
+val subset_rewrite_spell_it_as : string
+
+(** tool_guidance.* — generic cross-domain tool-result guidance, one arm of
+    [Tool_guidance.t] per key. *)
+
+val tool_guidance_broadcast_delivery_rejected : string
+val tool_guidance_broadcast_content_required : string
+val tool_guidance_workspace_message_delivery_rejected : string
+val tool_guidance_post_execution_hook_failed : string
+val tool_guidance_mcp_outcome_unknown : string
+val tool_guidance_reject_verdict_requires_reason : string
+val tool_guidance_no_metrics_found_for_agent : string
+val tool_guidance_invalid_agent_card_action : string
+
+(** agent_core.* — templates the host installs into
+    [Agent_core.Tool_guidance_text] at prompt-init time; agent_core itself
+    stays config-free. *)
+
+val agent_core_unknown_tool_not_found : string
+val agent_core_unknown_tool_not_found_no_tools : string
+val agent_core_unknown_tool_closest_registered : string
+val agent_core_unknown_tool_extra_characters : string
+val agent_core_unknown_tool_not_bare_with_closest : string
+val agent_core_unknown_tool_not_bare : string
+val agent_core_handoff_description : string
+val agent_core_handoff_prompt_param_description : string
+val agent_core_agent_tool_prompt_param_description : string

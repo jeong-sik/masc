@@ -16,7 +16,6 @@ type stop_reason =
   | Completed
   | Yielded_to_operation_queued of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
-  | Awaiting_external_effect of { turns_used : int }
   | Yielded_after_repeated_tool_call of {
       turns_used : int;
       tool_name : string;

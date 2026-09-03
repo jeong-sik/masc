@@ -1039,10 +1039,6 @@ let load_overview ~(host : string) ~(port : int) :
         let* items = optional_list_field json "attention_queue" in
         decode_attention_items items
       in
-      let* attention_items =
-        let* items = optional_list_field json "attention_items" in
-        decode_attention_items items
-      in
       let* agent_briefs = optional_list_field json "agent_briefs" in
       let* keeper_briefs = optional_list_field json "keeper_briefs" in
       let* top_attention =
@@ -1071,7 +1067,6 @@ let load_overview ~(host : string) ~(port : int) :
          a count read from there was a default dressed as a reading. *)
       let ov_keepers = List.length keeper_briefs in
       let ov_mcp_agents = List.length agent_briefs in
-      let ov_incident_count = List.length incidents in
       let* ov_generated_at = required_string_field json "generated_at" in
       Ok
         {
@@ -1080,7 +1075,6 @@ let load_overview ~(host : string) ~(port : int) :
           ov_project;
           ov_keepers;
           ov_mcp_agents;
-          ov_incident_count;
           (* The briefing projects one fact onto two lists: an incident is
              also queued for operator attention, as the same JSON row. On the
              live runtime all three incidents came back on both lists and the
@@ -1089,7 +1083,7 @@ let load_overview ~(host : string) ~(port : int) :
              again, not a second fact. Items that differ in any field keep
              both rows. *)
           ov_attention_items =
-            (incidents @ attention_queue @ attention_items
+            (incidents @ attention_queue
             |> List.fold_left
                  (fun kept item ->
                    if List.mem item kept then kept else item :: kept)

@@ -113,7 +113,7 @@ let test_remote_ssh_keeper_reaches_ssh_dispatch_branch () =
   setup @@ fun ~config ~meta ~playground ->
   with_dispatch_override @@ fun () ->
   let raw =
-    Keeper_tool_execute_runtime.handle_tool_execute ~turn_sandbox_factory:None
+    Keeper_tool_execute_runtime.handle_tool_execute ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:None
       ~config ~meta ~args:(args ~cwd:playground) ()
   in
   let fields =

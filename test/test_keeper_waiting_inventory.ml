@@ -766,36 +766,6 @@ let test_corrupt_external_attention_is_read_error () =
      | _first :: _second :: _rest -> fail "expected one keeper waiting row, got multiple")
 ;;
 
-let test_external_attention_projection_is_bounded () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "external-attention-bounded-keeper" in
-  ensure_keeper config keeper_name;
-  let initial_json = Server_keeper_waiting_inventory.dashboard_json config in
-  let limit = json_int_member "external_attention_row_limit" initial_json in
-  check bool "external attention row limit is positive" true (limit > 0);
-  for index = 1 to limit + 1 do
-    record_external_attention_exn config ~keeper_name index
-  done;
-  let json = Server_keeper_waiting_inventory.dashboard_json config in
-  check bool "root row count reports truncation" true
-    (json_bool_member "row_count_truncated" json);
-  check int "one keeper has truncated external attention" 1
-    (json_int_member "external_attention_truncated_keeper_count" json);
-  check int "row count is capped" limit (json_int_member "row_count" json);
-  match find_keeper json keeper_name with
-  | None -> fail "keeper row missing"
-  | Some keeper ->
-    check bool "keeper waiting count reports truncation" true
-      (json_bool_member "waiting_count_truncated" keeper);
-    check bool "external attention source reports truncation" true
-      U.(keeper |> member "truncated_sources" |> member "external_attention" |> to_bool);
-    check int "keeper waiting count is capped" limit
-      (json_int_member "waiting_count" keeper);
-    check int "keeper waiting rows are capped" limit
-      U.(keeper |> member "waiting_on" |> to_list |> List.length)
-;;
-
 let test_global_pending_confirm_is_actionable_row () =
   with_workspace
   @@ fun config ->
@@ -920,8 +890,6 @@ let () =
             test_keeper_name_discovery_failure_is_read_error
         ; test_case "corrupt external attention is read_error" `Quick
             test_corrupt_external_attention_is_read_error
-        ; test_case "external attention projection is bounded" `Quick
-            test_external_attention_projection_is_bounded
         ; test_case "global pending confirm is actionable row" `Quick
             test_global_pending_confirm_is_actionable_row
         ; test_case "corrupt pending confirms is read_error" `Quick

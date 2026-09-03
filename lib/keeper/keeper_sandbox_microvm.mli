@@ -8,7 +8,12 @@
     measured cost of the backend and for the two Docker hardening flags
     [container run] does not accept. *)
 
+val command_argv_for : Keeper_microvm_backend.t -> string list
+(** The CLI prefix for one backend. *)
+
 val command_argv : unit -> string list
+(** {!command_argv_for} [Apple_container]. The spelling every call site had
+    before RFC-0405 introduced the choice. *)
 
 val unsupported_docker_flags : string list
 (** Docker hardening flags [container run] rejects. [container] errors on an
@@ -187,9 +192,40 @@ val keeper_work_root_write_probe_argv
 
 val keeper_vm_container_kind : string
 
+val inspect_argv_for
+  :  Keeper_microvm_backend.t
+  -> container_name:string
+  -> string list
+(** The argv that makes this backend report a guest's state in the shape
+    {!running_of_inspect_json_for} parses. *)
+
+val stop_argv_for
+  :  Keeper_microvm_backend.t
+  -> container_name:string
+  -> string list
+
+val delete_force_argv_for
+  :  Keeper_microvm_backend.t
+  -> container_name:string
+  -> string list
+
 val inspect_argv : container_name:string -> string list
 
+val running_of_inspect_json_for
+  :  Keeper_microvm_backend.t
+  -> string
+  -> (bool, string) result
+(** Whether the guest this backend describes is running.
+
+    Each backend owns its own parse: [container inspect] answers a list whose
+    first element nests [status.state], [msb inspect --format json] a flat
+    object whose [status] is capitalised. A shape the chosen parser does not
+    recognise is [Error]. It is never [Ok false] -- read as "not running", an
+    unrecognised answer takes a live guest down and boots a second beside
+    it. *)
+
 val running_of_inspect_json : string -> (bool, string) result
+(** {!running_of_inspect_json_for} [Apple_container]. *)
 (** [Ok true] iff [.[0].status.state = "running"]. The caller maps a
     non-zero inspect exit to absent before calling this. *)
 

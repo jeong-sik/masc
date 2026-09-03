@@ -448,8 +448,15 @@ let test_tick_stamps_wakes_from_clock_and_anchors_recurrence_on_now () =
   in
   let refusing = accepting_consumer ~accept:(Error "unsupported kind") (ref []) in
   readings := 0;
-  let _ = tick_ok config ~now:201.0 ~clock ~consumer:refusing in
-  check int "a refused payload reads the clock once" 1 !readings;
+  let refused_tick = tick_ok config ~now:201.0 ~clock ~consumer:refusing in
+  (* Per attempt, not per tick. This tick carries more than the schedule just
+     created: the retried one three assertions above is back to due, so it is
+     a candidate here too and the refusing consumer turns both away. Counting
+     the tick's readings against a literal 1 asserted that only one schedule
+     was ever due, which is a fact about the fixtures rather than about the
+     clock. *)
+  check int "a refused payload reads the clock once per attempt"
+    (List.length refused_tick.dispatches) !readings;
   (match
      Schedule_store.last_wake_for_schedule_instance
        (Schedule_store.read_state config)

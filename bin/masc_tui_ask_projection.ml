@@ -21,6 +21,30 @@ let draft_for existing ~(row : Decode.ask_row) =
 let response_for draft ~(question : Decode.ask_question) =
   List.assoc_opt question.aq_id draft.d_responses
 
+(* A human line for what the draft answers, in the labels the operator saw
+   rather than the choice ids the wire carries: chosen labels joined per
+   question, a written answer quoted, a skipped question named. Empty when the
+   draft has answered nothing, so the caller can fall back to the Keeper name
+   alone. *)
+let summarize_answer draft ~(row : Decode.ask_row) =
+  let per_question (question : Decode.ask_question) =
+    match response_for draft ~question with
+    | None -> None
+    | Some (Draft_chose ids) ->
+        let label_of id =
+          List.find_opt
+            (fun (choice : Decode.ask_choice) -> String.equal choice.ac_id id)
+            question.aq_choices
+          |> Option.map (fun (choice : Decode.ask_choice) -> choice.ac_label)
+        in
+        (match List.filter_map label_of ids with
+         | [] -> None
+         | labels -> Some (String.concat ", " labels))
+    | Some (Draft_wrote text) -> Some (Printf.sprintf "\"%s\"" text)
+    | Some Draft_skipped -> Some "skipped"
+  in
+  String.concat "; " (List.filter_map per_question row.ar_questions)
+
 let without question_id responses =
   List.filter (fun (id, _) -> not (String.equal id question_id)) responses
 

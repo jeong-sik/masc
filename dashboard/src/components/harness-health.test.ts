@@ -11,12 +11,9 @@ function sampleResponse() {
     scope_note: 'Harness health explains safety rails and calibration loops.',
     overview: {
       evaluator_status: 'warning',
-      handoff_status: 'healthy',
       last_signal_at: 1711440300,
       evaluator_last_event_at: 1711440300,
-      handoff_last_event_at: 1711430000,
       fallback_ratio: 0.83,
-      latest_handoff_generation: 27,
     },
     calibration: {
       total_verdicts: 12,
@@ -42,24 +39,6 @@ function sampleResponse() {
         fallback_reason: null,
       },
     ],
-    recent_handoffs: {
-      description: 'Keeper checkpoint rollovers sourced from keeper metrics snapshots.',
-      status: 'healthy',
-      last_event_at: 1711430000,
-      empty_reason: null,
-      total_recent: 1,
-      recent_events: [
-        {
-          timestamp: 1711430000,
-          keeper_name: 'keeper-a',
-          trace_id: 'trace-abc123',
-          generation: 5,
-          next_generation: 6,
-          prev_trace_id: 'trace-prev',
-          new_trace_id: 'trace-new',
-        },
-      ],
-    },
   }
 }
 
@@ -147,9 +126,8 @@ describe('HarnessHealth', () => {
     expect(get).toHaveBeenCalledWith('/api/v1/dashboard/harness-health')
     expect(container.textContent).toContain('안전 감시')
     expect(container.textContent).toContain('감시 흐름도')
-    expect(container.textContent).toContain('keeper 장기 실행 중 평가와 교체가 정상인지 감시합니다')
+    expect(container.textContent).toContain('keeper 장기 실행 중 평가 판정이 정상인지 감시합니다')
     expect(container.textContent).toContain('평가 모델 건강도')
-    expect(container.textContent).toContain('keeper 세대 교체')
     expect(container.textContent).toContain('대체 처리율')
     expect(container.textContent).toContain('judge timeout')
     expect(mermaidSource(container)).toContain('flowchart LR')
@@ -226,47 +204,10 @@ describe('HarnessHealth', () => {
     const source = module.buildHarnessFlowMermaid(sampleResponse() as never)
 
     expect(source).toContain('class evaluator warningRail;')
-    expect(source).toContain('class handoff healthyRail;')
     expect(source).toContain('class evaluator activeRail;')
-    expect(source).toContain('교체 신호')
     expect(source).toContain('/api/v1/dashboard/harness-health')
     // Mermaid classDef parser cannot lex CSS var(--token) — colors must stay as hex literals.
     expect(source).not.toMatch(/classDef[^\n]*var\(/)
   })
 
-  it('updates the handoff rail immediately on keeper_handoff SSE events', async () => {
-    const get = vi.fn<(path: string) => Promise<unknown>>()
-      .mockResolvedValue(sampleResponse())
-    const lastEvent = signal<unknown>(null)
-
-    const { HarnessHealth } = await loadComponentWithApi({
-      get,
-      lastEvent,
-    })
-
-    render(html`<${HarnessHealth} />`, container)
-    await flushUi()
-    expect(container.textContent).toContain('keeper-a')
-
-    lastEvent.value = {
-      type: 'agent_core:masc:harness:handoff',
-      payload: {
-        timestamp: 1711440900,
-        keeper_name: 'keeper-b',
-        trace_id: 'trace-b',
-        generation: 8,
-        next_generation: 9,
-      },
-    }
-    await flushUi()
-
-    expect(container.textContent).toContain('keeper-b')
-    expect(container.textContent).toContain('9세대')
-    expect(mermaidSource(container)).toContain('class handoff activeRail;')
-
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    await flushUi()
-
-    expect(get).toHaveBeenCalledTimes(2)
-  })
 })

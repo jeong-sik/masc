@@ -301,12 +301,13 @@ let handle_cycle_exception ~base_path ~(meta : keeper_meta) exn =
 
 (* The queue records attention that a Keeper must observe, not provider health.
    A source normally leaves only after a completed turn has observed the
-   admitted batch. A durable-stimulus yield and the repeated-assistant-text
-   loop guard are narrow checkpoint exceptions: attention-only rows advance
-   after the continuation is durably preserved. Provider/config/context
-   failures therefore leave every source untouched; otherwise one runtime
-   failure can terminally discard an arbitrary batch of unrelated Board,
-   Schedule, Task, or completion-authority facts. *)
+   admitted batch. Every typed checkpoint is the other case: attention-only
+   rows advance after the continuation is durably preserved, because each
+   checkpoint reason is produced after a model round ran with the batch
+   projected. Provider/config/context failures therefore leave every source
+   untouched; otherwise one runtime failure can terminally discard an
+   arbitrary batch of unrelated Board, Schedule, Task, or
+   completion-authority facts. *)
 type batch_disposition =
   | Batch_ack_completed
   | Batch_ack_attention_only
@@ -356,15 +357,20 @@ let batch_disposition_of_cycle_outcome
        Every checkpoint reason is produced after at least one model round
        ran with the admitted attention projected: a newer durable source
        arrived, the loop guard durably preserved the turn, a tool call was
-       deferred to the Gate, or a chat operation took the slot. The turn
-       resumes from its checkpoint with that attention already in its
-       history, so retaining the batch replays the same attention into the
+       deferred to the Gate, or a chat operation took the slot. On the
+       agent-core lane the turn resumes from its checkpoint with that
+       attention already in its history; on an official-client lane the
+       vendor session carries it, and a session restart between the yield
+       and the resume (client, runtime, or tool-surface change) drops it,
+       which was already the case for the two reasons acked before #32602.
+       Retaining the batch replays the same attention into the
        continuation. For a HITL resolution the cost was a full turn per wake:
        the intake admits one resolution per turn and the resumed turn ended
        on the same deferred call, so a spent grant at the queue head was
        re-delivered on every cycle and the resolutions behind it never
        reached the model (edgar.a.poe, 2026-09-02, eight turns on one
-       Execute). The ACK below still requires the HITL continuation receipt,
+       Execute; docs/audits/keeper-fleet-waiting-audit-20260902.md §13.4 in
+       #32479). The ACK below still requires the HITL continuation receipt,
        so an unconsumed grant is retained. Connector attention remains
        pending until it has an exact reply/ignore settlement. *)
     Batch_ack_attention_only

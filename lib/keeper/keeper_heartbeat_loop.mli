@@ -170,7 +170,9 @@ val batch_disposition_of_cycle_outcome :
     (durable stimulus arrived, loop guard, Gate-deferred tool call, queued
     chat operation) ACKs attention-only sources after preserving the
     continuation, because each one is produced after a model round ran with
-    the admitted batch projected; Connector_attention stays pending until an
+    the admitted batch projected (the agent-core checkpoint carries it; an
+    official-client vendor session carries it unless that session restarts
+    before the resume); Connector_attention stays pending until an
     exact reply/ignore settlement exists, and a HITL resolution stays pending
     until its continuation receipt is recorded. Every failed, cancelled,
     input-required, or skipped outcome leaves the whole batch pending.

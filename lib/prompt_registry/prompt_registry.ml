@@ -177,6 +177,89 @@ let read_file_if_exists path =
     Some (markdown_body content)
   else None
 
+(* ── Fragment-group slots (#32780) ─────────────────────────────────────
+
+   A group file carries several one-line fragments as [### marker]
+   paragraphs, each optionally declaring its template variables on the
+   marker line: [### standing.current (vars: target, behind, ahead)]. A
+   slot registers under [<group-key>.<marker>], so every consumer and name
+   constant addresses it exactly as it addressed the old one-file-per-line
+   layout — the registry, not the callers, knows the file was merged.
+   Twenty-seven 1–3-line files became four group files this way. *)
+
+let fragment_tbl : (string, string * string) Hashtbl.t = Hashtbl.create 16
+(** [slot key → (group key, marker)] — filled by the directory loader. *)
+
+(* Marker line shapes: "### name" or "### name (vars: a, b)". [None] for
+   every other line. *)
+let parse_slot_header line =
+  if String.length line > 4 && String.sub line 0 4 = "### " then (
+    let rest = String.trim (String.sub line 4 (String.length line - 4)) in
+    let marker, vars =
+      match String.index_opt rest '(' with
+      | Some open_paren when
+          String.length rest >= open_paren + 8
+          && String.sub rest (open_paren + 1) 6 = "vars: "
+          && String.ends_with ~suffix:")" rest ->
+        ( String.trim (String.sub rest 0 open_paren)
+        , Some
+            (String.sub rest (open_paren + 7) (String.length rest - open_paren - 8)) )
+      | _ -> (rest, None)
+    in
+    if marker = "" then None else Some (marker, vars))
+  else None
+
+(* Body → (marker, declared vars, paragraph) list, in file order. A
+   paragraph runs from its marker line to the next marker line, trimmed. *)
+let split_slots body =
+  let lines = String.split_on_char '\n' body in
+  let rec gather acc pending_marker paragraph reversed_lines =
+    match reversed_lines with
+    | [] ->
+      ( match pending_marker with
+      | None -> List.rev acc
+      | Some (marker, vars) ->
+        List.rev
+          ((marker, vars, String.trim (String.concat "\n" (List.rev paragraph)))
+           :: acc) )
+    | line :: rest -> (
+      match parse_slot_header line with
+      | Some (marker, vars) ->
+        let acc =
+          match pending_marker with
+          | None -> acc
+          | Some (m, v) ->
+            (m, v, String.trim (String.concat "\n" (List.rev paragraph))) :: acc
+        in
+        gather acc (Some (marker, vars)) [] rest
+      | None ->
+        ( match pending_marker with
+        | Some _ -> gather acc pending_marker (line :: paragraph) rest
+        | None -> gather acc None [] rest
+        (* prose before the first marker *) ) )
+  in
+  gather [] None [] (List.rev lines)
+
+let slot_paragraph body marker =
+  split_slots body
+  |> List.find_opt (fun (m, _, _) -> String.equal m marker)
+  |> Option.map (fun (_, _, paragraph) -> paragraph)
+
+(* The file a key resolves against: its own file, or its group's file. *)
+let prompt_source_path key =
+  match Hashtbl.find_opt fragment_tbl key with
+  | Some (group_key, _marker) -> prompt_markdown_path group_key
+  | None -> prompt_markdown_path key
+
+(* The file value for a key: the whole body, or one slot paragraph. *)
+let file_value_of_key key =
+  match Hashtbl.find_opt fragment_tbl key with
+  | Some (group_key, marker) -> (
+    match Option.bind (prompt_markdown_path group_key) read_file_if_exists with
+    | Some body -> slot_paragraph body marker
+    | None -> None)
+  | None -> Option.bind (prompt_markdown_path key) read_file_if_exists
+
 (** {1 Registration and Lookup} *)
 
 (** Register a prompt entry in the registry.
@@ -225,6 +308,7 @@ let clear () : unit =
     Hashtbl.clear version_index;
     Hashtbl.clear override_tbl;
     Hashtbl.clear meta_tbl;
+    Hashtbl.clear fragment_tbl;
     prompts_dir := None;
     markdown_dir := None;
     (* Clear files if persistence enabled *)
@@ -279,8 +363,8 @@ type prompt_snapshot = {
    mutex.  Intended for batch [list_prompts]/[validate_prompt_templates]
    call sites that previously held [with_mutex] across [read_file_if_exists]. *)
 let resolved_of_snapshot (s : prompt_snapshot) =
-  let file_path = prompt_markdown_path s.snap_key in
-  let file_value = Option.bind file_path read_file_if_exists in
+  let file_path = prompt_source_path s.snap_key in
+  let file_value = file_value_of_key s.snap_key in
   build_resolved_from_snapshot
     ~key:s.snap_key
     ~override_value:s.snap_override_value
@@ -361,7 +445,7 @@ let load_prompts_from_directory dir =
               let path = Filename.concat dir file in
               try
                 let content = In_channel.with_open_text path In_channel.input_all in
-                let meta_pairs, _body = parse_frontmatter content in
+                let meta_pairs, body = parse_frontmatter content in
                 match List.assoc_opt "description" meta_pairs with
                 | None -> ()  (* no frontmatter or no description — skip *)
                 | Some description ->
@@ -390,9 +474,31 @@ let load_prompts_from_directory dir =
                       | Some v -> parse_list_value v
                       | None -> []
                     in
-                    register_prompt_unlocked ~key ~description ~category
-                      ~operator_surface
-                      ~required_file:true ~template_variables ()
+                    (* A group file with [### marker] paragraphs registers
+                       each paragraph as <key>.<marker> and not the group
+                       key itself — nothing consumes the group key, and the
+                       slot declarations (including per-slot variables) live
+                       on the marker lines. *)
+                    let slots = split_slots body in
+                    if slots <> [] then
+                      List.iter
+                        (fun (marker, slot_vars, _paragraph) ->
+                          let slot_key = key ^ "." ^ marker in
+                          let template_variables =
+                            match slot_vars with
+                            | None -> []
+                            | Some declared ->
+                              parse_list_value ("[" ^ declared ^ "]")
+                          in
+                          Hashtbl.replace fragment_tbl slot_key (key, marker);
+                          register_prompt_unlocked ~key:slot_key ~description
+                            ~category ~operator_surface ~required_file:true
+                            ~template_variables ())
+                        slots
+                    else
+                      register_prompt_unlocked ~key ~description ~category
+                        ~operator_surface
+                        ~required_file:true ~template_variables ()
               with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                 Log.Misc.error
                   "load_prompts_from_directory: failed to read %s: %s"
@@ -404,8 +510,8 @@ let load_prompts_from_directory dir =
 
 (** Resolve a prompt. Resolution: override > file > missing. *)
 let resolve_prompt key =
-  let file_path = prompt_markdown_path key in
-  let file_value = Option.bind file_path read_file_if_exists in
+  let file_path = prompt_source_path key in
+  let file_value = file_value_of_key key in
   with_mutex (fun () ->
     let override_value =
       Hashtbl.find_opt override_tbl key
@@ -482,9 +588,7 @@ let render_prompt_template key vars =
     we validated but before we wrote the override). *)
 let validated_override ?expected_contract_revision key value =
   let trimmed = String.trim value in
-  let file_value =
-    Option.bind (prompt_markdown_path key) read_file_if_exists
-  in
+  let file_value = file_value_of_key key in
   if not (is_valid_prompt_key key) then Error "Invalid prompt key"
   else if trimmed = "" then Error "Prompt cannot be empty"
   else if String.length trimmed > 10000 then Error "Prompt too long (max 10000 chars)"

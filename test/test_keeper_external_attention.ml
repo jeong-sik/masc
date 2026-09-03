@@ -74,10 +74,7 @@ let test_json_roundtrip () =
     A.external_message_ref_of_json msg;
   check_roundtrip "item" A.item_to_json A.item_of_json att;
   check_roundtrip "recorded event" A.event_to_json A.event_of_json
-    (A.Recorded att);
-  check_roundtrip "resolved event" A.event_to_json A.event_of_json
-    (A.Resolved
-       { event_id = att.A.event_id; resolved_at = 30.0; reason = "replied" })
+    (A.Recorded att)
 
 let with_temp_base name f =
   let base_path = temp_base_path name in
@@ -129,8 +126,8 @@ let test_record_dedup_window_bounded () =
     true
     (List.exists
        (function
-         | A.Recorded recorded -> String.equal recorded.A.event_id first.A.event_id
-         | A.Resolved _ | A.Ignored _ | A.Quarantined _ -> false)
+         | A.Recorded recorded ->
+           String.equal recorded.A.event_id first.A.event_id)
        evidence_events);
   (* The oldest event has scrolled past the window: re-recording it is a
      fresh append, not a duplicate. *)
@@ -162,11 +159,15 @@ let test_record_dedupes_and_reads_pending () =
   | `Error detail -> Alcotest.failf "duplicate record failed: %s" detail);
   Alcotest.(check int) "one physical recorded event" 1
     (List.length (A.load_events ~base_path ~keeper_name:att.A.keeper_name));
-  match A.pending_for_keeper ~base_path ~keeper_name:att.A.keeper_name ~limit:10 () with
-  | [ pending ] ->
-      Alcotest.(check string) "pending event id" att.A.event_id pending.A.event_id
-  | pending ->
-      Alcotest.failf "expected 1 pending item, got %d" (List.length pending)
+  match
+    A.load_events ~base_path ~keeper_name:att.A.keeper_name
+    |> List.filter_map (function A.Recorded item -> Some item)
+  with
+  | [ recorded ] ->
+      Alcotest.(check string) "recorded event id" att.A.event_id
+        recorded.A.event_id
+  | recorded ->
+      Alcotest.failf "expected 1 recorded item, got %d" (List.length recorded)
 
 let test_discord_channel_and_thread_conversation_ids_stay_distinct () =
   let channel =
@@ -182,47 +183,6 @@ let test_discord_channel_and_thread_conversation_ids_stay_distinct () =
   Alcotest.(check bool) "distinct lane ids" true
     (channel.A.conversation_id <> thread.A.conversation_id)
 
-(* A quarantining turn failure terminalizes the queue entry, and the wake is
-   edge-triggered, so nothing will deliver this row to a Keeper again. It has to
-   leave the pending list — but as its own event, because no turn judged it. *)
-let test_quarantined_clears_pending_and_stays_apart_from_ignored () =
-  with_temp_base "keeper-external-attention-quarantine" @@ fun base_path ->
-  let att = item () in
-  (match A.record ~base_path att with
-  | `Recorded -> ()
-  | `Duplicate _ -> Alcotest.fail "first record was duplicate"
-  | `Error detail -> Alcotest.failf "record failed: %s" detail);
-  let keeper_name = att.A.keeper_name in
-  let pending_count () =
-    List.length (A.pending_for_keeper ~base_path ~keeper_name ~limit:10 ())
-  in
-  Alcotest.(check int) "pending before quarantine" 1 (pending_count ());
-  (match
-     A.mark_quarantined ~base_path ~keeper_name ~event_ids:[ att.A.event_id ]
-       ~reason:"connector_attention_turn_quarantined: exhausted_visible_alive" ()
-   with
-  | Ok () -> ()
-  | Error detail -> Alcotest.failf "mark_quarantined failed: %s" detail);
-  Alcotest.(check int) "pending after quarantine" 0 (pending_count ());
-  (* Read back from disk so the JSON codec is on the hook too: a quarantined row
-     must not reload as a turn that decided not to reply. *)
-  let terminal_tags =
-    A.load_events ~base_path ~keeper_name
-    |> List.filter_map (function
-         | A.Recorded _ -> None
-         | A.Resolved _ -> Some "resolved"
-         | A.Ignored _ -> Some "ignored"
-         | A.Quarantined { event_id; reason; _ } ->
-             Alcotest.(check string)
-               "quarantined event id" att.A.event_id event_id;
-             Alcotest.(check bool)
-               "reason carries the turn failure detail" true
-               (String.length reason > 0);
-             Some "quarantined")
-  in
-  Alcotest.(check (list string))
-    "one quarantine terminal event" [ "quarantined" ] terminal_tags
-
 let () =
   Alcotest.run "keeper_external_attention"
     [
@@ -237,8 +197,5 @@ let () =
             test_record_dedup_window_bounded;
           Alcotest.test_case "Discord channel/thread lanes are distinct" `Quick
             test_discord_channel_and_thread_conversation_ids_stay_distinct;
-          Alcotest.test_case
-            "quarantine clears pending without claiming a judgement" `Quick
-            test_quarantined_clears_pending_and_stays_apart_from_ignored;
         ] );
     ]

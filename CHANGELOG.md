@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## [0.30.0] - 2026-09-04
+
+- **The install wizard detects what is ready before it asks.** The setup
+  catalog no longer dies on a provider it cannot resolve (#32852) and now offers
+  subscription CLIs — Claude Code, Codex, Antigravity — beside HTTP providers
+  (#32857). It reports which local model servers are actually running (#32868)
+  and which execution sandboxes the host can offer — docker, microvm via Apple's
+  `container` CLI, remote_ssh (#32884). When there is no terminal it uses the one
+  source that is ready rather than error or skip (#32914), and the menu default
+  lands on a ready source instead of a dead one (#32903).
+- **A subscription is shown as signed in, not just installed.** `masc
+  runtime-probe <runtime_id>` reports whether a Claude Code or Codex CLI is
+  actually signed in, reusing the server's own login probe rather than parsing
+  credential files, and the wizard uses it to distinguish "installed" from
+  "signed in" (#32897).
+- **Connecting an MCP client is one command.** `masc mcp-config
+  [--client env|codex|claude-desktop]` mints a bearer and prints a ready client
+  config block, so a client connects without hand-wiring the URL, token, and
+  header (#32907).
+- **The README and RFC-0408 match what shipped.** The README documents the
+  first-run detection and the one-command MCP setup (#32901, #32907); RFC-0408
+  is marked implemented and its sandbox premise corrected to what the code does
+  (#32919).
+
 ## [0.29.1] - 2026-09-03
 
 - **The release gate runs again.** Four scenarios in the release evidence

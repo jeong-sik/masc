@@ -505,7 +505,7 @@
  (name masc_tui_link)
  (wrapped false)
  (modules masc_tui_link)
- (libraries base64))
+ (libraries base64 uri))
 
 (library
  (name masc_tui_terminal_probe)

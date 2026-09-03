@@ -715,6 +715,11 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
               match take_input_byte reader ~timeout:0.05 with
               | Some 'G' -> Some (Graphics_reply (read_apc_body reader))
               | Some _ | None -> key "esc")
+          (* Alt+Backspace arrives as ESC DEL (or ESC BS where Backspace sends
+             BS): the second byte was swallowed as "esc" and the chat closed
+             under the typist's thumb. It names its own key now, and the
+             composer reads it as delete-word-back. *)
+          | Some ('\x7f' | '\x08') -> key "alt-backspace"
           | Some _ | None -> key "esc")
       | Some byte -> (
           match Masc_tui_message_layout.utf8_scalar_byte_length byte with
@@ -1240,6 +1245,17 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     let new_content =
       Buffer.contents state.msg_input
       |> Masc_tui_message_layout.drop_last_utf8_scalar
+    in
+    Buffer.clear state.msg_input;
+    Buffer.add_string state.msg_input new_content;
+    true
+  | "\x17" | "alt-backspace" ->
+    (* Ctrl-W, or Alt+Backspace on a terminal that sends ESC DEL: the last
+       word goes, the rest of the draft stays. *)
+    forget_recall state;
+    let new_content =
+      Buffer.contents state.msg_input
+      |> Masc_tui_message_layout.drop_last_utf8_word
     in
     Buffer.clear state.msg_input;
     Buffer.add_string state.msg_input new_content;
@@ -7080,9 +7096,13 @@ let move_ask_cursor state delta =
       state.ask_cursor <- next;
       state.ask_question_cursor <- 0;
       state.pending_ask_submit <- None;
-      match List.nth_opt rows next with
-      | None -> ()
-      | Some (row : Tui_decode.ask_row) ->
+      match (state.ask_answer_mode, List.nth_opt rows next) with
+      (* Walking the list while browsing is not answering. Opening a draft
+         here would make [ and ] commit to a question the operator was only
+         looking at, and [a] is the key that says they mean it. *)
+      | Ask_browsing, _ -> ()
+      | Ask_answering _, None -> ()
+      | Ask_answering _, Some (row : Tui_decode.ask_row) ->
           state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Tui_decode.ar_id };
           state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row)
     end
@@ -11785,6 +11805,21 @@ and is loaded on demand through keeper_skill.
                     toggle_ask_choice state (position - 1)
                 | Some _ | None -> ())
             | _ -> ());
+           Render_schedule.request render_schedule Render_schedule.Force
+       (* The same two keys the answering mode uses, so the walk does not
+          change shape when the operator commits. j/k cannot serve here: the
+          approval queue above owns them, which is why this list had no way to
+          move at all -- [a] opened whichever ask the cursor had been left on,
+          and with more than one waiting there was no way to reach the rest
+          without answering the first. *)
+       | Some ("[" | "]" as k)
+         when state.view = Approvals
+              && (match state.ask_answer_mode with
+                  | Ask_browsing -> true
+                  | Ask_answering _ -> false)
+              && (not state.approval_detail_open)
+              && not state.context_inspector_open ->
+           move_ask_cursor state (if String.equal k "[" then -1 else 1);
            Render_schedule.request render_schedule Render_schedule.Force
        (* [/context] is modal: the summary and exact input text must not leak
           keys into the composer underneath. The quit confirmation and chrome

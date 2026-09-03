@@ -29,22 +29,6 @@ let simple_bin
     }
 ;;
 
-let with_cwd ~raw ~cwd ir =
-  let scope = cwd_scope ~cwd_base:cwd raw in
-  let rec map = function
-    | Masc_exec.Shell_ir.Simple simple ->
-      Masc_exec.Shell_ir.Simple { simple with cwd = scope }
-    | Masc_exec.Shell_ir.Pipeline stages ->
-      Masc_exec.Shell_ir.Pipeline (List.map map stages)
-    | Masc_exec.Shell_ir.Sequence { head; tail } ->
-      Masc_exec.Shell_ir.Sequence
-        { head = map head
-        ; tail = List.map (fun (connector, part) -> connector, map part) tail
-        }
-  in
-  map ir
-;;
-
 type dispatch_error =
   | Gate_reject of string
   | Cannot_parse of Shell_gate.parse_reason

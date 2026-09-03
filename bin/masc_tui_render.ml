@@ -1872,16 +1872,21 @@ let draw_ask_questions buf cols (state : state) =
                   | None -> false
                 in
                 let draft = Ask_projection.draft_for state.ask_draft ~row in
-                let selected_row = answering && row_index = state.ask_cursor in
+                (* The cursor exists in both modes and [a] opens whatever it
+                   is on, so it is drawn in both. Tying it to [answering] made
+                   the caret appear only after the operator had already
+                   committed to a row -- the surface asked them to choose
+                   first and showed them nothing to choose between. *)
+                let selected_row = row_index = state.ask_cursor in
                 List.iteri
                   (fun question_index (question : Masc.Tui_decode.ask_question) ->
                     let selected_question =
                       selected_row && question_index = state.ask_question_cursor
                     in
-                    (* The caret is the only thing saying which question the
-                       digits will land on, so it is drawn even when the row
-                       is not the selected one -- a blank there reads as no
-                       selection at all. *)
+                    (* The caret is the only thing saying where the cursor
+                       is: which question [a] opens while browsing, and which
+                       one the digits land on while answering. A blank on every
+                       row reads as no selection at all. *)
                     let caret = if selected_question then ">" else " " in
                     box_line buf cols
                       (Printf.sprintf " %s%s%s%s%s  %s" caret
@@ -1920,10 +1925,13 @@ let draw_ask_questions buf cols (state : state) =
                           | Masc.Tui_decode.Ask_multi, false -> "[ ]"
                         in
                         (* Numbers only where they do something: the digits
-                           answer the question under the caret. A number on
-                           every row would promise a key that does nothing. *)
+                           answer the question under the caret, and only once
+                           the operator is answering it. A number on every row,
+                           or one drawn while browsing, promises a key that
+                           does nothing. *)
                         let position =
-                          if selected_question && choice_index < 9 then
+                          if answering && selected_question && choice_index < 9
+                          then
                             Printf.sprintf "%d" (choice_index + 1)
                           else " "
                         in
@@ -2446,8 +2454,8 @@ let render_approvals (state : state) =
   let hints =
     match state.ask_answer_mode with
     | Ask_browsing ->
-        "j/k:move  y/n:decide  e:outside lane  a:answer a question  \
-         r:refresh  Tab:next"
+        "j/k:move  y/n:decide  e:outside lane  [/]:question  \
+         a:answer a question  r:refresh  Tab:next"
     | Ask_answering { aam_ask_id } ->
         (* Say when the next Enter sends. The approval queue two panes up
            already draws its armed state; this one announced itself only as an

@@ -560,7 +560,7 @@
  (name masc_tui_markdown_render_cache)
  (wrapped false)
  (modules masc_tui_markdown_render_cache)
- (libraries masc_tui_markdown))
+ (libraries masc_tui_lru masc_tui_markdown))
 
 (library
  (name masc_tui_send_disposition)
@@ -640,6 +640,11 @@
  (wrapped false)
  (modules masc_tui_frame_timing)
  (libraries mtime.clock.os))
+
+(library
+ (name masc_tui_lru)
+ (wrapped false)
+ (modules masc_tui_lru))
 
 (library
  (name masc_tui_help)

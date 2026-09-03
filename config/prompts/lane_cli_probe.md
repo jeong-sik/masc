@@ -1,7 +1,7 @@
 ---
 description: Lane CLI probe 픽스처 — librarian·hitl 레인의 system/user 프롬프트
 category: probe
-operator_surface: fragment
+operator_surface: primary
 ---
 
 ### librarian.system

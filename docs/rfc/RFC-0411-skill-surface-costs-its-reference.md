@@ -12,7 +12,8 @@ related: ["0042"]
 ## 0. 한 줄 요약
 
 `keeper_skill` 도구 서술의 `Available:` 블록은 스킬마다 정확 참조 전체(64hex
-`content_revision` 포함)를 싣는다. 매 턴 3,685바이트다. 회수는 0.0072회/턴.
+`content_revision` 포함)를 싣는다. masc 자신이 재는 발견 비용이 매 턴
+3,383바이트이고 그중 55%가 참조다. 회수는 0.0072회/턴.
 이 문서는 그 블록에서 참조를 덜어내고 이름으로 부르게 하는 것, 그리고 그때
 필요한 이름 충돌 규칙을 정한다.
 
@@ -20,28 +21,43 @@ related: ["0042"]
 
 라이브 base-path `/Users/dancer/me`, 2026-09-04.
 
-### 1.1 비용
+### 1.1 비용 — masc 자신이 재고 있다
 
-`keeper_tool_composition_surface.ml:72` `instruction_skill_description`:
+`GET /api/v1/skills` 의 `surfaces[].profile.context` 가 스킬마다 이미
+`discovery_bytes` / `tool_schema_bytes` / `body_bytes` 를 낸다. 손으로 재구성할
+필요가 없다.
+
+| 스킬 | discovery_B | schema_B | body_B | 노드 | 배치 |
+|---|---:|---:|---:|---:|---:|
+| verify-before-claiming-done | 565 | 0 | 2,334 | | |
+| root-cause-first | 491 | 0 | 2,857 | | |
+| tui-pty-scenario | 444 | 0 | 2,200 | | |
+| turn-opening | 380 | 0 | 982 | | |
+| ci-red-attribution | 355 | 0 | 2,180 | | |
+| ocaml-coding | 331 | 0 | 8,359 | | |
+| skill-authoring | 264 | 0 | 1,337 | | |
+| mission-snapshot | 196 | 196 | 1,094 | 4 | 2 |
+| work-intake | 186 | 186 | 888 | 3 | 2 |
+| background-snapshot | 171 | 171 | 643 | 2 | 1 |
+| **합** | **3,383** | **553** | **22,874** | | |
+
+매 턴 **3,383바이트**가 발견 비용이고, 조합 스킬 3개가 도구 스키마로 **553바이트**를
+더 쓴다. 본문 22,874바이트는 부를 때만 온다 — 점진 공개는 동작하고 있다
+(`ci-red-attribution` 은 발견 355B 로 본문 2,180B 를 가린다, 16%).
+
+비용의 정체는 `keeper_tool_composition_surface.ml:72`
+`instruction_skill_description` 이 만드는 `Available:` 블록이다.
 
 ```ocaml
 skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
 ```
 
-`listed` 는 스킬마다 한 줄이고, 그 줄은
-`Skill_reference.to_yojson skill.reference |> Yojson.Safe.to_string` 로 시작한다.
-즉 `source_id` / `package_id` / `name` / 64hex `content_revision` 이 전부 들어간다.
+`listed` 의 각 줄은 `Skill_reference.to_yojson ... |> Yojson.Safe.to_string` 로
+시작한다. 즉 `source_id` / `package_id` / `name` / 64hex `content_revision` 이
+전부 들어간다. 라이브 카탈로그로 계산하면 그 참조 JSON 만 **스킬당 185바이트**,
+10개면 1,854바이트다. 발견 비용 3,383 중 **55%** 가 참조다.
 
-라이브 카탈로그(`/api/v1/skills`, 스킬 10개)로 같은 문자열을 재구성해 재면:
-
-| | 바이트 |
-|---|---:|
-| `Available:` 블록 전체 | 3,685 |
-| 스킬당 | 368 |
-| 그중 참조 JSON | 185 |
-
-`Yojson.Safe.to_string` 은 공백 없이 낸다. 위 값은 그 형식으로 계산했다.
-참조 185B/스킬은 `#31324` 가 적은 값과 정확히 같다.
+185B/스킬은 `#31324` 이 적은 값과 정확히 같다.
 
 ### 1.2 회수
 
@@ -103,7 +119,7 @@ ci-red-attribution: PR 이 빨간데 내 변경 탓인지 ...
 work-intake: See the clock, your open tasks, ...
 ```
 
-스킬당 185바이트가 줄어 블록이 약 1.9KB 가 된다.
+스킬당 185바이트가 줄어 발견 비용이 3,383 → 약 1,529바이트가 된다. 55% 감소.
 
 ### 4.2 호출
 
@@ -141,7 +157,7 @@ work-intake: See the clock, your open tasks, ...
 
 | 지표 | 방법 | 기준선 |
 |---|---|---|
-| `Available:` 바이트 | 라이브 카탈로그로 블록 재구성 | 3,685 B |
+| 발견 바이트 | `/api/v1/skills` 의 `surfaces[].profile.context.discovery_bytes` 합 | 3,383 B |
 | 스킬 계열 호출/턴 | `tool_calls/*.jsonl` 의 `tool` 필드 | 0.0072 |
 | 참조 누락 거부 | system log 의 keeper_skill 거부 | polisher 사례 1건 |
 
@@ -157,11 +173,11 @@ work-intake: See the clock, your open tasks, ...
 ## 8. 대안과 그 이유
 
 - **목록 도구(`skills_list()`)로 미루기.** Hermes 와 Anthropic Tool Search 의
-  방식이고 3,685B 를 전부 없앤다. 다만 지금 회수가 0.0072회/턴인데 왕복을 하나
+  방식이고 3,383B 를 전부 없앤다. 다만 지금 회수가 0.0072회/턴인데 왕복을 하나
   더 세우면 더 줄 수 있다. §4 를 먼저 하고 회수를 본 뒤에 판단한다.
 - **프롬프트에 카탈로그 블록 추가.** 도구 서술이 이미 같은 일을 한다. 두 번
   싣는 것이고 `#32935`·`#32939` 의 컨텍스트 압력과 부딪힌다.
-- **아무것도 안 하기.** 매 턴 3,685B 는 키퍼 11명이 계속 낸다. 회수가 낮은
+- **아무것도 안 하기.** 매 턴 3,383B 는 키퍼 11명이 계속 낸다. 회수가 낮은
   것과 별개로, 비용의 절반이 호출부가 알 필요 없는 값이라는 점은 남는다.
 
 ## 9. 근거

@@ -810,9 +810,9 @@ let persist_overrides base_path =
   with_override_mutation_lock (fun () ->
       save_override_entries base_path (override_entries ()))
 
-let set_override_persisted ~base_path key value =
+let set_override_persisted ?expected_contract_revision ~base_path key value =
   with_override_mutation_lock (fun () ->
-      match validated_override key value with
+      match validated_override ?expected_contract_revision key value with
       | Error message -> Error (Validation_error message)
       | Ok entry ->
           let candidate = upsert_override_entry entry (override_entries ()) in

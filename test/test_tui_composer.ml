@@ -28,6 +28,7 @@ let outcome_testable =
           | Composer.Take_focus -> "take_focus"
           | Composer.Release_focus -> "release_focus"
           | Composer.Send -> "send"
+          | Composer.Start_listening -> "start_listening"
           | Composer.Edit -> "edit"
           | Composer.Pass_to_surface -> "pass"))
     ( = )
@@ -128,6 +129,49 @@ let test_send_requires_a_reachable_target () =
           ~target:(Composer.Unreachable { keeper = "beta"; reason = "gone" })
           ()))
 
+
+(* Ctrl-Y asks for a capture. It has to be a control code: in a focused row
+   every printable key is draft text, so a letter binding would take that
+   letter from typing. *)
+let test_focused_composer_claims_the_listen_key () =
+  check_key
+    ~label:"ctrl-y starts a capture"
+    (make ~focus:Composer.Focused ())
+    Composer.listen_key
+    Composer.Start_listening
+;;
+
+(* A transcript needs somewhere to go. Capturing into a row with no recipient
+   leaves the operator holding speech that cannot be sent. *)
+let test_listen_key_needs_a_recipient () =
+  check_key
+    ~label:"no keeper, no capture"
+    (make ~target:Composer.No_target ~focus:Composer.Focused ())
+    Composer.listen_key
+    Composer.Edit
+;;
+
+(* Unfocused the row claims one key and no more; the surfaces bind letters to
+   lifecycle and navigation, and a second claim here would take one. *)
+let test_unfocused_composer_does_not_claim_the_listen_key () =
+  check_key
+    ~label:"the surface still gets ctrl-y while the row is idle"
+    (make ~focus:Composer.Unfocused ())
+    Composer.listen_key
+    Composer.Pass_to_surface
+;;
+
+(* The binding is a control code rather than a letter, which is what keeps
+   typing whole. A single printable character here would be a regression that
+   the two tests above still pass. *)
+let test_the_listen_key_is_not_typable () =
+  let byte = Composer.listen_key.[0] in
+  Alcotest.(check bool)
+    "listen_key is one control byte"
+    true
+    (String.length Composer.listen_key = 1 && Char.code byte < 32)
+;;
+
 let () =
   Alcotest.run "tui-composer"
     [ ( "what the row says"
@@ -151,6 +195,16 @@ let () =
             test_prompt_names_staged_images
         ; Alcotest.test_case "input needs a recipient" `Quick
             test_input_is_refused_without_a_recipient
+        ] )
+    ; ( "voice"
+      , [ Alcotest.test_case "focused it claims the listen key" `Quick
+            test_focused_composer_claims_the_listen_key
+        ; Alcotest.test_case "the listen key needs a recipient" `Quick
+            test_listen_key_needs_a_recipient
+        ; Alcotest.test_case "unfocused it does not claim the listen key" `Quick
+            test_unfocused_composer_does_not_claim_the_listen_key
+        ; Alcotest.test_case "the listen key is not typable" `Quick
+            test_the_listen_key_is_not_typable
         ] )
     ; ( "layout"
       , [ Alcotest.test_case "the cursor stays inside the row" `Quick

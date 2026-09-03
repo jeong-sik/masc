@@ -116,6 +116,16 @@ val speech_margin_db : float
     transcript is indistinguishable from a real one, so the refusal has to
     happen here. *)
 
+val rms_amplitude_of_file : string -> float option
+(** Linear RMS amplitude of an audio file, read through [sox stat].
+    [None] when sox does not run or its output carries no level line.
+
+    Safe to call on a file still being written: sox reports the level of what
+    is there. That is what a level meter reads, because opening a second
+    capture device costs about 2.5 s — longer than most utterances — while the
+    recording in progress is already a continuous record of what the
+    microphone hears. *)
+
 val db_of_amplitude : float -> float
 (** dBFS for a linear RMS amplitude; [neg_infinity] at zero. *)
 

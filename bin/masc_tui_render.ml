@@ -496,8 +496,33 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
              (Printf.sprintf "%s[%s]%s  %s %s%s%s" Ansi.dim timestamp Ansi.reset
                 badge Ansi.dim request_label Ansi.reset))
 
-let composer_prompt_text composer =
-  Printf.sprintf " %s %s " "\xe2\x80\xba" (Composer.prompt composer)
+(* A level meter, only while a capture is running.
+
+   A dead input device and a quiet room both end the same way — an empty draft
+   — and nothing else distinguishes them. The bar spans -60 dB to 0, which puts
+   an ordinary room near a third and speech visibly above it.
+
+   Part of the prompt rather than drawn beside it, so the cursor column, which
+   is computed from the prompt's width, does not have to know about it. *)
+let voice_meter_text (state : state) =
+  match state.voice_capture, state.voice_level_db with
+  | None, _ -> ""
+  | Some _, None -> "[듣는 중] "
+  | Some _, Some db ->
+    let width = 12 in
+    let filled =
+      if db = Float.neg_infinity
+      then 0
+      else max 0 (min width (int_of_float ((db +. 60.) /. 5.)))
+    in
+    Printf.sprintf
+      "[%s%s] "
+      (String.concat "" (List.init filled (fun _ -> "\xe2\x96\x88")))
+      (String.concat "" (List.init (width - filled) (fun _ -> "\xc2\xb7")))
+;;
+
+let composer_prompt_text ?(voice = "") composer =
+  Printf.sprintf " %s %s%s " "\xe2\x80\xba" voice (Composer.prompt composer)
 
 (* Unfocused the row is dim and says which key opens it; focused it is drawn in
    full and carries the cursor. Either way it occupies the same single row, so
@@ -706,7 +731,7 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
 
 let composer_line state ~cols =
   let composer = Composer_projection.of_state state in
-  let prompt = composer_prompt_text composer in
+  let prompt = composer_prompt_text ~voice:(voice_meter_text state) composer in
   let tone =
     match (composer.Composer.focus, composer.Composer.target) with
     | Composer.Focused, _ -> (Theme.info ())
@@ -717,6 +742,13 @@ let composer_line state ~cols =
   let draft = Terminal_text.single_line composer.Composer.draft in
   let hint =
     match (composer.Composer.focus, composer.Composer.target) with
+    (* Shown on an empty focused draft only. A capture key nobody can see is a
+       key nobody presses, and the row has space exactly while there is no
+       draft to crowd. It goes away once a capture starts, because the meter
+       has taken that space and says the same thing louder. *)
+    | Composer.Focused, Composer.Ready _
+      when state.voice_capture = None && Buffer.length state.msg_input = 0 ->
+        "  (^Y to speak)"
     | Composer.Focused, _ -> ""
     | Composer.Unfocused, Composer.Ready _ ->
         Printf.sprintf "  (%s to write)" Composer.focus_key
@@ -741,7 +773,10 @@ let composer_cursor state ~rows ~cols =
   | Composer.Unfocused -> Frame_presenter.Hidden
   | Composer.Focused ->
       let prompt_cells =
-        Message_layout.display_width (composer_prompt_text composer)
+        (* The same string the row draws: a meter that widened the prompt
+           without widening this would put the cursor inside the draft. *)
+        Message_layout.display_width
+          (composer_prompt_text ~voice:(voice_meter_text state) composer)
       in
       let draft_cells =
         Message_layout.display_width

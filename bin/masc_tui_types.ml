@@ -2434,6 +2434,17 @@ type state = {
      once it is already receiving text cannot be found by looking. Focus is
      what routes keys into it, and the operator takes and releases that. *)
   mutable composer_focused: bool;
+  (* A microphone capture in flight, and the level it is hearing.
+     [voice_capture] is the keeper the transcript is bound for, taken when the
+     capture starts: the roster cursor moves on its own under a refresh, and a
+     transcript that arrived seconds later would otherwise land on whoever is
+     selected now.
+
+     [voice_level_db] is the last level read from the growing recording, so an
+     operator can see the microphone is hearing them. Without it a dead input
+     device and a quiet room look identical — both end as an empty draft. *)
+  mutable voice_capture: string option;
+  mutable voice_level_db: float option;
   (* A top-level [q] arms exit instead of ending the TUI immediately. The next
      unrelated input clears it; a second [q] exits. *)
   mutable quit_armed: bool;
@@ -3250,6 +3261,8 @@ let create_state
   keeper_action_pending = None;
   keeper_action_serial = 0;
   composer_focused = false;
+  voice_capture = None;
+  voice_level_db = None;
   quit_armed = false;
   last_action = None;
   fleet_safety = None;

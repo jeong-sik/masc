@@ -1,0 +1,199 @@
+---
+status: runbook
+---
+
+# Voice Runbook
+
+Speech into and out of MASC: which endpoints carry it, what an operator has to
+run locally, and the two calls an external device makes. Everything here was
+measured on one workstation (M3 Max, macOS) on 2026-09-03/04; numbers are from
+that machine and say so where they matter.
+
+## Configuration
+
+One section in `runtime.toml`, read by `Voice_config`:
+
+```toml
+[voice.tts]             default_model, default_voice, agent_voices, endpoints
+[voice.stt]             default_model, endpoints
+[voice.session]         endpoints          # realtime; empty unless configured
+[voice.local_playback]  enabled, agents
+```
+
+An endpoint declares a `kind`, and the kind decides the request that gets
+built — not a string match on the URL:
+
+| `kind` | TTS | STT | Auth |
+|---|---|---|---|
+| `elevenlabs_direct` | `POST <base>/text-to-speech/<voice_id>` | `POST <base>/speech-to-text` | `xi-api-key` |
+| `openai_compat` | `POST <base>/audio/speech` | `POST <base>/audio/transcriptions` | `Authorization: Bearer`, omitted entirely when no `api_key_env` |
+| `voice_mcp` | MCP tool call | — | — |
+
+`voice_tuning` (stability / similarity_boost / style) is ElevenLabs vocabulary
+and is not sent to an `openai_compat` endpoint, which never asked for it.
+A voice id is provider-specific in the same way, so the fallback chain resolves
+the voice per endpoint rather than carrying the first endpoint's id onward.
+
+### The endpoint list is a real fallback chain
+
+`lib/voice/voice_bridge.ml`'s `try_endpoints` advances to the next endpoint when one
+fails, so a local server that is not running costs a fallback rather than
+stopping voice. This is **not** how `runtime.exact_output_lanes.*.slots`
+behaves — there, a connection failure folds the lane. Do not carry an
+intuition from one to the other.
+
+Advancing is refused for `Outcome_unknown`: a TTS call whose result is unknown
+may already have played audio, and retrying would speak twice.
+
+### There is no retry count
+
+No reader consumes one. `call_voice_mcp_endpoint` runs a single attempt, and
+recovery is the endpoint chain. `max_retries` in an endpoint table is rejected
+by the field whitelist, which is correct — see the incident below.
+
+## Local STT
+
+`scripts/whisper-server.sh` (in the `me` repo) wraps whisper.cpp:
+
+```sh
+scripts/whisper-server.sh start     # :2022, /v1/audio/transcriptions, lang=ko
+scripts/whisper-server.sh status    # includes resident size
+scripts/whisper-server.sh test      # says a phrase, prints the transcript
+scripts/whisper-server.sh stop
+```
+
+whisper.cpp serves `/inference` by default; the script moves it with
+`--inference-path` so `<base_url>/audio/transcriptions` lands, which is the
+path `openai_compat` builds.
+
+```toml
+[[voice.stt.endpoints]]
+id = "whisper-local"
+kind = "openai_compat"
+base_url = "http://127.0.0.1:2022/v1"
+enabled = true
+timeout_seconds = 60.0
+
+[[voice.stt.endpoints]]
+id = "elevenlabs-stt"     # fallback
+```
+
+Measured with `ggml-large-v3-turbo` on a real Korean utterance: **0.85 s**,
+transcript correct. The STT `default_model` is workspace-wide rather than
+per-endpoint, so `scribe_v2` rides along to whisper, which ignores it.
+
+The server holds its model resident for as long as it runs — **1.8 GB** for
+large-v3-turbo — with no idle unload of the kind ollama does. Stop it when
+speech is infrequent.
+
+## Capture thresholds
+
+`record_and_transcribe` measures the room at each capture rather than using a
+constant, because a constant was wrong:
+
+| | |
+|---|---|
+| Noise floor, pass one | −37.2 dB |
+| Noise floor, pass two, minutes later, same room | −26.3 dB |
+| The constant that used to be the threshold | −40.0 dB (1% of full scale) |
+
+Both floors are above it, so sox's silence filter saw sound continuously:
+recording started at once and the trailing-silence condition never came true.
+Every capture ran to its timeout and handed the transcriber a room.
+
+- **Trigger**: floor + 3 dB. Speech sat only 5.0 dB and 6.1 dB above the floor
+  on those two passes — an ordinary sentence at a built-in microphone — so a
+  wider margin swallows the utterance.
+- **Gate**: floor + 2 dB over the whole capture. Below the trigger, so a
+  capture that started on a transient and carries nothing is still refused.
+- Both fall back to the old constant when the calibration probe cannot run.
+
+### Why the gate exists
+
+Whisper answers silence with a sentence. Three captures of an empty room, sent
+to the local endpoint, returned `"감사합니다."`, `"감사합니다."` and `"네"` —
+fluent Korean for an operator who said nothing. The only previous guard was
+`st_size > 100`, and a capture that ran to its timeout on room tone is large,
+so size cannot tell the two apart.
+
+The refusal has to happen before the endpoint chain: once audio reaches an STT
+endpoint, a hallucinated transcript is indistinguishable from a real one.
+
+### Device timings
+
+| | |
+|---|---|
+| `rec` open overhead, warm | 0.5–0.8 s |
+| `rec` open overhead, first call after idle | ~2.5 s |
+| Trailing-silence wait | 2.0 s |
+| Local transcription | 0.85 s |
+
+A level meter therefore reads the recording as it grows rather than opening a
+second capture device. `Voice_bridge.rms_amplitude_of_file` is safe to call on
+a file still being written; sox reports the level of what is there.
+
+## TUI
+
+`Ctrl-Y` in a focused composer row starts a capture; the transcript is appended
+to the draft, not sent. A meter runs in the prompt while it records, because a
+dead input device and a quiet room both end as an empty draft and nothing else
+separates them.
+
+The binding is a control code because every printable key in a focused row is
+draft text.
+
+## External devices
+
+Any device that can make two HTTP calls can speak to a keeper. No MASC change
+is needed; this was verified end to end on 2026-09-04.
+
+```sh
+TOKEN=$(cat ~/me/.masc/auth/admin.token)
+
+# 1. audio in, text out
+curl -X POST "$MASC/api/v1/voice/transcribe" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: audio/wav' \
+  --data-binary @utterance.wav
+# {"status":"transcribed","text":"...","endpoint_id":"whisper-local"}
+
+# 2. text to a keeper
+curl -X POST "$MASC/api/v1/keepers/chat/stream" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"request_id":"<uuid>","name":"sangsu","message":"<the text>"}'
+# 200, then an SSE stream: KEEPER_CHAT_OPERATION_ACCEPTED, RUN_STARTED, ...
+```
+
+Notes that cost time to rediscover:
+
+- The audio goes in the **raw body**, not as multipart. `Content-Type` names
+  the format.
+- The keeper field is `name`, not `keeper_name`.
+- `request_id` is **required**; omitting it returns 400.
+- `/transcribe` is admin-gated. `/api/v1/voice/audio/<token>` is not — that
+  token is a capability, which is why TTS clips can be fetched by a browser.
+- The transcribe response names `endpoint_id`, so it is visible whether a call
+  was served locally or fell back.
+
+## Incident: voice was down for six days and said nothing
+
+`runtime.toml [voice]` carried `max_retries` on both endpoint lists.
+`lib/voice_config/voice_config.ml` arrived on 2026-08-28 with a field whitelist that does not
+accept it, so every voice read failed from that day until 2026-09-03.
+
+It went unnoticed because four readers in `voice_bridge_core` matched
+`Error _` and substituted defaults — the hardcoded agent-voice map, 0.5/0.75/0.0
+tuning, playback off, the `"Sarah"` fallback voice. `Voice_config.load_detailed`
+separates `Not_configured` from `Invalid` precisely so the second reaches an
+operator, and its interface says so; those four collapsed both.
+
+The only surface that reported it was `GET /api/v1/voice/config`, which returns
+500 and no turn calls.
+
+Fixed in #32881: `Invalid` is logged per read, naming which reader fell back.
+`Not_configured` stays silent, since an environment without voice is not a
+fault.
+
+**If voice behaves oddly, read `GET /api/v1/voice/config` first.** It is the
+one surface that distinguishes "not configured" from "configured and broken".

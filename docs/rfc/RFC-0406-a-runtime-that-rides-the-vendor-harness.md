@@ -85,7 +85,31 @@ keeper 를 변종에 붙이는 건 `runtime_id` 한 줄이다. 새 keeper 필드
 
 **지연 대상 82개를 그 keeper 는 쓸 수 없다.** 지연이 아니라 부재다. schedule, delegate, run, ask, fusion, 부착된 github/slack 도구가 사라진다. 이건 숨겨진 열화가 아니라 **선언한 거래**다 — 변종을 고른 사람이 그걸 골랐다.
 
-측정으로 정해야 할 것: 지금 official-client 로 도는 keeper 들이 그 82개 중 무엇을 실제로 쓰는가. 그 수치가 없으면 어느 keeper 를 변종에 붙일지 못 정한다. 이 RFC 는 그 측정을 선행 조건으로 둔다.
+### 측정 (2026-08 + 2026-09, official-client 레인만)
+
+`tool_calls` 를 `runtime_profile` 로 갈라, official-client 턴을 `(trace_id, keeper_turn_id)` 로 유니크하게 세고, 그 턴 중 지연 대상 도구를 하나라도 부른 비율이다. 분모는 각 keeper 자신의 official 턴 수다.
+
+| keeper | official 턴 | 쓴 지연 도구 | **잃는 턴 비율** | 가장 자주 쓰는 것 |
+|---|---:|---:|---:|---|
+| `lab-sangsu` | 781 | 6 | **0.9%** | `masc_board_post_update` |
+| `analyst` | 1,218 | 22 | 5.3% | `masc_config` 1% |
+| `code-reviewer` | 2,578 | 28 | 5.4% | `masc_board_post_update` 1% |
+| `kidsnote` | 672 | 18 | 9.2% | `masc_board_post_update` 2% |
+| `rondo` | 1,319 | 21 | 13.4% | `masc_board_stats` 5% |
+| `rw-e0-r9-20260820-review` | 388 | 4 | 14.9% | `masc_board_stats` 13% |
+| `sangsu` | 1,746 | 25 | 22.2% | `keeper_skill` 7% |
+| `taskmaster` | 1,232 | 20 | 26.8% | `masc_board_vote` 12% |
+| `lane-smith` | 939 | 15 | **35.5%** | `masc_board_stats` 22%, `keeper_skill` 20% |
+
+레인 전체로는 지연 대상 42개가 실제로 불린다(2,600+ 호출). **변종은 fleet 기본값이 될 수 없다.**
+
+읽는 법:
+
+- `lane-smith`(35.5%)와 `taskmaster`(26.8%)는 붙이면 안 된다. 세 턴에 한 번 잃는다.
+- `lab-sangsu`(0.9%)는 붙여도 된다. 백 턴에 한 번이다.
+- `code-reviewer`(5.4%)가 판단이 필요한 자리다. 열아홉 턴에 한 번 잃는 대신, 이 keeper 가 `bootstrap_floor_exceeded` 로 실제로 멈추는 쪽이다(2026-09-03, 23건, operator 가 `restart_fresh` 로 풀 때까지 offline). 무엇을 잃느냐와 아예 못 도느냐의 거래다.
+
+`masc_board_stats`, `keeper_skill`, `masc_board_vote`, `keeper_broadcast`, `masc_config` 다섯이 상위를 차지한다. 이들만 `always_loaded` 로 되돌리면 대부분의 keeper 가 변종을 받아들일 수 있다 — 다만 그건 이 RFC 가 아니라 지연 선언 자체를 다시 재는 일이고, 그 판정은 `tool-deferral-has-a-break-even-turns-not-calls` 의 부등식을 레인별로 다시 적용해야 한다.
 
 ## 5. 하지 않는 것
 
@@ -116,6 +140,6 @@ CI 는 `dune build @check` 뿐이므로 병합 전 위 셋과 `test_official_cli
 
 ## 7. 남은 미지
 
-1. **어느 keeper 를 붙일지.** §4 의 측정이 없다. 이 RFC 를 병합해도 그 수치 없이는 변종을 켤 수 없다.
+1. ~~어느 keeper 를 붙일지~~ — §4 가 답한다. 남는 판단은 `code-reviewer`(5.4%) 한 자리다.
 2. **vendor 도구만으로 충분한가.** Codex 의 `Native_read` 는 읽기 전용 sandbox 라 쓰기가 자기 `apply_patch` 로만 가고, 그게 sandbox 에 막힌다(§1). 변종을 켜면 posture 도 같이 정해야 한다.
 3. **`tool_surface_sha256`.** `keeper_official_client_session_store.ml:784-791` 이 `Settled` resume 분기에서만 `required_tool_surface_sha256` 를 `Some` 으로 둔다. 변종 전환은 sha 를 바꾸므로 그 분기에서 무슨 일이 나는지 확인이 필요하다. 11개 분기 중 1개다.

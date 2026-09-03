@@ -30,8 +30,13 @@
     else. *)
 
 type field = Connector
-(** Fields of the Execute schema a rewrite can point at. [Connector] is the
-    conditional that joins two programs. *)
+(** Where a rewrite points a caller who nested one pipeline inside another:
+    at the connector between stages, so each stage is named once.
+
+    Not a field of the Execute schema. It read as one when the schema carried
+    a typed [pipeline]; since #32650 the schema is [argv], [script], [shell],
+    [cwd], [timeout_sec], and this arm is unreachable until the Shell IR
+    parser judges [script] -- the same note {!of_reason} carries above. *)
 
 type call =
   | Spawn

@@ -11,6 +11,7 @@ additional_properties = false
 # 2026-09-01..03: 32 turns needed it across 6317 provider requests, and its
 # 658 B schema rode every one of those requests. Loading it on demand costs
 # one extra request on those 32 turns and saves the 658 B on the rest.
+# What that trade does not cover is in Tool_loading_declarations.
 defer_loading = true
 [[params]]
 name = "category"

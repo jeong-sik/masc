@@ -1603,7 +1603,9 @@ type preset_restore_report = {
 }
 
 val decode_presets : Yojson.Safe.t -> (presets_snapshot, string) result
-(** GET /api/v1/presets. An [{ok:false, error}] body is the error. *)
+(** GET /api/v1/presets. Any [error] field is the error, whatever [ok] says:
+    the server answers its warm-up and auth refusals with [error] alone on a
+    200. *)
 
 val decode_preset_saved : Yojson.Safe.t -> (preset_manifest, string) result
 (** POST /api/v1/presets — the manifest of the preset just written. *)

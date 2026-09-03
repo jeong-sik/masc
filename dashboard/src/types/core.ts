@@ -1529,8 +1529,9 @@ export interface KeeperConfig {
   config_transaction_warnings?: KeeperManifestWarning[]
   autoboot_enabled: boolean
   max_context_override: number | null
-  sandbox_profile?: 'local' | 'docker' | 'microvm' | string
+  sandbox_profile?: 'docker' | 'microvm' | 'remote_ssh' | string
   network_mode?: 'none' | 'inherit' | string
+  remote_endpoint?: string | null
   keeper_last_error?: string | null
   sandbox_roots: string[]
   prompt: KeeperConfigPrompt

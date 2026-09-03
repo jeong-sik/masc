@@ -1344,7 +1344,7 @@ let run_turn
                         let turn_outcome =
                           match terminal_effect_state with
                           | Keeper_tools_agent_core.Terminal_effect_completed _ ->
-                            Ok Keeper_turn_outcome.External_effect_completed
+                            Ok Keeper_turn_outcome.Terminal_effect_settled
                           | Keeper_tools_agent_core.Terminal_effect_failed failure ->
                             Error
                               (Agent_core.Error.Internal

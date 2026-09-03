@@ -210,3 +210,22 @@ val tool_failure_policy_rejection : string
 val tool_failure_runtime_failure : string
 val tool_failure_workflow_rejection : string
 val tool_failure_operator_cancelled : string
+
+(** Gate replay delivery wording — one key per replay evidence state and one
+    per resolution path, following the keeper.observation.* precedent. The
+    model-facing instruction lives in the template; the execution path only
+    picks the key and supplies the evidence data. *)
+
+val keeper_gate_replay_evidence_applied : string
+val keeper_gate_replay_evidence_applied_with_warning : string
+val keeper_gate_replay_evidence_failed : string
+val keeper_gate_replay_evidence_indeterminate : string
+val keeper_gate_replay_repair_required : string
+val keeper_gate_replay_resolution_without_replay_outcome : string
+val keeper_gate_replay_resolution_exact_input : string
+
+(** HITL context-summary canonical output contract — the schema is data the
+    caller supplies; the contract sentence lives in the template. Variable:
+    [schema_json]. *)
+
+val judge_effect_output_contract : string

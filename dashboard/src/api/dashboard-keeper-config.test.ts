@@ -217,4 +217,32 @@ describe('keeper config source projection', () => {
       'Invalid keeper config response: config_write is malformed',
     )
   })
+
+  // remote_endpoint is not on keeper_meta -- it comes from the profile
+  // defaults -- so the panel can only initialise the remote_ssh row and tell
+  // an edit from a clear if this field survives the read.
+  it('reads remote_endpoint, and yields null when the response omits it', async () => {
+    const body = (extra: Record<string, unknown>) => JSON.stringify({
+      name: 'rtprobe',
+      config_revision: {
+        manifest: { state: 'sha256', value: 'a'.repeat(64) },
+        runtime_assignment: { state: 'runtime_config_missing' },
+      },
+      max_context_override: null,
+      skills: { names: null },
+      ...extra,
+    })
+    const respond = (payload: string) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(payload, {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    respond(body({ sandbox_profile: 'remote_ssh', remote_endpoint: 'builder' }))
+    expect((await fetchKeeperConfig('rtprobe')).remote_endpoint).toBe('builder')
+
+    respond(body({ sandbox_profile: 'docker' }))
+    expect((await fetchKeeperConfig('rtprobe')).remote_endpoint).toBeNull()
+  })
 })

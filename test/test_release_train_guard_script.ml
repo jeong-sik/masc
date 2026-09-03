@@ -39,6 +39,10 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
+let rec waitpid_retrying pid =
+  try Unix.waitpid [] pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_retrying pid
+
 let run_process ~cwd prog argv =
   let out = Filename.temp_file "release-train-guard-out" ".txt" in
   let err = Filename.temp_file "release-train-guard-err" ".txt" in
@@ -55,7 +59,7 @@ let run_process ~cwd prog argv =
         Sys.chdir cwd;
         Unix.create_process prog argv Unix.stdin out_fd err_fd)
   in
-  let _, status = Unix.waitpid [] pid in
+  let _, status = waitpid_retrying pid in
   let code =
     match status with
     | Unix.WEXITED code -> code

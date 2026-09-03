@@ -132,6 +132,248 @@ val keeper_columns_used_width : keeper_columns -> int
     [inner_width] it was allocated for, and equals it once that width admits
     the minimum row. *)
 
+(** {1 Memory fleet columns} *)
+
+val memory_state_width : int
+val memory_revision_width : int
+val memory_facts_width : int
+val memory_size_width : int
+val memory_source_width : int
+val memory_delta_width : int
+val memory_cell_gap : int
+
+type memory_columns = {
+  mcol_show_revision : bool;
+  mcol_show_source : bool;
+  mcol_name : int;
+}
+(** Plain-text cell budgets for one Memory row, in cells. *)
+
+type memory_row_values = {
+  mrow_state : string;
+  mrow_name : string;
+  mrow_revision : string;
+  mrow_facts : string;
+  mrow_size : string;
+  mrow_source : string;
+  mrow_delta : string;
+}
+(** One row's readings, already rendered as text. Each field is its own cell:
+    the revision, the fact count and the byte size are three units and do not
+    share one. *)
+
+val allocate_memory_columns : inner_width:int -> memory_columns
+(** Divide the box's inner width across the Memory columns. The source-bound
+    cell drops first and the revision second; the keeper's name and its state
+    never drop. Slack above the minimum goes to the name, up to the widest
+    name worth reading whole. *)
+
+val memory_columns_used_width : memory_columns -> int
+(** Total cells the allocation occupies, gaps included. Never exceeds the
+    [inner_width] it was allocated for. Unlike the roster it can fall short of
+    it: every Memory cell has a widest known reading, so surplus width stays
+    margin instead of padding one cell out to the frame. *)
+
+val memory_header_row : memory_columns -> string
+(** The column names, laid out on the allocation. *)
+
+val memory_row :
+  ?state_style:string ->
+  ?size_style:string ->
+  ?delta_style:string ->
+  ?close:string ->
+  memory_columns ->
+  memory_row_values ->
+  string
+(** One row, laid out on the same allocation as {!memory_header_row}. Both are
+    built from one description of the columns, so a cell can never sit at a
+    different offset from the header that names it -- the defect this pair
+    replaces, where a name over eighteen cells or a reading over fourteen
+    pushed the rest of its row right of the header.
+
+    The three styles dress the state cell, the size reading and the delta, and
+    nothing else. A keeper that deviates says so where it deviates rather than
+    turning its whole line one colour: the readings that are fine keep the
+    line's own dress. Escapes cost no display cells, so a dressed row is still
+    exactly as wide as its header. *)
+
+(** {1 Workspace repository columns} *)
+
+val workspace_name_width : int
+val workspace_branch_width : int
+val workspace_status_width : int
+val workspace_sync_width : int
+val workspace_minimum_path_width : int
+val workspace_cell_gap : int
+
+type workspace_row_values = {
+  wrow_name : string;
+  wrow_branch : string;
+  wrow_status : string;
+  wrow_sync : string;
+  wrow_path : string;
+}
+(** One repository row's readings, already rendered as text. *)
+
+val workspace_path_width : inner_width:int -> int
+(** Cells the path may occupy: what the named columns leave, never below
+    {!workspace_minimum_path_width}. Computed from the column widths rather
+    than from a constant kept in step with them by hand. *)
+
+val workspace_header_row : path_width:int -> string
+val workspace_row : path_width:int -> workspace_row_values -> string
+(** The header and one row, laid out on the same columns. This screen used to
+    print one format string in two places; a column can no longer exist in the
+    header at a width the rows do not use. *)
+
+(** {1 System log columns} *)
+
+val system_log_time_width : int
+val system_log_level_width : int
+val system_log_module_width : int
+val system_log_keeper_width : int
+val system_log_category_width : int
+val system_log_minimum_message_width : int
+val system_log_cell_gap : int
+
+type system_log_row_values = {
+  slog_time : string;
+  slog_level : string;
+  slog_module : string;
+  slog_keeper : string;
+  slog_category : string;
+  slog_message : string;
+}
+
+type system_log_styles = {
+  slog_time_style : string;
+  slog_module_style : string;
+  slog_keeper_style : string;
+  slog_category_style : string;
+}
+(** The dresses a log row wears whatever it says. The level's is separate
+    because it is the one that changes with the reading. *)
+
+val system_log_plain_styles : system_log_styles
+(** No dress at all, for a caller drawing an undressed row and for the tests
+    that check a dressed row measures the same. *)
+
+val system_log_message_width : inner_width:int -> int
+(** Cells the message may occupy: what the named columns leave, never below
+    {!system_log_minimum_message_width}. *)
+
+val system_log_header_row : message_width:int -> string
+
+val system_log_row :
+  styles:system_log_styles ->
+  level_style:string ->
+  message_width:int ->
+  system_log_row_values ->
+  string
+(** One entry, laid out on the same columns as {!system_log_header_row}. The
+    widths used to live in two format strings, the row's threaded between five
+    escape sequences where nothing could compare them with the header's. *)
+
+(** {1 Lane run columns} *)
+
+val lane_started_width : int
+val lane_subject_width : int
+val lane_status_width : int
+val lane_elapsed_width : int
+val lane_slot_width : int
+val lane_minimum_run_id_width : int
+val lane_cell_gap : int
+
+type lane_run_row_values = {
+  lrow_started : string;
+  lrow_subject : string;
+  lrow_status : string;
+  lrow_elapsed : string;
+  lrow_slot : string;
+  lrow_run_id : string;
+}
+
+val lane_run_id_width : inner_width:int -> int
+(** Cells the run id may occupy: the remainder, never below
+    {!lane_minimum_run_id_width}. *)
+
+val lane_run_header_row : identity_header:string -> run_id_width:int -> string
+
+val lane_run_row :
+  identity_header:string ->
+  status_style:string ->
+  run_id_width:int ->
+  lane_run_row_values ->
+  string
+(** One run, on the same columns as {!lane_run_header_row}. [identity_header]
+    names the second column, which reads differently for one keeper's runs and
+    for a fleet's. *)
+
+(** {1 File change columns} *)
+
+val change_turn_width : int
+val change_task_width : int
+val change_op_width : int
+val change_result_width : int
+val change_file_width : int
+val change_minimum_summary_width : int
+val change_cell_gap : int
+
+type change_row_values = {
+  crow_turn : string;
+  crow_task : string;
+  crow_op : string;
+  crow_result : string;
+  crow_file : string;
+  crow_summary : string;
+}
+
+val change_summary_width : inner_width:int -> int
+val change_header_row : summary_width:int -> string
+
+val change_row :
+  op_style:string ->
+  result_style:string ->
+  summary_width:int ->
+  change_row_values ->
+  string
+(** One change, on the same columns as {!change_header_row}. The file cell is
+    fitted now: it was padded and never cut, so a long path pushed the summary
+    beside it -- the column that says what the turn actually did -- off the
+    frame. *)
+
+(** {1 Fusion run columns} *)
+
+val fusion_time_width : int
+val fusion_age_width : int
+val fusion_state_width : int
+val fusion_preset_width : int
+val fusion_minimum_run_width : int
+val fusion_cell_gap : int
+
+type fusion_row_values = {
+  frow_time : string;
+  frow_age : string;
+  frow_state : string;
+  frow_keeper : string;
+  frow_preset : string;
+  frow_run : string;
+}
+
+val fusion_run_width : inner_width:int -> keeper_width:int -> int
+val fusion_header_row : keeper_width:int -> run_width:int -> string
+
+val fusion_row :
+  state_style:string ->
+  keeper_width:int ->
+  run_width:int ->
+  fusion_row_values ->
+  string
+(** One run, on the same columns as {!fusion_header_row}. The keeper cell is
+    sized by the caller to the names it holds; the run id takes what is left,
+    where it used to be unbounded in the header and cut at fourteen in the
+    row. *)
+
 module Terminal_size_cache : sig
   type refresh =
     | Changed of (int * int)

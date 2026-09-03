@@ -501,10 +501,15 @@ end
 (** {1 Keeper Keepalive Loop Constants} *)
 
 module KeeperKeepalive = struct
-  (** Heartbeat cycle interval in seconds. Default: 30.
+  (** Heartbeat cycle interval in seconds. Default: 300.
       Every positive operator-selected cadence is preserved exactly. This is
       the foundational timing constant — every keeper cycle (presence,
-      snapshot, board scan, turn) runs at this cadence. *)
+      snapshot, board scan, turn) runs at this cadence.
+
+      It is a ceiling, not a fixed spacing: a queued stimulus wakes the lane
+      inside [sleep_chunk_sec], so a keeper with work runs more often than
+      this. Measured 2026-09-03: polisher 289 s and analyst 265 s median
+      between turns, pr-updater 88 s. *)
   let interval_sec = keepalive_interval_sec_
 
   (** Interruptible sleep chunk size in seconds: the upper bound on how long a

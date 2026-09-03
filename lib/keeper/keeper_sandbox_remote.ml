@@ -108,6 +108,7 @@ let keeper_root ~remote_root ~keeper_name =
 ;;
 
 let remote_keeper_root t = keeper_root ~remote_root:t.remote_root ~keeper_name:t.keeper_name
+let gh_config_dir t = t.gh_config_dir
 
 let of_openssh ~base_path ~keeper_name (o : openssh) =
   let remote_root = o.endpoint.remote_root in
@@ -335,13 +336,35 @@ type stderr_stream =
   ; mutable tail : string
   }
 
+(* The trailer is the final RS-delimited frame, so its opening delimiter is the
+   second-to-last RS of the completed stream, and every byte before that RS is
+   payload no matter what arrives next. Returns how much of [text] can be handed
+   to the caller now. Holding the whole tail back instead would delay a stderr
+   line until the process exits, and [gh auth login] writes its one-time code to
+   stderr and then waits for the browser: a code delivered at exit arrives after
+   the login it was needed for has already timed out. *)
+let releasable_prefix_len text =
+  match String.rindex_opt text rs with
+  | None -> String.length text
+  | Some last ->
+    (match String.rindex_from_opt text (last - 1) rs with
+     | None -> last
+     | Some second_last -> second_last)
+;;
+
 let stream_stderr_chunk stream chunk =
   let combined = stream.tail ^ chunk in
-  let excess = String.length combined - trailer_tail_limit in
-  if excess > 0
+  (* The tail limit still bounds the retained region when payload bytes carry an
+     RS of their own; a trailer is orders of magnitude below it. *)
+  let release =
+    max (releasable_prefix_len combined) (String.length combined - trailer_tail_limit)
+  in
+  if release > 0
   then (
-    Option.iter (fun callback -> callback (String.sub combined 0 excess)) stream.callback;
-    stream.tail <- String.sub combined excess (String.length combined - excess))
+    Option.iter
+      (fun callback -> callback (String.sub combined 0 release))
+      stream.callback;
+    stream.tail <- String.sub combined release (String.length combined - release))
   else stream.tail <- combined
 ;;
 

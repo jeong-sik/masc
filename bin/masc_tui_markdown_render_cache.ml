@@ -37,33 +37,32 @@ module Streaming = struct
   }
 end
 
+(* One store per kind, each keyed by the identity that owns the result, so a
+   lookup is a hash rather than a walk of everything retained. The pane looks
+   one of these up for every message it walks, and a scrolled transcript walks
+   hundreds: a list made the walk cost the capacity times its own length,
+   which is why the bound used to be too small to hold a scrolled pane in the
+   first place. *)
 type 'identity t = {
-  capacity : int;
-  equal : 'identity -> 'identity -> bool;
-  mutable recent : 'identity Completed.rendered list;
-  mutable growing_recent : 'identity Streaming.growing list;
+  completed : ('identity, 'identity Completed.rendered) Masc_tui_lru.t;
+  growing : ('identity, 'identity Streaming.growing) Masc_tui_lru.t;
 }
 
-let create ~capacity ~equal =
+let create ~capacity =
   if capacity <= 0 then invalid_arg "Markdown render cache capacity must be positive";
-  { capacity; equal; recent = []; growing_recent = [] }
+  { completed = Masc_tui_lru.create ~capacity;
+    growing = Masc_tui_lru.create ~capacity;
+  }
 
-let same_key cache (left : _ Completed.key) (right : _ Completed.key) =
-  cache.equal left.identity right.identity
-  && String.equal left.text right.text
+(* The identity finds the entry; the rest of the key says whether what was
+   found is still what this render would produce. Comparing the source text
+   costs nothing when it is the same string the last frame rendered, which is
+   what it is while the transcript sits still. *)
+let same_rest (left : _ Completed.key) (right : _ Completed.key) =
+  String.equal left.text right.text
   && left.width = right.width
   && left.theme_revision = right.theme_revision
   && left.palette_generation = right.palette_generation
-
-let take_matching cache key (entries : _ Completed.rendered list) =
-  let rec loop before (remaining : _ Completed.rendered list) =
-    match remaining with
-    | [] -> None
-    | entry :: rest when same_key cache key entry.key ->
-        Some (entry, List.rev_append before rest)
-    | entry :: rest -> loop (entry :: before) rest
-  in
-  loop [] entries
 
 let take count entries =
   let rec loop kept reversed = function
@@ -81,16 +80,10 @@ let drop count entries =
   in
   loop count entries
 
+(* One width/source/revision tuple per completed entry. A resize or visual
+   revision replaces that entry's old rows instead of accumulating variants. *)
 let remember cache (rendered : _ Completed.rendered) =
-  (* One width/source/revision tuple per completed entry. A resize or visual
-     revision replaces that entry's old rows instead of accumulating variants. *)
-  let other_identities =
-    List.filter
-      (fun (entry : _ Completed.rendered) ->
-        not (cache.equal rendered.key.identity entry.key.identity))
-      cache.recent
-  in
-  cache.recent <- take cache.capacity (rendered :: other_identities)
+  Masc_tui_lru.set cache.completed rendered.key.identity rendered
 
 let render cache ~theme_revision ~palette_generation ~width ~renderer ~source =
   match source with
@@ -99,42 +92,29 @@ let render cache ~theme_revision ~palette_generation ~width ~renderer ~source =
       let key : _ Completed.key =
         { identity; text; width; theme_revision; palette_generation }
       in
-      (match take_matching cache key cache.recent with
-       | Some (rendered, others) ->
-           (* A hit becomes the most recent entry, so the bound removes the
-              completed messages the viewport has not touched for longest. *)
-           cache.recent <- rendered :: others;
+      (match Masc_tui_lru.find cache.completed identity with
+       (* A hit is already the most recent entry, so the bound removes the
+          completed messages the viewport has not touched for longest. *)
+       | Some (rendered : _ Completed.rendered) when same_rest key rendered.key ->
            rendered.rows
-       | None ->
+       | Some _ | None ->
            let rows = renderer ~width text in
            remember cache { key; rows };
            rows)
 
-let same_visual_key cache (left : _ Streaming.key) (right : _ Streaming.key) =
-  cache.equal left.identity right.identity
-  && left.width = right.width
+let same_visual_rest (left : _ Streaming.key) (right : _ Streaming.key) =
+  left.width = right.width
   && left.theme_revision = right.theme_revision
   && left.palette_generation = right.palette_generation
 
-let take_matching_growing cache key (entries : _ Streaming.growing list) =
-  let rec loop before (remaining : _ Streaming.growing list) =
-    match remaining with
-    | [] -> None
-    | entry :: rest when same_visual_key cache key entry.key ->
-        Some (entry, List.rev_append before rest)
-    | entry :: rest -> loop (entry :: before) rest
-  in
-  loop [] entries
+let find_growing cache (key : _ Streaming.key) =
+  match Masc_tui_lru.find cache.growing key.identity with
+  | Some (growing : _ Streaming.growing) when same_visual_rest key growing.key ->
+      Some growing
+  | Some _ | None -> None
 
 let remember_growing cache (growing : _ Streaming.growing) =
-  let other_identities =
-    List.filter
-      (fun (entry : _ Streaming.growing) ->
-        not (cache.equal growing.key.identity entry.key.identity))
-      cache.growing_recent
-  in
-  cache.growing_recent <-
-    take cache.capacity (growing :: other_identities)
+  Masc_tui_lru.set cache.growing growing.key.identity growing
 
 let validate_streaming_render ~source_length
     (rendered : Masc_tui_markdown.streaming_render) =
@@ -164,11 +144,9 @@ let render_growing cache ~theme_revision ~palette_generation ~width ~renderer
   let key : _ Streaming.key =
     { identity; width; theme_revision; palette_generation }
   in
-  match take_matching_growing cache key cache.growing_recent with
-  | Some (growing, others) when String.equal growing.text text ->
-      cache.growing_recent <- growing :: others;
-      growing.rows
-  | Some (growing, others) when String.starts_with ~prefix:growing.text text ->
+  match find_growing cache key with
+  | Some growing when String.equal growing.text text -> growing.rows
+  | Some growing when String.starts_with ~prefix:growing.text text ->
       let pending =
         String.sub text growing.stable_source_len
           (String.length text - growing.stable_source_len)
@@ -189,11 +167,11 @@ let render_growing cache ~theme_revision ~palette_generation ~width ~renderer
           rows;
         }
       in
-      cache.growing_recent <- updated :: others;
+      remember_growing cache updated;
       rows
-  | Some (_, _) | None -> reset_growing cache ~key ~text ~renderer
+  | Some _ | None -> reset_growing cache ~key ~text ~renderer
 
 module For_testing = struct
-  let retained_entries cache = List.length cache.recent
-  let retained_growing_entries cache = List.length cache.growing_recent
+  let retained_entries cache = Masc_tui_lru.size cache.completed
+  let retained_growing_entries cache = Masc_tui_lru.size cache.growing
 end

@@ -355,6 +355,7 @@
   test_surface_tool_toml_parity
   test_keeper_artifact_read_request
   test_tool_result_wire_ceiling
+  test_setting_registry_default_parity
   test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
@@ -701,6 +702,7 @@
   test_surface_tool_toml_parity
   test_keeper_artifact_read_request
   test_tool_result_wire_ceiling
+  test_setting_registry_default_parity
   test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
@@ -773,7 +775,7 @@
  (libraries
  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
-  masc.skill_config masc.skill_reference masc.skill_snapshot
+  masc.skill_config masc.skill_reference masc.skill_snapshot masc.config
   ;; The fake ssh shim renders its result trailer with the same function
   ;; the real shim uses, so the wire version cannot be typed in by hand.
  exec_ssh_protocol))
@@ -813,7 +815,7 @@
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
-  masc.skill_config masc.skill_reference masc.skill_snapshot))
+  masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
 
 ; Extracted from the big (tests ...) group above: the keeper fixture TOMLs
 ; seed sandbox_profile = "local" (incidental — the suite measures mention
@@ -825,7 +827,7 @@
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
-  masc.skill_config masc.skill_reference masc.skill_snapshot))
+  masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
 
 ; Extracted from the big (tests ...) group above: the declarative keeper
 ; fixture TOMLs seed sandbox_profile = "local" (incidental — the suite
@@ -837,7 +839,7 @@
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
-  masc.skill_config masc.skill_reference masc.skill_snapshot))
+  masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
 
 ; Extracted from the big (tests ...) group above: the connector route
 ; fixtures boot keepers whose sandbox_profile resolves to Local (incidental —
@@ -850,7 +852,7 @@
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
-  masc.skill_config masc.skill_reference masc.skill_snapshot))
+  masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
 
 ; Repository catalog tests depend only on the focused repo_manager library.
 ; The iMessage connector's platform-independent core. Needs sqlite3 directly
@@ -1396,6 +1398,7 @@
   test_process_eio_detached
   test_voice_runtime_overlay
   test_voice_bridge_error
+  test_voice_capture_thresholds
   test_resilience
   test_common
   test_workspace_messages_raw
@@ -1541,6 +1544,7 @@
   test_process_eio_detached
   test_voice_runtime_overlay
   test_voice_bridge_error
+  test_voice_capture_thresholds
   test_resilience
   test_common
   test_workspace_messages_raw
@@ -3023,6 +3027,11 @@
  (libraries alcotest masc_tui_keeper_chat_projection masc_tui_keeper_chat_queue masc_tui_types))
 
 (test
+ (name test_tui_chat_timeline_assembly)
+ (modules test_tui_chat_timeline_assembly)
+ (libraries alcotest masc_tui_types))
+
+(test
  (name test_tui_ask_selection_wiring)
  (modules test_tui_ask_selection_wiring)
  (libraries alcotest ast_grep)
@@ -3140,6 +3149,11 @@
  (name test_tui_clipboard)
  (modules test_tui_clipboard)
  (libraries alcotest masc_tui_clipboard))
+
+(test
+ (name test_tui_image_preview)
+ (modules test_tui_image_preview)
+ (libraries alcotest masc_tui_image_preview masc_tui_keeper_chat_projection))
 
 (test
  (name test_tui_keeper_chat_projection)
@@ -3285,6 +3299,11 @@
  (name test_tui_frame_timing)
  (modules test_tui_frame_timing)
  (libraries alcotest masc_tui_frame_timing))
+
+(test
+ (name test_tui_lru)
+ (modules test_tui_lru)
+ (libraries alcotest masc_tui_lru))
 
 (test
  (name test_tui_approval_authority)
@@ -3649,6 +3668,18 @@
  (action
   (run python3 %{dep:test_capture_tui_keeper_chat.py})))
 
+(rule
+ (alias runtest-test_tui_frame_latency_verdict)
+ (deps
+  test_tui_frame_latency_verdict.py
+  ../scripts/tui-frame-latency.py)
+ (action
+  (run python3 %{dep:test_tui_frame_latency_verdict.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_frame_latency_verdict)))
+
 (alias
  (name runtest)
  (deps (alias runtest-test_capture_tui_keeper_chat)))
@@ -3873,9 +3904,17 @@
  (libraries alcotest masc_tui_approval_detail))
 
 (test
+ (name test_tui_table)
+ (modules test_tui_table)
+ (libraries alcotest masc_tui_message_layout masc_tui_table))
+
+(test
  (name test_tui_render_schedule)
  (modules test_tui_render_schedule)
- (libraries alcotest masc_tui_render_schedule))
+ ; masc_tui_message_layout so a column offset is asked in display cells rather
+ ; than bytes: the delta column is headed with a two-byte glyph one cell wide,
+ ; and a byte offset would report the header and its own cell as misaligned.
+ (libraries alcotest masc_tui_message_layout masc_tui_render_schedule))
 
 (test
  (name test_tui_terminal_write_repair)
@@ -4278,6 +4317,11 @@
 (test
  (name test_keeper_sandbox_remote)
  (modules test_keeper_sandbox_remote)
+ (libraries masc_test_deps exec_ssh_protocol eio_main))
+
+(test
+ (name test_keeper_github_login_lane)
+ (modules test_keeper_github_login_lane)
  (libraries masc_test_deps exec_ssh_protocol eio_main))
 
 (test

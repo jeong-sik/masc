@@ -28,6 +28,7 @@ type transcript_slot =
       }
   | Tool_delivery of { ordinal : int }
   | Terminal_assistant
+  | Approval_request
   | Approval_resolution
   | Approval_replay
   | Approval_replay_correction

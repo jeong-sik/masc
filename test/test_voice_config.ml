@@ -308,9 +308,91 @@ let test_endpoint_voice_is_absent_when_not_declared () =
       config.Vc.tts.endpoints
 ;;
 
+
+(* The whitelist is the contract the live config is written against, and
+   nothing compared the two. [runtime.toml [voice]] carried [max_retries] on
+   both endpoint lists; the whitelist introduced 2026-08-28 does not accept
+   it, so every voice read failed from that day until 2026-09-03. The only
+   surface that reported it was GET /api/v1/voice/config, which returns 500
+   and no turn calls.
+
+   This pins the shape a working endpoint actually has. A field added to the
+   live config without being added here fails at parse, which is where it
+   should. *)
+let test_a_live_shaped_endpoint_parses () =
+  let endpoint id =
+    `Assoc
+      [ "id", `String id
+      ; "kind", `String "elevenlabs_direct"
+      ; "api_key_env", `String "ELEVENLABS_API_KEY"
+      ; "enabled", `Bool true
+      ; "timeout_seconds", `Float 35.0
+      ]
+  in
+  let json =
+    `Assoc
+      [ ( "tts"
+        , `Assoc
+            [ "default_model", `String "eleven_multilingual_v2"
+            ; "default_voice", `String "SAz9YHcvj6GT2YYXdXww"
+            ; "endpoints", `List [ endpoint "elevenlabs-tts" ]
+            ] )
+      ; ( "stt"
+        , `Assoc
+            [ "default_model", `String "scribe_v2"
+            ; "endpoints", `List [ endpoint "elevenlabs-stt" ]
+            ] )
+      ]
+  in
+  match Vc.parse_json json with
+  | Ok config ->
+    check int "one tts endpoint" 1 (List.length config.Vc.tts.Vc.endpoints);
+    check int "one stt endpoint" 1 (List.length config.Vc.stt.Vc.endpoints)
+  | Error message -> fail ("a live-shaped voice config must parse: " ^ message)
+;;
+
+(* The field that broke it. Rejection is correct -- no reader consumes a retry
+   count, and the fallback is the endpoint chain rather than a repeat of one
+   endpoint (a repeated TTS attempt risks speaking twice). What was missing is
+   anything that notices, so this pins that the rejection names the field. *)
+let test_an_unknown_endpoint_field_is_rejected_by_name () =
+  let json =
+    `Assoc
+      [ ( "tts"
+        , `Assoc
+            [ "default_voice", `String "SAz9YHcvj6GT2YYXdXww"
+            ; ( "endpoints"
+              , `List
+                  [ `Assoc
+                      [ "id", `String "elevenlabs-tts"
+                      ; "kind", `String "elevenlabs_direct"
+                      ; "enabled", `Bool true
+                      ; "max_retries", `Int 2
+                      ]
+                  ] )
+            ] )
+      ]
+  in
+  match Vc.parse_json json with
+  | Ok _ -> fail "max_retries is not a supported endpoint field"
+  | Error message ->
+    check
+      bool
+      "the rejection names the field so an operator can find it"
+      true
+      (String_util.string_contains_substring ~needle:"max_retries" message)
+;;
+
 let () =
   Alcotest.run "voice_config"
     [
+      ( "live_shape",
+        [
+          test_case "a live-shaped endpoint parses"
+            `Quick test_a_live_shaped_endpoint_parses;
+          test_case "an unknown endpoint field is rejected by name"
+            `Quick test_an_unknown_endpoint_field_is_rejected_by_name;
+        ] );
       ( "load_detailed",
         [
           test_case "unconfigured is Not_configured"

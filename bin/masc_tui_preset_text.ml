@@ -17,6 +17,11 @@ let counts (m : D.preset_manifest) =
 let listing_lines (snapshot : D.presets_snapshot) =
   let presets =
     match snapshot.D.pss_presets with
+    (* Presets whose manifest did not read are still presets; saying "no
+       presets yet" beside their rows would send the operator to save one
+       when the fix is to look at why the manifest is unreadable. *)
+    | [] when snapshot.D.pss_unreadable <> [] ->
+      [ "읽을 수 있는 프리셋이 없습니다 — 아래 줄이 이유입니다" ]
     | [] ->
       [ "no presets yet — /preset save <name> [description] snapshots the live state" ]
     | presets ->
@@ -69,6 +74,33 @@ let restore_lines (report : D.preset_restore_report) =
    :: part_lines ~label:"prompt overrides" report.D.prr_prompt_overrides)
   @ part_lines ~label:"keeper instructions" report.D.prr_instructions
   @ [ runtime_line report.D.prr_runtime ]
+;;
+
+(* One list row in the Config pane: the name, then the counts, then when it
+   was saved. The description is detail, not a row. *)
+let pane_row (m : D.preset_manifest) =
+  Printf.sprintf "%-28s %s  %s" m.D.pm_name (counts m) m.D.pm_created_at
+;;
+
+(* The detail below the list: what the selected preset holds, and the last
+   restore report this session saw. *)
+let detail_lines ~(selected : D.preset_manifest option)
+      ~(report : D.preset_restore_report option) =
+  let preset =
+    match selected with
+    | None -> [ "선택한 프리셋이 없습니다" ]
+    | Some m ->
+      [ Printf.sprintf "%s · %s" m.D.pm_name (counts m)
+      ; (if String.equal m.D.pm_description "" then "설명 없음" else m.D.pm_description)
+      ; "저장 시각 " ^ m.D.pm_created_at
+      ; (match m.D.pm_keepers with
+         | [] -> "지시문을 담은 keeper 없음"
+         | keepers -> "지시문 " ^ String.concat ", " keepers)
+      ]
+  in
+  match report with
+  | None -> preset
+  | Some report -> preset @ [ "" ] @ restore_lines report
 ;;
 
 (* Clean means nothing was skipped and runtime.toml did not fail; the pane

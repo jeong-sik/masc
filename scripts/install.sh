@@ -66,18 +66,30 @@ TEAM="${MASC_TEAM_PRESET:-}"
 # provider pings.
 readonly MASC_INSTALL_PUBLIC_PING_TIMEOUT_S=5
 readonly MASC_INSTALL_AUTH_PING_TIMEOUT_S=10
+# The wizard probes every local model server up front to report which are
+# running, so this ceiling is kept short: a closed loopback port refuses
+# instantly, and a hung one should not stall the whole detection sweep.
+readonly MASC_INSTALL_LOCAL_PROBE_TIMEOUT_S=2
 readonly MASC_INSTALL_RELEASE_METADATA_TIMEOUT_S=30
 readonly MASC_INSTALL_CONFIG_FETCH_TIMEOUT_S=60
 readonly MASC_INSTALL_BINARY_DOWNLOAD_TIMEOUT_S=300
 readonly MASC_INSTALL_CURL_RETRIES=3
 
 # --- provider catalog ---------------------------------------------------------
+# The catalog is a flat list of NUL-delimited records with no record separator,
+# so every reader must know each record kind's field count. Two menu kinds
+# share these parallel arrays: a "provider" reaches an HTTP endpoint with an
+# env-var API key; a "subscription" is reached through its own CLI (Claude Code
+# / Codex / Antigravity) and needs no key and no endpoint. PROVIDER_KINDS keeps
+# them apart so the endpoint/key steps stay off the subscription path.
 PROVIDER_IDS=()
 PROVIDER_NAMES=()
 PROVIDER_KEYS=()
 PROVIDER_ENDPOINTS=()
 PROVIDER_PING_PATHS=()
 PROVIDER_DEFAULT_RUNTIME_IDS=()
+PROVIDER_KINDS=()
+PROVIDER_COMMANDS=()
 PROVIDER_INDEX_RESULT=""
 DEFAULT_PROVIDER_INDEX=0
 CATALOG_FILE=""
@@ -127,9 +139,11 @@ load_provider_catalog() {
   PROVIDER_ENDPOINTS=()
   PROVIDER_PING_PATHS=()
   PROVIDER_DEFAULT_RUNTIME_IDS=()
+  PROVIDER_KINDS=()
+  PROVIDER_COMMANDS=()
   DEFAULT_PROVIDER_INDEX=0
 
-  local kind id name key endpoint ping_path runtime_id default_provider_id="" missing_default_runtime_id=""
+  local kind id name key endpoint ping_path runtime_id command default_provider_id="" missing_default_runtime_id=""
   [ -z "$CATALOG_FILE" ] || rm -f "$CATALOG_FILE"
   CATALOG_FILE="$(mktemp)" || die "could not create provider wizard catalog temp file"
   "$DEST" runtime-wizard-catalog --base-path "$base_path" >"$CATALOG_FILE" \
@@ -153,6 +167,29 @@ load_provider_catalog() {
         PROVIDER_ENDPOINTS+=("$endpoint")
         PROVIDER_PING_PATHS+=("${ping_path:-}")
         PROVIDER_DEFAULT_RUNTIME_IDS+=("$runtime_id")
+        PROVIDER_KINDS+=("provider")
+        PROVIDER_COMMANDS+=("")
+        ;;
+      subscription)
+        # A subscription runtime signs in through its own CLI, so it carries no
+        # API key and no endpoint. It joins the same menu as a keyless entry;
+        # the empty key and endpoint keep it off the .env.local and ping paths,
+        # and $command is what the wizard probes with `command -v`.
+        read_catalog_field id
+        read_catalog_field name
+        read_catalog_field command
+        read_catalog_field runtime_id
+        [ -n "${id:-}" ] || die "provider wizard catalog has empty subscription id"
+        [ -n "${name:-}" ] || die "provider wizard catalog has empty display name for $id"
+        [ -n "${runtime_id:-}" ] || die "provider wizard catalog has empty runtime id for $id"
+        PROVIDER_IDS+=("$id")
+        PROVIDER_NAMES+=("$name")
+        PROVIDER_KEYS+=("")
+        PROVIDER_ENDPOINTS+=("")
+        PROVIDER_PING_PATHS+=("")
+        PROVIDER_DEFAULT_RUNTIME_IDS+=("$runtime_id")
+        PROVIDER_KINDS+=("subscription")
+        PROVIDER_COMMANDS+=("${command:-}")
         ;;
       default-provider)
         read_catalog_field id
@@ -183,8 +220,11 @@ load_provider_catalog() {
   fi
 
   for idx in "${!PROVIDER_IDS[@]}"; do
-    [ -n "${PROVIDER_ENDPOINTS[$idx]}" ] \
-      || die "provider ${PROVIDER_IDS[$idx]} in runtime.toml has no endpoint"
+    # A subscription has no endpoint by design; only HTTP providers must carry one.
+    if [ "${PROVIDER_KINDS[$idx]}" = "provider" ]; then
+      [ -n "${PROVIDER_ENDPOINTS[$idx]}" ] \
+        || die "provider ${PROVIDER_IDS[$idx]} in runtime.toml has no endpoint"
+    fi
     [ -n "${PROVIDER_DEFAULT_RUNTIME_IDS[$idx]}" ] \
       || die "provider ${PROVIDER_IDS[$idx]} in runtime.toml has no concrete runtime binding"
     if [ -n "${PROVIDER_KEYS[$idx]}" ] && ! [[ "${PROVIDER_KEYS[$idx]}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
@@ -235,6 +275,123 @@ provider_env_key() {
   return 1
 }
 
+# A loopback endpoint is a model server running on this machine, so "is it up?"
+# is a meaningful question. A remote/cloud endpoint is always routable and its
+# gate is the API key instead, so the wizard does not probe those for liveness.
+endpoint_is_local() {
+  case "$1" in
+    *://localhost:* | *://localhost/* | *://localhost \
+    | *://127.0.0.1:* | *://127.0.0.1/* | *://127.0.0.1 \
+    | *://0.0.0.0:* | *://0.0.0.0/* | *://0.0.0.0 \
+    | *://\[::1\]:* | *://\[::1\]/* | *://\[::1\]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Best-effort, unauthenticated liveness probe of a local server's healthcheck
+# path. Exit 0 means the server answered. A closed loopback port refuses at
+# once, so this does not wait out the timeout for servers that are simply down.
+probe_local_reachable() {
+  local idx="$1"
+  local endpoint="${PROVIDER_ENDPOINTS[$idx]}"
+  local ping_path="${PROVIDER_PING_PATHS[$idx]}"
+  curl -fsS --max-time "$MASC_INSTALL_LOCAL_PROBE_TIMEOUT_S" \
+    "${endpoint%/}${ping_path}" >/dev/null 2>&1
+}
+
+# One word describing whether this entry is ready to use right now:
+#   reachable / not running  -- a local server, probed over HTTP
+#   installed / not installed -- a subscription CLI, checked with command -v
+#   cloud                     -- a remote provider, gated by its API key
+#   local                     -- a local server with no healthcheck path to probe
+provider_availability_label() {
+  local idx="$1"
+  case "${PROVIDER_KINDS[$idx]}" in
+    subscription)
+      local cmd="${PROVIDER_COMMANDS[$idx]}"
+      if [ -z "$cmd" ] || ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "not installed"
+      else
+        # Installed -- also ask its own CLI whether it is signed in. A login
+        # check has no drift-safe shell form, so it goes through the masc
+        # runtime-probe subcommand, which reuses the server's official-client
+        # login probe. 0=signed in, 1=not signed in; anything else (probe not
+        # applicable) leaves it at the plain "installed" the CLI presence proved.
+        local probe_status=0
+        "$DEST" runtime-probe --base-path "$BASE_PATH" \
+          "${PROVIDER_DEFAULT_RUNTIME_IDS[$idx]}" >/dev/null 2>&1 || probe_status=$?
+        case "$probe_status" in
+          0) echo "installed, signed in" ;;
+          1) echo "installed, not signed in" ;;
+          *) echo "installed" ;;
+        esac
+      fi
+      ;;
+    *)
+      if endpoint_is_local "${PROVIDER_ENDPOINTS[$idx]}"; then
+        if [ -z "${PROVIDER_PING_PATHS[$idx]}" ]; then
+          echo "local"
+        elif probe_local_reachable "$idx"; then
+          echo "reachable"
+        else
+          echo "not running"
+        fi
+      else
+        echo "cloud"
+      fi
+      ;;
+  esac
+}
+
+# The "detect" half of detect-then-skip: before choosing, print what is ready.
+# Runs on every wizard invocation (including --dry-run and --provider), so the
+# operator sees which local servers are up and which subscriptions are signed
+# in before anything is written.
+report_provider_availability() {
+  log "detected model sources:"
+  local i
+  for i in "${!PROVIDER_IDS[@]}"; do
+    log "  - ${PROVIDER_NAMES[$i]}: $(provider_availability_label "$i")"
+  done
+}
+
+# The second axis: where a keeper's tools execute. Unlike the model source, the
+# sandbox has no install-time global default to write -- it is per-keeper, in
+# .masc/config/keepers/<name>.toml, and a --team preset carries its own choice.
+# So this only reports which backends the host can offer, and points at where
+# the choice is actually made. The three real backends are docker, microvm
+# (Apple's `container` CLI on macOS), and remote_ssh.
+report_sandbox_backends() {
+  log "detected execution sandboxes (set per keeper, not here):"
+
+  if command -v docker >/dev/null 2>&1; then
+    # docker info fails fast when the daemon socket is absent, so this does not
+    # hang when Docker is installed but not running.
+    if docker info >/dev/null 2>&1; then
+      log "  - docker: available"
+    else
+      log "  - docker: installed, daemon not responding"
+    fi
+  else
+    log "  - docker: not installed"
+  fi
+
+  if [ -e /System/Library/CoreServices/SystemVersion.plist ]; then
+    if command -v container >/dev/null 2>&1; then
+      log "  - microvm (apple container): available"
+    else
+      log "  - microvm (apple container): not installed"
+    fi
+  else
+    log "  - microvm (apple container): macOS only"
+  fi
+
+  # remote_ssh is transport-only; its endpoints live in runtime.toml, so host
+  # detection is not meaningful -- point at where they are declared instead.
+  log "  - remote_ssh: declare endpoints in runtime.toml [exec.ssh.endpoints]"
+  log "  choose one per keeper via sandbox_profile in .masc/config/keepers/<name>.toml, or --team <preset>"
+}
+
 prompt_provider() {
   if ! is_tty; then
     echo "$DEFAULT_PROVIDER_INDEX"
@@ -249,7 +406,11 @@ prompt_provider() {
       local marker=""
       [ "$i" -eq "$DEFAULT_PROVIDER_INDEX" ] && marker=" (default)"
       printf >&2 '  %d) %s%s' "$((i + 1))" "${PROVIDER_NAMES[$i]}" "$marker"
-      [ -n "${PROVIDER_KEYS[$i]}" ] && printf >&2 ' - needs %s' "${PROVIDER_KEYS[$i]}"
+      if [ "${PROVIDER_KINDS[$i]}" = "subscription" ]; then
+        printf >&2 ' - uses %s login' "$(basename "${PROVIDER_COMMANDS[$i]:-its CLI}")"
+      elif [ -n "${PROVIDER_KEYS[$i]}" ]; then
+        printf >&2 ' - needs %s' "${PROVIDER_KEYS[$i]}"
+      fi
       printf >&2 '\n'
     done
     printf >&2 '> '
@@ -441,6 +602,22 @@ ping_provider() {
   local key_var
   key_var=$(provider_key_var "$idx")
 
+  # A subscription has no endpoint to reach; the meaningful check is whether its
+  # CLI is on PATH. Being signed in is a deeper, per-CLI probe left to a later
+  # step (RFC-0408) -- here we only confirm the command exists.
+  if [ "${PROVIDER_KINDS[$idx]}" = "subscription" ]; then
+    local cli_command="${PROVIDER_COMMANDS[$idx]}"
+    if [ -z "$cli_command" ]; then
+      warn "subscription $(provider_name "$idx") has no CLI command in runtime.toml; skipping check"
+      return 0
+    fi
+    if command -v "$cli_command" >/dev/null 2>&1; then
+      return 0
+    fi
+    warn "$cli_command not found on PATH; sign in to $(provider_name "$idx") before using it"
+    return 1
+  fi
+
   if [ -z "$ping_path" ]; then
     warn "provider $(provider_name "$idx") has no healthcheck.path in runtime.toml; skipping ping"
     return 0
@@ -478,12 +655,24 @@ run_wizard() {
   local base_path="$1"
   local provider_idx key
   load_provider_catalog "$base_path"
+  report_provider_availability
+  report_sandbox_backends
 
   if [ -n "$WIZARD_PROVIDER" ]; then
     provider_idx=$(provider_index_by_id "$WIZARD_PROVIDER") \
       || die "unknown provider: $WIZARD_PROVIDER"
   else
     provider_idx=$(prompt_provider)
+  fi
+
+  # A local server that is not up will not answer once the default is set, so
+  # say so plainly rather than leave the operator to discover it at first run.
+  # The choice still stands: the server may just need to be started afterwards.
+  if [ "${PROVIDER_KINDS[$provider_idx]}" = "provider" ] \
+    && endpoint_is_local "${PROVIDER_ENDPOINTS[$provider_idx]}" \
+    && [ -n "${PROVIDER_PING_PATHS[$provider_idx]}" ] \
+    && ! probe_local_reachable "$provider_idx"; then
+    warn "$(provider_name "$provider_idx") is not running at ${PROVIDER_ENDPOINTS[$provider_idx]}; start it before using masc"
   fi
 
   key=$(resolve_wizard_key "$provider_idx")

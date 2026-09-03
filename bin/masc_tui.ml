@@ -1423,9 +1423,11 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       inspect_context ();
       true
     end else if c = Some 15 then begin
-      (* Ctrl-O: look at the picture this conversation last named. The path is
-         already on screen -- the point is not having to retype it into
-         /image, which on a nested evidence path is most of the work. *)
+      (* Ctrl-O: look at the picture this conversation last named -- or, when
+         it named none, the newest image staged for the next message, drawn
+         from the bytes the composer is already holding. The path is already
+         on screen -- the point is not having to retype it into /image, which
+         on a nested evidence path is most of the work. *)
       open_named_image ();
       true
     end else if Masc_tui_message_layout.is_printable_utf8_scalar s then begin
@@ -1489,6 +1491,10 @@ type http_surface_results = {
      server after a restart, without a failed request reaching this process. *)
   http_server_identity: (Tui_decode.server_identity, string) result;
 }
+
+type preset_sink =
+  | Preset_to_chat of string option
+  | Preset_to_pane
 
 type async_msg =
   | Http_refresh_done of http_surface_results
@@ -1689,9 +1695,11 @@ type async_msg =
   | Runtime_params_loaded of
       (Tui_decode.runtime_param_row list, string) result
   | Prompts_loaded of (Tui_decode.prompts_snapshot, string) result
-  | Presets_listed of string option * (Tui_decode.presets_snapshot, string) result
-  | Preset_saved of string option * (Tui_decode.preset_manifest, string) result
-  | Preset_restored of string option * (Tui_decode.preset_restore_report, string) result
+  (* Where a preset answer goes: the chat pane that typed the command, or
+     the Config pane that pressed the key. *)
+  | Presets_listed of preset_sink * (Tui_decode.presets_snapshot, string) result
+  | Preset_saved of preset_sink * (Tui_decode.preset_manifest, string) result
+  | Preset_restored of preset_sink * (Tui_decode.preset_restore_report, string) result
   | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of (Masc_tui_mcp.resource list, string) result
   | Code_entries_loaded of
@@ -3309,6 +3317,21 @@ let launch_preset_call state ~mailbox ~call ~wrap =
           `Stop_daemon)
   | None -> enqueue_async mailbox (wrap (Error "Eio switch is unavailable"))
 
+let launch_presets_load state ~mailbox =
+  state.presets_error <- None;
+  launch_preset_call state ~mailbox
+    ~call:(fun ~host ~port -> Masc_tui_loader.load_presets ~host ~port)
+    ~wrap:(fun result -> Presets_listed (Preset_to_pane, result))
+
+let preset_rows_for_state state =
+  match state.presets_snapshot with
+  | None -> []
+  | Some snapshot -> snapshot.Tui_decode.pss_presets
+
+let selected_preset_for_state state =
+  let rows = preset_rows_for_state state in
+  List.nth_opt rows (max 0 (min state.presets_cursor (List.length rows - 1)))
+
 let prompt_rows_for_state state =
   match state.prompts_snapshot with
   | None -> []
@@ -4410,6 +4433,7 @@ let goto_surface state ~mailbox (destination : surface) =
           comes from instead of quietly inheriting runtime.toml's. *)
        match state.config_pane with
        | Config_prompts -> launch_prompts_load state ~mailbox
+       | Config_presets -> launch_presets_load state ~mailbox
        | Config_params -> launch_runtime_params_load state ~mailbox
        | Config_runtime | Config_models | Config_themes ->
            launch_runtime_config_load state ~mailbox)
@@ -5373,10 +5397,10 @@ let chat_status_text completed =
         turn_ref
   | Keeper_chat.Continuation_checkpoint ->
       Printf.sprintf "Continuation checkpoint recorded (turn %s)" turn_ref
-  | Keeper_chat.External_effect_completed ->
-      Printf.sprintf "External effect completed (turn %s)" turn_ref
+  | Keeper_chat.Terminal_effect_settled ->
+      Printf.sprintf "Reply delivered by a terminal tool (turn %s)" turn_ref
   | Keeper_chat.External_effect_pending ->
-      Printf.sprintf "External effect remains pending (turn %s)" turn_ref
+      Printf.sprintf "Waiting for Gate approval (turn %s)" turn_ref
   | Keeper_chat.No_visible_reply ->
       Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
 
@@ -5537,6 +5561,12 @@ let paste_clipboard_image state =
    and remembered: the answer cannot change while the process runs, and asking
    again would put another reply on the key stream. [None] until asked. *)
 let terminal_draws_images = ref None
+
+(* Said the same at both doors a picture comes through: the capability was
+   asked once and the answer cannot change, so neither does the sentence that
+   reports it. *)
+let terminal_draws_no_images =
+  "this terminal does not draw images (it did not answer the graphics query)"
 
 (* Read a whole file. Images are the only thing this reads off disk, and a
    picture is not a thing to stream: it goes to the terminal in one write or
@@ -5711,6 +5741,54 @@ let clamp_planning_cursor state =
   if state.planning_cursor >= count then
     state.planning_cursor <- max 0 (count - 1)
 
+(* Put a picture's bytes on the terminal, or say why not. Both doors a
+   picture comes through -- a path the conversation named and an attachment
+   staged for the next message -- end here, so what the terminal can show is
+   answered once. [refuse] is the caller's wording: each door names its own
+   key and its own label for the thing it could not show, and [title] is the
+   line above the picture -- a path for a named file, the attachment's name
+   for a staged one, which has no path.
+
+   Asked before the write, not after: [place] is told not to answer, so a
+   format the terminal cannot decode leaves a cleared screen and no word
+   about why -- the picture that never arrives looks exactly like the picture
+   that did. The sniff is the composer's, so both surfaces read bytes by one
+   rule. *)
+let draw_image state ~refuse ~title data =
+  match Masc.Keeper_vision_tool.sniff_image_media_type data with
+  | Error detail -> refuse detail
+  | Ok media when not (String.equal media Masc_tui_graphics.payload_media_type)
+    ->
+      refuse
+        (Printf.sprintf "the terminal draws %s and this is %s"
+           Masc_tui_graphics.payload_media_type media)
+  | Ok _ ->
+      let rows, columns = get_terminal_size () in
+      (* Three rows kept back, not the two this comment used to claim: the
+         name above the picture, the way out below it, and one more.
+         Counting what is drawn, the picture starts at row 2 and the way
+         out is written at row [rows], so [rows - 2] would already clear
+         it -- the third row is spare.
+         Left as it is on purpose. Some terminals scroll when an image
+         reaches the last row, and a spare row is the usual guard, but
+         nothing here records whether that is why. Naming it after a reason
+         that may not be the real one would put a guess in the code, so the
+         comment says what is true and stops there. *)
+      let box =
+        { Masc_tui_graphics.columns = max 1 (columns - 2)
+        ; rows = max 1 (rows - 3)
+        }
+      in
+      write_to_terminal
+        (Ansi.clear ^ Masc_tui_graphics.delete_all
+        ^ Printf.sprintf "\x1b[1;1H%s\x1b[2;1H"
+            (Message_layout.fit_width title (max 1 (columns - 1)))
+        ^ Masc_tui_graphics.place ~data box
+        ^ Printf.sprintf "\x1b[%d;1H%s" rows
+            (Message_layout.fit_width "  any key: back" (max 1 (columns - 1))));
+      state.image_open <-
+        Some { image_title = title; image_bytes = String.length data }
+
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
    to say so would hide the only surface that can say it. *)
@@ -5719,53 +5797,29 @@ let open_image state ~notice path =
     notice ~role:Message_error (Printf.sprintf "/image %s: %s" path reason)
   in
   match !terminal_draws_images with
-  | Some false ->
-      refuse
-        "this terminal does not draw images (it did not answer the graphics query)"
+  | Some false -> refuse terminal_draws_no_images
   | Some true | None -> (
       match read_file_bytes path with
       | Error detail -> refuse detail
       | Ok data when String.length data = 0 -> refuse "the file is empty"
-      (* Asked before the write, not after: [place] is told not to answer, so a
-         format the terminal cannot decode leaves a cleared screen and no word
-         about why -- the picture that never arrives looks exactly like the
-         picture that did. The sniff is the composer's, so both surfaces read
-         bytes by one rule. *)
-      | Ok data -> (
-        match Masc.Keeper_vision_tool.sniff_image_media_type data with
-        | Error detail -> refuse detail
-        | Ok media
-          when not (String.equal media Masc_tui_graphics.payload_media_type) ->
-            refuse
-              (Printf.sprintf "the terminal draws %s and this is %s"
-                 Masc_tui_graphics.payload_media_type media)
-        | Ok _ ->
-          let rows, columns = get_terminal_size () in
-          (* Three rows kept back, not the two this comment used to claim: the
-             name above the picture, the way out below it, and one more.
-             Counting what is drawn, the picture starts at row 2 and the way
-             out is written at row [rows], so [rows - 2] would already clear
-             it -- the third row is spare.
-             Left as it is on purpose. Some terminals scroll when an image
-             reaches the last row, and a spare row is the usual guard, but
-             nothing here records whether that is why. Naming it after a reason
-             that may not be the real one would put a guess in the code, so the
-             comment says what is true and stops there. *)
-          let box =
-            { Masc_tui_graphics.columns = max 1 (columns - 2)
-            ; rows = max 1 (rows - 3)
-            }
-          in
-          write_to_terminal
-            (Ansi.clear ^ Masc_tui_graphics.delete_all
-            ^ Printf.sprintf "\x1b[1;1H%s\x1b[2;1H"
-                (Message_layout.fit_width path (max 1 (columns - 1)))
-            ^ Masc_tui_graphics.place ~data box
-            ^ Printf.sprintf "\x1b[%d;1H%s" rows
-                (Message_layout.fit_width "  any key: back"
-                   (max 1 (columns - 1))));
-          state.image_open <-
-            Some { image_path = path; image_bytes = String.length data }))
+      | Ok data -> draw_image state ~refuse ~title:path data)
+
+(* The staged door. Ctrl-V leaves the image in the attachment as base64 for
+   the wire to the endpoint; the terminal wants the PNG's own bytes, so they
+   are decoded back and drawn by the same tail a named file gets. The
+   attachment's name titles the screen: a staged image has no path, and the
+   name is the label the draft marker already knows it by. *)
+let open_staged_image state ~notice attachment =
+  let title = attachment.Masc_tui_keeper_chat_projection.name in
+  let refuse reason =
+    notice ~role:Message_error (Printf.sprintf "Ctrl-O %s: %s" title reason)
+  in
+  match !terminal_draws_images with
+  | Some false -> refuse terminal_draws_no_images
+  | Some true | None -> (
+      match Base64.decode attachment.Masc_tui_keeper_chat_projection.data with
+      | Error (`Msg detail) -> refuse detail
+      | Ok data -> draw_image state ~refuse ~title data)
 
 (* The picture this conversation last named, if it named one. Newest first
    because that is why the key is pressed: something just arrived. Older ones
@@ -5792,17 +5846,28 @@ let newest_named_image state =
               and the reader means the one nearest what they just read. *)
            | last :: _ -> Some last)
 
-(* Ctrl-O. The refusal is text for the pane rather than a cleared screen: a
-   key that did nothing and a key that found nothing look the same otherwise,
-   which is the shape of failure this whole surface keeps having. *)
+(* Ctrl-O. What it opens is chosen by [Masc_tui_image_preview.choose_preview]:
+   the path the conversation last named if it named one, else the newest
+   staged attachment -- a screenshot staged a keystroke ago never enters the
+   transcript, so without that door the key answered "nothing" with a picture
+   sitting in the composer. The refusal when there is neither is text for the
+   pane rather than a cleared screen: a key that did nothing and a key that
+   found nothing look the same otherwise, which is the shape of failure this
+   whole surface keeps having. *)
 let open_named_image state =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
-  match newest_named_image state with
-  | None ->
+  match
+    Masc_tui_image_preview.choose_preview ~named:(newest_named_image state)
+      ~staged:state.msg_attachments
+  with
+  | Masc_tui_image_preview.Named_path path -> open_image state ~notice path
+  | Masc_tui_image_preview.Staged attachment ->
+      open_staged_image state ~notice attachment
+  | Masc_tui_image_preview.No_image ->
       notice ~role:Message_status
-        (Printf.sprintf "Ctrl-O: this conversation names no %s to look at"
+        (Printf.sprintf
+           "Ctrl-O: this conversation names no %s to look at, and no image is staged for the next message"
            Masc_tui_image_ref.extension)
-  | Some path -> open_image state ~notice path
 
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
@@ -6010,7 +6075,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port -> Masc_tui_loader.load_presets ~host ~port)
-        ~wrap:(fun result -> Presets_listed (target, result))
+        ~wrap:(fun result -> Presets_listed (Preset_to_chat target, result))
   | Masc_tui_command.Preset_save_missing_name ->
       notice ~role:Message_error "/preset save needs a name on the same line"
   | Masc_tui_command.Preset_save { name; description } ->
@@ -6018,7 +6083,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port ->
           Masc_tui_loader.save_preset ~host ~port ~name ~description)
-        ~wrap:(fun result -> Preset_saved (target, result))
+        ~wrap:(fun result -> Preset_saved (Preset_to_chat target, result))
   | Masc_tui_command.Preset_restore_missing_name ->
       notice ~role:Message_error "/preset restore needs a name on the same line"
   | Masc_tui_command.Preset_restore name ->
@@ -6027,7 +6092,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (Printf.sprintf "restoring preset %s — the live state is autosaved first" name);
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
-        ~wrap:(fun result -> Preset_restored (target, result))
+        ~wrap:(fun result -> Preset_restored (Preset_to_chat target, result))
   | Masc_tui_command.Unknown word ->
       add_event state "error"
         (Printf.sprintf
@@ -6080,7 +6145,7 @@ let apply_keeper_chat_result state request result =
                  Message_keeper
              | Keeper_chat.Visible_reply
              | Keeper_chat.Continuation_checkpoint
-             | Keeper_chat.External_effect_completed
+             | Keeper_chat.Terminal_effect_settled
              | Keeper_chat.External_effect_pending
              | Keeper_chat.No_visible_reply -> Message_status
            in
@@ -8070,6 +8135,23 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Switch_keeper _ ->
            (* The switch handler owns the view change. *)
            set_msg_scroll state 0
+       (* The preset answers are chat notices — a listing, a saved line, a
+          restore report. Typed from the roster they would land in a pane the
+          operator is not looking at, so the chat pane comes forward the way
+          it does for a message. *)
+       | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
+       | Masc_tui_command.Preset_save_missing_name
+       | Masc_tui_command.Preset_restore _
+       | Masc_tui_command.Preset_restore_missing_name ->
+           set_msg_scroll state 0;
+           if state.view <> Keepers Keeper_message then begin
+             match state.msg_target_keeper_name with
+             | Some keeper_name ->
+                 reset_message_file_changes state keeper_name;
+                 launch_keeper_history_load state ~mailbox ~keeper_name
+             | None -> ()
+           end;
+           state.view <- Keepers Keeper_message
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
        | Masc_tui_command.Open_settings
@@ -8083,10 +8165,6 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Attach_image _ | Masc_tui_command.Attach_image_missing_path
-       | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
-       | Masc_tui_command.Preset_save_missing_name
-       | Masc_tui_command.Preset_restore _
-       | Masc_tui_command.Preset_restore_missing_name
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
               the keeper, and the answer lands in Recent Events. *)
@@ -8573,31 +8651,57 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                   (prompt_catalog_count_for_state state - 1));
            state.prompts_error <- None
        | Error detail -> state.prompts_error <- Some detail)
-  | Presets_listed (target, result) ->
-      (match result with
-       | Ok snapshot ->
+  | Presets_listed (sink, result) ->
+      (match sink, result with
+       | Preset_to_chat target, Ok snapshot ->
            chat_notice state ~keeper_name:target ~role:Message_status
              (String.concat "\n" (Masc_tui_preset_text.listing_lines snapshot))
-       | Error detail ->
-           chat_notice state ~keeper_name:target ~role:Message_error detail)
-  | Preset_saved (target, result) ->
-      (match result with
-       | Ok manifest ->
+       | Preset_to_chat target, Error detail ->
+           chat_notice state ~keeper_name:target ~role:Message_error detail
+       | Preset_to_pane, Ok snapshot ->
+           state.presets_snapshot <- Some snapshot;
+           state.presets_error <- None;
+           state.presets_cursor <-
+             max 0
+               (min state.presets_cursor
+                  (List.length snapshot.Tui_decode.pss_presets - 1))
+       | Preset_to_pane, Error detail -> state.presets_error <- Some detail)
+  | Preset_saved (sink, result) ->
+      (match sink, result with
+       | Preset_to_chat target, Ok manifest ->
            chat_notice state ~keeper_name:target ~role:Message_status
              (Masc_tui_preset_text.saved_line manifest)
-       | Error detail ->
-           chat_notice state ~keeper_name:target ~role:Message_error detail)
-  | Preset_restored (target, result) ->
-      (match result with
-       | Ok report ->
+       | Preset_to_chat target, Error detail ->
+           chat_notice state ~keeper_name:target ~role:Message_error detail
+       | Preset_to_pane, Ok manifest ->
+           state.preset_busy <- false;
+           report_action state "system" (Masc_tui_preset_text.saved_line manifest);
+           launch_presets_load state ~mailbox
+       | Preset_to_pane, Error detail ->
+           state.preset_busy <- false;
+           report_action state "error" ("preset save: " ^ detail))
+  | Preset_restored (sink, result) ->
+      (match sink, result with
+       | Preset_to_chat target, Ok report ->
            let role =
              if Masc_tui_preset_text.restore_is_clean report then Message_status
              else Message_error
            in
            chat_notice state ~keeper_name:target ~role
              (String.concat "\n" (Masc_tui_preset_text.restore_lines report))
-       | Error detail ->
-           chat_notice state ~keeper_name:target ~role:Message_error detail)
+       | Preset_to_chat target, Error detail ->
+           chat_notice state ~keeper_name:target ~role:Message_error detail
+       | Preset_to_pane, Ok report ->
+           state.preset_busy <- false;
+           state.preset_report <- Some report;
+           report_action state
+             (if Masc_tui_preset_text.restore_is_clean report then "system" else "error")
+             (Printf.sprintf "%s 복원 · 이전 상태는 %s"
+                report.Tui_decode.prr_restored report.Tui_decode.prr_autosave);
+           launch_presets_load state ~mailbox
+       | Preset_to_pane, Error detail ->
+           state.preset_busy <- false;
+           report_action state "error" ("preset restore: " ^ detail))
   | Librarian_input_loaded (prompt_key, result) ->
       let still_selected =
         match selected_prompt_for_state state with
@@ -11875,8 +11979,12 @@ and is loaded on demand through keeper_skill.
        | Verification ->
            if cancelled [ "a"; "A" ] then
              state.verification_verdict_armed <- None
+       | Config ->
+           (* A restore rewrites three surfaces; its arm must not outlive the
+              keypress that set it. *)
+           if cancelled [ "u"; "U" ] then state.preset_restore_armed <- None
        | Overview | Acting | Lanes | Harness | Memory | Fusion | Repositories
-       | Changes | Connectors | Runtime | Config | Resources | Tools
+       | Changes | Connectors | Runtime | Resources | Tools
        | System_logs | Code -> ());
       (* Destructive binding removal deliberately requires two consecutive
          [u] presses. Any intervening action invalidates the ownership
@@ -11912,6 +12020,40 @@ and is loaded on demand through keeper_skill.
           belong to the value.  Friendly mode turns the registry's declared
           type into a bool/number/string control; capital E is the explicit
           raw-JSON escape hatch.  The server remains the final authority. *)
+       (* Typing a preset name. The pane owns every printable key while a
+          draft is open, so a name with an s or an r in it does not fire the
+          save and restore keys under it. *)
+       | Some k
+         when state.view = Config
+              && state.config_pane = Config_presets
+              && Option.is_some state.preset_save_draft ->
+           (match state.preset_save_draft with
+            | None -> ()
+            | Some draft ->
+              (match k with
+               | "esc" ->
+                 state.preset_save_draft <- None;
+                 report_action state "system" "프리셋 저장 취소"
+               | "\r" | "\n" | "enter" ->
+                 let name = String.trim draft in
+                 if String.equal name "" then
+                   report_action state "error" "프리셋 이름이 필요합니다"
+                 else begin
+                   state.preset_save_draft <- None;
+                   state.preset_busy <- true;
+                   report_action state "system" (name ^ " 저장 중");
+                   launch_preset_call state ~mailbox:async_messages
+                     ~call:(fun ~host ~port ->
+                       Masc_tui_loader.save_preset ~host ~port ~name ~description:"")
+                     ~wrap:(fun result -> Preset_saved (Preset_to_pane, result))
+                 end
+               | "\127" | "\b" | "backspace" ->
+                 let length = String.length draft in
+                 if length > 0 then
+                   state.preset_save_draft <- Some (String.sub draft 0 (length - 1))
+               | s when String.length s = 1 && Char.code s.[0] >= 32 ->
+                 state.preset_save_draft <- Some (draft ^ s)
+               | _ -> ()))
        | Some k when Option.is_some state.runtime_param_edit ->
            (match state.runtime_param_edit with
             | None -> ()
@@ -13571,6 +13713,15 @@ and is loaded on demand through keeper_skill.
            (match state.view with
             | Approvals -> answer_presented_approval Deny
             | Schedules -> handle_schedule_create ()
+            (* The presets pane says [n] is its own key: a new preset from
+               the live state, named in the line the pane opens. *)
+            | Config when state.config_pane = Config_presets ->
+                if state.preset_busy then
+                  report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
+                else begin
+                  state.preset_restore_armed <- None;
+                  state.preset_save_draft <- Some ""
+                end
             | Overview | Acting | Keepers _ | Memory | Lanes | Board | Planning
             | Verification | Harness | Fusion | Repositories | Code | Changes
             | Connectors | Runtime | Config | Resources | Tools | System_logs ->
@@ -13727,6 +13878,31 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers _ | Approvals | Planning
             | Memory | Repositories | Changes | Connectors
             | Runtime | Config | Tools | Resources | System_logs -> ())
+       (* On Config, s and t hop to Resources and Tools and r is the global
+          refresh, so the pane takes u, twice, for the destructive restore.
+          Its save key is n, answered inside the [n] dispatch below, which
+          the surface list there requires. *)
+       | Some "u" | Some "U"
+         when state.view = Config && state.config_pane = Config_presets ->
+           (match selected_preset_for_state state with
+            | None -> report_action state "error" "되돌릴 프리셋을 고르세요"
+            | Some manifest ->
+              let name = manifest.Tui_decode.pm_name in
+              if state.preset_busy then
+                report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
+              else if state.preset_restore_armed = Some name then begin
+                state.preset_restore_armed <- None;
+                state.preset_busy <- true;
+                report_action state "system" (name ^ " 복원 중 · 지금 상태는 먼저 저장됩니다");
+                launch_preset_call state ~mailbox:async_messages
+                  ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
+                  ~wrap:(fun result -> Preset_restored (Preset_to_pane, result))
+              end
+              else begin
+                state.preset_restore_armed <- Some name;
+                report_action state "system"
+                  (Printf.sprintf "u 를 한 번 더 누르면 %s 로 되돌립니다" name)
+              end)
        | Some "r" | Some "R" ->
            state.pending_approval_action <- None;
            load_local_workspace_if_safe state base_path;
@@ -14284,6 +14460,13 @@ and is loaded on demand through keeper_skill.
                 let last = List.length (Masc_tui_theme_choice.entries ()) - 1 in
                 state.theme_cursor <- min (max 0 last) (state.theme_cursor + 1);
                 preview_theme_under_cursor ()
+            | Config when state.config_pane = Config_presets ->
+                let count = List.length (preset_rows_for_state state) in
+                if state.presets_cursor < count - 1 then begin
+                  state.presets_cursor <- state.presets_cursor + 1;
+                  state.config_scroll <- 0;
+                  state.preset_restore_armed <- None
+                end
             | Config when state.config_pane = Config_prompts ->
                 let count = prompt_catalog_count_for_state state in
                 if state.prompts_cursor < count - 1 then begin
@@ -14628,6 +14811,13 @@ and is loaded on demand through keeper_skill.
             | Config when state.config_pane = Config_themes ->
                 state.theme_cursor <- max 0 (state.theme_cursor - 1);
                 preview_theme_under_cursor ()
+            | Config when state.config_pane = Config_presets ->
+                let next = max 0 (state.presets_cursor - 1) in
+                if next <> state.presets_cursor then begin
+                  state.presets_cursor <- next;
+                  state.config_scroll <- 0;
+                  state.preset_restore_armed <- None
+                end
             | Config when state.config_pane = Config_prompts ->
                 let next = max 0 (state.prompts_cursor - 1) in
                 if next <> state.prompts_cursor then begin
@@ -15687,7 +15877,8 @@ and is loaded on demand through keeper_skill.
               | Config_runtime -> Config_models
               | Config_models -> Config_params
               | Config_params -> Config_prompts
-              | Config_prompts -> Config_themes
+              | Config_prompts -> Config_presets
+              | Config_presets -> Config_themes
               | Config_themes -> Config_runtime);
            state.prompts_cursor <- 0;
            state.config_scroll <- 0;
@@ -15708,6 +15899,12 @@ and is loaded on demand through keeper_skill.
             | Config_prompts ->
               if state.prompts_snapshot = None
               then launch_prompts_load state ~mailbox:async_messages
+            | Config_presets ->
+              state.presets_cursor <- 0;
+              state.preset_save_draft <- None;
+              state.preset_restore_armed <- None;
+              if state.presets_snapshot = None
+              then launch_presets_load state ~mailbox:async_messages
             | Config_params -> launch_runtime_params_load state ~mailbox:async_messages
             (* Same first-visit load as the prompts pane. The models table is
                a projection of runtime.toml, so entering it without the file
@@ -15868,7 +16065,8 @@ and is loaded on demand through keeper_skill.
                     selected model's [models.NAME] line, where the existing
                     $EDITOR path takes over. One write path, not two. *)
                  | Config_models -> handle_config_models_open_source ()
-                 | Config_themes -> ())
+                 (* The preset pane writes through s and r, never $EDITOR. *)
+                 | Config_presets | Config_themes -> ())
             | Tools -> handle_skill_edit ()
             | Schedules -> handle_schedule_modify ()
             | Approvals ->

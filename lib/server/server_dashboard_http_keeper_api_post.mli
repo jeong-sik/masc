@@ -86,8 +86,12 @@ val context_shrink_of_patch :
 
 (** Pure validation of a dashboard config patch body: duplicate keys, the
     allowed-field list, and per-field types/contracts (including the shared
-    autonomous wake-prompt contract). [Ok ()] means {!handle_keeper_config_post}
-    would proceed to apply it. *)
+    autonomous wake-prompt contract). [remote_endpoint] is checked for shape
+    only -- a non-blank string, or null to detach it; whether the name is
+    declared under [exec.ssh.endpoints] and whether the profile admits an
+    endpoint at all are decided by [Keeper_turn_up_args.parse] on the apply
+    path. [Ok ()] means {!handle_keeper_config_post} would proceed to apply
+    it. *)
 val validate_dashboard_config_patch :
   meta:Keeper_meta_contract.keeper_meta ->
   (string * Yojson.Safe.t) list ->

@@ -20,6 +20,7 @@ module Keeper_memory = Masc.Keeper_memory
 module Keeper_execution = Masc.Keeper_execution
 module Keeper_runtime = Masc.Keeper_runtime
 module Keeper_github_identity = Masc.Keeper_github_identity
+module Keeper_github_login_lane = Masc.Keeper_github_login_lane
 module Tool_operator = Masc.Tool_operator
 module Operator_control = Operator_control
 module Dashboard_execution = Dashboard_execution
@@ -1040,15 +1041,6 @@ let runtime_wizard_fields fields =
   in
   loop [] fields
 
-let runtime_wizard_endpoint (provider : Runtime_schema.provider) =
-  match provider.transport with
-  | Runtime_schema.Http endpoint -> Ok endpoint
-  | Runtime_schema.Cli _ ->
-      Error
-        (Printf.sprintf
-           "provider %s uses a CLI transport; install wizard requires an HTTP endpoint"
-           provider.id)
-
 let runtime_wizard_credential_key (provider : Runtime_schema.provider) =
   match provider.credentials with
   | None -> Ok ""
@@ -1079,10 +1071,29 @@ let runtime_wizard_binding_for_provider (cfg : Runtime_schema.config)
           choice and guessing it would install a model nobody picked. *)
        | [] when List.length bindings = 1 -> Ok (List.hd bindings)
        | [] ->
-           Error
-             (Printf.sprintf
-                "provider %s has %d enabled bindings and no install wizard default; set wizard-default = true on exactly one [%s.<model>] binding"
-                provider.id (List.length bindings) provider.id)
+           (* Prefer the binding the config already runs by default: that is the
+              operator's own pick, not a guess, so a live config with several
+              bindings and one [runtime].default no longer fails the wizard.
+              Only when this provider does not own the default runtime is the
+              choice genuinely ambiguous, and then it stays an error the caller
+              skips rather than guessing a model nobody picked. *)
+           (match
+              (match cfg.default_runtime_id with
+               | None -> None
+               | Some runtime_id ->
+                   List.find_opt
+                     (fun (binding : Runtime_schema.binding) ->
+                        String.equal
+                          (Runtime_schema.binding_key binding)
+                          runtime_id)
+                     bindings)
+            with
+            | Some binding -> Ok binding
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "provider %s has %d enabled bindings and no install wizard default; set wizard-default = true on exactly one [%s.<model>] binding"
+                     provider.id (List.length bindings) provider.id))
        | defaults ->
            Error
              (Printf.sprintf
@@ -1092,23 +1103,41 @@ let runtime_wizard_binding_for_provider (cfg : Runtime_schema.config)
                 provider.id))
 
 let runtime_wizard_provider_record cfg (provider : Runtime_schema.provider) =
-  match
-    ( runtime_wizard_endpoint provider
-    , runtime_wizard_credential_key provider
-    , runtime_wizard_binding_for_provider cfg provider )
-  with
-  | Error msg, _, _ | _, Error msg, _ | _, _, Error msg -> Error msg
-  | Ok endpoint, Ok credential_key, Ok binding ->
-      let runtime_id = Runtime_schema.binding_key binding in
-      runtime_wizard_fields
-        [ "kind", "provider"
-        ; "id", provider.id
-        ; "display_name", provider.display_name
-        ; "credential_key", credential_key
-        ; "endpoint", endpoint
-        ; "healthcheck_path", Option.value ~default:"" provider.healthcheck_path
-        ; "runtime_id", runtime_id
-        ]
+  match provider.transport with
+  | Runtime_schema.Cli command ->
+      (* A subscription runtime is reached through its own CLI (Claude Code /
+         Codex / Antigravity), not an HTTP endpoint and not an .env key: the
+         wizard offers it as a subscription and lets that CLI own the login.
+         [command] is the binary the installer probes for with `command -v`;
+         whether that CLI is actually signed in is a later, probe-based step
+         (RFC-0408). *)
+      (match runtime_wizard_binding_for_provider cfg provider with
+       | Error _ as err -> err
+       | Ok binding ->
+           runtime_wizard_fields
+             [ "kind", "subscription"
+             ; "id", provider.id
+             ; "display_name", provider.display_name
+             ; "command", command
+             ; "runtime_id", Runtime_schema.binding_key binding
+             ])
+  | Runtime_schema.Http endpoint ->
+      (match
+         ( runtime_wizard_credential_key provider
+         , runtime_wizard_binding_for_provider cfg provider )
+       with
+       | Error msg, _ | _, Error msg -> Error msg
+       | Ok credential_key, Ok binding ->
+           let runtime_id = Runtime_schema.binding_key binding in
+           runtime_wizard_fields
+             [ "kind", "provider"
+             ; "id", provider.id
+             ; "display_name", provider.display_name
+             ; "credential_key", credential_key
+             ; "endpoint", endpoint
+             ; "healthcheck_path", Option.value ~default:"" provider.healthcheck_path
+             ; "runtime_id", runtime_id
+             ])
 
 let runtime_wizard_default_record (cfg : Runtime_schema.config) =
   match cfg.default_runtime_id with
@@ -1136,19 +1165,30 @@ let runtime_wizard_default_record (cfg : Runtime_schema.config) =
             | Ok record -> Ok (Some record)))
 
 let runtime_wizard_catalog_records (cfg : Runtime_schema.config) =
+  (* One provider the wizard cannot represent -- a CLI-transport runtime with no
+     endpoint, or ambiguous bindings it will not guess -- is skipped with a
+     warning rather than failing the whole catalog. The wizard offers what it
+     can and stays silent about what it cannot, so a single misconfigured or
+     out-of-scope provider does not deny every other one. *)
   let rec provider_records acc = function
-    | [] -> Ok (List.rev acc)
+    | [] -> List.rev acc
     | provider :: rest ->
         (match runtime_wizard_provider_record cfg provider with
-         | Error _ as err -> err
+         | Error msg ->
+             Printf.eprintf "runtime-wizard-catalog: skipping provider %s: %s\n"
+               provider.id msg;
+             provider_records acc rest
          | Ok record -> provider_records (record :: acc) rest)
   in
   let enabled_providers =
     List.filter (fun (provider : Runtime_schema.provider) -> provider.enabled) cfg.providers
   in
   match provider_records [] enabled_providers with
-  | Error _ as err -> err
-  | Ok records ->
+  | [] ->
+      Error
+        "runtime.toml has no provider the setup wizard can offer (every enabled \
+         provider was CLI-transport, credential-less, or had ambiguous bindings)"
+  | records ->
       (match runtime_wizard_default_record cfg with
        | Error _ as err -> err
        | Ok None -> Ok records
@@ -1190,6 +1230,119 @@ let runtime_wizard_catalog_cmd =
   let info = Cmd.info "runtime-wizard-catalog" ~doc in
   Cmd.v info Term.(const runtime_wizard_catalog_cmd_exit $ base_path)
 
+(* A subscription runtime signs in through its own CLI. This asks whether it is
+   signed in *right now*, reusing the same login checks the server's official-
+   client probe uses -- [Runtime_claude_code.probe_subscription] /
+   [Runtime_codex_app_server.probe_subscription], which measure the login
+   without submitting a model turn. The install wizard calls this to upgrade a
+   subscription from "installed" (command -v) to "signed in". A CLI probe has no
+   drift-safe shell equivalent, which is why it lives here rather than in
+   install.sh.
+
+   Output contract (stdout first word, then exit code) so a shell caller can
+   read either: authenticated (0) / not-authenticated (1) / not-a-subscription
+   (2, an HTTP provider) / unsupported (3, antigravity has no login probe) /
+   the runtime id is not configured (4). *)
+let runtime_probe_subscription_timeout_s = 20.0
+
+let runtime_probe_cmd_exit base_path runtime_id =
+  let runtime_config_path = runtime_config_path_for_base_path base_path in
+  match Runtime.load_list ~config_path:runtime_config_path with
+  | Error msg ->
+      Printf.eprintf "runtime-probe failed: %s\n" msg;
+      1
+  | Ok (runtimes, _default, _, _, _) -> (
+      match
+        List.find_opt
+          (fun (rt : Runtime.t) -> String.equal rt.id runtime_id)
+          runtimes
+      with
+      | None ->
+          Printf.eprintf "runtime-probe: runtime %S is not configured\n" runtime_id;
+          4
+      | Some (runtime : Runtime.t) -> (
+          match runtime.execution with
+          | Runtime_execution.Agent_core _ ->
+              print_string "not-a-subscription\n";
+              Printf.eprintf
+                "runtime %S is an HTTP provider; probe its endpoint instead\n"
+                runtime_id;
+              2
+          | Runtime_execution.Antigravity_cli _ ->
+              print_string "unsupported\n";
+              Printf.eprintf "runtime %S (antigravity) exposes no login probe\n"
+                runtime_id;
+              3
+          | Runtime_execution.Claude_code exec ->
+              Eio_main.run @@ fun env ->
+              let bound =
+                Float.min runtime_probe_subscription_timeout_s exec.timeout_s
+              in
+              let config =
+                { (Runtime_claude_code.default_config ~cwd:base_path) with
+                  cli_path = exec.cli_path
+                ; model = exec.model
+                ; admission_timeout_s = bound
+                ; timeout_s = Some bound
+                }
+              in
+              (match
+                 Runtime_claude_code.probe_subscription
+                   ~mgr:(Eio.Stdenv.process_mgr env)
+                   ~clock:(Eio.Stdenv.clock env)
+                   ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+                   config
+               with
+               | Ok sub ->
+                   Printf.printf
+                     "authenticated auth_method=%s subscription_type=%s\n"
+                     sub.auth_method sub.subscription_type;
+                   0
+               | Error e ->
+                   print_string "not-authenticated\n";
+                   Printf.eprintf "%s\n" (Runtime_claude_code.error_to_string e);
+                   1)
+          | Runtime_execution.Codex_app_server exec ->
+              Eio_main.run @@ fun env ->
+              let bound =
+                Float.min runtime_probe_subscription_timeout_s exec.timeout_s
+              in
+              let config =
+                { (Runtime_codex_app_server.default_config ()) with
+                  cli_path = exec.cli_path
+                ; model = exec.model
+                ; admission_timeout_s = bound
+                ; timeout_s = Some bound
+                }
+              in
+              (match
+                 Runtime_codex_app_server.probe_subscription
+                   ~mgr:(Eio.Stdenv.process_mgr env)
+                   ~clock:(Eio.Stdenv.clock env)
+                   ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+                   config
+               with
+               | Ok result ->
+                   Printf.printf "authenticated subscription_type=%s\n"
+                     result.subscription.plan_type;
+                   0
+               | Error e ->
+                   print_string "not-authenticated\n";
+                   Printf.eprintf "%s\n"
+                     (Runtime_codex_app_server.error_to_string e);
+                   1)))
+
+let runtime_probe_id =
+  let doc = "Runtime id (provider.model) to probe for subscription sign-in" in
+  Arg.(required & pos 0 (some string) None & info [] ~docv:"RUNTIME_ID" ~doc)
+
+let runtime_probe_cmd =
+  let doc =
+    "Report whether a subscription runtime (Claude Code / Codex) is signed in."
+  in
+  let info = Cmd.info "runtime-probe" ~doc in
+  Cmd.v info Term.(const runtime_probe_cmd_exit $ base_path $ runtime_probe_id)
+
 let schedule_prune_cmd_exit base_path =
   let config = Workspace_utils.default_config base_path in
   match Schedule_service.prune config with
@@ -1223,14 +1376,17 @@ let keeper_github_action_cmd name doc run =
       prerr_endline (Printf.sprintf "invalid keeper name: %s" keeper_name);
       1)
     else
-      match Keeper_meta_store.read_meta config keeper_name with
+      (* Effective meta, not persisted meta: [sandbox_profile] is TOML-owned
+         and a persisted read answers with the default, which would send every
+         Keeper's login to this host. *)
+      match Keeper_meta_store.read_effective_meta config keeper_name with
       | Error message ->
         prerr_endline message;
         1
       | Ok None ->
         prerr_endline (Printf.sprintf "keeper %S not found" keeper_name);
         1
-      | Ok (Some _) -> run ~config ~keeper_name ~hostname
+      | Ok (Some meta) -> run ~config ~meta ~hostname
   in
   Cmd.v
     (Cmd.info name ~doc)
@@ -1245,19 +1401,49 @@ let keeper_github_cmd =
     keeper_github_action_cmd
       "login"
       "Log a Keeper into GitHub CLI."
-      Keeper_github_identity.run_cli_login
+      (fun ~config ~(meta : Keeper_meta_contract.keeper_meta) ~hostname ->
+        (* This subcommand runs under [Cmd.eval'], outside the [Eio_main.run]
+           that only the server's [start] enters, and both lanes need a runtime.
+           The remote lane opens an Eio switch per remote command, which without
+           a runtime raises [Effect.Unhandled]. The host lane runs, but an
+           uninitialized [Process_eio] takes the fallback that collects the
+           child's output and replays it after exit, so a device flow would show
+           its one-time code only once the wait for that code had expired. *)
+        Eio_main.run
+        @@ fun env ->
+        Process_eio.init
+          ~cwd_default:(Eio.Stdenv.cwd env)
+          ~proc_mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env);
+        match Keeper_github_login_lane.for_keeper ~config ~meta ~hostname with
+        | Error message ->
+          prerr_endline message;
+          1
+        | Ok lane -> Keeper_github_identity.run_cli_login ~lane)
   in
+  (* Status and logout still read and write this host's directory. For a
+     Remote_ssh Keeper they therefore answer about the host, which is what
+     they did before this command learned about lanes; closing that is
+     RFC-sized work on [observe] and [logout_argv], not a lane switch. *)
   let status =
     keeper_github_action_cmd
       "status"
       "Observe stored and effective Keeper GitHub identities."
-      Keeper_github_identity.run_cli_status
+      (fun ~config ~(meta : Keeper_meta_contract.keeper_meta) ~hostname ->
+        Keeper_github_identity.run_cli_status
+          ~config
+          ~keeper_name:meta.Keeper_meta_contract.name
+          ~hostname)
   in
   let logout =
     keeper_github_action_cmd
       "logout"
       "Remove a Keeper GitHub CLI login."
-      Keeper_github_identity.run_cli_logout
+      (fun ~config ~(meta : Keeper_meta_contract.keeper_meta) ~hostname ->
+        Keeper_github_identity.run_cli_logout
+          ~config
+          ~keeper_name:meta.Keeper_meta_contract.name
+          ~hostname)
   in
   Cmd.group
     (Cmd.info "keeper-github" ~doc:"Manage Keeper-specific GitHub CLI identity.")
@@ -1304,6 +1490,7 @@ let cmd =
     ; login_cmd
     ; runtime_default_set_cmd
     ; runtime_wizard_catalog_cmd
+    ; runtime_probe_cmd
     ; schedule_prune_cmd
     ; keeper_github_cmd
     ; build_commit_cmd

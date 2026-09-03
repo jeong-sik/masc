@@ -320,9 +320,11 @@ export type RuntimeDraft = {
   runtime_id: string
   autoboot_enabled: boolean
   max_context_override: string
-  sandbox_profile: SandboxProfile
+  sandbox_profile: SandboxProfile | null
   mention_targets_text: string
   network_mode: SandboxNetworkMode
+  // '' = no endpoint. Only meaningful under remote_ssh; serialised as null.
+  remote_endpoint: string
   proactive_enabled: boolean
   // Keeper-level autonomous wake prompt; '' = inherit fleet (sent as null)
   skill_selection:
@@ -469,18 +471,20 @@ function retainKeeperConfigPanelSubscriptions(): () => void {
   }
 }
 
-// A value this panel has not been taught used to become 'local' -- the
-// loosest profile -- so a keeper declaring microvm would have been shown, and
-// saved back, as running on the host. Match every known profile by name and
-// keep 'local' for the genuinely absent case only.
-export function coerceSandboxProfile(raw: string | undefined): SandboxProfile {
+// The runtime's profile set is closed (keeper_sandbox_config.ml). A value this
+// panel has not been taught is not mapped to a default: the old default was
+// 'local', the loosest profile, so a keeper declaring microvm was shown, and
+// saved back, as running on the host. null blocks the save instead.
+export function coerceSandboxProfile(raw: string | undefined): SandboxProfile | null {
   switch (raw) {
     case 'docker':
       return 'docker'
     case 'microvm':
       return 'microvm'
+    case 'remote_ssh':
+      return 'remote_ssh'
     default:
-      return 'local'
+      return null
   }
 }
 
@@ -496,6 +500,7 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
     mention_targets_text: c.workspace.mention_targets.join('\n'),
     network_mode: coerceNetworkMode(c.network_mode),
+    remote_endpoint: c.remote_endpoint ?? '',
     proactive_enabled: proactiveConfigValue(c),
     skill_selection: c.skills.names === null
       ? { mode: 'all', prior_names_text: '' }
@@ -529,6 +534,9 @@ export function rebaseRuntimeDraftOnFreshConfig(
     rebased.mention_targets_text = draft.mention_targets_text
   }
   if (draft.network_mode !== base.network_mode) rebased.network_mode = draft.network_mode
+  if (draft.remote_endpoint !== base.remote_endpoint) {
+    rebased.remote_endpoint = draft.remote_endpoint
+  }
   if (draft.proactive_enabled !== base.proactive_enabled) {
     rebased.proactive_enabled = draft.proactive_enabled
   }
@@ -967,6 +975,22 @@ export function buildRuntimePayloadResult(
 ): RuntimePayloadBuildResult {
   const maxContextOverride = parseMaxContextOverrideDraft(draft.max_context_override)
   if (!maxContextOverride.ok) return maxContextOverride
+  const profile = draft.sandbox_profile
+  if (profile === null) {
+    return {
+      ok: false,
+      error: '샌드박스 프로필을 읽지 못했습니다. 새로 고친 뒤 다시 선택해 주세요.',
+    }
+  }
+  const endpointDraft = draft.remote_endpoint.trim()
+  const endpointOrig = (orig.remote_endpoint ?? '').trim()
+  if (profile === 'remote_ssh' && endpointDraft === '') {
+    return {
+      ok: false,
+      error:
+        'remote_ssh 는 remote_endpoint 가 있어야 합니다. runtime.toml 의 [exec.ssh.endpoints.<이름>] 에 등록된 이름을 넣어 주세요.',
+    }
+  }
   const payload: KeeperConfigUpdatePayload = {}
   const newMentionTargets = listTextToStrings(draft.mention_targets_text)
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
@@ -975,8 +999,14 @@ export function buildRuntimePayloadResult(
     payload.max_context_override = maxContextOverride.value
   }
   if (!sameStringArray(newMentionTargets, orig.workspace.mention_targets)) payload.mention_targets = newMentionTargets
-  if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
+  if (profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = profile
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
+  // null is an explicit detach. Leaving the field out instead carries the
+  // keeper TOML's endpoint into the new profile, which the runtime refuses
+  // with remote_endpoint_requires_remote_ssh.
+  if (endpointDraft !== endpointOrig) {
+    payload.remote_endpoint = endpointDraft === '' ? null : endpointDraft
+  }
   if (draft.proactive_enabled !== proactiveConfigValue(orig)) payload.proactive_enabled = draft.proactive_enabled
   if (draft.skill_selection.mode === 'all') {
     if (orig.skills.names !== null) payload.skills = {}
@@ -1006,6 +1036,13 @@ function updateRuntimeDraft(field: keyof RuntimeDraft, value: boolean | number |
   const isGuest = next.sandbox_profile === 'docker' || next.sandbox_profile === 'microvm'
   if ((field === 'sandbox_profile' || field === 'network_mode') && !isGuest && next.network_mode === 'none') {
     next.network_mode = 'inherit'
+  }
+  // The endpoint names an [exec.ssh.endpoints.<name>] entry only the SSH
+  // dispatch reads. Carrying it into another profile is refused at config load
+  // (remote_endpoint_requires_remote_ssh), so switching away clears it here and
+  // the payload sends null rather than leaving the field out.
+  if (field === 'sandbox_profile' && next.sandbox_profile !== 'remote_ssh') {
+    next.remote_endpoint = ''
   }
   runtimeDraft.value = { ...state, draft: next }
 }
@@ -1068,6 +1105,7 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     mention_targets: 'mention_targets' in payload,
     sandbox_profile: 'sandbox_profile' in payload,
     network_mode: 'network_mode' in payload,
+    remote_endpoint: 'remote_endpoint' in payload,
     proactive_enabled: 'proactive_enabled' in payload,
     skills: 'skills' in payload,
   }
@@ -1536,6 +1574,39 @@ export function InlineSelectRow({
       >
         ${options.map(option => html`<option value=${option}>${option}</option>`)}
       </select>
+    </div>
+  `
+}
+
+export function InlineTextRow({
+  label,
+  value,
+  placeholder,
+  hint,
+  onChange,
+  dirty = false,
+}: {
+  label: string
+  value: string
+  placeholder?: string
+  hint?: string
+  onChange: (v: string) => void
+  dirty?: boolean
+}) {
+  return html`
+    <div class="kcf-inline-row py-2.5 px-4 rounded-[var(--r-4)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 mb-2 v2-monitoring-row">
+      <div class="flex items-center justify-between gap-3">
+        <span class="text-sm font-medium text-text-muted">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
+        <input
+          type="text"
+          aria-label=${label}
+          placeholder=${placeholder ?? ''}
+          class="kcf-inline-control w-48 text-sm bg-card/60 border border-card-border rounded-[var(--r-1)] px-3 py-1.5 text-text-strong"
+          value=${value}
+          onInput=${(event: Event) => onChange((event.target as HTMLInputElement).value)}
+        />
+      </div>
+      ${hint ? html`<div class="mt-1 text-2xs text-text-dim">${hint}</div>` : null}
     </div>
   `
 }
@@ -2237,15 +2308,30 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     ${rd && runtimeCanEdit ? html`
       <${InlineSelectRow}
         label="sandbox_profile"
-        value=${rd.sandbox_profile}
-        options=${['local', 'docker', 'microvm'] as const}
+        value=${rd.sandbox_profile ?? ''}
+        options=${['docker', 'microvm', 'remote_ssh'] as const}
         onChange=${(value: string) => updateRuntimeDraft('sandbox_profile', value as SandboxProfile)}
         dirty=${dirtyFlags.sandbox_profile}
       />
-      ${(c.sandbox_profile === 'docker' || c.sandbox_profile === 'microvm') && rd.sandbox_profile === 'local' ? html`
+      ${rd.sandbox_profile === null ? html`
         <${Callout}
-          title="격리 해제 경고"
-          body=${`${c.sandbox_profile} → local 전환은 격리를 해제하고 호스트에서 바로 실행합니다.`}
+          title="sandbox_profile 을 읽지 못했습니다"
+          body=${`서버가 보낸 값은 ${c.sandbox_profile ?? '(없음)'} 입니다. docker, microvm, remote_ssh 중 하나를 고르기 전에는 저장되지 않습니다.`}
+          tone="warn"
+        />
+      ` : null}
+      ${rd.sandbox_profile === 'remote_ssh' ? html`
+        <${InlineTextRow}
+          label="remote_endpoint"
+          value=${rd.remote_endpoint}
+          placeholder="builder"
+          hint="runtime.toml 의 [exec.ssh.endpoints.<이름>] 에 등록된 이름. 등록되지 않은 이름은 저장할 때 거절됩니다."
+          onChange=${(value: string) => updateRuntimeDraft('remote_endpoint', value)}
+          dirty=${dirtyFlags.remote_endpoint}
+        />
+        <${Callout}
+          title="remote_ssh 는 원격 호스트에서 실행합니다"
+          body="이 keeper 의 명령은 remote_endpoint 가 가리키는 호스트에서 돌아갑니다. 매번 버리는 게스트가 아니라 그 호스트의 계정을 그대로 쓰고, network_mode 는 inherit 하나만 받습니다. docker 쪽 격리 설정은 이 프로필에 적용되지 않습니다."
           tone="warn"
         />
       ` : null}
@@ -2274,7 +2360,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         />
       ` : null}
     ` : html`
-      <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'local'} />
+      <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? '(미선언)'} />
+      ${c.remote_endpoint ? html`<${ConfigRow} label="remote_endpoint" value=${c.remote_endpoint} />` : null}
       <${ConfigRow}
         label="network_mode"
         value=${c.network_mode ?? 'inherit'}

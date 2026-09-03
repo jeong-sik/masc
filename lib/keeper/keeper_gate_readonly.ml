@@ -3,7 +3,7 @@
 
     The configured contextual judge's authority is "the concrete effect's
     safety" — never why the Keeper chose the request
-    (config/prompts/judge.effect.md). For one closed class that question has
+    (config/prompts/judge.md, slot effect). For one closed class that question has
     a deterministic answer: a shell-less argv (no redirection, pipe, or
     command substitution is expressible) whose command is observation-only,
     running inside a per-keeper disposable guest (docker container or

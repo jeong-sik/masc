@@ -359,6 +359,13 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
          , `String
              (Keeper_types_profile_sandbox.network_mode_to_string
                 m.network_mode) );
+         (* Not on [keeper_meta]: the endpoint name lives in the profile
+            defaults, so it is read from [defaults] rather than [m]. The
+            dashboard needs it to initialise the remote_ssh row and to tell an
+            edit from a clear. *)
+         ( "remote_endpoint"
+         , Json_util.string_opt_to_json
+             defaults.Keeper_types_profile.remote_endpoint );
          ("keeper_last_error", Json_util.string_opt_to_json keeper_last_error);
          ( "sandbox_roots"
          , `List

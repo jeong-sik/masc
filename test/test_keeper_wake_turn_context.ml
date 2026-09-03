@@ -521,7 +521,7 @@ let task_id_exn value =
 
 let test_current_task_unavailable_is_explicit () =
   (* The needles assert the configured prose — the
-     [current_task_unobservable] slot of [keeper.observation.md] — so the
+     [observation.current_task_unobservable] slot of [keeper.md] — so the
      suite's prompts have to be loaded; without them the renderer falls back
      to different built-in wording. *)
   let task_id = task_id_exn "task-42" in

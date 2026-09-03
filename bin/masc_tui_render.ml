@@ -270,7 +270,17 @@ let board_document_markdown ~width body =
    generation travels separately because only a user row's ambient terminal
    background changes its closing strings. *)
 let chat_markdown_theme_revision = 1
-let chat_markdown_cache_capacity = 128
+
+(* Large enough to hold what a scrolled pane walks.
+
+   A frame lays out the newest [scroll + height] rows, so reading back through
+   a long turn walks hundreds of messages and asks this cache for each. At a
+   hundred and twenty-eight the walk evicted its own earlier answers before
+   the next frame asked for them again, and every notch of the wheel rendered
+   the same messages over: the pane's worst frames were spent here. The store
+   finds an entry by its identity rather than by walking, so a bound this size
+   costs a hash per lookup and the memory of the rows themselves. *)
+let chat_markdown_cache_capacity = 1024
 
 
 type chat_markdown_identity = {
@@ -281,16 +291,8 @@ type chat_markdown_identity = {
   cmi_entry_index : int;
 }
 
-let equal_chat_markdown_identity left right =
-  left.cmi_style = right.cmi_style
-  && String.equal left.cmi_keeper_name right.cmi_keeper_name
-  && String.equal left.cmi_request_id right.cmi_request_id
-  && Option.equal Float.equal left.cmi_observed_at right.cmi_observed_at
-  && left.cmi_entry_index = right.cmi_entry_index
-
 let chat_markdown_cache =
   Markdown_cache.create ~capacity:chat_markdown_cache_capacity
-    ~equal:equal_chat_markdown_identity
 
 let chat_markdown_streaming ~context ~width body =
   Markdown.render_streaming
@@ -5417,9 +5419,16 @@ let render_lane_run_list (state : state) ~lane_id =
     if String.equal lane_id Runtime.verifier_exact_lane_id then "SUBJECT"
     else "ACTOR"
   in
+  (* The run id takes what the named columns leave; it used to run off the
+     header with no end while the row cut it at twelve. *)
+  let run_id_width =
+    Render_schedule.lane_run_id_width
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
+  in
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  %-17s %-16s %-11s %-8s %-16s %s" "STARTED"
-       identity_heading "STATUS" "ELAPSED" "SLOT" "RUN ID");
+    ("  "
+    ^ Render_schedule.lane_run_header_row ~identity_header:identity_heading
+        ~run_id_width);
   box_divider buf cols;
   (match state.lane_runs_error with
    | None -> ()
@@ -5460,17 +5469,22 @@ let render_lane_run_list (state : state) ~lane_id =
             | Some seconds -> Printf.sprintf "%.1fs" seconds
           in
           let line =
-            Printf.sprintf "  %-17s %-16s %s%-11s%s %-8s %-16s %s"
-              (lane_run_clock run.lrs_started_at)
-              (fit_width (Terminal_text.single_line (lane_run_subject run)) 16)
-              (lane_run_status_style run.lrs_status)
-              (fit_width (Tui_decode.lane_run_status_label run.lrs_status) 11)
-              Ansi.reset elapsed
-              (fit_width
-                 (Terminal_text.single_line_or ~default:"—"
-                    run.lrs_selected_slot)
-                 16)
-              (fit_width (Terminal_text.single_line run.lrs_run_id) 12)
+            "  "
+            ^ Render_schedule.lane_run_row ~identity_header:identity_heading
+                ~status_style:(lane_run_status_style run.lrs_status)
+                ~run_id_width
+                { Render_schedule.lrow_started =
+                    lane_run_clock run.lrs_started_at
+                ; lrow_subject =
+                    Terminal_text.single_line (lane_run_subject run)
+                ; lrow_status =
+                    Tui_decode.lane_run_status_label run.lrs_status
+                ; lrow_elapsed = elapsed
+                ; lrow_slot =
+                    Terminal_text.single_line_or ~default:"—"
+                      run.lrs_selected_slot
+                ; lrow_run_id = Terminal_text.single_line run.lrs_run_id
+                }
           in
           if index + scroll = state.lane_runs_cursor then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
@@ -7280,19 +7294,55 @@ let chat_rows_with_timeline_ats messages =
       chat_timeline_ats_memo := Some (messages, combined);
       combined
 
+(* The visibility-filtered timeline of one row list, computed once per list
+   and visibility pair.
+
+   The chat frame asks for this twice on the same inputs: once to place the
+   live turn and once through [keeper_message_layout_entries]. The filter
+   walks every committed row on every key, and its answer depends only on the
+   row list -- replaced, not mutated, when the conversation changes -- and the
+   two visibility readings, so those three are the key. Same scoping as
+   [chat_timeline_ats_memo] above: a frame with different rows or a toggled
+   visibility replaces the slot, and nothing is kept stale. *)
+type visible_timeline_memo = {
+  vtm_messages : msg_entry list;
+  vtm_memory : memory_visibility;
+  vtm_reasoning : reasoning_visibility;
+  vtm_timeline : (msg_entry * float option) list;
+}
+
+let visible_timeline_memo : visible_timeline_memo option ref = ref None
+
 let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
   let messages =
     match messages with
     | Some messages -> messages
     | None -> chat_rows_for state keeper_name
   in
-  chat_rows_with_timeline_ats messages
-  |> List.filter (fun (message, _) ->
-    state.msg_memory_visibility <> Memory_hidden
-    || message.me_role <> Message_memory)
-  |> List.filter (fun (message, _) ->
-    message.me_role <> Message_thinking
-    || state.msg_reasoning_visibility <> Reasoning_hidden)
+  match !visible_timeline_memo with
+  | Some memo
+    when memo.vtm_messages == messages
+         && memo.vtm_memory = state.msg_memory_visibility
+         && memo.vtm_reasoning = state.msg_reasoning_visibility ->
+      memo.vtm_timeline
+  | Some _ | None ->
+      let timeline =
+        chat_rows_with_timeline_ats messages
+        |> List.filter (fun (message, _) ->
+          state.msg_memory_visibility <> Memory_hidden
+          || message.me_role <> Message_memory)
+        |> List.filter (fun (message, _) ->
+          message.me_role <> Message_thinking
+          || state.msg_reasoning_visibility <> Reasoning_hidden)
+      in
+      visible_timeline_memo :=
+        Some
+          { vtm_messages = messages;
+            vtm_memory = state.msg_memory_visibility;
+            vtm_reasoning = state.msg_reasoning_visibility;
+            vtm_timeline = timeline;
+          };
+      timeline
 ;;
 
 let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
@@ -7300,10 +7350,10 @@ let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
   |> List.map fst
 ;;
 
-let keeper_message_layout_entries ?messages (state : state) ~keeper_name
-    ~chat_cols =
+let compute_keeper_message_layout_entries (state : state) ~keeper_name
+    ~chat_cols ~messages =
   let visible_timeline =
-    keeper_message_visible_timeline ?messages state ~keeper_name
+    keeper_message_visible_timeline ~messages state ~keeper_name
   in
   let messages = List.map fst visible_timeline in
   (* Derived once for the width and again per row, so the badge the pane
@@ -7318,7 +7368,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
         if String.equal label "you" then "YOU"
         else label
     | Message_keeper -> Keeper_chat.terminal_safe_text message.me_keeper_name
-    | Message_autonomous -> "AUTO"
+    | Message_autonomous -> Keeper_chat.terminal_safe_text message.me_keeper_name
     | Message_status -> "STATUS"
     | Message_error -> "ERROR"
     | Message_tool -> "TOOLS"
@@ -7332,15 +7382,35 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
      it. Adjacent rows from the exact same request still fold as continuations
      in [Message_layout]; a row resuming after another lane names its source
      again. *)
+  (* Who asked for a turn is one fact per turn, not one per row. It was the
+     speaker label on every autonomous row, so the same keeper answered as
+     itself when a person asked and as AUTO when nobody did -- two speakers for
+     one keeper, interleaved with broadcasts and journal commits on one clock.
+     The turn's opening row says it; the rows continuing that turn read as the
+     keeper, like every other answer it gives. *)
+  let role_label_of message edge =
+    match message.Masc_tui_types.me_role with
+    | Message_autonomous -> (
+        match edge with
+        | Masc_tui_types.Turn_opens | Masc_tui_types.Turn_alone -> "AUTO"
+        | Masc_tui_types.Turn_continues | Masc_tui_types.Turn_closes
+        | Masc_tui_types.Turn_outside ->
+            base_role_label_of message)
+    | _ -> base_role_label_of message
+  in
   let visible_messages =
     List.mapi (fun entry_index message -> (entry_index, message)) messages
+  in
+  let turn_edges =
+    List.map snd (Masc_tui_types.mark_turn_edges messages)
   in
   let timeline_ats = List.map snd visible_timeline in
   let labeled_messages =
     List.map2
-      (fun (entry_index, message) timeline_at ->
-        (entry_index, message, base_role_label_of message, timeline_at))
-      visible_messages timeline_ats
+      (fun ((entry_index, message), edge) timeline_at ->
+        (entry_index, message, role_label_of message edge, timeline_at))
+      (List.combine visible_messages turn_edges)
+      timeline_ats
   in
   let projected_tool_rows =
     keeper_message_tool_rows state ~keeper_name ~chat_cols
@@ -7501,6 +7571,105 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
       labeled_messages
   in
   layout_entries
+
+(* One conversation's layout entries, computed once per change of their
+   inputs.
+
+   Building them walks every visible message -- the safe text, the aligned
+   badge, the link scan of the whole body, and a tool projection whose
+   durable-call association filters the call snapshot per row -- and the chat
+   frame asked for it on every key, so typing one character into the composer
+   rebuilt the transcript's entire layout. The answer depends on:
+
+   - the row list, replaced rather than mutated when the conversation
+     changes, so its physical identity is the key (the same contract
+     [chat_rows_for] and [chat_timeline_ats_memo] already rely on);
+   - the keeper, the pane width, and the memory/reasoning/tool visibility
+     readings, compared by value;
+   - this keeper's file-change index and durable-call snapshot readings,
+     replaced wholesale when a load lands, so physical identity says whether
+     they moved;
+   - the terminal palette generation, because the tool detail rows bake the
+     resolved colours into their text and a palette that arrived after
+     start-up must not keep drawing the previous answer's escapes.
+
+   Scroll is not an input: it selects the visible slice after the entries
+   exist, so moving through history keeps this answer. Module state rather
+   than a field on [state], like [chat_rows_memo]: a derived reading is not
+   authority, and the input layer would otherwise have to invalidate it at
+   every mutation site. *)
+type layout_entries_memo = {
+  lem_keeper_name : string;
+  lem_messages : msg_entry list;
+  lem_chat_cols : int;
+  lem_memory : memory_visibility;
+  lem_reasoning : reasoning_visibility;
+  lem_tools : tool_visibility;
+  lem_file_changes_keeper : string option;
+  lem_file_change_index : Keeper_chat_diff.index;
+  lem_calls_keeper : string option;
+  lem_calls_loading : bool;
+  lem_calls_error : string option;
+  lem_calls : keeper_calls_snapshot option;
+  lem_palette_generation : int;
+  lem_entries : Message_layout.entry list;
+}
+
+let layout_entries_memo : layout_entries_memo option ref = ref None
+
+let keeper_message_layout_entries ?messages (state : state) ~keeper_name
+    ~chat_cols =
+  let messages =
+    match messages with
+    | Some messages -> messages
+    | None -> chat_rows_for state keeper_name
+  in
+  let palette_generation =
+    Masc_tui_terminal_palette.snapshot_generation
+      (Masc_tui_terminal_palette.snapshot ())
+  in
+  match !layout_entries_memo with
+  | Some memo
+    when String.equal memo.lem_keeper_name keeper_name
+         && memo.lem_messages == messages
+         && memo.lem_chat_cols = chat_cols
+         && memo.lem_memory = state.msg_memory_visibility
+         && memo.lem_reasoning = state.msg_reasoning_visibility
+         && memo.lem_tools = state.msg_tool_visibility
+         && Option.equal String.equal memo.lem_file_changes_keeper
+              state.msg_file_changes_keeper
+         && memo.lem_file_change_index == state.msg_file_change_index
+         && Option.equal String.equal memo.lem_calls_keeper
+              state.keeper_calls_keeper
+         && Bool.equal memo.lem_calls_loading state.keeper_calls_loading
+         && Option.equal String.equal memo.lem_calls_error
+              state.keeper_calls_error
+         && memo.lem_calls == state.keeper_calls
+         && memo.lem_palette_generation = palette_generation ->
+      memo.lem_entries
+  | Some _ | None ->
+      let entries =
+        compute_keeper_message_layout_entries state ~keeper_name ~chat_cols
+          ~messages
+      in
+      layout_entries_memo :=
+        Some
+          { lem_keeper_name = keeper_name;
+            lem_messages = messages;
+            lem_chat_cols = chat_cols;
+            lem_memory = state.msg_memory_visibility;
+            lem_reasoning = state.msg_reasoning_visibility;
+            lem_tools = state.msg_tool_visibility;
+            lem_file_changes_keeper = state.msg_file_changes_keeper;
+            lem_file_change_index = state.msg_file_change_index;
+            lem_calls_keeper = state.keeper_calls_keeper;
+            lem_calls_loading = state.keeper_calls_loading;
+            lem_calls_error = state.keeper_calls_error;
+            lem_calls = state.keeper_calls;
+            lem_palette_generation = palette_generation;
+            lem_entries = entries;
+          };
+      entries
 
 (* Where the pane has to scroll to put a message holding [query] on screen, and
    which message that is.
@@ -8534,9 +8703,13 @@ let render_system_logs (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  (* The message takes what the named columns leave, asked of the columns. *)
+  let message_width =
+    Render_schedule.system_log_message_width
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
+  in
   let col_hdr =
-    Printf.sprintf "  %-8s %-7s %-16s %-12s %-9s %s" "Time" "Level" "Module"
-      "Keeper" "Category" "Message"
+    "  " ^ Render_schedule.system_log_header_row ~message_width
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -8580,22 +8753,28 @@ let render_system_logs (state : state) =
           in
           let category = system_log_category_text e in
           let level_style = system_log_level_style e.sl_level in
-          (* Module and keeper are fitted rather than only padded: a long
-             module name used to push every column right of it out of line
-             with the header. *)
+          (* Every cell is fitted to the width its header is drawn at; a long
+             module name used to push every column right of it out of line. *)
           let line =
-            Printf.sprintf "  %s%-8s%s %s%s %-5s%s %s%s%s %s%s%s %s%s%s %s"
-              Ansi.dim (Terminal_text.clock_timestamp e.sl_ts) Ansi.reset
-              level_style (system_log_level_mark e.sl_level)
-              (Masc.Tui_decode.system_log_level_label e.sl_level) Ansi.reset
-              (Masc_tui_theme.tone Masc_tui_theme.Accent) (fit_width (Terminal_text.single_line e.sl_module) 16)
-              Ansi.reset
-              (Theme.keeper_origin ())
-          (fit_width (Terminal_text.single_line keeper) 12)
-              Ansi.reset
-              Ansi.dim (fit_width (Terminal_text.single_line category) 9)
-              Ansi.reset
-              (Terminal_text.single_line e.sl_message)
+            "  "
+            ^ Render_schedule.system_log_row ~message_width ~level_style
+                ~styles:
+                  { Render_schedule.slog_time_style = Ansi.dim
+                  ; slog_module_style =
+                      Masc_tui_theme.tone Masc_tui_theme.Accent
+                  ; slog_keeper_style = Theme.keeper_origin ()
+                  ; slog_category_style = Ansi.dim
+                  }
+                { Render_schedule.slog_time =
+                    Terminal_text.clock_timestamp e.sl_ts
+                ; slog_level =
+                    system_log_level_mark e.sl_level ^ " "
+                    ^ Masc.Tui_decode.system_log_level_label e.sl_level
+                ; slog_module = Terminal_text.single_line e.sl_module
+                ; slog_keeper = Terminal_text.single_line keeper
+                ; slog_category = Terminal_text.single_line category
+                ; slog_message = Terminal_text.single_line e.sl_message
+                }
           in
           if idx = state.system_logs_cursor then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
@@ -9515,12 +9694,17 @@ let render_fusion_list (state : state) =
       16 runs
     |> min 26
   in
+  (* The run id takes what the named columns leave, once the keeper column has
+     been sized to the names it actually holds. *)
+  let run_width =
+    Render_schedule.fusion_run_width ~keeper_width
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
+  in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  %-8s %-7s %-18s %-*s %-10s %s" "TIME" "AGE" "STATE"
-       keeper_width "KEEPER" "PRESET" "RUN");
+    ("  " ^ Render_schedule.fusion_header_row ~keeper_width ~run_width);
   box_divider buf cols;
   (match state.fusion_error with
    | None -> ()
@@ -9564,15 +9748,15 @@ let render_fusion_list (state : state) =
             | Fusion_completed | Fusion_failed _ -> status
           in
           let line =
-            (* [fit_width] pads, so the cell is already the column's width. *)
-            Printf.sprintf "%-8s %-7s %s%-18s%s %s %-10s %s"
-              (fusion_run_clock run)
-              (fit_width (fusion_run_age ~now:now_epoch run) 7)
-              (fusion_run_status_color run.fur_status)
-              (fit_width state_text 18) Ansi.reset
-              (fit_width (Terminal_text.single_line run.fur_keeper) keeper_width)
-              (fit_width (Terminal_text.single_line run.fur_preset) 10)
-              (fit_width (Terminal_text.single_line run.fur_run_id) 14)
+            Render_schedule.fusion_row ~keeper_width ~run_width
+              ~state_style:(fusion_run_status_color run.fur_status)
+              { Render_schedule.frow_time = fusion_run_clock run
+              ; frow_age = fusion_run_age ~now:now_epoch run
+              ; frow_state = state_text
+              ; frow_keeper = Terminal_text.single_line run.fur_keeper
+              ; frow_preset = Terminal_text.single_line run.fur_preset
+              ; frow_run = Terminal_text.single_line run.fur_run_id
+              }
           in
           if row_index = state.fusion_cursor then
             box_line buf cols (Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line)
@@ -10008,10 +10192,14 @@ let render_repository_list (state : state) =
   surface_chrome state ~terminal_rows ~cols ~surface_key:"repositories"
     ~title ~hints:(Masc_tui_keys.footer_hints state.view)
     ~body:(fun ~budget c ->
-      let path_width = max 8 (cols - 55) in
+      (* The path takes what the named columns leave, asked of the columns
+         rather than of a constant standing in for their total. *)
+      let path_width =
+        Render_schedule.workspace_path_width
+          ~inner_width:(max 1 (framed_inner_width cols - 2))
+      in
       c.push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "  %-18s %-12s %-9s %-6s %s" "Name" "Branch" "Status"
-           "Sync" "Path");
+        ("  " ^ Render_schedule.workspace_header_row ~path_width);
       c.push_divider ();
       (match state.repositories_error with
        | None -> ()
@@ -10055,13 +10243,17 @@ let render_repository_list (state : state) =
           | Some r ->
               let open Masc.Tui_decode in
               let line =
-                Printf.sprintf "  %-18s %-12s %-9s %-6s %s"
-                  (Terminal_text.single_line r.rp_name)
-                  (Terminal_text.single_line r.rp_default_branch)
-                  (Terminal_text.single_line r.rp_status)
-                  (if r.rp_auto_sync then "auto" else "manual")
-                  (Message_layout.fit_middle path_width
-                     (Terminal_text.single_line r.rp_resolved_local_path))
+                "  "
+                ^ Render_schedule.workspace_row ~path_width
+                    { Render_schedule.wrow_name =
+                        Terminal_text.single_line r.rp_name
+                    ; wrow_branch =
+                        Terminal_text.single_line r.rp_default_branch
+                    ; wrow_status = Terminal_text.single_line r.rp_status
+                    ; wrow_sync = (if r.rp_auto_sync then "auto" else "manual")
+                    ; wrow_path =
+                        Terminal_text.single_line r.rp_resolved_local_path
+                    }
               in
               if idx = state.repositories_cursor then c.push_selected line
               else c.push line
@@ -10212,73 +10404,136 @@ let memory_context_lines (k : Masc.Tui_decode.memory_keeper_health) =
   current_line :: facts_line :: source_line :: librarian_line :: vision_line
   :: (read_error_lines @ alert_lines)
 
-let memory_state_label (k : Masc.Tui_decode.memory_keeper_health) =
+type memory_state =
+  | Memory_ordinary
+  | Memory_warning
+  | Memory_degraded
+  | Memory_no_current
+  | Memory_source_only
+  | Memory_starving
+  | Memory_read_error
+
+let memory_state (k : Masc.Tui_decode.memory_keeper_health) =
   let open Masc.Tui_decode in
   if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
-  then "read-error"
+  then Memory_read_error
   else if
     (not k.mkh_snapshot_present)
     && k.mkh_librarian_failures > 0
     && not k.mkh_source_snapshot_present
-  then "STARVING"
+  then Memory_starving
   else if (not k.mkh_snapshot_present) && k.mkh_source_snapshot_present
-  then "source-only"
+  then Memory_source_only
   else if not k.mkh_snapshot_present
-  then "no-current"
+  then Memory_no_current
   else if k.mkh_librarian_failures > 0
-  then "degraded"
+  then Memory_degraded
   else if List.exists (fun alert -> String.equal alert.ma_severity "warn") k.mkh_alerts
-  then "warning"
-  else "ok"
+  then Memory_warning
+  else Memory_ordinary
 
-let memory_row_line (k : Masc.Tui_decode.memory_keeper_health) =
-  let open Masc.Tui_decode in
-  let ordinary =
-    if k.mkh_snapshot_present
-    then
-      Printf.sprintf "r%d/%d/%s" k.mkh_revision k.mkh_facts
-        (Masc_tui_context_inspector.format_bytes k.mkh_snapshot_bytes)
-    else "-"
-  in
-  let source =
-    if Option.is_some k.mkh_source_read_error
-    then "read-error"
-    else if k.mkh_source_snapshot_present
-    then
-      Printf.sprintf "r%d/%d/i%d/%s" k.mkh_source_revision k.mkh_source_facts
-        k.mkh_source_invalidations
-        (Masc_tui_context_inspector.format_bytes k.mkh_source_snapshot_bytes)
-    else "-"
-  in
-  Printf.sprintf "  %-18s %-14s %-18s %+5d/-%-4d  %s" k.mkh_keeper_id ordinary
-    source k.mkh_added k.mkh_removed (memory_state_label k)
+let memory_state_label = function
+  | Memory_ordinary -> "ok"
+  | Memory_warning -> "warning"
+  | Memory_degraded -> "degraded"
+  | Memory_no_current -> "no-current"
+  | Memory_source_only -> "source-only"
+  | Memory_starving -> "STARVING"
+  | Memory_read_error -> "read-error"
 
-(* A starving keeper is an error the server graded; a keeper with a config
-   but no snapshot yet is quiet, not bad. A source-bound snapshot changes the
-   label, not the server's severity: the Librarian failure remains red and its
-   exact message stays in the detail pane. *)
-let memory_row_style (k : Masc.Tui_decode.memory_keeper_health) =
+(* The table's variant: a keeper reading normally says nothing in this cell.
+   Thirteen rows spelling "ok" spent a column of the frame without telling an
+   operator anything the absence of a word does not already say, and the one
+   row that deviates is then the only row in the column carrying text. The
+   detail pane below keeps {!memory_state_label}, where the word is identity
+   rather than repetition. *)
+let memory_state_cell = function
+  | Memory_ordinary -> ""
+  | state -> memory_state_label state
+
+(* Which revision, how many facts, how many bytes: three readings in three
+   units. They shared one cell joined by slashes, which no header could name
+   and which pushed the rest of the row right as soon as the joined reading
+   outgrew the cell -- "r6476/139/94.4 KB" is seventeen cells against fourteen.
+   Each gets a cell, and every cell is fitted to the same allocation the header
+   is drawn from. *)
+(* How a keeper that is not reading normally is dressed. A starving keeper is
+   an error the server graded; a keeper with a config but no snapshot yet is
+   quiet, not bad. A source-bound snapshot changes the label, not the server's
+   severity: the Librarian failure remains red and its exact message stays in
+   the detail pane.
+
+   This dresses cells, not the line. It sits above the row builder because the
+   row asks for it. *)
+let memory_deviation_style (k : Masc.Tui_decode.memory_keeper_health) =
   let open Masc.Tui_decode in
+  (* An error the server graded outranks every reading taken here: the row is
+     red whatever the snapshot looks like. Everything below it reads the same
+     variant the cell and the detail pane read, so one keeper cannot be graded
+     two ways, and a state added later has to be given a colour here before
+     this compiles. *)
   let server_error =
     List.exists (fun alert -> String.equal alert.ma_severity "error") k.mkh_alerts
   in
-  let server_warn =
-    List.exists (fun alert -> String.equal alert.ma_severity "warn") k.mkh_alerts
+  if server_error then Some (Theme.bad ())
+  else
+    match memory_state k with
+    | Memory_starving -> Some (Theme.bad ())
+    | Memory_read_error
+    | Memory_no_current
+    | Memory_source_only
+    | Memory_degraded
+    | Memory_warning ->
+        Some (Theme.warn ())
+    | Memory_ordinary -> None
+
+let memory_row_line columns (k : Masc.Tui_decode.memory_keeper_health) =
+  let open Masc.Tui_decode in
+  let em_dash = "\xe2\x80\x94" in
+  let ordinary_reading value = if k.mkh_snapshot_present then value () else em_dash in
+  let source =
+    if Option.is_some k.mkh_source_read_error then "read error"
+    else if k.mkh_source_snapshot_present then
+      Printf.sprintf "r%d i%d %s" k.mkh_source_revision
+        k.mkh_source_invalidations
+        (Masc_tui_context_inspector.format_bytes k.mkh_source_snapshot_bytes)
+    else em_dash
   in
-  if server_error
-     ||
-     ((not k.mkh_snapshot_present)
-      && k.mkh_librarian_failures > 0
-      && not k.mkh_source_snapshot_present)
-  then Some (Theme.bad ())
-  else if
-    server_warn
-    || not k.mkh_snapshot_present
-    || k.mkh_librarian_failures > 0
-    || Option.is_some k.mkh_read_error
-    || Option.is_some k.mkh_source_read_error
-  then Some (Theme.warn ())
-  else None
+  (* A keeper that gained and lost facts in the same read shows both; one that
+     did neither shows nothing, because a column of "+0/-0" is the "ok" column
+     again in another hand. *)
+  let delta =
+    match k.mkh_added, k.mkh_removed with
+    | 0, 0 -> ""
+    | added, 0 -> Printf.sprintf "+%d" added
+    | 0, removed -> Printf.sprintf "-%d" removed
+    | added, removed -> Printf.sprintf "+%d -%d" added removed
+  in
+  (* Colour lands on the cell that deviates and on the reading that measures
+     it, not on the line. A whole row turned amber makes an operator hunt for
+     which of six readings meant it; two dressed cells say so directly. The
+     Keepers table has drawn its health this way for as long as it has had a
+     health column. *)
+  let deviation = Option.value (memory_deviation_style k) ~default:"" in
+  let state_style = deviation in
+  (* An absent snapshot is why the state cell is dressed at all, and the size
+     is where that absence shows as a reading. *)
+  let size_style = if k.mkh_snapshot_present then "" else deviation in
+  (* Facts leaving a keeper's memory is the one movement worth a colour of its
+     own; facts arriving is what a working keeper does all day. *)
+  let delta_style = if k.mkh_removed > 0 then Theme.warn () else "" in
+  "  "
+  ^ Render_schedule.memory_row ~state_style ~size_style ~delta_style columns
+      { Render_schedule.mrow_state = memory_state_cell (memory_state k)
+      ; mrow_name = k.mkh_keeper_id
+      ; mrow_revision = ordinary_reading (fun () -> string_of_int k.mkh_revision)
+      ; mrow_facts = ordinary_reading (fun () -> string_of_int k.mkh_facts)
+      ; mrow_size =
+          ordinary_reading (fun () ->
+              Masc_tui_context_inspector.format_bytes k.mkh_snapshot_bytes)
+      ; mrow_source = source
+      ; mrow_delta = delta
+      }
 
 let render_memory (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -10308,13 +10563,18 @@ let render_memory (state : state) =
           s.mhs_total_support_invalidations s.mhs_total_source_facts timestamp
           (connection_badge state)
   in
+  (* Two cells of gutter carry the cursor band; the columns divide what is
+     left. Allocated once here rather than per row, so every row and the header
+     above them are laid out on one reading of the frame. *)
+  let columns =
+    Render_schedule.allocate_memory_columns
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
+  in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"memory"
     ~title ~hints:(Masc_tui_keys.footer_hints state.view)
     ~body:(fun ~budget c ->
       c.push_styled ~style:(Theme.recede ())
-        (Printf.sprintf
-           "  %-18s %-14s %-18s %11s  %s"
-           "Keeper" "Ordinary" "Source-bound" "+/-" "State");
+        ("  " ^ Render_schedule.memory_header_row columns);
       c.push_divider ();
       (match state.memory_health_error with
        | None -> ()
@@ -10360,11 +10620,8 @@ let render_memory (state : state) =
                  graded-warn keeper keeps its health color on every other
                  row. *)
               if idx = state.memory_health_cursor then
-                c.push_selected (memory_row_line k)
-              else
-                match memory_row_style k with
-                | Some style -> c.push_styled ~style (memory_row_line k)
-                | None -> c.push (memory_row_line k)
+                c.push_selected (memory_row_line columns k)
+              else c.push (memory_row_line columns k)
         done;
         if overflowing then
           c.push_styled ~style:(Theme.recede ())
@@ -10827,9 +11084,13 @@ let render_changes_list (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  (* What the turn did takes the cells the named columns leave. *)
+  let summary_width =
+    Render_schedule.change_summary_width
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
+  in
   let col_hdr =
-    Printf.sprintf "  %-6s %-10s %-5s %-8s %-38s %s"
-      "Turn" "Task" "Op" "Result" "File" "What"
+    "  " ^ Render_schedule.change_header_row ~summary_width
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -10912,15 +11173,22 @@ let render_changes_list (state : state) =
           let kind_style, kind = change_kind_badge change in
           let result_style, result = change_result_badge change in
           let line =
-            Printf.sprintf "  %-6s %-10s %s%-5s%s %s%-8s%s %-38s %s"
-              (Option.fold ~none:"-" ~some:string_of_int
-                 change.Masc.Tui_decode.fc_turn)
-              (Terminal_text.single_line
-                 (Option.value ~default:"-" change.Masc.Tui_decode.fc_task_id))
-              kind_style kind Ansi.reset
-              result_style result Ansi.reset
-              (Terminal_text.single_line (change_row_address change))
-              (change_row_summary change)
+            "  "
+            ^ Render_schedule.change_row ~op_style:kind_style ~result_style
+                ~summary_width
+                { Render_schedule.crow_turn =
+                    Option.fold ~none:"-" ~some:string_of_int
+                      change.Masc.Tui_decode.fc_turn
+                ; crow_task =
+                    Terminal_text.single_line
+                      (Option.value ~default:"-"
+                         change.Masc.Tui_decode.fc_task_id)
+                ; crow_op = kind
+                ; crow_result = result
+                ; crow_file =
+                    Terminal_text.single_line (change_row_address change)
+                ; crow_summary = change_row_summary change
+                }
           in
           (* A call that failed still changed what the keeper tried to do, and
              it is the row an operator is looking for. Dim marks it as an
@@ -13202,6 +13470,7 @@ let config_pane_strip (state : state) =
     ; name Config_models "models"
     ; name Config_params "params"
     ; name Config_prompts "prompts"
+    ; name Config_presets "presets"
     ; name Config_themes "themes"
     ]
   ^ Ansi.dim ^ "  p:next" ^ Ansi.reset
@@ -13630,6 +13899,106 @@ let theme_name_width ~cols =
   max 8 (min 29 (framed_inner_width cols - fixed_cells))
 ;;
 
+(* Prompt presets (#32777). A preset is one named snapshot of three
+   surfaces the operator changes together: the prompt override table, each
+   keeper's instructions, and runtime.toml's assignments and exact-output
+   lanes. The pane lists them, saves the live state under a typed name, and
+   restores one behind a two-press arm — a restore rewrites all three, and
+   the report below the list is the only place it says what it skipped and
+   whether runtime.toml committed. *)
+let render_presets (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let presets =
+    match state.presets_snapshot with
+    | None -> []
+    | Some snapshot -> snapshot.Tui_decode.pss_presets
+  in
+  let unreadable =
+    match state.presets_snapshot with
+    | None -> []
+    | Some snapshot -> snapshot.Tui_decode.pss_unreadable
+  in
+  let total = List.length presets in
+  let cursor = max 0 (min state.presets_cursor (total - 1)) in
+  let selected = List.nth_opt presets cursor in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %s%d개%s  %s  %s"
+       (screen_title " MASC 프리셋")
+       Ansi.dim total Ansi.reset
+       (config_pane_strip state)
+       (connection_badge state));
+  box_divider buf cols;
+  let error_rows = if Option.is_some state.presets_error then 1 else 0 in
+  let entry_rows = if Option.is_some state.preset_save_draft then 1 else 0 in
+  let combined_height = max 2 (rows - 9 - error_rows - entry_rows) in
+  let list_height = min 8 (max 1 (combined_height / 3)) in
+  let detail_height = max 1 (combined_height - list_height) in
+  let first = if cursor < list_height then 0 else cursor - list_height + 1 in
+  (match state.presets_error with
+   | Some detail ->
+     box_line buf cols
+       (Theme.bad () ^ "  " ^ fit_width (Terminal_text.single_line detail) (cols - 6)
+        ^ Ansi.reset)
+   | None -> ());
+  let drawn = ref 0 in
+  if total = 0 then begin
+    incr drawn;
+    box_line_styled buf cols ~style:(Theme.recede ())
+      (match state.presets_snapshot with
+       | None -> "  불러오는 중..."
+       | Some _ -> "  아직 프리셋이 없습니다 · s 로 지금 상태를 저장하세요")
+  end;
+  List.iteri
+    (fun index (manifest : Tui_decode.preset_manifest) ->
+      if index >= first && index < first + list_height then begin
+        incr drawn;
+        let armed =
+          state.preset_restore_armed = Some manifest.Tui_decode.pm_name
+        in
+        let mark = if armed then Theme.warn () ^ "r" ^ Ansi.reset else " " in
+        let label =
+          mark ^ " "
+          ^ fit_width
+              (Terminal_text.single_line (Masc_tui_preset_text.pane_row manifest))
+              (max 4 (cols - 6))
+        in
+        if index = cursor then box_line buf cols (Theme.selection ^ " " ^ label ^ Ansi.reset)
+        else box_line buf cols (" " ^ label)
+      end)
+    presets;
+  for _ = 1 to list_height - !drawn do
+    box_empty buf cols
+  done;
+  box_divider buf cols;
+  let detail =
+    Masc_tui_preset_text.detail_lines ~selected ~report:state.preset_report
+    @ List.map
+        (fun (name, reason) -> Printf.sprintf "! %s — %s" name reason)
+        unreadable
+  in
+  let max_scroll = max 0 (List.length detail - detail_height) in
+  let scroll = max 0 (min state.config_scroll max_scroll) in
+  for index = 0 to detail_height - 1 do
+    match List.nth_opt detail (scroll + index) with
+    | Some line -> box_line buf cols ("  " ^ fit_width (Terminal_text.single_line line) (max 4 (cols - 6)))
+    | None -> box_empty buf cols
+  done;
+  (match state.preset_save_draft with
+   | Some draft ->
+     box_line buf cols
+       (Theme.info () ^ "  이름: " ^ Ansi.reset
+        ^ fit_width (Terminal_text.single_line draft) (max 4 (cols - 14))
+        ^ Ansi.dim ^ "  Enter:저장  Esc:취소" ^ Ansi.reset)
+   | None -> ());
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:"j/k:선택  PgUp/PgDn:읽기  n:저장  u,u:되돌리기  r:새로고침");
+  finish_surface state ~surface_key:"presets" ~rows:terminal_rows ~cols buf
+
 let render_themes (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -13983,6 +14352,7 @@ let render_surface (state : state) =
   | Config -> (
     match state.config_pane with
     | Config_prompts -> render_prompts state
+    | Config_presets -> render_presets state
     | Config_themes -> render_themes state
     | Config_runtime -> render_config state
     | Config_models -> render_config_models state

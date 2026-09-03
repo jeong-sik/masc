@@ -60,6 +60,12 @@ val remote_root : t -> string
 val remote_keeper_root : t -> string
 (** [<remote_root>/<sanitized keeper name>]. *)
 
+val gh_config_dir : t -> string
+(** Where this endpoint's [gh] keeps the Keeper's identity, and the value the
+    lane injects as [GH_CONFIG_DIR] on every request:
+    [<remote_keeper_root>/.config/gh] for OpenSSH, the mounted snapshot path
+    for a guest. *)
+
 val transport : t -> transport
 
 val injected_env : t -> (string * string) list

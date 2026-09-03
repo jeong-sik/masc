@@ -454,13 +454,27 @@ let url_ends_at ch =
   | ' ' | '\t' | '\x1b' | '"' | '\'' | ')' | ']' | '>' | '<' -> true
   | _ -> Char.code ch < 0x20
 
-let url_begins_at text index =
-  let begins prefix =
-    let plen = String.length prefix in
-    index + plen <= String.length text
-    && String.equal (String.sub text index plen) prefix
+(* Does [prefix] sit at [index]? Answered by comparing bytes where they are.
+   Cutting the substring to compare it allocated one for every character of
+   every message body -- two, since two prefixes are tried -- so a pane of
+   half a megabyte of transcript produced a million short-lived strings on
+   every frame, and the collector spent the frame on them. *)
+let prefix_at text index prefix =
+  let plen = String.length prefix in
+  index + plen <= String.length text
+  &&
+  let rec same offset =
+    offset >= plen
+    || (Char.equal text.[index + offset] prefix.[offset] && same (offset + 1))
   in
-  begins "http://" || begins "https://"
+  same 0
+
+let url_begins_at text index =
+  (* Both schemes start with the same letter, and almost no character in a
+     transcript does, so this decides the common case in one comparison. *)
+  index < String.length text
+  && Char.equal text.[index] 'h'
+  && (prefix_at text index "http://" || prefix_at text index "https://")
 
 let url_end text index =
   let length = String.length text in

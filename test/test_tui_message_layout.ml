@@ -616,18 +616,8 @@ let transcript count =
 
 let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =
   let rendered = ref [] in
-  let equal_identity
-      (left_keeper, left_request, left_at, left_index)
-      (right_keeper, right_request, right_at, right_index) =
-    String.equal left_keeper right_keeper
-    && String.equal left_request right_request
-    && Float.equal left_at right_at
-    && left_index = right_index
-  in
   let cache_capacity = 2 in
-  let cache =
-    Markdown_cache.create ~capacity:cache_capacity ~equal:equal_identity
-  in
+  let cache = Markdown_cache.create ~capacity:cache_capacity in
   let markdown ~(entry : Layout.entry) ~width =
     let source =
       match entry.markdown_source with
@@ -1793,6 +1783,15 @@ let test_the_two_link_readers_agree () =
     ; ("two in a row", "https://a.test/one https://a.test/two")
     ; ("closed by punctuation", "the evidence (https://a.test/x).")
     ; ("at the very end", "read https://a.test/z")
+      (* The scheme test reads bytes where they are now, so the cases that
+         run off the end of the text, or share a first letter without
+         sharing the scheme, have to answer as they always did. *)
+    ; ("a truncated scheme at the end", "cut off here http")
+    ; ("almost the scheme", "https:/a.test/x and http:/b.test/y")
+    ; ("a word that starts the same way", "https and http and httpx://a.test/q")
+    ; ("upper case is a different scheme", "HTTPS://a.test/x")
+    ; ("the text is one character", "h")
+    ; ("nothing at all", "")
     ]
 
 (* The margin is paid for out of the body, not out of the frame. A row that

@@ -3,6 +3,12 @@ description = """
 Send a message visible to all agents in the MASC workspace. Use for status \
 updates, announcements, or warnings."""
 
+
+# Held back from the request until the model asks for it by name.
+# 2026-09-01..03: 10 turns needed it across 6317 provider requests, and its
+# 624 B schema rode every one of those requests. Loading it on demand costs
+# one extra request on those 10 turns and saves the 624 B on the rest.
+defer_loading = true
 [[params]]
 name = "content"
 type = "string"

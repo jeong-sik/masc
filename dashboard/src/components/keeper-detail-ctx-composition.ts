@@ -16,33 +16,66 @@ export const ctxCompositionSearch = signal('')
 
 // ── Context Composition Panel ────────────────────────────
 
+// The attributed branch of a point's composition, or null. Written as a
+// function rather than a `> 0` byte test so a turn measured at zero bytes and
+// a turn never measured stay apart here too.
+function attributedCtx(point: KeeperMetricPoint) {
+  const attribution = point.ctx_composition?.attribution
+  if (attribution == null || attribution.status !== 'attributed') return null
+  return attribution
+}
+
 export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
-  const points = series.filter(
-    (p: KeeperMetricPoint) => (p.ctx_composition?.attributed_bytes ?? 0) > 0,
-  )
-  if (points.length === 0) return null
+  const observed = series.filter((p: KeeperMetricPoint) => p.ctx_composition != null)
+  if (observed.length === 0) return null
 
-  const latest = points[points.length - 1] ?? null
+  const latest = observed[observed.length - 1] ?? null
   const latestComposition = latest?.ctx_composition ?? null
   if (!latestComposition) return null
 
-  const latestTotalBytes = latestComposition.attributed_bytes
+  // The latest turn is reported as it stands. Filtering it out and drawing the
+  // newest surviving point instead is what put one runtime's composition under
+  // another runtime's label (masc#32995).
+  const attribution = latestComposition.attribution
+  if (attribution.status !== 'attributed') {
+    const gapDetail = attribution.detail
+      ? attribution.reason + ' · ' + attribution.detail
+      : attribution.reason
+    return html`
+      <div class="mb-5 v2-monitoring-panel">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">CTX Composition</span>
+          <${MutedSpan}>${observed.length} snapshots</${MutedSpan}>
+        </div>
+        <${DetailCard}>
+          <${Eyebrow}>attributed content bytes</${Eyebrow}>
+          <span class="text-sm font-medium text-[var(--color-fg-secondary)]">마지막 턴의 입력 바이트는 측정되지 않았어요</span>
+          <span class="text-3xs font-mono text-[var(--color-fg-disabled)]">${gapDetail}</span>
+        <//>
+      </div>
+    `
+  }
+
+  const points = observed.filter((p: KeeperMetricPoint) => attributedCtx(p) != null)
+  if (points.length === 0) return null
+
+  const latestTotalBytes = attribution.attributed_bytes
   const latestActual = latestComposition.actual_input_tokens
-  const latestEntries = Object.entries(latestComposition.segments)
+  const latestEntries = Object.entries(attribution.segments)
     .filter(([, segment]) => (segment?.bytes ?? 0) > 0)
     .sort(([, left], [, right]) => (right.bytes ?? 0) - (left.bytes ?? 0))
   if (latestEntries.length === 0 || latestTotalBytes <= 0) return null
   const visibleCtxEntries = filterCtxCompositionEntries(latestEntries, ctxCompositionSearch.value)
 
   const allKeys = Array.from(
-    new Set(points.flatMap((point: KeeperMetricPoint) => Object.keys(point.ctx_composition?.segments ?? {}))),
+    new Set(points.flatMap((point: KeeperMetricPoint) => Object.keys(attributedCtx(point)?.segments ?? {}))),
   )
   const sortedKeys = allKeys
-    .filter((key) => points.some((point: KeeperMetricPoint) => (point.ctx_composition?.segments?.[key]?.bytes ?? 0) > 0))
+    .filter((key) => points.some((point: KeeperMetricPoint) => (attributedCtx(point)?.segments?.[key]?.bytes ?? 0) > 0))
     .sort((left, right) => {
-      const rightLatest = latestComposition.segments[right]?.bytes ?? 0
-      const leftLatest = latestComposition.segments[left]?.bytes ?? 0
+      const rightLatest = attribution.segments[right]?.bytes ?? 0
+      const leftLatest = attribution.segments[left]?.bytes ?? 0
       if (rightLatest !== leftLatest) return rightLatest - leftLatest
       return left.localeCompare(right)
     })
@@ -104,7 +137,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
           </${DetailRow}>
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="컨텍스트 구성 스택 히스토리" style="background:var(--bg-deepest);">
             ${points.map((point: KeeperMetricPoint, index: number) => {
-              const comp = point.ctx_composition
+              const comp = attributedCtx(point)
               if (!comp || comp.attributed_bytes <= 0) return null
               const x = pad + (index * barStep) + Math.max(0, (barStep - barWidth) / 2)
               let yCursor = H - pad

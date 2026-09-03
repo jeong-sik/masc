@@ -65,18 +65,45 @@ type raw_trace_sink_outcome =
   | Sink_ready of Agent_core.Raw_trace.t
   | Sink_degraded of Agent_core.Error.t
 
-type request_evidence =
+(* The attribution inputs masc owns, kept apart from the wire measurement it
+   does not always own. [body_bytes] can only be read on the Agent Core lane,
+   where masc's own serializer produced the bytes; the three official-client
+   lanes assemble the wire inside the client. Welding the two together is what
+   made every antigravity, claude_code and codex turn report an input
+   attribution of zero: one missing measurement erased four outputs that had
+   nothing to do with it. The file already made this split once for
+   [model_input_window_ref], for the same reason. *)
+type request_attribution =
+  { runtime_profile : string
+    (** The lane attempt that assembled this request. A turn that failed over
+        settles on a different runtime, and the record keeps both so a reader
+        compares instead of assuming. *)
+  ; prompt_blocks : Turn_record.prompt_block list
+  ; provider_content :
+      ( Agent_core.Types.message list
+      , Keeper_agent_prompt_metrics.provenance_failure )
+      result
+    (** The transmitted messages with the typed prompt-context carrier
+        removed, or the typed reason that removal refused. A [result] rather
+        than an [option]: "the projection never ran" and "it ran and its
+        output could not be classified" are different facts and the record
+        says which. *)
+  ; tools : Agent_core.Tool.t list
+    (** The surface this request carried. On the Agent Core lane this comes
+        from {!Keeper_agent_tool_surface.on_the_wire} rather than the list the
+        turn was built with, because that lane sends a listing in place of the
+        attached-service schemas and widens its own set mid-turn. On an
+        official-client lane it is the list handed to the client, which the
+        Claude lane narrows to [[]] when the target declares no tool
+        support. *)
+  }
+
+type request_wire_evidence =
   { wire_observation : Turn_record.request_wire_observation
   ; serialized_observation :
       Llm_provider.Request_wire_observer.observation option
-  ; prompt_blocks : Turn_record.prompt_block list
-  ; input_messages : Agent_core.Types.message list option
-  ; projected_messages : Agent_core.Types.message list option
-  ; tools : Agent_core.Tool.t list
-    (** The surface this request carried, from
-        {!Keeper_agent_tool_surface.on_the_wire}. Not the list the turn was
-        built with: the Agent Core lane sends a listing in place of the
-        attached-service schemas and widens its own set mid-turn. *)
+  ; wire_projected_messages : Agent_core.Types.message list option
+  ; wire_tools : Agent_core.Tool.t list
   }
 
 (* What the queue held when the turn decided to yield. The decision itself is
@@ -887,13 +914,24 @@ let run_turn
     let receipt_response_text_present_ref =
       s.Keeper_run_tools.receipt_response_text_present_ref
     in
-    let request_evidence_ref = ref None in
-    (* Kept apart from [request_evidence_ref] rather than folded into it: the
+    let request_attribution_ref : request_attribution option ref = ref None in
+    let request_wire_evidence_ref : request_wire_evidence option ref =
+      ref None
+    in
+    (* Kept apart from the evidence cells rather than folded into them: the
        window cut is observed before serialization, so a turn whose request was
        refused at the wire has a real cut and no wire observation. Sharing one
        cell would let the missing half erase the half that was measured. *)
     let model_input_window_ref = ref None in
-    let current_request_input_messages_ref = ref None in
+    let current_request_provider_content_ref :
+      ( Agent_core.Types.message list
+      , Keeper_agent_prompt_metrics.provenance_failure )
+      result
+      option
+      ref
+      =
+      ref None
+    in
     let current_request_projected_messages_ref = ref None in
     let source_model_input_projection =
       s.Keeper_run_tools.model_input_projection
@@ -910,7 +948,7 @@ let run_turn
          checkpoints receive the unwindowed history. *)
       match source_model_input_projection messages with
       | Error _ as error ->
-        current_request_input_messages_ref := None;
+        current_request_provider_content_ref := None;
         current_request_projected_messages_ref := None;
         error
       | Ok projected_messages as result ->
@@ -918,21 +956,45 @@ let run_turn
         let prompt_context_present =
           Option.is_some acc.Keeper_run_tools.extra_system_context_size
         in
-        (match
-           Keeper_agent_prompt_metrics.provider_content_messages
-             ~prompt_context_present
-             ~projection_input:messages
-             ~projected_messages
-         with
-         | Ok provider_content ->
-           current_request_input_messages_ref := Some provider_content
+        let provider_content =
+          Keeper_agent_prompt_metrics.provider_content_messages
+            ~prompt_context_present
+            ~projection_input:messages
+            ~projected_messages
+        in
+        (* The failure is kept, not only logged. A warn line tells an operator
+           reading logs; the record has to tell a reader of the metrics why
+           the turn carries no bytes. *)
+        current_request_provider_content_ref := Some provider_content;
+        (match provider_content with
+         | Ok _ -> ()
          | Error failure ->
-           current_request_input_messages_ref := None;
            Log.Keeper.warn
              "turn input composition unavailable: keeper=%s trace=%s reason=%s"
              meta.name trace_id
              (Keeper_agent_prompt_metrics.provenance_failure_summary failure));
         result
+    in
+    (* Attribution recorded by an official-client lane, which windows the
+       provider-bound history inside the runtime and hands the result to a
+       client that assembles the wire itself. The list reported here is the
+       one masc handed over -- the same quantity the [Durable_shape] window
+       observation counts as [transmitted_atoms]. *)
+    let record_transmitted_model_input ~runtime_id ~tools ~transmitted_messages =
+      let prompt_context_present =
+        Option.is_some acc.Keeper_run_tools.extra_system_context_size
+      in
+      let attribution : request_attribution =
+        { runtime_profile = runtime_id
+        ; prompt_blocks = acc.prompt_blocks
+        ; provider_content =
+            Keeper_agent_prompt_metrics.provider_content_of_transmitted
+              ~prompt_context_present
+              ~messages:transmitted_messages
+        ; tools
+        }
+      in
+      request_attribution_ref := Some attribution
     in
     (* 8. Run Agent *)
     let record_turn_progress, yield_on_tool, on_yield, on_resume, on_event =
@@ -1146,7 +1208,16 @@ let run_turn
                       ?agent_core_checkpoint:resume_agent_core_checkpoint
                       ?event_bus
                       ?trace_link
-                      ~on_runtime_attempt:s.Keeper_run_tools.on_runtime_attempt
+                      ~on_runtime_attempt:
+                        (fun attempt ->
+                           (* Each lane attempt assembles its own request.
+                              Without this clear, a failed attempt's evidence
+                              survives into the record of the runtime that
+                              finally answered, and the metrics row credits
+                              one lane's bytes to another. *)
+                           request_attribution_ref := None;
+                           request_wire_evidence_ref := None;
+                           s.Keeper_run_tools.on_runtime_attempt attempt)
                       ~on_runtime_attempt_error:
                         (fun ~runtime_id:_ ~attempt _error ->
                            (* [on_runtime_attempt] observes only materialized
@@ -1169,6 +1240,12 @@ let run_turn
                         (fun ~measurement observation ->
                            model_input_window_ref :=
                              Some (measurement, observation))
+                      ~on_request_attribution:
+                        (fun ~runtime_id ~tools ~transmitted_messages ->
+                           record_transmitted_model_input
+                             ~runtime_id
+                             ~tools
+                             ~transmitted_messages)
                       ~on_request_wire_observation:
                         (fun
                           ~runtime_id
@@ -1176,33 +1253,46 @@ let run_turn
                           ~body_bytes
                           ~serialized
                         ->
-                           Option.iter
-                             (s.Keeper_run_tools.stage_skill_delivery_on_wire
+                           (match !current_request_provider_content_ref with
+                            | Some (Ok provider_content) ->
+                              s.Keeper_run_tools.stage_skill_delivery_on_wire
                                 ~runtime_id
-                                ~agent_core_turn:acc.current_turn)
-                             !current_request_input_messages_ref;
+                                ~agent_core_turn:acc.current_turn
+                                provider_content
+                            | Some (Error _) | None -> ());
                            Keeper_request_wire_observation.record
                              ~keeper_name:meta.name
                              ~runtime_id
                              ~max_request_body_bytes
                              ~body_bytes;
-                           request_evidence_ref :=
-                             Some
-                               { wire_observation =
-                                   { Turn_record.runtime_profile = runtime_id
-                                   ; body_bytes
-                                   }
-                               ; serialized_observation = serialized
-                               ; prompt_blocks = acc.prompt_blocks
-                               ; input_messages =
-                                   !current_request_input_messages_ref
-                               ; projected_messages =
-                                   !current_request_projected_messages_ref
-                               ; tools =
-                                   Keeper_agent_tool_surface.on_the_wire
-                                     ~agent_cell:agent_ref
-                                     ~built:built_tools
-                               })
+                           let request_tools =
+                             Keeper_agent_tool_surface.on_the_wire
+                               ~agent_cell:agent_ref
+                               ~built:built_tools
+                           in
+                           (match !current_request_provider_content_ref with
+                            | None -> ()
+                            | Some provider_content ->
+                              let attribution : request_attribution =
+                                { runtime_profile = runtime_id
+                                ; prompt_blocks = acc.prompt_blocks
+                                ; provider_content
+                                ; tools = request_tools
+                                }
+                              in
+                              request_attribution_ref := Some attribution);
+                           let wire_evidence : request_wire_evidence =
+                             { wire_observation =
+                                 { Turn_record.runtime_profile = runtime_id
+                                 ; body_bytes
+                                 }
+                             ; serialized_observation = serialized
+                             ; wire_projected_messages =
+                                 !current_request_projected_messages_ref
+                             ; wire_tools = request_tools
+                             }
+                           in
+                           request_wire_evidence_ref := Some wire_evidence)
                       ~on_official_client_result_handoff:
                         s.Keeper_run_tools.observe_official_client_result_handoff
                       ~on_official_client_native_action:
@@ -1275,27 +1365,42 @@ let run_turn
                      ~tool_calls:acc.tool_calls
                  in
                  let usage = Inference_utils.usage_of_response result.response in
-                 let ctx_composition =
-                   match !request_evidence_ref with
-                   | Some
-                       { prompt_blocks
-                       ; input_messages = Some input_messages
-                       ; tools = request_tools
-                       ; _
-                       } ->
-                     Keeper_agent_prompt_metrics.build_ctx_composition_metrics
-                       ~prompt_blocks
-                       ~tools:request_tools
-                       ~input_messages
-                       ~actual_input_tokens:(Some usage.input_tokens)
-                   | Some { input_messages = None; _ } | None ->
-                     { Keeper_agent_prompt_metrics.actual_input_tokens =
-                         (if usage.input_tokens > 0
-                          then Some usage.input_tokens
-                          else None)
-                     ; attributed_bytes = 0
-                     ; segments = []
-                     }
+                 let ctx_composition
+                   : Keeper_agent_prompt_metrics.ctx_composition_metrics
+                   =
+                   let actual_input_tokens =
+                     if usage.input_tokens > 0
+                     then Some usage.input_tokens
+                     else None
+                   in
+                   (* Absent evidence and unresolved provenance are recorded
+                      as what they are. Writing a zero here is what let a
+                      reader conclude the largest tool surfaces in the fleet
+                      cost nothing (masc#32995). *)
+                   let attribution =
+                     match !request_attribution_ref with
+                     | None ->
+                       Keeper_agent_prompt_metrics.Not_measured
+                         Keeper_agent_prompt_metrics.Dispatch_not_reached
+                     | Some (attribution : request_attribution) ->
+                       (match attribution.provider_content with
+                        | Error failure ->
+                          Keeper_agent_prompt_metrics.(
+                            Not_measured
+                              (Input_provenance_unresolved failure))
+                        | Ok input_messages ->
+                          Keeper_agent_prompt_metrics.Attributed
+                            { runtime_profile = attribution.runtime_profile
+                            ; segments =
+                                Keeper_agent_prompt_metrics.build_ctx_segments
+                                  ~prompt_blocks:attribution.prompt_blocks
+                                  ~tools:attribution.tools
+                                  ~input_messages
+                            })
+                   in
+                   { Keeper_agent_prompt_metrics.actual_input_tokens
+                   ; attribution
+                   }
                  in
                  let completion_observation ()
                      : Keeper_execution_receipt.completion_contract_result =
@@ -1573,9 +1678,10 @@ let run_turn
            failed -- an unwritable blob is an absent reference, never a marker
            pointing at bytes that are not there. *)
         let tool_surface_ref =
-          match !request_evidence_ref with
+          match !request_attribution_ref with
           | None -> None
-          | Some { tools = request_tools; _ } ->
+          | Some (attribution : request_attribution) ->
+            let request_tools = attribution.tools in
             let payload =
               Yojson.Safe.to_string
                 (Turn_record.tool_surface_to_json
@@ -1611,34 +1717,33 @@ let run_turn
                     (Tool_output.Stored reference)))
         in
         let input_components =
-          match !request_evidence_ref with
-          | Some
-              { prompt_blocks
-              ; input_messages = Some input_messages
-              ; tools = request_tools
-              ; _
-              } ->
-            let segments =
-              (Keeper_agent_prompt_metrics.build_ctx_composition_metrics
-                 ~prompt_blocks
-                 ~tools:request_tools
-                 ~input_messages
-                 ~actual_input_tokens:None)
-                .segments
-            in
-            Some
-              (List.map
-                 (fun
-                   (component,
-                    (segment :
-                      Keeper_agent_prompt_metrics.prompt_segment_metrics)) ->
-                    { Turn_record.component = component; bytes = segment.bytes })
-                 segments)
-          | Some { input_messages = None; _ } | None -> None
+          match !request_attribution_ref with
+          | None -> None
+          | Some (attribution : request_attribution) ->
+            (match attribution.provider_content with
+             | Error _ -> None
+             | Ok input_messages ->
+               let segments =
+                 Keeper_agent_prompt_metrics.build_ctx_segments
+                   ~prompt_blocks:attribution.prompt_blocks
+                   ~tools:attribution.tools
+                   ~input_messages
+               in
+               Some
+                 (List.map
+                    (fun
+                      (component,
+                       (segment :
+                         Keeper_agent_prompt_metrics.prompt_segment_metrics)) ->
+                       { Turn_record.component = component
+                       ; bytes = segment.bytes
+                       })
+                    segments))
         in
         let blocks =
-          match !request_evidence_ref with
-          | Some evidence -> evidence.prompt_blocks
+          match !request_attribution_ref with
+          | Some (attribution : request_attribution) ->
+            attribution.prompt_blocks
           | None -> acc.prompt_blocks
         in
         let raw_trace_run_ref =
@@ -1662,11 +1767,11 @@ let run_turn
                  run_ref.worker_run_id detail;
                None)
         in
-        (match !request_evidence_ref with
+        (match !request_wire_evidence_ref with
          | Some
              { serialized_observation = Some wire
-             ; projected_messages = Some messages
-             ; tools
+             ; wire_projected_messages = Some messages
+             ; wire_tools = tools
              ; _
              } ->
            Keeper_provider_input_snapshot.write_best_effort
@@ -1681,7 +1786,7 @@ let run_turn
              ~messages
              ~tools
          | Some { serialized_observation = None; _ }
-         | Some { projected_messages = None; _ }
+         | Some { wire_projected_messages = None; _ }
          | None -> ());
         Keeper_turn_record_writer.write
           ~config
@@ -1703,8 +1808,9 @@ let run_turn
           ~ttfrc_ms
           ~request_wire_observation:
             (Option.map
-               (fun evidence -> evidence.wire_observation)
-               !request_evidence_ref)
+               (fun (evidence : request_wire_evidence) ->
+                evidence.wire_observation)
+               !request_wire_evidence_ref)
           ~model_input_window:
             (Option.map
                (fun

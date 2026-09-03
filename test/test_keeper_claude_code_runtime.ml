@@ -1397,6 +1397,7 @@ let run_direct_attempt ?hooks ~base_path ~cli_path ~goal ~tools () =
                     ~tools
                     ~initial_messages:[]
                     ~model_input_projection:None
+                    ~on_transmitted_model_input:(fun _ -> ())
                     ~hooks
                     ~context_injector:None
                       (* Dynamic tools require the Keeper shared context

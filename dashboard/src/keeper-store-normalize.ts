@@ -1,4 +1,5 @@
 import type {
+  CtxAttribution,
   CtxCompositionTelemetry,
   Keeper,
   KeeperContextMetricsUnavailable,
@@ -452,6 +453,35 @@ function normalizePromptSegments(
   return segments
 }
 
+// A row whose `attribution` is missing or malformed is dropped, not defaulted.
+// Rows written before this shape existed cannot say whether the turn was
+// measured, so answering that question for them would record a judgement
+// nobody made; the panel omits them instead.
+function normalizeCtxAttribution(raw: Record<string, unknown> | null): CtxAttribution | null {
+  if (!raw || !isRecord(raw.attribution)) return null
+  const attribution = raw.attribution
+  if (attribution.status === 'attributed') {
+    const runtimeProfile = asString(attribution.runtime_profile)
+    const attributedBytes = asNumber(attribution.attributed_bytes)
+    if (runtimeProfile == null || attributedBytes == null) return null
+    return {
+      status: 'attributed',
+      runtime_profile: runtimeProfile,
+      attributed_bytes: attributedBytes,
+      segments: normalizePromptSegments(
+        isRecord(attribution.segments) ? attribution.segments : null,
+        new Set(),
+      ),
+    }
+  }
+  if (attribution.status === 'not_measured') {
+    const reason = asString(attribution.reason)
+    if (reason == null) return null
+    return { status: 'not_measured', reason, detail: asString(attribution.detail) ?? null }
+  }
+  return null
+}
+
 function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
   if (!Array.isArray(raw)) return []
   return raw
@@ -476,16 +506,12 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
             }
           : null
       const rawCtxComposition = isRecord(item.ctx_composition) ? item.ctx_composition : null
-      const rawCtxSegments =
-        rawCtxComposition && isRecord(rawCtxComposition.segments) ? rawCtxComposition.segments : null
-      const ctxSegments =
-        normalizePromptSegments(rawCtxSegments, new Set())
+      const attribution = normalizeCtxAttribution(rawCtxComposition)
       const ctx_composition: CtxCompositionTelemetry | null =
-        rawCtxComposition != null || Object.keys(ctxSegments).length > 0
+        rawCtxComposition != null && attribution != null
           ? {
-              actual_input_tokens: rawCtxComposition ? (asNumber(rawCtxComposition.actual_input_tokens) ?? null) : null,
-              attributed_bytes: rawCtxComposition ? (asNumber(rawCtxComposition.attributed_bytes) ?? 0) : 0,
-              segments: ctxSegments,
+              actual_input_tokens: asNumber(rawCtxComposition.actual_input_tokens) ?? null,
+              attribution,
             }
           : null
       const rawTel = isRecord(item.inference_telemetry) ? item.inference_telemetry : null

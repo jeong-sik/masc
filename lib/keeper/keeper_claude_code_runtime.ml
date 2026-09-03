@@ -1090,7 +1090,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name
 ;;
 
 let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
-    ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
+    ~tools ~initial_messages ~model_input_projection
+    ~on_transmitted_model_input ~hooks ~context_injector
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
@@ -1175,14 +1176,24 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
             ~system_prompt
             ~tools
             ~initial_messages
+            (* Reported after the capacity projection, which is the last
+               thing masc applies before handing the list to the client. A
+               lane that reports nothing wrote every Claude Code turn's input
+               attribution as zero (masc#32995). *)
             ~model_input_projection:
               (Some
-                 (model_input_projection_for_capacity
-                    ~capacity_bytes
-                    ~observed_next_shrink_capacity_bytes
-                    ~observed_floor_capacity_bytes
-                    ?on_model_input_window_observation
-                    model_input_projection))
+                 (fun messages ->
+                    Result.map
+                      (fun transmitted ->
+                         on_transmitted_model_input transmitted;
+                         transmitted)
+                      (model_input_projection_for_capacity
+                         ~capacity_bytes
+                         ~observed_next_shrink_capacity_bytes
+                         ~observed_floor_capacity_bytes
+                         ?on_model_input_window_observation
+                         model_input_projection
+                         messages)))
             ~hooks
           ~context_injector
           ~context

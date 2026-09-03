@@ -30,12 +30,6 @@ type prompt_metrics =
   ; user_message_segment : prompt_segment_metrics
   }
 
-type ctx_composition_metrics =
-  { actual_input_tokens : int option
-  ; attributed_bytes : int
-  ; segments : (Turn_record.input_component_id * prompt_segment_metrics) list
-  }
-
 let rec split_at count rev_prefix values =
   if count = 0
   then Some (List.rev rev_prefix, values)
@@ -100,6 +94,97 @@ let provenance_failure_summary failure =
   | Some detail -> reason ^ " " ^ detail
 ;;
 
+(* Why a turn carries no byte attribution. Two constructors, because the two
+   are fixed differently: the first says no request reached a provider on this
+   attempt, the second says a request went out and the messages it carried
+   could not be resolved back to provider content. *)
+type attribution_gap =
+  | Dispatch_not_reached
+  | Input_provenance_unresolved of provenance_failure
+
+let attribution_gap_reason = function
+  | Dispatch_not_reached -> "dispatch_not_reached"
+  | Input_provenance_unresolved failure -> provenance_failure_reason failure
+;;
+
+let attribution_gap_detail = function
+  | Dispatch_not_reached -> None
+  | Input_provenance_unresolved failure -> provenance_failure_detail failure
+;;
+
+(* The total is not a field. A stored sum can disagree with the segments it
+   claims to sum, and this record is read by a panel that draws the segments
+   against that total; [attributed_bytes] computes it so the two cannot
+   diverge. *)
+type ctx_attribution =
+  | Attributed of
+      { runtime_profile : string
+      ; segments : (Turn_record.input_component_id * prompt_segment_metrics) list
+      }
+  | Not_measured of attribution_gap
+
+type ctx_composition_metrics =
+  { actual_input_tokens : int option
+  ; attribution : ctx_attribution
+  }
+
+let segment_bytes_total
+    (segments : (Turn_record.input_component_id * prompt_segment_metrics) list)
+  =
+  List.fold_left
+    (fun total (_, (segment : prompt_segment_metrics)) -> total + segment.bytes)
+    0
+    segments
+;;
+
+let attributed_bytes = function
+  | Not_measured _ -> None
+  | Attributed { segments; runtime_profile = _ } ->
+    Some (segment_bytes_total segments)
+;;
+
+(* Carrier removal alone, with no statement about ordering. The prefix checks
+   in [provider_content_messages] compare a projection against what it was
+   handed; a caller holding the list a runtime actually transmitted has no
+   such pair, and on a lane whose tail window cuts the head by design those
+   checks would refuse every turn. *)
+let remove_prompt_context ~prompt_context_present messages =
+  let rec walk seen rev_retained = function
+    | [] ->
+      if Bool.equal seen prompt_context_present
+      then Ok (List.rev rev_retained)
+      else
+        Error
+          (Prompt_context_presence_mismatch
+             { carrier_observed = seen; prompt_context_present })
+    | (message : Agent_core.Types.message) :: rest ->
+      (match
+         Agent_core.Types.Extra_system_context_provenance.classify
+           message.metadata
+       with
+       | Agent_core.Types.Extra_system_context_provenance.Absent ->
+         walk seen (message :: rev_retained) rest
+       | Agent_core.Types.Extra_system_context_provenance.Present
+         when prompt_context_present && not seen -> walk true rev_retained rest
+       | Agent_core.Types.Extra_system_context_provenance.Present ->
+         if seen
+         then Error Prompt_context_carrier_repeated
+         else
+           Error
+             (Prompt_context_presence_mismatch
+                { carrier_observed = true; prompt_context_present })
+       | Agent_core.Types.Extra_system_context_provenance.Invalid ->
+         Error Prompt_context_carrier_metadata_invalid
+       | Agent_core.Types.Extra_system_context_provenance.Duplicate ->
+         Error Prompt_context_carrier_metadata_duplicate)
+  in
+  walk false [] messages
+;;
+
+let provider_content_of_transmitted ~prompt_context_present ~messages =
+  remove_prompt_context ~prompt_context_present messages
+;;
+
 (* The index is reported rather than a bare "not equal" because the two
    rewrites this separates need different fixes: a carrier the assembler
    inserted lands at a low index, a reordered tail lands near the end. *)
@@ -134,39 +219,9 @@ let provider_content_messages
      | Some first_divergent_index ->
        Error (Input_prefix_rewritten { first_divergent_index })
      | None ->
-       let rec remove_prompt_context seen rev_retained = function
-         | [] ->
-           if Bool.equal seen prompt_context_present
-           then Ok (List.rev rev_retained)
-           else
-             Error
-               (Prompt_context_presence_mismatch
-                  { carrier_observed = seen; prompt_context_present })
-         | (message : Agent_core.Types.message) :: rest ->
-           (match
-            Agent_core.Types.Extra_system_context_provenance.classify
-                message.metadata
-            with
-            | Agent_core.Types.Extra_system_context_provenance.Absent ->
-              remove_prompt_context seen (message :: rev_retained) rest
-            | Agent_core.Types.Extra_system_context_provenance.Present
-              when prompt_context_present && not seen ->
-              remove_prompt_context true rev_retained rest
-            | Agent_core.Types.Extra_system_context_provenance.Present ->
-              if seen
-              then Error Prompt_context_carrier_repeated
-              else
-                Error
-                  (Prompt_context_presence_mismatch
-                     { carrier_observed = true; prompt_context_present })
-            | Agent_core.Types.Extra_system_context_provenance.Invalid ->
-              Error Prompt_context_carrier_metadata_invalid
-            | Agent_core.Types.Extra_system_context_provenance.Duplicate ->
-              Error Prompt_context_carrier_metadata_duplicate)
-       in
        Result.map
          (fun retained_input -> retained_input @ projection_suffix)
-         (remove_prompt_context false [] projection_input))
+         (remove_prompt_context ~prompt_context_present projection_input))
 ;;
 
 let prompt_segment_metrics_of_sanitized_text (text : string) : prompt_segment_metrics =
@@ -336,11 +391,11 @@ let input_component_of_block
   | Agent_core.Types.Document _ -> Turn_record.Message_document
   | Agent_core.Types.Audio _ -> Turn_record.Message_audio)
 
-let build_ctx_composition_metrics
+let build_ctx_segments
     ~(prompt_blocks : Turn_record.prompt_block list)
     ~(tools : Agent_core.Tool.t list)
-    ~(input_messages : Agent_core.Types.message list)
-    ~(actual_input_tokens : int option) : ctx_composition_metrics =
+    ~(input_messages : Agent_core.Types.message list) :
+    (Turn_record.input_component_id * prompt_segment_metrics) list =
   let totals :
       (Turn_record.input_component_id, prompt_segment_metrics) Hashtbl.t =
     Hashtbl.create 16
@@ -384,40 +439,48 @@ let build_ctx_composition_metrics
           if metric.bytes > 0 then add_segment_metric totals ~bucket metric)
         message.content)
     input_messages;
-  let segments =
-    Hashtbl.to_seq totals
-    |> List.of_seq
-    |> List.sort (fun (left, _) (right, _) ->
-      String.compare
-        (Turn_record.input_component_id_to_string left)
-        (Turn_record.input_component_id_to_string right))
-  in
-  let attributed_bytes =
-    List.fold_left
-      (fun acc (_, metric) -> acc + metric.bytes)
-      0 segments
-  in
-  let actual_input_tokens =
-    match actual_input_tokens with
-    | Some n when n > 0 -> Some n
-    | Some _ | None -> None
-  in
-  {
-    actual_input_tokens;
-    attributed_bytes;
-    segments;
-  }
+  Hashtbl.to_seq totals
+  |> List.of_seq
+  |> List.sort (fun (left, _) (right, _) ->
+    String.compare
+      (Turn_record.input_component_id_to_string left)
+      (Turn_record.input_component_id_to_string right))
+
+let segments_to_json
+    (segments : (Turn_record.input_component_id * prompt_segment_metrics) list)
+    : Yojson.Safe.t =
+  `Assoc
+    (List.map
+       (fun (key, value) ->
+         ( Turn_record.input_component_id_to_string key
+         , prompt_segment_metrics_to_json value ))
+       segments)
+
+(* [not_measured] carries neither [attributed_bytes] nor [segments]. A reader
+   that finds no total has to decide what to show; a reader handed a zero
+   shows a turn that cost nothing, which is the reading this record exists to
+   stop. *)
+let ctx_attribution_to_json (attribution : ctx_attribution) : Yojson.Safe.t =
+  match attribution with
+  | Attributed { runtime_profile; segments } ->
+    `Assoc
+      [
+        ("status", `String "attributed");
+        ("runtime_profile", `String runtime_profile);
+        ("attributed_bytes", `Int (segment_bytes_total segments));
+        ("segments", segments_to_json segments);
+      ]
+  | Not_measured gap ->
+    `Assoc
+      [
+        ("status", `String "not_measured");
+        ("reason", `String (attribution_gap_reason gap));
+        ("detail", Json_util.string_opt_to_json (attribution_gap_detail gap));
+      ]
 
 let ctx_composition_to_json (metrics : ctx_composition_metrics) : Yojson.Safe.t =
   `Assoc
     [
       ("actual_input_tokens", Json_util.int_opt_to_json metrics.actual_input_tokens);
-      ("attributed_bytes", `Int metrics.attributed_bytes);
-      ( "segments",
-        `Assoc
-          (List.map
-             (fun (key, value) ->
-               ( Turn_record.input_component_id_to_string key
-               , prompt_segment_metrics_to_json value ))
-             metrics.segments) );
+      ("attribution", ctx_attribution_to_json metrics.attribution);
     ]

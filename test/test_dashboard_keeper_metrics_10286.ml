@@ -58,7 +58,14 @@ let current_turn_metric () =
         `Assoc
           [
             ("actual_input_tokens", `Int 120);
-            ("attributed_bytes", `Int 640);
+            ( "attribution",
+              `Assoc
+                [
+                  ("status", `String "attributed");
+                  ("runtime_profile", `String "runtime.current");
+                  ("attributed_bytes", `Int 640);
+                  ("segments", `Assoc []);
+                ] );
           ] );
       ( "runtime",
         `Assoc
@@ -149,7 +156,11 @@ let test_metrics_series_preserves_current_turn_telemetry () =
       check int "current usage retained" 120
         (row |> member "usage" |> member "input_tokens" |> to_int);
       check int "current composition retained" 640
-        (row |> member "ctx_composition" |> member "attributed_bytes" |> to_int);
+        (row
+        |> member "ctx_composition"
+        |> member "attribution"
+        |> member "attributed_bytes"
+        |> to_int);
       check string "current runtime retained" "completed"
         (row |> member "runtime" |> member "outcome" |> to_string)
   | other ->

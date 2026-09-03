@@ -378,7 +378,8 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
 let run_without_lifecycle ~runtime_id ~keeper_name
     ~on_model_input_window_observation
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
-    ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
+    ~system_prompt ~tools ~initial_messages ~model_input_projection
+    ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted
     ~on_official_client_result_handoff ~on_native_action
@@ -465,6 +466,23 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~goal
         ?on_model_input_window_observation
         model_input_projection
+    in
+    (* Reported after the window, because on this lane the window is the last
+       authority over what ships: the source projection runs first here, so a
+       reading taken at the source counts history the tail window then cut.
+       The wrapper is applied to whatever the admission contract produced,
+       including the pass-through it returns for a runtime that declares no
+       cap -- a lane that reports nothing is the shape masc#32995 was. *)
+    let model_input_projection : Agent_core.Agent.model_input_projection option =
+      Some
+        (fun messages ->
+           let* transmitted =
+             match model_input_projection with
+             | None -> Ok messages
+             | Some project -> project messages
+           in
+           on_transmitted_model_input transmitted;
+           Ok transmitted)
     in
     let* prepared =
       Host.prepare_turn
@@ -1058,7 +1076,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name
 ;;
 
 let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
-    ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
+    ~tools ~initial_messages ~model_input_projection
+    ~on_transmitted_model_input ~hooks ~context_injector
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
@@ -1085,6 +1104,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
         ~tools
         ~initial_messages
         ~model_input_projection
+        ~on_transmitted_model_input
         ~hooks
         ~context_injector
         ~context

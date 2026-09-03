@@ -791,6 +791,7 @@ let test_spawn_failure_is_pre_dispatch () =
                       ~tools:[]
                       ~initial_messages:[]
                       ~model_input_projection:None
+                      ~on_transmitted_model_input:(fun _ -> ())
                       ~hooks:None
                       ~context_injector:None
                       ~context:None

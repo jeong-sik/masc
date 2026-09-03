@@ -9281,10 +9281,12 @@ let render_harness_list (state : state) =
   (match stale_note with
    | None -> ()
    | Some note -> box_line_styled buf cols ~style:(Theme.warn ()) note);
-  let col_hdr =
-    Printf.sprintf "  %-8s %-14s %-9s %-9s %-24s %s" "Time"
-      "Task \xe2\x86\x92 Overview" "Gate" "Verdict" "Evaluator" "Reason"
+  (* The reason takes the cells the named columns leave. *)
+  let reason_width =
+    Render_schedule.harness_reason_width
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
+  let col_hdr = "  " ^ Render_schedule.harness_header_row ~reason_width in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
   (match state.harness_error with
@@ -9344,23 +9346,19 @@ let render_harness_list (state : state) =
                     (String.sub verdict (at + 1)
                        (String.length verdict - at - 1)) )
           in
-          let evaluator_width = 24 in
-          let reason_width =
-            (* 2 gutter + 8 time + 14 task + 9 gate + 9 ruling + evaluator,
-               and one space between each. *)
-            cols - (2 + 8 + 1 + 14 + 1 + 9 + 1 + 9 + 1 + evaluator_width + 1)
-          in
           let line =
-            Printf.sprintf "  %-8s %-14s %-9s %s%-9s%s %-*s %s"
-              (Terminal_text.clock_timestamp
-                 (Masc_domain.iso8601_of_unix_seconds v.hv_at))
-              (Terminal_text.single_line v.hv_task_id)
-              (Terminal_text.single_line v.hv_gate)
-              (semantic_status_color verdict) ruling Ansi.reset
-              evaluator_width
-              (fit_width (Terminal_text.single_line evaluator) evaluator_width)
-              (if reason = "" || reason_width <= 0 then ""
-               else fit_width reason reason_width)
+            "  "
+            ^ Render_schedule.harness_row
+                ~verdict_style:(semantic_status_color verdict) ~reason_width
+                { Render_schedule.hrow_time =
+                    Terminal_text.clock_timestamp
+                      (Masc_domain.iso8601_of_unix_seconds v.hv_at)
+                ; hrow_task = Terminal_text.single_line v.hv_task_id
+                ; hrow_gate = Terminal_text.single_line v.hv_gate
+                ; hrow_verdict = ruling
+                ; hrow_evaluator = Terminal_text.single_line evaluator
+                ; hrow_reason = reason
+                }
           in
           let style =
             match v.hv_fallback_reason with

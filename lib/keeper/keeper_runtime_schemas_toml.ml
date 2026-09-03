@@ -7,10 +7,15 @@
     partial runtime surface, so a reader of these values never has to ask
     whether a schema loaded.
 
-    Three of the four tools published here stay in OCaml for now. keeper_artifact_read takes its max_bytes bounds and default
-    from [Keeper_artifact_read] and keeper_analyze_image takes its media-type enum from
-    [Keeper_vision_tool]; a TOML literal would cut that derivation, so each
-    moves once it has a test pinning the file against its owner.
+    All four now load from TOML, including the two whose numbers an OCaml
+    module owns: keeper_artifact_read's max_bytes bounds belong to
+    [Keeper_artifact_read] and keeper_analyze_image's media-type enum to
+    [Keeper_vision_tool]. Moving them cut those derivations, and the pin that
+    was supposed to arrive with the move did not. keeper_artifact_read then
+    drifted: #32748 lowered the bound in OCaml and the file kept advertising
+    65536, so a model reading the schema could ask for four times what the
+    handler accepts. [test_keeper_runtime_schemas_toml_parity] now pins both
+    files against their owner modules, which is what makes the literals safe.
     masc_fusion_status emits an empty ["required"] list, which the loader omits
     because nothing declares itself required -- moving it would change the
     bytes, and the empty list is a no-op that five tools carry and twenty-six

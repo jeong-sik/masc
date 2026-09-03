@@ -2034,6 +2034,7 @@
 (include stanzas/test_rfc3339_format_owner.inc)
 (include stanzas/test_env_snapshot_reports_applied_default.inc)
 (include stanzas/test_verification_authority_tools.inc)
+(include stanzas/test_keeper_microvm_backend.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
 
 (include stanzas/test_exec_policy_cwd_hint.inc)
@@ -3900,11 +3901,6 @@
 (include stanzas/test_verifier_exact_lane.inc)
 
 
-(include stanzas/test_keeper_canary_facts.inc)
-(include stanzas/test_keeper_canary_evidence.inc)
-(include stanzas/test_keeper_canary_judge.inc)
-(include stanzas/test_keeper_canary_failover.inc)
-(include stanzas/test_keeper_canary_serving.inc)
 
 (include stanzas/test_run_registry_concurrent_mutation.inc)
 (include stanzas/test_exact_lane_run_registry.inc)

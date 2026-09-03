@@ -214,6 +214,7 @@ type keeper_meta = {
   sandbox_profile : Keeper_types_profile.sandbox_profile;
   sandbox_image : string option;
   network_mode : Keeper_types_profile.network_mode;
+  microvm_backend : Keeper_microvm_backend.t option;
   mention_targets : string list;
   proactive : proactive_policy;
   (* Lifecycle *)

@@ -19,7 +19,17 @@
     The guest owns its working tree on a per-keeper volume (RFC-0400): the
     host playground is never mounted into it. *)
 
-let command_argv () = [ "container" ]
+module Backend = Keeper_microvm_backend
+
+(* The backend a call builds argv for. Every builder below takes it, so the
+   choice travels with the call instead of sitting in module state that a
+   second keeper on a second backend would race. *)
+let command_argv_for backend = [ Backend.cli_name backend ]
+
+(* The Apple runtime stays the default so every existing call site keeps the
+   argv it had. RFC-0405 moves the choice to the keeper's TOML; a caller that
+   has not been threaded yet still builds what it built before. *)
+let command_argv () = command_argv_for Backend.Apple_container
 
 (** Flags Docker takes that [container run] rejects outright.
 
@@ -297,10 +307,28 @@ let exec_argv ~container_name ~uid ~gid ~container_cwd ~stdin ~command_argv =
   @ (container_name :: command_argv)
 ;;
 
-let stop_argv ~container_name = command_argv () @ [ "stop"; container_name ]
+(* The two runtimes spell removal differently -- [container delete --force]
+   against [msb remove --force] -- and stop the same way. Measured against
+   msb 0.6.16 on 2026-09-03; a spelling this file guesses at would fail every
+   call rather than fail once, so each is written from that CLI's own help. *)
+let stop_argv_for backend ~container_name =
+  command_argv_for backend @ [ "stop"; container_name ]
+;;
+
+let delete_force_argv_for backend ~container_name =
+  match (backend : Backend.t) with
+  | Backend.Apple_container ->
+    command_argv_for backend @ [ "delete"; "--force"; container_name ]
+  | Backend.Microsandbox ->
+    command_argv_for backend @ [ "remove"; "--force"; container_name ]
+  | Backend.Nerdctl_kata ->
+    command_argv_for backend @ [ "rm"; "--force"; container_name ]
+;;
+
+let stop_argv ~container_name = stop_argv_for Backend.Apple_container ~container_name
 
 let delete_force_argv ~container_name =
-  command_argv () @ [ "delete"; "--force"; container_name ]
+  delete_force_argv_for Backend.Apple_container ~container_name
 ;;
 
 (* ── The work volume and the shim (RFC-0400) ────────────────────────── *)
@@ -530,7 +558,44 @@ let keeper_vm_container_kind = "keeper-vm"
 (** [container inspect] answers JSON; state lives at [.[0].status.state]
     ("running" observed live). A missing container exits 1, which the
     caller maps to absent before parsing. *)
-let running_of_inspect_json raw =
+(* Two runtimes, two shapes, measured 2026-09-03:
+
+     container inspect      [ { "status": { "state": "running" } } ]
+     msb inspect --format json
+                            { "name": ..., "status": "Running" }
+
+   A list against an object, a nested state against a flat one, lowercase
+   against capitalised. Neither parser is written to tolerate the other's
+   shape: a shape this code does not know is [Error], never [Ok false]. Read
+   as "not running", an unrecognised answer would take a live guest down and
+   boot a second one beside it. *)
+let running_of_microsandbox_inspect_json raw =
+  match Yojson.Safe.from_string raw with
+  | `Assoc fields ->
+    (match List.assoc_opt "status" fields with
+     | Some (`String status) ->
+       Ok (String.equal (String.lowercase_ascii status) "running")
+     | Some _ | None -> Error "msb inspect: status missing")
+  | _ -> Error "msb inspect: unparseable JSON"
+  | exception Yojson.Json_error _ -> Error "msb inspect: unparseable JSON"
+;;
+
+(* [nerdctl inspect --format "{{json .State.Running}}"] answers the bare
+   literal, the same template masc already sends Docker. Anything else is an
+   [Error]: a template that stopped resolving prints an empty line, and read
+   as "not running" that takes a live guest down. *)
+let running_of_nerdctl_state_json raw =
+  match String.trim raw with
+  | "true" -> Ok true
+  | "false" -> Ok false
+  | other ->
+    Error
+      (Printf.sprintf
+         "nerdctl inspect: expected the State.Running literal, got %S"
+         other)
+;;
+
+let running_of_apple_inspect_json raw =
   match Yojson.Safe.from_string raw with
   | `List (`Assoc fields :: _) ->
     (match List.assoc_opt "status" fields with
@@ -544,7 +609,34 @@ let running_of_inspect_json raw =
     Error "container inspect: unparseable JSON"
 ;;
 
-let inspect_argv ~container_name = command_argv () @ [ "inspect"; container_name ]
+let running_of_inspect_json_for backend raw =
+  match (backend : Backend.t) with
+  | Backend.Apple_container -> running_of_apple_inspect_json raw
+  | Backend.Microsandbox -> running_of_microsandbox_inspect_json raw
+  | Backend.Nerdctl_kata -> running_of_nerdctl_state_json raw
+;;
+
+let running_of_inspect_json raw = running_of_apple_inspect_json raw
+
+
+(* [container inspect] answers JSON by default; [msb inspect] answers a
+   human table unless asked, so the machine form is requested explicitly. *)
+let inspect_argv_for backend ~container_name =
+  match (backend : Backend.t) with
+  | Backend.Apple_container -> command_argv_for backend @ [ "inspect"; container_name ]
+  | Backend.Microsandbox ->
+    command_argv_for backend @ [ "inspect"; container_name; "--format"; "json" ]
+  (* [nerdctl inspect] defaults to --mode dockercompat, so the Go template
+     Docker already answers works here unchanged. Asking for the one field
+     rather than the whole document keeps the parse to a literal. *)
+  | Backend.Nerdctl_kata ->
+    command_argv_for backend
+    @ [ "inspect"; "--format"; "{{json .State.Running}}"; container_name ]
+;;
+
+let inspect_argv ~container_name =
+  inspect_argv_for Backend.Apple_container ~container_name
+;;
 
 (** Guests whose owning server is gone.
 

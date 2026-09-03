@@ -15,9 +15,6 @@ val deliver :
     Keeper. The wake is a hint: a busy or lifecycle-deferred Keeper still finds
     the entry on its next lane cycle.
 
-    The attention row and the queue entry are two separate writes. When the
-    queue refuses the entry there is nothing left to make any Keeper judge the
-    row -- the wake is edge-triggered, and only a new ambient message re-arms
-    it -- so the row would sit pending on the operator's attention panel
-    forever, wearing the face of work that is coming. It is marked
-    [Quarantined] instead: nobody judged it, and nobody will. *)
+    A refused entry is logged and counted, and that is the whole of it: the
+    queue is what says a Keeper owes an answer, so an entry that never landed
+    leaves nothing behind claiming otherwise. *)

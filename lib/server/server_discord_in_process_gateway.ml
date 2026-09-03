@@ -349,14 +349,26 @@ let refresh_discord_directory_once ~clock ~base_dir ~token =
   in
   let record_rest_error ~scope ~target error =
     let detail = Format.asprintf "%a" Discord_rest_client.pp_error error in
-    (match classify_directory_rest_failure error with
+    let classification = classify_directory_rest_failure error in
+    (match classification with
      | Directory_authentication_failed ->
        authentication_failed := scope :: !authentication_failed
      | Directory_permission_denied ->
        permission_denied := scope :: !permission_denied
      | Directory_channel_gone -> ()
      | Directory_operation_failed -> errors := scope :: !errors);
-    Log.Server.warn "Discord directory %s target=%s: %s" scope target detail
+    let reason = match classification with
+      | Directory_authentication_failed ->
+        "the bot token was rejected — check the token"
+      | Directory_permission_denied ->
+        "the bot lacks access (channel/server permissions) — grant access or \
+         unbind it"
+      | Directory_channel_gone ->
+        "the channel is deleted"
+      | Directory_operation_failed -> ""
+    in
+    Log.Server.warn "Discord directory %s target=%s: %s%s%s" scope target detail
+      (if reason = "" then "" else " — ") reason
   in
   let refresh_channel channel_id =
     if Hashtbl.mem gone_bound_channels channel_id then ()

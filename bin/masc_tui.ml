@@ -4709,6 +4709,7 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         | Keeper_chat_history.Tool_calls _
         | Keeper_chat_history.Skill_activity _
         | Keeper_chat_history.Reasoning _
+        | Keeper_chat_history.Gate_activity _
         | Keeper_chat_history.Memory_activity _ ->
             None)
       rows
@@ -4725,6 +4726,7 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         | Keeper_chat_history.Tool_calls _
         | Keeper_chat_history.Skill_activity _
         | Keeper_chat_history.Reasoning _
+        | Keeper_chat_history.Gate_activity _
         | Keeper_chat_history.Memory_activity _ -> None)
       rows
   in
@@ -4779,6 +4781,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
   let memory_summary =
     match row.Keeper_chat_history.kind with
     | Keeper_chat_history.Memory_activity { summary } -> summary
+    | Keeper_chat_history.Gate_activity _
     | Keeper_chat_history.Addressed_to_keeper _
     | Keeper_chat_history.Said_by_keeper
     | Keeper_chat_history.Autonomous_reply
@@ -4837,6 +4840,16 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , Some activity )
     | Keeper_chat_history.Reasoning lines ->
         (Message_thinking, Turn_progress, String.concat "\n" lines, None, None)
+    | Keeper_chat_history.Gate_activity { phase; tool } ->
+        (* Server-owned gate status, drawn from the phase rather than from
+           the sentence the store composed. It is not Memory: putting it in
+           that lane interleaved approvals with journal commits, and hiding
+           the journal hid the gate with it. *)
+        ( Message_status
+        , Turn_progress
+        , Masc_tui_gate_text.lifecycle_line ~phase ~tool
+        , None
+        , None )
     | Keeper_chat_history.Memory_activity _ ->
         (Message_memory, Turn_progress, row.text, None, None)
   in
@@ -4850,6 +4863,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
       | Keeper_chat_history.Tool_calls _
       | Keeper_chat_history.Skill_activity _
       | Keeper_chat_history.Reasoning _
+      | Keeper_chat_history.Gate_activity _
       | Keeper_chat_history.Memory_activity _), _
     | Keeper_chat_history.Addressed_to_keeper _, None -> None
   in

@@ -3131,6 +3131,11 @@
  (libraries alcotest masc_tui_types))
 
 (test
+ (name test_tui_gate_text)
+ (modules test_tui_gate_text)
+ (libraries alcotest masc_tui_gate_text))
+
+(test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
  (libraries alcotest masc masc_tui_types unix))

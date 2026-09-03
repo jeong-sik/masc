@@ -1497,6 +1497,15 @@ type preset_sink =
   | Preset_to_pane
 
 type async_msg =
+  (* A microphone capture, from the fiber that runs it. The keeper is carried
+     on every one of these rather than read from the state at delivery: the
+     roster cursor moves under a refresh, and a transcript that took several
+     seconds would otherwise land on whoever happens to be selected when it
+     arrives. *)
+  | Voice_level of { keeper : string; db : float }
+  | Voice_transcribed of { keeper : string; text : string }
+  | Voice_silent of { keeper : string; reason : string }
+  | Voice_failed of { keeper : string; error : string }
   | Http_refresh_done of http_surface_results
   | Http_refresh_failed of string * Approval.Flow.generation option
   | Http_scoped_refresh_done of http_scoped_surface_results
@@ -8095,6 +8104,109 @@ let handle_keeper_action state ~base_path ~mailbox action =
 (* Apply one keystroke the composer claimed. Sending routes through the same
    chat surface the [c] key opens, so a message typed on the roster and one
    typed in the chat view take the identical dispatch path. *)
+(* One microphone capture, off the input loop.
+
+   [Voice_bridge.record_and_transcribe] blocks for as long as the operator
+   speaks — up to its timeout — so running it inline would freeze the TUI mid
+   sentence. It is forked, and what comes back arrives as an [async_msg] like
+   every other background result.
+
+   The meter is read from the recording as it grows rather than from the
+   microphone: opening a second capture device costs about 2.5 s here, which is
+   longer than most utterances. Sox writes the file continuously, so the level
+   of the newest bytes is the level being heard now. Nothing else can tell the
+   operator their input device is dead — a dead microphone and a quiet room
+   both end as an empty draft. *)
+let launch_voice_capture state ~mailbox ~keeper =
+  let capture_dir = Filename.get_temp_dir_name () in
+  let meter_glob () =
+    (* The capture writes under a name Voice_bridge chooses; the meter finds
+       the newest one rather than being told, so the two do not have to agree
+       on a filename across a library boundary. *)
+    try
+      Sys.readdir capture_dir
+      |> Array.to_list
+      |> List.filter (fun f ->
+        String.length f > 9
+        && String.equal (String.sub f 0 9) "masc_stt_"
+        && Filename.check_suffix f ".wav")
+      |> List.map (fun f -> Filename.concat capture_dir f)
+      |> List.sort (fun a b ->
+        compare (Unix.stat b).Unix.st_mtime (Unix.stat a).Unix.st_mtime)
+      |> function
+      | newest :: _ -> Some newest
+      | [] -> None
+    with
+    | Sys_error _ | Unix.Unix_error _ -> None
+  in
+  let run () =
+    let result =
+      try Ok (Masc.Voice_bridge.record_and_transcribe ~agent_id:keeper ()) with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    let msg =
+      match result with
+      | Error e -> Voice_failed { keeper; error = e }
+      | Ok (Error e) -> Voice_failed { keeper; error = e }
+      | Ok (Ok json) -> (
+        let field name =
+          match json with
+          | `Assoc fields -> (
+            match List.assoc_opt name fields with
+            | Some (`String v) -> Some v
+            | Some _ | None -> None)
+          | _ -> None
+        in
+        match field "status", field "text" with
+        | Some "no_audio", _ ->
+          Voice_silent
+            { keeper
+            ; reason = Option.value (field "message") ~default:"nothing was heard"
+            }
+        | _, Some text when String.trim text <> "" ->
+          Voice_transcribed { keeper; text = String.trim text }
+        | _, _ -> Voice_silent { keeper; reason = "nothing was heard" })
+    in
+    enqueue_async mailbox msg
+  in
+  let meter () =
+    (* Stops when the capture posts its result: the level is only meaningful
+       while something is recording. *)
+    let rec tick () =
+      match state.voice_capture with
+      | Some active when String.equal active keeper ->
+        (match Eio_context.get_clock_opt () with
+         | None -> ()
+         | Some clock ->
+           Eio.Time.sleep clock 0.5;
+           (match meter_glob () with
+            | None -> ()
+            | Some file ->
+              (match Masc.Voice_bridge.rms_amplitude_of_file file with
+               | Some amplitude ->
+                 enqueue_async
+                   mailbox
+                   (Voice_level
+                      { keeper; db = Masc.Voice_bridge.db_of_amplitude amplitude })
+               | None -> ()));
+           tick ())
+      | Some _ | None -> ()
+    in
+    tick ()
+  in
+  match Eio_context.get_switch_opt () with
+  | None ->
+    enqueue_async
+      mailbox
+      (Voice_failed { keeper; error = "Eio switch is unavailable" })
+  | Some sw ->
+    state.voice_capture <- Some keeper;
+    state.voice_level_db <- None;
+    Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon);
+    Eio.Fiber.fork_daemon ~sw (fun () -> meter (); `Stop_daemon)
+;;
+
 let handle_composer_key state ~base_path ~mailbox key =
   if state.workspace_identity <> Masc_tui_types.Workspace_identity_match
   then false
@@ -8113,6 +8225,15 @@ let handle_composer_key state ~base_path ~mailbox key =
            then open_message_for_keeper state keeper_name;
            state.composer_focused <- true
        | Composer.No_target | Composer.Unreachable _ -> ());
+      true
+  | Composer.Start_listening ->
+      (* One capture at a time: a second microphone would contend for the same
+         input device and the two transcripts would race into one draft. *)
+      (match state.voice_capture, composer.Composer.target with
+       | Some _, _ -> ()
+       | None, Composer.Ready keeper_name ->
+           launch_voice_capture state ~mailbox ~keeper:keeper_name
+       | None, (Composer.No_target | Composer.Unreachable _) -> ());
       true
   | Composer.Release_focus ->
       save_message_draft state;
@@ -8292,6 +8413,35 @@ let handle_paste state ~base_path ~mailbox ~(paste : Masc_tui_paste.t) =
 let apply_async_message state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
+  (* Every voice message carries the keeper the capture was started for, and
+     each is dropped unless that capture is still the one in flight. An
+     operator who moved the cursor, or pressed the key again, has said the
+     first capture no longer belongs to this draft. *)
+  | Voice_level { keeper; db } ->
+      if state.voice_capture = Some keeper then state.voice_level_db <- Some db
+  | Voice_transcribed { keeper; text } ->
+      if state.voice_capture = Some keeper then (
+        state.voice_capture <- None;
+        state.voice_level_db <- None;
+        (* Appended, not replacing: an operator who typed part of a message and
+           then spoke the rest keeps both. A separator only where there is
+           something to separate. *)
+        if Buffer.length state.msg_input > 0
+           && not (String.equal (Buffer.contents state.msg_input) "")
+        then Buffer.add_char state.msg_input ' ';
+        Buffer.add_string state.msg_input text;
+        save_message_draft state;
+        state.last_action <- Some ("voice: " ^ text, Unix.gettimeofday ()))
+  | Voice_silent { keeper; reason } ->
+      if state.voice_capture = Some keeper then (
+        state.voice_capture <- None;
+        state.voice_level_db <- None;
+        state.last_action <- Some ("voice: " ^ reason, Unix.gettimeofday ()))
+  | Voice_failed { keeper; error } ->
+      if state.voice_capture = Some keeper then (
+        state.voice_capture <- None;
+        state.voice_level_db <- None;
+        state.last_action <- Some ("voice failed: " ^ error, Unix.gettimeofday ()))
   | Http_refresh_done results ->
       http_refresh_inflight := false;
       apply_http_surfaces state results;

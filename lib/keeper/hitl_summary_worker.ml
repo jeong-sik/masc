@@ -272,16 +272,30 @@ let build_context_bundle ~(entry : pending_approval) =
 
 let message role text = Agent_core.Types.text_message role text
 
-let canonical_output_contract =
-  Printf.sprintf
-    "Return exactly one JSON object matching this canonical JSON Schema. Do not \
-     add fields.\n%s"
-    (Yojson.Safe.to_string Schema.hitl_context_summary_schema)
+(* The contract sentence lives in the keeper.hitl_summary.output_contract
+   template; this function only supplies the canonical schema as data. A
+   template that does not render is logged and falls back to the bare schema
+   JSON, never to instruction prose written here. *)
+let canonical_output_contract () =
+  let schema_json = Yojson.Safe.to_string Schema.hitl_context_summary_schema in
+  match
+    Prompt_registry.render_prompt_template
+      Prompt_names.keeper_hitl_summary_output_contract
+      [ "schema_json", schema_json ]
+  with
+  | Ok text -> String.trim text
+  | Error detail ->
+    Log.Keeper.error
+      "hitl summary output-contract prompt %s did not render, falling back to the bare \
+       schema: %s"
+      Prompt_names.keeper_hitl_summary_output_contract
+      detail;
+    schema_json
 ;;
 
 let messages_for_summary ~system_prompt ~context_bundle =
   [ message Agent_core.Types.System system_prompt
-  ; message Agent_core.Types.User canonical_output_contract
+  ; message Agent_core.Types.User (canonical_output_contract ())
   ; message Agent_core.Types.User (Yojson.Safe.to_string context_bundle)
   ]
 ;;
@@ -1212,7 +1226,7 @@ type cli_walk_outcome =
          as it would have without cli slots. *)
 
 let cli_prompt ~context_bundle =
-  canonical_output_contract ^ "\n\n" ^ Yojson.Safe.to_string context_bundle
+  canonical_output_contract () ^ "\n\n" ^ Yojson.Safe.to_string context_bundle
 ;;
 
 let try_cli_slots

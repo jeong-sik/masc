@@ -66,39 +66,70 @@ let message_json text =
       ("content", `Assoc [ ("type", `String "text"); ("text", `String text) ]);
     ]
 
+(* The instruction wording lives in the mcp.tool_help template; this function
+   only pre-renders the grounded fields as data strings. A template that does
+   not render is logged and falls back to the bare data, never to prose
+   written here. *)
 let tool_help_text ~tool_name ~focus schemas =
   match Tool_help_registry.find_entry schemas tool_name with
   | None -> Error (Printf.sprintf "unknown tool: %s" tool_name)
   | Some entry ->
-      let focus_lines =
-        match focus with
-        | Some value -> [ "Focus: " ^ value; "" ]
-        | None -> []
-      in
-      Ok
-        (String.concat "\n"
-           ([
-              "Explain this MCP tool using only the grounded fields below.";
-              "Do not invent extra workflow steps beyond the listed help.";
-              "";
-            ]
-           @ focus_lines
-           @
-           [
-             "Tool: " ^ entry.name;
-             "Short description: " ^ entry.short_description;
-             "When to use: " ^ entry.when_to_use;
-             "Key constraints:";
-           ]
-           @ List.map (fun item -> "- " ^ item) entry.key_constraints
-           @
-           [
-             "";
-             "Details:";
-             entry.details_markdown;
-           ]
-           @
-           (if entry.doc_refs = [] then [] else "" :: "Docs:" :: List.map (fun item -> "- " ^ item) entry.doc_refs)))
+    let bullet_lines items =
+      String.concat "\n" (List.map (fun item -> "- " ^ item) items)
+    in
+    let focus_section =
+      match focus with
+      | Some value -> "Focus: " ^ value ^ "\n\n"
+      | None -> ""
+    in
+    let docs_section =
+      if entry.doc_refs = [] then "" else "\n\nDocs:\n" ^ bullet_lines entry.doc_refs
+    in
+    let key_constraints =
+      (* The blank line before "Details:" rides on this variable so an empty
+         constraint list does not leave a doubled blank line. *)
+      match entry.key_constraints with
+      | [] -> ""
+      | items -> bullet_lines items ^ "\n"
+    in
+    let vars =
+      [ "focus_section", focus_section
+      ; "tool_name", entry.name
+      ; "short_description", entry.short_description
+      ; "when_to_use", entry.when_to_use
+      ; "key_constraints", key_constraints
+      ; "details_markdown", entry.details_markdown
+      ; "docs_section", docs_section
+      ]
+    in
+    (match Prompt_registry.render_prompt_template Prompt_names.mcp_tool_help vars with
+     | Ok text ->
+       (* The trim cancels the template file's trailing newline. It would also
+          strip a details_markdown value ending in whitespace when no docs
+          follow it; no current registry entry has one, so this stays latent. *)
+       Ok (String.trim text)
+     | Error detail ->
+       Log.Misc.error
+         "mcp tool_help prompt %s did not render, falling back to the bare data: %s"
+         Prompt_names.mcp_tool_help
+         detail;
+       Ok
+         (String.concat
+            "\n"
+            ((match focus with
+              | Some value -> [ "Focus: " ^ value ]
+              | None -> [])
+             @ [ "Tool: " ^ entry.name
+               ; entry.short_description
+               ; entry.when_to_use
+               ; bullet_lines entry.key_constraints
+               ; entry.details_markdown
+               ]
+             @
+             if entry.doc_refs = []
+             then []
+             else "Docs:" :: List.map (fun item -> "- " ^ item) entry.doc_refs)))
+;;
 
 let get_json ~config:_ ~name ~arguments schemas =
   match lookup name with

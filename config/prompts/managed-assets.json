@@ -14,6 +14,8 @@
     "keeper.autonomous.wake.txt",
     "keeper.capability_probe.md",
     "keeper.context.md",
+    "keeper.gate_replay.md",
+    "keeper.hitl_summary.md",
     "keeper.md",
     "keeper.observation.md",
     "keeper.world.active_goals.md",

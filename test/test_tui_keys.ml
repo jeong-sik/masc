@@ -369,9 +369,12 @@ let test_lanes_run_list_footer_names_the_drill_down () =
     "j/k:move  Right / Enter:prompt  Left / Esc:back  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_lanes_run_list
 
+(* [compare], not [scroll]: #32270 stacked Input and Output into one list that
+   one scroll walks, so the two panes move together and the key's name says
+   which of the two it does. *)
 let test_lanes_run_detail_footer_appends_the_scroll_position () =
   check str "the run detail footer carries its live scroll position"
-    "j/k:scroll  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit  (3/40)"
+    "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit  (3/40)"
     (Masc_tui_keys.footer_hints_lanes_run_detail ~scroll:3 ~max_scroll:40)
 
 let test_overview_footer_projects_by_focus () =

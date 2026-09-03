@@ -495,7 +495,11 @@ let handle_gate_keeper_status_by_name ~sw ~clock state request reqd =
 
     Authenticated host-runtime log read for the selected Keeper. Discovery is
     label-scoped by the sandbox layer; the route never accepts a caller-owned
-    container id. *)
+    container id.
+
+    A profile that keeps no container on this host is a normal answer, not a
+    gateway fault: it returns 200 with state="no_local_stream". 502 stays
+    reserved for a container runtime that was asked and failed. *)
 let handle_gate_keeper_sandbox_logs state request reqd =
   let respond ?(status = `OK) value =
     (* Container stdout/stderr can contain credentials. It is deliberately

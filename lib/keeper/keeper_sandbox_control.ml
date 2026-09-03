@@ -785,6 +785,10 @@ type sandbox_log_backend =
   | Docker_logs
   | Apple_container_logs
 
+type sandbox_log_source =
+  | Local_backend of sandbox_log_backend
+  | No_local_stream of string
+
 type sandbox_logs_error =
   | Sandbox_logs_meta_read_failed of string
   | Sandbox_logs_keeper_not_found
@@ -795,18 +799,27 @@ let sandbox_log_backend_label = function
   | Apple_container_logs -> "apple_container"
 ;;
 
+(* The sentence an operator reads when the profile keeps nothing local. It
+   agrees with [why_no_container]'s Remote_ssh answer above: the endpoint is
+   where execution happens, so the endpoint is where the logs are. The
+   endpoint's name is deliberately absent -- [keeper_meta] does not carry it,
+   and resolving it against runtime.toml would put a new failure mode on a
+   path that is not failing. *)
+let remote_ssh_no_local_stream_reason =
+  "This Keeper runs on its configured SSH endpoint, so no container log \
+   stream exists on this host; read the logs on the endpoint."
+;;
+
 let resolve_sandbox_log_target ~(config : Workspace.config) ~keeper_name =
   match Keeper_meta_store.read_effective_meta config keeper_name with
   | Error detail -> Error (Sandbox_logs_meta_read_failed detail)
   | Ok None -> Error Sandbox_logs_keeper_not_found
   | Ok (Some meta) ->
     (match meta.sandbox_profile with
-     | Docker -> Ok (Docker_logs, meta.name)
-     | Micro_vm -> Ok (Apple_container_logs, meta.name)
+     | Docker -> Ok (Local_backend Docker_logs, meta.name)
+     | Micro_vm -> Ok (Local_backend Apple_container_logs, meta.name)
      | Remote_ssh ->
-       Error
-         (Sandbox_logs_backend_failed
-            "remote SSH Keeper has no local container log stream; inspect the configured endpoint"))
+       Ok (No_local_stream remote_ssh_no_local_stream_reason, meta.name))
 ;;
 
 let sandbox_log_argv backend ~tail ~container_id =
@@ -821,62 +834,72 @@ let sandbox_log_argv backend ~tail ~container_id =
 
 let logs_json ~(config : Workspace.config) ~keeper_name ~timeout_sec ~tail () =
   let tail = max 1 (min 500 tail) in
-  let discovered =
-    match resolve_sandbox_log_target ~config ~keeper_name with
-    | Error _ as error -> error
-    | Ok (backend, effective_keeper_name) ->
-      let containers =
-        match backend with
-        | Docker_logs ->
-          Keeper_sandbox_runtime.list_containers
-            ~keeper_name:effective_keeper_name
-            ~base_path:config.Workspace.base_path
-            ~timeout_sec
-            ()
-        | Apple_container_logs ->
-          Keeper_sandbox_microvm.list_live_containers
-            ~base_path:config.Workspace.base_path
-            ~keeper_name:effective_keeper_name
-            ~timeout_sec
-      in
-      Result.map_error
-        (fun detail -> Sandbox_logs_backend_failed detail)
-        containers
-      |> Result.map (fun containers -> backend, effective_keeper_name, containers)
-  in
-  Result.map
-    (fun (backend, effective_keeper_name, containers) ->
-      let rows =
-        List.map
-          (fun (container : Keeper_sandbox_runtime.live_container) ->
-            let status, stdout, stderr =
-              Process_eio.run_argv_with_status_split ~timeout_sec
-                (sandbox_log_argv backend ~tail ~container_id:container.id)
-            in
-            let error =
-              match status with
-              | Unix.WEXITED 0 -> `Null
-              | status ->
-                `String
-                  (Printf.sprintf "log command failed (%s)"
-                     (Keeper_sandbox_exec_failure.status_label status))
-            in
-            `Assoc
-              [ "instance_id", `String container.id
-              ; "instance_name", `String container.name
-              ; "running", Json_util.bool_opt_to_json container.running
-              ; "stdout", `String stdout
-              ; "stderr", `String stderr
-              ; "error", error
-              ])
-          containers
-      in
-      `Assoc
+  match resolve_sandbox_log_target ~config ~keeper_name with
+  (* Rebuilt, not re-used: the payload type on the Ok side differs here, so
+     [Error _ as e] would not typecheck. *)
+  | Error resolve_error -> Error resolve_error
+  | Ok (No_local_stream reason, effective_keeper_name) ->
+    (* A profile that keeps no container here is answered, not failed: the
+       key set matches the local shapes so no caller tests for presence. *)
+    Ok
+      (`Assoc
         [ "keeper", `String effective_keeper_name
-        ; "backend", `String (sandbox_log_backend_label backend)
-        ; "state", `String (if rows = [] then "no_instance" else "available")
+        ; "backend", `Null
+        ; "state", `String "no_local_stream"
+        ; "reason", `String reason
         ; "tail", `Int tail
-        ; "instances", `List rows
+        ; "instances", `List []
         ])
-    discovered
+  | Ok (Local_backend backend, effective_keeper_name) ->
+    let containers =
+      match backend with
+      | Docker_logs ->
+        Keeper_sandbox_runtime.list_containers
+          ~keeper_name:effective_keeper_name
+          ~base_path:config.Workspace.base_path
+          ~timeout_sec
+          ()
+      | Apple_container_logs ->
+        Keeper_sandbox_microvm.list_live_containers
+          ~base_path:config.Workspace.base_path
+          ~keeper_name:effective_keeper_name
+          ~timeout_sec
+    in
+    Result.map_error
+      (fun detail -> Sandbox_logs_backend_failed detail)
+      containers
+    |> Result.map (fun containers ->
+         let rows =
+           List.map
+             (fun (container : Keeper_sandbox_runtime.live_container) ->
+               let status, stdout, stderr =
+                 Process_eio.run_argv_with_status_split ~timeout_sec
+                   (sandbox_log_argv backend ~tail ~container_id:container.id)
+               in
+               let error =
+                 match status with
+                 | Unix.WEXITED 0 -> `Null
+                 | status ->
+                   `String
+                     (Printf.sprintf "log command failed (%s)"
+                        (Keeper_sandbox_exec_failure.status_label status))
+               in
+               `Assoc
+                 [ "instance_id", `String container.id
+                 ; "instance_name", `String container.name
+                 ; "running", Json_util.bool_opt_to_json container.running
+                 ; "stdout", `String stdout
+                 ; "stderr", `String stderr
+                 ; "error", error
+                 ])
+             containers
+         in
+         `Assoc
+           [ "keeper", `String effective_keeper_name
+           ; "backend", `String (sandbox_log_backend_label backend)
+           ; "state", `String (if rows = [] then "no_instance" else "available")
+           ; "reason", `Null
+           ; "tail", `Int tail
+           ; "instances", `List rows
+           ])
 ;;

@@ -127,18 +127,34 @@ type sandbox_log_backend =
   | Docker_logs
   | Apple_container_logs
 
+type sandbox_log_source =
+  | Local_backend of sandbox_log_backend
+      (** The Keeper's tree sits on this host under a container runtime that
+          keeps a stdio stream this server can read. *)
+  | No_local_stream of string
+      (** The Keeper's effective profile keeps no container on this host, so
+          there is no stream to read. The payload is the operator-facing
+          sentence saying where the logs are instead. This is a normal
+          answer, not a failure. *)
+
 type sandbox_logs_error =
   | Sandbox_logs_meta_read_failed of string
   | Sandbox_logs_keeper_not_found
   | Sandbox_logs_backend_failed of string
+      (** A container runtime was asked for this Keeper's instances and the
+          call failed. A profile that owns no local instances does not reach
+          this constructor: it answers [No_local_stream]. *)
 
 val resolve_sandbox_log_target :
   config:Workspace.config ->
   keeper_name:string ->
-  (sandbox_log_backend * string, sandbox_logs_error) result
-(** Resolve the selected Keeper's effective TOML-owned sandbox profile and
-    canonical name. Durable metadata carries only a placeholder profile and
-    must never choose the log backend. *)
+  (sandbox_log_source * string, sandbox_logs_error) result
+(** Resolve the selected Keeper's effective TOML-owned sandbox profile into a
+    log source, paired with the canonical Keeper name. Durable metadata
+    carries only a placeholder profile and must never choose the log backend.
+    Every profile resolves to a source: a profile with no local container
+    stream answers [No_local_stream] rather than an error. Returns only
+    [Sandbox_logs_meta_read_failed] or [Sandbox_logs_keeper_not_found]. *)
 
 val logs_json :
   config:Workspace.config ->
@@ -149,4 +165,12 @@ val logs_json :
   (Yojson.Safe.t, sandbox_logs_error) result
 (** Read the selected Keeper's actual Docker or Apple Container stdio logs.
     Container discovery remains label-scoped to [config.base_path] and
-    the effective Keeper name. *)
+    the effective Keeper name.
+
+    Three success shapes, all under one constant key set ([keeper],
+    [backend], [state], [reason], [tail], [instances]): [state="available"]
+    with a backend and one or more instances, [state="no_instance"] with a
+    backend and none, and [state="no_local_stream"] with [backend] null,
+    [instances] empty, and [reason] carrying the sentence for the operator.
+    A caller separates the last two on [state], and again on whether
+    [backend] is null. *)

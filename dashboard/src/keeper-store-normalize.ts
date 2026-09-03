@@ -13,8 +13,9 @@ import type {
   PipelineStage,
   PromptTelemetry,
   ProviderHealth,
+  SandboxProfile,
 } from './types'
-import { KEEPER_CONTEXT_NOT_OBSERVED_REASONS } from './types'
+import { KEEPER_CONTEXT_NOT_OBSERVED_REASONS, toSandboxProfile } from './types'
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { isKeeperOffline } from './lib/keeper-predicates'
 import { keeperDisplayStatus } from './lib/keeper-runtime-display'
@@ -173,15 +174,14 @@ function normalizeKeeperTrustSeverity(raw: unknown): KeeperTrustLatestEvent['sev
   }
 }
 
-function normalizeKeeperSandboxProfile(raw: unknown): Keeper['sandbox_profile'] {
-  const profile = asString(raw)?.trim().toLowerCase()
-  switch (profile) {
-    case 'local':
-    case 'docker':
-      return profile
-    default:
-      return null
-  }
+/** Reads the roster row's `sandbox_profile` (emitted by
+ *  `dashboard_http_keeper.ml` straight from
+ *  `keeper_sandbox_config.sandbox_profile_to_string`) through the shared closed
+ *  set. The previous switch listed `docker` and `local` only, so a microvm or
+ *  remote_ssh keeper normalized to null and every consumer rendered it as an
+ *  unknown sandbox; `local` is not a string the runtime can emit at all. */
+function normalizeKeeperSandboxProfile(raw: unknown): SandboxProfile | null {
+  return toSandboxProfile(asString(raw))
 }
 
 /** Maps lowercase backend phase strings (`keeper_state_machine.ml:phase_to_string`)

@@ -1774,33 +1774,35 @@ describe('AgentRoster live-only cards', () => {
     expect(container.textContent).not.toContain('주의 · ')
   })
 
-  it('surfaces the honest worktree-isolation badge for local-sandbox keepers', async () => {
+  // The row used to swap the keeper-id line for a "worktree 격리" badge when
+  // sandbox_profile was 'local'. The runtime's set is docker / microvm /
+  // remote_ssh (keeper_sandbox_config.ml), so that badge never rendered for
+  // any keeper and the ns slot is the keeper id for every profile.
+  it('keeps the keeper id in the ns slot for every profile the runtime emits', async () => {
     agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active', keeper_name: 'sangsu' })]
-    keepers.value = [
-      {
-        name: 'sangsu',
-        keeper_id: 'sangsu-uuid-77',
-        status: 'active',
-        phase: 'Running',
-        registered: true,
-        keepalive_running: true,
-        sandbox_profile: 'local',
-      } as Keeper,
-    ]
+    for (const profile of ['docker', 'microvm', 'remote_ssh'] as const) {
+      keepers.value = [
+        {
+          name: 'sangsu',
+          keeper_id: 'sangsu-uuid-77',
+          status: 'active',
+          phase: 'Running',
+          registered: true,
+          keepalive_running: true,
+          sandbox_profile: profile,
+        } as Keeper,
+      ]
 
-    await act(async () => {
-      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
-    })
-    await flushUi()
+      await act(async () => {
+        render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+      })
+      await flushUi()
 
-    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
-    const badge = row.querySelector('.fl-sandbox') as HTMLElement
-    expect(badge).not.toBeNull()
-    expect(row.textContent).toContain('worktree 격리')
-    // honest label: git worktree isolation is not an OS security boundary
-    expect(badge.getAttribute('title')).toContain('OS sandbox 없음')
-    // the runtime alias / keeper id no longer occupies the row ns slot
-    expect((row.querySelector('.fl-ns') as HTMLElement).textContent).not.toContain('sangsu-uuid-77')
+      const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+      expect(row.querySelector('.fl-sandbox')).toBeNull()
+      expect(row.textContent).not.toContain('worktree 격리')
+      expect((row.querySelector('.fl-ns') as HTMLElement).textContent).toContain('sangsu-uuid-77')
+    }
   })
 
   it('keeps a distinct projected keeper id without inferring an agent alias', async () => {

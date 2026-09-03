@@ -6,7 +6,7 @@ import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import type { KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState } from '../types'
+import type { KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, SandboxProfile } from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
   const booleanValue = asBoolean(value)
@@ -435,10 +435,10 @@ export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
     .then(raw => normalizeKeeperConfig(raw, name))
 }
 
-// Mirrors the runtime's closed set (lib/config/keeper_sandbox_config.ml).
-// Anything outside it parses to None there, so the dashboard must not add a
-// member of its own.
-export type SandboxProfile = 'docker' | 'microvm' | 'remote_ssh'
+// The closed profile set is declared once, in types/core.ts, next to the
+// coverage record that drives the panel's parser and its select. This module
+// re-exports it so `from './api/dashboard'` consumers are unchanged.
+export type { SandboxProfile } from '../types'
 export type SandboxNetworkMode = 'none' | 'inherit'
 
 export type KeeperConfigUpdatePayload = {

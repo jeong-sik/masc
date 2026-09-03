@@ -1230,9 +1230,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                    presence dot (and any informative detail) label-less. -->
               <${AgentPresence} status=${row.presenceDisplay.status} detail=${row.presenceDisplay.detail} size="sm" showLabel=${!row.isKeeper} />
             </div>
-            ${row.keeperRuntime?.sandbox_profile === 'local'
-              ? html`<div class="fl-ns"><span class="fl-sandbox" title="git worktree 격리 · localhost-trust (OS sandbox 없음)">⬡</span> worktree 격리</div>`
-              : keeperId ? html`<div class="fl-ns">keeper-id · ${keeperId}</div>` : null}
+            <!-- The 'local' worktree-isolation line that used to sit here was
+                 unreachable: the runtime's profile set is docker / microvm /
+                 remote_ssh (keeper_sandbox_config.ml) and it cannot emit
+                 'local'. -->
+            ${keeperId ? html`<div class="fl-ns">keeper-id · ${keeperId}</div>` : null}
           </div>
         </div>
 

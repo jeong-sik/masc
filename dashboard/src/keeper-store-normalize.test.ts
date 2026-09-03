@@ -34,6 +34,38 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
   })
 })
 
+describe('normalizeKeepers sandbox_profile', () => {
+  // The switch listed 'local' and 'docker' only. dashboard_http_keeper.ml emits
+  // sandbox_profile_to_string, so a microvm or remote_ssh keeper normalized to
+  // null and every consumer read it as an unknown sandbox: the fleet chip said
+  // "sandbox unknown", the goal tree's 샌드박스 cell was blank, and the detail
+  // alert strip lost its fallback.
+  it('keeps every profile the runtime can emit', () => {
+    const keepers = normalizeKeepers([
+      { name: 'a', status: 'active', sandbox_profile: 'docker' },
+      { name: 'b', status: 'active', sandbox_profile: 'microvm' },
+      { name: 'c', status: 'active', sandbox_profile: 'remote_ssh' },
+    ])
+    expect(keepers.map(keeper => keeper.sandbox_profile)).toEqual([
+      'docker',
+      'microvm',
+      'remote_ssh',
+    ])
+  })
+
+  // 'local' is not a string sandbox_profile_of_string parses, so a row carrying
+  // it is a row this dashboard cannot read -- not a fourth profile.
+  it('reads anything outside the runtime set as null', () => {
+    const keepers = normalizeKeepers([
+      { name: 'a', status: 'active', sandbox_profile: 'local' },
+      { name: 'b', status: 'active', sandbox_profile: 'some_future_profile' },
+      { name: 'c', status: 'active', sandbox_profile: '' },
+      { name: 'd', status: 'active' },
+    ])
+    expect(keepers.map(keeper => keeper.sandbox_profile)).toEqual([null, null, null, null])
+  })
+})
+
 describe('normalizeKeepers phase field', () => {
   it('normalizes lowercase backend phase to PascalCase KeeperPhase', () => {
     const [keeper] = normalizeKeepers([

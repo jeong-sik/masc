@@ -235,12 +235,14 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
     count_where live_keepers (fun keeper ->
       json_string_field_opt "sandbox_profile" keeper = Some profile)
   in
+  (* One bucket per member of the runtime's closed set
+     ([Keeper_sandbox_config.sandbox_profile]). The "local" bucket that used to
+     sit here counted a profile [sandbox_profile_of_string] rejects, so it read
+     zero on every request and its warn reason could never fire; remote_ssh,
+     which the runtime does emit, had no bucket at all. *)
   let docker_live_count = sandbox_profile_live_count "docker" in
   let microvm_live_count = sandbox_profile_live_count "microvm" in
-  let local_live_count =
-    count_where live_keepers (fun keeper ->
-      json_string_field_opt "sandbox_profile" keeper = Some "local")
-  in
+  let remote_ssh_live_count = sandbox_profile_live_count "remote_ssh" in
   let unknown_sandbox_count =
     count_where live_keepers (fun keeper ->
       Option.is_none (json_string_field_opt "sandbox_profile" keeper))
@@ -272,9 +274,6 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
         (if sandbox_error_count > 0 then
            Some (Printf.sprintf "%d live keepers report sandbox errors" sandbox_error_count)
          else None);
-        (if local_live_count > 0 then
-           Some (Printf.sprintf "%d live keepers are still running in local sandbox" local_live_count)
-         else None);
         (if unknown_sandbox_count > 0 then
            Some (Printf.sprintf "%d live keepers are missing sandbox provenance" unknown_sandbox_count)
          else None);
@@ -282,7 +281,7 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
   in
   let execution_safety_status =
     if pending_visible > 0 then "bad"
-    else if sandbox_error_count > 0 || local_live_count > 0 || unknown_sandbox_count > 0
+    else if sandbox_error_count > 0 || unknown_sandbox_count > 0
     then "warn"
     else "ok"
   in
@@ -344,7 +343,7 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
             ("live_keepers", List.length live_keepers);
             ("docker_live", docker_live_count);
             ("microvm_live", microvm_live_count);
-            ("local_live", local_live_count);
+            ("remote_ssh_live", remote_ssh_live_count);
             ("pending_approvals", pending_visible);
           ];
       readiness_pillar_json

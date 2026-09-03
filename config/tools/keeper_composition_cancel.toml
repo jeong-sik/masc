@@ -1,5 +1,8 @@
 name = "keeper_composition_cancel"
-description = "Request cancellation of one async Keeper composition by its exact durable request id."
+description = """
+Request cancellation of one async Keeper composition.
+
+Addressed by its exact durable request id."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name. Not

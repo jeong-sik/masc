@@ -1,9 +1,8 @@
 name = "keeper_person_note_set"
 description = """
-Remember (or clear) a note about a person met on a connected surface, keyed \
-by their roster speaker_id. Deliberate memory: the note survives after their \
-chat rows age out of the log window and shows up on the keeper_surface_read \
-roster."""
+Remember, or clear, a note about a person met on a connected surface.
+
+The note is keyed by their roster speaker_id. Deliberate memory: the note survives after their chat rows age out of the log window and shows up on the keeper_surface_read roster."""
 
 # Held back from the request until the model asks for it by name. Not
 # called once on 2026-08-29 or 2026-08-30 across the fleet.

@@ -565,6 +565,14 @@ let all =
       ~consumers:[ "Env_config_runtime.Inference"; "Tool_misc_web_search" ]
       ~category:"web_search"
       "Web-search result cache TTL in seconds"
+  ; setting
+      ~env_name:"MASC_OTEL_ENABLED"
+      ~exposure:(Toml_and_env "otel.enabled")
+      ~value_kind:Boolean
+      ~default:"false"
+      ~consumers:[ "Otel_config.enabled"; "Otel_spans" ]
+      ~category:"otel"
+      "Export OpenTelemetry spans and metrics to the OTLP endpoint"
   ]
 ;;
 

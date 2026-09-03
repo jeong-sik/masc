@@ -3,7 +3,7 @@ rfc: "0403"
 title: Keeper 별 도구 선택 — 부착 서비스는 provider 단위로만 켜고 끌 수 있다
 status: Draft
 created: 2026-09-02
-updated: 2026-09-02
+updated: 2026-09-03
 author: Claude Opus 5 (1M context)
 supersedes: []
 superseded_by: null
@@ -20,7 +20,8 @@ Keeper 가 부착 서비스를 하나 붙이면 그 서비스의 도구를 **전
 ## 1. 문제 — 실측 (2026-09-02)
 
 각 Keeper 가 실제로 wire 에 싣는 도구 스키마와, 로그 8일치에서 **한 번도 부르지
-않은** 도구의 비중:
+않은** 도구의 비중. **미호출 바이트는 이 RFC 가 걷어낼 수 있는 양이 아니다** —
+그 안에는 이 축이 건드리지 않는 내장 도구가 섞여 있다. 실제 절감은 §4 를 볼 것:
 
 | keeper | 레인 | 도구 | 스키마 | 미호출 | 미호출 바이트 | 비중 |
 |---|---|---|---|---|---|---|
@@ -51,9 +52,18 @@ Keeper 가 부착 서비스를 하나 붙이면 그 서비스의 도구를 **전
 | `atlassian_createConfluencePage` | 5,135 B | **0** |
 | `atlassian_createConfluenceFooterComment` | 4,655 B | **0** |
 
-네 개 합 **21.3 KB**. 같은 keeper 가 실제로 부른 Atlassian 도구는
-`searchJiraIssuesUsingJql` 94회, `getJiraIssue` 78회 등 읽기 쪽이다. 이 Keeper 는
-이름 그대로 checker 이고 Confluence 에 쓰지 않는다.
+네 개 합 **21.3 KB**. 같은 Keeper 가 31일치 `tool_calls` 전 기록
+(2026-08-03 ~ 09-02) 에서 실제로 부른 부착 도구는 다섯 종뿐이고 전부 읽기다:
+
+| 도구 | 호출 |
+|---|---|
+| `atlassian_searchJiraIssuesUsingJql` | 2,001 |
+| `atlassian_getJiraIssue` | 48 |
+| `atlassian_getJiraIssueRemoteIssueLinks` | 7 |
+| `atlassian_getAccessibleAtlassianResources` | 5 |
+| `atlassian_atlassianUserInfo` | 1 |
+
+이 Keeper 는 이름 그대로 checker 이고 Confluence 에 쓰지 않는다.
 
 ### 1.2 기존 장치로는 못 막는다
 
@@ -159,10 +169,32 @@ attached_allow = [
 
 ## 4. 검증
 
+### 4.1 실측한 절감 — `kidsnote-pr-jira-checker`
+
+라이브 wire 목록(`tools_ref` blob)에 31일치 호출 기록으로 만든 허용목록을
+적용해 계산했다. 배포 전이라 라이브 선언은 넣지 않았다.
+
+| | 도구 | 바이트 |
+|---|---|---|
+| 현재 wire | 122 | 135,500 |
+| 내장 — **이 축이 건드리지 않음** | 91 | 84,010 |
+| 부착 | 31 | 51,490 |
+| 부착 중 실제 호출됨 (허용목록) | 5 | 4,500 |
+| **부착 중 제거 가능** | **26** | **46,990** |
+| 적용 후 wire | 96 | 88,510 |
+
+**절감 46,990 B, 35%.**
+
+§1 표의 "미호출 94.4 KB" 는 이 축의 절감량이 아니다. 그 수치는 내장과 부착을
+합친 미호출이고, 내장 도구는 `defer_loading` 의 축이라 여기서 안 빠진다.
+초안이 둘을 섞어 적었다.
+
+### 4.2 목표
+
 | 지표 | 현재 | 목표 |
 |---|---|---|
-| `kidsnote-pr-jira-checker` 도구 수 / 스키마 | 122 / 140 KB | 선언한 수 / 그만큼 |
-| 미호출 스키마 바이트 | 94.4 KB | 선언 밖 도구는 0 |
+| `kidsnote-pr-jira-checker` 부착 도구 / 바이트 | 31 / 51,490 | 선언한 수 / 그만큼 |
+| 선언 밖 부착 도구 | 26 · 46,990 B | 0 |
 | 선언 없는 Keeper | — | **바이트 변화 0** |
 
 필수 회귀 테스트:

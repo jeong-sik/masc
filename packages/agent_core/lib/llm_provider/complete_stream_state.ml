@@ -158,6 +158,43 @@ let block_header_equal left right =
 
 let text_of_block block = String.concat "" (List.rev block.text_chunks_rev)
 
+(* A generation that starts repeating one paragraph does not stop on its own;
+   it runs to the token ceiling. Measured on a live collapse (29,788 bytes, 234
+   paragraphs, 11 distinct): the third occurrence of a repeated paragraph
+   landed at 1,691 bytes — 5% of what the provider was eventually paid for.
+   The remaining 95% wrote the same eleven paragraphs 221 more times.
+
+   Three is the same threshold the Keeper turn loop already uses for repeated
+   assistant text between rounds; this is that rule one layer in, where a
+   single generation can be stopped before it is finished.
+
+   Only whole paragraphs count. A repeated word or line is ordinary prose —
+   lists, tables and code all repeat short strings — and the collapse this
+   catches repeats units large enough to be a paragraph. Blank and very short
+   paragraphs are skipped for the same reason. *)
+let repeat_threshold = 3
+let repeat_min_paragraph_bytes = 40
+
+let repeating_paragraph text =
+  let paragraphs =
+    String.split_on_char '\n' text
+    |> List.filter_map (fun line ->
+      let trimmed = String.trim line in
+      if String.length trimmed < repeat_min_paragraph_bytes then None else Some trimmed)
+  in
+  let counts = Hashtbl.create 64 in
+  List.fold_left
+    (fun found paragraph ->
+       match found with
+       | Some _ -> found
+       | None ->
+         let seen = (try Hashtbl.find counts paragraph with Not_found -> 0) + 1 in
+         Hashtbl.replace counts paragraph seen;
+         if seen >= repeat_threshold then Some (paragraph, seen) else None)
+    None
+    paragraphs
+;;
+
 let block_has_payload block =
   block.text_chunks_rev <> []
   || block.input_piece_count > 0
@@ -240,6 +277,39 @@ let capture_failure failure state =
   | Some _ -> state
   | None -> { state with failure = Some failure }
 ;;
+
+(* Applied to text blocks only. A reasoning block that circles is a separate
+   question with its own ceiling, and stopping a provider mid-thought on a
+   repeated line would end turns that were about to answer. *)
+let guard_repeating_text ~index state =
+  match Blocks.find_opt index state.blocks with
+  | None -> state
+  | Some block ->
+    (match block.header with
+     | Announced { kind = Text_block; _ } ->
+       let text = text_of_block block in
+       (match repeating_paragraph text with
+        | None -> state
+        | Some (paragraph, occurrences) ->
+          capture_failure
+            (Types.Stream_repeating
+               { paragraph; occurrences; bytes_seen = String.length text })
+            state)
+     (* An unannounced block has no declared kind yet; a repeat there is
+        indistinguishable from a provider that has not said what it is
+        sending. *)
+     | Unannounced
+     | Announced { kind = Thinking_block; _ }
+     | Announced { kind = Reasoning_details_block; _ }
+     | Announced { kind = Redacted_thinking_block; _ }
+     | Announced { kind = Tool_use_block; _ }
+     | Announced { kind = Tool_result_block _; _ }
+     | Announced { kind = Image_block; _ }
+     | Announced { kind = Document_block; _ }
+     | Announced { kind = Audio_block; _ }
+     | Announced { kind = Unknown_block _; _ } -> state)
+;;
+
 
 let close_all_blocks state =
   { state with
@@ -363,7 +433,7 @@ let normalize_event state event =
   | Types.SSEUnsupportedResponse _
   | Types.Connected
   | Types.Timeout _
-  | Types.StreamIncomplete _ -> Ok (Some event)
+  | Types.StreamIncomplete _ | Types.StreamRepeating _ -> Ok (Some event)
 ;;
 
 let transition_open state = function
@@ -534,10 +604,12 @@ let transition_open state = function
             })
          state
      | _ ->
-       update_block
-         index
-         (fun block ->
-            match delta with
+       guard_repeating_text
+         ~index
+         (update_block
+            index
+            (fun block ->
+               match delta with
          | Types.TextDelta text | Types.ThinkingDelta text ->
            (* Incremental deltas append unconditionally. Whole text values have
               the distinct [TextSnapshot] constructor, so repeated tokens are
@@ -571,7 +643,7 @@ let transition_open state = function
            { block with
              signature_chunks_rev = signature :: block.signature_chunks_rev
            })
-         state)
+            state))
   | Types.ContentBlockStop { index } ->
     if state.message_lifecycle = Message_stopped
     then terminal_event_failure "content_block_stop_after_message_stop" state
@@ -625,6 +697,13 @@ let transition_open state = function
       state
   | Types.StreamIncomplete { reason } ->
     { state with disposition = Incomplete reason }
+  (* An inbound repeat event is the transport telling us what this module
+     already decides for itself; it is captured as the same sticky failure so
+     both paths end one way. *)
+  | Types.StreamRepeating { paragraph; occurrences; bytes_seen } ->
+    capture_failure
+      (Types.Stream_repeating { paragraph; occurrences; bytes_seen })
+      state
   | Types.MessageStop ->
     (match state.message_lifecycle with
      | Message_stopped -> state

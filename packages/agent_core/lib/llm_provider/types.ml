@@ -1615,6 +1615,11 @@ type sse_event =
   | Connected
   | Timeout of string
   | StreamIncomplete of { reason : string }
+  | StreamRepeating of
+      { paragraph : string
+      ; occurrences : int
+      ; bytes_seen : int
+      }
 
 (** Terminal error captured while accumulating a streaming response.
 
@@ -1638,6 +1643,17 @@ type stream_error =
       ; raw : string
       }
   | Stream_incomplete of { reason : string }
+  | Stream_repeating of
+      { paragraph : string
+      ; occurrences : int
+      ; bytes_seen : int
+      }
+      (** The generation started repeating one paragraph and did not stop. This
+          is neither a transport fault nor a malformed payload: the bytes parse,
+          and the provider is answering. Ending here rather than at the token
+          ceiling is what makes the difference legible — and it costs a
+          twentieth of the output, because a repeat is established long before
+          the ceiling is reached. *)
   | Stream_unknown_event of
       { event_type : string
       ; raw : string

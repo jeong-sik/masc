@@ -32,6 +32,7 @@ let stream_error_to_string = function
   | Stream_parse_failed { reason; _ } -> reason
   | Stream_ndjson_parse_failed { reason; _ } -> reason
   | Stream_incomplete { reason } -> reason
+  | Stream_repeating { paragraph; _ } -> paragraph
   | Stream_unknown_event { event_type; _ } -> "unknown_event:" ^ event_type
   | Stream_unsupported_part { part; _ } -> "unsupported_part:" ^ part
   | Stream_unsupported_response { response; _ } -> "unsupported_response:" ^ response
@@ -144,6 +145,80 @@ let test_accumulate_content_block_start_tool () =
     Alcotest.(check string) "tool_id" "tu_1" id;
     Alcotest.(check string) "tool_name" "calculator" name
   | _ -> Alcotest.fail "expected typed tool block"
+;;
+
+(* ── accumulate: repeating generation ─────────────────────── *)
+
+(* Measured on a live collapse: 29,788 bytes, 234 paragraphs, 11 distinct, and
+   the third occurrence of a repeated paragraph landed at 1,691 bytes — 5% of
+   what the provider was eventually paid for. The stream ends at that third
+   occurrence instead of at the token ceiling. *)
+
+let long_paragraph =
+  "lesson 03:20:12Z를 다시 정확히 읽자: due 전 금지는 dashboard 보고에만 적용된다"
+;;
+
+let feed_paragraphs acc lines =
+  Streaming.accumulate_event
+    acc
+    (ContentBlockStart
+       { index = 0; content_type = "text"; tool_id = None; tool_name = None });
+  List.iter
+    (fun line ->
+       Streaming.accumulate_event
+         acc
+         (ContentBlockDelta { index = 0; delta = TextDelta (line ^ "\n") }))
+    lines
+;;
+
+let test_repeating_paragraph_ends_the_stream () =
+  let acc = Streaming.create_stream_acc () in
+  feed_paragraphs acc [ long_paragraph; "다른 문단이 사이에 하나 들어간다 " ^ long_paragraph; long_paragraph; long_paragraph ];
+  match Streaming.failure acc with
+  | Some (Stream_repeating { paragraph; occurrences; bytes_seen }) ->
+    Alcotest.(check string) "the repeated paragraph" long_paragraph paragraph;
+    Alcotest.(check int) "stopped at the threshold" 3 occurrences;
+    if bytes_seen <= 0 then Alcotest.fail "bytes_seen must record what was read"
+  | Some _ -> Alcotest.fail "a repeat must not be reported as another failure"
+  | None -> Alcotest.fail "three identical paragraphs must end the stream"
+;;
+
+let test_two_occurrences_do_not_end_the_stream () =
+  let acc = Streaming.create_stream_acc () in
+  feed_paragraphs acc [ long_paragraph; long_paragraph ];
+  match Streaming.failure acc with
+  | None -> ()
+  | Some _ -> Alcotest.fail "two occurrences are repetition, not a collapse"
+;;
+
+(* Prose repeats short strings all the time — list markers, table cells, a
+   bare "ok". Only paragraph-sized units count, or ordinary answers would be
+   cut off. *)
+let test_short_repeated_lines_are_left_alone () =
+  let acc = Streaming.create_stream_acc () in
+  feed_paragraphs acc [ "- ok"; "- ok"; "- ok"; "- ok"; "- ok" ];
+  match Streaming.failure acc with
+  | None -> ()
+  | Some _ -> Alcotest.fail "short repeated lines must not end a stream"
+;;
+
+(* A reasoning block that circles is a separate question with its own ceiling;
+   stopping a provider mid-thought would end turns that were about to answer. *)
+let test_thinking_repeats_are_not_guarded () =
+  let acc = Streaming.create_stream_acc () in
+  Streaming.accumulate_event
+    acc
+    (ContentBlockStart
+       { index = 0; content_type = "thinking"; tool_id = None; tool_name = None });
+  List.iter
+    (fun _ ->
+       Streaming.accumulate_event
+         acc
+         (ContentBlockDelta { index = 0; delta = ThinkingDelta (long_paragraph ^ "\n") }))
+    [ (); (); (); () ];
+  match Streaming.failure acc with
+  | None -> ()
+  | Some _ -> Alcotest.fail "a repeating thinking block is not this guard's business"
 ;;
 
 (* ── accumulate: ContentBlockDelta ────────────────────────── *)
@@ -1059,6 +1134,24 @@ let () =
   Alcotest.run
     "stream_accumulator"
     [ "create", [ Alcotest.test_case "initial state" `Quick test_create_initial_state ]
+    ; ( "repeating"
+      , [ Alcotest.test_case
+            "three identical paragraphs end the stream"
+            `Quick
+            test_repeating_paragraph_ends_the_stream
+        ; Alcotest.test_case
+            "two do not"
+            `Quick
+            test_two_occurrences_do_not_end_the_stream
+        ; Alcotest.test_case
+            "short repeated lines are left alone"
+            `Quick
+            test_short_repeated_lines_are_left_alone
+        ; Alcotest.test_case
+            "thinking repeats are not guarded"
+            `Quick
+            test_thinking_repeats_are_not_guarded
+        ] )
     ; ( "accumulate"
       , [ Alcotest.test_case "message_start" `Quick test_accumulate_message_start
         ; Alcotest.test_case

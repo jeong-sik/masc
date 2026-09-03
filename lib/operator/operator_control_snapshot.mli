@@ -14,8 +14,9 @@
       (production caller [server_dashboard_http_keeper_api]).
     - {!valid_snapshot_view_strings},
       {!snapshot_view_of_string_opt}, {!snapshot_view}
-      (consumed by the [tool_operator] tool schema; no suite pins
-      the view vocabulary today).
+      (the [masc_operator_snapshot] tool schema's [view] enum is a
+      literal in [config/tools/masc_operator_snapshot.toml]; the
+      enum-mirror test pins it against this list).
     - {!get_payload} (runtime-include
       consumer {!Operator_control_action} reaches it
       unqualified).
@@ -71,9 +72,10 @@ val snapshot_view_to_string : snapshot_view -> string
 
 val valid_snapshot_view_strings : string list
 (** Wire forms accepted by {!snapshot_view_of_string_opt}.
-    Mirrored into the [tool_operator] tool schema's
-    [view] enum field via this surface so adding a
-    constructor automatically updates both the parser and schema. *)
+    The [masc_operator_snapshot] tool schema's [view] enum is a
+    literal in [config/tools/masc_operator_snapshot.toml]; the
+    enum-mirror test compares it against this list so adding a
+    constructor fails the suite until the file follows. *)
 
 val snapshot_view_of_string_opt : string -> snapshot_view option
 (** Trim- and case-insensitive parser ({!Summary} ↔

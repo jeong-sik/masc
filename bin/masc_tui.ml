@@ -16233,14 +16233,9 @@ and is loaded on demand through keeper_skill.
          that only watched turns would leave that mark frozen on whatever
          quarter it stopped at -- which reads as a lane stuck there. *)
       let anything_running =
-        List.exists Masc_tui_answering.is_running state.keeper_turns
-        || (match state.standalone_lanes with
-            | None -> false
-            | Some snapshot ->
-              List.exists
-                (fun (lane : Tui_decode.standalone_lane) ->
-                  lane.sl_status = Tui_decode.Standalone_running)
-                snapshot.Tui_decode.sls_lanes)
+        Masc_tui_answering.anything_running ~turns:state.keeper_turns
+          ~live_transcript:(Option.is_some state.msg_live)
+          ~lanes:state.standalone_lanes
       in
       if not anything_running then begin
         if state.activity_frame >= 0 then begin

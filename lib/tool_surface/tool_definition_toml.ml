@@ -561,6 +561,7 @@ type loaded =
   ; agent_core_projection : Masc_domain.tool_schema option
   ; help : help option
   ; loading : loading
+  ; operator_remote_description : string option
   ; shell_command : string list option
         (** RFC tools-as-shell-commands: the sub-command path this tool is
             reachable under inside a keeper's shell line ([board post get]
@@ -820,6 +821,13 @@ let tool_of_pairs ~name pairs =
       let* flag = as_bool ~context:"defer_loading" value in
       Ok (if flag then Deferrable else Always_loaded)
   in
+  let* operator_remote_description =
+    match List.assoc_opt "operator_remote_description" pairs with
+    | None -> Ok None
+    | Some value ->
+      let* text = as_non_empty_string ~context:"operator_remote_description" value in
+      Ok (Some text)
+  in
   let* shell_command =
     match List.assoc_opt "shell_command" pairs with
     | None -> Ok None
@@ -881,6 +889,7 @@ let tool_of_pairs ~name pairs =
         ; "agent_core_projection"
         ; "help"
         ; "defer_loading"
+        ; "operator_remote_description"
         ; "shell_command"
         ]
     in
@@ -903,6 +912,7 @@ let tool_of_pairs ~name pairs =
     ; agent_core_projection
     ; help
     ; loading
+    ; operator_remote_description
     ; shell_command
     }
 ;;

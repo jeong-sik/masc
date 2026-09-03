@@ -355,6 +355,43 @@ let test_goal_tool_enum_mirrors () =
     ]
 ;;
 
+(* masc_operator_snapshot, masc_operator_digest and masc_operator_action moved
+   to config/tools/masc_operator_*.toml, where the enum arrays are literals:
+   nothing in TOML can read an OCaml value. The owners are
+   [Operator_control_snapshot], [Masc.Operator_action_constants] and
+   [Masc.Operator_action_catalog]. Each property is checked on its own tool's
+   schema -- digest and action both declare [target_type] with different
+   vocabularies, so a combined walk could let one hide the other's drift. *)
+let test_operator_tool_enum_mirrors () =
+  let schema name =
+    match
+      List.find_opt
+        (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
+        Operator_tool.schemas
+    with
+    | Some s -> s
+    | None -> failf "%s is absent from Operator_tool.schemas" name
+  in
+  List.iter
+    (fun (tool, property, owner) ->
+       check
+         (list string)
+         (Printf.sprintf "%s %s matches its typed owner" tool property)
+         (List.sort_uniq String.compare owner)
+         (advertised_values_for_schemas [ schema tool ] ~property))
+    [ ( "masc_operator_snapshot"
+      , "view"
+      , Operator_control_snapshot.valid_snapshot_view_strings )
+    ; ( "masc_operator_digest"
+      , "target_type"
+      , [ Masc.Operator_action_constants.workspace_target_type ] )
+    ; ( "masc_operator_action"
+      , "target_type"
+      , Masc.Operator_action_constants.valid_target_type_strings )
+    ; "masc_operator_action", "action_type", Masc.Operator_action_catalog.strings
+    ]
+;;
+
 (* Board sub-board access. [Masc.Board] owns the vocabulary through
    [sub_board_access_of_string_opt]; the schema writes the three strings by
    hand, in two places. *)
@@ -482,6 +519,7 @@ let () =
             `Quick
             test_read_file_default_appears_in_its_description
         ; test_case "goal tool enums" `Quick test_goal_tool_enum_mirrors
+        ; test_case "operator tool enums" `Quick test_operator_tool_enum_mirrors
         ; test_case "sub_board access values decode" `Quick
             test_sub_board_access_advertised_values_decode
         ; test_case "reclaim_policy values decode" `Quick

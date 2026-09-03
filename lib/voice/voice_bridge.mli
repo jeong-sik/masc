@@ -134,11 +134,22 @@ val amplitude_of_db : float -> float
 
 (** {1 Microphone record + transcribe} *)
 
+val measure_noise_floor : agent_id:string -> float option
+(** One short capture with no silence filter, returning the room's RMS
+    amplitude. [None] when the recorder could not run.
+
+    Exposed for a caller that captures repeatedly: the room does not change
+    between two utterances the way it changes across a session, and re-probing
+    costs about 1.15 s of the gap between them. *)
+
 val record_and_transcribe :
   agent_id:string ->
   ?timeout_sec:float ->
   ?language_code:string ->
+  ?noise_floor:float ->
   unit ->
   (Yojson.Safe.t, string) result
 (** Record from microphone (with beep tones), transcribe via STT.
+    [noise_floor] reuses a level already measured; omitted, the room is
+    probed before recording.
     Returns transcription JSON on success. *)

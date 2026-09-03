@@ -8141,7 +8141,13 @@ let launch_voice_capture state ~mailbox ~keeper =
   in
   let run () =
     let result =
-      try Ok (Masc.Voice_bridge.record_and_transcribe ~agent_id:keeper ()) with
+      try
+        Ok
+          (Masc.Voice_bridge.record_and_transcribe
+             ~agent_id:keeper
+             ?noise_floor:state.voice_floor
+             ())
+      with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
@@ -8207,6 +8213,18 @@ let launch_voice_capture state ~mailbox ~keeper =
     Eio.Fiber.fork_daemon ~sw (fun () -> meter (); `Stop_daemon)
 ;;
 
+(* Continuous mode's only moving part: after each capture settles, start the
+   next one. Left as a separate step rather than looping inside the fiber so
+   the mode can be turned off between utterances — a fiber that re-armed itself
+   would have to be cancelled mid-recording, and that throws away speech
+   already said. *)
+let rearm_continuous_capture state ~mailbox ~keeper =
+  match state.voice_continuous with
+  | Some active when String.equal active keeper && state.voice_capture = None ->
+      launch_voice_capture state ~mailbox ~keeper
+  | Some _ | None -> ()
+;;
+
 let handle_composer_key state ~base_path ~mailbox key =
   if state.workspace_identity <> Masc_tui_types.Workspace_identity_match
   then false
@@ -8227,12 +8245,39 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Composer.No_target | Composer.Unreachable _ -> ());
       true
   | Composer.Start_listening ->
+      (* Pressing it while continuous mode is on turns the mode off. That is
+         the only way out: a mode that re-arms itself needs a key that stops
+         it, and the key that started it is the one the operator will reach
+         for. A capture already running is left to finish — cancelling it
+         would throw away speech that was already said. *)
+      (match state.voice_continuous with
+       | Some _ ->
+           state.voice_continuous <- None;
+           state.last_action <- Some ("voice: continuous off", Unix.gettimeofday ())
+       | None ->
       (* One capture at a time: a second microphone would contend for the same
          input device and the two transcripts would race into one draft. *)
       (match state.voice_capture, composer.Composer.target with
        | Some _, _ -> ()
        | None, Composer.Ready keeper_name ->
            launch_voice_capture state ~mailbox ~keeper:keeper_name
+       | None, (Composer.No_target | Composer.Unreachable _) -> ()));
+      true
+  | Composer.Toggle_continuous ->
+      (match state.voice_continuous, composer.Composer.target with
+       | Some _, _ ->
+           state.voice_continuous <- None;
+           state.last_action <- Some ("voice: continuous off", Unix.gettimeofday ())
+       | None, Composer.Ready keeper_name ->
+           (* The floor is measured once here rather than per capture, which is
+              what makes the gap between utterances short enough to speak
+              across. It is dropped when the mode ends, so a session that moves
+              to a different room measures again. *)
+           state.voice_continuous <- Some keeper_name;
+           state.voice_floor <- Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper_name;
+           state.last_action <- Some ("voice: continuous on", Unix.gettimeofday ());
+           if state.voice_capture = None
+           then launch_voice_capture state ~mailbox ~keeper:keeper_name
        | None, (Composer.No_target | Composer.Unreachable _) -> ());
       true
   | Composer.Release_focus ->
@@ -8423,6 +8468,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       if state.voice_capture = Some keeper then (
         state.voice_capture <- None;
         state.voice_level_db <- None;
+        rearm_continuous_capture state ~mailbox ~keeper;
         (* Appended, not replacing: an operator who typed part of a message and
            then spoke the rest keeps both. A separator only where there is
            something to separate. *)
@@ -8436,11 +8482,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       if state.voice_capture = Some keeper then (
         state.voice_capture <- None;
         state.voice_level_db <- None;
+        (* Silence re-arms too: an operator who paused longer than the
+           trailing-silence window has not left the mode. *)
+        rearm_continuous_capture state ~mailbox ~keeper;
         state.last_action <- Some ("voice: " ^ reason, Unix.gettimeofday ()))
   | Voice_failed { keeper; error } ->
       if state.voice_capture = Some keeper then (
         state.voice_capture <- None;
         state.voice_level_db <- None;
+        (* A failure ends the mode rather than re-arming into it. Whatever
+           stopped the recorder — no input device, a missing binary — will stop
+           it again, and a loop that re-arms on failure spins. *)
+        state.voice_continuous <- None;
+        state.voice_floor <- None;
         state.last_action <- Some ("voice failed: " ^ error, Unix.gettimeofday ()))
   | Http_refresh_done results ->
       http_refresh_inflight := false;

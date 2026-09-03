@@ -242,6 +242,20 @@ tables, per-surface behavior, themes, and troubleshooting are in
 
 ## MCP client setup
 
+The one-step path is `masc mcp-config`: it mints a bearer and prints a ready
+config block for your client, so you paste one block instead of assembling the
+URL, token, and header by hand.
+
+```bash
+masc mcp-config --base-path /path/to/project --client codex
+masc mcp-config --base-path /path/to/project --client claude-desktop
+masc mcp-config --base-path /path/to/project --client env   # shell exports
+```
+
+It mints a long-lived worker token (pass `--expiring` for a session-scoped one)
+and embeds the endpoint, token, and header for the chosen client. The manual
+pieces below are the same shapes, for wiring a client the command does not cover.
+
 HTTP is the public MCP path. First load the worker bearer created by
 `quickstart.sh`:
 

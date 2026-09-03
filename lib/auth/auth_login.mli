@@ -168,6 +168,22 @@ val render_shell : t -> string
     single-quotes escaped via the standard ['\\''] sequence) so the
     output is safe for unattended sourcing. *)
 
+type mcp_client =
+  | Codex  (** bearer-env TOML block, e.g. Codex-style clients. *)
+  | Claude_desktop  (** [mcpServers] JSON that bridges over [mcp-remote]. *)
+  | Env  (** shell exports, for any client that reads the token from env. *)
+
+val mcp_client_of_string : string -> mcp_client option
+(** ["codex"] / ["claude-desktop"] / ["env"], or [None] for any other name. *)
+
+val render_mcp_client_config : t -> mcp_client -> string
+(** [render_mcp_client_config report client] returns a ready configuration
+    block for [client], carrying [report]'s [mcp_url], [mcp_token_env_var], and
+    minted bearer, so a client can connect without hand-wiring the URL, token,
+    and header. [Env] delegates to {!render_shell}; the other two embed the raw
+    bearer in the block the client reads, matching the documented shapes in
+    [docs/MCP-TEMPLATE.md] and the README. *)
+
 val render_text : t -> string
 (** [render_text report] returns a multi-line human-readable summary
     suitable for terminal display: status / base_path /

@@ -121,7 +121,13 @@ let make_meta ?(name = keeper_matrix_owner) () =
           ("trace_id", `String "keeper-tool-matrix-trace");
         ])
   with
-  | Ok meta -> meta
+  | Ok meta ->
+    (* The decoder fills [sandbox_profile] with a placeholder its own comment
+       calls a bug to read as authority, and nothing here overwrote it, so
+       every case ran under whatever that placeholder happened to be --
+       Docker. What this suite measures is the tools, not a backend, so it
+       says which backend it wants instead of inheriting one it never chose. *)
+    { meta with sandbox_profile = Masc_test_deps.fixture_sandbox_profile () }
   | Error err -> failwith ("make_meta failed: " ^ err)
 
 let all_keeper_tool_schemas_raw () =

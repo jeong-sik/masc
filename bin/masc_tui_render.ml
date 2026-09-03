@@ -7366,7 +7366,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
         if String.equal label "you" then "YOU"
         else label
     | Message_keeper -> Keeper_chat.terminal_safe_text message.me_keeper_name
-    | Message_autonomous -> "AUTO"
+    | Message_autonomous -> Keeper_chat.terminal_safe_text message.me_keeper_name
     | Message_status -> "STATUS"
     | Message_error -> "ERROR"
     | Message_tool -> "TOOLS"
@@ -7380,15 +7380,35 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
      it. Adjacent rows from the exact same request still fold as continuations
      in [Message_layout]; a row resuming after another lane names its source
      again. *)
+  (* Who asked for a turn is one fact per turn, not one per row. It was the
+     speaker label on every autonomous row, so the same keeper answered as
+     itself when a person asked and as AUTO when nobody did -- two speakers for
+     one keeper, interleaved with broadcasts and journal commits on one clock.
+     The turn's opening row says it; the rows continuing that turn read as the
+     keeper, like every other answer it gives. *)
+  let role_label_of message edge =
+    match message.Masc_tui_types.me_role with
+    | Message_autonomous -> (
+        match edge with
+        | Masc_tui_types.Turn_opens | Masc_tui_types.Turn_alone -> "AUTO"
+        | Masc_tui_types.Turn_continues | Masc_tui_types.Turn_closes
+        | Masc_tui_types.Turn_outside ->
+            base_role_label_of message)
+    | _ -> base_role_label_of message
+  in
   let visible_messages =
     List.mapi (fun entry_index message -> (entry_index, message)) messages
+  in
+  let turn_edges =
+    List.map snd (Masc_tui_types.mark_turn_edges messages)
   in
   let timeline_ats = List.map snd visible_timeline in
   let labeled_messages =
     List.map2
-      (fun (entry_index, message) timeline_at ->
-        (entry_index, message, base_role_label_of message, timeline_at))
-      visible_messages timeline_ats
+      (fun ((entry_index, message), edge) timeline_at ->
+        (entry_index, message, role_label_of message edge, timeline_at))
+      (List.combine visible_messages turn_edges)
+      timeline_ats
   in
   let projected_tool_rows =
     keeper_message_tool_rows state ~keeper_name ~chat_cols

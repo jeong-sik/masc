@@ -96,6 +96,30 @@ let test_write_shapes_stay_blocked () =
   blocked "git with no subcommand" [ "git" ]
 ;;
 
+
+let executes ~operation ~sandbox_profile argv =
+  Readonly.observation_only_request ~operation ~sandbox_profile ~input:(gate_input argv)
+;;
+
+let executes_script ~operation ~sandbox_profile script =
+  Readonly.observation_only_request
+    ~operation
+    ~sandbox_profile
+    ~input:(script_gate_input script)
+;;
+
+let script_gate_request ?profile ?target ~sandbox_profile base_path script =
+  { Keeper_gate.keeper_name = "alpha"
+  ; operation = "tool_execute"
+  ; input = script_gate_input ?profile ?target script
+  ; base_path
+  ; sandbox_profile
+  ; causal_context = None
+  ; task_id = None
+  ; continuation_channel = None
+  }
+;;
+
 (* ── script→argv equivalence (RFC-0404) ─────────────────────────────── *)
 
 let equivalent label script argv =
@@ -194,29 +218,6 @@ let test_auto_judge_allows_script_observation_without_queueing () =
        | Keeper_gate.Auto_judge_unavailable detail -> "auto_judge_unavailable: " ^ detail
        | Keeper_gate.Mode_state_invalid detail -> "mode_state_invalid: " ^ detail)
   | Keeper_gate.Unavailable _ -> fail "script observation made the queue unavailable"
-;;
-
-let executes ~operation ~sandbox_profile argv =
-  Readonly.observation_only_request ~operation ~sandbox_profile ~input:(gate_input argv)
-;;
-
-let executes_script ~operation ~sandbox_profile script =
-  Readonly.observation_only_request
-    ~operation
-    ~sandbox_profile
-    ~input:(script_gate_input script)
-;;
-
-let script_gate_request ?profile ?target ~sandbox_profile base_path script =
-  { Keeper_gate.keeper_name = "alpha"
-  ; operation = "tool_execute"
-  ; input = script_gate_input ?profile ?target script
-  ; base_path
-  ; sandbox_profile
-  ; causal_context = None
-  ; task_id = None
-  ; continuation_channel = None
-  }
 ;;
 
 let docker = Some Keeper_types_profile_sandbox.Docker

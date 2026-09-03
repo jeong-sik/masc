@@ -266,7 +266,7 @@ let test_group_body_registers_under_group_key () =
       let surfaces = registered_surfaces () in
       check (option string) "the group body keeps the frontmatter surface"
         (Some "primary") (List.assoc_opt "test.body" surfaces);
-      check (option string) "a slot is a fragment of its group" (Some "fragment")
+      check (option string) "a slot takes its group's surface" (Some "primary")
         (List.assoc_opt "test.body.identity" surfaces))
 ;;
 

@@ -338,6 +338,23 @@ let test_backspace_removes_one_utf8_scalar () =
   check string "invalid buffer is preserved" invalid
     (Layout.drop_last_utf8_scalar invalid)
 
+let test_word_delete_removes_blanks_then_word () =
+  let word input = Layout.drop_last_utf8_word input in
+  check string "last word goes, separator stays" "hello " (word "hello world");
+  check string "trailing blanks go with the word" "hello  "
+    (word "hello  world  ");
+  check string "a second press walks the next word" "" (word "hello ");
+  check string "a lone word empties the draft" "" (word "hello");
+  check string "empty stays empty" "" (word "");
+  check string "only blanks empty the draft" "" (word "   ");
+  check string "tab is a separator" "hello\t" (word "hello\tworld");
+  check string "newline is a separator" "one\n" (word "one\ntwo");
+  check string "multi-byte words go whole" "한글 " (word "한글 단어");
+  check string "multi-byte separator side survives" "한글 "
+    (word "한글 세종🙂");
+  let invalid = "word \xE2" in
+  check string "invalid buffer is preserved" invalid (word invalid)
+
 let test_input_viewport_keeps_latest_complete_scalars () =
   let viewport max_cells input = Layout.input_viewport ~max_cells input in
   check string "short input stays complete" "abc" (viewport 8 "abc");
@@ -1876,6 +1893,8 @@ let () =
             test_utf8_scalar_input_contract
         ; test_case "backspace removes one UTF-8 scalar" `Quick
             test_backspace_removes_one_utf8_scalar
+        ; test_case "word delete removes blanks then word" `Quick
+            test_word_delete_removes_blanks_then_word
         ; test_case "input viewport keeps latest scalars" `Quick
             test_input_viewport_keeps_latest_complete_scalars
         ; test_case "input cursor uses visible cells" `Quick

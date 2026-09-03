@@ -8,6 +8,35 @@ open Alcotest
 module Cal = Masc.Eval_calibration
 module AR = Masc.Task.Anti_rationalization
 
+(* [select_examples] renders the rejected-label prose and
+   [format_few_shot_block] the few-shot templates from
+   config/prompts/eval.calibration.few_shot.md through the prompt registry.
+   Pin resolution to the repo's own prompt files — the same idiom
+   test_fusion_wake uses — so these paths render the real templates inside
+   the dune sandbox instead of raising on a missing prompt. *)
+let has_prompt_root path =
+  Sys.file_exists (Filename.concat path "config/prompts/eval.calibration.few_shot.md")
+;;
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_prompt_root root -> root
+  | _ ->
+    let rec ascend path =
+      if has_prompt_root path
+      then path
+      else (
+        let parent = Filename.dirname path in
+        if String.equal parent path then Sys.getcwd () else ascend parent)
+    in
+    ascend (Sys.getcwd ())
+;;
+
+let () =
+  Prompt_registry.set_markdown_dir (Filename.concat (repo_root ()) "config/prompts");
+  Masc.Prompt_defaults.init ()
+;;
+
 let test_counter = ref 0
 
 let contains ~sub s =

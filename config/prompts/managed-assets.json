@@ -12,10 +12,12 @@
     "judge.md",
     "keeper.autonomous.wake.txt",
     "keeper.md",
+    "keeper.world.transcript.md",
     "lane_cli_probe.md",
     "librarian.md",
     "mcp.md",
     "tool_failure.md",
+    "tool_help.md",
     "verification.md"
   ]
 }

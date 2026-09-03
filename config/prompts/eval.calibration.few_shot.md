@@ -13,3 +13,6 @@ Example {{index}}:
   Task: {{task_title}}
   Notes: {{notes_excerpt}}
   Correct verdict: {{correct_verdict}}
+
+### rejected_label
+REJECT: evaluator incorrectly approved

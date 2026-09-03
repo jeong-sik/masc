@@ -146,10 +146,24 @@ let evidence_section ~required_evidence =
 
 (* Unavailable or partial roots are rejected while constructing the lookup
    surface. Reaching this renderer with no entries therefore means the
-   authority measured a readable, empty root. *)
+   authority measured a readable, empty root. The empty-marker sentence lives
+   in verification.md ([lookup.root_layout_empty]); the two-space indent is
+   layout, not prose. *)
 let root_layout_lines = function
-  | [] -> "  (this root is empty)"
-  | entries -> entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n"
+  | [] ->
+    (match
+       Prompt_registry.render_prompt_template
+         Prompt_names.verification_lookup_root_layout_empty
+         []
+     with
+     | Ok text -> Ok ("  " ^ String.trim text)
+     | Error detail ->
+       Error
+         (sprintf
+            "prompt %s: %s"
+            Prompt_names.verification_lookup_root_layout_empty
+            detail))
+  | entries -> Ok (entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n")
 ;;
 
 let tool_names schemas =
@@ -161,14 +175,16 @@ let tool_names schemas =
 let lookup_section = function
   | No_lookup_surface -> render Prompt_names.verification_lookup_none []
   | Lookup_tools { schemas; dispatch = _; root_layout } ->
+    let ( let* ) = Result.bind in
+    let* lookup_root_layout = root_layout_lines root_layout in
     render
       Prompt_names.verification_lookup_producer_tree
-      [ "lookup_tools", tool_names schemas
-      ; "lookup_root_layout", root_layout_lines root_layout
-      ]
+      [ "lookup_tools", tool_names schemas; "lookup_root_layout", lookup_root_layout ]
 ;;
 
-let build_prompt ?(few_shot_block = "") ?completion_contract
+let build_prompt
+      ?(few_shot_block = "")
+      ?completion_contract
       ?(required_evidence = [])
       ~(lookup : lookup_surface)
       (req : review_request) : (string, string) result =

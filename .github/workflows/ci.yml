@@ -66,6 +66,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Check source text integrity
+        run: scripts/ci/check-source-text-integrity.sh
+
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
 

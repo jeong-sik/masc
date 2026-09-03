@@ -170,13 +170,18 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
            response.content
        in
        let response = { response with content = admission.Agent_tools.admitted } in
-       (match admission.Agent_tools.rejected with
-        | 0 -> ()
-        | rejected ->
+       (match admission.Agent_tools.rejected_names with
+        | [] -> ()
+        | names ->
+          (* The names, not just how many. An operator reading a bare count
+             cannot tell a hallucinated tool from a catalog that drifted. *)
           Log.warn
             _log
             "tool calls dropped before history"
-            [ Log.I ("rejected", rejected); Log.I ("turn", turn) ]);
+            [ Log.I ("rejected", List.length names)
+            ; Log.S ("names", Agent_tools.describe_rejected_names names)
+            ; Log.I ("turn", turn)
+            ]);
        let usage =
          Agent_turn.accumulate_usage
            ~current_usage:agent.state.usage
@@ -246,20 +251,21 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
                | Types.Audio _ -> false)
              response.content
          in
-         match admission.Agent_tools.rejected with
-         | 0 -> None
+         match admission.Agent_tools.rejected_names with
+         | [] -> None
          | _ when admitted_any_call -> None
-         | rejected ->
+         | names ->
            Some
              { Types.role = User
              ; content =
                  [ Types.Text
                      (Printf.sprintf
                         "%d tool call(s) in your previous message named no \
-                         registered tool and were not run. Send a registered \
-                         tool name on its own and put every argument in the \
-                         input object."
-                        rejected)
+                         registered tool and were not run: %s. Send a \
+                         registered tool name on its own and put every \
+                         argument in the input object."
+                        (List.length names)
+                        (Agent_tools.describe_rejected_names names))
                  ]
              ; name = None
              ; tool_call_id = None
@@ -363,7 +369,7 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
        (* The admitted response, not the wire one, is what the output stage must
           route: dispatch reads [response.content] on its own, so handing back
           the original here would run a call the transcript no longer records. *)
-       Ok (response, admission.Agent_tools.rejected))
+       Ok (response, admission.Agent_tools.rejected_names))
 ;;
 
 (* ── Stage 5: Execute ────────────────────────────────────── *)
@@ -493,7 +499,7 @@ let stage_output ?raw_trace_run ?before_tool_execution ~turn ~rejected_tool_call
              response.content
          in
          (match Nonempty.of_list tool_uses with
-          | None when rejected_tool_calls > 0 ->
+          | None when rejected_tool_calls <> [] ->
             (* Every call this turn named no registered tool, so admission kept
                none of them (see [Agent_tools.admit_tool_use_names]). The turn
                did reach a decision — it just routed nowhere — and the note

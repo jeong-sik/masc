@@ -14,7 +14,6 @@ type waiting_source =
   | Chat_operation_queued
   | Chat_operation_running
   | Hitl_pending
-  | External_attention
   | Fusion_running
   | Schedule_waiting
   | Owner_shutdown
@@ -30,7 +29,6 @@ type wake_producer =
   | Connector_attention_hook
   | Hitl_resolution_hook
   | Keeper_ask_answer
-  | External_attention_store
   | Schedule_store
   | Schedule_runner
   | Operator_pending_confirm_store
@@ -67,8 +65,6 @@ module For_testing : sig
       (urgency, source, conversation), the oldest member anchoring the row.
       Exposed for the grouping tests; production reads go through
       [dashboard_json]. *)
-  val external_attention_grouped_rows :
-    keeper_name:string -> Keeper_external_attention.item list -> waiting_row list
 
   (** Pending queue selections with Connector_attention stimuli collapsed
       into one row per urgency. Exposed for the grouping tests; production

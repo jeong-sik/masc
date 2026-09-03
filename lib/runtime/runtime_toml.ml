@@ -739,8 +739,6 @@ let parse_thinking_control_format ~(path : string) ~(token : string option) (raw
   | "ollama-think" | "ollama_think" -> reject_orphan_token Runtime_schema.Ollama_think
   | "reasoning-effort" | "reasoning_effort" ->
     reject_orphan_token Runtime_schema.Reasoning_effort
-  | "enable-thinking" | "enable_thinking" ->
-    reject_orphan_token Runtime_schema.Enable_thinking
   | other ->
     (* Unknown enum members fail the load, mirroring how this parser already
        rejects unknown protocols / credential types. A silent downgrade to
@@ -751,7 +749,7 @@ let parse_thinking_control_format ~(path : string) ~(token : string option) (raw
          (path ^ ".thinking-control-format")
          (Printf.sprintf
             "unknown thinking-control-format %S — expected one of \
-             none|thinking-object|thinking-object-only|chat-template-kwargs|chat-template-token|ollama-think|reasoning-effort|enable-thinking"
+             none|thinking-object|thinking-object-only|chat-template-kwargs|chat-template-token|ollama-think|reasoning-effort"
             other))
 ;;
 

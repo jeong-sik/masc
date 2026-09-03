@@ -19,13 +19,11 @@ type thinking_control_format =
           instead of raising per request. *)
   | Ollama_think
   | Reasoning_effort
-  | Enable_thinking
 
 type preserve_thinking_control_format =
   | No_preserve_thinking_control
   | Thinking_object_keep_all
   | Chat_template_kwargs_preserve_thinking
-  | Top_level_preserve_thinking
   | Always_preserved_thinking
   | Thinking_object_clear_thinking
   (** A provider [thinking] request object whose [clear_thinking] member both
@@ -142,7 +140,6 @@ let canonical_label_of_thinking_control_format = function
   | Chat_template_token _ -> "chat_template_token"
   | Ollama_think -> "ollama_think"
   | Reasoning_effort -> "reasoning_effort"
-  | Enable_thinking -> "enable_thinking"
 ;;
 
 (* These formats carry no companion token and can therefore serve directly as
@@ -156,7 +153,6 @@ let tokenless_thinking_control_formats =
   ; Chat_template_kwargs
   ; Ollama_think
   ; Reasoning_effort
-  ; Enable_thinking
   ]
 ;;
 
@@ -198,8 +194,7 @@ let token_of_thinking_control_format = function
   | Thinking_object_only
   | Chat_template_kwargs
   | Ollama_think
-  | Reasoning_effort
-  | Enable_thinking -> None
+  | Reasoning_effort -> None
 ;;
 
 let validate_thinking_control_token token =
@@ -292,7 +287,6 @@ let preserve_thinking_control_format_table =
   [ "none", No_preserve_thinking_control
   ; "thinking_object_keep_all", Thinking_object_keep_all
   ; "chat_template_kwargs_preserve_thinking", Chat_template_kwargs_preserve_thinking
-  ; "top_level_preserve_thinking", Top_level_preserve_thinking
   ; "always_preserved", Always_preserved_thinking
   ; "thinking_object_clear_thinking", Thinking_object_clear_thinking
   ]
@@ -308,7 +302,6 @@ let preserve_wire_owns_thinking_object = function
   | No_preserve_thinking_control
   | Thinking_object_keep_all
   | Chat_template_kwargs_preserve_thinking
-  | Top_level_preserve_thinking
   | Always_preserved_thinking -> false
 ;;
 

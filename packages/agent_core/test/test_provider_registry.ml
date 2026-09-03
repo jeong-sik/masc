@@ -818,9 +818,9 @@ let test_catalog_accepts_explicit_thinking_control_formats () =
              {"id": "kimi-k2", "kind": "openai_compat",
               "base_url": "https://kimi-k2.example",
               "capabilities": {"thinking_control_format": "thinking_object_only"}},
-             {"id": "top-level-thinking", "kind": "openai_compat",
-              "base_url": "https://top-level-thinking.example",
-              "capabilities": {"thinking_control_format": "enable_thinking"}},
+             {"id": "thinking-object", "kind": "openai_compat",
+              "base_url": "https://thinking-object.example",
+              "capabilities": {"thinking_control_format": "thinking_object"}},
              {"id": "ollama-cloud", "kind": "ollama",
               "base_url": "https://ollama-cloud.example",
               "capabilities": {"thinking_control_format": "ollama_think"}},
@@ -848,7 +848,7 @@ let test_catalog_accepts_explicit_thinking_control_formats () =
       | None -> fail (id ^ " should exist")
     in
     check_format "kimi-k2" Capabilities.Thinking_object_only;
-    check_format "top-level-thinking" Capabilities.Enable_thinking;
+    check_format "thinking-object" Capabilities.Thinking_object;
     check_format "ollama-cloud" Capabilities.Ollama_think;
     check_format "openai-reasoning" Capabilities.Reasoning_effort;
     (match Provider_catalog.lookup catalog "kimi-latest" with

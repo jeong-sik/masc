@@ -328,36 +328,6 @@ let test_qwen36_reasoning_dialect_without_preserve_keeps_tool_reasoning () =
     (RD.should_replay_reasoning dialect ~assistant_had_tool_call:true)
 ;;
 
-(* The top-level enable_thinking wire has no catalog producer left after the
-   DashScope preset went; a manifest or override can still declare it, so the
-   three fields it renders stay pinned here. *)
-let test_top_level_enable_thinking_wire_renders_preserve_and_budget () =
-  let caps =
-    { CAP.openai_compat_chat_extended_capabilities with
-      thinking_control_format = CAP.Enable_thinking
-    ; preserve_thinking_control_format = CAP.Top_level_preserve_thinking
-    }
-  in
-  let config =
-    PC.make
-      ~kind:OpenAI_compat
-      ~model_id:"top-level-thinking-test"
-      ~base_url:"https://top-level-thinking.example/v1"
-      ~model_capabilities_override:caps
-      ~enable_thinking:true
-      ~preserve_thinking:true
-      ~thinking_budget:4096
-      ()
-  in
-  let json = BOR.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
-  check bool "enable_thinking true" true (json |> member "enable_thinking" |> to_bool);
-  check bool "preserve_thinking true" true (json |> member "preserve_thinking" |> to_bool);
-  check int "thinking budget" 4096 (json |> member "thinking_budget" |> to_int);
-  check_member_absent "chat_template_kwargs" json;
-  check_member_absent "thinking" json;
-  check_member_absent "reasoning_effort" json
-;;
-
 let test_mimo_v25_uses_thinking_object_and_json_mode () =
   let config =
     declared_catalog_openai_compat_config
@@ -1431,10 +1401,6 @@ let () =
               "declared qwen3.6 dialect keeps tool reasoning"
               `Quick
               test_qwen36_reasoning_dialect_without_preserve_keeps_tool_reasoning
-          ; test_case
-              "top-level enable_thinking wire renders preserve and budget"
-              `Quick
-              test_top_level_enable_thinking_wire_renders_preserve_and_budget
           ; test_case
               "mimo v2.5 uses thinking object and json mode"
               `Quick

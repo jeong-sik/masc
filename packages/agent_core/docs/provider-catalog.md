@@ -210,14 +210,12 @@ Accepted `thinking_control_format` values are:
 - `chat_template_token` (inject the catalog/manifest `thinking_control_token` into the chat template)
 - `ollama_think` (Ollama native `/api/chat` top-level `think`)
 - `reasoning_effort`
-- `enable_thinking` (top-level `enable_thinking` plus optional `thinking_budget`)
 
 Accepted `preserve_thinking_control_format` values are:
 
 - `none`
 - `thinking_object_keep_all` (`thinking.keep = "all"`)
 - `chat_template_kwargs_preserve_thinking`
-- `top_level_preserve_thinking`
 - `always_preserved` (historical reasoning must be replayed; no request field)
 
 Accepted `reasoning_output_format` values are:

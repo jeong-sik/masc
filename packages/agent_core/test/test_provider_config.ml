@@ -1356,7 +1356,6 @@ let test_clear_thinking_object_request_field () =
     [ "no preserve wire omits", Capabilities.No_preserve_thinking_control
     ; "thinking_object_keep_all omits", Capabilities.Thinking_object_keep_all
     ; "chat_template_kwargs omits", Capabilities.Chat_template_kwargs_preserve_thinking
-    ; "top_level omits", Capabilities.Top_level_preserve_thinking
     ; "always_preserved omits", Capabilities.Always_preserved_thinking
     ]
 ;;

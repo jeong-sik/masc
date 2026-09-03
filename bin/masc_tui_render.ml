@@ -8806,8 +8806,45 @@ let render_keeper_message (state : state) =
             is holding them up. Only while there is something to queue. *)
          let queue_hint =
            if Buffer.length state.msg_input > 0 then
-             " · Enter queues your line; this turn keeps running"
+             " · Enter queues your line; it sends when this turn ends"
            else ""
+         in
+         (* The gate and the prompt describe the same held call. Drawn apart,
+            one row asked the operator to answer while another said a judge
+            was deciding, and neither said how they related — so the screen
+            read as two authorities waiting on each other. The prompt says
+            which one holds the call and that the operator's key still ends
+            it. *)
+         let gate_note =
+           match
+             Masc_tui_types.keeper_effects_at_the_gate state
+               ~keeper_name:(Keeper_chat_transcript.keeper_name live)
+           with
+           | [] -> ""
+           | pending -> (
+             let judging =
+               List.find_opt
+                 (fun (row : Tui_decode.gate_pending) ->
+                   row.gp_phase = Tui_decode.Gate_judging)
+                 pending
+             in
+             match judging with
+             | None -> ""
+             | Some row ->
+               let age =
+                 match row.gp_waiting_s with
+                 | Some seconds -> " " ^ Masc_tui_answering.duration_text seconds
+                 | None -> ""
+               in
+               Printf.sprintf " · the judge is deciding%s; your answer ends it now" age)
+         in
+         (* [status_rows] puts the approval question first among its Attention
+            rows, so the note lands on that one and not on an interrupt or a
+            stream diagnostic that shares the kind. *)
+         let note_unused =
+           ref
+             (not (String.equal gate_note "")
+              && Option.is_some (Keeper_chat_transcript.awaiting_approval live))
          in
          List.iter
            (fun (kind, text) ->
@@ -8818,7 +8855,15 @@ let render_keeper_message (state : state) =
                      ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
                      ^ " · " ^ text ^ queue_hint)
               | Keeper_chat_transcript.Attention ->
-                  box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text)
+                  let suffix =
+                    if !note_unused then begin
+                      note_unused := false;
+                      gate_note
+                    end
+                    else ""
+                  in
+                  box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
+                    ("  " ^ text ^ suffix)
               | Keeper_chat_transcript.Approval outcome ->
                   let style =
                     match outcome with

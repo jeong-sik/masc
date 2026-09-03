@@ -3071,7 +3071,14 @@ type state = {
    match over the result, which is what keeps the next field from taking
    letters without taking pasted text.
 
-   The composer is not one of these. It is the fallback both paths already
+   The board draft is one of these and the chat composer is not, which reads
+   backwards until you look at what a paste has to do in each. Both hold many
+   lines, but the composer's paste also classifies a dropped file and spills a
+   long paste to a file in the keeper's workspace -- neither of which a board
+   post has anywhere to go. What the board draft needs is the text, and that
+   is what a case here gives it.
+
+   The chat composer is not one of these. It is the fallback both paths already
    share -- keys reach it through [Composer.classify_key] before this is
    consulted, and a paste reaches it when this says [None] -- and its paste
    path does work these cannot (a dropped file, a spill to disk) that has no
@@ -3088,6 +3095,7 @@ type text_input_target =
   | Text_row_search
   | Text_identity_app_form
   | Text_identity_filter
+  | Text_board_draft
 
 (* The order is the key dispatch's order, which is what an operator already
    experiences: a preset name being typed holds every letter, and the two
@@ -3111,6 +3119,8 @@ let text_input_target (state : state) ~compact_viewport =
     Some Text_identity_app_form
   else if identity_surface && Option.is_some state.identity_filter then
     Some Text_identity_filter
+  else if state.view = Board && state.board_mode = Board_compose then
+    Some Text_board_draft
   else None
 ;;
 

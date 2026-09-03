@@ -19,7 +19,8 @@ let target =
       | Some Tui_types.Text_palette -> "palette"
       | Some Tui_types.Text_row_search -> "row-search"
       | Some Tui_types.Text_identity_app_form -> "identity-app-form"
-      | Some Tui_types.Text_identity_filter -> "identity-filter"))
+      | Some Tui_types.Text_identity_filter -> "identity-filter"
+      | Some Tui_types.Text_board_draft -> "board-draft"))
     ( = )
 ;;
 
@@ -131,6 +132,25 @@ let test_the_palette_keeps_a_compact_frame () =
     (resolved ~compact_viewport:true state)
 ;;
 
+let test_a_board_post_being_written_claims_its_draft () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Board;
+  check target "reading the board" None (resolved state);
+  state.Tui_types.board_mode <- Tui_types.Board_compose;
+  check target "writing a post" (Some Tui_types.Text_board_draft)
+    (resolved state)
+;;
+
+let test_the_palette_claims_over_a_board_draft () =
+  (* The palette draws over the board pane, and its key handler runs first.
+     A paste follows the characters. *)
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Board;
+  state.Tui_types.board_mode <- Tui_types.Board_compose;
+  state.Tui_types.palette_open <- true;
+  check target "palette first" (Some Tui_types.Text_palette) (resolved state)
+;;
+
 let () =
   Alcotest.run
     "tui text input target"
@@ -152,7 +172,11 @@ let () =
           test_case "the identity fields let go of a compact frame" `Quick
             test_the_identity_fields_let_go_of_a_compact_frame;
           test_case "the palette keeps a compact frame" `Quick
-            test_the_palette_keeps_a_compact_frame
+            test_the_palette_keeps_a_compact_frame;
+          test_case "a board post being written claims its draft" `Quick
+            test_a_board_post_being_written_claims_its_draft;
+          test_case "the palette claims over a board draft" `Quick
+            test_the_palette_claims_over_a_board_draft
         ] )
     ]
 ;;

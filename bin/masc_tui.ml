@@ -12204,7 +12204,16 @@ and is loaded on demand through keeper_skill.
             | Some Text_identity_filter ->
                 state.identity_filter <-
                   Some (Option.value state.identity_filter ~default:"" ^ text);
-                state.identity_cursor <- 0)
+                state.identity_cursor <- 0
+            (* A board post holds many lines, so this one takes the paste
+               whole rather than on one line. It does not spill to a file the
+               way the chat draft does: that file is written into the keeper's
+               workspace for the keeper to read, and a board post has no
+               keeper and nowhere to put it. *)
+            | Some Text_board_draft ->
+                Buffer.add_string state.board_draft
+                  (Keeper_chat.terminal_safe_text ~preserve_newlines:true
+                     paste.Masc_tui_paste.text))
        (* Both sides of this arm are wanted: the guard decides whether a paste
           is handled at all, and the rewrite decides what text it carries. *)
        | Some (Pasted paste)
@@ -13686,9 +13695,8 @@ and is loaded on demand through keeper_skill.
                in
                ()
        | Some k
-         when (not message_mode)
-              && state.view = Board
-              && state.board_mode = Board_compose ->
+         when text_input_target state ~compact_viewport
+              = Some Text_board_draft ->
            (* Same shape as the chat pane: while a draft is being written,
               printable keys belong to the draft. A key the handler declines
               (Tab) keeps its global meaning, so the cycle works mid-compose

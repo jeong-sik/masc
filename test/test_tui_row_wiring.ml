@@ -83,6 +83,20 @@ let test_the_title_does_not_count_another_queue () =
   Alcotest.(check bool) "the filter note it keeps is still read" true
     (reads ~binding_name:"render_approvals" ~fields:[ "aps_hidden_count" ] > 0)
 
+(* The Overview summary row wears the same word as the tab badge beside it,
+   and for a while they counted different things: the badge walked all three
+   approval lists, the row read the confirm queue's own visible count. A
+   runtime holding one keeper tool call drew "Approvals: 0" under a tab
+   reading "Approvals·1". One name, one population. *)
+let test_the_overview_row_counts_every_approval_list () =
+  Alcotest.(check int)
+    "no confirm-queue count of its own in the Overview summary" 0
+    (reads ~binding_name:"render_overview"
+       ~fields:[ "aps_visible_count"; "aps_total_count" ]);
+  Alcotest.(check int) "the row walks the list the badge walks" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_overview" ~callee:"approval_items")
+
 (* [operation=] is the right-hand side of the line directly above whenever the
    two agree, which is every operation but an identity call. The detail line
    compares them rather than printing it unconditionally, because at eighty
@@ -357,6 +371,8 @@ let () =
             `Quick test_the_detail_height_is_read_off_the_line_it_draws
         ; Alcotest.test_case "the title does not count another queue" `Quick
             test_the_title_does_not_count_another_queue
+        ; Alcotest.test_case "the Overview row counts every approval list"
+            `Quick test_the_overview_row_counts_every_approval_list
         ; Alcotest.test_case "the operation is compared before repeating"
             `Quick
             test_the_detail_pane_compares_before_repeating_the_operation

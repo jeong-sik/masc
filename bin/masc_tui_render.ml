@@ -1220,10 +1220,26 @@ let render_overview (state : state) =
     | Some o, None ->
         let health_color = workspace_health_color o.ov_workspace_health in
         let health_label = workspace_health_label o.ov_workspace_health in
+        (* The tab strip's badge counts held keeper tool calls, pending gate
+           rows, and confirm-queue entries together, and so does the Approvals
+           screen's own header. This row counted only the third of those, so a
+           runtime holding one keeper tool call drew "Approvals: 0" beside a
+           tab reading "Approvals·1" -- one name over two populations.
+           All three now walk [approval_items].
+
+           A list that failed to load contributes nothing to that walk, which
+           would let the row understate the queue in silence. The "+?" tail
+           says the number is a floor, not a reading. *)
         let approval_count =
-          match state.approval_snapshot, state.approvals_error with
-          | Some snapshot, None -> string_of_int snapshot.aps_visible_count
-          | None, _ | Some _, Some _ -> "?"
+          let on_screen = List.length (Masc_tui_types.approval_items state) in
+          let source_unread =
+            Option.is_none state.approval_snapshot
+            || Option.is_some state.approvals_error
+            || Option.is_some state.keeper_tool_approvals_error
+            || Option.is_some state.gate_queue_unavailable
+          in
+          if source_unread then Printf.sprintf "%d+?" on_screen
+          else string_of_int on_screen
         in
         (* Keepers and MCP clients are counted apart: a row reading
            "Agents: 2" over a runtime with ten keepers named the wrong

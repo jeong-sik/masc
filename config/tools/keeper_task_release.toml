@@ -8,6 +8,16 @@ task returns to the backlog with your summary attached, and you can claim \
 different work immediately. This does not cancel the task and does not \
 delete anything you already submitted. You must own the task."""
 
+# 지연 판단은 호출 수가 아니라 그 도구가 필요했던 서로 다른 턴 수로 한다
+# (masc #32062): 실으면 스키마 x 요청수, 지연하면 필요했던 턴 수 x 표면 바이트다.
+# agent-core 5 keeper 의 도구-사용 턴 11,164 개와 표면 67,000 B 기준으로 이 도구는
+# 1,146 B 를 매 요청에 싣고 114 턴(1.0%)에서만 필요했다 — 1.7x 다.
+#
+# 조회 도구는 이 계산이 유리해도 지연하지 않는다. keeper_capability_search 와
+# keeper_tools_list 는 목록이 길 때 찾는 수단이라, 지연하면 찾는 일 자체가 한 홉
+# 멀어진다. 그 비용은 바이트로 잡히지 않는다. 이 도구는 조회가 아니다.
+defer_loading = true
+
 [[params]]
 name = "task_id"
 type = "string"

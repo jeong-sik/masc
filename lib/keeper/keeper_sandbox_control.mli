@@ -125,15 +125,15 @@ val live_status_json :
 
 type sandbox_log_backend =
   | Docker_logs
-  | Apple_container_logs
-      (** The microvm profile resolves here unconditionally, so this reads
-          Apple's [container] even for a Keeper whose [microvm_backend] names
-          [microsandbox] or [nerdctl_kata]. That call fails and surfaces as
-          [Sandbox_logs_backend_failed] for a Keeper that is running
-          correctly. The backend axis is not part of the match below, so
-          adding a microVM runtime asks nothing here. Threading it changes
-          this wire's backend label and the reader that parses it, tracked
-          in issue 32916 alongside RFC-0405. *)
+  | Micro_vm_logs of Keeper_microvm_backend.t
+      (** The runtime the Keeper declared, so the log call reaches the CLI
+          that holds the guest. Before #32837 this had no backend and read
+          Apple's [container] for every microvm Keeper, which made a Keeper
+          running correctly on [msb] surface as
+          [Sandbox_logs_backend_failed]. The wire's [backend] field now
+          carries the runtime's own spelling, so a new runtime is a value the
+          reader has to accept as well as a constructor the compiler asks
+          about. *)
 
 type sandbox_log_source =
   | Local_backend of sandbox_log_backend

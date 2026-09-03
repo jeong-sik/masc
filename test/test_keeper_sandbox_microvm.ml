@@ -4,8 +4,21 @@
    [unsupported_docker_flags] were rejected with "Unknown option". *)
 
 module M = Masc.Keeper_sandbox_microvm
+module Backend = Masc.Keeper_microvm_backend
 module Runtime = Masc.Keeper_sandbox_runtime
 module Profile = Keeper_types_profile_sandbox
+
+(* This file is Apple's lane. Measured against container CLI 1.3.0, and the
+   per-runtime table lives in test_keeper_microvm_backend.ml, so a boot argv
+   here is the Apple one made unconditional. A refusal would mean the Apple
+   arm lost a guarantee it has a flag for, which is the failure worth a loud
+   test rather than a silent [Error]. *)
+let apple_boot_argv = function
+  | Ok argv -> argv
+  | Error refusals ->
+    Alcotest.fail
+      (M.constraint_refusals_message Backend.Apple_container refusals)
+;;
 
 let probe_mount_args =
   [ "-v"; "/base/.masc/config:/tmp/masc-runtime/.masc/config:ro" ]
@@ -13,7 +26,9 @@ let probe_mount_args =
   @ M.shim_mount_args ~host_dir:"/base/.masc/microvm/shim"
 
 let argv ?(network = Profile.Network_none) () =
-  M.turn_start_argv
+  apple_boot_argv
+  @@ M.turn_start_argv_for
+    Backend.Apple_container
     ~container_name:"masc-keeper-vm-probe"
     ~label_args:[ "--label"; "masc.mcp.kind=keeper-vm" ]
     ~uid:501
@@ -23,6 +38,7 @@ let argv ?(network = Profile.Network_none) () =
     ~network_args:(M.network_args ~dns:(Some "1.1.1.1") network)
     ~mount_args:probe_mount_args
     ~image:"masc-keeper-sandbox:local"
+    ~constraints:Backend.all_guest_constraints
 
 let contains needle haystack = List.exists (String.equal needle) haystack
 
@@ -122,6 +138,7 @@ let inspect_result status stdout stderr = status, stdout, stderr
 let test_image_probe_uses_structured_evidence () =
   let present =
     M.classify_image_probe
+      ~listing_shape:M.Listing_json_array
       ~inspect:(inspect_result (Unix.WEXITED 0) {|[{"configuration":{}}]|} "")
       ~listing:None
   in
@@ -130,6 +147,7 @@ let test_image_probe_uses_structured_evidence () =
    | _ -> Alcotest.fail "valid inspect JSON must establish image presence");
   let missing =
     M.classify_image_probe
+      ~listing_shape:M.Listing_json_array
       ~inspect:(inspect_result (Unix.WEXITED 1) "any human prose" "any stderr")
       ~listing:(Some (inspect_result (Unix.WEXITED 0) "[]" ""))
   in
@@ -138,6 +156,7 @@ let test_image_probe_uses_structured_evidence () =
    | _ -> Alcotest.fail "a healthy structured listing must distinguish a missing image");
   let service_dead =
     M.classify_image_probe
+      ~listing_shape:M.Listing_json_array
       ~inspect:(inspect_result (Unix.WEXITED 1) "same exit code" "")
       ~listing:(Some (inspect_result (Unix.WEXITED 1) "" "service unavailable"))
   in
@@ -146,6 +165,7 @@ let test_image_probe_uses_structured_evidence () =
    | _ -> Alcotest.fail "an unreadable image store must stay probe-failed");
   let malformed =
     M.classify_image_probe
+      ~listing_shape:M.Listing_json_array
       ~inspect:(inspect_result (Unix.WEXITED 0) "not json" "")
       ~listing:None
   in
@@ -154,6 +174,7 @@ let test_image_probe_uses_structured_evidence () =
    | _ -> Alcotest.fail "successful status with malformed JSON must fail closed");
   let malformed_listing =
     M.classify_image_probe
+      ~listing_shape:M.Listing_json_array
       ~inspect:(inspect_result (Unix.WEXITED 1) "" "")
       ~listing:(Some (inspect_result (Unix.WEXITED 0) "not json" ""))
   in
@@ -162,6 +183,7 @@ let test_image_probe_uses_structured_evidence () =
    | _ -> Alcotest.fail "malformed listing JSON must not establish image absence");
   let cli_missing =
     M.classify_image_probe
+      ~listing_shape:M.Listing_json_array
       ~inspect:(inspect_result (Unix.WEXITED 127) "" "not found")
       ~listing:None
   in
@@ -188,11 +210,24 @@ let microvm_meta ~name : Masc.Keeper_meta_contract.keeper_meta =
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> { meta with sandbox_profile = Profile.Micro_vm }
+  (* A guest that reached dispatch was booted on a runtime, so the fixture
+     carries one. Durable meta leaves the field empty and the TOML resolve
+     fills it; skipping it here would test a state no booted guest is in. *)
+  | Ok meta ->
+    { meta with
+      sandbox_profile = Profile.Micro_vm
+    ; microvm_backend = Some Backend.Apple_container
+    }
   | Error e -> Alcotest.fail e
 
+(* Off Micro_vm the runtime field is empty: the TOML load refuses the key
+   there, and a Docker keeper carrying one would be a second place for the
+   answer to live. *)
 let docker_meta ~name =
-  { (microvm_meta ~name) with sandbox_profile = Profile.Docker }
+  { (microvm_meta ~name) with
+    sandbox_profile = Profile.Docker
+  ; microvm_backend = None
+  }
 
 let refusal = Profile.backend_unimplemented_message Profile.Micro_vm
 
@@ -211,14 +246,16 @@ let test_live_structured_image_probe () =
   | Some _ ->
     with_eio_fs @@ fun () ->
     (match
-       M.image_probe
+       M.image_probe_for
+         Backend.Apple_container
          ~image:"masc-keeper-sandbox:local"
          ~timeout_sec:15.0
      with
      | M.Image_present -> ()
      | _ -> Alcotest.fail "present image did not produce Image_present");
     match
-      M.image_probe
+      M.image_probe_for
+        Backend.Apple_container
         ~image:"masc-proof-definitely-missing:never"
         ~timeout_sec:15.0
     with
@@ -415,7 +452,9 @@ let test_echoes_name_the_host_bundle () =
 
 let test_turn_start_argv_shape () =
   let a =
-    M.turn_start_argv
+    apple_boot_argv
+    @@ M.turn_start_argv_for
+      Backend.Apple_container
       ~container_name:"masc-keeper-turn-probe"
       ~label_args:[ "--label"; "masc.mcp.kind=turn" ]
       ~uid:501
@@ -425,6 +464,7 @@ let test_turn_start_argv_shape () =
       ~network_args:(M.network_args ~dns:None Profile.Network_none)
       ~mount_args:[ "-v"; "/base/.masc/config:/home/keeper/.masc/config:ro" ]
       ~image:"masc-keeper-sandbox:local"
+      ~constraints:Backend.all_guest_constraints
   in
   List.iter
     (fun flag ->
@@ -458,7 +498,9 @@ let test_turn_start_argv_shape () =
   if contains "--cpus" a
   then Alcotest.fail "cpus:None must pass no --cpus";
   let sized =
-    M.turn_start_argv
+    apple_boot_argv
+    @@ M.turn_start_argv_for
+      Backend.Apple_container
       ~container_name:"masc-keeper-turn-probe"
       ~label_args:[]
       ~uid:501
@@ -468,6 +510,7 @@ let test_turn_start_argv_shape () =
       ~network_args:[]
       ~mount_args:[]
       ~image:"masc-keeper-sandbox:local"
+      ~constraints:Backend.all_guest_constraints
   in
   if not (adjacent ~flag:"--cpus" ~value:"8" sized)
   then Alcotest.fail "cpus:Some must pass --cpus <count>";
@@ -481,13 +524,13 @@ let test_inspect_state_parser () =
   let stopped =
     {|[{"configuration":{"id":"x"},"status":{"state":"stopped"}}]|}
   in
-  (match M.running_of_inspect_json running with
+  (match M.running_of_inspect_json_for Backend.Apple_container running with
    | Ok true -> ()
    | Ok false | Error _ -> Alcotest.fail "running JSON must parse as running");
-  (match M.running_of_inspect_json stopped with
+  (match M.running_of_inspect_json_for Backend.Apple_container stopped with
    | Ok false -> ()
    | Ok true | Error _ -> Alcotest.fail "stopped JSON must parse as not running");
-  match M.running_of_inspect_json "not json" with
+  match M.running_of_inspect_json_for Backend.Apple_container "not json" with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "garbage must be an Error, not a state"
 
@@ -978,7 +1021,7 @@ let error_exn = function
 ;;
 
 let test_volume_create_argv_carries_a_size () =
-  let argv = M.volume_create_argv ~volume_name:"masc-keeper-work-x" ~size:"64g" in
+  let argv = M.apple_volume_create_argv ~volume_name:"masc-keeper-work-x" ~size:"64g" in
   Alcotest.(check bool) "goes through container" true (contains "container" argv);
   Alcotest.(check bool) "creates a volume" true (adjacent ~flag:"volume" ~value:"create" argv);
   (* The image is sparse -- 4 GiB nominal measured at 84 MB on disk -- so the
@@ -1098,9 +1141,18 @@ let test_running_guest_is_a_remote_endpoint () =
     Alcotest.(check bool) "the lane's own env still leads" true
       (List.mem_assoc "GH_CONFIG_DIR" injected);
     (match Masc.Keeper_sandbox_remote.transport endpoint with
-     | Masc.Keeper_sandbox_remote.Container_exec { uid; gid; _ } ->
+     | Masc.Keeper_sandbox_remote.Container_exec
+         (guest : Masc.Keeper_sandbox_remote.container_exec) ->
+       (* The prefix arrives prebuilt, so what this pins is that the argv the
+          transport hands out is that prefix with the shim appended -- not a
+          second assembly the transport does on its own. *)
+       Alcotest.(check (list string)) "the transport appends only the shim"
+         (guest.prefix @ [ guest.shim_path ])
+         argv;
+       (* [create_minimal] runs as 0:0, so this is the runtime's own pair
+          reaching the exec rather than a value the prefix invented. *)
        Alcotest.(check bool) "execs as the runtime's uid:gid" true
-         (adjacent ~flag:"--user" ~value:(Printf.sprintf "%d:%d" uid gid) argv)
+         (adjacent ~flag:"--user" ~value:"0:0" argv)
      | Masc.Keeper_sandbox_remote.Openssh _ -> Alcotest.fail "a guest is not an OpenSSH endpoint");
     let docker =
       Masc.Keeper_turn_sandbox_runtime.For_testing.create_minimal

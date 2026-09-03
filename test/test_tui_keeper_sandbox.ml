@@ -255,6 +255,51 @@ let test_actual_container_logs_are_typed_and_terminal_safe () =
   Alcotest.(check bool) "raw escape is absent" false (contains rendered "\027]")
 ;;
 
+(* The server sends the runtime's own spelling (#32837), and this decoder is
+   strict: an unknown backend string blanks the whole panel rather than
+   guessing. So every runtime the server can name has to be a value this
+   reader accepts, and that is what these pin. *)
+let test_every_microvm_runtime_reaches_the_reader () =
+  List.iter
+    (fun (wire, label) ->
+      let json =
+        Yojson.Safe.from_string
+          (Printf.sprintf
+             {|{"keeper":"alpha","backend":%S,"state":"no_instance","tail":50,"instances":[]}|}
+             wire)
+      in
+      match Masc_tui_keeper_sandbox.decode_logs ~sanitize:Fun.id json with
+      | Error detail -> Alcotest.failf "%s was refused by the reader: %s" wire detail
+      | Ok logs ->
+        let rendered =
+          Masc_tui_keeper_sandbox.logs_view_lines ~width:64 logs
+          |> String.concat "\n"
+        in
+        Alcotest.(check bool)
+          (wire ^ " names its runtime")
+          true
+          (contains rendered label))
+    [ "docker", "Docker"
+    ; "apple_container", "Apple Container"
+    ; "microsandbox", "microsandbox"
+    ; "nerdctl_kata", "nerdctl (Kata)"
+    ]
+;;
+
+(* A backend the server does not send is still refused, so the reader is
+   strict rather than merely wide. *)
+let test_an_unknown_backend_is_still_refused () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"keeper":"alpha","backend":"firecracker","state":"no_instance","tail":50,"instances":[]}|}
+  in
+  match Masc_tui_keeper_sandbox.decode_logs ~sanitize:Fun.id json with
+  | Ok _ -> Alcotest.fail "an unimplemented runtime was accepted by the reader"
+  | Error detail ->
+    Alcotest.(check bool) "the refusal names the value" true
+      (contains detail "firecracker")
+;;
+
 let test_actual_container_logs_report_no_instance () =
   let json =
     Yojson.Safe.from_string
@@ -346,5 +391,9 @@ let () =
             test_actual_container_logs_report_no_local_stream
         ; Alcotest.test_case "no local stream refuses a backend" `Quick
             test_no_local_stream_rejects_a_backend
+        ; Alcotest.test_case "every microvm runtime reaches the reader" `Quick
+            test_every_microvm_runtime_reaches_the_reader
+        ; Alcotest.test_case "an unknown backend is still refused" `Quick
+            test_an_unknown_backend_is_still_refused
         ] )
     ]

@@ -155,15 +155,19 @@ let seed_runtime_meta config name =
       | Ok () -> meta
   | Error err -> Alcotest.failf "write_meta failed: %s" err)
 
-let write_keeper_toml ~keepers_dir ~name ~sandbox_profile ~instructions =
+let write_keeper_toml ?microvm_backend ~keepers_dir ~name ~sandbox_profile
+      ~instructions =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     (Printf.sprintf
        {|[keeper]
 sandbox_profile = "%s"
-instructions = %S
+%sinstructions = %S
 |}
        sandbox_profile
+       (match microvm_backend with
+        | None -> ""
+        | Some backend -> Printf.sprintf "microvm_backend = %S\n" backend)
        instructions)
 
 let write_keeper_agent ~keepers_dir ~name instructions =
@@ -310,7 +314,11 @@ sandbox_profile = "docker"
 let test_sandbox_log_target_uses_effective_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "microvm-logs" in
+  (* The runtime is declared, so the assertion below is host-independent and
+     says what #32837 changed: the log backend is the Keeper's own runtime,
+     not Apple's for every microvm Keeper. *)
   write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"microvm"
+    ~microvm_backend:"microsandbox"
     ~instructions:"Read the effective log backend.";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -325,8 +333,17 @@ let test_sandbox_log_target_uses_effective_meta () =
   | Ok (Sandbox_control.No_local_stream reason, _) ->
     Alcotest.failf "microvm Keeper reported no local stream: %s" reason
   | Ok
-      ( Sandbox_control.Local_backend Sandbox_control.Apple_container_logs,
-        effective_name ) ->
+      ( Sandbox_control.Local_backend
+          (Sandbox_control.Micro_vm_logs Masc.Keeper_microvm_backend.Apple_container)
+      , _ ) ->
+    Alcotest.fail
+      "a Keeper declaring microsandbox read its logs through Apple's runtime"
+  | Ok
+      ( Sandbox_control.Local_backend
+          (Sandbox_control.Micro_vm_logs
+             ( Masc.Keeper_microvm_backend.Microsandbox
+             | Masc.Keeper_microvm_backend.Nerdctl_kata ))
+      , effective_name ) ->
     Alcotest.(check string) "effective keeper name" name effective_name
 
 (* Named once and asserted by both tests below, so a reworded sentence is one

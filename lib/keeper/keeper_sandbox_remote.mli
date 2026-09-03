@@ -2,8 +2,8 @@
 
     One endpoint value drives the framed [masc-exec-shim] exchange
     ({!Exec_ssh_protocol}) over either transport. The OpenSSH transport is
-    the RFC-0395 lane; the [container exec] transport is the RFC-0400 lane
-    for an Apple [container] guest that owns its working tree. *)
+    the RFC-0395 lane; the guest-exec transport is the RFC-0400 lane for a
+    microVM guest that owns its working tree. *)
 
 type openssh =
   { endpoint : Exec_ssh_endpoint.t
@@ -14,13 +14,16 @@ type openssh =
   }
 
 type container_exec =
-  { cli : string list  (** The CLI prefix, normally [\["container"\]]. *)
+  { prefix : string list
+    (** The whole exec argv up to and including the guest name, built by the
+        declaring runtime ({!Keeper_sandbox_microvm.shim_exec_prefix_for}).
+        It is prebuilt rather than assembled here because the three runtimes
+        disagree on more than the executable -- the stdin flag, whether a
+        separator precedes the command, and whether an environment entry can
+        be set on an exec at all -- and one of them cannot express it, which
+        a function returning an argv could not say. *)
   ; container_name : string  (** The running guest. *)
-  ; uid : int
-  ; gid : int
   ; shim_path : string  (** Absolute guest path of [masc-exec-shim]. *)
-  ; shim_config_path : string
-    (** Guest path handed to the shim as [MASC_EXEC_SHIM_CONFIG]. *)
   }
 
 type transport =
@@ -80,9 +83,8 @@ val lane_prefix : transport -> string
 
 val transport_argv : t -> string list
 (** Exact argv that delivers the framed request to the shim: the pinned
-    OpenSSH argv ending in the fixed remote command [masc-exec-shim], or
-    [container exec -i --user u:g -w <root> --env MASC_EXEC_SHIM_CONFIG=..
-    <guest> <shim path>]. *)
+    OpenSSH argv ending in the fixed remote command [masc-exec-shim], or the
+    guest's prebuilt exec prefix with the guest path of the shim appended. *)
 
 val probe_argv : t -> string list
 (** {!transport_argv} with the shim asked for [--probe]. *)

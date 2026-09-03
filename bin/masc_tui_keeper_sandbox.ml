@@ -422,9 +422,15 @@ let view_lines ~width reading =
   @ wrapped_rows ~width ~label:"Container stdio" ~tone:`Info "o  actual logs"
   @ wrapped_rows ~width ~label:"Sandbox calls" ~tone:`Info "t  tool calls"
 
+(* The server answers the runtime's own spelling, so every runtime it can
+   name has to be a value here. A strict decoder is the point -- an unknown
+   string blanks the whole panel rather than guessing -- which is why a new
+   microVM runtime is a change on both sides of this wire. *)
 type log_backend =
   | Docker_log_backend
   | Apple_container_log_backend
+  | Microsandbox_log_backend
+  | Nerdctl_kata_log_backend
 
 type log_instance =
   { log_instance_id : string
@@ -513,6 +519,8 @@ let decode_logs ~sanitize json =
     | None | Some `Null -> Ok None
     | Some (`String "docker") -> Ok (Some Docker_log_backend)
     | Some (`String "apple_container") -> Ok (Some Apple_container_log_backend)
+    | Some (`String "microsandbox") -> Ok (Some Microsandbox_log_backend)
+    | Some (`String "nerdctl_kata") -> Ok (Some Nerdctl_kata_log_backend)
     | Some (`String value) ->
       Error ("sandbox logs.backend has unsupported value " ^ sanitize value)
     | Some _ -> Error "sandbox logs.backend must be a string or null"
@@ -546,6 +554,8 @@ let logs_view_lines ~width logs =
   let backend_label = function
     | Docker_log_backend -> "Docker"
     | Apple_container_log_backend -> "Apple Container"
+    | Microsandbox_log_backend -> "microsandbox"
+    | Nerdctl_kata_log_backend -> "nerdctl (Kata)"
   in
   (* A tail count belongs to a stream. Without one, neither it nor a backend
      name is printed: there is nothing they would describe. *)

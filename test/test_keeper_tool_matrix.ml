@@ -182,8 +182,17 @@ let run_capture_process ~env ~out_file ~err_file prog argv =
           let pid =
             Unix.create_process_env prog argv env Unix.stdin out_fd err_fd
           in
-          let _, status = Unix.waitpid [] pid in
-          process_exit_code status))
+          (* EINTR is not a failed wait -- it is the kernel saying a signal
+             arrived before the child did, and the call has to be made again.
+             Letting it escape turned every one of the 88 matrix cases into
+             the same exception, so the suite reported a harness interruption
+             88 times and never once reported a tool. *)
+          let rec wait_for_child () =
+            match Unix.waitpid [] pid with
+            | _, status -> status
+            | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_for_child ()
+          in
+          process_exit_code (wait_for_child ())))
 
 let isolated_child_env_unset =
   [ "MASC_BASE_PATH"

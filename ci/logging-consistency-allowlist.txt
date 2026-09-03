@@ -74,13 +74,10 @@ lib/agent_core_log_bridge.ml
 # --- Operator CLI harnesses (bin/) ---
 # These binaries are run by a person at a terminal and their stdout/stderr is
 # the answer to the command, not a server record. fusion_run prints four arms
-# side by side "so a human can judge"; keeper_canary_run narrates a live
-# recall protocol turn by turn; the probe CLI is the operator entry point to
-# the RFC-0374 probe lane; checkpoint purge and the preflight helper are
-# offline one-shots. Routing any of it through the structured sink would move
-# the output away from the person who asked for it.
-bin/keeper_canary_run.ml
-bin/keeper_canary_http.ml
+# side by side "so a human can judge"; the probe CLI is the operator entry
+# point to the RFC-0374 probe lane; checkpoint purge and the preflight helper
+# are offline one-shots. Routing any of it through the structured sink would
+# move the output away from the person who asked for it.
 bin/fusion_run.ml
 bin/keeper_capability_probe_cli.ml
 bin/masc_lane_cli_probe.ml

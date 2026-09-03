@@ -1,0 +1,41 @@
+(** Which microVM runtime serves the [Micro_vm] sandbox profile.
+
+    The profile says a keeper's tree lives on a guest behind a hypervisor
+    boundary ([Endpoint_owned], network closed by default, reads and writes
+    over the remote lane). It does not say which runtime provides that guest,
+    and until RFC-0405 one runtime was assumed: Apple's [container], which
+    exists only on macOS 26+.
+
+    A backend answers the argv this codebase already builds — the CLI shape
+    consumers reach through {!Keeper_sandbox_microvm} — and the parse of what
+    that CLI reports back. Everything above that line is shared: the work
+    volume, the shim mount, the identity snapshot, the session ceiling. Those
+    are RFC-0400's model of a guest, and they do not change with the
+    hypervisor under it. *)
+
+type t =
+  | Apple_container
+      (** [container] (Apple Containerization, macOS 26+). One VM per
+          container through Virtualization.framework. *)
+  | Microsandbox
+      (** [msb] (microsandbox, libkrun). Runs where KVM is available, which
+          includes Linux — the platform Apple's runtime cannot serve. *)
+
+val to_string : t -> string
+val of_string : string -> t option
+val all : t list
+
+val valid_strings : string list
+(** The accepted spellings, for a schema mirror and for a refusal that can
+    name what it would have taken. *)
+
+val cli_name : t -> string
+(** The executable this backend drives. A backend whose CLI is absent is
+    refused rather than substituted, so the name reaches the refusal. *)
+
+val default_for_host : unit -> t option
+(** The backend to assume when a keeper declares [Micro_vm] without naming
+    one. [Some Apple_container] on macOS, where that runtime is the platform
+    answer; [None] elsewhere, so a keeper on a host with no assumed backend
+    is refused at boot instead of silently taking a different isolation than
+    the one it declared. *)

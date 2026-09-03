@@ -3272,6 +3272,11 @@
  (libraries alcotest str masc_tui_frame_presenter masc_tui_terminal_palette))
 
 (test
+ (name test_tui_frame_timing)
+ (modules test_tui_frame_timing)
+ (libraries alcotest masc_tui_frame_timing))
+
+(test
  (name test_tui_approval_authority)
  (modules test_tui_approval_authority)
  (libraries alcotest masc_tui_approval_authority masc_tui_types))

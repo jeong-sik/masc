@@ -5,6 +5,15 @@ let contains haystack needle =
     true
   with Not_found -> false
 
+(* [wrapped_rows] breaks a sentence across rows at whatever width the caller
+   passed, colours each row, and pads continuations with spaces. An assertion
+   on the sentence would otherwise pass or fail on where the wrap landed. This
+   drops the SGR codes and collapses whitespace runs, so what is left is the
+   words in order and a reworded sentence is the only thing that fails. *)
+let flattened rendered =
+  Str.global_replace (Str.regexp "[ \n]+") " "
+    (Str.global_replace (Str.regexp "\027\\[[0-9;]*m") "" rendered)
+
 let observed =
   Yojson.Safe.from_string
     {|{
@@ -290,7 +299,9 @@ let test_actual_container_logs_report_no_local_stream () =
       |> String.concat "\n"
     in
     Alcotest.(check bool) "operator learns where the logs are" true
-      (contains rendered "read the logs on the endpoint");
+      (contains (flattened rendered)
+         "This Keeper runs on its configured SSH endpoint, so no container \
+          log stream exists on this host; read the logs on the endpoint.");
     Alcotest.(check bool) "no empty-instance wording" false
       (contains rendered "run a sandbox command first")
 ;;
@@ -304,7 +315,10 @@ let test_no_local_stream_rejects_a_backend () =
   match Masc_tui_keeper_sandbox.decode_logs ~sanitize:Fun.id json with
   | Ok _ -> Alcotest.fail "a no_local_stream payload named a backend"
   | Error detail ->
-    Alcotest.(check bool) "actionable error" true (contains detail "backend")
+    (* The whole message, not a substring: five decoder errors mention a
+       backend, so a looser check would pass on the wrong refusal. *)
+    Alcotest.(check string) "the refusal names the contradiction"
+      "sandbox logs.no_local_stream cannot name a backend" detail
 ;;
 
 let () =

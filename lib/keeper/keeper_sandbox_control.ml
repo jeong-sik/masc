@@ -817,6 +817,12 @@ let resolve_sandbox_log_target ~(config : Workspace.config) ~keeper_name =
   | Ok (Some meta) ->
     (match meta.sandbox_profile with
      | Docker -> Ok (Local_backend Docker_logs, meta.name)
+     (* [meta.microvm_backend] is in scope and unread: every microvm Keeper
+        resolves to Apple's runtime, so one naming microsandbox or
+        nerdctl_kata reaches a CLI it does not run and its healthy state
+        reads as [Sandbox_logs_backend_failed]. Threading the backend
+        changes the wire label and the reader that parses it, which is
+        RFC-0405's work rather than this profile fix: issue 32916. *)
      | Micro_vm -> Ok (Local_backend Apple_container_logs, meta.name)
      | Remote_ssh ->
        Ok (No_local_stream remote_ssh_no_local_stream_reason, meta.name))

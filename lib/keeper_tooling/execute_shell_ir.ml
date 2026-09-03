@@ -11,7 +11,6 @@ let simple_bin
       ?cwd_raw
       ?cwd_base
       ?(sandbox = Masc_exec.Sandbox_target.host ())
-      ?(redirects = [])
       bin
       args
   =
@@ -25,12 +24,10 @@ let simple_bin
     ; args = List.map lit args
     ; env = []
     ; cwd
-    ; redirects
+    ; redirects = []
     ; sandbox
     }
 ;;
-
-let pipeline stages = Masc_exec.Shell_ir.Pipeline stages
 
 let with_cwd ~raw ~cwd ir =
   let scope = cwd_scope ~cwd_base:cwd raw in

@@ -38,11 +38,7 @@ let typed_input_command_text
   (* The script is already the command line this wants to render. The shell
      that runs it is not part of the line the caller wrote. *)
   | Keeper_tool_execute_typed_input.Script { text; shell = _ } -> text
-  | Keeper_tool_execute_typed_input.Staged { program = { head; tail }; _ } ->
-    head :: tail
-    |> List.map (fun (stage : Keeper_tool_execute_typed_input.exec_stage) ->
-      typed_stage_command_text stage.argv)
-    |> String.concat " | "
+  | Keeper_tool_execute_typed_input.Argv argv -> typed_stage_command_text argv
 ;;
 
 (* Execute's callable surface is synchronous: the call holds the Keeper's only

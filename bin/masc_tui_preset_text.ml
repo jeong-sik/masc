@@ -17,6 +17,11 @@ let counts (m : D.preset_manifest) =
 let listing_lines (snapshot : D.presets_snapshot) =
   let presets =
     match snapshot.D.pss_presets with
+    (* Presets whose manifest did not read are still presets; saying "no
+       presets yet" beside their rows would send the operator to save one
+       when the fix is to look at why the manifest is unreadable. *)
+    | [] when snapshot.D.pss_unreadable <> [] ->
+      [ "읽을 수 있는 프리셋이 없습니다 — 아래 줄이 이유입니다" ]
     | [] ->
       [ "no presets yet — /preset save <name> [description] snapshots the live state" ]
     | presets ->

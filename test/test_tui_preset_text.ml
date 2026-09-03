@@ -24,7 +24,13 @@ let test_listing_names_counts_and_unreadable () =
        { D.pss_presets = [ morning ]; pss_unreadable = [ "torn", "manifest.json missing" ] });
   check (list string) "empty listing tells the operator how to save"
     [ "no presets yet — /preset save <name> [description] snapshots the live state" ]
-    (Text.listing_lines { D.pss_presets = []; pss_unreadable = [] })
+    (Text.listing_lines { D.pss_presets = []; pss_unreadable = [] });
+  check (list string) "unreadable rows are not an empty list"
+    [ "읽을 수 있는 프리셋이 없습니다 — 아래 줄이 이유입니다"
+    ; "  ! torn — manifest.json missing"
+    ]
+    (Text.listing_lines
+       { D.pss_presets = []; pss_unreadable = [ "torn", "manifest.json missing" ] })
 
 let test_saved_line_carries_the_counts () =
   check string "saved" "saved preset morning — overrides 1 · keepers 2 · assignments 12 · lanes 4"

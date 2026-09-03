@@ -589,12 +589,9 @@ let hitl_rows keeper_name pending =
    duplicated is a store this build cannot read: that is the Keeper's own
    evidence log failing, and no other row reports it. *)
 let external_attention_store_error_rows ~base_path ~keeper_name =
-  match
-    Keeper_external_attention.pending_for_keeper_result ~base_path ~keeper_name
-      ~limit:0 ()
-  with
-  | Ok _ -> []
-  | Error err ->
+  match Keeper_external_attention.store_read_error ~base_path ~keeper_name with
+  | None -> []
+  | Some err ->
     [ read_error_row
         ~keeper_name
         ~waiting_on:"external_attention_store"

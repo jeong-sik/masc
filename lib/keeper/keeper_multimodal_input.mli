@@ -30,6 +30,15 @@ val parse_user_blocks : Yojson.Safe.t -> (user_input_block list, string) result
 (** Parse the optional [user_blocks] request field. Duplicate or undeclared
     fields, unknown block types, and malformed media refs are request errors. *)
 
+val validate_attachment_references :
+  attachments:Keeper_chat_store.attachment list ->
+  user_input_block list ->
+  (unit, string) result
+(** Fail closed when an [attachments] entry is not referenced by any
+    [user_blocks] media block.  Attachments are a byte store; an unreferenced
+    attachment never reaches AGENT_CORE and would otherwise be silently
+    dropped.  Referencing the same attachment more than once is allowed. *)
+
 val fallback_message :
   attachments:Keeper_chat_store.attachment list -> user_input_block list -> string
 (** Text fallback for the existing string-only keeper turn path.  Raw media data

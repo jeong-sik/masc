@@ -772,6 +772,10 @@ let parse_keeper_chat_stream_request body_str =
     in
     let* attachments = Keeper_multimodal_input.parse_attachments json in
     let* user_blocks = Keeper_multimodal_input.parse_user_blocks json in
+    let* () =
+      Keeper_multimodal_input.validate_attachment_references ~attachments
+        user_blocks
+    in
     let message =
       if String.equal raw_message ""
       then Keeper_multimodal_input.fallback_message ~attachments user_blocks

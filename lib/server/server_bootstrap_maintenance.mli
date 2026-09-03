@@ -66,3 +66,7 @@ module Recovery_for_testing : sig
     'a list ->
     unit
 end
+
+val retention_becomes_warning : int -> bool
+(** One recovery pass a minute; the pass landing on a full day (1440)
+    warns. Exposed for the suite. *)

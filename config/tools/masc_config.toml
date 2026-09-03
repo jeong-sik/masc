@@ -1,9 +1,8 @@
 name = "masc_config"
 description = """
-Return the effective runtime configuration with source attribution (env var \
-or default) for each setting. Sensitive values (tokens, passwords) are \
-masked. Use to inspect or verify the server config without restarting. Pass \
-category to filter results to a single section."""
+Return the effective runtime configuration.
+
+Each setting carries its source attribution: env var or default. Sensitive values (tokens, passwords) are masked. Use to inspect or verify the server config without restarting. Pass category to filter results to a single section."""
 additional_properties = false
 
 
@@ -11,6 +10,7 @@ additional_properties = false
 # 2026-09-01..03: 32 turns needed it across 6317 provider requests, and its
 # 658 B schema rode every one of those requests. Loading it on demand costs
 # one extra request on those 32 turns and saves the 658 B on the rest.
+# What that trade does not cover is in Tool_loading_declarations.
 defer_loading = true
 [[params]]
 name = "category"

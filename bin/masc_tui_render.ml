@@ -1830,6 +1830,26 @@ let render_approval_detail (state : state) (row : approval_row) =
   finish_surface state ~clamped:(Approval_detail_scroll !scroll)
     ~surface_key:"approval-detail" ~rows:terminal_rows ~cols buf
 
+(* Long question, choice, and reason text was cut to one line with a trailing
+   "~", so an operator could not read the decision being asked of them. Each
+   field wraps instead: the first row carries [head] (the caret and Keeper
+   name, or a choice's number and mark), and every wrapped row after it is
+   indented to [head]'s visible width so the text stays in one column. [head]'s
+   ANSI is not counted toward the indent -- display_width reads cells, not
+   escape bytes. box_line pads content to the inner width, so a row of exactly
+   the inner width is filled, not truncated. *)
+let box_wrapped_field buf cols ~head ~style body =
+  let indent = Message_layout.display_width head in
+  let avail = max 8 (framed_inner_width cols - indent) in
+  match Message_layout.wrap_words ~max_cells:avail (Terminal_text.single_line body) with
+  | [] -> box_line buf cols head
+  | first :: rest ->
+      box_line buf cols (head ^ style ^ first ^ Ansi.reset);
+      let hang = String.make indent ' ' in
+      List.iter
+        (fun segment -> box_line buf cols (hang ^ style ^ segment ^ Ansi.reset))
+        rest
+
 (* Drawn into its own buffer so the pane above can be told how many rows it
    has to give up. Counting the rows a second way is what let the section draw
    its header into the one row left over and push every question off-screen. *)
@@ -1888,17 +1908,17 @@ let draw_ask_questions buf cols (state : state) =
                        one the digits land on while answering. A blank on every
                        row reads as no selection at all. *)
                     let caret = if selected_question then ">" else " " in
-                    box_line buf cols
-                      (Printf.sprintf " %s%s%s%s%s  %s" caret
-                         (if selected_question then Ansi.bold else "")
-                         (fit_width
-                            (Terminal_text.single_line row.Masc.Tui_decode.ar_keeper)
-                            16)
-                         (if selected_question then Ansi.reset else "")
-                         Ansi.reset
-                         (fit_width
-                            (Terminal_text.single_line question.Masc.Tui_decode.aq_prompt)
-                            (max 8 (cols - 24))));
+                    box_wrapped_field buf cols
+                      ~head:
+                        (Printf.sprintf " %s%s%s%s%s  " caret
+                           (if selected_question then Ansi.bold else "")
+                           (fit_width
+                              (Terminal_text.single_line row.Masc.Tui_decode.ar_keeper)
+                              16)
+                           (if selected_question then Ansi.reset else "")
+                           Ansi.reset)
+                      ~style:(if selected_question then Ansi.bold else "")
+                      question.Masc.Tui_decode.aq_prompt;
                     let chosen =
                       match Ask_projection.response_for draft ~question with
                       | Some (Ask_projection.Draft_chose ids) -> ids
@@ -1935,25 +1955,22 @@ let draw_ask_questions buf cols (state : state) =
                             Printf.sprintf "%d" (choice_index + 1)
                           else " "
                         in
-                        box_line buf cols
-                          (Printf.sprintf "    %s %s %s%s%s  %s" position mark
-                             (if picked then Ansi.bold else Ansi.dim)
-                             (fit_width
-                                (Terminal_text.single_line choice.Masc.Tui_decode.ac_id)
-                                12)
-                             Ansi.reset
-                             (fit_width
-                                (Terminal_text.single_line choice.Masc.Tui_decode.ac_label)
-                                (max 8 (cols - 28)))))
+                        box_wrapped_field buf cols
+                          ~head:
+                            (Printf.sprintf "    %s %s %s%s%s  " position mark
+                               (if picked then Ansi.bold else Ansi.dim)
+                               (Terminal_text.single_line choice.Masc.Tui_decode.ac_id)
+                               Ansi.reset)
+                          ~style:(if picked then Ansi.bold else Ansi.dim)
+                          choice.Masc.Tui_decode.ac_label)
                       question.Masc.Tui_decode.aq_choices;
                     (* What the operator has put down so far, in the two shapes
                        a list of choices cannot show. *)
                     (match Ask_projection.response_for draft ~question with
                      | Some (Ask_projection.Draft_wrote text) ->
-                         box_line buf cols
-                           (Printf.sprintf "      %swrote: %s%s" Ansi.bold
-                              (fit_width (Terminal_text.single_line text) (max 8 (cols - 16)))
-                              Ansi.reset)
+                         box_wrapped_field buf cols
+                           ~head:(Printf.sprintf "      %swrote: " Ansi.bold)
+                           ~style:Ansi.bold text
                      | Some Ask_projection.Draft_skipped ->
                          box_line buf cols
                            (Printf.sprintf "      %sskipped%s" Ansi.dim Ansi.reset)
@@ -1961,16 +1978,16 @@ let draw_ask_questions buf cols (state : state) =
                     match question.Masc.Tui_decode.aq_free_text with
                     | Masc.Tui_decode.Ask_choices_only -> ()
                     | Masc.Tui_decode.Ask_free_text_allowed { aft_hint } ->
-                        box_line buf cols
-                          (Printf.sprintf "      %sfree text welcome%s%s" Ansi.dim
-                             (match aft_hint with
-                              | None -> ""
-                              | Some hint ->
-                                  " -- "
-                                  ^ fit_width
-                                      (Terminal_text.single_line hint)
-                                      (max 8 (cols - 32)))
-                             Ansi.reset))
+                        (match aft_hint with
+                         | None ->
+                             box_line buf cols
+                               (Printf.sprintf "      %sfree text welcome%s" Ansi.dim
+                                  Ansi.reset)
+                         | Some hint ->
+                             box_wrapped_field buf cols
+                               ~head:
+                                 (Printf.sprintf "      %sfree text welcome -- " Ansi.dim)
+                               ~style:Ansi.dim hint))
                   row.Masc.Tui_decode.ar_questions;
                 (* The reason is what separates a decision that matters from
                    one that does not, so it is drawn, not hidden behind a
@@ -1978,10 +1995,9 @@ let draw_ask_questions buf cols (state : state) =
                 match row.Masc.Tui_decode.ar_context with
                 | None -> ()
                 | Some context ->
-                    box_line buf cols
-                      (Printf.sprintf "    %swhy: %s%s" Ansi.dim
-                         (fit_width (Terminal_text.single_line context) (max 8 (cols - 12)))
-                         Ansi.reset))
+                    box_wrapped_field buf cols
+                      ~head:(Printf.sprintf "    %swhy: " Ansi.dim)
+                      ~style:Ansi.dim context)
               rows))
 
 let ask_section_rows buf =
@@ -2452,10 +2468,21 @@ let render_approvals (state : state) =
   Buffer.add_buffer buf ask_buf;
 
   let hints =
+    (* One name for the key in both modes. [ and ] call the same function
+       either way -- they walk the asks -- and the surface used to call that
+       "question" while browsing and "ask" while answering, which is the same
+       key asking the operator to learn it twice. Named once here so the two
+       footers cannot drift apart again.
+
+       The vocabulary is the repository's: [/] walks the container a surface
+       is a list of. Board says post, Changes says keeper, this says ask. *)
+    let walk_asks = "[/]:ask" in
     match state.ask_answer_mode with
     | Ask_browsing ->
-        "j/k:move  y/n:decide  e:outside lane  [/]:question  \
-         a:answer a question  r:refresh  Tab:next"
+        Printf.sprintf
+          "j/k:move  y/n:decide  e:outside lane  %s  a:answer a question  \
+           r:refresh  Tab:next"
+          walk_asks
     | Ask_answering { aam_ask_id } ->
         (* Say when the next Enter sends. The approval queue two panes up
            already draws its armed state; this one announced itself only as an
@@ -2465,8 +2492,10 @@ let render_approvals (state : state) =
          | Some armed when String.equal armed aam_ask_id ->
              "Press Enter again to send  |  s:skip  c:clear  Esc:back"
          | Some _ | None ->
-             "j/k:question  [/]:ask  1-9:pick  s:skip  c:clear  Enter:answer  \
-              Esc:back")
+             Printf.sprintf
+               "j/k:question  %s  1-9:pick  s:skip  c:clear  Enter:answer  \
+                Esc:back"
+               walk_asks)
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
 

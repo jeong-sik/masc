@@ -26,15 +26,41 @@ let test_the_ask_list_can_be_walked_before_answering () =
 ;;
 
 (* A key the footer offers and the surface does not answer is worse than no
-   key: the operator presses it and reads the silence as a broken pane. *)
-let test_the_footer_offers_the_keys_that_walk_the_list () =
-  Alcotest.(check bool) "the browsing footer names the walk" true
+   key: the operator presses it and reads the silence as a broken pane.
+
+   The label is asserted through the one name both footers read, not by
+   pinning either sentence. [ and ] call the same function in both modes --
+   they walk the asks -- and this surface used to call that "question" while
+   browsing and "ask" while answering: one key, two names, on one screen.
+   Pinning the sentences would have frozen that; naming it once is what makes
+   the two unable to disagree. *)
+let test_the_two_modes_give_the_walk_one_name () =
+  Alcotest.(check int) "the browsing footer and the answering one share a name"
+    1
     (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
-       ~binding_name:"render_approvals"
-       ~needle:
-         "j/k:move  y/n:decide  e:outside lane  [/]:question  a:answer a \
-          question  r:refresh  Tab:next"
-     = 1)
+       ~binding_name:"render_approvals" ~needle:"[/]:ask");
+  Alcotest.(check int)
+    "and no second spelling survives beside it" 0
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"render_approvals" ~needle:"[/]:question")
+;;
+
+(* The vocabulary is the repository's, not this surface's. [ and ] walk the
+   container a surface is a list of: Board says post, Changes says keeper,
+   Approvals says ask. Three surfaces, three names -- a fourth means one of
+   them has started calling the same key something of its own. *)
+let test_the_bracket_keys_keep_one_vocabulary () =
+  let names = [ "[/]:ask"; "[/]:keeper"; "[/]:post" ] in
+  List.iter
+    (fun name ->
+       Alcotest.(check int) (name ^ " is the name one surface uses") 1
+         (Ast_grep.count_string_literals ~module_path:render ~needle:name))
+    names;
+  (* Every bracket-key label in the file is one of those three. A fourth is a
+     surface that has started calling the walk something of its own, which is
+     how this surface came to say both "ask" and "question". *)
+  Alcotest.(check int) "and no surface spells the walk a fourth way" 3
+    (Ast_grep.count_string_literals ~module_path:render ~needle:"[/]:")
 ;;
 
 (* The panel is drawn by [draw_ask_questions], and the caret it draws is the
@@ -56,8 +82,10 @@ let () =
     [ ( "selection"
       , [ Alcotest.test_case "the list can be walked before answering" `Quick
             test_the_ask_list_can_be_walked_before_answering
-        ; Alcotest.test_case "the footer offers those keys" `Quick
-            test_the_footer_offers_the_keys_that_walk_the_list
+        ; Alcotest.test_case "the two modes give the walk one name" `Quick
+            test_the_two_modes_give_the_walk_one_name
+        ; Alcotest.test_case "the bracket keys keep one vocabulary" `Quick
+            test_the_bracket_keys_keep_one_vocabulary
         ; Alcotest.test_case "the caret reads the cursor the keys move" `Quick
             test_the_caret_is_drawn_from_the_cursor_the_keys_move
         ] )

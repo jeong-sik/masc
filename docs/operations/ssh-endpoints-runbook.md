@@ -4,11 +4,6 @@ This is the operator runbook for RFC-0395 and `sandbox_profile = "remote_ssh"`.
 The lane is fail-closed: do not recover an SSH failure by changing a keeper to
 `local` or silently routing it to Docker.
 
-A second document covers the same contract. `docs/REMOTE-SSH-RUNBOOK.md` walks it
-with `scripts/remote-ssh/bootstrap-endpoint.sh` instead of the executable used
-here, and adds per-vendor notes. The two provisioning tools are separate
-implementations that do not call each other, so pick one per endpoint.
-
 ## Prerequisites
 
 - A Linux host reachable with OpenSSH and a dedicated remote account.
@@ -52,6 +47,23 @@ From the MASC repository:
 scripts/build-shim-static.sh artifacts/masc-exec-shim
 file artifacts/masc-exec-shim
 ```
+
+That builds one artifact for the host you are on, which is what
+`scripts/test-ssh-fixture.sh` consumes.
+
+musl static linking makes the shim indifferent to the remote distribution but
+not to its CPU: x86_64 instances need `amd64`, Graviton and Ampere need
+`arm64`, and an artifact built for the wrong one fails the remote probe rather
+than running. To produce both and keep them side by side, use the
+architecture-aware builder instead:
+
+```sh
+scripts/remote-ssh/build-shim.sh                 # amd64 + arm64
+scripts/remote-ssh/build-shim.sh --arch arm64    # one of them
+```
+
+It writes `dist/remote-ssh/masc-exec-shim-linux-<arch>`; pass the matching file
+to the bootstrap's `--shim`.
 
 Continue only when `file` reports `statically linked` or `static-pie linked`
 and no dynamic interpreter. The build script enforces this check.
@@ -111,6 +123,21 @@ Repo checkout materialization is not inferred from the host filesystem. Until
 the typed inventory in masc#31460 lands, provision required checkouts through
 an explicit operator-approved repository workflow.
 
+### What one endpoint separates, and what it does not
+
+Every keeper on an endpoint logs in as the same unix account. The boundary
+between two keepers there is the directory jail under `remote_root`, not an OS
+boundary: a keeper that escapes the jail reaches its neighbours. Use one
+endpoint per trust domain, and when keepers must not reach each other, give each
+its own unix account and declare a separate endpoint per account.
+
+The endpoint's `max_concurrent_sessions` semaphore is also shared by every
+keeper pointed at it. Raising a keeper's throughput lowers its neighbours'.
+
+Recreating the remote instance changes its host key. `StrictHostKeyChecking=yes`
+is enforced, so the pin at `.masc/ssh/known_hosts.d/<name>` must be verified out
+of band and rewritten before the endpoint answers again.
+
 ## 5. Verify and upgrade
 
 Run the live transport proof from the exact source head:
@@ -126,6 +153,17 @@ To upgrade a real endpoint, rebuild the static artifact and rerun the bootstrap
 with the same endpoint and keeper token inputs. The dedicated key is reused;
 the unchanged host key is re-confirmed; the shim and recorded probe are
 replaced through the pinned channel. A major-version mismatch blocks preflight.
+
+### Reading the evidence instead of the report
+
+A keeper's own account of a remote command is not evidence. Read the ledger:
+
+- approval receipts: the `outcomes` in `<base>/.masc/gate/replay-results.json`
+- command output: `<base>/.masc/tool_blobs/<sha2>/<sha256>`
+
+A blob's `via` and `sandbox_profile` fields say which lane actually carried the
+command. `via: remote_ssh` with exit 0 is proof the endpoint ran it; a keeper
+sentence saying so is not.
 
 ## Failure modes
 

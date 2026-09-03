@@ -258,9 +258,11 @@ let replace_or_append_multiline_array section_lines ~key ~values =
          if array_closes_on_key_line line
          then Some (List.rev acc, rest)
          else (
+           (* The close is a [\]] outside a comment: a comment line inside
+              the block may mention a table such as [runtime.lanes]. *)
            let rec consume = function
              | [] -> []
-             | l :: r -> if String.contains l ']' then r else consume r
+             | l :: r -> if String.contains (strip_comment l) ']' then r else consume r
            in
            Some (List.rev acc, consume rest))
        | _ -> find_span (line :: acc) rest)

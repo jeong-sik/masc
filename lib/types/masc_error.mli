@@ -79,9 +79,8 @@ val code : t -> int
 
 val dashboard_auth_error_code : t -> string option
 (** [dashboard_auth_error_code err] maps a typed error to the stable
-    dashboard auth-error-code string consumed by the Bonsai dashboard
-    ([DashboardShellAuthSummary.auth_error_code]) and the keeper stream
-    401 retry gate (TS enum in
+    dashboard auth-error-code string consumed by the dashboard shell
+    auth summary and the keeper stream 401 retry gate (TS enum in
     [dashboard/src/types/dashboard-execution.ts]).
 
     SSOT for both the dashboard shell summary JSON and the HTTP 401

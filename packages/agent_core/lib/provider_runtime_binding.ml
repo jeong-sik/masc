@@ -236,7 +236,6 @@ let base_capabilities_of_kind = function
   | PConfig.OpenAI_compat -> Llm_provider.Capabilities.openai_compat_chat_capabilities
   | PConfig.Gemini -> Llm_provider.Capabilities.gemini_capabilities
   | PConfig.Glm -> Llm_provider.Capabilities.glm_capabilities
-  | PConfig.DashScope -> Llm_provider.Capabilities.dashscope_capabilities
 ;;
 
 let registry_capabilities_for_provider_config (cfg : PConfig.t) =

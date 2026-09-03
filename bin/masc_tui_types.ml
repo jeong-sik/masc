@@ -2056,6 +2056,11 @@ type state = {
      [h] on the help sheet for the session). Off leaves "?:help" as the one
      remaining hint -- the door back for the reader who knows the keys. *)
   mutable hints_visible: bool;
+  (* Whether a line typed while an earlier one still waits joins that line
+     instead of queueing behind it ([tui].coalesce_queued_input at boot). A
+     queued line has not been sent, so joining two changes what one turn
+     receives rather than what a turn in flight sees. *)
+  mutable coalesce_queued_input: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
   (* Cursor over the overlay's actionable rows (running / just finished);
@@ -2972,6 +2977,7 @@ let create_state
   agenda_open = false;
   agenda_scroll = 0;
   hints_visible = true;
+  coalesce_queued_input = true;
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;
@@ -3453,12 +3459,32 @@ let oldest_at (entries : msg_entry list) =
    Rows the operator paged back to are older than anything the fresh window
    carries, so they are kept. Replacing the list with the fresh window alone
    threw them away on every tick, which is why paging back never got past
-   whatever the first load happened to reach (#31089). *)
+   whatever the first load happened to reach (#31089).
+
+   The window does not own the middle either. The tail is bounded (100
+   user/assistant rows, 400 lines absolute), and a keeper flooding approval
+   rows evicts conversation rows the operator was reading: the old rule
+   dropped every held row at or after the fresh window's oldest on the
+   assumption the window carried it, so the middle of a conversation vanished
+   on exactly the tick that pushed it out of the window (#32660). A held row
+   survives unless the fresh window actually carries its identity; the
+   carried copy replaces it. *)
 let merge_paged_history ~(paged : msg_entry list) ~(fresh : msg_entry list) =
-  match oldest_at fresh with
-  | None -> paged
-  | Some at ->
-    List.filter (fun (entry : msg_entry) -> entry.me_at < at) paged @ fresh
+  let carried =
+    List.fold_left
+      (fun acc (entry : msg_entry) -> entry.me_identity :: acc)
+      [] fresh
+  in
+  let held =
+    List.filter
+      (fun (entry : msg_entry) ->
+         not (List.exists (fun identity -> identity = entry.me_identity) carried))
+      paged
+  in
+  List.sort
+    (fun (left : msg_entry) (right : msg_entry) ->
+       Float.compare left.me_at right.me_at)
+    (held @ fresh)
 
 let set_msg_scroll (state : state) rows =
   let rows = max 0 rows in

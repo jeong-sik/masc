@@ -235,7 +235,12 @@ let restore_snapshot_unlocked path = function
          Sys.remove path;
          Keeper_fs_durable_directory.fsync_directory (Filename.dirname path);
          Ok ()
-       with exn ->
+       with
+       (* The rollback did not fail; it was stopped. Reporting it as a
+          reconciliation the operator must perform sends them after a manifest
+          that may still be exactly where the next attempt expects it. *)
+       | Eio.Cancel.Cancelled _ as error -> raise error
+       | exn ->
          Error
            (reconciliation_required
               path
@@ -366,6 +371,16 @@ let full_fields
       else parsed.profile_defaults.skill_names
     with
     | Some names -> ("skills.names", Keeper_toml_loader.Toml_string_array names) :: fields
+    | None -> fields
+  in
+  (* RFC-0403. Carried straight from the profile: this axis has no
+     [masc_keeper_up] argument, so the file is its only source. Leaving it out
+     of this list would delete an operator's selection the next time anything
+     called keeper_up on this Keeper, with nothing said. *)
+  let fields =
+    match parsed.profile_defaults.attached_tool_allow with
+    | Some names ->
+      ("tools.attached_allow", Keeper_toml_loader.Toml_string_array names) :: fields
     | None -> fields
   in
   let fields =

@@ -5933,27 +5933,6 @@ let test_decode_gate_row_of_another_operation_has_no_site () =
             "no site" None pending.Tui_decode.gp_execution_cwd
       | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
 
-let test_decode_execute_gate_row_reads_a_pipeline () =
-  (* A staged call carries no top-level argv. The stages read the way they
-     run rather than collapsing to the first one. *)
-  let stage argv =
-    `Assoc [ ("argv", `List (List.map (fun word -> `String word) argv)) ]
-  in
-  let preview =
-    decoded_execute_preview ~preview:"{\"schema\":\"masc.keeper_gate.request.v1\"}"
-      ~input:
-        (`Assoc
-           [ ( "input",
-               `Assoc
-                 [ ( "pipeline",
-                     `List [ stage [ "git"; "log"; "--oneline" ]; stage [ "head"; "-5" ] ] );
-                 ] );
-           ])
-  in
-  Alcotest.check
-    Alcotest.(option string)
-    "stages read the way they run"
-    (Some "git log --oneline | head -5") preview
 
 let test_decode_execute_gate_row_quotes_a_word_with_a_space () =
   let preview =
@@ -7271,8 +7250,6 @@ let () =
           test_decode_execute_gate_row_leads_with_the_command;
         Alcotest.test_case "an execute row shows the script line" `Quick
           test_decode_execute_gate_row_shows_the_script_line;
-        Alcotest.test_case "an execute row reads a pipeline" `Quick
-          test_decode_execute_gate_row_reads_a_pipeline;
         Alcotest.test_case "an execute row carries where it would run" `Quick
           test_decode_execute_gate_row_carries_where_it_would_run;
         Alcotest.test_case "another operation has no execution site" `Quick

@@ -4,6 +4,12 @@ Get fitness scores for agents based on completion rate, reliability, and \
 speed metrics."""
 additional_properties = false
 
+
+# Held back from the request until the model asks for it by name.
+# 2026-09-01..03: 2 turns needed it across 6317 provider requests, and its
+# 424 B schema rode every one of those requests. Loading it on demand costs
+# one extra request on those 2 turns and saves the 424 B on the rest.
+defer_loading = true
 [[params]]
 name = "agent_name"
 type = "string"

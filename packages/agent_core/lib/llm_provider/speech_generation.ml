@@ -130,7 +130,7 @@ let validate_request (config : Provider_config.t) text voice =
   match config.kind with
   | Provider_config.OpenAI_compat -> Ok Openai_speech
   | Provider_config.Gemini -> Ok Gemini_interaction
-  | Anthropic | Kimi | Ollama | Glm | DashScope ->
+  | Anthropic | Kimi | Ollama | Glm ->
     reject
       (Printf.sprintf
          "speech generation has no wire implementation for provider kind %s"

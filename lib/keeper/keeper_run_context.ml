@@ -30,15 +30,7 @@ let build_base_system_prompt
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(meta : keeper_meta)
   =
-  let active_goal_summaries =
-    Keeper_unified_prompt.active_goal_summaries_of_store ~config
-  in
-  Keeper_unified_prompt.build_system_prompt
-    ~meta
-    ~config
-    ~profile_defaults
-    ~active_goal_summaries
-    ()
+  Keeper_unified_prompt.build_system_prompt ~meta ~config ~profile_defaults ()
 
 let prepare_run_context
       ~(config : Workspace.config)

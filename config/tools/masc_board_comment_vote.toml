@@ -4,6 +4,12 @@ Vote on a comment (up or down) to signal agreement or quality. Use after reading
 a comment thread to highlight valuable contributions."""
 
 # The pattern mirrors Board_types.Comment_id.json_schema_pattern (#29457).
+
+# Held back from the request until the model asks for it by name.
+# 2026-09-01..03: 4 turns needed it across 6317 provider requests, and its
+# 562 B schema rode every one of those requests. Loading it on demand costs
+# one extra request on those 4 turns and saves the 562 B on the rest.
+defer_loading = true
 [[params]]
 name = "comment_id"
 type = "string"

@@ -172,33 +172,31 @@ let handle_speak_with_outcome
         (Yojson.Safe.to_string
            (keeper_text_fallback_json ~agent_id:meta.name ~message)))
 
-let handle_listen_with_outcome
-      ~(meta : keeper_meta)
-      ~(authorize_external_effect : external_effect_authorizer)
-      ~(args : Yojson.Safe.t)
-      ()
+(* Listen opens the user's microphone window, so it never becomes a Gate
+   request. An approval cycle outlives the recording window (auto_judge
+   resolution is measured in tens of seconds against a 60s default timeout),
+   and a post-approval replay would open the microphone after the user has
+   stopped talking. Inbound speech is input collection, not an outbound
+   effect; speak is the voice leaf the Gate still reviews. *)
+let handle_listen_with_outcome ~(meta : keeper_meta) ~(args : Yojson.Safe.t) ()
   =
   let timeout_sec = Safe_ops.json_float ~default:60.0 "timeout_seconds" args in
   let language_code = Safe_ops.json_string_opt "language_code" args in
-  authorize_external_effect
-    ~operation:(command_to_string Listen)
-    ~input:args
-    ~continue:(fun () ->
-      match
-        Voice_bridge.record_and_transcribe
-          ~agent_id:meta.name
-          ~timeout_sec
-          ?language_code
-          ()
-      with
-      | Ok json -> Keeper_tool_execution.success (Yojson.Safe.to_string json)
-      | Error err ->
-        Keeper_tool_execution.failure
-          ~class_:Tool_result.Runtime_failure
-          (Tool_args.error_response_with
-             [ "error", `String err
-             ; "agent_id", `String meta.name
-             ]))
+  match
+    Voice_bridge.record_and_transcribe
+      ~agent_id:meta.name
+      ~timeout_sec
+      ?language_code
+      ()
+  with
+  | Ok json -> Keeper_tool_execution.success (Yojson.Safe.to_string json)
+  | Error err ->
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
+      (Tool_args.error_response_with
+         [ "error", `String err
+         ; "agent_id", `String meta.name
+         ])
 
 let append_assoc_fields json fields =
   match json with
@@ -349,7 +347,7 @@ let handle_with_outcome
   match command with
   | Speak ->
     handle_speak_with_outcome ~config ~meta ~authorize_external_effect ~args
-  | Listen -> handle_listen_with_outcome ~meta ~authorize_external_effect ~args ()
+  | Listen -> handle_listen_with_outcome ~meta ~args ()
   | Agent -> handle_agent_with_outcome ~meta
   | Sessions -> handle_sessions_with_outcome ()
   | Session_start -> handle_session_start_with_outcome ~meta ~args

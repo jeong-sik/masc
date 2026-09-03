@@ -2345,14 +2345,29 @@ let test_agent_delegate_submits_owner_operation_without_waiting () =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
+  let previous_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Fun.protect
     ~finally:(fun () ->
+      restore_env "MASC_CONFIG_DIR" previous_config_dir;
+      Config_dir_resolver.reset ();
       Keeper_registry.For_testing.clear ();
       remove_tree base_path)
     (fun () ->
        Eio.Switch.run @@ fun sw ->
        let config = Workspace.default_config base_path in
        ignore (Workspace.init config ~agent_name:(Some "owner-tool-test"));
+       (* Delegate preflight reads the keeper's declared lane from its TOML;
+          since #32078 a keeper without one is refused ("sandbox_profile is
+          required"), so the fixture declares the lane the way an operator's
+          keeper TOML does. *)
+       let config_dir = Filename.concat base_path ".masc/config" in
+       mkdir_p (Filename.concat config_dir "keepers");
+       Unix.putenv "MASC_CONFIG_DIR" config_dir;
+       Config_dir_resolver.reset ();
+       let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+       write_file
+         (Filename.concat keepers_dir "agent-operation-target.toml")
+         "[keeper]\nname = \"agent-operation-target\"\ninstructions = \"test keeper\"\nsandbox_profile = \"docker\"\n";
        let meta = make_meta "agent-operation-target" in
        Keeper_meta_store.replace_snapshot config meta |> Result.get_ok;
        ignore
@@ -2717,7 +2732,7 @@ let test_root_inventory_reads_undecodable_meta_as_absent_and_boot_rematerializes
        write_file
          (Filename.concat keepers_dir (name ^ ".toml"))
          (Printf.sprintf
-            "[keeper]\nname = \"%s\"\ninstructions = \"test keeper\"\nsandbox_profile = \"local\"\n"
+            "[keeper]\nname = \"%s\"\ninstructions = \"test keeper\"\nsandbox_profile = \"docker\"\n"
             name);
        Keeper_meta_store.replace_snapshot config (make_meta name) |> Result.get_ok;
        let meta_path = Keeper_types_profile.keeper_meta_path config name in

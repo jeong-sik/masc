@@ -271,7 +271,6 @@ let test_find_capable_composite () =
 let expected_default_provider_names =
   [ "claude"
   ; "cohere"
-  ; "dashscope"
   ; "deepseek"
   ; "gemini"
   ; "gemini-image"
@@ -533,9 +532,6 @@ let test_default_max_context () =
    | Some e ->
      check (option int) "deepseek provider capability 128K" (Some 128_000) e.max_context
    | None -> fail "deepseek should exist");
-  (match Provider_registry.find reg "dashscope" with
-   | Some e -> check (option int) "dashscope 128K" (Some 128_000) e.max_context
-   | None -> fail "dashscope should exist");
   match Provider_registry.find reg "siliconflow" with
   | Some e -> check (option int) "siliconflow 128K" (Some 128_000) e.max_context
   | None -> fail "siliconflow should exist"
@@ -822,9 +818,9 @@ let test_catalog_accepts_explicit_thinking_control_formats () =
              {"id": "kimi-k2", "kind": "openai_compat",
               "base_url": "https://kimi-k2.example",
               "capabilities": {"thinking_control_format": "thinking_object_only"}},
-             {"id": "dashscope", "kind": "openai_compat",
-              "base_url": "https://dashscope.example",
-              "capabilities": {"thinking_control_format": "enable_thinking"}},
+             {"id": "thinking-object", "kind": "openai_compat",
+              "base_url": "https://thinking-object.example",
+              "capabilities": {"thinking_control_format": "thinking_object"}},
              {"id": "ollama-cloud", "kind": "ollama",
               "base_url": "https://ollama-cloud.example",
               "capabilities": {"thinking_control_format": "ollama_think"}},
@@ -852,7 +848,7 @@ let test_catalog_accepts_explicit_thinking_control_formats () =
       | None -> fail (id ^ " should exist")
     in
     check_format "kimi-k2" Capabilities.Thinking_object_only;
-    check_format "dashscope" Capabilities.Enable_thinking;
+    check_format "thinking-object" Capabilities.Thinking_object;
     check_format "ollama-cloud" Capabilities.Ollama_think;
     check_format "openai-reasoning" Capabilities.Reasoning_effort;
     (match Provider_catalog.lookup catalog "kimi-latest" with

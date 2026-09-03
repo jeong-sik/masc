@@ -183,14 +183,26 @@ let setup_exporter
     end else begin
       let failures = Atomic.get _consecutive_failures + 1 in
       Atomic.set _consecutive_failures failures;
-      Log.Otel.warn "OTLP health check failed (%d consecutive) -> %s"
-        failures endpoint;
-      if Atomic.get exporter_active && failures >= 3 then begin
-        Log.Otel.error "OTLP exporter marked inactive after %d consecutive failures -> %s"
+      (* Losing a live exporter is news; a collector that is still absent is
+         not. The recovery path below already says so in its own comment ("No
+         WARN spam"), and the count stays readable either way -- it is served
+         as [consecutive_failures] on the runtime route. Reporting the steady
+         state every 30s is what buried the rest: 1,133 of 1,686 WARN/ERROR
+         lines in one 19h window were this line, at 909 consecutive. *)
+      if Atomic.get exporter_active
+      then begin
+        Log.Otel.warn "OTLP health check failed (%d consecutive) -> %s"
           failures endpoint;
-        Atomic.set exporter_active false;
-        stop_current_export_backend ()
-      end;
+        if failures >= 3 then begin
+          Log.Otel.error "OTLP exporter marked inactive after %d consecutive failures -> %s"
+            failures endpoint;
+          Atomic.set exporter_active false;
+          stop_current_export_backend ()
+        end
+      end
+      else
+        Log.Otel.debug "OTLP health check failed (%d consecutive) -> %s"
+          failures endpoint;
       supervisor_loop ()
     end
   in

@@ -91,7 +91,7 @@
       "supports_native_streaming": true
     },
     {
-      "_comment": "Qwen3.5-Plus — Alibaba DashScope. 1M ctx (CORRECTED — was 128K), 65K output. enable_thinking with 3 budget modes. https://openrouter.ai/qwen/qwen3.5-plus-20260420",
+      "_comment": "Qwen3.5-Plus — Alibaba Cloud. 1M ctx (CORRECTED — was 128K), 65K output. enable_thinking with 3 budget modes. https://openrouter.ai/qwen/qwen3.5-plus-20260420",
       "id_prefix": "qwen3.5",
       "base": "openai_chat",
       "max_context_tokens": 1000000,

@@ -6,6 +6,12 @@ removes every derived fact that no longer has a complete support path and \
 records both the direct reason and the support invalidations for inspection."""
 additional_properties = false
 
+
+# Held back from the request until the model asks for it by name.
+# 2026-09-01..03: 35 turns needed it across 6317 provider requests, and its
+# 659 B schema rode every one of those requests. Loading it on demand costs
+# one extra request on those 35 turns and saves the 659 B on the rest.
+defer_loading = true
 [[params]]
 name = "memory_id"
 type = "string"

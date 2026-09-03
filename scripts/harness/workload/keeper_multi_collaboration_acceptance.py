@@ -30,7 +30,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 
 SCRIPT_PATH = pathlib.Path(__file__).resolve()
@@ -182,6 +182,51 @@ if rw26_fibonacci_leading_one_count(10) != 3:
 # same boot window seen after the socket returns.
 TRANSPORT_RETRY_INTERVAL_SEC = 10.0
 TRANSPORT_RETRY_ATTEMPTS = 30
+# HTTP 429 is the server saying "later", not "never": the per-IP bucket
+# (bin/main_eio.ml, 100 req/s, burst 150) refills within a second and the
+# per-agent bucket within a few. The client obeys Retry-After when the
+# response carries one and otherwise waits a second, hands every rejected
+# response (status, rate-limit headers, body, tool) to its owner as
+# evidence, and gives up after RATE_LIMIT_RETRY_ATTEMPTS. r8 run1
+# (2026-09-02, #32671) died on the first 429 of a 33-turn run, with the
+# bucket's drain unattributed because the rejection leaves no server log.
+RATE_LIMIT_RETRY_ATTEMPTS = 30
+RATE_LIMIT_RETRY_FALLBACK_SEC = 1.0
+
+
+def retry_after_seconds(error: urllib.error.HTTPError) -> float:
+    raw = error.headers.get("Retry-After")
+    if raw is None:
+        return RATE_LIMIT_RETRY_FALLBACK_SEC
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return RATE_LIMIT_RETRY_FALLBACK_SEC
+
+
+def rate_limited_record(
+    *,
+    url: str,
+    method: str,
+    tool: str | None,
+    attempt: int,
+    error: urllib.error.HTTPError,
+    detail: str,
+) -> dict[str, Any]:
+    return {
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "url": url,
+        "method": method,
+        "tool": tool,
+        "attempt": attempt,
+        "status": error.code,
+        "headers": {
+            key: value
+            for key, value in error.headers.items()
+            if key.lower().startswith(("x-ratelimit", "retry-after"))
+        },
+        "body": detail[:500],
+    }
 
 GOAL_VERIFIER_PHASE_FAILED = "goal_verifier_phase_failed"
 
@@ -384,6 +429,8 @@ class McpClient:
         self.session_id: str | None = None
         self.protocol_version = "2025-11-25"
         self._request_id = 0
+        # Owner-supplied sink for every HTTP 429 this client retried.
+        self.on_rate_limited: Callable[[dict[str, Any]], None] | None = None
 
     def _next_id(self) -> int:
         self._request_id += 1
@@ -422,6 +469,7 @@ class McpClient:
         *,
         _retry_on_stale_session: bool = True,
         _transport_retries: int = TRANSPORT_RETRY_ATTEMPTS,
+        _rate_limit_retries: int = RATE_LIMIT_RETRY_ATTEMPTS,
     ) -> dict[str, Any]:
         request_id = self._next_id()
         payload = json.dumps(
@@ -456,6 +504,25 @@ class McpClient:
                     self.protocol_version = protocol_version
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", errors="replace")
+            if error.code == 429 and _rate_limit_retries > 0:
+                record = rate_limited_record(
+                    url=self.endpoint,
+                    method=method,
+                    tool=params.get("name") if isinstance(params, dict) else None,
+                    attempt=RATE_LIMIT_RETRY_ATTEMPTS - _rate_limit_retries + 1,
+                    error=error,
+                    detail=detail,
+                )
+                if self.on_rate_limited is not None:
+                    self.on_rate_limited(record)
+                time.sleep(retry_after_seconds(error))
+                return self.request(
+                    method,
+                    params,
+                    _retry_on_stale_session=_retry_on_stale_session,
+                    _transport_retries=_transport_retries,
+                    _rate_limit_retries=_rate_limit_retries - 1,
+                )
             if (
                 _retry_on_stale_session
                 and error.code == 404
@@ -476,7 +543,10 @@ class McpClient:
                 self.session_id = None
                 self.initialize()
                 return self.request(
-                    method, params, _retry_on_stale_session=False
+                    method,
+                    params,
+                    _retry_on_stale_session=False,
+                    _rate_limit_retries=_rate_limit_retries,
                 )
             raise AcceptanceError(f"MCP HTTP {error.code}: {detail[:1000]}") from error
         except urllib.error.URLError as error:
@@ -488,6 +558,7 @@ class McpClient:
                     params,
                     _retry_on_stale_session=_retry_on_stale_session,
                     _transport_retries=_transport_retries - 1,
+                    _rate_limit_retries=_rate_limit_retries,
                 )
             raise AcceptanceError(f"MCP transport failed: {error}") from error
         value = self._decode_response(body, request_id)
@@ -503,6 +574,7 @@ class McpClient:
                     params,
                     _retry_on_stale_session=_retry_on_stale_session,
                     _transport_retries=_transport_retries - 1,
+                    _rate_limit_retries=_rate_limit_retries,
                 )
             raise AcceptanceError(
                 f"MCP {method} JSON-RPC error: {json.dumps(error_value, ensure_ascii=False)}"
@@ -1287,6 +1359,8 @@ class MissionRun:
         self.catalog = catalog
         self.client = client
         self.writer = writer
+        self.rate_limited_responses: list[dict[str, Any]] = []
+        client.on_rate_limited = self.record_rate_limited
         self.endpoint = endpoint
         self.token = token
         self.timeout = timeout
@@ -1390,8 +1464,15 @@ class MissionRun:
 
     def new_client(self) -> McpClient:
         client = McpClient(self.endpoint, self.token, self.timeout)
+        client.on_rate_limited = self.record_rate_limited
         client.initialize()
         return client
+
+    def record_rate_limited(self, record: dict[str, Any]) -> None:
+        # Every 429 the run survived stays visible: the full list under
+        # observations/, the count under resources.transport_rate_limited_count.
+        self.rate_limited_responses.append(record)
+        self.writer.write_json("observations/transport-429.json", self.rate_limited_responses)
 
     def dashboard_get(self, path: str) -> dict[str, Any]:
         parsed = urllib.parse.urlparse(self.endpoint)
@@ -1402,11 +1483,29 @@ class MissionRun:
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         request = urllib.request.Request(url, headers=headers, method="GET")
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                value = json.loads(response.read().decode("utf-8"))
-        except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError) as error:
-            raise AcceptanceError(f"Dashboard GET {path} failed: {error}") from error
+        for attempt in range(1, RATE_LIMIT_RETRY_ATTEMPTS + 2):
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    value = json.loads(response.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as error:
+                if error.code == 429 and attempt <= RATE_LIMIT_RETRY_ATTEMPTS:
+                    detail = error.read().decode("utf-8", errors="replace")
+                    self.record_rate_limited(
+                        rate_limited_record(
+                            url=url,
+                            method="GET",
+                            tool=None,
+                            attempt=attempt,
+                            error=error,
+                            detail=detail,
+                        )
+                    )
+                    time.sleep(retry_after_seconds(error))
+                    continue
+                raise AcceptanceError(f"Dashboard GET {path} failed: {error}") from error
+            except (urllib.error.URLError, json.JSONDecodeError) as error:
+                raise AcceptanceError(f"Dashboard GET {path} failed: {error}") from error
         if not isinstance(value, dict):
             raise AcceptanceError(f"Dashboard GET {path} returned a non-object payload")
         return value
@@ -3714,6 +3813,7 @@ def build_bundle(
             "sandbox_profile": run.sandbox_profile,
             "tool_approval_modes": run.tool_approval_modes,
             "turn_settle_budget_sec": run.turn_settle_budget_sec,
+            "transport_rate_limited_count": len(run.rate_limited_responses),
             "goal_id": run.goal_id,
             "goal_verifier_goal_id": run.verifier_goal_id,
             "goal_verifier_task_id": run.verifier_task_id,

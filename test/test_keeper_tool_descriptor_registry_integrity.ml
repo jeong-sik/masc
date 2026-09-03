@@ -1537,6 +1537,12 @@ let cluster_projection_table =
   ; "masc_keeper_down", "tool_masc_keeper_dispatch"
   ; "masc_keeper_delegate", "tool_masc_keeper_dispatch"
   ; "masc_keeper_up", "tool_masc_keeper_dispatch"
+    (* The ask family rides the misc dispatcher: its schemas live in
+       [Tool_schemas_misc.schemas], so the descriptor and the in-process route
+       are the misc cluster's. *)
+  ; "masc_ask", "tool_masc_misc_dispatch"
+  ; "masc_ask_status", "tool_masc_misc_dispatch"
+  ; "masc_ask_withdraw", "tool_masc_misc_dispatch"
   ]
 ;;
 

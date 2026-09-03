@@ -30,12 +30,12 @@ let test_every_way_back_asks_for_what_is_behind_it () =
       n
 ;;
 
-let entry_at at : Tui_types.msg_entry =
+let entry_at ?(id = "") at : Tui_types.msg_entry =
   { Tui_types.me_keeper_name = "alpha"
   ; me_role = Tui_types.Message_keeper
   ; me_identity =
-      Tui_types.Persisted_legacy_row
-        { request_id = ""; operation_seq = 0 }
+      Tui_types.Persisted_row
+        (if id = "" then Printf.sprintf "msg-%.0f" at else id)
   ; me_turn_phase = Tui_types.Turn_output
   ; me_turn_sequence = None
   ; me_operation_seq = 0
@@ -88,14 +88,35 @@ let test_a_refresh_keeps_what_was_paged_back_to () =
 ;;
 
 (* Rows the fresh window already carries come back in it, so keeping the paged
-   copy too would show them twice. *)
+   copy too would show them twice. Same row, same id: the window's copy
+   replaces the held one. *)
 let test_a_refresh_does_not_double_the_overlap () =
-  let paged = [ entry_at 100.; entry_at 300.; entry_at 400. ] in
-  let fresh = [ entry_at 300.; entry_at 400.; entry_at 500. ] in
+  let paged =
+    [ entry_at 100.; entry_at ~id:"msg-300" 300.; entry_at ~id:"msg-400" 400. ]
+  in
+  let fresh =
+    [ entry_at ~id:"msg-300" 300.; entry_at ~id:"msg-400" 400.; entry_at 500. ]
+  in
   check
     (list (float 0.001))
     "only rows older than the window survive"
     [ 100.; 300.; 400.; 500. ]
+    (ats (Tui_types.merge_paged_history ~paged ~fresh))
+;;
+
+(* The tail window is bounded, and a keeper flooding approval rows pushes
+   conversation rows out of it between two refreshes. The old rule dropped
+   every held row at or after the window's oldest -- on the assumption the
+   window still carried it -- so the middle of the conversation vanished on
+   the tick that pushed it out (#32660). A row the window does not carry
+   stays on screen. *)
+let test_a_row_the_window_evicted_stays_visible () =
+  let paged = [ entry_at 300.; entry_at 400. ] in
+  let fresh = [ entry_at 500.; entry_at 600. ] in
+  check
+    (list (float 0.001))
+    "evicted rows kept, fresh window appended"
+    [ 300.; 400.; 500.; 600. ]
     (ats (Tui_types.merge_paged_history ~paged ~fresh))
 ;;
 
@@ -1438,6 +1459,8 @@ let () =
             test_a_refresh_keeps_what_was_paged_back_to
         ; test_case "a refresh does not double the overlap" `Quick
             test_a_refresh_does_not_double_the_overlap
+        ; test_case "a row the window evicted stays visible" `Quick
+            test_a_row_the_window_evicted_stays_visible
         ; test_case "an empty refresh keeps the transcript" `Quick
             test_an_empty_refresh_keeps_the_transcript
         ; test_case "oldest_at reports the cursor" `Quick

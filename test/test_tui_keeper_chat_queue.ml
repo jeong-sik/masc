@@ -271,6 +271,27 @@ let test_take_newest_for_keeper_does_not_touch_another_keeper () =
         [ "alpha one"; "beta one"; "beta two" ]
         (messages rest)
 ;;
+
+(* Which waiting line a newly typed one joins. The reader types a thought,
+   then its correction: both are meant for one turn, and neither has been sent
+   -- dispatch takes a line out of the queue -- so joining them changes what
+   one turn receives, not what a turn in flight sees. *)
+let join_target_cases =
+  [ test_case "nothing waiting -> no target" `Quick (fun () ->
+        check bool "none" true
+          (Queue.join_target Queue.empty ~keeper_name:"alpha" = None))
+  ; test_case "joins the last waiting line, not the first" `Quick (fun () ->
+        let queue, _ = push_exn Queue.empty ~keeper_name:"alpha" "first" in
+        let queue, _ = push_exn queue ~keeper_name:"alpha" "second" in
+        match Queue.join_target queue ~keeper_name:"alpha" with
+        | Some item -> check string "last" "second" item.Queue.request.Chat.message
+        | None -> fail "expected a join target")
+  ; test_case "another keeper's line is not a target" `Quick (fun () ->
+        let queue, _ = push_exn Queue.empty ~keeper_name:"beta" "beta line" in
+        check bool "none" true
+          (Queue.join_target queue ~keeper_name:"alpha" = None))
+  ]
+
 let () =
   run
     "tui_keeper_chat_queue"
@@ -301,5 +322,6 @@ let () =
         ; test_case "take newest is scoped to one Keeper" `Quick
             test_take_newest_for_keeper_does_not_touch_another_keeper
         ] )
+    ; ("join_target", join_target_cases)
     ]
 ;;

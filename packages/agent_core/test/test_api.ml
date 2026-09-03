@@ -262,7 +262,7 @@ let test_parse_openai_response_preserves_fenced_json () =
   let json_str =
     {|{
     "id": "chatcmpl_test",
-    "model": "dashscope",
+    "model": "qwen",
     "choices": [{
       "finish_reason": "stop",
       "index": 0,
@@ -291,7 +291,7 @@ let test_parse_openai_response_reasoning_content () =
   let json_str =
     {|{
     "id": "chatcmpl_think",
-    "model": "dashscope-3.5-35b",
+    "model": "qwen3.5-35b",
     "choices": [{
       "finish_reason": "stop",
       "index": 0,
@@ -326,7 +326,7 @@ let test_parse_openai_response_reasoning_with_tools () =
   let json_str =
     {|{
     "id": "chatcmpl_think_tool",
-    "model": "dashscope-3.5-35b",
+    "model": "qwen3.5-35b",
     "choices": [{
       "finish_reason": "tool_calls",
       "index": 0,
@@ -365,7 +365,7 @@ let test_parse_openai_response_blank_reasoning () =
   let json_str =
     {|{
     "id": "chatcmpl_blank",
-    "model": "dashscope-3.5-35b",
+    "model": "qwen3.5-35b",
     "choices": [{
       "finish_reason": "stop",
       "index": 0,
@@ -392,7 +392,7 @@ let test_parse_openai_response_no_reasoning () =
   let json_str =
     {|{
     "id": "chatcmpl_no_think",
-    "model": "dashscope-3.5-35b",
+    "model": "qwen3.5-35b",
     "choices": [{
       "finish_reason": "stop",
       "index": 0,
@@ -418,7 +418,7 @@ let test_parse_openai_response_ollama_reasoning () =
   let json_str =
     {|{
     "id": "chatcmpl_ollama",
-    "model": "dashscope-3.5:35b-a3b-nvfp4",
+    "model": "qwen3.5:35b-a3b-nvfp4",
     "choices": [{
       "finish_reason": "stop",
       "index": 0,
@@ -458,7 +458,7 @@ let test_parse_openai_response_reasoning_content_preferred () =
   let json_str =
     {|{
     "id": "chatcmpl_both",
-    "model": "dashscope-3.5-35b",
+    "model": "qwen3.5-35b",
     "choices": [{
       "finish_reason": "stop",
       "index": 0,

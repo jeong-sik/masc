@@ -139,6 +139,10 @@ let for_surface = function
       ; b Navigate "p" "runtime"
           ~help:"back to the Runtime surface this hangs off"
       ; b Act "Esc" "runtime" ~help:"back to the Runtime surface it hangs off"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching standalone lane; the run list \
+                 and a run's detail carry no searchable rows"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Board ->
@@ -216,6 +220,10 @@ let for_surface = function
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "a" "approve" ~help:"approve the row under the cursor (press twice)"
       ; b Act "x" "reject" ~help:"reject with a reason ($EDITOR form)"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching task id, title, or submitter; \
+                 the queue answers this, an open detail does not"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Harness ->
@@ -227,8 +235,12 @@ let for_surface = function
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "y" "agree" ~help:"record the machine's verdict as yours"
-      ; b Act "n" "overrule" ~help:"record the opposite verdict; $EDITOR takes the reason"
+        (* [x], not [n]: this surface answers the row search, and [n] / [N]
+           step it. Spelled the way Verification spells its own rejection. *)
+      ; b Act "x" "overrule" ~help:"record the opposite verdict; $EDITOR takes the reason"
       ; b Act "Y" "copy task" ~help:"copy a link to the task on Overview"
+      ; b Search "/" "find" ~help:"jump the cursor to a matching task id or title"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Fusion ->
@@ -252,6 +264,8 @@ let for_surface = function
       [ b Navigate "j/k" "move" ~help:"move the keeper row"
       ; b Act "Enter" "facts"
           ~help:"browse what the selected keeper actually remembers"
+      ; b Search "/" "find" ~help:"jump the cursor to a matching keeper"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Repositories ->
@@ -263,6 +277,10 @@ let for_surface = function
       ; b Act "a" "add" ~help:"register a repository; opens $EDITOR"
       ; b Act "Left / Esc" "back"
           ~help:"leave Git changes, or return to Overview"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching repository, or to a changed \
+                 path while Git changes is open"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Changes ->
@@ -284,6 +302,8 @@ let for_surface = function
       [ b Navigate "j/k" "scroll"
       ; b Act "b / u" "bind / unbind" ~help:"bind / unbind a channel"
       ; b Act "Esc" "keeper" ~help:"back to the selected Keeper"
+      ; b Search "/" "find" ~help:"jump the cursor to a matching transport"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Runtime ->
@@ -295,6 +315,9 @@ let for_surface = function
           ~help:"walk the three substrate readings; the third is the \
                  standalone Lanes surface"
       ; b Act "Left / Esc" "back"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching lane id or runtime id"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Config ->
@@ -362,15 +385,23 @@ let for_surface = function
           ~help:"ask the language server what a name on the cursor line is \
                  (one name asks at once; several open the palette as \
                  choices)"
+      ; b Act "R" "references"
+          ~help:"ask the language server where a name on the cursor line is \
+                 used; needs the project's reference index, and says which \
+                 command builds it when there is none"
       ; b Act "D" "definition"
           ~help:"jump to where a name on the cursor line is defined (one \
                  name jumps at once; several open the palette as choices)"
       ; b Act "B" "back"
           ~help:"walk back through the definition jumps, newest first"
+      ; b Act "b" "blame"
+          ~help:"who last touched each run of lines, in the margin; b again \
+                 drops it"
       ; b Act "m" "notes"
           ~help:"the notes anchored to the open file (repository scope)"
       ; b Act "w" "add note"
-          ~help:"in the notes view: add one through the $EDITOR form \
+          ~help:"in the notes view: add one through the $EDITOR form, \
+                 anchored to the line the cursor was on when the view opened \
                  (kind: Comment / Decision / Question / Bookmark)"
       ; b Act "d" "diff"
           ~help:"on the project tree, list every working-tree change; on an \
@@ -409,6 +440,10 @@ let for_surface = function
       ; b Act "Right / Enter" "detail"
           ~help:"show the full message, source, category, turn, and JSON details"
       ; b Act "Left / Esc" "back"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching module, keeper, or message, \
+                 over the rows the level and category filters leave"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
 
@@ -443,6 +478,42 @@ let footer_hints_overview ~task_focus =
          else b)
   |> hints_of_bindings
 
+(* The Code surface's footer, which the renderer used to spell by hand. It
+   named d, H, m and w and nothing else, so the three language-server keys
+   never appeared on the screen they work on -- and neither did blame or the
+   row search when those arrived. Projected here, from the table the help
+   sheet already reads, and narrowed to what the current mode answers: an
+   overlay owns the pane, so the keys that act on the code underneath are
+   dead while it is up, and the tree pane answers none of the file keys. *)
+type code_pane =
+  | Code_tree  (** the file list has focus *)
+  | Code_file  (** a file is open and nothing covers it *)
+  | Code_overlay  (** history, diff or notes is drawn over the file *)
+
+let footer_hints_code ~pane =
+  let file_keys =
+    [ "Shift-Left / Shift-Right"; "K"; "D"; "R"; "B"; "b"; "d"; "H"; "m" ]
+  in
+  (* Two keys belong to one pane each and were showing on all three. [w]
+     writes a note and only the notes view takes it; [Enter (history)] opens
+     a commit's pull request and only the history view has commits. Named
+     apart from [file_keys] because they are the overlay's own, not the
+     file's. *)
+  let overlay_keys = [ "w"; "Enter (history)" ] in
+  let dead =
+    match pane with
+    | Code_tree -> overlay_keys @ file_keys
+    | Code_file -> overlay_keys
+    | Code_overlay -> file_keys
+  in
+  for_surface Code
+  |> List.filter (fun b -> not (List.mem b.key dead))
+  |> List.map (fun b ->
+       if String.equal b.key "j/k" then
+         { b with label = (match pane with Code_tree -> "move" | _ -> "scroll") }
+       else b)
+  |> hints_of_bindings
+
 let footer_hints_resources ~detail_focus =
   for_surface Resources
   |> List.map (fun binding ->
@@ -454,19 +525,27 @@ let footer_hints_resources ~detail_focus =
 let opens_keepers ~message_mode key =
   (not message_mode) && String.equal key keepers_jump.key
 
-(* An armed two-press action expires on the next unrelated key: otherwise it
-   waits indefinitely and a later press of the same key -- after the cursor
-   has moved, after a refresh -- submits work the operator armed minutes ago
-   for something else.
+(* An armed two-press action expires on the next unrelated input: otherwise
+   it waits indefinitely and a later press of the same key -- after the
+   cursor has moved, after a refresh -- submits work the operator armed
+   minutes ago for something else.
 
-   A loop turn that read no key is not an unrelated key. The rule lives here
-   because it was restated once per armed field in the dispatch loop, and one
-   restatement (the connector unbind) counted [None] as a cancel. The loop
-   turns without input, so that arm survived a single iteration: the two [u]
-   presses only removed a binding when both bytes arrived in the same read. *)
-let cancels_two_press ~key ~second_press =
+   Two facts, not one. [input_seen] says the loop actually read something:
+   the loop turns on a timeout as well, and a turn that read nothing is not
+   an unrelated input. [key] says what it read, and it is [None] for a
+   mouse report, a paste, and a graphics reply -- deliberate input that is
+   not the second press, so it cancels.
+
+   The rule lives here because the dispatch loop restated it once per armed
+   field and the connector unbind's restatement read the timeout turn as an
+   unrelated key. Its arm therefore survived one iteration: the two [u]
+   presses removed a binding only when both bytes arrived in the same
+   read. *)
+let cancels_two_press ~input_seen ~key ~second_press =
+  input_seen
+  &&
   match key with
-  | None -> false
+  | None -> true
   | Some pressed -> not (List.exists (String.equal pressed) second_press)
 
 (* The Fusion detail view: the keys table owns the key list; the renderer
@@ -523,6 +602,7 @@ let footer_hints_memory_facts =
     ([ b Navigate "j/k" "move"
      ; b Act "c" "category" ~help:"cycle the category filter (All first)"
      ; b Search "/" "find" ~help:"jump the cursor to a matching fact"
+     ; b Search "n / N" "next / previous match"
      ; b Act "Esc" "health" ~help:"close the browser, back to the table"
      ]
      @ listing_meta)

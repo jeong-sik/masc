@@ -13,26 +13,24 @@
     runs no shell" about a working [$PWD] and rewrote it into an absolute
     path, which is the same trip this module exists to stop.
 
-    What survives is where a typed form is still the better call:
+    What survives is where another form is still the better call:
 
-    - a heredoc is stdin, and the stdin field takes the body as bytes rather
-      than making it survive the shell's quoting;
     - [&] leaves a child the shell's exit orphans, and Spawn is the tool that
       returns a handle for one;
-    - a nested pipeline is not a shell question at all -- the typed [pipeline]
-      field is flat, and that is what {!Connector} points at.
+    - a nested pipeline is what {!Connector} names. The typed [pipeline]
+      field is gone from the Execute schema, so this arm is unreachable until
+      the Shell IR parser judges [script] (RFC-execute-boundary-is-the-sandbox).
 
     Everything else answers {!Unrepresentable}: the shell runs the line, and
-    the only thing worth adding is that argv and pipeline are the forms that
-    get path scope.
+    the only thing worth adding is that argv is the form that gets path
+    scope.
 
     {!of_reason} stays exhaustive. A construct cannot join the excluded list
     without someone choosing whether the caller should have done anything
     else. *)
 
-type field = Stdin | Connector
-(** Fields of the Execute schema a rewrite can point at. [Stdin] is
-    {!Keeper_tool_execute_typed_input.input_source}; [Connector] is the
+type field = Connector
+(** Fields of the Execute schema a rewrite can point at. [Connector] is the
     conditional that joins two programs. *)
 
 type call =

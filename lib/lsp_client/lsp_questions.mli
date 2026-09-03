@@ -17,6 +17,27 @@ type question =
 val question_of_string : string -> question option
 val string_of_question : question -> string
 
+val reference_index_ready
+  :  question:question
+  -> language:Lsp_process_manager.language
+  -> project_root:string
+  -> (unit, string) result
+(** [Ok ()] unless [question] is {!References} and the project has no
+    reference index, in which case the error is the sentence a caller shows:
+    what to run, where this looked, and why a short list would have been
+    worse than a refusal. In that order, because the sentence reaches a TUI
+    pane title that truncates from the right -- at 200 columns it arrived as
+    "Run: dun~", which is the half an operator cannot act on.
+
+    Asked before the question rather than after the answer, because a server
+    with no index does not say so -- it answers with the occurrences in the
+    file it was given, which was one where the truth was three (#30504).
+
+    Here rather than in each surface: the Keeper tool and the REST question
+    route already share {!Lsp_position}'s arithmetic so they cannot disagree
+    about where a name sits, and they should not be able to disagree about
+    whether an answer is worth asking for. *)
+
 type location =
   { path : string
   ; line : int

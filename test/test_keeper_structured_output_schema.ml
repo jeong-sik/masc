@@ -145,7 +145,29 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
     (List.sort String.compare Keeper_librarian.wire_claim_fields)
     (required_strings claim_schema);
   check bool "librarian claim schema is closed" false
-    (allows_additional_properties claim_schema)
+    (allows_additional_properties claim_schema);
+  (* The two Board provenance fields are answered on every claim, null when
+     the claim came from the transcript, so strict schema modes accept it. *)
+  let type_tokens schema =
+    match schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "type" fields with
+       | Some (`List values) ->
+         List.filter_map (function `String s -> Some s | _ -> None) values
+       | Some (`String s) -> [ s ]
+       | _ -> [])
+    | _ -> []
+  in
+  List.iter
+    (fun field ->
+       check
+         (list string)
+         (field ^ " is a required nullable string")
+         [ "null"; "string" ]
+         (List.sort String.compare (type_tokens (schema_property field claim_schema))))
+    [ Keeper_memory_os_types.wire_field_board_post_id
+    ; Keeper_memory_os_types.wire_field_board_comment_id
+    ]
 ;;
 
 let test_librarian_dropped_schema_is_closed () =

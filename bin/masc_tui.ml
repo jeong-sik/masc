@@ -1623,6 +1623,10 @@ type async_msg =
       string * (Masc.Tui_decode.git_diff, string) result
   | Code_notes_loaded of
       string * (Masc.Tui_decode.ide_annotation list, string) result
+  (* The path the margin describes; stamped so a late answer cannot caption
+     another file. *)
+  | Code_blame_loaded of
+      string * (Masc.Tui_decode.blame_block list, string) result
   (* The path the note anchored to; success re-reads the listing. *)
   | Code_note_written of string * (unit, string) result
   (* (question, symbol, answer) — the note the pane shows names both. *)
@@ -2938,6 +2942,32 @@ let github_pr_url ~remote ~number =
 (* The codebase slug for the surface's scope, when it has one. Only a
    repository row carries the server-minted slug (RFC-0378: the client
    never re-derives it); the other scopes honestly have none. *)
+(* Same fiber-and-mailbox shape as the notes read below. Scoped by the same
+   keeper / repo axes the file itself was read through, so the margin
+   describes the checkout on screen rather than whichever one the server
+   would default to. *)
+let launch_code_blame_load state ~mailbox ~path =
+  let host = server_peer_host in
+  let port = state.port in
+  let keeper, repo = code_scope_axes state in
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_git_blame ?keeper ?repo ~host ~port ~path ()
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_blame_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_blame_loaded (path, Error "Eio switch is unavailable"))
+
 let launch_code_notes_load state ~mailbox ~codebase ~path =
   let host = server_peer_host in
   let port = state.port in
@@ -4910,17 +4940,74 @@ let launch_keeper_request ?promoted state ~mailbox request =
         (Keeper_chat_dispatch_blocked
            (request, "Eio switch is unavailable"))
 
+(* The joined line keeps the request identity the history row already carries,
+   so the row is rewritten rather than duplicated. [append_user_history_once]
+   matches on identity AND text, so a changed text would otherwise append a
+   second row for the same queue item. *)
+let update_queued_history_text state (request : Keeper_chat.request) =
+  let text =
+    Keeper_chat.terminal_safe_text ~preserve_newlines:true request.message
+  in
+  state.msg_history <-
+    List.map
+      (fun entry ->
+        if
+          (match entry.me_role with Message_user _ -> true | _ -> false)
+          && String.equal entry.me_request_id request.Keeper_chat.request_id
+          && String.equal entry.me_keeper_name request.keeper_name
+        then { entry with me_text = text }
+        else entry)
+      state.msg_history
+
 let queue_keeper_message state request =
   let submitted_at = Unix.gettimeofday () in
-  match Chat_queue.push state.msg_queued ~submitted_at request with
-  | Error _ as error -> error
-  | Ok (queue, waiting) ->
+  let joined =
+    if not state.coalesce_queued_input
+    then None
+    else (
+      match
+        Chat_queue.join_target state.msg_queued
+          ~keeper_name:request.Keeper_chat.keeper_name
+      with
+      | None -> None
+      | Some item ->
+        let waiting_request = item.Chat_queue.request in
+        let merged =
+          { waiting_request with
+            Keeper_chat.message =
+              waiting_request.Keeper_chat.message
+              ^ "\n"
+              ^ request.Keeper_chat.message
+          ; Keeper_chat.attachments =
+              waiting_request.Keeper_chat.attachments
+              @ request.Keeper_chat.attachments
+          }
+        in
+        (match
+           Chat_queue.replace_request state.msg_queued
+             ~request_id:merged.Keeper_chat.request_id merged
+         with
+         | Error _ -> None
+         | Ok queue -> Some (queue, merged)))
+  in
+  match joined with
+  | Some (queue, merged) ->
       state.msg_queued <- queue;
-      (* Keep one request-owned session row for recall and the later active
-         turn, but causal projection withholds it from the transcript while
-         the queue owns it. NEXT renders the queue item itself. *)
-      append_user_history_once ~submitted_at state request;
-      Ok waiting
+      update_queued_history_text state merged;
+      Ok
+        (Chat_queue.length_for_keeper queue
+           ~keeper_name:merged.Keeper_chat.keeper_name)
+  | None ->
+      (match Chat_queue.push state.msg_queued ~submitted_at request with
+       | Error _ as error -> error
+       | Ok (queue, waiting) ->
+           state.msg_queued <- queue;
+           (* Keep one request-owned session row for recall and the later
+              active turn, but causal projection withholds it from the
+              transcript while the queue owns it. NEXT renders the queue item
+              itself. *)
+           append_user_history_once ~submitted_at state request;
+           Ok waiting)
 ;;
 
 let queue_keeper_steer state ~causal_parent_request_id request =
@@ -8436,8 +8523,27 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.code_notes <- None;
           state.code_notes_error <- None;
           state.code_notes_open <- false;
-          state.code_notes_scroll <- 0
+          state.code_notes_scroll <- 0;
+          state.code_blame <- None;
+          state.code_blame_error <- None
       | Error detail -> state.code_file_error <- Some detail)
+  | Code_blame_loaded (path, result) ->
+      (* Stamped by path like the notes below: an answer that arrives after
+         the operator moved on describes bytes that are no longer on screen,
+         and a margin naming the wrong authors is worse than no margin. *)
+      let still_current =
+        match state.code_file with
+        | Some (open_path, _) -> String.equal open_path path
+        | None -> false
+      in
+      if still_current then (
+        match result with
+        | Ok blocks ->
+            state.code_blame <- Some (path, blocks);
+            state.code_blame_error <- None
+        | Error detail ->
+            state.code_blame <- None;
+            state.code_blame_error <- Some detail)
   | Code_notes_loaded (path, result) ->
       let still_current =
         match state.code_file with
@@ -9865,6 +9971,10 @@ let main () =
      key, and a reader who never set it sees no change. *)
   state.hints_visible <-
     Option.value (Masc_tui_config.hints_visible ~base_path) ~default:true;
+  state.coalesce_queued_input <-
+    Option.value
+      (Masc_tui_config.coalesce_queued_input ~base_path)
+      ~default:true;
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
@@ -10410,8 +10520,20 @@ let main () =
                 report_action state "error"
                   "no $EDITOR set; export EDITOR to add a note here"
             | Some _ -> (
+                (* The line the cursor is on, which is the line the operator
+                   pressed [w] about. This was the literal 1, and it shows:
+                   every one of the 51 annotations this workspace has ever
+                   stored anchors at line 1, including the two written from
+                   here. Nobody declined to anchor -- the form never offered
+                   their line, and correcting it meant editing JSON in
+                   $EDITOR before writing a word.
+
+                   [code_file_cursor] is 0-based and is the same anchor a
+                   language-server question is asked at, so [w] and [K]/[D]/
+                   [R] now agree about which line the operator means. *)
                 let stem =
-                  "{\n  \"line_start\": 1,\n  \"line_end\": 1,\n  \"kind\": \"Comment\",\n  \"content\": \"\"\n}\n"
+                  Masc_tui_types.code_note_stem
+                    ~anchor:(state.code_file_cursor + 1)
                 in
                 match
                   Masc_tui_editor.roundtrip ~restore:restore_terminal
@@ -11491,18 +11613,22 @@ and is loaded on demand through keeper_skill.
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
          a mouse report, or any other key means the operator stayed. *)
       if Option.is_some input && not quit_key then state.quit_armed <- false;
-      (* An armed shutdown expires on the next unrelated key. Otherwise it
+      (* An armed shutdown expires on the next unrelated input. Otherwise it
          waits indefinitely and a later press of the same key -- after the
          cursor has moved, after a refresh -- submits work the operator armed
          minutes ago for something else. Same rule for every other armed
-         action here.
+         action here, and the same one the quit confirmation above already
+         uses: deliberate input that is not the second press ends it.
 
-         One predicate rather than one restatement per field: the connector
-         unbind used to spell the rule itself and counted a loop turn with no
-         key as an unrelated key, so its arm survived a single iteration. *)
+         One predicate rather than one restatement per field. The connector
+         unbind used to spell the rule itself and read a loop turn that
+         fetched no input as an unrelated key, so its arm survived a single
+         iteration. The viewport is not part of the rule: an armed
+         destructive action must not outlive the moment it was armed in,
+         least of all across a resize the operator cannot see it through. *)
       let cancelled second_press =
-        (not compact_viewport)
-        && Masc_tui_keys.cancels_two_press ~key ~second_press
+        Masc_tui_keys.cancels_two_press
+          ~input_seen:(Option.is_some input) ~key ~second_press
       in
       (match state.view with
        | Approvals ->
@@ -12004,8 +12130,9 @@ and is loaded on demand through keeper_skill.
             | "esc" -> close ()
             | "\r" when
                 (let q = String.trim state.palette_query in
-                 String.starts_with ~prefix:"hover " q
-                 || String.starts_with ~prefix:"def " q) ->
+                 List.exists
+                   (fun (prefix, _) -> String.starts_with ~prefix q)
+                   Masc_tui_types.lsp_question_prefixes) ->
                 (* A typed command, not an entry: the argument is the symbol
                    the language-server question is asked about, on the Code
                    pane's cursor line. *)
@@ -12018,9 +12145,17 @@ and is loaded on demand through keeper_skill.
                           (String.sub q (i + 1) (String.length q - i - 1)) )
                   | None -> (q, "")
                 in
+                (* The typed word back to the question it names, through the
+                   same table the entries were built from. *)
                 let question =
-                  if String.equal question "def" then "definition"
-                  else question
+                  match
+                    List.find_opt
+                      (fun (prefix, _) ->
+                        String.equal (String.trim prefix) question)
+                      Masc_tui_types.lsp_question_prefixes
+                  with
+                  | Some (_, canonical) -> canonical
+                  | None -> question
                 in
                 if String.equal symbol "" then begin
                   (* Bare "def " or "hover ": run the highlighted candidate
@@ -12049,7 +12184,8 @@ and is loaded on demand through keeper_skill.
                   if state.view <> Code || Option.is_none state.code_file
                   then
                     add_event state "error"
-                      "hover/def ask about the file open on the Code surface"
+                      "hover, def and refs ask about the file open on the \
+                       Code surface"
                   else
                     start_code_lsp_question state ~mailbox:async_messages
                       ~question ~symbol
@@ -12920,7 +13056,7 @@ and is loaded on demand through keeper_skill.
                          state.code_target_line <- Some (cursor + 1);
                          launch_code_file_load state
                            ~mailbox:async_messages ~path)))
-       | Some (("K" | "D") as key_name)
+       | Some (("K" | "D" | "R") as key_name)
          when state.view = Code && state.code_focus_file = Right_pane
               && Option.is_some state.code_file
               && not state.code_history_open
@@ -12932,8 +13068,10 @@ and is loaded on demand through keeper_skill.
               palette with each as an entry (typing still narrows, and a
               typed "def <name>" keeps working), and none says so. *)
            let question, prefix =
-             if String.equal key_name "K" then ("hover", "hover ")
-             else ("definition", "def ")
+             match key_name with
+             | "K" -> ("hover", "hover ")
+             | "R" -> ("references", "refs ")
+             | "D" | _ -> ("definition", "def ")
            in
            (match Masc_tui_types.code_cursor_line_symbols state with
             | [] ->
@@ -12950,6 +13088,28 @@ and is loaded on demand through keeper_skill.
            (* Adding a note lives inside the notes view: the view proves the
               scope, and the fresh listing lands where the writer looks. *)
            handle_code_note_write ()
+       | Some "b" when state.view = Code && state.code_focus_file = Right_pane
+                       && Option.is_some state.code_file ->
+           (* Who last touched each run of lines, in the margin beside the
+              code. A margin rather than a view: blame answers a question
+              about the line you are reading, and a separate screen would
+              take that line away to answer it.
+
+              Loaded is showing, so this toggles by fetching or dropping.
+              Re-fetched rather than kept on a second press: an edit or a
+              commit since the last read moves the runs, and a stale margin
+              names the wrong author with no sign that it is stale. *)
+           (match state.code_file with
+            | None -> ()
+            | Some (path, _) ->
+                if Option.is_some state.code_blame then begin
+                  state.code_blame <- None;
+                  state.code_blame_error <- None
+                end
+                else begin
+                  state.code_blame_error <- None;
+                  launch_code_blame_load state ~mailbox:async_messages ~path
+                end)
        | Some "m" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some state.code_file ->
            (* The notes anchored to the open file. Repository scope only:
@@ -13153,20 +13313,21 @@ and is loaded on demand through keeper_skill.
             | _ -> ())
        (* Stepping the last search is what [n] means on a surface that binds
           it to nothing else, so it is the tail of this arm rather than an
-          arm of its own above it. As its own arm it outranked the three
-          surfaces below: [search_last] is one string for the whole session,
-          so after any search anywhere, Harness answered [n] with a jump to
-          the next match instead of the overrule its footer names.
+          arm of its own above it. As its own arm it sat above every surface
+          that binds the key, and [search_last] is one string for the whole
+          session: a surface with row texts and its own [n] would lose that
+          key permanently after any search anywhere. Nothing is in that
+          position today -- Harness was, and its overrule moved to [x] --
+          and this shape is what keeps it that way.
 
           The match is exhaustive on purpose. A surface added later has to
           say whether [n] is its own key or the search step. *)
        | Some (("n" | "N") as direction) ->
            (match state.view with
             | Approvals -> answer_presented_approval Deny
-            | Harness -> handle_harness_overrule ()
             | Schedules -> handle_schedule_create ()
             | Overview | Acting | Keepers _ | Memory | Lanes | Board | Planning
-            | Verification | Fusion | Repositories | Code | Changes
+            | Verification | Harness | Fusion | Repositories | Code | Changes
             | Connectors | Runtime | Config | Resources | Tools | System_logs ->
                 if
                   state.search_last <> ""
@@ -13617,9 +13778,19 @@ and is loaded on demand through keeper_skill.
                   state.changes_tree_diff_path <- None
                 end
                 else
-                  (* Changes opens from the roster, so Esc goes back to the
-                     roster rather than to Overview. *)
-                  state.view <- Keepers Keeper_list
+                  (* Changes opens from a keeper surface, so Esc goes back to
+                     the one it was opened from rather than to Overview. The
+                     detail draws whoever the roster cursor names, and the
+                     roster can shrink while this surface is up: with nobody
+                     under the cursor the detail has nothing to draw, so the
+                     way back is the roster. The chat pane demotes its own
+                     return for the same reason. *)
+                  state.view <-
+                    (match state.changes_return, selected_keeper state with
+                     | Changes_return_detail, Some _ -> Keepers Keeper_detail
+                     | Changes_return_detail, None
+                     | Changes_return_list, (Some _ | None) ->
+                         Keepers Keeper_list)
             | Repositories ->
                 if state.repository_changes_open then
                   close_repository_changes state
@@ -14790,14 +14961,18 @@ and is loaded on demand through keeper_skill.
             | Acting
             | Connectors | Config | Resources | Tools -> ())
        (* Changes reads one keeper's file writes and already binds to the
-          roster cursor on entry, so it opens from the roster rather than
-          from the Tab ring. Both keeper surfaces, because both list [f] in
-          their footer and both are read from that same cursor -- detail
-          listed the key with no arm behind it, so the hint was dead
-          there. *)
-       | Some "f" | Some "F"
-         when state.view = Keepers Keeper_list
-              || state.view = Keepers Keeper_detail ->
+          roster cursor on entry, so it opens from a keeper surface rather
+          than from the Tab ring. Both of them list [f] in their footer and
+          both name the keeper with the same cursor; detail listed the key
+          with no arm behind it, so the hint was dead there.
+
+          One arm each rather than one arm with a disjunction, because each
+          also records where Esc goes back to. *)
+       | Some "f" | Some "F" when state.view = Keepers Keeper_list ->
+           state.changes_return <- Changes_return_list;
+           goto_surface state ~mailbox:async_messages Changes
+       | Some "f" | Some "F" when state.view = Keepers Keeper_detail ->
+           state.changes_return <- Changes_return_detail;
            goto_surface state ~mailbox:async_messages Changes
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
@@ -15139,6 +15314,12 @@ and is loaded on demand through keeper_skill.
            (* Reject wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)
            handle_verification_reject ()
+       | Some "x" | Some "X" when state.view = Harness ->
+           (* The negative verdict, spelled the way Verification spells its
+              own. It was [n], which this surface cannot keep: Harness
+              answers the row search, and [n] steps that search on every
+              surface that does not bind the key itself. *)
+           handle_harness_overrule ()
        | Some (("l" | "L" | "o") as log_key)
          when (match log_key, state.view with
                | ("l" | "L"), Keepers (Keeper_list | Keeper_detail)

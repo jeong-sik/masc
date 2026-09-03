@@ -97,11 +97,6 @@ let test_request_path_ollama () =
   check_string "ollama path" "/api/chat" cfg.request_path
 ;;
 
-let test_request_path_dashscope () =
-  let cfg = Provider_config.make ~kind:DashScope ~model_id:"m" ~base_url:"" () in
-  check_string "dashscope path" "/chat/completions" cfg.request_path
-;;
-
 let test_request_path_override () =
   let cfg =
     Provider_config.make
@@ -141,8 +136,7 @@ let expected_auth_headers_for_kind = function
   | Provider_config.Gemini -> [ "x-goog-api-key", "provider-key" ]
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama
-  | Provider_config.Glm
-  | Provider_config.DashScope -> [ "Authorization", "Bearer provider-key" ]
+  | Provider_config.Glm -> [ "Authorization", "Bearer provider-key" ]
 ;;
 
 let test_auth_headers_for_kind_and_key_wire_headers () =
@@ -469,21 +463,6 @@ let test_validate_output_schema_glm_rejected () =
     (Result.is_error (Provider_config.validate_output_schema_request cfg))
 ;;
 
-let test_validate_output_schema_dashscope_accepted () =
-  let cfg =
-    Provider_config.make
-      ~kind:DashScope
-      ~model_id:"dashscope-max"
-      ~base_url:"https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
-      ()
-  in
-  check_bool
-    "dashscope accepted"
-    true
-    (Result.is_ok (Provider_config.validate_output_schema_request cfg))
-;;
-
 let test_validate_output_schema_kimi_rejected () =
   let cfg =
     Provider_config.make
@@ -547,7 +526,7 @@ let test_validate_output_schema_supported_non_openai () =
          (Provider_config.string_of_provider_kind kind ^ " accepts schema")
          true
          (Result.is_ok (Provider_config.validate_output_schema_request cfg)))
-    [ Anthropic; Gemini; DashScope ];
+    [ Anthropic; Gemini ];
   let ollama_cfg =
     Provider_config.make
       ~kind:Ollama
@@ -1263,6 +1242,65 @@ let test_validate_reasoning_effort_subset_rejects_unsupported () =
     | Ok () -> Alcotest.fail "high effort should be rejected by accepted subset")
 ;;
 
+let test_validate_reasoning_effort_checks_the_explicit_disable () =
+  let manifest =
+    Yojson.Safe.from_string
+      {|{"schema_version":1,"models":[
+          {"id_prefix":"effort-off-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low"]},
+          {"id_prefix":"effort-off-ok-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["none","low"]},
+          {"id_prefix":"effort-off-undeclared-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort"},
+          {"id_prefix":"effort-off-object-model","base":"openai_chat_extended","thinking_control_format":"thinking_object","accepted_reasoning_efforts":["low"]}]}|}
+    |> Capability_manifest.of_json
+    |> Result.get_ok
+  in
+  Fun.protect ~finally:Capability_manifest.clear_global (fun () ->
+    Capability_manifest.set_global manifest;
+    let cfg model_id =
+      let declared_capabilities =
+        match Capabilities.for_model_id model_id with
+        | Some capabilities -> capabilities
+        | None -> Alcotest.failf "fixture capability %s was not declared" model_id
+      in
+      Provider_config.make
+        ~kind:OpenAI_compat
+        ~model_id
+        ~base_url:"https://api.openai.com/v1"
+        ~model_capabilities_override:declared_capabilities
+        ~enable_thinking:false
+        ~reasoning_effort:Reasoning_effort.Low
+        ()
+    in
+    let validate model_id =
+      Provider_config.validate_reasoning_effort_request_typed (cfg model_id)
+    in
+    (* The categorical wire carries the disable as effort none, so the ladder
+       is checked against none, not against the row's low. *)
+    (match validate "effort-off-model" with
+     | Error
+         (Provider_config.Explicit_disable_outside_ladder
+            { accepted = Some [ Provider_config.Low ]; _ }) -> ()
+     | Error rejection ->
+       Alcotest.failf
+         "unexpected rejection: %s"
+         (Provider_config.reasoning_effort_request_rejection_to_message rejection)
+     | Ok () -> Alcotest.fail "a ladder without none cannot carry enable_thinking=false");
+    (match validate "effort-off-undeclared-model" with
+     | Error (Provider_config.Explicit_disable_outside_ladder { accepted = None; _ }) -> ()
+     | Error rejection ->
+       Alcotest.failf
+         "unexpected rejection: %s"
+         (Provider_config.reasoning_effort_request_rejection_to_message rejection)
+     | Ok () -> Alcotest.fail "an undeclared ladder cannot carry enable_thinking=false");
+    Alcotest.(check bool)
+      "a ladder with none admits the disable"
+      true
+      (Result.is_ok (validate "effort-off-ok-model"));
+    Alcotest.(check bool)
+      "a thinking_object row keeps its own toggle and its low effort"
+      true
+      (Result.is_ok (validate "effort-off-object-model")))
+;;
+
 let test_validate_reasoning_effort_fails_closed_without_declaration () =
   let config =
     Provider_config.make
@@ -1318,7 +1356,6 @@ let test_clear_thinking_object_request_field () =
     [ "no preserve wire omits", Capabilities.No_preserve_thinking_control
     ; "thinking_object_keep_all omits", Capabilities.Thinking_object_keep_all
     ; "chat_template_kwargs omits", Capabilities.Chat_template_kwargs_preserve_thinking
-    ; "top_level omits", Capabilities.Top_level_preserve_thinking
     ; "always_preserved omits", Capabilities.Always_preserved_thinking
     ]
 ;;
@@ -2041,7 +2078,7 @@ let test_all_is_exhaustive () =
   List.iter
     (fun k ->
        match (k : Provider_config.provider_kind) with
-       | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | DashScope | Glm -> ())
+       | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> ())
     xs
 ;;
 
@@ -2187,7 +2224,6 @@ let () =
         ; Alcotest.test_case "gemini" `Quick test_request_path_gemini
         ; Alcotest.test_case "glm" `Quick test_request_path_glm
         ; Alcotest.test_case "ollama" `Quick test_request_path_ollama
-        ; Alcotest.test_case "dashscope" `Quick test_request_path_dashscope
         ; Alcotest.test_case "override" `Quick test_request_path_override
         ] )
     ; ( "auth_headers"
@@ -2286,10 +2322,6 @@ let () =
             "kimi rejected"
             `Quick
             test_validate_output_schema_kimi_rejected
-        ; Alcotest.test_case
-            "dashscope accepted"
-            `Quick
-            test_validate_output_schema_dashscope_accepted
         ; Alcotest.test_case
             "unrequested schema bypasses restrictions"
             `Quick
@@ -2433,6 +2465,10 @@ let () =
             "reasoning effort undeclared fails closed"
             `Quick
             test_validate_reasoning_effort_fails_closed_without_declaration
+        ; Alcotest.test_case
+            "reasoning effort checks the explicit disable"
+            `Quick
+            test_validate_reasoning_effort_checks_the_explicit_disable
         ; Alcotest.test_case
             "clear_thinking object request field"
             `Quick

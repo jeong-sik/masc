@@ -9,13 +9,11 @@ type thinking_control_format =
   | Chat_template_token of string
   | Ollama_think
   | Reasoning_effort
-  | Enable_thinking
 
 type preserve_thinking_control_format =
   | No_preserve_thinking_control
   | Thinking_object_keep_all
   | Chat_template_kwargs_preserve_thinking
-  | Top_level_preserve_thinking
   | Always_preserved_thinking
   | Thinking_object_clear_thinking
 

@@ -23,15 +23,12 @@ type thinking_control_format = Capability_vocab.thinking_control_format =
           the system turn; the token is carried in the constructor. *)
   | Ollama_think
   | Reasoning_effort
-  | Enable_thinking
-  (** DashScope-style top-level [enable_thinking] / [preserve_thinking] bools
-      plus optional [thinking_budget]. *)
 [@@deriving show, eq]
 
 let%test "thinking_control_format derives equal and show" =
   equal_thinking_control_format No_thinking_control No_thinking_control
-  && (not (equal_thinking_control_format No_thinking_control Enable_thinking))
-  && String.length (show_thinking_control_format Enable_thinking) > 0
+  && (not (equal_thinking_control_format No_thinking_control Reasoning_effort))
+  && String.length (show_thinking_control_format Reasoning_effort) > 0
 ;;
 
 type preserve_thinking_control_format =
@@ -39,7 +36,6 @@ type preserve_thinking_control_format =
   | No_preserve_thinking_control
   | Thinking_object_keep_all
   | Chat_template_kwargs_preserve_thinking
-  | Top_level_preserve_thinking
   | Always_preserved_thinking
   | Thinking_object_clear_thinking
   (** Provider [thinking] object whose [clear_thinking] member gates prior-turn
@@ -497,7 +493,7 @@ let mimo_capabilities =
 
 (* Ollama OpenAI-compat endpoint behavior on tool_choice is model-dependent
    (docs.ollama.com/capabilities/tool-calling: the parameter is silently
-   ignored for some models). Some DashScope_3.5 deployments w/ native Jinja
+   ignored for some models). Some Qwen3.5 deployments w/ native Jinja
    chat template do honor tool_choice:required in practice.
 
    Industry context: LiteLLM's model_prices_and_context_window.json
@@ -512,7 +508,7 @@ let mimo_capabilities =
    support declare it per Provider_config via
    [Provider_config.supports_tool_choice_override]. Agent Core does not
    match on [model_id] to guess model-side behavior — the consumer
-   (e.g. a config loader that knows it deployed DashScope_3.5 w/ the Jinja
+   (e.g. a config loader that knows it deployed Qwen3.5 w/ the Jinja
    chat template) owns that policy. This is stricter than LiteLLM's
    static-table approach, which requires JSON edits + redeploy to
    flip capability, and avoids the fragile model_id pattern match that
@@ -592,15 +588,6 @@ let ollama_cloud_v1_capabilities =
         ; Reasoning_effort.High
         ; Reasoning_effort.Max
         ]
-  }
-;;
-
-let dashscope_capabilities =
-  { openai_compat_chat_extended_capabilities with
-    supports_tool_choice = true
-  ; supports_min_p = true
-  ; thinking_control_format = Enable_thinking
-  ; preserve_thinking_control_format = Top_level_preserve_thinking
   }
 ;;
 
@@ -722,7 +709,6 @@ let capabilities_of_kind (kind : Provider_kind.t) : capabilities =
   | Provider_kind.Ollama -> ollama_capabilities
   | Provider_kind.Gemini -> gemini_capabilities
   | Provider_kind.Glm -> glm_capabilities
-  | Provider_kind.DashScope -> dashscope_capabilities
 ;;
 
 let provider_kind_alias_of_label label =
@@ -776,7 +762,6 @@ let%test "capabilities_of_kind aliases the same presets as the label classifier"
     ; Provider_kind.Ollama, "ollama"
     ; Provider_kind.Gemini, "gemini"
     ; Provider_kind.Glm, "glm"
-    ; Provider_kind.DashScope, "dashscope"
     ]
 ;;
 
@@ -1968,13 +1953,12 @@ let%test "for_model_id nvidia-vl has image input" =
 ;;
 
 let%test "for_model_id qwen3 has chat_template_kwargs thinking control" =
-  (* DashScope_3.x OpenAI-compatible llama.cpp/llama-server deployments return
+  (* Qwen3.x OpenAI-compatible llama.cpp/llama-server deployments return
      [reasoning_content] when thinking is enabled through
      {"chat_template_kwargs": {"enable_thinking": bool}}.  Without this
      format, [supports_extended_thinking = true] never reaches the wire. *)
-  match for_model_id "dashscope-3.5" with
-  | Some c ->
-    c.supports_reasoning_budget && c.thinking_control_format = Chat_template_kwargs
+  match for_model_id "qwen3.5" with
+  | Some c -> c.thinking_control_format = Chat_template_kwargs
   | None -> false
 ;;
 

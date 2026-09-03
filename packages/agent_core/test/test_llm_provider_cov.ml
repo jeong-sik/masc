@@ -1303,7 +1303,7 @@ let test_for_model_id_gemini3 () =
 ;;
 
 let test_for_model_id_qwen3 () =
-  match Capabilities.for_model_id "dashscope-3.5-35b" with
+  match Capabilities.for_model_id "qwen3.5-35b" with
   | Some c ->
     Alcotest.(check bool) "tools" true c.supports_tools;
     Alcotest.(check bool) "reasoning" true c.supports_reasoning;
@@ -1854,7 +1854,7 @@ let () =
         ; Alcotest.test_case "gpt" `Quick test_for_model_id_gpt4o
         ; Alcotest.test_case "gemini legacy" `Quick test_for_model_id_gemini25
         ; Alcotest.test_case "gemini-3" `Quick test_for_model_id_gemini3
-        ; Alcotest.test_case "dashscope-3" `Quick test_for_model_id_qwen3
+        ; Alcotest.test_case "qwen3" `Quick test_for_model_id_qwen3
         ; Alcotest.test_case "llama-4" `Quick test_for_model_id_llama4
         ; Alcotest.test_case "llama4" `Quick test_for_model_id_llama4_alt
         ; Alcotest.test_case "glm" `Quick test_for_model_id_glm

@@ -24,6 +24,12 @@ type keeper_profile_defaults = {
   native_tool_posture : Runtime_native_tools.posture option;
   (* Profile-only Skill selection; explicit empty is distinct from absence. *)
   skill_names : string list option;
+  (* RFC-0403: which of the attached services' tools this keeper takes.
+     [None] is every tool the attached providers offer, which is what a
+     keeper got before this field existed. Attached tools only: built-in
+     tools already choose through [defer_loading], and two axes over one
+     tool would leave no way to read which one held it back. *)
+  attached_tool_allow : string list option;
   (* Per-keeper AGENT_CORE CLI transport env vars (AGENT_CORE 0.159+).
      Parsed from [[keeper.agent_core_env]] table.  Keys MUST match
      ^AGENT_CORE_[A-Z]+_.+ — any other entries are dropped with
@@ -51,6 +57,7 @@ let empty_keeper_profile_defaults =
     always_allow = None;
     native_tool_posture = None;
     skill_names = None;
+    attached_tool_allow = None;
     agent_core_env = [];
   }
 ;;

@@ -427,14 +427,6 @@ let ingest_tool_event_from_hook
     ~timestamp_ms
     ()
 
-let observation_snapshot_json ~take =
-  let snapshot =
-    if take then Agent_observation.take_snapshot ()
-    else Agent_observation.peek_snapshot ()
-  in
-  Agent_observation.snapshot_to_json snapshot
-;;
-
 let install_agent_observation_sinks () =
   (* Tool/turn sinks fire on the keeper turn fiber (main Eio domain). Their
      bodies parse tool output (Yojson) and append JSONL — synchronous I/O that

@@ -5933,27 +5933,6 @@ let test_decode_gate_row_of_another_operation_has_no_site () =
             "no site" None pending.Tui_decode.gp_execution_cwd
       | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
 
-let test_decode_execute_gate_row_reads_a_pipeline () =
-  (* A staged call carries no top-level argv. The stages read the way they
-     run rather than collapsing to the first one. *)
-  let stage argv =
-    `Assoc [ ("argv", `List (List.map (fun word -> `String word) argv)) ]
-  in
-  let preview =
-    decoded_execute_preview ~preview:"{\"schema\":\"masc.keeper_gate.request.v1\"}"
-      ~input:
-        (`Assoc
-           [ ( "input",
-               `Assoc
-                 [ ( "pipeline",
-                     `List [ stage [ "git"; "log"; "--oneline" ]; stage [ "head"; "-5" ] ] );
-                 ] );
-           ])
-  in
-  Alcotest.check
-    Alcotest.(option string)
-    "stages read the way they run"
-    (Some "git log --oneline | head -5") preview
 
 let test_decode_execute_gate_row_quotes_a_word_with_a_space () =
   let preview =
@@ -6720,6 +6699,77 @@ let test_decode_skill_evidence_tie_compares_rfc3339_instants () =
   | Error detail -> Alcotest.fail detail
 ;;
 
+
+(* --- git blame: the route's bare array, and the run lookup the margin uses --- *)
+
+let blame_json ~line_start ~line_end ~author ~at_ms =
+  `Assoc
+    [ ("file_path", `String "bin/masc_tui.ml")
+    ; ("line_start", `Int line_start)
+    ; ("line_end", `Int line_end)
+    ; ("keeper_id", `String author)
+    ; ("timestamp_ms", `Int at_ms)
+    ; ("kind", `String "edit")
+    ]
+
+let test_decode_git_blame_reads_the_bare_array () =
+  (* The route answers with a list, not the {ok; data} envelope its
+     neighbours use. Pinned as measured against the running server. *)
+  let json =
+    `List
+      [ blame_json ~line_start:1 ~line_end:2 ~author:"jeong-sik" ~at_ms:1769165332000
+      ; blame_json ~line_start:3 ~line_end:3684 ~author:"Jeong-Sik Yun"
+          ~at_ms:1775728426000
+      ]
+  in
+  match Tui_decode.decode_git_blame json with
+  | Error err -> Alcotest.fail err
+  | Ok blocks ->
+      Alcotest.(check int) "two runs" 2 (List.length blocks);
+      let first = List.nth blocks 0 in
+      Alcotest.(check string) "author" "jeong-sik" first.Tui_decode.bb_author;
+      Alcotest.(check int) "start" 1 first.Tui_decode.bb_line_start;
+      Alcotest.(check int) "end" 2 first.Tui_decode.bb_line_end;
+      Alcotest.(check (float 1.)) "epoch milliseconds ride out as they came"
+        1769165332000. first.Tui_decode.bb_at_ms
+
+let test_decode_git_blame_refuses_the_enveloped_shape () =
+  (* If the route ever grows the envelope its neighbours carry, this fails
+     loudly instead of drawing an empty margin over a file that has history. *)
+  match
+    Tui_decode.decode_git_blame
+      (`Assoc [ ("ok", `Bool true); ("data", `List []) ])
+  with
+  | Ok _ -> Alcotest.fail "an object is not the array this route sends"
+  | Error _ -> ()
+
+let test_blame_block_at_names_the_run_and_its_first_line () =
+  match
+    Tui_decode.decode_git_blame
+      (`List
+        [ blame_json ~line_start:1 ~line_end:3 ~author:"ada" ~at_ms:1000
+        ; blame_json ~line_start:4 ~line_end:9 ~author:"grace" ~at_ms:2000
+        ])
+  with
+  | Error err -> Alcotest.fail err
+  | Ok blocks ->
+      let at line =
+        match Tui_decode.blame_block_at blocks line with
+        | None -> ("-", false)
+        | Some (block, starts) -> (block.Tui_decode.bb_author, starts)
+      in
+      let show (author, starts) =
+        author ^ if starts then " (start)" else ""
+      in
+      Alcotest.(check string) "line 1 opens the first run" "ada (start)"
+        (show (at 1));
+      Alcotest.(check string) "line 2 continues it" "ada" (show (at 2));
+      Alcotest.(check string) "line 4 opens the second" "grace (start)"
+        (show (at 4));
+      Alcotest.(check string) "line 9 closes it" "grace" (show (at 9));
+      Alcotest.(check string) "past the end nothing covers" "-" (show (at 10));
+      Alcotest.(check string) "before the first, nothing either" "-" (show (at 0))
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_verification_evidence",
@@ -7200,8 +7250,6 @@ let () =
           test_decode_execute_gate_row_leads_with_the_command;
         Alcotest.test_case "an execute row shows the script line" `Quick
           test_decode_execute_gate_row_shows_the_script_line;
-        Alcotest.test_case "an execute row reads a pipeline" `Quick
-          test_decode_execute_gate_row_reads_a_pipeline;
         Alcotest.test_case "an execute row carries where it would run" `Quick
           test_decode_execute_gate_row_carries_where_it_would_run;
         Alcotest.test_case "another operation has no execution site" `Quick
@@ -7237,6 +7285,14 @@ let () =
           test_decode_skills_catalog_closes_schema_and_state;
         Alcotest.test_case "reads every unready state" `Quick
           test_decode_skills_catalog_reads_each_unready_state;
+      ] );
+    ( "git_blame",
+      [ Alcotest.test_case "reads the route's bare array" `Quick
+          test_decode_git_blame_reads_the_bare_array
+      ; Alcotest.test_case "refuses the enveloped shape" `Quick
+          test_decode_git_blame_refuses_the_enveloped_shape
+      ; Alcotest.test_case "names the run and its first line" `Quick
+          test_blame_block_at_names_the_run_and_its_first_line
       ] );
     ( "skill_evidence",
       [ Alcotest.test_case "reads exact v5 coverage" `Quick

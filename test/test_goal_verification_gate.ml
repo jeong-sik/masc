@@ -756,7 +756,16 @@ let test_keeper_keeps_and_sees_a_verifying_goal () =
     "the world observation keeps the verifying goal"
     [ goal_id ]
     observation.Keeper_world_observation.active_goals;
-  let summaries = Keeper_unified_prompt.active_goal_summaries_of_store ~config in
+  (* The subject here is how a [Verifying] goal renders, not which goals a
+     turn is given: the summary is stated so the annotation is what the check
+     depends on. *)
+  let summaries =
+    [ { Keeper_unified_prompt.summary_goal_id = goal_id
+      ; summary_title = "Goal under proof"
+      ; summary_phase = Some Goal_phase.Verifying
+      }
+    ]
+  in
   let { Keeper_unified_prompt.world_state; _ } =
     Keeper_unified_prompt.build_prompt
       ~meta

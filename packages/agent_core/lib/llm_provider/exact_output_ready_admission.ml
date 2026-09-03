@@ -224,8 +224,7 @@ let response_format (target : request_target) requirement =
              | PC.Kimi
              | PC.OpenAI_compat
              | PC.Ollama
-             | PC.Glm
-             | PC.DashScope )
+             | PC.Glm )
            , Domain_schema _ ) -> Ok ()
        in
        let wire_schema = schema_for_wire target requirement.schema in

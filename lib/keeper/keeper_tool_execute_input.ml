@@ -2,8 +2,8 @@
 
    Static helpers around [Keeper_tool_execute_typed_input] - quote a token for
    policy strings, render an [Exec]/[Pipeline] back to a shell-command
-   string (for policy validation + auditing), inspect whether env was
-   provided, and pretty-print a validation error.
+   string (for policy validation + auditing), and pretty-print a validation
+   error.
 
    Extracted from [Keeper_tool_execute_runtime] (godfile decomp). Pure mapping
    over typed input + Stdlib. *)
@@ -38,17 +38,7 @@ let typed_input_command_text
   (* The script is already the command line this wants to render. The shell
      that runs it is not part of the line the caller wrote. *)
   | Keeper_tool_execute_typed_input.Script { text; shell = _ } -> text
-  | Keeper_tool_execute_typed_input.Staged { program = { head; tail }; _ } ->
-    head :: tail
-    |> List.map (fun (stage : Keeper_tool_execute_typed_input.exec_stage) ->
-      typed_stage_command_text stage.argv)
-    |> String.concat " | "
-;;
-
-let typed_input_has_env
-      ({ env; _ } : Keeper_tool_execute_typed_input.execute_input)
-  =
-  env <> []
+  | Keeper_tool_execute_typed_input.Argv argv -> typed_stage_command_text argv
 ;;
 
 (* Execute's callable surface is synchronous: the call holds the Keeper's only

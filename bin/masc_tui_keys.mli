@@ -33,15 +33,19 @@ val opens_keepers : message_mode:bool -> string -> bool
     declined it. Message mode never treats printable [2] as this jump. *)
 
 val cancels_two_press :
-  key:string option -> second_press:string list -> bool
-(** Whether [key] cancels a standing two-press confirmation whose second
-    press is one of [second_press].
+  input_seen:bool -> key:string option -> second_press:string list -> bool
+(** Whether the input the loop just read cancels a standing two-press
+    confirmation whose second press is one of [second_press].
 
-    A loop turn that read no key is not an unrelated key, so [None] never
-    cancels. The dispatch loop restated this rule once per armed field, and
-    the connector unbind's restatement read [None] as a cancel: the arm then
-    lived for one loop iteration, and two [u] presses removed a binding only
-    when both bytes arrived in the same read. *)
+    [input_seen] is whether the loop read anything at all: it also turns on
+    a timeout, and a turn that read nothing cancels nothing. [key] is what
+    it read, and it is [None] for a mouse report, a paste, and a graphics
+    reply -- deliberate input that is not the second press, so it cancels.
+
+    The dispatch loop restated this rule once per armed field, and the
+    connector unbind's restatement read the timeout turn as an unrelated
+    key: its arm lived for one loop iteration, and two [u] presses removed a
+    binding only when both bytes arrived in the same read. *)
 
 val for_surface : Masc_tui_types.surface -> binding list
 (** The surface's own bindings, in declaration order within each group.
@@ -58,6 +62,20 @@ val footer_hints_overview : task_focus:bool -> string
     the task list (task_focus) or the event list. The projection relabels
     j/k by focus and drops the keys dead in the other mode — the table
     stays the SSOT, no second key list. *)
+
+type code_pane =
+  | Code_tree  (** the file list has focus *)
+  | Code_file  (** a file is open and nothing covers it *)
+  | Code_overlay  (** history, diff or notes is drawn over the file *)
+
+val footer_hints_code : pane:code_pane -> string
+(** The Code footer, narrowed to what [pane] answers.
+
+    Separate from {!footer_hints} because this surface has three modes and a
+    key live in one is dead in another. It was a literal in the renderer
+    naming [d], [H], [m] and [w], which is why the three language-server
+    questions never appeared on the screen they work on, and why blame and
+    the row search did not either when they arrived. *)
 
 val footer_hints_resources : detail_focus:bool -> string
 (** The Resources footer, with [j/k] relabelled for the focused pane. All

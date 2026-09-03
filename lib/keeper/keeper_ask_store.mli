@@ -87,5 +87,7 @@ val settled :
     recorded. *)
 
 val open_ask_count : base_path:string -> keeper_name:string -> int
-(** How many questions this Keeper is waiting on. Feeds the waiting inventory
-    without loading every ask into the caller. *)
+(** How many questions this Keeper is waiting on. Counts the stored rows
+    without loading every ask into the caller; the ask tool handlers and the
+    [/api/v1/keepers/asks] route report it, the waiting inventory does not
+    read it. *)

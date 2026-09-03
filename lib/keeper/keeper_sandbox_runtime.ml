@@ -675,6 +675,41 @@ let image_preflight_start_error (failure : classified_error) =
     failure
 ;;
 
+let docker_preflight_failed_label = "docker_preflight_failed"
+
+(* One line an operator can act on: every check the preflight failed, then
+   the next actions the preflight already names. Consumed by keeper_up
+   admission, so a Docker keeper is refused where it is declared instead of
+   failing its first Execute. The failure classes ride along so the line
+   stays non-empty even if a future check records a class without a
+   message. *)
+let docker_preflight_rejection (preflight : docker_preflight) =
+  if preflight.ok
+  then None
+  else (
+    let failures =
+      [ preflight.docker_runtime_error; preflight.image_error; preflight.hardening_error ]
+      |> List.filter_map (fun failure -> failure)
+    in
+    let classes =
+      match preflight.failure_classes with
+      | [] -> ""
+      | classes -> Printf.sprintf " (classes: %s)" (String.concat "," classes)
+    in
+    let next =
+      match preflight.next_actions with
+      | [] -> ""
+      | actions -> Printf.sprintf "; next: %s" (String.concat " " actions)
+    in
+    Some
+      (Printf.sprintf
+         "%s: %s%s%s"
+         docker_preflight_failed_label
+         (String.concat "; " failures)
+         classes
+         next))
+;;
+
 let docker_preflight_to_yojson (preflight : docker_preflight) =
   `Assoc
     [ "backend", `String "docker"

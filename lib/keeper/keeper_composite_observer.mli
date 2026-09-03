@@ -183,21 +183,9 @@ type run_state =
     }
   | Suspended of Keeper_state_machine.phase
 
-val run_state_of_entry :
-  Keeper_registry.registry_entry -> last_skip:last_skip option -> run_state
-(** Pure derivation, exposed so other server surfaces (Bonsai
-    keepers/summary row, [masc_keeper_list] detailed rows) can classify a
-    registry entry directly instead of re-deriving a full {!snapshot}. *)
-
 val run_state_to_json : run_state -> Yojson.Safe.t
 (** [{"kind": "in_turn" | "waiting" | "suspended"; ...}]. See [.ml] for the
     exact per-kind shape. *)
-
-val wake_reason_kind_and_stimuli : Keeper_registry.wake_reason -> string * string list
-(** [("proactive_tick", [])] or [("woken", <stimulus kind labels>)].
-    Exposed so non-JSON consumers (Bonsai [keepers/summary] row, which has
-    its own typed wire record) can project a {!run_state}'s wake without
-    round-tripping through {!run_state_to_json}. *)
 
 type fsm_guard_violation_bucket = {
   action : string;

@@ -188,9 +188,6 @@ val emit_annotation_request : annotation_request -> (annotation_result, string) 
 
 type snapshot
 
-val take_snapshot : unit -> snapshot
-(** Return accumulated observations and reset the accumulator atomically. *)
-
 val peek_snapshot : unit -> snapshot
 (** Return accumulated observations without resetting the accumulator. *)
 

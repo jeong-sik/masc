@@ -13,6 +13,30 @@ open Keeper_execution
 open Keeper_turn_up_args
 
 
+(* The envelope a successful create hands back. It names the isolation the
+   keeper actually landed on, not the isolation the caller asked for:
+   [network_mode] is not a keeper_up argument -- it is dashboard-owned -- so a
+   keeper created through this tool always takes its sandbox profile's
+   default, and docker and microvm both default to none. This is the only
+   point at which the creating operator learns that. Without it a keeper whose
+   instructions name a network service is created blocked, and the block first
+   shows up as a credential error inside the guest. *)
+let create_response_json ~name ~trace_id ~instructions ~proactive_enabled
+    ~max_context_override ~sandbox_profile ~network_mode ~agent_core_env =
+  `Assoc
+    [ ("name", `String name)
+    ; ("agent_name", `String name)
+    ; ("trace_id", `String trace_id)
+    ; ("instructions", `String instructions)
+    ; ("proactive_enabled", `Bool proactive_enabled)
+    ; ("max_context_override", Json_util.int_opt_to_json max_context_override)
+    ; ("sandbox_profile", `String (sandbox_profile_to_string sandbox_profile))
+    ; ("network_mode", `String (network_mode_to_string network_mode))
+    ; ( "agent_core_env"
+      , `Assoc (List.map (fun (k, v) -> (k, `String v)) agent_core_env) )
+    ]
+;;
+
 let write_initial_meta ~intake_token config meta =
   match
     Keeper_owner_registry.create_meta
@@ -333,15 +357,17 @@ let create_keeper ~expected_config_revision (ctx : _ context)
          | Keepalive_started _ ->
         Progress.Tracker.complete tracker ~message:"Keeper created" ();
         Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
-        let json = `Assoc [
-          ("name", `String meta.name);
-          ("agent_name", `String meta.name);
-          ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-          ("instructions", `String meta.instructions);
-          ("proactive_enabled", `Bool meta.proactive.enabled);
-          ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);
-          ("agent_core_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.agent_core_env));
-        ] in
+        let json =
+          create_response_json
+            ~name:meta.name
+            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+            ~instructions:meta.instructions
+            ~proactive_enabled:meta.proactive.enabled
+            ~max_context_override:meta.max_context_override
+            ~sandbox_profile:meta.sandbox_profile
+            ~network_mode:meta.network_mode
+            ~agent_core_env:meta.agent_core_env
+        in
         tool_result_ok_data json
          | ( Keepalive_already_registered _
            | Keepalive_lifecycle_denied _

@@ -45,6 +45,23 @@ type tree_location =
 val tree_location_of_profile : sandbox_profile -> tree_location
 (** Docker: [Shared_mount]. Micro_vm and Remote_ssh: [Endpoint_owned]. *)
 
+val runs_in_disposable_guest : sandbox_profile -> bool
+(** Whether the profile executes the payload inside a per-keeper disposable
+    guest whose isolation is at least docker-grade: a hardened container
+    ([Docker]) or a VM behind the hypervisor with its own kernel
+    ([Micro_vm]). The payload reaches the guest as argv with no shell at any
+    layer (docker exec takes argv; the microvm exec shim spawns with
+    [Unix.execvpe] after jailing cwd under the work volume).
+
+    [Remote_ssh] is excluded on purpose: it is transport-only — the
+    container knobs are not reproduced and the network is inherited — so its
+    requests keep paying the configured judgment path.
+
+    This is the typed authority the observation-only gate classification
+    ([Keeper_gate_readonly]) branches on; gate decisions never compare the
+    profile's wire string. Adding a [sandbox_profile] constructor fails the
+    build here until the new profile's answer is decided. *)
+
 val backend_unimplemented_message : sandbox_profile -> string
 (** The refusal a caller must surface when the declared profile has no
     runtime in this build. One sentence, shared by every dispatch surface,

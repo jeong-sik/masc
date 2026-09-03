@@ -88,6 +88,8 @@ let parse_attachment ~index json =
       ; size
       ; mime_type = String.trim mime_type
       ; data
+      ; width = None
+      ; height = None
       }
 
 let parse_attachments json =

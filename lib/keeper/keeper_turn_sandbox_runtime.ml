@@ -1344,6 +1344,45 @@ let microvm_remote_endpoint ?timeout_sec (t : t) =
      | Ok () -> microvm_remote_endpoint_of_running t ~container_name)
 ;;
 
+(* Reading a keeper's tree needs the guest, not the turn that happens to be
+   using it. The guest name is a function of the keeper and the base path,
+   and the guest is keeper-lifetime, so a caller holding no lifecycle
+   authority can still name and reach one that is up. [create] here computes
+   paths and reads the process uid; it starts nothing, and this function
+   deliberately never calls [ensure_started]. Booting on behalf of a reader
+   would spend a VM start, write the identity snapshot and make the work
+   root -- effects that belong to the keeper's own turn.
+
+   No running-state probe either: a stopped guest fails the [container exec]
+   on its own. The probe is [microvm_guest_absence_reason], which the caller
+   runs only to name a failure it already has. *)
+let microvm_attached_endpoint ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  let t = create ~config ~meta () in
+  let container_name = microvm_container_name ~config ~keeper_name:meta.name in
+  microvm_remote_endpoint_of_running t ~container_name
+;;
+
+(* [Some reason] when the guest is not running, so a caller can replace a raw
+   exec failure with the fact behind it; [None] when the guest is up or the
+   probe itself could not answer, leaving the caller's own error in place. *)
+let microvm_guest_absence_reason ?timeout_sec ~(config : Workspace.config)
+      ~(meta : keeper_meta) () =
+  if meta.sandbox_profile <> Keeper_types_profile_sandbox.Micro_vm
+  then None
+  else
+    let container_name = microvm_container_name ~config ~keeper_name:meta.name in
+    match probe_microvm_container_state ?timeout_sec container_name with
+    | Ok Keeper_sandbox_runtime.Docker_container_running -> None
+    | Error _ -> None
+    | Ok (Keeper_sandbox_runtime.Docker_container_stopped
+         | Keeper_sandbox_runtime.Docker_container_absent) ->
+      Some
+        (Printf.sprintf
+           "microvm_guest_not_running: keeper %s's guest %s is not running; a read \
+            attaches to a running guest and never boots one"
+           meta.name container_name)
+;;
+
 let retire_current_github_identity_snapshot t =
   update_github_identity_snapshots t (fun snapshots ->
     match snapshots.current with

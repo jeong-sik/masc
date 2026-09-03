@@ -26,6 +26,16 @@ type t =
   ; file_change_evidence : Keeper_file_change_evidence.t option
   }
 
+(* Every payload that leaves here can land in a keeper transcript, where the
+   checkpoint encoder refuses an object that binds a key twice -- and it does
+   so after the tool has already run, which is how one keeper lost 12
+   consecutive turns to a schedule result on 2026-08-29 (#31701). The inbound
+   argument boundary resolves the same ambiguity through the same rule, so a
+   repeat is answered identically in both directions. *)
+let resolve_repeated_keys data =
+  fst (Llm_provider.Json_object_keys.deduplicate data)
+;;
+
 let success raw_output =
   { raw_output
   ; data = None
@@ -39,6 +49,7 @@ let success raw_output =
 ;;
 
 let success_data ?metadata data =
+  let data = resolve_repeated_keys data in
   { raw_output = Yojson.Safe.to_string data
   ; data = Some data
   ; metadata
@@ -51,6 +62,7 @@ let success_data ?metadata data =
 ;;
 
 let deferred_data ?metadata data =
+  let data = resolve_repeated_keys data in
   { raw_output = Yojson.Safe.to_string data
   ; data = Some data
   ; metadata
@@ -63,6 +75,7 @@ let deferred_data ?metadata data =
 ;;
 
 let deferred_external_effect_data ?metadata data =
+  let data = resolve_repeated_keys data in
   { raw_output = Yojson.Safe.to_string data
   ; data = Some data
   ; metadata
@@ -97,6 +110,7 @@ let failure_data
       ~message
       data
   =
+  let data = resolve_repeated_keys data in
   { raw_output = message
   ; data = Some data
   ; metadata

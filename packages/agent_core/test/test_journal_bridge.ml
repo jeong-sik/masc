@@ -34,7 +34,7 @@ let test_turn_started_projection () =
 ;;
 
 let test_llm_request_projection () =
-  let evt = Durable_event.Llm_request { turn = 1; model = "dashscope"; timestamp = ts } in
+  let evt = Durable_event.Llm_request { turn = 1; model = "qwen"; timestamp = ts } in
   check string "name" "durable.llm_request" (projection_name evt);
   match projection_payload evt with
   | `Assoc fields ->
@@ -46,7 +46,7 @@ let test_llm_request_projection () =
     check
       string
       "model"
-      "dashscope"
+      "qwen"
       (match List.assoc_opt "model" fields with
        | Some (`String s) -> s
        | _ -> "")

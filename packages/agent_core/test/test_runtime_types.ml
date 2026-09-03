@@ -251,7 +251,7 @@ let test_spawn_agent_request () =
     ; role = Some "helper"
     ; prompt = "help me"
     ; provider = Some "local"
-    ; model = Some "dashscope"
+    ; model = Some "qwen"
     ; system_prompt = None
     }
   in
@@ -356,7 +356,7 @@ let test_event_kind () =
             { participant_name = "sub"
             ; summary = Some "ready"
             ; provider = Some "local"
-            ; model = Some "dashscope"
+            ; model = Some "qwen"
             ; raw_trace_run_id = Some "wr-1"
             }
         }
@@ -365,7 +365,7 @@ let test_event_kind () =
             { participant_name = "sub"
             ; summary = Some "done"
             ; provider = Some "local"
-            ; model = Some "dashscope"
+            ; model = Some "qwen"
             ; raw_trace_run_id = Some "wr-1"
             }
         ; stop_reason = Some "stop"
@@ -376,7 +376,7 @@ let test_event_kind () =
             { participant_name = "sub"
             ; summary = None
             ; provider = Some "local"
-            ; model = Some "dashscope"
+            ; model = Some "qwen"
             ; raw_trace_run_id = Some "wr-2"
             }
         ; failure_cause = Runtime.Execution_error "failed"

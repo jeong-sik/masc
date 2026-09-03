@@ -328,12 +328,22 @@ let test_qwen36_reasoning_dialect_without_preserve_keeps_tool_reasoning () =
     (RD.should_replay_reasoning dialect ~assistant_had_tool_call:true)
 ;;
 
-let test_qwen36_dashscope_uses_top_level_enable_thinking () =
+(* The top-level enable_thinking wire has no catalog producer left after the
+   DashScope preset went; a manifest or override can still declare it, so the
+   three fields it renders stay pinned here. *)
+let test_top_level_enable_thinking_wire_renders_preserve_and_budget () =
+  let caps =
+    { CAP.openai_compat_chat_extended_capabilities with
+      thinking_control_format = CAP.Enable_thinking
+    ; preserve_thinking_control_format = CAP.Top_level_preserve_thinking
+    }
+  in
   let config =
     PC.make
-      ~kind:DashScope
-      ~model_id:"Qwen3.6-35B-A3B"
-      ~base_url:"https://dashscope.aliyuncs.com/compatible-mode/v1"
+      ~kind:OpenAI_compat
+      ~model_id:"top-level-thinking-test"
+      ~base_url:"https://top-level-thinking.example/v1"
+      ~model_capabilities_override:caps
       ~enable_thinking:true
       ~preserve_thinking:true
       ~thinking_budget:4096
@@ -346,27 +356,6 @@ let test_qwen36_dashscope_uses_top_level_enable_thinking () =
   check_member_absent "chat_template_kwargs" json;
   check_member_absent "thinking" json;
   check_member_absent "reasoning_effort" json
-;;
-
-let test_qwen36_dashscope_dialect_reports_enable_thinking () =
-  (* The reported dialect metadata must match what build_request actually emits
-     for a DashScope Qwen config (top-level enable_thinking, asserted above),
-     not the model catalog's chat_template_kwargs. *)
-  let config =
-    PC.make
-      ~kind:DashScope
-      ~model_id:"Qwen3.6-35B-A3B"
-      ~base_url:"https://dashscope.aliyuncs.com/compatible-mode/v1"
-      ~enable_thinking:true
-      ~preserve_thinking:true
-      ()
-  in
-  let dialect = RD.for_provider_config config in
-  check
-    string
-    "toggle wire"
-    "enable_thinking"
-    (RD.toggle_wire_to_string dialect.toggle_wire)
 ;;
 
 let test_mimo_v25_uses_thinking_object_and_json_mode () =
@@ -1443,13 +1432,9 @@ let () =
               `Quick
               test_qwen36_reasoning_dialect_without_preserve_keeps_tool_reasoning
           ; test_case
-              "qwen3.6 dashscope uses top-level enable_thinking"
+              "top-level enable_thinking wire renders preserve and budget"
               `Quick
-              test_qwen36_dashscope_uses_top_level_enable_thinking
-          ; test_case
-              "qwen3.6 dashscope dialect reports enable_thinking"
-              `Quick
-              test_qwen36_dashscope_dialect_reports_enable_thinking
+              test_top_level_enable_thinking_wire_renders_preserve_and_budget
           ; test_case
               "mimo v2.5 uses thinking object and json mode"
               `Quick

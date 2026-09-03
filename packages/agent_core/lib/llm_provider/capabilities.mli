@@ -18,7 +18,7 @@ type thinking_control_format = Capability_vocab.thinking_control_format =
   | Ollama_think
   | Reasoning_effort
   | Enable_thinking
-  (** DashScope-style top-level [enable_thinking] / [preserve_thinking] bools
+  (** Top-level [enable_thinking] / [preserve_thinking] bools
       plus optional [thinking_budget]. *)
 [@@deriving show, eq]
 
@@ -191,7 +191,6 @@ val openai_compat_chat_extended_capabilities : capabilities
 val gemini_capabilities : capabilities
 val ollama_capabilities : capabilities
 val ollama_cloud_capabilities : capabilities
-val dashscope_capabilities : capabilities
 val glm_capabilities : capabilities
 
 (** NVIDIA NIM Nvidia capabilities: Llama-based, chat_template_kwargs thinking.
@@ -272,7 +271,7 @@ val for_model_id : string -> capabilities option
 
     Recognized labels (case-insensitive, whitespace trimmed):
     [anthropic] / [claude], [openai_compat] / [openai],
-    [gemini], [ollama], [glm] / [zhipu], [kimi], [dashscope],
+    [gemini], [ollama], [glm] / [zhipu], [kimi],
     [xai], [mistral], [cohere], [mimo], [nvidia].
 
     Canonical labels and aliases for the closed {!Provider_kind.t} space are

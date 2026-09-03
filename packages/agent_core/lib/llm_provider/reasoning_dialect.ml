@@ -607,10 +607,6 @@ let base_for_provider_config (config : Provider_config.t) =
     (match Provider_config.capabilities_for_config_model config with
      | Some caps -> of_capabilities caps
      | None -> provider_capabilities_of_kind config.kind |> of_capabilities)
-  | DashScope ->
-    (* DashScope emits top-level enable_thinking/preserve_thinking regardless of
-       the model catalog. *)
-    of_capabilities Capabilities.dashscope_capabilities
 ;;
 
 (* Replay activation for the [Thinking_object_clear_thinking] preserve wire.

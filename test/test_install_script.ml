@@ -156,6 +156,39 @@ wizard-default = true
    port (127.0.0.1:1 refuses instantly) so the reachability probe deterministically
    reports "not running". A cloud provider sits beside it to exercise the "cloud"
    label, which is never probed. *)
+(* A subscription whose CLI is on PATH (/bin/echo stands in), so the wizard gets
+   past "installed" and runs the login probe. /bin/echo is not the real client,
+   so the probe's JSON parse fails and runtime-probe reports "not signed in" --
+   a deterministic stand-in for a present-but-not-signed-in CLI. *)
+let write_runtime_catalog_with_installed_subscription base_path =
+  let config_dir = Filename.concat base_path ".masc/config" in
+  let runtime_file = Filename.concat config_dir "runtime.toml" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
+  write_file
+    runtime_file
+    {|
+[runtime]
+default = "claude_code.claude-sonnet-5"
+
+[providers.claude_code]
+display-name = "Claude Code Max Subscription"
+protocol = "claude-code"
+command = "/bin/echo"
+is-non-interactive = true
+
+[models.claude-sonnet-5]
+api-name = "claude-sonnet-5"
+max-context = 200000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[claude_code.claude-sonnet-5]
+wizard-default = true
+|};
+  runtime_file
+;;
+
 let write_runtime_catalog_with_local_server base_path =
   let config_dir = Filename.concat base_path ".masc/config" in
   let runtime_file = Filename.concat config_dir "runtime.toml" in
@@ -1140,6 +1173,26 @@ let test_wizard_reports_execution_sandboxes () =
         "sandbox_profile in .masc/config/keepers")
 ;;
 
+let test_wizard_reports_subscription_sign_in () =
+  let tmpdir = Filename.temp_file "masc-install-signin-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_installed_subscription tmpdir);
+      let output, status =
+        run_install_status [ "--dry-run"; "--provider"; "claude_code" ] tmpdir
+      in
+      check bool "subscription sign-in probe exits 0" true (status = Unix.WEXITED 0);
+      (* /bin/echo is present (so past "installed") but is not the real client,
+         so runtime-probe reports it as not signed in. *)
+      assert_contains
+        "the report distinguishes installed from signed in"
+        output
+        "Claude Code Max Subscription: installed, not signed in")
+;;
+
 let test_provider_ping_does_not_expose_key_in_curl_argv () =
   let script = install_script () in
   assert_contains
@@ -1835,6 +1888,10 @@ let () =
             "wizard reports available execution sandboxes"
             `Quick
             test_wizard_reports_execution_sandboxes
+        ; test_case
+            "wizard reports whether a subscription is signed in"
+            `Quick
+            test_wizard_reports_subscription_sign_in
         ; test_case "wizard parses the real runtime.toml catalog" `Quick test_wizard_parses_real_runtime_toml
         ; test_case
             "real runtime.toml providers declare healthcheck paths"

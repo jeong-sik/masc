@@ -1230,6 +1230,119 @@ let runtime_wizard_catalog_cmd =
   let info = Cmd.info "runtime-wizard-catalog" ~doc in
   Cmd.v info Term.(const runtime_wizard_catalog_cmd_exit $ base_path)
 
+(* A subscription runtime signs in through its own CLI. This asks whether it is
+   signed in *right now*, reusing the same login checks the server's official-
+   client probe uses -- [Runtime_claude_code.probe_subscription] /
+   [Runtime_codex_app_server.probe_subscription], which measure the login
+   without submitting a model turn. The install wizard calls this to upgrade a
+   subscription from "installed" (command -v) to "signed in". A CLI probe has no
+   drift-safe shell equivalent, which is why it lives here rather than in
+   install.sh.
+
+   Output contract (stdout first word, then exit code) so a shell caller can
+   read either: authenticated (0) / not-authenticated (1) / not-a-subscription
+   (2, an HTTP provider) / unsupported (3, antigravity has no login probe) /
+   the runtime id is not configured (4). *)
+let runtime_probe_subscription_timeout_s = 20.0
+
+let runtime_probe_cmd_exit base_path runtime_id =
+  let runtime_config_path = runtime_config_path_for_base_path base_path in
+  match Runtime.load_list ~config_path:runtime_config_path with
+  | Error msg ->
+      Printf.eprintf "runtime-probe failed: %s\n" msg;
+      1
+  | Ok (runtimes, _default, _, _, _) -> (
+      match
+        List.find_opt
+          (fun (rt : Runtime.t) -> String.equal rt.id runtime_id)
+          runtimes
+      with
+      | None ->
+          Printf.eprintf "runtime-probe: runtime %S is not configured\n" runtime_id;
+          4
+      | Some (runtime : Runtime.t) -> (
+          match runtime.execution with
+          | Runtime_execution.Agent_core _ ->
+              print_string "not-a-subscription\n";
+              Printf.eprintf
+                "runtime %S is an HTTP provider; probe its endpoint instead\n"
+                runtime_id;
+              2
+          | Runtime_execution.Antigravity_cli _ ->
+              print_string "unsupported\n";
+              Printf.eprintf "runtime %S (antigravity) exposes no login probe\n"
+                runtime_id;
+              3
+          | Runtime_execution.Claude_code exec ->
+              Eio_main.run @@ fun env ->
+              let bound =
+                Float.min runtime_probe_subscription_timeout_s exec.timeout_s
+              in
+              let config =
+                { (Runtime_claude_code.default_config ~cwd:base_path) with
+                  cli_path = exec.cli_path
+                ; model = exec.model
+                ; admission_timeout_s = bound
+                ; timeout_s = Some bound
+                }
+              in
+              (match
+                 Runtime_claude_code.probe_subscription
+                   ~mgr:(Eio.Stdenv.process_mgr env)
+                   ~clock:(Eio.Stdenv.clock env)
+                   ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+                   config
+               with
+               | Ok sub ->
+                   Printf.printf
+                     "authenticated auth_method=%s subscription_type=%s\n"
+                     sub.auth_method sub.subscription_type;
+                   0
+               | Error e ->
+                   print_string "not-authenticated\n";
+                   Printf.eprintf "%s\n" (Runtime_claude_code.error_to_string e);
+                   1)
+          | Runtime_execution.Codex_app_server exec ->
+              Eio_main.run @@ fun env ->
+              let bound =
+                Float.min runtime_probe_subscription_timeout_s exec.timeout_s
+              in
+              let config =
+                { (Runtime_codex_app_server.default_config ()) with
+                  cli_path = exec.cli_path
+                ; model = exec.model
+                ; admission_timeout_s = bound
+                ; timeout_s = Some bound
+                }
+              in
+              (match
+                 Runtime_codex_app_server.probe_subscription
+                   ~mgr:(Eio.Stdenv.process_mgr env)
+                   ~clock:(Eio.Stdenv.clock env)
+                   ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+                   config
+               with
+               | Ok result ->
+                   Printf.printf "authenticated subscription_type=%s\n"
+                     result.subscription.plan_type;
+                   0
+               | Error e ->
+                   print_string "not-authenticated\n";
+                   Printf.eprintf "%s\n"
+                     (Runtime_codex_app_server.error_to_string e);
+                   1)))
+
+let runtime_probe_id =
+  let doc = "Runtime id (provider.model) to probe for subscription sign-in" in
+  Arg.(required & pos 0 (some string) None & info [] ~docv:"RUNTIME_ID" ~doc)
+
+let runtime_probe_cmd =
+  let doc =
+    "Report whether a subscription runtime (Claude Code / Codex) is signed in."
+  in
+  let info = Cmd.info "runtime-probe" ~doc in
+  Cmd.v info Term.(const runtime_probe_cmd_exit $ base_path $ runtime_probe_id)
+
 let schedule_prune_cmd_exit base_path =
   let config = Workspace_utils.default_config base_path in
   match Schedule_service.prune config with
@@ -1377,6 +1490,7 @@ let cmd =
     ; login_cmd
     ; runtime_default_set_cmd
     ; runtime_wizard_catalog_cmd
+    ; runtime_probe_cmd
     ; schedule_prune_cmd
     ; keeper_github_cmd
     ; build_commit_cmd

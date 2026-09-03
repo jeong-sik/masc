@@ -582,12 +582,20 @@ let restore_instructions ~base_path instructions =
 
 let lanes_table_prefix = "runtime.exact_output_lanes."
 
+let lane_holds ~current_lanes lane =
+  match List.find_opt (fun current -> String.equal current.id lane.id) current_lanes with
+  | Some current -> current.slots = lane.slots && current.cli_slots = lane.cli_slots
+  | None -> false
+;;
+
 (* Line-level edits of the two tables, so every other line of runtime.toml,
    comments included, survives. Assignment rows go through the runtime's own
    row writer (quoted keys, so a dotted keeper name stays one key). Keepers
    assigned now but absent from the preset lose their row; lanes present in
-   the file but absent from the preset are left alone. *)
-let runtime_text_with ~current_assignments ~assignments ~lanes content =
+   the file but absent from the preset are left alone. A lane whose slots
+   already match is not rewritten either: the array writer drops comment
+   lines inside the block, and the live file keeps its lane notes there. *)
+let runtime_text_with ~current_assignments ~current_lanes ~assignments ~lanes content =
   let content =
     List.fold_left
       (fun content (keeper_name, _) ->
@@ -606,15 +614,18 @@ let runtime_text_with ~current_assignments ~assignments ~lanes content =
   in
   List.fold_left
     (fun content lane ->
-      let path = lanes_table_prefix ^ lane.id in
-      let content =
-        Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:lane.slots
-      in
-      Toml_line_editor.edit_table_multiline_array
-        content
-        ~path
-        ~key:"cli_slots"
-        ~values:lane.cli_slots)
+      if lane_holds ~current_lanes lane
+      then content
+      else (
+        let path = lanes_table_prefix ^ lane.id in
+        let content =
+          Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:lane.slots
+        in
+        Toml_line_editor.edit_table_multiline_array
+          content
+          ~path
+          ~key:"cli_slots"
+          ~values:lane.cli_slots))
     content
     lanes
 ;;
@@ -625,12 +636,7 @@ let runtime_text_with ~current_assignments ~assignments ~lanes content =
 let routing_holds ~current_assignments ~current_lanes ~assignments ~lanes =
   let sorted = List.sort compare in
   sorted current_assignments = sorted assignments
-  && List.for_all
-       (fun lane ->
-         match List.find_opt (fun current -> String.equal current.id lane.id) current_lanes with
-         | Some current -> current.slots = lane.slots && current.cli_slots = lane.cli_slots
-         | None -> false)
-       lanes
+  && List.for_all (lane_holds ~current_lanes) lanes
 ;;
 
 let restore_runtime ~base_path ~assignments ~lanes =
@@ -645,7 +651,9 @@ let restore_runtime ~base_path ~assignments ~lanes =
        if routing_holds ~current_assignments ~current_lanes ~assignments ~lanes
        then Runtime_unchanged
        else (
-         let text = runtime_text_with ~current_assignments ~assignments ~lanes content in
+         let text =
+           runtime_text_with ~current_assignments ~current_lanes ~assignments ~lanes content
+         in
          match Runtime.save_config_text ~runtime_config_path:path text with
          | Ok _receipt -> Runtime_committed
          | Error message -> Runtime_failed message))

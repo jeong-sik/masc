@@ -621,6 +621,12 @@
  (libraries masc masc_tui_message_layout))
 
 (library
+ (name masc_tui_tool_table)
+ (wrapped false)
+ (modules masc_tui_tool_table)
+ (libraries masc_tui_table))
+
+(library
  (name masc_tui_table)
  (wrapped false)
  ; masc_tui_message_layout so a cell is fitted in display cells rather than
@@ -889,6 +895,7 @@
   masc_skill_reference
   masc_skill_snapshot
   masc_tui_theme
+  masc_tui_tool_table
   masc_tui_tool_tree
   masc_tui_types
   yojson))

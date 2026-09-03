@@ -16,7 +16,7 @@ open Tui_decode
 open Masc_tui_ansi
 
 module Tool_tree = Masc_tui_tool_tree
-
+module Tool_table = Masc_tui_tool_table
 let json_assoc_member_opt = Masc_tui_json.member_opt
 
 (* Newest events the Skill Timeline section draws. The full count still
@@ -331,9 +331,9 @@ let tools_display_lines (state : state) =
                  | None, None -> tool.et_origin
                in
                Ansi.dim,
-               Printf.sprintf "   %-34s %s"
-                 (Terminal_text.single_line tool.et_name)
-                 (Terminal_text.single_line source))
+               Tool_table.effective_tool_line
+                 ~name:(Terminal_text.single_line tool.et_name)
+                 ~origin:(Terminal_text.single_line source))
             ets_tools
         in
         let skill_profile_lines =
@@ -663,7 +663,7 @@ let tools_display_lines (state : state) =
                     (Theme.warn ()),
                     "     " ^ Terminal_text.single_line entry)
                   left_out)
-        @ [ Ansi.bold, Printf.sprintf "   %-34s %s" "Tool" "Origin" ]
+        @ [ Ansi.bold, Tool_table.effective_tool_header ]
         @ tool_lines
     end
   in
@@ -929,7 +929,7 @@ let tools_display_lines (state : state) =
       [ Ansi.bold,
         Printf.sprintf " Registered Catalog — %d tools"
           (List.length registered_tools);
-        Ansi.dim, Printf.sprintf "   %-32s %-8s %s" "Tool" "Direct" "Surfaces" ]
+        Ansi.dim, Tool_table.catalog_tool_header ]
     in
     heading
     @ List.map
@@ -960,11 +960,10 @@ let tools_display_lines (state : state) =
                 if tool.tl_surfaces = [] then (Theme.warn ()) else Ansi.dim
               in
               ( Masc_tui_theme.tone Masc_tui_theme.Normal,
-                Printf.sprintf "      %-30s %s%-8s %s"
-                  (Terminal_text.single_line tool.tl_name)
-                  metadata
-                  (if tool.tl_direct_call then "yes" else "no")
-                  (Terminal_text.single_line surfaces) ))
+                Tool_table.catalog_tool_line ~metadata
+                  ~name:(Terminal_text.single_line tool.tl_name)
+                  ~direct:(if tool.tl_direct_call then "yes" else "no")
+                  ~surfaces:(Terminal_text.single_line surfaces) ))
         registered_rows
     end
   in
@@ -991,9 +990,15 @@ let tools_display_lines (state : state) =
             Printf.sprintf " Skill Usage — %d skill%s in use across keepers"
               (List.length used)
               (if List.length used = 1 then "" else "s")
+          (* One skill's keepers do not fit beside its name -- there can be
+             several, joined -- so the rows put them on the line below. The
+             header said the two sat side by side and named the second column
+             over the first one's trailing spaces; it now stands where each
+             reading stands. *)
+          ; Ansi.dim, Tool_table.skill_usage_name_indent ^ "SKILL"
           ; Ansi.dim,
-            Printf.sprintf "   %-24s %s" "Skill"
-              "Keeper  inv/delivered/actions \xc2\xb7 last used" ]
+            Tool_table.skill_usage_keeper_indent
+            ^ "KEEPER  inv/delivered/actions \xc2\xb7 last used" ]
         in
         let rows =
           List.concat_map
@@ -1009,9 +1014,9 @@ let tools_display_lines (state : state) =
                  |> String.concat " · "
                in
                [ ( Ansi.bold,
-                   Printf.sprintf "   %-24s"
-                     (Terminal_text.single_line surface.scs_name) )
-               ; (Ansi.dim, "     " ^ keepers) ])
+                   Tool_table.skill_usage_name_indent
+                   ^ Terminal_text.single_line surface.scs_name )
+               ; (Ansi.dim, Tool_table.skill_usage_keeper_indent ^ keepers) ])
             used
         in
         let rejection_rows =

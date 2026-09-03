@@ -473,6 +473,7 @@ let prepare_agent_setup
       ?composition_plan_index
       ~skill_activation_context
       ~turn_ctx_cell
+      ~checkpoint_owner:(fun () -> !active_checkpoint_owner)
       ()
   in
   let replay_delivery =

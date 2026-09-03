@@ -8198,7 +8198,15 @@ let render_keeper_message (state : state) =
             (List.map (fun entry -> None, entry) live_entries)
             [] committed_tagged
     in
-    let layout_entries = List.map snd tagged_layout_entries in
+    (* With no turn streaming, the entries the walk measures are the ones
+       [layout_entries_memo] holds across frames, and passing that very list
+       is what lets the walk keep its row counts: a fresh list of the same
+       entries is a different question to it. *)
+    let layout_entries =
+      match live_projection with
+      | None -> committed_layout_entries
+      | Some _ -> List.map snd tagged_layout_entries
+    in
     let inner_width = max 1 (framed_inner_width chat_cols) in
     (* Clamped here rather than where the key is handled: the limit depends on
        the terminal width and the pane's height, and a resize changes both

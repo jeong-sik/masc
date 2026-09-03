@@ -1331,40 +1331,126 @@ let clamp_scroll ?markdown ?origin ~inner_width ~height requested entries =
     min requested (max 0 (count 0 (List.rev entries) - height))
   end
 
-(* Clamp and slice from the rows one walk already measured. The separate
-   [clamp_scroll] then [scrolled_rows] calls traverse the same newest prefix;
-   with a bounded render cache, a prefix larger than the cache can evict its
-   own later hits during the second traversal. Keeping the rows from this walk
-   avoids a frame-local cache of another size and makes every visited entry
-   pay for layout once. *)
+(* How many rows each entry takes, newest first, for one list of entries at
+   one width.
+
+   Reading back through a conversation asks the same question of the same
+   entries on every frame: a wheel notch moves the window three rows and the
+   frame lays out the whole distance again to find where the window now
+   starts. The distance is what a deep scroll makes long, so that walk cost
+   what the reader had scrolled past rather than what they were looking at.
+
+   A row count does not change while the entry, the width, and the origin
+   shape stay as they were, so the counts are kept and the next frame extends
+   them only as far as it newly reaches. Rendering the rows themselves stays
+   where it was: the frame does it for the entries its window touches. *)
+type row_counts = {
+  rc_entries : entry list;
+  rc_inner_width : int;
+  rc_origin : origin_display;
+  rc_newest_first : entry array;
+  rc_counts : int array;
+  mutable rc_filled : int;
+      (** Entries from the newest whose count is known, so a frame that
+          scrolled further extends this rather than starting again. *)
+}
+
+let row_counts_memo : row_counts option ref = ref None
+
+let row_counts_for entries ~inner_width ~origin =
+  match !row_counts_memo with
+  | Some held
+    when held.rc_entries == entries
+         && held.rc_inner_width = inner_width
+         && held.rc_origin = origin ->
+      held
+  | Some _ | None ->
+      let newest_first = Array.of_list (List.rev entries) in
+      let held =
+        { rc_entries = entries;
+          rc_inner_width = inner_width;
+          rc_origin = origin;
+          rc_newest_first = newest_first;
+          rc_counts = Array.make (Array.length newest_first) 0;
+          rc_filled = 0;
+        }
+      in
+      row_counts_memo := Some held;
+      held
+
+let entry_rows_at held ?markdown index =
+  let count = Array.length held.rc_newest_first in
+  let previous =
+    if index + 1 < count then Some held.rc_newest_first.(index + 1) else None
+  in
+  rows_of_entry ?markdown ~origin:held.rc_origin ~inner_width:held.rc_inner_width
+    ~previous held.rc_newest_first.(index)
+
+(* Extend the known counts from the newest until they cover [wanted] rows, or
+   until the conversation runs out. Answers how many rows and how many entries
+   that took, which is the walk the window is then cut out of. *)
+let count_rows_until held ?markdown ~wanted () =
+  let entry_count = Array.length held.rc_newest_first in
+  let rec walk index total =
+    if total >= wanted || index >= entry_count then (index, total)
+    else begin
+      if index >= held.rc_filled
+      then begin
+        held.rc_counts.(index) <-
+          List.length (entry_rows_at held ?markdown index);
+        held.rc_filled <- index + 1
+      end;
+      walk (index + 1) (total + held.rc_counts.(index))
+    end
+  in
+  walk 0 0
+
+(* The window, and the scroll it had to be clamped to.
+
+   Rows are numbered from the oldest of the entries the walk visited, which is
+   the numbering the window is expressed in. Entry [index] -- counting from
+   the newest -- holds the rows [total - before - count] up to
+   [total - before], where [before] is what the entries newer than it take. *)
 let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entries =
   if requested <= 0 then
     requested, visible_rows ?markdown ?origin ~inner_width ~height entries
   else begin
     let inner_width = max 1 inner_width in
+    let origin = Option.value origin ~default:Origin_row in
     let window_height = max 0 height in
     let bound_height = max 1 height in
-    let enough = requested + bound_height in
-    let rec collect gathered gathered_count = function
-      | [] -> gathered, gathered_count
-      | _ when gathered_count >= enough -> gathered, gathered_count
-      | entry :: older ->
-          let rows =
-            rows_of_entry ?markdown ?origin ~inner_width
-              ~previous:(List.nth_opt older 0) entry
-          in
-          collect (rows @ gathered) (gathered_count + List.length rows) older
+    let held = row_counts_for entries ~inner_width ~origin in
+    let visited, total =
+      count_rows_until held ?markdown ~wanted:(requested + bound_height) ()
     in
-    let gathered, gathered_count = collect [] 0 (List.rev entries) in
-    let from_bottom =
-      min requested (max 0 (gathered_count - bound_height))
-    in
-    let bottom = max 0 (gathered_count - from_bottom) in
+    let from_bottom = min requested (max 0 (total - bound_height)) in
+    let bottom = max 0 (total - from_bottom) in
     let first = max 0 (bottom - window_height) in
-    ( from_bottom
-    , List.filteri
-        (fun index _ -> index >= first && index < bottom)
-        gathered )
+    let rec gather index before selected =
+      if index >= visited then selected
+      else begin
+        let count = held.rc_counts.(index) in
+        let low = total - before - count in
+        let high = total - before in
+        let selected =
+          if high <= first || low >= bottom then selected
+          else begin
+            let rows = entry_rows_at held ?markdown index in
+            let take_from = max first low and take_to = min bottom high in
+            let chosen =
+              List.filteri
+                (fun offset _ ->
+                  let position = low + offset in
+                  position >= take_from && position < take_to)
+                rows
+            in
+            chosen @ selected
+          end
+        in
+        gather (index + 1) (before + count) selected
+      end
+    in
+    (from_bottom, gather 0 0 [])
   end
 
 let last_page_start ~height row_costs =

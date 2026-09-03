@@ -6,6 +6,19 @@ module Owner = Keeper_owner
 module Owner_registry = Keeper_owner_registry
 module Chat_operation = Owner.Chat_operation
 
+(* Prompts moved from code into config/prompts; load them so rendered rows show
+   the intended text. Matches the other prompt-rendering tests. *)
+let () =
+  let prompt_dir =
+    Filename.concat
+      (match Sys.getenv_opt "DUNE_SOURCEROOT" with
+       | Some root -> root
+       | None -> Sys.getcwd ())
+      "config/prompts"
+  in
+  Prompt_registry.set_markdown_dir prompt_dir;
+  Prompt_registry.load_prompts_from_directory prompt_dir
+
 let json = testable Yojson.Safe.pretty_print Yojson.Safe.equal
 
 let runtime_toml =

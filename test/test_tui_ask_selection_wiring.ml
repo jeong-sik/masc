@@ -160,6 +160,23 @@ let test_the_footer_names_the_editor_key () =
        ~binding_name:"render_approvals" ~needle:"1-9:pick  ")
 ;;
 
+(* The panel is the last block the Approvals surface writes, and
+   [finish_surface] drops a surface's final rows when it overruns -- so an
+   unbudgeted question list does not push the approval queue off the screen, it
+   pushes itself off, cursor and all. Four questions on one ask is enough, and
+   this workspace's own store holds one (measured 2026-09-04).
+
+   The panel therefore asks [Masc_tui_ask_layout] what it can afford instead of
+   drawing everything and hoping. Both halves are asserted: the caller passes a
+   budget, and the panel plans against it. *)
+let test_the_panel_draws_against_a_budget () =
+  Alcotest.(check int) "the surface hands the panel a budget" 1
+    (Ast_grep.count_calls_with_label ~module_path:render
+       ~callee:"draw_ask_questions" ~label:"budget");
+  Alcotest.(check bool) "and the panel plans what fits" true
+    (Ast_grep.count_calls ~module_path:render ~callee:"Ask_layout.plan" > 0)
+;;
+
 let () =
   Alcotest.run "tui_ask_selection_wiring"
     [ ( "selection"
@@ -183,6 +200,10 @@ let () =
             test_typing_outranks_the_choice_digits
         ; Alcotest.test_case "the footer names the editor key" `Quick
             test_the_footer_names_the_editor_key
+        ] )
+    ; ( "budget"
+      , [ Alcotest.test_case "the panel draws against a budget" `Quick
+            test_the_panel_draws_against_a_budget
         ] )
     ]
 ;;

@@ -1692,6 +1692,38 @@ let test_missing_provider_flag_value_errors () =
       assert_contains "missing provider value message" output "--provider requires a value")
 ;;
 
+let test_invalid_sandbox_profile_rejected () =
+  let tmpdir = Filename.temp_file "masc-install-sandbox-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      let output, status = run_install_status [ "--sandbox"; "bogus" ] tmpdir in
+      check bool "invalid sandbox exits nonzero" true (status <> Unix.WEXITED 0);
+      assert_contains
+        "invalid sandbox names the three real profiles"
+        output
+        "--sandbox must be docker, microvm, or remote_ssh")
+;;
+
+let test_local_sandbox_profile_rejected () =
+  let tmpdir = Filename.temp_file "masc-install-sandbox-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      (* "local" is not a loadable sandbox_profile, so seeding it would break the
+         keeper; the flag rejects it rather than write a keeper that fails to load. *)
+      let output, status = run_install_status [ "--sandbox"; "local" ] tmpdir in
+      check bool "local sandbox exits nonzero" true (status <> Unix.WEXITED 0);
+      assert_contains
+        "local sandbox is called out as not loadable"
+        output
+        "not a loadable profile")
+;;
+
 let test_runtime_default_failure_does_not_write_env_local () =
   if Unix.geteuid () = 0 then Alcotest.skip ();
   let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
@@ -1958,6 +1990,8 @@ let () =
             `Quick
             test_real_runtime_toml_provider_healthchecks
         ; test_case "--provider requires a value" `Quick test_missing_provider_flag_value_errors
+        ; test_case "invalid --sandbox is rejected" `Quick test_invalid_sandbox_profile_rejected
+        ; test_case "--sandbox local is rejected" `Quick test_local_sandbox_profile_rejected
         ; test_case
             "runtime default failure does not write env.local"
             `Quick

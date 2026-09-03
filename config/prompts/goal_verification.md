@@ -1,7 +1,7 @@
 ---
 description: 목표 증명 판정 — 판정 본문(proof)과 읽기 전용 조회 도구 설명(lookup)
 category: verification
-operator_surface: fragment
+operator_surface: primary
 ---
 
 ### proof (vars: goal_title, metric, target_value, lookup_section)

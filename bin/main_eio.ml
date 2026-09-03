@@ -20,6 +20,7 @@ module Keeper_memory = Masc.Keeper_memory
 module Keeper_execution = Masc.Keeper_execution
 module Keeper_runtime = Masc.Keeper_runtime
 module Keeper_github_identity = Masc.Keeper_github_identity
+module Keeper_github_login_lane = Masc.Keeper_github_login_lane
 module Tool_operator = Masc.Tool_operator
 module Operator_control = Operator_control
 module Dashboard_execution = Dashboard_execution
@@ -1262,14 +1263,17 @@ let keeper_github_action_cmd name doc run =
       prerr_endline (Printf.sprintf "invalid keeper name: %s" keeper_name);
       1)
     else
-      match Keeper_meta_store.read_meta config keeper_name with
+      (* Effective meta, not persisted meta: [sandbox_profile] is TOML-owned
+         and a persisted read answers with the default, which would send every
+         Keeper's login to this host. *)
+      match Keeper_meta_store.read_effective_meta config keeper_name with
       | Error message ->
         prerr_endline message;
         1
       | Ok None ->
         prerr_endline (Printf.sprintf "keeper %S not found" keeper_name);
         1
-      | Ok (Some _) -> run ~config ~keeper_name ~hostname
+      | Ok (Some meta) -> run ~config ~meta ~hostname
   in
   Cmd.v
     (Cmd.info name ~doc)
@@ -1284,19 +1288,36 @@ let keeper_github_cmd =
     keeper_github_action_cmd
       "login"
       "Log a Keeper into GitHub CLI."
-      Keeper_github_identity.run_cli_login
+      (fun ~config ~(meta : Keeper_meta_contract.keeper_meta) ~hostname ->
+        match Keeper_github_login_lane.for_keeper ~config ~meta ~hostname with
+        | Error message ->
+          prerr_endline message;
+          1
+        | Ok lane -> Keeper_github_identity.run_cli_login ~lane)
   in
+  (* Status and logout still read and write this host's directory. For a
+     Remote_ssh Keeper they therefore answer about the host, which is what
+     they did before this command learned about lanes; closing that is
+     RFC-sized work on [observe] and [logout_argv], not a lane switch. *)
   let status =
     keeper_github_action_cmd
       "status"
       "Observe stored and effective Keeper GitHub identities."
-      Keeper_github_identity.run_cli_status
+      (fun ~config ~(meta : Keeper_meta_contract.keeper_meta) ~hostname ->
+        Keeper_github_identity.run_cli_status
+          ~config
+          ~keeper_name:meta.Keeper_meta_contract.name
+          ~hostname)
   in
   let logout =
     keeper_github_action_cmd
       "logout"
       "Remove a Keeper GitHub CLI login."
-      Keeper_github_identity.run_cli_logout
+      (fun ~config ~(meta : Keeper_meta_contract.keeper_meta) ~hostname ->
+        Keeper_github_identity.run_cli_logout
+          ~config
+          ~keeper_name:meta.Keeper_meta_contract.name
+          ~hostname)
   in
   Cmd.group
     (Cmd.info "keeper-github" ~doc:"Manage Keeper-specific GitHub CLI identity.")

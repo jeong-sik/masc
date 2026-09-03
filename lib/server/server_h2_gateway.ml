@@ -1298,7 +1298,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                    ~status:`Bad_request
                    ~extra_headers:cors
                else
-                 match Keeper_meta_store.read_meta config keeper_name with
+                 (* Effective meta, not persisted meta: [sandbox_profile] is
+                    TOML-owned and a persisted read answers with the default,
+                    which would send every Keeper's login to this host. *)
+                 match Keeper_meta_store.read_effective_meta config keeper_name with
                  | Error message ->
                    h2_respond_json_value
                      h2_reqd
@@ -1314,16 +1317,14 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                         ])
                      ~status:`Not_found
                      ~extra_headers:cors
-                 | Ok (Some _) ->
+                 | Ok (Some meta) ->
                    let hostname =
                      Option.value
                        ~default:"github.com"
                        (Server_utils.query_param httpun_request "hostname")
                    in
                    (match
-                      Keeper_github_identity.login_env
-                        ~config
-                        ~keeper_name
+                      Keeper_github_login_lane.for_keeper ~config ~meta ~hostname
                     with
                     | Error message ->
                       h2_respond_json_value
@@ -1331,7 +1332,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                         (`Assoc [ "error", `String message ])
                         ~status:`Bad_request
                         ~extra_headers:cors
-                    | Ok env ->
+                    | Ok lane ->
                       let headers =
                         H2.Headers.of_list
                           ([ "content-type", "text/event-stream"
@@ -1363,8 +1364,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                              Keeper_github_identity.stream_login
                                ~config
                                ~keeper_name
-                               ~hostname
-                               ~env
+                               ~lane
                                ~is_closed:(fun () ->
                                  H2.Body.Writer.is_closed writer)
                                ~send_event

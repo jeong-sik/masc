@@ -1,9 +1,18 @@
 # Skill 이 도달하지 않는다 — 라이브 실측과 외부 설계 대조 (r1)
 
-masc 의 Skill 서브시스템은 고장난 게 아니라 **키퍼가 볼 수 없다**. 발행·스냅샷·
-정확 참조·원장까지 다 도는데, 키퍼 프롬프트에 카탈로그가 0바이트로 들어간다.
-이 문서는 그 사실을 먼저 못박고, 같은 문제를 외부 시스템·논문이 어떻게 푸는지
-대조한 다음, masc 에 맞는 활성화 방안을 셋으로 좁힌다.
+masc 의 Skill 은 두 갈래로 키퍼에 닿는다. 조합 도구(`keeper_compose_<skill>`)는
+도구 스키마에 들어가서 **닿고**, 본문 읽기(`keeper_skill`)와 카탈로그는 task 가
+스킬을 골라야 열리는데 **그 선택이 라이브에 0건**이라 안 닿는다. 그래서 스킬
+계열 호출은 하루 8,236건 중 13건(0.16%)이고, 그중 8건은 한 조합 도구가 전부
+실패한 것이다.
+
+이 문서는 그 실측을 먼저 못박고, 같은 문제를 외부 시스템·논문이 어떻게 푸는지
+대조한 다음, masc 에 맞는 활성화 방안을 좁힌다.
+
+한 가지 먼저: masc 의 스킬 파일은 **이미 Anthropic 표준 모양이다**.
+`.masc/skills/<name>/SKILL.md` 에 `name` + `description` frontmatter 가 있고
+description 도 "무엇을 하고 언제 쓰는지"를 담고 있다. 형식은 이미 맞다.
+없는 것은 그 description 을 키퍼 앞에 놓는 자리다.
 
 근거는 `2026-09-04-skill-activation-evidence-record.md`.
 
@@ -61,13 +70,44 @@ description 산문이고 필드 모양(`"...skill...":`)은 0건이다.
 
 | 지표 | 값 |
 |---|---:|
-| tool_call 행 | 8,160 |
+| tool_call 행 | 8,236 |
 | 서로 다른 도구 | 82 |
-| 서로 다른 턴 | 1,770 |
-| `keeper_skill` | **2 (0.025%)** |
+| 서로 다른 턴 | 1,796 |
+| `keeper_skill` | 2 |
+| `keeper_compose_<skill>` | 11 |
+| **스킬 계열 합** | **13 (0.16%)** |
 
-턴 885개당 1건이다. 상위 도구는 `keeper_artifact_read` 1,475 ·
+턴 1,796개에 13건, 턴당 0.01건이다. 상위 도구는 `keeper_artifact_read` 1,475 ·
 `keeper_time_now` 1,102 · `Execute` 879 · `Read` 572 · `keeper_memory_write` 501.
+
+스킬은 도구 계열이 **둘**이다. `keeper_skill` 은 본문을 정확 참조로 읽고,
+`keeper_compose_<skill>` 은 스킬이 정의한 조합을 실행한다. 후자는
+`keeper_effective_tool_surface.ml` 이 스킬 프로필에서 만들어 **도구 스키마에
+넣는다**(`Instruction_skill | Composition_skill _ | Composition_control` origin).
+그래서 프롬프트에 카탈로그가 없어도 조합 도구는 키퍼가 볼 수 있다.
+
+### 그리고 그중 8건이 전부 실패한다
+
+| 도구 | 호출 | 성공 |
+|---|---:|---:|
+| `keeper_compose_work-intake` | 8 | **0** |
+| `keeper_compose_mission-snapshot` | 2 | 2 |
+| `keeper_compose_background-snapshot` | 1 | 1 |
+| `keeper_skill` | 2 | 2 |
+
+`keeper_compose_work-intake` 는 오늘 8번 불려 8번 다 `Tool_result.Failed` 로
+끝났다. 기록된 payload 는 `composition_tool`/`tool_kind`/`settled`/`cause`/
+`effect_disposition` 모양인데, 이건 `keeper_tool_composition_surface.ml:570`
+`failure_data` 가 **Error 분기에서만** 내는 모양이다. 성공한
+`keeper_compose_mission-snapshot` 은 `actions` 키를 갖는다.
+
+보이는 범위의 노드는 둘 다 `disposition: "completed"` 다. 실패 원인은
+`cause` 필드에 있는데 **읽을 수가 없다** — 기록된 output 이 3,557자에서
+`...(truncated)` 로 잘리고(`observability_redact.ml:34`) `cause` 는 `settled`
+뒤에 오기 때문이다. 키퍼는 온전한 결과를 받았다(`result_bytes` 11,858~12,004).
+
+즉 masc 의 tool_calls 저장소로는 **어떤 조합이 왜 실패했는지 알 수 없다**.
+진단 필드가 정확히 잘리는 자리에 있다.
 
 ### 열린 이슈와의 관계
 
@@ -213,11 +253,23 @@ revision 이 이미 들고 있다.
 
 ## 5. 권고
 
-**B + C 를 한 RFC 로 묶는다.** A 는 masc 의 현재 컨텍스트 압력과 정면으로
-부딪히고(`#32935`, `#32939`), B 는 masc 가 이미 쓰는 기전이라 새 개념이 없다.
-C 없이 B 만 하면 목록을 봐도 64hex 를 어디서 구할지가 남는다.
+**순서가 있다.**
 
-D 는 활성화가 오른 뒤로 미룬다.
+0. **`keeper_compose_work-intake` 8/8 실패부터 고친다.** 오늘 스킬 계열 호출의
+   62%가 이 한 도구이고 전부 실패한다. 활성화를 논하기 전에, 시도한 키퍼가
+   실패를 받는 상태를 두면 안 된다. 같이 고칠 것 — `cause` 가 telemetry 절단
+   뒤에 있어서 저장소만 보고는 원인을 못 읽는다.
+1. **키퍼 프로필 `skill_names` 를 한 명에게 켜고 잰다.** 코드 변경 0이다.
+   `keeper_types_profile_toml_normalizers.mli:71` 에 이미 있는 필드이고, 켜면
+   선택 사유가 `Keeper_profile` 로 잡힌다. 라이브 11명 중 이걸 쓰는 키퍼는
+   0명이다. 가장 싼 실험이 아직 안 돌았다.
+2. 그다음 **B + C**. A 는 masc 의 현재 컨텍스트 압력과 정면으로
+   부딪히고(`#32935`, `#32939`), B 는 masc 가 이미 쓰는 기전이라 새 개념이 없다.
+   C 없이 B 만 하면 목록을 봐도 64hex 를 어디서 구할지가 남는다.
+3. D 는 활성화가 오른 뒤로 미룬다.
+
+0번과 1번을 건너뛰고 새 표면부터 만들면, 고장난 도구와 안 켜본 스위치를 그대로
+둔 채 설계를 얹는 셈이 된다.
 
 측정은 조치 전후 같은 방법으로 한다. `tool_calls/*.jsonl` 의 `tool` 필드로
 `keeper_skill` 호출/턴, 그리고 키퍼 `last-prompt.json` 의 스킬 바이트. 지금

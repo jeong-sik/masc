@@ -54,3 +54,20 @@
 - SkillSmith 의 세 수치는 abstract 에 없을 수 있다.
 - Skill Coverage 를 masc 원장에 적용할 수 있는지는 판단만 적었고 실제로
   constraint 를 뽑아보지 않았다.
+
+## 정정 (코드 레벨 확인 후)
+
+첫 판(`success` 필드를 `keeper_skill` 하나로만 셌다)의 수치가 틀렸다.
+
+| Evidence | Timestamp | Confidence | Delta |
+|---|---|---|---|
+| `tool_calls/2026-09/03.jsonl` 을 `keeper_skill` + `keeper_compose*` 두 계열로 다시 집계 | 02:0x | High | 2건이 아니라 13건. 8,236행 / 턴 1,796. 첫 판의 0.025% 는 한 계열만 센 값 |
+| 같은 파일의 성공 여부 | 02:0x | High | `keeper_compose_work-intake` 8건 전부 `success=False`. 나머지(mission-snapshot 2, background-snapshot 1, keeper_skill 2)는 전부 성공 |
+| 실패 payload 의 키 모양 대조 | 02:1x | High | 실패는 `settled`/`cause`/`effect_disposition`, 성공은 `actions`. 전자는 `keeper_tool_composition_surface.ml:570` `failure_data` 가 Error 분기에서만 내는 모양 |
+| `result_bytes` 11,858~12,004 vs 기록된 output 3,557자 + `...(truncated)` | 02:1x | High | 절단은 telemetry 전용(`observability_redact.ml:34`). 키퍼는 온전한 결과를 받았다. 다만 `cause` 가 `settled` 뒤라 저장소로는 원인을 못 읽는다 |
+| `lib/keeper/keeper_effective_tool_surface.ml:241` 부근 `selection_reason` | 02:0x | High | `skill_names` 가 있으면 `Keeper_profile`, 없으면 `global_references` 매칭 시 `Catalog_default`. 즉 선언 없이도 조합 도구가 스키마에 들어가는 경로가 있다 |
+| `lib/keeper/keeper_types_profile_toml_normalizers.mli:71` `skill_names : string list option` | 02:0x | High | 키퍼 프로필 TOML 필드. 라이브 `config/keepers/*.toml` 에서 이 키를 쓰는 키퍼 0명 |
+| `.masc/skills/ci-red-attribution/SKILL.md` 원문 | 02:0x | High | `name` + `description` frontmatter. Anthropic 표준 모양 그대로이고 description 은 "무엇을/언제" 를 담고 있다 |
+
+읽지 못한 것: `keeper_compose_work-intake` 실패의 `cause` 값. 저장소가 그 자리에서
+잘린다. raw-traces 에서도 해당 `tool_execution_finished` 행을 특정하지 못했다.

@@ -152,6 +152,56 @@ wizard-default = true
   runtime_file
 ;;
 
+(* A config whose default is a local model server, bound to a closed loopback
+   port (127.0.0.1:1 refuses instantly) so the reachability probe deterministically
+   reports "not running". A cloud provider sits beside it to exercise the "cloud"
+   label, which is never probed. *)
+let write_runtime_catalog_with_local_server base_path =
+  let config_dir = Filename.concat base_path ".masc/config" in
+  let runtime_file = Filename.concat config_dir "runtime.toml" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
+  write_file
+    runtime_file
+    {|
+[runtime]
+default = "local_llama.qwen"
+
+[providers.local_llama]
+display-name = "Local llama.cpp"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[providers.local_llama.healthcheck]
+path = "/models"
+
+[providers.deepseek]
+display-name = "DeepSeek API"
+protocol = "openai-compatible-http"
+endpoint = "https://api.deepseek.com"
+
+[providers.deepseek.healthcheck]
+path = "/models"
+
+[providers.deepseek.credentials]
+type = "env"
+key = "DEEPSEEK_API_KEY"
+
+[models.qwen]
+api-name = "qwen"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[local_llama.qwen]
+wizard-default = true
+
+[deepseek.qwen]
+wizard-default = true
+|};
+  runtime_file
+;;
+
 let write_runtime_catalog_with_invalid_key base_path =
   let config_dir = Filename.concat base_path ".masc/config" in
   let runtime_file = Filename.concat config_dir "runtime.toml" in
@@ -1008,6 +1058,57 @@ let test_wizard_offers_subscription_runtime () =
         "truncated provider wizard catalog record")
 ;;
 
+let test_wizard_reports_model_source_availability () =
+  let tmpdir = Filename.temp_file "masc-install-detect-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      let output, status =
+        run_install_status
+          [ "--dry-run"; "--provider"; "deepseek"; "--api-key"; "fake-key" ]
+          tmpdir
+      in
+      check bool "detection report exits 0" true (status = Unix.WEXITED 0);
+      assert_contains
+        "wizard prints a detection report"
+        output
+        "detected model sources:";
+      assert_contains
+        "a down local server is reported as not running"
+        output
+        "Local llama.cpp: not running";
+      assert_contains
+        "a cloud provider is labeled cloud, not probed"
+        output
+        "DeepSeek API: cloud")
+;;
+
+let test_wizard_warns_when_selected_local_server_is_down () =
+  let tmpdir = Filename.temp_file "masc-install-detect-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      (* local_llama is keyless, so no --api-key is needed to select it. *)
+      let output, status =
+        run_install_status [ "--dry-run"; "--provider"; "local_llama" ] tmpdir
+      in
+      check bool "selecting a down local server still exits 0" true (status = Unix.WEXITED 0);
+      assert_contains
+        "the down local server is called out before finishing"
+        output
+        "Local llama.cpp is not running at http://127.0.0.1:1/v1";
+      assert_contains
+        "the default runtime is still set to the chosen server"
+        output
+        {|[dry-run] would set [runtime].default = "local_llama.qwen"|})
+;;
+
 let test_provider_ping_does_not_expose_key_in_curl_argv () =
   let script = install_script () in
   assert_contains
@@ -1691,6 +1792,14 @@ let () =
             "wizard offers a subscription runtime with no api key"
             `Quick
             test_wizard_offers_subscription_runtime
+        ; test_case
+            "wizard reports which model sources are available"
+            `Quick
+            test_wizard_reports_model_source_availability
+        ; test_case
+            "wizard warns when the selected local server is down"
+            `Quick
+            test_wizard_warns_when_selected_local_server_is_down
         ; test_case "wizard parses the real runtime.toml catalog" `Quick test_wizard_parses_real_runtime_toml
         ; test_case
             "real runtime.toml providers declare healthcheck paths"

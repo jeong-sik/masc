@@ -66,6 +66,10 @@ TEAM="${MASC_TEAM_PRESET:-}"
 # provider pings.
 readonly MASC_INSTALL_PUBLIC_PING_TIMEOUT_S=5
 readonly MASC_INSTALL_AUTH_PING_TIMEOUT_S=10
+# The wizard probes every local model server up front to report which are
+# running, so this ceiling is kept short: a closed loopback port refuses
+# instantly, and a hung one should not stall the whole detection sweep.
+readonly MASC_INSTALL_LOCAL_PROBE_TIMEOUT_S=2
 readonly MASC_INSTALL_RELEASE_METADATA_TIMEOUT_S=30
 readonly MASC_INSTALL_CONFIG_FETCH_TIMEOUT_S=60
 readonly MASC_INSTALL_BINARY_DOWNLOAD_TIMEOUT_S=300
@@ -269,6 +273,74 @@ provider_env_key() {
     return 0
   fi
   return 1
+}
+
+# A loopback endpoint is a model server running on this machine, so "is it up?"
+# is a meaningful question. A remote/cloud endpoint is always routable and its
+# gate is the API key instead, so the wizard does not probe those for liveness.
+endpoint_is_local() {
+  case "$1" in
+    *://localhost:* | *://localhost/* | *://localhost \
+    | *://127.0.0.1:* | *://127.0.0.1/* | *://127.0.0.1 \
+    | *://0.0.0.0:* | *://0.0.0.0/* | *://0.0.0.0 \
+    | *://\[::1\]:* | *://\[::1\]/* | *://\[::1\]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Best-effort, unauthenticated liveness probe of a local server's healthcheck
+# path. Exit 0 means the server answered. A closed loopback port refuses at
+# once, so this does not wait out the timeout for servers that are simply down.
+probe_local_reachable() {
+  local idx="$1"
+  local endpoint="${PROVIDER_ENDPOINTS[$idx]}"
+  local ping_path="${PROVIDER_PING_PATHS[$idx]}"
+  curl -fsS --max-time "$MASC_INSTALL_LOCAL_PROBE_TIMEOUT_S" \
+    "${endpoint%/}${ping_path}" >/dev/null 2>&1
+}
+
+# One word describing whether this entry is ready to use right now:
+#   reachable / not running  -- a local server, probed over HTTP
+#   installed / not installed -- a subscription CLI, checked with command -v
+#   cloud                     -- a remote provider, gated by its API key
+#   local                     -- a local server with no healthcheck path to probe
+provider_availability_label() {
+  local idx="$1"
+  case "${PROVIDER_KINDS[$idx]}" in
+    subscription)
+      local cmd="${PROVIDER_COMMANDS[$idx]}"
+      if [ -n "$cmd" ] && command -v "$cmd" >/dev/null 2>&1; then
+        echo "installed"
+      else
+        echo "not installed"
+      fi
+      ;;
+    *)
+      if endpoint_is_local "${PROVIDER_ENDPOINTS[$idx]}"; then
+        if [ -z "${PROVIDER_PING_PATHS[$idx]}" ]; then
+          echo "local"
+        elif probe_local_reachable "$idx"; then
+          echo "reachable"
+        else
+          echo "not running"
+        fi
+      else
+        echo "cloud"
+      fi
+      ;;
+  esac
+}
+
+# The "detect" half of detect-then-skip: before choosing, print what is ready.
+# Runs on every wizard invocation (including --dry-run and --provider), so the
+# operator sees which local servers are up and which subscriptions are signed
+# in before anything is written.
+report_provider_availability() {
+  log "detected model sources:"
+  local i
+  for i in "${!PROVIDER_IDS[@]}"; do
+    log "  - ${PROVIDER_NAMES[$i]}: $(provider_availability_label "$i")"
+  done
 }
 
 prompt_provider() {
@@ -534,12 +606,23 @@ run_wizard() {
   local base_path="$1"
   local provider_idx key
   load_provider_catalog "$base_path"
+  report_provider_availability
 
   if [ -n "$WIZARD_PROVIDER" ]; then
     provider_idx=$(provider_index_by_id "$WIZARD_PROVIDER") \
       || die "unknown provider: $WIZARD_PROVIDER"
   else
     provider_idx=$(prompt_provider)
+  fi
+
+  # A local server that is not up will not answer once the default is set, so
+  # say so plainly rather than leave the operator to discover it at first run.
+  # The choice still stands: the server may just need to be started afterwards.
+  if [ "${PROVIDER_KINDS[$provider_idx]}" = "provider" ] \
+    && endpoint_is_local "${PROVIDER_ENDPOINTS[$provider_idx]}" \
+    && [ -n "${PROVIDER_PING_PATHS[$provider_idx]}" ] \
+    && ! probe_local_reachable "$provider_idx"; then
+    warn "$(provider_name "$provider_idx") is not running at ${PROVIDER_ENDPOINTS[$provider_idx]}; start it before using masc"
   fi
 
   key=$(resolve_wizard_key "$provider_idx")

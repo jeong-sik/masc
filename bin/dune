@@ -341,6 +341,11 @@
  (modules masc_tui_command))
 
 (library
+ (name masc_tui_gate_text)
+ (wrapped false)
+ (modules masc_tui_gate_text))
+
+(library
  (name masc_tui_preset_text)
  (wrapped false)
  (modules masc_tui_preset_text)
@@ -1010,6 +1015,7 @@
   masc_tui_observer
   masc_tui_acting
   masc_tui_command
+  masc_tui_gate_text
   masc_tui_preset_text
   masc_tui_mcp
   masc_tui_keeper_chat_transcript

@@ -65,6 +65,10 @@ type kind =
   | Tool_calls of Transcript.tool_block
   | Skill_activity of Transcript.skill_activity
   | Reasoning of string list
+  | Gate_activity of
+      { phase : string
+      ; tool : string option
+      }
   | Memory_activity of { summary : string option }
 
 let tool_rows block =
@@ -1163,15 +1167,25 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
               skill_rows @ trace_rows @ said)
       | Some "system" ->
           (* Durable approval lifecycle rows are server-owned status, never
-             Keeper speech. The TUI's existing [Memory_activity] presentation
-             is the neutral system lane: it renders the typed row without
-             advancing reply/recovery semantics. *)
+             Keeper speech. A row that carries the typed lifecycle is read as
+             that fact: the store also writes a rendered sentence, and reading
+             the sentence instead put the gate's steps in the Memory journal
+             lane, where they interleaved with memory commits and read as
+             conversation. Rows without the payload keep the neutral lane. *)
+          let kind =
+            match List.assoc_opt "approval_lifecycle" fields with
+            | Some (`Assoc lifecycle) -> (
+              match string_field lifecycle "phase" with
+              | Some phase -> Gate_activity { phase; tool = string_field lifecycle "tool_name" }
+              | None -> Memory_activity { summary = None })
+            | Some _ | None -> Memory_activity { summary = None }
+          in
           [ Utterance
               { at
               ; structural_id = structural_id_of_fields fields "system"
               ; turn_sequence
               ; turn_id
-              ; kind = Memory_activity { summary = None }
+              ; kind
               ; text = content
               ; attachments = []
               }
@@ -1294,7 +1308,8 @@ let annotate_recovered_interruptions rows =
                 { origin_request_id = failure.origin_request_id; recovered_at }
           }, later_reply_at
         | Addressed_to_keeper _ | Said_by_keeper | Autonomous_reply
-        | Tool_calls _ | Skill_activity _ | Reasoning _ | Memory_activity _ ->
+        | Tool_calls _ | Skill_activity _ | Reasoning _ | Gate_activity _
+        | Memory_activity _ ->
           row, later_reply_at
       in
       loop later_reply_at (row :: acc) rest

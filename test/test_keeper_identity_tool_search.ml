@@ -67,7 +67,7 @@ let build (offer : Keeper_identity_tools.offered_tool) =
           }))
 ;;
 
-let placement ?(agent_cell = ref None) ?(history = []) offering =
+let placement ?(agent_cell = ref None) ?(history = []) ?(carry_window = 0) offering =
   Keeper_identity_tool_search.make
     ~keeper_name:"search-test"
     { Keeper_identity_tool_search.deferred =
@@ -82,14 +82,15 @@ let placement ?(agent_cell = ref None) ?(history = []) offering =
           offering
     ; agent_cell
     ; history
+    ; carry_window
     }
 ;;
 
-let search ?agent_cell ?history offering =
+let search ?agent_cell ?history ?carry_window offering =
   Option.map
     (fun (p : Keeper_identity_tool_search.placement) ->
        p.Keeper_identity_tool_search.tool)
-    (placement ?agent_cell ?history offering)
+    (placement ?agent_cell ?history ?carry_window offering)
 ;;
 
 let the_tool offering =
@@ -439,8 +440,8 @@ let asked_for names =
   }
 ;;
 
-let already_used ?history offering =
-  match placement ?history offering with
+let already_used ?history ?carry_window offering =
+  match placement ?history ?carry_window offering with
   | Some p ->
     List.map
       (fun (t : Agent_core.Tool.t) -> t.Agent_core.Tool.schema.name)
@@ -558,6 +559,162 @@ let test_a_builtin_call_is_not_mistaken_for_an_attached_one () =
     (already_used ~history:[ called "Read" ] (offered two_offered))
 ;;
 
+(* [n] calls to a built-in, which advance the carry clock without being
+   carried themselves -- the shape a Keeper leaves between two pieces of
+   attached work. *)
+let filler n = List.init n (fun _ -> called "Read")
+
+let three_offered =
+  [ "jira_search", "Search issues"
+  ; "confluence_search", "Search pages"
+  ; "jira_create", "Create an issue"
+  ]
+;;
+
+(* Carrying everything ever run has no upper bound: measured over 19,100 turns
+   2026-09-01..03 the per-keeper median carried was 32.1 KB of schema and
+   reached 51.9 KB, while the median gap between two uses of one tool is 2
+   turns. A tool whose last call is further back than the window is not
+   placed. *)
+let test_a_tool_outside_the_window_is_not_placed () =
+  check
+    (list string)
+    "only the tool called inside the window is placed"
+    [ "atlassian_confluence_search" ]
+    (already_used
+       ~carry_window:10
+       ~history:
+         ((called "atlassian_jira_search" :: filler 40)
+          @ [ called "atlassian_confluence_search" ])
+       (offered two_offered))
+;;
+
+(* A dropped tool is not stranded. The listing omits exactly the names placed
+   with schemas, so dropping one puts it back into the listing on the same
+   request, one load away. *)
+let test_a_dropped_tool_returns_to_the_listing () =
+  let tool =
+    match
+      search
+        ~carry_window:10
+        ~history:
+          ((called "atlassian_jira_search" :: filler 40)
+           @ [ called "atlassian_confluence_search" ])
+        (offered two_offered)
+    with
+    | Some tool -> tool
+    | None -> fail "expected a listing tool"
+  in
+  let description = tool.Agent_core.Tool.schema.description in
+  check bool "the dropped tool is named again" true
+    (contains description "atlassian_jira_search");
+  check bool "the carried tool is still not named" false
+    (contains description "atlassian_confluence_search")
+;;
+
+(* The window is not read at the end of the fold. Nothing grows the carry
+   after the one call here, so the tool is still placed 40 calls later even
+   though the window is 10. *)
+let test_the_carry_is_not_cut_without_a_new_tool () =
+  check
+    (list string)
+    "a tool stays placed while nothing new is loaded"
+    [ "atlassian_jira_search" ]
+    (already_used
+       ~carry_window:10
+       ~history:(called "atlassian_jira_search" :: filler 40)
+       (offered three_offered))
+;;
+
+(* The cut rides a change the request was already paying for. A call to a name
+   the carry already holds only moves that name's ordinal, so the tool array
+   is byte-identical and cutting there would forfeit the provider's cache
+   prefix for a change nothing asked for.
+
+   [A; B; 40 fillers; A] at a window of 10: the second A is already carried,
+   so no cut runs and B stays placed 41 calls after its own last use. This is
+   the freeze [carry_window] documents -- a cut on every call would drop B
+   here. *)
+let test_a_call_to_a_carried_tool_does_not_cut () =
+  check
+    (list string)
+    "a tool stale past the window stays placed while the carry does not grow"
+    [ "atlassian_confluence_search"; "atlassian_jira_search" ]
+    (already_used
+       ~carry_window:10
+       ~history:
+         ([ called "atlassian_jira_search"; called "atlassian_confluence_search" ]
+          @ filler 40
+          @ [ called "atlassian_jira_search" ])
+       (offered three_offered))
+;;
+
+(* The cut measures the whole carry, not only the name that arrives. A tool
+   the window dropped and the model then called again re-enters the carry, and
+   that re-entry grows the array exactly as a name new to the conversation
+   does -- so it is cut on, and whatever went stale while it was away leaves.
+
+   Cutting only at a name's first use in the conversation instead would let
+   the carry regrow to every tool the conversation ever ran, with no later
+   call able to cut it: once every name has been seen once, no call is a first
+   use. That is the unbounded set the window replaces, so this is the case
+   that separates the two rules.
+
+   [A; 40 fillers; B; 40 fillers; A] at a window of 10: B is 41 calls stale
+   when A returns, so only A is placed. *)
+let test_a_returning_tool_is_cut_on_like_a_new_one () =
+  check
+    (list string)
+    "what went stale while the returning tool was away is not placed"
+    [ "atlassian_jira_search" ]
+    (already_used
+       ~carry_window:10
+       ~history:
+         ((called "atlassian_jira_search" :: filler 40)
+          @ (called "atlassian_confluence_search" :: filler 40)
+          @ [ called "atlassian_jira_search" ])
+       (offered three_offered))
+;;
+
+(* The array is keyed by its exact bytes in the exact order sent, so a tool
+   that leaves the window and comes back must come back in the slot it left
+   rather than at the head of the carry. Here the carry order is the reverse
+   of the offering order. *)
+let test_a_returning_tool_keeps_its_place () =
+  match
+    placement
+      ~carry_window:10
+      ~history:
+        ((called "atlassian_jira_create" :: filler 40)
+         @ [ called "atlassian_jira_search"; called "atlassian_jira_create" ])
+      (offered three_offered)
+  with
+  | None -> fail "an attached service was offered and produced no placement"
+  | Some p ->
+    check
+      (list string)
+      "the returning tool is placed in offering order"
+      [ "atlassian_jira_search"; "atlassian_jira_create" ]
+      (List.map
+         (fun (t : Agent_core.Tool.t) -> t.Agent_core.Tool.schema.name)
+         p.Keeper_identity_tool_search.already_used)
+;;
+
+(* 0 places every tool the conversation has run, which is what shipped before
+   the window. The knob's off position, not a special case in the fold. *)
+let test_a_zero_window_places_everything () =
+  check
+    (list string)
+    "an unbounded window places both"
+    [ "atlassian_confluence_search"; "atlassian_jira_search" ]
+    (already_used
+       ~carry_window:0
+       ~history:
+         ((called "atlassian_jira_search" :: filler 40)
+          @ [ called "atlassian_confluence_search" ])
+       (offered two_offered))
+;;
+
 let () =
   run
     "keeper_identity_tool_search"
@@ -590,6 +747,22 @@ let () =
             test_a_carried_tool_is_not_also_named_in_the_listing
         ; test_case "a carried tool can still be named" `Quick
             test_a_carried_tool_can_still_be_named
+        ] )
+    ; ( "the carry window"
+      , [ test_case "drops a tool whose last call is outside it" `Quick
+            test_a_tool_outside_the_window_is_not_placed
+        ; test_case "returns a dropped tool to the listing" `Quick
+            test_a_dropped_tool_returns_to_the_listing
+        ; test_case "does not cut without a new tool" `Quick
+            test_the_carry_is_not_cut_without_a_new_tool
+        ; test_case "does not cut on a call to a tool it already carries" `Quick
+            test_a_call_to_a_carried_tool_does_not_cut
+        ; test_case "cuts on a returning tool as it does on a new one" `Quick
+            test_a_returning_tool_is_cut_on_like_a_new_one
+        ; test_case "keeps a returning tool in offering order" `Quick
+            test_a_returning_tool_keeps_its_place
+        ; test_case "places everything when it is zero" `Quick
+            test_a_zero_window_places_everything
         ] )
     ; ( "loading"
       , [ test_case "makes a named tool callable in the running agent" `Quick

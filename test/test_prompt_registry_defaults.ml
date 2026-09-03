@@ -240,8 +240,11 @@ Diverged; no numbers.
           rendered
       | Error message -> fail ("render failed: " ^ message));
       check string "group key is not registered" ""
-        (Prompt_registry.get_prompt "test.group")) )
-;;
+        (Prompt_registry.get_prompt "test.group"))
+  (* An inner binding, not a definition: this sits inside [let () =],
+     so ending it with [;;] closed the entry point and left the [run]
+     below it dangling. *)
+  in
 
   run "Prompt_registry_defaults"
     [

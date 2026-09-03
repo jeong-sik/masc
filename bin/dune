@@ -430,7 +430,15 @@
  (name masc_tui_config)
  (wrapped false)
  (modules masc_tui_config)
- (libraries masc.config_dir_resolver masc.fs_compat masc.keeper_toml))
+ ; masc.runtime is here for the write side alone: it owns runtime.toml's
+ ; write lock, its validation and its atomic replace, and the [tui] keys are
+ ; in the file those already guard.
+ (libraries
+  masc.config_dir_resolver
+  masc.fs_compat
+  masc.keeper_toml
+  masc.runtime
+  masc.toml_line_editor))
 
 (library
  (name masc_tui_theme_catalog)

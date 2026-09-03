@@ -64,6 +64,48 @@ let test_done_has_no_non_verification_lane () =
   |> expect_error L.Verification_submission_required
 ;;
 
+(* Cancel had no test of its own, and it does not answer the way Done does.
+   Done refuses every non-verification lane; Cancel ends a Task the assignee
+   holds with nothing checking the claim. Pinned here so the asymmetry is a
+   decision someone made rather than something a reader has to notice. *)
+let cancelled_by = function
+  | Ok { L.new_status = D.Cancelled { cancelled_by; _ }; _ } -> cancelled_by
+  | Ok _ -> failwith "cancel did not produce Cancelled"
+  | Error _ -> failwith "cancel was refused"
+;;
+
+let test_cancel_ends_an_owned_task_without_verification () =
+  let actor = cancelled_by (decide ~same_agent:true ~task_status:in_progress ~action:D.Cancel ()) in
+  if not (String.equal actor owner)
+  then failwith "cancel recorded the wrong actor";
+  (* The same state refuses Done outright. *)
+  decide ~same_agent:true ~task_status:in_progress ~action:D.Done_action ()
+  |> expect_error L.Verification_submission_required
+;;
+
+let test_cancel_of_someone_elses_task_is_refused () =
+  decide ~same_agent:false ~task_status:in_progress ~action:D.Cancel ()
+  |> expect_error L.Invalid_transition;
+  decide ~same_agent:false ~task_status:awaiting ~action:D.Cancel ()
+  |> expect_error L.Invalid_transition
+;;
+
+(* An unclaimed Task has no assignee, so [same_agent] answers for nobody and
+   the cancel lands regardless. No Keeper tool reaches this today — the
+   Keeper surface has claim/create/done/release and no cancel — so the only
+   callers are operator clients. A Keeper-facing cancel would inherit this. *)
+let test_cancel_of_an_unclaimed_task_asks_no_owner () =
+  let actor = cancelled_by (decide ~same_agent:false ~task_status:D.Todo ~action:D.Cancel ()) in
+  if not (String.equal actor owner)
+  then failwith "cancel of a Todo recorded the wrong actor"
+;;
+
+let test_cancel_cannot_undo_a_finished_task () =
+  let done_status = D.Done { assignee = owner; completed_at = now; notes = None } in
+  decide ~same_agent:true ~task_status:done_status ~action:D.Cancel ()
+  |> expect_error L.Invalid_transition
+;;
+
 let test_verification_preserves_original_start_time () =
   let original_started_at = "2026-07-12T23:45:00Z" in
   let submitted =
@@ -277,4 +319,8 @@ let () =
   test_verdict_rejects_stale_verification_id ();
   test_claim_on_awaiting_is_refused ();
   test_awaiting_is_claimable_by_nobody ();
+  test_cancel_ends_an_owned_task_without_verification ();
+  test_cancel_of_someone_elses_task_is_refused ();
+  test_cancel_of_an_unclaimed_task_asks_no_owner ();
+  test_cancel_cannot_undo_a_finished_task ();
   Printf.printf "workspace_task_lifecycle: all tests passed\n%!"

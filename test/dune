@@ -3204,6 +3204,7 @@
  (deps
   %{workspace_root}/bin/masc_tui.ml
   %{workspace_root}/bin/masc_tui_render.ml
+  %{workspace_root}/bin/masc_tui_render_tools.ml
   %{workspace_root}/bin/masc_tui_types.ml)
  (libraries
   alcotest

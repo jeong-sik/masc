@@ -102,14 +102,22 @@ row it shows.
 reverse-video selection stay. `MASC_TUI_FORCE_COLOR=1` overrides.
 
 The Config surface's Themes pane picks a bundled base16 scheme (monokai,
-solarized, and others) for the session. To keep a pick across restarts,
-name it in `runtime.toml` under a `[tui]` table — the TUI reads it at boot
-and applies it, and an absent or unknown name just follows the terminal:
+solarized, and others). Moving the cursor previews a scheme, `Esc` puts back
+whatever was in force, `Enter` keeps the pick and `x` withdraws it.
+
+A kept pick is written to `runtime.toml` under a `[tui]` table, which the TUI
+reads at boot, so it is still there on the next start. Withdrawing removes the
+key rather than naming a scheme, because following the terminal is the absence
+of a choice. The same key can be set by hand, and an absent or unknown name
+follows the terminal:
 
 ```toml
 [tui]
 theme = "monokai"
 ```
+
+If the file cannot be written, the scheme still applies for this session and
+the event log says which of the two happened.
 
 The table measures the seven colours MASC uses for semantic text against a
 4.5:1 contrast floor. `native 7/7` means the theme clears it without help;

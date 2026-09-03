@@ -158,6 +158,116 @@ let coalesce_cases =
           (coalesce_of "[tui]\ncoalesce_queued_input = \"yes\"\n"))
   ]
 
+(* The write side of [tui].theme. It is the only key here that changes while
+   masc runs -- the rest are read once at boot -- and the writer spells it in
+   the line editor's table-and-key form while [theme_of_doc] above reads the
+   loader's dotted form. The two grammars are not the same, so nothing can be
+   shared between them; these round trips are what keep them from drifting
+   apart. *)
+let written text ~theme = Config.text_with_theme text ~theme
+
+let contains haystack needle =
+  let n = String.length needle in
+  let rec scan i =
+    if i + n > String.length haystack then false
+    else if String.equal (String.sub haystack i n) needle then true
+    else scan (i + 1)
+  in
+  n = 0 || scan 0
+
+(* The live runtime.toml carries no [tui] table, so the missing-table case is
+   the one every first pick takes. The comment and the other table are in the
+   fixture because the server writes its own tables of this same file: a
+   writer that reformatted rather than edited one line would take an
+   operator's comments, and could take their routing with them. *)
+let unstored =
+  "# operators edit this file by hand\n\
+   [runtime]\n\
+   default = \"local.sample\"\n"
+
+let write_cases =
+  [ Alcotest.test_case "a first pick lands where the reader looks" `Quick
+      (fun () ->
+        check_opt "gruvbox-dark" (Some "gruvbox-dark")
+          (theme_of (written unstored ~theme:(Some "gruvbox-dark"))))
+  ; Alcotest.test_case "a second pick replaces the first" `Quick (fun () ->
+        let twice =
+          written
+            (written unstored ~theme:(Some "gruvbox-dark"))
+            ~theme:(Some "solarized-light")
+        in
+        check_opt "solarized-light" (Some "solarized-light") (theme_of twice);
+        (* Appending instead of replacing would leave two rows and let TOML
+           duplicate-key handling pick which one the reader gets. *)
+        Alcotest.(check bool) "the earlier pick is gone" false
+          (contains twice "gruvbox-dark"))
+  ; Alcotest.test_case "withdrawing removes the key" `Quick (fun () ->
+        check_opt "none" None
+          (theme_of
+             (written
+                (written unstored ~theme:(Some "gruvbox-dark"))
+                ~theme:None)))
+  ; Alcotest.test_case "withdrawing without a stored pick is harmless" `Quick
+      (fun () -> check_opt "none" None (theme_of (written unstored ~theme:None)))
+  ; Alcotest.test_case "the rest of the file survives a write" `Quick (fun () ->
+        let text = written unstored ~theme:(Some "gruvbox-dark") in
+        Alcotest.(check bool) "the hand-written comment is still there" true
+          (contains text "operators edit this file by hand");
+        check_opt "another table still reads" (Some "local.sample")
+          (Toml.toml_string_opt (doc_of text) "runtime.default"))
+  ]
+
+(* End to end, through the same two calls the TUI makes: the theme pane stores
+   the pick, and the next start reads it back. A [tui] table is not something
+   the runtime schema models, so this also answers whether writing one leaves
+   a runtime.toml the server still loads -- the write validates the whole file
+   and refuses it otherwise. *)
+let storable_runtime =
+  "[providers.local]\n\
+   protocol = \"openai-compatible-http\"\n\
+   endpoint = \"http://127.0.0.1:1/v1\"\n\
+   \n\
+   [models.sample]\n\
+   api-name = \"sample\"\n\
+   max-context = 1024\n\
+   \n\
+   [local.sample]\n\
+   max-request-body-bytes = 65536\n\
+   \n\
+   [runtime]\n\
+   default = \"local.sample\"\n"
+
+let store_or_fail ~base_path theme =
+  match Config.set_theme ~base_path theme with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "storing the theme failed: %s" message
+
+(* Runtime's config write lock leaves a runtime.toml.lock beside the file it
+   guards. Removing it here is what lets the shared temp-base cleanup finish
+   its rmdir instead of leaving a directory behind on every run. *)
+let with_storable_base f =
+  with_temp_base (fun ~base ~config ->
+      let path = Filename.concat config "runtime.toml" in
+      write path storable_runtime;
+      Fun.protect
+        ~finally:(fun () -> try Sys.remove (path ^ ".lock") with _ -> ())
+        (fun () -> f ~base_path:base))
+
+let store_cases =
+  [ Alcotest.test_case "a stored pick is there on the next read" `Quick
+      (fun () ->
+        with_storable_base (fun ~base_path ->
+            store_or_fail ~base_path (Some "gruvbox-dark");
+            check_opt "gruvbox-dark" (Some "gruvbox-dark")
+              (Config.theme ~base_path)))
+  ; Alcotest.test_case "withdrawing is there on the next read too" `Quick
+      (fun () ->
+        with_storable_base (fun ~base_path ->
+            store_or_fail ~base_path (Some "gruvbox-dark");
+            store_or_fail ~base_path None;
+            check_opt "none" None (Config.theme ~base_path)))
+  ]
+
 let () =
   Alcotest.run "tui_config"
     [ ("theme_of_doc", cases)
@@ -166,4 +276,6 @@ let () =
     ; ("hints_visible_of_doc", hints_cases)
     ; ("coalesce_queued_input", coalesce_cases)
     ; ("theme_io", io_cases)
+    ; ("text_with_theme", write_cases)
+    ; ("set_theme", store_cases)
     ]

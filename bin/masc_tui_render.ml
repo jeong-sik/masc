@@ -8558,6 +8558,20 @@ let render_keeper_message (state : state) =
       | None -> ""
       | Some age -> " · " ^ age
     in
+    (* The request the live transcript is already drawing says everything this
+       row would: its phase, its age, and the tools it is in. Drawing both put
+       a second age and an opaque request id above the ACTIVE TURN line, and
+       three ages in one frame read as a stuck screen. The row stays for every
+       request the transcript is not covering — a second message sent to the
+       same keeper still has to be visible. *)
+    let live_request_id =
+      match state.msg_live with
+      | Some live
+        when state.msg_target_keeper_name
+             = Some (Keeper_chat_transcript.keeper_name live) ->
+        Some (Keeper_chat_transcript.request_id live)
+      | Some _ | None -> None
+    in
     (match
        List.partition
          (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
@@ -8566,6 +8580,11 @@ let render_keeper_message (state : state) =
      | mine, others ->
          List.iter
            (fun entry ->
+             if
+               not
+                 (Option.equal String.equal live_request_id
+                    (Some entry.sent_request.request_id))
+             then
              let activity =
                match entry.phase with
                | Turn_streaming -> "sending"
@@ -8665,14 +8684,19 @@ let render_keeper_message (state : state) =
          let running_mark =
            Masc_tui_answering.running_glyph ~frame:state.activity_frame
          in
-         (* How long it has been going. The mark says a turn is running and
-            the text says what it is doing; neither answers the question an
-            operator holds while waiting on the row, which is whether this is
-            a normal wait or a stuck one. The Answering overlay already
-            answers it for every other running turn, in the same spelling. *)
-         let running_for =
-           Masc_tui_answering.elapsed_text ~now:(Unix.gettimeofday ())
-             (Keeper_chat_transcript.started_at live)
+         (* The age belongs to the progress row, which already ends with it
+            (masc #29229 pins that a turn which never started still reports
+            one). Printing it here too put the same number twice in one line,
+            and a number that repeats reads as a frozen screen rather than a
+            clock. *)
+         (* An operator who has typed while a turn runs is about to press
+            Enter and does not know what it will do. The footer says it, forty
+            columns away from the caret; said here it is beside the line that
+            is holding them up. Only while there is something to queue. *)
+         let queue_hint =
+           if Buffer.length state.msg_input > 0 then
+             " · Enter queues your line; this turn keeps running"
+           else ""
          in
          List.iter
            (fun (kind, text) ->
@@ -8681,7 +8705,7 @@ let render_keeper_message (state : state) =
                   box_line_styled chat_buf chat_cols ~style:(Masc_tui_theme.tone Masc_tui_theme.Accent)
                     ("  " ^ running_mark ^ " " ^ Ansi.bold ^ "ACTIVE TURN"
                      ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                     ^ " · " ^ running_for ^ " · " ^ text)
+                     ^ " · " ^ text ^ queue_hint)
               | Keeper_chat_transcript.Attention ->
                   box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text)
               | Keeper_chat_transcript.Approval outcome ->

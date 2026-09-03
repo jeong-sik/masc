@@ -72,6 +72,37 @@ describe('KeeperSandboxLivePanel', () => {
     )
   })
 
+  it('names docker as the CLI for a docker keeper', async () => {
+    fetchSandboxStatus.mockResolvedValue(status({ sandbox_profile: 'docker' }))
+
+    render(html`<${KeeperSandboxLivePanel} keeperName="sangsu" />`)
+
+    expect(await screen.findByLabelText('container log command')).toHaveTextContent(
+      'docker logs -f masc-keeper-vm-lane-smith-faea17a4',
+    )
+  })
+
+  // The old two-way test answered 'docker' for anything that was not microvm,
+  // so a profile with no docker containers still got a `docker logs -f` line
+  // to copy. No CLI means no command row.
+  it('offers no log command for a profile that runs no containers', async () => {
+    fetchSandboxStatus.mockResolvedValue(status({ sandbox_profile: 'remote_ssh' }))
+
+    render(html`<${KeeperSandboxLivePanel} keeperName="remote-one" />`)
+
+    expect(await screen.findByText('masc-keeper-vm-lane-smith-faea17a4')).toBeInTheDocument()
+    expect(screen.queryByLabelText('container log command')).toBeNull()
+  })
+
+  it('offers no log command for a profile this bundle cannot name', async () => {
+    fetchSandboxStatus.mockResolvedValue(status({ sandbox_profile: 'some_future_profile' }))
+
+    render(html`<${KeeperSandboxLivePanel} keeperName="future-one" />`)
+
+    expect(await screen.findByText('masc-keeper-vm-lane-smith-faea17a4')).toBeInTheDocument()
+    expect(screen.queryByLabelText('container log command')).toBeNull()
+  })
+
   it('explains an observed absence without pretending the keeper ran locally', async () => {
     fetchSandboxStatus.mockResolvedValue(status({
       containers: [],

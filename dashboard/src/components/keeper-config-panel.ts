@@ -12,7 +12,7 @@ import { ApiRequestError } from '../api/core'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import type { DashboardRuntimeProviderSnapshot, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { KeeperConfig, KeeperHookSlot } from '../types'
-import { SANDBOX_PROFILE_OPTIONS, toSandboxProfile } from '../types'
+import { SANDBOX_PROFILE_OPTIONS, UNKNOWN_SANDBOX_PROFILE, isGuestSandboxProfile, toSandboxProfile } from '../types'
 import { formatTokens } from '../lib/format-number'
 import {
   PHASE_LABEL_KO,
@@ -1057,8 +1057,10 @@ function updateRuntimeDraft(field: keyof RuntimeDraft, value: boolean | number |
   // 'none' belongs to the guest profiles. Testing against 'docker' alone put
   // a microvm keeper back on 'inherit', which container cannot honour at all:
   // it has no host network, so the keeper would have been saved with a mode
-  // its own backend refuses.
-  const isGuest = next.sandbox_profile === 'docker' || next.sandbox_profile === 'microvm'
+  // its own backend refuses. The answer now comes from
+  // SANDBOX_PROFILE_IS_GUEST (types/core.ts), which a new profile cannot be
+  // added to the union without answering.
+  const isGuest = isGuestSandboxProfile(next.sandbox_profile)
   if ((field === 'sandbox_profile' || field === 'network_mode') && !isGuest && next.network_mode === 'none') {
     next.network_mode = 'inherit'
   }
@@ -2378,10 +2380,20 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         dirty=${dirtyFlags.sandbox_profile}
       />
       ${InlineControlError(runtimeErrorFor('sandbox_profile'))}
+      <!-- Two different things land here and the operator needs to tell them
+           apart. The server omits sandbox_profile entirely when the keeper's
+           profile fails to load (the 200 + config_error body), and
+           normalizeKeeperConfig fills UNKNOWN_SANDBOX_PROFILE in its place —
+           quoting that back as "the server sent" named a string the server
+           never wrote. Anything else in this state is a value the server did
+           send and this bundle does not know. -->
       ${rd.sandbox_profile === null ? html`
         <${Callout}
           title="sandbox_profile 을 읽지 못했습니다"
-          body=${`서버가 보낸 값은 ${c.sandbox_profile ?? '(없음)'} 입니다. ${SANDBOX_PROFILE_OPTIONS.join(', ')} 중 하나를 고르기 전에는 저장되지 않습니다.`}
+          body=${(c.sandbox_profile === undefined || c.sandbox_profile === UNKNOWN_SANDBOX_PROFILE
+            ? '서버 응답에 sandbox_profile 이 없습니다. 이 keeper 의 프로필 파일을 읽는 데 실패했을 때 그렇습니다 — 위쪽 설정 오류를 먼저 보세요.'
+            : `서버가 보낸 값은 ${c.sandbox_profile} 인데, 이 화면이 아는 프로필이 아닙니다.`)
+            + ` ${SANDBOX_PROFILE_OPTIONS.join(', ')} 중 하나를 고르기 전에는 저장되지 않습니다.`}
           tone="warn"
         />
       ` : null}
@@ -2411,7 +2423,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${InlineSelectRow}
         label="network_mode"
         value=${rd.network_mode}
-        options=${rd.sandbox_profile === 'docker' || rd.sandbox_profile === 'microvm'
+        options=${isGuestSandboxProfile(rd.sandbox_profile)
           ? ['inherit', 'none'] as const
           : ['inherit'] as const}
         onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
@@ -2422,7 +2434,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <div class="kcf-paths">
         <span class="kcf-path-eff mono">sandbox: ${(c.sandbox_roots ?? []).join(', ')}</span>
       </div>
-      ${rd.sandbox_profile === 'docker' || rd.sandbox_profile === 'microvm' ? html`
+      ${isGuestSandboxProfile(rd.sandbox_profile) ? html`
         <${SetupGuideCard} connectorId="sandbox_hardened" />
       ` : null}
       ${rd.sandbox_profile === 'microvm' ? html`

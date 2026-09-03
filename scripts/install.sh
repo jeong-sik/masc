@@ -21,6 +21,8 @@
 #   --api-key KEY      Provider API key (use with --provider; visible in ps)
 #   --api-key-stdin    Read provider API key from stdin (use with --provider)
 #   --team PRESET      Seed a keeper team preset (e.g. classic) into the config
+#   --sandbox PROFILE  Set the seeded team keepers' sandbox_profile
+#                        (docker|microvm|remote_ssh; use with --team)
 #                      root so the named keepers autoboot on the default model.
 #                      Requires a release/branch that ships presets/<PRESET>/.
 #
@@ -60,6 +62,7 @@ WIZARD_API_KEY=""
 WIZARD_API_KEY_STDIN=0
 WIZARD_GENERIC_API_KEY="${MASC_API_KEY:-}"
 TEAM="${MASC_TEAM_PRESET:-}"
+WIZARD_SANDBOX="${MASC_SANDBOX_PROFILE:-}"
 
 # Installer network budgets are script-local SSOTs. Keep them explicit instead
 # of scattering bare curl numbers across release lookup, config seeding, and
@@ -457,7 +460,8 @@ report_sandbox_backends() {
   # remote_ssh is transport-only; its endpoints live in runtime.toml, so host
   # detection is not meaningful -- point at where they are declared instead.
   log "  - remote_ssh: declare endpoints in runtime.toml [exec.ssh.endpoints]"
-  log "  choose one per keeper via sandbox_profile in .masc/config/keepers/<name>.toml, or --team <preset>"
+  log "  choose one per keeper via sandbox_profile in .masc/config/keepers/<name>.toml,"
+  log "  or --team <preset> (add --sandbox docker|microvm|remote_ssh to set the team's)"
 }
 
 prompt_provider() {
@@ -875,6 +879,7 @@ while [ $# -gt 0 ]; do
     --api-key)     require_flag_value "$1" "${2-}"; WIZARD_API_KEY="$2"; shift 2 ;;
     --api-key-stdin) WIZARD_API_KEY_STDIN=1; shift ;;
     --team)        require_flag_value "$1" "${2-}"; TEAM="$2"; shift 2 ;;
+    --sandbox)     require_flag_value "$1" "${2-}"; WIZARD_SANDBOX="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) die "unknown flag: $1 (try --help)" ;;
   esac
@@ -897,6 +902,15 @@ esac
 case "$WIZARD" in
   auto|0|1) ;;
   *) die "MASC_WIZARD must be auto, 0, or 1" ;;
+esac
+
+# Only the three real per-keeper profiles can be written. "local" is a
+# flag-gated in-process lane, not a loadable sandbox_profile value, so it is
+# rejected here rather than seeded into a keeper that would then fail to load.
+case "$WIZARD_SANDBOX" in
+  ''|docker|microvm|remote_ssh) ;;
+  local) die "--sandbox local is not a loadable profile; use docker, microvm, or remote_ssh (or omit to keep the preset's own)" ;;
+  *) die "--sandbox must be docker, microvm, or remote_ssh" ;;
 esac
 
 [ -z "$BASE_PATH" ] && BASE_PATH="$PWD"
@@ -1227,12 +1241,34 @@ maybe_run_wizard "$BASE_PATH"
 # the release SHA256SUMS, like the config seed). The keepers inherit
 # [runtime].default, so no catalog is edited. Runs after config seed so
 # runtime.toml exists first.
+# Rewrite a seeded keeper's sandbox_profile to the operator's --sandbox choice.
+# Only a line that starts with `sandbox_profile` is touched, so a preset's
+# commented rationale (`# sandbox_profile = ...`) is left alone, and a file that
+# declares no profile (or is not a keeper TOML) is untouched. This overrides the
+# preset's own choice on purpose; the caller has asked for it explicitly.
+set_keeper_sandbox_profile() {
+  local file="$1" profile="$2"
+  grep -q '^sandbox_profile[[:space:]]*=' "$file" 2>/dev/null || return 0
+  local tmp
+  tmp="$(mktemp "${file}.sbtmp.XXXXXX")" || die "could not create temp file for $file"
+  PARTIAL_FILES+=("$tmp")
+  if sed 's/^sandbox_profile[[:space:]]*=.*/sandbox_profile = "'"$profile"'"/' "$file" > "$tmp" \
+    && mv -f "$tmp" "$file"; then
+    log "set sandbox_profile = \"$profile\" in $(basename "$file")"
+  else
+    rm -f "$tmp"
+    die "could not set sandbox_profile in $file"
+  fi
+}
+
 seed_team() {
   local preset="$1"
   local cfg="$BASE_PATH/.masc/config"
 
   if [ "$DRY_RUN" -eq 1 ]; then
     log "[dry-run] would seed team preset '$preset' into $cfg (presets/$preset/ at $VERSION)"
+    [ -n "$WIZARD_SANDBOX" ] \
+      && log "[dry-run] would set sandbox_profile = \"$WIZARD_SANDBOX\" on the team's keepers"
     return 0
   fi
 
@@ -1268,6 +1304,7 @@ seed_team() {
     verify_checksum "$tmp" "presets/$preset/$rel"
     mv "$tmp" "$dest"
     log "seeded team file: $rel"
+    [ -n "$WIZARD_SANDBOX" ] && set_keeper_sandbox_profile "$dest" "$WIZARD_SANDBOX"
   done < "$manifest_tmp"
   rm -f "$manifest_tmp"
   log "team preset '$preset' seeded; its keepers autoboot on next server start"

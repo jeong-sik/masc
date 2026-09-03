@@ -1172,10 +1172,17 @@ let same_repeatable_body_row left right =
 
 let collapse_repeated_body_rows ~inner_width rows =
   let gap row repeated_rows =
+    (* The gap keeps the repeated row's margin, so its text budget is what
+       the margin leaves -- fitting to the whole [inner_width] drew the row
+       margin plus a full-width text and spilled past the border, exactly the
+       spill [origin_gutter] bounds its own margin against. *)
     { style = Status
     ; kind = Viewport_gap { hidden_rows = repeated_rows }
     ; shade = Shade_none
-    ; text = repeated_rows_gap_text ~inner_width repeated_rows
+    ; text =
+        repeated_rows_gap_text
+          ~inner_width:(inner_width - display_width row.gutter)
+          repeated_rows
     ; gutter_label_at = 0
     ; gutter = row.gutter
     }

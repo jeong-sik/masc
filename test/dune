@@ -775,6 +775,17 @@
  exec_ssh_protocol))
 
 (test
+ (name test_connector_attention_delivery_wiring)
+ (modules test_connector_attention_delivery_wiring)
+ ; Read through Ast_grep, so the sources are deps: without them the test runs
+ ; against whatever the build directory happens to hold.
+ (deps
+  %{workspace_root}/lib/server/server_connector_attention_delivery.ml
+  %{workspace_root}/lib/server/server_discord_in_process_gateway.ml
+  %{workspace_root}/lib/server/server_slack_in_process_gateway.ml)
+ (libraries alcotest ast_grep))
+
+(test
  (name test_voice_session_manager)
  (modules test_voice_session_manager)
  (libraries masc_test_deps eio_main unix))

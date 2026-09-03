@@ -257,7 +257,15 @@ let keeper_tool_approval_timeout_sec = 180.0
    The reply says whether a wait was actually released. A late answer -- one
    whose call already timed out, or was never held -- reports [settled: false]
    rather than reading as success, so an operator is not told a call was
-   approved when nothing was listening for it. *)
+   approved when nothing was listening for it.
+
+   A late answer is not discarded, though: when the wait it names timed out
+   here, the decision is remembered in {!Keeper_late_approval} and the reply
+   says [remembered: true]. The operator's decision is about the call, and
+   the retried call -- same tool, same arguments, new call id -- is then
+   settled by it once instead of asking the same question again. An answer
+   that names no wait this process ever held matches nothing and is dropped,
+   as before. *)
 let handle_keeper_tool_approval state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in
@@ -300,14 +308,29 @@ let handle_keeper_tool_approval state request reqd =
             (Keeper_tool_approval_registry.shared ())
             ~keeper_name ~tool_call_id decision
         in
+        let remembered =
+          if settled then false
+          else
+            (* The wait is gone, but if it timed out here the answer still
+               descends from a question this operator was really shown, so it
+               stands for the identical retried call. *)
+            match
+              Keeper_late_approval.remember_late
+                (Keeper_late_approval.shared ())
+                ~keeper_name ~tool_call_id decision
+            with
+            | Keeper_late_approval.Remembered _ -> true
+            | Keeper_late_approval.No_matching_ask -> false
+        in
         Log.Keeper.info
-          "keeper_tool_approval: keeper=%s tool_call_id=%s decision=%s settled=%b"
+          "keeper_tool_approval: keeper=%s tool_call_id=%s decision=%s settled=%b remembered=%b"
           keeper_name tool_call_id
           (Keeper_tool_approval_registry.decision_to_string decision)
-          settled;
+          settled remembered;
         respond_json_value_with_cors ~status:`OK request reqd
           (`Assoc
              [ ("settled", `Bool settled)
+             ; ("remembered", `Bool remembered)
              ; ( "decision"
                , `String (Keeper_tool_approval_registry.decision_to_string decision) )
              ])))
@@ -1818,6 +1841,7 @@ let process_single_turn ~user_row_origin ~submission
   let approval_gate =
     Keeper_tool_approval_gate.create
       ~registry:(Keeper_tool_approval_registry.shared ())
+      ~late_approvals:(Keeper_late_approval.shared ())
       ~publish:(fun event -> push_worker_event (Stream_chat_event event))
       ~clock
       ~keeper_name:payload.name

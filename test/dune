@@ -2107,6 +2107,7 @@
 
 (include stanzas/test_keeper_chat_discord.inc)
 (include stanzas/test_keeper_chat_tool_trail.inc)
+(include stanzas/test_keeper_late_approval.inc)
 
 (test
  (name test_keeper_chat_slack)

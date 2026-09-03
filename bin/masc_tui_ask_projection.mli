@@ -35,6 +35,13 @@ val summarize_answer : draft -> row:Masc.Tui_decode.ask_row -> string
     quoted, a skipped question named. Empty when nothing is answered yet, so a
     caller can fall back to the Keeper name alone. *)
 
+val open_rows :
+  Masc.Tui_decode.asks_snapshot -> Masc.Tui_decode.ask_row list
+(** The asks still waiting on a human, in wire order. The panel, its footer,
+    and the executable all walk this list; a second copy of the predicate is
+    how the cursor and the drawn rows come to disagree about which ask is
+    selected. *)
+
 val newly_opened_ask_ids :
   previous:Masc.Tui_decode.asks_snapshot option ->
   current:Masc.Tui_decode.asks_snapshot ->
@@ -69,6 +76,13 @@ val free_text_slot : Masc.Tui_decode.ask_question -> free_text_slot option
     server would refuse. *)
 
 val free_text_hint : free_text_slot -> string option
+
+val free_text_question_id : free_text_slot -> string
+(** Which question the slot writes to. The editor holds a slot while the
+    operator types, and the panel has to know which row to draw the caret
+    on; reading it back here keeps the answer in one place rather than
+    storing the id a second time beside the slot. *)
+
 val set_text : draft -> slot:free_text_slot -> text:string -> draft
 (** Blank text clears the response instead of recording it: the domain rejects
     a blank write, and an editor emptied by backspaces means unanswered. *)

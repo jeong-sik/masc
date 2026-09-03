@@ -287,6 +287,11 @@
  (libraries masc yojson))
 
 (library
+ (name masc_tui_ask_layout)
+ (wrapped false)
+ (modules masc_tui_ask_layout))
+
+(library
  (name masc_tui_task_selection)
  (wrapped false)
  (modules masc_tui_task_selection)
@@ -828,6 +833,7 @@
   masc_tui_acting
   masc_tui_composer
   masc_tui_agenda
+  masc_tui_ask_layout
   masc_tui_ask_projection
   masc_tui_board_detail
   masc_tui_attachment
@@ -943,6 +949,7 @@
   masc_tui_agenda
   masc_tui_ansi
   masc_tui_answering
+  masc_tui_ask_layout
   masc_tui_ask_projection
   masc_tui_frame
   masc_tui_frame_timing

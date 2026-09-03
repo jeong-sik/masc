@@ -77,6 +77,106 @@ let test_the_caret_is_drawn_from_the_cursor_the_keys_move () =
     (writes "ask_question_cursor" > 0)
 ;;
 
+(* The domain has accepted a written answer since the surface shipped, and the
+   terminal had no key that produced one: [set_text] and [free_text_slot] had
+   zero callers outside their own tests, while the panel drew "free text
+   welcome" over a keyboard with nowhere to put the text.
+
+   A question can arrive carrying no choices at all -- the server accepts one
+   as long as it welcomes free text ([Keeper_ask.question], [No_way_to_answer]
+   fires only when a question offers neither) -- and on those the digits answer
+   nothing, so [s]: skipped was the only answer this terminal could give. The
+   dashboard has had a textarea for the same question since the surface
+   shipped. *)
+let test_a_written_answer_can_be_reached_from_the_terminal () =
+  Alcotest.(check bool) "the executable reaches the domain's write" true
+    (Ast_grep.count_calls ~module_path:executable ~callee:"Ask.set_text" > 0);
+  Alcotest.(check bool) "through a slot, which is the only way in" true
+    (Ast_grep.count_calls ~module_path:executable ~callee:"Ask.free_text_slot" > 0)
+;;
+
+(* Opening, saving and abandoning are three keys, so they are three functions:
+   Esc must drop the typing without writing it, and Enter must write it. One
+   function doing both is how an abandoned draft gets recorded. *)
+let test_the_editor_opens_saves_and_abandons () =
+  List.iter
+    (fun name ->
+       Alcotest.(check bool) (name ^ " is wired to a key") true
+         (Ast_grep.count_calls ~module_path:executable ~callee:name > 0))
+    [ "begin_ask_text_entry"; "commit_ask_text_entry"; "cancel_ask_text_entry" ]
+;;
+
+(* Leaving the answering mode drops the typing the way it drops the draft. An
+   editor left open would take the next surface's keys. *)
+let test_leaving_the_mode_closes_the_editor () =
+  Alcotest.(check int) "the editor is cleared with the draft" 1
+    (Ast_grep.count_field_clears_to_none ~module_path:executable
+       ~binding_name:"leave_ask_answering" ~field_name:"ask_text_entry")
+;;
+
+(* The typing arm has to come before the answering arm. That arm reads every
+   one-character key as a choice position, so an operator typing "1 second"
+   would have the 1 picked for them and the rest swallowed. Order is the whole
+   guarantee here, and a match arm's position is not something a call count can
+   see. *)
+let test_typing_outranks_the_choice_digits () =
+  let source =
+    In_channel.with_open_bin (Ast_grep.resolve_module_path executable)
+      In_channel.input_all
+  in
+  let index needle =
+    let n = String.length needle and len = String.length source in
+    let rec scan i =
+      if i + n > len then None
+      else if String.sub source i n = needle then Some i
+      else scan (i + 1)
+    in
+    scan 0
+  in
+  (* The call inside the digit arm, not the definition far above it: the arms
+     are what this is ordering, and both names appear earlier in the file as
+     bindings. *)
+  match
+    ( index "Option.is_some state.ask_text_entry"
+    , index "toggle_ask_choice state (position - 1)" )
+  with
+  | Some typing, Some digits ->
+      Alcotest.(check bool) "the editor takes the keyboard before the digits do"
+        true (typing < digits)
+  | None, _ -> Alcotest.fail "no arm guards on an open editor"
+  | Some _, None -> Alcotest.fail "no arm picks a choice by position"
+;;
+
+(* The footer names [t] only where it works. A question with no choices makes
+   [1-9] a promise the surface cannot keep, and one that refuses free text
+   makes [t] the same, so both labels are conditional on the question under the
+   cursor. *)
+let test_the_footer_names_the_editor_key () =
+  Alcotest.(check int) "the write key is named once" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"render_approvals" ~needle:"t:write  ");
+  Alcotest.(check int) "and the digits keep their own label" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"render_approvals" ~needle:"1-9:pick  ")
+;;
+
+(* The panel is the last block the Approvals surface writes, and
+   [finish_surface] drops a surface's final rows when it overruns -- so an
+   unbudgeted question list does not push the approval queue off the screen, it
+   pushes itself off, cursor and all. Four questions on one ask is enough, and
+   this workspace's own store holds one (measured 2026-09-04).
+
+   The panel therefore asks [Masc_tui_ask_layout] what it can afford instead of
+   drawing everything and hoping. Both halves are asserted: the caller passes a
+   budget, and the panel plans against it. *)
+let test_the_panel_draws_against_a_budget () =
+  Alcotest.(check int) "the surface hands the panel a budget" 1
+    (Ast_grep.count_calls_with_label ~module_path:render
+       ~callee:"draw_ask_questions" ~label:"budget");
+  Alcotest.(check bool) "and the panel plans what fits" true
+    (Ast_grep.count_calls ~module_path:render ~callee:"Ask_layout.plan" > 0)
+;;
+
 let () =
   Alcotest.run "tui_ask_selection_wiring"
     [ ( "selection"
@@ -88,6 +188,22 @@ let () =
             test_the_bracket_keys_keep_one_vocabulary
         ; Alcotest.test_case "the caret reads the cursor the keys move" `Quick
             test_the_caret_is_drawn_from_the_cursor_the_keys_move
+        ] )
+    ; ( "free text"
+      , [ Alcotest.test_case "a written answer can be reached" `Quick
+            test_a_written_answer_can_be_reached_from_the_terminal
+        ; Alcotest.test_case "the editor opens, saves and abandons" `Quick
+            test_the_editor_opens_saves_and_abandons
+        ; Alcotest.test_case "leaving the mode closes the editor" `Quick
+            test_leaving_the_mode_closes_the_editor
+        ; Alcotest.test_case "typing outranks the choice digits" `Quick
+            test_typing_outranks_the_choice_digits
+        ; Alcotest.test_case "the footer names the editor key" `Quick
+            test_the_footer_names_the_editor_key
+        ] )
+    ; ( "budget"
+      , [ Alcotest.test_case "the panel draws against a budget" `Quick
+            test_the_panel_draws_against_a_budget
         ] )
     ]
 ;;

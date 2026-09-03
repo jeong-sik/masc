@@ -4292,6 +4292,8 @@
 
 (include stanzas/test_masc_ask_tool_surface.inc)
 
+(include stanzas/test_tui_ask_layout.inc)
+
 (include stanzas/test_tui_ask_projection.inc)
 
 (test

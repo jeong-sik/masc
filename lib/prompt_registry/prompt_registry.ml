@@ -210,19 +210,37 @@ let is_slot_marker marker =
    a markdown heading that is prose. *)
 (* A slot is a fragment of the prompt its group assembles, so that is the
    default. A slot an operator tunes on its own says so by ending its marker
-   line with [\[primary\]] — the surface has to be per slot, because folding
-   files by reader put operator-facing prompts and assembly fragments in the
-   same file. *)
+   line with [\[primary\]], optionally carrying its own description
+   ([\[primary: what it is\]]). Both have to be per slot: folding files by
+   reader put operator-facing prompts and assembly fragments in one file, and
+   a row whose description is its group's says the same sentence as every
+   other row in the list. *)
 let strip_primary_suffix rest =
-  let suffix = "[primary]" in
-  if String.ends_with ~suffix rest then
-    (String.trim (String.sub rest 0 (String.length rest - String.length suffix)), true)
-  else (rest, false)
+  if String.ends_with ~suffix:"]" rest then (
+    match String.rindex_opt rest '[' with
+    | None -> (rest, None)
+    | Some open_bracket ->
+      let inside =
+        String.sub rest (open_bracket + 1) (String.length rest - open_bracket - 2)
+      in
+      let head, description =
+        match String.index_opt inside ':' with
+        | Some colon ->
+          ( String.trim (String.sub inside 0 colon)
+          , String.trim
+              (String.sub inside (colon + 1) (String.length inside - colon - 1)) )
+        | None -> (String.trim inside, "")
+      in
+      if String.equal head "primary" then
+        ( String.trim (String.sub rest 0 open_bracket)
+        , Some (if String.equal description "" then None else Some description) )
+      else (rest, None))
+  else (rest, None)
 ;;
 
 let parse_slot_header line =
   if String.length line > 4 && String.sub line 0 4 = "### " then (
-    let rest, primary =
+    let rest, primary_declaration =
       strip_primary_suffix (String.trim (String.sub line 4 (String.length line - 4)))
     in
     let marker, vars =
@@ -236,13 +254,14 @@ let parse_slot_header line =
             (String.sub rest (open_paren + 7) (String.length rest - open_paren - 8)) )
       | _ -> (rest, None)
     in
-    if is_slot_marker marker then Some (marker, vars, primary) else None)
+    if is_slot_marker marker then Some (marker, vars, primary_declaration) else None)
   else None
 
 type body_split = {
   preamble : string;  (** trimmed prose before the first marker *)
-  slots : (string * string option * bool * string) list;
-      (** (marker, declared vars, operator-facing, paragraph) in file order *)
+  slots : (string * string option * string option option * string) list;
+      (** (marker, declared vars, [Some description] when the slot declared
+          itself operator-facing, paragraph) in file order *)
 }
 
 (* Body → preamble and slots, walking the lines in file order. A
@@ -252,8 +271,8 @@ let split_body body : body_split =
   let close_pending pending paragraph slots =
     match pending with
     | None -> slots
-    | Some (marker, vars, primary) ->
-      (marker, vars, primary, close paragraph) :: slots
+    | Some (marker, vars, primary_declaration) ->
+      (marker, vars, primary_declaration, close paragraph) :: slots
   in
   let rec gather ~preamble ~slots ~pending ~paragraph = function
     | [] ->
@@ -530,7 +549,7 @@ let load_prompts_from_directory dir =
                        no paragraph is logged and not registered. *)
                     let (_ : string list) =
                       List.fold_left
-                        (fun seen (marker, slot_vars, primary, paragraph) ->
+                        (fun seen (marker, slot_vars, primary_declaration, paragraph) ->
                           if List.mem marker seen then begin
                             Log.Misc.error
                               "prompt %s declares slot %s twice; the first paragraph stands and the later one is ignored"
@@ -552,11 +571,16 @@ let load_prompts_from_directory dir =
                                 parse_list_value ("[" ^ declared ^ "]")
                             in
                             Hashtbl.replace fragment_tbl slot_key (key, marker);
-                            register_prompt_unlocked ~key:slot_key ~description
-                              ~category
-                              ~operator_surface:
-                                (if primary then Types.Primary else Types.Fragment)
-                              ~required_file:true ~template_variables ();
+                            let slot_surface, slot_description =
+                              match primary_declaration with
+                              | None -> (Types.Fragment, description)
+                              | Some None -> (Types.Primary, description)
+                              | Some (Some own) -> (Types.Primary, own)
+                            in
+                            register_prompt_unlocked ~key:slot_key
+                              ~description:slot_description ~category
+                              ~operator_surface:slot_surface ~required_file:true
+                              ~template_variables ();
                             marker :: seen
                           end)
                         [] split.slots

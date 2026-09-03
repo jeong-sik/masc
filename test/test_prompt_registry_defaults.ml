@@ -177,6 +177,21 @@ let registered_surfaces () =
   | _ -> []
 ;;
 
+(* The registered description of one key; [None] when unregistered. *)
+let registered_description key =
+  match Prompt_registry.prompts_json () with
+  | `Assoc [ ("prompts", `List prompts) ] ->
+    List.find_map
+      (function
+        | `Assoc fields -> (
+          match (List.assoc_opt "key" fields, List.assoc_opt "description" fields) with
+          | Some (`String k), Some (`String d) when String.equal k key -> Some d
+          | _ -> None)
+        | _ -> None)
+      prompts
+  | _ -> None
+;;
+
 (* The registered template_variables of one key; [None] when unregistered. *)
 let registered_variables key =
   match Prompt_registry.prompts_json () with
@@ -281,7 +296,7 @@ operator_surface: primary
 ---
 The body an operator tunes.
 
-### identity (vars: name) [primary]
+### identity (vars: name) [primary: what the keeper is called]
 You are {{name}}.
 
 ### row (vars: id)
@@ -305,7 +320,15 @@ let test_a_slot_declares_its_own_surface () =
       check string "the marker suffix is not part of the value" "You are {{name}}."
         (Prompt_registry.get_prompt "test.surface.identity");
       check (option (list string)) "variables still parse beside the suffix"
-        (Some [ "name" ]) (registered_variables "test.surface.identity"))
+        (Some [ "name" ]) (registered_variables "test.surface.identity");
+      (* Without its own sentence every row in a folded file would repeat the
+         group's description, which is what the operator reads the list by. *)
+      check (option string) "a marked slot carries its own description"
+        (Some "what the keeper is called")
+        (registered_description "test.surface.identity");
+      check (option string) "an unmarked slot falls back to the group's"
+        (Some "a group whose slots do not share one surface")
+        (registered_description "test.surface.row"))
 ;;
 
 let test_heading_only_body_is_prose () =

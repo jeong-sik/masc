@@ -177,21 +177,28 @@ let read_file_if_exists path =
     Some (markdown_body content)
   else None
 
-(* ── Fragment-group slots (#32780) ─────────────────────────────────────
+(* ── Fragment-group slots (#32780, #32814) ─────────────────────────────
 
-   A group file carries several one-line fragments as [### marker]
-   paragraphs, each optionally declaring its template variables on the
-   marker line: [### standing.current (vars: target, behind, ahead)]. A
-   slot registers under [<group-key>.<marker>], so every consumer and name
-   constant addresses it exactly as it addressed the old one-file-per-line
-   layout — the registry, not the callers, knows the file was merged.
-   Twenty-seven 1–3-line files became four group files this way. *)
+   A group file carries several short fragments as [### marker]
+   paragraphs. A marker is a key segment — the grammar of
+   [is_valid_prompt_key], so a markdown heading with spaces or braces
+   inside a paragraph stays prose — optionally followed by the slot's
+   variables: [### standing.current (vars: target, behind, ahead)]. A
+   slot registers under [<group-key>.<marker>], so every consumer and
+   name constant keeps its old key; the registry, not the callers, knows
+   the file was merged. Prose before the first marker is the group's own
+   body and registers under the group key when there is any.
+
+   Paragraphs are gathered in file order. The first cut walked the lines
+   backwards, handed every slot the paragraph above it and dropped the
+   last one (#32814). *)
 
 let fragment_tbl : (string, string * string) Hashtbl.t = Hashtbl.create 16
 (** [slot key → (group key, marker)] — filled by the directory loader. *)
 
-(* Marker line shapes: "### name" or "### name (vars: a, b)". [None] for
-   every other line. *)
+(* Marker line shapes: "### name" or "### name (vars: a, b)", where
+   [name] obeys [is_valid_prompt_key]. [None] for every other line,
+   including a markdown heading that is prose. *)
 let parse_slot_header line =
   if String.length line > 4 && String.sub line 0 4 = "### " then (
     let rest = String.trim (String.sub line 4 (String.length line - 4)) in
@@ -206,42 +213,45 @@ let parse_slot_header line =
             (String.sub rest (open_paren + 7) (String.length rest - open_paren - 8)) )
       | _ -> (rest, None)
     in
-    if marker = "" then None else Some (marker, vars))
+    if is_valid_prompt_key marker then Some (marker, vars) else None)
   else None
 
-(* Body → (marker, declared vars, paragraph) list, in file order. A
-   paragraph runs from its marker line to the next marker line, trimmed. *)
-let split_slots body =
-  let lines = String.split_on_char '\n' body in
-  let rec gather acc pending_marker paragraph reversed_lines =
-    match reversed_lines with
+type body_split = {
+  preamble : string;  (** trimmed prose before the first marker *)
+  slots : (string * string option * string) list;
+      (** (marker, declared vars, trimmed paragraph) in file order *)
+}
+
+(* Body → preamble and slots, walking the lines in file order. A
+   paragraph runs from its marker line to the next marker line. *)
+let split_body body : body_split =
+  let close lines = String.trim (String.concat "\n" (List.rev lines)) in
+  let close_pending pending paragraph slots =
+    match pending with
+    | None -> slots
+    | Some (marker, vars) -> (marker, vars, close paragraph) :: slots
+  in
+  let rec gather ~preamble ~slots ~pending ~paragraph = function
     | [] ->
-      ( match pending_marker with
-      | None -> List.rev acc
-      | Some (marker, vars) ->
-        List.rev
-          ((marker, vars, String.trim (String.concat "\n" (List.rev paragraph)))
-           :: acc) )
+      { preamble = close preamble
+      ; slots = List.rev (close_pending pending paragraph slots) }
     | line :: rest -> (
       match parse_slot_header line with
-      | Some (marker, vars) ->
-        let acc =
-          match pending_marker with
-          | None -> acc
-          | Some (m, v) ->
-            (m, v, String.trim (String.concat "\n" (List.rev paragraph))) :: acc
-        in
-        gather acc (Some (marker, vars)) [] rest
-      | None ->
-        ( match pending_marker with
-        | Some _ -> gather acc pending_marker (line :: paragraph) rest
-        | None -> gather acc None [] rest
-        (* prose before the first marker *) ) )
+      | Some header ->
+        gather ~preamble ~slots:(close_pending pending paragraph slots)
+          ~pending:(Some header) ~paragraph:[] rest
+      | None -> (
+        match pending with
+        | Some _ ->
+          gather ~preamble ~slots ~pending ~paragraph:(line :: paragraph) rest
+        | None ->
+          gather ~preamble:(line :: preamble) ~slots ~pending ~paragraph rest))
   in
-  gather [] None [] (List.rev lines)
+  gather ~preamble:[] ~slots:[] ~pending:None ~paragraph:[]
+    (String.split_on_char '\n' body)
 
 let slot_paragraph body marker =
-  split_slots body
+  (split_body body).slots
   |> List.find_opt (fun (m, _, _) -> String.equal m marker)
   |> Option.map (fun (_, _, paragraph) -> paragraph)
 
@@ -251,14 +261,20 @@ let prompt_source_path key =
   | Some (group_key, _marker) -> prompt_markdown_path group_key
   | None -> prompt_markdown_path key
 
-(* The file value for a key: the whole body, or one slot paragraph. *)
+(* The file value for a key: one slot paragraph for a slot key; for any
+   other key its file's body — the preamble alone when the file carries
+   slots, so a group key never returns its slots' text. *)
 let file_value_of_key key =
   match Hashtbl.find_opt fragment_tbl key with
   | Some (group_key, marker) -> (
     match Option.bind (prompt_markdown_path group_key) read_file_if_exists with
     | Some body -> slot_paragraph body marker
     | None -> None)
-  | None -> Option.bind (prompt_markdown_path key) read_file_if_exists
+  | None ->
+    Option.bind (prompt_markdown_path key) read_file_if_exists
+    |> Option.map (fun body ->
+           let split = split_body body in
+           if split.slots = [] then body else split.preamble)
 
 (** {1 Registration and Lookup} *)
 
@@ -473,28 +489,29 @@ let load_prompts_from_directory dir =
                       | Some v -> parse_list_value v
                       | None -> []
                     in
-                    (* A group file with [### marker] paragraphs registers
-                       each paragraph as <key>.<marker> and not the group
-                       key itself — nothing consumes the group key, and the
-                       slot declarations (including per-slot variables) live
-                       on the marker lines. *)
-                    let slots = split_slots body in
-                    if slots <> [] then
-                      List.iter
-                        (fun (marker, slot_vars, _paragraph) ->
-                          let slot_key = key ^ "." ^ marker in
-                          let template_variables =
-                            match slot_vars with
-                            | None -> []
-                            | Some declared ->
-                              parse_list_value ("[" ^ declared ^ "]")
-                          in
-                          Hashtbl.replace fragment_tbl slot_key (key, marker);
-                          register_prompt_unlocked ~key:slot_key ~description
-                            ~category ~operator_surface ~required_file:true
-                            ~template_variables ())
-                        slots
-                    else
+                    (* A group file registers each [### marker] paragraph
+                       as <key>.<marker> — a fragment of its group whatever
+                       the frontmatter surface says — with the variables
+                       declared on the marker line. The prose before the
+                       first marker is the group's own body and registers
+                       under the group key when there is any; a file
+                       without markers registers whole. *)
+                    let split = split_body body in
+                    List.iter
+                      (fun (marker, slot_vars, _paragraph) ->
+                        let slot_key = key ^ "." ^ marker in
+                        let template_variables =
+                          match slot_vars with
+                          | None -> []
+                          | Some declared ->
+                            parse_list_value ("[" ^ declared ^ "]")
+                        in
+                        Hashtbl.replace fragment_tbl slot_key (key, marker);
+                        register_prompt_unlocked ~key:slot_key ~description
+                          ~category ~operator_surface:Types.Fragment
+                          ~required_file:true ~template_variables ())
+                      split.slots;
+                    if split.slots = [] || split.preamble <> "" then
                       register_prompt_unlocked ~key ~description ~category
                         ~operator_surface
                         ~required_file:true ~template_variables ()

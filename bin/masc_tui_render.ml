@@ -10306,26 +10306,25 @@ let memory_row_line columns (k : Masc.Tui_decode.memory_keeper_health) =
    exact message stays in the detail pane. *)
 let memory_row_style (k : Masc.Tui_decode.memory_keeper_health) =
   let open Masc.Tui_decode in
+  (* An error the server graded outranks every reading taken here: the row is
+     red whatever the snapshot looks like. Everything below it reads the same
+     variant the cell and the detail pane read, so one keeper cannot be graded
+     two ways, and a state added later has to be given a colour here before
+     this compiles. *)
   let server_error =
     List.exists (fun alert -> String.equal alert.ma_severity "error") k.mkh_alerts
   in
-  let server_warn =
-    List.exists (fun alert -> String.equal alert.ma_severity "warn") k.mkh_alerts
-  in
-  if server_error
-     ||
-     ((not k.mkh_snapshot_present)
-      && k.mkh_librarian_failures > 0
-      && not k.mkh_source_snapshot_present)
-  then Some (Theme.bad ())
-  else if
-    server_warn
-    || not k.mkh_snapshot_present
-    || k.mkh_librarian_failures > 0
-    || Option.is_some k.mkh_read_error
-    || Option.is_some k.mkh_source_read_error
-  then Some (Theme.warn ())
-  else None
+  if server_error then Some (Theme.bad ())
+  else
+    match memory_state k with
+    | Memory_starving -> Some (Theme.bad ())
+    | Memory_read_error
+    | Memory_no_current
+    | Memory_source_only
+    | Memory_degraded
+    | Memory_warning ->
+        Some (Theme.warn ())
+    | Memory_ordinary -> None
 
 let render_memory (state : state) =
   let terminal_rows, cols = get_terminal_size () in

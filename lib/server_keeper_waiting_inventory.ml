@@ -3,7 +3,6 @@ type waiting_source =
   | Chat_operation_queued
   | Chat_operation_running
   | Hitl_pending
-  | External_attention
   | Fusion_running
   | Schedule_waiting
   | Owner_shutdown
@@ -25,7 +24,6 @@ type wake_producer =
   | Connector_attention_hook
   | Hitl_resolution_hook
   | Keeper_ask_answer
-  | External_attention_store
   | Schedule_store
   | Schedule_runner
   | Operator_pending_confirm_store
@@ -52,14 +50,12 @@ type waiting_row =
   ; detail : Yojson.Safe.t
   }
 
-let external_attention_dashboard_row_limit = 64
 
 let source_to_string = function
   | Event_queue_pending -> "event_queue_pending"
   | Chat_operation_queued -> "chat_operation_queued"
   | Chat_operation_running -> "chat_operation_running"
   | Hitl_pending -> "hitl_pending"
-  | External_attention -> "external_attention"
   | Fusion_running -> "fusion_running"
   | Schedule_waiting -> "schedule_waiting"
   | Owner_shutdown -> "owner_shutdown"
@@ -72,7 +68,6 @@ let all_waiting_sources =
   ; Chat_operation_queued
   ; Chat_operation_running
   ; Hitl_pending
-  ; External_attention
   ; Fusion_running
   ; Schedule_waiting
   ; Owner_shutdown
@@ -99,7 +94,6 @@ let wake_producer_to_string = function
   | Connector_attention_hook -> "connector_attention_hook"
   | Hitl_resolution_hook -> "hitl_resolution_hook"
   | Keeper_ask_answer -> "keeper_ask_answer"
-  | External_attention_store -> "external_attention_store"
   | Schedule_store -> "schedule_store"
   | Schedule_runner -> "schedule_runner"
   | Operator_pending_confirm_store -> "operator_pending_confirm_store"
@@ -148,16 +142,6 @@ let waiting_row_json (row : waiting_row) =
     ; "next_action", `String row.next_action
     ; "detail", row.detail
     ]
-;;
-
-let take_with_truncation limit rows =
-  let limit = max 0 limit in
-  let rec loop remaining acc = function
-    | rest when remaining <= 0 -> List.rev acc, rest <> []
-    | [] -> List.rev acc, false
-    | row :: rest -> loop (remaining - 1) (row :: acc) rest
-  in
-  loop limit [] rows
 ;;
 
 (* [payload_kind] collapses every payload to a constant label, so the fields
@@ -599,107 +583,24 @@ let hitl_rows keeper_name pending =
     })
 ;;
 
-let external_attention_what (item : Keeper_external_attention.item) =
-  match item.urgency with
-  | Keeper_external_attention.Mention -> Printf.sprintf "%s 멘션" item.source_label
-  | Direct_message -> Printf.sprintf "%s DM" item.source_label
-  | Ambient -> Printf.sprintf "%s 대화 (멘션 없음)" item.source_label
-  | System -> Printf.sprintf "%s 시스템 알림" item.source_label
-;;
-
-(* Same display wall as the queue rows above, from the sibling store: a
-   backlogged conversation records one pending external-attention row per
-   message. Grouping unit is the conversation — urgency × source ×
-   conversation_id — because that is what the keeper will answer (RFC-0377
-   drains a conversation backlog in one turn). One pending item renders
-   exactly the ungrouped row; a group renders the oldest arrival as [since],
-   the oldest event id as the row address, and the newest content preview.
-   Mentions and DMs can share a conversation with ambient traffic and still
-   aggregate only among their own urgency. *)
-let external_attention_grouped_rows ~keeper_name
-    (pending : Keeper_external_attention.item list) : waiting_row list =
-  let rec collect groups = function
-    | [] -> List.rev groups
-    | (item : Keeper_external_attention.item) :: rest ->
-      let key =
-        ( Keeper_external_attention.urgency_to_string item.urgency
-        , item.source_label
-        , item.conversation.conversation_id )
-      in
-      (match List.assoc_opt key groups with
-       | Some members ->
-         collect
-           ((key, item :: members) :: List.remove_assoc key groups)
-           rest
-       | None -> collect ((key, [ item ]) :: groups) rest)
-  in
-  let oldest (members : Keeper_external_attention.item list) =
-    List.fold_left
-      (fun (best : Keeper_external_attention.item)
-           (item : Keeper_external_attention.item) ->
-         if item.received_at < best.received_at then item else best)
-      (List.hd members)
-      members
-  in
-  let newest (members : Keeper_external_attention.item list) =
-    List.fold_left
-      (fun (best : Keeper_external_attention.item)
-           (item : Keeper_external_attention.item) ->
-         if item.received_at > best.received_at then item else best)
-      (List.hd members)
-      members
-  in
-  collect [] pending
-  |> List.map (fun (_, members) ->
-         let count = List.length members in
-         let anchor = oldest members in
-         let preview = (newest members).content_preview in
-         { keeper_name = Some keeper_name
-         ; source = External_attention
-         ; waiting_on = anchor.source_label
-         ; what =
-             (if count > 1 then
-                Printf.sprintf "%s ×%d" (external_attention_what anchor) count
-              else external_attention_what anchor)
-         ; wake_producer = External_attention_store
-         ; since = Some anchor.received_at
-         ; due_at = None
-         ; next_action = "keeper_process_external_attention"
-         ; detail =
-             `Assoc
-               ([ "event_id", `String anchor.event_id
-                ; "urgency",
-                  `String (Keeper_external_attention.urgency_to_string anchor.urgency)
-                ; "conversation_id", `String anchor.conversation.conversation_id
-                ; "content_preview", `String preview
-                ; "surface",
-                  Keeper_external_attention.surface_ref_to_json anchor.conversation.surface
-                ]
-               @
-               if count > 1 then
-                 [ ("group_count", `Int count) ]
-               else [])
-         })
-;;
-
-let external_attention_rows ~base_path ~keeper_name =
+(* The pending rows this used to build carried the same events the queue rows
+   carry, and the queue rows carry them better -- collapsed per urgency, with
+   the [source_ref] an operator can cancel or transfer through. What was never
+   duplicated is a store this build cannot read: that is the Keeper's own
+   evidence log failing, and no other row reports it. *)
+let external_attention_store_error_rows ~base_path ~keeper_name =
   match
     Keeper_external_attention.pending_for_keeper_result ~base_path ~keeper_name
-      ~limit:(external_attention_dashboard_row_limit + 1) ()
+      ~limit:0 ()
   with
+  | Ok _ -> []
   | Error err ->
-    ( [ read_error_row
-          ~keeper_name
-          ~waiting_on:"external_attention_store"
-          ~next_action:"repair_external_attention_store"
-          (`Assoc [ "error", `String err ])
-      ]
-    , false )
-  | Ok pending ->
-    let pending, truncated =
-      take_with_truncation external_attention_dashboard_row_limit pending
-    in
-    (external_attention_grouped_rows ~keeper_name pending, truncated)
+    [ read_error_row
+        ~keeper_name
+        ~waiting_on:"external_attention_store"
+        ~next_action:"repair_external_attention_store"
+        (`Assoc [ "error", `String err ])
+    ]
 ;;
 
 let fusion_rows keeper_name runs =
@@ -970,7 +871,7 @@ let record_keeper_state_metrics per_keeper =
        let count =
          per_keeper
          |> List.fold_left
-              (fun total (_keeper_name, busy, rows, _external_attention_truncated) ->
+              (fun total (_keeper_name, busy, rows) ->
                  if keeper_state ~busy rows = state then total + 1 else total)
               0
        in
@@ -985,7 +886,7 @@ let record_metrics ~now ~per_keeper ~global_rows =
   let all_keeper_rows =
     List.flatten
       (List.map
-         (fun (_keeper_name, _busy, rows, _external_attention_truncated) -> rows)
+         (fun (_keeper_name, _busy, rows) -> rows)
          per_keeper)
   in
   record_scope_metrics ~now ~scope:"keeper" all_keeper_rows;
@@ -1046,7 +947,7 @@ let source_next_actions rows =
     source, `List (List.map (fun action -> `String action) actions))
 ;;
 
-let keeper_json ~base_path keeper_name ~busy ~external_attention_truncated rows =
+let keeper_json ~base_path keeper_name ~busy rows =
   let state = keeper_state ~busy rows in
   let since =
     rows
@@ -1063,12 +964,6 @@ let keeper_json ~base_path keeper_name ~busy ~external_attention_truncated rows 
     ; "state", `String (keeper_state_to_string state)
     ; "waiting_on", `List (List.map waiting_row_json rows)
     ; "waiting_count", `Int (List.length rows)
-    ; "waiting_count_truncated", `Bool external_attention_truncated
-    ; ( "truncated_sources"
-      , `Assoc
-          (if external_attention_truncated
-           then [ "external_attention", `Bool true ]
-           else []) )
     ; "sources", `Assoc (source_counts rows)
     ; "since", Json_util.float_opt_to_json since
     ; "since_iso", unix_iso_json since
@@ -1082,19 +977,16 @@ let keeper_json ~base_path keeper_name ~busy ~external_attention_truncated rows 
 let keeper_rows ~base_path ~pending_approvals ~fusion_runs ~pending_confirms keeper_names =
   keeper_names
   |> List.map (fun keeper_name ->
-    let external_attention_rows, external_attention_truncated =
-      external_attention_rows ~base_path ~keeper_name
-    in
     let rows =
       event_queue_rows ~base_path ~keeper_name
       @ chat_operation_rows ~base_path keeper_name
       @ owner_shutdown_rows ~base_path keeper_name
       @ hitl_rows keeper_name pending_approvals
-      @ external_attention_rows
+      @ external_attention_store_error_rows ~base_path ~keeper_name
       @ fusion_rows keeper_name fusion_runs
       @ pending_confirm_rows [ keeper_name ] pending_confirms
     in
-    keeper_name, rows, external_attention_truncated)
+    keeper_name, rows)
 ;;
 
 let rows_for_keeper keeper_name rows =
@@ -1157,9 +1049,9 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
   let per_keeper =
     keeper_rows ~base_path:config.Workspace.base_path ~pending_approvals ~fusion_runs
       ~pending_confirms keeper_names
-    |> List.map (fun (keeper_name, rows, external_attention_truncated) ->
+    |> List.map (fun (keeper_name, rows) ->
       let rows = rows @ rows_for_keeper keeper_name schedule_rows in
-      keeper_name, keeper_is_busy busy_names keeper_name, rows, external_attention_truncated)
+      keeper_name, keeper_is_busy busy_names keeper_name, rows)
   in
   let global_rows =
     global_rows_from schedule_rows
@@ -1170,31 +1062,19 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
   in
   let keeper_json_rows =
     per_keeper
-    |> List.map (fun (keeper_name, busy, rows, external_attention_truncated) ->
-      keeper_json
-        ~base_path:config.Workspace.base_path
-        keeper_name
-        ~busy
-        ~external_attention_truncated
-        rows)
+    |> List.map (fun (keeper_name, busy, rows) ->
+      keeper_json ~base_path:config.Workspace.base_path keeper_name ~busy rows)
   in
   let all_keeper_rows =
     List.flatten
       (List.map
-         (fun (_keeper_name, _busy, rows, _external_attention_truncated) -> rows)
+         (fun (_keeper_name, _busy, rows) -> rows)
          per_keeper)
-  in
-  let external_attention_truncated_keeper_count =
-    per_keeper
-    |> List.fold_left
-         (fun count (_keeper_name, _busy, _rows, external_attention_truncated) ->
-            if external_attention_truncated then count + 1 else count)
-         0
   in
   let waiting_keeper_count =
     per_keeper
     |> List.fold_left
-         (fun count (_keeper_name, busy, rows, _external_attention_truncated) ->
+         (fun count (_keeper_name, busy, rows) ->
             match keeper_state ~busy rows with
             | Idle -> count
             | Busy | Waiting | Deferred -> count + 1)
@@ -1212,10 +1092,6 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
     ; "keeper_count", `Int (List.length keeper_names)
     ; "waiting_keeper_count", `Int waiting_keeper_count
     ; "row_count", `Int (List.length all_keeper_rows)
-    ; "row_count_truncated", `Bool (external_attention_truncated_keeper_count > 0)
-    ; "external_attention_row_limit", `Int external_attention_dashboard_row_limit
-    ; ( "external_attention_truncated_keeper_count"
-      , `Int external_attention_truncated_keeper_count )
     ; "global_row_count", `Int (List.length global_rows)
     ; ( "global_pending_confirm_count_known"
       , `Bool (List.length pending_confirm_read_error_rows = 0) )
@@ -1252,7 +1128,6 @@ let dashboard_json_for_keeper config ~keeper_name =
 module For_testing = struct
   let dashboard_json_with_pending_reader = dashboard_json_with_pending_reader
 
-  let external_attention_grouped_rows = external_attention_grouped_rows
 
   let rows_for_queue_snapshot = rows_for_queue_snapshot
 end

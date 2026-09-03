@@ -63,9 +63,6 @@ val mcp_managed_agent : string
 val mcp_operator_remote : string
 val keeper_workspace : string
 val keeper_identity : string
-val keeper_canary_judge_system : string
-val keeper_canary_judge_user : string
-val keeper_canary_recall : string
 val keeper_capability_probe : string
 val lane_cli_probe_librarian_system : string
 val lane_cli_probe_librarian_user : string

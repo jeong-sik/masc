@@ -677,6 +677,48 @@ let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =
   check int "persistent retention remains bounded" cache_capacity
     (Markdown_cache.For_testing.retained_entries cache)
 
+(* Reading further back does not lay out again what it already measured.
+
+   A wheel notch moves the window three rows, and the frame has to know how
+   far back the window now starts. That distance is what a deep scroll makes
+   long. The row counts of the entries behind the window do not change while
+   the entries and the width do not, so the second walk pays for what it
+   newly reaches and for what it draws, not for the whole distance. *)
+let test_a_second_walk_pays_for_what_it_newly_reaches () =
+  let entries = transcript 60 in
+  let inner_width = 30 in
+  let height = 8 in
+  let laid_out = ref 0 in
+  let markdown ~(entry : Layout.entry) ~width =
+    incr laid_out;
+    Layout.wrap_words ~max_cells:width entry.body
+  in
+  let walk requested =
+    laid_out := 0;
+    let scroll, rows =
+      Layout.clamped_scrolled_rows ~markdown ~inner_width ~height ~requested
+        entries
+    in
+    (scroll, rows, !laid_out)
+  in
+  let _, first_rows, first_cost = walk 90 in
+  let _, second_rows, second_cost = walk 93 in
+  check bool "the first walk reaches far back" true (first_cost > 20);
+  check bool
+    (Printf.sprintf "the second walk costs %d against the first's %d"
+       second_cost first_cost)
+    true
+    (second_cost * 3 < first_cost);
+  check bool "and both drew a window" true
+    (List.length first_rows > 0 && List.length second_rows > 0);
+  (* A width the counts were not measured at is a different question. *)
+  laid_out := 0;
+  ignore
+    (Layout.clamped_scrolled_rows ~markdown ~inner_width:(inner_width + 6)
+       ~height ~requested:93 entries
+      : int * Layout.row list);
+  check bool "a new width measures again" true (!laid_out > second_cost)
+
 let test_clamping_a_scroll_reads_only_as_far_as_it_must () =
   List.iter
     (fun count ->
@@ -1930,6 +1972,8 @@ let () =
             test_a_body_of_one_line_is_one_row
         ; test_case "a rendered body is escaped before it is rendered" `Quick
             test_a_rendered_body_is_escaped_before_it_is_rendered
+        ; test_case "a second walk pays for what it newly reaches" `Quick
+            test_a_second_walk_pays_for_what_it_newly_reaches
         ; test_case "clamping a scroll reads only as far as it must" `Quick
             test_clamping_a_scroll_reads_only_as_far_as_it_must
         ; test_case "a scrolled window matches the full walk" `Quick

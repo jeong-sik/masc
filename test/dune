@@ -3018,6 +3018,11 @@
   (source_tree ../bin)))
 
 (test
+ (name test_tui_chat_rows_memo)
+ (modules test_tui_chat_rows_memo)
+ (libraries alcotest masc_tui_keeper_chat_projection masc_tui_keeper_chat_queue masc_tui_types))
+
+(test
  (name test_tui_ask_selection_wiring)
  (modules test_tui_ask_selection_wiring)
  (libraries alcotest ast_grep)

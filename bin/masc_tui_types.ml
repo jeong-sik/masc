@@ -1856,6 +1856,7 @@ type surface =
   | Keepers of keeper_mode
   | Memory
   | Lanes
+  | Clients
   | Board
   | Approvals
   | Planning
@@ -1914,6 +1915,7 @@ let surface_ring_index (view : surface) =
     | Verification | Harness -> Planning
     | Changes | Connectors | Schedules | Fusion -> Keepers Keeper_list
     | Lanes -> Runtime
+    | Clients -> Runtime
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting
@@ -1990,7 +1992,7 @@ let surface_needs : surface -> surface_needs = function
      different machinery. *)
   | Approvals ->
       { nothing with needs_operator_approvals = true; needs_asks = true }
-  | Memory | Lanes | Schedules | Verification | Harness | Fusion
+  | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
   | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
   | Tools ->
       nothing
@@ -2751,6 +2753,14 @@ type state = {
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
   mutable standalone_lanes_generation: int;
+  (* The clients roster, off the ring under Runtime the way Lanes is. A
+     cursor, not just a scroll: "/" search lands on a row by name, and the
+     cursor is where it lands. *)
+  mutable clients_surface: Tui_decode.clients_snapshot option;
+  mutable clients_surface_error: string option;
+  mutable clients_surface_scroll: int;
+  mutable clients_surface_cursor: int;
+  mutable clients_surface_generation: int;
   (* Run drill-down under the standalone observation rows. [lane_runs] is the
      summary page of the lane named in [lanes_mode]; payloads stay behind the
      per-run detail fetch, so the list never holds one. *)
@@ -3516,6 +3526,11 @@ let create_state
   standalone_lanes = None;
   standalone_lanes_error = None;
   standalone_lanes_generation = 0;
+  clients_surface = None;
+  clients_surface_error = None;
+  clients_surface_scroll = 0;
+  clients_surface_cursor = 0;
+  clients_surface_generation = 0;
   lanes_mode = Lanes_overview;
   lanes_standalone_cursor = 0;
   lane_runs = None;
@@ -4231,6 +4246,11 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
       (match state.lanes_mode with
        | Lanes_run_detail _ -> None
        | Lanes_overview | Lanes_run_list _ -> Some (lanes_scrolled state))
+  | Clients ->
+      listing ~error:state.clients_surface_error
+        (match state.clients_surface with
+         | None -> 0
+         | Some snapshot -> List.length snapshot.Tui_decode.cls_clients)
   | Harness ->
       if Option.is_some state.harness_detail then None
       else
@@ -4410,6 +4430,16 @@ let surface_row_texts (state : state) : surface -> string list option = function
                    snapshot.Tui_decode.sls_lanes
            in
            (match standalone with [] -> None | _ -> Some standalone))
+  | Clients ->
+      let names =
+        match state.clients_surface with
+        | None -> []
+        | Some snapshot ->
+            List.map
+              (fun (row : Tui_decode.client_row) -> row.Tui_decode.cr_name)
+              snapshot.Tui_decode.cls_clients
+      in
+      (match names with [] -> None | _ -> Some names)
   | Verification ->
       if Option.is_some state.verification_detail_request_id then None
       else
@@ -4795,6 +4825,7 @@ let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
   @ [ "go Task Review", Palette_goto Verification ]
   @ [ "go Lanes", Palette_goto Lanes ]
+  @ [ "go Clients", Palette_goto Clients ]
   @ [ "go Schedules", Palette_goto Schedules ]
   @ [ "go Fusion", Palette_goto Fusion ]
   @ [ "go Code", Palette_goto Code ]

@@ -1594,6 +1594,8 @@ type async_msg =
       result
   | Standalone_lanes_loaded of
       int * (Masc.Tui_decode.standalone_lanes_snapshot, string) result
+  | Clients_loaded of
+      int * (Masc.Tui_decode.clients_snapshot, string) result
   (* Keyed by the lane / run they answer for: an answer that lands after the
      operator left the list or the run is not this view's answer. *)
   | Lane_runs_loaded of
@@ -4192,6 +4194,25 @@ let launch_lanes_load state ~mailbox =
         (Standalone_lanes_loaded
            (standalone_generation, Error "Eio switch is unavailable"))
 
+let launch_clients_load state ~mailbox =
+  let host = server_peer_host in
+  let port = state.port in
+  state.clients_surface_generation <- state.clients_surface_generation + 1;
+  let generation = state.clients_surface_generation in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_clients ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Clients_loaded (generation, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Clients_loaded (generation, Error "Eio switch is unavailable"))
+
 let launch_lane_runs_load state ~mailbox ~lane_id =
   let host = server_peer_host in
   let port = state.port in
@@ -4276,6 +4297,7 @@ let search_row_cursor state =
   match state.view with
   | Keepers Keeper_list -> Some state.keeper_cursor
   | Lanes -> Some state.lanes_standalone_cursor
+  | Clients -> Some state.clients_surface_cursor
   | Verification ->
       if Option.is_some state.verification_detail_request_id then None
       else Some state.verification_cursor
@@ -4340,6 +4362,9 @@ let search_land state index =
       state.context_inspector_cursor <- index;
       state.context_inspector_detail_scroll <- 0
   | Lanes -> state.lanes_standalone_cursor <- index
+  | Clients ->
+      state.clients_surface_cursor <- index;
+      follow state.clients_surface_scroll (fun s -> state.clients_surface_scroll <- s)
   | Verification ->
       state.verification_cursor <- index;
       follow state.verification_scroll (fun s -> state.verification_scroll <- s)
@@ -4466,6 +4491,7 @@ let goto_surface state ~mailbox (destination : surface) =
     state.lanes_action_error <- None;
   (match destination with
    | Lanes -> launch_lanes_load state ~mailbox
+   | Clients -> launch_clients_load state ~mailbox
    | Keepers Keeper_list -> launch_keeper_lanes_load state ~mailbox
    | Approvals ->
        launch_keeper_tool_approvals_load state ~mailbox;
@@ -5776,6 +5802,7 @@ let selected_surface_reference state =
         (fun (keeper : Tui_decode.keeper) -> Link.reference Keeper keeper.k_name)
         (List.nth_opt state.keepers state.keeper_cursor)
   | Lanes -> None
+  | Clients -> None
   | Verification ->
       (* The task, not the request: a verification request is a question about
          a task, and the task is the thing another surface can open. *)
@@ -10286,6 +10313,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 (min state.lanes_standalone_cursor
                    (List.length snapshot.Tui_decode.sls_lanes - 1))
         | Error detail -> state.standalone_lanes_error <- Some detail)
+  | Clients_loaded (generation, result) ->
+      if generation = state.clients_surface_generation then (
+        match result with
+        | Ok snapshot ->
+            state.clients_surface <- Some snapshot;
+            state.clients_surface_error <- None;
+            (* A refresh may shrink the roster; the cursor has to stay a
+               valid row of the snapshot now in state. *)
+            state.clients_surface_cursor <-
+              max
+                0
+                (min state.clients_surface_cursor
+                   (List.length snapshot.Masc.Tui_decode.cls_clients - 1))
+        | Error detail -> state.clients_surface_error <- Some detail)
   | Lane_runs_loaded (lane_id, result) ->
       (match state.lanes_mode with
        | Lanes_run_list open_lane when String.equal open_lane lane_id ->
@@ -10463,7 +10504,8 @@ let terminal_title_visible_keeper state =
       Option.map
         (fun (keeper : keeper) -> keeper.k_name)
         (selected_keeper state)
-  | Overview | Acting | Memory | Lanes | Board | Approvals | Planning | Schedules
+  | Overview | Acting | Memory | Lanes | Clients | Board | Approvals
+  | Planning | Schedules
   | Verification | Harness | Fusion | Repositories | Changes | Connectors
   | Runtime | Config | Resources | Tools | System_logs -> None
 ;;
@@ -10908,7 +10950,8 @@ let main () =
   let presented_surface_reference () =
     match state.view with
     | Approvals -> Option.bind !presented_approval approval_row_reference
-    | Overview | Acting | Keepers _ | Lanes | Board | Planning | Schedules
+    | Overview | Acting | Keepers _ | Lanes | Clients | Board | Planning
+    | Schedules
     | Memory | Verification | Harness | Fusion | Repositories | Changes | Connectors
     | Runtime | Config | Resources | Code | Tools | System_logs ->
         selected_surface_reference state
@@ -12401,7 +12444,8 @@ and is loaded on demand through keeper_skill.
            (* A restore rewrites three surfaces; its arm must not outlive the
               keypress that set it. *)
            if cancelled [ "u"; "U" ] then state.preset_restore_armed <- None
-       | Overview | Acting | Lanes | Harness | Memory | Fusion | Repositories
+       | Overview | Acting | Lanes | Clients | Harness | Memory | Fusion
+       | Repositories
        | Changes | Connectors | Runtime | Resources | Tools
        | System_logs | Code -> ());
       (* Destructive binding removal deliberately requires two consecutive
@@ -14063,7 +14107,8 @@ and is loaded on demand through keeper_skill.
                        | Board_read _ -> not state.board_detail_wide
                        | Board_list | Board_compose -> false)
                   | Code -> Option.is_some state.code_file
-                  | Acting | Keepers _ | Lanes | Approvals | Planning
+                  | Acting | Keepers _ | Lanes | Clients | Approvals
+                  | Planning
                   | Schedules | Verification | Harness | Fusion
                   | Memory | Repositories | Changes | Connectors | Runtime | Config
                   | Tools | System_logs -> false) ->
@@ -14080,7 +14125,8 @@ and is loaded on demand through keeper_skill.
               when Option.is_some state.code_file
                    && not state.repository_changes_open ->
                 state.code_focus_file <- focus
-            | Acting | Keepers _ | Lanes | Approvals | Planning | Schedules
+            | Acting | Keepers _ | Lanes | Clients | Approvals | Planning
+            | Schedules
             | Memory | Verification | Harness | Fusion | Repositories | Changes
             | Connectors | Runtime | Config | Code | Tools
             | System_logs -> ())
@@ -14187,7 +14233,8 @@ and is loaded on demand through keeper_skill.
                   state.preset_restore_armed <- None;
                   state.preset_save_draft <- Some ""
                 end
-            | Overview | Acting | Keepers _ | Memory | Lanes | Board | Planning
+            | Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
+            | Planning
             | Verification | Harness | Fusion | Repositories | Code | Changes
             | Connectors | Runtime | Config | Resources | Tools | System_logs ->
                 if
@@ -14308,7 +14355,15 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail ->
                 state.detail_scroll <-
                   max 0 (state.detail_scroll + (direction * page))
-            | Lanes ->
+             | Clients ->
+                 let cursor, scroll =
+                   move_row_cursor state ~delta:(direction * page)
+                     ~cursor:state.clients_surface_cursor
+                     ~scroll:state.clients_surface_scroll
+                 in
+                 state.clients_surface_cursor <- cursor;
+                 state.clients_surface_scroll <- scroll
+             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
                      state.lane_run_detail_scroll <-
@@ -14415,7 +14470,9 @@ and is loaded on demand through keeper_skill.
                  | None -> ())
             | Planning | Verification ->
                 launch_verification_load state ~mailbox:async_messages
-            | Lanes ->
+             | Clients ->
+                 launch_clients_load state ~mailbox:async_messages
+             | Lanes ->
                 launch_lanes_load state ~mailbox:async_messages;
                 (match state.lanes_mode with
                  | Lanes_run_list lane_id ->
@@ -14623,7 +14680,11 @@ and is loaded on demand through keeper_skill.
                   (* Off-ring child: the way out of the list is the ring
                      parent, loaded, same as Connectors and Code. *)
                   goto_surface state ~mailbox:async_messages Config
-            | Lanes ->
+             | Clients ->
+                 (* Off-ring child: the way out is the ring parent, loaded,
+                    the same exit Resources takes to Config. *)
+                 goto_surface state ~mailbox:async_messages Runtime
+             | Lanes ->
                 state.lanes_action_error <- None;
                 (match state.lanes_mode with
                  | Lanes_run_detail (lane_id, _) ->
@@ -14821,7 +14882,7 @@ and is loaded on demand through keeper_skill.
                 state.system_logs_detail_scroll <- 0
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
             | Keepers Keeper_list | Acting | Approvals
-            | Memory | Repositories | Connectors | Config | Tools -> ())
+             | Memory | Repositories | Connectors | Config | Tools | Clients -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
             | Code ->
@@ -15038,6 +15099,14 @@ and is loaded on demand through keeper_skill.
                    in
                    state.verification_cursor <- cursor;
                    state.verification_scroll <- scroll)
+            | Clients ->
+                let cursor, scroll =
+                  move_row_cursor state ~delta:1
+                    ~cursor:state.clients_surface_cursor
+                    ~scroll:state.clients_surface_scroll
+                in
+                state.clients_surface_cursor <- cursor;
+                state.clients_surface_scroll <- scroll
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
@@ -15374,6 +15443,14 @@ and is loaded on demand through keeper_skill.
                    in
                    state.verification_cursor <- cursor;
                    state.verification_scroll <- scroll)
+            | Clients ->
+                let cursor, scroll =
+                  move_row_cursor state ~delta:(-1)
+                    ~cursor:state.clients_surface_cursor
+                    ~scroll:state.clients_surface_scroll
+                in
+                state.clients_surface_cursor <- cursor;
+                state.clients_surface_scroll <- scroll
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
@@ -15859,7 +15936,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting
-            | Connectors | Config | Resources | Tools -> ())
+             | Connectors | Config | Resources | Tools | Clients -> ())
        (* Changes reads one keeper's file writes and already binds to the
           roster cursor on entry, so it opens from a keeper surface rather
           than from the Tab ring. Both of them list [f] in their footer and
@@ -16001,7 +16078,7 @@ and is loaded on demand through keeper_skill.
                  | None -> ())
             | Overview | Acting | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
             | Lanes | Board | Approvals | Planning | Schedules
-            | Memory | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
+            | Memory | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | Clients
             | System_logs -> ())
        | Some "d" when state.view = Changes ->
            (* The same file, read from the tree instead of from the log. Two
@@ -16238,7 +16315,16 @@ and is loaded on demand through keeper_skill.
                     ~content_height:(keeper_log_content_height state);
                 state.view <- Keepers Keeper_logs
             | None -> ())
-       | Some "m" | Some "M" | Some "c" | Some "C" ->
+| Some "c" | Some "C"
+         when state.view = Runtime
+              && Option.is_none state.runtime_detail_target ->
+            (* The third Runtime reading: not what the lanes call, not what
+               the workspace could call, but who is attached to it — the
+               clients roster, off the ring under Runtime the way Lanes is.
+               This arm sits above the chat arm because that one takes [c]
+               unguarded on every surface that names a Keeper. *)
+            goto_surface state ~mailbox:async_messages Clients
+| Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat from every row that names a Keeper. Standalone Lanes carry
               no Keeper identity; Keeper chat is owned by the Keepers surface.
               [c] is an alias for [m] because the footer names the action rather
@@ -16274,7 +16360,8 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | Clients
+            | System_logs -> ())
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_params ->
            handle_runtime_param_clear ()
@@ -16315,6 +16402,8 @@ and is loaded on demand through keeper_skill.
                 state.runtime_mode <- Masc_tui_types.Runtime_lanes;
                 state.runtime_surface_scroll <- 0;
                 goto_surface state ~mailbox:async_messages Lanes)
+       | Some "p" | Some "P" when state.view = Clients ->
+           goto_surface state ~mailbox:async_messages Runtime
        | Some "p" | Some "P"
          when state.view = Lanes && state.lanes_mode = Lanes_overview ->
            goto_surface state ~mailbox:async_messages Runtime
@@ -16406,7 +16495,8 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | Clients
+            | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
             | Code -> ()
@@ -16449,7 +16539,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Schedules | Verification | Harness
-            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
@@ -16472,7 +16562,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Planning | Schedules | Verification | Harness
-            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs
+             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients
             -> ())
        | Some "E"
          when state.view = Config && state.config_pane = Config_params ->
@@ -16571,7 +16661,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Board | Planning | Verification | Harness
-            | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs -> ())
+             | Memory | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs | Clients -> ())
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_prompts ->
            if state.prompts_show_runtime_assets
@@ -16632,7 +16722,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Memory | Lanes
             | Board | Planning | Schedules | Harness
-            | Fusion | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Fusion | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients -> ())
       | _ -> ());
 
       (* Surface navigation asks only for datasets the destination adds. The
@@ -16767,7 +16857,8 @@ and is loaded on demand through keeper_skill.
                 explicit refresh for its child badge, but does not poll a
                 hidden 200-row queue on every cadence tick. *)
              launch_verification_load state ~mailbox:async_messages
-         | Lanes -> launch_lanes_load state ~mailbox:async_messages
+             | Lanes -> launch_lanes_load state ~mailbox:async_messages
+             | Clients -> launch_clients_load state ~mailbox:async_messages
          | Harness -> launch_harness_load state ~mailbox:async_messages
          | Fusion ->
              launch_fusion_runs_load state ~mailbox:async_messages;

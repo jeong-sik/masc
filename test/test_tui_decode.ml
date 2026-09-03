@@ -3487,6 +3487,98 @@ let test_every_lane_status_word_fits_its_column () =
     ; Tui_decode.Standalone_no_retained_observation
     ]
 
+(* decode_clients — the Runtime family's roster reading of everyone attached
+   to the workspace. The rows below carry the dashboard's own field set
+   (emoji, koreanName among them) so the test also pins that the roster
+   ignores the profile decorations rather than rejecting them. *)
+let clients_row_json ~name ~agent_type ~status ~keeper ~task =
+  `Assoc
+    [ "name", `String name
+    ; "agent_type", `String agent_type
+    ; "keeper_name"
+      , (match keeper with Some keeper -> `String keeper | None -> `Null)
+    ; "keeper_id", `Null
+    ; "status", `String status
+    ; "current_task"
+      , (match task with Some task -> `String task | None -> `Null)
+    ; "session_bound_at", `String "2026-09-04T01:00:00Z"
+    ; "last_seen", `String "2026-09-04T01:20:00Z"
+    ; "capabilities", `List [ `String "chat" ]
+    ; "emoji", `String "x"
+    ; "koreanName", `String "client"
+    ]
+
+let clients_snapshot_json rows =
+  `Assoc
+    [ "schema", `String "masc.dashboard.clients.v1"
+    ; "generated_at", `String "2026-09-04T01:21:00Z"
+    ; "observation_only", `Bool true
+    ; "clients", `List rows
+    ]
+
+let test_decode_clients_reads_the_status_enum_and_ignores_profile () =
+  let json =
+    clients_snapshot_json
+      [ clients_row_json ~name:"codex-mcp-client" ~agent_type:"codex"
+          ~status:"active" ~keeper:None ~task:None
+      ; clients_row_json ~name:"analyst-agent" ~agent_type:"keeper"
+          ~status:"busy" ~keeper:(Some "analyst") ~task:(Some "task-845")
+      ]
+  in
+  match Tui_decode.decode_clients_snapshot json with
+  | Error detail -> Alcotest.failf "decode failed: %s" detail
+  | Ok snapshot ->
+      (match snapshot.Tui_decode.cls_clients with
+       | [ mcp; bound ] ->
+           Alcotest.(check (option string))
+             "a non-keeper client carries no keeper" None
+             mcp.Tui_decode.cr_keeper_name;
+           Alcotest.(check (option string))
+             "a bound row carries its task" (Some "task-845")
+             bound.Tui_decode.cr_current_task;
+           Alcotest.(check string)
+             "the wire spelling decodes" "active"
+             (Tui_decode.client_status_to_string mcp.Tui_decode.cr_status);
+           Alcotest.(check string)
+             "busy decodes" "busy"
+             (Tui_decode.client_status_to_string bound.Tui_decode.cr_status)
+       | _ -> Alcotest.fail "expected both rows")
+
+let test_decode_clients_rejects_unknown_status_and_schema () =
+  (match
+     Tui_decode.decode_clients_snapshot
+       (clients_snapshot_json
+          [ clients_row_json ~name:"x" ~agent_type:"codex"
+              ~status:"hibernating" ~keeper:None ~task:None ])
+   with
+   | Ok _ -> Alcotest.fail "an unknown status decoded"
+   | Error detail ->
+       Alcotest.(check bool) "error names the status" true
+         (String.starts_with ~prefix:"clients: unknown status" detail));
+  (match
+     Tui_decode.decode_clients_snapshot
+       (clients_snapshot_json
+          [ clients_row_json ~name:"x" ~agent_type:"codex"
+              ~status:"Active" ~keeper:None ~task:None ])
+   with
+   | Ok _ -> Alcotest.fail "the capital spelling decoded"
+   | Error detail ->
+       Alcotest.(check bool) "error names the status" true
+         (String.starts_with ~prefix:"clients: unknown status" detail));
+  match
+    Tui_decode.decode_clients_snapshot
+      (`Assoc
+         [ "schema", `String "masc.dashboard.clients.v2"
+         ; "generated_at", `String "2026-09-04T01:21:00Z"
+         ; "observation_only", `Bool true
+         ; "clients", `List []
+         ])
+  with
+  | Ok _ -> Alcotest.fail "a wrong schema decoded"
+  | Error detail ->
+      Alcotest.(check bool) "error names the schema" true
+        (String.starts_with ~prefix:"clients: unsupported schema" detail)
+
 let test_decode_standalone_lanes_rejects_duplicate_ids () =
   let duplicate = standalone_lane_json "board_attention_exact" "Board" in
   let json =
@@ -7034,6 +7126,13 @@ let () =
           test_decode_standalone_lanes_rejects_duplicate_ids;
         Alcotest.test_case "every lane status word fits its column" `Quick
           test_every_lane_status_word_fits_its_column;
+      ] );
+    ( "decode_clients",
+      [
+        Alcotest.test_case "reads both status spellings, ignores the profile" `Quick
+          test_decode_clients_reads_the_status_enum_and_ignores_profile;
+        Alcotest.test_case "rejects an unknown status and a wrong schema" `Quick
+          test_decode_clients_rejects_unknown_status_and_schema;
       ] );
     ( "decode_lane_runs",
       [

@@ -564,7 +564,8 @@ let awaiting_approval_notice (state : state) =
           let where =
             match state.view with
             | Keepers Keeper_message -> ""
-            | Overview | Acting | Keepers _ | Lanes | Board | Approvals | Planning
+            | Overview | Acting | Keepers _ | Lanes | Clients | Board
+            | Approvals | Planning
             | Memory | Schedules | Verification | Harness | Fusion
             | Repositories | Code | Changes | Connectors | Runtime | Config
             | Resources | Tools | System_logs ->
@@ -6123,6 +6124,134 @@ let render_lane_run_detail (state : state) ~run_id =
        ~hints:(Masc_tui_keys.footer_hints_lanes_run_detail ~scroll ~max_scroll));
   finish_surface state ~clamped:(Lane_run_detail_scroll scroll)
     ~surface_key:"lane-run" ~rows:terminal_rows ~cols buf
+
+(* The clients roster: everyone attached to this workspace in one reading —
+   directory agents, state-backed sessions, runtime fibers. The keeper
+   roster answers "which Keepers exist"; this answers "who is here now",
+   which includes identities no other surface lists, such as a non-keeper
+   MCP client. One row per identity, sorted by name on the server, with the
+   status dot, the type, the keeper a row is bound to when it is, and what
+   task it holds. *)
+let render_clients (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let clients =
+    match state.clients_surface with
+    | None -> []
+    | Some snapshot -> snapshot.Masc.Tui_decode.cls_clients
+  in
+  let shown = List.length clients in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.clients_surface with
+    | None ->
+        Printf.sprintf "%s  (not loaded)  %s  %s"
+          (screen_title " MASC Runtime · Clients") timestamp
+          (connection_badge state)
+    | Some _ ->
+        Printf.sprintf "%s (%d attached)  %s  %s"
+          (screen_title " MASC Runtime · Clients") shown timestamp
+          (connection_badge state)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  (* Measured from the rows like the verification submitter column: a fixed
+     width puts the columns after the longest name out of line with the
+     rest, and session names are the column the eye scans by. *)
+  let name_width =
+    List.fold_left
+      (fun widest (row : Masc.Tui_decode.client_row) ->
+         max widest
+           (Message_layout.display_width
+              (Terminal_text.single_line row.Masc.Tui_decode.cr_name)))
+      16 clients
+    |> min 24
+  in
+  let col_hdr =
+    Printf.sprintf "  %-9s %-*s %-10s %-16s %-9s %s" "Status" name_width
+      "Name" "Type" "Keeper" "Task" "Last seen"
+  in
+  box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
+  box_divider buf cols;
+  (match state.clients_surface_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:(Theme.bad ())
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = listing_chrome ~error:state.clients_surface_error in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.clients_surface_scroll max_scroll) in
+  (* The wire carries RFC3339; the roster only needs the clock, the same
+     reading the header's own timestamp gives it a distance to. *)
+  let clock_of_iso value =
+    match String.index_opt value 'T' with
+    | Some at when String.length value - at >= 9 ->
+        String.sub value (at + 1) 8
+    | _ -> value
+  in
+  if shown = 0 then begin
+    let empty =
+      match state.clients_surface_error with
+      | Some _ -> page_failed_note
+      | None -> "  (nobody attached)"
+    in
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt clients idx with
+      | None -> box_empty buf cols
+      | Some row ->
+          let open Masc.Tui_decode in
+          let status = client_status_to_string row.cr_status in
+          let name = Terminal_text.single_line row.cr_name in
+          let keeper =
+            match row.cr_keeper_name with
+            | Some keeper -> Terminal_text.single_line keeper
+            | None -> "-"
+          in
+          let task =
+            match row.cr_current_task with
+            | Some task -> Terminal_text.single_line task
+            | None -> "-"
+          in
+          let line =
+            Printf.sprintf "  %-9s %s %-10s %-16s %-9s %s" status
+              (fit_width name name_width)
+              (fit_width (Terminal_text.single_line row.cr_agent_type) 10)
+              (fit_width keeper 16)
+              (fit_width task 9)
+              (clock_of_iso row.cr_last_seen)
+          in
+          (* Inactive rows stay in the roster -- "who left" is part of the
+             reading -- but they recede, the way the empty-state rows do. *)
+          let style =
+            match row.cr_status with
+            | Client_inactive -> Theme.recede ()
+            | _ -> Ansi.reset
+          in
+          if idx = state.clients_surface_cursor then
+            box_line_selected buf cols line
+          else box_line_styled buf cols ~style line
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:(Theme.recede ())
+      (Printf.sprintf "[%d attached, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  finish_surface state ~surface_key:"clients" ~rows:terminal_rows ~cols buf
+;;
 
 let render_lanes (state : state) =
   match state.lanes_mode with
@@ -14827,6 +14956,7 @@ let render_surface (state : state) =
   | Keepers Keeper_message -> render_keeper_message state
   | Keepers Keeper_runtime_pick -> render_runtime_pick state
   | Lanes -> render_lanes state
+  | Clients -> render_clients state
   | Board ->
       (match state.board_mode with
        | Board_list -> render_board_list state
@@ -16461,7 +16591,8 @@ let render (state : state) =
       match state.view with
       | Approvals ->
           List.nth_opt (approval_items state) state.approval_cursor
-      | Overview | Acting | Keepers _ | Memory | Lanes | Board | Planning
+      | Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
+      | Planning
       | Schedules | Verification | Harness | Fusion | Repositories | Changes
       | Connectors | Runtime | Config | Resources | Code | Tools
       | System_logs -> None

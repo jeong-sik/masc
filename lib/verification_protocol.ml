@@ -399,6 +399,49 @@ let stalled_metadata
        ; ("timestamp", `Float (Time_compat.now ()))
        ])
 
+(* How far back a stall looks for its own earlier post.
+
+   The window exists because the Board is a stream, not an index: there is an
+   exact-key index for Fusion run ids and nothing equivalent for a stall, and
+   a stall does not carry enough durable truth to justify building one. Set
+   against the storm this closes — one verification produced 40+ posts over
+   1h44m — the hearth's own recent history is far more than the repeats ever
+   spanned. A stall that outlives the window posts again, which is the right
+   answer that far out. *)
+let stall_lookback_posts = 200
+
+(* Whether this exact stall is already on the Board.
+
+   The Board is what the repeat is about, so the Board is what decides. The
+   post carries its identity in typed metadata — [type], [verification_id],
+   [gate], [detail] — so this reads those fields rather than matching the
+   rendered sentence, and it asks the same question the metadata answers.
+
+   A post that failed to land leaves nothing to find, so a stall whose notice
+   never reached anyone is reported again on the next sweep. *)
+let stall_already_on_the_board ~verification_id ~gate ~detail =
+  let same_stall (post : Board.post) =
+    match post.meta_json with
+    | None -> false
+    | Some (`Assoc fields) ->
+      let field name =
+        match List.assoc_opt name fields with
+        | Some (`String value) -> Some value
+        | Some _ | None -> None
+      in
+      field "type" = Some "verification_stalled"
+      && field "verification_id" = Some verification_id
+      && field "gate" = Some gate
+      && field "detail" = Some detail
+    | Some _ -> false
+  in
+  Board_dispatch.list_posts
+    ~hearth:"verification"
+    ~post_kind_filter:Board.System_post
+    ~limit:stall_lookback_posts
+    ()
+  |> List.exists same_stall
+
 let notify_stalled_verification
       ~(authority : Masc_domain.completion_authority)
       ~task_id
@@ -406,6 +449,9 @@ let notify_stalled_verification
       ~gate
       ~detail
   =
+  if stall_already_on_the_board ~verification_id ~gate ~detail
+  then ()
+  else
   match
     Board_dispatch.create_post
       ~author:(Masc_domain.completion_authority_actor authority)

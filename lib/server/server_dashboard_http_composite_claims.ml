@@ -100,6 +100,7 @@ let row_is_task_claim json =
       ( Keeper_tooling.Name.Broadcast
       | Keeper_tooling.Name.Task_create
       | Keeper_tooling.Name.Task_done
+      | Keeper_tooling.Name.Task_cancel
       | Keeper_tooling.Name.Task_release
       | Keeper_tooling.Name.Tasks_audit
       | Keeper_tooling.Name.Tasks_list )

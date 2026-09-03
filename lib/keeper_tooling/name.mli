@@ -11,6 +11,7 @@ type t =
   | Task_claim
   | Task_create
   | Task_done
+  | Task_cancel
   | Task_release
   | Tasks_audit
   | Tasks_list

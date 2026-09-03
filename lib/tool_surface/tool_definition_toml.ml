@@ -557,6 +557,7 @@ let loading_to_string = function
 type loaded =
   { schema : Masc_domain.tool_schema
   ; keeper_projection : Masc_domain.tool_schema option
+  ; agent_core_projection : Masc_domain.tool_schema option
   ; help : help option
   ; loading : loading
   ; shell_command : string list option
@@ -727,8 +728,11 @@ let assemble_input_schema ~params ~additional_properties ~alternatives : Yojson.
         | _ :: _ -> [ "oneOf", `List alternatives ]))
 ;;
 
-let keeper_projection_of_pairs ~name pairs =
-  let context = "keeper_projection" in
+(* The two projection tables — [keeper_projection] and
+   [agent_core_projection] — share one grammar: a deliberately narrower
+   description and input schema for one consumer surface, decoded with the
+   same known-keys discipline as the file itself. *)
+let projection_of_pairs ~context ~name pairs =
   let* description =
     match List.assoc_opt "description" pairs with
     | None -> Error (sprintf "%s is missing the required key \"description\"" context)
@@ -827,7 +831,23 @@ let tool_of_pairs ~name pairs =
     | Some value ->
       let* projection_pairs = as_table_pairs ~context:"keeper_projection" value in
       let* projection =
-        keeper_projection_of_pairs ~name:declared_name projection_pairs
+        projection_of_pairs
+          ~context:"keeper_projection"
+          ~name:declared_name
+          projection_pairs
+      in
+      Ok (Some projection)
+  in
+  let* agent_core_projection =
+    match List.assoc_opt "agent_core_projection" pairs with
+    | None -> Ok None
+    | Some value ->
+      let* projection_pairs = as_table_pairs ~context:"agent_core_projection" value in
+      let* projection =
+        projection_of_pairs
+          ~context:"agent_core_projection"
+          ~name:declared_name
+          projection_pairs
       in
       Ok (Some projection)
   in
@@ -849,6 +869,7 @@ let tool_of_pairs ~name pairs =
         ; "params"
         ; "one_of"
         ; "keeper_projection"
+        ; "agent_core_projection"
         ; "help"
         ; "defer_loading"
         ; "shell_command"
@@ -869,6 +890,7 @@ let tool_of_pairs ~name pairs =
             assemble_input_schema ~params ~additional_properties ~alternatives
         }
     ; keeper_projection
+    ; agent_core_projection
     ; help
     ; loading
     ; shell_command

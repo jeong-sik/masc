@@ -2732,6 +2732,34 @@ let add_routes ~sw ~clock router =
          let json = dashboard_perf_http_json (Mcp_server.workspace_config state) in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/clients" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         (* Everyone attached to this workspace in one reading: directory
+            agents, state-backed sessions, and runtime fibers, merged by
+            [dashboard_agents_safe]. The TUI's Runtime family reads this to
+            answer "who is connected", which no other surface lists — the
+            keeper roster carries keepers only, so a non-keeper MCP client
+            is invisible there. Sorted by name so two readings a refresh
+            apart diff as row changes, not reorderings. Observation-only:
+            joining a session to its task binding is a read, and the
+            backlog stays the authority on ownership. *)
+         let config = Mcp_server.workspace_config state in
+         let agents =
+           List.sort
+             (fun (a : Masc_domain.agent) (b : Masc_domain.agent) ->
+                String.compare a.name b.name)
+             (dashboard_agents_safe config)
+         in
+         let json =
+           `Assoc
+             [ ("schema", `String "masc.dashboard.clients.v1")
+             ; ("generated_at", `String (Masc_domain.now_iso ()))
+             ; ("observation_only", `Bool true)
+             ; ("clients", `List (List.map dashboard_agent_json agents))
+             ]
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/harness-health" (fun _request reqd ->
        with_public_read (fun state req reqd ->
          let since = Server_utils.query_param req "since" in

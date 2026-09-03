@@ -5198,6 +5198,85 @@ let decode_file_mount_paths items =
     (fun item -> required_string_field item "container_path")
     items
 
+type client_status =
+  | Client_active
+  | Client_busy
+  | Client_listening
+  | Client_inactive
+
+type client_row = {
+  cr_name : string;
+  cr_agent_type : string;
+  cr_status : client_status;
+  cr_current_task : string option;
+  cr_keeper_name : string option;
+  cr_session_bound_at : string;
+  cr_last_seen : string;
+  cr_capabilities : string list;
+}
+
+type clients_snapshot = {
+  cls_observed_at : string;
+  cls_clients : client_row list;
+}
+
+(* The clients roster's status is the agent_status ADT on the wire. The
+   emitter ([string_of_agent_status], which [dashboard_agent_json] uses)
+   spells the four closed values lowercase and nothing else, so this reads
+   exactly those four words: a spelling the producer never sends is a
+   different enum and rejects the row rather than drawing a wrong dot. *)
+let client_status_of_string value =
+  match value with
+  | "active" -> Ok Client_active
+  | "busy" -> Ok Client_busy
+  | "listening" -> Ok Client_listening
+  | "inactive" -> Ok Client_inactive
+  | other -> Error ("clients: unknown status " ^ other)
+
+let client_status_to_string = function
+  | Client_active -> "active"
+  | Client_busy -> "busy"
+  | Client_listening -> "listening"
+  | Client_inactive -> "inactive"
+
+let decode_client_row json =
+  let* cr_name = required_string_field json "name" in
+  let* cr_agent_type = required_string_field json "agent_type" in
+  let* status = required_string_field json "status" in
+  let* cr_status = client_status_of_string status in
+  let* cr_current_task = required_nullable_string_field json "current_task" in
+  let* cr_keeper_name = required_nullable_string_field json "keeper_name" in
+  let* cr_session_bound_at = required_string_field json "session_bound_at" in
+  let* cr_last_seen = required_string_field json "last_seen" in
+  let* capabilities = required_list_field json "capabilities" in
+  let* cr_capabilities = decode_string_list "capabilities" capabilities in
+  Ok
+    { cr_name
+    ; cr_agent_type
+    ; cr_status
+    ; cr_current_task
+    ; cr_keeper_name
+    ; cr_session_bound_at
+    ; cr_last_seen
+    ; cr_capabilities
+    }
+
+let decode_clients_snapshot json =
+  let* schema = required_string_field json "schema" in
+  let* () =
+    if String.equal schema "masc.dashboard.clients.v1" then Ok ()
+    else Error ("clients: unsupported schema " ^ schema)
+  in
+  let* cls_observed_at = required_string_field json "generated_at" in
+  let* observation_only = required_bool_field json "observation_only" in
+  let* () =
+    if observation_only then Ok ()
+    else Error "clients snapshot is not observation-only"
+  in
+  let* rows = required_list_field json "clients" in
+  let* cls_clients = decode_list "clients" decode_client_row rows in
+  Ok { cls_observed_at; cls_clients }
+
 let decode_keeper_secret_projection ~keeper json =
   let* status = required_string_field json "status" in
   let ksp_status = keeper_secret_status_of_string status in

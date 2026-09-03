@@ -52,6 +52,61 @@ let git_read_subcommands =
   ; "whatchanged"; "cat-file"; "name-rev"; "grep"
   ]
 
+(* gh subcommands that only read, keyed by their family. A family is listed
+   with the exact verbs that read; every other verb of that family — and every
+   family not listed — falls through to the judge. [pr checkout] and [repo
+   clone] write the working tree, [pr merge]/[create]/[comment] write on
+   GitHub, and [auth login] writes credentials, so none of them appear.
+
+   The network read itself is not what the judge is for: [git ls-remote] and
+   the web_fetch capability are already admitted here, and they carry the same
+   identity to the same kind of endpoint. What the judge answers is whether an
+   effect lands, and a listed verb lands none. *)
+let gh_read_verbs_by_family =
+  [ "pr", [ "list"; "view"; "diff"; "checks"; "status" ]
+  ; "issue", [ "list"; "view"; "status" ]
+  ; "run", [ "list"; "view" ]
+  ; "repo", [ "view"; "list" ]
+  ; "release", [ "list"; "view" ]
+  ; "workflow", [ "list"; "view" ]
+  ; "label", [ "list" ]
+  ; "cache", [ "list" ]
+  ; "gist", [ "list"; "view" ]
+  ; "search", [ "prs"; "issues"; "repos"; "code"; "commits" ]
+  ; "auth", [ "status" ]
+  ]
+
+(* [--web] leaves the guest: it opens a browser on the host. Nothing else in
+   the read verbs takes an argument that writes. *)
+let gh_flag_leaves_the_guest flag = String.equal flag "--web" || String.equal flag "-w"
+
+(* [gh api] is a GET only while nothing on the line makes it anything else.
+   A field flag alone flips the method to POST, which is why they are refused
+   here rather than only the explicit method flags. *)
+let gh_api_flag_writes flag =
+  List.mem flag
+    [ "-X"; "--method"; "-f"; "--raw-field"; "-F"; "--field"; "--input" ]
+  || String.starts_with ~prefix:"-X" flag
+  || String.starts_with ~prefix:"--method=" flag
+  || String.starts_with ~prefix:"--field=" flag
+  || String.starts_with ~prefix:"--raw-field=" flag
+  || String.starts_with ~prefix:"--input=" flag
+
+let gh_argv_is_read argv =
+  match argv with
+  | [] -> false
+  | "api" :: rest ->
+    rest <> []
+    && not (List.exists (fun flag -> gh_api_flag_writes flag || gh_flag_leaves_the_guest flag) rest)
+  | family :: verb :: rest -> (
+    match List.assoc_opt family gh_read_verbs_by_family with
+    | None -> false
+    | Some verbs ->
+      List.mem verb verbs
+      && not (List.exists gh_flag_leaves_the_guest rest))
+  | [ _ ] -> false
+;;
+
 (* git global options that consume the next argv slot before the
    subcommand. *)
 let git_global_flag_with_value = [ "-C"; "-c"; "--git-dir"; "--work-tree" ]
@@ -130,6 +185,7 @@ let classify_argv argv =
      | "uniq" ->
        List.length (List.filter (fun arg -> String.length arg = 0 || String.sub arg 0 1 <> "-") rest) <= 1
      | "git" -> git_argv_is_read rest
+     | "gh" -> gh_argv_is_read rest
      | command -> List.mem command observation_commands)
 ;;
 

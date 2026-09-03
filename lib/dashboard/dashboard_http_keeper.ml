@@ -466,7 +466,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               metrics_lines
             |> fst
           in
-          let metrics_series_items, metrics_window_summary, last_handoff_event =
+          let metrics_series_items, metrics_window_summary =
             compute_metrics_window
               ~parsed_metrics ~compact ~series_points
           in
@@ -869,7 +869,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("conversation_fragment_filtered_count", `Int conversation_fragment_filtered_count);
               ("k2k_count", `Int k2k_count);
               ("k2k_mentions", k2k_mentions);
-              ("last_handoff_event", match last_handoff_event with Some j -> j | None -> `Null);
               ("provider_health", provider_health_json);
               ("trust", trust_json);
               ("context_budget", context_budget);

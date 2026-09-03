@@ -986,6 +986,102 @@ let planning_header_row ~phase_width ~title_width =
 let planning_row ~phase_style ~phase_width ~title_width values =
   Table.row (planning_cells ~phase_style ~phase_width ~title_width values)
 
+(* Board post columns.
+
+   The list sized its title as [cols] minus a constant summed by hand from ten
+   widths and their gaps, and its header carried a second copy of the same
+   arithmetic. They disagreed: the rows sized the title to [cols - 68] while
+   the header claimed a fixed twenty, so at eighty columns the header ran eight
+   cells long, pushed SCORE into the frame and REPLIES off it -- two columns
+   still drawn on every row with nothing left saying what they were. The
+   repair at the time was a third number.
+
+   The gaps came back to one with the rest of the fleet. Board was spacing its
+   columns two cells apart, which is six cells of the title spent on being
+   different from every other table on the screen. *)
+
+let board_mark_width = 1
+let board_id_width = 12
+let board_hearth_width = 12
+let board_author_width = 16
+let board_age_width = 6
+let board_score_width = 5
+let board_replies_width = 7
+let board_minimum_title_width = 12
+
+type board_row_values = {
+  brow_mark : string;
+  brow_id : string;
+  brow_hearth : string;
+  brow_author : string;
+  brow_title : string;
+  brow_age : string;
+  brow_score : string;
+  brow_replies : string;
+}
+
+type board_row_styles = {
+  bstyle_id : string;
+  bstyle_hearth : string;
+  bstyle_author : string;
+  bstyle_age : string;
+  bstyle_score : string;
+  bstyle_replies : string;
+}
+
+let board_no_values =
+  { brow_mark = ""
+  ; brow_id = ""
+  ; brow_hearth = ""
+  ; brow_author = ""
+  ; brow_title = ""
+  ; brow_age = ""
+  ; brow_score = ""
+  ; brow_replies = ""
+  }
+
+let board_no_styles =
+  { bstyle_id = ""
+  ; bstyle_hearth = ""
+  ; bstyle_author = ""
+  ; bstyle_age = ""
+  ; bstyle_score = ""
+  ; bstyle_replies = ""
+  }
+
+let board_cells ?(styles = board_no_styles) ~title_width values =
+  [ (* The kind mark is a mark, like Planning's proof. A name would be wider
+       than the cell holding it, and it carries its own dress: the glyph and
+       its colour are chosen together. *)
+    Table.cell ~header:" " ~width:board_mark_width values.brow_mark
+  ; Table.cell ~style:styles.bstyle_id ~header:"ID" ~width:board_id_width
+      values.brow_id
+  ; Table.cell ~style:styles.bstyle_hearth ~header:"HEARTH"
+      ~width:board_hearth_width values.brow_hearth
+  ; Table.cell ~style:styles.bstyle_author ~header:"AUTHOR"
+      ~width:board_author_width values.brow_author
+  ; Table.cell ~header:"TITLE" ~width:title_width values.brow_title
+    (* Right, the way Planning's age reads. A span is a number and the two
+       screens are read one after the other; left on one and right on the
+       other is the drift this description exists to close. *)
+  ; Table.cell ~align:Table.Right ~style:styles.bstyle_age ~header:"AGE"
+      ~width:board_age_width values.brow_age
+  ; Table.cell ~style:styles.bstyle_score ~header:"SCORE"
+      ~width:board_score_width values.brow_score
+  ; Table.cell ~style:styles.bstyle_replies ~header:"REPLIES"
+      ~width:board_replies_width values.brow_replies
+  ]
+
+let board_title_width ~inner_width =
+  let named = Table.used_width (board_cells ~title_width:0 board_no_values) in
+  max board_minimum_title_width (inner_width - named)
+
+let board_header_row ~title_width =
+  Table.header_row (board_cells ~title_width board_no_values)
+
+let board_row ?close ~styles ~title_width values =
+  Table.row ?close (board_cells ~styles ~title_width values)
+
 module Terminal_size_cache = struct
   type refresh =
     | Changed of (int * int)

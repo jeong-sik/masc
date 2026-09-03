@@ -244,9 +244,9 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let current_keeper_mode =
     match state.view with
     | Keepers mode -> Some mode
-    | Overview | Acting | Memory | Lanes | Board | Approvals | Planning
-    | Schedules | Verification | Harness | Fusion | Repositories | Code
-    | Changes | Connectors | Runtime | Config | Resources | Tools
+    | Overview | Acting | Memory | Lanes | Clients | Board | Approvals
+    | Planning | Schedules | Verification | Harness | Fusion | Repositories
+    | Code | Changes | Connectors | Runtime | Config | Resources | Tools
     | System_logs -> None
   in
   let current_navigation =
@@ -1263,6 +1263,13 @@ let load_standalone_lanes ~(host : string) ~(port : int) :
   match fetch_standalone_lanes ~host ~port with
   | Error err -> Error ("standalone lanes load failed: " ^ err)
   | Ok json -> Tui_decode.decode_standalone_lanes_snapshot json
+
+(** Load the clients roster from /api/v1/dashboard/clients *)
+let load_clients ~(host : string) ~(port : int) :
+    (Tui_decode.clients_snapshot, string) result =
+  match fetch_clients ~host ~port with
+  | Error err -> Error ("clients load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_clients_snapshot json
 
 (** Load the repository list from /api/v1/repositories *)
 let load_repositories ~(host : string) ~(port : int) :

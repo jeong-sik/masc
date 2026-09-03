@@ -564,7 +564,8 @@ let awaiting_approval_notice (state : state) =
           let where =
             match state.view with
             | Keepers Keeper_message -> ""
-            | Overview | Acting | Keepers _ | Lanes | Board | Approvals | Planning
+            | Overview | Acting | Keepers _ | Lanes | Clients | Board
+            | Approvals | Planning
             | Memory | Schedules | Verification | Harness | Fusion
             | Repositories | Code | Changes | Connectors | Runtime | Config
             | Resources | Tools | System_logs ->
@@ -2775,34 +2776,21 @@ let render_approvals (state : state) =
 (* Who wrote it, in one column. 1561 of this workspace's 2171 posts are system
    posts and 588 are automation; the 22 a person wrote are what an operator is
    scanning for, so those are the ones that get a mark. *)
-(* The Board's column widths, asked once by the header and once by every row.
+(* The widths now live beside their column names in [Render_schedule], which
+   is the one place the header and the rows both read. The age column is sized
+   for the widest [span_text] draws, "1d00h": a board's oldest live threads are
+   days old, so the day tier is the one it holds. *)
 
-   The title is what absorbs the terminal: 68 is what the fixed columns and
-   the gaps between them take, so what is left is the title's. Held here
-   rather than spelled at both call sites, because the two used to disagree
-   and a header that disagrees with its rows is worse than no header -- it
-   labels the wrong column and the reader has no way to notice.
+(* Four cells of lead sit ahead of the mark on the header and on every row, so
+   the table gets what the frame leaves less those four. Summing the widths and
+   their gaps by hand is what the column description replaced: the sum was
+   written once for the rows and once for the header, and the two drifted until
+   REPLIES sat past the right edge whatever the title was sized to. *)
+let board_table_lead = 4
 
-   The mark is one display cell wide for every kind ([board_kind_mark]), so
-   the header pads one to sit over it. *)
-let board_score_w = 5
-let board_replies_w = 7
-
-(* The widest [span_text] draws: "1d00h". A board's oldest live threads are
-   days old, so the day tier is the one this column is sized for. *)
-let board_age_w = 6
-
-(* 4 lead + 1 mark + 1 gap + 12 id + 2 + 12 hearth + 2 + 16 author + 2
-   + 2 + age + 2 + score + 2 + replies, and 2 more for the frame the box draws
-   around all of it, measured rather than assumed: at eighty columns a row
-   built to 78 still overflowed, so the frame takes four. The old 68 accounted
-   for none of it, which is why REPLIES sat past the right edge no matter how
-   the title was sized. *)
-let board_row_fixed_cols = 4 + 1 + 1 + 12 + 2 + 12 + 2 + 16 + 2 + 2
-                           + board_age_w + 2 + board_score_w + 2
-                           + board_replies_w + 4
-
-let board_row_layout ~cols = (1, 12, 12, 16, max 1 (cols - board_row_fixed_cols))
+let board_title_width ~cols =
+  Render_schedule.board_title_width
+    ~inner_width:(max 0 (framed_inner_width cols - board_table_lead))
 
 let board_kind_mark = function
   | Some Post_by_person -> Ansi.bold ^ (Theme.info ()) ^ "@" ^ Ansi.reset
@@ -3003,14 +2991,12 @@ let render_board_list (state : state) =
      what they were. The mark ahead of the id is one cell and the header
      reserved two, which put every label one cell right of its data.
 
-     [board_row_layout] is the one place either of them asks. *)
-  let mark_pad, id_w, hearth_w, author_w, title_w = board_row_layout ~cols in
+     The column description in [Render_schedule] is the one place either of
+     them asks. *)
+  let title_w = board_title_width ~cols in
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "    %-*s %-*s  %-*s  %-*s  %-*s  %s  %s  %s" mark_pad ""
-       id_w "ID" hearth_w "HEARTH" author_w "AUTHOR" title_w "TITLE"
-       (Printf.sprintf "%-*s" board_age_w "AGE")
-       (Printf.sprintf "%-*s" board_score_w "SCORE")
-       (Printf.sprintf "%-*s" board_replies_w "REPLIES"));
+    (String.make board_table_lead ' '
+     ^ Render_schedule.board_header_row ~title_width:title_w);
   box_divider buf cols;
 
   let board_list_error =
@@ -3044,59 +3030,39 @@ let render_board_list (state : state) =
       if idx < count then begin
         let p = List.nth state.board_posts idx in
         let is_selected = idx = state.board_cursor in
-        let id =
-          (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ fit_width (Terminal_text.single_line p.bp_id) id_w
-          ^ Ansi.reset
+        (* The age is since the post or one of its comments last moved. A
+           board's list had no timestamp at all, so "what is still alive" --
+           the question the [recent] and [updated] sort orders answer -- could
+           only be read off the order the rows happened to arrive in. Spelled
+           with the same ladder the Approvals queue uses, so a span reads the
+           same on both. *)
+        let values =
+          { Render_schedule.brow_mark = board_kind_mark p.bp_kind
+          ; brow_id = Terminal_text.single_line p.bp_id
+          ; brow_hearth =
+              Option.value ~default:""
+                (Terminal_text.optional_single_line p.bp_hearth)
+          ; brow_author = Terminal_text.single_line p.bp_author
+          ; brow_title = Terminal_text.single_line p.bp_title
+          ; brow_age = Message_layout.span_text (now_unix -. p.bp_updated_at)
+          ; brow_score = Masc_tui_board_score.text p.bp_votes
+          ; brow_replies = Printf.sprintf "c%d" p.bp_comment_count
+          }
         in
-        let hearth =
-          Ansi.dim
-          ^ fit_width
-              (match Terminal_text.optional_single_line p.bp_hearth with
-               | Some hearth -> hearth
-               | None -> "")
-              hearth_w
-          ^ Ansi.reset
+        let styles =
+          { Render_schedule.bstyle_id =
+              Masc_tui_theme.tone Masc_tui_theme.Accent
+          ; bstyle_hearth = Ansi.dim
+          ; bstyle_author = Masc_tui_theme.tone Masc_tui_theme.Accent
+          ; bstyle_age = Ansi.dim
+          ; bstyle_score = board_score_style p.bp_votes
+          ; bstyle_replies = Ansi.dim
+          }
         in
-        let author =
-          (Masc_tui_theme.tone Masc_tui_theme.Accent)
-          ^ fit_width (Terminal_text.single_line p.bp_author) author_w
-          ^ Ansi.reset
+        let content =
+          String.make board_table_lead ' '
+          ^ Render_schedule.board_row ~styles ~title_width:title_w values
         in
-        let score =
-          (board_score_style p.bp_votes)
-          ^ Printf.sprintf "%-*s" board_score_w
-              (Masc_tui_board_score.text p.bp_votes)
-          ^ Ansi.reset
-        in
-        let replies =
-          Ansi.dim
-          ^ Printf.sprintf "%-*s" board_replies_w
-              (Printf.sprintf "c%d" p.bp_comment_count)
-          ^ Ansi.reset
-        in
-        (* Since the post or one of its comments last moved. A board's list
-           had no timestamp at all, so "what is still alive" -- the question
-           the [recent] and [updated] sort orders answer -- could only be read
-           off the order the rows happened to arrive in. Spelled with the same
-           ladder the Approvals queue uses, so a span reads the same on both. *)
-        let age =
-          Ansi.dim
-          ^ Printf.sprintf "%-*s" board_age_w
-              (Message_layout.span_text (now_unix -. p.bp_updated_at))
-          ^ Ansi.reset
-        in
-        let line =
-          Printf.sprintf "  %s %s  %s  %s  %s  %s  %s  %s"
-            (board_kind_mark p.bp_kind)
-            id
-            hearth
-            author
-            (fit_width (Terminal_text.single_line p.bp_title) title_w)
-            age
-            score
-            replies
-        in
-        let content = "  " ^ line in
         if is_selected then
           box_line_selected buf cols (Masc_tui_theme.strip_sgr content)
         else
@@ -6124,6 +6090,134 @@ let render_lane_run_detail (state : state) ~run_id =
   finish_surface state ~clamped:(Lane_run_detail_scroll scroll)
     ~surface_key:"lane-run" ~rows:terminal_rows ~cols buf
 
+(* The clients roster: everyone attached to this workspace in one reading —
+   directory agents, state-backed sessions, runtime fibers. The keeper
+   roster answers "which Keepers exist"; this answers "who is here now",
+   which includes identities no other surface lists, such as a non-keeper
+   MCP client. One row per identity, sorted by name on the server, with the
+   status dot, the type, the keeper a row is bound to when it is, and what
+   task it holds. *)
+let render_clients (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let clients =
+    match state.clients_surface with
+    | None -> []
+    | Some snapshot -> snapshot.Masc.Tui_decode.cls_clients
+  in
+  let shown = List.length clients in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.clients_surface with
+    | None ->
+        Printf.sprintf "%s  (not loaded)  %s  %s"
+          (screen_title " MASC Runtime · Clients") timestamp
+          (connection_badge state)
+    | Some _ ->
+        Printf.sprintf "%s (%d attached)  %s  %s"
+          (screen_title " MASC Runtime · Clients") shown timestamp
+          (connection_badge state)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  (* Measured from the rows like the verification submitter column: a fixed
+     width puts the columns after the longest name out of line with the
+     rest, and session names are the column the eye scans by. *)
+  let name_width =
+    List.fold_left
+      (fun widest (row : Masc.Tui_decode.client_row) ->
+         max widest
+           (Message_layout.display_width
+              (Terminal_text.single_line row.Masc.Tui_decode.cr_name)))
+      16 clients
+    |> min 24
+  in
+  let col_hdr =
+    Printf.sprintf "  %-9s %-*s %-10s %-16s %-9s %s" "Status" name_width
+      "Name" "Type" "Keeper" "Task" "Last seen"
+  in
+  box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
+  box_divider buf cols;
+  (match state.clients_surface_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:(Theme.bad ())
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = listing_chrome ~error:state.clients_surface_error in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.clients_surface_scroll max_scroll) in
+  (* The wire carries RFC3339; the roster only needs the clock, the same
+     reading the header's own timestamp gives it a distance to. *)
+  let clock_of_iso value =
+    match String.index_opt value 'T' with
+    | Some at when String.length value - at >= 9 ->
+        String.sub value (at + 1) 8
+    | _ -> value
+  in
+  if shown = 0 then begin
+    let empty =
+      match state.clients_surface_error with
+      | Some _ -> page_failed_note
+      | None -> "  (nobody attached)"
+    in
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll in
+      match List.nth_opt clients idx with
+      | None -> box_empty buf cols
+      | Some row ->
+          let open Masc.Tui_decode in
+          let status = client_status_to_string row.cr_status in
+          let name = Terminal_text.single_line row.cr_name in
+          let keeper =
+            match row.cr_keeper_name with
+            | Some keeper -> Terminal_text.single_line keeper
+            | None -> "-"
+          in
+          let task =
+            match row.cr_current_task with
+            | Some task -> Terminal_text.single_line task
+            | None -> "-"
+          in
+          let line =
+            Printf.sprintf "  %-9s %s %-10s %-16s %-9s %s" status
+              (fit_width name name_width)
+              (fit_width (Terminal_text.single_line row.cr_agent_type) 10)
+              (fit_width keeper 16)
+              (fit_width task 9)
+              (clock_of_iso row.cr_last_seen)
+          in
+          (* Inactive rows stay in the roster -- "who left" is part of the
+             reading -- but they recede, the way the empty-state rows do. *)
+          let style =
+            match row.cr_status with
+            | Client_inactive -> Theme.recede ()
+            | _ -> Ansi.reset
+          in
+          if idx = state.clients_surface_cursor then
+            box_line_selected buf cols line
+          else box_line_styled buf cols ~style line
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:(Theme.recede ())
+      (Printf.sprintf "[%d attached, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  finish_surface state ~surface_key:"clients" ~rows:terminal_rows ~cols buf
+;;
+
 let render_lanes (state : state) =
   match state.lanes_mode with
   | Lanes_overview -> render_lanes_overview state
@@ -8806,8 +8900,45 @@ let render_keeper_message (state : state) =
             is holding them up. Only while there is something to queue. *)
          let queue_hint =
            if Buffer.length state.msg_input > 0 then
-             " · Enter queues your line; this turn keeps running"
+             " · Enter queues your line; it sends when this turn ends"
            else ""
+         in
+         (* The gate and the prompt describe the same held call. Drawn apart,
+            one row asked the operator to answer while another said a judge
+            was deciding, and neither said how they related — so the screen
+            read as two authorities waiting on each other. The prompt says
+            which one holds the call and that the operator's key still ends
+            it. *)
+         let gate_note =
+           match
+             Masc_tui_types.keeper_effects_at_the_gate state
+               ~keeper_name:(Keeper_chat_transcript.keeper_name live)
+           with
+           | [] -> ""
+           | pending -> (
+             let judging =
+               List.find_opt
+                 (fun (row : Tui_decode.gate_pending) ->
+                   row.gp_phase = Tui_decode.Gate_judging)
+                 pending
+             in
+             match judging with
+             | None -> ""
+             | Some row ->
+               let age =
+                 match row.gp_waiting_s with
+                 | Some seconds -> " " ^ Masc_tui_answering.duration_text seconds
+                 | None -> ""
+               in
+               Printf.sprintf " · the judge is deciding%s; your answer ends it now" age)
+         in
+         (* [status_rows] puts the approval question first among its Attention
+            rows, so the note lands on that one and not on an interrupt or a
+            stream diagnostic that shares the kind. *)
+         let note_unused =
+           ref
+             (not (String.equal gate_note "")
+              && Option.is_some (Keeper_chat_transcript.awaiting_approval live))
          in
          List.iter
            (fun (kind, text) ->
@@ -8818,7 +8949,15 @@ let render_keeper_message (state : state) =
                      ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
                      ^ " · " ^ text ^ queue_hint)
               | Keeper_chat_transcript.Attention ->
-                  box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text)
+                  let suffix =
+                    if !note_unused then begin
+                      note_unused := false;
+                      gate_note
+                    end
+                    else ""
+                  in
+                  box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
+                    ("  " ^ text ^ suffix)
               | Keeper_chat_transcript.Approval outcome ->
                   let style =
                     match outcome with
@@ -14827,6 +14966,7 @@ let render_surface (state : state) =
   | Keepers Keeper_message -> render_keeper_message state
   | Keepers Keeper_runtime_pick -> render_runtime_pick state
   | Lanes -> render_lanes state
+  | Clients -> render_clients state
   | Board ->
       (match state.board_mode with
        | Board_list -> render_board_list state
@@ -16461,7 +16601,8 @@ let render (state : state) =
       match state.view with
       | Approvals ->
           List.nth_opt (approval_items state) state.approval_cursor
-      | Overview | Acting | Keepers _ | Memory | Lanes | Board | Planning
+      | Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
+      | Planning
       | Schedules | Verification | Harness | Fusion | Repositories | Changes
       | Connectors | Runtime | Config | Resources | Code | Tools
       | System_logs -> None

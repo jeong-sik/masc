@@ -212,6 +212,54 @@ let test_age_seconds_preserves_missing_timestamp () =
     (Keeper_status_metrics.age_seconds_opt ~now_ts:100.0 75.0)
 ;;
 
+(* #32971 Root B: the Turn row the metrics producer writes today carries
+   neither [generation] (removed by #29590) nor [handoff_performed] (removed
+   by #31522). While the summary required both, every Turn row was discarded
+   and a Keeper with hundreds of turns reported turn_points 0. *)
+let producer_shaped_turn_line ~channel =
+  Yojson.Safe.to_string
+    (`Assoc
+      (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+      @ [ "ts", `String "2026-09-04T00:00:00Z"
+        ; "ts_unix", `Float 100.0
+        ; "channel", `String channel
+        ; "trace_id", `String "trace-producer"
+        ; "latency_ms", `Int 20
+        ; "turn_mode", `String "text_response"
+        ; "tool_call_count", `Int 0
+        ; "tools_used", `List []
+        ]))
+;;
+
+let test_producer_shaped_turn_rows_reach_the_summary () =
+  let summary_field key =
+    Keeper_status_metrics.summarize_metrics_lines
+      [ producer_shaped_turn_line ~channel:"turn"
+      ; producer_shaped_turn_line ~channel:"turn"
+      ; producer_shaped_turn_line ~channel:"scheduled_autonomous"
+      ]
+    |> Keeper_status_metrics.metrics_summary_to_json
+    |> Yojson.Safe.Util.member key
+    |> Yojson.Safe.Util.to_int
+  in
+  Alcotest.(check int) "reactive rows raise turn_points" 2 (summary_field "turn_points");
+  Alcotest.(check int)
+    "autonomous rows raise proactive_points"
+    1
+    (summary_field "proactive_points");
+  Alcotest.(check int) "every row is sampled" 3 (summary_field "sample_points")
+;;
+
+let test_summary_json_drops_the_retired_handoff_counters () =
+  let json =
+    Keeper_status_metrics.metrics_summary_to_json
+      Keeper_status_metrics.empty_metrics_summary
+  in
+  let absent key = Yojson.Safe.Util.member key json = `Null in
+  Alcotest.(check bool) "handoff_count is gone" true (absent "handoff_count");
+  Alcotest.(check bool) "last_handoff is gone" true (absent "last_handoff")
+;;
+
 let test_tool_audit_cache_advances_from_negative_by_appended_rows () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -263,7 +311,6 @@ let test_tool_audit_cache_advances_from_negative_by_appended_rows () =
              ; "channel", `String "turn"
              ; "turn_mode", `String "tool_use"
              ; "latency_ms", `Int 1
-             ; "handoff_performed", `Bool false
              ; "tool_call_count", `Int 1
              ; "tools_used", `List [ `String "masc_status" ]
              ]));
@@ -306,7 +353,6 @@ let test_tool_audit_cache_invalidation_for_recreated_keeper () =
              ; "channel", `String "turn"
              ; "turn_mode", `String "tool_use"
              ; "latency_ms", `Int 1
-             ; "handoff_performed", `Bool false
              ; "tool_call_count", `Int 1
              ; "tools_used", `List [ `String tool_name ]
              ])
@@ -500,6 +546,16 @@ let () =
             "missing timestamps do not become zero age"
             `Quick
             test_age_seconds_preserves_missing_timestamp
+        ] );
+      ( "metrics window producer contract",
+        [ Alcotest.test_case
+            "producer-shaped turn rows reach the summary"
+            `Quick
+            test_producer_shaped_turn_rows_reach_the_summary
+        ; Alcotest.test_case
+            "retired handoff counters are gone from the wire"
+            `Quick
+            test_summary_json_drops_the_retired_handoff_counters
         ] );
       ( "tool audit cache",
         [ Alcotest.test_case

@@ -271,7 +271,7 @@ let startup_sweep_microvm_guests (state : Mcp_server.server_state) =
   try
     let timeout_sec = Env_config_sandbox.Runtime.microvm_remove_timeout_sec () in
     let config = Mcp_server.workspace_config state in
-    let outcome =
+    let outcomes =
       Keeper_sandbox_microvm.sweep_abandoned_guests
         ~base_path:config.base_path
         ~command_available:Executable_path.command_available
@@ -280,25 +280,32 @@ let startup_sweep_microvm_guests (state : Mcp_server.server_state) =
         ~run_argv:(fun ~timeout_sec argv ->
           Process_eio.run_argv_with_status ~timeout_sec argv)
     in
-    match outcome with
-    | None ->
+    match outcomes with
+    | [] ->
       Log.Misc.info
-        "startup microvm sweep skipped: `container` CLI is not available on PATH"
-    | Some outcome ->
-      (match outcome.removed with
-       | [] -> ()
-       | removed ->
-         Log.Misc.info
-           "startup sweep: removed %d microvm guest(s) whose server is gone: %s"
-           (List.length removed)
-           (String.concat ", " removed));
+        "startup microvm sweep swept no runtime: none of %s has both its CLI on \
+         PATH and a guest listing this build can scope to a base path"
+        (String.concat ", " Keeper_microvm_backend.valid_strings)
+    | outcomes ->
       List.iter
-        (fun (container_id, detail) ->
-           Log.Misc.warn
-             "startup sweep: microvm guest %s survived removal: %s"
-             container_id
-             detail)
-        outcome.failed
+        (fun (backend, (outcome : Keeper_sandbox_microvm.sweep_outcome)) ->
+           (match outcome.removed with
+            | [] -> ()
+            | removed ->
+              Log.Misc.info
+                "startup sweep: removed %d %s guest(s) whose server is gone: %s"
+                (List.length removed)
+                (Keeper_microvm_backend.to_string backend)
+                (String.concat ", " removed));
+           List.iter
+             (fun (container_id, detail) ->
+                Log.Misc.warn
+                  "startup sweep: %s guest %s survived removal: %s"
+                  (Keeper_microvm_backend.to_string backend)
+                  container_id
+                  detail)
+             outcome.failed)
+        outcomes
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

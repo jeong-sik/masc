@@ -437,6 +437,61 @@ val planning_row :
     column is named with a space: it is a mark like the roster's, and a name
     would be four cells wider than the cell holding it. *)
 
+(** Board post columns.
+
+    The list sized its title as the terminal minus a constant summed by hand
+    from ten widths and their gaps, and the header carried a second copy of the
+    same arithmetic. They disagreed: at eighty columns the header ran eight
+    cells long, which pushed SCORE into the frame and REPLIES off it, leaving
+    two columns drawn on every row with nothing saying what they were.
+
+    Board also spaced its columns two cells apart while every other table used
+    one, so six cells of the title were spent on being different. They match
+    now. *)
+
+type board_row_values = {
+  brow_mark : string;
+  brow_id : string;
+  brow_hearth : string;
+  brow_author : string;
+  brow_title : string;
+  brow_age : string;
+  brow_score : string;
+  brow_replies : string;
+}
+
+type board_row_styles = {
+  bstyle_id : string;
+  bstyle_hearth : string;
+  bstyle_author : string;
+  bstyle_age : string;
+  bstyle_score : string;
+  bstyle_replies : string;
+}
+(** What dresses each reading. The layout module carries no palette, so the
+    colours come from the caller that owns one; the score's varies by row and
+    the rest are the screen's constants. *)
+
+val board_no_styles : board_row_styles
+(** Every reading undressed. A caller drawing the row plain -- a test, or a
+    surface that dresses the whole line -- has nothing to spell out. *)
+
+val board_title_width : inner_width:int -> int
+(** What the title has after the named columns, never below a floor. [inner_width]
+    is what the row has left of the frame, the four cells of lead ahead of the
+    mark already taken off. *)
+
+val board_header_row : title_width:int -> string
+
+val board_row :
+  ?close:string ->
+  styles:board_row_styles ->
+  title_width:int ->
+  board_row_values ->
+  string
+(** One post, on the same columns as {!board_header_row}. The kind mark carries
+    its own dress: the glyph and its colour are chosen together. *)
+
 module Terminal_size_cache : sig
   type refresh =
     | Changed of (int * int)

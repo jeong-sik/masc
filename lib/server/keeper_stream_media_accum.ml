@@ -241,6 +241,7 @@ let on_event ?(stream_scope = 0) t (evt : Agent_core.Types.sse_event) =
   | Agent_core.Types.SSEUnsupportedPart _
   | Agent_core.Types.SSEUnsupportedResponse _ -> discard_current_scope t
   | Agent_core.Types.StreamIncomplete _
+  | Agent_core.Types.StreamRepeating _
   | Agent_core.Types.MessageStart _
   | Agent_core.Types.ContentBlockStart _
   | Agent_core.Types.ContentBlockDelta _

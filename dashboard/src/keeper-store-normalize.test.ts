@@ -276,7 +276,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
   })
 
-  it('accepts the current nested handoff contract', () => {
+  it('normalizes a producer-shaped metrics series row', () => {
     const [keeper] = normalizeKeepers([
       {
         name: 'beta',
@@ -288,14 +288,8 @@ describe('normalizeKeepers lifecycle metrics', () => {
             context_tokens: 880,
             context_max: 1000,
             latency_ms: 140,
-            generation: 5,
             channel: 'turn',
             cost_usd: 0.2,
-            handoff_performed: true,
-            handoff: {
-              performed: true,
-              to_generation: 6,
-            },
           },
         ],
       },
@@ -304,10 +298,11 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(keeper?.metrics_series).toHaveLength(1)
     const metric = keeper!.metrics_series![0]
     expect(metric).toMatchObject({
-      is_handoff: true,
-      handoff_new_generation: 6,
+      ts: 2,
+      channel: 'turn',
+      latency_ms: 140,
     })
-    expect(deriveLifecycleState(keeper!)).toBe('handoff-imminent')
+    expect(deriveLifecycleState(keeper!)).toBe('active')
   })
 
   it('keeps runtime tool audit fields while ignoring retired context source', () => {

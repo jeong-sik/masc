@@ -251,9 +251,13 @@ let joined_opt parts =
   | [] -> None
   | rows -> Some (String.concat " · " rows)
 
+(* The profile, not the runtime under it: this wire carries which sandbox a
+   Keeper declared and not which microVM CLI serves it. Naming Apple here
+   labelled every msb and nerdctl Keeper with a runtime it does not use. The
+   runtime appears in the logs section, which does carry it. *)
 let profile_label = function
   | Some Docker -> "Docker"
-  | Some Micro_vm -> "Apple Container VM"
+  | Some Micro_vm -> "microVM guest"
   | Some Remote_ssh -> "Remote SSH"
   | None -> "not reported"
 
@@ -422,9 +426,23 @@ let view_lines ~width reading =
   @ wrapped_rows ~width ~label:"Container stdio" ~tone:`Info "o  actual logs"
   @ wrapped_rows ~width ~label:"Sandbox calls" ~tone:`Info "t  tool calls"
 
+(* The server answers the runtime's own spelling, so every runtime it can
+   name has to be a value here. A strict decoder is the point -- an unknown
+   string blanks the whole panel rather than guessing -- which is why a new
+   microVM runtime is a change on both sides of this wire.
+
+   This type is parallel to the server's closed sum rather than the same
+   type: this library links no server code, so the compiler cannot ask. What
+   asks is
+   [test_the_reader_accepts_every_runtime_the_server_can_name] in
+   test/test_tui_keeper_sandbox.ml, which iterates
+   [Keeper_microvm_backend.valid_strings] and fails when one has no arm
+   below. Adding a runtime there without adding it here fails the suite. *)
 type log_backend =
   | Docker_log_backend
   | Apple_container_log_backend
+  | Microsandbox_log_backend
+  | Nerdctl_kata_log_backend
 
 type log_instance =
   { log_instance_id : string
@@ -513,6 +531,8 @@ let decode_logs ~sanitize json =
     | None | Some `Null -> Ok None
     | Some (`String "docker") -> Ok (Some Docker_log_backend)
     | Some (`String "apple_container") -> Ok (Some Apple_container_log_backend)
+    | Some (`String "microsandbox") -> Ok (Some Microsandbox_log_backend)
+    | Some (`String "nerdctl_kata") -> Ok (Some Nerdctl_kata_log_backend)
     | Some (`String value) ->
       Error ("sandbox logs.backend has unsupported value " ^ sanitize value)
     | Some _ -> Error "sandbox logs.backend must be a string or null"
@@ -546,6 +566,8 @@ let logs_view_lines ~width logs =
   let backend_label = function
     | Docker_log_backend -> "Docker"
     | Apple_container_log_backend -> "Apple Container"
+    | Microsandbox_log_backend -> "microsandbox"
+    | Nerdctl_kata_log_backend -> "nerdctl (Kata)"
   in
   (* A tail count belongs to a stream. Without one, neither it nor a backend
      name is printed: there is nothing they would describe. *)

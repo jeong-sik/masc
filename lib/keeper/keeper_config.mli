@@ -132,6 +132,20 @@ val keeper_enable_thinking : unit -> bool
     [keeper.turn.max_tool_rounds]; 0 means unbounded. *)
 val keeper_max_tool_rounds : unit -> int option
 
+(** How far back through a conversation a deferred tool's most recent call may
+    be and still be placed with its argument schema, counted in tool calls of
+    any tool. A tool further back than this is shown by name in the listing
+    again and its schema is not sent until it is asked for.
+
+    Sampled rather than enforced continuously: the carry is measured against
+    this window on a call to a tool the carry does not already hold, and not
+    between two such calls, so a tool can sit further back than this and still
+    be placed. [Keeper_identity_tool_search.surface] carries the reason.
+
+    Hot-reloadable via [keeper.tool_search.carry_window]; 0 places every tool
+    the conversation has run. *)
+val keeper_tool_carry_window : unit -> int
+
 (** {1 Runtime Param Handles}
 
     Exposed for test use only (e.g. [Runtime_params.clear]). *)

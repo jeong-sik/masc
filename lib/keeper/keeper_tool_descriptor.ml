@@ -1205,6 +1205,13 @@ let tasks_list_output_schema =
       ; "matching_count", `Assoc [ "type", `String "integer" ]
       ; "returned_count", `Assoc [ "type", `String "integer" ]
       ; "truncated", `Assoc [ "type", `String "boolean" ]
+        (* Emitted by [Keeper_tool_task_runtime] only when a page is cut
+           short; the last page carries none, so it stays optional. Absent
+           here until #32488 added the keyset cursor to the response without
+           widening this schema, which made every composition holding a
+           [keeper_tasks_list] node fail output validation with
+           [unexpected_field: next_cursor] instead of returning. *)
+      ; "next_cursor", `Assoc [ "type", `String "string" ]
       ]
     ~required:
       [ "backlog_authority"; "degraded"; "projection"; "kind"; "revision" ]

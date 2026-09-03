@@ -7404,6 +7404,8 @@ let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
         |> List.filter (fun (message, _) ->
           message.me_role <> Message_thinking
           || state.msg_reasoning_visibility <> Reasoning_hidden)
+        |> Masc_tui_types.fold_memory_summary_runs
+             ~visibility:state.msg_memory_visibility
       in
       visible_timeline_memo :=
         Some

@@ -37,9 +37,13 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
 describe('normalizeKeepers sandbox_profile', () => {
   // The switch listed 'local' and 'docker' only. dashboard_http_keeper.ml emits
   // sandbox_profile_to_string, so a microvm or remote_ssh keeper normalized to
-  // null and every consumer read it as an unknown sandbox: the fleet chip said
-  // "sandbox unknown", the goal tree's 샌드박스 cell was blank, and the detail
-  // alert strip lost its fallback.
+  // null and the fleet chip read it as an unknown sandbox
+  // (fleet-telemetry-panel.ts). That chip is the consumer this path feeds. The
+  // goal tree's 샌드박스 cell is not: it decodes
+  // dashboard_goals_types_timeline.ml through decodeGoalDetailKeeper, which
+  // never calls this normalizer. Neither is the detail alert strip, whose
+  // sandbox_profile arm sits behind sandbox_target — emitted with
+  // ~default:"unknown", so the `||` never falls through to it.
   it('keeps every profile the runtime can emit', () => {
     const keepers = normalizeKeepers([
       { name: 'a', status: 'active', sandbox_profile: 'docker' },

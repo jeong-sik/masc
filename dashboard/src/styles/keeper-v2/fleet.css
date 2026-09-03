@@ -136,7 +136,6 @@
   padding: 0 6px; border-radius: var(--radius-pill);
 }
 .fl-ns { display: flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-dim); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: help; }
-.fl-ns .fl-sandbox { margin-left: 0; flex: none; }
 
 /* state cell */
 .fl-state { display: flex; flex-direction: column; gap: 3px; min-width: 0; }

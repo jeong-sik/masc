@@ -7,6 +7,7 @@ import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, 
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
 import type { KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, SandboxProfile } from '../types'
+import { UNKNOWN_NETWORK_MODE, UNKNOWN_SANDBOX_PROFILE } from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
   const booleanValue = asBoolean(value)
@@ -344,8 +345,8 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       decodeConfigWarnings(data.config_transaction_warnings),
     autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
     max_context_override: maxContextOverride,
-    sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
-    network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
+    sandbox_profile: asNullableString(data.sandbox_profile) ?? UNKNOWN_SANDBOX_PROFILE,
+    network_mode: asNullableString(data.network_mode) ?? UNKNOWN_NETWORK_MODE,
     remote_endpoint: asNullableString(data.remote_endpoint),
     keeper_last_error: asNullableString(data.keeper_last_error),
     sandbox_roots: normalizeStringList(data.sandbox_roots),

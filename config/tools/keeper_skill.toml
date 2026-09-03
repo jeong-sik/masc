@@ -1,6 +1,15 @@
 name = "keeper_skill"
 description = "Read one frozen instruction Skill body by its canonical exact reference. When that body names a bundled file needed for the current work, call again with its relative `file` path. A file larger than the turn's configured `[skills].resource-read-max-bytes`, or content that cannot fit the provider's shared inline tool-result boundary, is rejected before activation is recorded. Use the exact reference projected by the current Task or this tool's Available list; names alone are never accepted."
 additional_properties = false
+# 지연 판단은 호출 수가 아니라 그 도구가 필요했던 서로 다른 턴 수로 한다
+# (masc #32062): 실으면 스키마 x 요청수, 지연하면 필요했던 턴 수 x 표면 바이트다.
+# agent-core 5 keeper 의 도구-사용 턴 11,164 개와 표면 67,000 B 기준으로 이 도구는
+# 3,695 B 를 매 요청에 싣고 176 턴(1.6%)에서만 필요했다 — 3.5x 이다.
+#
+# 조회 도구는 이 계산이 유리해도 지연하지 않는다. keeper_capability_search 와
+# keeper_tools_list 는 목록이 길 때 찾는 수단이라, 지연하면 찾는 일 자체가 한 홉
+# 멀어진다. 그 비용은 바이트로 잡히지 않는다. 이 도구는 조회가 아니다.
+defer_loading = true
 
 [[params]]
 name = "identity"

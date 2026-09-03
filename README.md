@@ -115,6 +115,37 @@ A release carries the server binary, the terminal UI, and the deployment
 preflight helpers. The installer puts `masc-tui` next to `masc` and prints the
 command that starts it.
 
+### First-run setup
+
+After placing the binaries the installer runs a one-time setup wizard (skip it
+with `--no-wizard`). It reports what it detects on this host before writing
+anything, and the only files it writes are `.masc/config/.env.local` (one
+provider key) and `[runtime].default` in `runtime.toml`.
+
+Two axes are reported. The **model source** is where turns get their tokens:
+
+- A cloud provider (Anthropic, OpenAI, GLM, DeepSeek, …) is offered against its
+  API-key environment variable. Pass `--provider <id>` to select one without
+  prompting, and `--api-key` or `--api-key-stdin` to supply the key.
+- A local server (Ollama, llama-server, MLX) is curled at its healthcheck path
+  and shown `reachable` or `not running`, so a server that is not up is visible
+  before it is chosen.
+- A subscription CLI (Claude Code, Codex, Antigravity) is reached through that
+  CLI's own login, so it needs no key. It is shown `installed` once its command
+  is on `PATH`, and `signed in` when its own login check passes.
+
+The **execution sandbox** is where a Keeper's tools run. The wizard only reports
+which backends the host can offer — `docker` (daemon reachable), `microvm` via
+Apple's `container` CLI on macOS, and `remote_ssh` (endpoints declared in
+`runtime.toml`). It does not choose one: the sandbox is set per Keeper in
+`.masc/config/keepers/<name>.toml`, or by a `--team <preset>` that carries its
+own choice.
+
+The subscription sign-in check is also a standalone command:
+`masc runtime-probe <runtime_id>` exits `0` when the CLI is signed in and `1`
+when it is not, reusing the server's login probe instead of reading credential
+files.
+
 ## Terminal UI
 
 A release install puts `masc-tui` on `PATH` next to `masc`; from a source

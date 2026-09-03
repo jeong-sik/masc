@@ -1079,10 +1079,29 @@ let runtime_wizard_binding_for_provider (cfg : Runtime_schema.config)
           choice and guessing it would install a model nobody picked. *)
        | [] when List.length bindings = 1 -> Ok (List.hd bindings)
        | [] ->
-           Error
-             (Printf.sprintf
-                "provider %s has %d enabled bindings and no install wizard default; set wizard-default = true on exactly one [%s.<model>] binding"
-                provider.id (List.length bindings) provider.id)
+           (* Prefer the binding the config already runs by default: that is the
+              operator's own pick, not a guess, so a live config with several
+              bindings and one [runtime].default no longer fails the wizard.
+              Only when this provider does not own the default runtime is the
+              choice genuinely ambiguous, and then it stays an error the caller
+              skips rather than guessing a model nobody picked. *)
+           (match
+              (match cfg.default_runtime_id with
+               | None -> None
+               | Some runtime_id ->
+                   List.find_opt
+                     (fun (binding : Runtime_schema.binding) ->
+                        String.equal
+                          (Runtime_schema.binding_key binding)
+                          runtime_id)
+                     bindings)
+            with
+            | Some binding -> Ok binding
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "provider %s has %d enabled bindings and no install wizard default; set wizard-default = true on exactly one [%s.<model>] binding"
+                     provider.id (List.length bindings) provider.id))
        | defaults ->
            Error
              (Printf.sprintf
@@ -1136,19 +1155,30 @@ let runtime_wizard_default_record (cfg : Runtime_schema.config) =
             | Ok record -> Ok (Some record)))
 
 let runtime_wizard_catalog_records (cfg : Runtime_schema.config) =
+  (* One provider the wizard cannot represent -- a CLI-transport runtime with no
+     endpoint, or ambiguous bindings it will not guess -- is skipped with a
+     warning rather than failing the whole catalog. The wizard offers what it
+     can and stays silent about what it cannot, so a single misconfigured or
+     out-of-scope provider does not deny every other one. *)
   let rec provider_records acc = function
-    | [] -> Ok (List.rev acc)
+    | [] -> List.rev acc
     | provider :: rest ->
         (match runtime_wizard_provider_record cfg provider with
-         | Error _ as err -> err
+         | Error msg ->
+             Printf.eprintf "runtime-wizard-catalog: skipping provider %s: %s\n"
+               provider.id msg;
+             provider_records acc rest
          | Ok record -> provider_records (record :: acc) rest)
   in
   let enabled_providers =
     List.filter (fun (provider : Runtime_schema.provider) -> provider.enabled) cfg.providers
   in
   match provider_records [] enabled_providers with
-  | Error _ as err -> err
-  | Ok records ->
+  | [] ->
+      Error
+        "runtime.toml has no provider the setup wizard can offer (every enabled \
+         provider was CLI-transport, credential-less, or had ambiguous bindings)"
+  | records ->
       (match runtime_wizard_default_record cfg with
        | Error _ as err -> err
        | Ok None -> Ok records

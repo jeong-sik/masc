@@ -2367,6 +2367,51 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
     actual
 ;;
 
+(* [edit_config_text] exists so a caller does not have to load runtime.toml
+   itself: loading outside the lock and then committing loses any write that
+   landed in between, and the server and the TUI edit different tables of this
+   one file. What that buys is only real if the edit is handed the file's
+   current text, which is what the first check reads.
+
+   The fixture is the repo's own runtime.toml rather than a hand-written
+   minimal one, because the second thing this has to answer is whether the
+   [\[tui\]] table the TUI writes there makes the config invalid. The schema
+   models no such table; a hand-made fixture would not prove that the file the
+   write actually lands on still loads. *)
+let test_edit_config_text_reads_the_file_and_commits_the_edit () =
+  let source =
+    Fs_compat.load_file (Filename.concat (repo_root ()) "config/runtime.toml")
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "edit_config_text_" ".toml" in
+  let oc = open_out path in
+  output_string oc source;
+  close_out oc;
+  let handed = ref None in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       match
+         Runtime.edit_config_text ~runtime_config_path:path (fun content ->
+           handed := Some content;
+           content ^ "\n[tui]\ntheme = \"gruvbox-dark\"\n")
+       with
+       | Error detail ->
+         failf "a [tui] table must not make runtime.toml invalid: %s" detail
+       | Ok _receipt ->
+         check bool "the edit was handed the file's own text" true
+           (match !handed with
+            | Some seen -> String.equal seen source
+            | None -> false);
+         check bool "the committed file carries the edit" true
+           (String_util.contains_substring
+              (Fs_compat.load_file path)
+              "theme = \"gruvbox-dark\""))
+;;
+
 let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
   let content =
     "[providers.local]\n\
@@ -4799,5 +4844,8 @@ let () =
         ; test_case
             "load allows a lane that mixes checkpoint owners"
             `Quick test_load_allows_a_lane_that_mixes_checkpoint_owners
+        ; test_case
+            "edit_config_text edits the file's own text and commits it"
+            `Quick test_edit_config_text_reads_the_file_and_commits_the_edit
         ] )
     ]

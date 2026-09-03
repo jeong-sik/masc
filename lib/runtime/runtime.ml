@@ -2350,6 +2350,24 @@ let save_config_text ?runtime_config_path content =
     content
 ;;
 
+(* The read-modify-write form of [save_config_text]. A caller that loads the
+   file itself and then hands the edited text to [save_config_text] loses any
+   write that landed in between, because only the write is inside the lock.
+   Here the load, the edit and the commit are all inside it. Different
+   processes edit different tables of this one file -- the server writes
+   keeper assignments and lanes, the TUI writes the reader's [\[tui\]] keys --
+   so that gap is reachable rather than theoretical. *)
+let edit_config_text ?runtime_config_path edit =
+  let* path = runtime_config_path_result ?runtime_config_path () in
+  let* locked =
+    with_runtime_config_write_lock path (fun () ->
+      let* content = load_file_result path in
+      commit_runtime_config_text ~path (edit content))
+  in
+  let* receipt = locked.value in
+  Ok (attach_lock_warnings locked.warnings receipt)
+;;
+
 let validate_config_text ?runtime_config_path content =
   let* path = runtime_config_path_result ?runtime_config_path () in
   let* _loaded, _exact_output_lanes =

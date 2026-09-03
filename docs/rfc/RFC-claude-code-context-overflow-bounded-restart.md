@@ -268,21 +268,7 @@ turn receipt는 다음을 포함한다.
 provider token 수치는 진단 원문으로 보존하되 byte/token 환산 상수로 admission을
 결정하지 않는다.
 
-## 9. Why durable compaction is not the first repair
-
-과거 automatic overflow compaction은 실제로 더 작은 checkpoint를 commit한 운영 증거가
-없어 #26546에서 제거됐다. 실패한 compaction 뒤 동일 source를 재queue해 또 다른 loop를
-만들었다.
-
-이 RFC는 그 경로를 되살리지 않는다.
-
-- bootstrap view는 provider transmission projection이다.
-- durable checkpoint는 사실 보존 SSOT다.
-- floor rejection fence는 provider call을 멈추는 liveness 장치다.
-- durable summary/handoff는 별도 정책이며 commit 성공과 source transition을 하나의
-  transaction으로 증명한 뒤에만 재도입할 수 있다.
-
-## 10. Tool-surface follow-up
+## 9. Tool-surface follow-up
 
 incident checkpoint의 97개 tool schema는 약 115 KB로 4.33 MB history보다 작았으므로
 이번 사건의 1차 원인은 아니다. 다만 200k-token runtime에서 floor까지 거부되면 tool
@@ -298,7 +284,7 @@ surface가 주요 unshrinkable component가 될 수 있다.
 generic untyped `tool_call(name, json)`로 policy boundary를 우회하는 설계는 허용하지
 않는다.
 
-## 11. Required tests
+## 10. Required tests
 
 ### 11.1 Adapter classification
 
@@ -353,7 +339,7 @@ fake provider는 full과 midpoint를 거부하고 floor를 수락하는 경우, 
 경우를 각각 검증한다. 어떤 경우에도 다음 cycle에서 동일 full prompt가 재전송되면
 실패다.
 
-## 12. Implementation phases
+## 11. Implementation phases
 
 ### Phase A — evidence-preserving adapter
 
@@ -383,7 +369,7 @@ fake provider는 full과 midpoint를 거부하고 floor를 수락하는 경우, 
 - live full -> smaller/floor -> settle 또는 durable block 관측
 - 동일 episode provider dispatch가 다시 생기지 않음을 heartbeat 두 번 이상 확인
 
-## 13. Current PR status
+## 12. Current PR status
 
 PR #28284는 Phase A와 Phase B 일부의 prototype이다. 다음 조건을 만족하기 전에는
 root fix 또는 merge-ready로 부르지 않는다.
@@ -394,7 +380,7 @@ root fix 또는 merge-ready로 부르지 않는다.
 - same episode의 다음 heartbeat/provider spawn이 차단됨
 - effect-fenced overflow가 다음 cycle에서 auto-supersede되지 않음
 
-## 14. Rejected alternatives
+## 13. Rejected alternatives
 
 - **checkpoint clear/purge**: incident recovery일 뿐 재발 방지가 아니다.
 - **fixed three halvings only**: 한 call은 끝내지만 다음 heartbeat replay를 막지 못한다.

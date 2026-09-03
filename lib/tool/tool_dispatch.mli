@@ -132,7 +132,6 @@ type module_tag =
   | Mod_plan | Mod_operator
   | Mod_local_runtime
   | Mod_run
-  | Mod_compact
   | Mod_agent | Mod_task | Mod_state
   | Mod_control | Mod_agent_timeline | Mod_schedule | Mod_spawn | Mod_code_query | Mod_misc
   | Mod_library

@@ -106,9 +106,13 @@ type placement =
             a possible 133 and still climbing. Use stops where the work stops.
 
             Empty until something runs, so a Keeper that never reaches its
-            attached services pays nothing for this. Compaction drops the
-            evidence with the messages and the model re-asks, which is what it
-            does today. *)
+            attached services pays nothing for this. Within a session the set
+            only grows: nothing removes a tool once it has been used, and a
+            restart is the only thing that clears it. Measured live
+            2026-09-03, one Keeper held 138 tools across 217 of its 260
+            requests and another held 150 across 163 of 187, with 51-58% of
+            each request's tool schema being tools that Keeper never called
+            (masc#32939). *)
   ; observe_turn : unit -> turn_discovery
         (** Call once when the turn ends, on both the ordinary and the raised
             path, and records {!Loaded_unused} where an operator can read it.

@@ -101,7 +101,6 @@ check "V2-importance-scores" 0 \
 
 # V4: MASC domain marker constant definitions (message content pollution)
 # Allowed: keeper_working_context.ml (goal_prefix),
-#          context_compact_agent_core.ml (memory_summary_prefix),
 #          tool_goals.ml (goal_prefix)
 check "V4-marker-definitions" 0 \
   'let goal_prefix\|let memory_summary_prefix' \

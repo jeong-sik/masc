@@ -97,7 +97,7 @@ Extract these functions (all top-level, no closure issues):
   `set_turn_decision_stage`, `set_turn_runtime_state`,
   `mark_turn_runtime_exhausted`, `mark_turn_runtime_done`,
   `mark_turn_provider_attempt_started`, `set_turn_phase`,
-  `set_turn_selected_model`, `prepare_turn_retry_after_compaction`,
+  `set_turn_selected_model`,
   `mark_turn_gate_rejected_by_name`, `mark_turn_finished`,
   `record_skip_reasons`, `touch_last_turn_ts`, `increment_turn_failures`,
   `reset_turn_failures`, `get_turn_failures`
@@ -111,7 +111,7 @@ or use the global `registry` ref.
 Extract event dispatch cluster:
 
 - `execute_entry_action_observability`, `followup_event_of_entry_action`,
-  `record_followup_dispatch_rejection`, `compaction_stage_after_event`,
+  `record_followup_dispatch_rejection`,
   `dispatch_event_with_audit`, `dispatch_event`, `dispatch_event_and_log`,
   `dispatch_event_unit`, `dispatch_event_with_audit_and_log`
 

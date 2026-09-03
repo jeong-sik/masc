@@ -71,7 +71,7 @@ into the execution / observability mesh:
 ```
 Admission_queue Runtime_event_bus Approval_callbacks
 Audit_log Auth Board Board_core_classify Board_dispatch Config
-Context_compact_oas Inference_inflight_observation
+Inference_inflight_observation
 Drift_guard Eval_gate Eval_harness Exec_core Failure_envelope
 Inference_utils Llm_metric_bridge
 Lockfree_atomic Masc_context_injector Masc_eio_env Masc_event_bus

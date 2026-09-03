@@ -20,7 +20,6 @@ const CATEGORY_CHIPS: Array<{ key: FilterKey; label: string }> = [
   { key: 'tool_call',  label: '도구 호출' },
   { key: 'agent_core_tool',   label: 'Agent Core 도구' },
   { key: 'agent_core_turn',   label: 'Agent Core 턴' },
-  { key: 'agent_core_context', label: 'Agent Core 압축' },
   { key: 'thinking',   label: '내부 사고' },
   { key: 'broadcast',  label: '브로드캐스트' },
   { key: 'task',       label: '태스크' },

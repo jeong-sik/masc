@@ -30,7 +30,6 @@ let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   | Mod_misc -> "misc"
   | Mod_inline -> "inline"
   | Mod_operator -> "operator"
-  | Mod_compact -> "compact"
 ;;
 
 (** Dispatch a tool by its module tag using keeper-available context.
@@ -174,11 +173,6 @@ let dispatch
            (Printf.sprintf
               "tool '%s' requires MCP session context (not available in keeper)"
               name))
-    (* ── Tier D: Cycle-breaking — runtime modules that back-reference dispatcher state *)
-    | Mod_compact ->
-      Some
-        (workflow_err
-           (Printf.sprintf "tool '%s' is an internal context tool (use MCP client)" name))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

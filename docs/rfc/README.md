@@ -287,7 +287,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-shell-ir-typed-command-substitution | typed 커맨드 치환 — `$(cmd)`를 자식 IR로 읽고, 그 stdout을 argv 한 원소로 쓴다 | Draft | - |
 | RFC-skills-as-tools | Skill 과 Tool 은 한 카탈로그의 두 표면 — SKILL.md 가 지시·합성·비동기를 선언한다 | Active | - |
 | RFC-spawn-a-process-that-outlives-the-call | Spawn: a process that outlives the call | Draft | - |
-| RFC-tool-results-age-out-of-context | 도구 결과는 만든 턴에서만 원문이다 — 컴팩션을 걷어낸 뒤 남은 누적을 닫는다 | Draft | - |
+| RFC-tool-results-age-out-of-context | 도구 결과는 만든 턴에서만 원문이다 — 히스토리에 남은 누적을 닫는다 | Draft | - |
 | RFC-tools-as-shell-commands | 도구를 셸 first-class 커맨드로 — 순차 결합의 provider 왕복을 없앤다 | Draft | - |
 | RFC-tui-frame-budget | TUI 프레임 예산 — 모든 화면에서 build p99 8ms, 입력→화면 p99 20ms | Draft | - |
 | RFC-tui-operator-ia | TUI 정보 구조 재설계 — 18탭을 숫자 키 10개로 접고, Keeper 워크벤치를 중심 화면으로 | Draft | - |

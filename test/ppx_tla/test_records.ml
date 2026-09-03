@@ -16,7 +16,7 @@ module Conditions = struct
   type t = {
     healthy : bool;
     overflow : bool;
-    has_pending_compaction : bool;
+    has_pending_work : bool;
     awaiting_approval : bool;
   }
   [@@deriving tla]
@@ -39,7 +39,7 @@ end
 let test_conditions_field_names () =
   assert
     (Conditions.field_names
-     = [ "healthy"; "overflow"; "has_pending_compaction"; "awaiting_approval" ])
+     = [ "healthy"; "overflow"; "has_pending_work"; "awaiting_approval" ])
 
 let test_conditions_field_count () =
   assert (Conditions.field_count = 4)

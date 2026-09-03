@@ -404,12 +404,10 @@ type capacity_refusal =
       }
   | Provider_request_body_refusal of { status : int }
 
-(* Two-axis refusal view over the AGENT_CORE error type. The compaction lane
-   used to sit between these two — the error was first classified into a
-   compaction trigger and this projection read that. With the lane gone the
-   error is matched once, directly. Non-capacity errors and the serving-
-   constraint facts (evidence validity, unmeasurable tokens) stay [None]: they
-   are not a capacity limit and must never be guessed into one. *)
+(* Two-axis refusal view over the AGENT_CORE error type. The error is matched
+   once, directly. Non-capacity errors and the serving-constraint facts
+   (evidence validity, unmeasurable tokens) stay [None]: they are not a
+   capacity limit and must never be guessed into one. *)
 let capacity_refusal_of_error
     (err : Agent_core.Error.t) : capacity_refusal option =
   match err with

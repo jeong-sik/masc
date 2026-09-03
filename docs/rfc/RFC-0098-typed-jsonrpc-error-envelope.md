@@ -175,7 +175,7 @@ PR-3+ targets, ordered by blast radius:
 2. `lib/keeper/keeper_autonomy.ml:248` — `Llm_orchestration.complete` same shape.
 3. `lib/operator/operator_pending_confirm.ml:33-37` — unknown actor → "dashboard" string collapse. This is a [[RFC-0089]] string-classifier instance; cross-reference in PR.
 4. `lib/keeper/keeper_context_core.ml` — `Tool_result.json` breakage area; orchestrate with [[RFC-0062]].
-5. `lib/inference_utils.ml`, `lib/context_compact_oas.ml` — same family.
+5. `lib/inference_utils.ml` — same family.
 
 Each PR-3+ cites both RFC-0098 (envelope code) and the relevant upstream RFC (0077 for write, 0089 for string-class, 0062 for tool result).
 

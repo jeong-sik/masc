@@ -26,7 +26,6 @@ export const SCHED_TERMINAL: readonly string[] = ['succeeded', 'failed', 'cancel
 
 export const SCHED_PAYLOAD: Readonly<Record<string, { glyph: string; lbl: string }>> = {
   'keeper.start': { glyph: '◇', lbl: 'keeper 기동' },
-  'compact.sweep': { glyph: '◉', lbl: '컴팩션 스윕' },
   'index.reindex': { glyph: '▤', lbl: '재색인' },
   'report.generate': { glyph: '▦', lbl: '리포트 생성' },
   'trace.export': { glyph: '▥', lbl: 'trace 내보내기' },

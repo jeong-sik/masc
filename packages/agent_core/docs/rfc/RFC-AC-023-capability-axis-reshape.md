@@ -36,7 +36,6 @@ Kimi            → Provider_c
 OpenAI_compat   → Provider_d_compat
 Gemini          → Provider_f
 DeepSeek        → DeepSeek
-DashScope       → Provider_h
 Mistral         → Provider_j
 Glm/GLM         → Provider_k
 Qwen            → Provider_h_3
@@ -272,7 +271,6 @@ type transport_caps = {
 | `Provider_d_compat` | `Chat_completions_v1` | **wire protocol** (OpenAI-호환 wire를 의미하므로) |
 | `Provider_f` | `Gemini` | model brand |
 | `DeepSeek` | `DeepSeek` | model brand |
-| `Provider_h` | `DashScope` | model brand |
 | `Provider_h_3` (Qwen family) | `Qwen` | model brand |
 | `Provider_j` | `Mistral` | model brand |
 | `Provider_k` | `GLM` | model brand |

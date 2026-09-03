@@ -57,7 +57,7 @@ type entry =
   ; thinking_control_format : Capability_vocab.thinking_control_format option
     (** Canonical thinking-wire format the model uses (none / thinking_object /
         thinking_object_adaptive / thinking_object_only / chat_template_kwargs /
-        chat_template_token / reasoning_effort / enable_thinking). Parsed + applied in
+        chat_template_token / ollama_think / reasoning_effort). Parsed + applied in
         {!Capabilities.apply_manifest_entry}. Without this field a manifest
         entry silently dropped the model's thinking knob (Agent Core contract).
 

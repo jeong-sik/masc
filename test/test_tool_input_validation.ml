@@ -1514,27 +1514,6 @@ let readonly_exec_input program arguments =
   | Error msg ->
     Alcotest.failf "expected typed Execute parse to pass, got %s" msg
 
-let readonly_pipeline_input stages =
-  match
-    Keeper_tool_execute_typed_input.of_json
-      (`Assoc
-        [ ( "pipeline"
-          , `List
-              (List.map
-                 (fun (program, arguments) ->
-                    `Assoc
-                      [ ( "argv"
-                        , `List
-                            (List.map
-                               (fun arg -> `String arg)
-                               (program :: arguments)) ) ])
-                 stages) )
-        ; "cwd", `String "/tmp"
-        ])
-  with
-  | Ok input -> input
-  | Error msg ->
-    Alcotest.failf "expected typed Execute pipeline parse to pass, got %s" msg
 
 let test_tool_execute_write_validation_stays_structural () =
   match
@@ -1547,27 +1526,15 @@ let test_tool_execute_write_validation_stays_structural () =
       "write-capable structural validation should not reject program: %s"
       (Keeper_tool_execute_input.typed_validation_error_text e)
 
-let tool_execute_exec_stage args =
+let tool_execute_argv_form args =
   match Keeper_tool_execute_typed_input.of_json args with
-  | Ok
-      { source =
-          Staged
-            { program = { head = { argv = program :: arguments; _ }; tail = [] }
-            ; _
-            }
-      ; _
-      } ->
-    program, arguments
-  | Ok { source = Staged { program = { head = { argv = []; _ }; _ }; _ }; _ } ->
-    Alcotest.fail "expected non-empty argv"
-  | Ok { source = Staged { program = { tail = _ :: _; _ }; _ }; _ } ->
-    Alcotest.fail "expected a single-stage program"
-  | Ok { source = Script _; _ } ->
-    Alcotest.fail "expected the staged form"
+  | Ok { source = Argv (program :: arguments); _ } -> program, arguments
+  | Ok { source = Argv []; _ } -> Alcotest.fail "expected non-empty argv"
+  | Ok { source = Script _; _ } -> Alcotest.fail "expected the argv form"
   | Error msg ->
     Alcotest.failf "expected typed tool_execute parse to pass, got %s" msg
 
-let tool_execute_exec_argv args = snd (tool_execute_exec_stage args)
+let tool_execute_exec_argv args = snd (tool_execute_argv_form args)
 
 let test_tool_execute_find_expression_not_rewritten () =
   let argv =
@@ -1602,7 +1569,7 @@ let test_tool_execute_find_global_option_not_rewritten () =
 
 let test_tool_execute_empty_program_not_promoted () =
   let program, argv =
-    tool_execute_exec_stage
+    tool_execute_argv_form
       (`Assoc
         [ "argv"
         , `List [ `String ""; `String "find"; `String "-type"; `String "f" ]
@@ -1614,39 +1581,6 @@ let test_tool_execute_empty_program_not_promoted () =
     [ "find"; "-type"; "f" ]
     argv
 
-let test_tool_execute_pipeline_find_expression_not_rewritten () =
-  match
-    Keeper_tool_execute_typed_input.of_json
-      (`Assoc
-        [ ( "pipeline"
-          , `List
-              [ `Assoc
-                  [ "argv", `List [ `String "find"; `String "-type"; `String "f" ] ]
-              ; `Assoc [ "argv", `List [ `String "head"; `String "-5" ] ]
-              ] )
-        ])
-  with
-  | Ok
-      { source =
-          Keeper_tool_execute_typed_input.Staged
-            { program =
-                { head = { Keeper_tool_execute_typed_input.argv; _ }
-                ; tail = _ :: _
-                }
-            ; _
-            }
-      ; _
-      } ->
-    Alcotest.(check (list string))
-      "pipeline find stage remains caller-authored"
-      [ "find"; "-type"; "f" ]
-      argv
-  | Ok { source = Keeper_tool_execute_typed_input.Staged { program = { tail = []; _ }; _ }; _ } ->
-    Alcotest.fail "expected a multi-stage program"
-  | Ok { source = Keeper_tool_execute_typed_input.Script _; _ } ->
-    Alcotest.fail "expected the staged form"
-  | Error msg ->
-    Alcotest.failf "expected typed tool_execute pipeline parse to pass, got %s" msg
 
 let test_validate_args_tool_execute_rejects_bad_argv_type () =
   let args =
@@ -2490,10 +2424,6 @@ let () =
         test_tool_execute_find_expression_not_rewritten;
       Alcotest.test_case "tool_execute find global option not rewritten" `Quick
         test_tool_execute_find_global_option_not_rewritten;
-      Alcotest.test_case "tool_execute empty program not promoted" `Quick
-        test_tool_execute_empty_program_not_promoted;
-      Alcotest.test_case "tool_execute pipeline find not rewritten" `Quick
-        test_tool_execute_pipeline_find_expression_not_rewritten;
       Alcotest.test_case "tool_execute rejects bad typed argv" `Quick
         test_validate_args_tool_execute_rejects_bad_argv_type;
       Alcotest.test_case "tool_execute stages rejected by schema" `Quick

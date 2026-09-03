@@ -373,6 +373,7 @@ let board_signal_entry_accepts_delivery (entry : Keeper_registry.registry_entry)
 let record_board_attention_candidate
       ~(config : Workspace.config)
       ~(signal_kind_label : string)
+      ~(audience_label : string)
       ~(meta : keeper_meta)
       (signal : Board_dispatch.board_signal)
   =
@@ -409,7 +410,7 @@ let record_board_attention_candidate
          ~labels:
            [ ("keeper", meta.name)
            ; ("kind", signal_kind_label)
-           ; ("audience", Keeper_board_audience.label Keeper_board_audience.Discoverable)
+           ; ("audience", audience_label)
            ; ("persistence", persistence)
            ]
          ()
@@ -611,6 +612,7 @@ let wakeup_relevant_keeper_for_board_signal
                   record_board_attention_candidate
                     ~config
                     ~signal_kind_label
+                    ~audience_label:(Keeper_board_audience.label audience)
                     ~meta
                     signal
                 | Keeper_world_observation_board_signal.Available
@@ -719,20 +721,36 @@ let wakeup_relevant_keeper_for_board_signal
                  ]
                ()
            | Keeper_world_observation_board_signal.Available
-               Keeper_board_audience.Judge_discoverable ->
-             (* The outer audience match excludes [Discoverable]. Keep this
-                fail-visible if a future routing rule violates that boundary. *)
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string KeepaliveSignalFailures)
-               ~labels:
-                 [ ("keeper", meta.name)
-                 ; ("phase", "unexpected_discoverable_immediate_route")
-                 ]
-               ();
-             Log.Keeper.error
-               "board immediate route returned discoverable judgment: keeper=%s post=%s"
-               meta.name
-               signal.post_id
+               Keeper_board_audience.Judge_discoverable -> (
+             (* The outer audience match excludes [Discoverable]. A comment
+                signal routed through [Thread_participants] legitimately lands
+                here (#27329): a lane that never touched the thread has no
+                deterministic address, and this push path is the only
+                producer of comment judgment candidates, so the lane records
+                an attention candidate. Every other kind still violates the
+                boundary — keep that fail-visible. *)
+             match signal.kind with
+             | Board_dispatch.Board_comment_added ->
+               record_board_attention_candidate
+                 ~config
+                 ~signal_kind_label
+                 ~audience_label:(Keeper_board_audience.label audience)
+                 ~meta
+                 signal
+             | Board_dispatch.Board_post_created
+             | Board_dispatch.Board_reaction_changed _
+             | Board_dispatch.Board_vote_cast _ ->
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string KeepaliveSignalFailures)
+                 ~labels:
+                   [ ("keeper", meta.name)
+                   ; ("phase", "unexpected_discoverable_immediate_route")
+                   ]
+                 ();
+               Log.Keeper.error
+                 "board immediate route returned discoverable judgment: keeper=%s post=%s"
+                 meta.name
+                 signal.post_id)
            | Keeper_world_observation_board_signal.Available
                (Keeper_board_audience.Deliver reason) ->
              (match deliver_addressed_board_signal ~config ~reason ~signal meta with

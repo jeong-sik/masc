@@ -12,7 +12,6 @@ type provider_kind = Provider_kind.t =
   | Ollama
   | Gemini
   | Glm
-  | DashScope
 
 (** Default [request_path] for a given provider kind. Centralised so that
     [make] and any caller building a record literal stay aligned with the
@@ -25,7 +24,6 @@ let request_path_default_for_kind = function
   | Ollama -> "/api/chat"
   | Gemini -> ""
   | Glm -> "/chat/completions"
-  | DashScope -> "/chat/completions"
 ;;
 
 type t =
@@ -203,7 +201,7 @@ let capabilities_for_config_model (config : t) =
     let allow_bare_fallback =
       match config.provider_id, config.kind with
       | Some _, _ | None, OpenAI_compat -> false
-      | None, (Anthropic | Kimi | Ollama | Gemini | Glm | DashScope) -> true
+      | None, (Anthropic | Kimi | Ollama | Gemini | Glm) -> true
     in
     (* The label says which provider; [kind] says which of that provider's
        wires this config resolved to. Both are needed: a provider that admits
@@ -229,7 +227,7 @@ let auth_headers_for_kind_and_secret ~(kind : provider_kind) ~(api_key : Secret.
     match kind with
     | Anthropic | Kimi -> [ "x-api-key", Secret.header_value api_key ]
     | Gemini -> [ "x-goog-api-key", Secret.header_value api_key ]
-    | OpenAI_compat | Ollama | Glm | DashScope ->
+    | OpenAI_compat | Ollama | Glm ->
       [ "Authorization", "Bearer " ^ Secret.header_value api_key ])
 ;;
 
@@ -303,7 +301,6 @@ let clear_thinking_object_request_field
   | Capabilities.No_preserve_thinking_control
   | Capabilities.Thinking_object_keep_all
   | Capabilities.Chat_template_kwargs_preserve_thinking
-  | Capabilities.Top_level_preserve_thinking
   | Capabilities.Always_preserved_thinking -> None
 ;;
 
@@ -367,7 +364,6 @@ let request_capabilities_for_config (config : t) =
        | Kimi -> Capabilities.kimi_capabilities
        | Ollama -> Capabilities.ollama_capabilities
        | Gemini -> Capabilities.gemini_capabilities
-       | DashScope -> Capabilities.dashscope_capabilities
        | OpenAI_compat -> Capabilities.default_capabilities)
   in
   caps
@@ -380,7 +376,7 @@ let tool_choice_capabilities_for_config (config : t) =
     | None ->
       (match config.kind with
        | Glm -> Capabilities.glm_capabilities
-       | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | DashScope ->
+       | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini ->
          Capabilities.default_capabilities)
   in
   match config.supports_tool_choice_override with
@@ -422,7 +418,7 @@ let validate_anthropic_thinking_tool_choice (config : t) =
     Error
       (Unsupported_named_tool_choice_with_thinking
          { provider_kind = config.kind; model_id = config.model_id; tool_name })
-  | Anthropic, _, _ | (Kimi | OpenAI_compat | Ollama | Gemini | Glm | DashScope), _, _ ->
+  | Anthropic, _, _ | (Kimi | OpenAI_compat | Ollama | Gemini | Glm), _, _ ->
     Ok ()
 ;;
 
@@ -521,8 +517,7 @@ let wire_reasoning_effort (config : t) ~(caps : Capabilities.capabilities) =
   | Capabilities.Thinking_object_only
   | Capabilities.Chat_template_kwargs
   | Capabilities.Chat_template_token _
-  | Capabilities.Ollama_think
-  | Capabilities.Enable_thinking -> config.reasoning_effort
+  | Capabilities.Ollama_think -> config.reasoning_effort
 ;;
 
 let validate_reasoning_effort_request_typed (config : t) =
@@ -540,8 +535,7 @@ let validate_reasoning_effort_request_typed (config : t) =
           | Capabilities.Thinking_object_only
           | Capabilities.Chat_template_kwargs
           | Capabilities.Chat_template_token _
-          | Capabilities.Ollama_think
-          | Capabilities.Enable_thinking )
+          | Capabilities.Ollama_think )
         , _ ) -> false
     in
     (match caps.Capabilities.accepted_reasoning_efforts with
@@ -643,7 +637,7 @@ let validate_request_path (config : t) =
   then (
     match config.kind with
     | OpenAI_compat -> Ok ()
-    | Anthropic | Kimi | Ollama | Gemini | Glm | DashScope ->
+    | Anthropic | Kimi | Ollama | Gemini | Glm ->
       Error
         "OpenAI Responses API request_path requires provider kind OpenAI_compat; other \
          provider kinds use their own wire formats.")
@@ -663,7 +657,7 @@ let validate_request_path (config : t) =
    function the request serializers use, so this decision and the wire it gates
    read one capability record. That matters when a config names no catalog row:
    the previous inline fallback dropped to [default_capabilities] (structured =
-   false) and would have denied an Anthropic/Gemini/DashScope config that names
+   false) and would have denied an Anthropic/Gemini config that names
    an off-catalog model, whereas the wire path resolves it to the provider's
    base record via the [config.kind] arm below. The old kind gate admitted those
    unconditionally; routing through the shared resolver keeps that behaviour

@@ -240,12 +240,12 @@ let resolve_tool_call tool_index name input =
    evidence authority for what the provider actually sent. *)
 type tool_use_admission =
   { admitted : Types.content_block list
-  ; rejected : int
+  ; rejected_names : string list
   ; tool_source_map : Hooks.admitted_tool_source_map
   }
 
 let admit_tool_use_names tool_index blocks =
-  let rejected = ref 0 in
+  let rejected_names = ref [] in
   let next_planned_index = ref 0 in
   let next_source_tool_use_ordinal = ref 0 in
   let admitted_tool_sources = ref [] in
@@ -265,7 +265,7 @@ let admit_tool_use_names tool_index blocks =
                 :: !admitted_tool_sources;
               Some (Types.ToolUse { id; name = resolved; input = resolved_input })
             | _, _, None ->
-              incr rejected;
+              rejected_names := name :: !rejected_names;
               None)
          | Types.Text _
          | Types.Thinking _
@@ -278,12 +278,51 @@ let admit_tool_use_names tool_index blocks =
       blocks
   in
   { admitted
-  ; rejected = !rejected
+  ; rejected_names = List.rev !rejected_names
   ; tool_source_map =
       { Hooks.admitted_tool_sources = List.rev !admitted_tool_sources
       ; source_tool_use_count = !next_source_tool_use_ordinal
       }
   }
+;;
+
+(* The note built from these names is a User message, so the transcript
+   replays it on every later request for the life of the conversation. A name
+   is provider text of unbounded length and one turn can carry many, so the
+   rendering is bounded on both axes. *)
+let rejected_name_display_limit = 8
+let rejected_name_char_limit = 64
+
+let describe_rejected_names names =
+  let distinct =
+    List.rev
+      (List.fold_left
+         (fun acc name -> if List.mem name acc then acc else name :: acc)
+         []
+         names)
+  in
+  let rec take index shown = function
+    | [] -> List.rev shown, 0
+    | rest when index >= rejected_name_display_limit -> List.rev shown, List.length rest
+    | name :: rest -> take (index + 1) (name :: shown) rest
+  in
+  let shown, hidden = take 0 [] distinct in
+  let clip name =
+    if String.length name <= rejected_name_char_limit
+    then name
+    else begin
+      (* Never cut inside a UTF-8 sequence. The clipped name is carried in the
+         prompt for the rest of the conversation, and an invalid byte there
+         would be replayed on every request. *)
+      let cut = ref rejected_name_char_limit in
+      while !cut > 0 && Char.code name.[!cut] land 0xC0 = 0x80 do
+        decr cut
+      done;
+      String.sub name 0 !cut ^ "..."
+    end
+  in
+  let listed = String.concat ", " (List.map (fun name -> "\"" ^ clip name ^ "\"") shown) in
+  if hidden = 0 then listed else Printf.sprintf "%s and %d more" listed hidden
 ;;
 
 let schedule_tool_use ~tool_index index (id, name, input) =

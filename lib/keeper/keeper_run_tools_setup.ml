@@ -453,6 +453,7 @@ let prepare_agent_setup
     ; cleanup = keeper_tools_cleanup
     ; terminal_effect_state
     ; gate_replay_delivery
+    ; turn_sandbox_factory
     }
     =
     Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
@@ -527,6 +528,14 @@ let prepare_agent_setup
     | None ->
       Ok ()
   in
+  (* A paste the TUI staged into this keeper's host bookkeeping bundle is
+     readable to an endpoint-owned keeper only once it sits on the endpoint;
+     the keeper-facing message already names the bare file. The turn owns the
+     endpoint -- its factory is the one allowed to start a stopped guest --
+     so delivery runs here, ahead of prompt assembly, so the first Read of
+     the turn finds the file. Shared-mount keepers read the staged file
+     directly and this is a no-op for them. *)
+  Keeper_paste_delivery.deliver_for_turn ~config ~meta ~turn_sandbox_factory;
   let model_message =
     Keeper_gate_replay.compose_model_message
       ~base_path:config.base_path

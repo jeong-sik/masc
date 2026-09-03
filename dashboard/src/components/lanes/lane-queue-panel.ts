@@ -62,7 +62,6 @@ import {
   LANE_QUEUE_WINDOW_S,
   LANE_STAGES,
   LANE_STAGE_LABELS,
-  boundedCount,
   drainStateOfEvidence,
   laneAgoText,
   laneLifecycleItemOf,
@@ -286,12 +285,10 @@ function LanePipeline({ entry, dev }: { entry: DashboardKeeperWaitingKeeper; dev
 
 function WaitAges({
   entry,
-  rowLimit,
   dev,
   nowSec,
 }: {
   entry: DashboardKeeperWaitingKeeper
-  rowLimit: number | null
   dev: boolean
   nowSec: number
 }): VNode {
@@ -344,9 +341,6 @@ function WaitAges({
           </div>
         `
       })}
-      ${entry.waiting_count_truncated === true
-        ? html`<div class="lq-trunc">${rowLimit != null ? `${rowLimit}건까지만 표시` : '서버 상한에서 잘림'} — 실제 대기는 더 많습니다</div>`
-        : null}
     </div>
   `
 }
@@ -515,7 +509,7 @@ export function KeeperWaitQueueRail({ keeperName, dev = false }: { keeperName: s
       <h4 style=${{ display: 'flex', alignItems: 'center', gap: '7px' }}>
         작업 대기열
         ${entry && waitingCount > 0
-          ? html`<${CountBadge}>${boundedCount(waitingCount, entry.waiting_count_truncated === true)}<//>`
+          ? html`<${CountBadge}>${waitingCount}<//>`
           : null}
       </h4>
       ${!entry || !present
@@ -525,7 +519,6 @@ export function KeeperWaitQueueRail({ keeperName, dev = false }: { keeperName: s
               <div class="lq-state-row"><span class="lq-chip" data-tone=${present.tone}>${present.label}</span></div>
               <${WaitAges}
                 entry=${entry}
-                rowLimit=${current?.inventory?.external_attention_row_limit ?? null}
                 dev=${dev}
                 nowSec=${nowSec}
               />
@@ -721,7 +714,7 @@ export function LaneQueuePanel(props: LaneQueuePanelProps = {}): VNode {
             ${selEntry
               ? html`
                   <span class="lq-chip" data-tone=${laneStatePresent(selEntry.state).tone}>${laneStatePresent(selEntry.state).label}</span>
-                  <span class="mono">${boundedCount(selEntry.waiting_count, selEntry.waiting_count_truncated === true)}건</span>
+                  <span class="mono">${selEntry.waiting_count}건</span>
                 `
               : null}
           </div>
@@ -732,7 +725,6 @@ export function LaneQueuePanel(props: LaneQueuePanelProps = {}): VNode {
                 <div class="lq-sec-sub">오래 기다린 순서</div>
                 <${WaitAges}
                   entry=${selEntry}
-                  rowLimit=${selInventoryState?.inventory?.external_attention_row_limit ?? null}
                   dev=${dev}
                   nowSec=${nowSec}
                 />

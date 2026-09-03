@@ -121,7 +121,7 @@ val agent_core_tool_of_masc :
 val agent_core_tool_of_masc_with_execution_env :
   ?descriptor:Agent_core.Tool.descriptor ->
   ?base_path:string ->
-  ?model_projection:Tool_output.model_projection ->
+  ?model_projection:(unit -> Tool_output.model_projection) ->
   ?on_externalization_error:(externalization_error -> unit) ->
   name:string ->
   description:string ->
@@ -130,4 +130,10 @@ val agent_core_tool_of_masc_with_execution_env :
   Agent_core.Tool.t
 (** Create an AGENT_CORE [Tool.t] whose handler also receives the exact AGENT_CORE execution
     environment. This is for correlation and observability; callers must not
-    treat invocation metadata as authorization. *)
+    treat invocation metadata as authorization.
+
+    [model_projection] is asked on each call rather than captured once. The
+    tool bundle is built before the turn resolves a runtime, and a
+    heterogeneous lane fallback can change the answer between attempts, so a
+    projection fixed at build time would describe the wrong lane. This adapter
+    does not know what a lane is; it only defers the question. *)

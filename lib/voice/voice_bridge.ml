@@ -773,10 +773,99 @@ let play_tone freq =
   | exn -> Log.Transport.debug "play_tone failed: %s" (Printexc.to_string exn)
 ;;
 
+(* Room level, measured rather than assumed.
+
+   The recording threshold used to be the literal 1% that sox's silence filter
+   takes as a fraction of full scale (about -40 dBFS). Measured on this
+   workstation 2026-09-03, the noise floor sat at -37.2 dB on one pass and
+   -26.3 dB on another minutes later, both above that constant: the filter saw
+   sound continuously, so recording started immediately and the trailing-silence
+   condition never came true. Every capture ran to the timeout and handed
+   whisper a room.
+
+   The floor moves by more than 10 dB between passes in one room, which is why
+   this is read at each capture rather than configured once. *)
+
+let calibration_seconds = 0.5
+
+(* Speech sat 5.0 dB and 6.1 dB above the floor on the two measured passes --
+   an ordinary sentence at a laptop's built-in microphone, not a quiet one. A
+   margin near that separation swallows the utterance, so the trigger is set
+   just clear of the room and the gate below decides whether anything was said. *)
+let trigger_margin_db = 3.0
+
+(* What a capture must exceed, over its whole length, to be worth transcribing.
+   Below the trigger margin so that a capture which did fire but carries only
+   room tone is still refused. *)
+let speech_margin_db = 2.0
+
+let rms_amplitude_of_file audio_file =
+  match run_voice_status ~timeout_sec:10.0 [ "sox"; audio_file; "-n"; "stat" ] with
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  (* sox reports a level whatever its exit code, and a non-zero exit on a
+     truncated capture still carries the line we read. The parse decides, not
+     the status. *)
+  | _, output ->
+    (* sox writes stat to stderr, which run_voice_status folds into output. The
+       line is "RMS     amplitude:    0.013946". *)
+    let line =
+      String.split_on_char '\n' output
+      |> List.find_opt (fun l ->
+        String_util.string_contains_substring ~needle:"RMS" l
+        && String_util.string_contains_substring ~needle:"amplitude" l)
+    in
+    Option.bind line (fun l ->
+      match List.filter (fun t -> t <> "") (String.split_on_char ' ' l) with
+      | _ :: _ :: value :: _ -> float_of_string_opt value
+      | _ -> None)
+;;
+
+let db_of_amplitude v = if v > 0.0 then 20.0 *. log10 v else neg_infinity
+let amplitude_of_db d = if d = neg_infinity then 0.0 else 10.0 ** (d /. 20.0)
+
+(* sox's silence filter takes a percentage of full scale. *)
+let percent_of_amplitude v = 100.0 *. v
+
+(* One short capture with no silence filter, so it records the room as it is. *)
+let measure_noise_floor ~agent_id =
+  let probe =
+    Filename.temp_file (Printf.sprintf "masc_nf_%s_" (safe_agent_id agent_id)) ".wav"
+  in
+  let cleanup () = try Sys.remove probe with Sys_error _ -> () in
+  Eio_guard.protect ~finally:cleanup (fun () ->
+       match
+         run_voice_status
+           ~timeout_sec:(calibration_seconds +. 5.0)
+           [ "rec"; "-q"; "-t"; "wav"; probe
+           ; "rate"; "16k"; "channels"; "1"
+           ; "trim"; "0"; Printf.sprintf "%.2f" calibration_seconds ]
+       with
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+       | Unix.WEXITED 0, _ -> rms_amplitude_of_file probe
+       | _ -> None)
+;;
+
 let record_and_transcribe ~agent_id ?(timeout_sec = 15.0) ?language_code () =
   let audio_file =
     Filename.temp_file (Printf.sprintf "masc_stt_%s_" (safe_agent_id agent_id)) ".wav"
   in
+  (* [None] when the probe could not run: the capture then uses the constant
+     this replaced rather than a threshold derived from nothing. *)
+  let noise_floor = measure_noise_floor ~agent_id in
+  let trigger_percent =
+    match noise_floor with
+    | Some floor when floor > 0.0 ->
+      percent_of_amplitude
+        (amplitude_of_db (db_of_amplitude floor +. trigger_margin_db))
+    | Some _ | None -> 1.0
+  in
+  let threshold = Printf.sprintf "%.2f%%" trigger_percent in
+  Log.Transport.debug
+    "voice capture: noise floor %s, trigger %s"
+    (match noise_floor with
+     | Some f -> Printf.sprintf "%.1f dB" (db_of_amplitude f)
+     | None -> "unmeasured")
+    threshold;
   let rec_argv =
     [ "rec"
     ; "-q"
@@ -790,10 +879,10 @@ let record_and_transcribe ~agent_id ?(timeout_sec = 15.0) ?language_code () =
     ; "silence"
     ; "1"
     ; "0.5"
-    ; "1%"
+    ; threshold
     ; "1"
     ; "2.0"
-    ; "1%"
+    ; threshold
     ]
   in
   let cleanup () =
@@ -820,13 +909,33 @@ let record_and_transcribe ~agent_id ?(timeout_sec = 15.0) ?language_code () =
       try (Unix.stat audio_file).st_size > 100 with
       | Unix.Unix_error _ -> false
     in
-    if not file_exists
+    (* Whisper answers silence with a sentence. Measured 2026-09-03 against the
+       local whisper.cpp endpoint, three captures of an empty room returned
+       "감사합니다.", "감사합니다." and "네" -- fluent text for an operator who
+       said nothing. Byte size cannot tell those apart from speech: a capture
+       that ran to its timeout on room tone is large.
+
+       So the level decides, and a capture that never rose above the room is
+       not sent. This is the only place that refusal can happen; once the audio
+       reaches the endpoint chain, a hallucinated transcript is indistinguishable
+       from a real one. *)
+    let silent =
+      match noise_floor, if file_exists then rms_amplitude_of_file audio_file else None with
+      | Some floor, Some captured when floor > 0.0 ->
+        db_of_amplitude captured < db_of_amplitude floor +. speech_margin_db
+      | _ -> false
+    in
+    if (not file_exists) || silent
     then
       Ok
         (`Assoc
             [ "status", `String "no_audio"
             ; "text", `String ""
-            ; "message", `String "no speech detected or recording too short"
+            ; ( "message"
+              , `String
+                  (if file_exists
+                   then "nothing was said above the room level"
+                   else "no speech detected or recording too short") )
             ])
     else transcribe_audio ~audio_file ?language_code ())
 ;;

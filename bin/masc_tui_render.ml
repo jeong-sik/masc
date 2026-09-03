@@ -7351,11 +7351,7 @@ let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
 ;;
 
 let compute_keeper_message_layout_entries (state : state) ~keeper_name
-    ~chat_cols ~messages =
-  let visible_timeline =
-    keeper_message_visible_timeline ~messages state ~keeper_name
-  in
-  let messages = List.map fst visible_timeline in
+    ~chat_cols ~start_index visible_entries =
   (* Derived once for the width and again per row, so the badge the pane
      measures is the badge it draws. *)
   let base_role_label_of (message : Masc_tui_types.msg_entry) =
@@ -7398,20 +7394,6 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
             base_role_label_of message)
     | _ -> base_role_label_of message
   in
-  let visible_messages =
-    List.mapi (fun entry_index message -> (entry_index, message)) messages
-  in
-  let turn_edges =
-    List.map snd (Masc_tui_types.mark_turn_edges messages)
-  in
-  let timeline_ats = List.map snd visible_timeline in
-  let labeled_messages =
-    List.map2
-      (fun ((entry_index, message), edge) timeline_at ->
-        (entry_index, message, role_label_of message edge, timeline_at))
-      (List.combine visible_messages turn_edges)
-      timeline_ats
-  in
   let projected_tool_rows =
     keeper_message_tool_rows state ~keeper_name ~chat_cols
   in
@@ -7422,8 +7404,10 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
     (* The position distinguishes rows whose durable timestamp and request
        fields tie. A history reorder can only cause a miss: the exact body is
        another cache-key field, so an index never authorizes stale rows. *)
-    List.map
-      (fun (entry_index, message, grouped_role_label, timeline_at) ->
+    List.mapi
+      (fun offset (message, timeline_at, edge) ->
+        let entry_index = start_index + offset in
+        let grouped_role_label = role_label_of message edge in
         (* Projected once: the style is read off it and the body is built
            from it, and projecting twice would let a fold decide the colour
            from one reading and the text from another. *)
@@ -7568,39 +7552,95 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                  };
            }
             : Message_layout.entry))
-      labeled_messages
+      visible_entries
   in
   layout_entries
 
-(* One conversation's layout entries, computed once per change of their
-   inputs.
+(* One conversation's layout entries, reused per message across a change of
+   the conversation.
 
-   Building them walks every visible message -- the safe text, the aligned
-   badge, the link scan of the whole body, and a tool projection whose
-   durable-call association filters the call snapshot per row -- and the chat
-   frame asked for it on every key, so typing one character into the composer
-   rebuilt the transcript's entire layout. The answer depends on:
+   #32878 memoized this list whole: any landed message replaced the row
+   list, and the next frame rebuilt an entry for every visible message --
+   the safe text, the aligned badge, the link scan of the whole body, and a
+   tool projection whose durable-call association filters the call snapshot
+   per row. In an active chat, where a row lands every few seconds while
+   the operator types, nearly every frame paid for the whole transcript.
+   An entry is a pure function of one message and the readings below, so a
+   frame whose conversation moved recomputes only the positions that
+   actually moved; the rest are taken over unchanged.
 
-   - the row list, replaced rather than mutated when the conversation
-     changes, so its physical identity is the key (the same contract
-     [chat_rows_for] and [chat_timeline_ats_memo] already rely on);
+   The full list of what one entry reads, and what busts its reuse:
+
+   - the message record, compared by physical identity. Every field an
+     entry is built from -- role, text, keeper name, tool block, skill
+     activity, memory summary, request id, durable timestamp, observed-at --
+     is a field of this record, and the row pipeline ([chat_timeline_slots],
+     [chat_timeline_rows], the visibility filter) passes records through
+     untouched: a conversation change replaces records rather than mutating
+     them, the same contract [chat_rows_memo] and [chat_timeline_ats_memo]
+     already rely on. A row rewritten in place (a queued line edited before
+     sending) arrives as a fresh record and misses;
+   - the entry's position in the visible timeline, baked into
+     [markdown_source] as [entry_index]. The walk below compares
+     positionally, so a reused entry's index is its position by
+     construction; a removal or insertion above it ends the shared prefix
+     and the tail is recomputed with its new indices;
+   - the projected timeline moment for that position, from
+     [chat_projected_timeline_ats]: a per-request floor over the whole row
+     list in list order, so a row sorting in above (a late tool row joining
+     its turn) can move the floor for later rows of that request. The walk
+     compares the moment by value at every position, and a moved floor ends
+     the sharing there;
+   - the row's turn edge, from [mark_turn_edges]: whether the row opens,
+     continues, closes, or is its whole turn, which the role label of an
+     autonomous row reads ([AUTO] only where a turn opens). The edge of a
+     position is a function of where its request's first and last rows sit
+     in the visible list, so an append to an open turn flips the edge of
+     the turn's previous last row; the walk compares the edge by value at
+     every position, and a flipped edge ends the sharing there;
    - the keeper, the pane width, and the memory/reasoning/tool visibility
-     readings, compared by value;
+     readings, compared by value. The width decides the badge column and
+     the tool-row wrap; the visibilities decide the folded thinking body,
+     the journal summary body, and the compact/full tool projection (memory
+     and reasoning also decide which rows the visible timeline holds at
+     all, which the position comparison then sees);
    - this keeper's file-change index and durable-call snapshot readings,
      replaced wholesale when a load lands, so physical identity says whether
-     they moved;
+     they moved; the tool detail rows read both;
    - the terminal palette generation, because the tool detail rows bake the
      resolved colours into their text and a palette that arrived after
      start-up must not keep drawing the previous answer's escapes.
 
-   Scroll is not an input: it selects the visible slice after the entries
-   exist, so moving through history keeps this answer. Module state rather
-   than a field on [state], like [chat_rows_memo]: a derived reading is not
-   authority, and the input layer would otherwise have to invalidate it at
-   every mutation site. *)
+   Deliberately not inputs: the scroll position and the origin-display mode
+   act after the entries exist ([rows_of_entry] takes them), the live turn
+   is built where it is drawn, and [keeper_message_clock]'s timezone is the
+   process's own for its whole life -- the assumption the whole-list memo
+   already made.
+
+   The reuse is a parallel walk over the previous and current visible
+   timelines: while the record, the projected moment, and the turn edge at
+   a position all agree, the entry computed for it is taken over; from the
+   first position that differs, the tail is computed fresh. An append --
+   the common case, every committed row landing at the newest end --
+   therefore computes one entry, or two when it closes a turn's previous
+   last row; a mid-list insertion recomputes the suffix below it, which
+   during a live turn is the turn still settling. [Lazy.t] inside the entry
+   was considered so a constructed-but-unviewed entry could skip its link
+   scan and tool rows, but entries are constructed off the visible slice
+   only when the readings above change wholesale -- first load, an older
+   page prepending, a visibility toggle, a resize -- never on the
+   per-message path this memo exists for, and a lazy [body] would change
+   [Message_layout.entry] for every reader to serve a path that already
+   runs once per change.
+
+   One slot holding one conversation's entries, replaced wholesale when any
+   reading changes: nothing accumulates across keepers, widths, or palette
+   generations, and nothing is kept stale. Module state rather than a field
+   on [state], like [chat_rows_memo]: a derived reading is not authority,
+   and the input layer would otherwise have to invalidate it at every
+   mutation site. *)
 type layout_entries_memo = {
   lem_keeper_name : string;
-  lem_messages : msg_entry list;
   lem_chat_cols : int;
   lem_memory : memory_visibility;
   lem_reasoning : reasoning_visibility;
@@ -7612,10 +7652,47 @@ type layout_entries_memo = {
   lem_calls_error : string option;
   lem_calls : keeper_calls_snapshot option;
   lem_palette_generation : int;
+  lem_visible_timeline : (msg_entry * float option) list;
+  lem_visible_entries : (msg_entry * float option * turn_edge) list;
   lem_entries : Message_layout.entry list;
 }
 
 let layout_entries_memo : layout_entries_memo option ref = ref None
+
+(* The visible timeline with each row's turn edge beside it. Marking the
+   edges walks the list once, so it runs only when the timeline actually
+   changed; the identical-frame path below answers on the timeline's
+   physical identity without paying it. *)
+let keeper_message_visible_entries visible_timeline =
+  let edges =
+    List.map snd (Masc_tui_types.mark_turn_edges (List.map fst visible_timeline))
+  in
+  List.map2
+    (fun (message, timeline_at) edge -> (message, timeline_at, edge))
+    visible_timeline edges
+;;
+
+(* Positions whose message record, projected moment, and turn edge all
+   survived a conversation change keep the entry already computed for them.
+   The first position that differs ends the sharing, because the index
+   baked into [markdown_source], the per-request floor walked in list
+   order, and the first/last marking an edge reads are each only as good as
+   every position above them. The suffix goes back as the tail cell it was
+   found at, so a caller can tell "nothing shared" by physical identity
+   rather than by measuring. *)
+let rec shared_layout_entry_prefix reversed old_visible old_entries
+    new_visible =
+  match old_visible, old_entries, new_visible with
+  | (old_message, old_at, old_edge) :: old_visible_rest,
+    entry :: old_entries_rest,
+    (message, timeline_at, edge) :: new_visible_rest
+    when old_message == message
+         && Option.equal Float.equal old_at timeline_at
+         && old_edge = edge ->
+      shared_layout_entry_prefix (entry :: reversed) old_visible_rest
+        old_entries_rest new_visible_rest
+  | _ -> List.rev reversed, new_visible
+;;
 
 let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     ~chat_cols =
@@ -7624,38 +7701,68 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     | Some messages -> messages
     | None -> chat_rows_for state keeper_name
   in
+  let visible_timeline =
+    keeper_message_visible_timeline ~messages state ~keeper_name
+  in
   let palette_generation =
     Masc_tui_terminal_palette.snapshot_generation
       (Masc_tui_terminal_palette.snapshot ())
   in
+  let same_inputs (memo : layout_entries_memo) =
+    String.equal memo.lem_keeper_name keeper_name
+    && memo.lem_chat_cols = chat_cols
+    && memo.lem_memory = state.msg_memory_visibility
+    && memo.lem_reasoning = state.msg_reasoning_visibility
+    && memo.lem_tools = state.msg_tool_visibility
+    && Option.equal String.equal memo.lem_file_changes_keeper
+         state.msg_file_changes_keeper
+    && memo.lem_file_change_index == state.msg_file_change_index
+    && Option.equal String.equal memo.lem_calls_keeper
+         state.keeper_calls_keeper
+    && Bool.equal memo.lem_calls_loading state.keeper_calls_loading
+    && Option.equal String.equal memo.lem_calls_error
+         state.keeper_calls_error
+    && memo.lem_calls == state.keeper_calls
+    && memo.lem_palette_generation = palette_generation
+  in
   match !layout_entries_memo with
   | Some memo
-    when String.equal memo.lem_keeper_name keeper_name
-         && memo.lem_messages == messages
-         && memo.lem_chat_cols = chat_cols
-         && memo.lem_memory = state.msg_memory_visibility
-         && memo.lem_reasoning = state.msg_reasoning_visibility
-         && memo.lem_tools = state.msg_tool_visibility
-         && Option.equal String.equal memo.lem_file_changes_keeper
-              state.msg_file_changes_keeper
-         && memo.lem_file_change_index == state.msg_file_change_index
-         && Option.equal String.equal memo.lem_calls_keeper
-              state.keeper_calls_keeper
-         && Bool.equal memo.lem_calls_loading state.keeper_calls_loading
-         && Option.equal String.equal memo.lem_calls_error
-              state.keeper_calls_error
-         && memo.lem_calls == state.keeper_calls
-         && memo.lem_palette_generation = palette_generation ->
+    when same_inputs memo && memo.lem_visible_timeline == visible_timeline ->
       memo.lem_entries
+  | Some memo when same_inputs memo ->
+      let visible_entries = keeper_message_visible_entries visible_timeline in
+      let prefix, suffix =
+        shared_layout_entry_prefix [] memo.lem_visible_entries
+          memo.lem_entries visible_entries
+      in
+      let entries =
+        match suffix with
+        | [] -> prefix
+        | _ when suffix == visible_entries ->
+            compute_keeper_message_layout_entries state ~keeper_name
+              ~chat_cols ~start_index:0 visible_entries
+        | _ ->
+            prefix
+            @ compute_keeper_message_layout_entries state ~keeper_name
+                ~chat_cols ~start_index:(List.length prefix) suffix
+      in
+      layout_entries_memo :=
+        Some
+          { memo with
+            lem_visible_timeline = visible_timeline;
+            lem_visible_entries = visible_entries;
+            lem_entries = entries;
+          };
+      entries
   | Some _ | None ->
+      let visible_entries = keeper_message_visible_entries visible_timeline in
       let entries =
         compute_keeper_message_layout_entries state ~keeper_name ~chat_cols
-          ~messages
+          ~start_index:0 visible_entries
       in
       layout_entries_memo :=
         Some
           { lem_keeper_name = keeper_name;
-            lem_messages = messages;
             lem_chat_cols = chat_cols;
             lem_memory = state.msg_memory_visibility;
             lem_reasoning = state.msg_reasoning_visibility;
@@ -7667,6 +7774,8 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
             lem_calls_error = state.keeper_calls_error;
             lem_calls = state.keeper_calls;
             lem_palette_generation = palette_generation;
+            lem_visible_timeline = visible_timeline;
+            lem_visible_entries = visible_entries;
             lem_entries = entries;
           };
       entries

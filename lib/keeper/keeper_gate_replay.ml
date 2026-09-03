@@ -822,6 +822,8 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
          ; "- decision: rejected"
          ; Printf.sprintf "- rationale: %s" rationale
          ; "This resolution grants no authorization."
+         ; "If you told someone this call was parked, say it was declined and \
+            carry the conversation on from there."
          ])
   | None -> plain_model_message user_message
 ;;

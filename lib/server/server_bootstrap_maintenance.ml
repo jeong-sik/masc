@@ -11,6 +11,15 @@
    not runtime.toml, not the deployed environment, not a script. A knob
    nobody turns, named after something that does not exist, is read once at
    boot to produce the number written here. *)
+(* Recovery passes that retained a non-executable owner, per keeper+reason.
+   Purely per process; see the retained arm below. *)
+let retained_owner_passes : (string, int) Hashtbl.t = Hashtbl.create 8
+
+(* One pass a minute means 1440 is about a day. The pass that lands exactly
+   on a full day warns; the rest stay quiet. Exposed for the suite. *)
+let retention_becomes_warning (count : int) = count > 0 && count mod 1440 = 0
+
+
 let maintenance_tick_sec = 60.0
 
 let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
@@ -414,16 +423,8 @@ let recover_projected_durable_demand_owner
                " — paused beyond a day of recovery passes; only an operator \
                 resume clears this (POST /api/v1/keepers_bulk/directive, \
                 action=resume)"
-             else ""))
+             else """)))
 ;;
-
-(* Recovery passes that retained a non-executable owner, per keeper+reason.
-   Purely per process; see the retained arm below. *)
-let retained_owner_passes : (string, int) Hashtbl.t = Hashtbl.create 8
-
-(* One pass a minute means 1440 is about a day. The pass that lands exactly
-   on a full day warns; the rest stay quiet. Exposed for the suite. *)
-let retention_becomes_warning (count : int) = count > 0 && count mod 1440 = 0
 
 let consume_owner_projection_batch
       ~commit_cursor

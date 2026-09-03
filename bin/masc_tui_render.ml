@@ -8591,6 +8591,63 @@ let render_keeper_message (state : state) =
                   box_line_styled chat_buf chat_cols ~style ("  " ^ text)))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
      | Some _ | None -> ());
+    (* Effects this Keeper is not waiting on. A deferral returns successfully
+       and the Keeper carries on, so the tool row reads as a plain return and
+       nothing else on this pane said the effect was still out. The phase
+       vocabulary and the age are the Approvals screen's own, so the two
+       surfaces cannot disagree about a row they both hold. *)
+    (match state.msg_target_keeper_name with
+     | None -> ()
+     | Some keeper_name -> (
+         match keeper_effects_at_the_gate state ~keeper_name with
+         | [] -> ()
+         | pending ->
+             let severity (row : Tui_decode.gate_pending) =
+               match row.gp_phase with
+               | Tui_decode.Gate_blocked -> 3
+               | Tui_decode.Gate_human_required -> 2
+               | Tui_decode.Gate_queued -> 1
+               | Tui_decode.Gate_judging -> 0
+             in
+             let worst =
+               List.fold_left
+                 (fun worst row ->
+                   if severity row > severity worst then row else worst)
+                 (List.hd pending) (List.tl pending)
+             in
+             let style =
+               match worst.gp_phase with
+               | Tui_decode.Gate_blocked -> Theme.bad ()
+               | Tui_decode.Gate_queued | Tui_decode.Gate_human_required ->
+                   Theme.warn ()
+               | Tui_decode.Gate_judging -> Theme.info ()
+             in
+             let named =
+               List.map
+                 (fun (row : Tui_decode.gate_pending) ->
+                   let phase =
+                     match row.gp_phase with
+                     | Tui_decode.Gate_queued -> "queued"
+                     | Tui_decode.Gate_judging -> "judging"
+                     | Tui_decode.Gate_human_required -> "human"
+                     | Tui_decode.Gate_blocked -> "blocked"
+                   in
+                   let age =
+                     match row.gp_waiting_s with
+                     | Some seconds -> Masc_tui_answering.duration_text seconds
+                     | None -> "?"
+                   in
+                   Printf.sprintf "%s %s %s"
+                     (Keeper_chat.terminal_safe_text row.gp_display_tool)
+                     age phase)
+                 pending
+             in
+             let count = List.length pending in
+             box_line_styled chat_buf chat_cols ~style
+               (Printf.sprintf "  AT THE GATE · %d external effect%s out · %s"
+                  count
+                  (if count = 1 then "" else "s")
+                  (String.concat " · " named))));
     if not target_registered then begin
       let unavailable_message =
         match state.keepers_error with

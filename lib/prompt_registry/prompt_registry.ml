@@ -499,9 +499,11 @@ let load_prompts_from_directory dir =
                       | None -> []
                     in
                     (* A group file registers each [### marker] paragraph
-                       as <key>.<marker> — a fragment of its group whatever
-                       the frontmatter surface says — with the variables
-                       declared on the marker line. The prose before the
+                       as <key>.<marker>, carrying the group's frontmatter
+                       surface (the TUI prompt list hides fragments by
+                       default, so a merged operator-facing prompt keeps
+                       its primary surface) and the variables declared on
+                       the marker line. The prose before the
                        first marker is the group's own body and registers
                        under the group key when there is any; a file
                        without markers registers whole. *)
@@ -536,7 +538,7 @@ let load_prompts_from_directory dir =
                             in
                             Hashtbl.replace fragment_tbl slot_key (key, marker);
                             register_prompt_unlocked ~key:slot_key ~description
-                              ~category ~operator_surface:Types.Fragment
+                              ~category ~operator_surface
                               ~required_file:true ~template_variables ();
                             marker :: seen
                           end)

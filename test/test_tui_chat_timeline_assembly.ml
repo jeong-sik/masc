@@ -213,6 +213,110 @@ let test_queued_requests_are_not_in_the_transcript () =
     (List.length timeline.Tui_types.ctl_items)
 ;;
 
+(* Where a turn begins and ends, for a pane drawing its boundary.
+
+   Nine kinds of row share one clock here, and two more -- another agent's
+   broadcast and a memory commit -- belong to no turn at all. Flat, they are in
+   the right order and in no order that says what produced what. *)
+
+let edge_name = function
+  | Tui_types.Turn_opens -> "opens"
+  | Tui_types.Turn_continues -> "continues"
+  | Tui_types.Turn_closes -> "closes"
+  | Tui_types.Turn_alone -> "alone"
+  | Tui_types.Turn_outside -> "outside"
+;;
+
+let edges rows =
+  Tui_types.mark_turn_edges rows |> List.map (fun (_, edge) -> edge_name edge)
+;;
+
+let check_edges label expected rows =
+  Alcotest.(check (list string)) label expected (edges rows)
+;;
+
+let test_a_turn_opens_once_and_closes_once () =
+  check_edges "three rows of one request"
+    [ "opens"; "continues"; "closes" ]
+    [ row ~request_id:"r1" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
+        ~phase:Tui_types.Turn_input ~text:"go" 1.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_tool ~phase:Tui_types.Turn_tool
+        ~text:"read" 2.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"done" 3.
+    ]
+;;
+
+let test_a_turn_of_one_row_opens_and_closes_on_it () =
+  check_edges "a lone answer" [ "alone" ]
+    [ row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"done" 1.
+    ]
+;;
+
+(* A broadcast has no request. Drawn inside the boundary it would say the
+   keeper read it and answered; it belongs outside. *)
+let test_a_broadcast_belongs_to_no_turn () =
+  check_edges "a broadcast between two turns"
+    [ "alone"; "outside"; "alone" ]
+    [ row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"first" 1.
+    ; row ~role:(Tui_types.Message_user (Tui_types.Sent_by_other "rondo"))
+        ~phase:Tui_types.Turn_input ~text:"main is red" 2.
+    ; row ~request_id:"r2" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"second" 3.
+    ]
+;;
+
+(* A memory commit records when it was written, not which turn asked, so it
+   has no turn to sit inside either. *)
+let test_a_journal_commit_belongs_to_no_turn () =
+  check_edges "a commit beside a turn" [ "opens"; "outside"; "closes" ]
+    [ row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"answer" 1.
+    ; row ~role:Tui_types.Message_memory ~phase:Tui_types.Turn_progress
+        ~text:"r4400 committed" 2.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"more" 3.
+    ]
+;;
+
+(* The case neighbour comparison gets wrong: a broadcast arriving mid-turn
+   would close the turn and reopen it, drawing two turns where the keeper took
+   one. The edges are the request's first and last row, not the gaps. *)
+let test_an_interrupted_turn_still_opens_once () =
+  check_edges "a broadcast inside a turn"
+    [ "opens"; "outside"; "continues"; "closes" ]
+    [ row ~request_id:"r1" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
+        ~phase:Tui_types.Turn_input ~text:"go" 1.
+    ; row ~role:(Tui_types.Message_user (Tui_types.Sent_by_other "rondo"))
+        ~phase:Tui_types.Turn_input ~text:"main is red" 2.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_tool ~phase:Tui_types.Turn_tool
+        ~text:"read" 3.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"done" 4.
+    ]
+;;
+
+(* Two turns interleaved -- parallel lanes do this -- each keep one boundary. *)
+let test_interleaved_turns_each_open_once () =
+  check_edges "r1 and r2 alternating"
+    [ "opens"; "opens"; "closes"; "closes" ]
+    [ row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"a" 1.
+    ; row ~request_id:"r2" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"b" 2.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"c" 3.
+    ; row ~request_id:"r2" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"d" 4.
+    ]
+;;
+
+let test_an_empty_conversation_has_no_edges () =
+  check_edges "nothing to draw" [] []
+;;
+
 let () =
   Alcotest.run
     "tui chat timeline assembly"
@@ -234,7 +338,21 @@ let () =
           Alcotest.test_case "journal and unowned lines keep their places" `Quick
             test_journal_and_unowned_lines_keep_their_places;
           Alcotest.test_case "queued requests are not in the transcript" `Quick
-            test_queued_requests_are_not_in_the_transcript
+            test_queued_requests_are_not_in_the_transcript;
+          Alcotest.test_case "a turn opens once and closes once" `Quick
+            test_a_turn_opens_once_and_closes_once;
+          Alcotest.test_case "a turn of one row opens and closes on it" `Quick
+            test_a_turn_of_one_row_opens_and_closes_on_it;
+          Alcotest.test_case "a broadcast belongs to no turn" `Quick
+            test_a_broadcast_belongs_to_no_turn;
+          Alcotest.test_case "a journal commit belongs to no turn" `Quick
+            test_a_journal_commit_belongs_to_no_turn;
+          Alcotest.test_case "an interrupted turn still opens once" `Quick
+            test_an_interrupted_turn_still_opens_once;
+          Alcotest.test_case "interleaved turns each open once" `Quick
+            test_interleaved_turns_each_open_once;
+          Alcotest.test_case "an empty conversation has no edges" `Quick
+            test_an_empty_conversation_has_no_edges
         ] )
     ]
 ;;

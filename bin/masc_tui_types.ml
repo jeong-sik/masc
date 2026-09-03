@@ -617,6 +617,81 @@ let chat_timeline ~loaded ~session ~queued_request_ids =
   { ctl_items = chat_timeline_slots (loaded @ visible_session) }
 ;;
 
+(* Which lane a chat row belongs to, asked of the row rather than of where it
+   happens to sit.
+
+   The pane draws nine kinds of row on one clock: what a person said, what the
+   keeper answered, what an autonomous turn answered, its thinking, its tool
+   block, its skills, a memory commit, a status line, an error. Another agent's
+   broadcast and an external request arrive on the same clock and belong to no
+   turn at all. Laid out flat they are in the right order and in no order that
+   says what produced what.
+
+   The timeline already sorts rows this way to place them
+   ({!chat_timeline_slots}); this is the same question asked of one row, so a
+   renderer can draw the boundary without rebuilding the timeline. *)
+type chat_row_lane =
+  | Lane_turn of string
+      (** Produced inside the turn with this request id. *)
+  | Lane_unowned
+      (** No request owns it: another agent's broadcast, a system line. It
+          shares the clock with a turn without being part of one, and drawing
+          it inside the turn's boundary would say the keeper read it. *)
+  | Lane_memory
+      (** A memory journal commit. It carries no request either -- the store
+          records when it was written, not which turn asked -- so its place is
+          beside the turns rather than in one. *)
+
+let chat_row_lane (row : msg_entry) =
+  if row.me_role = Message_memory then Lane_memory
+  else if String.equal row.me_request_id "" then Lane_unowned
+  else Lane_turn row.me_request_id
+
+(* Where a row sits in its turn, for a renderer drawing the turn's edges. *)
+type turn_edge =
+  | Turn_opens
+  | Turn_continues
+  | Turn_closes
+  | Turn_alone  (** A turn of one row: it opens and closes on the same line. *)
+  | Turn_outside  (** Belongs to no turn; nothing to open or close. *)
+
+(* A turn opens once and closes once even when its rows are not adjacent.
+
+   Rows of one request can be separated by a broadcast that arrived mid-turn,
+   and comparing each row with its neighbour would then close the turn and
+   reopen it around the interruption -- drawing two turns where the keeper took
+   one. The edges are the request's first and last row in this list, not the
+   gaps between neighbours. *)
+let mark_turn_edges rows =
+  let first = Hashtbl.create 16 in
+  let last = Hashtbl.create 16 in
+  List.iteri
+    (fun index row ->
+      match chat_row_lane row with
+      | Lane_unowned | Lane_memory -> ()
+      | Lane_turn request_id ->
+          if not (Hashtbl.mem first request_id) then
+            Hashtbl.replace first request_id index;
+          Hashtbl.replace last request_id index)
+    rows;
+  List.mapi
+    (fun index row ->
+      let edge =
+        match chat_row_lane row with
+        | Lane_unowned | Lane_memory -> Turn_outside
+        | Lane_turn request_id -> (
+            let opens = Hashtbl.find_opt first request_id = Some index in
+            let closes = Hashtbl.find_opt last request_id = Some index in
+            match opens, closes with
+            | true, true -> Turn_alone
+            | true, false -> Turn_opens
+            | false, true -> Turn_closes
+            | false, false -> Turn_continues)
+      in
+      (row, edge))
+    rows
+;;
+
 let chat_timeline_rows timeline =
   let turn_rows turn =
     List.combine turn.ct_rows (chat_projected_timeline_ats turn.ct_rows)

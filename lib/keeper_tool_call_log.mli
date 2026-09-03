@@ -5,6 +5,13 @@
 
     @since 2.249.0 *)
 
+val max_output_len : int
+(** Bytes of a record's serialized output that reach disk; the rest is cut with
+    a [...(truncated)] suffix. Exposed because payload builders order their
+    fields against it — an unbounded field placed before a diagnostic one takes
+    the diagnostic away with it (see
+    [Keeper_tool_composition_surface.failure_payload]). *)
+
 val set_truncation_info :
   invocation:Agent_core.Tool_contract.Invocation.t ->
   original_bytes:int ->

@@ -1198,6 +1198,43 @@ describe('KeeperConfigPanel', () => {
     expect(keeperConfigSubscriptionCountsForTests()).toEqual({ reset: 0, update: 0 })
   })
 
+  // A Keeper with no network reads as a broken credential from the inside: gh
+  // cannot reach github.com to check its token, so it calls the token invalid.
+  // The panel is the one surface that knows better, so `none` has to be
+  // legible there rather than sitting in a row that looks like every other.
+  it('marks network_mode none and says what it costs', async () => {
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(
+      makeKeeperConfig({ sandbox_profile: 'microvm', network_mode: 'none' }),
+    )
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+    selectKcfTab(container, '권한·샌드박스')
+    await flush()
+    await flush()
+
+    expect(container.textContent).toContain('이 Keeper 는 네트워크가 없습니다')
+    expect(container.textContent).toContain("'토큰이 invalid'")
+    const warned = container.querySelectorAll('[class*="color-status-warn"]')
+    expect(warned.length).toBeGreaterThan(0)
+  })
+
+  it('says nothing about the network when the Keeper has one', async () => {
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(
+      makeKeeperConfig({ sandbox_profile: 'microvm', network_mode: 'inherit' }),
+    )
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+    selectKcfTab(container, '권한·샌드박스')
+    await flush()
+    await flush()
+
+    expect(container.textContent).not.toContain('이 Keeper 는 네트워크가 없습니다')
+  })
+
   it('allows runtime config assignment writes when Keeper name is valid without a manifest path', async () => {
     const base = makeKeeperConfig()
     const promptOnlyConfig = makeKeeperConfig({

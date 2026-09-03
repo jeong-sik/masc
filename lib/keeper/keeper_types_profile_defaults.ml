@@ -14,6 +14,7 @@ type keeper_profile_defaults = {
      [remote_ssh_endpoint_missing]; the registry itself arrives with
      Phase 1 task 2. *)
   remote_endpoint : string option;
+  microvm_backend : Keeper_microvm_backend.t option;
   max_context_override : int option;
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
@@ -51,6 +52,7 @@ let empty_keeper_profile_defaults =
     sandbox_image = None;
     network_mode = None;
     remote_endpoint = None;
+    microvm_backend = None;
     max_context_override = None;
     telemetry_feedback_enabled = None;
     telemetry_feedback_window_hours = None;

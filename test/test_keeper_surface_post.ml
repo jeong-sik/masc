@@ -710,8 +710,15 @@ let test_channel_reference_resolution () =
   let wider_names = names @ [ ("C3", "ops") ] in
   check (option string) "unbound channel's name never resolves"
     None (ref wider_names bound "ops");
-  check (option string) "unbound channel's id passes through unresolved"
-    (Some "C3") (ref wider_names bound "C3")
+  check (option string) "unbound channel's id returns None (caller passes it through)"
+    None (ref wider_names bound "C3");
+  (* Ambiguity resolves to nothing: two bound channels sharing a name must
+     not pick one silently. *)
+  let ambiguous_names = names @ [ ("C2", "dev-team") ] in
+  check (option string) "a name held by two bound channels resolves to none"
+    None (ref ambiguous_names bound "#dev-team");
+  check (option string) "space after the hash is trimmed away"
+    (Some "C1") (ref names bound "# dev-team")
 ;;
 
 let () =

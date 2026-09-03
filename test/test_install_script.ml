@@ -1109,6 +1109,37 @@ let test_wizard_warns_when_selected_local_server_is_down () =
         {|[dry-run] would set [runtime].default = "local_llama.qwen"|})
 ;;
 
+let test_wizard_reports_execution_sandboxes () =
+  let tmpdir = Filename.temp_file "masc-install-sandbox-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      let output, status =
+        run_install_status [ "--dry-run"; "--provider"; "local_llama" ] tmpdir
+      in
+      check bool "sandbox report exits 0" true (status = Unix.WEXITED 0);
+      (* Host-independent structure: the section and each of the three real
+         backends are listed. Whether each is "available" depends on the host,
+         so that is measured, not asserted here. *)
+      assert_contains
+        "the sandbox axis is reported"
+        output
+        "detected execution sandboxes";
+      assert_contains "docker backend is listed" output "docker:";
+      assert_contains
+        "the microvm backend is listed"
+        output
+        "microvm (apple container):";
+      assert_contains "the remote_ssh backend is listed" output "remote_ssh:";
+      assert_contains
+        "the report points at where the choice is actually made"
+        output
+        "sandbox_profile in .masc/config/keepers")
+;;
+
 let test_provider_ping_does_not_expose_key_in_curl_argv () =
   let script = install_script () in
   assert_contains
@@ -1800,6 +1831,10 @@ let () =
             "wizard warns when the selected local server is down"
             `Quick
             test_wizard_warns_when_selected_local_server_is_down
+        ; test_case
+            "wizard reports available execution sandboxes"
+            `Quick
+            test_wizard_reports_execution_sandboxes
         ; test_case "wizard parses the real runtime.toml catalog" `Quick test_wizard_parses_real_runtime_toml
         ; test_case
             "real runtime.toml providers declare healthcheck paths"

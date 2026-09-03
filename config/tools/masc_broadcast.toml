@@ -38,3 +38,23 @@ type = "string"
 description = """
 Optional typed cache signal: task ID observed as active in the subject agent \
 cache. Must be supplied together with task_cache_subject_agent."""
+
+[agent_core_projection]
+description = "Broadcast a message to all active agents. Use when sharing status updates, workspace signals, or requesting help from any available agent."
+additional_properties = false
+
+[[agent_core_projection.params]]
+name = "content"
+type = "string"
+required = true
+description = "Broadcast body text"
+
+[[agent_core_projection.params]]
+name = "task_cache_subject_agent"
+type = "string"
+description = "Agent whose current-task cache was observed; supply together with task_cache_task_id"
+
+[[agent_core_projection.params]]
+name = "task_cache_task_id"
+type = "string"
+description = "Task ID observed in the subject agent cache; supply together with task_cache_subject_agent"

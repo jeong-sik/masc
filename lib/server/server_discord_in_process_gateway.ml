@@ -625,21 +625,6 @@ let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
         channel_id keeper_name error;
       None
 
-let mark_attention_resolved ~base_dir ~keeper_name ~event_id ~reason =
-  match
-    Keeper_external_attention.mark_resolved
-      ~base_path:base_dir
-      ~keeper_name
-      ~event_ids:[ event_id ]
-      ~reason
-      ()
-  with
-  | Ok () -> ()
-  | Error error ->
-      Log.Server.warn
-        "discord external attention resolve failed (keeper=%s event=%s): %s"
-        keeper_name event_id error
-
 let log_binding_lookup_failure ~channel_id error =
   let detail =
     Format.asprintf "%a" State.pp_binding_lookup_error error
@@ -733,7 +718,9 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
     (* Resolved once for this message, so the attention record and the
        durable chat row name the same room. *)
     let channel_name = resolve_channel_name ~base_dir ~channel_id in
-    let attention_event_id =
+    (* Recorded as evidence; this route answers inline rather than queueing, so
+       nothing downstream needs the id. *)
+    let (_ : string option) =
       record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id ~channel_name
         ~message_id ~author_id ~author_name ~content ~mentions_bot
         ~route:"triggered" ~urgency
@@ -803,12 +790,7 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
             (Channel_gate.gate_error_to_string gate_err))
      | Ok out ->
        if String.equal out.content "" then begin
-         (match attention_event_id with
-          | Some event_id ->
-              mark_attention_resolved ~base_dir ~keeper_name ~event_id
-                ~reason:"discord_empty_reply"
-          | None -> ());
-         Discord_observability.record_inbound_dispatch
+                  Discord_observability.record_inbound_dispatch
            Discord_observability.Empty_reply;
          Discord_observability.record_reply Discord_observability.Reply_empty
        end
@@ -818,12 +800,7 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
               ~reply_to_message_id:message_id ()
           with
           | Ok _ ->
-            (match attention_event_id with
-             | Some event_id ->
-               mark_attention_resolved ~base_dir ~keeper_name ~event_id
-                 ~reason:"discord_reply_sent"
-             | None -> ());
-            Discord_observability.record_inbound_dispatch
+                        Discord_observability.record_inbound_dispatch
               Discord_observability.Reply_sent;
             Discord_observability.record_reply
               Discord_observability.Reply_send_ok

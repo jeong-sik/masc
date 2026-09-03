@@ -240,21 +240,6 @@ let record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
       channel_id keeper_name error;
     None
 
-let mark_attention_resolved ~base_dir ~keeper_name ~event_id ~reason =
-  match
-    Keeper_external_attention.mark_resolved
-      ~base_path:base_dir
-      ~keeper_name
-      ~event_ids:[ event_id ]
-      ~reason
-      ()
-  with
-  | Ok () -> ()
-  | Error error ->
-    Log.Server.warn
-      "slack external attention resolve failed (keeper=%s event=%s): %s"
-      keeper_name event_id error
-
 (* ---------------------------------------------------------------- *)
 (* Inbound delivery                                                 *)
 (* ---------------------------------------------------------------- *)
@@ -409,12 +394,7 @@ let deliver_inbound ~clock ~base_dir accepted =
            (Channel_gate.gate_error_to_string gate_err))
      | Ok out ->
        if String.equal out.content "" then begin
-         (match attention_event_id with
-          | Some event_id ->
-            mark_attention_resolved ~base_dir ~keeper_name ~event_id
-              ~reason:"slack_empty_reply"
-          | None -> ());
-         Slack_observability.record_inbound_dispatch
+                  Slack_observability.record_inbound_dispatch
            Slack_observability.Empty_reply;
          Slack_observability.record_reply Slack_observability.Reply_empty
        end
@@ -424,12 +404,7 @@ let deliver_inbound ~clock ~base_dir accepted =
              ~reply_to_message_id:reply_to_thread_ts ()
          with
          | Ok _ ->
-           (match attention_event_id with
-            | Some event_id ->
-              mark_attention_resolved ~base_dir ~keeper_name ~event_id
-                ~reason:"slack_reply_sent"
-            | None -> ());
-           Slack_observability.record_inbound_dispatch
+                      Slack_observability.record_inbound_dispatch
              Slack_observability.Reply_sent;
            Slack_observability.record_reply Slack_observability.Reply_send_ok
          | Error e ->
@@ -750,7 +725,6 @@ module For_testing = struct
   let submit_event = submit_event
   let submit_ambient_event = submit_ambient_event
   let record_external_attention = record_external_attention
-  let mark_attention_resolved = mark_attention_resolved
   let resolve_event_identity = resolve_event_identity
 end
 

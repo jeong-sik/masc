@@ -717,6 +717,11 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
               match take_input_byte reader ~timeout:0.05 with
               | Some 'G' -> Some (Graphics_reply (read_apc_body reader))
               | Some _ | None -> key "esc")
+          (* Alt+Backspace arrives as ESC DEL (or ESC BS where Backspace sends
+             BS): the second byte was swallowed as "esc" and the chat closed
+             under the typist's thumb. It names its own key now, and the
+             composer reads it as delete-word-back. *)
+          | Some ('\x7f' | '\x08') -> key "alt-backspace"
           | Some _ | None -> key "esc")
       | Some byte -> (
           match Masc_tui_message_layout.utf8_scalar_byte_length byte with
@@ -1242,6 +1247,17 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     let new_content =
       Buffer.contents state.msg_input
       |> Masc_tui_message_layout.drop_last_utf8_scalar
+    in
+    Buffer.clear state.msg_input;
+    Buffer.add_string state.msg_input new_content;
+    true
+  | "\x17" | "alt-backspace" ->
+    (* Ctrl-W, or Alt+Backspace on a terminal that sends ESC DEL: the last
+       word goes, the rest of the draft stays. *)
+    forget_recall state;
+    let new_content =
+      Buffer.contents state.msg_input
+      |> Masc_tui_message_layout.drop_last_utf8_word
     in
     Buffer.clear state.msg_input;
     Buffer.add_string state.msg_input new_content;

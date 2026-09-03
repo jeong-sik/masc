@@ -161,6 +161,10 @@ let for_surface = function
       ; b Act "Y" "copy link" ~help:"copy the selected post reference"
       ; b Navigate "Ctrl-W" "pane" ~help:"switch between the post list and detail pane"
       ; b Navigate "h/l" "pane" ~help:"focus the post list or detail pane"
+        (* Beside [f], not instead of it: [f] narrows the list to one hearth,
+           this jumps the cursor to a post without changing what is listed. *)
+      ; b Search "/" "find" ~help:"jump the cursor to a matching post id, author or title"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Approvals ->
@@ -194,6 +198,10 @@ let for_surface = function
       ; b Act "x" "drop"
       ; b Act "o" "reopen"
       ; b Act "Y" "copy link" ~help:"copy the selected goal reference"
+        (* Over the goals [f] and [s] left on screen, in the order they are
+           drawn: the search walks what the list shows, not the snapshot. *)
+      ; b Search "/" "find" ~help:"jump the cursor to a matching goal id or title"
+      ; b Search "n / N" "next / previous match"
       ]
       @ listing_meta
   | Schedules ->

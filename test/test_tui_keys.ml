@@ -423,7 +423,7 @@ let test_every_detail_surface_steps_through_its_list () =
 
 let test_planning_footer_carries_filter_and_sort () =
   check str "planning names filter and sort"
-    "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Planning)
 
 let test_board_and_planning_explain_their_order () =
@@ -804,6 +804,113 @@ let test_lanes_sub_modes_stay_unsearchable () =
   Alcotest.(check (option (list string))) "run detail keeps / closed" None
     (surface_row_texts state Lanes)
 
+(* Board and Planning answer "/" over the list they draw. Both panes window
+   themselves around the cursor, so a landing is on screen without a scroll
+   to follow it; what has to hold is that the searched text is the list the
+   cursor counts positions in, and that the panes which are not a list keep
+   the key closed. *)
+
+let board_post ?(author = "alpha") id title =
+  { bp_id = id
+  ; bp_author = author
+  ; bp_title = title
+  ; bp_body = "body nobody searches"
+  ; bp_votes = 0
+  ; bp_comment_count = 0
+  ; bp_created_at = "2026-09-04T00:00:00Z"
+  ; bp_updated_at = 0.
+  ; bp_hearth = None
+  ; bp_kind = None
+  }
+
+let board_state () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Board;
+  state.board_posts <-
+    [ board_post "p-1" "release evidence sweep"
+    ; board_post ~author:"beta" "p-2" "frame budget"
+    ];
+  state
+
+let test_board_searches_the_post_list () =
+  let state = board_state () in
+  Alcotest.(check (option (list string)))
+    "id, author and title -- what the list draws"
+    (Some
+       [ "p-1 alpha release evidence sweep"; "p-2 beta frame budget" ])
+    (surface_row_texts state Board)
+
+let test_board_reading_and_writing_keep_the_key_closed () =
+  let state = board_state () in
+  state.board_mode <- Board_read "p-1";
+  Alcotest.(check (option (list string))) "reading a post" None
+    (surface_row_texts state Board);
+  state.board_mode <- Board_compose;
+  (* Writing is the stronger case: "/" there is draft text. *)
+  Alcotest.(check (option (list string))) "writing a post" None
+    (surface_row_texts state Board)
+
+let test_board_without_posts_offers_nothing_to_search () =
+  let state = board_state () in
+  state.board_posts <- [];
+  Alcotest.(check (option (list string))) "no rows" None
+    (surface_row_texts state Board)
+
+let planning_goal_row id title =
+  { pg_id = id
+  ; pg_title = title
+  ; pg_phase = Goal_phase.Executing
+  ; pg_priority = 1
+  ; pg_due_date = None
+  ; pg_metric = None
+  ; pg_target_value = None
+  ; pg_proof = Tui_decode.Proof_idle
+  ; pg_last_review_note = None
+  ; pg_last_review_at = None
+  ; pg_created_at = None
+  ; pg_updated_at = None
+  }
+
+let planning_state () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Planning;
+  state.planning <-
+    Some
+      { pl_goals =
+          [ planning_goal_row "g-1" "cut the frame budget"
+          ; planning_goal_row "g-2" "paste follows the field"
+          ]
+      ; pl_rollup = { pr_active = 2; pr_verifying = 0; pr_done = 0; pr_dropped = 0 }
+      ; pl_backlog =
+          { pb_todo = 0; pb_claimed = 0; pb_running = 0; pb_done = 0
+          ; pb_cancelled = 0 }
+      ; pl_generated_at = "2026-09-04T00:00:00Z"
+      };
+  state
+
+let test_planning_searches_the_goals_the_list_shows () =
+  let state = planning_state () in
+  Alcotest.(check (option (list string)))
+    "id and title"
+    (Some [ "g-1 cut the frame budget"; "g-2 paste follows the field" ])
+    (surface_row_texts state Planning)
+
+let test_planning_searches_what_the_filter_left () =
+  (* The cursor counts positions in the filtered, sorted list, so the search
+     has to walk that list and not the snapshot: a filter that hides a goal
+     would otherwise land the cursor one row off for every goal it hid. *)
+  let state = planning_state () in
+  state.planning_filter <- Planning_filter_completed;
+  Alcotest.(check (option (list string)))
+    "nothing active survives the completed filter" None
+    (surface_row_texts state Planning)
+
+let test_planning_detail_keeps_the_key_closed () =
+  let state = planning_state () in
+  state.planning_mode <- Planning_detail "g-1";
+  Alcotest.(check (option (list string))) "a goal is open" None
+    (surface_row_texts state Planning)
+
 let hit_to_string = function
   | Lanes_hit_standalone index -> Printf.sprintf "standalone %d" index
   | Lanes_hit_none -> "none"
@@ -968,6 +1075,8 @@ let surfaces_that_answer_the_row_search =
   ; "Runtime", Runtime
   ; "System logs", System_logs
   ; "Code", Code
+  ; "Board", Board
+  ; "Planning", Planning
   ]
 
 let test_every_searchable_surface_names_its_search () =
@@ -997,9 +1106,10 @@ let test_a_surface_without_rows_offers_no_row_search () =
     ; "Keeper calls", Keepers Keeper_calls
     ; "Chat", Keepers Keeper_message
     ; "Runtime pick", Keepers Keeper_runtime_pick
-    ; "Board", Board
+      (* Approvals has rows worth searching and still says no "/": [n] there
+         is deny, unarmed and immediate, so offering the search would invite
+         the reflex that follows it into refusing an approval. *)
     ; "Approvals", Approvals
-    ; "Planning", Planning
     ; "Schedules", Schedules
     ; "Fusion", Fusion
     ; "Resources", Resources
@@ -1276,6 +1386,20 @@ let () =
             test_the_keeper_sub_modes_do_not_share_a_section
         ; Alcotest.test_case "without a surface the order is the strip's" `Quick
             test_without_a_surface_the_order_is_the_strips
+        ] )
+    ; ( "board and planning rows"
+      , [ Alcotest.test_case "Board searches the post list" `Quick
+            test_board_searches_the_post_list
+        ; Alcotest.test_case "reading and writing keep the key closed" `Quick
+            test_board_reading_and_writing_keep_the_key_closed
+        ; Alcotest.test_case "no posts, nothing to search" `Quick
+            test_board_without_posts_offers_nothing_to_search
+        ; Alcotest.test_case "Planning searches the goals the list shows"
+            `Quick test_planning_searches_the_goals_the_list_shows
+        ; Alcotest.test_case "Planning searches what the filter left" `Quick
+            test_planning_searches_what_the_filter_left
+        ; Alcotest.test_case "a goal detail keeps the key closed" `Quick
+            test_planning_detail_keeps_the_key_closed
         ] )
     ; ( "lanes rows"
       , [ Alcotest.test_case "search leads with the standalone labels" `Quick

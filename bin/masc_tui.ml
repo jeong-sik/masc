@@ -4300,7 +4300,24 @@ let search_row_cursor state =
         && not state.code_diff_open && not state.code_notes_open
       then Some state.code_file_cursor
       else Some state.code_cursor
-  | _ -> None
+  | Board ->
+      (match state.board_mode with
+       | Board_read _ | Board_compose -> None
+       | Board_list -> Some state.board_cursor)
+  | Planning ->
+      (match state.planning_mode with
+       | Planning_detail _ -> None
+       | Planning_list -> Some state.planning_cursor)
+  (* Named rather than left to a wildcard. [surface_row_texts] is exhaustive
+     and will name a new surface; this used to end in [_ -> None], so a
+     surface given searchable rows there still had no cursor to move here and
+     the key did nothing. The three matches -- the rows, this reading, and
+     the write below -- have to agree, and only naming every surface makes
+     the compiler say so. *)
+  | Overview | Acting | Keepers Keeper_detail | Keepers Keeper_logs
+  | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
+  | Approvals | Schedules | Fusion | Changes | Config | Resources | Tools ->
+      None
 
 let search_land state index =
   let follow ?(cursor = index) scroll set_scroll =
@@ -4385,9 +4402,21 @@ let search_land state index =
      compile time; this match has to move with it or the search finds a row and
      then goes nowhere. A [_] here would let the two drift apart silently, and
      the drift shows up as a search that quietly does nothing. *)
+  (* These three lists window themselves around the cursor when they draw --
+     the same reason the Code tree above takes no [follow] -- so the landing
+     is on screen without a scroll to move. [state.board_scroll] is the
+     reading pane's, not the list's. *)
+  | Board ->
+      (match state.board_mode with
+       | Board_read _ | Board_compose -> ()
+       | Board_list -> state.board_cursor <- index)
+  | Planning ->
+      (match state.planning_mode with
+       | Planning_detail _ -> ()
+       | Planning_list -> state.planning_cursor <- index)
   | Overview | Acting | Keepers Keeper_detail | Keepers Keeper_logs
   | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
-  | Board | Approvals | Planning | Schedules | Fusion | Changes | Config
+  | Approvals | Schedules | Fusion | Changes | Config
   | Resources | Tools ->
       ()
 

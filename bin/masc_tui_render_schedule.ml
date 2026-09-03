@@ -415,7 +415,6 @@ let memory_facts_width = 5
 let memory_size_width = 9
 let memory_source_width = 20
 let memory_delta_width = 6
-let memory_cell_gap = 2
 
 type memory_columns = {
   mcol_show_revision : bool;
@@ -477,7 +476,7 @@ let memory_cells ?(state_style = "") ?(size_style = "") ?(delta_style = "")
     ]
 
 let memory_columns_used_width columns =
-  Table.used_width ~gap:memory_cell_gap (memory_cells columns memory_no_values)
+  Table.used_width (memory_cells columns memory_no_values)
 
 (* The source-bound reading answers "is anything pinned to a file", and the
    revision answers "how far has the snapshot moved". Neither is the question
@@ -524,10 +523,10 @@ let allocate_memory_columns ~inner_width =
     { base with mcol_name = base.mcol_name + growth }
 
 let memory_header_row columns =
-  Table.header_row ~gap:memory_cell_gap (memory_cells columns memory_no_values)
+  Table.header_row (memory_cells columns memory_no_values)
 
 let memory_row ?state_style ?size_style ?delta_style ?close columns values =
-  Table.row ~gap:memory_cell_gap ?close
+  Table.row ?close
     (memory_cells ?state_style ?size_style ?delta_style columns values)
 
 (* Workspace repository columns.
@@ -548,7 +547,6 @@ let workspace_sync_width = 6
    the repository, and the screen is better off dropping cells from the frame
    than showing a path nobody can place. *)
 let workspace_minimum_path_width = 8
-let workspace_cell_gap = 1
 
 type workspace_row_values = {
   wrow_name : string;
@@ -576,17 +574,17 @@ let workspace_cells ~path_width values =
 
 let workspace_path_width ~inner_width =
   let named =
-    Table.used_width ~gap:workspace_cell_gap
+    Table.used_width
       (workspace_cells ~path_width:0 workspace_no_values)
   in
   max workspace_minimum_path_width (inner_width - named)
 
 let workspace_header_row ~path_width =
-  Table.header_row ~gap:workspace_cell_gap
+  Table.header_row
     (workspace_cells ~path_width workspace_no_values)
 
 let workspace_row ~path_width values =
-  Table.row ~gap:workspace_cell_gap (workspace_cells ~path_width values)
+  Table.row (workspace_cells ~path_width values)
 
 (* System log columns.
 
@@ -608,7 +606,6 @@ let system_log_module_width = 16
 let system_log_keeper_width = 12
 let system_log_category_width = 9
 let system_log_minimum_message_width = 12
-let system_log_cell_gap = 1
 
 type system_log_row_values = {
   slog_time : string;
@@ -663,17 +660,17 @@ let system_log_cells ?(styles = system_log_plain_styles) ?(level_style = "")
 
 let system_log_message_width ~inner_width =
   let named =
-    Table.used_width ~gap:system_log_cell_gap
+    Table.used_width
       (system_log_cells ~message_width:0 system_log_no_values)
   in
   max system_log_minimum_message_width (inner_width - named)
 
 let system_log_header_row ~message_width =
-  Table.header_row ~gap:system_log_cell_gap
+  Table.header_row
     (system_log_cells ~message_width system_log_no_values)
 
 let system_log_row ~styles ~level_style ~message_width values =
-  Table.row ~gap:system_log_cell_gap
+  Table.row
     (system_log_cells ~styles ~level_style ~message_width values)
 
 (* Lane run columns.
@@ -692,7 +689,6 @@ let lane_slot_width = 16
 (* A run id truncated below this identifies nothing; the screen is better off
    dropping the frame's last cells than showing half of one. *)
 let lane_minimum_run_id_width = 12
-let lane_cell_gap = 1
 
 type lane_run_row_values = {
   lrow_started : string;
@@ -728,17 +724,17 @@ let lane_run_cells ~identity_header ?(status_style = "") ~run_id_width values =
 
 let lane_run_id_width ~inner_width =
   let named =
-    Table.used_width ~gap:lane_cell_gap
+    Table.used_width
       (lane_run_cells ~identity_header:"" ~run_id_width:0 lane_run_no_values)
   in
   max lane_minimum_run_id_width (inner_width - named)
 
 let lane_run_header_row ~identity_header ~run_id_width =
-  Table.header_row ~gap:lane_cell_gap
+  Table.header_row
     (lane_run_cells ~identity_header ~run_id_width lane_run_no_values)
 
 let lane_run_row ~identity_header ~status_style ~run_id_width values =
-  Table.row ~gap:lane_cell_gap
+  Table.row
     (lane_run_cells ~identity_header ~status_style ~run_id_width values)
 
 (* File change columns.
@@ -754,7 +750,6 @@ let change_op_width = 5
 let change_result_width = 8
 let change_file_width = 38
 let change_minimum_summary_width = 12
-let change_cell_gap = 1
 
 type change_row_values = {
   crow_turn : string;
@@ -788,17 +783,17 @@ let change_cells ?(op_style = "") ?(result_style = "") ~summary_width values =
 
 let change_summary_width ~inner_width =
   let named =
-    Table.used_width ~gap:change_cell_gap
+    Table.used_width
       (change_cells ~summary_width:0 change_no_values)
   in
   max change_minimum_summary_width (inner_width - named)
 
 let change_header_row ~summary_width =
-  Table.header_row ~gap:change_cell_gap
+  Table.header_row
     (change_cells ~summary_width change_no_values)
 
 let change_row ~op_style ~result_style ~summary_width values =
-  Table.row ~gap:change_cell_gap
+  Table.row
     (change_cells ~op_style ~result_style ~summary_width values)
 
 (* Fusion run columns.
@@ -813,7 +808,6 @@ let fusion_age_width = 7
 let fusion_state_width = 18
 let fusion_preset_width = 10
 let fusion_minimum_run_width = 12
-let fusion_cell_gap = 1
 
 type fusion_row_values = {
   frow_time : string;
@@ -846,17 +840,17 @@ let fusion_cells ?(state_style = "") ~keeper_width ~run_width values =
 
 let fusion_run_width ~inner_width ~keeper_width =
   let named =
-    Table.used_width ~gap:fusion_cell_gap
+    Table.used_width
       (fusion_cells ~keeper_width ~run_width:0 fusion_no_values)
   in
   max fusion_minimum_run_width (inner_width - named)
 
 let fusion_header_row ~keeper_width ~run_width =
-  Table.header_row ~gap:fusion_cell_gap
+  Table.header_row
     (fusion_cells ~keeper_width ~run_width fusion_no_values)
 
 let fusion_row ~state_style ~keeper_width ~run_width values =
-  Table.row ~gap:fusion_cell_gap
+  Table.row
     (fusion_cells ~state_style ~keeper_width ~run_width values)
 
 (* Harness verdict columns.
@@ -876,7 +870,6 @@ let harness_gate_width = 9
 let harness_verdict_width = 9
 let harness_evaluator_width = 24
 let harness_minimum_reason_width = 12
-let harness_cell_gap = 1
 
 type harness_row_values = {
   hrow_time : string;
@@ -909,17 +902,17 @@ let harness_cells ?(verdict_style = "") ~reason_width values =
 
 let harness_reason_width ~inner_width =
   let named =
-    Table.used_width ~gap:harness_cell_gap
+    Table.used_width
       (harness_cells ~reason_width:0 harness_no_values)
   in
   max harness_minimum_reason_width (inner_width - named)
 
 let harness_header_row ~reason_width =
-  Table.header_row ~gap:harness_cell_gap
+  Table.header_row
     (harness_cells ~reason_width harness_no_values)
 
 let harness_row ~verdict_style ~reason_width values =
-  Table.row ~gap:harness_cell_gap
+  Table.row
     (harness_cells ~verdict_style ~reason_width values)
 
 module Terminal_size_cache = struct

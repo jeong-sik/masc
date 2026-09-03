@@ -35,9 +35,18 @@ let cell ?(align = Left) ?(style = "") ~header ~width value =
    undressed. *)
 let default_close = "\027[0m"
 
-let used_width ~gap cells =
+(* One cell between columns, on every table on every screen.
+
+   It used to be each table's own number. Nine of the ten picked one and the
+   Memory table picked two, for no reason it recorded, so moving between two
+   screens moved the columns under the reader's eye. A screen cannot pick its
+   own any more: there is nothing to pass. *)
+let cell_gap = 1
+let separator = String.make cell_gap ' '
+
+let used_width cells =
   List.fold_left (fun total cell -> total + cell.width) 0 cells
-  + (max 0 gap * max 0 (List.length cells - 1))
+  + (cell_gap * max 0 (List.length cells - 1))
 
 (* Folded in the middle rather than cut at one end: an identifier cut at the
    head reads as a different identifier, and a number cut at either end is a
@@ -59,18 +68,17 @@ let pad cell text =
   | Left -> fitted ^ String.make slack ' '
   | Right -> String.make slack ' ' ^ fitted
 
-let line ~gap ~pick ~dress cells =
-  String.concat
-    (String.make (max 0 gap) ' ')
+let line ~pick ~dress cells =
+  String.concat separator
     (List.map (fun cell -> dress cell (pad cell (pick cell))) cells)
 
 (* Column names carry no reading, so they carry no reading's colour. The header
    wears whatever the caller dressed the line in. *)
-let header_row ~gap cells =
-  line ~gap ~pick:(fun cell -> cell.header) ~dress:(fun _ text -> text) cells
+let header_row cells =
+  line ~pick:(fun cell -> cell.header) ~dress:(fun _ text -> text) cells
 
-let row ~gap ?(close = default_close) cells =
-  line ~gap
+let row ?(close = default_close) cells =
+  line
     ~pick:(fun cell -> cell.value)
     ~dress:(fun cell text ->
       if String.equal cell.style "" then text else cell.style ^ text ^ close)

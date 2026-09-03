@@ -33,13 +33,23 @@ val cell :
     the row stays the colour the caller gave the line. Column names never take
     it; a header is not a reading. *)
 
-val used_width : gap:int -> cell list -> int
-(** Cells the row occupies, the [gap] between columns included. *)
+val cell_gap : int
+(** Cells between one column and the next, the same on every table on every
+    screen. Exported for a table whose last column has no widest form and is
+    appended after the cells rather than laid out as one: it spaces that
+    column the way the contract spaces the rest.
 
-val header_row : gap:int -> cell list -> string
+    It was each table's own number. Nine of the ten chose one and the Memory
+    table chose two, recording no reason, so moving between two screens moved
+    the columns under the reader's eye. There is nothing to pass now. *)
+
+val used_width : cell list -> int
+(** Cells the row occupies, the gaps between columns included. *)
+
+val header_row : cell list -> string
 (** The column names, laid out on the given cells. *)
 
-val row : gap:int -> ?close:string -> cell list -> string
+val row : ?close:string -> cell list -> string
 (** One row's readings, laid out on the same cells as {!header_row}. A reading
     past its width folds in the middle; it never widens its column, so a row is
     exactly as wide as the header above it whatever it carries -- styled cells

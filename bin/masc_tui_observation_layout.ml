@@ -102,7 +102,6 @@ let log_usage_width = 13
 let log_latency_width = 9
 let log_cost_width = 9
 let log_work_width = 10
-let log_cell_gap = 1
 let log_row_indent = "  "
 
 let log_cells (entry : Tui_decode.log_entry) =
@@ -145,12 +144,12 @@ let empty_log_cells =
 
 let plain_log_header =
   log_row_indent
-  ^ Masc_tui_table.header_row ~gap:log_cell_gap
+  ^ Masc_tui_table.header_row
       (log_table_cells ~time:"" empty_log_cells)
 
 let plain_log_row ~time entry =
   log_row_indent
-  ^ Masc_tui_table.row ~gap:log_cell_gap
+  ^ Masc_tui_table.row
       (log_table_cells ~time (log_cells entry))
 
 let context_summary = function

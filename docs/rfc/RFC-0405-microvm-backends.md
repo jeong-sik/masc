@@ -116,22 +116,65 @@ microsandbox `msb inspect` 도 gondolin `list` 도 이 모양이 아니다. 파�
 내려가지 않는다. 지금 `docker_preflight` 가 하는 것과 같은 fail-closed 이고,
 에러가 어느 CLI 를 어디서 찾았는지 말한다.
 
-## 미확인 — 착수 전에 재야 할 것
+## 실측 (2026-09-03, 이 맥에서 직접 돌림)
 
-문서로 읽은 것과 돌려본 것은 다르다. 아래는 **아직 안 쟀다.**
+RFC 초안은 다섯 개를 미확인으로 뒀고, 그중 둘이 타당성을 정한다고 적었다. 다 쟀다.
+**gondolin 이 탈락할 수 있다는 초안의 우려는 틀렸다.**
 
-1. **비대화형 exec.** masc 는 shim 에 프레임을 stdin 으로 밀고 stdout/stderr 를
-   받는다. `msb exec` 가 이걸 하는지, gondolin 의 `attach` 가 대화형 전용인지.
-   **gondolin 은 여기서 탈락할 수 있다.**
-2. **volume 모델.** work volume 을 keeper 수명으로 두고 게스트에 마운트하는
-   모양이 두 백엔드에 있는지. 없으면 트리 소유 모델을 다시 그려야 한다.
-3. **게스트 수명.** 이름으로 채택(adopt)이 되는지. masc 는 턴과 서버 재기동을
-   넘겨 같은 게스트를 다시 쓴다(#31340).
-4. **rootless.** microsandbox 의 Linux KVM 접근에 권한이 필요한지 문서에 없다.
-5. **inspect/list JSON 모양.** D3 의 파서를 쓰려면 실물이 필요하다.
+### microsandbox (`msb` 0.6.16, brew)
 
-1번과 3번이 핵심이다. 둘 중 하나라도 아니면 그 백엔드는 (B) 방식으로 못 붙고,
-새 dispatch 층이 필요하다 — 그건 이 RFC 의 범위가 아니다.
+| 질문 | 결과 |
+|---|---|
+| 비대화형 exec | `msb exec <name> -- CMD` — 됨 |
+| stdin 파이프 | 됨 (`printf ... \| msb exec ... -- cat` 이 그대로 돌아옴) |
+| stdout/stderr 분리 | 됨 |
+| 종료코드 전달 | 됨 (`exit 42` → 42) |
+| 이름으로 채택 | `create --name` 후 호출을 넘겨 `exec`/`stop`/`start` |
+| 마운트 | `--mount-dir HOST:GUEST` — 됨 |
+| inspect JSON | `--format json` → `{ "name": ..., "status": "Running" }` |
+| rootless | macOS 에서 sudo 없이 붙음. **Linux KVM 은 미확인** |
+
+wire 3요소(stdin·스트림 분리·종료코드)가 다 되는 것이 결정적이다. masc 의 shim
+계약(프레임을 stdin 으로, 본문을 stdout 으로, trailer 를 stderr 로)이 그대로
+얹힌다.
+
+**함정 하나:** 마운트 경로는 심볼릭을 미리 풀어야 한다. macOS 에서 `/tmp/...` 를
+그대로 주면 `mount: Not a directory (os error 20)` 로 죽고, `/private/tmp/...` 로
+주면 붙는다.
+
+### gondolin (`npx @earendil-works/gondolin`)
+
+```
+exec   Run a command via the virtio socket or in-process VM
+list   List active VM sessions registered in the local cache
+```
+
+```
+gondolin exec --sock PATH -- CMD [ARGS...]
+```
+
+`attach` 는 대화형이지만 **`exec` 가 따로 있다.** 실행 중 VM 을 유닉스 소켓
+경로로 지목해 비대화형으로 명령을 보낸다. 마운트는 `--mount-hostfs HOST:GUEST[:ro]`,
+하이퍼바이저는 `--vmm qemu|krun`.
+
+Apple/microsandbox 와 다른 점은 **주소가 이름이 아니라 소켓 경로**라는 것뿐이다.
+masc 가 안정적 컨테이너 이름을 유도하듯 안정적 소켓 경로를 유도하면 된다.
+
+### inspect 모양이 백엔드마다 다르다는 것은 확인됐다
+
+```
+Apple          [ { "status": { "state": "running" } } ]     리스트·중첩·소문자
+microsandbox   { "status": "Running", "name": ... }         객체·평면·대문자
+```
+
+D3(파서는 백엔드가 소유하고 모르는 모양은 `Error`)이 그대로 필요하다.
+
+### 남은 미확인
+
+- Linux 에서 microsandbox 가 KVM 접근에 권한을 요구하는지 (이 맥에서는 못 잰다)
+- gondolin `list` 의 출력 모양 — 소켓 경로를 어떻게 돌려주는지
+
+둘 다 해당 백엔드를 구현할 때 그 자리에서 재면 된다. 설계를 바꾸지 않는다.
 
 ## 검증
 

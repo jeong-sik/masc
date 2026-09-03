@@ -150,6 +150,7 @@ let test_gate_allows_only_the_exact_persisted_rule () =
          ; operation = "external-effect"
          ; input
          ; base_path
+         ; sandbox_profile = None
          ; causal_context = None
          ; task_id = None
          ; continuation_channel = None
@@ -338,6 +339,7 @@ let gate_request ~base_path : Gate.request =
   ; operation = "external-effect"
   ; input = `Assoc [ "target", `String "exact" ]
   ; base_path
+  ; sandbox_profile = None
   ; causal_context = None
   ; task_id = None
   ; continuation_channel = None

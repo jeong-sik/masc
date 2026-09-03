@@ -136,7 +136,6 @@ not as current files or open backlog items.
 | P1 | **OpenAI replay policy** | Responses `previous_response_id`, encrypted reasoning-item replay, `function_call`, and `function_call_output` manual replay are implemented; Chat Completions vs Responses matrix remains incomplete | reasoning items MUST replay with tool-call outputs (Responses) or `previous_response_id` | S3.2 |
 | P2 | Gemini `thoughtSignature` | "soft preserve", summaries/signatures conflated | hard 400 if not echoed; parallel = first part only; signatures ≠ summaries | S3.2, S6.5 |
 | P2 | Gemini `thinkingLevel` matrix | `supports_minimal:bool` only | low/medium/high; medium absent on gemini-3-pro; minimal Flash-only | S1.3 |
-| P2 | Qwen DashScope `preserve_thinking` scope | applied to all DashScope | audit artifact says allowlist-only; official source capture required before implementation | S1.2 |
 | P2 | Kimi visibility | `Provider_hidden`+`No_streaming_reasoning` | audit artifact says `reasoning_content` side-channel streamed before content; official source capture required before implementation | S3.2 |
 | P2 | OpenAI Responses `phase` | not modeled | `phase:commentary/final_answer` round-trips on stateless replay | S3.2 |
 
@@ -152,7 +151,7 @@ Full per-finding verify reasoning and source URLs: audit artifact `wf_ad6e7c0c-a
 | Gemini thought signatures and `thinking_level` matrix are model-specific and signatures must be preserved in stateless mode. | [Gemini thinking guide](https://ai.google.dev/gemini-api/docs/thinking) — checked by browser fetch on 2026-06-29 12:36 KST. | `gemini_family`, signature carrier, replay policy, streaming field mapping. | High. Page last updated 2026-06-24 UTC. |
 | GLM/Z.AI thinking fields, `clear_thinking`, `reasoning_content`, GLM-5.2 effort, and `tool_choice=auto` are typed dialect facts. | [Z.AI chat completion API](https://docs.z.ai/api-reference/llm/chat-completion) — checked by browser fetch on 2026-06-29 12:36 KST. | GLM thinking dialect, replay policy, forced-tool capability. | High. Uncertainty: GLM-4.5 guide should be kept as secondary docs only; API reference is the authority. |
 | MiniMax M2/M3 thinking/replay semantics. | `확인 필요`: no official MiniMax source was captured in this PR update. | MiniMax provider dialect and replay policy. | Low. Do not implement from audit artifact alone. |
-| Qwen/Kimi thinking visibility and replay details. | `확인 필요`: audit artifact only in this PR update; capture official docs or live probe before code changes. | DashScope/Kimi dialect rows. | Low. Treat as backlog evidence gap, not implementation authority. |
+| Qwen/Kimi thinking visibility and replay details. | `확인 필요`: audit artifact only in this PR update; capture official docs or live probe before code changes. | Kimi dialect rows. | Low. Treat as backlog evidence gap, not implementation authority. |
 
 ## 4. Enforcement (강제 방법)
 
@@ -199,7 +198,7 @@ telemetry gate나 lenient repair를 추가하지 말고, `Text` → `ToolUse` �
 
 경계는 대체로 올바르다: MASC는 `Llm_provider.Capabilities`를 typed로 직접 소비하고(`runtime_wire_overlay.ml: agent_capabilities_of_llm_capabilities`가 agent_core variant를 verbatim 통과) model 이름 string-match로 reasoning을 결정하지 않는다. OAS는 MASC를 모른다.
 
-단 하나의 경계 부채(MASC측, 정보용): `masc lib/runtime/runtime_schema.ml`이 자체 `thinking_control_format`를 **재선언(5/9 variant, `Thinking_object_adaptive`/`Thinking_object_only`/`Enable_thinking`/`Ollama_think` 누락)** 한다. parse는 unknown에서 fail-closed(silent 아님)지만, OAS에 새 variant가 추가돼도 MASC 컴파일이 깨지지 않아 drift 무방비다. 게다가 그 필드는 wire 경로에서 읽히지 않아 운영자 TOML 설정이 inert no-op(의도-침묵)이다. **P2 SSOT 부채(데이터 경로는 안전).** 해결: 필드 삭제(agent_core catalog가 단일 SSOT) 또는 agent_core variant 집합에 대한 exhaustive drift 테스트. 이는 agent_core 변경이 아니라 MASC 후속 작업이며, 본 RFC의 S9.1을 경계 너머로 확장한 사례로 기록한다. Tracking issue: [jeong-sik/masc#22654](https://github.com/jeong-sik/masc/issues/22654).
+단 하나의 경계 부채(MASC측, 정보용): `masc lib/runtime/runtime_schema.ml`이 자체 `thinking_control_format`를 **재선언(5/8 variant, `Thinking_object_adaptive`/`Thinking_object_only`/`Ollama_think` 누락)** 한다. parse는 unknown에서 fail-closed(silent 아님)지만, OAS에 새 variant가 추가돼도 MASC 컴파일이 깨지지 않아 drift 무방비다. 게다가 그 필드는 wire 경로에서 읽히지 않아 운영자 TOML 설정이 inert no-op(의도-침묵)이다. **P2 SSOT 부채(데이터 경로는 안전).** 해결: 필드 삭제(agent_core catalog가 단일 SSOT) 또는 agent_core variant 집합에 대한 exhaustive drift 테스트. 이는 agent_core 변경이 아니라 MASC 후속 작업이며, 본 RFC의 S9.1을 경계 너머로 확장한 사례로 기록한다. Tracking issue: [jeong-sik/masc#22654](https://github.com/jeong-sik/masc/issues/22654).
 
 ## 7. Relationships
 - **RFC-AC-023** (capability axis reshape) — GLM/MiniMax dialect 작업과 model×transport two-record가 여기 land. 본 RFC는 그 작업이 만족해야 할 표준을 정의한다.

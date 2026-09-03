@@ -1008,6 +1008,85 @@ let test_a_surface_without_rows_offers_no_row_search () =
     ; "Tools", Tools
     ]
 
+let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
+  (* The renderer used to spell this footer by hand, naming d, H, m and w.
+     The three language-server questions worked on that screen and never
+     appeared on it; blame and the row search did not either once they
+     arrived. Projected from the table now, narrowed per pane. *)
+  let file = Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_file in
+  let tree = Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_tree in
+  let overlay =
+    Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_overlay
+  in
+  let holds needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec scan i =
+      i + n <= h
+      && (String.equal (String.sub haystack i n) needle || scan (i + 1))
+    in
+    scan 0
+  in
+  List.iter
+    (fun hint ->
+       check Alcotest.bool ("an open file names " ^ hint) true
+         (holds hint file))
+    [ "K:hover"; "D:definition"; "R:references"; "b:blame"; "/:find"
+    ; "d:diff"; "H:history"; "m:notes" ];
+  check Alcotest.bool "an open file scrolls" true (holds "j/k:scroll" file);
+  (* The tree answers none of the file's keys, and says so by not naming
+     them -- a hint for a key the pane will not take is the same lie as a
+     key with no hint. *)
+  List.iter
+    (fun hint ->
+       check Alcotest.bool ("the tree does not name " ^ hint) false
+         (holds hint tree))
+    [ "K:hover"; "D:definition"; "R:references"; "b:blame"; "H:history" ];
+  check Alcotest.bool "the tree moves" true (holds "j/k:move" tree);
+  (* An overlay covers the code, so the keys that act on it are gone while
+     it is up -- and [w], which writes a note, is live only there. *)
+  check Alcotest.bool "an overlay drops the code keys" false
+    (holds "b:blame" overlay);
+  check Alcotest.bool "an overlay keeps the note write" true
+    (holds "w:add note" overlay);
+  check Alcotest.bool "and the open file does not offer it" false
+    (holds "w:add note" file);
+  (* The history view has commits to open; the other two panes do not, and
+     named the key anyway until it was read off a running screen. *)
+  check Alcotest.bool "an overlay opens a commit" true
+    (holds "Enter (history):open" overlay);
+  List.iter
+    (fun (label, hints) ->
+       check Alcotest.bool (label ^ " has no commit to open") false
+         (holds "Enter (history)" hints))
+    [ ("the tree", tree); ("an open file", file) ]
+
+let test_the_note_form_offers_the_line_the_cursor_is_on () =
+  (* The anchor was the literal 1. It shows in the store: every one of this
+     workspace's 51 annotations sits at line 1, including the two written
+     from this pane -- which is what a form that never offered a line
+     produces, not a workspace that declined to anchor.
+
+     1-based, because it is the number the gutter draws beside the line. *)
+  let holds needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec scan i =
+      i + n <= h
+      && (String.equal (String.sub haystack i n) needle || scan (i + 1))
+    in
+    scan 0
+  in
+  let stem = Masc_tui_types.code_note_stem ~anchor:412 in
+  check Alcotest.bool "the cursor line opens the form" true
+    (holds {|"line_start": 412|} stem);
+  check Alcotest.bool "and closes it" true (holds {|"line_end": 412|} stem);
+  check Alcotest.bool "the anchor is not pinned to the top" false
+    (holds {|"line_start": 1,|} stem);
+  check Alcotest.bool "the kind still leads with a comment" true
+    (holds {|"kind": "Comment"|} stem);
+  (* The first line is a real anchor, not the absence of one. *)
+  check Alcotest.bool "line one is expressible" true
+    (holds {|"line_start": 1|} (Masc_tui_types.code_note_stem ~anchor:1))
+
 let test_code_asks_the_language_server_three_questions () =
   (* K hover, D definition, R references -- one family, one case each, and
      uppercase throughout so the surface's lowercase keys stay its own. The
@@ -1099,6 +1178,10 @@ let () =
             `Quick test_code_separates_blame_from_the_definition_walk
         ; Alcotest.test_case "Code asks the language server three questions"
             `Quick test_code_asks_the_language_server_three_questions
+        ; Alcotest.test_case "the Code footer names the keys of its pane"
+            `Quick test_the_code_footer_names_the_keys_of_the_pane_it_draws
+        ; Alcotest.test_case "the note form offers the cursor line" `Quick
+            test_the_note_form_offers_the_line_the_cursor_is_on
         ; Alcotest.test_case "every searchable surface names its search"
             `Quick test_every_searchable_surface_names_its_search
         ; Alcotest.test_case "a surface without rows offers no row search"

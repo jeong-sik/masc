@@ -7276,10 +7276,17 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
           | Message_skill _ -> (
               match message.me_skill_activity with
               | None -> message.me_text
+              (* Always full, not tied to [msg_tool_visibility]: a skill row is
+                 one of ours, and whether a served skill was actually delivered
+                 and used is the fact the row exists to carry. Folding it behind
+                 the tool toggle made "SERVED ONLY vs DELIVERED · USED" the same
+                 keystroke away as a docker exec's schedule, so the operator saw
+                 only a name and a state and had to expand to learn if the skill
+                 did anything. A skill has few rows (the action list and one
+                 proof line), so showing them costs little and the toggle still
+                 governs the tool projections beside it. *)
               | Some activity ->
-                  Keeper_chat_transcript.skill_rows
-                    ~full:(state.msg_tool_visibility = Tools_full)
-                    activity
+                  Keeper_chat_transcript.skill_rows ~full:true activity
                   |> String.concat "\n")
           (* The Memory journal's change arrives inside a ["```diff"]
              fence, so a leading [+] is fence content rather than a list
@@ -7747,9 +7754,11 @@ let render_keeper_message (state : state) =
                           (skill_tone_of_state skill.state))
                        "SKILL"
                        (String.concat "\n"
-                          (Keeper_chat_transcript.skill_rows
-                             ~full:(state.msg_tool_visibility = Tools_full)
-                             skill)))
+                          (* Full on the live trail too: the same reason the
+                             committed skill rows are always full — the skill's
+                             delivery and observed actions are the feature this
+                             row reports, not a detail behind the tool toggle. *)
+                          (Keeper_chat_transcript.skill_rows ~full:true skill)))
               | Keeper_chat_transcript.Trail_text text ->
                   Some
                     (entry
@@ -13858,28 +13867,16 @@ let render_code (state : state) =
    end
    else if state.code_focus_file = Right_pane then content_pane buf cols
    else list_pane ~framed:false buf cols);
+  let code_pane =
+    if state.code_focus_file <> Right_pane then Masc_tui_keys.Code_tree
+    else if
+      state.code_history_open || state.code_diff_open || state.code_notes_open
+    then Masc_tui_keys.Code_overlay
+    else Masc_tui_keys.Code_file
+  in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:
-         (Printf.sprintf
-            "j/k:%s  h/l:pane  %sEnter:open  %sEsc:%s  r:refresh  Tab:next  q:quit"
-            (if state.code_focus_file = Right_pane then "scroll" else "move")
-            (if
-               state.code_focus_file = Right_pane && not state.code_history_open
-               && not state.code_diff_open && not state.code_notes_open
-             then "Shift-\xe2\x86\x90/\xe2\x86\x92:pan  "
-             else "")
-            (if state.code_notes_open then
-               "w:add  d:diff  H:history  m:notes  "
-             else if state.code_focus_file = Right_pane then
-               "d:diff  H:history  m:notes  "
-             else "")
-            (if
-               state.code_history_open || state.code_diff_open
-               || state.code_notes_open
-             then "code"
-             else if state.code_focus_file = Right_pane then "list"
-             else "up")));
+       ~hints:(Masc_tui_keys.footer_hints_code ~pane:code_pane));
   finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf
 
 let resource_display_name (resource : Masc_tui_mcp.resource) =

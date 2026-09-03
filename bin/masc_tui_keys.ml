@@ -400,7 +400,8 @@ let for_surface = function
       ; b Act "m" "notes"
           ~help:"the notes anchored to the open file (repository scope)"
       ; b Act "w" "add note"
-          ~help:"in the notes view: add one through the $EDITOR form \
+          ~help:"in the notes view: add one through the $EDITOR form, \
+                 anchored to the line the cursor was on when the view opened \
                  (kind: Comment / Decision / Question / Bookmark)"
       ; b Act "d" "diff"
           ~help:"on the project tree, list every working-tree change; on an \
@@ -475,6 +476,42 @@ let footer_hints_overview ~task_focus =
          if b.key = "j/k" then
            { b with label = (if task_focus then "tasks" else "events") }
          else b)
+  |> hints_of_bindings
+
+(* The Code surface's footer, which the renderer used to spell by hand. It
+   named d, H, m and w and nothing else, so the three language-server keys
+   never appeared on the screen they work on -- and neither did blame or the
+   row search when those arrived. Projected here, from the table the help
+   sheet already reads, and narrowed to what the current mode answers: an
+   overlay owns the pane, so the keys that act on the code underneath are
+   dead while it is up, and the tree pane answers none of the file keys. *)
+type code_pane =
+  | Code_tree  (** the file list has focus *)
+  | Code_file  (** a file is open and nothing covers it *)
+  | Code_overlay  (** history, diff or notes is drawn over the file *)
+
+let footer_hints_code ~pane =
+  let file_keys =
+    [ "Shift-Left / Shift-Right"; "K"; "D"; "R"; "B"; "b"; "d"; "H"; "m" ]
+  in
+  (* Two keys belong to one pane each and were showing on all three. [w]
+     writes a note and only the notes view takes it; [Enter (history)] opens
+     a commit's pull request and only the history view has commits. Named
+     apart from [file_keys] because they are the overlay's own, not the
+     file's. *)
+  let overlay_keys = [ "w"; "Enter (history)" ] in
+  let dead =
+    match pane with
+    | Code_tree -> overlay_keys @ file_keys
+    | Code_file -> overlay_keys
+    | Code_overlay -> file_keys
+  in
+  for_surface Code
+  |> List.filter (fun b -> not (List.mem b.key dead))
+  |> List.map (fun b ->
+       if String.equal b.key "j/k" then
+         { b with label = (match pane with Code_tree -> "move" | _ -> "scroll") }
+       else b)
   |> hints_of_bindings
 
 let footer_hints_resources ~detail_focus =

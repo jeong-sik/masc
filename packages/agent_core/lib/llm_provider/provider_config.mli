@@ -22,7 +22,6 @@ type provider_kind = Provider_kind.t =
   | Gemini
   | Glm
   (** ZhipuAI GLM native: OpenAI_compat wire format + JWT auth + GLM error parsing. @since 0.83.0 *)
-  | DashScope
 
 (** Default HTTP request path for a given provider kind.
     Single source of truth shared by [make] and direct record-literal
@@ -388,10 +387,7 @@ val structured_output_name_of_schema : Yojson.Safe.t -> string
     - [Ollama] is accepted only when the selected model capability record
       reports [supports_structured_output]; Ollama-family model rows can differ
       even when the transport accepts a JSON-format field.
-    - [Gemini], [Anthropic], and [DashScope] are accepted.
-      DashScope (DashScope) exposes [response_format.json_schema] on its
-      OpenAI-compatible endpoint; the field is forwarded by
-      [backend_openai.ml] without additional host validation.
+    - [Gemini] and [Anthropic] are accepted.
     - [Kimi] follows the same endpoint declaration path, but the native Kimi
       capability profile currently does not advertise strict schema output.
     - [Glm] is rejected: Z.AI's current official docs document JSON mode
@@ -450,7 +446,14 @@ val validate_tool_choice_request : t -> (unit, string) result
     serialization. The canonical effort vocabulary lives in
     {!Reasoning_effort}. A categorical effort is valid only when the selected
     model or explicit capability override declares an accepted subset; an
-    absent declaration fails closed. *)
+    absent declaration fails closed.
+
+    The value checked is the one the wire will carry: on a
+    {!Capabilities.Reasoning_effort} row an explicit [enable_thinking = Some
+    false] travels as the effort [none] ({!Reasoning_effort.under_explicit_toggle}),
+    so a ladder without [none] rejects that disable with
+    [Explicit_disable_outside_ladder] instead of letting the request keep the
+    caller's effort. *)
 type reasoning_effort_request_rejection =
   | Unsupported_reasoning_effort of
       { provider_kind : provider_kind
@@ -462,6 +465,11 @@ type reasoning_effort_request_rejection =
       { provider_kind : provider_kind
       ; model_id : string
       ; effort : reasoning_effort
+      }
+  | Explicit_disable_outside_ladder of
+      { provider_kind : provider_kind
+      ; model_id : string
+      ; accepted : reasoning_effort list option
       }
 
 val reasoning_effort_request_rejection_to_message

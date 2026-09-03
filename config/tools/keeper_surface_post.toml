@@ -32,8 +32,10 @@ provided, content is only the Slack notification fallback text."""
 name = "channel_id"
 type = "string"
 description = """
-Bound Discord or Slack channel id. Required only when more than one channel \
-is bound for the selected surface; must be one of those bindings."""
+Bound Discord or Slack channel id, or that channel's name (with or without \
+a leading '#'). A name resolves to the bound channel's id automatically — \
+the channel must be bound and have received at least one message so its \
+name is known. Unresolvable references are rejected."""
 
 [[params]]
 name = "mention_user_ids"

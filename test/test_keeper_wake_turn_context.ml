@@ -728,7 +728,9 @@ let test_open_goal_store_keeps_one_stable_safety_contract () =
   in
   let config = Masc.Workspace.default_config "/tmp/unused" in
   let active_goal_summaries =
-    Prompt.active_goal_summaries_of_store ~config
+    Prompt.active_goal_summaries_for_task
+      ~config
+      ~current_task:Inputs.No_current_task
   in
   let decision = WO.keeper_cycle_decision ~meta:meta_with_goal base_observation in
   let { Prompt.system_prompt = autonomous_system_prompt; _ } =

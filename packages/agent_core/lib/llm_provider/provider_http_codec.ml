@@ -40,7 +40,7 @@ let of_config (config : Provider_config.t) =
   | Provider_config.OpenAI_compat
     when Provider_config.request_path_targets_responses_api config.request_path ->
     Openai_responses
-  | Provider_config.OpenAI_compat | Provider_config.DashScope -> Openai_chat
+  | Provider_config.OpenAI_compat -> Openai_chat
   | Provider_config.Ollama -> Ollama_chat
   | Provider_config.Gemini -> Gemini_generate_content
   | Provider_config.Glm -> Glm_chat
@@ -86,10 +86,6 @@ let%test "kind owns codec; path and model strings do not infer it" =
       , Raw_schema )
     ; ( codec ~kind:Provider_config.Glm ~model_id:"model" ()
       , Glm_chat
-      , true
-      , Openai_named_schema )
-    ; ( codec ~kind:Provider_config.DashScope ~model_id:"model" ()
-      , Openai_chat
       , true
       , Openai_named_schema )
     ]

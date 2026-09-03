@@ -33,30 +33,11 @@ let render_instruction key vars =
   | Error detail -> invalid_arg (Printf.sprintf "missing or invalid prompt %s: %s" key detail)
 
 let build_keeper_system_prompt
-    ~instructions ?(keeper_name = "")
-    ?(workspace_root = "") ?(active_goals = []) () =
+    ~instructions ?(keeper_name = "") ?(workspace_root = "") () =
   let custom =
     let s = String.trim instructions in
     if s = "" then ""
     else Printf.sprintf "\nCustom instructions:\n%s\n" s
-  in
-  let active_goals_block =
-    match active_goals with
-    | [] -> ""
-    | goals ->
-        let lines =
-          List.map
-            (fun (id, title) ->
-               match String.trim title with
-               | "" -> Printf.sprintf "- %s" (String_util.escape_xml id)
-               | title ->
-                 Printf.sprintf "- %s %s"
-                   (String_util.escape_xml id)
-                   (String_util.escape_xml title))
-            goals
-        in
-        Printf.sprintf "\n<available_goals>\n%s\n</available_goals>\n"
-          (String.concat "\n" lines)
   in
   let workspace_block =
     if workspace_root = "" then ""
@@ -84,10 +65,11 @@ let build_keeper_system_prompt
       (* ── Keeper-specific blocks ─────────────────────────────── *)
       identity_block;
       workspace_block;
-      (* Operator instructions and the goals open right now. *)
+      (* Operator instructions. The Goals a keeper can pick up ride the
+         turn's own context, where they change without rewriting the prefix
+         every keeper shares. *)
       "<instructions>";
       custom;
-      active_goals_block;
       "</instructions>";
     ]
 

@@ -54,11 +54,14 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
 
   (* ── Asking the operator (delegated) ────────────────────────── *)
   | Some Tool_schemas_misc.Ask ->
-      Mcp_tool_runtime_ask.handle_ask ~tool_name:name ~start_time:start ctx
+      Mcp_tool_runtime_ask.handle_ask ~tool_name:name ~start_time:start
+        { Mcp_tool_runtime_ask.config; agent_name; arguments }
   | Some Tool_schemas_misc.Ask_status ->
-      Mcp_tool_runtime_ask.handle_ask_status ~tool_name:name ~start_time:start ctx
+      Mcp_tool_runtime_ask.handle_ask_status ~tool_name:name ~start_time:start
+        { Mcp_tool_runtime_ask.config; agent_name; arguments }
   | Some Tool_schemas_misc.Ask_withdraw ->
-      Mcp_tool_runtime_ask.handle_ask_withdraw ~tool_name:name ~start_time:start ctx
+      Mcp_tool_runtime_ask.handle_ask_withdraw ~tool_name:name ~start_time:start
+        { Mcp_tool_runtime_ask.config; agent_name; arguments }
 
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
   | None ->

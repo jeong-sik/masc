@@ -59,7 +59,7 @@ let contains_encoded_control value =
 let validate_request_path ~kind value =
   match kind with
   | PC.Gemini -> if value = "" then Ok () else Error Unsupported_gemini_request_path
-  | PC.Anthropic | PC.Kimi | PC.OpenAI_compat | PC.Ollama | PC.Glm | PC.DashScope ->
+  | PC.Anthropic | PC.Kimi | PC.OpenAI_compat | PC.Ollama | PC.Glm ->
     let path_segments = String.split_on_char '/' value in
     if
       value = ""
@@ -93,8 +93,7 @@ let validate_model_path kind model_id =
   | PC.Kimi
   | PC.OpenAI_compat
   | PC.Ollama
-  | PC.Glm
-  | PC.DashScope -> Ok ()
+  | PC.Glm -> Ok ()
 ;;
 
 let target_string_field ~target_label ~field toml =

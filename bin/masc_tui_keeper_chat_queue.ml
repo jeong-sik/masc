@@ -178,3 +178,12 @@ let replace_request queue ~request_id request =
     in
     replace [] queue
 ;;
+
+let join_target queue ~keeper_name =
+  waiting_for_keeper queue ~keeper_name
+  |> List.rev
+  |> List.find_opt (fun item ->
+         match item.intent with
+         | Next -> true
+         | Steer_after_interrupt -> false)
+;;

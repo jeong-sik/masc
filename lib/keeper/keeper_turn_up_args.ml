@@ -248,7 +248,17 @@ let validate_no_unknown_keys args =
     if unknown = [] then Ok () else Error (turn_up_arg_unknown unknown)
   | _ -> Ok ()
 
-let parse (ctx : _ context) (args : Yojson.Safe.t) :
+(* The Docker dispatchability probe [parse] runs for a Docker profile. The
+   real one shells out to [docker info] and inspects the image; the test
+   suite has no daemon and passes its own. *)
+let docker_preflight_default ~timeout_sec =
+  Keeper_sandbox_runtime.docker_preflight ~timeout_sec ()
+;;
+
+let parse
+    ?(docker_preflight = docker_preflight_default)
+    (ctx : _ context)
+    (args : Yojson.Safe.t) :
     (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
@@ -314,7 +324,10 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       | Some _ -> instructions_arg
       | None -> profile_defaults.instructions
     in
-    let remote_endpoint_error =
+    (* Whether the stated profile can dispatch at all. Config shape first
+       (an endpoint on a non-SSH profile, a missing one on SSH), then the
+       profile's own preflight where one exists. *)
+    let sandbox_dispatch_error =
       match sandbox_profile_error, remote_endpoint_res with
       | Some _, _ -> None
       | None, Error error -> Some error
@@ -363,10 +376,31 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
          | Some (Docker | Micro_vm), Some _ ->
            Some
              "remote_endpoint_requires_remote_ssh: clear remote_endpoint or select sandbox_profile=remote_ssh"
-         | Some (Docker | Micro_vm), None -> None)
+         | Some Docker, None ->
+           (* Same fail-closed as the [Remote_ssh] arm: a Docker keeper whose
+              daemon, image or hardening the preflight cannot see is
+              undispatchable, and admitting it only moves the refusal to its
+              first Execute. new-keeper, 2026-09-02: admitted from the TUI in
+              33 ms with no daemon on the host, two Execute failures on
+              docker_container_probe_failed, purged eleven minutes later.
+              [None] from the preflight is the master switch being off, which
+              keeps the operator's opt-out. *)
+           (match
+              docker_preflight
+                ~timeout_sec:
+                  (Env_config_sandbox.Shell_timeout.timeout_sec
+                     ~bucket:Env_config_sandbox.Shell_timeout.Io
+                     ())
+            with
+            | None -> None
+            | Some preflight ->
+              Keeper_sandbox_runtime.docker_preflight_rejection preflight)
+         (* No microvm preflight exists yet; the guest is created on the first
+            sandboxed call (RFC-0401). *)
+         | Some Micro_vm, None -> None)
     in
     match
-      sandbox_profile_error, remote_endpoint_error, max_context_override_res
+      sandbox_profile_error, sandbox_dispatch_error, max_context_override_res
     with
     | Some msg, _, _
     | None, Some msg, _ ->

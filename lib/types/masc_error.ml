@@ -291,8 +291,8 @@ let code = function
 
 (* [dashboard_auth_error_code] is the SSOT mapping from a typed
    [masc_error] to the stable dashboard auth-error-code string that the
-   Bonsai dashboard's [DashboardShellAuthSummary.auth_error_code] /
-   keeper stream 401 retry gate consume (TS enum in
+   dashboard's shell auth summary / keeper stream 401 retry gate
+   consume (TS enum in
    dashboard/src/types/dashboard-execution.ts). Introduced in #21040
    for the shell summary; this top-level home lets both
    [server_dashboard_http_core] (shell JSON) and [server_auth]

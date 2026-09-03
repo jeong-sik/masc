@@ -2,8 +2,6 @@ module Shell_gate = Masc_exec_command_gate.Shell_command_gate
 
 let lit text = Masc_exec.Shell_ir.Lit (text, Masc_exec.Shell_ir.default_meta)
 
-let env_bindings bindings = List.map (fun (key, value) -> key, lit value) bindings
-
 let cwd_scope ?cwd_base raw =
   let cwd = Option.value cwd_base ~default:raw in
   Some (Masc_exec.Path_scope.classify ~raw ~cwd)
@@ -13,8 +11,6 @@ let simple_bin
       ?cwd_raw
       ?cwd_base
       ?(sandbox = Masc_exec.Sandbox_target.host ())
-      ?(env = [])
-      ?(redirects = [])
       bin
       args
   =
@@ -26,14 +22,12 @@ let simple_bin
   Masc_exec.Shell_ir.Simple
     { bin
     ; args = List.map lit args
-    ; env = env_bindings env
+    ; env = []
     ; cwd
-    ; redirects
+    ; redirects = []
     ; sandbox
     }
 ;;
-
-let pipeline stages = Masc_exec.Shell_ir.Pipeline stages
 
 let with_cwd ~raw ~cwd ir =
   let scope = cwd_scope ~cwd_base:cwd raw in

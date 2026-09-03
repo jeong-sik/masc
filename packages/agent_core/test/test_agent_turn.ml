@@ -329,7 +329,7 @@ let test_accumulate_usage_local_pricing () =
     Llm_provider.Provider_config.make
       ~kind:OpenAI_compat
       ~provider_id:"local"
-      ~model_id:"dashscope-3.5"
+      ~model_id:"qwen3.5"
       ~base_url:"http://localhost:8085"
       ()
   in
@@ -337,7 +337,7 @@ let test_accumulate_usage_local_pricing () =
     Agent_turn.accumulate_usage
       ~current_usage:current
       ~provider_config:(Some provider_config)
-      ~response_model:(Some "dashscope-3.5")
+      ~response_model:(Some "qwen3.5")
       ~response_usage:(Some response_usage)
   in
   Alcotest.(check (float 0.001)) "local is free" 0.0 result.estimated_cost_usd
@@ -405,9 +405,9 @@ let test_accumulate_usage_uses_typed_provider_and_response_model () =
 let test_accumulate_usage_records_incomplete_cache_pricing () =
   let provider_config =
     Llm_provider.Provider_config.make
-      ~kind:DashScope
-      ~model_id:"dashscope-3.5"
-      ~base_url:"https://dashscope.invalid"
+      ~kind:OpenAI_compat
+      ~model_id:"qwen3.5"
+      ~base_url:"https://example.invalid"
       ()
   in
   let response_usage : Types.api_usage =
@@ -422,12 +422,12 @@ let test_accumulate_usage_records_incomplete_cache_pricing () =
     Agent_turn.accumulate_usage
       ~current_usage:Types.empty_usage
       ~provider_config:(Some provider_config)
-      ~response_model:(Some "dashscope-3.5")
+      ~response_model:(Some "qwen3.5")
       ~response_usage:(Some response_usage)
   in
   Alcotest.(check (float 0.0001)) "no invented cost" 0.0 result.estimated_cost_usd;
   match result.pricing_gap with
-  | Some (Types.Pricing_unavailable "dashscope-3.5") -> ()
+  | Some (Types.Pricing_unavailable "qwen3.5") -> ()
   | Some gap -> Alcotest.failf "unexpected pricing gap: %s" (Types.show_pricing_gap gap)
   | None -> Alcotest.fail "missing explicit pricing gap"
 ;;

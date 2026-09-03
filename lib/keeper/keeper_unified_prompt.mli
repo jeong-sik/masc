@@ -89,20 +89,23 @@ type goal_summary = {
   summary_phase : Goal_phase.t option;
 }
 
-val active_goal_summaries_of_store :
-  config:Workspace.config -> goal_summary list
-(** The Goals still open enough to progress, read straight from the store.
+val active_goal_summaries_for_task :
+  config:Workspace.config ->
+  current_task:Keeper_world_observation_inputs.current_task_observation ->
+  goal_summary list
+(** The Goals this turn's task is linked to and still open enough to progress.
 
-    A Goal is shared intent and names no keeper, so this is the same list for
-    everyone. {!Goal_phase.admits_self_directed_progress} decides membership --
-    [Verifying] stays in (the gate holds the phase, not the work) and terminal
-    phases drop out. *)
+    A Goal is shared intent and names no keeper, so the store answers the same
+    list for everyone; the task the keeper holds is what makes a subset of it
+    this turn's context. {!Goal_phase.admits_self_directed_progress} decides
+    which of the linked Goals stay -- [Verifying] stays in (the gate holds the
+    phase, not the work) and terminal phases drop out. A turn holding no task
+    carries none of them; [masc_goal_list] answers the rest. *)
 
 val build_system_prompt :
   meta:Keeper_meta_contract.keeper_meta ->
   config:Workspace.config ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
-  ?active_goal_summaries:goal_summary list ->
   unit ->
   string
 (** Build the model-facing stable Keeper contract shared by direct and

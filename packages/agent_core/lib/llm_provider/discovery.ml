@@ -507,13 +507,13 @@ let%test "parse_models valid" =
     `Assoc
       [ ( "data"
         , `List
-            [ `Assoc [ "id", `String "dashscope-3.5-35b"; "owned_by", `String "local" ]
+            [ `Assoc [ "id", `String "qwen3.5-35b"; "owned_by", `String "local" ]
             ; `Assoc [ "id", `String "llama-4-scout"; "owned_by", `String "nous" ]
             ] )
       ]
   in
   match parse_models json with
-  | Ok models -> List.length models = 2 && (List.hd models).id = "dashscope-3.5-35b"
+  | Ok models -> List.length models = 2 && (List.hd models).id = "qwen3.5-35b"
   | Error _ -> false
 ;;
 
@@ -549,11 +549,11 @@ let%test "parse_props valid" =
     `Assoc
       [ "total_slots", `Int 4
       ; ( "default_generation_settings"
-        , `Assoc [ "n_ctx", `Int 8192; "model", `String "dashscope-3.5" ] )
+        , `Assoc [ "n_ctx", `Int 8192; "model", `String "qwen3.5" ] )
       ]
   in
   match parse_props json with
-  | Ok p -> p.total_slots = 4 && p.ctx_size = 8192 && p.model = "dashscope-3.5"
+  | Ok p -> p.total_slots = 4 && p.ctx_size = 8192 && p.model = "qwen3.5"
   | Error _ -> false
 ;;
 
@@ -645,7 +645,7 @@ let%test "model_info_to_json" =
 
 let%test "server_props_to_json" =
   let json =
-    server_props_to_json { total_slots = 4; ctx_size = 8192; model = "dashscope" }
+    server_props_to_json { total_slots = 4; ctx_size = 8192; model = "qwen" }
   in
   let open Yojson.Safe.Util in
   json |> member "total_slots" |> to_int = 4 && json |> member "ctx_size" |> to_int = 8192
@@ -964,10 +964,10 @@ let%test "endpoint_for_model returns url when model is indexed" =
        Atomic.set
          _discovered_ctx
          { endpoint_ctxs = [ "http://a:8085", 32768 ]
-         ; model_endpoints = [ "dashscope-3.5-9b", "http://a:8085" ]
+         ; model_endpoints = [ "qwen3.5-9b", "http://a:8085" ]
          ; per_slot_ctx = Some 32768
          };
-       endpoint_for_model "dashscope-3.5-9b" = Some "http://a:8085")
+       endpoint_for_model "qwen3.5-9b" = Some "http://a:8085")
 ;;
 
 let%test "endpoint_for_model returns None for unknown model" =
@@ -978,7 +978,7 @@ let%test "endpoint_for_model returns None for unknown model" =
        Atomic.set
          _discovered_ctx
          { endpoint_ctxs = [ "http://a:8085", 32768 ]
-         ; model_endpoints = [ "dashscope-3.5-9b", "http://a:8085" ]
+         ; model_endpoints = [ "qwen3.5-9b", "http://a:8085" ]
          ; per_slot_ctx = Some 32768
          };
        endpoint_for_model "nonexistent" = None)
@@ -1079,14 +1079,14 @@ let%test "first_discovered_model_id_for_url prevents cross-provider" =
          _discovered_ctx
          { endpoint_ctxs = []
          ; model_endpoints =
-             [ "dashscope-3.5-9b-local", "http://127.0.0.1:8085"
-             ; "dashscope-3.5:9b-nvfp4", "http://127.0.0.1:11434"
+             [ "qwen3.5-9b-local", "http://127.0.0.1:8085"
+             ; "qwen3.5:9b-nvfp4", "http://127.0.0.1:11434"
              ]
          ; per_slot_ctx = None
          };
        (* ollama endpoint must NOT return the llama-server model *)
        first_discovered_model_id_for_url "http://127.0.0.1:8085"
-       = Some "dashscope-3.5-9b-local"
+       = Some "qwen3.5-9b-local"
        && first_discovered_model_id_for_url "http://127.0.0.1:11434"
-          = Some "dashscope-3.5:9b-nvfp4")
+          = Some "qwen3.5:9b-nvfp4")
 ;;

@@ -6,6 +6,12 @@ progress tracking. After init, use masc_run_plan to set approach and \
 masc_run_get to review."""
 additional_properties = false
 
+
+# Held back from the request until the model asks for it by name.
+# 2026-09-01..03: 27 turns needed it across 6317 provider requests, and its
+# 527 B schema rode every one of those requests. Loading it on demand costs
+# one extra request on those 27 turns and saves the 527 B on the rest.
+defer_loading = true
 [[params]]
 name = "task_id"
 type = "string"

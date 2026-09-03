@@ -4173,6 +4173,24 @@ def paste_into_a_field_interaction() -> Interaction:
             b":" + PASTE_START + b"go lanes" + PASTE_END + b"\r",
             b"MASC Lanes",
         )
+
+        # A board post is written in its own draft, not in the chat composer,
+        # and it holds many lines: the paste goes in whole. CR is what a
+        # terminal writes for a break in pasted text, which is the byte that
+        # would otherwise have been Return.
+        palette_go(process, master_fd, output, b"go board", b"MASC Board")
+        send_and_wait(process, master_fd, output, b"w", b"MASC Board")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            PASTE_START + b"pasted board line\rsecond board line" + PASTE_END,
+            b"second board line",
+        )
+        # Esc arms the draft's send-or-discard; d throws it away and leaves
+        # the pane, where q is draft text rather than quit.
+        send_and_wait(process, master_fd, output, b"\x1b", b"s:send  d:discard")
+        send_and_wait(process, master_fd, output, b"d", b"MASC Board")
         os.write(master_fd, b"q")
 
     return interact

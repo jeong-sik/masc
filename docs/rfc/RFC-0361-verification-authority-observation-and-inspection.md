@@ -189,11 +189,11 @@ list_runs / get / run_to_yojson / replay / max_completed_retained
 - **무관리 fiber.** 판정 fiber는 keeper lifecycle 없이 돌고, 재시도는 fixed-interval maintenance pulse(`schedule_retry` / `retry_interval_sec`)다. 프로세스 restart 시 in-flight review의 fiber는 증발하고 남는 것은 `verification_run_registry`의 `running` 레코드뿐인데, 그것을 재개하는 주체가 없다. 완료 판정 — task 전이의 최종 게이트 — 의 증거가 restart 경계에서 단절된다.
 - **관측 범위의 task 한정.** `verification_run_registry`는 task 전용이다. constitution이 요구하는 Goal Verifier가 판정을 시작하면 그 verdict는 registry 밖이다.
 
-**"키퍼"와 "keeper급 standalone"의 구별.** Non-goal §2의 금지 다섯 가지(레지스트리 등록·자기 샌드박스·task action·heartbeat·페르소나 toml)는 전부 유지한다. keeper급 standalone은 그 다섯 가지 없이 실행체 특성만 갖는다: 전용 lane, 고정 identity, supervised lifecycle, 관측 레코드. 선례는 이미 repo에 있다 — `lib/exact_lane_run_registry.ml`의 Librarian·Hitl_auto_judge·Board_attention·Compaction이 키퍼 등록 없이 `[runtime.exact_output_lanes.*]`의 frozen-order slot lane 위에서 실행된다.
+**"키퍼"와 "keeper급 standalone"의 구별.** Non-goal §2의 금지 다섯 가지(레지스트리 등록·자기 샌드박스·task action·heartbeat·페르소나 toml)는 전부 유지한다. keeper급 standalone은 그 다섯 가지 없이 실행체 특성만 갖는다: 전용 lane, 고정 identity, supervised lifecycle, 관측 레코드. 선례는 이미 repo에 있다 — `lib/exact_lane_run_registry.ml`의 Librarian·Hitl_auto_judge·Board_attention이 키퍼 등록 없이 `[runtime.exact_output_lanes.*]`의 frozen-order slot lane 위에서 실행된다.
 
 결정 넷:
 
-(a) **전용 exact-output lane `verifier_exact` 등록과 frozen-order slot failover.** `[runtime.exact_output_lanes.verifier_exact]`에 slots를 선언하고 판정 호출은 lane을 거쳐 선언 순서대로 failover한다. `[runtime].cross_verifier`의 단일 runtime 바인딩(`runtime.toml:17`)은 lane의 첫 슬롯으로 흡수하거나 lane이 참조하는 이름으로 남긴다 — 어느 쪽이든 provider 선택의 SSOT는 하나여야 하며, 구현 슬라이스에서 택한다. 고정 순서 failover는 Librarian·Compaction과 같은 계약이다.
+(a) **전용 exact-output lane `verifier_exact` 등록과 frozen-order slot failover.** `[runtime.exact_output_lanes.verifier_exact]`에 slots를 선언하고 판정 호출은 lane을 거쳐 선언 순서대로 failover한다. `[runtime].cross_verifier`의 단일 runtime 바인딩(`runtime.toml:17`)은 lane의 첫 슬롯으로 흡수하거나 lane이 참조하는 이름으로 남긴다 — 어느 쪽이든 provider 선택의 SSOT는 하나여야 하며, 구현 슬라이스에서 택한다. 고정 순서 failover는 Librarian과 같은 계약이다.
 
 (b) **고정 authority identity.** `authority_actor`를 판정마다 랜덤이 아닌 고정 문자열(예: lane id와 같은 `verifier_exact`)로 바꾼다. run 식별은 기존 `verification_id`가 계속 맡고, actor는 집계·캘리브레이션·감사의 축이 된다.
 

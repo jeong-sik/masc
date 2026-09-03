@@ -22,8 +22,8 @@ Examples:
   wrong boundary instead of reading the exact source line;
 - an error row followed by more broad exploration may mean the failure boundary
   was not pinned before continuing;
-- context compaction or stale trace evidence may mean the next action should be
-  a narrow refresh, handoff, or scope split rather than another open-ended turn.
+- stale trace evidence may mean the next action should be a narrow refresh,
+  handoff, or scope split rather than another open-ended turn.
 
 The missing capability is not another answer-quality judge. It is a small,
 evidence-linked critic of the **working method** that can suggest alternate next
@@ -76,7 +76,6 @@ Phase 1 uses deterministic signals only:
 - recent failure or gate rejection before more exploration;
 - repeated use of the same tool in the recent window;
 - repeated short `exec`-style calls that may indicate a sampling loop;
-- context compaction or high context churn;
 - high tool churn without a task-completed marker;
 - stale latest trace evidence while the operator is looking at the run.
 

@@ -104,7 +104,7 @@ else `Bad_gateway
 2. **요청 경로에서 이미 주입된 값을 env 로 재조회**: keeper_tool_execute_runtime:388, tool_workspace:60. 요청별 환경 정책을 명시적으로 소유하는 loader는 예외지만, `<> Some "false"` 같은 permissive 파싱으로 오타와 부재를 같은 값으로 합치는 경로는 허용하지 않는다.
 3. **결정 로직에서 owner API를 우회한 FS 접근·레이아웃 지식 이중화**: mcp_server:342(writer 레이아웃 재구현). store/loader가 자기 레이아웃을 읽는 것은 대상이 아니다.
 4. **Option/Result 의미 붕괴 후 재추론**: dashboard_verification:160(Result→failwith 로 실패 브랜치가 타입에서 소멸). 경계에서 모든 분기를 명시적으로 처리하는 정상 해소는 대상이 아니다.
-5. **catch-all 의 Cancelled 삼킴**: otel_spans:107(Cancelled→false), keeper_compact_audit:232. 형제 6곳의 `Eio.Cancel.Cancelled _ as e -> raise e` 규율이 표준.
+5. **catch-all 의 Cancelled 삼킴**: otel_spans:107(Cancelled→false). 형제 6곳의 `Eio.Cancel.Cancelled _ as e -> raise e` 규율이 표준.
 6. **이름/prefix 관습 분류기**: tool_dispatch:107, tool_telemetry:39(주석이 스스로 탈출구를 인정), workspace_task_receipts:23(keeper↔agent 이름의 매직 오프셋 역파싱).
 7. **닫힌 세계에서 생산자 없는 가드**: keeper_error_classify:184, runtime_info 가드 2건, prompt_defaults:22, voice_runtime_overlay:168(then/else 동일 분기). 저장소 내부의 exhaustive typed producer만 입력한다는 증거와 회귀 테스트가 있을 때 삭제한다. 외부 입력·persisted data·version-skew가 도달 가능한 경로는 `rg` 0건만으로 dead라 판정하지 않는다. 미래 upstream 변화는 가능하면 typed variant와 exhaustive match로 잡고, 불가능한 wire 경계는 명시적 unknown/error 분기를 유지한다.
 
@@ -117,7 +117,7 @@ else `Bad_gateway
 | 배치 | 내용 | 대상 |
 |---|---|---|
 | B1 | 닫힌 생산자 그래프로 증명된 dead-guard 소거 + 의미 보존이 확인된 `*_opt` 치환 | prompt_defaults, voice_runtime_overlay, keeper_multimodal_input, keeper_approval/audit, workspace_goal_index, dashboard_goals_types_accessor |
-| B2 | 예외 catch 폭 정합 — Cancelled 재던짐 + dead catch 제거 | keeper_compact_audit, otel_spans, prompt_registry, types_core, masc_error, keeper_chat_blocks |
+| B2 | 예외 catch 폭 정합 — Cancelled 재던짐 + dead catch 제거 | otel_spans, prompt_registry, types_core, masc_error, keeper_chat_blocks |
 | B3 | 확정 substring 왕복 13건 소거 | keeper_error_classify, server_dashboard_http_runtime_info, failure_envelope, keeper_context_core_history, bin/masc_trace |
 
 ### Phase 2 — 요청 경로 typed 채널 (고위험, 스모크 필수)

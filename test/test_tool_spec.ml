@@ -49,7 +49,7 @@ let () =
               Tool_spec.create
                 ~name:"__test_spec_optional"
                 ~description:"test optional"
-                ~module_tag:Tool_dispatch.Mod_compact
+                ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
                 ~handler_binding:Tag_dispatch
                 ~is_read_only:true

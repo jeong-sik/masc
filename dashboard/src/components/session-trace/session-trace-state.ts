@@ -38,7 +38,6 @@ export type TraceEventKind =
   | 'thinking'
   | 'agent_core_tool'
   | 'agent_core_turn'
-  | 'agent_core_context'
 
 export type TraceStatus = 'success' | 'failure' | 'gate_rejected'
 
@@ -79,7 +78,6 @@ export interface TraceSummary {
   tool_call_count: number
   agent_core_tool_count: number
   agent_core_turn_count: number
-  agent_core_context_count: number
   broadcast_count: number
   task_completed_count: number
   task_claimed_count: number
@@ -94,7 +92,6 @@ export interface TraceSummary {
   agent_core_cache_miss_input_tokens: number
   agent_core_llm_call_count: number
   agent_core_error_count: number
-  agent_core_tokens_saved: number
 }
 
 interface TraceSlot {
@@ -224,7 +221,6 @@ export function getTraceSummary(agent: string): TraceSummary {
   let tool_call_count = 0
   let agent_core_tool_count = 0
   let agent_core_turn_count = 0
-  let agent_core_context_count = 0
   let broadcast_count = 0
   let task_completed_count = 0
   let task_claimed_count = 0
@@ -239,7 +235,6 @@ export function getTraceSummary(agent: string): TraceSummary {
   let agent_core_cache_miss_input_tokens = 0
   let agent_core_llm_call_count = 0
   let agent_core_error_count = 0
-  let agent_core_tokens_saved = 0
 
   for (const e of events) {
     switch (e.kind) {
@@ -252,15 +247,6 @@ export function getTraceSummary(agent: string): TraceSummary {
       case 'agent_core_turn':
         agent_core_turn_count++
         break
-      case 'agent_core_context': {
-        agent_core_context_count++
-        const before = e.detail.before_tokens
-        const after = e.detail.after_tokens
-        if (typeof before === 'number' && typeof after === 'number' && before > after) {
-          agent_core_tokens_saved += before - after
-        }
-        break
-      }
       case 'broadcast':
         broadcast_count++
         break
@@ -314,7 +300,6 @@ export function getTraceSummary(agent: string): TraceSummary {
     tool_call_count,
     agent_core_tool_count,
     agent_core_turn_count,
-    agent_core_context_count,
     broadcast_count,
     task_completed_count,
     task_claimed_count,
@@ -329,7 +314,6 @@ export function getTraceSummary(agent: string): TraceSummary {
     agent_core_cache_miss_input_tokens,
     agent_core_llm_call_count,
     agent_core_error_count,
-    agent_core_tokens_saved,
   }
 }
 
@@ -345,7 +329,6 @@ export function getKindCounts(agent: string): Record<TraceEventKind | 'all', num
     thinking: 0,
     agent_core_tool: 0,
     agent_core_turn: 0,
-    agent_core_context: 0,
   }
   for (const e of events) counts[e.kind] = (counts[e.kind] ?? 0) + 1
   return counts as Record<TraceEventKind | 'all', number>

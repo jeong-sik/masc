@@ -121,10 +121,9 @@ let test_input_capacity_is_not_context_overflow () =
        .Provider_context_overflow _ -> false)
 ;;
 
-(* ContextOverflow counts toward the ordinary crash threshold (#26546): the
-   automatic overflow-compaction recovery was removed after producing no
-   committed compaction. Exempting it would pin [consecutive] at 0 while a
-   request with no state-changing successor loops every cycle. *)
+(* ContextOverflow counts toward the ordinary crash threshold: nothing
+   recovers from it automatically, so exempting it would pin [consecutive] at
+   0 while a request with no state-changing successor loops every cycle. *)
 let test_context_overflow_is_not_auto_recoverable () =
   check
     bool
@@ -152,8 +151,8 @@ let request_body_refused_by_provider ~status =
        })
 ;;
 
-(* The byte axis used to fall through [| _ -> None] and produce no compaction
-   request at all, so these two assertions are the ones that failed before. *)
+(* The byte axis used to fall through [| _ -> None] and produce no capacity
+   refusal at all, so these two assertions are the ones that failed before. *)
 let test_byte_axis_is_a_capacity_refusal () =
   (match
      Budget.capacity_refusal_of_error

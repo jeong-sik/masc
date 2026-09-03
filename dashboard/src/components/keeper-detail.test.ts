@@ -450,7 +450,7 @@ describe('filterCheckpointHistory', () => {
     makeSummary({
       snapshot_id: 'snap-def456',
       source_kind: 'agent_core_current',
-      latest_preview: 'Compaction triggered',
+      latest_preview: 'Checkpoint written',
     }),
     makeSummary({
       snapshot_id: 'snap-ghi789',
@@ -486,7 +486,7 @@ describe('filterCheckpointHistory', () => {
   })
 
   it('trims the query before matching', () => {
-    const result = filterCheckpointHistory(rows, '  compaction  ')
+    const result = filterCheckpointHistory(rows, '  checkpoint  ')
     expect(result).toHaveLength(1)
     expect(result[0]?.snapshot_id).toBe('snap-def456')
   })

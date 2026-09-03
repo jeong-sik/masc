@@ -281,7 +281,6 @@ export type JournalEventType =
   | 'keeper_tool_call'
   | 'agent_core_tool'
   | 'agent_core_turn'
-  | 'agent_core_context'
   | 'agent_core_event'
   | 'unknown'
 

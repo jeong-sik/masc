@@ -12,7 +12,7 @@ status: Draft
 ## Contract
 
 Each Keeper owns one ordered memory lane, separate from its interactive turn
-lane. Memory extraction, storage, compaction, and forgetting for Keeper A never
+lane. Memory extraction, storage, and forgetting for Keeper A never
 acquire a fleet-wide permit and never block Keeper B.
 
 Submissions are durable FIFO work, not a bounded best-effort queue. Saturation,

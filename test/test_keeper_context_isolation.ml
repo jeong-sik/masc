@@ -6,7 +6,6 @@
     Covers:
     - Two keepers with separate contexts never cross-contaminate
     - Checkpoint save/load preserves context identity
-    - Compaction on one keeper doesn't affect another
     - Sub-agent scope from one keeper is invisible to the other *)
 
 open Alcotest

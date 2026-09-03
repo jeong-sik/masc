@@ -72,7 +72,7 @@ The dual-keyed `STATE_DISPLAY_NAMES` papers over the casing split for the *Korea
 ```ts
 // dashboard/src/types/core.ts
 export const KEEPER_PHASE_VALUES = [
-  'offline', 'running', 'failing', 'overflowed', 'compacting',
+  'offline', 'running', 'failing', 'overflowed',
   'handing_off', 'draining', 'paused', 'stopped', 'crashed',
   'restarting', 'dead', 'zombie',
 ] as const

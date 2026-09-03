@@ -6,7 +6,6 @@ const baseSummary: TraceSummary = {
   tool_call_count: 0,
   agent_core_tool_count: 0,
   agent_core_turn_count: 0,
-  agent_core_context_count: 0,
   broadcast_count: 0,
   task_completed_count: 0,
   task_claimed_count: 0,
@@ -21,7 +20,6 @@ const baseSummary: TraceSummary = {
   agent_core_cache_miss_input_tokens: 0,
   agent_core_llm_call_count: 0,
   agent_core_error_count: 0,
-  agent_core_tokens_saved: 0,
 }
 
 function summary(overrides: Partial<TraceSummary> = {}): TraceSummary {
@@ -110,21 +108,6 @@ describe('evaluateProcessTrace', () => {
     expect(findings[0]?.evidence).toEqual(['exec 500ms', 'exec 500ms', 'exec 500ms', 'exec 500ms'])
   })
 
-  it('flags context compaction as process pressure', () => {
-    const findings = evaluateProcessTrace({
-      events: [
-        event({ kind: 'agent_core_context', summary: 'Agent Core compact', detail: { before_tokens: 180_000, after_tokens: 90_000 } }),
-      ],
-      summary: summary({ agent_core_context_count: 1, agent_core_tokens_saved: 90_000 }),
-    })
-
-    expect(ids(findings)).toContain('context-pressure')
-    expect(findings.find(finding => finding.id === 'context-pressure')?.evidence).toEqual([
-      'context compactions 1',
-      'tokens saved 90000',
-    ])
-  })
-
   it('caps noisy traces to three advisory findings', () => {
     const nowMs = 10 * 60 * 1000
     const repeated = [0, 1, 2].map(index =>
@@ -142,7 +125,6 @@ describe('evaluateProcessTrace', () => {
       events: repeated,
       summary: summary({
         tool_call_count: 8,
-        agent_core_context_count: 1,
         agent_core_error_count: 1,
       }),
       nowMs,
@@ -152,7 +134,7 @@ describe('evaluateProcessTrace', () => {
     expect(ids(findings)).toEqual([
       'recent-failure-boundary',
       'repeated-tool-loop',
-      'context-pressure',
+      'tool-churn-no-completion',
     ])
   })
 })

@@ -30,7 +30,6 @@ function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
     s.tool_call_count === 0
     && s.agent_core_tool_count === 0
     && s.agent_core_turn_count === 0
-    && s.agent_core_context_count === 0
     && s.broadcast_count === 0
     && s.task_completed_count === 0
     && s.agent_core_input_tokens === 0
@@ -52,8 +51,6 @@ function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
   if (s.tool_call_count > 0) items.push(`도구 ${s.tool_call_count}회`)
   if (s.agent_core_tool_count > 0) items.push(`Agent Core 도구 ${s.agent_core_tool_count}회`)
   if (s.agent_core_turn_count > 0) items.push(`Agent Core 턴 ${s.agent_core_turn_count}건`)
-  if (s.agent_core_context_count > 0) items.push(`Agent Core 압축 ${s.agent_core_context_count}건`)
-  if (s.agent_core_tokens_saved > 0) items.push(`절약 ${s.agent_core_tokens_saved}tok`)
   if (s.agent_core_input_tokens > 0 || s.agent_core_output_tokens > 0) {
     items.push(`Agent Core 토큰 ${s.agent_core_input_tokens}→${s.agent_core_output_tokens}`)
   }

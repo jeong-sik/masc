@@ -45,11 +45,6 @@ val observation_only_request
   -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile option
   -> input:Yojson.Safe.t
   -> bool
-val observation_only_request
-  :  operation:string
-  -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile option
-  -> input:Yojson.Safe.t
-  -> bool
 
 val observation_network_capabilities : string list
 

@@ -310,13 +310,22 @@ let discord_member_page_limit = 1000
 type directory_rest_failure =
   | Directory_authentication_failed
   | Directory_permission_denied
+  | Directory_channel_gone
   | Directory_operation_failed
+
+(* A deleted channel answers 10003 (Unknown Channel) for as long as it is
+   gone — no retry ever brings it back. The refresh loop used to re-ask
+   every bound dead channel on every pass; these are remembered per process
+   and skipped, and a restart re-checks the verdict. *)
+let gone_bound_channels : (string, unit) Hashtbl.t = Hashtbl.create 4
 
 let classify_directory_rest_failure = function
   | Discord_rest_client.Http_status { code = 401; _ } ->
     Directory_authentication_failed
   | Discord_rest_client.Discord_api { http_status = 401; _ } ->
     Directory_authentication_failed
+  | Discord_rest_client.Discord_api { code = 10003; _ } ->
+    Directory_channel_gone
   | Discord_rest_client.Http_status { code = 403; _ }
   | Discord_rest_client.Discord_api { http_status = 403; _ }
   | Discord_rest_client.Discord_api { code = 50001 | 50013; _ } ->
@@ -345,10 +354,13 @@ let refresh_discord_directory_once ~clock ~base_dir ~token =
        authentication_failed := scope :: !authentication_failed
      | Directory_permission_denied ->
        permission_denied := scope :: !permission_denied
+     | Directory_channel_gone -> ()
      | Directory_operation_failed -> errors := scope :: !errors);
     Log.Server.warn "Discord directory %s target=%s: %s" scope target detail
   in
   let refresh_channel channel_id =
+    if Hashtbl.mem gone_bound_channels channel_id then ()
+    else
     match Discord_rest_client.snowflake_of_string channel_id with
     | Error detail ->
       Log.Server.warn "Discord directory skipped channel %s: %s" channel_id detail
@@ -358,7 +370,13 @@ let refresh_discord_directory_once ~clock ~base_dir ~token =
            ~channel_id:channel_snowflake ()
        with
        | Error error ->
-         record_rest_error ~scope:"bound_channel" ~target:channel_id error
+         (match classify_directory_rest_failure error with
+          | Directory_channel_gone ->
+            Hashtbl.replace gone_bound_channels channel_id ();
+            Log.Server.warn
+              "Discord directory bound channel %s is deleted (10003); skipping                it until restart — unbind it to stop this warning"
+              channel_id
+          | _ -> record_rest_error ~scope:"bound_channel" ~target:channel_id error)
        | Ok json ->
          (match discord_channel_directory_entry json with
           | Error detail ->

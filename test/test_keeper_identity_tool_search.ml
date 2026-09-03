@@ -639,7 +639,7 @@ let test_a_call_to_a_carried_tool_does_not_cut () =
   check
     (list string)
     "a tool stale past the window stays placed while the carry does not grow"
-    [ "atlassian_jira_search"; "atlassian_confluence_search" ]
+    [ "atlassian_confluence_search"; "atlassian_jira_search" ]
     (already_used
        ~carry_window:10
        ~history:

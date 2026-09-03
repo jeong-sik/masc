@@ -1140,8 +1140,6 @@
 
 /* keeper sandbox 표시 — git worktree 격리 (브라스) */
 .kcf-top-sandbox { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.04em; color: var(--volt-strong); border: 1px solid var(--volt-dim); background: var(--volt-wash); padding: 2px 9px; border-radius: var(--radius-pill); white-space: nowrap; }
-.fl-sandbox { margin-left: 6px; color: var(--volt-strong); font-size: var(--fs-10); cursor: help; }
-.kp-sandbox { color: var(--volt-strong); font-size: 9.5px; cursor: help; }
 .sub-sandbox { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-mono); font-size: var(--fs-10); color: var(--volt-strong); border: 1px solid var(--volt-dim); background: var(--volt-wash); padding: 1px 7px; border-radius: var(--radius-pill); white-space: nowrap; }
 
 /* nav 라이브 활동 점 — 스트리밍 중 keeper / 진행 중 fusion */

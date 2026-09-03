@@ -1225,6 +1225,15 @@ type ask_answer_mode =
   | Ask_browsing
   | Ask_answering of { aam_ask_id: string }
 
+(* An answer being typed, for the questions a choice cannot answer. The slot
+   is what the domain accepts a write through, and it names its own question,
+   so an editor left open while the snapshot moves underneath still lands on
+   the question it was opened for. *)
+type ask_text_entry = {
+  ate_slot: Masc_tui_ask_projection.free_text_slot;
+  ate_text: string;
+}
+
 (** Overview snapshot from /api/v1/dashboard/briefing *)
 type workspace_health =
   | Workspace_health_critical
@@ -2538,6 +2547,11 @@ type state = {
   (* One answer at a time. The draft carries the ask it belongs to, so moving
      the cursor cannot post an answer under the wrong question. *)
   mutable ask_draft: Masc_tui_ask_projection.draft option;
+  (* Open while the operator types an answer no choice covers. A question the
+     server sent with no choices at all can be answered only this way, and
+     until this existed the terminal drew "free text welcome" over a keyboard
+     that had nowhere to put the text. *)
+  mutable ask_text_entry: ask_text_entry option;
   mutable pending_ask_submit: string option;
   mutable ask_submit_inflight: bool;
   (* The tool calls keepers are holding, drawn above the operator actions on
@@ -3323,6 +3337,7 @@ let create_state
   ask_cursor = 0;
   ask_question_cursor = 0;
   ask_draft = None;
+  ask_text_entry = None;
   pending_ask_submit = None;
   ask_submit_inflight = false;
   keeper_tool_approvals = [];

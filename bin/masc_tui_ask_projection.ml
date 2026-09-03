@@ -45,13 +45,21 @@ let summarize_answer draft ~(row : Decode.ask_row) =
   in
   String.concat "; " (List.filter_map per_question row.ar_questions)
 
-let open_ask_ids (snapshot : Decode.asks_snapshot) =
-  List.filter_map
+(* The asks still waiting on a human, in wire order. One filter for every
+   caller: the panel draws these rows, the footer names the keys that work on
+   the one under the cursor, and the executable answers it. Three copies of
+   this predicate is how the cursor and the drawn list come to disagree about
+   which ask is selected. *)
+let open_rows (snapshot : Decode.asks_snapshot) =
+  List.filter
     (fun (row : Decode.ask_row) ->
       match row.ar_resolution with
-      | Decode.Ask_open -> Some row.ar_id
-      | Decode.Ask_answered _ | Decode.Ask_withdrawn _ -> None)
+      | Decode.Ask_open -> true
+      | Decode.Ask_answered _ | Decode.Ask_withdrawn _ -> false)
     snapshot.asn_rows
+
+let open_ask_ids (snapshot : Decode.asks_snapshot) =
+  List.map (fun (row : Decode.ask_row) -> row.ar_id) (open_rows snapshot)
 
 (* Ask ids open in [current] that were not open in [previous] — the questions
    that arrived since the last read. A poll that re-reads the same open asks
@@ -119,6 +127,7 @@ let free_text_slot (question : Decode.ask_question) =
   | Decode.Ask_choices_only -> None
 
 let free_text_hint slot = slot.fts_hint
+let free_text_question_id slot = slot.fts_question_id
 
 let set_text draft ~slot ~text =
   let question_id = slot.fts_question_id in

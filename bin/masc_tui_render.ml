@@ -1969,6 +1969,19 @@ let box_wrapped_field buf cols ~head ~style body =
         (fun segment -> box_line buf cols (hang ^ style ^ segment ^ Ansi.reset))
         rest
 
+(* The question the ask cursor is on, or none when nothing is waiting. The
+   footer asks for it to decide which keys it can honestly name: a question
+   with no choices makes [1-9] a promise the surface cannot keep, and one that
+   refuses free text makes [t] the same. *)
+let selected_ask_question (state : state) =
+  match state.asks_snapshot with
+  | None -> None
+  | Some snapshot -> (
+      match List.nth_opt (Ask_projection.open_rows snapshot) state.ask_cursor with
+      | None -> None
+      | Some (row : Masc.Tui_decode.ask_row) ->
+          List.nth_opt row.Masc.Tui_decode.ar_questions state.ask_question_cursor)
+
 (* Drawn into its own buffer so the pane above can be told how many rows it
    has to give up. Counting the rows a second way is what let the section draw
    its header into the one row left over and push every question off-screen. *)
@@ -1985,14 +1998,7 @@ let draw_ask_questions buf cols (state : state) =
   (match state.asks_snapshot with
    | None -> ()
    | Some snapshot ->
-       let open_rows =
-         List.filter
-           (fun (row : Masc.Tui_decode.ask_row) ->
-             match row.Masc.Tui_decode.ar_resolution with
-             | Masc.Tui_decode.Ask_open -> true
-             | Masc.Tui_decode.Ask_answered _ | Masc.Tui_decode.Ask_withdrawn _ -> false)
-           snapshot.Masc.Tui_decode.asn_rows
-       in
+       let open_rows = Ask_projection.open_rows snapshot in
        box_divider buf cols;
        box_line buf cols
          (Printf.sprintf "%sQuestions waiting on you (%d)%s" Ansi.bold
@@ -2097,16 +2103,48 @@ let draw_ask_questions buf cols (state : state) =
                     match question.Masc.Tui_decode.aq_free_text with
                     | Masc.Tui_decode.Ask_choices_only -> ()
                     | Masc.Tui_decode.Ask_free_text_allowed { aft_hint } ->
-                        (match aft_hint with
-                         | None ->
-                             box_line buf cols
-                               (Printf.sprintf "      %sfree text welcome%s" Ansi.dim
-                                  Ansi.reset)
-                         | Some hint ->
+                        (* The editor belongs to one question, and the slot
+                           it holds names which. Matching on that rather than
+                           on the cursor means a snapshot arriving mid-sentence
+                           cannot move the typing onto another row. *)
+                        let editing_here =
+                          match state.ask_text_entry with
+                          | Some entry
+                            when String.equal
+                                   (Ask_projection.free_text_question_id entry.ate_slot)
+                                   question.Masc.Tui_decode.aq_id ->
+                              Some entry
+                          | Some _ | None -> None
+                        in
+                        (match editing_here with
+                         (* The typing is drawn where it lands, with the same
+                            block caret the row search uses. Without it the
+                            keys went into a buffer nothing on screen showed,
+                            which reads as a terminal that has stopped
+                            listening. *)
+                         | Some entry ->
                              box_wrapped_field buf cols
-                               ~head:
-                                 (Printf.sprintf "      %sfree text welcome -- " Ansi.dim)
-                               ~style:Ansi.dim hint))
+                               ~head:(Printf.sprintf "      %swrite: " Ansi.bold)
+                               ~style:Ansi.bold
+                               (Terminal_text.single_line entry.ate_text
+                                ^ "\xe2\x96\x8c")
+                         | None ->
+                             (* The key that opens the editor is named by the
+                                footer, which knows whether the question under
+                                the cursor takes text; naming it on every row
+                                that welcomes free text would offer [t] on rows
+                                it does nothing to. *)
+                             (match aft_hint with
+                              | None ->
+                                  box_line buf cols
+                                    (Printf.sprintf "      %sfree text welcome%s"
+                                       Ansi.dim Ansi.reset)
+                              | Some hint ->
+                                  box_wrapped_field buf cols
+                                    ~head:
+                                      (Printf.sprintf
+                                         "      %sfree text welcome -- " Ansi.dim)
+                                    ~style:Ansi.dim hint)))
                   row.Masc.Tui_decode.ar_questions;
                 (* The reason is what separates a decision that matters from
                    one that does not, so it is drawn, not hidden behind a
@@ -2602,19 +2640,42 @@ let render_approvals (state : state) =
           "j/k:move  y/n:decide  e:outside lane  %s  a:answer a question  \
            r:refresh  Tab:next"
           walk_asks
-    | Ask_answering { aam_ask_id } ->
-        (* Say when the next Enter sends. The approval queue two panes up
-           already draws its armed state; this one announced itself only as an
-           event, on a surface that draws no events, so the first Enter looked
-           like a key that had not landed. *)
-        (match state.pending_ask_submit with
-         | Some armed when String.equal armed aam_ask_id ->
-             "Press Enter again to send  |  s:skip  c:clear  Esc:back"
-         | Some _ | None ->
-             Printf.sprintf
-               "j/k:question  %s  1-9:pick  s:skip  c:clear  Enter:answer  \
-                Esc:back"
-               walk_asks)
+    | Ask_answering { aam_ask_id } -> (
+        match state.ask_text_entry with
+        (* Typing owns the keyboard, so the footer stops offering the keys it
+           has taken: the digits are text here, not choices. *)
+        | Some _ -> "Enter:save  Esc:cancel"
+        | None ->
+            (* Say when the next Enter sends. The approval queue two panes up
+               already draws its armed state; this one announced itself only as
+               an event, on a surface that draws no events, so the first Enter
+               looked like a key that had not landed. *)
+            (match state.pending_ask_submit with
+             | Some armed when String.equal armed aam_ask_id ->
+                 "Press Enter again to send  |  s:skip  c:clear  Esc:back"
+             | Some _ | None ->
+                 (* Only the keys the selected question answers to. A question
+                    can arrive with no choices at all -- the server accepts one
+                    as long as it welcomes free text -- and there [1-9] does
+                    nothing, which reads as a pane that has stopped listening
+                    rather than as a key that was never for this question. *)
+                 let question = selected_ask_question state in
+                 let has_choices =
+                   match question with
+                   | Some (q : Masc.Tui_decode.ask_question) ->
+                       q.Masc.Tui_decode.aq_choices <> []
+                   | None -> false
+                 in
+                 let takes_text =
+                   match question with
+                   | Some q -> Option.is_some (Ask_projection.free_text_slot q)
+                   | None -> false
+                 in
+                 Printf.sprintf "j/k:question  %s  %s%ss:skip  c:clear  \
+                                 Enter:answer  Esc:back"
+                   walk_asks
+                   (if has_choices then "1-9:pick  " else "")
+                   (if takes_text then "t:write  " else "")))
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
 

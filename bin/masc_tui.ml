@@ -7335,18 +7335,13 @@ let handle_approval_decision state approval decision ~mailbox =
            approval.ap_summary)
 
 (* The asks an operator can act on: the open ones, in the order the server
-   sent them. The pane draws the same filter, so this cursor and those rows
-   are one list rather than two that drift. *)
+   sent them. The pane draws the same list through the same function, so this
+   cursor and those rows cannot drift apart. *)
 let open_ask_rows state =
   match state.asks_snapshot with
   | None -> []
   | Some snapshot ->
-      List.filter
-        (fun (row : Tui_decode.ask_row) ->
-          match row.Tui_decode.ar_resolution with
-          | Tui_decode.Ask_open -> true
-          | Tui_decode.Ask_answered _ | Tui_decode.Ask_withdrawn _ -> false)
-        snapshot.Tui_decode.asn_rows
+      Ask.open_rows snapshot
 
 let selected_ask_row state = List.nth_opt (open_ask_rows state) state.ask_cursor
 
@@ -7362,6 +7357,7 @@ let selected_ask_question state =
 let leave_ask_answering state =
   state.ask_answer_mode <- Ask_browsing;
   state.ask_draft <- None;
+  state.ask_text_entry <- None;
   state.pending_ask_submit <- None
 
 let enter_ask_answering state =
@@ -7432,6 +7428,58 @@ let toggle_ask_choice state index =
       | Some choice ->
           with_ask_draft state (fun draft question ->
               Ask.toggle_choice draft ~question ~choice))
+
+(* Open the editor on the question under the cursor.
+
+   A question can arrive with no choices at all -- the domain accepts one as
+   long as it welcomes free text -- and on those the digits answer nothing.
+   Until this key existed the panel drew "free text welcome" beside a keyboard
+   that had no way to write any, so the only answer the terminal could give
+   such a question was [s]: skipped. The dashboard has had a textarea for it
+   since the surface shipped.
+
+   Reopening on an answer already written starts from that text rather than
+   from blank: a typo in a long answer should cost a backspace, not the whole
+   sentence. *)
+let begin_ask_text_entry state =
+  match (selected_ask_row state, selected_ask_question state) with
+  | Some row, Some (question : Tui_decode.ask_question) -> (
+      match Ask.free_text_slot question with
+      | None ->
+          add_event state "system"
+            (Printf.sprintf "%s takes one of its choices, not free text"
+               question.Tui_decode.aq_header)
+      | Some slot ->
+          let existing =
+            match Ask.response_for (Ask.draft_for state.ask_draft ~row) ~question with
+            | Some (Ask.Draft_wrote text) -> text
+            | Some (Ask.Draft_chose _) | Some Ask.Draft_skipped | None -> ""
+          in
+          state.ask_text_entry <- Some { ate_slot = slot; ate_text = existing })
+  | (Some _ | None), _ -> ()
+
+(* Typing edits the buffer alone. The draft is written once, on the key that
+   closes the editor, so a half-typed answer is never a response the submit
+   gate would count as answered. *)
+let edit_ask_text state f =
+  match state.ask_text_entry with
+  | None -> ()
+  | Some entry -> state.ask_text_entry <- Some { entry with ate_text = f entry.ate_text }
+
+let commit_ask_text_entry state =
+  match state.ask_text_entry with
+  | None -> ()
+  | Some entry ->
+      (* Through the slot, which names its own question: the cursor may have
+         been moved by a snapshot arriving while the operator typed, and the
+         answer belongs to the question the editor was opened on. Blank text
+         clears the response rather than recording one -- an editor emptied by
+         backspaces means unanswered, and the domain refuses a blank write. *)
+      with_ask_draft state (fun draft _question ->
+          Ask.set_text draft ~slot:entry.ate_slot ~text:entry.ate_text);
+      state.ask_text_entry <- None
+
+let cancel_ask_text_entry state = state.ask_text_entry <- None
 
 let skip_ask_question state =
   with_ask_draft state (fun draft question -> Ask.skip draft ~question)
@@ -12405,6 +12453,25 @@ and is loaded on demand through keeper_skill.
           modal and surface branch: those states are hidden, and a question,
           search cursor, or draft must not move behind the fallback. *)
        | Some _ when compact_viewport -> ()
+       (* Writing an answer takes every printable key, the way the row search
+          and the app form do, and it sits above the answering arm because
+          that arm reads digits as choices and [s]/[c] as commands. An
+          operator typing "1 second" must not have the 1 picked for them. *)
+       | Some k
+         when state.view = Approvals
+              && Option.is_some state.ask_text_entry
+              && not state.context_inspector_open ->
+           (match k with
+            | "esc" -> cancel_ask_text_entry state
+            | "\r" | "\n" | "enter" -> commit_ask_text_entry state
+            | "\127" | "\b" ->
+                edit_ask_text state Masc_tui_message_layout.drop_last_utf8_scalar
+            | s
+              when (String.length s = 1 && Char.code s.[0] >= 32)
+                   || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
+                edit_ask_text state (fun text -> text ^ s)
+            | _ -> ());
+           Render_schedule.request render_schedule Render_schedule.Force
        (* Answering is modal. A question needs a key per choice, and this
           surface already spent its arrows and its y/n on the approval queue,
           so the keys have to come from somewhere. Quit and the chrome
@@ -12424,6 +12491,10 @@ and is loaded on demand through keeper_skill.
             | "]" -> move_ask_cursor state 1
             | "s" | "S" -> skip_ask_question state
             | "c" | "C" -> clear_ask_question state
+            (* Ahead of the digit arm below, which takes every one-character
+               key and drops the ones that are not positions -- [t] landed
+               there and did nothing. *)
+            | "t" | "T" -> begin_ask_text_entry state
             (* Terminals send Enter as CR. "enter" is the name the Kitty
                protocol gives codepoint 13, and this was the only site in the
                file waiting for it -- the other twelve read "\r" -- so the

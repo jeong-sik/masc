@@ -1,9 +1,9 @@
 ---
-rfc: "0401"
+rfc: "0406"
 status: Draft
 ---
 
-# RFC-0401 — 검증자는 떠 있는 게스트에 붙는다
+# RFC-0406 — 검증자는 떠 있는 게스트에 붙는다
 
 - Status: Draft
 - Decision driver: 검증 조회가 microvm keeper 의 작업 트리를 하나도 못 읽는다.

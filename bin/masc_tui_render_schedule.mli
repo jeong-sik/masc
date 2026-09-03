@@ -140,7 +140,6 @@ val memory_facts_width : int
 val memory_size_width : int
 val memory_source_width : int
 val memory_delta_width : int
-val memory_cell_gap : int
 
 type memory_columns = {
   mcol_show_revision : bool;
@@ -204,7 +203,6 @@ val workspace_branch_width : int
 val workspace_status_width : int
 val workspace_sync_width : int
 val workspace_minimum_path_width : int
-val workspace_cell_gap : int
 
 type workspace_row_values = {
   wrow_name : string;
@@ -234,7 +232,6 @@ val system_log_module_width : int
 val system_log_keeper_width : int
 val system_log_category_width : int
 val system_log_minimum_message_width : int
-val system_log_cell_gap : int
 
 type system_log_row_values = {
   slog_time : string;
@@ -282,7 +279,6 @@ val lane_status_width : int
 val lane_elapsed_width : int
 val lane_slot_width : int
 val lane_minimum_run_id_width : int
-val lane_cell_gap : int
 
 type lane_run_row_values = {
   lrow_started : string;
@@ -317,7 +313,6 @@ val change_op_width : int
 val change_result_width : int
 val change_file_width : int
 val change_minimum_summary_width : int
-val change_cell_gap : int
 
 type change_row_values = {
   crow_turn : string;
@@ -349,7 +344,6 @@ val fusion_age_width : int
 val fusion_state_width : int
 val fusion_preset_width : int
 val fusion_minimum_run_width : int
-val fusion_cell_gap : int
 
 type fusion_row_values = {
   frow_time : string;
@@ -382,7 +376,6 @@ val harness_gate_width : int
 val harness_verdict_width : int
 val harness_evaluator_width : int
 val harness_minimum_reason_width : int
-val harness_cell_gap : int
 
 type harness_row_values = {
   hrow_time : string;

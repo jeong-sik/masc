@@ -1,10 +1,8 @@
 module Table = Masc_tui_table
 
 let effective_tool_name_width = 34
-let effective_tool_cell_gap = 1
 let catalog_tool_name_width = 32
 let catalog_direct_width = 8
-let catalog_cell_gap = 1
 
 (* Catalog rows sit under a domain and a family heading, indented past both so
    the tree reads. The column header carries that same indent or it names
@@ -23,33 +21,34 @@ let catalog_tool_cells ?(direct_style = "") ~name ~direct () =
       direct
   ]
 
-(* The indent before the first cell and the gap before the free last column,
-   written once for each table. The header and the rows differed by exactly
-   these two on the catalog -- three cells of indent against six -- so a line
-   that names the columns and a line that fills them are drawn through one
-   function here. *)
-let framed ~indent ~gap ~cells ~tail = indent ^ cells ^ String.make gap ' ' ^ tail
+(* The indent before the first cell, written once for each table, and the free
+   last column spaced the way the contract spaces the rest. The header and the
+   rows differed by exactly the indent on the catalog -- three cells against
+   six -- so a line that names the columns and a line that fills them are drawn
+   through one function here. *)
+let framed ~indent ~cells ~tail =
+  indent ^ cells ^ String.make Table.cell_gap ' ' ^ tail
 
 let effective_tool_header =
-  framed ~indent:effective_row_indent ~gap:effective_tool_cell_gap
-    ~cells:(Table.header_row ~gap:effective_tool_cell_gap (effective_tool_cells ""))
+  framed ~indent:effective_row_indent
+    ~cells:(Table.header_row (effective_tool_cells ""))
     ~tail:"ORIGIN"
 
 let effective_tool_line ~name ~origin =
-  framed ~indent:effective_row_indent ~gap:effective_tool_cell_gap
-    ~cells:(Table.row ~gap:effective_tool_cell_gap (effective_tool_cells name))
+  framed ~indent:effective_row_indent
+    ~cells:(Table.row (effective_tool_cells name))
     ~tail:origin
 
 let catalog_tool_header =
-  framed ~indent:catalog_row_indent ~gap:catalog_cell_gap
+  framed ~indent:catalog_row_indent
     ~cells:
-      (Table.header_row ~gap:catalog_cell_gap
+      (Table.header_row
          (catalog_tool_cells ~name:"" ~direct:"" ()))
     ~tail:"SURFACES"
 
 let catalog_tool_line ~metadata ~name ~direct ~surfaces =
-  framed ~indent:catalog_row_indent ~gap:catalog_cell_gap
+  framed ~indent:catalog_row_indent
     ~cells:
-      (Table.row ~gap:catalog_cell_gap
+      (Table.row
          (catalog_tool_cells ~direct_style:metadata ~name ~direct ()))
     ~tail:(metadata ^ surfaces)
